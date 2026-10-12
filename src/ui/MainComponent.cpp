@@ -5,7 +5,7 @@
 #include "engine/ProjectFile.h"
 #include "ui/Theme.h"
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -299,7 +299,7 @@ void MainComponent::timerCallback()
 void MainComponent::updateTitle()
 {
     if (auto* window = getTopLevelComponent())
-        window->setName (currentFile.exists() ? "Daw - " + currentFile.getFileNameWithoutExtension() : juce::String ("Daw"));
+        window->setName (currentFile.exists() ? "LYNX - " + currentFile.getFileNameWithoutExtension() : juce::String ("LYNX"));
 }
 
 void MainComponent::newProject()
@@ -314,7 +314,7 @@ void MainComponent::newProject()
 void MainComponent::chooseFileToOpen()
 {
     fileChooser = std::make_unique<juce::FileChooser> ("Abrir projeto", currentFile.getParentDirectory(),
-                                                       juce::String ("*") + ProjectFile::extension + ";*.flp");
+                                                       juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this] (const juce::FileChooser& chooser) {
@@ -335,9 +335,9 @@ void MainComponent::openFile (const juce::File& file)
             return;
         }
 
-        currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .dawproj
+        currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
         if (auto* window = getTopLevelComponent())
-            window->setName ("Daw - " + file.getFileNameWithoutExtension() + " (importado do FL)");
+            window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
         return;
     }
 
@@ -402,4 +402,4 @@ void MainComponent::showAudioSettings()
     options.resizable = false;
     options.launchAsync();
 }
-} // namespace daw
+} // namespace lynx

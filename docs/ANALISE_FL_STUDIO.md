@@ -5,7 +5,7 @@
 > decompilado, foi copiado. Tudo abaixo é descrição, com palavras nossas, de comportamento, estruturas
 > (conceitualmente) e algoritmos. Endereços e nomes de símbolos servem só como rastreabilidade da evidência.
 
-- **Alvo:** `/home/kauan/projetos/daw-analise/FLEngine_x64.dll` (Delphi, PE x86-64, ~22 MB)
+- **Alvo:** `~/projetos/daw-analise/FLEngine_x64.dll` (Delphi, PE x86-64, ~22 MB)
 - **SHA-256:** `6d9c5ab09c1d5594012ac2c31cf9ed08e73f42164ed0964cccae10a95d9b8e02`
 - **Ferramentas:** REA MCP + Ghidra 12.1.4 (59.803 procedimentos, 42.077 strings)
 - **Data:** 2026-10-12
@@ -347,7 +347,7 @@ Execução (`FUN_00cf42f0` → `FUN_00cf4250` → `FUN_011fec40` → `FUN_00cf44
   próprio, e prever a exposição de `thread-pool`.
 - Para o bridge, o desenho IPC do FL é: memória compartilhada nomeada para áudio e dados, canal de
   mensagens, ping/heartbeat e thread leitora + thread de processamento. Isso pode ser reproduzido com
-  shared memory + semáforos/eventos e um processo `daw-bridge` por plugin ou por grupo.
+  shared memory + semáforos/eventos e um processo `lynx-bridge` por plugin ou por grupo.
 - Fazer o scan num processo separado com banco persistente e modo "fast scan" (só arquivos novos).
 - Implementar "smart disable" (detecção de silêncio + bypass), medição de CPU por plugin e a opção de
   buffer fixo por plugin.

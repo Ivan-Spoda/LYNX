@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Daw VERSION 0.1.0 LANGUAGES C CXX)
+project(LYNX VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,33 +8,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---------------------------------------------------------------------------
 # Núcleo sem JUCE: modelo, sequenciador, instrumentos internos e leitor de .flp
 
-add_library(daw_core STATIC
+add_library(lynx_core STATIC
     src/flp/Flp.cpp
     src/core/Song.cpp
     src/core/Scheduler.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
     src/core/FlpImport.cpp)
-target_include_directories(daw_core PUBLIC src)
+target_include_directories(lynx_core PUBLIC src)
 
-add_executable(daw_tests tests/tests.cpp)
-target_link_libraries(daw_tests PRIVATE daw_core)
+add_executable(lynx_tests tests/tests.cpp)
+target_link_libraries(lynx_tests PRIVATE lynx_core)
 
 add_executable(flpdump tools/flpdump.cpp)
-target_link_libraries(flpdump PRIVATE daw_core)
+target_link_libraries(flpdump PRIVATE lynx_core)
 
 add_executable(renderwav tools/renderwav.cpp)
-target_link_libraries(renderwav PRIVATE daw_core)
+target_link_libraries(renderwav PRIVATE lynx_core)
 
 enable_testing()
-add_test(NAME daw_tests COMMAND daw_tests)
+add_test(NAME lynx_tests COMMAND lynx_tests)
 
 # ---------------------------------------------------------------------------
 # App (JUCE)
 
-option(DAW_BUILD_APP "Compila o app com JUCE" ON)
+option(LYNX_BUILD_APP "Compila o app com JUCE" ON)
 
-if(DAW_BUILD_APP)
+if(LYNX_BUILD_APP)
     include(FetchContent)
     FetchContent_Declare(
         JUCE
@@ -43,11 +43,11 @@ if(DAW_BUILD_APP)
         GIT_SHALLOW ON)
     FetchContent_MakeAvailable(JUCE)
 
-    juce_add_gui_app(Daw
-        PRODUCT_NAME "Daw"
+    juce_add_gui_app(LYNX
+        PRODUCT_NAME "LYNX"
         COMPANY_NAME "Kauan")
 
-    target_sources(Daw PRIVATE
+    target_sources(LYNX PRIVATE
         src/Main.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
@@ -58,18 +58,18 @@ if(DAW_BUILD_APP)
         src/ui/ChannelRackComponent.cpp
         src/ui/PianoRollComponent.cpp)
 
-    target_compile_definitions(Daw PRIVATE
+    target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
         JUCE_ASIO=0                      # ligar quando o ASIO SDK estiver disponível
         JUCE_USE_MP3AUDIOFORMAT=1
-        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Daw,JUCE_PRODUCT_NAME>"
-        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Daw,JUCE_VERSION>")
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LYNX,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:LYNX,JUCE_VERSION>")
 
-    target_link_libraries(Daw
+    target_link_libraries(LYNX
         PRIVATE
-            daw_core
+            lynx_core
             juce::juce_audio_utils
             juce::juce_audio_processors
             juce::juce_dsp

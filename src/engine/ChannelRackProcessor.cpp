@@ -1,6 +1,6 @@
 #include "engine/ChannelRackProcessor.h"
 
-namespace daw
+namespace lynx
 {
 ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -43,4 +43,4 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         buffer.clear();
     }
 }
-} // namespace daw
+} // namespace lynx

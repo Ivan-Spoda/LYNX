@@ -9,7 +9,7 @@
 
 #include "core/Scheduler.h"
 
-namespace daw
+namespace lynx
 {
 class LiveEventQueue
 {
@@ -48,4 +48,4 @@ private:
     std::atomic<std::size_t> writeIndex { 0 };
     std::atomic<std::size_t> readIndex { 0 };
 };
-} // namespace daw
+} // namespace lynx

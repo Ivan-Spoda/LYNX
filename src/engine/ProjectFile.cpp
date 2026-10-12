@@ -2,7 +2,7 @@
 
 #include "engine/Text.h"
 
-namespace daw::ProjectFile
+namespace lynx::ProjectFile
 {
 namespace
 {
@@ -36,7 +36,7 @@ juce::String str (const std::string& s) { return juce::String::fromUTF8 (s.c_str
 juce::String toJson (const Song& song)
 {
     auto root = std::make_unique<juce::DynamicObject>();
-    root->setProperty ("format", "daw-project");
+    root->setProperty ("format", "lynx-project");
     root->setProperty ("version", currentVersion);
     root->setProperty ("bpm", song.bpm);
     root->setProperty ("beatsPerBar", song.beatsPerBar);
@@ -96,7 +96,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         return std::nullopt;
     }
 
-    if (root["format"].toString() != "daw-project")
+    // "daw-project" = projetos salvos antes do projeto se chamar LYNX
+    if (root["format"].toString() != "lynx-project" && root["format"].toString() != "daw-project")
     {
         error = utf8 ("não é um projeto desta DAW");
         return std::nullopt;
@@ -104,7 +105,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if ((int) root["version"] > currentVersion)
     {
-        error = utf8 ("projeto salvo por uma versão mais nova da DAW");
+        error = utf8 ("projeto salvo por uma versão mais nova do LYNX");
         return std::nullopt;
     }
 
@@ -185,4 +186,4 @@ std::optional<Song> load (const juce::File& file, juce::String& error)
 
     return fromJson (file.loadFileAsString(), error);
 }
-} // namespace daw::ProjectFile
+} // namespace lynx::ProjectFile

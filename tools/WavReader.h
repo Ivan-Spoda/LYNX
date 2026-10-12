@@ -13,7 +13,7 @@
 
 #include "core/Instruments.h"
 
-namespace daw::tools
+namespace lynx::tools
 {
 inline std::shared_ptr<const SampleData> readWav (const std::string& path)
 {
@@ -100,4 +100,4 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
 
     return sample;
 }
-} // namespace daw::tools
+} // namespace lynx::tools

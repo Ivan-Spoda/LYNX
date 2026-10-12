@@ -4,7 +4,7 @@
 #include <cctype>
 #include <map>
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -134,4 +134,4 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
     return song;
 }
-} // namespace daw
+} // namespace lynx

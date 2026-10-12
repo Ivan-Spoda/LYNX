@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace daw
+namespace lynx
 {
 // Proteção do master até existir um limiter de verdade no mixer: linear até 0,9 e
 // depois uma curva suave que nunca passa de 1,0 (evita a distorção dura do clipping).
@@ -20,4 +20,4 @@ inline void softClip (float* samples, int n) noexcept
             samples[i] = std::copysign (knee + headroom * std::tanh ((a - knee) / headroom), x);
     }
 }
-} // namespace daw
+} // namespace lynx

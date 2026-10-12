@@ -1,6 +1,6 @@
 #include "engine/Metronome.h"
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -64,4 +64,4 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
         }
     }
 }
-} // namespace daw
+} // namespace lynx

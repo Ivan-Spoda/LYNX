@@ -8,7 +8,7 @@
 #include "ui/ChannelRackComponent.h"
 #include "ui/PianoRollComponent.h"
 
-namespace daw
+namespace lynx
 {
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -23,7 +23,7 @@ public:
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
 
-    // Abre .dawproj ou .flp (também usado pela linha de comando).
+    // Abre .lynx ou .flp (também usado pela linha de comando).
     void openFile (const juce::File& file);
 
     // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas).
@@ -66,4 +66,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
-} // namespace daw
+} // namespace lynx

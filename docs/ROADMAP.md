@@ -16,9 +16,9 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Sampler: `.wav`/`.flac`/`.ogg`/`.mp3`/`.aiff` por canal, inclusive os WAV-com-Ogg do FL
 - [x] Projetos `.flp` importados tocam com os samples reais da instalação do FL
 - [x] Piano Roll (criar, mover, redimensionar, apagar, snap, zoom, preview, ghost notes)
-- [x] Salvar/abrir projeto no formato próprio (`.dawproj`, JSON versionado)
+- [x] Salvar/abrir projeto no formato próprio (`.lynx`, JSON versionado)
 - [x] Volume, pan e mute por canal; teclado do PC como teclado musical
-- [x] Exportar para WAV (`Daw.exe --render`)
+- [x] Exportar para WAV (`LYNX.exe --render`)
 - [ ] Velocity no Piano Roll, seleção múltipla, copiar/colar, desfazer/refazer
 - [ ] Solo por canal, renomear/colorir patterns
 - [ ] Entrada MIDI e gravação de notas

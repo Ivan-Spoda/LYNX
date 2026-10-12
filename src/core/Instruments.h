@@ -11,7 +11,7 @@
 
 #include "core/Song.h"
 
-namespace daw
+namespace lynx
 {
 class Instrument
 {
@@ -52,4 +52,4 @@ struct Noise
         return (float) (std::int32_t) state * (1.0f / 2147483648.0f);
     }
 };
-} // namespace daw
+} // namespace lynx

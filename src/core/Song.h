@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace daw
+namespace lynx
 {
 constexpr int ppq = 960;              // ticks por semínima
 constexpr int stepsPerBeat = 4;       // step sequencer em semicolcheias
@@ -66,4 +66,4 @@ struct Song
 
     static Song makeDefault();
 };
-} // namespace daw
+} // namespace lynx

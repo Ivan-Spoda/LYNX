@@ -11,7 +11,7 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Transport.h"
 
-namespace daw
+namespace lynx
 {
 // Dono do dispositivo de áudio, do grafo de processamento e do documento (Song).
 // Fica entre o driver e o AudioProcessorPlayer para avançar o transporte
@@ -85,4 +85,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };
-} // namespace daw
+} // namespace lynx

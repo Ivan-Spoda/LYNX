@@ -8,7 +8,7 @@
 #include "engine/Metronome.h"
 #include "flp/Flp.h"
 
-namespace daw
+namespace lynx
 {
 using IONode = juce::AudioProcessorGraph::AudioGraphIOProcessor;
 
@@ -242,4 +242,4 @@ void AudioEngine::audioDeviceStopped()
 {
     player.audioDeviceStopped();
 }
-} // namespace daw
+} // namespace lynx

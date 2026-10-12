@@ -4,7 +4,7 @@
 
 #include "ui/Theme.h"
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -520,4 +520,4 @@ void ChannelRackComponent::timerCallback()
         dirty (playheadStep);
     }
 }
-} // namespace daw
+} // namespace lynx

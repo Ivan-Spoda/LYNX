@@ -8,7 +8,7 @@
 
 #include "core/Song.h"
 
-namespace daw
+namespace lynx
 {
 struct NoteEvent
 {
@@ -57,4 +57,4 @@ void schedulePatternLoop (const Pattern& pattern,
                           int numSamples,
                           double ticksPerSampleValue,
                           EventBuffer& out) noexcept;
-} // namespace daw
+} // namespace lynx

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace daw
+namespace lynx
 {
 std::unique_ptr<const RackState> RackState::build (Song song,
                                                    const RackState* previous,
@@ -152,4 +152,4 @@ void RackRenderer::process (const RackState* state,
     if (position < numSamples)
         renderSegment (*state, left + position, right + position, numSamples - position);
 }
-} // namespace daw
+} // namespace lynx

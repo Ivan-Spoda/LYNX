@@ -4,7 +4,7 @@
 
 // Paleta e LookAndFeel: tons de cinza-azulado escuros, destaques em laranja,
 // verde e azul, no espírito do FL Studio.
-namespace daw::theme
+namespace lynx::theme
 {
 inline const juce::Colour window { 0xff1e2226 };
 inline const juce::Colour panel { 0xff2b3036 };
@@ -53,4 +53,4 @@ public:
         setColour (juce::TabbedButtonBar::frontTextColourId, accentOrange);
     }
 };
-} // namespace daw::theme
+} // namespace lynx::theme

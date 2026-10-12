@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -402,4 +402,4 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     return std::make_unique<DrumInstrument> (kind);
 }
-} // namespace daw
+} // namespace lynx

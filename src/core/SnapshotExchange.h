@@ -13,7 +13,7 @@
 #include <atomic>
 #include <memory>
 
-namespace daw
+namespace lynx
 {
 template <typename T>
 class SnapshotExchange
@@ -84,4 +84,4 @@ private:
     std::array<std::atomic<const T*>, 8> retired {};
     const T* active = nullptr; // só a thread de áudio toca
 };
-} // namespace daw
+} // namespace lynx

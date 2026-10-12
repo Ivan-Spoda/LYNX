@@ -6,7 +6,7 @@
 
 #include "engine/AudioEngine.h"
 
-namespace daw
+namespace lynx
 {
 // Channel Rack no estilo do FL: uma linha por canal com mute, pan, volume, nome
 // e a grade de steps da pattern atual.
@@ -76,4 +76,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackComponent)
 };
-} // namespace daw
+} // namespace lynx

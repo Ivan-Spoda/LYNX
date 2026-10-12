@@ -4,7 +4,7 @@
 
 #include "core/Song.h"
 
-namespace daw
+namespace lynx
 {
 // Estado do transporte compartilhado entre a UI e a thread de áudio.
 // Só atomics: a thread de áudio nunca trava esperando a UI.
@@ -29,4 +29,4 @@ struct Transport
         return positionTicks.load (std::memory_order_relaxed) / ppq;
     }
 };
-} // namespace daw
+} // namespace lynx

@@ -59,7 +59,7 @@ int main (int argc, char** argv)
     std::ifstream in (argv[1], std::ios::binary);
     std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
 
-    daw::Song song;
+    lynx::Song song;
 
     // No Linux/WSL o FL fica em /mnt/c; os caminhos do .flp usam barras invertidas.
     const std::string flRoot = std::getenv ("FL_ROOT") ? std::getenv ("FL_ROOT")
@@ -69,13 +69,13 @@ int main (int argc, char** argv)
         return p;
     };
 
-    daw::FlpImportOptions options;
+    lynx::FlpImportOptions options;
     options.roots = { flRoot, flRoot + "/Data", "" };
     options.fileExists = [&] (const std::string& p) { return std::filesystem::exists (toLocal (p)); };
 
     try
     {
-        song = daw::importFlp (flp::parseProject (bytes), options);
+        song = lynx::importFlp (flp::parseProject (bytes), options);
     }
     catch (const flp::Error& e)
     {
@@ -100,7 +100,7 @@ int main (int argc, char** argv)
 
     constexpr int sampleRate = 44100;
     constexpr int blockSize = 256;
-    const auto tps = daw::ticksPerSample (song.bpm, sampleRate);
+    const auto tps = lynx::ticksPerSample (song.bpm, sampleRate);
     const auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s de cauda
 
     std::printf ("%.1f BPM, %zu canais, pattern \"%s\" (%zu notas), %d loops, %.1f s\n", song.bpm,
@@ -113,16 +113,16 @@ int main (int argc, char** argv)
         std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
     }
 
-    std::map<std::string, std::shared_ptr<const daw::SampleData>> cache;
-    auto state = daw::RackState::build (song, nullptr, sampleRate, [&] (const std::string& p) {
+    std::map<std::string, std::shared_ptr<const lynx::SampleData>> cache;
+    auto state = lynx::RackState::build (song, nullptr, sampleRate, [&] (const std::string& p) {
         auto& entry = cache[p];
         if (entry == nullptr)
-            entry = daw::tools::readWav (toLocal (p));
+            entry = lynx::tools::readWav (toLocal (p));
         if (entry == nullptr)
             std::printf ("  (não consegui ler %s)\n", p.c_str());
         return entry;
     });
-    daw::RackRenderer renderer;
+    lynx::RackRenderer renderer;
     renderer.prepare (sampleRate);
 
     std::vector<float> left (totalSamples), right (totalSamples);

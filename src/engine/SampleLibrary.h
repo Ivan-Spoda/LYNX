@@ -7,7 +7,7 @@
 
 #include "core/Instruments.h"
 
-namespace daw
+namespace lynx
 {
 // Decodifica arquivos de áudio para SampleData, com cache por caminho.
 // Thread da UI (decodificar aloca e faz I/O).
@@ -27,4 +27,4 @@ private:
     juce::AudioFormatManager formats;
     std::map<juce::String, std::weak_ptr<const SampleData>> cache;
 };
-} // namespace daw
+} // namespace lynx

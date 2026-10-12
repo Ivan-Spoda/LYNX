@@ -2,7 +2,7 @@
 
 #include "ui/Theme.h"
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -531,4 +531,4 @@ void PianoRollComponent::timerCallback()
         repaint();
     }
 }
-} // namespace daw
+} // namespace lynx

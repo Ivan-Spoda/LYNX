@@ -13,7 +13,7 @@
 #include "core/Scheduler.h"
 #include "core/Song.h"
 
-namespace daw
+namespace lynx
 {
 // Snapshot imutável publicado pela UI. Os instrumentos são compartilhados entre
 // snapshots consecutivos para as vozes não serem cortadas quando a música é editada.
@@ -60,4 +60,4 @@ private:
     const RackState* lastState = nullptr;
     EventBuffer events;
 };
-} // namespace daw
+} // namespace lynx

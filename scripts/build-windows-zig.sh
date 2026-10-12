@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build cruzado do Daw.exe (Windows x64) a partir do Linux/WSL usando Zig (clang + MinGW-w64).
+# Build cruzado do LYNX.exe (Windows x64) a partir do Linux/WSL usando Zig (clang + MinGW-w64).
 # Não precisa de Visual Studio nem de CMake. O build oficial continua sendo o CMakeLists.txt.
 #
 # Variáveis: ZIG (caminho do zig), JUCE_DIR (checkout do JUCE 8), OUT (pasta de saída), JOBS
@@ -30,7 +30,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_PLUGINHOST_VST3 0'
     echo '#define JUCE_ASIO 0'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
-    echo '#define JUCE_APPLICATION_NAME_STRING "Daw"'
+    echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
     echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.0"'
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
 } > "$OUT/JuceConfig.h.new"
@@ -80,13 +80,13 @@ printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     $ZIG c++ $COMMON_STR -Wall -Wextra -c "$src" -o "$obj"'
 
 echo "Recursos (manifest)..."
-( cd resources && "$ZIG" rc /fo "../$OUT/Daw.res" Daw.rc )
+( cd resources && "$ZIG" rc /fo "../$OUT/LYNX.res" LYNX.rc )
 
 echo "Linkando..."
-"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/Daw.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT/Daw.res" \
+"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT/LYNX.res" \
     -Wl,--subsystem,windows \
     -lole32 -loleaut32 -luuid -lwinmm -lws2_32 -lshlwapi -lversion -lwininet -limm32 -lcomdlg32 \
     -lgdi32 -luser32 -lcomctl32 -lshell32 -ladvapi32 -lrpcrt4 -ldbghelp -lsetupapi -luxtheme -ldwmapi \
     -ld2d1 -ldcomp -ldwrite -ldxgi -ld3d11 -ldxguid -lwsock32 -lopengl32 -lpropsys -lmfplat -lmfuuid -lksuser -lavrt
 
-ls -la "$OUT/Daw.exe"
+ls -la "$OUT/LYNX.exe"

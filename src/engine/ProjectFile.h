@@ -6,13 +6,13 @@
 
 #include "core/Song.h"
 
-namespace daw
+namespace lynx
 {
-// Formato próprio de projeto: JSON versionado (.dawproj).
+// Formato próprio de projeto: JSON versionado (.lynx).
 // Notas vão como arrays compactos [start, length, channel, key, velocity].
 namespace ProjectFile
 {
-constexpr const char* extension = ".dawproj";
+constexpr const char* extension = ".lynx";
 constexpr int currentVersion = 1;
 
 juce::String toJson (const Song& song);
@@ -21,4 +21,4 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error);
 bool save (const Song& song, const juce::File& file, juce::String& error);
 std::optional<Song> load (const juce::File& file, juce::String& error);
 } // namespace ProjectFile
-} // namespace daw
+} // namespace lynx

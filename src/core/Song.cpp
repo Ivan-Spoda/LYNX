@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace daw
+namespace lynx
 {
 void Pattern::sortNotes()
 {
@@ -74,4 +74,4 @@ Song Song::makeDefault()
 
     return song;
 }
-} // namespace daw
+} // namespace lynx

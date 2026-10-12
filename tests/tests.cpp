@@ -1,4 +1,4 @@
-// Testes do núcleo (sem JUCE). Uso: daw_tests [pasta-com-arquivos-flp]
+// Testes do núcleo (sem JUCE). Uso: lynx_tests [pasta-com-arquivos-flp]
 
 #include <cmath>
 #include <cstdio>
@@ -261,7 +261,7 @@ TEST (flp_real_files)
             CHECK (! p.version.empty());
             CHECK (p.tempo > 10.0 && p.tempo < 1000.0);
 
-            const auto song = daw::importFlp (p);
+            const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
 
             for (auto& pat : p.patterns)
@@ -291,33 +291,33 @@ TEST (flp_real_files)
 
 TEST (pattern_toggle_step_and_length)
 {
-    daw::Pattern p;
+    lynx::Pattern p;
     CHECK (! p.hasStep (0, 4));
     p.toggleStep (0, 4);
     CHECK (p.hasStep (0, 4));
-    CHECK (p.notes.size() == 1 && p.notes[0].start == 4 * daw::ticksPerStep);
-    CHECK (p.effectiveLength (4) == 4 * daw::ppq); // um compasso
+    CHECK (p.notes.size() == 1 && p.notes[0].start == 4 * lynx::ticksPerStep);
+    CHECK (p.effectiveLength (4) == 4 * lynx::ppq); // um compasso
     p.toggleStep (1, 20);                            // segundo compasso
-    CHECK (p.effectiveLength (4) == 8 * daw::ppq);
+    CHECK (p.effectiveLength (4) == 8 * lynx::ppq);
     p.toggleStep (0, 4);
     CHECK (! p.hasStep (0, 4) && p.notes.size() == 1);
 }
 
 TEST (scheduler_places_events_at_exact_samples)
 {
-    daw::Pattern p;
+    lynx::Pattern p;
     p.toggleStep (0, 0);
     p.toggleStep (0, 4); // tick 960 = 1 tempo
 
     const double sr = 48000.0, bpm = 120.0; // 1 tempo = 0,5 s = 24000 samples
-    const auto tps = daw::ticksPerSample (bpm, sr);
-    daw::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (bpm, sr);
+    lynx::EventBuffer ev;
 
-    daw::schedulePatternLoop (p, p.effectiveLength (4), 23900.0 * tps, 512, tps, ev);
+    lynx::schedulePatternLoop (p, p.effectiveLength (4), 23900.0 * tps, 512, tps, ev);
     // a nota do tempo 2 começa no sample 24000 → offset 100 neste bloco
     int ons = 0;
     for (auto& e : ev)
-        if (e.type == daw::NoteEvent::Type::on)
+        if (e.type == lynx::NoteEvent::Type::on)
         {
             ++ons;
             CHECK (e.sampleOffset == 100);
@@ -327,20 +327,20 @@ TEST (scheduler_places_events_at_exact_samples)
 
 TEST (scheduler_wraps_the_loop)
 {
-    daw::Pattern p;
+    lynx::Pattern p;
     p.toggleStep (2, 0);
     const auto len = p.effectiveLength (4); // 3840 ticks
     const double sr = 48000.0;
-    const auto tps = daw::ticksPerSample (120.0, sr);
-    daw::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (120.0, sr);
+    lynx::EventBuffer ev;
 
     // bloco que atravessa o fim do loop: começa 10 samples antes
     const auto start = (double) len - 10.0 * tps;
-    daw::schedulePatternLoop (p, len, start, 64, tps, ev);
+    lynx::schedulePatternLoop (p, len, start, 64, tps, ev);
 
     bool found = false;
     for (auto& e : ev)
-        if (e.type == daw::NoteEvent::Type::on && e.channel == 2)
+        if (e.type == lynx::NoteEvent::Type::on && e.channel == 2)
         {
             found = true;
             CHECK (e.sampleOffset == 10);
@@ -350,19 +350,19 @@ TEST (scheduler_wraps_the_loop)
 
 TEST (scheduler_off_before_on_at_same_sample)
 {
-    daw::Pattern p;
-    daw::Note a;
+    lynx::Pattern p;
+    lynx::Note a;
     a.start = 0; a.length = 240; a.channel = 0;
-    daw::Note b = a;
+    lynx::Note b = a;
     b.start = 240;
     p.notes = { a, b };
-    const auto tps = daw::ticksPerSample (120.0, 48000.0);
-    daw::EventBuffer ev;
-    daw::schedulePatternLoop (p, p.effectiveLength (4), 200.0, 4000, tps, ev);
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::EventBuffer ev;
+    lynx::schedulePatternLoop (p, p.effectiveLength (4), 200.0, 4000, tps, ev);
 
     CHECK (ev.size() >= 2);
-    CHECK (ev[0].type == daw::NoteEvent::Type::off);
-    CHECK (ev[1].type == daw::NoteEvent::Type::on);
+    CHECK (ev[0].type == lynx::NoteEvent::Type::off);
+    CHECK (ev[1].type == lynx::NoteEvent::Type::on);
     CHECK (ev[0].sampleOffset == ev[1].sampleOffset);
 }
 
@@ -378,7 +378,7 @@ TEST (snapshot_exchange_hands_over_and_recycles)
 
     int alive = 0;
     {
-        daw::SnapshotExchange<Counted> x;
+        lynx::SnapshotExchange<Counted> x;
         CHECK (x.acquire() == nullptr);
 
         x.publish (std::make_unique<Counted> (1, &alive));
@@ -404,12 +404,12 @@ TEST (snapshot_exchange_hands_over_and_recycles)
 
 TEST (rack_renderer_makes_sound_and_reuses_instruments)
 {
-    auto song = daw::Song::makeDefault();
+    auto song = lynx::Song::makeDefault();
     song.bpm = 120.0;
     const double sr = 48000.0;
-    auto state = daw::RackState::build (song, nullptr, sr);
+    auto state = lynx::RackState::build (song, nullptr, sr);
 
-    daw::RackRenderer r;
+    lynx::RackRenderer r;
     r.prepare (sr);
     std::vector<float> l (512), rr (512);
 
@@ -421,22 +421,22 @@ TEST (rack_renderer_makes_sound_and_reuses_instruments)
     {
         r.process (state.get(), true, tick, 512, l.data(), rr.data());
         for (auto& e : r.lastEvents())
-            if (e.type == daw::NoteEvent::Type::on && e.channel == 0)
+            if (e.type == lynx::NoteEvent::Type::on && e.channel == 0)
                 ++kicks;
         for (int i = 0; i < 512; ++i)
         {
             CHECK (std::isfinite (l[(std::size_t) i]));
             peak = std::max (peak, std::abs (l[(std::size_t) i]));
         }
-        tick += 512 * daw::ticksPerSample (song.bpm, sr);
+        tick += 512 * lynx::ticksPerSample (song.bpm, sr);
     }
 
     CHECK (peak > 0.1f && peak < 4.0f);
     CHECK (kicks == 2); // 120 BPM: tempos em 0 e 0,5 s
 
     // editar a música preserva os instrumentos de canais que não mudaram de tipo
-    song.channels[4].instrument = daw::InstrumentKind::kick;
-    auto next = daw::RackState::build (song, state.get(), sr);
+    song.channels[4].instrument = lynx::InstrumentKind::kick;
+    auto next = lynx::RackState::build (song, state.get(), sr);
     CHECK (next->instruments[0] == state->instruments[0]);
     CHECK (next->instruments[4] != state->instruments[4]);
 
@@ -464,27 +464,27 @@ TEST (flp_import_maps_channels_and_rescales)
     pat.notes.push_back (n);
     p.patterns.push_back (pat);
 
-    const auto s = daw::importFlp (p);
+    const auto s = lynx::importFlp (p);
     CHECK (s.bpm == 150.0);
     CHECK (s.channels.size() == 2); // o clip de áudio fica de fora
-    CHECK (s.channels[0].instrument == daw::InstrumentKind::kick);
-    CHECK (s.channels[1].instrument == daw::InstrumentKind::synth);
+    CHECK (s.channels[0].instrument == lynx::InstrumentKind::kick);
+    CHECK (s.channels[1].instrument == lynx::InstrumentKind::synth);
     CHECK (s.patterns.size() == 1);
-    CHECK (s.patterns[0].notes[0].start == daw::ppq);           // 96 @ PPQ 96 = 1 tempo
+    CHECK (s.patterns[0].notes[0].start == lynx::ppq);           // 96 @ PPQ 96 = 1 tempo
     CHECK (s.patterns[0].notes[0].channel == 1);                // índice denso
-    CHECK (s.patterns[0].notes[0].length == daw::ticksPerStep); // nota de step
+    CHECK (s.patterns[0].notes[0].length == lynx::ticksPerStep); // nota de step
     CHECK (std::abs (s.patterns[0].notes[0].velocity - 0.5f) < 1e-6f);
 }
 
 TEST (live_queue_is_fifo_and_bounded)
 {
-    daw::LiveEventQueue q;
-    daw::NoteEvent e;
+    lynx::LiveEventQueue q;
+    lynx::NoteEvent e;
     CHECK (! q.pop (e));
 
     for (int i = 0; i < 10; ++i)
     {
-        daw::NoteEvent in;
+        lynx::NoteEvent in;
         in.key = i;
         CHECK (q.push (in));
     }
@@ -495,18 +495,18 @@ TEST (live_queue_is_fifo_and_bounded)
     int pushed = 0;
     while (q.push (e))
         ++pushed;
-    CHECK (pushed == (int) daw::LiveEventQueue::capacity - 1); // uma vaga fica livre para distinguir cheio de vazio
+    CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // uma vaga fica livre para distinguir cheio de vazio
 }
 
 TEST (sampler_plays_pitched_one_shot)
 {
     // sample de 1000 frames com rampa: dá para medir a posição pela amplitude
-    auto data = std::make_shared<daw::SampleData>();
+    auto data = std::make_shared<lynx::SampleData>();
     data->sampleRate = 48000.0;
     for (int i = 0; i < 1000; ++i)
         data->left.push_back (1.0f);
 
-    auto sampler = daw::makeInstrument (daw::InstrumentKind::sampler, data);
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
     sampler->prepare (48000.0);
     std::vector<float> l (2048, 0.0f), r (2048, 0.0f);
 
@@ -527,7 +527,7 @@ TEST (sampler_plays_pitched_one_shot)
     CHECK (sounding >= 495 && sounding <= 500);
     CHECK (r[10] > 0.5f); // mono vai para os dois lados
 
-    auto silent = daw::makeInstrument (daw::InstrumentKind::sampler, nullptr);
+    auto silent = lynx::makeInstrument (lynx::InstrumentKind::sampler, nullptr);
     silent->prepare (48000.0);
     silent->noteOn (60, 1.0f);
     std::fill (l.begin(), l.end(), 0.0f);
@@ -537,30 +537,30 @@ TEST (sampler_plays_pitched_one_shot)
 
 TEST (rack_live_notes_and_sample_provider)
 {
-    daw::Song song;
-    daw::ChannelDef c;
+    lynx::Song song;
+    lynx::ChannelDef c;
     c.name = "Smp";
-    c.instrument = daw::InstrumentKind::sampler;
+    c.instrument = lynx::InstrumentKind::sampler;
     c.samplePath = "a.wav";
     song.channels.push_back (c);
     song.patterns.emplace_back();
 
     int loads = 0;
-    auto provider = [&] (const std::string& path) -> std::shared_ptr<const daw::SampleData> {
+    auto provider = [&] (const std::string& path) -> std::shared_ptr<const lynx::SampleData> {
         ++loads;
         CHECK (path == "a.wav");
-        auto d = std::make_shared<daw::SampleData>();
+        auto d = std::make_shared<lynx::SampleData>();
         d->left.assign (4800, 0.5f);
         return d;
     };
 
-    auto state = daw::RackState::build (song, nullptr, 48000.0, provider);
+    auto state = lynx::RackState::build (song, nullptr, 48000.0, provider);
     CHECK (loads == 1);
 
-    daw::RackRenderer renderer;
+    lynx::RackRenderer renderer;
     renderer.prepare (48000.0);
-    daw::LiveEventQueue live;
-    daw::NoteEvent on;
+    lynx::LiveEventQueue live;
+    lynx::NoteEvent on;
     on.channel = 0;
     on.velocity = 1.0f;
     live.push (on);
@@ -570,39 +570,39 @@ TEST (rack_live_notes_and_sample_provider)
     CHECK (l[0] > 0.1f);
 
     // mesmo sample: reaproveita; sample diferente: recarrega
-    auto same = daw::RackState::build (song, state.get(), 48000.0, provider);
+    auto same = lynx::RackState::build (song, state.get(), 48000.0, provider);
     CHECK (loads == 1 && same->instruments[0] == state->instruments[0]);
     song.channels[0].samplePath = "b.wav";
-    auto other = daw::RackState::build (song, state.get(), 48000.0, [&] (const std::string&) { ++loads; return nullptr; });
+    auto other = lynx::RackState::build (song, state.get(), 48000.0, [&] (const std::string&) { ++loads; return nullptr; });
     CHECK (loads == 2 && other->instruments[0] != state->instruments[0]);
 }
 
 TEST (flp_paths_resolve_and_samplers_import)
 {
-    daw::FlPathRoots roots { "C:\\FL", "C:\\FL\\Data", "D:\\User" };
-    CHECK (daw::resolveFlPath ("%FLStudioFactoryData%\\Data\\x.wav", roots) == "C:\\FL\\Data\\x.wav");
-    CHECK (daw::resolveFlPath ("%FLStudioData%\\Patches\\y.wav", roots) == "C:\\FL\\Data\\Patches\\y.wav");
-    CHECK (daw::resolveFlPath ("%FLStudioUserData%\\z.wav", roots) == "D:\\User\\z.wav");
-    CHECK (daw::resolveFlPath ("E:\\abs.wav", roots) == "E:\\abs.wav");
-    CHECK (daw::resolveFlPath ("%FLStudioUserData%\\z.wav", {}) == "");
+    lynx::FlPathRoots roots { "C:\\FL", "C:\\FL\\Data", "D:\\User" };
+    CHECK (lynx::resolveFlPath ("%FLStudioFactoryData%\\Data\\x.wav", roots) == "C:\\FL\\Data\\x.wav");
+    CHECK (lynx::resolveFlPath ("%FLStudioData%\\Patches\\y.wav", roots) == "C:\\FL\\Data\\Patches\\y.wav");
+    CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", roots) == "D:\\User\\z.wav");
+    CHECK (lynx::resolveFlPath ("E:\\abs.wav", roots) == "E:\\abs.wav");
+    CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", {}) == "");
 
     flp::Project p;
     p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "%FLStudioData%\\k.wav", 1 },
                    { 1, flp::ChannelType::sampler, "Hat", "", "%FLStudioData%\\missing.wav", 1 } };
-    daw::FlpImportOptions options;
+    lynx::FlpImportOptions options;
     options.roots = roots;
     options.fileExists = [] (const std::string& path) { return path == "C:\\FL\\Data\\k.wav"; };
 
-    const auto s = daw::importFlp (p, options);
-    CHECK (s.channels[0].instrument == daw::InstrumentKind::sampler);
+    const auto s = lynx::importFlp (p, options);
+    CHECK (s.channels[0].instrument == lynx::InstrumentKind::sampler);
     CHECK (s.channels[0].samplePath == "C:\\FL\\Data\\k.wav");
-    CHECK (s.channels[1].instrument == daw::InstrumentKind::hat); // sem arquivo: instrumento interno
+    CHECK (s.channels[1].instrument == lynx::InstrumentKind::hat); // sem arquivo: instrumento interno
 }
 
 TEST (soft_clip_is_transparent_below_knee_and_bounded)
 {
     float s[] = { 0.5f, -0.89f, 1.5f, -3.0f, 0.95f };
-    daw::softClip (s, 5);
+    lynx::softClip (s, 5);
     CHECK (s[0] == 0.5f && s[1] == -0.89f);
     CHECK (s[2] > 0.9f && s[2] <= 1.0f);
     CHECK (s[3] < -0.9f && s[3] >= -1.0f);

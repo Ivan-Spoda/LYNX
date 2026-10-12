@@ -6,7 +6,7 @@
 #include "core/Song.h"
 #include "flp/Flp.h"
 
-namespace daw
+namespace lynx
 {
 // Pastas para onde apontam as variáveis que o FL grava nos caminhos de sample.
 struct FlPathRoots
@@ -30,4 +30,4 @@ struct FlpImportOptions
 Song importFlp (const flp::Project& project, const FlpImportOptions& options = {});
 
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type);
-} // namespace daw
+} // namespace lynx

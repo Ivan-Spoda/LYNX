@@ -1,6 +1,6 @@
 #include "engine/SampleLibrary.h"
 
-namespace daw
+namespace lynx
 {
 namespace
 {
@@ -106,4 +106,4 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     cache[path] = data;
     return data;
 }
-} // namespace daw
+} // namespace lynx

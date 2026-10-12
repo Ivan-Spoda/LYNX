@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace daw
+namespace lynx
 {
 void EventBuffer::add (const NoteEvent& e) noexcept
 {
@@ -74,4 +74,4 @@ void schedulePatternLoop (const Pattern& pattern,
 
     out.sortByOffset();
 }
-} // namespace daw
+} // namespace lynx

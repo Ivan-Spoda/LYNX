@@ -6,7 +6,7 @@
 #include "ui/MainComponent.h"
 #include "ui/Theme.h"
 
-class DawApplication final : public juce::JUCEApplication
+class LynxApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
@@ -38,10 +38,10 @@ public:
         }
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
-        engine = std::make_unique<daw::AudioEngine>();
+        engine = std::make_unique<lynx::AudioEngine>();
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
 
-        // Duplo clique num .dawproj/.flp abre a DAW com o arquivo como argumento.
+        // Duplo clique num .lynx/.flp abre o LYNX com o arquivo como argumento.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
             mainWindow->openFile (juce::File (args[0].unquoted()));
     }
@@ -56,19 +56,19 @@ public:
     void systemRequestedQuit() override { quit(); }
 
 private:
-    // Daw.exe --selftest relatorio.txt: renderiza 2 s sem placa de som e grava o resultado.
+    // LYNX.exe --selftest relatorio.txt: renderiza 2 s sem placa de som e grava o resultado.
     // Código de saída 0 = saiu áudio, 1 = silêncio.
     void runSelfTest (const juce::String& reportPath)
     {
-        daw::AudioEngine offline (false);
+        lynx::AudioEngine offline (false);
         const auto peak = offline.renderOffline (2.0, 48000.0);
         const auto audioOk = peak > 0.01f && peak < 10.0f;
 
         // ida e volta do formato de projeto, com acentos no nome
-        auto original = daw::Song::makeDefault();
+        auto original = lynx::Song::makeDefault();
         original.channels[0].name = "Bumbo ação";
         juce::String error;
-        const auto reloaded = daw::ProjectFile::fromJson (daw::ProjectFile::toJson (original), error);
+        const auto reloaded = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (original), error);
         const auto projectOk = reloaded && reloaded->channels.size() == original.channels.size()
                                && reloaded->channels[0].name == original.channels[0].name
                                && reloaded->patterns[0].notes.size() == original.patterns[0].notes.size()
@@ -88,18 +88,18 @@ private:
         quit();
     }
 
-    // Daw.exe --render projeto.(flp|dawproj) saida.wav [segundos]
+    // LYNX.exe --render projeto.(flp|lynx) saida.wav [segundos]
     // Exporta a pattern atual para WAV 24 bits (num .flp importado, a que tem mais notas).
     void runRender (const juce::String& inputPath, const juce::String& outputPath, double seconds)
     {
-        daw::AudioEngine offline (false);
+        lynx::AudioEngine offline (false);
         const juce::File input (inputPath);
         juce::String error, report;
         bool ok = false;
 
         if (input.hasFileExtension ("flp"))
             ok = offline.importFlpFile (input, error);
-        else if (auto song = daw::ProjectFile::load (input, error))
+        else if (auto song = lynx::ProjectFile::load (input, error))
         {
             offline.setSong (std::move (*song));
             ok = true;
@@ -110,7 +110,7 @@ private:
         if (ok)
         {
             for (const auto& c : offline.getSong().channels)
-                if (c.instrument == daw::InstrumentKind::sampler)
+                if (c.instrument == lynx::InstrumentKind::sampler)
                 {
                     ++samplers;
                     samplersLoaded += offline.getSampleLibrary().load (juce::String::fromUTF8 (c.samplePath.c_str())) != nullptr;
@@ -125,7 +125,7 @@ private:
             if (writer == nullptr)
             {
                 ok = false;
-                error = daw::utf8 ("não foi possível criar ") + outputPath;
+                error = lynx::utf8 ("não foi possível criar ") + outputPath;
             }
             else
             {
@@ -143,14 +143,14 @@ private:
         quit();
     }
 
-    // Daw.exe --snapshot prefixo [projeto]: desenha a janela fora da tela e grava
+    // LYNX.exe --snapshot prefixo [projeto]: desenha a janela fora da tela e grava
     // prefixo-rack.png e prefixo-pianoroll.png (usado para conferir a UI sem mexer na tela).
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         {
-            daw::AudioEngine offline (false);
-            daw::MainComponent ui (offline);
+            lynx::AudioEngine offline (false);
+            lynx::MainComponent ui (offline);
             ui.setSize (1280, 720);
 
             if (projectPath.isNotEmpty())
@@ -180,11 +180,11 @@ private:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        MainWindow (const juce::String& name, daw::AudioEngine& engine)
-            : DocumentWindow (name, daw::theme::window, DocumentWindow::allButtons)
+        MainWindow (const juce::String& name, lynx::AudioEngine& engine)
+            : DocumentWindow (name, lynx::theme::window, DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            content = new daw::MainComponent (engine);
+            content = new lynx::MainComponent (engine);
             setContentOwned (content, true);
             setResizable (true, true);
             setResizeLimits (800, 400, 10000, 10000);
@@ -198,14 +198,14 @@ private:
         void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }
 
     private:
-        daw::MainComponent* content = nullptr; // pertence à janela
+        lynx::MainComponent* content = nullptr; // pertence à janela
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };
 
-    daw::theme::LookAndFeel lookAndFeel;
-    std::unique_ptr<daw::AudioEngine> engine;
+    lynx::theme::LookAndFeel lookAndFeel;
+    std::unique_ptr<lynx::AudioEngine> engine;
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION (DawApplication)
+START_JUCE_APPLICATION (LynxApplication)

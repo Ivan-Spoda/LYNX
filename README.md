@@ -1,22 +1,46 @@
-# Daw
+# LYNX
 
-DAW leve em C++20 + JUCE 8, com o fluxo de trabalho do FL Studio.
-Veja `docs/ARQUITETURA.md`, `docs/ROADMAP.md` e `docs/ESTADO.md`.
+DAW leve em C++20 + JUCE 8, com o fluxo de trabalho do FL Studio e foco em rodar bem em
+qualquer PC, independente do tamanho do projeto.
+
+> Projeto em desenvolvimento. Veja o que já existe em [`docs/ESTADO.md`](docs/ESTADO.md) e o
+> plano em [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## O que já funciona
 
-- Channel Rack com step sequencer (clique liga, arrastar pinta, clique direito apaga)
-- Várias patterns, BPM, metrônomo, posição em compasso:tempo:step
-- Instrumentos internos sintetizados: kick, snare, hat, clap e synth polifônico
-- Notas disparadas no sample exato; a UI nunca trava a thread de áudio
-- Abrir projetos `.flp` do FL Studio (canais, patterns e notas; 165/165 demos do FL 2026 leem sem erro)
+- **Channel Rack** com step sequencer, pan/volume/mute por canal, várias patterns
+- **Piano Roll**: criar, mover, redimensionar e apagar notas, snap, zoom, preview e ghost notes
+- **Instrumentos**: sampler (`.wav`, `.flac`, `.ogg`, `.mp3`, `.aiff`) e bateria/synth sintetizados
+- **Teclado do PC como piano** (layout do FL: `Z`..`M` e `Q`..`P`)
+- **Projetos**: formato próprio `.lynx` (JSON) e importação de `.flp` do FL Studio com os samples
+  reais da instalação do FL
+- **Exportar para WAV** pela linha de comando
+- Motor de áudio sem locks: notas no sample exato, a interface nunca trava o áudio
+
+## Atalhos
+
+| Tecla | Ação |
+|---|---|
+| Espaço | Play / Pause |
+| F6 / F7 | Channel Rack / Piano Roll |
+| Ctrl+N / Ctrl+O / Ctrl+S | Novo / Abrir / Salvar (Ctrl+Shift+S: salvar como) |
+| `Z`..`M`, `Q`..`P` | Tocar o canal selecionado |
+
+## Linha de comando
+
+```
+LYNX.exe projeto.lynx                         abre um projeto (.lynx ou .flp)
+LYNX.exe --render projeto.flp saida.wav 20    exporta 20 s para WAV 24 bits
+LYNX.exe --selftest relatorio.txt             autoteste sem placa de som
+LYNX.exe --snapshot prefixo projeto.flp       desenha a interface em PNG
+```
 
 ## Compilar
 
 ### Windows a partir do WSL/Linux, sem Visual Studio (Zig)
 
 ```
-./scripts/build-windows-zig.sh      # gera build-win/Daw.exe
+./scripts/build-windows-zig.sh      # gera build-win/LYNX.exe
 ```
 
 Precisa do Zig 0.14.1 em `~/opt/zig-x86_64-linux-0.14.1` e do JUCE 8.0.4 em `~/opt/juce-8.0.4`
@@ -38,5 +62,22 @@ cmake --build build --config Release
 ./scripts/build-local.sh ["pasta com arquivos .flp"]
 ```
 
-Também gera `build-local/flpdump` (mostra o conteúdo de um `.flp`) e `build-local/renderwav`
-(renderiza uma pattern de um `.flp` para `.wav` com os instrumentos internos).
+Também gera `build-local/flpdump` (mostra o conteúdo de um `.flp`) e `build-local/renderwav`.
+
+## Organização
+
+```
+src/core/     modelo, sequenciador, instrumentos, leitor de .flp (C++ puro, testável sem JUCE)
+src/flp/      leitor do formato .flp
+src/engine/   motor de áudio (JUCE): dispositivo, grafo, samples, arquivo de projeto
+src/ui/       interface: Channel Rack, Piano Roll, janela principal
+tests/        testes do núcleo
+tools/        flpdump, renderwav
+docs/         arquitetura, estado, roadmap e a análise comportamental do FL Studio
+```
+
+## Sobre o FL Studio
+
+O LYNX é uma implementação independente. O FL Studio foi estudado para entender o
+comportamento e o formato de arquivo (veja `docs/ANALISE_FL_STUDIO.md`); nenhum código da
+Image-Line foi copiado.

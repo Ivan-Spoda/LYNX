@@ -4,7 +4,7 @@
 
 #include "engine/AudioEngine.h"
 
-namespace daw
+namespace lynx
 {
 // Piano Roll do canal selecionado na pattern atual.
 //  - clique esquerdo no vazio cria uma nota (com a última duração usada) e já permite arrastar
@@ -73,4 +73,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PianoRollComponent)
 };
-} // namespace daw
+} // namespace lynx

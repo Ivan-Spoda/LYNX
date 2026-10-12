@@ -7,7 +7,7 @@
 #include "core/SnapshotExchange.h"
 #include "engine/Transport.h"
 
-namespace daw
+namespace lynx
 {
 // Nó do grafo que toca o Channel Rack: pega o snapshot mais recente da música
 // e renderiza os instrumentos internos com o sequenciador.
@@ -47,4 +47,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackProcessor)
 };
-} // namespace daw
+} // namespace lynx

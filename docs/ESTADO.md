@@ -4,11 +4,11 @@ Atualizado em 2026-10-12.
 
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
-  canais de saída). Corrigido e coberto pelo `Daw.exe --selftest`.
-- `Daw.exe --render projeto.flp saida.wav 20` exporta um demo do FL com 17/17 samples reais.
-- `Daw.exe --snapshot prefixo projeto.flp` desenha a UI fora da tela em PNG: é assim que
+  canais de saída). Corrigido e coberto pelo `LYNX.exe --selftest`.
+- `LYNX.exe --render projeto.flp saida.wav 20` exporta um demo do FL com 17/17 samples reais.
+- `LYNX.exe --snapshot prefixo projeto.flp` desenha a UI fora da tela em PNG: é assim que
   confiro a interface sem mexer na tela do usuário.
-- `Daw.exe` compila de forma cruzada do WSL com Zig 0.14.1 + JUCE 8.0.4, abre no Windows 11
+- `LYNX.exe` compila de forma cruzada do WSL com Zig 0.14.1 + JUCE 8.0.4, abre no Windows 11
   e mostra o Channel Rack (verificado por captura de tela da janela).
 - Testes do núcleo: 75 mil verificações passando, incluindo leitura dos 165 `.flp` instalados
   com o FL Studio 2026 (versões 10.9 a 25.2).
