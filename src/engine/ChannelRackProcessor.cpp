@@ -1,0 +1,45 @@
+#include "engine/ChannelRackProcessor.h"
+
+namespace daw
+{
+ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x)
+    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      transport (t),
+      exchange (x)
+{
+}
+
+void ChannelRackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock)
+{
+    renderer.prepare (sampleRate);
+    scratch.setSize (2, maximumExpectedSamplesPerBlock);
+}
+
+void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    const auto numSamples = buffer.getNumSamples();
+    const auto* state = exchange.acquire();
+    const auto playing = transport.playing.load (std::memory_order_relaxed);
+    const auto startTick = transport.positionTicks.load (std::memory_order_relaxed);
+
+    if (buffer.getNumChannels() >= 2)
+    {
+        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1));
+    }
+    else if (numSamples <= scratch.getNumSamples())
+    {
+        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1));
+
+        if (buffer.getNumChannels() == 1)
+        {
+            buffer.copyFrom (0, 0, scratch, 0, 0, numSamples);
+            buffer.addFrom (0, 0, scratch, 1, 0, numSamples);
+            buffer.applyGain (0.5f);
+        }
+    }
+    else
+    {
+        buffer.clear();
+    }
+}
+} // namespace daw
