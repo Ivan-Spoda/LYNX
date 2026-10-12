@@ -79,16 +79,40 @@ void Song::removePattern (int index)
     currentPattern = std::clamp (currentPattern > index ? currentPattern - 1 : currentPattern, 0, (int) patterns.size() - 1);
 }
 
+std::vector<MixerTrack> Song::defaultMixer (int inserts)
+{
+    std::vector<MixerTrack> mixer ((std::size_t) std::clamp (inserts + 1, 1, maxMixerTracks));
+    mixer[0].name = "Master";
+
+    for (std::size_t i = 1; i < mixer.size(); ++i)
+        mixer[i].name = "Insert " + std::to_string (i);
+
+    return mixer;
+}
+
+int Song::nextFreeInsert() const
+{
+    for (int t = 1; t < (int) mixer.size(); ++t)
+        if (std::none_of (channels.begin(), channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; }))
+            return t;
+
+    return std::max (0, (int) mixer.size() - 1);
+}
+
 Song Song::makeDefault()
 {
     Song song;
+    song.mixer = defaultMixer();
     song.channels = {
-        { "Kick", InstrumentKind::kick, 0.9f, 0.0f, false, {} },
-        { "Clap", InstrumentKind::clap, 0.7f, 0.0f, false, {} },
-        { "Hat", InstrumentKind::hat, 0.5f, 0.1f, false, {} },
-        { "Snare", InstrumentKind::snare, 0.7f, 0.0f, false, {} },
-        { "Synth", InstrumentKind::synth, 0.5f, 0.0f, false, {} },
+        { "Kick", InstrumentKind::kick, 0.9f, 0.0f, false, {}, 0 },
+        { "Clap", InstrumentKind::clap, 0.7f, 0.0f, false, {}, 0 },
+        { "Hat", InstrumentKind::hat, 0.5f, 0.1f, false, {}, 0 },
+        { "Snare", InstrumentKind::snare, 0.7f, 0.0f, false, {}, 0 },
+        { "Synth", InstrumentKind::synth, 0.5f, 0.0f, false, {}, 0 },
     };
+
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        song.channels[i].mixerTrack = (int) i + 1;
 
     auto& p = song.patterns.emplace_back();
     p.name = "Pattern 1";

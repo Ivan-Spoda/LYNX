@@ -90,8 +90,20 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             }
         }
 
+        def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
         song.channels.push_back (std::move (def));
     }
+
+    // Mixer: nomes do .flp; inserts suficientes para todas as rotas (mínimo 16, como um projeto novo).
+    int highestTrack = 16;
+    for (const auto& c : song.channels)
+        highestTrack = std::max (highestTrack, c.mixerTrack);
+
+    song.mixer = Song::defaultMixer (highestTrack);
+
+    for (const auto& insert : project.mixer)
+        if (insert.index > 0 && insert.index < (int) song.mixer.size() && ! insert.name.empty())
+            song.mixer[(std::size_t) insert.index].name = insert.name;
 
     const auto filePpq = project.header.ppq > 0 ? (std::int64_t) project.header.ppq : 96;
     auto rescale = [filePpq] (std::int64_t ticks) { return ticks * ppq / filePpq; };

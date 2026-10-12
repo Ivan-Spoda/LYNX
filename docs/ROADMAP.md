@@ -33,7 +33,10 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [ ] Automação (clips de automação)
 
 ## Fase 4: mixer e plugins
-- [ ] Mixer com inserts, sends e roteamento (o FL tem 125+ inserts e 10 slots por trilha)
+- [x] Mixer: Master + até 127 inserts, fader (0,8 = 0 dB), pan, mute, solo, medidores estéreo
+- [x] Roteamento canal → insert (caixinha no Channel Rack, menu do mixer); importado do `.flp`
+- [ ] Sends entre inserts e roteamento insert → insert (hoje todo insert vai para o Master)
+- [ ] Slots de efeito por insert (o FL tem 10)
 - [ ] Efeitos internos básicos (EQ, compressor, reverb, delay)
 - [ ] Hosting de VST3 (JUCE) e CLAP; scan em processo separado
 - [ ] Compensação de latência (PDC)

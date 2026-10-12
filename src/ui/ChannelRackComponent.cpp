@@ -132,6 +132,8 @@ ChannelRackComponent::Area ChannelRackComponent::areaAt (int x, int y, int& row)
         return Area::pan;
     if (x < muteWidth + 2 * knobWidth)
         return Area::volume;
+    if (x < nameLeft())
+        return Area::route;
     if (x < gridLeft())
         return Area::name;
 
@@ -175,8 +177,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             continue;
 
         const auto& channel = song.channels[(std::size_t) row];
-        const auto nameArea = juce::Rectangle<float> ((float) muteWidth + 2 * knobWidth + 2, (float) y + 3,
-                                                      (float) nameWidth, (float) rowHeight - 6);
+        const auto nameArea = juce::Rectangle<float> ((float) nameLeft(), (float) y + 3, (float) nameWidth, (float) rowHeight - 6);
 
         g.setColour (theme::muteLed (channel.muted));
         g.fillEllipse ((float) 9, (float) y + rowHeight / 2.0f - 5, 10, 10);
@@ -185,6 +186,17 @@ void ChannelRackComponent::paint (juce::Graphics& g)
                   true, theme::accentBlue);
         drawKnob (g, { (float) muteWidth + knobWidth, (float) y, (float) knobWidth, (float) rowHeight }, channel.volume,
                   false, theme::accentGreen);
+
+        // caixinha com o insert do mixer ("-" = direto no Master), como no FL
+        const auto routeArea = juce::Rectangle<float> ((float) (muteWidth + 2 * knobWidth) + 1, (float) y + 7,
+                                                       (float) routeWidth - 3, (float) rowHeight - 14);
+        g.setColour (theme::knobBackground);
+        g.fillRoundedRectangle (routeArea, 3.0f);
+        g.setColour (channel.mixerTrack > 0 ? theme::accentOrange : theme::text.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
+                    juce::Justification::centred);
+        g.setFont (juce::FontOptions (14.0f));
 
         g.setColour (row == selected ? theme::channelButtonSelected : theme::channelButton);
         g.fillRoundedRectangle (nameArea, 4.0f);
@@ -216,7 +228,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
     const auto addY = 4 + (int) song.channels.size() * rowHeight;
     g.setColour (juce::Colours::white.withAlpha (0.5f));
-    g.drawText (utf8 ("+ adicionar canal (ou arraste um arquivo de áudio)"), muteWidth + 2 * knobWidth + 4, addY,
+    g.drawText (utf8 ("+ adicionar canal (ou arraste um arquivo de áudio)"), nameLeft() + 2, addY,
                 400, rowHeight, juce::Justification::centredLeft);
 
     if (playheadStep >= 0 && playheadStep < steps)
@@ -252,6 +264,12 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
             knobStartValue = area == Area::pan ? song.channels[(std::size_t) row].pan : song.channels[(std::size_t) row].volume;
             return;
 
+        case Area::route:
+            knobDrag = area;
+            knobRow = row;
+            routeStartValue = song.channels[(std::size_t) row].mixerTrack;
+            return;
+
         case Area::name:
             engine.setSelectedChannel (row);
 
@@ -285,7 +303,14 @@ void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
         const auto delta = (float) -e.getDistanceFromDragStartY() / 150.0f;
         const auto row = knobRow;
 
-        if (knobDrag == Area::pan)
+        if (knobDrag == Area::route)
+        {
+            const auto tracks = juce::jmax (1, (int) engine.getSong().mixer.size());
+            const auto value = juce::jlimit (0, tracks - 1, routeStartValue - e.getDistanceFromDragStartY() / 6);
+            if (value != engine.getSong().channels[(std::size_t) row].mixerTrack)
+                engine.editSong ([row, value] (Song& s) { s.channels[(std::size_t) row].mixerTrack = value; });
+        }
+        else if (knobDrag == Area::pan)
         {
             const auto value = juce::jlimit (-1.0f, 1.0f, knobStartValue + delta * 2.0f);
             engine.editSong ([row, value] (Song& s) { s.channels[(std::size_t) row].pan = value; });
@@ -322,6 +347,8 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
         engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].pan = 0.0f; });
     else if (area == Area::volume)
         engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].volume = 0.8f; });
+    else if (area == Area::route)
+        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
     else if (area == Area::name && onOpenPianoRoll)
         onOpenPianoRoll();
 }
@@ -402,6 +429,7 @@ void ChannelRackComponent::showAddChannelMenu()
                 ChannelDef c;
                 c.name = instrumentName (kind);
                 c.instrument = kind;
+                c.mixerTrack = s.nextFreeInsert();
                 s.channels.push_back (c);
             });
             engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
@@ -437,7 +465,11 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 
     engine.editSong ([channel, path, name] (Song& s) {
         const auto isNew = channel < 0 || channel >= (int) s.channels.size();
+        const auto freeInsert = s.nextFreeInsert();
         auto& c = isNew ? s.channels.emplace_back() : s.channels[(std::size_t) channel];
+
+        if (isNew)
+            c.mixerTrack = freeInsert;
         c.instrument = InstrumentKind::sampler;
         c.samplePath = path;
         c.name = name;

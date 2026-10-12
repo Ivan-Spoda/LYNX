@@ -10,6 +10,7 @@
 
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
+#include "core/Meters.h"
 #include "core/Scheduler.h"
 #include "core/Song.h"
 
@@ -37,7 +38,9 @@ struct RackState
 class RackRenderer
 {
 public:
-    void prepare (double sampleRate) noexcept;
+    // Aloca os buffers do mixer: chamar fora da thread de áudio.
+    // Blocos maiores que maxBlockSize são processados em pedaços.
+    void prepare (double sampleRate, int maxBlockSize = 2048);
 
     // Thread de áudio. left/right são sobrescritos. `live` (opcional) traz notas
     // tocadas ao vivo, aplicadas no início do bloco.
@@ -47,18 +50,24 @@ public:
                   int numSamples,
                   float* left,
                   float* right,
-                  LiveEventQueue* live = nullptr) noexcept;
+                  LiveEventQueue* live = nullptr,
+                  MeterBank* meters = nullptr) noexcept;
 
     // Eventos do último bloco (para testes e diagnóstico).
     const EventBuffer& lastEvents() const noexcept { return events; }
 
 private:
-    void renderSegment (const RackState& state, float* left, float* right, int n) noexcept;
+    void processChunk (const RackState& state, bool playing, double startTick, int numSamples,
+                       float* left, float* right, MeterBank* meters) noexcept;
+    void renderSegment (const RackState& state, int offset, int n) noexcept;
+    float* trackBuffer (int track, int channel) noexcept;
 
     double sampleRate = 44100.0;
     bool wasPlaying = false;
     double expectedTick = -1.0; // onde o próximo bloco deveria começar, para detectar saltos
     const RackState* lastState = nullptr;
     EventBuffer events;
+    std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
+    int blockCapacity = 0;
 };
 } // namespace lynx

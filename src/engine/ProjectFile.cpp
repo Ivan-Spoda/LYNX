@@ -56,6 +56,8 @@ juce::String toJson (const Song& song)
         if (! c.samplePath.empty())
             o->setProperty ("sample", str (c.samplePath));
 
+        o->setProperty ("mixer", c.mixerTrack);
+
         channels.add (juce::var (o.release()));
     }
 
@@ -90,6 +92,21 @@ juce::String toJson (const Song& song)
                                             (juce::int64) c.offset });
 
     root->setProperty ("playlist", clips);
+
+    juce::Array<juce::var> mixer;
+
+    for (const auto& t : song.mixer)
+    {
+        auto o = std::make_unique<juce::DynamicObject>();
+        o->setProperty ("name", str (t.name));
+        o->setProperty ("volume", t.volume);
+        o->setProperty ("pan", t.pan);
+        o->setProperty ("muted", t.muted);
+        o->setProperty ("solo", t.solo);
+        mixer.add (juce::var (o.release()));
+    }
+
+    root->setProperty ("mixer", mixer);
     root->setProperty ("mode", song.mode == PlayMode::song ? "song" : "pattern");
     return juce::JSON::toString (juce::var (root.release()), false);
 }
@@ -133,6 +150,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.pan = juce::jlimit (-1.0f, 1.0f, (float) c.getProperty ("pan", 0.0));
             def.muted = (bool) c.getProperty ("muted", false);
             def.samplePath = c["sample"].toString().toStdString();
+            def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
             song.channels.push_back (std::move (def));
         }
 
@@ -185,6 +203,24 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         }
 
     song.mode = root["mode"].toString() == "song" ? PlayMode::song : PlayMode::pattern;
+
+    if (auto* mixer = root["mixer"].getArray())
+        for (const auto& t : *mixer)
+        {
+            if ((int) song.mixer.size() >= maxMixerTracks)
+                break;
+
+            MixerTrack track;
+            track.name = t["name"].toString().toStdString();
+            track.volume = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("volume", unityFader));
+            track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
+            track.muted = (bool) t.getProperty ("muted", false);
+            track.solo = (bool) t.getProperty ("solo", false);
+            song.mixer.push_back (std::move (track));
+        }
+
+    if (song.mixer.empty()) // projetos de antes do mixer
+        song.mixer = Song::defaultMixer();
 
     song.currentPattern = juce::jlimit (0, (int) song.patterns.size() - 1, song.currentPattern);
     return song;

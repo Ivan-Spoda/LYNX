@@ -42,26 +42,55 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     return state;
 }
 
-void RackRenderer::prepare (double sr) noexcept
+namespace
+{
+// Pan de potência constante: no centro os dois lados ficam em 1 (0 dB).
+void panGains (float pan, float gain, float& left, float& right) noexcept
+{
+    const auto angle = (pan + 1.0f) * 0.25f * 3.14159265f;
+    left = gain * std::cos (angle) * 1.41421356f;
+    right = gain * std::sin (angle) * 1.41421356f;
+}
+
+float peakOf (const float* data, int n) noexcept
+{
+    float peak = 0.0f;
+
+    for (int i = 0; i < n; ++i)
+        peak = std::max (peak, std::abs (data[i]));
+
+    return peak;
+}
+} // namespace
+
+void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     sampleRate = sr;
+    blockCapacity = std::max (64, maxBlockSize);
+    mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
 
     if (lastState != nullptr)
         for (auto& instrument : lastState->instruments)
             instrument->prepare (sr);
 }
 
-void RackRenderer::renderSegment (const RackState& state, float* left, float* right, int n) noexcept
+float* RackRenderer::trackBuffer (int track, int channel) noexcept
+{
+    return mixBuffers.data() + ((std::size_t) track * 2 + (std::size_t) channel) * (std::size_t) blockCapacity;
+}
+
+void RackRenderer::renderSegment (const RackState& state, int offset, int n) noexcept
 {
     const auto& channels = state.song.channels;
+    const auto tracks = std::max<int> (1, (int) state.song.mixer.size());
 
     for (std::size_t i = 0; i < state.instruments.size() && i < channels.size(); ++i)
     {
         const auto& c = channels[i];
-        // pan de potência constante
-        const auto angle = (c.pan + 1.0f) * 0.25f * 3.14159265f;
-        state.instruments[i]->render (left, right, n, c.volume * std::cos (angle) * 1.41421356f,
-                                      c.volume * std::sin (angle) * 1.41421356f);
+        const auto track = std::clamp (c.mixerTrack, 0, tracks - 1);
+        float gl = 0.0f, gr = 0.0f;
+        panGains (c.pan, c.volume, gl, gr);
+        state.instruments[i]->render (trackBuffer (track, 0) + offset, trackBuffer (track, 1) + offset, n, gl, gr);
     }
 }
 
@@ -71,17 +100,18 @@ void RackRenderer::process (const RackState* state,
                             int numSamples,
                             float* left,
                             float* right,
-                            LiveEventQueue* live) noexcept
+                            LiveEventQueue* live,
+                            MeterBank* meters) noexcept
 {
     std::memset (left, 0, sizeof (float) * (std::size_t) numSamples);
     std::memset (right, 0, sizeof (float) * (std::size_t) numSamples);
     events.clear();
 
-    if (state == nullptr)
+    if (state == nullptr || blockCapacity == 0)
         return;
 
     // Um snapshot montado antes de o dispositivo abrir pode ter outra taxa. prepare()
-    // não aloca, então pode rodar aqui.
+    // dos instrumentos não aloca, então pode rodar aqui.
     if (state != lastState && state->sampleRate != sampleRate)
         for (auto& instrument : state->instruments)
             instrument->prepare (sampleRate);
@@ -97,7 +127,8 @@ void RackRenderer::process (const RackState* state,
             instrument->allNotesOff();
 
     wasPlaying = playing;
-    expectedTick = startTick + numSamples * ticksPerSample (state->song.bpm, sampleRate);
+    const auto tps = ticksPerSample (state->song.bpm, sampleRate);
+    expectedTick = startTick + numSamples * tps;
 
     if (live != nullptr)
     {
@@ -117,7 +148,27 @@ void RackRenderer::process (const RackState* state,
         }
     }
 
-    const auto& song = state->song;
+    // Blocos maiores que os buffers do mixer são feitos em pedaços.
+    for (int done = 0; done < numSamples; done += blockCapacity)
+    {
+        const auto n = std::min (blockCapacity, numSamples - done);
+        processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
+    }
+}
+
+void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
+                                 float* left, float* right, MeterBank* meters) noexcept
+{
+    const auto& song = state.song;
+    const auto tracks = std::max<int> (1, (int) song.mixer.size());
+
+    for (int t = 0; t < tracks; ++t)
+    {
+        std::memset (trackBuffer (t, 0), 0, sizeof (float) * (std::size_t) numSamples);
+        std::memset (trackBuffer (t, 1), 0, sizeof (float) * (std::size_t) numSamples);
+    }
+
+    events.clear();
 
     if (playing && song.mode == PlayMode::song)
     {
@@ -131,21 +182,22 @@ void RackRenderer::process (const RackState* state,
                              ticksPerSample (song.bpm, sampleRate), events);
     }
 
-    // Renderiza em segmentos entre eventos para cada nota começar no sample exato.
+    // 1) instrumentos -> trilhas do mixer, em segmentos entre eventos para cada nota
+    //    começar no sample exato
     int position = 0;
 
     for (const auto& e : events)
     {
         if (e.sampleOffset > position)
         {
-            renderSegment (*state, left + position, right + position, e.sampleOffset - position);
+            renderSegment (state, position, e.sampleOffset - position);
             position = e.sampleOffset;
         }
 
-        if (e.channel < 0 || e.channel >= (int) state->instruments.size())
+        if (e.channel < 0 || e.channel >= (int) state.instruments.size())
             continue;
 
-        auto& instrument = *state->instruments[(std::size_t) e.channel];
+        auto& instrument = *state.instruments[(std::size_t) e.channel];
 
         if (e.type == NoteEvent::Type::on)
         {
@@ -159,6 +211,53 @@ void RackRenderer::process (const RackState* state,
     }
 
     if (position < numSamples)
-        renderSegment (*state, left + position, right + position, numSamples - position);
+        renderSegment (state, position, numSamples - position);
+
+    // 2) inserts -> Master (com mute/solo)
+    const auto anySolo = std::any_of (song.mixer.begin() + std::min<std::ptrdiff_t> (1, (std::ptrdiff_t) song.mixer.size()),
+                                      song.mixer.end(), [] (const MixerTrack& t) { return t.solo; });
+
+    float* masterL = trackBuffer (0, 0);
+    float* masterR = trackBuffer (0, 1);
+
+    for (int t = 1; t < tracks; ++t)
+    {
+        const auto& track = song.mixer[(std::size_t) t];
+
+        if (track.muted || (anySolo && ! track.solo))
+            continue;
+
+        float gl = 0.0f, gr = 0.0f;
+        panGains (track.pan, track.volume / unityFader, gl, gr);
+        const auto* l = trackBuffer (t, 0);
+        const auto* r = trackBuffer (t, 1);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            masterL[i] += l[i] * gl;
+            masterR[i] += r[i] * gr;
+        }
+
+        if (meters != nullptr)
+            meters->accumulate (t, peakOf (l, numSamples) * gl, peakOf (r, numSamples) * gr);
+    }
+
+    // 3) Master -> saída. Sem mixer configurado, o Master fica em 0 dB.
+    float gl = 1.0f, gr = 1.0f;
+
+    if (! song.mixer.empty())
+    {
+        const auto& master = song.mixer[0];
+        panGains (master.pan, master.muted ? 0.0f : master.volume / unityFader, gl, gr);
+    }
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        left[i] = masterL[i] * gl;
+        right[i] = masterR[i] * gr;
+    }
+
+    if (meters != nullptr)
+        meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
 }
 } // namespace lynx

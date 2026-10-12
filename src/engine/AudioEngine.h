@@ -30,6 +30,7 @@ public:
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     Transport& getTransport() noexcept { return transport; }
     SampleLibrary& getSampleLibrary() noexcept { return samples; }
+    MeterBank& getMeters() noexcept { return meters; }
 
     void play() noexcept;
     void stop() noexcept;
@@ -78,6 +79,7 @@ private:
     Transport transport;
     SampleLibrary samples;
     LiveEventQueue liveEvents;
+    MeterBank meters;
 
     Song song;
     int selectedChannel = 0;

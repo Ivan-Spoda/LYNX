@@ -168,6 +168,8 @@ private:
             saveSnapshot (ui, prefix + "-pianoroll.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            ui.selectTabForSnapshot (3);
+            saveSnapshot (ui, prefix + "-mixer.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

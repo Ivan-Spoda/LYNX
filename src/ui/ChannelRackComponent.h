@@ -40,18 +40,20 @@ public:
     static constexpr int rowHeight = 30;
     static constexpr int muteWidth = 26;
     static constexpr int knobWidth = 28;
+    static constexpr int routeWidth = 30;
     static constexpr int nameWidth = 150;
     static constexpr int stepWidth = 22;
 
 private:
-    enum class Area { none, mute, pan, volume, name, grid, addRow };
+    enum class Area { none, mute, pan, volume, route, name, grid, addRow };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
 
     Area areaAt (int x, int y, int& row) const;
     int numSteps() const;
-    int gridLeft() const noexcept { return muteWidth + 2 * knobWidth + nameWidth + 12; }
+    int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
+    int gridLeft() const noexcept { return nameLeft() + nameWidth + 10; }
     juce::Rectangle<int> rowBounds (int row) const;
     juce::Rectangle<int> stepBounds (int row, int step) const;
     bool cellHasNote (int channel, int step) const;
@@ -71,6 +73,7 @@ private:
     Area knobDrag = Area::none;
     int knobRow = -1;
     float knobStartValue = 0.0f;
+    int routeStartValue = 0;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
 

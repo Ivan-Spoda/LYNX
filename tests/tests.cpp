@@ -745,6 +745,101 @@ TEST (rack_releases_notes_on_position_jump)
     CHECK (tail < 0.001f);
 }
 
+namespace
+{
+// Dois samplers de sinal constante 0,5 em inserts diferentes; retorna o pico da saída.
+float renderMixerCase (const std::function<void (lynx::Song&)>& tweak, lynx::MeterBank* meters = nullptr)
+{
+    lynx::Song s;
+    s.mixer = lynx::Song::defaultMixer (4);
+
+    for (int i = 0; i < 2; ++i)
+    {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::sampler;
+        c.samplePath = "dc";
+        c.volume = 1.0f;
+        c.mixerTrack = i + 1;
+        s.channels.push_back (c);
+    }
+
+    s.patterns.emplace_back();
+    tweak (s);
+
+    auto provider = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (48000, 0.5f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, provider);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 256);
+    lynx::LiveEventQueue live;
+
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        lynx::NoteEvent on;
+        on.channel = ch;
+        on.velocity = 1.0f;
+        live.push (on);
+    }
+
+    std::vector<float> l (1000), rr (1000); // maior que o bloco do mixer: testa os pedaços
+    r.process (state.get(), false, 0.0, 1000, l.data(), rr.data(), &live, meters);
+    return std::max (std::abs (l[999]), std::abs (rr[999]));
+}
+} // namespace
+
+TEST (mixer_routes_mutes_solos_and_meters)
+{
+    // dois canais de 0,5 somados no Master em 0 dB
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song&) {}) - 1.0f) < 1e-4f);
+
+    // mute do insert 1: sobra só o canal 2
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.mixer[1].muted = true; }) - 0.5f) < 1e-4f);
+
+    // solo no insert 2: idem
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.mixer[2].solo = true; }) - 0.5f) < 1e-4f);
+
+    // fader do Master no máximo (1,0) = ganho 1/0,8
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.mixer[0].volume = 1.0f; }) - 1.25f) < 1e-4f);
+
+    // os dois canais no mesmo insert, insert com fader a -6 dB (0,4)
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) {
+               s.channels[1].mixerTrack = 1;
+               s.mixer[1].volume = 0.4f;
+           }) - 0.5f) < 1e-4f);
+
+    // rota fora do mixer cai no último insert existente, sem travar
+    CHECK (renderMixerCase ([] (lynx::Song& s) { s.channels[0].mixerTrack = 100; }) > 0.9f);
+
+    // sem mixer: tudo direto na saída em 0 dB
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.mixer.clear(); }) - 1.0f) < 1e-4f);
+
+    lynx::MeterBank meters;
+    renderMixerCase ([] (lynx::Song&) {}, &meters);
+    CHECK (std::abs (meters.takePeak (1, 0) - 0.5f) < 1e-4f);
+    CHECK (std::abs (meters.takePeak (0, 1) - 1.0f) < 1e-4f);
+    CHECK (meters.takePeak (1, 0) == 0.0f); // ler zera
+    CHECK (meters.takePeak (3, 0) == 0.0f); // insert sem canal
+}
+
+TEST (next_free_insert_and_flp_mixer_import)
+{
+    auto s = lynx::Song::makeDefault();
+    CHECK (s.mixer.size() == 17 && s.mixer[0].name == "Master");
+    CHECK (s.nextFreeInsert() == 6); // os 5 canais padrão ocupam 1..5
+
+    flp::Project p;
+    p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "", 30 } };
+    p.mixer = { { 0, "" }, { 30, "Drums" } };
+    const auto song = lynx::importFlp (p);
+    CHECK (song.channels[0].mixerTrack == 30);
+    CHECK (song.mixer.size() == 31);
+    CHECK (song.mixer[30].name == "Drums" && song.mixer[0].name == "Master");
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

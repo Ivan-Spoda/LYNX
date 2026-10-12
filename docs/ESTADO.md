@@ -42,4 +42,5 @@ Confirmadas empiricamente nos demos:
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
 ## Próximo passo
-Fase 4: mixer (inserts, roteamento dos canais, volume/pan/mute/solo, medidores), depois clips de áudio.
+Efeitos nos inserts do mixer (EQ, compressor, delay, reverb internos) e depois hosting de VST3;
+em paralelo, clips de áudio na playlist (os vocais dos demos do FL).

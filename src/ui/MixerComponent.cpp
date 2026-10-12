@@ -1,0 +1,442 @@
+#include "ui/MixerComponent.h"
+
+#include "engine/Text.h"
+#include "ui/Theme.h"
+
+namespace lynx
+{
+namespace
+{
+constexpr int headerHeight = 34;
+constexpr int panHeight = 34;
+constexpr int buttonsHeight = 22;
+constexpr int feedsHeight = 46;
+
+// Fader 0..1 -> dB, com 0,8 = 0 dB (como no FL).
+juce::String faderToDb (float volume)
+{
+    if (volume <= 0.0001f)
+        return "-inf";
+
+    const auto db = juce::Decibels::gainToDecibels (volume / unityFader);
+    return (db > 0 ? "+" : "") + juce::String (db, 1);
+}
+
+// Nível 0..1 do medidor em escala de dB (-60..+6).
+float meterPosition (float gain)
+{
+    const auto db = juce::Decibels::gainToDecibels (gain, -60.0f);
+    return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f);
+}
+} // namespace
+
+MixerStrips::MixerStrips (AudioEngine& e)
+    : engine (e)
+{
+    setWantsKeyboardFocus (false);
+    setMouseClickGrabsKeyboardFocus (false);
+    engine.addChangeListener (this);
+    updateSize();
+    startTimerHz (30);
+}
+
+MixerStrips::~MixerStrips()
+{
+    engine.removeChangeListener (this);
+}
+
+void MixerStrips::setVisibleHeight (int height)
+{
+    visibleHeight = juce::jmax (260, height);
+    updateSize();
+}
+
+void MixerStrips::updateSize()
+{
+    const auto tracks = (int) engine.getSong().mixer.size();
+    setSize (stripX (tracks) + stripWidth + 8, visibleHeight);
+    levels.resize ((std::size_t) juce::jmax (1, tracks) * 2, 0.0f);
+}
+
+int MixerStrips::stripX (int track) const noexcept
+{
+    return track == 0 ? 4 : 4 + masterWidth + 10 + (track - 1) * stripWidth;
+}
+
+int MixerStrips::trackAt (int x) const noexcept
+{
+    const auto tracks = (int) engine.getSong().mixer.size();
+
+    for (int t = 0; t <= tracks; ++t) // t == tracks = botão "+"
+        if (x >= stripX (t) && x < stripX (t) + stripWidthOf (t))
+            return t;
+
+    return -1;
+}
+
+juce::Rectangle<int> MixerStrips::panArea (int t) const
+{
+    return { stripX (t), headerHeight, stripWidthOf (t), panHeight };
+}
+
+juce::Rectangle<int> MixerStrips::muteArea (int t) const
+{
+    return { stripX (t) + 6, headerHeight + panHeight, 26, buttonsHeight };
+}
+
+juce::Rectangle<int> MixerStrips::soloArea (int t) const
+{
+    return { stripX (t) + stripWidthOf (t) - 32, headerHeight + panHeight, 26, buttonsHeight };
+}
+
+juce::Rectangle<int> MixerStrips::faderArea (int t) const
+{
+    const auto top = headerHeight + panHeight + buttonsHeight + 8;
+    return { stripX (t) + 6, top, stripWidthOf (t) - 12, getHeight() - top - feedsHeight - 22 };
+}
+
+MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
+{
+    if (t == (int) engine.getSong().mixer.size())
+        return Part::add;
+
+    if (panArea (t).contains (p))
+        return Part::pan;
+    if (muteArea (t).contains (p))
+        return Part::mute;
+    if (t > 0 && soloArea (t).contains (p))
+        return Part::solo;
+    if (faderArea (t).expanded (0, 6).contains (p))
+        return Part::fader;
+
+    return Part::body;
+}
+
+void MixerStrips::paint (juce::Graphics& g)
+{
+    const auto& song = engine.getSong();
+    const auto tracks = (int) song.mixer.size();
+    const auto clip = g.getClipBounds();
+    g.fillAll (theme::window);
+
+    for (int t = 0; t < tracks; ++t)
+    {
+        const auto x = stripX (t);
+        const auto w = stripWidthOf (t);
+
+        if (x > clip.getRight() || x + w < clip.getX())
+            continue;
+
+        const auto& track = song.mixer[(std::size_t) t];
+        const auto strip = juce::Rectangle<int> (x, 2, w - 4, getHeight() - 4);
+
+        g.setColour (t == selected ? juce::Colour (0xff3c444d) : (t == 0 ? juce::Colour (0xff343a41) : theme::panel));
+        g.fillRoundedRectangle (strip.toFloat(), 4.0f);
+
+        if (t == selected)
+        {
+            g.setColour (theme::accentOrange);
+            g.drawRoundedRectangle (strip.toFloat(), 4.0f, 1.5f);
+        }
+
+        // cabeçalho: número e nome
+        g.setColour (theme::text.withAlpha (0.55f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 4, w - 4, 12, juce::Justification::centred);
+        g.setColour (track.muted ? juce::Colours::grey : theme::text);
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 2, 16, w - 8, 16, juce::Justification::centred, 1, 0.7f);
+
+        // pan
+        {
+            const auto area = panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f);
+            const auto centre = area.getCentre();
+            constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
+            constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
+            const auto to = start + range * (track.pan + 1.0f) * 0.5f;
+            const auto mid = start + range * 0.5f;
+
+            g.setColour (theme::knobBackground);
+            g.fillEllipse (area);
+            juce::Path arc;
+            arc.addCentredArc (centre.x, centre.y, 11.5f, 11.5f, 0.0f, juce::jmin (mid, to), juce::jmax (mid, to), true);
+            g.setColour (theme::accentBlue);
+            g.strokePath (arc, juce::PathStrokeType (2.5f));
+            g.setColour (juce::Colours::white);
+            g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * 9.0f, centre.y - std::cos (to) * 9.0f, 1.5f);
+        }
+
+        // mute e solo
+        {
+            const auto m = muteArea (t).toFloat();
+            g.setColour (theme::muteLed (track.muted));
+            g.fillEllipse (m.withSizeKeepingCentre (12.0f, 12.0f));
+
+            if (t > 0)
+            {
+                const auto s = soloArea (t).toFloat().reduced (2.0f);
+                g.setColour (track.solo ? theme::accentOrange : theme::knobBackground);
+                g.fillRoundedRectangle (s, 3.0f);
+                g.setColour (track.solo ? juce::Colours::black : theme::text.withAlpha (0.6f));
+                g.setFont (juce::FontOptions (11.0f));
+                g.drawText ("S", s.toNearestInt(), juce::Justification::centred);
+            }
+        }
+
+        // medidores + fader
+        {
+            const auto area = faderArea (t);
+            const auto meterW = 6;
+            const auto meters = area.withWidth (meterW * 2 + 3);
+            const auto fader = area.withTrimmedLeft (meterW * 2 + 8);
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterW + 3), meters.getY(), meterW, meters.getHeight());
+                g.setColour (theme::knobBackground);
+                g.fillRect (bar);
+
+                const auto level = (std::size_t) t * 2 + (std::size_t) ch < levels.size() ? levels[(std::size_t) t * 2 + (std::size_t) ch] : 0.0f;
+                const auto h = (int) (meterPosition (level) * (float) bar.getHeight());
+                const auto lit = bar.withTop (bar.getBottom() - h);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffff4040), (float) bar.getX(), (float) bar.getY(),
+                                                         theme::accentGreen, (float) bar.getX(), (float) bar.getBottom(), false));
+                g.fillRect (lit);
+            }
+
+            // trilho do fader e marca de 0 dB
+            const auto railX = (float) fader.getCentreX();
+            g.setColour (theme::knobBackground);
+            g.fillRoundedRectangle (railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight(), 2.0f);
+            const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
+            g.setColour (theme::text.withAlpha (0.3f));
+            g.drawHorizontalLine ((int) unityY, (float) fader.getX(), (float) fader.getRight());
+
+            const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
+            const auto cap = juce::Rectangle<float> ((float) fader.getX() + 2.0f, capY - 7.0f, (float) fader.getWidth() - 4.0f, 14.0f);
+            g.setColour (juce::Colour (0xffb8bec5));
+            g.fillRoundedRectangle (cap, 3.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawHorizontalLine ((int) capY, cap.getX() + 2.0f, cap.getRight() - 2.0f);
+
+            g.setColour (theme::text.withAlpha (0.6f));
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, 14, juce::Justification::centred);
+        }
+
+        // canais que chegam nesta trilha
+        {
+            juce::StringArray feeds;
+            for (const auto& c : song.channels)
+                if (juce::jlimit (0, tracks - 1, c.mixerTrack) == t)
+                    feeds.add (juce::String::fromUTF8 (c.name.c_str()));
+
+            g.setColour (theme::accentOrange.withAlpha (0.8f));
+            g.setFont (juce::FontOptions (10.0f));
+            const auto text = feeds.size() > 3 ? feeds[0] + ", " + feeds[1] + " +" + juce::String (feeds.size() - 2) : feeds.joinIntoString (", ");
+            g.drawFittedText (text, x + 3, getHeight() - feedsHeight, w - 10, feedsHeight - 6, juce::Justification::centredTop, 3, 0.8f);
+        }
+    }
+
+    // botão "+"
+    if (tracks < maxMixerTracks)
+    {
+        const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60);
+        g.setColour (theme::panel);
+        g.fillRoundedRectangle (add.toFloat(), 4.0f);
+        g.setColour (theme::text.withAlpha (0.6f));
+        g.setFont (juce::FontOptions (22.0f));
+        g.drawText ("+", add, juce::Justification::centred);
+    }
+}
+
+void MixerStrips::mouseDown (const juce::MouseEvent& e)
+{
+    const auto t = trackAt (e.x);
+
+    if (t < 0)
+        return;
+
+    const auto part = partAt (t, e.getPosition());
+
+    if (part == Part::add)
+    {
+        engine.editSong ([] (Song& s) {
+            if (s.mixer.empty())
+                s.mixer = Song::defaultMixer (0);
+
+            auto& track = s.mixer.emplace_back();
+            track.name = "Insert " + std::to_string (s.mixer.size() - 1);
+        });
+        return;
+    }
+
+    if (selected != t)
+    {
+        selected = t;
+        repaint();
+    }
+
+    if (e.mods.isPopupMenu())
+    {
+        showMenu (t);
+        return;
+    }
+
+    const auto& track = engine.getSong().mixer[(std::size_t) t];
+
+    switch (part)
+    {
+        case Part::mute:
+            engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].muted = ! s.mixer[(std::size_t) t].muted; });
+            return;
+
+        case Part::solo:
+            engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].solo = ! s.mixer[(std::size_t) t].solo; });
+            return;
+
+        case Part::pan:
+        case Part::fader:
+            dragPart = part;
+            dragTrack = t;
+            dragStartValue = part == Part::pan ? track.pan : track.volume;
+
+            if (part == Part::fader) // clicar no trilho pula o fader para lá
+            {
+                const auto area = faderArea (t);
+                const auto capY = area.getBottom() - track.volume * (float) area.getHeight();
+
+                if (std::abs ((float) e.y - capY) > 9.0f)
+                {
+                    dragStartValue = juce::jlimit (0.0f, 1.0f, (float) (area.getBottom() - e.y) / (float) area.getHeight());
+                    engine.editSong ([t, v = dragStartValue] (Song& s) { s.mixer[(std::size_t) t].volume = v; });
+                }
+            }
+            return;
+
+        case Part::body:
+        case Part::none:
+        case Part::add:
+            return;
+    }
+}
+
+void MixerStrips::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragPart == Part::none)
+        return;
+
+    const auto t = dragTrack;
+
+    if (dragPart == Part::fader)
+    {
+        const auto height = (float) faderArea (t).getHeight();
+        const auto fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
+        const auto v = juce::jlimit (0.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / height * fine);
+        engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].volume = v; });
+    }
+    else
+    {
+        const auto v = juce::jlimit (-1.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / 75.0f);
+        engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].pan = v; });
+    }
+}
+
+void MixerStrips::mouseUp (const juce::MouseEvent&)
+{
+    dragPart = Part::none;
+    dragTrack = -1;
+}
+
+void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const auto t = trackAt (e.x);
+
+    if (t < 0 || t >= (int) engine.getSong().mixer.size())
+        return;
+
+    const auto part = partAt (t, e.getPosition());
+
+    if (part == Part::fader)
+        engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].volume = unityFader; });
+    else if (part == Part::pan)
+        engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].pan = 0.0f; });
+}
+
+void MixerStrips::showMenu (int t)
+{
+    const auto& song = engine.getSong();
+    const auto channel = engine.getSelectedChannel();
+    juce::PopupMenu menu;
+    menu.addSectionHeader (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
+
+    if (channel < (int) song.channels.size())
+        menu.addItem (utf8 ("Rotear o canal \"") + juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str())
+                          + utf8 ("\" para cá"),
+                      [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
+
+    menu.addItem ("Renomear...", [this, t] {
+        auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str()));
+        window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, t, window] (int result) {
+                                     const auto name = window->getTextEditorContents ("name").trim().toStdString();
+                                     if (result == 1 && ! name.empty() && t < (int) engine.getSong().mixer.size())
+                                         engine.editSong ([t, name] (Song& s) { s.mixer[(std::size_t) t].name = name; });
+                                 }),
+                                 true);
+    });
+    menu.addItem ("Resetar (0 dB, centro, sem mute/solo)", [this, t] {
+        engine.editSong ([t] (Song& s) {
+            auto& track = s.mixer[(std::size_t) t];
+            track.volume = unityFader;
+            track.pan = 0.0f;
+            track.muted = track.solo = false;
+        });
+    });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void MixerStrips::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    selected = juce::jlimit (0, juce::jmax (0, (int) engine.getSong().mixer.size() - 1), selected);
+    updateSize();
+    repaint();
+}
+
+void MixerStrips::timerCallback()
+{
+    auto& meters = engine.getMeters();
+    bool changed = false;
+
+    for (std::size_t i = 0; i < levels.size(); ++i)
+    {
+        const auto peak = meters.takePeak ((int) (i / 2), (int) (i % 2));
+        const auto next = juce::jmax (peak, levels[i] * 0.86f); // queda de ~20 dB/s a 30 Hz
+        const auto shown = next < 0.001f ? 0.0f : next;
+        changed = changed || std::abs (shown - levels[i]) > 1e-4f;
+        levels[i] = shown;
+    }
+
+    if (changed && isShowing())
+        repaint();
+}
+
+// ---------------------------------------------------------------------------
+
+MixerComponent::MixerComponent (AudioEngine& engine)
+    : strips (engine)
+{
+    viewport.setViewedComponent (&strips, false);
+    viewport.setScrollBarsShown (false, true);
+    addAndMakeVisible (viewport);
+}
+
+void MixerComponent::resized()
+{
+    viewport.setBounds (getLocalBounds());
+    strips.setVisibleHeight (getHeight() - viewport.getScrollBarThickness());
+}
+} // namespace lynx

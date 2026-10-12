@@ -14,7 +14,8 @@ namespace lynx
 class ChannelRackProcessor final : public juce::AudioProcessor
 {
 public:
-    ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange, LiveEventQueue& live);
+    ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange, LiveEventQueue& live,
+                          MeterBank& meters);
 
     const juce::String getName() const override { return "Channel Rack"; }
 
@@ -42,6 +43,7 @@ private:
     const Transport& transport;
     SnapshotExchange<RackState>& exchange;
     LiveEventQueue& live;
+    MeterBank& meters;
     RackRenderer renderer;
     juce::AudioBuffer<float> scratch; // para saída mono
 

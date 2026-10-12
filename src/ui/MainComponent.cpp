@@ -31,13 +31,15 @@ int keyCodeToNote (int keyCode)
 constexpr int rackTab = 0;
 constexpr int pianoRollTab = 1;
 constexpr int playlistTab = 2;
+constexpr int mixerTab = 3;
 } // namespace
 
 MainComponent::MainComponent (AudioEngine& e)
     : engine (e),
       rack (e),
       pianoRoll (e),
-      playlist (e)
+      playlist (e),
+      mixer (e)
 {
     newButton.onClick = [this] { newProject(); };
     openButton.onClick = [this] { chooseFileToOpen(); };
@@ -80,7 +82,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setJustificationType (juce::Justification::centredRight);
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   L pattern/song   Ctrl+S salvar   Ctrl+O abrir"),
+    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+S salvar   Ctrl+O abrir"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -92,6 +94,7 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.addTab ("Channel Rack", theme::toolbar, &rackViewport, false);
     tabs.addTab ("Piano Roll", theme::toolbar, &pianoRoll, false);
     tabs.addTab ("Playlist", theme::toolbar, &playlist, false);
+    tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &playButton, &stopButton,
@@ -193,6 +196,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (! cmd && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
     {
         toggleMode();
+        return true;
+    }
+
+    if (key.getKeyCode() == juce::KeyPress::F9Key)
+    {
+        tabs.setCurrentTabIndex (mixerTab);
         return true;
     }
 

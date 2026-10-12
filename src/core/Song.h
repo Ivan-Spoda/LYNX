@@ -13,6 +13,8 @@ namespace lynx
 constexpr int ppq = 960;              // ticks por semínima
 constexpr int stepsPerBeat = 4;       // step sequencer em semicolcheias
 constexpr int ticksPerStep = ppq / stepsPerBeat;
+constexpr int maxMixerTracks = 128;   // 0 = Master, 1..127 = inserts (o FL tem 125 + master)
+constexpr float unityFader = 0.8f;    // posição do fader que dá 0 dB, como no FL
 
 enum class InstrumentKind : std::uint8_t
 {
@@ -32,6 +34,16 @@ struct ChannelDef
     float pan = 0.0f;      // -1..1
     bool muted = false;
     std::string samplePath; // usado quando instrument == sampler
+    int mixerTrack = 0;     // 0 = direto no Master
+};
+
+struct MixerTrack
+{
+    std::string name;
+    float volume = unityFader; // 0..1; ganho = volume / unityFader
+    float pan = 0.0f;          // -1..1
+    bool muted = false;
+    bool solo = false;
 };
 
 struct Note
@@ -84,6 +96,12 @@ struct Song
 
     std::vector<Clip> playlist;
     PlayMode mode = PlayMode::pattern;
+
+    std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
+
+    static std::vector<MixerTrack> defaultMixer (int inserts = 16);
+    // Primeiro insert que nenhum canal usa (ou o último, se todos estiverem ocupados).
+    int nextFreeInsert() const;
 
     // Fim do último clip, arredondado para compasso (mínimo 1 compasso).
     std::int64_t songLength() const noexcept;

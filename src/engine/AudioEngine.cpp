@@ -73,7 +73,7 @@ void AudioEngine::buildInitialGraph()
     graph.setPlayConfigDetails (0, 2, transport.sampleRate.load(), 512);
 
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
-    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents));
+    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, meters));
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
 
     for (int channel = 0; channel < 2; ++channel)

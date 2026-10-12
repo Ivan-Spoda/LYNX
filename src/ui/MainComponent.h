@@ -7,6 +7,7 @@
 #include "engine/AudioEngine.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/PianoRollComponent.h"
+#include "ui/MixerComponent.h"
 #include "ui/PlaylistComponent.h"
 
 namespace lynx
@@ -27,7 +28,7 @@ public:
     // Abre .lynx ou .flp (também usado pela linha de comando).
     void openFile (const juce::File& file);
 
-    // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist.
+    // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist, 3 = Mixer.
     void selectTabForSnapshot (int tab);
 
 private:
@@ -63,6 +64,7 @@ private:
     juce::Viewport rackViewport;
     PianoRollComponent pianoRoll;
     PlaylistComponent playlist;
+    MixerComponent mixer;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
 
     std::unique_ptr<juce::FileChooser> fileChooser;
