@@ -148,6 +148,13 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
+
+            if (c.kind == ClipKind::audio)
+            {
+                paintAudioClip (g, c, r);
+                continue;
+            }
+
             const auto colour = patternColour (c.pattern);
             const auto selected = c.pattern == song.currentPattern;
 
@@ -268,6 +275,99 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 juce::Justification::centredLeft);
 }
 
+const std::vector<float>* PlaylistComponent::waveformFor (const std::string& path)
+{
+    if (auto it = waveforms.find (path); it != waveforms.end())
+        return it->second.empty() ? nullptr : &it->second;
+
+    auto& peaks = waveforms[path]; // vazio = não deu para ler (não tenta de novo)
+
+    if (auto data = engine.getSampleLibrary().load (juce::String::fromUTF8 (path.c_str())))
+    {
+        const auto frames = data->frames();
+        peaks.assign ((frames + waveformBucket - 1) / waveformBucket, 0.0f);
+
+        for (std::size_t i = 0; i < frames; ++i)
+        {
+            auto v = std::abs (data->left[i]);
+            if (! data->right.empty())
+                v = std::max (v, std::abs (data->right[i]));
+            auto& peak = peaks[i / waveformBucket];
+            peak = std::max (peak, v);
+        }
+
+        waveformRates[path] = data->sampleRate;
+
+        // normaliza pelo pico do arquivo: áudio baixo também fica legível na tela
+        const auto loudest = *std::max_element (peaks.begin(), peaks.end());
+        if (loudest > 0.0f)
+            for (auto& p : peaks)
+                p /= loudest;
+    }
+
+    return peaks.empty() ? nullptr : &peaks;
+}
+
+void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
+{
+    const auto& song = engine.getSong();
+
+    if (c.channel < 0 || c.channel >= (int) song.channels.size())
+        return;
+
+    const auto& channel = song.channels[(std::size_t) c.channel];
+    const auto colour = juce::Colour (0xff4f7f9f); // clips de áudio em azul, como destaque
+
+    g.setColour (colour.withAlpha (0.85f));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (colour.darker (0.6f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+
+    const auto title = r.withHeight (13.0f);
+    g.setColour (colour.darker (0.4f));
+    g.fillRoundedRectangle (title, 3.0f);
+
+    if (r.getWidth() > 24)
+    {
+        g.setColour (juce::Colours::white);
+        g.drawText (juce::String::fromUTF8 (channel.name.c_str()), title.reduced (3, 0).toNearestInt(),
+                    juce::Justification::centredLeft, true);
+    }
+
+    const auto* peaks = waveformFor (channel.samplePath);
+
+    if (peaks == nullptr)
+        return;
+
+    // forma de onda: cada coluna de pixel mostra o pico do trecho de áudio que ela cobre
+    const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 1.0f);
+    const auto rate = waveformRates[channel.samplePath];
+    const auto secondsPerTick = 60.0 / (song.bpm * ppq);
+    const auto centreY = body.getCentreY();
+    const auto halfHeight = body.getHeight() / 2.0f;
+    const auto clip = g.getClipBounds().toFloat();
+    g.setColour (colour.darker (0.8f).withAlpha (0.9f));
+
+    for (auto x = std::max (body.getX(), clip.getX()); x < std::min (body.getRight(), clip.getRight()); x += 1.0f)
+    {
+        const auto tickInClip = (double) c.offset + (xToTick ((int) x) - (double) c.start);
+        const auto tickNext = tickInClip + 1.0 / pixelsPerTick;
+        auto from = (std::size_t) std::max (0.0, tickInClip * secondsPerTick * rate / waveformBucket);
+        auto to = (std::size_t) std::max (0.0, tickNext * secondsPerTick * rate / waveformBucket);
+
+        if (from >= peaks->size())
+            break;
+
+        to = std::min (std::max (to, from + 1), peaks->size());
+        float peak = 0.0f;
+        for (auto i = from; i < to; ++i)
+            peak = std::max (peak, (*peaks)[i]);
+
+        const auto h = std::min (1.0f, peak) * halfHeight;
+        g.drawVerticalLine ((int) x, centreY - h, centreY + h);
+    }
+}
+
 int PlaylistComponent::clipAt (int x, int y, bool& onRightEdge) const
 {
     const auto& playlist = engine.getSong().playlist;
@@ -298,7 +398,7 @@ void PlaylistComponent::seekTo (int x)
     const auto tick = juce::jmax (0.0, (double) snap (xToTick (x), true));
 
     if (engine.getSong().mode != PlayMode::song)
-        engine.editSong ([] (Song& s) { s.mode = PlayMode::song; });
+        engine.editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
 
     engine.seek (tick);
     playheadTick = tick;
@@ -338,8 +438,8 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         drag = rightEdge ? Drag::resize : Drag::move;
         grabOffset = c.start - snap (xToTick (e.x), snapOn);
 
-        if (c.pattern != engine.getSong().currentPattern)
-            engine.editSong ([p = c.pattern] (Song& s) { s.currentPattern = p; });
+        if (c.kind == ClipKind::pattern && c.pattern != engine.getSong().currentPattern)
+            engine.editSong ([p = c.pattern] (Song& s) { s.currentPattern = p; }, false);
         return;
     }
 
@@ -432,9 +532,64 @@ void PlaylistComponent::mouseMove (const juce::MouseEvent& e)
 void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
 {
     bool edge = false;
+    const auto hit = gridArea().contains (e.getPosition()) ? clipAt (e.x, e.y, edge) : -1;
 
-    if (gridArea().contains (e.getPosition()) && clipAt (e.x, e.y, edge) >= 0 && onOpenPattern)
+    if (hit >= 0 && engine.getSong().playlist[(std::size_t) hit].kind == ClipKind::pattern && onOpenPattern)
         onOpenPattern();
+}
+
+bool PlaylistComponent::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+            return true;
+
+    return false;
+}
+
+void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    auto start = juce::jmax<std::int64_t> (0, snap (xToTick (x), true));
+    auto track = yToTrack (y);
+
+    for (const auto& f : files)
+    {
+        const juce::File file (f);
+
+        if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+            continue;
+
+        const auto data = engine.getSampleLibrary().load (file.getFullPathName());
+
+        if (data == nullptr)
+            continue;
+
+        // duração do áudio convertida em ticks no BPM atual
+        const auto seconds = (double) data->frames() / data->sampleRate;
+        const auto length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) (seconds * engine.getSong().bpm / 60.0 * ppq));
+        const auto path = file.getFullPathName().toStdString();
+        const auto name = file.getFileNameWithoutExtension().toStdString();
+
+        engine.editSong ([=] (Song& s) {
+            ChannelDef c;
+            c.name = name;
+            c.instrument = InstrumentKind::audioClip;
+            c.samplePath = path;
+            c.mixerTrack = s.nextFreeInsert();
+            s.channels.push_back (c);
+
+            Clip clip;
+            clip.kind = ClipKind::audio;
+            clip.channel = (int) s.channels.size() - 1;
+            clip.track = track;
+            clip.start = start;
+            clip.length = length;
+            s.playlist.push_back (clip);
+            s.mode = PlayMode::song;
+        });
+
+        ++track; // vários arquivos: um embaixo do outro
+    }
 }
 
 void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

@@ -20,6 +20,8 @@ public:
 
     virtual void prepare (double sampleRate) noexcept = 0;
     virtual void noteOn (int key, float velocity) noexcept = 0;
+    // Começa a nota já `startSeconds` adiante (só faz sentido para samples; os outros ignoram).
+    virtual void noteOnAt (int key, float velocity, double /*startSeconds*/) noexcept { noteOn (key, velocity); }
     virtual void noteOff (int key) noexcept = 0;
     virtual void allNotesOff() noexcept = 0;
 

@@ -64,7 +64,7 @@ MainComponent::MainComponent (AudioEngine& e)
         const auto index = patternBox.getSelectedItemIndex();
 
         if (index >= 0 && index != engine.getSong().currentPattern)
-            engine.editSong ([index] (Song& s) { s.currentPattern = index; });
+            engine.editSong ([index] (Song& s) { s.currentPattern = index; }, false);
     };
 
     newPatternButton.setTooltip ("Nova pattern");
@@ -82,7 +82,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setJustificationType (juce::Justification::centredRight);
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+S salvar   Ctrl+O abrir"),
+    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -166,6 +166,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::spaceKey)
     {
         togglePlay();
+        return true;
+    }
+
+    if (cmd && key.getKeyCode() == 'Z')
+    {
+        key.getModifiers().isShiftDown() ? engine.redo() : engine.undo();
+        return true;
+    }
+
+    if (cmd && key.getKeyCode() == 'Y')
+    {
+        engine.redo();
         return true;
     }
 
@@ -256,7 +268,7 @@ void MainComponent::togglePlay()
 
 void MainComponent::toggleMode()
 {
-    engine.editSong ([] (Song& s) { s.mode = s.mode == PlayMode::song ? PlayMode::pattern : PlayMode::song; });
+    engine.editSong ([] (Song& s) { s.mode = s.mode == PlayMode::song ? PlayMode::pattern : PlayMode::song; }, false);
 }
 
 void MainComponent::openPianoRoll()

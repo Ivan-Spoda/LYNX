@@ -16,6 +16,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::clap: return "clap";
         case InstrumentKind::synth: return "synth";
         case InstrumentKind::sampler: return "sampler";
+        case InstrumentKind::audioClip: return "audioClip";
     }
     return "synth";
 }
@@ -23,7 +24,7 @@ const char* instrumentId (InstrumentKind k)
 InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
-                    InstrumentKind::synth, InstrumentKind::sampler })
+                    InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip })
         if (id == instrumentId (k))
             return k;
 
@@ -110,7 +111,7 @@ juce::String toJson (const Song& song)
 
     for (const auto& c : song.playlist)
         clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
-                                            (juce::int64) c.offset });
+                                            (juce::int64) c.offset, c.kind == ClipKind::audio ? 1 : 0, c.channel });
 
     root->setProperty ("playlist", clips);
 
@@ -237,7 +238,15 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             clip.length = (juce::int64) c[3];
             clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
 
-            if (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() && clip.length > 0)
+            if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
+            {
+                clip.kind = ClipKind::audio;
+                clip.channel = (int) c[6];
+
+                if (clip.channel >= 0 && clip.channel < (int) song.channels.size() && clip.length > 0)
+                    song.playlist.push_back (clip);
+            }
+            else if (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() && clip.length > 0)
                 song.playlist.push_back (clip);
         }
 

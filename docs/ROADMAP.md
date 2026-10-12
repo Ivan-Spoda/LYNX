@@ -19,7 +19,8 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Salvar/abrir projeto no formato próprio (`.lynx`, JSON versionado)
 - [x] Volume, pan e mute por canal; teclado do PC como teclado musical
 - [x] Exportar para WAV (`LYNX.exe --render`)
-- [ ] Velocity no Piano Roll, seleção múltipla, copiar/colar, desfazer/refazer
+- [x] Desfazer/refazer (Ctrl+Z / Ctrl+Y), um passo por gesto do mouse
+- [ ] Velocity no Piano Roll, seleção múltipla, copiar/colar
 - [ ] Solo por canal, renomear/colorir patterns
 - [ ] Entrada MIDI e gravação de notas
 - [ ] Exportar pela interface (hoje só pela linha de comando)
@@ -27,7 +28,10 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 ## Fase 3: arranjo
 - [x] Playlist: clips de pattern no tempo, trilhas, modo PAT/SONG, seek pela régua
 - [x] Importar a playlist do `.flp` (clips de pattern, com recorte de início/fim)
-- [ ] Clips de áudio na playlist (streaming do disco); os demos do FL usam para vocais e loops
+- [x] Clips de áudio na playlist (forma de onda, arrastar arquivo, recorte, retomada no meio após seek)
+- [x] Importar clips de áudio do `.flp` (offsets em tempos ou em ms, detectado por clip)
+- [ ] Streaming do disco para áudios longos (hoje o arquivo inteiro vai para a memória)
+- [ ] Time-stretch/resample de clips de áudio
 - [ ] Loop region, seleção múltipla, copiar/colar clips, clips "únicos"
 - [ ] Vários arrangements
 - [ ] Automação (clips de automação)

@@ -21,7 +21,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
-            && (kind != InstrumentKind::sampler || previous->song.channels[i].samplePath == channel.samplePath))
+            && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip)
+                || previous->song.channels[i].samplePath == channel.samplePath))
         {
             state->instruments.push_back (previous->instruments[i]);
             continue;
@@ -29,7 +30,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         std::shared_ptr<const SampleData> sample;
 
-        if (kind == InstrumentKind::sampler && samples && ! channel.samplePath.empty())
+        if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip) && samples && ! channel.samplePath.empty())
             sample = samples (channel.samplePath);
 
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
@@ -175,6 +176,8 @@ void RackRenderer::process (const RackState* state,
         for (auto& instrument : state->instruments)
             instrument->allNotesOff();
 
+    // começou a tocar ou pulou: clips de áudio em andamento precisam começar no meio
+    resumeAudio = playing && (! wasPlaying || jumped);
     wasPlaying = playing;
     const auto tps = ticksPerSample (state->song.bpm, sampleRate);
     expectedTick = startTick + numSamples * tps;
@@ -202,6 +205,7 @@ void RackRenderer::process (const RackState* state,
     {
         const auto n = std::min (blockCapacity, numSamples - done);
         processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
+        resumeAudio = false;
     }
 }
 
@@ -221,7 +225,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (playing && song.mode == PlayMode::song)
     {
-        scheduleSong (song, startTick, numSamples, ticksPerSample (song.bpm, sampleRate), events);
+        scheduleSong (song, startTick, numSamples, ticksPerSample (song.bpm, sampleRate), events, resumeAudio);
     }
     else if (playing && ! song.patterns.empty())
     {
@@ -251,7 +255,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         if (e.type == NoteEvent::Type::on)
         {
             if (! song.channels[(std::size_t) e.channel].muted)
-                instrument.noteOn (e.key, e.velocity);
+                instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
         }
         else
         {

@@ -66,11 +66,12 @@ void Song::removePattern (int index)
         return;
 
     patterns.erase (patterns.begin() + index);
-    playlist.erase (std::remove_if (playlist.begin(), playlist.end(), [index] (const Clip& c) { return c.pattern == index; }),
+    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
+                                    [index] (const Clip& c) { return c.kind == ClipKind::pattern && c.pattern == index; }),
                     playlist.end());
 
     for (auto& c : playlist)
-        if (c.pattern > index)
+        if (c.kind == ClipKind::pattern && c.pattern > index)
             --c.pattern;
 
     if (patterns.empty())
@@ -97,6 +98,32 @@ int Song::nextFreeInsert() const
             return t;
 
     return std::max (0, (int) mixer.size() - 1);
+}
+
+void Song::removeChannel (int index)
+{
+    if (index < 0 || index >= (int) channels.size())
+        return;
+
+    channels.erase (channels.begin() + index);
+
+    for (auto& p : patterns)
+    {
+        p.notes.erase (std::remove_if (p.notes.begin(), p.notes.end(), [index] (const Note& n) { return n.channel == index; }),
+                       p.notes.end());
+
+        for (auto& n : p.notes)
+            if (n.channel > index)
+                --n.channel;
+    }
+
+    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
+                                    [index] (const Clip& c) { return c.kind == ClipKind::audio && c.channel == index; }),
+                    playlist.end());
+
+    for (auto& c : playlist)
+        if (c.kind == ClipKind::audio && c.channel > index)
+            --c.channel;
 }
 
 Song Song::makeDefault()

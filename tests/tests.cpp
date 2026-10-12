@@ -476,12 +476,13 @@ TEST (flp_import_maps_channels_and_rescales)
 
     const auto s = lynx::importFlp (p);
     CHECK (s.bpm == 150.0);
-    CHECK (s.channels.size() == 2); // o clip de áudio fica de fora
+    CHECK (s.channels.size() == 3); // canais de clip de áudio ficam no rack, como no FL
     CHECK (s.channels[0].instrument == lynx::InstrumentKind::kick);
-    CHECK (s.channels[1].instrument == lynx::InstrumentKind::synth);
+    CHECK (s.channels[1].instrument == lynx::InstrumentKind::audioClip);
+    CHECK (s.channels[2].instrument == lynx::InstrumentKind::synth);
     CHECK (s.patterns.size() == 1);
     CHECK (s.patterns[0].notes[0].start == lynx::ppq);           // 96 @ PPQ 96 = 1 tempo
-    CHECK (s.patterns[0].notes[0].channel == 1);                // índice denso
+    CHECK (s.patterns[0].notes[0].channel == 2);
     CHECK (s.patterns[0].notes[0].length == lynx::ticksPerStep); // nota de step
     CHECK (std::abs (s.patterns[0].notes[0].velocity - 0.5f) < 1e-6f);
 }
@@ -939,6 +940,121 @@ TEST (rack_runs_insert_effects_and_reuses_them)
     s.mixer[2].effects[0] = lynx::makeEffectSlot (lynx::EffectKind::delay);
     auto c = lynx::RackState::build (s, b.get(), 48000.0);
     CHECK (c->effects[2][0] != b->effects[2][0]);
+}
+
+TEST (audio_clips_trigger_cut_and_resume)
+{
+    lynx::Song s;
+    s.bpm = 120.0; // 1 tempo = 0,5 s = 24000 samples a 48 kHz
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::audioClip;
+    c.samplePath = "ramp";
+    c.volume = 1.0f;
+    s.channels.push_back (c);
+    s.patterns.emplace_back();
+
+    lynx::Clip clip;
+    clip.kind = lynx::ClipKind::audio;
+    clip.channel = 0;
+    clip.start = lynx::ppq;      // começa no tempo 2
+    clip.length = 2 * lynx::ppq; // dura 2 tempos
+    clip.offset = lynx::ppq;     // pula o primeiro tempo do áudio
+    s.playlist.push_back (clip);
+    s.mode = lynx::PlayMode::song;
+
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::EventBuffer ev;
+    lynx::scheduleSong (s, 0.0, 4 * 24000, tps, ev);
+    CHECK (ev.size() == 2);
+    CHECK (ev[0].type == lynx::NoteEvent::Type::on && ev[0].sampleOffset == 24000 && std::abs (ev[0].startSeconds - 0.5) < 1e-9);
+    CHECK (ev[1].type == lynx::NoteEvent::Type::off && ev[1].sampleOffset == 3 * 24000);
+
+    // seek para o meio do clip (tempo 2,5): com resume, começa no primeiro sample do bloco
+    ev.clear();
+    lynx::scheduleSong (s, 1.5 * lynx::ppq, 256, tps, ev, true);
+    CHECK (ev.size() == 1 && ev[0].sampleOffset == 0 && std::abs (ev[0].startSeconds - 0.75) < 1e-9);
+    ev.clear();
+    lynx::scheduleSong (s, 1.5 * lynx::ppq, 256, tps, ev, false);
+    CHECK (ev.size() == 0);
+
+    // sample com valor = posição em segundos: dá para conferir de onde ele começou a tocar
+    auto provider = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->sampleRate = 48000.0;
+        for (int i = 0; i < 48000 * 3; ++i)
+            d->left.push_back ((float) i / 48000.0f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, provider);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> l (256), rr (256);
+
+    // primeiro bloco tocando já no meio do clip
+    r.process (state.get(), true, 1.5 * lynx::ppq, 256, l.data(), rr.data());
+    CHECK (std::abs (l[0] - 0.75f) < 0.001f);
+
+    // o clip acaba no tempo 3: depois do fade curto, silêncio (o sample ainda teria áudio)
+    double tick = 3.0 * lynx::ppq - 10 * tps;
+    r.process (state.get(), false, tick, 256, l.data(), rr.data()); // para (fade)
+    for (int i = 0; i < 4; ++i)
+        r.process (state.get(), false, tick, 256, l.data(), rr.data());
+    CHECK (std::abs (l[255]) < 1e-6f);
+}
+
+TEST (remove_channel_fixes_notes_and_audio_clips)
+{
+    lynx::Song s;
+    s.channels.resize (3);
+    s.patterns.resize (1);
+    s.patterns[0].notes = { { 0, 240, 0, 60, 1.0f }, { 0, 240, 1, 60, 1.0f }, { 0, 240, 2, 60, 1.0f } };
+    lynx::Clip a;
+    a.kind = lynx::ClipKind::audio;
+    a.channel = 1;
+    a.length = 100;
+    lynx::Clip b = a;
+    b.channel = 2;
+    s.playlist = { a, b };
+    s.removeChannel (1);
+    CHECK (s.channels.size() == 2);
+    CHECK (s.patterns[0].notes.size() == 2 && s.patterns[0].notes[1].channel == 1);
+    CHECK (s.playlist.size() == 1 && s.playlist[0].channel == 1);
+}
+
+TEST (flp_import_audio_clips_with_offsets)
+{
+    flp::Project p;
+    p.header.ppq = 96;
+    p.tempo = 120.0;
+    p.channels = { { 0, flp::ChannelType::audioClip, "Vocal", "", "%FLStudioData%\\v.wav", 2 },
+                   { 1, flp::ChannelType::audioClip, "Loop", "", "%FLStudioData%\\l.wav", 3 } };
+    flp::Arrangement arr;
+    flp::PlaylistItem beats; // offset em tempos: fim - início = duração em tempos
+    beats.kind = flp::PlaylistItem::Kind::channelClip;
+    beats.index = 0;
+    beats.position = 192;
+    beats.length = 384;          // 4 tempos
+    beats.startOffset = 2.0f;
+    beats.endOffset = 6.0f;
+    flp::PlaylistItem ms = beats; // offset em ms: 4 tempos a 120 BPM = 2000 ms
+    ms.index = 1;
+    ms.startOffset = 500.0f;
+    ms.endOffset = 2500.0f;
+    arr.items = { beats, ms };
+    p.arrangements.push_back (arr);
+
+    lynx::FlpImportOptions options;
+    options.roots = { "C:\\FL", "C:\\FL\\Data", "" };
+    options.fileExists = [] (const std::string&) { return true; };
+    const auto s = lynx::importFlp (p, options);
+
+    CHECK (s.channels.size() == 2 && s.channels[0].instrument == lynx::InstrumentKind::audioClip);
+    CHECK (s.channels[0].samplePath == "C:\\FL\\Data\\v.wav");
+    CHECK (s.playlist.size() == 2);
+    CHECK (s.playlist[0].kind == lynx::ClipKind::audio && s.playlist[0].start == 2 * lynx::ppq);
+    CHECK (s.playlist[0].offset == 2 * lynx::ppq);
+    CHECK (s.playlist[1].offset == lynx::ppq); // 500 ms a 120 BPM = 1 tempo
+    CHECK (s.mode == lynx::PlayMode::song);
 }
 
 int main (int argc, char** argv)

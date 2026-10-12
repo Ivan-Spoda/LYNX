@@ -69,6 +69,7 @@ private:
     double sampleRate = 44100.0;
     bool wasPlaying = false;
     double expectedTick = -1.0; // onde o próximo bloco deveria começar, para detectar saltos
+    bool resumeAudio = false;
     const RackState* lastState = nullptr;
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity

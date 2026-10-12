@@ -135,14 +135,66 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on)
 
 void AudioEngine::setSong (Song newSong)
 {
+    undoStack.clear();
+    redoStack.clear();
     song = std::move (newSong);
     selectedChannel = 0;
     publishSong();
 }
 
-void AudioEngine::editSong (const std::function<void (Song&)>& edit)
+void AudioEngine::editSong (const std::function<void (Song&)>& edit, bool undoable)
 {
+    if (undoable)
+    {
+        // Durante um arraste chegam dezenas de edições; só a primeira do clique guarda o estado.
+        bool samePress = false;
+
+        if (juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+        {
+            const auto press = juce::Desktop::getInstance().getMainMouseSource().getLastMouseDownTime();
+            samePress = press == lastUndoPress;
+            lastUndoPress = press;
+        }
+        else
+        {
+            lastUndoPress = {};
+        }
+
+        if (! samePress)
+        {
+            undoStack.push_back (song);
+            redoStack.clear();
+
+            if (undoStack.size() > maxUndoSteps)
+                undoStack.pop_front();
+        }
+    }
+
     edit (song);
+    publishSong();
+}
+
+void AudioEngine::undo()
+{
+    if (undoStack.empty())
+        return;
+
+    redoStack.push_back (std::move (song));
+    song = std::move (undoStack.back());
+    undoStack.pop_back();
+    lastUndoPress = {};
+    publishSong();
+}
+
+void AudioEngine::redo()
+{
+    if (redoStack.empty())
+        return;
+
+    undoStack.push_back (std::move (song));
+    song = std::move (redoStack.back());
+    redoStack.pop_back();
+    lastUndoPress = {};
     publishSong();
 }
 

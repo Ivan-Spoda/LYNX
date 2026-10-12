@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <map>
 
 namespace lynx
@@ -69,8 +70,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
     for (const auto& c : project.channels)
     {
-        // Clips de áudio e automação vivem na playlist, não no Channel Rack.
-        if (c.type == flp::ChannelType::audioClip || c.type == flp::ChannelType::automationClip)
+        // Clips de automação ainda não existem no nosso modelo.
+        if (c.type == flp::ChannelType::automationClip)
             continue;
 
         channelMap[c.index] = (int) song.channels.size();
@@ -79,16 +80,21 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         def.name = c.name.empty() ? "Canal " + std::to_string (c.index + 1) : c.name;
         def.instrument = guessInstrument (def.name, c.type);
 
-        if (c.type == flp::ChannelType::sampler && ! c.samplePath.empty() && options.fileExists)
+        const auto isAudioClip = c.type == flp::ChannelType::audioClip;
+
+        if ((c.type == flp::ChannelType::sampler || isAudioClip) && ! c.samplePath.empty() && options.fileExists)
         {
             const auto path = resolveFlPath (c.samplePath, options.roots);
 
             if (! path.empty() && options.fileExists (path))
             {
-                def.instrument = InstrumentKind::sampler;
+                def.instrument = isAudioClip ? InstrumentKind::audioClip : InstrumentKind::sampler;
                 def.samplePath = path;
             }
         }
+
+        if (isAudioClip && def.instrument != InstrumentKind::audioClip)
+            def.instrument = InstrumentKind::audioClip; // sem arquivo: fica mudo, mas o clip continua na playlist
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
         song.channels.push_back (std::move (def));
@@ -141,15 +147,49 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         }
     }
 
-    // Playlist: só o primeiro arrangement e só clips de pattern por enquanto
-    // (clips de áudio e automação ainda não existem no nosso modelo).
+    // Playlist: só o primeiro arrangement; clips de pattern e de áudio
+    // (clips de automação ainda não existem no nosso modelo).
     if (! project.arrangements.empty())
     {
         for (const auto& item : project.arrangements.front().items)
         {
+            if (item.length == 0)
+                continue;
+
+            if (item.kind == flp::PlaylistItem::Kind::channelClip)
+            {
+                const auto channel = channelMap.find (item.index);
+
+                if (channel == channelMap.end() || song.channels[(std::size_t) channel->second].instrument != InstrumentKind::audioClip)
+                    continue;
+
+                Clip clip;
+                clip.kind = ClipKind::audio;
+                clip.channel = channel->second;
+                clip.track = item.track;
+                clip.start = rescale (item.position);
+                clip.length = rescale (item.length);
+
+                // O início do trecho vem em tempos ou em milissegundos, conforme o clip;
+                // descobrimos pela unidade em que (fim - início) bate com a duração.
+                const auto beats = (double) item.length / (double) filePpq;
+                const auto span = (double) item.endOffset - (double) item.startOffset;
+
+                if (std::isfinite (item.startOffset) && item.startOffset > 0.0f)
+                {
+                    if (std::abs (span - beats) < 0.02 * std::max (1.0, beats))
+                        clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
+                    else if (std::abs (span - beats * 60000.0 / song.bpm) < 0.02 * std::max (1.0, span))
+                        clip.offset = (std::int64_t) std::llround (item.startOffset / 1000.0 * song.bpm / 60.0 * ppq);
+                }
+
+                song.playlist.push_back (clip);
+                continue;
+            }
+
             const auto it = patternMap.find (item.index);
 
-            if (item.kind != flp::PlaylistItem::Kind::pattern || it == patternMap.end() || item.length == 0)
+            if (it == patternMap.end())
                 continue;
 
             Clip clip;

@@ -30,6 +30,9 @@ Confirmadas empiricamente nos demos:
   pattern), não floats; -1 (que aparece como NaN se lido como float) = sem recorte. Nos clips de
   canal (áudio/automação) os mesmos bytes são floats.
 - 51 dos 165 `.flp` instalados têm playlist com clips de pattern.
+- Clips de áudio (clips de canal): os floats em +24/+28 são início/fim do trecho, ora em tempos,
+  ora em milissegundos (no LeriQ - SHINE, ms). O FL não estica esses clips: a duração do sample
+  bate com a do clip no tempo do projeto.
 
 ## Descobertas sobre os samples do FL
 - Muitos samples de fábrica são WAV com format tag 0x674F/0x6750 e um stream Ogg Vorbis no
@@ -42,5 +45,5 @@ Confirmadas empiricamente nos demos:
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
 ## Próximo passo
-Desfazer/refazer (Ctrl+Z) em toda edição, clips de áudio na playlist (os vocais dos demos do FL)
-e hosting de VST3.
+Hosting de VST3 (testar se o SDK do VST3 embutido no JUCE compila com MinGW/Zig), depois
+exportar pela interface e edição de velocity/seleção no Piano Roll.

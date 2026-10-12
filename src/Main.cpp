@@ -83,12 +83,21 @@ private:
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
                                && reloaded->mixer[3].effects[0].params[1] == 0.25f;
-        const auto ok = audioOk && projectOk;
+        // desfazer/refazer
+        offline.editSong ([] (lynx::Song& s) { s.bpm = 99.0; });
+        offline.editSong ([] (lynx::Song& s) { s.bpm = 101.0; });
+        offline.undo();
+        const auto afterUndo = offline.getSong().bpm;
+        offline.redo();
+        const auto undoOk = afterUndo == 99.0 && offline.getSong().bpm == 101.0 && offline.canUndo() && ! offline.canRedo();
+
+        const auto ok = audioOk && projectOk && undoOk;
 
         juce::String report;
         report << "conexoes=" << offline.getNumGraphConnections() << "\n"
                << "pico=" << peak << "\n"
                << "projeto=" << (projectOk ? "OK" : "ERRO " + error) << "\n"
+               << "desfazer=" << (undoOk ? "OK" : "ERRO") << "\n"
                << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
 
         if (reportPath.isNotEmpty())
@@ -120,7 +129,7 @@ private:
         if (ok)
         {
             for (const auto& c : offline.getSong().channels)
-                if (c.instrument == lynx::InstrumentKind::sampler)
+                if (c.instrument == lynx::InstrumentKind::sampler || c.instrument == lynx::InstrumentKind::audioClip)
                 {
                     ++samplers;
                     samplersLoaded += offline.getSampleLibrary().load (juce::String::fromUTF8 (c.samplePath.c_str())) != nullptr;
@@ -145,7 +154,7 @@ private:
             }
         }
 
-        report << "samplers=" << samplersLoaded << "/" << samplers << "\n"
+        report << "samples=" << samplersLoaded << "/" << samplers << "\n"
                << "resultado=" << (ok ? "OK" : "ERRO " + error) << "\n";
         juce::File (outputPath + ".txt").replaceWithText (report);
 

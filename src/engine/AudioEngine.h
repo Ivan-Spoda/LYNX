@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <functional>
 
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -42,8 +43,17 @@ public:
 
     // Documento (thread da UI)
     const Song& getSong() const noexcept { return song; }
-    void setSong (Song newSong);
-    void editSong (const std::function<void (Song&)>& edit);
+    void setSong (Song newSong); // projeto novo/aberto: zera o histórico
+
+    // Edita a música e publica para o áudio. Edições `undoable` entram no histórico;
+    // todas as edições feitas enquanto o mesmo clique do mouse está pressionado
+    // (arrastar uma nota, girar um knob) viram um passo só.
+    void editSong (const std::function<void (Song&)>& edit, bool undoable = true);
+
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
+    void undo();
+    void redo();
 
     // Canal selecionado no Channel Rack (alvo do Piano Roll e do teclado). Thread da UI.
     int getSelectedChannel() const noexcept { return selectedChannel; }
@@ -83,6 +93,10 @@ private:
 
     Song song;
     int selectedChannel = 0;
+
+    static constexpr std::size_t maxUndoSteps = 100;
+    std::deque<Song> undoStack, redoStack;
+    juce::Time lastUndoPress; // clique do mouse que já gerou um passo de desfazer
     SnapshotExchange<RackState> rackExchange;
     RackState lastPublishedShape; // canais + instrumentos do último snapshot, para reaproveitar vozes
 

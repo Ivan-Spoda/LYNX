@@ -8,7 +8,7 @@ namespace lynx
 {
 namespace
 {
-const char* instrumentName (InstrumentKind k)
+juce::String instrumentName (InstrumentKind k)
 {
     switch (k)
     {
@@ -18,6 +18,7 @@ const char* instrumentName (InstrumentKind k)
         case InstrumentKind::clap: return "Clap";
         case InstrumentKind::synth: return "Synth";
         case InstrumentKind::sampler: return "Sampler";
+        case InstrumentKind::audioClip: return utf8 ("Clip de áudio");
     }
     return "?";
 }
@@ -29,21 +30,6 @@ void setStep (Pattern& p, int channel, int step, bool on)
 {
     if (p.hasStep (channel, step) != on)
         p.toggleStep (channel, step);
-}
-
-void removeChannelNotes (Song& s, int channel, bool shiftOthers)
-{
-    for (auto& p : s.patterns)
-    {
-        auto& notes = p.notes;
-        notes.erase (std::remove_if (notes.begin(), notes.end(), [channel] (const Note& n) { return n.channel == channel; }),
-                     notes.end());
-
-        if (shiftOthers)
-            for (auto& n : notes)
-                if (n.channel > channel)
-                    --n.channel;
-    }
 }
 
 void drawKnob (juce::Graphics& g, juce::Rectangle<float> r, float value01, bool bipolar, juce::Colour colour)
@@ -211,6 +197,14 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.reduced (10, 0).toNearestInt(),
                     juce::Justification::centredLeft, true);
 
+        if (channel.instrument == InstrumentKind::audioClip)
+        {
+            g.setColour (theme::text.withAlpha (0.35f));
+            g.drawText (utf8 ("clip de áudio — toca pela Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
+            g.setFont (juce::FontOptions (14.0f));
+            continue;
+        }
+
         for (int step = 0; step < steps; ++step)
         {
             const auto r = stepBounds (row, step);
@@ -359,7 +353,8 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
     const auto row = (e.y - 4) / rowHeight;
     const auto step = (e.x - gridLeft()) / stepWidth;
 
-    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < gridLeft())
+    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < gridLeft()
+        || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip)
         return;
 
     if (row == lastPaintedRow && step == lastPaintedStep)
@@ -410,10 +405,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
     });
     menu.addSeparator();
     menu.addItem ("Remover canal", engine.getSong().channels.size() > 1, false, [this, channel] {
-        engine.editSong ([channel] (Song& s) {
-            s.channels.erase (s.channels.begin() + channel);
-            removeChannelNotes (s, channel, true);
-        });
+        engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
     });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -427,7 +419,7 @@ void ChannelRackComponent::showAddChannelMenu()
         menu.addItem (instrumentName (kind), [this, kind] {
             engine.editSong ([kind] (Song& s) {
                 ChannelDef c;
-                c.name = instrumentName (kind);
+                c.name = instrumentName (kind).toStdString();
                 c.instrument = kind;
                 c.mixerTrack = s.nextFreeInsert();
                 s.channels.push_back (c);

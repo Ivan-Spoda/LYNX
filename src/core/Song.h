@@ -24,7 +24,8 @@ enum class InstrumentKind : std::uint8_t
     hat,
     clap,
     synth,
-    sampler
+    sampler,
+    audioClip // sampler sem transposição que para no fim do clip (canal de clip de áudio, como no FL)
 };
 
 struct ChannelDef
@@ -88,14 +89,22 @@ struct Pattern
     void toggleStep (int channel, int step);
 };
 
-// Um bloco na Playlist que toca um trecho de uma pattern.
+enum class ClipKind : std::uint8_t
+{
+    pattern,
+    audio
+};
+
+// Um bloco na Playlist: um trecho de uma pattern, ou um trecho do áudio de um canal audioClip.
 struct Clip
 {
     int pattern = 0;
     int track = 0;
     std::int64_t start = 0;   // ticks na música
     std::int64_t length = 0;  // ticks
-    std::int64_t offset = 0;  // a partir de qual tick da pattern o clip começa
+    std::int64_t offset = 0;  // quanto do começo da pattern/áudio é pulado (ticks)
+    ClipKind kind = ClipKind::pattern;
+    int channel = -1;         // clips de áudio: canal (audioClip) que tem o sample
 
     std::int64_t end() const noexcept { return start + length; }
 };
@@ -128,6 +137,9 @@ struct Song
 
     // Remove uma pattern e conserta os clips e o índice atual.
     void removePattern (int index);
+
+    // Remove um canal com as notas e clips de áudio dele, e reindexa os demais.
+    void removeChannel (int index);
 
     static Song makeDefault();
 };

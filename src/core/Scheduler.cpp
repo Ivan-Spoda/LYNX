@@ -74,7 +74,7 @@ void schedulePatternLoop (const Pattern& pattern,
 
     out.sortByOffset();
 }
-void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out) noexcept
+void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume) noexcept
 {
     if (numSamples <= 0 || tps <= 0.0 || song.playlist.empty())
         return;
@@ -90,8 +90,40 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
         return (from < loopEnd && to > loopStart) || (loopEnd > (double) loop && from < loopEnd - (double) loop);
     };
 
+    const auto secondsPerTick = 60.0 / (std::max (song.bpm, 1.0) * ppq);
+
     for (const auto& clip : song.playlist)
     {
+        if (clip.kind == ClipKind::audio)
+        {
+            if (clip.channel < 0 || clip.channel >= (int) song.channels.size() || clip.length <= 0)
+                continue;
+
+            NoteEvent e;
+            e.channel = clip.channel;
+            e.velocity = 1.0f;
+
+            if (resume && loopStart > (double) clip.start && loopStart < (double) clip.end())
+            {
+                e.type = NoteEvent::Type::on;
+                e.sampleOffset = 0;
+                e.startSeconds = ((double) clip.offset + loopStart - (double) clip.start) * secondsPerTick;
+                out.add (e);
+            }
+
+            if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
+                continue;
+
+            e.type = NoteEvent::Type::on;
+            e.startSeconds = (double) clip.offset * secondsPerTick;
+            emitOccurrences ((double) clip.start, loop, startTick, endTick, tps, numSamples, e, out);
+
+            e.type = NoteEvent::Type::off;
+            e.startSeconds = 0.0;
+            emitOccurrences ((double) clip.end(), loop, startTick, endTick, tps, numSamples, e, out);
+            continue;
+        }
+
         if (clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
             continue;
 

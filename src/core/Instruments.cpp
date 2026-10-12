@@ -143,6 +143,7 @@ private:
 
             case InstrumentKind::synth:
             case InstrumentKind::sampler:
+            case InstrumentKind::audioClip:
                 break;
         }
 
@@ -297,7 +298,8 @@ struct SamplerVoice
 class SamplerInstrument final : public Instrument
 {
 public:
-    explicit SamplerInstrument (std::shared_ptr<const SampleData> s) : sample (std::move (s)) {}
+    // clipMode: clip de áudio da Playlist (sem transposição, para no noteOff)
+    SamplerInstrument (std::shared_ptr<const SampleData> s, bool clip) : sample (std::move (s)), clipMode (clip) {}
 
     void prepare (double sr) noexcept override
     {
@@ -306,9 +308,16 @@ public:
         allNotesOff();
     }
 
-    void noteOn (int key, float velocity) noexcept override
+    void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
+
+    void noteOnAt (int key, float velocity, double startSeconds) noexcept override
     {
         if (sample == nullptr || sample->frames() < 2)
+            return;
+
+        const auto startFrame = std::max (0.0, startSeconds * sample->sampleRate);
+
+        if (startFrame >= (double) (sample->frames() - 1))
             return;
 
         SamplerVoice* target = nullptr;
@@ -332,10 +341,15 @@ public:
         *target = {};
         target->active = true;
         target->velocity = velocity;
-        target->rate = sample->sampleRate / sampleRate * std::pow (2.0, (key - 60) / 12.0);
+        target->position = startFrame;
+        target->rate = sample->sampleRate / sampleRate * (clipMode ? 1.0 : std::pow (2.0, (key - 60) / 12.0));
     }
 
-    void noteOff (int) noexcept override {}
+    void noteOff (int) noexcept override
+    {
+        if (clipMode)
+            allNotesOff(); // o clip acabou: some com fade curto
+    }
 
     void allNotesOff() noexcept override
     {
@@ -386,6 +400,7 @@ public:
 
 private:
     std::shared_ptr<const SampleData> sample;
+    bool clipMode = false;
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
@@ -394,8 +409,8 @@ private:
 
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
-    if (kind == InstrumentKind::sampler)
-        return std::make_unique<SamplerInstrument> (std::move (sample));
+    if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
+        return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);
 
     if (kind == InstrumentKind::synth)
         return std::make_unique<SynthInstrument>();

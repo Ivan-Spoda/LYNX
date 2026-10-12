@@ -19,6 +19,7 @@ struct NoteEvent
     int channel = 0;
     int key = 60;
     float velocity = 0.0f;
+    double startSeconds = 0.0; // clips de áudio: de onde o sample começa a tocar
 };
 
 // Buffer de capacidade fixa. Eventos além da capacidade são descartados
@@ -57,11 +58,15 @@ void schedulePatternLoop (const Pattern& pattern,
                           int numSamples,
                           double ticksPerSampleValue,
                           EventBuffer& out) noexcept;
-// Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip toca as
-// notas da sua pattern que caem em [offset, offset + length); notas são cortadas no fim do clip.
+// Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip de pattern
+// toca as notas da pattern que caem em [offset, offset + length); notas são cortadas no
+// fim do clip. Clips de áudio disparam o sample do canal no início e param no fim.
+// `resume` = a reprodução começou ou pulou para startTick: clips de áudio que já estavam
+// em andamento nesse ponto começam no meio, no primeiro sample do bloco.
 void scheduleSong (const Song& song,
                    double startTick,
                    int numSamples,
                    double ticksPerSampleValue,
-                   EventBuffer& out) noexcept;
+                   EventBuffer& out,
+                   bool resume = false) noexcept;
 } // namespace lynx

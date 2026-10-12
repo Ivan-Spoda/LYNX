@@ -1,6 +1,9 @@
 #pragma once
 
 #include <functional>
+#include <map>
+#include <string>
+#include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -14,8 +17,10 @@ namespace lynx
 //  - clicar num clip torna a pattern dele a atual; duplo clique abre no Channel Rack
 //  - clique direito apaga (arrastar apaga vários)
 //  - clicar na régua posiciona a reprodução e liga o modo Song
+//  - arrastar um arquivo de áudio para a Playlist cria um clip de áudio
 //  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
 class PlaylistComponent final : public juce::Component,
+                                public juce::FileDragAndDropTarget,
                                 private juce::ChangeListener,
                                 private juce::Timer,
                                 private juce::ScrollBar::Listener
@@ -34,6 +39,10 @@ public:
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+
+    // arrastar arquivos de áudio cria clips de áudio (e um canal para cada um)
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     static constexpr int headerWidth = 96;
     static constexpr int timelineHeight = 24;
@@ -59,6 +68,12 @@ private:
     int clipAt (int x, int y, bool& onRightEdge) const;
     void updateScrollBars();
     void seekTo (int x);
+    void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
+    const std::vector<float>* waveformFor (const std::string& path);
+
+    static constexpr std::size_t waveformBucket = 256; // frames por ponto da forma de onda
+    std::map<std::string, std::vector<float>> waveforms;
+    std::map<std::string, double> waveformRates;
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
