@@ -14,11 +14,6 @@ Atualizado em 2026-10-12.
   com o FL Studio 2026 (versões 10.9 a 25.2).
 - `renderwav` gera áudio de patterns importadas de `.flp`.
 
-## Ainda não verificado
-- Reprodução de áudio no app com o mouse e teclado de um usuário real (a janela abre e o
-  dispositivo de áudio inicia: o medidor de CPU sai de 0).
-- Build com Visual Studio/CMake (não há MSVC nesta máquina).
-
 ## Descobertas sobre o formato .flp (além de docs/ANALISE_FL_STUDIO.md)
 Confirmadas empiricamente nos demos:
 - Registro de nota: 24 bytes em todas as versões, inclusive 25.x.
