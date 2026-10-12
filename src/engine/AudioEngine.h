@@ -9,6 +9,7 @@
 #include "core/RackRenderer.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
+#include "engine/PluginHost.h"
 #include "engine/SampleLibrary.h"
 #include "engine/Transport.h"
 
@@ -32,6 +33,14 @@ public:
     Transport& getTransport() noexcept { return transport; }
     SampleLibrary& getSampleLibrary() noexcept { return samples; }
     MeterBank& getMeters() noexcept { return meters; }
+    PluginHost& getPluginHost() noexcept { return plugins; }
+
+    // Instâncias vivas (para abrir a janela do plugin). nullptr se não for plugin.
+    std::shared_ptr<Instrument> getChannelInstrument (int channel) const;
+    std::shared_ptr<Effect> getEffect (int track, int slot) const;
+
+    // Copia o estado atual dos plugins para o Song (antes de salvar).
+    void capturePluginStates();
 
     void play() noexcept;
     void stop() noexcept;
@@ -90,6 +99,7 @@ private:
     SampleLibrary samples;
     LiveEventQueue liveEvents;
     MeterBank meters;
+    PluginHost plugins;
 
     Song song;
     int selectedChannel = 0;

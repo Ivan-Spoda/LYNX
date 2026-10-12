@@ -44,6 +44,12 @@ Confirmadas empiricamente nos demos:
 - Ouvir o app tocando (o autoteste prova que o grafo gera áudio; falta confirmar na placa do usuário).
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
+## Hosting de plugins
+- O VST3 SDK que vem com o JUCE compila com Zig/MinGW; basta pôr
+  `juce_audio_processors/format_types/VST3_SDK` no include path.
+- Plugins são preparados numa taxa fixa; quando o dispositivo muda de taxa, o engine recria as
+  instâncias. Latência de plugin (PDC) ainda não é compensada.
+
 ## Próximo passo
-Hosting de VST3 (testar se o SDK do VST3 embutido no JUCE compila com MinGW/Zig), depois
-exportar pela interface e edição de velocity/seleção no Piano Roll.
+Exportar pela interface (WAV), velocity e seleção múltipla no Piano Roll, compensação de
+latência dos plugins.

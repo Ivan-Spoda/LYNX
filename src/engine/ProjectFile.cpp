@@ -17,6 +17,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::synth: return "synth";
         case InstrumentKind::sampler: return "sampler";
         case InstrumentKind::audioClip: return "audioClip";
+        case InstrumentKind::plugin: return "plugin";
     }
     return "synth";
 }
@@ -24,7 +25,8 @@ const char* instrumentId (InstrumentKind k)
 InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
-                    InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip })
+                    InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
+                    InstrumentKind::plugin })
         if (id == instrumentId (k))
             return k;
 
@@ -41,13 +43,32 @@ const char* effectId (EffectKind k)
         case EffectKind::compressor: return "compressor";
         case EffectKind::delay: return "delay";
         case EffectKind::reverb: return "reverb";
+        case EffectKind::plugin: return "plugin";
     }
     return "eq";
 }
 
+juce::var pluginToVar (const PluginRef& p)
+{
+    auto o = std::make_unique<juce::DynamicObject>();
+    o->setProperty ("id", str (p.id));
+    o->setProperty ("name", str (p.name));
+    o->setProperty ("state", str (p.state));
+    return juce::var (o.release());
+}
+
+PluginRef pluginFromVar (const juce::var& v)
+{
+    PluginRef p;
+    p.id = v["id"].toString().toStdString();
+    p.name = v["name"].toString().toStdString();
+    p.state = v["state"].toString().toStdString();
+    return p;
+}
+
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
-    for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb })
+    for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin })
         if (id == effectId (k))
             return k;
 
@@ -79,6 +100,9 @@ juce::String toJson (const Song& song)
             o->setProperty ("sample", str (c.samplePath));
 
         o->setProperty ("mixer", c.mixerTrack);
+
+        if (c.instrument == InstrumentKind::plugin)
+            o->setProperty ("plugin", pluginToVar (c.plugin));
 
         channels.add (juce::var (o.release()));
     }
@@ -137,6 +161,9 @@ juce::String toJson (const Song& song)
             for (auto v : slot.params)
                 params.add (juce::roundToInt (v * 10000.0f) / 10000.0);
             e->setProperty ("params", params);
+
+            if (slot.kind == EffectKind::plugin)
+                e->setProperty ("plugin", pluginToVar (slot.plugin));
             effects.add (juce::var (e.release()));
         }
 
@@ -191,6 +218,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.muted = (bool) c.getProperty ("muted", false);
             def.samplePath = c["sample"].toString().toStdString();
             def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
+            def.plugin = pluginFromVar (c["plugin"]);
             song.channels.push_back (std::move (def));
         }
 
@@ -281,6 +309,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
                             slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
 
+                    slot.plugin = pluginFromVar (e["plugin"]);
                     track.effects.push_back (slot);
                 }
 

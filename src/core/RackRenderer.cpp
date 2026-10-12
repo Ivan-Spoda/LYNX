@@ -6,11 +6,46 @@
 
 namespace lynx
 {
+namespace
+{
+// Instrumento mudo: canal de plugin que não pôde ser carregado.
+class SilentInstrument final : public Instrument
+{
+public:
+    void prepare (double) noexcept override {}
+    void noteOn (int, float) noexcept override {}
+    void noteOff (int) noexcept override {}
+    void allNotesOff() noexcept override {}
+    void render (float*, float*, int, float, float) noexcept override {}
+};
+
+// Efeito que não faz nada: slot de plugin ausente.
+class BypassEffect final : public Effect
+{
+public:
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+    void process (float*, float*, int, const EffectSlot&, double) noexcept override {}
+};
+} // namespace
+
 std::unique_ptr<const RackState> RackState::build (Song song,
                                                    const RackState* previous,
                                                    double sampleRate,
                                                    const SampleProvider& samples)
 {
+    Factories factories;
+    factories.samples = samples;
+    return build (std::move (song), previous, sampleRate, factories);
+}
+
+std::unique_ptr<const RackState> RackState::build (Song song,
+                                                   const RackState* previous,
+                                                   double sampleRate,
+                                                   const Factories& factories)
+{
+    const auto& samples = factories.samples;
+
     auto state = std::make_unique<RackState>();
     state->instruments.reserve (song.channels.size());
 
@@ -22,9 +57,22 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
             && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip)
-                || previous->song.channels[i].samplePath == channel.samplePath))
+                || previous->song.channels[i].samplePath == channel.samplePath)
+            && (kind != InstrumentKind::plugin
+                || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate)))
         {
             state->instruments.push_back (previous->instruments[i]);
+            continue;
+        }
+
+        if (kind == InstrumentKind::plugin)
+        {
+            std::shared_ptr<Instrument> instrument;
+
+            if (factories.pluginInstruments && ! channel.plugin.id.empty())
+                instrument = factories.pluginInstruments (channel.plugin, sampleRate);
+
+            state->instruments.push_back (instrument != nullptr ? instrument : std::make_shared<SilentInstrument>());
             continue;
         }
 
@@ -50,14 +98,30 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
             if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
-                && previous->song.mixer[t].effects[i].kind == kind)
+                && previous->song.mixer[t].effects[i].kind == kind
+                && (kind != EffectKind::plugin
+                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate)))
             {
                 state->effects[t].push_back (previous->effects[t][i]);
                 continue;
             }
 
-            std::shared_ptr<Effect> effect = makeEffect (kind);
-            effect->prepare (sampleRate);
+            std::shared_ptr<Effect> effect;
+
+            if (kind == EffectKind::plugin)
+            {
+                if (factories.pluginEffects && ! slots[i].plugin.id.empty())
+                    effect = factories.pluginEffects (slots[i].plugin, sampleRate);
+
+                if (effect == nullptr)
+                    effect = std::make_shared<BypassEffect>();
+            }
+            else
+            {
+                effect = makeEffect (kind);
+                effect->prepare (sampleRate);
+            }
+
             state->effects[t].push_back (std::move (effect));
         }
     }

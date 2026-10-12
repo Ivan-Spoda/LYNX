@@ -2,6 +2,7 @@
 
 #include "engine/Text.h"
 
+#include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -19,6 +20,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::synth: return "Synth";
         case InstrumentKind::sampler: return "Sampler";
         case InstrumentKind::audioClip: return utf8 ("Clip de áudio");
+        case InstrumentKind::plugin: return "Plugin";
     }
     return "?";
 }
@@ -343,6 +345,8 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
         engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].volume = 0.8f; });
     else if (area == Area::route)
         engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
+    else if (area == Area::name && engine.getSong().channels[(std::size_t) row].instrument == InstrumentKind::plugin)
+        openPluginWindow (row);
     else if (area == Area::name && onOpenPianoRoll)
         onOpenPianoRoll();
 }
@@ -383,12 +387,27 @@ void ChannelRackComponent::showChannelMenu (int channel)
     instruments.addSeparator();
     instruments.addItem ("Sampler (escolher arquivo)...", [this, channel] { chooseSample (channel); });
 
+    juce::PopupMenu plugins;
+    addPluginItems (plugins, engine, true, [this, channel] (PluginRef ref) {
+        engine.editSong ([channel, ref] (Song& s) {
+            auto& c = s.channels[(std::size_t) channel];
+            c.instrument = InstrumentKind::plugin;
+            c.plugin = ref;
+            c.name = ref.name;
+        });
+        openPluginWindow (channel);
+    });
+    instruments.addSubMenu ("Plugin VST3", plugins);
+
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
 
     if (c.instrument == InstrumentKind::sampler)
         menu.addItem (juce::String ("Sample: ") + juce::File (juce::String::fromUTF8 (c.samplePath.c_str())).getFileName(),
                       false, false, [] {});
+
+    if (c.instrument == InstrumentKind::plugin)
+        menu.addItem (utf8 ("Abrir interface do plugin"), [this, channel] { openPluginWindow (channel); });
 
     menu.addItem ("Piano Roll", [this] {
         if (onOpenPianoRoll)
@@ -430,6 +449,22 @@ void ChannelRackComponent::showAddChannelMenu()
     menu.addSeparator();
     menu.addItem ("Sampler (escolher arquivo)...", [this] { chooseSample (-1); });
 
+    juce::PopupMenu plugins;
+    addPluginItems (plugins, engine, true, [this] (PluginRef ref) {
+        engine.editSong ([ref] (Song& s) {
+            ChannelDef c;
+            c.name = ref.name;
+            c.instrument = InstrumentKind::plugin;
+            c.plugin = ref;
+            c.mixerTrack = s.nextFreeInsert();
+            s.channels.push_back (c);
+        });
+        const auto added = (int) engine.getSong().channels.size() - 1;
+        engine.setSelectedChannel (added);
+        openPluginWindow (added); // como no FL: o plugin abre ao ser adicionado
+    });
+    menu.addSubMenu ("Plugin VST3", plugins);
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
@@ -469,6 +504,21 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 
     if (channel < 0)
         engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
+}
+
+void ChannelRackComponent::openPluginWindow (int channel)
+{
+    auto instrument = engine.getChannelInstrument (channel);
+
+    if (auto* plugin = dynamic_cast<PluginInstrument*> (instrument.get()))
+    {
+        PluginWindows::open (instrument, plugin->getInstance(),
+                             juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()));
+        return;
+    }
+
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
+                                            utf8 ("Este plugin não pôde ser carregado (não está instalado ou não foi escaneado)."));
 }
 
 void ChannelRackComponent::rename (int channel)

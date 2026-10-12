@@ -246,11 +246,19 @@ void AudioEngine::publishSong()
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
 
-    auto state = RackState::build (song, &lastPublishedShape, transport.sampleRate.load(),
-                                   [this] (const std::string& path) { return samples.load (juce::String::fromUTF8 (path.c_str())); });
+    RackState::Factories factories;
+    factories.samples = [this] (const std::string& path) { return samples.load (juce::String::fromUTF8 (path.c_str())); };
+    factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };
+    factories.pluginEffects = [this] (const PluginRef& ref, double sr) { return plugins.makeEffect (ref, sr); };
 
+    auto state = RackState::build (song, &lastPublishedShape, transport.sampleRate.load(), factories);
+
+    // o que o próximo build precisa para reaproveitar instrumentos e efeitos
     lastPublishedShape.song.channels = song.channels;
+    lastPublishedShape.song.mixer = song.mixer;
     lastPublishedShape.instruments = state->instruments;
+    lastPublishedShape.effects = state->effects;
+    lastPublishedShape.sampleRate = state->sampleRate;
 
     rackExchange.publish (std::move (state));
     sendChangeMessage();
@@ -259,6 +267,44 @@ void AudioEngine::publishSong()
 void AudioEngine::timerCallback()
 {
     rackExchange.collectGarbage();
+
+    // Plugins são preparados numa taxa fixa; se o dispositivo mudou de taxa, recria.
+    if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5)
+        publishSong();
+}
+
+std::shared_ptr<Instrument> AudioEngine::getChannelInstrument (int channel) const
+{
+    if (channel < 0 || channel >= (int) lastPublishedShape.instruments.size())
+        return nullptr;
+
+    return lastPublishedShape.instruments[(std::size_t) channel];
+}
+
+std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
+{
+    const auto& effects = lastPublishedShape.effects;
+
+    if (track < 0 || track >= (int) effects.size() || slot < 0 || slot >= (int) effects[(std::size_t) track].size())
+        return nullptr;
+
+    return effects[(std::size_t) track][(std::size_t) slot];
+}
+
+void AudioEngine::capturePluginStates()
+{
+    // Muda só o estado salvo (não recria nada nem entra no histórico de desfazer).
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
+            song.channels[i].plugin.state = capturePluginState (p->getInstance());
+
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
+                song.mixer[t].effects[s].plugin.state = capturePluginState (p->getInstance());
+
+    lastPublishedShape.song.channels = song.channels;
+    lastPublishedShape.song.mixer = song.mixer;
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,

@@ -377,6 +377,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Tempo", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Abafar", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f } } };
+    static const EffectInfo plugin { "Plugin", {} };
 
     switch (kind)
     {
@@ -384,6 +385,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::compressor: return comp;
         case EffectKind::delay: return delay;
         case EffectKind::reverb: return reverb;
+        case EffectKind::plugin: return plugin;
     }
     return eq;
 }
@@ -428,6 +430,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::reverb:
             std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
+
+        case EffectKind::plugin:
+            break;
     }
 
     return {};
@@ -453,6 +458,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::compressor: return std::make_unique<Compressor>();
         case EffectKind::delay: return std::make_unique<Delay>();
         case EffectKind::reverb: return std::make_unique<Reverb>();
+        case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();
 }

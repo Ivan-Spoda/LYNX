@@ -42,7 +42,10 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [ ] Sends entre inserts e roteamento insert → insert (hoje todo insert vai para o Master)
 - [x] 10 slots de efeito por insert (e no Master), com bypass, trocar, mover, remover
 - [x] Efeitos internos: EQ de 3 bandas, compressor, delay sincronizado (ping-pong), reverb
-- [ ] Hosting de VST3 (JUCE) e CLAP; scan em processo separado
+- [x] Hosting de VST3: instrumentos nos canais e efeitos nos slots, janela do plugin, estado salvo no projeto
+- [x] Busca de plugins com janela de progresso, lista salva em %APPDATA%\LYNX, "dead man's pedal"
+- [ ] Busca em processo separado (hoje um plugin que trave na busca derruba o LYNX; ele é pulado na próxima)
+- [ ] CLAP
 - [ ] Compensação de latência (PDC)
 - [ ] Processamento multi-thread do grafo por camadas de dependência (como o FL, ver análise)
 - [ ] Plugins em processo separado (sandbox), estilo ilbridge

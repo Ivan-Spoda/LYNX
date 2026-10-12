@@ -95,6 +95,8 @@ private:
     const std::vector<EffectSlot>* slots() const;
     void showAddMenu (int slot);
     void showSlotMenu (int slot);
+    juce::Rectangle<int> pluginButtonBounds() const;
+    void openPluginWindow (int slot);
 
     AudioEngine& engine;
     int track = 0;

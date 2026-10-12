@@ -55,11 +55,13 @@ if(LYNX_BUILD_APP)
         src/engine/Metronome.cpp
         src/engine/SampleLibrary.cpp
         src/engine/ProjectFile.cpp
+        src/engine/PluginHost.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
         src/ui/PianoRollComponent.cpp
         src/ui/PlaylistComponent.cpp
-        src/ui/MixerComponent.cpp)
+        src/ui/MixerComponent.cpp
+        src/ui/PluginWindow.cpp)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0

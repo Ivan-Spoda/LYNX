@@ -29,6 +29,18 @@ struct RackState
     // Carrega (ou pega do cache) o áudio de um arquivo; nullptr se não conseguir.
     using SampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path)>;
 
+    // O app cria instrumentos/efeitos de plugin (o núcleo não conhece JUCE). nullptr = não deu
+    // (plugin ausente): o canal fica mudo / o slot vira bypass.
+    using PluginInstrumentFactory = std::function<std::shared_ptr<Instrument> (const PluginRef&, double sampleRate)>;
+    using PluginEffectFactory = std::function<std::shared_ptr<Effect> (const PluginRef&, double sampleRate)>;
+
+    struct Factories
+    {
+        SampleProvider samples;
+        PluginInstrumentFactory pluginInstruments;
+        PluginEffectFactory pluginEffects;
+    };
+
     // Monta o próximo estado reaproveitando os instrumentos de `previous` quando o
     // canal não mudou de instrumento nem de sample, e os efeitos quando o slot tem o
     // mesmo tipo. Roda na thread da UI (aloca).
@@ -36,6 +48,10 @@ struct RackState
                                                    const RackState* previous,
                                                    double sampleRate,
                                                    const SampleProvider& samples = {});
+    static std::unique_ptr<const RackState> build (Song song,
+                                                   const RackState* previous,
+                                                   double sampleRate,
+                                                   const Factories& factories);
 };
 
 class RackRenderer

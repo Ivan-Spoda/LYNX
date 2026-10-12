@@ -24,6 +24,13 @@ public:
             return;
         }
 
+        if (args.contains ("--plugintest"))
+        {
+            const auto i = args.indexOf ("--plugintest");
+            runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
         if (args.contains ("--snapshot"))
         {
             const auto i = args.indexOf ("--snapshot");
@@ -103,6 +110,82 @@ private:
         if (reportPath.isNotEmpty())
             juce::File (reportPath).replaceWithText (report);
 
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
+    // LYNX.exe --plugintest plugin.vst3 relatorio.txt: carrega o plugin, toca notas se for
+    // instrumento (e passa o som por ele se for efeito) e mede o áudio.
+    void runPluginTest (const juce::String& pluginPath, const juce::String& reportPath)
+    {
+        juce::String report;
+        bool ok = false;
+        {
+            lynx::AudioEngine offline (false);
+            auto& host = offline.getPluginHost();
+            const auto added = host.addPluginFile (juce::File (pluginPath));
+            report << "plugins_no_arquivo=" << added << "\n";
+
+            juce::PluginDescription instrument, effect;
+            bool hasInstrument = false, hasEffect = false;
+
+            for (const auto& type : host.getKnownPlugins().getTypes())
+            {
+                if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName())
+                    continue;
+
+                report << "  " << (type.isInstrument ? "instrumento: " : "efeito: ") << type.name << " (" << type.manufacturerName
+                       << ") em " << type.fileOrIdentifier << "\n";
+
+                if (type.isInstrument && ! hasInstrument) { instrument = type; hasInstrument = true; }
+                if (! type.isInstrument && ! hasEffect) { effect = type; hasEffect = true; }
+            }
+
+            auto song = lynx::Song::makeDefault();
+
+            if (hasInstrument)
+            {
+                auto& c = song.channels[4]; // o canal "Synth" vira o plugin
+                c.instrument = lynx::InstrumentKind::plugin;
+                c.plugin.id = instrument.createIdentifierString().toStdString();
+                c.plugin.name = instrument.name.toStdString();
+                c.volume = 1.0f;
+
+                for (int i = 0; i < 4; ++i) // um acorde por tempo
+                    for (int key : { 60, 64, 67 })
+                        song.patterns[0].notes.push_back ({ (std::int64_t) i * lynx::ppq, lynx::ppq / 2, 4, key, 0.9f });
+                song.patterns[0].sortNotes();
+            }
+
+            if (hasEffect)
+            {
+                lynx::EffectSlot slot;
+                slot.kind = lynx::EffectKind::plugin;
+                slot.plugin.id = effect.createIdentifierString().toStdString();
+                slot.plugin.name = effect.name.toStdString();
+                song.mixer[0].effects.push_back (slot);
+            }
+
+            offline.setSong (song);
+
+            const auto* loadedInstrument = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get());
+            const auto* loadedEffect = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, 0).get());
+            report << "instrumento_carregado=" << (loadedInstrument != nullptr ? "sim" : "nao") << "\n"
+                   << "efeito_carregado=" << (loadedEffect != nullptr ? "sim" : "nao") << "\n";
+
+            const auto peak = offline.renderOffline (3.0, 48000.0);
+            report << "pico=" << peak << "\n";
+
+            offline.capturePluginStates();
+            const auto stateSize = hasInstrument ? offline.getSong().channels[4].plugin.state.size() : (size_t) 0;
+            report << "estado_bytes_base64=" << (int) stateSize << "\n";
+
+            ok = (hasInstrument || hasEffect) && (! hasInstrument || loadedInstrument != nullptr)
+                 && (! hasEffect || loadedEffect != nullptr) && peak > 0.001f && peak < 10.0f;
+        }
+
+        report << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
+        juce::File (reportPath).replaceWithText (report);
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
     }

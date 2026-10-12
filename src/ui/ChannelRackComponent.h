@@ -63,6 +63,7 @@ private:
     void chooseSample (int channel); // channel < 0 = novo canal
     void assignSample (int channel, const juce::File& file);
     void rename (int channel);
+    void openPluginWindow (int channel);
 
     AudioEngine& engine;
     int playheadStep = -1;

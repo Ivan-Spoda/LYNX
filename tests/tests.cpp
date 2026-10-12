@@ -1057,6 +1057,74 @@ TEST (flp_import_audio_clips_with_offsets)
     CHECK (s.mode == lynx::PlayMode::song);
 }
 
+TEST (plugin_factories_create_reuse_and_fallback)
+{
+    lynx::Song s;
+    s.mixer = lynx::Song::defaultMixer (2);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::plugin;
+    c.plugin.id = "VST3-Synth-123";
+    c.mixerTrack = 1;
+    s.channels.push_back (c);
+    lynx::ChannelDef missing = c;
+    missing.plugin.id = "VST3-Ausente-0";
+    s.channels.push_back (missing);
+    lynx::EffectSlot fx;
+    fx.kind = lynx::EffectKind::plugin;
+    fx.plugin.id = "VST3-Reverb-9";
+    s.mixer[1].effects.push_back (fx);
+    s.patterns.emplace_back();
+
+    int instrumentsMade = 0, effectsMade = 0;
+    lynx::RackState::Factories f;
+    f.pluginInstruments = [&] (const lynx::PluginRef& ref, double) -> std::shared_ptr<lynx::Instrument> {
+        if (ref.id != "VST3-Synth-123")
+            return nullptr;
+        ++instrumentsMade;
+        auto synth = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        synth->prepare (48000.0);
+        return synth;
+    };
+    f.pluginEffects = [&] (const lynx::PluginRef&, double) -> std::shared_ptr<lynx::Effect> {
+        ++effectsMade;
+        auto eq = lynx::makeEffect (lynx::EffectKind::eq);
+        eq->prepare (48000.0);
+        return eq;
+    };
+
+    auto a = lynx::RackState::build (s, nullptr, 48000.0, f);
+    CHECK (instrumentsMade == 1 && effectsMade == 1);
+    CHECK (a->instruments.size() == 2 && a->instruments[1] != nullptr); // ausente: mudo, mas existe
+
+    // mudar o estado salvo não recria; trocar o plugin recria
+    s.channels[0].plugin.state = "abc";
+    auto b = lynx::RackState::build (s, a.get(), 48000.0, f);
+    CHECK (instrumentsMade == 1 && b->instruments[0] == a->instruments[0] && b->effects[1][0] == a->effects[1][0]);
+    s.mixer[1].effects[0].plugin.id = "VST3-Outro-1";
+    auto c2 = lynx::RackState::build (s, b.get(), 48000.0, f);
+    CHECK (effectsMade == 2);
+
+    // renderizar com plugin ausente e slot de plugin não quebra nada
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 256);
+    lynx::LiveEventQueue live;
+    lynx::NoteEvent on;
+    on.channel = 0;
+    on.velocity = 1.0f;
+    live.push (on);
+    on.channel = 1;
+    live.push (on);
+    std::vector<float> l (256), rr (256);
+    r.process (c2.get(), false, 0.0, 256, l.data(), rr.data(), &live);
+    float peak = 0.0f;
+    for (auto v : l)
+    {
+        CHECK (std::isfinite (v));
+        peak = std::max (peak, std::abs (v));
+    }
+    CHECK (peak > 0.0f);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

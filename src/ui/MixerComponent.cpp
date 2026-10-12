@@ -2,6 +2,7 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -540,8 +541,9 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.setColour (theme::muteLed (! slot.enabled));
             g.fillEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 5, 10, 10);
             g.setColour (slot.enabled ? theme::text : juce::Colours::grey);
-            g.drawText (juce::String (i + 1) + ". " + utf8 (effectInfo (slot.kind).name), r.withTrimmedLeft (24),
-                        juce::Justification::centredLeft);
+            const auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
+                                                              : utf8 (effectInfo (slot.kind).name);
+            g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24), juce::Justification::centredLeft);
         }
         else if (i == (int) s->size())
         {
@@ -555,6 +557,21 @@ void EffectsPanel::paint (juce::Graphics& g)
         return;
 
     const auto& slot = (*s)[(std::size_t) selectedSlot];
+
+    if (slot.kind == EffectKind::plugin)
+    {
+        const auto button = pluginButtonBounds();
+        g.setColour (theme::channelButton);
+        g.fillRoundedRectangle (button.toFloat(), 4.0f);
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (13.0f));
+        g.drawText (utf8 ("Abrir interface do plugin"), button, juce::Justification::centred);
+        g.setColour (theme::text.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
+        return;
+    }
+
     const auto& info = effectInfo (slot.kind);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (14.0f));
@@ -621,6 +638,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::plugin
+        && pluginButtonBounds().contains (e.getPosition()))
+    {
+        openPluginWindow (selectedSlot);
+        return;
+    }
+
     dragParam = knobAt (e.getPosition());
 
     if (dragParam >= 0)
@@ -658,6 +682,26 @@ void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
     });
 }
 
+juce::Rectangle<int> EffectsPanel::pluginButtonBounds() const
+{
+    return { 20, panelHeader + maxEffectSlots * slotHeight + 30, getWidth() - 40, 30 };
+}
+
+void EffectsPanel::openPluginWindow (int slot)
+{
+    auto effect = engine.getEffect (track, slot);
+
+    if (auto* plugin = dynamic_cast<PluginEffect*> (effect.get()))
+    {
+        const auto& s = engine.getSong().mixer[(std::size_t) track].effects[(std::size_t) slot];
+        PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()));
+        return;
+    }
+
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
+                                            utf8 ("Este plugin não pôde ser carregado (não está instalado ou não foi escaneado)."));
+}
+
 void EffectsPanel::showAddMenu (int)
 {
     juce::PopupMenu menu;
@@ -672,6 +716,24 @@ void EffectsPanel::showAddMenu (int)
             selectedSlot = (int) slots()->size() - 1;
             repaint();
         });
+
+    juce::PopupMenu plugins;
+    addPluginItems (plugins, engine, false, [this] (PluginRef ref) {
+        engine.editSong ([t = track, ref] (Song& song) {
+            auto& effects = song.mixer[(std::size_t) t].effects;
+            if ((int) effects.size() >= maxEffectSlots)
+                return;
+            EffectSlot slot;
+            slot.kind = EffectKind::plugin;
+            slot.plugin = ref;
+            effects.push_back (slot);
+        });
+        selectedSlot = (int) slots()->size() - 1;
+        openPluginWindow (selectedSlot);
+        repaint();
+    });
+    menu.addSeparator();
+    menu.addSubMenu ("Plugin VST3", plugins);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }

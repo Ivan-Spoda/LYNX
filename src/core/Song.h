@@ -25,7 +25,18 @@ enum class InstrumentKind : std::uint8_t
     clap,
     synth,
     sampler,
-    audioClip // sampler sem transposição que para no fim do clip (canal de clip de áudio, como no FL)
+    audioClip, // sampler sem transposição que para no fim do clip (canal de clip de áudio, como no FL)
+    plugin     // instrumento externo (VST3), criado pelo app
+};
+
+// Plugin externo: identificador do formato (o app sabe achar o arquivo) + estado salvo.
+struct PluginRef
+{
+    std::string id;    // identificador único do plugin (formato-nome-hash do JUCE)
+    std::string name;  // para mostrar mesmo quando o plugin não estiver instalado
+    std::string state; // estado do plugin em base64 (o que o plugin devolve ao salvar)
+
+    bool operator== (const PluginRef& o) const { return id == o.id && state == o.state; }
 };
 
 struct ChannelDef
@@ -37,6 +48,7 @@ struct ChannelDef
     bool muted = false;
     std::string samplePath; // usado quando instrument == sampler
     int mixerTrack = 0;     // 0 = direto no Master
+    PluginRef plugin;       // usado quando instrument == plugin
 };
 
 enum class EffectKind : std::uint8_t
@@ -44,7 +56,8 @@ enum class EffectKind : std::uint8_t
     eq,
     compressor,
     delay,
-    reverb
+    reverb,
+    plugin // efeito externo (VST3), criado pelo app
 };
 
 constexpr int maxEffectParams = 6;
@@ -55,6 +68,7 @@ struct EffectSlot
     EffectKind kind = EffectKind::eq;
     bool enabled = true;
     std::array<float, maxEffectParams> params {}; // 0..1; o significado depende do efeito
+    PluginRef plugin;                             // usado quando kind == plugin
 };
 
 struct MixerTrack

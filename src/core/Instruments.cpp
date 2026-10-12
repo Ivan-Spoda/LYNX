@@ -144,6 +144,7 @@ private:
             case InstrumentKind::synth:
             case InstrumentKind::sampler:
             case InstrumentKind::audioClip:
+            case InstrumentKind::plugin:
                 break;
         }
 

@@ -27,7 +27,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_USE_CURL 0'
     echo '#define JUCE_WEB_BROWSER 0'
     echo '#define JUCE_USE_WINDOWS_MEDIA_FORMAT 0'
-    echo '#define JUCE_PLUGINHOST_VST3 0'
+    echo '#define JUCE_PLUGINHOST_VST3 1'
     echo '#define JUCE_ASIO 0'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
@@ -39,7 +39,7 @@ cmp -s "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h" 2>/dev/null && rm "$OUT/JuceC
 
 COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
         -include "$OUT/JuceConfig.h" -include cmake/mingw/mingw_compat.h
-        -I"$OUT/shim" -I"$JUCE_DIR/modules" -Isrc)
+        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Isrc)
 
 export ZIG OUT JUCE_DIR TARGET
 export COMMON_STR="${COMMON[*]}"
@@ -68,8 +68,8 @@ fi
 
 APP_SOURCES=(src/Main.cpp
              src/engine/AudioEngine.cpp src/engine/ChannelRackProcessor.cpp src/engine/Metronome.cpp
-             src/engine/SampleLibrary.cpp src/engine/ProjectFile.cpp
-             src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp src/ui/PianoRollComponent.cpp src/ui/PlaylistComponent.cpp src/ui/MixerComponent.cpp
+             src/engine/SampleLibrary.cpp src/engine/ProjectFile.cpp src/engine/PluginHost.cpp
+             src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp src/ui/PianoRollComponent.cpp src/ui/PlaylistComponent.cpp src/ui/MixerComponent.cpp src/ui/PluginWindow.cpp
              src/core/Song.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp
              src/core/FlpImport.cpp src/core/Effects.cpp src/flp/Flp.cpp
              src/platform/MingwFixes.cpp)

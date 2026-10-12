@@ -130,12 +130,21 @@ Song Song::makeDefault()
 {
     Song song;
     song.mixer = defaultMixer();
+    auto channel = [] (const char* name, InstrumentKind kind, float volume, float pan) {
+        ChannelDef c;
+        c.name = name;
+        c.instrument = kind;
+        c.volume = volume;
+        c.pan = pan;
+        return c;
+    };
+
     song.channels = {
-        { "Kick", InstrumentKind::kick, 0.9f, 0.0f, false, {}, 0 },
-        { "Clap", InstrumentKind::clap, 0.7f, 0.0f, false, {}, 0 },
-        { "Hat", InstrumentKind::hat, 0.5f, 0.1f, false, {}, 0 },
-        { "Snare", InstrumentKind::snare, 0.7f, 0.0f, false, {}, 0 },
-        { "Synth", InstrumentKind::synth, 0.5f, 0.0f, false, {}, 0 },
+        channel ("Kick", InstrumentKind::kick, 0.9f, 0.0f),
+        channel ("Clap", InstrumentKind::clap, 0.7f, 0.0f),
+        channel ("Hat", InstrumentKind::hat, 0.5f, 0.1f),
+        channel ("Snare", InstrumentKind::snare, 0.7f, 0.0f),
+        channel ("Synth", InstrumentKind::synth, 0.5f, 0.0f),
     };
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)

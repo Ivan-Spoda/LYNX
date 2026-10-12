@@ -3,6 +3,7 @@
 #include "engine/Text.h"
 
 #include "engine/ProjectFile.h"
+#include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -119,6 +120,7 @@ MainComponent::MainComponent (AudioEngine& e)
 
 MainComponent::~MainComponent()
 {
+    PluginWindows::closeAll(); // interfaces de plugin antes do engine
     engine.removeChangeListener (this);
     stopTimer();
 }
@@ -427,6 +429,7 @@ void MainComponent::save (bool askForFile)
             file = file.withFileExtension (ProjectFile::extension);
 
         juce::String error;
+        engine.capturePluginStates(); // o estado dos plugins mora neles; copia antes de gravar
 
         if (ProjectFile::save (engine.getSong(), file, error))
         {

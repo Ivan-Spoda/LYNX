@@ -10,6 +10,10 @@ qualquer PC, independente do tamanho do projeto.
 
 - **Channel Rack** com step sequencer, pan/volume/mute por canal, várias patterns
 - **Piano Roll**: criar, mover, redimensionar e apagar notas, snap, zoom, preview e ghost notes
+- **Playlist** com clips de pattern e de áudio, modo PAT/SONG
+- **Mixer** com inserts, medidores, mute/solo e 10 slots de efeito (EQ, compressor, delay, reverb)
+- **Plugins VST3**: instrumentos e efeitos, com a interface própria de cada plugin
+- **Desfazer/refazer** em todas as edições
 - **Instrumentos**: sampler (`.wav`, `.flac`, `.ogg`, `.mp3`, `.aiff`) e bateria/synth sintetizados
 - **Teclado do PC como piano** (layout do FL: `Z`..`M` e `Q`..`P`)
 - **Projetos**: formato próprio `.lynx` (JSON) e importação de `.flp` do FL Studio com os samples
@@ -22,7 +26,9 @@ qualquer PC, independente do tamanho do projeto.
 | Tecla | Ação |
 |---|---|
 | Espaço | Play / Pause |
-| F6 / F7 | Channel Rack / Piano Roll |
+| F5 / F6 / F7 / F9 | Playlist / Channel Rack / Piano Roll / Mixer |
+| L | Alterna Pattern / Song |
+| Ctrl+Z / Ctrl+Y | Desfazer / refazer |
 | Ctrl+N / Ctrl+O / Ctrl+S | Novo / Abrir / Salvar (Ctrl+Shift+S: salvar como) |
 | `Z`..`M`, `Q`..`P` | Tocar o canal selecionado |
 
@@ -33,6 +39,7 @@ LYNX.exe projeto.lynx                         abre um projeto (.lynx ou .flp)
 LYNX.exe --render projeto.flp saida.wav 20    exporta 20 s para WAV 24 bits
 LYNX.exe --selftest relatorio.txt             autoteste sem placa de som
 LYNX.exe --snapshot prefixo projeto.flp       desenha a interface em PNG
+LYNX.exe --plugintest plugin.vst3 rel.txt     testa um plugin VST3
 ```
 
 ## Compilar
