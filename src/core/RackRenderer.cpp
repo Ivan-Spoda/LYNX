@@ -88,11 +88,16 @@ void RackRenderer::process (const RackState* state,
 
     lastState = state; // para prepare() saber quais instrumentos reconfigurar
 
-    if (wasPlaying && ! playing)
+    // Parar, ou pular para outra posição (seek/rewind), solta as notas presas:
+    // os "off" delas não vão mais acontecer.
+    const auto jumped = playing && wasPlaying && std::abs (startTick - expectedTick) > 1.0;
+
+    if ((wasPlaying && ! playing) || jumped)
         for (auto& instrument : state->instruments)
             instrument->allNotesOff();
 
     wasPlaying = playing;
+    expectedTick = startTick + numSamples * ticksPerSample (state->song.bpm, sampleRate);
 
     if (live != nullptr)
     {
@@ -114,7 +119,11 @@ void RackRenderer::process (const RackState* state,
 
     const auto& song = state->song;
 
-    if (playing && ! song.patterns.empty())
+    if (playing && song.mode == PlayMode::song)
+    {
+        scheduleSong (song, startTick, numSamples, ticksPerSample (song.bpm, sampleRate), events);
+    }
+    else if (playing && ! song.patterns.empty())
     {
         const auto patternIndex = std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1);
         const auto& pattern = song.patterns[(std::size_t) patternIndex];

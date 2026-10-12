@@ -34,6 +34,7 @@ public:
     void play() noexcept;
     void stop() noexcept;
     void rewind() noexcept;
+    void seek (double ticks) noexcept;
 
     // Nota tocada ao vivo (teclado do PC, preview). Thread da UI.
     void sendLiveNote (int channel, int key, float velocity, bool on);

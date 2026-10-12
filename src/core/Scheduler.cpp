@@ -74,4 +74,52 @@ void schedulePatternLoop (const Pattern& pattern,
 
     out.sortByOffset();
 }
+void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out) noexcept
+{
+    if (numSamples <= 0 || tps <= 0.0 || song.playlist.empty())
+        return;
+
+    const auto loop = song.songLength();
+    const auto endTick = startTick + numSamples * tps;
+
+    // Janela do bloco dentro do loop; se atravessar o fim, vira duas janelas.
+    const auto loopStart = std::fmod (startTick, (double) loop);
+    const auto loopEnd = loopStart + (endTick - startTick);
+
+    auto overlaps = [&] (double from, double to) {
+        return (from < loopEnd && to > loopStart) || (loopEnd > (double) loop && from < loopEnd - (double) loop);
+    };
+
+    for (const auto& clip : song.playlist)
+    {
+        if (clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
+            continue;
+
+        // folga de um tick para pegar o "off" que cai exatamente no fim do clip
+        if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
+            continue;
+
+        for (const auto& note : song.patterns[(std::size_t) clip.pattern].notes)
+        {
+            if (note.start < clip.offset || note.start >= clip.offset + clip.length)
+                continue;
+
+            const auto on = clip.start + (note.start - clip.offset);
+            const auto off = std::min (on + std::max<std::int64_t> (note.length, 1), clip.end());
+
+            NoteEvent e;
+            e.type = NoteEvent::Type::on;
+            e.channel = note.channel;
+            e.key = note.key;
+            e.velocity = note.velocity;
+            emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
+
+            e.type = NoteEvent::Type::off;
+            e.velocity = 0.0f;
+            emitOccurrences ((double) off, loop, startTick, endTick, tps, numSamples, e, out);
+        }
+    }
+
+    out.sortByOffset();
+}
 } // namespace lynx

@@ -501,7 +501,7 @@ void ChannelRackComponent::timerCallback()
     auto& transport = engine.getTransport();
     auto step = -1;
 
-    if (transport.playing.load())
+    if (transport.playing.load() && engine.getSong().mode == PlayMode::pattern)
     {
         const auto& song = engine.getSong();
         const auto& p = song.patterns[(std::size_t) song.currentPattern];

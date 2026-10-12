@@ -82,6 +82,15 @@ juce::String toJson (const Song& song)
     }
 
     root->setProperty ("patterns", patterns);
+
+    juce::Array<juce::var> clips;
+
+    for (const auto& c : song.playlist)
+        clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
+                                            (juce::int64) c.offset });
+
+    root->setProperty ("playlist", clips);
+    root->setProperty ("mode", song.mode == PlayMode::song ? "song" : "pattern");
     return juce::JSON::toString (juce::var (root.release()), false);
 }
 
@@ -157,6 +166,25 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if (song.patterns.empty())
         song.patterns.emplace_back().name = "Pattern 1";
+
+    if (auto* clips = root["playlist"].getArray())
+        for (const auto& c : *clips)
+        {
+            if (! c.isArray() || c.size() < 5)
+                continue;
+
+            Clip clip;
+            clip.pattern = (int) c[0];
+            clip.track = juce::jmax (0, (int) c[1]);
+            clip.start = juce::jmax<juce::int64> (0, (juce::int64) c[2]);
+            clip.length = (juce::int64) c[3];
+            clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
+
+            if (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() && clip.length > 0)
+                song.playlist.push_back (clip);
+        }
+
+    song.mode = root["mode"].toString() == "song" ? PlayMode::song : PlayMode::pattern;
 
     song.currentPattern = juce::jlimit (0, (int) song.patterns.size() - 1, song.currentPattern);
     return song;

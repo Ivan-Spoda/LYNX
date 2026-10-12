@@ -56,6 +56,24 @@ struct Pattern
     void toggleStep (int channel, int step);
 };
 
+// Um bloco na Playlist que toca um trecho de uma pattern.
+struct Clip
+{
+    int pattern = 0;
+    int track = 0;
+    std::int64_t start = 0;   // ticks na música
+    std::int64_t length = 0;  // ticks
+    std::int64_t offset = 0;  // a partir de qual tick da pattern o clip começa
+
+    std::int64_t end() const noexcept { return start + length; }
+};
+
+enum class PlayMode : std::uint8_t
+{
+    pattern, // toca a pattern atual em loop (como o "PAT" do FL)
+    song     // toca a Playlist (como o "SONG" do FL)
+};
+
 struct Song
 {
     double bpm = 130.0;
@@ -63,6 +81,15 @@ struct Song
     std::vector<ChannelDef> channels;
     std::vector<Pattern> patterns;
     int currentPattern = 0;
+
+    std::vector<Clip> playlist;
+    PlayMode mode = PlayMode::pattern;
+
+    // Fim do último clip, arredondado para compasso (mínimo 1 compasso).
+    std::int64_t songLength() const noexcept;
+
+    // Remove uma pattern e conserta os clips e o índice atual.
+    void removePattern (int index);
 
     static Song makeDefault();
 };

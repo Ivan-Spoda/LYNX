@@ -25,9 +25,11 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [ ] Exportar pela interface (hoje só pela linha de comando)
 
 ## Fase 3: arranjo
-- [ ] Playlist: clips de pattern no tempo, trilhas, loop region
-- [ ] Clips de áudio na playlist (streaming do disco)
-- [ ] Importar a playlist do `.flp` (os itens já são lidos pelo parser)
+- [x] Playlist: clips de pattern no tempo, trilhas, modo PAT/SONG, seek pela régua
+- [x] Importar a playlist do `.flp` (clips de pattern, com recorte de início/fim)
+- [ ] Clips de áudio na playlist (streaming do disco); os demos do FL usam para vocais e loops
+- [ ] Loop region, seleção múltipla, copiar/colar clips, clips "únicos"
+- [ ] Vários arrangements
 - [ ] Automação (clips de automação)
 
 ## Fase 4: mixer e plugins

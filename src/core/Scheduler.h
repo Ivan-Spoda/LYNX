@@ -57,4 +57,11 @@ void schedulePatternLoop (const Pattern& pattern,
                           int numSamples,
                           double ticksPerSampleValue,
                           EventBuffer& out) noexcept;
+// Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip toca as
+// notas da sua pattern que caem em [offset, offset + length); notas são cortadas no fim do clip.
+void scheduleSong (const Song& song,
+                   double startTick,
+                   int numSamples,
+                   double ticksPerSampleValue,
+                   EventBuffer& out) noexcept;
 } // namespace lynx

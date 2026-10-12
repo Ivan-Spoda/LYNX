@@ -519,7 +519,7 @@ void PianoRollComponent::timerCallback()
     auto& transport = engine.getTransport();
     auto tick = -1.0;
 
-    if (transport.playing.load() && isShowing())
+    if (transport.playing.load() && isShowing() && engine.getSong().mode == PlayMode::pattern)
     {
         const auto& song = engine.getSong();
         tick = std::fmod (transport.positionTicks.load(), (double) currentPattern (song).effectiveLength (song.beatsPerBar));

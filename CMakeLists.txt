@@ -56,7 +56,8 @@ if(LYNX_BUILD_APP)
         src/engine/ProjectFile.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
-        src/ui/PianoRollComponent.cpp)
+        src/ui/PianoRollComponent.cpp
+        src/ui/PlaylistComponent.cpp)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0

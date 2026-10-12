@@ -96,6 +96,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
     const auto filePpq = project.header.ppq > 0 ? (std::int64_t) project.header.ppq : 96;
     auto rescale = [filePpq] (std::int64_t ticks) { return ticks * ppq / filePpq; };
 
+    std::map<int, int> patternMap; // índice no FL -> índice denso nosso
+
     for (const auto& src : project.patterns)
     {
         Pattern p;
@@ -121,7 +123,36 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         p.sortNotes();
 
         if (! p.notes.empty())
+        {
+            patternMap[src.index] = (int) song.patterns.size();
             song.patterns.push_back (std::move (p));
+        }
+    }
+
+    // Playlist: só o primeiro arrangement e só clips de pattern por enquanto
+    // (clips de áudio e automação ainda não existem no nosso modelo).
+    if (! project.arrangements.empty())
+    {
+        for (const auto& item : project.arrangements.front().items)
+        {
+            const auto it = patternMap.find (item.index);
+
+            if (item.kind != flp::PlaylistItem::Kind::pattern || it == patternMap.end() || item.length == 0)
+                continue;
+
+            Clip clip;
+            clip.pattern = it->second;
+            clip.track = item.track;
+            clip.start = rescale (item.position);
+            clip.length = rescale (item.length);
+            clip.offset = item.patternStartTick > 0 ? rescale (item.patternStartTick) : 0;
+            song.playlist.push_back (clip);
+        }
+
+        std::sort (song.playlist.begin(), song.playlist.end(), [] (const Clip& a, const Clip& b) { return a.start < b.start; });
+
+        if (! song.playlist.empty())
+            song.mode = PlayMode::song;
     }
 
     if (song.patterns.empty())

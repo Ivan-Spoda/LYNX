@@ -25,6 +25,12 @@ Confirmadas empiricamente nos demos:
 - Nome de canal: 0xCB; arquivos ≤ 11 usam 0xC0. Nome interno do plugin: 0xC9.
 - A string de versão (0xC7) é sempre ASCII; os outros textos são UTF-16LE a partir da 11.5.4.
 
+## Descobertas sobre a playlist do .flp
+- Nos clips de pattern, os 8 bytes em +24 são dois int32 em ticks (início e fim do trecho da
+  pattern), não floats; -1 (que aparece como NaN se lido como float) = sem recorte. Nos clips de
+  canal (áudio/automação) os mesmos bytes são floats.
+- 51 dos 165 `.flp` instalados têm playlist com clips de pattern.
+
 ## Descobertas sobre os samples do FL
 - Muitos samples de fábrica são WAV com format tag 0x674F/0x6750 e um stream Ogg Vorbis no
   chunk `data`; outros são arquivos Ogg puros com extensão `.wav`. `SampleLibrary` trata os dois.
@@ -36,4 +42,4 @@ Confirmadas empiricamente nos demos:
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
 ## Próximo passo
-Fase 3: Playlist (arranjo) com importação da playlist do `.flp`, depois mixer.
+Fase 4: mixer (inserts, roteamento dos canais, volume/pan/mute/solo, medidores), depois clips de áudio.

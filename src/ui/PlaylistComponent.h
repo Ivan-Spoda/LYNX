@@ -1,0 +1,77 @@
+#pragma once
+
+#include <functional>
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "engine/AudioEngine.h"
+
+namespace lynx
+{
+// Playlist (arranjo) no estilo do FL: trilhas na vertical, tempo na horizontal.
+//  - clique esquerdo no vazio "pinta" a pattern atual (e já permite arrastar)
+//  - arrastar um clip move (tempo e trilha); a borda direita muda a duração
+//  - clicar num clip torna a pattern dele a atual; duplo clique abre no Channel Rack
+//  - clique direito apaga (arrastar apaga vários)
+//  - clicar na régua posiciona a reprodução e liga o modo Song
+//  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
+class PlaylistComponent final : public juce::Component,
+                                private juce::ChangeListener,
+                                private juce::Timer,
+                                private juce::ScrollBar::Listener
+{
+public:
+    explicit PlaylistComponent (AudioEngine& engine);
+    ~PlaylistComponent() override;
+
+    std::function<void()> onOpenPattern;
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+
+    static constexpr int headerWidth = 96;
+    static constexpr int timelineHeight = 24;
+    static constexpr int trackHeight = 38;
+    static constexpr int scrollBarSize = 12;
+
+    static juce::Colour patternColour (int pattern);
+
+private:
+    enum class Drag { none, move, resize, erase, seek };
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;
+    void scrollBarMoved (juce::ScrollBar*, double) override;
+
+    juce::Rectangle<int> gridArea() const;
+    double tickToX (double tick) const;
+    double xToTick (int x) const;
+    int trackToY (int track) const;
+    int yToTrack (int y) const;
+    int numTracks() const;
+    std::int64_t snap (double tick, bool enabled) const;
+    int clipAt (int x, int y, bool& onRightEdge) const;
+    void updateScrollBars();
+    void seekTo (int x);
+
+    AudioEngine& engine;
+    juce::ScrollBar hBar { false }, vBar { true };
+
+    double pixelsPerTick = 96.0 / (4 * ppq); // 96 px por compasso de 4 tempos
+    double scrollTicks = 0.0;
+    int scrollY = 0;
+
+    Drag drag = Drag::none;
+    int dragClip = -1;
+    std::int64_t grabOffset = 0;
+    double playheadTick = -1.0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaylistComponent)
+};
+} // namespace lynx

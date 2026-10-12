@@ -18,6 +18,7 @@ struct Transport
     std::atomic<double> sampleRate { 44100.0 };
     std::atomic<double> positionTicks { 0.0 };
     std::atomic<bool> rewindRequested { false };
+    std::atomic<double> seekRequest { -1.0 }; // < 0 = nenhum; a thread de áudio aplica no próximo bloco
 
     double ticksPerSample() const noexcept
     {

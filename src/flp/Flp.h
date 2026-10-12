@@ -112,6 +112,12 @@ struct PlaylistItem
     Kind kind = Kind::pattern;
     int index = 0;               // índice da pattern, ou do canal (clip de áudio/automação)
     std::uint16_t flags = 0;
+
+    // Os mesmos 8 bytes têm significados diferentes por tipo de clip:
+    //  - pattern: dois int32 em ticks (início/fim do trecho da pattern); -1 = sem recorte
+    //  - clip de canal (áudio/automação): dois float
+    std::int32_t patternStartTick = -1;
+    std::int32_t patternEndTick = -1;
     float startOffset = 0.0f;
     float endOffset = 0.0f;
 };

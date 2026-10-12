@@ -244,7 +244,7 @@ TEST (flp_real_files)
         return;
     }
 
-    int files = 0, withNotes = 0;
+    int files = 0, withNotes = 0, withPlaylist = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -274,6 +274,15 @@ TEST (flp_real_files)
             for (auto& a : p.arrangements)
                 for (auto& item : a.items)
                     CHECK (item.track >= 0 && item.track < 500);
+
+            for (auto& clip : song.playlist)
+            {
+                CHECK (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size());
+                CHECK (clip.length > 0 && clip.offset >= 0);
+            }
+
+            if (! song.playlist.empty())
+                ++withPlaylist;
         }
         catch (const flp::Error& e)
         {
@@ -282,7 +291,7 @@ TEST (flp_real_files)
         }
     }
 
-    std::printf ("  %d arquivos .flp lidos, %d com notas\n", files, withNotes);
+    std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist\n", files, withNotes, withPlaylist);
     CHECK (files > 0);
 }
 
@@ -607,6 +616,133 @@ TEST (soft_clip_is_transparent_below_knee_and_bounded)
     CHECK (s[2] > 0.9f && s[2] <= 1.0f);
     CHECK (s[3] < -0.9f && s[3] >= -1.0f);
     CHECK (s[4] > 0.9f && s[4] < 0.95f);
+}
+
+TEST (song_scheduler_plays_clips_with_offset_and_cut)
+{
+    lynx::Song s;
+    s.channels.resize (1);
+    auto& p = s.patterns.emplace_back();
+    for (int step : { 0, 4, 8, 12 }) // uma nota por tempo
+        p.toggleStep (0, step);
+
+    // clip no compasso 2 tocando só a segunda metade da pattern (tempos 3 e 4)
+    lynx::Clip c;
+    c.pattern = 0;
+    c.start = 4 * lynx::ppq;
+    c.length = 2 * lynx::ppq;
+    c.offset = 2 * lynx::ppq;
+    s.playlist.push_back (c);
+    CHECK (s.songLength() == 8 * lynx::ppq);
+
+    const double sr = 48000.0;
+    const auto tps = lynx::ticksPerSample (120.0, sr); // 1 tempo = 24000 samples
+    lynx::EventBuffer ev;
+
+    // música inteira em um bloco só (8 tempos = 192000 samples)
+    lynx::scheduleSong (s, 0.0, 192000, tps, ev);
+    std::vector<int> ons;
+    for (auto& e : ev)
+        if (e.type == lynx::NoteEvent::Type::on)
+            ons.push_back (e.sampleOffset);
+    CHECK (ons.size() == 2);
+    CHECK (ons.size() == 2 && ons[0] == 4 * 24000 && ons[1] == 5 * 24000);
+
+    // atravessando o loop: o compasso 1 está vazio, então nada no começo do segundo giro
+    ev.clear();
+    lynx::scheduleSong (s, 8.0 * lynx::ppq - 100 * tps, 200, tps, ev);
+    CHECK (ev.size() == 0);
+
+    // nota mais longa que o clip é cortada no fim do clip
+    p.notes[3].length = 4 * lynx::ppq;
+    ev.clear();
+    lynx::scheduleSong (s, 0.0, 192000, tps, ev);
+    int lastOff = -1;
+    for (auto& e : ev)
+        if (e.type == lynx::NoteEvent::Type::off)
+            lastOff = std::max (lastOff, e.sampleOffset);
+    CHECK (lastOff == 6 * 24000);
+}
+
+TEST (remove_pattern_fixes_clips)
+{
+    lynx::Song s;
+    s.patterns.resize (3);
+    s.currentPattern = 2;
+    s.playlist = { { 0, 0, 0, 100, 0 }, { 1, 0, 100, 100, 0 }, { 2, 1, 0, 100, 0 } };
+    s.removePattern (1);
+    CHECK (s.patterns.size() == 2);
+    CHECK (s.playlist.size() == 2 && s.playlist[1].pattern == 1);
+    CHECK (s.currentPattern == 1);
+}
+
+TEST (flp_import_brings_playlist)
+{
+    flp::Project p;
+    p.header.ppq = 96;
+    p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "", 1 } };
+    flp::Pattern empty;
+    empty.index = 1;
+    flp::Pattern full;
+    full.index = 2;
+    flp::Note n;
+    n.channel = 0;
+    full.notes.push_back (n);
+    p.patterns = { empty, full };
+
+    flp::Arrangement a;
+    flp::PlaylistItem item;
+    item.kind = flp::PlaylistItem::Kind::pattern;
+    item.index = 2;
+    item.position = 384;
+    item.length = 192;
+    item.track = 3;
+    item.patternStartTick = 96;
+    a.items.push_back (item);
+    item.index = 1; // pattern vazia: descartada
+    a.items.push_back (item);
+    item.kind = flp::PlaylistItem::Kind::channelClip; // áudio: ainda não suportado
+    a.items.push_back (item);
+    p.arrangements.push_back (a);
+
+    const auto s = lynx::importFlp (p);
+    CHECK (s.mode == lynx::PlayMode::song);
+    CHECK (s.playlist.size() == 1);
+    CHECK (s.playlist[0].pattern == 0 && s.playlist[0].track == 3);
+    CHECK (s.playlist[0].start == 4 * lynx::ppq && s.playlist[0].length == 2 * lynx::ppq && s.playlist[0].offset == lynx::ppq);
+}
+
+TEST (rack_releases_notes_on_position_jump)
+{
+    lynx::Song s;
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::synth;
+    s.channels.push_back (c);
+    auto& p = s.patterns.emplace_back();
+    lynx::Note n;
+    n.start = 0;
+    n.length = 4 * lynx::ppq; // nota longa
+    p.notes.push_back (n);
+    s.bpm = 120.0;
+
+    auto state = lynx::RackState::build (s, nullptr, 48000.0);
+    lynx::RackRenderer r;
+    r.prepare (48000.0);
+    std::vector<float> l (512), rr (512);
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+
+    double tick = 0.0;
+    for (int i = 0; i < 20; ++i, tick += 512 * tps)
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+
+    // salto para o tick 2000 (no meio da nota, sem "on" novo): o synth precisa calar
+    for (int i = 0; i < 40; ++i)
+        r.process (state.get(), true, 2000.0 + i * 512 * tps, 512, l.data(), rr.data());
+
+    float tail = 0.0f;
+    for (auto v : l)
+        tail = std::max (tail, std::abs (v));
+    CHECK (tail < 0.001f);
 }
 
 int main (int argc, char** argv)

@@ -30,12 +30,14 @@ int keyCodeToNote (int keyCode)
 
 constexpr int rackTab = 0;
 constexpr int pianoRollTab = 1;
+constexpr int playlistTab = 2;
 } // namespace
 
 MainComponent::MainComponent (AudioEngine& e)
     : engine (e),
       rack (e),
-      pianoRoll (e)
+      pianoRoll (e),
+      playlist (e)
 {
     newButton.onClick = [this] { newProject(); };
     openButton.onClick = [this] { chooseFileToOpen(); };
@@ -46,6 +48,8 @@ MainComponent::MainComponent (AudioEngine& e)
         engine.stop();
         engine.rewind();
     };
+    modeButton.setTooltip ("Pattern ou Song (tecla L)");
+    modeButton.onClick = [this] { toggleMode(); };
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
     settingsButton.onClick = [this] { showAudioSettings(); };
 
@@ -76,7 +80,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setJustificationType (juce::Justification::centredRight);
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal selecionado   F6 rack   F7 piano roll   Ctrl+S salvar   Ctrl+O abrir"),
+    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   L pattern/song   Ctrl+S salvar   Ctrl+O abrir"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -87,9 +91,11 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.setOutline (0);
     tabs.addTab ("Channel Rack", theme::toolbar, &rackViewport, false);
     tabs.addTab ("Piano Roll", theme::toolbar, &pianoRoll, false);
+    tabs.addTab ("Playlist", theme::toolbar, &playlist, false);
+    playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &playButton, &stopButton,
-                                                             &metronomeButton, &bpmSlider, &patternBox, &newPatternButton,
+                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
         addAndMakeVisible (c);
@@ -97,7 +103,7 @@ MainComponent::MainComponent (AudioEngine& e)
     }
 
     for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &playButton, &stopButton,
-                                                             &metronomeButton, &newPatternButton, &settingsButton })
+                                                             &modeButton, &metronomeButton, &newPatternButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
 
     engine.addChangeListener (this);
@@ -135,7 +141,8 @@ void MainComponent::resized()
     place (openButton, 56);
     place (saveButton, 60, 16);
     place (playButton, 60);
-    place (stopButton, 60, 8);
+    place (stopButton, 60, 4);
+    place (modeButton, 58, 8);
     place (metronomeButton, 70);
     place (bpmSlider, 150, 12);
     place (patternBox, 170);
@@ -174,6 +181,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'N')
     {
         newProject();
+        return true;
+    }
+
+    if (key.getKeyCode() == juce::KeyPress::F5Key)
+    {
+        tabs.setCurrentTabIndex (playlistTab);
+        return true;
+    }
+
+    if (! cmd && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
+    {
+        toggleMode();
         return true;
     }
 
@@ -226,6 +245,11 @@ void MainComponent::togglePlay()
     engine.getTransport().playing.load() ? engine.stop() : engine.play();
 }
 
+void MainComponent::toggleMode()
+{
+    engine.editSong ([] (Song& s) { s.mode = s.mode == PlayMode::song ? PlayMode::pattern : PlayMode::song; });
+}
+
 void MainComponent::openPianoRoll()
 {
     tabs.setCurrentTabIndex (pianoRollTab);
@@ -250,6 +274,9 @@ void MainComponent::selectTabForSnapshot (int tab)
     }
     else
         tabs.setCurrentTabIndex (tab);
+
+    if (tab == playlistTab)
+        playlist.resized(); // atualiza as barras de rolagem para a música carregada
 }
 
 void MainComponent::refreshToolbar()
@@ -262,6 +289,14 @@ void MainComponent::refreshToolbar()
 
     patternBox.setSelectedItemIndex (song.currentPattern, juce::dontSendNotification);
     bpmSlider.setValue (song.bpm, juce::dontSendNotification);
+    refreshModeButton();
+}
+
+void MainComponent::refreshModeButton()
+{
+    const auto songMode = engine.getSong().mode == PlayMode::song;
+    modeButton.setButtonText (songMode ? "SONG" : "PAT");
+    modeButton.setColour (juce::TextButton::buttonColourId, songMode ? theme::accentGreen.darker (0.5f) : theme::accentOrange.darker (0.5f));
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -272,6 +307,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     for (int i = 0; ! namesChanged && i < patternBox.getNumItems(); ++i)
         namesChanged = patternBox.getItemText (i) != juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str());
 
+    refreshModeButton();
+
     if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (bpmSlider.getValue() - song.bpm) > 1e-9)
         refreshToolbar();
 }
@@ -279,7 +316,10 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 void MainComponent::timerCallback()
 {
     auto& transport = engine.getTransport();
-    const auto beats = transport.positionInBeats();
+    const auto& song = engine.getSong();
+    const auto loop = song.mode == PlayMode::song ? song.songLength()
+                                                   : song.patterns[(std::size_t) song.currentPattern].effectiveLength (song.beatsPerBar);
+    const auto beats = std::fmod (transport.positionTicks.load(), (double) loop) / ppq;
     const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load());
     const auto bar = (int) (beats / beatsPerBar) + 1;
     const auto beat = (int) std::fmod (beats, (double) beatsPerBar) + 1;

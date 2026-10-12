@@ -121,6 +121,7 @@ float AudioEngine::renderOffline (double seconds, double sampleRate, juce::Audio
 void AudioEngine::play() noexcept { transport.playing.store (true); }
 void AudioEngine::stop() noexcept { transport.playing.store (false); }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
+void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
 
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on)
 {
@@ -217,6 +218,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 {
     if (transport.rewindRequested.exchange (false))
         transport.positionTicks.store (0.0);
+
+    if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
+        transport.positionTicks.store (target);
 
     player.audioDeviceIOCallbackWithContext (inputChannelData, numInputChannels,
                                              outputChannelData, numOutputChannels,

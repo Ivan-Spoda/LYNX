@@ -7,6 +7,7 @@
 #include "engine/AudioEngine.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/PianoRollComponent.h"
+#include "ui/PlaylistComponent.h"
 
 namespace lynx
 {
@@ -26,7 +27,7 @@ public:
     // Abre .lynx ou .flp (também usado pela linha de comando).
     void openFile (const juce::File& file);
 
-    // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas).
+    // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist.
     void selectTabForSnapshot (int tab);
 
 private:
@@ -40,12 +41,15 @@ private:
     void refreshToolbar();
     void updateTitle();
     void openPianoRoll();
+    void toggleMode();
+    void refreshModeButton();
 
     AudioEngine& engine;
 
     juce::TextButton newButton { "Novo" }, openButton { "Abrir" }, saveButton { "Salvar" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
+    juce::TextButton modeButton { "PAT" };
     juce::ToggleButton metronomeButton { "Metro" };
     juce::Slider bpmSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
     juce::ComboBox patternBox;
@@ -58,6 +62,7 @@ private:
     ChannelRackComponent rack;
     juce::Viewport rackViewport;
     PianoRollComponent pianoRoll;
+    PlaylistComponent playlist;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
 
     std::unique_ptr<juce::FileChooser> fileChooser;

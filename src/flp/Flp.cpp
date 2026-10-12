@@ -455,6 +455,8 @@ Project parseProject (std::span<const std::uint8_t> file)
                     item.flags = readLE<std::uint16_t> (e.data, o + 18);
                     item.startOffset = readLE<float> (e.data, o + 24);
                     item.endOffset = readLE<float> (e.data, o + 28);
+                    item.patternStartTick = readLE<std::int32_t> (e.data, o + 24);
+                    item.patternEndTick = readLE<std::int32_t> (e.data, o + 28);
 
                     const auto patternBase = base != 0 ? base : playlistPatternBase;
 

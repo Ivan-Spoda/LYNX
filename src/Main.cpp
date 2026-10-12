@@ -67,12 +67,16 @@ private:
         // ida e volta do formato de projeto, com acentos no nome
         auto original = lynx::Song::makeDefault();
         original.channels[0].name = "Bumbo ação";
+        original.playlist.push_back ({ 0, 2, 3840, 1920, 960 });
+        original.mode = lynx::PlayMode::song;
         juce::String error;
         const auto reloaded = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (original), error);
         const auto projectOk = reloaded && reloaded->channels.size() == original.channels.size()
                                && reloaded->channels[0].name == original.channels[0].name
                                && reloaded->patterns[0].notes.size() == original.patterns[0].notes.size()
-                               && reloaded->patterns[0].notes[3].start == original.patterns[0].notes[3].start;
+                               && reloaded->patterns[0].notes[3].start == original.patterns[0].notes[3].start
+                               && reloaded->mode == lynx::PlayMode::song && reloaded->playlist.size() == 1
+                               && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2;
         const auto ok = audioOk && projectOk;
 
         juce::String report;
@@ -144,7 +148,7 @@ private:
     }
 
     // LYNX.exe --snapshot prefixo [projeto]: desenha a janela fora da tela e grava
-    // prefixo-rack.png e prefixo-pianoroll.png (usado para conferir a UI sem mexer na tela).
+    // prefixo-rack.png, -pianoroll.png e -playlist.png (para conferir a UI sem mexer na tela).
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -162,6 +166,8 @@ private:
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
+            ui.selectTabForSnapshot (2);
+            saveSnapshot (ui, prefix + "-playlist.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

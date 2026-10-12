@@ -49,6 +49,36 @@ void Pattern::toggleStep (int channel, int step)
     sortNotes();
 }
 
+std::int64_t Song::songLength() const noexcept
+{
+    const std::int64_t bar = (std::int64_t) ppq * std::max (1, beatsPerBar);
+    std::int64_t end = 0;
+
+    for (const auto& c : playlist)
+        end = std::max (end, c.end());
+
+    return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
+}
+
+void Song::removePattern (int index)
+{
+    if (index < 0 || index >= (int) patterns.size())
+        return;
+
+    patterns.erase (patterns.begin() + index);
+    playlist.erase (std::remove_if (playlist.begin(), playlist.end(), [index] (const Clip& c) { return c.pattern == index; }),
+                    playlist.end());
+
+    for (auto& c : playlist)
+        if (c.pattern > index)
+            --c.pattern;
+
+    if (patterns.empty())
+        patterns.emplace_back().name = "Pattern 1";
+
+    currentPattern = std::clamp (currentPattern > index ? currentPattern - 1 : currentPattern, 0, (int) patterns.size() - 1);
+}
+
 Song Song::makeDefault()
 {
     Song song;
