@@ -1,5 +1,6 @@
 #include "ui/MixerComponent.h"
 
+#include "core/Effects.h"
 #include "engine/Text.h"
 #include "ui/Theme.h"
 
@@ -147,6 +148,13 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (12.0f));
         g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 2, 16, w - 8, 16, juce::Justification::centred, 1, 0.7f);
 
+        if (! track.effects.empty())
+        {
+            g.setColour (theme::accentBlue);
+            g.setFont (juce::FontOptions (9.0f));
+            g.drawText ("FX " + juce::String ((int) track.effects.size()), x + w - 30, 3, 24, 11, juce::Justification::centredRight);
+        }
+
         // pan
         {
             const auto area = panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f);
@@ -275,6 +283,9 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
     {
         selected = t;
         repaint();
+
+        if (onSelectionChanged)
+            onSelectionChanged (t);
     }
 
     if (e.mods.isPopupMenu())
@@ -363,6 +374,15 @@ void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
         engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].pan = 0.0f; });
 }
 
+void MixerStrips::selectTrack (int track)
+{
+    selected = juce::jlimit (0, juce::jmax (0, (int) engine.getSong().mixer.size() - 1), track);
+    repaint();
+
+    if (onSelectionChanged)
+        onSelectionChanged (selected);
+}
+
 void MixerStrips::showMenu (int t)
 {
     const auto& song = engine.getSong();
@@ -426,17 +446,318 @@ void MixerStrips::timerCallback()
 
 // ---------------------------------------------------------------------------
 
-MixerComponent::MixerComponent (AudioEngine& engine)
-    : strips (engine)
+namespace
+{
+constexpr int panelHeader = 30;
+constexpr int slotHeight = 24;
+constexpr EffectKind allEffects[] = { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb };
+} // namespace
+
+EffectsPanel::EffectsPanel (AudioEngine& e)
+    : engine (e)
+{
+    setWantsKeyboardFocus (false);
+    setMouseClickGrabsKeyboardFocus (false);
+    engine.addChangeListener (this);
+}
+
+EffectsPanel::~EffectsPanel()
+{
+    engine.removeChangeListener (this);
+}
+
+void EffectsPanel::setTrack (int t)
+{
+    track = t;
+    const auto* s = slots();
+    selectedSlot = s != nullptr && ! s->empty() ? 0 : -1;
+    repaint();
+}
+
+const std::vector<EffectSlot>* EffectsPanel::slots() const
+{
+    const auto& mixer = engine.getSong().mixer;
+    return track >= 0 && track < (int) mixer.size() ? &mixer[(std::size_t) track].effects : nullptr;
+}
+
+juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
+{
+    return { 8, panelHeader + slot * slotHeight, getWidth() - 16, slotHeight - 3 };
+}
+
+juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
+{
+    const auto top = panelHeader + maxEffectSlots * slotHeight + 40;
+    const auto w = (getWidth() - 16) / 3;
+    return { 8 + (param % 3) * w, top + (param / 3) * 86, w, 82 };
+}
+
+int EffectsPanel::knobAt (juce::Point<int> p) const
+{
+    const auto* s = slots();
+
+    if (s == nullptr || selectedSlot < 0 || selectedSlot >= (int) s->size())
+        return -1;
+
+    const auto count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
+
+    for (int i = 0; i < count; ++i)
+        if (knobBounds (i).contains (p))
+            return i;
+
+    return -1;
+}
+
+void EffectsPanel::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::panel);
+    g.setColour (theme::window);
+    g.drawVerticalLine (0, 0.0f, (float) getHeight());
+
+    const auto* s = slots();
+
+    if (s == nullptr)
+        return;
+
+    const auto& song = engine.getSong();
+    g.setColour (theme::accentOrange);
+    g.setFont (juce::FontOptions (14.0f));
+    g.drawText (utf8 ("Efeitos — ") + juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()), 10, 4,
+                getWidth() - 20, panelHeader - 8, juce::Justification::centredLeft, true);
+
+    g.setFont (juce::FontOptions (13.0f));
+
+    for (int i = 0; i < maxEffectSlots; ++i)
+    {
+        const auto r = slotBounds (i);
+        const auto filled = i < (int) s->size();
+        g.setColour (i == selectedSlot ? theme::channelButtonSelected : theme::channelButton.darker (filled ? 0.0f : 0.4f));
+        g.fillRoundedRectangle (r.toFloat(), 3.0f);
+
+        if (filled)
+        {
+            const auto& slot = (*s)[(std::size_t) i];
+            g.setColour (theme::muteLed (! slot.enabled));
+            g.fillEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 5, 10, 10);
+            g.setColour (slot.enabled ? theme::text : juce::Colours::grey);
+            g.drawText (juce::String (i + 1) + ". " + utf8 (effectInfo (slot.kind).name), r.withTrimmedLeft (24),
+                        juce::Justification::centredLeft);
+        }
+        else if (i == (int) s->size())
+        {
+            g.setColour (theme::text.withAlpha (0.45f));
+            g.drawText (juce::String (i + 1) + utf8 (". (vazio — clique para adicionar)"), r.withTrimmedLeft (24),
+                        juce::Justification::centredLeft);
+        }
+    }
+
+    if (selectedSlot < 0 || selectedSlot >= (int) s->size())
+        return;
+
+    const auto& slot = (*s)[(std::size_t) selectedSlot];
+    const auto& info = effectInfo (slot.kind);
+    g.setColour (theme::text);
+    g.setFont (juce::FontOptions (14.0f));
+    g.drawText (utf8 (info.name), 10, knobBounds (0).getY() - 28, getWidth() - 20, 20, juce::Justification::centredLeft);
+
+    for (int p = 0; p < (int) info.params.size(); ++p)
+    {
+        const auto r = knobBounds (p);
+        const auto value = slot.params[(std::size_t) p];
+        const auto area = r.withHeight (44).toFloat().withSizeKeepingCentre (38.0f, 38.0f);
+        const auto centre = area.getCentre();
+        constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
+        constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
+        const auto to = start + range * value;
+
+        g.setColour (theme::knobBackground);
+        g.fillEllipse (area);
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, 17.0f, 17.0f, 0.0f, start, to, true);
+        g.setColour (slot.enabled ? theme::accentOrange : juce::Colours::grey);
+        g.strokePath (arc, juce::PathStrokeType (3.0f));
+        g.setColour (juce::Colours::white);
+        g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * 13.0f, centre.y - std::cos (to) * 13.0f, 2.0f);
+
+        g.setColour (theme::text.withAlpha (0.8f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (utf8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + 46, r.getWidth(), 14, juce::Justification::centred);
+        g.setColour (theme::accentBlue);
+        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm).c_str()), r.getX(), r.getY() + 60,
+                    r.getWidth(), 14, juce::Justification::centred);
+    }
+}
+
+void EffectsPanel::mouseDown (const juce::MouseEvent& e)
+{
+    const auto* s = slots();
+
+    if (s == nullptr)
+        return;
+
+    for (int i = 0; i < maxEffectSlots; ++i)
+    {
+        const auto r = slotBounds (i);
+
+        if (! r.contains (e.getPosition()))
+            continue;
+
+        if (i >= (int) s->size())
+        {
+            showAddMenu (i);
+            return;
+        }
+
+        selectedSlot = i;
+        repaint();
+
+        if (e.mods.isPopupMenu())
+            showSlotMenu (i);
+        else if (e.x < r.getX() + 22) // LED: bypass
+            engine.editSong ([t = track, i] (Song& song) {
+                auto& slot = song.mixer[(std::size_t) t].effects[(std::size_t) i];
+                slot.enabled = ! slot.enabled;
+            });
+        return;
+    }
+
+    dragParam = knobAt (e.getPosition());
+
+    if (dragParam >= 0)
+        dragStart = (*s)[(std::size_t) selectedSlot].params[(std::size_t) dragParam];
+}
+
+void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragParam < 0)
+        return;
+
+    const auto fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
+    const auto v = juce::jlimit (0.0f, 1.0f, dragStart - (float) e.getDistanceFromDragStartY() / 150.0f * fine);
+    engine.editSong ([t = track, slot = selectedSlot, p = dragParam, v] (Song& song) {
+        song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) p] = v;
+    });
+}
+
+void EffectsPanel::mouseUp (const juce::MouseEvent&)
+{
+    dragParam = -1;
+}
+
+void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const auto p = knobAt (e.getPosition());
+
+    if (p < 0)
+        return;
+
+    const auto kind = (*slots())[(std::size_t) selectedSlot].kind;
+    const auto value = effectInfo (kind).params[(std::size_t) p].defaultValue;
+    engine.editSong ([t = track, slot = selectedSlot, p, value] (Song& song) {
+        song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) p] = value;
+    });
+}
+
+void EffectsPanel::showAddMenu (int)
+{
+    juce::PopupMenu menu;
+
+    for (auto kind : allEffects)
+        menu.addItem (utf8 (effectInfo (kind).name), [this, kind] {
+            engine.editSong ([t = track, kind] (Song& song) {
+                auto& effects = song.mixer[(std::size_t) t].effects;
+                if ((int) effects.size() < maxEffectSlots)
+                    effects.push_back (makeEffectSlot (kind));
+            });
+            selectedSlot = (int) slots()->size() - 1;
+            repaint();
+        });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void EffectsPanel::showSlotMenu (int slot)
+{
+    juce::PopupMenu replace;
+
+    for (auto kind : allEffects)
+        replace.addItem (utf8 (effectInfo (kind).name), [this, slot, kind] {
+            engine.editSong ([t = track, slot, kind] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot] = makeEffectSlot (kind); });
+        });
+
+    const auto count = (int) slots()->size();
+    juce::PopupMenu menu;
+    menu.addSubMenu ("Trocar por", replace);
+    menu.addItem ("Mover para cima", slot > 0, false, [this, slot] {
+        engine.editSong ([t = track, slot] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) t].effects;
+            std::swap (fx[(std::size_t) slot], fx[(std::size_t) slot - 1]);
+        });
+        selectedSlot = slot - 1;
+    });
+    menu.addItem ("Mover para baixo", slot < count - 1, false, [this, slot] {
+        engine.editSong ([t = track, slot] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) t].effects;
+            std::swap (fx[(std::size_t) slot], fx[(std::size_t) slot + 1]);
+        });
+        selectedSlot = slot + 1;
+    });
+    menu.addSeparator();
+    menu.addItem ("Remover", [this, slot] {
+        engine.editSong ([t = track, slot] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) t].effects;
+            fx.erase (fx.begin() + slot);
+        });
+        selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
+        repaint();
+    });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void EffectsPanel::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    const auto* s = slots();
+
+    if (s == nullptr)
+        track = 0;
+    else if (selectedSlot >= (int) s->size())
+        selectedSlot = (int) s->size() - 1;
+
+    repaint();
+}
+
+// ---------------------------------------------------------------------------
+
+MixerComponent::MixerComponent (AudioEngine& e)
+    : engine (e),
+      strips (e),
+      effects (e)
 {
     viewport.setViewedComponent (&strips, false);
     viewport.setScrollBarsShown (false, true);
     addAndMakeVisible (viewport);
+    addAndMakeVisible (effects);
+    strips.onSelectionChanged = [this] (int track) { effects.setTrack (track); };
+}
+
+void MixerComponent::selectFirstTrackWithEffects()
+{
+    const auto& mixer = engine.getSong().mixer;
+
+    for (int t = 0; t < (int) mixer.size(); ++t)
+        if (! mixer[(std::size_t) t].effects.empty())
+        {
+            strips.selectTrack (t);
+            return;
+        }
 }
 
 void MixerComponent::resized()
 {
-    viewport.setBounds (getLocalBounds());
-    strips.setVisibleHeight (getHeight() - viewport.getScrollBarThickness());
+    auto area = getLocalBounds();
+    effects.setBounds (area.removeFromRight (effectsWidth));
+    viewport.setBounds (area);
+    strips.setVisibleHeight (area.getHeight() - viewport.getScrollBarThickness());
 }
 } // namespace lynx

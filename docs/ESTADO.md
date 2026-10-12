@@ -42,5 +42,5 @@ Confirmadas empiricamente nos demos:
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
 ## Próximo passo
-Efeitos nos inserts do mixer (EQ, compressor, delay, reverb internos) e depois hosting de VST3;
-em paralelo, clips de áudio na playlist (os vocais dos demos do FL).
+Desfazer/refazer (Ctrl+Z) em toda edição, clips de áudio na playlist (os vocais dos demos do FL)
+e hosting de VST3.

@@ -37,6 +37,30 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         state->instruments.push_back (std::move (instrument));
     }
 
+    state->effects.resize (song.mixer.size());
+
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+    {
+        const auto& slots = song.mixer[t].effects;
+
+        for (std::size_t i = 0; i < slots.size() && i < (std::size_t) maxEffectSlots; ++i)
+        {
+            const auto kind = slots[i].kind;
+
+            if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
+                && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
+                && previous->song.mixer[t].effects[i].kind == kind)
+            {
+                state->effects[t].push_back (previous->effects[t][i]);
+                continue;
+            }
+
+            std::shared_ptr<Effect> effect = makeEffect (kind);
+            effect->prepare (sampleRate);
+            state->effects[t].push_back (std::move (effect));
+        }
+    }
+
     state->song = std::move (song);
     state->sampleRate = sampleRate;
     return state;
@@ -70,8 +94,14 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
 
     if (lastState != nullptr)
+    {
         for (auto& instrument : lastState->instruments)
             instrument->prepare (sr);
+
+        for (auto& track : lastState->effects)
+            for (auto& effect : track)
+                effect->prepare (sr);
+    }
 }
 
 float* RackRenderer::trackBuffer (int track, int channel) noexcept
@@ -94,6 +124,19 @@ void RackRenderer::renderSegment (const RackState& state, int offset, int n) noe
     }
 }
 
+void RackRenderer::runEffects (const RackState& state, int track, int n) noexcept
+{
+    if (track >= (int) state.effects.size())
+        return;
+
+    const auto& slots = state.song.mixer[(std::size_t) track].effects;
+    const auto& effects = state.effects[(std::size_t) track];
+
+    for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
+        if (slots[i].enabled)
+            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, slots[i], state.song.bpm);
+}
+
 void RackRenderer::process (const RackState* state,
                             bool playing,
                             double startTick,
@@ -113,8 +156,14 @@ void RackRenderer::process (const RackState* state,
     // Um snapshot montado antes de o dispositivo abrir pode ter outra taxa. prepare()
     // dos instrumentos não aloca, então pode rodar aqui.
     if (state != lastState && state->sampleRate != sampleRate)
+    {
         for (auto& instrument : state->instruments)
             instrument->prepare (sampleRate);
+
+        for (auto& track : state->effects)
+            for (auto& effect : track)
+                effect->prepare (sampleRate);
+    }
 
     lastState = state; // para prepare() saber quais instrumentos reconfigurar
 
@@ -227,6 +276,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         if (track.muted || (anySolo && ! track.solo))
             continue;
 
+        runEffects (state, t, numSamples);
+
         float gl = 0.0f, gr = 0.0f;
         panGains (track.pan, track.volume / unityFader, gl, gr);
         const auto* l = trackBuffer (t, 0);
@@ -242,7 +293,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
             meters->accumulate (t, peakOf (l, numSamples) * gl, peakOf (r, numSamples) * gr);
     }
 
-    // 3) Master -> saída. Sem mixer configurado, o Master fica em 0 dB.
+    // 3) efeitos do Master, depois Master -> saída. Sem mixer configurado, o Master fica em 0 dB.
+    runEffects (state, 0, numSamples);
+
     float gl = 1.0f, gr = 1.0f;
 
     if (! song.mixer.empty())

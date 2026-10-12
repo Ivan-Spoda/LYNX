@@ -1,5 +1,6 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/Effects.h"
 #include "engine/AudioEngine.h"
 #include "engine/ProjectFile.h"
 #include "engine/Text.h"
@@ -69,6 +70,8 @@ private:
         original.channels[0].name = "Bumbo ação";
         original.playlist.push_back ({ 0, 2, 3840, 1920, 960 });
         original.mode = lynx::PlayMode::song;
+        original.mixer[3].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::delay));
+        original.mixer[3].effects[0].params[1] = 0.25f;
         juce::String error;
         const auto reloaded = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (original), error);
         const auto projectOk = reloaded && reloaded->channels.size() == original.channels.size()
@@ -76,7 +79,10 @@ private:
                                && reloaded->patterns[0].notes.size() == original.patterns[0].notes.size()
                                && reloaded->patterns[0].notes[3].start == original.patterns[0].notes[3].start
                                && reloaded->mode == lynx::PlayMode::song && reloaded->playlist.size() == 1
-                               && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2;
+                               && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
+                               && reloaded->mixer[3].effects.size() == 1
+                               && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
+                               && reloaded->mixer[3].effects[0].params[1] == 0.25f;
         const auto ok = audioOk && projectOk;
 
         juce::String report;

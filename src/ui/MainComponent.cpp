@@ -286,6 +286,9 @@ void MainComponent::selectTabForSnapshot (int tab)
 
     if (tab == playlistTab)
         playlist.resized(); // atualiza as barras de rolagem para a música carregada
+
+    if (tab == mixerTab)
+        mixer.selectFirstTrackWithEffects();
 }
 
 void MainComponent::refreshToolbar()

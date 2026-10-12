@@ -14,7 +14,8 @@ add_library(lynx_core STATIC
     src/core/Scheduler.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
-    src/core/FlpImport.cpp)
+    src/core/FlpImport.cpp
+    src/core/Effects.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)

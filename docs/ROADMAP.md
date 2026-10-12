@@ -36,8 +36,8 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Mixer: Master + até 127 inserts, fader (0,8 = 0 dB), pan, mute, solo, medidores estéreo
 - [x] Roteamento canal → insert (caixinha no Channel Rack, menu do mixer); importado do `.flp`
 - [ ] Sends entre inserts e roteamento insert → insert (hoje todo insert vai para o Master)
-- [ ] Slots de efeito por insert (o FL tem 10)
-- [ ] Efeitos internos básicos (EQ, compressor, reverb, delay)
+- [x] 10 slots de efeito por insert (e no Master), com bypass, trocar, mover, remover
+- [x] Efeitos internos: EQ de 3 bandas, compressor, delay sincronizado (ping-pong), reverb
 - [ ] Hosting de VST3 (JUCE) e CLAP; scan em processo separado
 - [ ] Compensação de latência (PDC)
 - [ ] Processamento multi-thread do grafo por camadas de dependência (como o FL, ver análise)

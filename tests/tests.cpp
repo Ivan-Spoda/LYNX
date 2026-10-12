@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Effects.h"
 #include "core/FlpImport.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -838,6 +839,106 @@ TEST (next_free_insert_and_flp_mixer_import)
     CHECK (song.channels[0].mixerTrack == 30);
     CHECK (song.mixer.size() == 31);
     CHECK (song.mixer[30].name == "Drums" && song.mixer[0].name == "Master");
+}
+
+namespace
+{
+float runEffectOnSine (lynx::EffectKind kind, const std::function<void (lynx::EffectSlot&)>& tweak, double hz, float amp,
+                       int frames = 48000)
+{
+    auto fx = lynx::makeEffect (kind);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (kind);
+    tweak (slot);
+    std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
+    for (int i = 0; i < frames; ++i)
+        l[(std::size_t) i] = r[(std::size_t) i] = amp * (float) std::sin (6.283185307 * hz * i / 48000.0);
+    for (int i = 0; i < frames; i += 480)
+        fx->process (l.data() + i, r.data() + i, std::min (480, frames - i), slot, 120.0);
+    float peak = 0.0f;
+    for (int i = frames / 2; i < frames; ++i) // segunda metade: já estabilizado
+    {
+        CHECK (std::isfinite (l[(std::size_t) i]));
+        peak = std::max (peak, std::abs (l[(std::size_t) i]));
+    }
+    return peak;
+}
+} // namespace
+
+TEST (effects_eq_compressor_behave)
+{
+    // EQ no padrão é transparente
+    CHECK (std::abs (runEffectOnSine (lynx::EffectKind::eq, [] (auto&) {}, 1000.0, 0.5f) - 0.5f) < 0.01f);
+    // +18 dB nos graves: 60 Hz sobe bastante, 5 kHz quase nada
+    CHECK (runEffectOnSine (lynx::EffectKind::eq, [] (auto& s) { s.params[0] = 1.0f; }, 60.0, 0.05f) > 0.3f);
+    CHECK (runEffectOnSine (lynx::EffectKind::eq, [] (auto& s) { s.params[0] = 1.0f; }, 5000.0, 0.05f) < 0.06f);
+    // compressor: threshold -20 dB, ratio 20:1 achata um sinal de 0 dBFS para perto do threshold
+    const auto squashed = runEffectOnSine (lynx::EffectKind::compressor, [] (auto& s) {
+        s.params[0] = 40.0f / 60.0f;
+        s.params[1] = 1.0f;
+    }, 200.0, 1.0f);
+    CHECK (squashed < 0.2f && squashed > 0.05f);
+    // sinal abaixo do threshold passa intacto
+    CHECK (std::abs (runEffectOnSine (lynx::EffectKind::compressor, [] (auto& s) { s.params[0] = 1.0f; }, 200.0, 0.3f) - 0.3f) < 0.01f);
+}
+
+TEST (effects_delay_echoes_on_tempo_and_reverb_has_tail)
+{
+    auto delay = lynx::makeEffect (lynx::EffectKind::delay);
+    delay->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::delay);
+    slot.params[0] = 3.5f / 8.0f; // índice 3 = 1/4 = 0,5 s a 120 BPM
+    slot.params[1] = 0.0f;        // sem feedback: um eco só
+    slot.params[2] = 1.0f;
+    slot.params[4] = 0.0f;        // sem abafar
+    std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+    l[0] = r[0] = 1.0f;
+    delay->process (l.data(), r.data(), 48000, slot, 120.0);
+    CHECK (std::abs (l[24000] - 1.0f) < 1e-4f);
+    CHECK (std::abs (l[12000]) < 1e-6f);
+
+    auto reverb = lynx::makeEffect (lynx::EffectKind::reverb);
+    reverb->prepare (48000.0);
+    auto rs = lynx::makeEffectSlot (lynx::EffectKind::reverb);
+    rs.params[3] = 1.0f;
+    std::fill (l.begin(), l.end(), 0.0f);
+    std::fill (r.begin(), r.end(), 0.0f);
+    l[0] = r[0] = 1.0f;
+    reverb->process (l.data(), r.data(), 48000, rs, 120.0);
+    float tail = 0.0f;
+    for (int i = 4800; i < 9600; ++i) // entre 100 e 200 ms depois do impulso
+        tail = std::max (tail, std::abs (l[(std::size_t) i]));
+    CHECK (tail > 1e-4f && tail < 1.0f);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::delay, 0, slot.params[0], 120.0) == "1/4 (500 ms)");
+}
+
+TEST (rack_runs_insert_effects_and_reuses_them)
+{
+    // insert com EQ a -inf não existe; usamos a saída do EQ em -18 dB para ver o efeito agir
+    const auto quiet = renderMixerCase ([] (lynx::Song& s) {
+        auto eq = lynx::makeEffectSlot (lynx::EffectKind::eq);
+        eq.params[4] = 0.0f; // saída -18 dB
+        s.mixer[1].effects.push_back (eq);
+    });
+    CHECK (quiet > 0.55f && quiet < 0.6f); // 0,5 do canal 2 + 0,5 * 0,126 do canal 1
+
+    const auto bypassed = renderMixerCase ([] (lynx::Song& s) {
+        auto eq = lynx::makeEffectSlot (lynx::EffectKind::eq);
+        eq.params[4] = 0.0f;
+        eq.enabled = false;
+        s.mixer[1].effects.push_back (eq);
+    });
+    CHECK (std::abs (bypassed - 1.0f) < 1e-4f);
+
+    auto s = lynx::Song::makeDefault();
+    s.mixer[2].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::reverb));
+    auto a = lynx::RackState::build (s, nullptr, 48000.0);
+    s.mixer[2].effects[0].params[0] = 0.9f; // mexer num knob não recria o efeito
+    auto b = lynx::RackState::build (s, a.get(), 48000.0);
+    CHECK (b->effects[2][0] == a->effects[2][0]);
+    s.mixer[2].effects[0] = lynx::makeEffectSlot (lynx::EffectKind::delay);
+    auto c = lynx::RackState::build (s, b.get(), 48000.0);
+    CHECK (c->effects[2][0] != b->effects[2][0]);
 }
 
 int main (int argc, char** argv)

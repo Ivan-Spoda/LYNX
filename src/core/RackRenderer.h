@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
 #include "core/Meters.h"
@@ -22,13 +23,15 @@ struct RackState
 {
     Song song;
     std::vector<std::shared_ptr<Instrument>> instruments; // um por canal
+    std::vector<std::vector<std::shared_ptr<Effect>>> effects; // [trilha do mixer][slot]
     double sampleRate = 44100.0; // taxa com que os instrumentos novos foram preparados
 
     // Carrega (ou pega do cache) o áudio de um arquivo; nullptr se não conseguir.
     using SampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path)>;
 
     // Monta o próximo estado reaproveitando os instrumentos de `previous` quando o
-    // canal não mudou de instrumento nem de sample. Roda na thread da UI (aloca).
+    // canal não mudou de instrumento nem de sample, e os efeitos quando o slot tem o
+    // mesmo tipo. Roda na thread da UI (aloca).
     static std::unique_ptr<const RackState> build (Song song,
                                                    const RackState* previous,
                                                    double sampleRate,
@@ -60,6 +63,7 @@ private:
     void processChunk (const RackState& state, bool playing, double startTick, int numSamples,
                        float* left, float* right, MeterBank* meters) noexcept;
     void renderSegment (const RackState& state, int offset, int n) noexcept;
+    void runEffects (const RackState& state, int track, int n) noexcept;
     float* trackBuffer (int track, int channel) noexcept;
 
     double sampleRate = 44100.0;

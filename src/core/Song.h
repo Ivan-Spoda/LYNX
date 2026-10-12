@@ -4,6 +4,7 @@
 // A UI edita uma cópia e publica um snapshot imutável para a thread de áudio
 // (veja SnapshotExchange.h), então nada aqui precisa ser thread-safe.
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -37,6 +38,24 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = direto no Master
 };
 
+enum class EffectKind : std::uint8_t
+{
+    eq,
+    compressor,
+    delay,
+    reverb
+};
+
+constexpr int maxEffectParams = 6;
+constexpr int maxEffectSlots = 10; // como no FL
+
+struct EffectSlot
+{
+    EffectKind kind = EffectKind::eq;
+    bool enabled = true;
+    std::array<float, maxEffectParams> params {}; // 0..1; o significado depende do efeito
+};
+
 struct MixerTrack
 {
     std::string name;
@@ -44,6 +63,7 @@ struct MixerTrack
     float pan = 0.0f;          // -1..1
     bool muted = false;
     bool solo = false;
+    std::vector<EffectSlot> effects; // até maxEffectSlots, processados em ordem
 };
 
 struct Note

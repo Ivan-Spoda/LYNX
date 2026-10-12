@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -31,6 +32,10 @@ public:
 
     void updateSize();
     void setVisibleHeight (int height);
+
+    int getSelectedTrack() const noexcept { return selected; }
+    void selectTrack (int track);
+    std::function<void (int)> onSelectionChanged;
 
     static constexpr int stripWidth = 70;
     static constexpr int masterWidth = 86;
@@ -64,14 +69,57 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerStrips)
 };
 
+// Painel de efeitos da trilha selecionada: 10 slots e os knobs do slot escolhido.
+//  - clique num slot vazio: escolher efeito; clique num ocupado: editar os knobs
+//  - LED do slot: liga/desliga (bypass); clique direito: trocar, mover, remover
+class EffectsPanel final : public juce::Component,
+                           private juce::ChangeListener
+{
+public:
+    explicit EffectsPanel (AudioEngine& engine);
+    ~EffectsPanel() override;
+
+    void setTrack (int track);
+
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    juce::Rectangle<int> slotBounds (int slot) const;
+    juce::Rectangle<int> knobBounds (int param) const;
+    int knobAt (juce::Point<int> p) const;
+    const std::vector<EffectSlot>* slots() const;
+    void showAddMenu (int slot);
+    void showSlotMenu (int slot);
+
+    AudioEngine& engine;
+    int track = 0;
+    int selectedSlot = -1;
+    int dragParam = -1;
+    float dragStart = 0.0f;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectsPanel)
+};
+
 class MixerComponent final : public juce::Component
 {
 public:
     explicit MixerComponent (AudioEngine& engine);
     void resized() override;
 
+    // Seleciona a primeira trilha que tem efeitos (usado pelo modo --snapshot).
+    void selectFirstTrackWithEffects();
+
+    static constexpr int effectsWidth = 300;
+
 private:
+    AudioEngine& engine;
     MixerStrips strips;
     juce::Viewport viewport;
+    EffectsPanel effects;
 };
 } // namespace lynx

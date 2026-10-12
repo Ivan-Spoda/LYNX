@@ -31,6 +31,27 @@ InstrumentKind instrumentFromId (const juce::String& id)
 }
 
 juce::String str (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
+
+const char* effectId (EffectKind k)
+{
+    switch (k)
+    {
+        case EffectKind::eq: return "eq";
+        case EffectKind::compressor: return "compressor";
+        case EffectKind::delay: return "delay";
+        case EffectKind::reverb: return "reverb";
+    }
+    return "eq";
+}
+
+std::optional<EffectKind> effectFromId (const juce::String& id)
+{
+    for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb })
+        if (id == effectId (k))
+            return k;
+
+    return std::nullopt; // efeito de uma versão futura: ignorado
+}
 } // namespace
 
 juce::String toJson (const Song& song)
@@ -103,6 +124,24 @@ juce::String toJson (const Song& song)
         o->setProperty ("pan", t.pan);
         o->setProperty ("muted", t.muted);
         o->setProperty ("solo", t.solo);
+
+        juce::Array<juce::var> effects;
+
+        for (const auto& slot : t.effects)
+        {
+            auto e = std::make_unique<juce::DynamicObject>();
+            e->setProperty ("kind", effectId (slot.kind));
+            e->setProperty ("on", slot.enabled);
+            juce::Array<juce::var> params;
+            for (auto v : slot.params)
+                params.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+            e->setProperty ("params", params);
+            effects.add (juce::var (e.release()));
+        }
+
+        if (! effects.isEmpty())
+            o->setProperty ("effects", effects);
+
         mixer.add (juce::var (o.release()));
     }
 
@@ -216,6 +255,26 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
             track.muted = (bool) t.getProperty ("muted", false);
             track.solo = (bool) t.getProperty ("solo", false);
+
+            if (auto* effects = t["effects"].getArray())
+                for (const auto& e : *effects)
+                {
+                    const auto kind = effectFromId (e["kind"].toString());
+
+                    if (! kind || (int) track.effects.size() >= maxEffectSlots)
+                        continue;
+
+                    EffectSlot slot;
+                    slot.kind = *kind;
+                    slot.enabled = (bool) e.getProperty ("on", true);
+
+                    if (auto* params = e["params"].getArray())
+                        for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
+                            slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
+
+                    track.effects.push_back (slot);
+                }
+
             song.mixer.push_back (std::move (track));
         }
 
