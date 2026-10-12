@@ -52,14 +52,18 @@ if(DAW_BUILD_APP)
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
         src/engine/Metronome.cpp
+        src/engine/SampleLibrary.cpp
+        src/engine/ProjectFile.cpp
         src/ui/MainComponent.cpp
-        src/ui/ChannelRackComponent.cpp)
+        src/ui/ChannelRackComponent.cpp
+        src/ui/PianoRollComponent.cpp)
 
     target_compile_definitions(Daw PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
         JUCE_ASIO=0                      # ligar quando o ASIO SDK estiver disponível
+        JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Daw,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Daw,JUCE_VERSION>")
 

@@ -53,11 +53,11 @@ Song Song::makeDefault()
 {
     Song song;
     song.channels = {
-        { "Kick", InstrumentKind::kick, 0.9f, 0.0f, false },
-        { "Clap", InstrumentKind::clap, 0.7f, 0.0f, false },
-        { "Hat", InstrumentKind::hat, 0.5f, 0.1f, false },
-        { "Snare", InstrumentKind::snare, 0.7f, 0.0f, false },
-        { "Synth", InstrumentKind::synth, 0.5f, 0.0f, false },
+        { "Kick", InstrumentKind::kick, 0.9f, 0.0f, false, {} },
+        { "Clap", InstrumentKind::clap, 0.7f, 0.0f, false, {} },
+        { "Hat", InstrumentKind::hat, 0.5f, 0.1f, false, {} },
+        { "Snare", InstrumentKind::snare, 0.7f, 0.0f, false, {} },
+        { "Synth", InstrumentKind::synth, 0.5f, 0.0f, false, {} },
     };
 
     auto& p = song.patterns.emplace_back();

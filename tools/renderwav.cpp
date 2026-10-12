@@ -8,6 +8,11 @@
 #include <iterator>
 #include <vector>
 
+#include <algorithm>
+#include <filesystem>
+#include <map>
+
+#include "WavReader.h"
 #include "core/FlpImport.h"
 #include "core/RackRenderer.h"
 
@@ -56,9 +61,21 @@ int main (int argc, char** argv)
 
     daw::Song song;
 
+    // No Linux/WSL o FL fica em /mnt/c; os caminhos do .flp usam barras invertidas.
+    const std::string flRoot = std::getenv ("FL_ROOT") ? std::getenv ("FL_ROOT")
+                                                       : "/mnt/c/Program Files/Image-Line/FL Studio 2026";
+    auto toLocal = [] (std::string p) {
+        std::replace (p.begin(), p.end(), '\\', '/');
+        return p;
+    };
+
+    daw::FlpImportOptions options;
+    options.roots = { flRoot, flRoot + "/Data", "" };
+    options.fileExists = [&] (const std::string& p) { return std::filesystem::exists (toLocal (p)); };
+
     try
     {
-        song = daw::importFlp (flp::parseProject (bytes));
+        song = daw::importFlp (flp::parseProject (bytes), options);
     }
     catch (const flp::Error& e)
     {
@@ -92,11 +109,19 @@ int main (int argc, char** argv)
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
-        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth" };
+        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler" };
         std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
     }
 
-    auto state = daw::RackState::build (song, nullptr, sampleRate);
+    std::map<std::string, std::shared_ptr<const daw::SampleData>> cache;
+    auto state = daw::RackState::build (song, nullptr, sampleRate, [&] (const std::string& p) {
+        auto& entry = cache[p];
+        if (entry == nullptr)
+            entry = daw::tools::readWav (toLocal (p));
+        if (entry == nullptr)
+            std::printf ("  (não consegui ler %s)\n", p.c_str());
+        return entry;
+    });
     daw::RackRenderer renderer;
     renderer.prepare (sampleRate);
 

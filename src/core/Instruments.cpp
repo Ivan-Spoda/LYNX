@@ -142,6 +142,7 @@ private:
             }
 
             case InstrumentKind::synth:
+            case InstrumentKind::sampler:
                 break;
         }
 
@@ -278,10 +279,124 @@ private:
     float filterCoeff = 0.3f;
     std::array<SynthVoice, 16> voices {};
 };
+// ---------------------------------------------------------------------------
+// Sampler: toca o sample inteiro a cada nota (one-shot, como um step do FL),
+// transposto pela tecla (60 = altura original), com interpolação linear.
+
+struct SamplerVoice
+{
+    bool active = false;
+    double position = 0.0;
+    double rate = 1.0;
+    float velocity = 0.0f;
+    float fade = 1.0f;     // < 1 quando a voz foi roubada (declick)
+    bool stolen = false;
+    int age = 0;
+};
+
+class SamplerInstrument final : public Instrument
+{
+public:
+    explicit SamplerInstrument (std::shared_ptr<const SampleData> s) : sample (std::move (s)) {}
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        fadeStep = (float) (1.0 / (0.003 * sr)); // 3 ms
+        allNotesOff();
+    }
+
+    void noteOn (int key, float velocity) noexcept override
+    {
+        if (sample == nullptr || sample->frames() < 2)
+            return;
+
+        SamplerVoice* target = nullptr;
+
+        for (auto& v : voices)
+            if (! v.active)
+            {
+                target = &v;
+                break;
+            }
+
+        if (target == nullptr)
+        {
+            // Sem voz livre: rouba a mais antiga.
+            target = &voices[0];
+            for (auto& v : voices)
+                if (v.age > target->age)
+                    target = &v;
+        }
+
+        *target = {};
+        target->active = true;
+        target->velocity = velocity;
+        target->rate = sample->sampleRate / sampleRate * std::pow (2.0, (key - 60) / 12.0);
+    }
+
+    void noteOff (int) noexcept override {}
+
+    void allNotesOff() noexcept override
+    {
+        for (auto& v : voices)
+            if (v.active)
+                v.stolen = true; // some com fade em vez de cortar seco
+    }
+
+    void render (float* left, float* right, int n, float gl, float gr) noexcept override
+    {
+        if (sample == nullptr)
+            return;
+
+        const auto& l = sample->left;
+        const auto& r = sample->right.empty() ? sample->left : sample->right;
+        const auto last = (double) (sample->frames() - 1);
+
+        for (auto& v : voices)
+        {
+            if (! v.active)
+                continue;
+
+            for (int i = 0; i < n; ++i)
+            {
+                if (v.position >= last || (v.stolen && v.fade <= 0.0f))
+                {
+                    v.active = false;
+                    break;
+                }
+
+                const auto index = (std::size_t) v.position;
+                const auto frac = (float) (v.position - (double) index);
+                const auto sl = l[index] + frac * (l[index + 1] - l[index]);
+                const auto sr = r[index] + frac * (r[index + 1] - r[index]);
+                const auto gain = v.velocity * v.fade;
+
+                left[i] += sl * gain * gl;
+                right[i] += sr * gain * gr;
+
+                v.position += v.rate;
+                ++v.age;
+
+                if (v.stolen)
+                    v.fade -= fadeStep;
+            }
+        }
+    }
+
+private:
+    std::shared_ptr<const SampleData> sample;
+    double sampleRate = 44100.0;
+    float fadeStep = 0.01f;
+    std::array<SamplerVoice, 16> voices {};
+};
 } // namespace
 
-std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind)
+std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
+    if (kind == InstrumentKind::sampler)
+        return std::make_unique<SamplerInstrument> (std::move (sample));
+
     if (kind == InstrumentKind::synth)
         return std::make_unique<SynthInstrument>();
 

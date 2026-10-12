@@ -40,7 +40,26 @@ InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType
     return InstrumentKind::synth;
 }
 
-Song importFlp (const flp::Project& project)
+std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
+{
+    const std::pair<const char*, const std::string*> variables[] = {
+        { "%FLStudioFactoryData%", &roots.factoryData },
+        { "%FLStudioUserData%", &roots.userData },
+        { "%FLStudioData%", &roots.data },
+    };
+
+    for (const auto& [name, root] : variables)
+    {
+        const std::string variable (name);
+
+        if (flPath.compare (0, variable.size(), variable) == 0)
+            return root->empty() ? std::string() : *root + flPath.substr (variable.size());
+    }
+
+    return flPath;
+}
+
+Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
@@ -59,6 +78,18 @@ Song importFlp (const flp::Project& project)
         ChannelDef def;
         def.name = c.name.empty() ? "Canal " + std::to_string (c.index + 1) : c.name;
         def.instrument = guessInstrument (def.name, c.type);
+
+        if (c.type == flp::ChannelType::sampler && ! c.samplePath.empty() && options.fileExists)
+        {
+            const auto path = resolveFlPath (c.samplePath, options.roots);
+
+            if (! path.empty() && options.fileExists (path))
+            {
+                def.instrument = InstrumentKind::sampler;
+                def.samplePath = path;
+            }
+        }
+
         song.channels.push_back (std::move (def));
     }
 
@@ -95,6 +126,11 @@ Song importFlp (const flp::Project& project)
 
     if (song.patterns.empty())
         song.patterns.emplace_back().name = "Pattern 1";
+
+    // O .flp não diz qual pattern estava aberta; a mais cheia é o melhor ponto de partida.
+    for (int i = 0; i < (int) song.patterns.size(); ++i)
+        if (song.patterns[(std::size_t) i].notes.size() > song.patterns[(std::size_t) song.currentPattern].notes.size())
+            song.currentPattern = i;
 
     return song;
 }

@@ -2,10 +2,11 @@
 
 namespace daw
 {
-ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x)
+ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       transport (t),
-      exchange (x)
+      exchange (x),
+      live (l)
 {
 }
 
@@ -24,11 +25,11 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     if (buffer.getNumChannels() >= 2)
     {
-        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1));
+        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1), &live);
     }
     else if (numSamples <= scratch.getNumSamples())
     {
-        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1));
+        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1), &live);
 
         if (buffer.getNumChannels() == 1)
         {

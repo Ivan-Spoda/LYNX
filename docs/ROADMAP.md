@@ -13,11 +13,16 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Build Windows sem Visual Studio (Zig) e testes do núcleo
 
 ## Fase 2: compor de verdade
-- [ ] Sampler: carregar `.wav`/`.flac`/`.mp3` por canal (usa o `samplePath` do `.flp` quando existir)
-- [ ] Piano Roll (editar notas com duração, velocity, arrastar, quantizar)
-- [ ] Salvar/abrir projeto no formato próprio (JSON versionado + blobs)
-- [ ] Volume, pan e mute/solo por canal na UI; teclado do PC como teclado MIDI
+- [x] Sampler: `.wav`/`.flac`/`.ogg`/`.mp3`/`.aiff` por canal, inclusive os WAV-com-Ogg do FL
+- [x] Projetos `.flp` importados tocam com os samples reais da instalação do FL
+- [x] Piano Roll (criar, mover, redimensionar, apagar, snap, zoom, preview, ghost notes)
+- [x] Salvar/abrir projeto no formato próprio (`.dawproj`, JSON versionado)
+- [x] Volume, pan e mute por canal; teclado do PC como teclado musical
+- [x] Exportar para WAV (`Daw.exe --render`)
+- [ ] Velocity no Piano Roll, seleção múltipla, copiar/colar, desfazer/refazer
+- [ ] Solo por canal, renomear/colorir patterns
 - [ ] Entrada MIDI e gravação de notas
+- [ ] Exportar pela interface (hoje só pela linha de comando)
 
 ## Fase 3: arranjo
 - [ ] Playlist: clips de pattern no tempo, trilhas, loop region

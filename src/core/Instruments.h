@@ -1,12 +1,13 @@
 #pragma once
 
-// Instrumentos internos sintetizados (sem samples). Servem para a DAW fazer som
-// antes de existir hosting de plugins e para tocar projetos importados.
+// Instrumentos internos: bateria e synth sintetizados, e um sampler. Servem para a
+// DAW fazer som antes de existir hosting de plugins e para tocar projetos importados.
 // Tudo com capacidade fixa: noteOn/render nunca alocam.
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "core/Song.h"
 
@@ -26,7 +27,17 @@ public:
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
 };
 
-std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind);
+// Áudio de um sample já decodificado (carregado fora da thread de áudio).
+struct SampleData
+{
+    std::vector<float> left, right; // right vazio = mono
+    double sampleRate = 44100.0;
+
+    std::size_t frames() const noexcept { return left.size(); }
+};
+
+// `sample` só é usado pelo sampler; sem sample o sampler fica mudo.
+std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);
 
 // Ruído branco barato e determinístico (xorshift), igual em toda plataforma.
 struct Noise

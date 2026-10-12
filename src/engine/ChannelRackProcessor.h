@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/SnapshotExchange.h"
 #include "engine/Transport.h"
@@ -13,7 +14,7 @@ namespace daw
 class ChannelRackProcessor final : public juce::AudioProcessor
 {
 public:
-    ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange);
+    ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange, LiveEventQueue& live);
 
     const juce::String getName() const override { return "Channel Rack"; }
 
@@ -40,6 +41,7 @@ public:
 private:
     const Transport& transport;
     SnapshotExchange<RackState>& exchange;
+    LiveEventQueue& live;
     RackRenderer renderer;
     juce::AudioBuffer<float> scratch; // para saída mono
 

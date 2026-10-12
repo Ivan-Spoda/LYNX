@@ -20,7 +20,8 @@ enum class InstrumentKind : std::uint8_t
     snare,
     hat,
     clap,
-    synth
+    synth,
+    sampler
 };
 
 struct ChannelDef
@@ -30,6 +31,7 @@ struct ChannelDef
     float volume = 0.8f;   // 0..1
     float pan = 0.0f;      // -1..1
     bool muted = false;
+    std::string samplePath; // usado quando instrument == sampler
 };
 
 struct Note

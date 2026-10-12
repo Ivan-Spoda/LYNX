@@ -11,9 +11,11 @@
 #include <vector>
 
 #include "core/FlpImport.h"
+#include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
+#include "core/SoftClip.h"
 #include "core/Song.h"
 #include "flp/Flp.h"
 
@@ -472,6 +474,139 @@ TEST (flp_import_maps_channels_and_rescales)
     CHECK (s.patterns[0].notes[0].channel == 1);                // índice denso
     CHECK (s.patterns[0].notes[0].length == daw::ticksPerStep); // nota de step
     CHECK (std::abs (s.patterns[0].notes[0].velocity - 0.5f) < 1e-6f);
+}
+
+TEST (live_queue_is_fifo_and_bounded)
+{
+    daw::LiveEventQueue q;
+    daw::NoteEvent e;
+    CHECK (! q.pop (e));
+
+    for (int i = 0; i < 10; ++i)
+    {
+        daw::NoteEvent in;
+        in.key = i;
+        CHECK (q.push (in));
+    }
+
+    for (int i = 0; i < 10; ++i)
+        CHECK (q.pop (e) && e.key == i);
+
+    int pushed = 0;
+    while (q.push (e))
+        ++pushed;
+    CHECK (pushed == (int) daw::LiveEventQueue::capacity - 1); // uma vaga fica livre para distinguir cheio de vazio
+}
+
+TEST (sampler_plays_pitched_one_shot)
+{
+    // sample de 1000 frames com rampa: dá para medir a posição pela amplitude
+    auto data = std::make_shared<daw::SampleData>();
+    data->sampleRate = 48000.0;
+    for (int i = 0; i < 1000; ++i)
+        data->left.push_back (1.0f);
+
+    auto sampler = daw::makeInstrument (daw::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    std::vector<float> l (2048, 0.0f), r (2048, 0.0f);
+
+    sampler->noteOn (60, 1.0f);
+    sampler->noteOff (60); // one-shot: noteOff não corta
+    sampler->render (l.data(), r.data(), 2048, 1.0f, 1.0f);
+    int sounding = 0;
+    for (auto s : l)
+        sounding += s > 0.5f;
+    CHECK (sounding >= 995 && sounding <= 1000); // toca o sample inteiro na altura original
+
+    std::fill (l.begin(), l.end(), 0.0f);
+    sampler->noteOn (72, 1.0f); // uma oitava acima: metade da duração
+    sampler->render (l.data(), r.data(), 2048, 1.0f, 1.0f);
+    sounding = 0;
+    for (auto s : l)
+        sounding += s > 0.5f;
+    CHECK (sounding >= 495 && sounding <= 500);
+    CHECK (r[10] > 0.5f); // mono vai para os dois lados
+
+    auto silent = daw::makeInstrument (daw::InstrumentKind::sampler, nullptr);
+    silent->prepare (48000.0);
+    silent->noteOn (60, 1.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    silent->render (l.data(), r.data(), 64, 1.0f, 1.0f);
+    CHECK (l[0] == 0.0f);
+}
+
+TEST (rack_live_notes_and_sample_provider)
+{
+    daw::Song song;
+    daw::ChannelDef c;
+    c.name = "Smp";
+    c.instrument = daw::InstrumentKind::sampler;
+    c.samplePath = "a.wav";
+    song.channels.push_back (c);
+    song.patterns.emplace_back();
+
+    int loads = 0;
+    auto provider = [&] (const std::string& path) -> std::shared_ptr<const daw::SampleData> {
+        ++loads;
+        CHECK (path == "a.wav");
+        auto d = std::make_shared<daw::SampleData>();
+        d->left.assign (4800, 0.5f);
+        return d;
+    };
+
+    auto state = daw::RackState::build (song, nullptr, 48000.0, provider);
+    CHECK (loads == 1);
+
+    daw::RackRenderer renderer;
+    renderer.prepare (48000.0);
+    daw::LiveEventQueue live;
+    daw::NoteEvent on;
+    on.channel = 0;
+    on.velocity = 1.0f;
+    live.push (on);
+
+    std::vector<float> l (256), r (256);
+    renderer.process (state.get(), false, 0.0, 256, l.data(), r.data(), &live); // parado, mas a nota ao vivo toca
+    CHECK (l[0] > 0.1f);
+
+    // mesmo sample: reaproveita; sample diferente: recarrega
+    auto same = daw::RackState::build (song, state.get(), 48000.0, provider);
+    CHECK (loads == 1 && same->instruments[0] == state->instruments[0]);
+    song.channels[0].samplePath = "b.wav";
+    auto other = daw::RackState::build (song, state.get(), 48000.0, [&] (const std::string&) { ++loads; return nullptr; });
+    CHECK (loads == 2 && other->instruments[0] != state->instruments[0]);
+}
+
+TEST (flp_paths_resolve_and_samplers_import)
+{
+    daw::FlPathRoots roots { "C:\\FL", "C:\\FL\\Data", "D:\\User" };
+    CHECK (daw::resolveFlPath ("%FLStudioFactoryData%\\Data\\x.wav", roots) == "C:\\FL\\Data\\x.wav");
+    CHECK (daw::resolveFlPath ("%FLStudioData%\\Patches\\y.wav", roots) == "C:\\FL\\Data\\Patches\\y.wav");
+    CHECK (daw::resolveFlPath ("%FLStudioUserData%\\z.wav", roots) == "D:\\User\\z.wav");
+    CHECK (daw::resolveFlPath ("E:\\abs.wav", roots) == "E:\\abs.wav");
+    CHECK (daw::resolveFlPath ("%FLStudioUserData%\\z.wav", {}) == "");
+
+    flp::Project p;
+    p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "%FLStudioData%\\k.wav", 1 },
+                   { 1, flp::ChannelType::sampler, "Hat", "", "%FLStudioData%\\missing.wav", 1 } };
+    daw::FlpImportOptions options;
+    options.roots = roots;
+    options.fileExists = [] (const std::string& path) { return path == "C:\\FL\\Data\\k.wav"; };
+
+    const auto s = daw::importFlp (p, options);
+    CHECK (s.channels[0].instrument == daw::InstrumentKind::sampler);
+    CHECK (s.channels[0].samplePath == "C:\\FL\\Data\\k.wav");
+    CHECK (s.channels[1].instrument == daw::InstrumentKind::hat); // sem arquivo: instrumento interno
+}
+
+TEST (soft_clip_is_transparent_below_knee_and_bounded)
+{
+    float s[] = { 0.5f, -0.89f, 1.5f, -3.0f, 0.95f };
+    daw::softClip (s, 5);
+    CHECK (s[0] == 0.5f && s[1] == -0.89f);
+    CHECK (s[2] > 0.9f && s[2] <= 1.0f);
+    CHECK (s[3] < -0.9f && s[3] >= -1.0f);
+    CHECK (s[4] > 0.9f && s[4] < 0.95f);
 }
 
 int main (int argc, char** argv)

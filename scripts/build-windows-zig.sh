@@ -29,6 +29,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_USE_WINDOWS_MEDIA_FORMAT 0'
     echo '#define JUCE_PLUGINHOST_VST3 0'
     echo '#define JUCE_ASIO 0'
+    echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "Daw"'
     echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.0"'
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
@@ -67,7 +68,8 @@ fi
 
 APP_SOURCES=(src/Main.cpp
              src/engine/AudioEngine.cpp src/engine/ChannelRackProcessor.cpp src/engine/Metronome.cpp
-             src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp
+             src/engine/SampleLibrary.cpp src/engine/ProjectFile.cpp
+             src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp src/ui/PianoRollComponent.cpp
              src/core/Song.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp
              src/core/FlpImport.cpp src/flp/Flp.cpp
              src/platform/MingwFixes.cpp)
