@@ -39,6 +39,7 @@ private:
     void newProject();
     void chooseFileToOpen();
     void save (bool askForFile);
+    void exportAudio();
     void refreshToolbar();
     void updateTitle();
     void openPianoRoll();
@@ -47,7 +48,7 @@ private:
 
     AudioEngine& engine;
 
-    juce::TextButton newButton { "Novo" }, openButton { "Abrir" }, saveButton { "Salvar" };
+    juce::TextButton newButton { "Novo" }, openButton { "Abrir" }, saveButton { "Salvar" }, exportButton { "Exportar" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::TextButton modeButton { "PAT" };
@@ -69,6 +70,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
+    juce::String projectName; // nome sugerido para exportar (também de .flp importado)
     std::set<int> heldKeys; // teclas do teclado do PC tocando notas agora (keyCode)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

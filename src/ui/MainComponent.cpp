@@ -3,6 +3,7 @@
 #include "engine/Text.h"
 
 #include "engine/ProjectFile.h"
+#include "ui/ExportDialog.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
@@ -45,6 +46,8 @@ MainComponent::MainComponent (AudioEngine& e)
     newButton.onClick = [this] { newProject(); };
     openButton.onClick = [this] { chooseFileToOpen(); };
     saveButton.onClick = [this] { save (false); };
+    exportButton.setTooltip (utf8 ("Exportar áudio: WAV, FLAC ou OGG (Ctrl+R)"));
+    exportButton.onClick = [this] { exportAudio(); };
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this]
     {
@@ -83,7 +86,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setJustificationType (juce::Justification::centredRight);
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir"),
+    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -98,7 +101,7 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &playButton, &stopButton,
+    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
                                                              &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
@@ -106,7 +109,7 @@ MainComponent::MainComponent (AudioEngine& e)
         c->setMouseClickGrabsKeyboardFocus (false); // o teclado do PC fica com a janela principal
     }
 
-    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &playButton, &stopButton,
+    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
                                                              &modeButton, &metronomeButton, &newPatternButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
 
@@ -144,7 +147,8 @@ void MainComponent::resized()
 
     place (newButton, 56);
     place (openButton, 56);
-    place (saveButton, 60, 16);
+    place (saveButton, 60);
+    place (exportButton, 70, 16);
     place (playButton, 60);
     place (stopButton, 60, 4);
     place (modeButton, 58, 8);
@@ -186,6 +190,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'S')
     {
         save (key.getModifiers().isShiftDown());
+        return true;
+    }
+
+    if (cmd && key.getKeyCode() == 'R')
+    {
+        exportAudio();
         return true;
     }
 
@@ -374,6 +384,7 @@ void MainComponent::newProject()
     engine.rewind();
     engine.setSong (Song::makeDefault());
     currentFile = juce::File();
+    projectName = {};
     updateTitle();
 }
 
@@ -402,6 +413,7 @@ void MainComponent::openFile (const juce::File& file)
         }
 
         currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
+        projectName = file.getFileNameWithoutExtension();
         if (auto* window = getTopLevelComponent())
             window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
         return;
@@ -419,7 +431,13 @@ void MainComponent::openFile (const juce::File& file)
     engine.rewind();
     engine.setSong (std::move (*song));
     currentFile = file;
+    projectName = file.getFileNameWithoutExtension();
     updateTitle();
+}
+
+void MainComponent::exportAudio()
+{
+    showExportDialog (engine, currentFile.getParentDirectory(), projectName);
 }
 
 void MainComponent::save (bool askForFile)
@@ -434,6 +452,7 @@ void MainComponent::save (bool askForFile)
         if (ProjectFile::save (engine.getSong(), file, error))
         {
             currentFile = file;
+            projectName = file.getFileNameWithoutExtension();
             updateTitle();
         }
         else

@@ -2,6 +2,7 @@
 
 #include "core/Effects.h"
 #include "engine/AudioEngine.h"
+#include "engine/Exporter.h"
 #include "engine/ProjectFile.h"
 #include "engine/Text.h"
 #include "ui/MainComponent.h"
@@ -35,6 +36,13 @@ public:
         {
             const auto i = args.indexOf ("--snapshot");
             runSnapshot (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
+        if (args.contains ("--export"))
+        {
+            const auto i = args.indexOf ("--export");
+            runExport (args[i + 1].unquoted(), args[i + 2].unquoted(), args.contains ("--pattern"));
             return;
         }
 
@@ -241,6 +249,52 @@ private:
                << "resultado=" << (ok ? "OK" : "ERRO " + error) << "\n";
         juce::File (outputPath + ".txt").replaceWithText (report);
 
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
+    // LYNX.exe --export projeto.(flp|lynx) saida.(wav|flac|ogg) [--pattern]
+    // O mesmo caminho do "Exportar" da interface: música inteira (ou a pattern atual) com cauda.
+    void runExport (const juce::String& inputPath, const juce::String& outputPath, bool patternOnly)
+    {
+        juce::String error, report;
+        bool ok = false;
+        {
+            lynx::AudioEngine loader (false);
+            const juce::File input (inputPath);
+
+            if (input.hasFileExtension ("flp"))
+                ok = loader.importFlpFile (input, error);
+            else if (auto song = lynx::ProjectFile::load (input, error))
+            {
+                loader.setSong (std::move (*song));
+                ok = true;
+            }
+
+            if (ok)
+            {
+                const juce::File output (outputPath);
+                lynx::ExportSettings settings;
+                settings.wholeSong = ! patternOnly;
+                settings.format = output.hasFileExtension ("flac") ? lynx::ExportSettings::Format::flac24
+                                  : output.hasFileExtension ("ogg") ? lynx::ExportSettings::Format::ogg
+                                                                    : lynx::ExportSettings::Format::wav24;
+                lynx::ExportJob job (loader.getSong(), settings, output);
+                int lastPercent = -1;
+                ok = job.run ([&lastPercent] (double p) {
+                    lastPercent = (int) (p * 100.0);
+                    return true;
+                }, error);
+                report << "musica_segundos=" << job.getMusicSeconds() << "\n"
+                       << "pico=" << job.getPeak() << "\n"
+                       << "progresso_final=" << lastPercent << "\n"
+                       << "bytes=" << output.getSize() << "\n";
+                ok = ok && job.getPeak() > 0.001f;
+            }
+        }
+
+        report << "resultado=" << (ok ? "OK" : "ERRO " + error) << "\n";
+        juce::File (outputPath + ".txt").replaceWithText (report);
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
     }

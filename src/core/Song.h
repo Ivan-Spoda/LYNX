@@ -157,4 +157,10 @@ struct Song
 
     static Song makeDefault();
 };
+
+// Cópia da música pronta para exportar: sempre em modo song (a pattern atual vira um clip
+// se `wholeSong` for false ou a Playlist estiver vazia), com `tailTicks` de silêncio no fim
+// para releases e reverbs soarem sem a música recomeçar. `musicLength` recebe o fim da
+// parte musical (sem a cauda), em ticks.
+Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength);
 } // namespace lynx

@@ -1125,6 +1125,41 @@ TEST (plugin_factories_create_reuse_and_fallback)
     CHECK (peak > 0.0f);
 }
 
+TEST (export_song_adds_silent_tail_and_never_restarts)
+{
+    auto s = lynx::Song::makeDefault();
+    s.playlist.clear();
+    std::int64_t length = 0;
+    auto pat = lynx::makeExportSong (s, true, lynx::ppq * 8, length); // Playlist vazia: usa a pattern
+    CHECK (length == lynx::ppq * 4);
+    CHECK (pat.mode == lynx::PlayMode::song && pat.playlist.size() == 2);
+    CHECK (pat.songLength() >= length + lynx::ppq * 8);
+
+    // nenhuma nota nova depois do fim da música, só silêncio até o fim da cauda
+    lynx::EventBuffer events;
+    const auto tps = lynx::ticksPerSample (pat.bpm, 48000.0);
+    int onsAfterEnd = 0, onsBefore = 0;
+
+    for (double tick = 0.0; tick < (double) (length + lynx::ppq * 8); tick += 512 * tps)
+    {
+        events.clear();
+        lynx::scheduleSong (pat, tick, 512, tps, events);
+        for (const auto& e : events)
+            if (e.type == lynx::NoteEvent::Type::on)
+                (tick + e.sampleOffset * tps >= (double) length ? onsAfterEnd : onsBefore)++;
+    }
+
+    CHECK (onsBefore == (int) s.patterns[0].notes.size());
+    CHECK (onsAfterEnd == 0);
+
+    // com Playlist: o fim é o do último clip, sem arredondar
+    s.playlist.push_back ({ 0, 0, lynx::ppq * 2, lynx::ppq * 3, 0 });
+    auto song = lynx::makeExportSong (s, true, 0, length);
+    CHECK (length == lynx::ppq * 5 && song.playlist.size() == 1);
+    song = lynx::makeExportSong (s, false, 0, length);
+    CHECK (length == lynx::ppq * 4 && song.playlist[0].start == 0);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

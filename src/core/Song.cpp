@@ -126,6 +126,47 @@ void Song::removeChannel (int index)
             --c.channel;
 }
 
+Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength)
+{
+    Song out = song;
+
+    if (out.patterns.empty())
+        out.patterns.emplace_back().name = "Pattern 1";
+
+    if (! wholeSong || out.playlist.empty())
+    {
+        const auto index = std::clamp (out.currentPattern, 0, (int) out.patterns.size() - 1);
+        Clip clip;
+        clip.pattern = index;
+        clip.length = out.patterns[(std::size_t) index].effectiveLength (out.beatsPerBar);
+        out.playlist = { clip };
+        musicLength = clip.length;
+    }
+    else
+    {
+        musicLength = 0;
+
+        for (const auto& c : out.playlist)
+            musicLength = std::max (musicLength, c.end());
+    }
+
+    // pattern vazia na cauda: estende a música sem tocar nada. Um compasso a mais de folga
+    // porque o último bloco renderizado passa um pouco do fim e não pode voltar ao início.
+    if (tailTicks > 0)
+    {
+        tailTicks += (std::int64_t) ppq * std::max (1, out.beatsPerBar);
+        out.patterns.emplace_back().name = "(cauda)";
+        Clip tail;
+        tail.pattern = (int) out.patterns.size() - 1;
+        tail.start = musicLength;
+        tail.length = tailTicks;
+        out.playlist.push_back (tail);
+    }
+
+    out.mode = PlayMode::song;
+    return out;
+}
+
 Song Song::makeDefault()
 {
     Song song;

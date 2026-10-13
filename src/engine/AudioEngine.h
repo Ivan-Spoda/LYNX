@@ -73,8 +73,11 @@ public:
     bool importFlpFile (const juce::File& file, juce::String& error);
 
     // Renderiza sem dispositivo de áudio. Grava em `output` se não for nullptr.
-    // Retorna o pico (usado pelo autoteste).
-    float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr);
+    // Depois de `seconds`, continua por até `tailSeconds` enquanto ainda houver som.
+    // `progress(0..1)` retorna false para cancelar. Retorna o pico (usado pelo autoteste),
+    // ou -1 se cancelado.
+    float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr,
+                         const std::function<bool (double)>& progress = {}, double tailSeconds = 0.0);
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
 

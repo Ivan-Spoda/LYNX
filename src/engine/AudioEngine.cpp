@@ -85,9 +85,11 @@ void AudioEngine::buildInitialGraph()
     jassert (graph.getConnections().size() == 4);
 }
 
-float AudioEngine::renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output)
+float AudioEngine::renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output,
+                                  const std::function<bool (double)>& progress, double tailSeconds)
 {
     constexpr int blockSize = 512;
+    constexpr float silence = 3.0e-5f; // ~ -90 dB
     transport.sampleRate.store (sampleRate);
     graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
     graph.prepareToPlay (sampleRate, blockSize);
@@ -96,26 +98,48 @@ float AudioEngine::renderOffline (double seconds, double sampleRate, juce::Audio
     juce::AudioBuffer<float> buffer (2, blockSize);
     juce::MidiBuffer midi;
     float peak = 0.0f;
+    const auto musicSamples = (std::int64_t) (seconds * sampleRate);
+    const auto totalSamples = musicSamples + (std::int64_t) (juce::jmax (0.0, tailSeconds) * sampleRate);
+    std::int64_t quietSamples = 0;
+    bool cancelled = false;
 
-    for (int done = 0; done < (int) (seconds * sampleRate); done += blockSize)
+    for (std::int64_t done = 0; done < totalSamples; done += blockSize)
     {
-        buffer.clear();
-        graph.processBlock (buffer, midi);
+        const auto n = (int) juce::jmin<std::int64_t> (blockSize, totalSamples - done);
+        juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), 2, n);
+        view.clear();
+        graph.processBlock (view, midi);
 
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-            softClip (buffer.getWritePointer (ch), blockSize);
+        for (int ch = 0; ch < view.getNumChannels(); ++ch)
+            softClip (view.getWritePointer (ch), n);
 
-        peak = juce::jmax (peak, buffer.getMagnitude (0, blockSize));
+        const auto blockPeak = view.getMagnitude (0, n);
+        peak = juce::jmax (peak, blockPeak);
 
         if (output != nullptr)
-            output->writeFromAudioSampleBuffer (buffer, 0, blockSize);
+            output->writeFromAudioSampleBuffer (view, 0, n);
 
-        transport.positionTicks.store (transport.positionTicks.load() + blockSize * transport.ticksPerSample());
+        transport.positionTicks.store (transport.positionTicks.load() + n * transport.ticksPerSample());
+
+        // na cauda: meio segundo de silêncio encerra
+        if (done + n > musicSamples)
+        {
+            quietSamples = blockPeak < silence ? quietSamples + n : 0;
+
+            if (quietSamples > (std::int64_t) (sampleRate * 0.5))
+                break;
+        }
+
+        if (progress && (done / blockSize) % 32 == 0 && ! progress ((double) done / (double) juce::jmax<std::int64_t> (1, totalSamples)))
+        {
+            cancelled = true;
+            break;
+        }
     }
 
     stop();
     graph.releaseResources();
-    return peak;
+    return cancelled ? -1.0f : peak;
 }
 
 void AudioEngine::play() noexcept { transport.playing.store (true); }
