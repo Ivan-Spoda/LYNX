@@ -117,27 +117,34 @@ Atualizado em 2026-10-13.
 - **Compasso** da música (menu da pattern), importado do `.flp`.
 
 ## Confirmado x aproximado (import do FL)
-Tudo o que o import faz com plugins do FL vem dos documentos `docs/analise/REA_rodada*.md`. As rodadas 17 e
-18 verificaram as hipóteses (decompilação + manual oficial) e o código foi corrigido. Aplicado da rodada 18:
-Harmor (corte em log2 Hz 73,4 Hz…17,7 kHz com keytrack a partir de 130,81 Hz, tipos 0…18, volume
-`(3^x − 1)/2`, nível²), Sytrus (FM 4·g ciclos confirmada; RM em anel `1 − |a| + a·mod`), Effector (Delay com
-tempo do Mod Rate e realimentação X², Filter LP/HP, Reverb com abafamento Y²), Love Philter (base do arquivo,
-modo fixo por alvo; Mod X/Y → volume, inclusive automação/links de Mod X/Y), Toxic (FM 2·célula, sentido da
-matriz lido no código), BassDrum (Peak `1 + 100x³·s⁴`), Sakura (ADSR, Tune, Mix), BooBass (EQ de 3 bandas),
-Drumpad (Pitch e Mallet Amplitude).
+Tudo o que o import faz com plugins do FL vem dos documentos `docs/analise/REA_rodada*.md`. As rodadas 17, 18
+e 19 verificaram as hipóteses (decompilação + manual oficial) e o código foi corrigido. Aplicado:
+- Effector: efeito próprio (`core/Effector.cpp`) com os 12 algoritmos e os 12 parâmetros crus do FL — LFO preso
+  à música, Mod Rate/Tempo Reduce, entrada/saída; Distort (cascata exata), Lo-fi, Delay (tempo do Mod Rate),
+  Reverb (seco preservado), Stereo, Trancer, Stutter, Vowel e Ring com as leis lidas no código.
+- Harmor: corte em log2 Hz (73,4 Hz…17,7 kHz) com keytrack a partir de 130,81 Hz, tipos 0…18, volume
+  `(3^x − 1)/2` (até +12 dB), nível², envelope do filtro centrado em 0,5 com ±2·(hi − lo)·amt.
+- Sytrus: FM 4·g ciclos; RM em anel `1 − |a| + a·mod`. Toxic: FM 2·célula (sentido da matriz lido no código),
+  filtro p300 (LP/BP/HP), corte `2^(9u + 5)`, key-track 0,09·KT oct/st, envelope ±9·EGAmt oct.
+- Kepler: LFO1 (taxa, vibrato e corte em picos ±, atraso). BassDrum: Peak `1 + 100x³·s⁴`. Sakura: ADSR, Tune,
+  Mix, Hi-Cut. BooBass: EQ de 3 bandas. Drumpad: Pitch e Mallet Amplitude.
+- Love Philter: base do articulador, Mod X/Y → volume (com automação/links), tipos 4/5 (largura em oitavas),
+  7 (passa-tudo) e 11 (Mango).
 
 O que **ainda não tem confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
-- Harmor: ressonância e envelope do filtro (faixa do envelope não confirmada: ficam de fora); nível depois do
-  note-off com o envelope de volume desligado (o LYNX usa um release curto de declick); imagem/blur/prism/FX.
-- Sakura: as cordas físicas viram serra + triângulo; decaimento da corda calculado na tecla 60; Hi-Cut fora.
-- BooBass: a fonte é uma amostra interna (não está no projeto): o LYNX usa uma serra uma oitava abaixo.
-- Drumpad: o modelo físico (malha) não é reproduzido; timbre pelo nome do patch.
-- Toxic: filtro aberto (o índice do modo do filtro não foi localizado); ataque do envelope do modulador fora.
-- Kepler: profundidade do LFO e chorus (o synth do LYNX não tem chorus).
-- Effector: Distort/Lo-fi/Flanger/Phaser/Stereo continuam aproximados; corte em Hz do Filter estimado por um
-  polo a 44,1 kHz; Delay com Y > 0,5 (passa-altas no eco) fora.
-- Love Philter: tipos BP/notch (largura), passa-tudo e Mango; envelopes/LFOs ligados; Mod X com várias
-  unidades só no valor fixo.
+- Harmor: ressonância (curva por harmônica sem equivalente); com o envelope de volume desligado o FL mantém a
+  nota até roubo/redisparo — o LYNX usa um release curto de declick; imagem/blur/prism/FX.
+- Effector: Filter (cascata do FL não tabelada: 4 polos com realimentação), Flanger/Phaser (topologia exata
+  da realimentação), Reverb (decaimento/abafamento pelo reverb do LYNX).
+- Sakura: cordas físicas viram serra + triângulo; decaimento da corda na tecla 60; Hi-Cut na saída, não no
+  excitador; taxa do motor (48 kHz) não confirmada para o render.
+- BooBass: fonte é uma amostra interna que não está no projeto (o LYNX usa uma serra). Drumpad: o modelo
+  físico não é reproduzido.
+- Toxic: o filtro do FL tem 4 polos (o do LYNX, 2); ressonância sem escala; envelope do filtro linear no LYNX.
+- Kepler: chorus (o synth do LYNX não tem chorus); "Range" ×10 só no Exo; BPM Sync do LFO.
+- Love Philter: Mango em Hz é inferido do polo; envelopes/LFOs ligados; Mod X com várias unidades só no
+  valor fixo.
+- Pitcher: sem equivalente estático (a correção depende do detector de altura): passa reto.
 - Squeeze, Vintage Phaser: aproximações.
 - FLEX: os pacotes são protegidos; o LYNX não os abre (patch do synth pelo nome do preset).
 

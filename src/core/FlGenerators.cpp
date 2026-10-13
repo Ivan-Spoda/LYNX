@@ -385,7 +385,10 @@ bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& syn
     // D = 50x⁵ + 0,001 s e R = 10x⁵ + 0,1 s com polos de constante T/8,82 (o LYNX mede o tempo até −60 dB:
     // ×6,908/8,82), sustain x², Tune trunc(198x − 99)·0,01 semitom, String Mix linear (corda 1 ∝ 1 − mix).
     // O decaimento da corda (realimentação d^0,05 por período → T60 ≈ 60/(f·(−log10 d)) s) depende da
-    // nota: usa-se o T60 da tecla 60 (aproximação). O Hi-Cut fica de fora (a conversão para Hz não foi lida).
+    // nota: usa-se o T60 da tecla 60 (aproximação). Hi-Cut (REA_rodada19 §5): 4 polos de 1ª ordem com
+    // c = Cutoff² (sem envelope); cada polo corta em −fs·ln(1 − c)/2π e a cascata em ≈ 0,435 disso, com
+    // fs = 48 kHz (a taxa dos coeficientes do motor; não confirmada como a de render). No FL ele filtra o
+    // excitador; aqui, a saída do synth (2 polos).
     SynthSettings s;
     const auto mix = t[17];
     s.osc = { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f - mix }, SynthOscillator { Waveform::triangle, 0, 0.0f, mix }, SynthOscillator {} };
@@ -406,6 +409,8 @@ bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& syn
         s.decay = (float) std::max (0.01, stringT60);
     }
     s.cutoff = 20000.0f;
+    if (const auto c = (double) t[29] * t[29]; c < 0.999)
+        s.cutoff = (float) std::clamp (0.435 * -48000.0 * std::log (1.0 - c) / (2.0 * 3.141592653589793), 20.0, 20000.0);
     synth = s;
     return true;
 }
@@ -541,8 +546,28 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
         const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polaridade
         s.filterEnv = { sign * (float) octaves, s.attack, 0.0f, s.decay, s.sustain, s.release };
     }
-    // LFO1: a taxa é confirmada (21,739·2^(−T(x)) Hz), mas as profundidades LFO→DCO/corte não: ficam de fora
-    // chorus I/II do Juno: as taxas não foram confirmadas; sem chorus
+    // LFO1 (REA_rodada17 §6, rodada18 §7, rodada19 §3): um só LFO global quase senoidal, valor ±1;
+    // taxa 21,739·2^(−T(x)) Hz; vibrato ±A(k10) oitavas e corte ±A_c(k23) oitavas (picos); atraso = rampa
+    // linear de D(k7) s. O "Range" ×10 só existe no painel do Kepler Exo (aqui fica desligado); o BPM Sync
+    // (k6) não foi lido. Chorus I/II: o synth do LYNX não tem chorus.
+    static constexpr double lfoRateTable[11] = { 7.4422, 5.8074, 4.3499, 3.6563, 3.1131, 2.6712, 2.0463, 1.3093, 0.8515, 0.2838, 0.0 };
+    static constexpr double vibratoTable[11] = { 0, 0.00116, 0.00813, 0.01506, 0.02196, 0.02882, 0.05259, 0.07819, 0.12057, 0.17728, 0.21388 };
+    static constexpr double lfoCutoffTable[11] = { 0, 0.0914, 0.38038, 0.662, 0.96846, 1.23732, 1.48249, 1.85735, 2.27554, 2.66441, 2.82 };
+    static constexpr double lfoDelayTable[11] = { 0, 0.229, 0.447, 0.547, 0.833, 1.0, 2.074, 4.775, 5.612, 6.774, 6.706 };
+    ChannelLfo lfo;
+    lfo.period = (float) (1.0 / (21.739 * std::exp2 (-table (lfoRateTable, k[5]))));
+    lfo.attack = (float) table (lfoDelayTable, k[7]);
+    lfo.global = true;
+    if (const auto oct = table (vibratoTable, k[10]); oct > 1e-4)
+    {
+        s.lfo[lfoPitch] = lfo;
+        s.lfo[lfoPitch].amount = (float) (12.0 * oct);
+    }
+    if (const auto oct = table (lfoCutoffTable, k[23]); oct > 1e-3)
+    {
+        s.lfo[lfoCutoff] = lfo;
+        s.lfo[lfoCutoff].amount = (float) oct;
+    }
 
     // Main Volume: m(v) = 0,34968v − 0,32754v² + 1,39229v³ (v = 1 -> 0 dB)
     const auto v = (double) k[33];
@@ -768,13 +793,21 @@ bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& s
 
 bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
-    float p[294];
+    float p[301];
     if (! sslfFloats (state, "2iBT", 0x204C, p, 294))
         return false;
+    // p300 (modo do filtro) é cru, fora da faixa 0..1: lido à parte (REA_rodada19 §4.1)
+    std::fill (&p[294], &p[301], 0.0f);
+    if (state.size() >= 0x204C + 301 * 4)
+        std::memcpy (&p[294], state.data() + 0x204C + 294 * 4, sizeof (float) * 7);
+    const auto filterMode = std::isfinite (p[300]) ? std::clamp ((int) p[300], 0, 3) : 0;
 
     // portadora = operador ligado com mais "Mix" (REA_rodada17 §9) + o modulador ligado com a maior célula
     // da matriz para ela (REA_rodada18 §8: o operador alvo t recebe da fonte j a célula 109 + 6j + t,
-    // desvio de fase = 2·célula·saída ciclos). O filtro fica aberto (o modo do filtro não foi localizado).
+    // desvio de fase = 2·célula·saída ciclos). Filtro (REA_rodada19 §4): modo p300 (0 desligado, 1 LP, 2 BP,
+    // 3 HP), corte 2^(9u + 5) Hz na nota 60, key-track 0,09·KT oitava por semitom, envelope ±9·EGAmt oitavas
+    // com EGAmt = sinal(2x − 1)(2x − 1)². O filtro do FL tem 4 polos e o do LYNX 2 (inclinação aproximada);
+    // a ressonância não tem escala confirmada.
     int carrier = -1;
     for (int i = 0; i < 6; ++i)
         if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
@@ -811,6 +844,19 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     s.sustain = p[5] * p[5];
     s.release = 0.35f * seconds (p[6]) + 0.02f;
     s.cutoff = 20000.0f;
+    if (filterMode != 0)
+    {
+        const auto u = (double) p[15], kt = 0.09 * 12.0 * p[17]; // oitavas por oitava
+        s.filterType = filterMode == 1 ? 0 : filterMode == 2 ? 1 : 2;
+        s.keyTrack = (float) kt;
+        s.cutoff = (float) std::clamp (std::exp2 (9.0 * u + 5.0 - kt), 20.0, 20000.0); // o LYNX mede na tecla 48
+        s.resonance = std::clamp (0.9f * p[16], 0.0f, 0.95f);
+        const auto eg = 2.0 * p[23] - 1.0;
+        const auto egAmount = 9.0 * (eg < 0.0 ? -eg * eg : eg * eg);
+        if (std::abs (egAmount) > 0.01)
+            // o polo exponencial do FL chega perto do alvo em ~metade do tempo T; o envelope do LYNX é linear
+            s.filterEnv = { (float) egAmount, seconds (p[19]), 0.0f, 0.5f * seconds (p[20]), p[21] * p[21], 0.5f * seconds (p[22]) };
+    }
     gain = 1.0f;
     synth = s;
     return true;

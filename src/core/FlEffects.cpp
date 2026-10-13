@@ -738,93 +738,20 @@ bool transporter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Effector: o algoritmo escolhido vira o efeito interno parecido. Leis de X/Y do Delay, do Filter e do
-// Reverb: REA_rodada18 §3; as demais continuam aproximadas.
-std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double bpm)
+// Effector: o efeito Effector do LYNX (core/Effector.h) recebe os 12 parâmetros crus do FL
+std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double)
 {
     // "SSLF" + tamanho + "10XF" + 64 floats reservados + os 12 parâmetros
     if (d.size() < 12 + 76 * 4 || std::memcmp (d.data(), "SSLF", 4) != 0)
         return std::nullopt;
     float p[12];
     std::memcpy (p, d.data() + 12 + 64 * 4, sizeof (p));
-    for (auto& v : p)
-        v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
-
-    const auto x = p[3], y = p[4];
-    std::optional<EffectSlot> slot;
-    switch ((int) std::lround (p[0] * 11.0f))
-    {
-        case 0: // Distort
-            slot = makeEffectSlot (EffectKind::distortion);
-            slot->params[0] = x;
-            slot->params[1] = 1.0f - 0.5f * y;
-            break;
-        case 1: // Lo-fi: segura 128X³ + 1 amostras, 65536/(2048Y² + 1) níveis (REA_rodada18 §3.2); crossfade
-            slot = makeEffectSlot (EffectKind::lofi);
-            slot->params[0] = x;
-            slot->params[1] = y;
-            slot->params[2] = 1.0f;
-            break;
-        case 2: case 3: // Flanger / Phaser
-            slot = makeEffectSlot (EffectKind::chorus);
-            slot->params[1] = x;
-            slot->params[3] = y;
-            slot->params[2] = 1.0f;
-            break;
-        case 4: // Filter: s = 2(0,8X + 0,1); s ≤ 1 passa-baixas (polo s³), s > 1 passa-altas (polo 0,5(s − 1)³)
-        {
-            slot = makeEffectSlot (EffectKind::filter);
-            const auto sx = 2.0 * (0.8 * x + 0.1);
-            const auto hp = sx > 1.0;
-            const auto c = std::clamp (hp ? 0.5 * std::pow (sx - 1.0, 3.0) : std::pow (sx, 3.0), 1e-6, 0.999);
-            // corte de um polo com esse coeficiente a 44,1 kHz (o da cascata inteira não foi tabelado)
-            const auto hz = std::clamp (-44100.0 * std::log (1.0 - c) / (2.0 * 3.141592653589793), 20.0, 20000.0);
-            slot->params[0] = hp ? 0.5f : 0.0f;
-            slot->params[1] = (float) (std::log (hz / 20.0) / std::log (1000.0)); // filterHz: 20…20 000 em log
-            slot->params[2] = y;
-            break;
-        }
-        case 5: // Delay: tempo = período do Mod Rate, realimentação e nível do eco X², seco + w·eco
-        {
-            slot = makeEffectSlot (EffectKind::delay);
-            static constexpr double rates[] { 0.125, 0.25, 0.375, 0.5, 0.75, 1.0, 2.0, 4.0, 8.0 };
-            auto beats = rates[std::clamp ((int) (p[5] * 8.0f + 0.5f), 0, 8)];
-            while (beats * 60.0 / std::max (bpm, 20.0) > 1.5)
-                beats *= 0.5;
-            // divisão mais próxima do delay do LYNX (1/16 … 1 compasso)
-            static constexpr double divisions[] { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
-            int best = 0;
-            for (int k = 1; k < 8; ++k)
-                if (std::abs (std::log (divisions[k] / beats)) < std::abs (std::log (divisions[best] / beats)))
-                    best = k;
-            slot->params[0] = ((float) best + 0.5f) / 8.0f;
-            slot->params[1] = std::min (1.0f, x * x / 0.95f);
-            slot->params[2] = p[2] * x * x;
-            slot->params[3] = 0.0f;
-            // Y < 0,5 escurece o eco (passa-baixas de 1 polo 0,99·2Y + 0,01); o passa-altas de Y > 0,5 não existe aqui
-            slot->params[4] = y < 0.5f ? std::clamp ((1.0f - (0.99f * 2.0f * y + 0.01f)) / 0.9f, 0.0f, 1.0f) : 0.0f;
-            slot->mix = 1.0f;
-            slot->enabled = p[1] == 0.0f;
-            return slot;
-        }
-        case 6: // Reverb: decaimento cresce com X³; Y = abafamento dos agudos (Y²)
-            slot = makeEffectSlot (EffectKind::reverb);
-            slot->params[0] = x * x * x;
-            slot->params[1] = y * y;
-            slot->params[3] = 1.0f;
-            slot->params[4] = 0.0f; // só o molhado: o dry/wet do slot faz a mistura
-            break;
-        case 7: // Stereo: p = 2X − 1; Y·p vira diferença de nível (balanço). O atraso Haas de até 2 ms fica de fora
-        {
-            slot = makeEffectSlot (EffectKind::utility);
-            slot->params[1] = (float) clamp01 (0.5 + 0.5 * y * (2.0 * x - 1.0));
-            break;
-        }
-        default: return std::nullopt; // Trans, Grain, Vox, Ring
-    }
-
-    slot->mix = p[2];
-    slot->enabled = p[1] == 0.0f; // bypass = qualquer valor ≠ 0
+    auto slot = makeEffectSlot (EffectKind::effector);
+    for (int i = 0; i < 12; ++i)
+        slot.params[(std::size_t) i] = std::isfinite (p[i]) ? std::clamp (p[i], 0.0f, 1.0f) : 0.0f;
+    slot.enabled = slot.params[1] == 0.0f; // bypass = qualquer valor ≠ 0
+    slot.params[1] = 0.0f;
+    slot.mix = 1.0f; // a mistura de cada algoritmo é feita dentro do efeito (Wet Mix = parâmetro 2)
     return slot;
 }
 
@@ -1179,7 +1106,44 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
             b.ok = true;
             break;
         }
-        default: // 4/5 (largura em unidade não confirmada), 7 (passa-tudo), 11 (Mango, fórmula não detalhada)
+        case 4: case 5: // Vanilla passa-faixa / rejeita-faixa: largura em oitavas (REA_rodada19 §7.1)
+        {
+            x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
+            hzOf = [] (double v) { return (v + 0.0001) * 44100.0; };
+            b.hz = hzOf (x);
+            const auto n = std::max (1, mode);
+            auto bw = 0.01 + 0.1199 * (std::pow (101.0, u.alt ? r * (c + 1.0) * 0.5 : r) - 1.0);
+            bw = u.type == 4 ? bw * n : bw / n; // por estágio
+            const auto w = std::clamp (2.0 * 3.141592653589793 * b.hz / 44100.0, 1e-4, 2.8495);
+            b.q = std::clamp (1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * bw * w / std::sin (w))), 0.1, 18.0);
+            b.type = u.type == 4 ? peq::BandType::bandPass : peq::BandType::notch;
+            b.ok = true;
+            if (b.stages > 1) // a largura já foi dividida por estágio: não refazer a raiz do Q abaixo
+            {
+                b.hz = std::clamp (b.hz, 20.0, 20000.0);
+                return b;
+            }
+            break;
+        }
+        case 7: // passa-tudo: só muda a fase; sozinho na unidade, o módulo é 1 (REA_rodada19 §7.2)
+            b.type = peq::BandType::off;
+            b.ok = true;
+            return b;
+        case 11: // Mango: 4 polos com realimentação; o corte em Hz é inferido do polo (REA_rodada19 §7.3)
+        {
+            x = std::min (3.0, (std::pow (201.0, c) - 1.0) * 0.01495);
+            hzOf = [] (double v) {
+                const auto w = std::min ((v + 0.01) * 0.5, 0.65);
+                return 22050.0 * w * (1.873 * w * w * w + 0.4955 * w * w - 0.649 * w + 0.9988);
+            };
+            b.hz = hzOf (x);
+            b.q = lpQ (r);
+            b.type = peq::BandType::highCut;
+            b.stages = std::min (4, 2 * b.stages); // 4 polos (24 dB/oit) por estágio
+            b.ok = true;
+            break;
+        }
+        default:
             return b;
     }
     if (b.stages > 1)

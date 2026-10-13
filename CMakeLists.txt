@@ -27,6 +27,7 @@ add_library(lynx_core STATIC
     src/core/Templates.cpp
     src/core/FlWrapper.cpp
     src/core/FlEffects.cpp
+    src/core/Effector.cpp
     src/core/FlSamplers.cpp
     src/core/FlSynths.cpp
     src/core/FlSytrus.cpp

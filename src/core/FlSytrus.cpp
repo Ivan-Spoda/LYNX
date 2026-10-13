@@ -907,8 +907,8 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     // filtro 1 (ou o 2 se o 1 estiver aberto). REA_rodada18 §1.2/§1.4: o knob é linear em log2(Hz) entre
     // 73,416 Hz e 17 739,7 Hz para uma nota de 130,81 Hz (tecla 48) e acompanha o teclado com
     // KT = p55/1000 (p67 no filtro 2). Tipos 0…18 = combo sem separadores; só os passa-baixas/faixa/altas
-    // e rejeita-faixa têm equivalente. A ressonância e o envelope do filtro não têm escala confirmada:
-    // ficam de fora (relatado como aproximação no import).
+    // e rejeita-faixa têm equivalente. A ressonância do Harmor (curva por harmônica) não tem equivalente
+    // confirmado no filtro do LYNX e fica de fora.
     const auto& p = main.p;
     int which = p[52] < 8192 ? 0 : p[64] < 8192 ? 1 : -1;
     out.cutoff = 20000.0f;
@@ -931,6 +931,26 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
             out.filterType = lynxType;
             out.cutoff = (float) std::clamp (std::exp2 (lo + freq / 8192.0 * (hi - lo)), 20.0, 20000.0);
             out.keyTrack = (float) std::clamp ((which == 0 ? p[55] : p[67]) / 1000.0, -2.0, 2.0);
+
+            // envelope da frequência (articulador 4/5, aditivo com centro 0,5, REA_rodada19 §2.1):
+            // desloca 2·(hi − lo)·amt·(y − 0,5) oitavas, amt = p56/1000 (p68 no filtro 2)
+            const auto amount = 2.0 * (hi - lo) * std::clamp (which == 0 ? p[56] : p[68], -1000, 1000) / 1000.0;
+            if (! main.art.empty() && std::abs (amount) > 0.01)
+                if (const auto& art = main.art[(std::size_t) (4 + which)]; art.env.on && ! art.env.points.empty())
+                {
+                    const auto adsr = adsrOf (art.env, art.knobs, 1.0);
+                    const auto startLevel = art.env.points.front().second;
+                    double peak = startLevel;
+                    for (const auto& pt : art.env.points)
+                        peak = std::max (peak, pt.second);
+                    const auto susLevel = adsr.s * peak;
+                    const auto low = std::min (startLevel, susLevel);
+                    out.cutoff = (float) std::clamp (out.cutoff * std::exp2 ((low - 0.5) * amount), 20.0, 20000.0);
+                    const auto span = (peak - low) * amount;
+                    if (std::abs (span) > 0.05)
+                        out.filterEnv = { (float) std::clamp (span, -10.0, 10.0), (float) adsr.a, 0.0f, (float) adsr.d,
+                                          (float) std::clamp ((susLevel - low) / std::max (1e-6, peak - low), 0.0, 1.0), (float) adsr.r };
+                }
         }
     }
 

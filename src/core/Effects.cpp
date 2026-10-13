@@ -1,5 +1,7 @@
 #include "core/Effects.h"
 
+#include "core/Effector.h"
+
 #include "core/Biquad.h"
 
 #include <algorithm>
@@ -1378,6 +1380,9 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
     static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
     static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
+    static const EffectInfo effectorInfo { "Effector", { { "Tipo", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
+                                                         { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
+                                                         { "Forma LFO", 0.0f }, { "Entrada", 1.0f }, { "Saída", 0.5f } } };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.8496f }, { "Tensão", 0.5f },
                                                                   { "Queda", 0.4959f }, { "Base do LFO", 0.0f } } };
     static const EffectInfo parametric = [] {
@@ -1429,6 +1434,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::freqShift: return freqShift;
         case EffectKind::parallel: return parallelInfo;
         case EffectKind::lofi: return lofiInfo;
+        case EffectKind::effector: return effectorInfo;
     }
     return eq;
 }
@@ -1609,6 +1615,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
+        case EffectKind::effector:
+            return effector::formatParam (param, v, bpm);
+
         case EffectKind::plugin:
         case EffectKind::parallel:
             break;
@@ -1654,6 +1663,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::freqShift: return std::make_unique<FreqShift>();
         case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // vazio: use makeParallelEffect
         case EffectKind::lofi: return std::make_unique<LoFi>();
+        case EffectKind::effector: return effector::make();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

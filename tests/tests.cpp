@@ -13,6 +13,7 @@
 
 #include "core/Dither.h"
 #include "core/Effects.h"
+#include "core/Effector.h"
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
 #include "core/FlPatcher.h"
@@ -4484,4 +4485,96 @@ TEST (lofi_holds_and_quantizes)
         CHECK (std::abs (v / step - std::round (v / step)) < 1e-3f);
     CHECK (std::abs (l[0] - original[0]) <= step);
     CHECK (lynx::formatEffectParam (lynx::EffectKind::lofi, 1, 0.0f, 120.0) == "16.0 bits");
+}
+
+namespace
+{
+lynx::EffectParams effectorParams (int type, float x, float y)
+{
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::effector);
+    slot.params[0] = (float) type / 11.0f;
+    slot.params[3] = x;
+    slot.params[4] = y;
+    return slot.params;
+}
+} // namespace
+
+TEST (effector_algorithms)
+{
+    CHECK (lynx::effector::typeOf (8.0f / 11.0f) == 8);
+    CHECK (std::string (lynx::effector::typeName (11)) == "Ring");
+    CHECK (std::abs (lynx::effector::rateBeats (0.5f, 0.0f) - 0.75) < 1e-9); // trunc(8·0,5 + 0,5) = 4 -> 3/4
+    CHECK (std::abs (lynx::effector::rateBeats (1.0f, 0.5f) - 2.0) < 1e-9);   // 8 × (1 − 0,5)²
+
+    auto run = [] (const lynx::EffectParams& p, std::vector<float> in, double bpm = 120.0) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::effector);
+        fx->prepare (48000.0);
+        fx->setSongPosition (0.0);
+        auto r = in;
+        fx->process (in.data(), r.data(), (int) in.size(), p, bpm);
+        return in;
+    };
+
+    // Distort com Y = 1 (tudo vai para a cascata): 0,5 sai 0,5 (compensação G = 0,5/F(0,5))
+    {
+        auto p = effectorParams (0, 0.5f, 1.0f);
+        const auto out = run (p, std::vector<float> (4800, 0.5f));
+        CHECK (std::abs (out.back() - 0.5f) < 1e-3f);
+        const auto small = run (p, std::vector<float> (4800, 0.05f));
+        CHECK (small.back() > 0.45f && small.back() < 0.5f); // satura perto de ±0,5
+    }
+
+    // Ring: DC 1 vira o seno do portador, 2^(8,7·0 + 5) = 32 Hz -> 32 ciclos por segundo
+    {
+        auto p = effectorParams (11, 0.0f, 0.0f);
+        const auto out = run (p, std::vector<float> (48000, 1.0f));
+        int crossings = 0;
+        for (std::size_t i = 4800; i < out.size(); ++i)
+            crossings += (out[i - 1] < 0.0f) != (out[i] < 0.0f);
+        CHECK (crossings >= 56 && crossings <= 60); // 0,9 s × 32 Hz × 2
+    }
+
+    // Trancer, Y = 0: no começo do período o ganho cai a zero; X = 1 volta só no fim do período
+    {
+        auto p = effectorParams (8, 1.0f, 0.0f);
+        p[5] = 1.0f; // 8/1 = 8 tempos = 4 s a 120 BPM
+        const auto out = run (p, std::vector<float> (48000, 1.0f));
+        CHECK (out[100] > 0.3f);       // ainda subindo o "e" (1 % do período = 40 ms)
+        CHECK (out[24000] < 0.05f);    // 0,5 s: vale
+    }
+
+    // Reverb com Wet = 0: o seco passa intacto
+    {
+        auto p = effectorParams (6, 0.5f, 0.5f);
+        p[2] = 0.0f;
+        std::vector<float> in (4800);
+        for (std::size_t i = 0; i < in.size(); ++i)
+            in[i] = (float) std::sin (0.01 * (double) i);
+        const auto out = run (p, in);
+        for (std::size_t i = 0; i < in.size(); ++i)
+            CHECK (std::abs (out[i] - in[i]) < 1e-6f);
+    }
+
+    // Delay: o eco chega depois do período do Mod Rate (1/4 de tempo a 120 BPM = 125 ms), com nível X²
+    {
+        auto p = effectorParams (5, 0.7f, 0.5f);
+        p[5] = 1.0f / 8.0f; // índice 1 = 1/4
+        std::vector<float> in (12000, 0.0f);
+        in[0] = 1.0f;
+        const auto out = run (p, in);
+        CHECK (std::abs (out[6000] - 0.49f) < 0.02f);
+        CHECK (std::abs (out[3000]) < 1e-6f);
+    }
+
+    // Stutter: repete o começo gravado a cada período
+    {
+        auto p = effectorParams (9, 0.0f, 0.0f);
+        p[5] = 0.0f; // 1/8 de tempo = 62,5 ms = 3000 amostras
+        std::vector<float> in (9000);
+        for (std::size_t i = 0; i < in.size(); ++i)
+            in[i] = (float) i / 9000.0f;
+        const auto out = run (p, in);
+        CHECK (std::abs (out[3000 + 500] - in[500]) < 0.01f); // depois do crossfade, é o começo de novo
+        CHECK (std::abs (out[1000] - in[1000]) < 1e-6f);
+    }
 }
