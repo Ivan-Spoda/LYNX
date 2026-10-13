@@ -213,6 +213,7 @@ struct Project
     std::string version;
     std::uint32_t versionNumber = 0; // major*1e6 + minor*1e3 + patch
     double tempo = 140.0;
+    int beatsPerBar = 4; // evento 0x11 (o primeiro, do projeto)
     std::string title, artist, genre, url;
 
     std::vector<Channel> channels;

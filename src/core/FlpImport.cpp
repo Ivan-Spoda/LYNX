@@ -117,6 +117,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
+    song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
 
     // Canais do FL podem ter índices esparsos; mapeamos para índices densos.
     std::map<int, int> channelMap;

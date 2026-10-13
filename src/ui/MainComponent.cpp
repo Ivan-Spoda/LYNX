@@ -469,6 +469,13 @@ void MainComponent::showPatternMenu()
             s.currentPattern = index + 1;
         });
     });
+    juce::PopupMenu signatures;
+
+    for (int beats : { 2, 3, 4, 5, 6, 7, 8, 9, 12 })
+        signatures.addItem (juce::String (beats) + "/4", true, song.beatsPerBar == beats,
+                            [this, beats] { engine.editSong ([beats] (Song& s) { s.beatsPerBar = beats; }); });
+
+    menu.addSubMenu (utf8 ("Compasso da música"), signatures);
     menu.addSeparator();
     menu.addItem ("Remover pattern", song.patterns.size() > 1, false,
                   [this, index] { engine.editSong ([index] (Song& s) { s.removePattern (index); }); });

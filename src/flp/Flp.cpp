@@ -10,6 +10,7 @@ namespace
 // IDs de evento (nomes descrevem o significado, não seguem nenhuma API)
 enum : std::uint32_t
 {
+    evTimeSignatureNumerator = 0x11,
     evChannelType = 0x15,
     evChannelMixerTrackOld = 0x16, // u8, arquivos antigos
     evNewChannel = 0x40,
@@ -320,6 +321,7 @@ Project parseProject (std::span<const std::uint8_t> file)
     enum class Section { global, channel, arrangement, mixer } section = Section::global;
     int currentChannel = -1, currentPattern = -1, currentArrangement = -1;
     bool hasFineTempo = false;
+    bool hasTimeSignature = false;
     std::string pendingInsertName;
     std::uint32_t pendingInsertColour = 0;
 
@@ -345,6 +347,14 @@ Project parseProject (std::span<const std::uint8_t> file)
             case evTempo:
                 project.tempo = e.value / 1000.0;
                 hasFineTempo = true;
+                break;
+
+            case evTimeSignatureNumerator:
+                if (! hasTimeSignature && e.value >= 1 && e.value <= 32)
+                {
+                    project.beatsPerBar = (int) e.value;
+                    hasTimeSignature = true; // os seguintes são de patterns
+                }
                 break;
 
             case evTempoCoarse:

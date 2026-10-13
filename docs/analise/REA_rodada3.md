@@ -286,3 +286,214 @@ se k é ímpar (contratempo de 16 avos):
 2. Implemente no agendador de notas, e não por step: `atraso = (S − 2·|p − k·S|) · sg · sc / 2`
    (sg, sc ∈ 0…1), aplicado só quando o step mais próximo é ímpar. Isso reproduz o FL para steps e notas
    livres.
+
+---
+
+## 4. Parâmetros do canal: evento `0xD7` e eventos pequenos relacionados
+
+### 4.1 Carga **[DECOMP]**
+
+O dispatcher copia até **168 B** de `0xD7` para `C+0x284` (logo, offset no evento = `C+0x284+off`).
+Tamanhos vistos nos demos: 168 (1.855), 125 (758), 158, 157, 156, 112 (versões antigas são prefixos).
+Conversões de versão no load:
+
+- `< 10.?` (`0x1e8c50`) com `off 0x04 ≠ 0xFF`: preenche campos legados do sampler (`S+0x23C…0x254`).
+- `< 11.5.13` (`0x2dd27c`): zera os bytes `0x3D…0x3F` e normaliza `0x3C` para bool.
+- `< 11.?` (`0x2dda4a`): `0x34` e `0x40` passam por `FUN_0117bc50` e são limitados a **450…1447**.
+- `< 5.3.7`: `C+0x170`/`C+0x16C` ×100 (vol/pan antigos).
+- `< 6.1.5` (`0x5b916d`): modo de stretch 1…2 → +2; ≥ 3 → +4.
+- `< 6.1.?` (`0x5b9d21`): zera `0x04…0x07`.
+- `< 11.5.13` (`0xa7ec55`): **modo de stretch** remapeado pela tabela `{0,6,6,7,7,8,9,3,4,5}`
+  (`0x014e01fb`), e o resultado 5 vira 6.
+- Se `(flagsA9 & 1) == 0`: o campo `0x60` (tempo do stretch) estava gravado como **int** e é convertido
+  para float.
+
+### 4.2 Layout (168 B) **[marcas por linha]**
+
+Defaults = valor mais comum nos demos. A coluna "Evidência" diz o que foi confirmado. Os nomes marcados
+[HIP/com.] batem com a nomenclatura pública da comunidade (PyFLP) **e** com a distribuição dos dados, mas
+não foram vistos sendo consumidos no código.
+
+| Off | Tipo | Campo | Default | Evidência |
+|---|---|---|---|---|
+| 0x00 | i32 | ? (140 em audio clips, −1 nos demais) | −1 | [DADOS] não é o BPM do projeto |
+| 0x04 | i32 | campo legado (gatilho da conversão < 10) | 0 | [DECOMP] |
+| 0x08 | u8 | ? (1) | 1 | [DADOS] |
+| 0x0A | u8 | também escrito pelo evento `0x10` | 0 | [DECOMP] |
+| 0x0B | u8 bool | também escrito pelo evento `0x0E` (1 em geradores, 0 em audio/automation) | 1 | [DECOMP+DADOS] |
+| 0x0C | i32 | também escrito pelo evento `0x8D` | −1 | [DECOMP] |
+| 0x10 | i32 | 60 (nota C5) | 60 | [DADOS] provável nota-raiz do teclado [HIP] |
+| 0x14…0x27 | 5×f32 | 1,0 cada | 1,0 | [DADOS] |
+| 0x28 | i32 | **Arp: direção** (0 = off, 1 = up, …) | 0 | [HIP/com.+DADOS] |
+| 0x2C | i32 | **Arp: range** (oitavas) | 1 (audio clips: 3) | [HIP/com.] |
+| 0x30 | i32 | **Arp: acorde** (−1 = nenhum) | −1 | [HIP/com.] |
+| 0x34 | i32 | **Arp: time** (escala 450…1447, mesma conversão do gate) | 1024 | [DECOMP: clamp] + [HIP/com.] |
+| 0x38 | i32 | **Arp: gate** (0…48; 48 = 100 %) | 48 | [HIP/com.] (mesma faixa do arp do piano roll) |
+| 0x3C | u8 | Arp: slide | 0 | [HIP/com.] |
+| 0x3E | u8 | "Full porta" | 1 | [HIP/com.] |
+| 0x3F | u8 | "Add root" | 0 | [HIP/com.] |
+| 0x40 | i32 | **Gate do canal** (450…1447; **≥ 1447 = desligado**). Parâmetro de canal `p=9`. Quando ativo, a nota é encurtada para `pos + C+0x6D8` no disparo | 1447 | [DECOMP: `FUN_00d293d0`, `FUN_01046a70`] |
+| 0x44, 0x48 | 2×i32 | (0, 256) "key region"? | | [HIP/com.] |
+| 0x4C | i32 | parâmetro de canal `p=10` | 0 | [DECOMP] |
+| 0x50 | u8 | Normalize (precomputed) | 0 | [HIP/com.+DADOS] |
+| 0x51 | u8 | Inverter polaridade (precomputed) | 0 | [HIP/com.] |
+| 0x53 | u8 | **Modo de declick** (0…5) | 0 | [HIP/com.+DADOS: 0,1,3,2,5] |
+| 0x54 | i32 | Crossfade do loop | 0 | [HIP/com.] |
+| 0x58 | i32 | Trim | 0 | [HIP/com.] |
+| 0x5C | i32 | Arp: repeat | 1 | [HIP/com.] |
+| **0x60** | f32 (ou i32, ver acima) | **Stretch TIME**: duração-alvo em **1/192 de beat** (0 = desligado) | 0 | **[DECOMP]** `FUN_00fea570`, `FUN_00d26890` |
+| **0x64** | i32 | **Stretch PITCH** em centésimos (±1200) | 0 | **[DECOMP]** somado ao pitch da voz em `FUN_00d26890` |
+| **0x68** | i32 | **Stretch MUL** bruto: fator = `2^(v/10000)` (±20000 → ×¼…×4; 0 → 1,0) | 0 | **[DECOMP]** `FUN_01186110` |
+| **0x6C** | i32 | **Modo de stretch** (tabela §5.2) | 0 | **[DECOMP+STR]** |
+| 0x70 | i32 | ? | 2 | [DADOS] |
+| 0x74 | i64 | ? | −2 | [DADOS] |
+| **0x80** | f64 | **Início da amostra** (fração 0…1 do comprimento) | 0,0 | [DADOS: 0,057…] [HIP forte] |
+| **0x88** | f64 | **Fim/comprimento da amostra** (fração 0…1) | 1,0 | [DADOS: 0,39, 0,27…] [HIP forte] |
+| **0x90** | f64 | **Start offset** de reprodução = `v/máx_do_knob` (parâmetro `p=13`) | 0,0 | **[DECOMP]** `FUN_01046a70` |
+| 0x98 | i32 | ? | −1 | [DADOS] |
+| 0x9C, 0x9D | u8 | flags (1,1) | | [DADOS] |
+| **0xA0** | f64 | **Formant** 0…1 (0,5 = "preserve"); exibido como ±1200 c; parâmetro `p=15` = `v·2400` | 0,5 | **[DECOMP]** `FUN_01046a70` (texto "preserve") e `FUN_0067db90` |
+
+### 4.3 Outros eventos do canal que a LYNX precisa **[DECOMP+DADOS]**
+
+| Evento | Destino | Conteúdo |
+|---|---|---|
+| `0x00` (u8) | `C+0x32E` | Canal **ligado** (bool; parâmetro `p=7`) |
+| `0x15` (u8) | tipo | ChanType 0…5 |
+| `0x16` (u8/u16) | `C+0x258` | Trilha de mixer de destino (parâmetro `p=8`) |
+| `0x30` (u8) | `C+0x224` | "Truncate swing notes" (§3) |
+| `0x61` (u32) | `C+0x220` | Swing mix do canal 0…128 (§3) |
+| **`0x84` (u32)** | `C+0x27C`, `C+0x280` | **Cut group** = u16 baixo, **cut by** = u16 alto. Quando os dois são iguais e ≠ 0, o canal "corta a si mesmo" (`FUN_00feaaf0`; string " - cut by self"). Nos demos: `0x00010001`, `0x00020002`… |
+| **`0x87` (u32)** | `S+0x15C` | **Nota-raiz da amostra** (MIDI; só gravada quando ≠ default). Valores vistos 36, 48, 59, 72, 84 [HIP forte] |
+| `0x8F` (u32) | flags do sampler | bit 0 → `S+0xBD`, bit 1 → `S+0xF9`, bit 2 → `S+0xFA`, bit 3 → `S+0x14D`, bit 8 → `S+0xF8`. Audio clips: 2 / 0x102; samplers: 10 [nomes HIP] |
+| **`0xDD` (9 B)** | `C+0x1EC` | **Polifonia**: `i32 máx. vozes` (0 = ilimitado, 1 = mono), `i32 tempo de slide/porta` (parâmetro `p=6`), `u8 flags`. O disparo de voz chama o limitador `FUN_00d2bd90` quando máx ≠ 0 [DECOMP parcial] |
+| `0xDB` (24 B) | `C+0x16C` | pan/vol/pitch/ModX/ModY/tipo de filtro (§2) |
+| `0xE5` (20 B) | `C+0x184` | ajustes de nível (§2) |
+| `0xD1` (20 B) | `C+0x200` | Bloco "echo/delay" do canal: `+0x04` recebe +6400 no load; `+0x0C` nº de ecos (4); `+0x10` tempo (144). O evento legado `0x82` deriva `feedback = (128/(n+1))·n` [HIP para os nomes] |
+| `0xDA` ×5 | `S+0x198` | Envelopes/LFOs (§1) |
+
+**Não localizado nesta rodada:** a flag "Reverse" do sampler e "Keep on disk" (`KeepOnDiskBox` existe no
+DFM, mas não achamos o campo; candidatos: bits de `0x8F` ou bytes `0x50…0x53`/`0x9C` do `0xD7`).
+
+---
+
+## 5. Time-stretch de samplers e audio clips
+
+### 5.1 Como a voz calcula a velocidade de leitura (`FUN_00d26890`) **[DECOMP]**
+
+Definições (por voz):
+- `len` = comprimento da amostra em frames (`sample+0xA4`); `SRs` = sample rate da amostra (`sample+0x7C`).
+- `k` = `1/SR_saída` (fator global em `PTR_015e2e68+0x18`), então `SRs·k` é a razão de sample rate.
+- `T` = tempo-alvo em amostras de saída = `(time·(PPQ/4)/48) · amostrasPorTick` = `time/192` beats.
+- `mul = 2^(MUL/10000) · fatorDoEvento`, onde `fatorDoEvento` vem do item da playlist (ver §5.3; 1,0
+  para notas comuns).
+- `p` = pitch total em centésimos = pitch da nota/voz + pitch do canal + **Stretch PITCH** (`0x64`).
+- `FUN_0067d9b0(r)` define a velocidade de leitura `r` (amostras da fonte por amostra de saída). Para
+  `r > 1` o interpolador sinc baixa o corte para `π/r` e aumenta o número de pontos (máx. 512).
+- `FUN_0067db00(p, r)` = reamostragem: velocidade `2^(p/1200)·r` (pitch e duração acoplados).
+- `FUN_0067db90(p, τ, f)` = **stretch em tempo real** (élastique): pitch `2^(p/1200)` (clamp 0,01…32),
+  razão de tempo τ (clamp 1e-5…32) e formant `2^((1−f)·2 − 1)` (f = 0,5 → sem alteração).
+
+| Modo (`0x6C`) | TIME = 0 | TIME > 0 |
+|---|---|---|
+| **< 0** (Stretch, Stretch Pro: tempo real) | `r = SRs·k/mul`; élastique com pitch `p`, τ = `1/mul`, formant | `r = len/(T·mul)`; élastique com pitch `p`, τ = `len/(T·mul·SRs·k)`, formant → **a duração segue o BPM e o pitch fica independente** |
+| **0** (Resample) | reamostragem `2^(p/1200)·SRs·k`, dividida por `mul` se MUL ≠ 0 ou fator ≠ 1 | `r = len/(T·mul)` → encaixa no tempo, **o pitch acompanha** (o pitch da nota é ignorado) |
+| **≥ 1** (e3, slice, auto, e2: pré-calculados) | reamostragem `2^(p/1200)·SRs·k` (sem `mul`) | `r = len/(T·mul)` sobre o buffer já esticado offline |
+
+Os modos ≥ 1 são renderizados **offline** (`FUN_00a981f0`, unit `DSP_Stretching`: élastique, ou fatias por
+região para "slice"); daí o diálogo "Restretch all channels now?". Em tempo real só tocam o buffer
+pronto. A mensagem "The sample rate of this sample is too high. Choose a different time stretching option."
+vem desse caminho offline.
+
+### 5.2 Valores do modo **[DECOMP+STR, mapeamento por deslocamento: HIP forte]**
+
+A unit tem um array fixo de 12 nomes (`0x015ca520`): `stretch pro, stretch, resample, e3 generic, e3 mono,
+slice stretch, slice map, auto, e2 generic, e2 transient, e2 mono, e2 speech`. Com "resample" = 0 (o único
+modo em que o código divide a reamostragem por `mul`), o valor gravado é `índice − 2`:
+
+| Valor | Modo | Tipo |
+|---|---|---|
+| −2 | Stretch Pro | tempo real, com formant |
+| −1 | Stretch | tempo real |
+| 0 | Resample | reamostragem |
+| 1 | E3 generic | offline |
+| 2 | E3 mono | offline |
+| 3 | Slice stretch | offline por fatias |
+| 4 | Slice map | offline por fatias |
+| 5 | Auto | offline |
+| 6…9 | E2 generic / transient / mono / speech | offline |
+
+Isso bate com a conversão de arquivos antigos (os valores antigos 1…6 viram 6…9 = família E2; 7…9 viram
+3…5 = slice/auto) e com os demos: audio clips usam 0 (452), 5 (123), −1 (83), 2 (17), −2 (14).
+
+### 5.3 Audio clip na playlist **[DECOMP + HIP forte]**
+
+- O audio clip é um canal `ChanType 4` com a amostra em `0xC4`; os campos de stretch são os do `0xD7`
+  desse canal. Nos demos, 128 dos 705 audio clips têm TIME > 0 (ex.: 1536 = 8 beats, 3072 = 16 beats,
+  6144 = 32 beats).
+- Ao disparar a voz de um item da playlist (`FUN_00d293d0`), a voz do sampler recebe a **amostra do clip**
+  e um **fator de velocidade por evento** (`voz+0x39C`, double, default 1,0; `FUN_00d27bc0`). Esse fator
+  multiplica o `mul` do canal em `FUN_00d26890`.
+- No item de playlist de 80 B, o `f64` em `+0x40` (§4.2 da rodada 2) é 1,0 em 10.481 itens e 1,6303 /
+  1,2855 em 95 itens de audio clip que foram **redimensionados com stretch** ("Stretch audio when resizing
+  audio clips"). Isso indica que `+0x40` é esse fator de stretch por clip **[HIP forte]**.
+- Mapeamento tempo do clip → tempo da amostra (modo com TIME > 0):
+  `amostraPos = posNoClip_amostras · len / (T · mul · fatorClip)`. Como `T` é recalculado com
+  `amostrasPorTick`, uma mudança de BPM muda a velocidade de leitura: o clip continua ocupando
+  `time/192 · mul · fator` beats.
+- Os offsets de início/fim do item (`+0x18/+0x1C`) de audio clips **não** estão em ticks simples (num demo,
+  fim = 1484,9 para um item de 385 ticks com fator 1,2855). A unidade ficou em aberto.
+
+### Recomendações para o LYNX (stretch)
+
+1. Importador: leia `0x60` (TIME, em 1/192 beat; int se `(flagsA9&1)==0`), `0x64` (pitch c), `0x68`
+   (`mul = 2^(v/10000)`), `0x6C` (modo) e `0xA0` (formant). Converta: TIME > 0 → "warp para N beats".
+2. Modelo de playback: `velocidade = len/(T·mul·fator)` quando há TIME; caso contrário `mul`. Modo 0
+   reamostra (pitch acompanha); modos < 0 usam stretcher em tempo real (Rubber Band / SoundTouch no
+   LYNX) com pitch e formant independentes; modos ≥ 1 podem ser tratados como "stretch de alta qualidade
+   offline" ou mapeados para o mesmo stretcher.
+3. Guarde o fator de stretch do clip (`+0x40` do item) separado do canal; ele só escala a duração.
+
+---
+
+## 6. Perguntas que continuam em aberto
+
+1. Ordem exata das formas de onda do LFO (`PTR_015e3168[0..2]`; tabelas geradas em `FUN_009cdfc0`).
+2. Onde o envelope de **pan** é aplicado (o passo `FUN_00d24500` só combina o LFO de pan).
+3. Flags "Reverse" e "Keep on disk" do sampler; significado dos bits de `0x8F`.
+4. Unidade dos offsets de início/fim (`+0x18/+0x1C`) do item de playlist quando o item é um audio clip.
+5. Campos `0x00`, `0x10`, `0x14…0x27`, `0x70…0x7C` e `0x98…0x9D` do `0xD7`.
+6. Confirmar no código que o `f64 +0x40` do item vira o fator `+0x68` do evento de disparo.
+
+## Apêndice C: funções novas (rastreabilidade)
+
+| Endereço | Papel inferido | Confiança |
+|---|---|---|
+| `FUN_00f46490` (ramo `0xDA`) | Copia o registro de envelope/LFO para `S+0x198+i·0xA0` | DECOMP |
+| `FUN_009cec20` | Defaults do registro de envelope/LFO | DECOMP |
+| `FUN_009ce9e0` | Recalcula campos derivados (ticks, incrementos, curvas) | DECOMP |
+| `FUN_009ce950` | Knob → ticks: `(1000^(v/65536) − 1)·E`, zero se v < 101 | DECOMP |
+| `FUN_009ce890` / `FUN_006774b0` | Curva de tensão exponencial | DECOMP |
+| `FUN_009cedb0` | Estado inicial da voz (delay/attack/flag 4) | DECOMP |
+| `FUN_009ce490` | Passo por tick: DAHDSR + LFO | DECOMP |
+| `FUN_009cecc0` | Note-off: entra em release a partir do nível atual | DECOMP |
+| `FUN_00d24500` | Combina env/LFO nos 5 destinos da voz | DECOMP |
+| `FUN_00d24ae0` | Processamento da voz: passo do envelope só em fronteira de tick; ramp linear de ganho | DECOMP |
+| `FUN_00d0ece0` | Laço de ticks do motor (liga a flag de tick `PTR_015e1820`) | DECOMP |
+| `FUN_009ce3f0` / `FUN_013111e0` | Atualiza PPQ e PPQ/4 globais | DECOMP |
+| `FUN_00fe9d20` | Ganho do canal `f(vol)·f(volAdj)`, `f(x) = (11^x−1)/10` | DECOMP |
+| `FUN_00fe9bf0` | Pan efetivo do canal | DECOMP |
+| `FUN_00d59d70` | API `getChannelVolume` (normalizado ou dB) | DECOMP |
+| `FUN_006a6890` | Inicialização de constantes DSP (`ln 11`, `ln 2/12` etc.) | DECOMP |
+| `FUN_01311070` | Define o swing global e o atraso máximo `S·v/256` | DECOMP |
+| `FUN_00d0c220` | Disparo de notas de pattern com swing triangular e mix por canal | DECOMP |
+| `FUN_010012e0` | Conversão steps → notas (swing + shift por step) | DECOMP |
+| `FUN_00d5dbf0` | API `getSwing` (valor/128) | DECOMP |
+| `FUN_01046a70` (ramo de canal) | IDs de parâmetro do canal 0…15, 0x10…0x14, 0x1000+ (env/LFO) | DECOMP |
+| `FUN_00fea570` | Setter do TIME do stretch; recalcula `mul = 2^(MUL/10000)` | DECOMP |
+| `FUN_01186110` | `2^(v/10000)` | DECOMP |
+| `FUN_00d26890` | Velocidade de leitura da voz por modo/TIME/MUL/pitch/formant | DECOMP |
+| `FUN_0067d9b0` / `FUN_0067db00` / `FUN_0067db90` | Taxa do interpolador, reamostragem com pitch, stretcher em tempo real | DECOMP |
+| `FUN_00a981f0` | Stretch offline de uma amostra (élastique / por regiões) | DECOMP |
+| `FUN_00d293d0` | Dispara voz a partir de evento/item de playlist (gate, polifonia, fator de stretch) | DECOMP |
+| `FUN_00d27bc0` | Construtor da voz do sampler (fator de stretch = 1,0) | DECOMP |
