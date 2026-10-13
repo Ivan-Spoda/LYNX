@@ -57,6 +57,24 @@ MainComponent::MainComponent (AudioEngine& e)
     };
     recordButton.setClickingTogglesState (false);
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
+    recordMenuButton.setTooltip (utf8 ("O que gravar"));
+    recordMenuButton.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem (utf8 ("Notas (MIDI e teclado do PC) na pattern atual"), false, true, [] {});
+        menu.addItem (utf8 ("Áudio da entrada da placa (vira clip na Playlist)"), true, engine.isAudioRecordingArmed(), [this] {
+            engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
+
+            if (engine.getLastRecordingError().isNotEmpty())
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Entrada de áudio"),
+                                                        engine.getLastRecordingError());
+        });
+        menu.addSeparator();
+        menu.addItem (utf8 ("Abrir a pasta das gravações"), [] {
+            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações")).createDirectory();
+            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações")).startAsProcess();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
+    };
 
     modeButton.setTooltip ("Pattern ou Song (tecla L)");
     modeButton.onClick = [this] { toggleMode(); };
@@ -122,7 +140,7 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton,
+    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
                                                              &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton, &swingLabel, &swingSlider,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
@@ -130,7 +148,7 @@ MainComponent::MainComponent (AudioEngine& e)
         c->setMouseClickGrabsKeyboardFocus (false); // o teclado do PC fica com a janela principal
     }
 
-    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton,
+    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
                                                              &modeButton, &metronomeButton, &newPatternButton, &patternMenuButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
 
@@ -173,7 +191,8 @@ void MainComponent::resized()
     place (exportButton, 66, 12);
     place (playButton, 54);
     place (stopButton, 50, 4);
-    place (recordButton, 40, 4);
+    place (recordButton, 40, 0);
+    place (recordMenuButton, 16, 4);
     place (modeButton, 52, 8);
     place (metronomeButton, 64);
     place (bpmSlider, 124, 10);
@@ -449,8 +468,11 @@ void MainComponent::refreshModeButton()
     const auto recording = engine.isRecording();
     recordButton.setColour (juce::TextButton::buttonColourId, recording ? juce::Colour (0xffd03030) : theme::toolbar.brighter (0.1f));
     const auto inputs = engine.getActiveMidiInputs();
-    recordButton.setTooltip (utf8 ("Gravar notas na pattern atual enquanto toca (teclado do PC e MIDI)\nEntradas MIDI: ")
-                             + (inputs.isEmpty() ? utf8 ("nenhuma") : inputs.joinIntoString (", ")));
+    recordButton.setTooltip (utf8 ("Gravar enquanto toca: notas (teclado do PC e MIDI)")
+                             + (engine.isAudioRecordingArmed() ? utf8 (" e áudio da entrada") : juce::String())
+                             + utf8 ("\nEntradas MIDI: ") + (inputs.isEmpty() ? utf8 ("nenhuma") : inputs.joinIntoString (", ")));
+    recordMenuButton.setColour (juce::TextButton::buttonColourId,
+                                engine.isAudioRecordingArmed() ? juce::Colour (0xffa03030) : theme::toolbar.brighter (0.1f));
 
     const auto songMode = engine.getSong().mode == PlayMode::song;
     modeButton.setButtonText (songMode ? "SONG" : "PAT");

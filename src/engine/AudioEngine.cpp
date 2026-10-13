@@ -100,6 +100,13 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+
+    {
+        const juce::SpinLock::ScopedLockType lock (takeLock);
+        takeWriter = nullptr; // fecha o WAV do take em andamento (fica na pasta de gravações)
+    }
+
+    recordThread.stopThread (2000);
     prefetcher = nullptr;
     midiDevicesChanged = {};
     deviceManager.removeMidiInputDeviceCallback ({}, this);
@@ -235,6 +242,129 @@ double AudioEngine::estimatedPositionNow() const noexcept
     return tick;
 }
 
+void AudioEngine::updateAudioRecording()
+{
+    const auto wantTake = audioArmed && transport.recording.load();
+
+    // o arquivo fica pronto antes do Play: o primeiro bloco já é gravado
+    if (wantTake && takeWriter == nullptr && recordingError.isEmpty())
+        startAudioTake();
+
+    // parou de tocar (ou desligou a gravação) com algo gravado: fecha o take
+    if (takeWriter != nullptr && (! wantTake || ! transport.playing.load()) && takeFrames.load() > 0)
+        finishAudioTake();
+    else if (takeWriter != nullptr && ! wantTake)
+        finishAudioTake();
+}
+
+void AudioEngine::startAudioTake()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+
+    if (device == nullptr)
+        return;
+
+    takeChannels = juce::jlimit (0, 2, device->getActiveInputChannels().countNumberOfSetBits());
+
+    if (takeChannels == 0)
+    {
+        recordingError = utf8 ("nenhuma entrada de áudio ativa");
+        return;
+    }
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações"));
+    folder.createDirectory();
+    takeFile = folder.getNonexistentChildFile ("Take " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), ".wav");
+    takeSampleRate = device->getCurrentSampleRate();
+    takeLatency = device->getInputLatencyInSamples() + device->getOutputLatencyInSamples();
+
+    juce::WavAudioFormat wav;
+    auto stream = takeFile.createOutputStream();
+
+    if (stream == nullptr)
+    {
+        recordingError = utf8 ("não foi possível criar ") + takeFile.getFullPathName();
+        return;
+    }
+
+    auto* writer = wav.createWriterFor (stream.get(), takeSampleRate, (unsigned int) takeChannels, 24, {}, 0);
+
+    if (writer == nullptr)
+    {
+        stream.reset();
+        takeFile.deleteFile();
+        recordingError = utf8 ("o WAV não aceita esta taxa/canais");
+        return;
+    }
+
+    stream.release(); // agora é do writer
+    takeStartTick.store (-1.0);
+    takeFrames.store (0);
+    auto threaded = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer, recordThread, 1 << 18);
+    const juce::SpinLock::ScopedLockType lock (takeLock);
+    takeWriter = std::move (threaded);
+}
+
+void AudioEngine::finishAudioTake()
+{
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> done;
+    {
+        const juce::SpinLock::ScopedLockType lock (takeLock);
+        done = std::move (takeWriter);
+    }
+    done.reset(); // esvazia a fila e fecha o WAV
+
+    const auto frames = takeFrames.exchange (0);
+    const auto startTick = takeStartTick.exchange (-1.0);
+
+    if (frames <= 0 || startTick < 0.0)
+    {
+        takeFile.deleteFile();
+        return;
+    }
+
+    // o que entrou na placa corresponde ao que se ouvia latência atrás
+    const auto ticksPerSample = song.bpm * ppq / (60.0 * takeSampleRate);
+    auto start = (std::int64_t) std::llround (startTick - takeLatency * ticksPerSample);
+    std::int64_t offset = 0;
+
+    if (start < 0)
+    {
+        offset = -start;
+        start = 0;
+    }
+
+    const auto length = (std::int64_t) std::llround ((double) frames * ticksPerSample) - offset;
+
+    if (length <= 0)
+        return;
+
+    const auto path = takeFile.getFullPathName().toStdString();
+    const auto name = takeFile.getFileNameWithoutExtension().toStdString();
+
+    editSong ([=] (Song& s) {
+        ChannelDef c;
+        c.name = name;
+        c.instrument = InstrumentKind::audioClip;
+        c.samplePath = path;
+        c.mixerTrack = s.nextFreeInsert();
+        s.channels.push_back (c);
+
+        int track = 0;
+        for (const auto& clip : s.playlist)
+            track = std::max (track, clip.track + 1);
+
+        Clip clip;
+        clip.kind = ClipKind::audio;
+        clip.channel = (int) s.channels.size() - 1;
+        clip.track = track;
+        clip.start = start;
+        clip.length = length;
+        clip.offset = offset;
+        s.playlist.push_back (clip);
+    });
+}
+
 void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
     // thread MIDI: só filas e atomics
@@ -269,6 +399,36 @@ juce::StringArray AudioEngine::getActiveMidiInputs() const
             names.add (device.name);
 
     return names;
+}
+
+void AudioEngine::setAudioRecordingArmed (bool armed)
+{
+    audioArmed = armed;
+
+    if (armed)
+    {
+        // abre a entrada padrão (estéreo se der) no mesmo dispositivo/tipo de driver
+        auto setup = deviceManager.getAudioDeviceSetup();
+
+        if (auto* type = deviceManager.getCurrentDeviceTypeObject(); type != nullptr && setup.inputDeviceName.isEmpty())
+        {
+            const auto names = type->getDeviceNames (true);
+            const auto index = type->getDefaultDeviceIndex (true);
+
+            if (juce::isPositiveAndBelow (index, names.size()))
+                setup.inputDeviceName = names[index];
+        }
+
+        setup.useDefaultInputChannels = false;
+        setup.inputChannels.clear();
+        setup.inputChannels.setRange (0, 2, true);
+        recordingError = deviceManager.setAudioDeviceSetup (setup, true);
+
+        if (! recordThread.isThreadRunning())
+            recordThread.startThread();
+    }
+
+    sendChangeMessage();
 }
 
 void AudioEngine::setRecording (bool shouldRecord)
@@ -315,6 +475,8 @@ void AudioEngine::updateRecording()
     }
 
     uiRecorded.clear();
+
+    updateAudioRecording();
 
     if (! active && recorder.isActive())
         recorder.end (song, lastPlayingTick);
@@ -569,6 +731,29 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
         for (int ch = 0; ch < numInputChannels; ++ch)
             inputs[(std::size_t) ch] = inputChannelData[ch] != nullptr ? inputChannelData[ch] + done : nullptr;
+
+        // gravação de áudio: a entrada deste trecho vai para o disco (sem esperar lock)
+        if (playing && transport.recording.load (std::memory_order_relaxed))
+        {
+            const juce::SpinLock::ScopedTryLockType lock (takeLock);
+
+            if (lock.isLocked() && takeWriter != nullptr && numInputChannels > 0)
+            {
+                std::array<const float*, 2> take {};
+
+                for (int ch = 0; ch < takeChannels; ++ch)
+                    take[(std::size_t) ch] = inputs[(std::size_t) juce::jmin (ch, numInputChannels - 1)];
+
+                if (take[0] != nullptr && (takeChannels < 2 || take[1] != nullptr))
+                {
+                    if (takeStartTick.load (std::memory_order_relaxed) < 0.0)
+                        takeStartTick.store (transport.positionTicks.load (std::memory_order_relaxed));
+
+                    if (takeWriter->write (take.data(), n))
+                        takeFrames.fetch_add (n, std::memory_order_relaxed);
+                }
+            }
+        }
 
         for (int ch = 0; ch < numOutputChannels; ++ch)
             outputs[(std::size_t) ch] = outputChannelData[ch] != nullptr ? outputChannelData[ch] + done : nullptr;

@@ -59,6 +59,13 @@ public:
     void setRecording (bool shouldRecord);
     bool isRecording() const noexcept { return transport.recording.load(); }
 
+    // Gravação de áudio da entrada da placa: com isto ligado, gravar (Rec + Play) escreve a
+    // entrada num WAV e, ao parar, o take vira um clip na Playlist (compensado pela latência).
+    // Ligar abre a entrada do dispositivo (só então o Windows mostra o microfone em uso).
+    void setAudioRecordingArmed (bool armed);
+    bool isAudioRecordingArmed() const noexcept { return audioArmed; }
+    juce::String getLastRecordingError() const { return recordingError; }
+
     // Entradas MIDI: todas as disponíveis ficam ligadas e tocam o canal selecionado.
     juce::StringArray getActiveMidiInputs() const;
 
@@ -127,6 +134,9 @@ private:
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
     void enableAllMidiInputs();
     void updateRecording();
+    void updateAudioRecording();
+    void startAudioTake();
+    void finishAudioTake();
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
@@ -148,6 +158,19 @@ private:
     std::atomic<int> liveChannel { 0 };              // canal selecionado, lido pela thread MIDI
     std::atomic<double> blockTimeMs { 0.0 };         // quando positionTicks foi atualizado por último
     juce::MidiDeviceListConnection midiDevicesChanged;
+
+    // gravação de áudio
+    bool audioArmed = false;
+    juce::String recordingError;
+    juce::TimeSliceThread recordThread { "LYNX gravação" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> takeWriter;
+    juce::SpinLock takeLock;                       // a thread de áudio só tenta (nunca espera)
+    juce::File takeFile;
+    int takeChannels = 0;
+    std::atomic<double> takeStartTick { -1.0 };    // posição do primeiro sample gravado
+    std::atomic<juce::int64> takeFrames { 0 };
+    double takeSampleRate = 44100.0;
+    int takeLatency = 0;                           // entrada + saída, em samples
     MeterBank meters;
     PluginHost plugins;
 
