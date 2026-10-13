@@ -1,5 +1,7 @@
 #include "core/FlpImport.h"
 
+#include "core/SynthPresets.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -134,6 +136,10 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         ChannelDef def;
         def.name = c.name.empty() ? "Canal " + std::to_string (c.index + 1) : c.name;
         def.instrument = guessInstrument (def.name, c.type);
+
+        // sintetizador do FL que vira o synth interno: um preset que combine com o nome
+        if (def.instrument == InstrumentKind::synth)
+            def.synth = presetForChannelName (def.name);
 
         const auto isAudioClip = c.type == flp::ChannelType::audioClip;
 
