@@ -182,6 +182,17 @@ juce::String toJson (const Song& song)
 
         o->setProperty ("mixer", c.mixerTrack);
 
+        if (! (c.sampler == SamplerSettings {}))
+        {
+            auto sampler = std::make_unique<juce::DynamicObject>();
+            sampler->setProperty ("pitch", c.sampler.pitch);
+            sampler->setProperty ("attack", c.sampler.attack);
+            sampler->setProperty ("release", c.sampler.release);
+            sampler->setProperty ("reverse", c.sampler.reverse);
+            sampler->setProperty ("cut", c.sampler.cut);
+            o->setProperty ("samplerSettings", juce::var (sampler.release()));
+        }
+
         if (c.instrument == InstrumentKind::plugin)
             o->setProperty ("plugin", pluginToVar (c.plugin));
 
@@ -362,6 +373,16 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.samplePath = c["sample"].toString().toStdString();
             def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
             def.plugin = pluginFromVar (c["plugin"]);
+
+            if (const auto& s = c["samplerSettings"]; s.isObject())
+            {
+                def.sampler.pitch = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("pitch", 0.0));
+                def.sampler.attack = juce::jlimit (0.0f, 2.0f, (float) (double) s.getProperty ("attack", 0.0));
+                def.sampler.release = juce::jlimit (0.0f, 4.0f, (float) (double) s.getProperty ("release", 0.0));
+                def.sampler.reverse = (bool) s.getProperty ("reverse", false);
+                def.sampler.cut = (bool) s.getProperty ("cut", false);
+            }
+
             song.channels.push_back (std::move (def));
         }
 

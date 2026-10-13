@@ -1,6 +1,7 @@
 #include "ui/ChannelRackComponent.h"
 
 #include "ui/AutomationUi.h"
+#include "ui/ChannelSettings.h"
 
 #include "engine/Text.h"
 
@@ -427,8 +428,12 @@ void ChannelRackComponent::showChannelMenu (int channel)
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
 
     if (c.instrument == InstrumentKind::sampler)
+    {
         menu.addItem (juce::String ("Sample: ") + juce::File (juce::String::fromUTF8 (c.samplePath.c_str())).getFileName(),
                       false, false, [] {});
+        menu.addItem (utf8 ("Ajustes do sampler (afinação, envelope, ao contrário)..."),
+                      [this, channel] { openChannelSettings (engine, channel); });
+    }
 
     if (c.instrument == InstrumentKind::plugin)
     {

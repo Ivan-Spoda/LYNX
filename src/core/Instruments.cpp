@@ -1,5 +1,7 @@
 #include "core/Instruments.h"
 
+#include <atomic>
+
 #include <cmath>
 
 namespace lynx
@@ -294,6 +296,9 @@ struct SamplerVoice
     float fade = 1.0f;     // < 1 quando a voz foi roubada (declick)
     bool stolen = false;
     int age = 0;
+    int key = 60;
+    float env = 1.0f;      // envelope de ataque/release
+    float envStep = 0.0f;  // > 0 subindo (ataque), < 0 descendo (release)
 };
 
 class SamplerInstrument final : public Instrument
@@ -309,6 +314,15 @@ public:
         allNotesOff();
     }
 
+    void configure (const SamplerSettings& s) noexcept override
+    {
+        pitch.store (std::clamp (s.pitch, -24.0f, 24.0f));
+        attack.store (std::clamp (s.attack, 0.0f, 2.0f));
+        release.store (std::clamp (s.release, 0.0f, 4.0f));
+        reverse.store (s.reverse);
+        cut.store (s.cut);
+    }
+
     void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
 
     void noteOnAt (int key, float velocity, double startSeconds) noexcept override
@@ -316,10 +330,20 @@ public:
         if (sample == nullptr || sample->frames() < 2)
             return;
 
-        const auto startFrame = std::max (0.0, startSeconds * sample->sampleRate);
+        const auto backwards = ! clipMode && reverse.load();
+        const auto last = (double) (sample->frames() - 1);
+        auto startFrame = std::max (0.0, startSeconds * sample->sampleRate);
 
-        if (startFrame >= (double) (sample->frames() - 1))
+        if (startFrame >= last)
             return;
+
+        if (backwards)
+            startFrame = last - 1.0 - startFrame; // o par [index, index + 1] tem que caber
+
+        if (! clipMode && cut.load())
+            for (auto& v : voices)
+                if (v.active)
+                    v.stolen = true; // "cut itself": a nota anterior some com fade curto
 
         SamplerVoice* target = nullptr;
 
@@ -339,17 +363,36 @@ public:
                     target = &v;
         }
 
+        const auto semitones = clipMode ? 0.0 : (key - 60) + (double) pitch.load();
+        const auto attackSeconds = clipMode ? 0.0f : attack.load();
+
         *target = {};
         target->active = true;
+        target->key = key;
         target->velocity = velocity;
         target->position = startFrame;
-        target->rate = sample->sampleRate / sampleRate * (clipMode ? 1.0 : std::pow (2.0, (key - 60) / 12.0));
+        target->rate = sample->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
+        target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
+        target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
     }
 
-    void noteOff (int) noexcept override
+    void noteOff (int key) noexcept override
     {
         if (clipMode)
+        {
             allNotesOff(); // o clip acabou: some com fade curto
+            return;
+        }
+
+        // com release, a nota solta decai; sem release o sample toca inteiro (one-shot)
+        const auto seconds = release.load();
+
+        if (seconds <= 0.0f)
+            return;
+
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.envStep >= 0.0f)
+                v.envStep = -(float) (1.0 / (seconds * sampleRate));
     }
 
     void allNotesOff() noexcept override
@@ -375,7 +418,7 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
-                if (v.position >= last || (v.stolen && v.fade <= 0.0f))
+                if (v.position >= last || v.position < 0.0 || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.envStep < 0.0f))
                 {
                     v.active = false;
                     break;
@@ -385,13 +428,24 @@ public:
                 const auto frac = (float) (v.position - (double) index);
                 const auto sl = l[index] + frac * (l[index + 1] - l[index]);
                 const auto sr = r[index] + frac * (r[index + 1] - r[index]);
-                const auto gain = v.velocity * v.fade;
+                const auto gain = v.velocity * v.fade * v.env;
 
                 left[i] += sl * gain * gl;
                 right[i] += sr * gain * gr;
 
                 v.position += v.rate;
                 ++v.age;
+
+                if (v.envStep != 0.0f)
+                {
+                    v.env += v.envStep;
+
+                    if (v.env >= 1.0f && v.envStep > 0.0f)
+                    {
+                        v.env = 1.0f;
+                        v.envStep = 0.0f;
+                    }
+                }
 
                 if (v.stolen)
                     v.fade -= fadeStep;
@@ -405,6 +459,8 @@ private:
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
+    std::atomic<float> pitch { 0.0f }, attack { 0.0f }, release { 0.0f };
+    std::atomic<bool> reverse { false }, cut { false };
 };
 } // namespace
 

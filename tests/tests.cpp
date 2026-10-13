@@ -1691,6 +1691,63 @@ TEST (swing_delays_offbeat_sixteenths)
     CHECK (onOffset == (int) std::floor ((lynx::ticksPerStep * 1.5) / tps));
 }
 
+TEST (sampler_settings_pitch_reverse_envelope_cut)
+{
+    auto ramp = std::make_shared<lynx::SampleData>();
+    for (int i = 0; i < 48000; ++i)
+        ramp->left.push_back ((float) i / 48000.0f); // rampa: o valor diz onde a leitura está
+    ramp->sampleRate = 48000.0;
+
+    auto play = [&] (const lynx::SamplerSettings& s, int key, int frames, bool releaseAfterHalf) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+        inst->prepare (48000.0);
+        inst->configure (s);
+        inst->noteOn (key, 1.0f);
+        std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
+        inst->render (l.data(), r.data(), frames / 2, 1.0f, 1.0f);
+        if (releaseAfterHalf)
+            inst->noteOff (key);
+        inst->render (l.data() + frames / 2, r.data() + frames / 2, frames - frames / 2, 1.0f, 1.0f);
+        return l;
+    };
+
+    // +12 semitons: lê o dobro
+    lynx::SamplerSettings up;
+    up.pitch = 12.0f;
+    CHECK (std::abs (play (up, 60, 1000, false)[999] - 2.0f * 999.0f / 48000.0f) < 1e-3f);
+
+    // ao contrário: começa do fim
+    lynx::SamplerSettings back;
+    back.reverse = true;
+    CHECK (play (back, 60, 100, false)[10] > 0.99f);
+
+    // ataque de 10 ms: começa em silêncio e chega ao nível cheio
+    lynx::SamplerSettings slow;
+    slow.attack = 0.01f;
+    const auto a = play (slow, 60, 2000, false);
+    CHECK (a[10] < 0.2f * (10.0f / 48000.0f) + 1e-6f && std::abs (a[1500] - 1500.0f / 48000.0f) < 1e-4f);
+
+    // release de 5 ms: some logo depois de soltar; sem release toca inteiro
+    lynx::SamplerSettings rel;
+    rel.release = 0.005f;
+    CHECK (play (rel, 60, 2000, true)[1999] == 0.0f);
+    CHECK (play (lynx::SamplerSettings {}, 60, 2000, true)[1999] > 0.0f);
+
+    // cut itself: a segunda nota corta a primeira (sobra uma voz)
+    lynx::SamplerSettings cut;
+    cut.cut = true;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+    inst->prepare (48000.0);
+    inst->configure (cut);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (2000), r (2000);
+    inst->render (l.data(), r.data(), 1000, 1.0f, 1.0f);
+    inst->noteOn (60, 1.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    inst->render (l.data(), r.data(), 2000, 1.0f, 1.0f);
+    CHECK (std::abs (l[1999] - 1999.0f / 48000.0f) < 1e-4f); // só a nota nova
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

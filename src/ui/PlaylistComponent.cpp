@@ -21,7 +21,7 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
-    arrangementBox.setTooltip ("Arrangement (como no FL, um projeto pode ter vários)");
+    arrangementBox.setTooltip (utf8 ("Arrangement (como no FL, um projeto pode ter vários)"));
     arrangementBox.setWantsKeyboardFocus (false);
     arrangementBox.setMouseClickGrabsKeyboardFocus (false);
     arrangementBox.onChange = [this] { arrangementChosen(); };

@@ -4,6 +4,7 @@
 
 #include "engine/ProjectFile.h"
 #include "ui/AutomationUi.h"
+#include "ui/ChannelSettings.h"
 #include "ui/ExportDialog.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
@@ -164,6 +165,7 @@ MainComponent::~MainComponent()
 {
     PluginWindows::closeAll(); // interfaces de plugin antes do engine
     closeAutomationEditors();
+    closeChannelSettings();
     engine.removeChangeListener (this);
     stopTimer();
 }

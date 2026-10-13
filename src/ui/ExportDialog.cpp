@@ -61,7 +61,7 @@ public:
         whatBox.addItem (utf8 ("Pattern atual"), 2);
         whatBox.setSelectedItemIndex (engine.getSong().mode == PlayMode::song && ! engine.getSong().playlist.empty() ? 0 : 1,
                                       juce::dontSendNotification);
-        tailBox.addItemList ({ "Sem cauda", "Cauda de até 3 s", "Cauda de até 6 s", "Cauda de até 12 s" }, 1);
+        tailBox.addItemList ({ utf8 ("Sem cauda"), utf8 ("Cauda de até 3 s"), utf8 ("Cauda de até 6 s"), utf8 ("Cauda de até 12 s") }, 1);
         tailBox.setSelectedItemIndex (lastTail, juce::dontSendNotification);
 
         for (auto* l : { &formatLabel, &rateLabel, &whatLabel, &tailLabel })
@@ -169,6 +169,11 @@ private:
     static inline juce::File lastFolder;
 };
 } // namespace
+
+std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine)
+{
+    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX");
+}
 
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName)
 {

@@ -478,6 +478,11 @@ void closeAutomationEditors()
     windows().clear();
 }
 
+std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int automation)
+{
+    return std::make_unique<AutomationEditor> (engine, automation);
+}
+
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
     menu.addItem (utf8 ("Criar clip de automação"), [&engine, target] { createAutomationClip (engine, target); });

@@ -70,7 +70,8 @@ if(LYNX_BUILD_APP)
         src/ui/MixerComponent.cpp
         src/ui/PluginWindow.cpp
         src/ui/ExportDialog.cpp
-        src/ui/AutomationUi.cpp)
+        src/ui/AutomationUi.cpp
+        src/ui/ChannelSettings.cpp)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0

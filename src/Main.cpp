@@ -5,6 +5,9 @@
 #include "engine/Exporter.h"
 #include "engine/ProjectFile.h"
 #include "engine/Text.h"
+#include "ui/AutomationUi.h"
+#include "ui/ChannelSettings.h"
+#include "ui/ExportDialog.h"
 #include "ui/MainComponent.h"
 #include "ui/Theme.h"
 
@@ -396,6 +399,37 @@ private:
             saveSnapshot (ui, prefix + "-playlist.png");
             ui.selectTabForSnapshot (3);
             saveSnapshot (ui, prefix + "-mixer.png");
+
+            // janelas avulsas, com fundo do tema
+            auto saveWindow = [&prefix] (std::unique_ptr<juce::Component> c, const juce::String& name) {
+                juce::Component frame;
+                frame.setSize (c->getWidth(), c->getHeight());
+                frame.setOpaque (true);
+                frame.addAndMakeVisible (*c);
+                c->setTopLeftPosition (0, 0);
+                juce::Image image (juce::Image::ARGB, frame.getWidth(), frame.getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    frame.paintEntireComponent (g, false);
+                }
+                const juce::File file (prefix + name);
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto out = file.createOutputStream())
+                    png.writeImageToStream (image, *out);
+            };
+
+            saveWindow (lynx::makeExportPanel (offline), "-export.png");
+
+            if (! offline.getSong().automations.empty())
+            {
+                auto editor = lynx::makeAutomationEditor (offline, 0);
+                editor->setSize (760, 300);
+                saveWindow (std::move (editor), "-automation.png");
+            }
+
+            saveWindow (lynx::makeChannelSettingsPanel (offline, 0), "-sampler.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

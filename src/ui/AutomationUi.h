@@ -15,6 +15,9 @@ void createAutomationClip (AudioEngine& engine, const AutomationTarget& target);
 void openAutomationEditor (AudioEngine& engine, int automation);
 void closeAutomationEditors();
 
+// Só o editor (para o modo --snapshot).
+std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int automation);
+
 // Item "Criar clip de automação" para menus de knob.
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target);
 

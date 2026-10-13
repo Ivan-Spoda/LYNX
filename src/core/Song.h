@@ -43,6 +43,18 @@ struct PluginRef
     bool operator== (const PluginRef& o) const { return id == o.id && state == o.state; }
 };
 
+// Ajustes do sampler do canal (a janela "Channel settings" do FL).
+struct SamplerSettings
+{
+    float pitch = 0.0f;   // semitons, -24..24
+    float attack = 0.0f;  // segundos, 0..2
+    float release = 0.0f; // segundos, 0..4; 0 = toca o sample inteiro (one-shot)
+    bool reverse = false;
+    bool cut = false;     // nota nova corta a anterior ("cut itself")
+
+    bool operator== (const SamplerSettings&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -53,6 +65,7 @@ struct ChannelDef
     std::string samplePath; // usado quando instrument == sampler
     int mixerTrack = 0;     // 0 = direto no Master
     PluginRef plugin;       // usado quando instrument == plugin
+    SamplerSettings sampler; // usado quando instrument == sampler
 };
 
 enum class EffectKind : std::uint8_t
