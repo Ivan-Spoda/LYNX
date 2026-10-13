@@ -26,9 +26,11 @@ qualquer PC, independente do tamanho do projeto.
 - **Gravação**: notas (teclado do PC e MIDI) e áudio da entrada da placa
 - **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
 - **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
-  patterns, arrangements, marcadores, mixer com roteamento e efeitos nativos aproximados, automação,
-  3x Osc, filtro/envelopes do canal, VST3/CLAP de terceiros com estado quando estiverem instalados)
-  e `.mid`
+  patterns, arrangements, marcadores, mixer com roteamento, EQ das trilhas e efeitos nativos com os
+  ajustes salvos, automação, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Harmless e outros
+  synths aproximados, filtro/envelopes/LFOs do canal, VST3/CLAP de terceiros com estado quando estiverem
+  instalados; um relatório mostra o que não tem equivalente) e `.mid`; presets `.fst` do 3x Osc e de
+  efeitos do FL
 - **Desempenho**: motor sem locks, canais e mixer em várias threads, áudios longos lidos do disco
   sob demanda
 - **Desfazer/refazer** em todas as edições; **teclado do PC como piano** (layout do FL)
