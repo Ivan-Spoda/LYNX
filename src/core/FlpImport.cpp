@@ -582,9 +582,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             if (auto program = directWaveProgram (c.pluginState))
             {
                 std::vector<SampleZone> zones;
-                for (auto z : program->zones)
-                    if (z.path = existing (z.path); ! z.path.empty())
+                for (std::size_t i = 0; i < program->zones.size(); ++i)
+                {
+                    auto z = program->zones[i];
+                    auto path = existing (z.path);
+                    // arquivo que não existe nesta máquina: o áudio que o projeto guardou junto
+                    if (path.empty() && i < program->embeddedWav.size() && ! program->embeddedWav[i].empty() && options.saveEmbedded)
+                        path = options.saveEmbedded (program->embeddedWav[i], def.name + " " + std::to_string (i + 1));
+                    if (! path.empty())
+                    {
+                        z.path = path;
                         zones.push_back (std::move (z));
+                    }
+                }
 
                 if (! zones.empty())
                 {

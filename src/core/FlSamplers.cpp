@@ -199,6 +199,10 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
             SampleZone zone;
             float a = 0.0f, dcy = 0.0f, sus = 1.0f, rel = 0.0f;
             bool hasEnvelope = false;
+            std::int64_t frames = 0;
+            int channels = 0, bits = 0;
+            float rate = 44100.0f;
+            std::vector<std::uint8_t> embedded;
 
             forEachChunk (z.data, z.size, [&] (const Chunk& c) {
                 if (c.id == 0x1F4 && c.size >= 13) // cabeçalho: raiz, teclas, velocities, ganho
@@ -215,8 +219,11 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                     zone.path = ascii (c);
                 else if (c.id == 0x1F7 && c.size >= 32) // quadros, canais, ?, taxa, modo de loop, loop A, loop B
                 {
-                    std::int64_t frames = 0;
                     std::memcpy (&frames, c.data, 8);
+                    channels = i32 (c, 2);
+                    rate = f32 (c.data + 16);
+                    if (c.size >= 40)
+                        bits = i32 (c, 9);
                     const auto mode = i32 (c, 5);
                     const auto a = (std::int64_t) i32 (c, 6), b = (std::int64_t) i32 (c, 7);
 
@@ -226,6 +233,33 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                         zone.loopStart = a;
                         zone.loopEnd = b;
                         zone.loopMode = mode == 3 ? 2 : 1;
+                    }
+                }
+                else if (c.id == 0x205 && frames > 0 && channels >= 1 && channels <= 2 && (bits == 16 || bits == 32))
+                {
+                    // áudio embutido (REA_rodada9 §2.5): canais em blocos de (quadros + 512) amostras, com 256
+                    // de folga antes e depois do áudio [DADOS: 257 zeros exatos em cada ponta]
+                    const auto bytes = (std::size_t) bits / 8;
+                    const auto block = ((std::size_t) frames + 512) * bytes;
+                    if (block * (std::size_t) channels == c.size && std::isfinite (rate) && rate >= 1000.0f && rate <= 384000.0f)
+                    {
+                        std::vector<std::vector<float>> planar ((std::size_t) channels, std::vector<float> ((std::size_t) frames));
+                        for (int ch = 0; ch < channels; ++ch)
+                            for (std::int64_t i = 0; i < frames; ++i)
+                            {
+                                const auto* p = c.data + (std::size_t) ch * block + ((std::size_t) i + 256) * bytes;
+                                float v = 0.0f;
+                                if (bits == 32)
+                                    std::memcpy (&v, p, 4);
+                                else
+                                {
+                                    std::int16_t x = 0;
+                                    std::memcpy (&x, p, 2);
+                                    v = x / 32768.0f;
+                                }
+                                planar[(std::size_t) ch][(std::size_t) i] = std::isfinite (v) ? v : 0.0f;
+                            }
+                        embedded = makeWavFloat (planar, (int) std::lround (rate));
                     }
                 }
                 else if (c.id == 0x1F8 && c.size >= 4)
@@ -254,6 +288,7 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
             }
 
             program.zones.push_back (std::move (zone));
+            program.embeddedWav.push_back (std::move (embedded));
         });
 
         if (! program.zones.empty())
@@ -446,6 +481,31 @@ std::vector<std::uint8_t> makeWav16Mono (const std::int16_t* samples, std::size_
     tag ("data"); u32 (bytes);
     const auto* raw = reinterpret_cast<const std::uint8_t*> (samples);
     wav.insert (wav.end(), raw, raw + bytes);
+    return wav;
+}
+
+std::vector<std::uint8_t> makeWavFloat (const std::vector<std::vector<float>>& channels, int sampleRate)
+{
+    std::vector<std::uint8_t> wav;
+    if (channels.empty())
+        return wav;
+    const auto count = channels.front().size();
+    const auto n = (std::uint16_t) channels.size();
+    auto u32 = [&] (std::uint32_t v) { for (int i = 0; i < 4; ++i) wav.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto u16 = [&] (std::uint16_t v) { wav.push_back ((std::uint8_t) v); wav.push_back ((std::uint8_t) (v >> 8)); };
+    auto tag = [&] (const char* t) { wav.insert (wav.end(), t, t + 4); };
+    const auto bytes = (std::uint32_t) (count * n * 4);
+    tag ("RIFF"); u32 (36 + bytes); tag ("WAVE");
+    tag ("fmt "); u32 (16); u16 (3); u16 (n); u32 ((std::uint32_t) sampleRate); u32 ((std::uint32_t) sampleRate * n * 4); u16 ((std::uint16_t) (n * 4)); u16 (32);
+    tag ("data"); u32 (bytes);
+    wav.reserve (wav.size() + bytes);
+    for (std::size_t i = 0; i < count; ++i)
+        for (const auto& ch : channels)
+        {
+            const auto v = i < ch.size() ? ch[i] : 0.0f;
+            const auto* raw = reinterpret_cast<const std::uint8_t*> (&v);
+            wav.insert (wav.end(), raw, raw + 4);
+        }
     return wav;
 }
 

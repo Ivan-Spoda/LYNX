@@ -975,7 +975,7 @@ TEST (flp_real_files)
 
     // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
     {
-        int lovePhilters = 0, lovePhiltersRead = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
+        int embeddedZones = 0, lovePhilters = 0, lovePhiltersRead = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
             {
@@ -1012,6 +1012,15 @@ TEST (flp_real_files)
                                     ++parallel;
                             }
                     for (const auto& c : project.channels)
+                        if (c.pluginName == "DirectWave")
+                            if (const auto program = lynx::directWaveProgram (c.pluginState))
+                                for (const auto& wav : program->embeddedWav)
+                                    if (! wav.empty())
+                                    {
+                                        ++embeddedZones;
+                                        CHECK (wav.size() > 44 && std::memcmp (wav.data(), "RIFF", 4) == 0);
+                                    }
+                    for (const auto& c : project.channels)
                         if (c.pluginName == "Patcher")
                         {
                             const auto graph = lynx::parsePatcher (c.pluginState);
@@ -1024,6 +1033,8 @@ TEST (flp_real_files)
         std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos; Love Philter: %d, %d lidos\n", gates, shaped, effectors,
                      lovePhilters, lovePhiltersRead);
         CHECK (lovePhiltersRead == lovePhilters);
+        std::printf ("  DirectWave: %d zonas com áudio embutido\n", embeddedZones);
+        CHECK (embeddedZones == 12);
         std::printf ("  Patcher: %d no mixer (%d em série, %d em ramos paralelos simples), %d como instrumento com gerador\n", patchers, serial,
                      parallel, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);

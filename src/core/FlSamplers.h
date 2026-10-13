@@ -21,6 +21,7 @@ std::optional<std::vector<DrumPad>> fpcPads (const std::vector<std::uint8_t>& st
 struct DirectWaveProgram
 {
     std::vector<SampleZone> zones;
+    std::vector<std::vector<std::uint8_t>> embeddedWav; // por zona: WAV do áudio embutido no projeto (vazio = não tem)
     float attack = 0.0f, decay = 0.0f, sustain = 1.0f, release = 0.0f; // segundos / 0..1
 };
 std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8_t>& state);
@@ -47,6 +48,9 @@ std::vector<SampleZone> flKeysZones (const std::string& wti, const std::string& 
 
 // WAV PCM 16 bits mono com estas amostras (para os samples "raw").
 std::vector<std::uint8_t> makeWav16Mono (const std::int16_t* samples, std::size_t count, int sampleRate);
+
+// WAV float 32 bits intercalado a partir de canais separados (planar).
+std::vector<std::uint8_t> makeWavFloat (const std::vector<std::vector<float>>& channels, int sampleRate);
 
 // Pontos "cue" (quadros) de um WAV, em ordem; `frames` recebe a duração quando o áudio é PCM/float.
 std::vector<std::int64_t> wavCuePoints (const std::vector<std::uint8_t>& wav, std::int64_t& frames);

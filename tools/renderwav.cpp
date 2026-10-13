@@ -165,6 +165,7 @@ int main (int argc, char** argv)
     float peak = 0.0f;
     for (std::size_t i = 0; i < totalSamples; ++i)
         peak = std::max ({ peak, std::abs (left[i]), std::abs (right[i]) });
+    std::printf ("pico antes de normalizar: %.4f\n", peak);
 
     if (peak > 0.0f)
     {
