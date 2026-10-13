@@ -71,8 +71,15 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     stream.release(); // agora pertence ao writer
 
-    peak = engine->renderOffline (musicSeconds, settings.sampleRate, writer.get(), progress, settings.tailSeconds,
-                                  engine->getLatencySamples());
+    AudioEngine::RenderOptions render;
+    render.seconds = musicSeconds;
+    render.sampleRate = settings.sampleRate;
+    render.output = writer.get();
+    render.progress = progress;
+    render.tailSeconds = settings.tailSeconds;
+    render.trimSamples = engine->getLatencySamples();
+    render.ditherBits = settings.format == ExportSettings::Format::wav16 ? 16 : 0; // OGG codifica em float
+    peak = engine->renderOffline (render);
     writer.reset(); // fecha o arquivo (o cabeçalho do WAV é finalizado aqui)
 
     if (peak < 0.0f)

@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Dither.h"
 #include "core/Effects.h"
 #include "core/FlpImport.h"
 #include "core/LiveEventQueue.h"
@@ -1488,6 +1489,27 @@ TEST (mixer_mute_fades_instead_of_clicking)
     CHECK (l[0] > 0.45f && l[128] > 0.2f && l[128] < 0.3f && std::abs (l[255]) < 1e-6f); // rampa até zero
     r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
     CHECK (std::abs (l[0]) < 1e-9f);
+}
+
+TEST (dither_quantizes_to_lsb_grid_with_small_error)
+{
+    lynx::Dither d (16);
+    std::vector<float> x (4800);
+    for (std::size_t i = 0; i < x.size(); ++i)
+        x[i] = 0.25f * std::sin ((float) i * 0.05f);
+    auto y = x;
+    d.process (y.data(), (int) y.size(), 0);
+
+    double errorSum = 0.0;
+    bool onGrid = true;
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        const auto steps = y[i] * 32768.0f;
+        onGrid = onGrid && std::abs (steps - std::round (steps)) < 1e-3f;
+        errorSum += std::abs (y[i] - x[i]);
+    }
+    CHECK (onGrid);
+    CHECK (errorSum / (double) x.size() < 4.0 / 32768.0); // poucos LSB de ruído em média
 }
 
 int main (int argc, char** argv)

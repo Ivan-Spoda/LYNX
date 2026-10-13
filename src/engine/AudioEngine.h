@@ -86,9 +86,26 @@ public:
     // Depois de `seconds`, continua por até `tailSeconds` enquanto ainda houver som.
     // `progress(0..1)` retorna false para cancelar. Retorna o pico (usado pelo autoteste),
     // ou -1 se cancelado.
-    // `trimSamples` (PDC) descarta esse tanto do começo e renderiza o mesmo tanto a mais no fim.
-    float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr,
-                         const std::function<bool (double)>& progress = {}, double tailSeconds = 0.0, int trimSamples = 0);
+    struct RenderOptions
+    {
+        double seconds = 10.0;
+        double sampleRate = 44100.0;
+        juce::AudioFormatWriter* output = nullptr;
+        std::function<bool (double)> progress; // 0..1; false cancela
+        double tailSeconds = 0.0;
+        int trimSamples = 0;  // PDC: descarta esse tanto do começo e renderiza o mesmo tanto a mais no fim
+        int ditherBits = 0;   // > 0: dither TPDF com noise shaping para essa resolução
+    };
+
+    float renderOffline (const RenderOptions& options);
+    float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr)
+    {
+        RenderOptions o;
+        o.seconds = seconds;
+        o.sampleRate = sampleRate;
+        o.output = output;
+        return renderOffline (o);
+    }
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
 

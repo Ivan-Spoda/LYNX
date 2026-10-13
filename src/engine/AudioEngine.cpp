@@ -3,6 +3,7 @@
 #include "engine/Text.h"
 
 #include "core/FlpImport.h"
+#include "core/Dither.h"
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/Metronome.h"
@@ -91,9 +92,19 @@ void AudioEngine::buildInitialGraph()
     jassert (graph.getConnections().size() == 4);
 }
 
-float AudioEngine::renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output,
-                                  const std::function<bool (double)>& progress, double tailSeconds, int trimSamples)
+float AudioEngine::renderOffline (const RenderOptions& options)
 {
+    const auto seconds = options.seconds;
+    const auto sampleRate = options.sampleRate;
+    auto* output = options.output;
+    const auto& progress = options.progress;
+    const auto tailSeconds = options.tailSeconds;
+    const auto trimSamples = options.trimSamples;
+    std::optional<Dither> dither;
+
+    if (options.ditherBits > 0)
+        dither.emplace (options.ditherBits);
+
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
     transport.sampleRate.store (sampleRate);
@@ -122,6 +133,10 @@ float AudioEngine::renderOffline (double seconds, double sampleRate, juce::Audio
 
         const auto blockPeak = view.getMagnitude (0, n);
         peak = juce::jmax (peak, blockPeak);
+
+        if (dither)
+            for (int ch = 0; ch < view.getNumChannels(); ++ch)
+                dither->process (view.getWritePointer (ch), n, ch);
 
         // PDC: o começo é o silêncio da latência; o fim da música chega `trim` samples depois
         if (output != nullptr && done + n > trim)
