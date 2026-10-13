@@ -35,7 +35,7 @@ void writeLfos (juce::DynamicObject& o, const std::array<ChannelLfo, lfoTargets>
 
     for (int i = 0; i < lfoTargets; ++i)
         if (const auto& l = lfo[(std::size_t) i]; l.amount != 0.0f)
-            list.add (juce::Array<juce::var> { i, l.amount, l.period, l.sync, l.shape, l.delay, l.attack });
+            list.add (juce::Array<juce::var> { i, l.amount, l.period, l.sync, l.shape, l.delay, l.attack, l.global });
 
     if (! list.isEmpty())
         o.setProperty ("lfo", list);
@@ -45,11 +45,11 @@ void readLfos (const juce::var& o, std::array<ChannelLfo, lfoTargets>& lfo)
 {
     if (auto* list = o["lfo"].getArray())
         for (const auto& e : *list)
-            if (e.isArray() && e.size() == 7)
+            if (e.isArray() && e.size() >= 7)
                 if (const auto i = (int) e[0]; i >= 0 && i < lfoTargets)
                     lfo[(std::size_t) i] = { juce::jlimit (-48.0f, 48.0f, (float) (double) e[1]), juce::jlimit (0.005f, 64.0f, (float) (double) e[2]),
                                              (bool) e[3], juce::jlimit (0, 2, (int) e[4]), juce::jlimit (0.0f, 64.0f, (float) (double) e[5]),
-                                             juce::jlimit (0.0f, 64.0f, (float) (double) e[6]) };
+                                             juce::jlimit (0.0f, 64.0f, (float) (double) e[6]), e.size() >= 8 && (bool) e[7] };
 }
 
 const char* instrumentId (InstrumentKind k)

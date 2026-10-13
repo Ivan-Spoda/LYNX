@@ -195,6 +195,7 @@ private:
         bool running = false;
     };
     std::vector<TrackEqState> trackEqs; // EQ embutido de cada trilha
+    double chunkTick = 0.0;             // começo do bloco (para os LFOs globais)
     void applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;

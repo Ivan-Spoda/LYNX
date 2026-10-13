@@ -88,6 +88,7 @@ struct ChannelLfo
     int shape = 0;        // 0 senoide, 1 triângulo, 2 pulso
     float delay = 0.0f;   // segundos (ou tempos com `sync`) antes de começar
     float attack = 0.0f;  // fade-in, na mesma unidade
+    bool global = false;  // fase presa à posição da música (o botão "Global" do FL) em vez de recomeçar por nota
 
     bool operator== (const ChannelLfo&) const = default;
 };

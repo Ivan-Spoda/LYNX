@@ -569,6 +569,9 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
     std::memset (l, 0, sizeof (float) * (std::size_t) n);
     std::memset (r, 0, sizeof (float) * (std::size_t) n);
 
+    if ((std::size_t) i < state.instruments.size() && state.instruments[(std::size_t) i] != nullptr)
+        state.instruments[(std::size_t) i]->setSongPosition (chunkTick);
+
     auto& instrument = *state.instruments[(std::size_t) i];
     int position = 0;
 
@@ -862,6 +865,7 @@ void RackRenderer::process (const RackState* state,
 void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
                                  float* left, float* right, MeterBank* meters) noexcept
 {
+    chunkTick = startTick;
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
 

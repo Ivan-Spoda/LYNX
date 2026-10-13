@@ -267,6 +267,8 @@ struct LfoCoefficients
     double delaySamples = 0.0;
     float fadeStep = 1.0f;   // por sample
     int shape = 0;
+    bool global = false;
+    double cyclesPerTick = 0.0; // global: fase = posição da música (ticks) × isto
 
     static LfoCoefficients make (const ChannelLfo& l, double sampleRate, double bpm) noexcept
     {
@@ -278,10 +280,23 @@ struct LfoCoefficients
         c.delaySamples = std::max (0.0, (double) l.delay * unit * sampleRate);
         c.fadeStep = l.attack > 0.0f ? (float) (1.0 / ((double) l.attack * unit * sampleRate)) : 1.0f;
         c.shape = std::clamp (l.shape, 0, 2);
+        c.global = l.global;
+        // período em tempos (sincronizado) ou em segundos convertidos pelo BPM
+        const auto periodBeats = l.sync ? std::max (0.005, (double) l.period) : std::max (0.005, (double) l.period) * std::max (1.0, bpm) / 60.0;
+        c.cyclesPerTick = 1.0 / (periodBeats * ppq);
         return c;
     }
 
-    void start (LfoState& s) const noexcept { s = { 0.0, fadeStep >= 1.0f ? 1.0f : 0.0f, delaySamples }; }
+    // `songTicks`: posição da música (LFO global começa na fase dela; delay e fade-in continuam por nota)
+    void start (LfoState& s, double songTicks = 0.0) const noexcept
+    {
+        s = { 0.0, fadeStep >= 1.0f ? 1.0f : 0.0f, delaySamples };
+        if (global)
+        {
+            s.phase = songTicks * cyclesPerTick;
+            s.phase -= std::floor (s.phase);
+        }
+    }
 
     // avança `n` samples e devolve a saída (±1, já com o fade-in)
     float tick (LfoState& s, int n) const noexcept
@@ -435,8 +450,10 @@ public:
 
         for (std::size_t i = 0; i < lfoTargets; ++i)
             if (lfos[i].active)
-                lfos[i].start (v.lfo[i]);
+                lfos[i].start (v.lfo[i], songTicks);
     }
+
+    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
 
     // portamento: a voz parte de `from` e desliza até `to` no tempo de porta (porta do canal,
     // invertido pela nota)
@@ -768,6 +785,7 @@ private:
     std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
     std::atomic<double> bpm { 120.0 };
     double lastPhaseDelta = 0.0; // altura da última nota (de onde o porta parte)
+    double songTicks = 0.0;      // posição da música no bloco (LFO global)
     std::array<float, 3> oscPanL { 1.0f, 1.0f, 1.0f }, oscPanR { 1.0f, 1.0f, 1.0f };
     bool stereoOscillators = false;
     float nextPan = 0.0f, nextCents = 0.0f;
@@ -1024,7 +1042,7 @@ public:
 
         for (std::size_t i = 0; i < lfoTargets; ++i)
             if (lfos[i].active && ! clipMode)
-                lfos[i].start (target->lfo[i]);
+                lfos[i].start (target->lfo[i], songTicks);
         nextPan = nextCents = 0.0f;
         nextPorta = false;
     }
@@ -1264,6 +1282,12 @@ private:
     std::atomic<bool> porta { false };
     std::atomic<float> portaBeats { 0.125f };
     std::vector<LoadedZone> zones; // multi-sample (fixo depois de criado)
+    double songTicks = 0.0;         // posição da música no bloco (LFO global)
+
+public:
+    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
+
+private:
     unsigned roundRobin = 0;        // vez da próxima camada sobreposta
     double lastRate = 0.0; // velocidade de leitura da última nota (de onde o porta parte)
     std::atomic<int> filterType { 0 };

@@ -498,6 +498,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 l.shape = std::clamp (env.lfoShape, 0, 2);
                 l.delay = time (env.lfoDelay);
                 l.attack = time (env.lfoAttack);
+                l.global = (env.flags & 0x20) != 0;
                 return l;
             };
 

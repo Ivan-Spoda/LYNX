@@ -41,6 +41,8 @@ public:
     // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
     // forma que a thread de áudio leia sem esperar.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}
+    // Posição da música (ticks) no começo do bloco, para os LFOs globais. Thread de áudio.
+    virtual void setSongPosition (double /*ticks*/) noexcept {}
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos

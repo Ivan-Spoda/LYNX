@@ -153,6 +153,10 @@ public:
             row.sync.setTooltip (utf8 ("Período, atraso e fade-in em tempos (segue o BPM) em vez de segundos"));
             row.sync.onClick = [this] { changed(); };
             addAndMakeVisible (row.sync);
+            row.global.setButtonText ("Global");
+            row.global.setTooltip (utf8 ("A fase acompanha a posição da música em vez de recomeçar a cada nota"));
+            row.global.onClick = [this] { changed(); };
+            addAndMakeVisible (row.global);
         }
 
         const juce::String headers[] = { "Quantidade", utf8 ("Período"), "Forma", "Atraso", "Fade-in", "Unidade" };
@@ -185,7 +189,9 @@ public:
             row.shape.setBounds (line.removeFromLeft (w).withSizeKeepingCentre (w - 6, 24));
             row.delay.setBounds (line.removeFromLeft (w));
             row.attack.setBounds (line.removeFromLeft (w));
-            row.sync.setBounds (line.removeFromLeft (w).withSizeKeepingCentre (w - 6, 24));
+            auto toggles = line.removeFromLeft (w).withSizeKeepingCentre (w - 6, 50);
+            row.sync.setBounds (toggles.removeFromTop (24));
+            row.global.setBounds (toggles.removeFromBottom (24));
         }
     }
 
@@ -201,6 +207,7 @@ public:
             row.attack.setValue (l.attack, juce::dontSendNotification);
             row.shape.setSelectedId (l.shape + 1, juce::dontSendNotification);
             row.sync.setToggleState (l.sync, juce::dontSendNotification);
+            row.global.setToggleState (l.global, juce::dontSendNotification);
             const auto unit = l.sync ? " t" : " s";
             for (auto* s : { &row.period, &row.delay, &row.attack })
                 s->setTextValueSuffix (unit);
@@ -215,7 +222,8 @@ public:
         {
             const auto& row = rows[i];
             lfo[i] = { (float) row.amount.getValue(), (float) row.period.getValue(), row.sync.getToggleState(),
-                       juce::jlimit (0, 2, row.shape.getSelectedId() - 1), (float) row.delay.getValue(), (float) row.attack.getValue() };
+                       juce::jlimit (0, 2, row.shape.getSelectedId() - 1), (float) row.delay.getValue(), (float) row.attack.getValue(),
+                       row.global.getToggleState() };
         }
 
         return lfo;
@@ -227,7 +235,7 @@ private:
         juce::Label title;
         juce::Slider amount, period, delay, attack;
         juce::ComboBox shape;
-        juce::ToggleButton sync;
+        juce::ToggleButton sync, global;
     };
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)

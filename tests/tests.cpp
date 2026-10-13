@@ -1378,6 +1378,34 @@ TEST (zoned_sampler_loops_while_held)
     CHECK (after == 0.0f);
 }
 
+TEST (global_lfo_follows_song_position)
+{
+    // LFO de volume global (período 1 tempo): uma nota no meio do ciclo começa no meio da onda; a
+    // mesma nota com o LFO por nota começa na fase 0
+    auto first = [] (bool global, double songTicks) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+        c.synth.cutoff = 20000.0f;
+        c.synth.lfo[lynx::lfoVolume] = { 1.0f, 1.0f, true, 2, 0.0f, 0.0f, global }; // pulso: +1 na 1ª metade
+        inst->configure (c, 120.0);
+        inst->setSongPosition (songTicks);
+        inst->noteOn (69, 1.0f);
+        std::vector<float> l (4800), r (4800);
+        inst->render (l.data(), r.data(), 4800, 1.0f, 1.0f);
+        float peak = 0.0f;
+        for (std::size_t i = 2400; i < 4800; ++i)
+            peak = std::max (peak, std::abs (l[i]));
+        return peak;
+    };
+    // no meio do ciclo (fase 0,6) o pulso está em −1: volume ~0; por nota (fase 0) está em +1: ~2x
+    const auto globalLate = first (true, 0.6 * lynx::ppq);
+    const auto perNote = first (false, 0.6 * lynx::ppq);
+    CHECK (globalLate < 0.05f);
+    CHECK (perNote > 0.4f);
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual
