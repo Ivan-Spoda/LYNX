@@ -68,13 +68,16 @@ void Song::removePattern (int index)
         return;
 
     patterns.erase (patterns.begin() + index);
-    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
-                                    [index] (const Clip& c) { return c.kind == ClipKind::pattern && c.pattern == index; }),
-                    playlist.end());
 
-    for (auto& c : playlist)
-        if (c.kind == ClipKind::pattern && c.pattern > index)
-            --c.pattern;
+    forEachClipList ([index] (std::vector<Clip>& clips) {
+        clips.erase (std::remove_if (clips.begin(), clips.end(),
+                                     [index] (const Clip& c) { return c.kind == ClipKind::pattern && c.pattern == index; }),
+                     clips.end());
+
+        for (auto& c : clips)
+            if (c.kind == ClipKind::pattern && c.pattern > index)
+                --c.pattern;
+    });
 
     if (patterns.empty())
         patterns.emplace_back().name = "Pattern 1";
@@ -119,13 +122,15 @@ void Song::removeChannel (int index)
                 --n.channel;
     }
 
-    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
-                                    [index] (const Clip& c) { return c.kind == ClipKind::audio && c.channel == index; }),
-                    playlist.end());
+    forEachClipList ([index] (std::vector<Clip>& clips) {
+        clips.erase (std::remove_if (clips.begin(), clips.end(),
+                                     [index] (const Clip& c) { return c.kind == ClipKind::audio && c.channel == index; }),
+                     clips.end());
 
-    for (auto& c : playlist)
-        if (c.kind == ClipKind::audio && c.channel > index)
-            --c.channel;
+        for (auto& c : clips)
+            if (c.kind == ClipKind::audio && c.channel > index)
+                --c.channel;
+    });
 
     for (auto& a : automations)
     {
@@ -354,13 +359,71 @@ void Song::removeAutomation (int index)
         return;
 
     automations.erase (automations.begin() + index);
-    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
-                                    [index] (const Clip& c) { return c.kind == ClipKind::automation && c.automation == index; }),
-                    playlist.end());
 
-    for (auto& c : playlist)
-        if (c.kind == ClipKind::automation && c.automation > index)
-            --c.automation;
+    forEachClipList ([index] (std::vector<Clip>& clips) {
+        clips.erase (std::remove_if (clips.begin(), clips.end(),
+                                     [index] (const Clip& c) { return c.kind == ClipKind::automation && c.automation == index; }),
+                     clips.end());
+
+        for (auto& c : clips)
+            if (c.kind == ClipKind::automation && c.automation > index)
+                --c.automation;
+    });
+}
+
+void Song::selectArrangement (int index)
+{
+    if (arrangements.empty())
+        arrangements.push_back ({ "Arrangement 1", {}, 0, 0 });
+
+    currentArrangement = std::clamp (currentArrangement, 0, (int) arrangements.size() - 1);
+    index = std::clamp (index, 0, (int) arrangements.size() - 1);
+
+    if (index == currentArrangement)
+        return;
+
+    auto& from = arrangements[(std::size_t) currentArrangement];
+    from.clips = std::move (playlist);
+    from.loopStart = loopStart;
+    from.loopEnd = loopEnd;
+
+    auto& to = arrangements[(std::size_t) index];
+    playlist = std::move (to.clips);
+    to.clips.clear();
+    loopStart = to.loopStart;
+    loopEnd = to.loopEnd;
+    currentArrangement = index;
+}
+
+int Song::addArrangement (const std::string& name, bool copyCurrent)
+{
+    Arrangement a;
+    a.name = name;
+
+    if (copyCurrent)
+    {
+        a.clips = playlist;
+        a.loopStart = loopStart;
+        a.loopEnd = loopEnd;
+    }
+
+    arrangements.push_back (std::move (a));
+    selectArrangement ((int) arrangements.size() - 1);
+    return currentArrangement;
+}
+
+void Song::removeArrangement (int index)
+{
+    if (arrangements.size() <= 1 || index < 0 || index >= (int) arrangements.size())
+        return;
+
+    if (index == currentArrangement)
+        selectArrangement (index == 0 ? 1 : index - 1);
+
+    arrangements.erase (arrangements.begin() + index);
+
+    if (currentArrangement > index)
+        --currentArrangement;
 }
 
 float Song::targetValue (const AutomationTarget& t) const noexcept

@@ -99,6 +99,59 @@ AutomationTargetKind targetKindFromName (const juce::String& name)
 
     return AutomationTargetKind::none;
 }
+juce::var clipsToVar (const std::vector<Clip>& list)
+{
+    juce::Array<juce::var> clips;
+
+    // [pattern, trilha, início, duração, offset, tipo (0 pattern, 1 áudio, 2 automação), canal ou automação]
+    for (const auto& c : list)
+        clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
+                                            (juce::int64) c.offset, (int) c.kind,
+                                            c.kind == ClipKind::automation ? c.automation : c.channel });
+
+    return clips;
+}
+
+// Precisa de canais, patterns e automações já lidos para validar os índices.
+std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
+{
+    std::vector<Clip> out;
+
+    if (auto* clips = v.getArray())
+        for (const auto& c : *clips)
+        {
+            if (! c.isArray() || c.size() < 5)
+                continue;
+
+            Clip clip;
+            clip.pattern = (int) c[0];
+            clip.track = juce::jmax (0, (int) c[1]);
+            clip.start = juce::jmax<juce::int64> (0, (juce::int64) c[2]);
+            clip.length = (juce::int64) c[3];
+            clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
+
+            if (c.size() >= 7 && (int) c[5] == 2)
+            {
+                clip.kind = ClipKind::automation;
+                clip.automation = (int) c[6];
+
+                if (clip.automation >= 0 && clip.automation < (int) song.automations.size() && clip.length > 0)
+                    out.push_back (clip);
+            }
+            else if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
+            {
+                clip.kind = ClipKind::audio;
+                clip.channel = (int) c[6];
+
+                if (clip.channel >= 0 && clip.channel < (int) song.channels.size() && clip.length > 0)
+                    out.push_back (clip);
+            }
+            else if (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() && clip.length > 0)
+                out.push_back (clip);
+        }
+
+    return out;
+}
 } // namespace
 
 juce::String toJson (const Song& song)
@@ -179,15 +232,32 @@ juce::String toJson (const Song& song)
     if (! automations.isEmpty())
         root->setProperty ("automations", automations);
 
-    juce::Array<juce::var> clips;
+    root->setProperty ("playlist", clipsToVar (song.playlist));
 
-    // [pattern, trilha, início, duração, offset, tipo (0 pattern, 1 áudio, 2 automação), canal ou automação]
-    for (const auto& c : song.playlist)
-        clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
-                                            (juce::int64) c.offset, (int) c.kind,
-                                            c.kind == ClipKind::automation ? c.automation : c.channel });
+    if (song.arrangements.size() > 1)
+    {
+        juce::Array<juce::var> arrangements;
 
-    root->setProperty ("playlist", clips);
+        for (std::size_t i = 0; i < song.arrangements.size(); ++i)
+        {
+            const auto& a = song.arrangements[i];
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("name", str (a.name));
+
+            if ((int) i != song.currentArrangement) // o atual está em "playlist"
+            {
+                o->setProperty ("clips", clipsToVar (a.clips));
+
+                if (a.loopEnd > a.loopStart)
+                    o->setProperty ("loop", juce::Array<juce::var> { (juce::int64) a.loopStart, (juce::int64) a.loopEnd });
+            }
+
+            arrangements.add (juce::var (o.release()));
+        }
+
+        root->setProperty ("arrangements", arrangements);
+        root->setProperty ("currentArrangement", song.currentArrangement);
+    }
 
     juce::Array<juce::var> mixer;
 
@@ -343,38 +413,30 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             song.automations.push_back (std::move (automation));
         }
 
-    if (auto* clips = root["playlist"].getArray())
-        for (const auto& c : *clips)
+    song.playlist = clipsFromVar (root["playlist"], song);
+
+    if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())
+    {
+        song.arrangements.clear();
+
+        for (const auto& a : *arrangements)
         {
-            if (! c.isArray() || c.size() < 5)
-                continue;
+            Arrangement arrangement;
+            arrangement.name = a["name"].toString().toStdString();
+            arrangement.clips = clipsFromVar (a["clips"], song);
 
-            Clip clip;
-            clip.pattern = (int) c[0];
-            clip.track = juce::jmax (0, (int) c[1]);
-            clip.start = juce::jmax<juce::int64> (0, (juce::int64) c[2]);
-            clip.length = (juce::int64) c[3];
-            clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
-
-            if (c.size() >= 7 && (int) c[5] == 2)
+            if (const auto& loop = a["loop"]; loop.isArray() && loop.size() == 2)
             {
-                clip.kind = ClipKind::automation;
-                clip.automation = (int) c[6];
-
-                if (clip.automation >= 0 && clip.automation < (int) song.automations.size() && clip.length > 0)
-                    song.playlist.push_back (clip);
+                arrangement.loopStart = juce::jmax<juce::int64> (0, (juce::int64) loop[0]);
+                arrangement.loopEnd = juce::jmax<juce::int64> (arrangement.loopStart, (juce::int64) loop[1]);
             }
-            else if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
-            {
-                clip.kind = ClipKind::audio;
-                clip.channel = (int) c[6];
 
-                if (clip.channel >= 0 && clip.channel < (int) song.channels.size() && clip.length > 0)
-                    song.playlist.push_back (clip);
-            }
-            else if (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() && clip.length > 0)
-                song.playlist.push_back (clip);
+            song.arrangements.push_back (std::move (arrangement));
         }
+
+        song.currentArrangement = juce::jlimit (0, (int) song.arrangements.size() - 1, (int) root.getProperty ("currentArrangement", 0));
+        song.arrangements[(std::size_t) song.currentArrangement].clips.clear();
+    }
 
     song.mode = root["mode"].toString() == "song" ? PlayMode::song : PlayMode::pattern;
 

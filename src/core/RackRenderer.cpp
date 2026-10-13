@@ -357,7 +357,6 @@ float peakOf (const float* data, int n) noexcept
 void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
-    scratch.assign ((std::size_t) std::max (64, maxBlockSize) * 2, 0.0f);
     lastTrackGain.fill (std::numeric_limits<float>::quiet_NaN());
     channelBuffers.assign ((std::size_t) maxChannels * 2 * chunkCapacity, 0.0f);
     trackScratchBuffers.assign ((std::size_t) maxMixerTracks * 2 * chunkCapacity, 0.0f);

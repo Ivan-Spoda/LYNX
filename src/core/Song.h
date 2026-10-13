@@ -191,6 +191,14 @@ enum class PlayMode : std::uint8_t
     song     // toca a Playlist (como o "SONG" do FL)
 };
 
+// Um arranjo da Playlist (o FL permite vários por projeto).
+struct Arrangement
+{
+    std::string name;
+    std::vector<Clip> clips;               // vazio no arrangement atual: os clips dele moram em Song::playlist
+    std::int64_t loopStart = 0, loopEnd = 0;
+};
+
 struct Song
 {
     double bpm = 130.0;
@@ -202,6 +210,23 @@ struct Song
     std::vector<Clip> playlist;
     PlayMode mode = PlayMode::pattern;
     std::int64_t loopStart = 0, loopEnd = 0; // trecho em loop na Playlist (ticks); loopEnd <= loopStart = desligado
+
+    // Arrangements: `playlist` e o loop acima são os do atual; os outros ficam guardados aqui.
+    std::vector<Arrangement> arrangements { Arrangement { "Arrangement 1", {}, 0, 0 } };
+    int currentArrangement = 0;
+
+    void selectArrangement (int index);
+    int addArrangement (const std::string& name, bool copyCurrent = false); // retorna o índice (já selecionado)
+    void removeArrangement (int index);
+    // Aplica `fn` a todas as listas de clips (a atual e as guardadas).
+    template <typename Fn>
+    void forEachClipList (Fn&& fn)
+    {
+        fn (playlist);
+        for (std::size_t i = 0; i < arrangements.size(); ++i)
+            if ((int) i != currentArrangement)
+                fn (arrangements[i].clips);
+    }
 
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
 

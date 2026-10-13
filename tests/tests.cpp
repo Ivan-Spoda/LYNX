@@ -1573,6 +1573,31 @@ TEST (parallel_rendering_matches_sequential)
     CHECK (sum.load() == 2000 * 15);
 }
 
+TEST (arrangements_switch_and_keep_clip_indices)
+{
+    auto s = lynx::Song::makeDefault();
+    s.patterns.emplace_back().name = "B";
+    s.playlist = { { 1, 0, 0, 960, 0 } };
+    s.loopEnd = 960;
+    CHECK (s.arrangements.size() == 1 && s.currentArrangement == 0);
+
+    const auto second = s.addArrangement ("Versão curta", true);
+    CHECK (second == 1 && s.currentArrangement == 1 && s.playlist.size() == 1 && s.loopEnd == 960);
+    s.playlist.push_back ({ 0, 1, 960, 960, 0 });
+    s.loopEnd = 0;
+
+    s.selectArrangement (0);
+    CHECK (s.playlist.size() == 1 && s.loopEnd == 960 && s.arrangements[1].clips.size() == 2);
+
+    // remover a pattern 0 conserta os clips guardados no outro arrangement
+    s.removePattern (0);
+    CHECK (s.playlist.size() == 1 && s.playlist[0].pattern == 0);
+    CHECK (s.arrangements[1].clips.size() == 1 && s.arrangements[1].clips[0].pattern == 0);
+
+    s.removeArrangement (0);
+    CHECK (s.arrangements.size() == 1 && s.currentArrangement == 0 && s.playlist.size() == 1 && s.loopEnd == 0);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

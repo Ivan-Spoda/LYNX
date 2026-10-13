@@ -91,8 +91,13 @@ private:
     std::map<std::string, std::vector<float>> waveforms;
     std::map<std::string, double> waveformRates;
 
+    void refreshArrangementBox();
+    void arrangementChosen();
+    void renameArrangement();
+
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
+    juce::ComboBox arrangementBox;
 
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px por compasso de 4 tempos
     double scrollTicks = 0.0;

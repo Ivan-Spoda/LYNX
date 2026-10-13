@@ -21,8 +21,109 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
+    arrangementBox.setTooltip ("Arrangement (como no FL, um projeto pode ter vários)");
+    arrangementBox.setWantsKeyboardFocus (false);
+    arrangementBox.setMouseClickGrabsKeyboardFocus (false);
+    arrangementBox.onChange = [this] { arrangementChosen(); };
+    addAndMakeVisible (arrangementBox);
+    refreshArrangementBox();
+
     engine.addChangeListener (this);
     startTimerHz (30);
+}
+
+namespace
+{
+enum ArrangementAction
+{
+    newArrangement = 1001,
+    cloneArrangement,
+    renameArrangementAction,
+    removeArrangementAction
+};
+} // namespace
+
+void PlaylistComponent::refreshArrangementBox()
+{
+    const auto& song = engine.getSong();
+    juce::StringArray names;
+
+    for (const auto& a : song.arrangements)
+        names.add (juce::String::fromUTF8 (a.name.c_str()));
+
+    // só reconstrói quando algo mudou (reconstruir fecha o menu aberto)
+    bool same = arrangementBox.getNumItems() == names.size() + 4;
+    for (int i = 0; same && i < names.size(); ++i)
+        same = arrangementBox.getItemText (i) == names[i];
+
+    if (! same)
+    {
+        arrangementBox.clear (juce::dontSendNotification);
+
+        for (int i = 0; i < names.size(); ++i)
+            arrangementBox.addItem (names[i], i + 1);
+
+        arrangementBox.addSeparator();
+        arrangementBox.addItem (utf8 ("Novo arrangement"), newArrangement);
+        arrangementBox.addItem (utf8 ("Clonar este"), cloneArrangement);
+        arrangementBox.addItem (utf8 ("Renomear..."), renameArrangementAction);
+        arrangementBox.addItem (utf8 ("Remover este"), removeArrangementAction);
+        arrangementBox.setItemEnabled (removeArrangementAction, names.size() > 1);
+    }
+
+    arrangementBox.setSelectedId (song.currentArrangement + 1, juce::dontSendNotification);
+}
+
+void PlaylistComponent::arrangementChosen()
+{
+    const auto id = arrangementBox.getSelectedId();
+    const auto& song = engine.getSong();
+    setSelection ({});
+
+    if (id >= 1 && id <= (int) song.arrangements.size())
+    {
+        if (id - 1 != song.currentArrangement)
+            engine.editSong ([index = id - 1] (Song& s) { s.selectArrangement (index); }, false);
+        return;
+    }
+
+    switch (id)
+    {
+        case newArrangement:
+            engine.editSong ([] (Song& s) { s.addArrangement ("Arrangement " + std::to_string (s.arrangements.size() + 1)); });
+            break;
+        case cloneArrangement:
+            engine.editSong ([] (Song& s) {
+                s.addArrangement (s.arrangements[(std::size_t) s.currentArrangement].name + " (cópia)", true);
+            });
+            break;
+        case renameArrangementAction:
+            renameArrangement();
+            break;
+        case removeArrangementAction:
+            engine.editSong ([] (Song& s) { s.removeArrangement (s.currentArrangement); });
+            break;
+        default:
+            break;
+    }
+
+    refreshArrangementBox();
+}
+
+void PlaylistComponent::renameArrangement()
+{
+    const auto index = engine.getSong().currentArrangement;
+    auto* window = new juce::AlertWindow ("Renomear arrangement", {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().arrangements[(std::size_t) index].name.c_str()));
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
+                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
+
+                                 if (result == 1 && ! name.empty() && index < (int) engine.getSong().arrangements.size())
+                                     engine.editSong ([index, name] (Song& s) { s.arrangements[(std::size_t) index].name = name; });
+                             }),
+                             true);
 }
 
 PlaylistComponent::~PlaylistComponent()
@@ -86,6 +187,7 @@ void PlaylistComponent::updateScrollBars()
 
 void PlaylistComponent::resized()
 {
+    arrangementBox.setBounds (2, 1, headerWidth - 4, timelineHeight - 2);
     hBar.setBounds (headerWidth, getHeight() - scrollBarSize, getWidth() - headerWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, timelineHeight, scrollBarSize, getHeight() - timelineHeight - scrollBarSize);
     updateScrollBars();
@@ -321,10 +423,6 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
     g.setColour (theme::toolbar);
     g.fillRect (0, 0, headerWidth, timelineHeight);
-    g.setColour (song.mode == PlayMode::song ? theme::accentGreen : theme::text.withAlpha (0.5f));
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText (song.mode == PlayMode::song ? "SONG" : "PAT (L troca)", 6, 0, headerWidth - 8, timelineHeight,
-                juce::Justification::centredLeft);
 }
 
 const std::vector<float>* PlaylistComponent::waveformFor (const std::string& path)
@@ -1099,6 +1197,7 @@ void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         selection.clear();
     }
 
+    refreshArrangementBox();
     updateScrollBars();
     repaint();
 }

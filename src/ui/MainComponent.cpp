@@ -394,9 +394,11 @@ void MainComponent::showPatternMenu()
             s.patterns.insert (s.patterns.begin() + index + 1, std::move (copy));
 
             // os clips que apontam para patterns depois da nova andam uma posição
-            for (auto& c : s.playlist)
-                if (c.kind == ClipKind::pattern && c.pattern > index)
-                    ++c.pattern;
+            s.forEachClipList ([index] (std::vector<Clip>& clips) {
+                for (auto& c : clips)
+                    if (c.kind == ClipKind::pattern && c.pattern > index)
+                        ++c.pattern;
+            });
 
             s.currentPattern = index + 1;
         });

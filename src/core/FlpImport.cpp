@@ -307,10 +307,15 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         song.automations.push_back (std::move (a));
     }
 
-    // Playlist: só o primeiro arrangement; clips de pattern, de áudio e de automação.
+    // Playlist: todos os arrangements (o primeiro fica aberto); clips de pattern, de áudio e de automação.
     if (! project.arrangements.empty())
+        song.arrangements.clear();
+
+    for (const auto& arrangement : project.arrangements)
     {
-        for (const auto& item : project.arrangements.front().items)
+        std::vector<Clip> clips;
+
+        for (const auto& item : arrangement.items)
         {
             if (item.length == 0)
                 continue;
@@ -328,7 +333,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 if (std::isfinite (item.startOffset) && item.startOffset > 0.0f)
                     clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
 
-                song.playlist.push_back (clip);
+                clips.push_back (clip);
                 continue;
             }
 
@@ -359,7 +364,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                         clip.offset = (std::int64_t) std::llround (item.startOffset / 1000.0 * song.bpm / 60.0 * ppq);
                 }
 
-                song.playlist.push_back (clip);
+                clips.push_back (clip);
                 continue;
             }
 
@@ -374,14 +379,40 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             clip.start = rescale (item.position);
             clip.length = rescale (item.length);
             clip.offset = item.patternStartTick > 0 ? rescale (item.patternStartTick) : 0;
-            song.playlist.push_back (clip);
+            clips.push_back (clip);
         }
 
-        std::sort (song.playlist.begin(), song.playlist.end(), [] (const Clip& a, const Clip& b) { return a.start < b.start; });
+        std::sort (clips.begin(), clips.end(), [] (const Clip& a, const Clip& b) { return a.start < b.start; });
 
-        if (! song.playlist.empty())
-            song.mode = PlayMode::song;
+        Arrangement a;
+        a.name = arrangement.name.empty() ? "Arrangement " + std::to_string (song.arrangements.size() + 1) : arrangement.name;
+
+        if (song.arrangements.empty())
+            song.playlist = std::move (clips); // o primeiro é o atual
+        else
+            a.clips = std::move (clips);
+
+        song.arrangements.push_back (std::move (a));
     }
+
+    // o .flp não diz qual arrangement estava aberto; o mais cheio costuma ser a música
+    {
+        int fullest = 0;
+        std::size_t most = song.playlist.size();
+
+        for (int i = 1; i < (int) song.arrangements.size(); ++i)
+            if (song.arrangements[(std::size_t) i].clips.size() > most)
+            {
+                most = song.arrangements[(std::size_t) i].clips.size();
+                fullest = i;
+            }
+
+        song.selectArrangement (fullest);
+    }
+
+    if (! song.playlist.empty())
+        song.mode = PlayMode::song;
+
 
     if (song.patterns.empty())
         song.patterns.emplace_back().name = "Pattern 1";
