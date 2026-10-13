@@ -1,4 +1,5 @@
 #include "ui/ExportDialog.h"
+#include "ui/WindowOwner.h"
 
 #include "engine/Exporter.h"
 #include "engine/Text.h"
@@ -320,6 +321,7 @@ void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, c
     options.useNativeTitleBar = true;
     options.resizable = false;
     options.escapeKeyTriggersCloseButton = true;
-    options.launchAsync();
+    if (auto* dialog = options.launchAsync())
+        keepAboveMainWindow (*dialog);
 }
 } // namespace lynx

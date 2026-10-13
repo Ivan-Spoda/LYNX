@@ -1,3 +1,4 @@
+#include "ui/WindowOwner.h"
 #include "ui/ParametricEqEditor.h"
 
 #include <map>
@@ -322,6 +323,7 @@ public:
         setResizable (true, false);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        keepAboveMainWindow (*this);
     }
 
     void closeButtonPressed() override;

@@ -1,3 +1,4 @@
+#include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
 
 #include <functional>
@@ -1082,6 +1083,7 @@ public:
 
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        keepAboveMainWindow (*this);
     }
 
     int getChannel() const { return channel; }

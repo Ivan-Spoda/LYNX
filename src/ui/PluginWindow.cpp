@@ -1,3 +1,4 @@
+#include "ui/WindowOwner.h"
 #include "ui/PluginWindow.h"
 
 #include <map>
@@ -28,6 +29,7 @@ public:
             setResizable (editor->isResizable(), false);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        keepAboveMainWindow (*this);
     }
 
     ~PluginWindow() override

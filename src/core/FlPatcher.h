@@ -18,6 +18,18 @@ struct PatcherNode
     bool generator = false;
 };
 
+// Expressão série-paralelo do caminho de áudio IN ⇒ OUT (REA_rodada20 §3.3): nó (com o barramento de saída
+// usado, para os divisores), cadeia em série ou soma em paralelo; `gain` = produto dos ganhos dos cabos.
+struct PatcherExpr
+{
+    enum class Kind { identity, node, series, parallel };
+    Kind kind = Kind::identity;
+    int node = -1;
+    int bus = -1; // nó divisor: barramento de saída deste ramo (−1 = nó comum)
+    float gain = 1.0f;
+    std::vector<PatcherExpr> children;
+};
+
 struct PatcherGraph
 {
     std::vector<PatcherNode> nodes;
@@ -35,6 +47,7 @@ struct PatcherGraph
     std::vector<int> preChain; // nós em série antes da divisão em ramos
     int splitter = -1;         // Frequency Splitter / Stereo Shaper que divide (os ramos começam nas saídas dele)
     int mainGenerator = -1;       // gerador ligado à saída com mais ganho
+    std::optional<PatcherExpr> audio; // o grafo de áudio inteiro reduzido (vazio se não reduz ou tem gerador)
 };
 
 std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state);

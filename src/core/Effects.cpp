@@ -1260,7 +1260,9 @@ public:
             Branch branch;
             branch.gain = b.gain;
             for (const auto& child : b.chain)
-                if (child.kind != EffectKind::plugin && child.kind != EffectKind::parallel)
+                if (child.kind == EffectKind::parallel) // contêineres aninhados (grafos série-paralelo do Patcher)
+                    branch.chain.push_back ({ makeParallelEffect (child), child });
+                else if (child.kind != EffectKind::plugin)
                     branch.chain.push_back ({ makeEffect (child.kind), child });
             branches.push_back (std::move (branch));
         }

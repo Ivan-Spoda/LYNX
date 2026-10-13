@@ -1057,7 +1057,7 @@ TEST (flp_real_files)
                                 ++patchers;
                                 if (graph && ! graph->serialChain.empty())
                                     ++serial;
-                                if (graph && ! graph->branches.empty())
+                                if (graph && graph->serialChain.empty() && graph->audio)
                                     ++parallel;
                             }
                     for (const auto& c : project.channels)
@@ -1084,7 +1084,7 @@ TEST (flp_real_files)
         CHECK (lovePhiltersRead == lovePhilters && lovePhiltersConverted == lovePhilters);
         std::printf ("  DirectWave: %d zonas com áudio embutido\n", embeddedZones);
         CHECK (embeddedZones == 12);
-        std::printf ("  Patcher: %d no mixer (%d em série, %d em ramos paralelos simples), %d como instrumento com gerador\n", patchers, serial,
+        std::printf ("  Patcher: %d no mixer (%d em série, %d reduzidos a série/paralelo), %d como instrumento com gerador\n", patchers, serial,
                      parallel, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);
     }

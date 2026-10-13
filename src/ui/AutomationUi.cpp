@@ -1,3 +1,4 @@
+#include "ui/WindowOwner.h"
 #include "ui/AutomationUi.h"
 
 #include <map>
@@ -358,6 +359,7 @@ public:
         setResizeLimits (400, 200, 4000, 2000);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        keepAboveMainWindow (*this);
     }
 
     int getIndex() const { return static_cast<AutomationEditor*> (getContentComponent())->getIndex(); }

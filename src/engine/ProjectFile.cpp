@@ -190,8 +190,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
             branch.gain = juce::jlimit (0.0f, 4.0f, (float) (double) b.getProperty ("gain", 1.0));
             if (auto* chain = b["chain"].getArray())
                 for (const auto& child : *chain)
-                    if (auto c = effectFromVar (child); c && c->kind != EffectKind::parallel)
-                        branch.chain.push_back (std::move (*c));
+                    if (auto c = effectFromVar (child))
+                        branch.chain.push_back (std::move (*c)); // contêineres podem ser aninhados
             slot.branches.push_back (std::move (branch));
         }
     return slot;

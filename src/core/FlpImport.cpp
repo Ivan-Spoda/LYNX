@@ -961,58 +961,82 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     continue;
                 }
 
-            // Patcher em ramos paralelos simples: um contêiner com as cadeias de cada ramo
+            // Patcher com ramos (REA_rodada20 §3.3): o grafo de áudio reduzido a série/paralelo vira slots e
+            // contêineres paralelos aninhados; nós divisores entram pela banda/barramento usado
             if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
-                if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && ! graph->branches.empty())
+                if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && graph->audio)
                 {
-                    // o trecho em série antes da divisão vira slots normais
-                    bool first = true;
-                    for (const auto n : graph->preChain)
-                        if ((int) track.effects.size() < maxEffectSlots - 1)
-                            if (auto fx = effectFromFl (graph->nodes[(std::size_t) n].plugin, graph->nodes[(std::size_t) n].state, song.bpm);
-                                fx && fx->kind != EffectKind::plugin)
+                    std::function<std::vector<EffectSlot> (const PatcherExpr&, float&)> build = [&] (const PatcherExpr& e, float& gain) {
+                        std::vector<EffectSlot> chain;
+                        gain *= e.gain;
+                        switch (e.kind)
+                        {
+                            case PatcherExpr::Kind::identity: break;
+                            case PatcherExpr::Kind::node:
                             {
-                                if (first)
-                                    effectSlotMap.insert ({ { insert.index, original.index }, { (int) track.effects.size(), original.plugin } });
-                                first = false;
-                                track.effects.push_back (std::move (*fx));
+                                const auto& node = graph->nodes[(std::size_t) e.node];
+                                if (e.bus >= 0)
+                                {
+                                    const auto head = patcherBranchHead (node.plugin, node.state, e.bus);
+                                    if (! head.valid)
+                                    {
+                                        if (options.report != nullptr)
+                                            ++options.report->droppedEffects["Patcher: barramento " + std::to_string (e.bus) + " de " + node.plugin];
+                                        break;
+                                    }
+                                    gain *= head.gain;
+                                    if (head.slot)
+                                        chain.push_back (*head.slot);
+                                    if (! head.note.empty() && options.report != nullptr)
+                                        ++options.report->droppedEffects[head.note];
+                                }
+                                else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
+                                    chain.push_back (std::move (*fx));
+                                else if (options.report != nullptr)
+                                    ++options.report->droppedEffects[node.plugin + " (no Patcher)"];
+                                break;
                             }
-
-                    auto container = makeEffectSlot (EffectKind::parallel);
-                    for (const auto& b : graph->branches)
+                            case PatcherExpr::Kind::series:
+                                for (const auto& c : e.children)
+                                    for (auto& slot : build (c, gain))
+                                        chain.push_back (std::move (slot));
+                                break;
+                            case PatcherExpr::Kind::parallel:
+                            {
+                                auto container = makeEffectSlot (EffectKind::parallel);
+                                for (const auto& c : e.children)
+                                {
+                                    EffectBranch branch;
+                                    auto branchGain = 1.0f;
+                                    branch.chain = build (c, branchGain);
+                                    branch.gain = std::clamp (branchGain, 0.0f, 4.0f);
+                                    container.branches.push_back (std::move (branch));
+                                }
+                                chain.push_back (std::move (container));
+                                break;
+                            }
+                        }
+                        return chain;
+                    };
+                    auto gain = 1.0f;
+                    auto chain = build (*graph->audio, gain);
+                    if (std::abs (gain - 1.0f) > 1e-4f)
                     {
-                        EffectBranch branch;
-                        branch.gain = std::clamp (b.gain, 0.0f, 4.0f);
-                        if (graph->splitter >= 0) // ramo que sai de um barramento do divisor (banda, M/S)
-                        {
-                            const auto& splitter = graph->nodes[(std::size_t) graph->splitter];
-                            const auto head = patcherBranchHead (splitter.plugin, splitter.state, b.band);
-                            if (! head.valid)
-                            {
-                                if (options.report != nullptr)
-                                    ++options.report->droppedEffects["Patcher: barramento " + std::to_string (b.band) + " de " + splitter.plugin];
-                                continue;
-                            }
-                            branch.gain *= head.gain;
-                            if (head.slot)
-                                branch.chain.push_back (*head.slot);
-                            if (! head.note.empty() && options.report != nullptr)
-                                ++options.report->droppedEffects[head.note];
-                        }
-                        for (const auto n : b.nodes)
-                        {
-                            const auto& node = graph->nodes[(std::size_t) n];
-                            if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
-                                branch.chain.push_back (std::move (*fx));
-                            else if (options.report != nullptr)
-                                ++options.report->droppedEffects[node.plugin + " (no Patcher)"];
-                        }
-                        container.branches.push_back (std::move (branch));
+                        auto utility = makeEffectSlot (EffectKind::utility);
+                        utility.params[0] = gain <= 0.0f ? 0.0f : std::clamp ((float) (20.0 * std::log10 (gain) / 48.0 + 0.5), 0.0f, 1.0f);
+                        chain.push_back (std::move (utility));
+                    }
+                    if ((int) (track.effects.size() + chain.size()) > maxEffectSlots) // não cabe: um contêiner de um ramo
+                    {
+                        auto container = makeEffectSlot (EffectKind::parallel);
+                        container.branches.push_back ({ std::move (chain), 1.0f });
+                        chain = { std::move (container) };
                     }
                     effectSlotMap.insert ({ { insert.index, original.index }, { (int) track.effects.size(), original.plugin } });
-                    track.effects.push_back (std::move (container));
+                    for (auto& slot : chain)
+                        track.effects.push_back (std::move (slot));
                     if (options.report != nullptr)
-                        ++options.report->converted["Patcher (paralelo)"];
+                        ++options.report->converted["Patcher (série/paralelo)"];
                     continue;
                 }
 

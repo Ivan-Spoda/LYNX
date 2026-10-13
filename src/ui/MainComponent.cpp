@@ -1,4 +1,5 @@
 #include "ui/MainComponent.h"
+#include "ui/WindowOwner.h"
 
 #include "engine/PluginSandbox.h"
 
@@ -980,7 +981,8 @@ void MainComponent::showHelp()
     options.useNativeTitleBar = true;
     options.resizable = true;
     options.escapeKeyTriggersCloseButton = true;
-    options.launchAsync();
+    if (auto* dialog = options.launchAsync())
+        keepAboveMainWindow (*dialog);
 }
 
 void MainComponent::showImportReport()
@@ -1027,6 +1029,7 @@ void MainComponent::showAudioSettings()
     options.dialogTitle = utf8 ("Configurações de áudio");
     options.useNativeTitleBar = true;
     options.resizable = false;
-    options.launchAsync();
+    if (auto* dialog = options.launchAsync())
+        keepAboveMainWindow (*dialog);
 }
 } // namespace lynx

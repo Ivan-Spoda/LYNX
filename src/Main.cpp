@@ -15,6 +15,7 @@
 #include "ui/MainComponent.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Theme.h"
+#include "ui/WindowOwner.h"
 
 namespace
 {
@@ -214,6 +215,7 @@ public:
         crashEngine = engine.get();
         juce::SystemStats::setApplicationCrashHandler (onCrash);
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
+        lynx::setMainWindowForOwnership (mainWindow.get());
 
         // Duplo clique num .lynx/.flp abre o LYNX com o arquivo como argumento.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
