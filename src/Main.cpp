@@ -271,6 +271,48 @@ private:
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
                                && reloaded->mixer[3].effects[0].params[1] == 0.25f;
+        // ida e volta dos recursos novos: synth/sampler com modulação, EQs, utilitário, marcadores
+        auto rich = lynx::Song::makeDefault();
+        auto& synth = rich.channels[4].synth;
+        synth.osc[1] = { lynx::Waveform::square, -1, 7.0f, 0.4f, 5, -0.25f };
+        synth.filterType = 2;
+        synth.mono = true;
+        synth.portaBeats = 0.125f;
+        synth.am = true;
+        synth.filterEnv = { 3.0f, 0.01f, 0.02f, 0.3f, 0.25f, 0.4f };
+        synth.lfo[lynx::lfoPitch] = { 0.5f, 0.25f, true, 1, 0.1f, 0.2f };
+        auto& sampler = rich.channels[0].sampler;
+        sampler.cutoff = 1200.0f;
+        sampler.resonance = 0.3f;
+        sampler.filterType = 1;
+        sampler.pitchEnv = { -12.0f, 0.0f, 0.0f, 0.05f, 0.0f, 0.1f };
+        sampler.lfo[lynx::lfoVolume] = { 0.5f, 0.5f, false, 2, 0.0f, 0.0f };
+        rich.mixer[2].eq.gainDb = { 3.0f, -2.5f, 1.0f };
+        rich.mixer[2].eq.hz[1] = 2200.0f;
+        auto peqSlot = lynx::makeEffectSlot (lynx::EffectKind::parametricEq);
+        peqSlot.params[(std::size_t) lynx::peq::param (2, 2)] = lynx::peq::gainValue (6.0);
+        peqSlot.params[(std::size_t) (lynx::peq::slopeParam + 0)] = lynx::peq::slopeValue (3);
+        rich.mixer[2].effects.push_back (peqSlot);
+        auto utilitySlot = lynx::makeEffectSlot (lynx::EffectKind::utility);
+        utilitySlot.params[1] = 0.2f;
+        rich.mixer[2].effects.push_back (utilitySlot);
+        rich.addMarker ({ 3840, "Refrão", 0, 4 });
+        rich.addMarker ({ 7680, {}, 7, 8 });
+        const auto richBack = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (rich), error);
+        auto paramsClose = [] (const lynx::EffectParams& a, const lynx::EffectParams& b) {
+            for (std::size_t i = 0; i < a.size(); ++i)
+                if (std::abs (a[i] - b[i]) > 1.0e-3f)
+                    return false;
+            return true;
+        };
+        const auto richOk = richBack && richBack->channels[4].synth == synth && richBack->channels[0].sampler == sampler
+                            && richBack->mixer[2].eq == rich.mixer[2].eq && richBack->mixer[2].effects.size() == 2
+                            && richBack->mixer[2].effects[0].kind == lynx::EffectKind::parametricEq
+                            && paramsClose (richBack->mixer[2].effects[0].params, peqSlot.params)
+                            && richBack->mixer[2].effects[1].kind == lynx::EffectKind::utility
+                            && paramsClose (richBack->mixer[2].effects[1].params, utilitySlot.params)
+                            && richBack->markers() == rich.markers();
+
         // desfazer/refazer
         offline.editSong ([] (lynx::Song& s) { s.bpm = 99.0; });
         offline.editSong ([] (lynx::Song& s) { s.bpm = 101.0; });
@@ -321,12 +363,13 @@ private:
             }
         }
 
-        const auto ok = audioOk && projectOk && undoOk && recordOk && recordUndoOk && midiOk;
+        const auto ok = audioOk && projectOk && richOk && undoOk && recordOk && recordUndoOk && midiOk;
 
         juce::String report;
         report << "conexoes=" << offline.getNumGraphConnections() << "\n"
                << "pico=" << peak << "\n"
                << "projeto=" << (projectOk ? "OK" : "ERRO " + error) << "\n"
+               << "projeto_recursos=" << (richOk ? "OK" : "ERRO") << "\n"
                << "desfazer=" << (undoOk ? "OK" : "ERRO") << "\n"
                << "gravacao=" << (recordOk && recordUndoOk ? "OK" : "ERRO") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERRO") << "\n"
