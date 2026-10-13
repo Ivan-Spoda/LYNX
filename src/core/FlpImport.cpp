@@ -410,9 +410,16 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         def.name = c.name.empty() ? "Canal " + std::to_string (c.index + 1) : c.name;
         def.instrument = guessInstrument (def.name, c.type);
 
-        // sintetizador do FL que vira o synth interno: um preset que combine com o nome
+        // sintetizador do FL que vira o synth interno: um preset que combine com o nome (no FLEX, o nome
+        // do preset escolhido no plugin diz mais que o do canal)
         if (def.instrument == InstrumentKind::synth)
+        {
             def.synth = presetForChannelName (def.name);
+            if (lowercase (c.pluginName) == "flex")
+                if (const auto names = flexPresetName (c.pluginState))
+                    if (auto byPreset = presetForChannelName (names->second + " " + names->first); byPreset != SynthSettings {})
+                        def.synth = byPreset;
+        }
 
         const auto isAudioClip = c.type == flp::ChannelType::audioClip;
 
@@ -645,6 +652,16 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 }
             }
 
+        // Wave Traveller: toca o sample dele (a curva de scratch fica de fora)
+        if (c.pluginName == "Wave Traveller")
+            if (const auto wave = waveTravellerSample (c.pluginState))
+                if (auto path = existing (wave->first); ! path.empty())
+                {
+                    def.instrument = InstrumentKind::sampler;
+                    def.samplePath = std::move (path);
+                    def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - wave->second), -24.0f, 24.0f);
+                }
+
         // Fruity DrumSynth Live: o sample de bateria do FL com o mesmo nome do som escolhido
         if (c.pluginName == "Fruity DrumSynth Live")
             if (const auto sound = drumSynthLiveSound (c.pluginState))
@@ -713,6 +730,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 adopt();
             else if (name == "sakura" && synthFromSakura (c.pluginState, fromPlugin))
                 adopt();
+            else if (name == "kepler" && synthFromKepler (c.pluginState, fromPlugin, pluginGain))
+                adopt();
         }
 
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
@@ -771,7 +790,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura") && adoptedFromPlugin)
+                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler") && adoptedFromPlugin)
+                     || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)

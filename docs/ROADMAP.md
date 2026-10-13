@@ -94,4 +94,5 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)
 - [x] Gross Beat (gate de volume), Frequency Splitter, Effector (rodada 14)
 - [ ] Patcher (achatar cadeias em série; paralelo -> submix), links de controlador (Peak/Envelope Controller)
-- [ ] FLEX, Morphine, Drumpad, BooBass, Kepler, Wave Traveller, PoiZone, Toxic Biohazard, BassDrum
+- [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
+- [ ] Morphine, Drumpad, BooBass, PoiZone, Toxic Biohazard, BassDrum

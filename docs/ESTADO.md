@@ -78,6 +78,9 @@ Atualizado em 2026-10-13.
 - **FM no synth interno**: o osc 3 (calado) modula a fase dos osc 1 e 2, com índice que cai até um
   sustain (knobs "FM" e "Decaim. FM"). Usado no import do DX10, do GMS (Mod Kind FM) e do Sytrus
   (uma portadora com FM forte).
+- **Rodada 13**: Kepler aproximado pelo synth (serra/pulso/sub/ruído, VCF com Env1, LFO); Wave Traveller
+  toca o sample dele; FLEX escolhe o patch do synth pelo nome do preset/pacote. Os pacotes do FLEX são
+  protegidos (cifrados) e o LYNX **não** os abre: as amostras são conteúdo licenciado para uso no FLEX.
 - **Efeitos da rodada 14**: Gross Beat vira o novo "Gate de volume" (32 passos por compasso, mix,
   ataque/release; o slot de volume escolhido é amostrado), Frequency Splitter vira prateleiras no EQ
   paramétrico, Effector vira distorção/filtro/chorus/delay/reverb/largura conforme o algoritmo.
@@ -153,7 +156,8 @@ Confirmadas empiricamente nos demos:
 ## Próximo passo
 Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), ~25x mais rápido
 que o tempo real. Harmor (100 canais) entra como aproximação grosseira (partes A/B como serras, filtro,
-envelopes, uníssono). Sem equivalente ainda (tocam com preset do synth pelo nome): FLEX (57), Drumpad,
-Morphine, BooBass, Kepler, Wave Traveller, PoiZone, Toxic Biohazard, BassDrum. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
+envelopes, uníssono). Sem equivalente ainda (tocam com preset do synth pelo nome): FLEX (57; pelo nome do preset), Drumpad,
+Morphine, BooBass, PoiZone, Toxic Biohazard, BassDrum. Efeitos sem equivalente mais comuns: Pitcher,
+Patcher, Pitch Shifter, Vocodex. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
 Patcher (contêiner), Effector, Frequency Splitter, Vocodex. Também em aberto: ASIO (licença do SDK
 da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/Song.h"
@@ -51,5 +52,15 @@ bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& syn
 // Fruity DrumSynth Live (§3): nome do som escolhido (ex. "909 Hat O") e caminhos (com
 // %FLStudioData%) de samples de bateria do FL que o substituem, em ordem de preferência.
 std::optional<std::string> drumSynthLiveSound (const std::vector<std::uint8_t>& state);
+
+// Kepler (REA_rodada13 §2, modo "Kepler-1"): serra/pulso/sub/ruído, VCF com o Env1, LFO, chorus.
+bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+
+// Wave Traveller (§4): o sample (caminho com as variáveis do FL) e a nota-raiz; o scratch fica de fora.
+std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vector<std::uint8_t>& state);
+
+// FLEX (§1.1): nome do pacote e do preset, do estado do plugin. Os pacotes do FLEX são protegidos e o
+// LYNX não os abre: o canal ganha um patch do synth escolhido por esses nomes.
+std::optional<std::pair<std::string, std::string>> flexPresetName (const std::vector<std::uint8_t>& state);
 std::vector<std::string> drumSampleCandidates (const std::string& soundName);
 } // namespace lynx

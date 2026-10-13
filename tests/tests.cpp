@@ -357,10 +357,15 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromFruitKick (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
-        if (lynx::synthFromGms (blob, 120.0, synth, harmlessGain) || lynx::synthFromHarmor (blob, synth, harmlessGain) || lynx::synthFromOgun (blob, synth, harmlessGain) || lynx::synthFromSakura (blob, synth))
+        if (lynx::synthFromGms (blob, 120.0, synth, harmlessGain) || lynx::synthFromHarmor (blob, synth, harmlessGain) || lynx::synthFromOgun (blob, synth, harmlessGain)
+            || lynx::synthFromSakura (blob, synth) || lynx::synthFromKepler (blob, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack) && std::isfinite (harmlessGain));
         if (auto sound = lynx::drumSynthLiveSound (blob))
             CHECK (sound->size() < 256);
+        if (auto wave = lynx::waveTravellerSample (blob))
+            CHECK (! wave->first.empty() && wave->second >= 0 && wave->second <= 127);
+        if (auto flex = lynx::flexPresetName (blob))
+            CHECK ((! flex->first.empty() || ! flex->second.empty()) && flex->second.size() <= 1024);
         if (lynx::synthFromSytrus (blob, 120.0, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromDX10 (blob, synth))
@@ -660,6 +665,12 @@ TEST (flp_real_files)
                     decoded = lynx::synthFromOgun (c.pluginState, gs, g);
                 else if (c.pluginName == "Sakura")
                     decoded = lynx::synthFromSakura (c.pluginState, gs);
+                else if (c.pluginName == "Kepler")
+                    decoded = lynx::synthFromKepler (c.pluginState, gs, g);
+                else if (c.pluginName == "Wave Traveller")
+                    decoded = lynx::waveTravellerSample (c.pluginState).has_value() ? 2 : 0;
+                else if (c.pluginName == "FLEX")
+                    decoded = lynx::flexPresetName (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "Fruity DrumSynth Live")
                 {
                     const auto sound = lynx::drumSynthLiveSound (c.pluginState);
@@ -669,8 +680,8 @@ TEST (flp_real_files)
                     continue;
                 auto& counter = generators[c.pluginName];
                 ++counter.first;
-                counter.second += decoded;
-                if (decoded && c.pluginName != "Fruity DrumSynth Live")
+                counter.second += decoded != 0;
+                if (decoded == 1 && c.pluginName != "Fruity DrumSynth Live")
                 {
                     CHECK (std::isfinite (g) && g >= 0.0f && gs.cutoff >= 20.0f && gs.cutoff <= 20000.0f && gs.sustain >= 0.0f && gs.sustain <= 1.0f);
                     CHECK (std::isfinite (gs.attack) && std::isfinite (gs.decay) && std::isfinite (gs.release) && std::isfinite (gs.filterEnv.amount) && std::isfinite (gs.lfo[lynx::lfoCutoff].amount));

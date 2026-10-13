@@ -470,4 +470,107 @@ std::vector<std::string> drumSampleCandidates (const std::string& soundName)
         out.push_back (root + "Hats\\808 CH.wav");
     return out;
 }
+// ---- Kepler (REA_rodada13 §2) ----
+
+bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
+{
+    // u32 0, u32 tamanho, u32 0, u32 9 + "Kepler-1\0", u32 versão, u32 n, n floats
+    if (state.size() < 0x21 + 34 * 4 || u32At (state.data(), 12) != 9 || std::memcmp (state.data() + 16, "Kepler-1", 8) != 0)
+        return false;
+    const auto count = (int) u32At (state.data(), 0x1D);
+    if (count < 34 || count > 64 || 0x21 + (std::size_t) count * 4 > state.size())
+        return false;
+    float k[64] {};
+    std::memcpy (k, state.data() + 0x21, (std::size_t) count * 4);
+    for (auto& v : k)
+        v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
+
+    SynthSettings s;
+    const auto octave = std::clamp ((int) std::lround ((k[32] - 0.5f) * 4.0f), -2, 2); // Octave Transpose (0,5 = 0) [HIP: ±2]
+    const auto saw = k[14] >= 0.5f, pulse = k[13] >= 0.5f, sub = k[15] >= 0.5f;
+    s.osc = { SynthOscillator { Waveform::saw, octave, 0.0f, saw ? 1.0f : 0.0f },
+              SynthOscillator { Waveform::square, octave, 0.0f, pulse ? 0.8f : 0.0f },
+              SynthOscillator {} };
+    if (! saw && ! pulse)
+        s.osc[0].level = 1.0f;
+    if (k[17] > k[16] * (sub ? 1.0f : 0.0f) && k[17] > 0.05f) // ruído mais alto que o sub
+        s.osc[2] = { Waveform::noise, 0, 0.0f, k[17] };
+    else if (sub)
+        s.osc[2] = { Waveform::square, std::max (-3, octave - 1), 0.0f, std::max (0.05f, k[16]) };
+
+    // um ADSR (Env1) para volume e corte; tempos ~10·x³ s [HIP]
+    auto seconds = [] (float x) { return 10.0f * x * x * x; };
+    s.attack = seconds (k[26]);
+    s.decay = seconds (k[27]);
+    s.sustain = k[28];
+    s.release = std::max (0.01f, seconds (k[29]));
+    if (k[25] >= 0.5f) // VCA por gate
+    {
+        s.attack = 0.002f;
+        s.decay = 0.0f;
+        s.sustain = 1.0f;
+        s.release = 0.01f;
+    }
+
+    s.cutoff = (float) std::clamp (20.0 * std::pow (2.0, 10.0 * k[19]), 20.0, 20000.0);
+    s.resonance = std::min (0.95f, k[20]);
+    if (k[22] > 0.01f)
+    {
+        const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polaridade invertida
+        s.filterEnv = { sign * 8.0f * k[22], seconds (k[26]), 0.0f, seconds (k[27]), k[28], std::max (0.01f, seconds (k[29])) };
+    }
+
+    // LFO1: vibrato (DCO) e corte; período 1/(0,1..20 Hz) [HIP]
+    const auto lfoPeriod = (float) (1.0 / (0.1 * std::pow (200.0, (double) k[5])));
+    if (k[10] > 0.01f)
+        s.lfo[lfoPitch] = { k[10] * 1.0f, lfoPeriod, false, 1, seconds (k[7]), 0.0f };
+    if (k[23] > 0.01f)
+        s.lfo[lfoCutoff] = { k[23] * 4.0f, lfoPeriod, false, 1, seconds (k[7]), 0.0f };
+
+    // chorus do Juno: aproximado por desafinação + abertura do osc 2 (o chorus de verdade fica no mixer)
+    if (k[30] > 0.1f && s.osc[1].level > 0.0f)
+    {
+        s.osc[0].detune = -6.0f;
+        s.osc[1].detune = 6.0f;
+        s.osc[0].pan = -0.3f;
+        s.osc[1].pan = 0.3f;
+    }
+
+    gain = std::clamp (k[33] / 0.7f, 0.0f, 2.0f); // Main Volume [HIP: 0,7 = 0 dB]
+    synth = s;
+    return true;
+}
+
+// ---- Wave Traveller (§4): o sample e a nota-raiz ----
+
+std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 24 || u32At (state.data(), 0) != 1000)
+        return std::nullopt;
+    const auto root = (int) u32At (state.data(), 12);
+    const auto length = (std::size_t) u32At (state.data(), 16);
+    if (length == 0 || length > 4096 || 20 + length > state.size())
+        return std::nullopt;
+    std::string path (reinterpret_cast<const char*> (state.data() + 20), length);
+    path.resize (strnlen (path.c_str(), path.size()));
+    if (path.empty())
+        return std::nullopt;
+    return std::make_pair (path, std::clamp (root, 0, 127));
+}
+
+// ---- FLEX (§1.1): só o estado do plugin (os pacotes são protegidos e não são abertos) ----
+
+std::optional<std::pair<std::string, std::string>> flexPresetName (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 0x411 + 1024 || u32At (state.data(), 0) != 1)
+        return std::nullopt;
+    auto text = [&] (std::size_t offset) {
+        const auto* p = reinterpret_cast<const char*> (state.data() + offset);
+        return std::string (p, strnlen (p, 1024));
+    };
+    auto pack = text (0x10), preset = text (0x411);
+    if (preset.empty() && pack.empty())
+        return std::nullopt;
+    return std::make_pair (pack, preset);
+}
 } // namespace lynx
