@@ -83,7 +83,9 @@ MainComponent::MainComponent (AudioEngine& e)
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
     settingsButton.onClick = [this] { showAudioSettings(); };
 
-    bpmSlider.setRange (20.0, 999.0, 0.1);
+    bpmSlider.setRange (minTempo, maxTempo, 0.1);
+    bpmSlider.addMouseListener (this, true);
+    bpmSlider.setTooltip (utf8 ("Andamento (clique direito: criar automação de tempo)"));
     bpmSlider.setValue (engine.getSong().bpm, juce::dontSendNotification);
     bpmSlider.onValueChange = [this] { engine.editSong ([v = bpmSlider.getValue()] (Song& s) { s.bpm = v; }); };
 
@@ -309,6 +311,16 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     }
 
     return false;
+}
+
+void MainComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && (e.eventComponent == &bpmSlider || bpmSlider.isParentOf (e.eventComponent)))
+    {
+        juce::PopupMenu menu;
+        addAutomationItem (menu, engine, { AutomationTargetKind::tempo, 0 });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&bpmSlider));
+    }
 }
 
 bool MainComponent::keyStateChanged (bool)

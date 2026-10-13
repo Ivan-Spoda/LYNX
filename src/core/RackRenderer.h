@@ -45,6 +45,7 @@ struct RackState
     };
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
+    int tempoAutomation = -1; // automação do andamento, se houver
 
     // PDC: atrasos por aresta (nullptr = sem atraso) e as latências usadas para montar o plano.
     PdcPlan pdc;
@@ -126,6 +127,9 @@ public:
                   MeterBank* meters = nullptr,
                   LiveEventQueue* moreLive = nullptr) noexcept;
 
+    // Andamento usado no último bloco (muda com automação de tempo). O transporte avança com ele.
+    double currentBpm() const noexcept { return bpm; }
+
     // Eventos do último bloco (para testes e diagnóstico).
     const EventBuffer& lastEvents() const noexcept { return events; }
 
@@ -143,6 +147,7 @@ private:
     float* trackBuffer (int track, int channel) noexcept;
 
     double sampleRate = 44100.0;
+    double bpm = 120.0;
     bool wasPlaying = false;
     double expectedTick = -1.0; // onde o próximo bloco deveria começar, para detectar saltos
     bool resumeAudio = false;

@@ -2,7 +2,7 @@
 
 namespace lynx
 {
-ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l,
+ChannelRackProcessor::ChannelRackProcessor (Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l,
                                             LiveEventQueue& midi, MeterBank& m, WorkerPool* workers)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       transport (t),
@@ -46,5 +46,9 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         buffer.clear();
     }
+
+    // automação de tempo: o transporte avança no andamento que o renderer usou
+    if (state != nullptr && state->tempoAutomation >= 0)
+        transport.bpm.store (renderer.currentBpm(), std::memory_order_relaxed);
 }
 } // namespace lynx

@@ -1802,6 +1802,40 @@ TEST (note_pan_pitch_and_mute)
     CHECK (l[50] > 0.6f && std::abs (r[50]) < 1e-6f);
 }
 
+TEST (tempo_automation_changes_speed_and_duration)
+{
+    auto song = lynx::Song::makeDefault();
+    song.bpm = 120.0;
+    song.mode = lynx::PlayMode::song;
+    const auto bar = (std::int64_t) lynx::ppq * 4;
+    song.playlist = { { 0, 0, 0, bar, 0 }, { 0, 0, bar, bar, 0 } };
+    lynx::Automation tempo;
+    tempo.target = { lynx::AutomationTargetKind::tempo, 0 };
+    const auto v120 = lynx::valueFromTempo (120.0), v240 = lynx::valueFromTempo (240.0);
+    tempo.points = { { 0, v120 }, { bar - 1, v120 }, { bar, v240 } }; // degrau: 120 -> 240 no 2º compasso
+    song.automations.push_back (tempo);
+    lynx::Clip clip;
+    clip.kind = lynx::ClipKind::automation;
+    clip.automation = 0;
+    clip.track = 1;
+    clip.length = bar * 2;
+    song.playlist.push_back (clip);
+
+    CHECK (std::abs (song.tempoAt (100.0) - 120.0) < 0.01 && std::abs (song.tempoAt ((double) bar + 100.0) - 240.0) < 0.01);
+    // 1 compasso a 120 (2 s) + 1 a 240 (1 s)
+    CHECK (std::abs (song.secondsForTicks (bar * 2) - 3.0) < 0.01);
+
+    auto state = lynx::RackState::build (song, nullptr, 48000.0);
+    CHECK (state->tempoAutomation == 0);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> l (512), rr (512);
+    r.process (state.get(), true, 10.0, 512, l.data(), rr.data());
+    CHECK (std::abs (r.currentBpm() - 120.0) < 0.01);
+    r.process (state.get(), true, (double) bar + 10.0, 512, l.data(), rr.data());
+    CHECK (std::abs (r.currentBpm() - 240.0) < 0.01);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

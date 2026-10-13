@@ -20,11 +20,12 @@ ExportJob::ExportJob (const Song& song, const ExportSettings& s, const juce::Fil
       settings (s),
       output (file)
 {
-    // cauda em ticks no andamento da música (sem automação de tempo, é exato)
-    const auto ticksPerSecond = song.bpm * ppq / 60.0;
+    // duração integrando a automação de tempo; a cauda no andamento do fim da música
     std::int64_t musicTicks = 0;
+    makeExportSong (song, settings.wholeSong, 0, musicTicks);
+    const auto ticksPerSecond = song.tempoAt ((double) musicTicks) * ppq / 60.0;
     auto copy = makeExportSong (song, settings.wholeSong, (std::int64_t) (settings.tailSeconds * ticksPerSecond), musicTicks);
-    musicSeconds = (double) musicTicks / ticksPerSecond;
+    musicSeconds = copy.secondsForTicks (musicTicks);
 
     // a taxa antes do setSong: instrumentos e plugins já nascem preparados nela
     engine->getTransport().sampleRate.store (settings.sampleRate);

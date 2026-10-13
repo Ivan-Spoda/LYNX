@@ -287,6 +287,7 @@ void RackState::buildAutomationTables()
 
     pluginParams.clear();
     hasAutomation = false;
+    tempoAutomation = -1;
 
     // a última automação de um mesmo alvo ganha
     for (int a = 0; a < count; ++a)
@@ -328,6 +329,7 @@ void RackState::buildAutomationTables()
                 break;
             }
 
+            case AutomationTargetKind::tempo: tempoAutomation = a; break;
             case AutomationTargetKind::none: used = false; break;
         }
 
@@ -566,10 +568,10 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             for (std::size_t p = 0; p < params.size(); ++p)
                 params[p] = automated (autos[p], params[p]);
 
-            effects[i]->process (l, r, n, params, state.song.bpm);
+            effects[i]->process (l, r, n, params, bpm);
         }
         else
-            effects[i]->process (l, r, n, slots[i].params, state.song.bpm);
+            effects[i]->process (l, r, n, slots[i].params, bpm);
 
         if (isPlugin && key < smartDisable.size() && (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel))
             smartDisable[key].silentSamples = 0; // cauda (reverb, delay): continua processando
@@ -631,7 +633,20 @@ void RackRenderer::process (const RackState* state,
     // começou a tocar ou pulou: clips de áudio em andamento precisam começar no meio
     resumeAudio = playing && (! wasPlaying || jumped);
     wasPlaying = playing;
-    const auto tps = ticksPerSample (state->song.bpm, sampleRate);
+    // automação de tempo: o andamento vale o bloco inteiro (avaliado no começo dele)
+    bpm = state->song.bpm;
+
+    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song)
+    {
+        const auto length = (double) std::max<std::int64_t> (1, state->song.songLength());
+        const auto& clips = state->automationClips[(std::size_t) state->tempoAutomation];
+
+        if (! clips.empty())
+            bpm = tempoFromValue (automationValueAt (state->song, state->song.automations[(std::size_t) state->tempoAutomation], clips,
+                                                     std::fmod (std::max (0.0, startTick), length)));
+    }
+
+    const auto tps = ticksPerSample (bpm, sampleRate);
     expectedTick = startTick + numSamples * tps;
 
     for (auto* queue : { live, moreLive })
@@ -686,14 +701,14 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (playing && song.mode == PlayMode::song)
     {
-        scheduleSong (song, startTick, numSamples, ticksPerSample (song.bpm, sampleRate), events, resumeAudio);
+        scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio);
     }
     else if (playing && ! song.patterns.empty())
     {
         const auto patternIndex = std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1);
         const auto& pattern = song.patterns[(std::size_t) patternIndex];
         schedulePatternLoop (pattern, pattern.effectiveLength (song.beatsPerBar), startTick, numSamples,
-                             ticksPerSample (song.bpm, sampleRate), events, song.swing);
+                             ticksPerSample (bpm, sampleRate), events, song.swing);
     }
 
     // 1) canais, cada um com as próprias notas no sample exato (em paralelo quando vale a pena)

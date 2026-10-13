@@ -24,6 +24,7 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
+    void mouseDown (const juce::MouseEvent& e) override; // clique direito no BPM: automação de tempo
 
     // Abre .lynx ou .flp (também usado pela linha de comando).
     void openFile (const juce::File& file);

@@ -157,8 +157,13 @@ enum class AutomationTargetKind : std::uint8_t
     channelParam,  // index = canal com plugin; param = índice do parâmetro do plugin
     mixerVolume,   // index = trilha do mixer (0 = Master)
     mixerPan,      // index = trilha
-    effectParam    // index = trilha, slot, param (efeito interno ou plugin)
+    effectParam,   // index = trilha, slot, param (efeito interno ou plugin)
+    tempo          // andamento da música: 0..1 = minTempo..maxTempo BPM
 };
+
+constexpr double minTempo = 10.0, maxTempo = 522.0; // a faixa do FL
+inline double tempoFromValue (float v) noexcept { return minTempo + (maxTempo - minTempo) * (double) v; }
+inline float valueFromTempo (double bpm) noexcept { return (float) ((bpm - minTempo) / (maxTempo - minTempo)); }
 
 struct AutomationTarget
 {
@@ -306,6 +311,13 @@ struct Song
 
     // Valor atual (do modelo, sem automação) do alvo, 0..1; -1 se o alvo não existir.
     float targetValue (const AutomationTarget& target) const noexcept;
+
+    // Valor de uma automação numa posição da música (o mesmo que a reprodução usa); NaN sem clips.
+    float automationValueAt (int automation, double tick) const;
+    // Andamento em `tick`, considerando automação de tempo (no modo song).
+    double tempoAt (double tick) const;
+    // Duração em segundos dos primeiros `ticks` da música, integrando a automação de tempo.
+    double secondsForTicks (std::int64_t ticks) const;
 
     static Song makeDefault();
 };

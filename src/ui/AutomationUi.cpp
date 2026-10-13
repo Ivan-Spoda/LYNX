@@ -136,7 +136,9 @@ public:
         {
             const auto p = pointPosition (points[(std::size_t) hoverPoint]);
             g.setColour (theme::text);
-            g.drawText (juce::String (juce::roundToInt (points[(std::size_t) hoverPoint].value * 100.0f)) + "%",
+            const auto value = points[(std::size_t) hoverPoint].value;
+            g.drawText (a->target.kind == AutomationTargetKind::tempo ? juce::String (tempoFromValue (value), 1) + " BPM"
+                                                                       : juce::String (juce::roundToInt (value * 100.0f)) + "%",
                         (int) p.x + 8, (int) p.y - 18, 60, 14, juce::Justification::centredLeft);
         }
     }
@@ -414,6 +416,7 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
             return (t.kind == AutomationTargetKind::channelParam ? channelName : trackName) + " - " + param;
         }
 
+        case AutomationTargetKind::tempo: return "Tempo";
         case AutomationTargetKind::none: break;
     }
 

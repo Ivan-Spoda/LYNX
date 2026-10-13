@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace lynx
 {
@@ -444,10 +445,82 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
                 return mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param];
             return validTrack ? 0.5f : -1.0f; // parâmetro de plugin: o valor mora no plugin
         case AutomationTargetKind::channelParam: return validChannel ? 0.5f : -1.0f;
+        case AutomationTargetKind::tempo: return valueFromTempo (bpm);
         case AutomationTargetKind::none: break;
     }
 
     return -1.0f;
+}
+
+float Song::automationValueAt (int index, double tick) const
+{
+    if (index < 0 || index >= (int) automations.size())
+        return std::numeric_limits<float>::quiet_NaN();
+
+    std::vector<const Clip*> clips;
+
+    for (const auto& c : playlist)
+        if (c.kind == ClipKind::automation && c.automation == index && c.length > 0 && ! isTrackMuted (c.track))
+            clips.push_back (&c);
+
+    if (clips.empty())
+        return std::numeric_limits<float>::quiet_NaN();
+
+    std::stable_sort (clips.begin(), clips.end(), [] (const Clip* a, const Clip* b) { return a->start < b->start; });
+    const auto& automation = automations[(std::size_t) index];
+    const Clip* before = nullptr;
+
+    // mesma regra da reprodução: dentro do clip a curva; entre clips o último valor; antes o primeiro
+    for (const auto* c : clips)
+    {
+        if (tick < (double) c->start)
+            break;
+
+        if (tick < (double) c->end())
+            return automation.valueAt (tick - (double) c->start + (double) c->offset);
+
+        before = c;
+    }
+
+    if (before != nullptr)
+        return automation.valueAt ((double) (before->length + before->offset));
+
+    return automation.valueAt ((double) clips.front()->offset);
+}
+
+double Song::tempoAt (double tick) const
+{
+    if (mode != PlayMode::song)
+        return bpm;
+
+    for (int i = (int) automations.size() - 1; i >= 0; --i) // a última automação de tempo ganha
+        if (automations[(std::size_t) i].target.kind == AutomationTargetKind::tempo)
+            if (const auto v = automationValueAt (i, tick); ! std::isnan (v))
+                return tempoFromValue (v);
+
+    return bpm;
+}
+
+double Song::secondsForTicks (std::int64_t ticks) const
+{
+    const auto hasTempo = mode == PlayMode::song
+                          && std::any_of (automations.begin(), automations.end(),
+                                          [] (const Automation& a) { return a.target.kind == AutomationTargetKind::tempo; });
+
+    if (! hasTempo)
+        return (double) ticks * 60.0 / (std::max (1.0, bpm) * ppq);
+
+    // integra em passos de 1/16 (a reprodução troca o andamento bloco a bloco; a diferença é mínima)
+    double seconds = 0.0;
+    constexpr std::int64_t step = ticksPerStep;
+
+    for (std::int64_t t = 0; t < ticks; t += step)
+    {
+        const auto n = std::min (step, ticks - t);
+        seconds += (double) n * 60.0 / (std::max (1.0, tempoAt ((double) t)) * ppq);
+    }
+
+    return seconds;
 }
 
 float Automation::valueAt (double tick) const noexcept
