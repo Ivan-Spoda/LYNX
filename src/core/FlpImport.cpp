@@ -2,6 +2,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/FlWrapper.h"
@@ -388,8 +389,22 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
     }
 }
 
-Song importFlp (const flp::Project& project, const FlpImportOptions& options)
+Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 {
+    // Patcher usado como instrumento: o canal vira o gerador principal de dentro dele (REA_rodada14 §1)
+    std::optional<flp::Project> unpacked;
+    for (std::size_t i = 0; i < input.channels.size(); ++i)
+        if (lowercase (input.channels[i].pluginName) == "patcher")
+            if (const auto graph = parsePatcher (input.channels[i].pluginState); graph && graph->mainGenerator >= 0)
+            {
+                if (! unpacked)
+                    unpacked = input;
+                const auto& node = graph->nodes[(std::size_t) graph->mainGenerator];
+                unpacked->channels[i].pluginName = node.plugin;
+                unpacked->channels[i].pluginState = node.state;
+            }
+    const auto& project = unpacked ? *unpacked : input;
+
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
@@ -875,56 +890,71 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         auto& track = song.mixer[(std::size_t) insert.index];
 
-        for (const auto& slot : insert.slots)
+        for (const auto& original : insert.slots)
         {
-            if ((int) track.effects.size() >= maxEffectSlots)
-                continue;
-
-            ForeignPlugin foreign;
-            std::optional<EffectSlot> made;
-
-            const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
-
-            // FL antigo salvava os próprios efeitos Fruity como VST2 dentro do wrapper: vira o efeito interno
-            if (wrapped && foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
-                made = effectFromFl (foreign.name, {}, song.bpm);
-            else if (wrapped)
-            {
-                // o app troca pelo plugin instalado; sem ele, o slot sai
-                made = makeEffectSlot (EffectKind::plugin);
-                made->plugin.name = foreign.name;
-                made->plugin.foreign = std::move (foreign);
-            }
-            else
-                made = effectFromFl (slot.plugin, slot.state, song.bpm); // efeito nativo com os ajustes salvos (REA_rodada7)
-
-            if (! made)
-            {
-                // os que não mexem no áudio (controladores, visualizadores, anotações) não fazem falta
-                static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface", "Wave Candy",
-                                                "ZGameEditor Visualizer", "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
-                                                "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
-                const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
-
-                if (options.report != nullptr && slot.plugin != "Fruity Wrapper" && ! harmless)
-                    ++options.report->droppedEffects[slot.plugin];
-                continue;
-            }
-
-            auto fx = std::move (*made);
-
-            // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
-            for (const auto& control : project.controls)
-                if (control.id.isMixer() && control.id.track() == insert.index && control.id.slot() == slot.index)
+            // Patcher com uma cadeia simples em série: os plugins de dentro viram slots seguidos
+            std::vector<flp::MixerInsert::Slot> expanded { original };
+            if (lowercase (original.plugin) == "patcher")
+                if (const auto graph = parsePatcher (original.state); graph && ! graph->serialChain.empty())
                 {
-                    if (control.id.param() == 0x1F00)
-                        fx.enabled = control.value != 0;
-                    else if (control.id.param() == 0x1F01)
-                        fx.mix = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+                    expanded.clear();
+                    for (const auto n : graph->serialChain)
+                        expanded.push_back ({ original.index, graph->nodes[(std::size_t) n].plugin, graph->nodes[(std::size_t) n].state });
+                    if (options.report != nullptr)
+                        ++options.report->converted["Patcher (em série)"];
                 }
 
-            effectSlotMap[{ insert.index, slot.index }] = { (int) track.effects.size(), slot.plugin };
-            track.effects.push_back (fx);
+            for (const auto& slot : expanded)
+            {
+                if ((int) track.effects.size() >= maxEffectSlots)
+                    continue;
+
+                ForeignPlugin foreign;
+                std::optional<EffectSlot> made;
+
+                const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
+
+                // FL antigo salvava os próprios efeitos Fruity como VST2 dentro do wrapper: vira o efeito interno
+                if (wrapped && foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
+                    made = effectFromFl (foreign.name, {}, song.bpm);
+                else if (wrapped)
+                {
+                    // o app troca pelo plugin instalado; sem ele, o slot sai
+                    made = makeEffectSlot (EffectKind::plugin);
+                    made->plugin.name = foreign.name;
+                    made->plugin.foreign = std::move (foreign);
+                }
+                else
+                    made = effectFromFl (slot.plugin, slot.state, song.bpm); // efeito nativo com os ajustes salvos (REA_rodada7)
+
+                if (! made)
+                {
+                    // os que não mexem no áudio (controladores, visualizadores, anotações) não fazem falta
+                    static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface", "Wave Candy",
+                                                    "ZGameEditor Visualizer", "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
+                                                    "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
+                    const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
+
+                    if (options.report != nullptr && slot.plugin != "Fruity Wrapper" && ! harmless)
+                        ++options.report->droppedEffects[slot.plugin];
+                    continue;
+                }
+
+                auto fx = std::move (*made);
+
+                // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
+                for (const auto& control : project.controls)
+                    if (control.id.isMixer() && control.id.track() == insert.index && control.id.slot() == slot.index)
+                    {
+                        if (control.id.param() == 0x1F00)
+                            fx.enabled = control.value != 0;
+                        else if (control.id.param() == 0x1F01)
+                            fx.mix = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+                    }
+
+                effectSlotMap.insert ({ { insert.index, slot.index }, { (int) track.effects.size(), slot.plugin } });
+                track.effects.push_back (fx);
+            }
         }
     }
 

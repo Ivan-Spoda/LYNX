@@ -15,6 +15,7 @@
 #include "core/Effects.h"
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
+#include "core/FlPatcher.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
 #include "core/FlWrapper.h"
@@ -828,7 +829,7 @@ TEST (flp_real_files)
 
     // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
     {
-        int gates = 0, shaped = 0, effectors = 0;
+        int gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
             {
@@ -849,10 +850,26 @@ TEST (flp_real_files)
                             }
                             else if (slot.plugin == "Effector")
                                 effectors += lynx::effectFromFl (slot.plugin, slot.state).has_value();
+                            else if (slot.plugin == "Patcher")
+                            {
+                                const auto graph = lynx::parsePatcher (slot.state);
+                                CHECK (graph.has_value());
+                                ++patchers;
+                                if (graph && ! graph->serialChain.empty())
+                                    ++serial;
+                            }
+                    for (const auto& c : project.channels)
+                        if (c.pluginName == "Patcher")
+                        {
+                            const auto graph = lynx::parsePatcher (c.pluginState);
+                            CHECK (graph.has_value());
+                            generatorPatchers += graph && graph->mainGenerator >= 0;
+                        }
                 }
                 catch (const flp::Error&) {}
             }
         std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos\n", gates, shaped, effectors);
+        std::printf ("  Patcher: %d no mixer (%d em série), %d como instrumento com gerador\n", patchers, serial, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);
     }
 

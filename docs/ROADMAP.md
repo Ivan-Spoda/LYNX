@@ -94,7 +94,8 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)
 - [x] Gross Beat (gate de volume), Frequency Splitter, Effector (rodada 14)
 - [x] Links do Peak Controller (automação ao vivo)
-- [ ] Patcher (achatar cadeias em série; paralelo -> submix), Envelope/X-Y Controller
+- [x] Patcher: cadeia em série vira slots seguidos; Patcher instrumento usa o gerador de dentro
+- [ ] Patcher em paralelo (submix / M-S / multibanda), Envelope/X-Y Controller
 - [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
 - [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)
 - [ ] Morphine, PoiZone, Toxic Biohazard, BassDrum

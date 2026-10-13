@@ -88,6 +88,10 @@ Atualizado em 2026-10-13.
 - **Links de controlador**: o Peak Controller do FL vira um efeito que mede o pico da trilha, e o link dele
   vira uma automação "ao vivo" do alvo (lida a cada bloco): o *sidechain pumping* dos demos funciona.
   Envelope/X-Y/Formula Controller ainda ficam de fora.
+- **Patcher**: o grafo do estado é lido; uma cadeia simples em série vira slots seguidos no mixer e um
+  Patcher usado como instrumento toca o gerador principal de dentro (ex.: Harmor dentro do Patcher).
+  Patchers em paralelo (M/S, multibanda) ainda ficam de fora.
+- **Efeitos novos**: pitch shift e frequency shifter (base para o Pitch Shifter / Frequency Shifter do FL).
 - **Sytrus (REA rodada 11)**: estado zlib (inflate próprio no núcleo) com a matriz FM/RM, 10 unidades e
   articuladores; as 3 portadoras mais fortes viram os osciladores, FM forte vira onda mais rica +
   envelope de filtro, RM vira AM, o primeiro filtro ativo (com o envelope de cutoff) vira o filtro.
