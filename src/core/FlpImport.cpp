@@ -60,6 +60,53 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
     return flPath;
 }
 
+AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int>& channelMap, int mixerTracks)
+{
+    AutomationTarget t;
+
+    if (id.isChannel())
+    {
+        const auto channel = channelMap.find (id.channel());
+
+        if (channel == channelMap.end())
+            return t;
+
+        t.index = channel->second;
+        const auto p = id.param();
+
+        if (p == 0)
+            t.kind = AutomationTargetKind::channelVolume;
+        else if (p == 1)
+            t.kind = AutomationTargetKind::channelPan;
+        else if (p >= flp::ControlId::pluginParamBase)
+        {
+            t.kind = AutomationTargetKind::channelParam;
+            t.param = p - flp::ControlId::pluginParamBase;
+        }
+
+        return t;
+    }
+
+    if (id.isMixer() && id.track() >= 0 && id.track() < mixerTracks)
+    {
+        t.index = id.track();
+        const auto p = id.param();
+
+        if (p == flp::ControlId::mixerVolume)
+            t.kind = AutomationTargetKind::mixerVolume;
+        else if (p == flp::ControlId::mixerPan)
+            t.kind = AutomationTargetKind::mixerPan;
+        else if (p >= flp::ControlId::pluginParamBase)
+        {
+            t.kind = AutomationTargetKind::effectParam;
+            t.slot = id.slot();
+            t.param = p - flp::ControlId::pluginParamBase;
+        }
+    }
+
+    return t;
+}
+
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
@@ -70,7 +117,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
     for (const auto& c : project.channels)
     {
-        // Clips de automação ainda não existem no nosso modelo.
+        // clips de automação viram Song::automations (mais abaixo), não canais
         if (c.type == flp::ChannelType::automationClip)
             continue;
 
@@ -100,16 +147,84 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         song.channels.push_back (std::move (def));
     }
 
-    // Mixer: nomes do .flp; inserts suficientes para todas as rotas (mínimo 16, como um projeto novo).
+    // Mixer: nomes, mute/solo, roteamento e níveis do .flp; inserts suficientes para todas as
+    // rotas (mínimo 16, como um projeto novo). As trilhas extras do FL (500/501) ficam de fora.
     int highestTrack = 16;
     for (const auto& c : song.channels)
         highestTrack = std::max (highestTrack, c.mixerTrack);
 
-    song.mixer = Song::defaultMixer (highestTrack);
+    for (const auto& insert : project.mixer)
+        if (insert.index < maxMixerTracks)
+            for (auto target : insert.routes)
+                if (target < maxMixerTracks && (insert.index > 0 || target > 0))
+                    highestTrack = std::max ({ highestTrack, target, insert.index });
+
+    song.mixer = Song::defaultMixer (std::min (highestTrack, maxMixerTracks - 1));
+    const auto tracks = (int) song.mixer.size();
 
     for (const auto& insert : project.mixer)
-        if (insert.index > 0 && insert.index < (int) song.mixer.size() && ! insert.name.empty())
-            song.mixer[(std::size_t) insert.index].name = insert.name;
+    {
+        if (insert.index < 0 || insert.index >= tracks)
+            continue;
+
+        auto& track = song.mixer[(std::size_t) insert.index];
+
+        if (insert.index > 0 && ! insert.name.empty())
+            track.name = insert.name;
+
+        track.muted = (insert.flags & 0x08) == 0;
+        track.solo = insert.index > 0 && (insert.flags & 0x1000) != 0;
+
+        if (insert.index > 0 && insert.hasRoutes)
+        {
+            track.toMaster = std::find (insert.routes.begin(), insert.routes.end(), 0) != insert.routes.end();
+
+            // O nível vem do 0xE1 (abaixo). Sem registro, os templates do FL ligam todo insert às
+            // trilhas de send do fim do mixer (100+) com nível 0; rotas para inserts comuns valem 100%.
+            for (auto target : insert.routes)
+                if (target > 0 && target < tracks && target != insert.index)
+                    track.sends.push_back ({ target, target >= 100 ? 0.0f : 1.0f });
+        }
+    }
+
+    // ciclos não deveriam existir no arquivo; se existirem, o envio que fecha o ciclo cai
+    for (int t = 1; t < tracks; ++t)
+    {
+        auto sends = std::move (song.mixer[(std::size_t) t].sends);
+        song.mixer[(std::size_t) t].sends.clear();
+
+        for (const auto& s : sends)
+            song.setRoute (t, s.target, true, s.level);
+    }
+
+    for (const auto& control : project.controls)
+    {
+        if (! control.id.isMixer())
+            continue;
+
+        const auto t = control.id.track();
+        const auto p = control.id.param();
+
+        if (t < 0 || t >= tracks)
+            continue;
+
+        auto& track = song.mixer[(std::size_t) t];
+
+        // faixas do FL: volume 0..16000 (12800 = 0 dB), pan ±6400, envio 0..16000 (12800 = 100%)
+        if (p == flp::ControlId::mixerVolume)
+            track.volume = std::clamp (control.value / 16000.0f, 0.0f, 1.0f);
+        else if (p == flp::ControlId::mixerPan)
+            track.pan = std::clamp (control.value / 6400.0f, -1.0f, 1.0f);
+        else if (p >= flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
+            for (auto& send : track.sends)
+                if (send.target == p - flp::ControlId::mixerSendBase)
+                    send.level = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+    }
+
+    // o template do FL liga todo insert às trilhas de send com nível 0; isso não soa, só gasta CPU
+    for (auto& t : song.mixer)
+        t.sends.erase (std::remove_if (t.sends.begin(), t.sends.end(), [] (const MixerSend& s) { return s.level <= 0.0f; }),
+                       t.sends.end());
 
     const auto filePpq = project.header.ppq > 0 ? (std::int64_t) project.header.ppq : 96;
     auto rescale = [filePpq] (std::int64_t ticks) { return ticks * ppq / filePpq; };
@@ -150,14 +265,72 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         }
     }
 
-    // Playlist: só o primeiro arrangement; clips de pattern e de áudio
-    // (clips de automação ainda não existem no nosso modelo).
+    // Clips de automação: um Automation por canal de automação do FL, com o alvo do link 0xE3.
+    std::map<int, int> automationMap; // canal do FL -> índice em song.automations
+
+    for (const auto& c : project.channels)
+    {
+        if (c.type != flp::ChannelType::automationClip || c.automation.empty())
+            continue;
+
+        Automation a;
+        a.name = c.name.empty() ? "Automação " + std::to_string (c.index + 1) : c.name;
+
+        for (const auto& link : project.automationLinks)
+            if (link.channel == c.index)
+            {
+                a.target = automationTargetFor (link.target, channelMap, (int) song.mixer.size());
+                break;
+            }
+
+        for (std::size_t i = 0; i < c.automation.size(); ++i)
+        {
+            const auto& p = c.automation[i];
+            const auto tick = (std::int64_t) std::llround (p.position * ppq);
+            const auto value = (float) std::clamp (p.value, 0.0, 1.0);
+
+            // a curva do FL é do trecho que termina no ponto; a nossa fica no ponto da esquerda
+            if (i > 0)
+            {
+                auto& previous = a.points.back();
+
+                if (p.curve == 0 || p.curve == 1) // single/double curve: exponencial pela tensão
+                    previous.tension = std::clamp (-p.tension, -1.0f, 1.0f);
+                else if (p.curve == 2 && tick - previous.tick > 1) // hold: degrau logo antes do ponto
+                    a.points.push_back ({ tick - 1, previous.value, 0.0f });
+            }
+
+            a.points.push_back ({ tick, value, 0.0f });
+        }
+
+        automationMap[c.index] = (int) song.automations.size();
+        song.automations.push_back (std::move (a));
+    }
+
+    // Playlist: só o primeiro arrangement; clips de pattern, de áudio e de automação.
     if (! project.arrangements.empty())
     {
         for (const auto& item : project.arrangements.front().items)
         {
             if (item.length == 0)
                 continue;
+
+            if (item.kind == flp::PlaylistItem::Kind::channelClip && automationMap.count (item.index))
+            {
+                Clip clip;
+                clip.kind = ClipKind::automation;
+                clip.automation = automationMap[item.index];
+                clip.track = item.track;
+                clip.start = rescale (item.position);
+                clip.length = rescale (item.length);
+
+                // recorte em tempos (-1 = sem recorte)
+                if (std::isfinite (item.startOffset) && item.startOffset > 0.0f)
+                    clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
+
+                song.playlist.push_back (clip);
+                continue;
+            }
 
             if (item.kind == flp::PlaylistItem::Kind::channelClip)
             {

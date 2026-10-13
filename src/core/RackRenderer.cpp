@@ -667,7 +667,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         {
             const auto& send = track.sends[k];
 
-            if (send.target > 0 && send.target < tracks && send.target != t)
+            if (send.target > 0 && send.target < tracks && send.target != t && send.level > 0.0f)
                 sendTo (trackBuffer (send.target, 0), trackBuffer (send.target, 1), send.level, k + 1);
         }
 

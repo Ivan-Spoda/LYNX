@@ -31,12 +31,18 @@ enum : std::uint32_t
     evGenre = 0xCE,
     evArtist = 0xCF,
     evPatternNotes = 0xE0,
+    evControlValues = 0xE1,     // registros de 12 B {u32 ?, u32 controlID, i32 valor}
+    evAutomationLink = 0xE3,    // registros de 20 B {u32 canal<<16, u32 0, u32 controlID, u32 flags, u32 ?}
+    evAutomationPoints = 0xEA,  // header 21 B + 24 B por ponto + 112 B
+    evMixerRoutes = 0xEB,       // um byte por trilha de destino
     evPlaylistItems = 0xE9,
     evMixerInsertParams = 0xEC, // abre um novo insert do mixer
     evArrangementName = 0xF1,
 };
 
 constexpr std::size_t noteRecordSize = 24;
+constexpr std::size_t automationHeaderSize = 21;
+constexpr std::size_t automationPointSize = 24;
 constexpr std::uint16_t playlistPatternBase = 20480;
 
 constexpr std::uint32_t version (std::uint32_t major, std::uint32_t minor, std::uint32_t patch)
@@ -248,6 +254,22 @@ std::uint32_t parseVersionNumber (const std::string& text)
     }
 
     return version (parts[0], parts[1], parts[2]);
+}
+
+ControlId normalizeControlId (std::uint32_t raw)
+{
+    // antes do 24.2.99 a classe do mixer era 0x2... (o FL soma 0x50000000 ao carregar) e os
+    // envios ficavam em 0x1F40 + destino
+    if ((raw >> 28) == 2)
+    {
+        raw += 0x50000000u;
+        const auto p = raw & 0xFFFF;
+
+        if (p >= 0x1F40 && p < 0x1FC0)
+            raw = (raw & 0xFFFF0000u) | (std::uint32_t) (ControlId::mixerSendBase + (int) (p - 0x1F40));
+    }
+
+    return { raw };
 }
 
 std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize)
@@ -483,6 +505,76 @@ Project parseProject (std::span<const std::uint8_t> file)
                 break;
             }
 
+            case evControlValues:
+                for (std::size_t o = 0; o + 12 <= e.data.size(); o += 12)
+                    project.controls.push_back ({ normalizeControlId (readLE<std::uint32_t> (e.data, o + 4)),
+                                                  readLE<std::int32_t> (e.data, o + 8) });
+                break;
+
+            case evAutomationLink:
+                for (std::size_t o = 0; o + 20 <= e.data.size(); o += 20)
+                    if ((readLE<std::uint32_t> (e.data, o + 12) & 8) != 0) // 8 = clip de automação (4 = controle remoto)
+                        project.automationLinks.push_back ({ (int) (readLE<std::uint32_t> (e.data, o) >> 16),
+                                                             normalizeControlId (readLE<std::uint32_t> (e.data, o + 8)) });
+                break;
+
+            case evAutomationPoints:
+            {
+                if (section != Section::channel || e.data.size() < automationHeaderSize)
+                    break;
+
+                const auto count = readLE<std::uint32_t> (e.data, 17);
+
+                if (automationHeaderSize + (std::size_t) count * automationPointSize > e.data.size())
+                {
+                    project.warnings.push_back ("automação do canal " + std::to_string (currentChannel) + " truncada; ignorada");
+                    break;
+                }
+
+                auto& points = channel().automation;
+                points.clear();
+                double position = 0.0;
+
+                for (std::uint32_t i = 0; i < count; ++i)
+                {
+                    const auto o = automationHeaderSize + (std::size_t) i * automationPointSize;
+                    AutomationPoint p;
+                    position += readLE<double> (e.data, o); // distância até o ponto anterior
+                    p.position = position;
+                    p.value = readLE<double> (e.data, o + 8);
+                    p.tension = readLE<float> (e.data, o + 16);
+                    p.curve = e.data[o + 20];
+                    points.push_back (p);
+                }
+                break;
+            }
+
+            case evMixerRoutes:
+                if (section == Section::mixer && ! project.mixer.empty())
+                {
+                    auto& insert = project.mixer.back();
+                    insert.hasRoutes = true;
+                    insert.routes.clear();
+
+                    for (std::size_t i = 0; i < e.data.size(); ++i)
+                    {
+                        if (e.data[i] == 0)
+                            continue;
+
+                        // arquivos antigos tinham menos trilhas; as extras ("Current") viram 500/501
+                        auto target = (int) i;
+                        if (project.versionNumber < version (8, 5, 0) && target > 64)
+                            target += 35;
+                        else if (project.versionNumber < version (12, 9, 0) && target > 103)
+                            target += 397;
+                        else if (project.versionNumber < version (24, 2, 99) && target > 125)
+                            target += 375;
+
+                        insert.routes.push_back (target);
+                    }
+                }
+                break;
+
             case evMixerInsertName:
                 // O nome vem antes do evento que abre o insert ao qual pertence
                 // (confirmado cruzando com a rota dos canais nos demos).
@@ -496,6 +588,9 @@ Project parseProject (std::span<const std::uint8_t> file)
                 insert.index = (int) project.mixer.size() - 1;
                 insert.name = std::move (pendingInsertName);
                 pendingInsertName.clear();
+
+                if (e.data.size() >= 8)
+                    insert.flags = readLE<std::uint32_t> (e.data, 4);
                 break;
             }
 

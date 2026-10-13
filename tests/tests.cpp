@@ -249,7 +249,7 @@ TEST (flp_real_files)
         return;
     }
 
-    int files = 0, withNotes = 0, withPlaylist = 0;
+    int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -284,7 +284,29 @@ TEST (flp_real_files)
             {
                 CHECK (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size());
                 CHECK (clip.length > 0 && clip.offset >= 0);
+
+                if (clip.kind == lynx::ClipKind::automation)
+                    CHECK (clip.automation >= 0 && clip.automation < (int) song.automations.size());
             }
+
+            for (auto& a : song.automations)
+            {
+                ++automations;
+                automationsWithTarget += a.target.kind != lynx::AutomationTargetKind::none;
+                CHECK (! a.points.empty());
+
+                for (std::size_t i = 1; i < a.points.size(); ++i)
+                    CHECK (a.points[i].tick >= a.points[i - 1].tick);
+            }
+
+            // roteamento importado sem ciclos e com destinos válidos
+            CHECK (song.mixerOrder().size() + 1 == song.mixer.size());
+            for (auto& t : song.mixer)
+                for (auto& s : t.sends)
+                {
+                    ++sends;
+                    CHECK (s.target > 0 && s.target < (int) song.mixer.size());
+                }
 
             if (! song.playlist.empty())
                 ++withPlaylist;
@@ -296,8 +318,10 @@ TEST (flp_real_files)
         }
     }
 
-    std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist\n", files, withNotes, withPlaylist);
+    std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
+                 files, withNotes, withPlaylist, automations, automationsWithTarget, sends);
     CHECK (files > 0);
+    CHECK (automations > 0 && sends > 0);
 }
 
 // ---------------------------------------------------------------------------

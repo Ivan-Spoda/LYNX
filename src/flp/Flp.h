@@ -70,6 +70,15 @@ enum class ChannelType : std::uint8_t
     unknown = 255
 };
 
+// Ponto de um clip de automação (evento 0xEA). Posições em tempos (semínimas).
+struct AutomationPoint
+{
+    double position = 0.0;  // absoluta, já somando os deltas do arquivo
+    double value = 0.0;     // 0..1
+    float tension = 0.0f;   // -1..1
+    std::uint8_t curve = 0; // 0 = single curve, 1 = double, 2 = hold, 10 = smooth...
+};
+
 struct Channel
 {
     int index = 0;
@@ -78,6 +87,41 @@ struct Channel
     std::string pluginName;      // nome interno do gerador (ex.: "FLEX")
     std::string samplePath;
     int mixerTrack = -1;
+    std::vector<AutomationPoint> automation; // canais do tipo automationClip
+};
+
+// Endereço de um parâmetro automatizável (controlID do FL), já no formato atual:
+//  < 0x10000000: canal (id >> 16), parâmetro (id & 0xFFFF)
+//  0x70000000 + (trilha << 22) + (slot << 16) + p: mixer
+struct ControlId
+{
+    std::uint32_t raw = 0;
+
+    bool isChannel() const noexcept { return raw < 0x10000000u; }
+    bool isMixer() const noexcept { return raw >= 0x70000000u; }
+    int channel() const noexcept { return (int) (raw >> 16); }
+    int track() const noexcept { return (int) ((raw - 0x70000000u) >> 22); }
+    int slot() const noexcept { return (int) ((raw >> 16) & 0x3F); }
+    int param() const noexcept { return (int) (raw & 0xFFFF); }
+
+    static constexpr int mixerVolume = 0x1FC0;
+    static constexpr int mixerPan = 0x1FC1;
+    static constexpr int mixerSendBase = 0x2000; // + trilha de destino
+    static constexpr int pluginParamBase = 0x8000;
+};
+
+// Valor gravado de um parâmetro (evento 0xE1).
+struct ControlValue
+{
+    ControlId id;
+    std::int32_t value = 0;
+};
+
+// Liga um clip de automação (canal) a um parâmetro (evento 0xE3).
+struct AutomationLink
+{
+    int channel = 0;
+    ControlId target;
 };
 
 struct Note
@@ -134,6 +178,9 @@ struct MixerInsert
 {
     int index = 0;
     std::string name;
+    std::uint32_t flags = 0x4C;  // 0x08 = habilitada (apagado = mutada), 0x1000 = solo
+    std::vector<int> routes;      // trilhas de destino (0 = Master)
+    bool hasRoutes = false;
 };
 
 struct Project
@@ -148,6 +195,8 @@ struct Project
     std::vector<Pattern> patterns;
     std::vector<Arrangement> arrangements;
     std::vector<MixerInsert> mixer;
+    std::vector<ControlValue> controls;       // volumes, pans, níveis de envio...
+    std::vector<AutomationLink> automationLinks;
 
     std::vector<std::string> warnings; // coisas ignoradas ou suspeitas, para diagnóstico
 
@@ -160,4 +209,6 @@ Project parseProject (std::span<const std::uint8_t> file);
 // Utilitários expostos para testes
 std::uint32_t parseVersionNumber (const std::string& version);
 std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize);
+// Converte um controlID de arquivos antigos (classe 0x2..., envios em 0x1F40+d) para o formato atual.
+ControlId normalizeControlId (std::uint32_t raw);
 } // namespace flp

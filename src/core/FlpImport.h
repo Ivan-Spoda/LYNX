@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <string>
 
 #include "core/Song.h"
@@ -30,4 +31,7 @@ struct FlpImportOptions
 Song importFlp (const flp::Project& project, const FlpImportOptions& options = {});
 
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type);
+
+// Alvo nosso para um controlID do FL (canal/mixer). `channelMap` = canal do FL -> nosso.
+AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int>& channelMap, int mixerTracks);
 } // namespace lynx
