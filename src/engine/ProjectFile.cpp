@@ -228,6 +228,8 @@ juce::String toJson (const Song& song)
             synth->setProperty ("osc", oscs);
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance });
+            if (c.synth.mono)
+                synth->setProperty ("mono", true);
 
             for (auto [name, env] : { std::pair { "filterEnv", &c.synth.filterEnv }, { "pitchEnv", &c.synth.pitchEnv } })
                 if (env->amount != 0.0f)
@@ -529,6 +531,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
                     def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
                 }
+
+                def.synth.mono = (bool) s.getProperty ("mono", false);
 
                 for (auto [name, env, limit] : { std::tuple { "filterEnv", &def.synth.filterEnv, 10.0f }, { "pitchEnv", &def.synth.pitchEnv, 48.0f } })
                     if (const auto& e = s[name]; e.isArray() && e.size() == 6)

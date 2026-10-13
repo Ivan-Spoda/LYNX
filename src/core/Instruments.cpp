@@ -275,6 +275,41 @@ public:
 
     void noteOn (int key, float velocity) noexcept override
     {
+        if (mailbox.read (settings))
+            updateCoefficients();
+
+        if (settings.mono)
+        {
+            // canal mono (polifonia 1 no FL): a voz que soa troca de nota sem zerar fase nem filtro;
+            // os envelopes recomeçam do nível atual
+            SynthVoice* sounding = nullptr;
+
+            for (auto& v : voices)
+                if (v.active && (sounding == nullptr || v.age < sounding->age))
+                    sounding = &v;
+
+            if (sounding != nullptr)
+            {
+                for (auto& v : voices)
+                    if (&v != sounding)
+                        v.active = false;
+
+                auto& v = *sounding;
+                v.key = key;
+                v.velocity = velocity;
+                v.releasing = false;
+                v.stage = 0;
+                v.age = 0;
+                v.glideLeft = 0;
+                v.phaseDelta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+                for (auto& m : v.mod)
+                    m = { m.level, 0.0f, 0, 0 };
+                voicePan (nextPan, v.panL, v.panR);
+                nextPan = nextCents = 0.0f;
+                return;
+            }
+        }
+
         SynthVoice* target = &voices[0];
 
         for (auto& v : voices)

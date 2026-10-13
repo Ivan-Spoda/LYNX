@@ -283,6 +283,11 @@ public:
         };
         addAndMakeVisible (presetBox);
 
+        mono.setButtonText ("Mono");
+        mono.setTooltip (utf8 ("Uma voz só: a nota nova assume a que está soando (baixos e leads)"));
+        mono.onClick = [this] { apply(); };
+        addAndMakeVisible (mono);
+
         refresh();
         engine.addChangeListener (this);
         setSize (620, 590);
@@ -295,7 +300,9 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (10);
-        presetBox.setBounds (area.removeFromTop (24).removeFromLeft (200));
+        auto topRow = area.removeFromTop (24);
+        presetBox.setBounds (topRow.removeFromLeft (200));
+        mono.setBounds (topRow.removeFromLeft (100).withTrimmedLeft (16));
         area.removeFromTop (6);
         auto header = area.removeFromTop (16);
         header.removeFromLeft (150);
@@ -372,6 +379,7 @@ private:
     };
 
     std::array<EnvRow, 2> envRows; // corte, afinação
+    juce::ToggleButton mono;
     std::array<juce::Label, 6> envLabels;
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
@@ -416,6 +424,7 @@ private:
         release.setValue (s.release, juce::dontSendNotification);
         cutoff.setValue (s.cutoff, juce::dontSendNotification);
         resonance.setValue (s.resonance, juce::dontSendNotification);
+        mono.setToggleState (s.mono, juce::dontSendNotification);
         envRows[0].show (s.filterEnv);
         envRows[1].show (s.pitchEnv);
         updating = false;
@@ -444,6 +453,7 @@ private:
         s.resonance = (float) resonance.getValue();
         s.filterEnv = envRows[0].read();
         s.pitchEnv = envRows[1].read();
+        s.mono = mono.getToggleState();
 
         if (s == current()->synth)
             return;

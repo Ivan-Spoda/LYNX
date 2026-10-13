@@ -823,6 +823,36 @@ TEST (synth_pitch_and_filter_envelopes)
     CHECK (hf (0, 2400) > 4.0 * hf (40000, 42400));
 }
 
+TEST (synth_mono_reuses_the_sounding_voice)
+{
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.synth.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    c.synth.cutoff = 20000.0f;
+    c.synth.mono = true;
+    inst->configure (c, 120.0);
+    std::vector<float> l (48000), r (48000);
+    inst->noteOn (57, 1.0f);
+    inst->render (l.data(), r.data(), 4800, 1.0f, 1.0f);
+    inst->noteOn (69, 1.0f); // A4 assume a voz do A3: só uma nota soando
+    inst->render (l.data() + 4800, r.data() + 4800, 43200, 1.0f, 1.0f);
+    int crossings = 0;
+    float peak = 0.0f;
+    for (std::size_t i = 24001; i < 48000; ++i)
+    {
+        crossings += (l[i - 1] < 0.0f) != (l[i] < 0.0f);
+        peak = std::max (peak, std::abs (l[i]));
+    }
+    CHECK (std::abs (crossings - 440) < 4); // 0,5 s de 440 Hz, sem o A3 por baixo
+    CHECK (peak < 0.35f);                   // uma voz (0,3 de nível), não duas somadas
+    // sem estalo na troca: o salto entre samples vizinhos fica no tamanho do seno
+    float jump = 0.0f;
+    for (std::size_t i = 4790; i < 4810; ++i)
+        jump = std::max (jump, std::abs (l[i] - l[i - 1]));
+    CHECK (jump < 0.05f);
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual

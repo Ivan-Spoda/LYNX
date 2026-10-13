@@ -127,6 +127,7 @@ struct SynthSettings
     float resonance = 0.0f;  // 0..1
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
+    bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
 
     bool operator== (const SynthSettings&) const = default;
 };

@@ -305,6 +305,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         if ((c.cutGroup != 0 && c.cutGroup == c.cutBy) || c.maxVoices == 1)
             def.sampler.cut = true;
 
+        def.synth.mono = c.maxVoices == 1;
+
         // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
         const auto& volumeEnvelope = c.envelopes[1];
         const auto hasVolumeEnvelope = volumeEnvelope.present && volumeEnvelope.enabled;
