@@ -676,7 +676,7 @@ public:
         {
             auto& row = rows[(std::size_t) o];
             row.title.setText ("Osc " + juce::String (o + 1), juce::dontSendNotification);
-            row.wave.addItemList ({ "Seno", utf8 ("Triângulo"), "Serra", "Quadrada", utf8 ("Ruído") }, 1);
+            row.wave.addItemList ({ "Seno", utf8 ("Triângulo"), "Serra", "Quadrada", utf8 ("Ruído"), utf8 ("Harmônicas") }, 1);
             row.wave.onChange = [this] { apply(); };
             knob (row.octave, -3.0, 3.0, 1.0, " oit");
             knob (row.semitones, -11.0, 11.0, 1.0, " st");
@@ -1006,7 +1006,7 @@ private:
         auto s = current()->synth; // mantém o que esta janela não mostra (envelopes e LFOs)
 
         for (std::size_t o = 0; o < 3; ++o)
-            s.osc[o] = { (Waveform) juce::jlimit (0, 4, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
+            s.osc[o] = { (Waveform) juce::jlimit (0, 5, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
                          (float) rows[o].detune.getValue(), (float) rows[o].level.getValue(), (int) rows[o].semitones.getValue(),
                          (float) rows[o].pan.getValue() };
 

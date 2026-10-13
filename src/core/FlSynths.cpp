@@ -47,41 +47,97 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
 
     SynthSettings s;
 
-    // --- osciladores: timbre, máscara (ímpares -> quadrada), sub, uníssono ---
+    // --- osciladores (REA_rodada21 §1.1–1.4): a cor dá amplitude e fase de cada harmônica, a máscara multiplica
+    // a harmônica n por g_((n−1) mod 12)·m + (1 − m) e o "detune" p39 espaça as parciais em f·(1 + (k − 1)·D);
+    // tudo vira o espectro do oscilador "spectral" do LYNX. A sub 1 é um seno uma oitava abaixo ---
     const auto mask = std::clamp (x (23), 0.0, 1.0);
-    auto wave = (color == 5 || color == 6) ? Waveform::square : color == 7 ? Waveform::triangle : Waveform::saw;
-    // máscara padrão (ímpares 1, pares 0): pares × (1 − m) = serra·(1 − m) + quadrada·(m/2) (REA_rodada21 §1.2)
-    bool oddMask = true;
+    auto colorAmplitude = [color] (double n) {
+        const auto even = std::fmod (n, 2.0) == 0.0, mod4 = std::fmod (n, 4.0) == 0.0;
+        switch (color)
+        {
+            case 1: return std::sqrt (2.0) / (n + 1.0);
+            case 2: return 2.0 / (n + 3.0);
+            case 5: return even ? 1.1 / (n * (n - 1.0)) : 1.1 / n;
+            case 6: return even ? 1.1 / (n * std::pow (n - 1.0, 0.2)) : 1.1 / n;
+            case 7: return 0.29167 * (std::pow (7.0, 1.0 / n) - 1.0);
+            case 8: return 0.5 / n + (even ? 1.0 / (n + 1.0) : 0.0);
+            case 9: return 1.0 / (3.0 * n) + (even ? 2.0 / (3.0 * (n + 1.0)) : 0.0) + (mod4 ? 4.0 / (3.0 * (n + 3.0)) : 0.0);
+            case 10: return 0.5 / n + (even ? 0.5 / (n + 1.0) : 0.0) + (mod4 ? 0.5 / (n + 3.0) : 0.0);
+            default: return 1.0 / n; // 0 Saw, 3/4 serras com fase deslocada
+        }
+    };
+    auto colorPhase = [color] (int n) {
+        switch (color)
+        {
+            case 3: return n % 2 == 0 ? 0.25 : 0.0;
+            case 4: return n % 4 == 2 ? 0.5 : 0.0;
+            case 5: case 6: return n % 2 == 0 ? 0.25 : 0.0;
+            case 7: return n % 2 == 0 ? 0.75 : 0.0;
+            default: return 0.0;
+        }
+    };
+    // cor Custom: n amplitudes + n fases depois dos combos (REA_rodada10 §1.1/§1.5)
+    std::vector<float> customAmplitude, customPhase;
+    if (const auto customCount = i32At (d, tail + 28); color == 11 && customCount > 0 && customCount <= 4096
+        && d.size() >= tail + 32 + (std::size_t) customCount * 8)
+        for (int k = 0; k < customCount; ++k)
+        {
+            float a = 0.0f, ph = 0.0f;
+            std::memcpy (&a, d.data() + tail + 32 + 4 * (std::size_t) k, 4);
+            std::memcpy (&ph, d.data() + tail + 32 + 4 * (std::size_t) (customCount + k), 4);
+            customAmplitude.push_back (std::isfinite (a) ? a : 0.0f);
+            customPhase.push_back (std::isfinite (ph) ? ph : 0.0f);
+        }
+    double maskGain[12] {};
     for (int j = 0; j < 12; ++j)
-        oddMask = oddMask && p (11 + j) == (j % 2 == 0 ? 1000 : 0);
+    {
+        const auto g = std::clamp (p (11 + j), -2000, 2000) / 1000.0;
+        maskGain[j] = (g < 0.0 ? -1.0 : 1.0) * (std::pow (11.0, std::abs (g)) - 1.0) / 10.0;
+    }
+    // espaçamento D = 2^(p39/1200): reproduzido quando D ou 1/D é 1, 2 ou 4 (a série continua harmônica)
+    const auto detune = std::clamp (p (39), -2400, 2400);
+    int stride = 1, offset = 1, octaveShift = 0;
+    if (detune == 1200 || detune == 2400)
+        stride = detune == 1200 ? 2 : 4;
+    else if (detune == -1200 || detune == -2400)
+    {
+        offset = detune == -1200 ? 2 : 4; // parcial k em f/m·(k + m − 1): série de f/m
+        octaveShift = detune == -1200 ? -1 : -2;
+    }
+    for (int k = 1; k <= SynthSettings::spectrumSize; ++k)
+    {
+        const auto index = offset + (k - 1) * stride; // posição na série do oscilador
+        if (index > SynthSettings::spectrumSize)
+            break;
+        double amplitude = 0.0, phase = 0.0;
+        if (color == 11)
+        {
+            if (k <= (int) customAmplitude.size())
+                amplitude = customAmplitude[(std::size_t) k - 1], phase = customPhase[(std::size_t) k - 1];
+        }
+        else
+            amplitude = colorAmplitude (k), phase = colorPhase (k);
+        amplitude *= maskGain[(k - 1) % 12] * mask + (1.0 - mask);
+        s.spectrum[(std::size_t) index - 1] = (float) amplitude;
+        s.spectrumPhase[(std::size_t) index - 1] = (float) phase;
+    }
 
     const auto voices = std::clamp (p (65), 1, 9);
-    s.osc = { SynthOscillator { wave, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    const auto wave = Waveform::spectral;
+    s.osc = { SynthOscillator { wave, octaveShift, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
 
     if (voices >= 2) // uníssono: três cópias desafinadas e abertas no estéreo
     {
         const auto spread = std::max (5.0, (std::pow (41.0, std::clamp (p (67), 0, 256) / 256.0) - 1.0) * 1.875);
         const auto pan = std::clamp (p (66), 0, 128) / 128.0f;
-        s.osc[0].level = s.osc[1].level = s.osc[2].level = 1.0f / 3.0f;
-        s.osc[1] = { wave, 0, (float) std::min (100.0, spread), 1.0f / 3.0f, 0, pan };
-        s.osc[2] = { wave, 0, (float) -std::min (100.0, spread), 1.0f / 3.0f, 0, -pan };
+        s.osc[0].level = 1.0f / 3.0f;
+        s.osc[1] = { wave, octaveShift, (float) std::min (100.0, spread), 1.0f / 3.0f, 0, pan };
+        s.osc[2] = { wave, octaveShift, (float) -std::min (100.0, spread), 1.0f / 3.0f, 0, -pan };
     }
-    else
+    else if (p (2) > 0) // Sub 1: seno uma oitava abaixo com amplitude (p2/1024)·A(1) (serra ±1 = 2/π na fundamental)
     {
-        if (color >= 8 && color <= 10) // serra dupla/tripla
-        {
-            s.osc[0].level = 0.4f;
-            s.osc[1] = { Waveform::saw, 0, 7.0f, 0.3f };
-            s.osc[2] = { Waveform::saw, 0, -7.0f, 0.3f };
-        }
-        else if (mask > 0.001 && oddMask && wave == Waveform::saw)
-        {
-            s.osc[0].level = (float) (1.0 - mask);
-            s.osc[1] = { Waveform::square, 0, 0.0f, (float) (mask / 2.0) };
-        }
-
-        if (p (2) > 0) // sub-harmônica: seno uma oitava abaixo
-            s.osc[2] = { Waveform::sine, -1, 0.0f, (float) std::min (1.0, p (2) / 1024.0) * 0.5f };
+        const auto a1 = color == 11 ? (customAmplitude.empty() ? 0.0 : (double) customAmplitude[0]) : colorAmplitude (1.0);
+        s.osc[2] = { Waveform::sine, -1, 0.0f, (float) std::clamp (std::clamp (p (2), 0, 2048) / 1024.0 * a1 * 2.0 / 3.141592653589793, 0.0, 4.0) };
     }
 
     for (auto& o : s.osc)

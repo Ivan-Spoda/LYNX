@@ -143,7 +143,8 @@ enum class Waveform : std::uint8_t
     triangle,
     saw,
     square,
-    noise
+    noise,
+    spectral // tabela de harmônicas do canal (SynthSettings::spectrum): timbres aditivos importados (Harmless)
 };
 
 struct SynthOscillator
@@ -175,6 +176,10 @@ struct SynthSettings
     // tonalidade de 3 bandas depois do filtro (o EQ do BooBass): grave < ~178 Hz < médio < ~1,18 kHz < agudo,
     // separados por passa-baixas de 1 polo; ganhos lineares (1, 1, 1 = desligado)
     std::array<float, 3> bandGain { 1.0f, 1.0f, 1.0f };
+    // forma "spectral": amplitude e fase (em ciclos) das harmônicas 1…256, como uma soma de senos
+    static constexpr int spectrumSize = 256;
+    std::array<float, spectrumSize> spectrum {};
+    std::array<float, spectrumSize> spectrumPhase {};
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
     std::array<ChannelLfo, lfoTargets> lfo {}; // por LfoTarget

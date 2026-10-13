@@ -5,6 +5,7 @@
 #include <atomic>
 
 #include <cmath>
+#include <complex>
 
 namespace lynx
 {
@@ -16,6 +17,36 @@ constexpr double twoPi = 6.283185307179586;
 float decayCoefficient (double seconds, double sampleRate) noexcept
 {
     return (float) std::exp (std::log (0.001) / (seconds * sampleRate));
+}
+
+// FFT complexa radix-2 no lugar (tabelas de onda do oscilador espectral)
+void fftInPlace (std::vector<std::complex<double>>& a, bool inverse)
+{
+    const auto n = a.size();
+    for (std::size_t i = 1, j = 0; i < n; ++i)
+    {
+        auto bit = n >> 1;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
+        j ^= bit;
+        if (i < j)
+            std::swap (a[i], a[j]);
+    }
+    for (std::size_t len = 2; len <= n; len <<= 1)
+    {
+        const auto w = std::polar (1.0, (inverse ? 2.0 : -2.0) * twoPi / 2.0 / (double) len);
+        for (std::size_t i = 0; i < n; i += len)
+        {
+            std::complex<double> wn (1.0, 0.0);
+            for (std::size_t k = 0; k < len / 2; ++k)
+            {
+                const auto u = a[i + k], v = a[i + k + len / 2] * wn;
+                a[i + k] = u + v;
+                a[i + k + len / 2] = u - v;
+                wn *= w;
+            }
+        }
+    }
 }
 
 double midiToHz (int key) noexcept
@@ -781,14 +812,63 @@ private:
                 return s;
             }
             case Waveform::noise: return noise.next();
+            case Waveform::spectral:
+            {
+                // a tabela com harmônicas até 1024 >> j fica abaixo de Nyquist: j = menor nível que cabe
+                int level = 0;
+                while (level < wavetableLevels - 1 && (double) (1024 >> level) * dt > 0.5)
+                    ++level;
+                const auto& t = wavetables[(std::size_t) level];
+                const auto pos = phase * wavetableSize;
+                const auto i = std::min ((int) pos, wavetableSize - 1);
+                const auto f = (float) (pos - i);
+                return t[(std::size_t) i] + f * (t[(std::size_t) i + 1] - t[(std::size_t) i]);
+            }
         }
 
         return 0.0f;
     }
 
+    // tabelas de onda de banda limitada do espectro (IFFT por nível; o nível j guarda as harmônicas ≤ 1024 >> j)
+    static constexpr int wavetableSize = 2048, wavetableLevels = 10;
+    std::array<std::array<float, wavetableSize + 1>, wavetableLevels> wavetables {};
+    std::array<float, SynthSettings::spectrumSize> builtSpectrum {}, builtPhase {};
+    bool wavetablesBuilt = false;
+    std::vector<std::complex<double>> fftBins = std::vector<std::complex<double>> ((std::size_t) wavetableSize);
+
+    void buildWavetables()
+    {
+        if (wavetablesBuilt && builtSpectrum == settings.spectrum && builtPhase == settings.spectrumPhase)
+            return;
+        builtSpectrum = settings.spectrum;
+        builtPhase = settings.spectrumPhase;
+        wavetablesBuilt = true;
+        auto& bins = fftBins; // alocado junto com o instrumento (fora da thread de áudio)
+        for (int level = 0; level < wavetableLevels; ++level)
+        {
+            std::fill (bins.begin(), bins.end(), std::complex<double> {});
+            const auto top = std::min (SynthSettings::spectrumSize, 1024 >> level);
+            for (int h = 1; h <= top; ++h)
+            {
+                // a·sen(2π(h·t + φ)) = Im: coeficiente −i·a/2·e^(i2πφ) em +h e o conjugado em −h
+                const auto a = (double) settings.spectrum[(std::size_t) h - 1] * (2.0 / 3.141592653589793); // serra 1/n = a serra ±1 do LYNX
+                const auto c = std::polar (a / 2.0, twoPi * settings.spectrumPhase[(std::size_t) h - 1] - twoPi / 4.0);
+                bins[(std::size_t) h] = c;
+                bins[(std::size_t) (wavetableSize - h)] = std::conj (c);
+            }
+            fftInPlace (bins, true);
+            auto& t = wavetables[(std::size_t) level];
+            for (int i = 0; i < wavetableSize; ++i)
+                t[(std::size_t) i] = (float) bins[(std::size_t) i].real();
+            t[(std::size_t) wavetableSize] = t[0];
+        }
+    }
+
 
     void updateCoefficients() noexcept
     {
+        if (std::any_of (settings.osc.begin(), settings.osc.end(), [] (const SynthOscillator& o) { return o.wave == Waveform::spectral; }))
+            buildWavetables(); // só quando o espectro muda
         attackStep = (float) (1.0 / (std::max (0.0005, (double) settings.attack) * sampleRate));
         decayCoeff = decayCoefficient (std::max (0.001, (double) settings.decay), sampleRate);
         releaseCoeff = decayCoefficient (std::max (0.005, (double) settings.release), sampleRate);

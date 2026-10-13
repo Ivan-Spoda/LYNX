@@ -369,6 +369,17 @@ juce::String toJson (const Song& song)
                 oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level, osc.semitones, osc.pan });
 
             synth->setProperty ("osc", oscs);
+            if (std::any_of (c.synth.spectrum.begin(), c.synth.spectrum.end(), [] (float a) { return a != 0.0f; }))
+            {
+                juce::StringArray amplitudes, phases;
+                for (int h = 0; h < SynthSettings::spectrumSize; ++h)
+                {
+                    amplitudes.add (juce::String (c.synth.spectrum[(std::size_t) h], 6));
+                    phases.add (juce::String (c.synth.spectrumPhase[(std::size_t) h], 6));
+                }
+                synth->setProperty ("spectrum", amplitudes.joinIntoString (" "));
+                synth->setProperty ("spectrumPhase", phases.joinIntoString (" "));
+            }
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
             if (c.synth.mono)
@@ -710,7 +721,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         if (const auto& o = (*oscs)[i]; o.isArray() && o.size() >= 4)
                         {
                             auto& osc = def.synth.osc[(std::size_t) i];
-                            osc = { (Waveform) juce::jlimit (0, 4, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
+                            osc = { (Waveform) juce::jlimit (0, 5, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
                                     juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor com volume acima de 0 dB
 
                             if (o.size() >= 6) // semitons e pan (desde o import do 3x Osc)
@@ -740,6 +751,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
                 def.synth.am = (bool) s.getProperty ("am", false);
                 def.synth.ring = (bool) s.getProperty ("ring", false);
+                for (const auto& [key, target] : { std::pair { "spectrum", &def.synth.spectrum }, std::pair { "spectrumPhase", &def.synth.spectrumPhase } })
+                {
+                    const auto values = juce::StringArray::fromTokens (s.getProperty (key, "").toString(), " ", "");
+                    for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
+                        (*target)[(std::size_t) h] = juce::jlimit (-16.0f, 16.0f, values[h].getFloatValue());
+                }
                 def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
                 if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)
                     for (int b = 0; b < 3; ++b)

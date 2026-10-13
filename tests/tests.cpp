@@ -4684,3 +4684,30 @@ TEST (vocoder_follows_modulator)
     for (std::size_t i = 0; i < l.size(); ++i)
         CHECK (l[i] == r[i] && std::isfinite (l[i]));    // saída mono
 }
+
+TEST (synth_spectral_oscillator)
+{
+    // espectro 1/n = serra: mesmas proporções de harmônicas e mesmo nível da serra do LYNX
+    lynx::SynthSettings saw;
+    saw.osc[0] = { lynx::Waveform::saw, 0, 0.0f, 1.0f };
+    saw.cutoff = 20000.0f;
+    auto spectral = saw;
+    spectral.osc[0].wave = lynx::Waveform::spectral;
+    for (int n = 1; n <= lynx::SynthSettings::spectrumSize; ++n)
+        spectral.spectrum[(std::size_t) n - 1] = 1.0f / (float) n;
+    const auto a = renderSynthNote (saw, 57, 24000), b = renderSynthNote (spectral, 57, 24000); // 220 Hz
+    for (const auto h : { 1, 2, 3, 5 })
+    {
+        const auto ea = goertzel (a, 220.0 * h, 4800, 24000), eb = goertzel (b, 220.0 * h, 4800, 24000);
+        CHECK (std::abs (10.0 * std::log10 (eb / ea)) < 0.5); // dentro de 0,5 dB
+    }
+    // só ímpares: sem 2ª harmônica
+    auto odd = spectral;
+    for (int n = 2; n <= lynx::SynthSettings::spectrumSize; n += 2)
+        odd.spectrum[(std::size_t) n - 1] = 0.0f;
+    const auto c = renderSynthNote (odd, 57, 24000);
+    CHECK (goertzel (c, 440.0, 4800, 24000) < 1e-4 * goertzel (c, 220.0, 4800, 24000));
+    // nota aguda: as tabelas de banda limitada não deixam passar de Nyquist (sem dobras abaixo da fundamental)
+    const auto d = renderSynthNote (spectral, 105, 24000); // 3520 Hz
+    CHECK (goertzel (d, 1000.0, 4800, 24000) < 1e-3 * goertzel (d, 3520.0, 4800, 24000));
+}

@@ -127,7 +127,9 @@ e 19 verificaram as hipóteses (decompilação + manual oficial) e o código foi
 - Sytrus: FM 4·g ciclos; RM em anel `1 − |a| + a·mod`. Toxic: FM 2·célula (sentido da matriz lido no código),
   filtro p300 (LP/BP/HP), corte `2^(9u + 5)`, key-track 0,09·KT oct/st, envelope ±9·EGAmt oct.
 - Harmless (rodada 21): faixa do corte com as margens por tipo, keytracking, envelope de filtro centrado (não
-  adaptativo), LFO de corte unipolar, LFO preso à música (p87), máscara padrão = serra·(1 − m) + quadrada·m/2.
+  adaptativo), LFO de corte unipolar, LFO preso à música (p87). Timbre exato pelo oscilador "Harmônicas" do synth
+  (tabelas de banda limitada por IFFT): as 12 cores com amplitude e fase por harmônica (a Custom lida do estado),
+  a máscara aplicada harmônica a harmônica e o "detune" p39 de ±1200/±2400; Sub 1 com o nível certo.
   Ogun: corte 44100·(c + c₀) Hz, Q/largura do FL, release 20 s, uníssono ±5(11^(P15/256) − 1) ct. MiniSynth:
   períodos do LFO, quantidade ao quadrado, release, 2ª voz em semitons inteiros + 7,5 ct.
 - Kepler: LFO1 (taxa, vibrato e corte em picos ±, atraso). BassDrum: Peak `1 + 100x³·s⁴`. Sakura: ADSR, Tune,
@@ -153,8 +155,8 @@ O que **ainda não tem confirmação** e por isso é uma aproximação declarada
   valor fixo.
 - Fruity Vocoder: implementado com o algoritmo do FL (REA_rodada20 §4.1); Vocodex fica de fora (precisa de sidechain
   ou do synth interno).
-- Harmless: cores do timbre e máscaras irregulares por formas básicas; "detune" p39 (espaçamento das parciais)
-  não reproduzido; tremolo estéreo de 2,5 Hz (p25) e vibrato de 6 Hz (p41) fora; ressonância (largura do pico).
+- Harmless: EQ de timbre (6 bandas), Sub 3/4, proteção de graves e o filtro como curva por parcial (o LYNX usa
+  um biquad); p39 fora de ±1200/±2400; tremolo estéreo de 2,5 Hz (p25) e vibrato de 6 Hz (p41) fora; ressonância (largura do pico).
   Ogun: timbre e articuladores; o filtro em cascata vira 1 estágio. MiniSynth: velocidade → corte; LFO serra.
 - Pitcher: sem equivalente estático (a correção depende do detector de altura): passa reto.
 - Squeeze, Vintage Phaser: aproximações.
