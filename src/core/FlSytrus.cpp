@@ -1073,4 +1073,105 @@ std::optional<KeyboardControllerData> parseKeyboardController (const std::vector
     out.autoRelease = d[552] != 0;
     return out;
 }
+std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t>& blob)
+{
+    if (blob.size() < 8)
+        return std::nullopt;
+    std::uint32_t version = 0;
+    std::memcpy (&version, blob.data(), 4);
+    if (version > 0xffff)
+        version >>= 16;
+    if (version < 1 || version > 12)
+        return std::nullopt;
+    const auto body = inflateZlib (blob.data() + 4, blob.size() - 4, false, 8u << 20);
+    if (! body)
+        return std::nullopt;
+
+    LovePhilterState out;
+    out.version = (int) version;
+    const auto v = out.version;
+    Reader r { body->data(), body->size() };
+    for (auto& g : out.globals)
+        g = r.i32();
+    const auto globals2 = (std::size_t) (v >= 11 ? 0x21 : v == 10 ? 0x20 : 0x1F);
+    if (const auto* g2 = r.raw (globals2))
+    {
+        std::memcpy (&out.modX, g2, 4);
+        std::memcpy (&out.modY, g2 + 4, 4);
+    }
+    if (v >= 2)
+    {
+        r.u8();
+        r.i32();
+    }
+    if (v < 6)
+    {
+        const auto n = r.i32();
+        if (n < 0)
+            return std::nullopt;
+        r.raw ((std::size_t) n);
+    }
+    else
+    {
+        std::size_t n = r.u8();
+        if (n == 255)
+        {
+            const auto big = r.i32();
+            if (big < 0)
+                return std::nullopt;
+            n = (std::size_t) big;
+        }
+        r.raw (2 * n);
+    }
+
+    for (auto& unit : out.units)
+    {
+        for (auto& p : unit.params)
+            p = r.i32();
+        unit.mode = r.i32();
+        unit.type = r.i32();
+        unit.alt = r.u8() != 0;
+        unit.enabled = r.u8() != 0;
+        unit.waveshaper = r.u8() != 0;
+        Envelope e;
+        if (! readEnvelope (r, e)) // curva do waveshaper
+            return std::nullopt;
+        r.u8();
+        for (auto& a : unit.articulators)
+        {
+            r.i32(); // versão
+            a.unipolar = r.get<float>() > 0.5f;
+            a.envDepth = r.get<float>();
+            r.get<float>(); // profundidade do LFO
+            for (int pattern = 0; pattern < 10; ++pattern)
+            {
+                if (! readEnvelope (r, e))
+                    return std::nullopt;
+                r.raw (16);
+            }
+            const auto lfoVersionAt = r.pos + 4;
+            if (! readEnvelope (r, e))
+                return std::nullopt;
+            std::int32_t lfoVersion = 0;
+            std::memcpy (&lfoVersion, r.data + lfoVersionAt, 4);
+            r.raw (lfoVersion >= 3 ? 20 : 16);
+            for (int m = 0; m < 3; ++m) // X, Y, seguidor de envelope
+            {
+                if (! readEnvelope (r, e))
+                    return std::nullopt;
+                if (m == 0)
+                    a.mapX.points = e.points;
+                else if (m == 1)
+                    a.mapY.points = e.points;
+            }
+        }
+        if (r.failed)
+            return std::nullopt;
+    }
+    if (v >= 12)
+        r.u8();
+    if (r.failed || r.pos != body->size())
+        return std::nullopt;
+    return out;
+}
 } // namespace lynx

@@ -58,6 +58,35 @@ struct KeyboardControllerData
 };
 std::optional<KeyboardControllerData> parseKeyboardController (const std::vector<std::uint8_t>& state);
 
+// Fruity Love Philter (REA_rodada16 §2): estado zlib com 6 globais, Mod X/Y e 8 unidades de filtro, cada
+// uma com 12 parâmetros, modo (estágios), tipo, flags e 8 articuladores (pan, volume, corte, ressonância,
+// low, band, high, waveshaper) com os mapas X/Y.
+struct LovePhilterMap
+{
+    std::vector<std::pair<double, double>> points; // (Δx, y)
+};
+struct LovePhilterArticulator
+{
+    bool unipolar = false; // multiplicador (true) ou deslocamento (false)
+    float envDepth = 0.0f;
+    LovePhilterMap mapX, mapY;
+};
+struct LovePhilterUnit
+{
+    std::array<std::int32_t, 12> params {};
+    int mode = 0, type = 0;
+    bool alt = false, enabled = false, waveshaper = false;
+    std::array<LovePhilterArticulator, 8> articulators {};
+};
+struct LovePhilterState
+{
+    int version = 0;
+    std::array<std::int32_t, 6> globals {};
+    std::int32_t modX = 512, modY = 512;
+    std::array<LovePhilterUnit, 8> units {};
+};
+std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t>& state);
+
 // Valor (0..1) do articulador `sinceOn` depois do disparo; `sinceRelease` < 0 = tecla ainda presa.
 // Tempos na unidade do articulador (segundos, ou tempos com `tempo`).
 float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept;

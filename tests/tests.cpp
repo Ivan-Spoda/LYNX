@@ -974,7 +974,7 @@ TEST (flp_real_files)
 
     // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
     {
-        int gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
+        int lovePhilters = 0, lovePhiltersRead = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
             {
@@ -992,6 +992,11 @@ TEST (flp_real_files)
                                 ++gates;
                                 if (fx && std::any_of (fx->params.begin(), fx->params.begin() + 32, [] (float v) { return v < 0.99f; }))
                                     ++shaped;
+                            }
+                            else if (slot.plugin == "Fruity Love Philter")
+                            {
+                                ++lovePhilters;
+                                lovePhiltersRead += lynx::parseLovePhilter (slot.state).has_value();
                             }
                             else if (slot.plugin == "Effector")
                                 effectors += lynx::effectFromFl (slot.plugin, slot.state).has_value();
@@ -1015,7 +1020,9 @@ TEST (flp_real_files)
                 }
                 catch (const flp::Error&) {}
             }
-        std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos\n", gates, shaped, effectors);
+        std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos; Love Philter: %d, %d lidos\n", gates, shaped, effectors,
+                     lovePhilters, lovePhiltersRead);
+        CHECK (lovePhiltersRead == lovePhilters);
         std::printf ("  Patcher: %d no mixer (%d em série, %d em ramos paralelos simples), %d como instrumento com gerador\n", patchers, serial,
                      parallel, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);
