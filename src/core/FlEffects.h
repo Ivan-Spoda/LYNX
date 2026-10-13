@@ -33,6 +33,19 @@ struct FlParamMap
 };
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int flParam);
 
+// Começo de um ramo de Patcher que sai do barramento `bus` de um Frequency Splitter ou Stereo Shaper
+// (REA_rodada17 §1-2). Splitter: barramento 0 = soma das bandas; barramento k = banda cujo destino (palavra
+// 15 + i) vale k, filtrada pelos crossovers com a inclinação do combo; em 2 bandas a média é muda.
+// Stereo Shaper: 0 = saída da matriz; o destino da "diferença" (parâmetro 6) = entrada − saída.
+struct PatcherBranchHead
+{
+    bool valid = false;
+    std::optional<EffectSlot> slot; // efeito no começo do ramo (nada = sinal direto)
+    float gain = 1.0f;
+    std::string note;               // aproximação usada (para o relatório)
+};
+PatcherBranchHead patcherBranchHead (const std::string& pluginName, const std::vector<std::uint8_t>& state, int bus);
+
 // Fruity Love Philter -> efeitos do LYNX (REA_rodadas 16 §2 e 17 §15): cada unidade ligada vira um EQ
 // paramétrico (tipo, corte e Q pelas fórmulas do FL a 44,1 kHz) + ganho/pan. Uma unidade: `slots` em
 // série (e `paramMap` traduz a automação do FL para eles); várias em paralelo (NEXT = 0): um contêiner.

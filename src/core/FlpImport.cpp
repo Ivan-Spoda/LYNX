@@ -954,11 +954,40 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
                 if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && ! graph->branches.empty())
                 {
+                    // o trecho em série antes da divisão vira slots normais
+                    bool first = true;
+                    for (const auto n : graph->preChain)
+                        if ((int) track.effects.size() < maxEffectSlots - 1)
+                            if (auto fx = effectFromFl (graph->nodes[(std::size_t) n].plugin, graph->nodes[(std::size_t) n].state, song.bpm);
+                                fx && fx->kind != EffectKind::plugin)
+                            {
+                                if (first)
+                                    effectSlotMap.insert ({ { insert.index, original.index }, { (int) track.effects.size(), original.plugin } });
+                                first = false;
+                                track.effects.push_back (std::move (*fx));
+                            }
+
                     auto container = makeEffectSlot (EffectKind::parallel);
                     for (const auto& b : graph->branches)
                     {
                         EffectBranch branch;
                         branch.gain = std::clamp (b.gain, 0.0f, 4.0f);
+                        if (graph->splitter >= 0) // ramo que sai de um barramento do divisor (banda, M/S)
+                        {
+                            const auto& splitter = graph->nodes[(std::size_t) graph->splitter];
+                            const auto head = patcherBranchHead (splitter.plugin, splitter.state, b.band);
+                            if (! head.valid)
+                            {
+                                if (options.report != nullptr)
+                                    ++options.report->droppedEffects["Patcher: barramento " + std::to_string (b.band) + " de " + splitter.plugin];
+                                continue;
+                            }
+                            branch.gain *= head.gain;
+                            if (head.slot)
+                                branch.chain.push_back (*head.slot);
+                            if (! head.note.empty() && options.report != nullptr)
+                                ++options.report->droppedEffects[head.note];
+                        }
                         for (const auto n : b.nodes)
                         {
                             const auto& node = graph->nodes[(std::size_t) n];

@@ -1,6 +1,7 @@
 #include "core/FlPatcher.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -176,12 +177,14 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             graph.serialChain = std::move (chain);
     }
 
-    // ramos em paralelo: de IN, cada saída segue uma cadeia de nós com 1 entrada e 1 saída até OUT
+    // ramos em paralelo: trecho comum em série desde IN, depois ramos (do IN, de um nó com várias
+    // saídas, ou das bandas de um Frequency Splitter), cada um uma cadeia simples até OUT. Entradas de
+    // sidechain (barramento > 0 no destino) ficam de fora.
     if (hasInput && hasOutput)
     {
         struct Edge
         {
-            int from, to;
+            int from, to, fromBus;
             float gain;
         };
         std::vector<Edge> edges;
@@ -193,46 +196,98 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             const auto src = ports.find (c.source), dst = ports.find (c.destination);
             if (src == ports.end() || dst == ports.end())
                 continue;
-            if (src->second.bus != 0 || dst->second.bus != 0)
-                ok = false; // M/S, bandas, sidechain: fora
+            if (dst->second.bus != 0)
+                continue; // sidechain
             const auto from = src->second.node >= 0 ? src->second.node : (c.source == inputPin ? -1 : -3);
             const auto to = dst->second.node >= 0 ? dst->second.node : (c.destination == outputPin ? -2 : -3);
             if (from == -3 || to == -3)
+            {
                 ok = false;
-            edges.push_back ({ from, to, std::isfinite (c.gain) ? c.gain : 1.0f });
+                continue;
+            }
+            edges.push_back ({ from, to, src->second.bus, std::isfinite (c.gain) ? c.gain : 1.0f });
         }
 
-        auto countFrom = [&] (int n) { return (int) std::count_if (edges.begin(), edges.end(), [n] (const Edge& e) { return e.from == n; }); };
+        auto isSplitter = [&] (int n) {
+            auto name = graph.nodes[(std::size_t) n].plugin;
+            for (auto& ch : name)
+                ch = (char) std::tolower ((unsigned char) ch);
+            return name == "frequency splitter" || name == "fruity stereo shaper"; // nós que dividem por barramento
+        };
+        auto outs = [&] (int n) {
+            std::vector<std::size_t> r;
+            for (std::size_t i = 0; i < edges.size(); ++i)
+                if (edges[i].from == n)
+                    r.push_back (i);
+            return r;
+        };
         auto countTo = [&] (int n) { return (int) std::count_if (edges.begin(), edges.end(), [n] (const Edge& e) { return e.to == n; }); };
-        std::size_t used = 0;
-        for (const auto& start : edges)
+
+        // só barramento 0 fora do splitter (outras saídas, como as do Stereo Shaper, não são reproduzíveis)
+        for (const auto& e : edges)
+            if (e.fromBus != 0 && (e.from < 0 || ! isSplitter (e.from)))
+                ok = false;
+
+        std::vector<bool> consumed (edges.size(), false);
+        auto cursor = -1;
+        float preGain = 1.0f;
+        std::vector<int> pre;
+        while (ok)
         {
-            if (! ok || start.from != -1)
-                continue;
+            const auto o = outs (cursor);
+            if (o.size() != 1 || edges[o[0]].to < 0 || countTo (edges[o[0]].to) != 1)
+                break;
+            consumed[o[0]] = true;
+            preGain *= edges[o[0]].gain;
+            cursor = edges[o[0]].to;
+            if (graph.nodes[(std::size_t) cursor].generator)
+                ok = false;
+            pre.push_back (cursor);
+            if (isSplitter (cursor))
+                break;
+        }
+
+        std::vector<PatcherGraph::Branch> branches;
+        const auto splitterHere = cursor >= 0 && isSplitter (cursor);
+        for (const auto i : outs (cursor))
+        {
+            if (! ok)
+                break;
+            consumed[i] = true;
             PatcherGraph::Branch branch;
-            branch.gain = start.gain;
-            auto cursor = start.to;
-            ++used;
-            while (ok && cursor >= 0)
+            branch.gain = preGain * edges[i].gain;
+            branch.band = splitterHere ? edges[i].fromBus : 0;
+            auto at = edges[i].to;
+            while (ok && at >= 0)
             {
-                if (graph.nodes[(std::size_t) cursor].generator || countTo (cursor) != 1 || countFrom (cursor) != 1
+                const auto o = outs (at);
+                if (graph.nodes[(std::size_t) at].generator || isSplitter (at) || countTo (at) != 1 || o.size() != 1
                     || branch.nodes.size() > graph.nodes.size())
                 {
                     ok = false;
                     break;
                 }
-                branch.nodes.push_back (cursor);
-                const auto next = std::find_if (edges.begin(), edges.end(), [cursor] (const Edge& e) { return e.from == cursor; });
-                branch.gain *= next->gain;
-                cursor = next->to;
-                ++used;
+                branch.nodes.push_back (at);
+                consumed[o[0]] = true;
+                branch.gain *= edges[o[0]].gain;
+                at = edges[o[0]].to;
             }
-            if (cursor != -2)
+            if (at != -2)
                 ok = false;
-            graph.branches.push_back (std::move (branch));
+            branches.push_back (std::move (branch));
         }
-        if (! ok || used != edges.size() || graph.branches.size() < 2)
-            graph.branches.clear();
+
+        if (ok && std::all_of (consumed.begin(), consumed.end(), [] (bool c) { return c; })
+            && (branches.size() >= 2 || (splitterHere && ! branches.empty())))
+        {
+            if (splitterHere)
+            {
+                graph.splitter = cursor;
+                pre.pop_back();
+            }
+            graph.preChain = std::move (pre);
+            graph.branches = std::move (branches);
+        }
     }
 
     return graph;

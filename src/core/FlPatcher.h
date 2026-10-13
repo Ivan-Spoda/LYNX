@@ -29,8 +29,11 @@ struct PatcherGraph
     {
         std::vector<int> nodes;
         float gain = 1.0f;
+        int band = 0; // barramento de saída do nó divisor `splitter` de onde o ramo sai
     };
     std::vector<Branch> branches;
+    std::vector<int> preChain; // nós em série antes da divisão em ramos
+    int splitter = -1;         // Frequency Splitter / Stereo Shaper que divide (os ramos começam nas saídas dele)
     int mainGenerator = -1;       // gerador ligado à saída com mais ganho
 };
 

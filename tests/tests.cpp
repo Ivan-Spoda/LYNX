@@ -533,6 +533,44 @@ TEST (volume_gate_follows_bar_position)
     CHECK (l3[4000] > 0.99f);
 }
 
+TEST (patcher_branch_heads_follow_rea)
+{
+    auto words = [] (std::vector<std::int32_t> v) {
+        std::vector<std::uint8_t> b (v.size() * 4);
+        std::memcpy (b.data(), v.data(), b.size());
+        return b;
+    };
+    // Frequency Splitter, 2 bandas, destinos 1/2/3, inclinação combo 3 (24 dB/oit), envio do agudo −6 dB
+    std::vector<std::int32_t> fs (18, 0);
+    fs[0] = 4;
+    fs[1] = 32768;
+    fs[3] = 3;
+    fs[6] = 0;
+    fs[11] = -600;
+    fs[15] = 1;
+    fs[16] = 2;
+    fs[17] = 3;
+    const auto split = words (fs);
+    const auto low = lynx::patcherBranchHead ("Frequency Splitter", split, 1);
+    CHECK (low.valid && low.slot && low.note.empty());
+    if (low.slot)
+    {
+        CHECK (lynx::peq::type (low.slot->params[(std::size_t) lynx::peq::param (0, 0)]) == lynx::peq::BandType::highCut);
+        CHECK (lynx::peq::slopeStages (low.slot->params[(std::size_t) lynx::peq::slopeParam]) == 2);
+    }
+    const auto mid = lynx::patcherBranchHead ("Frequency Splitter", split, 2);
+    CHECK (mid.valid && mid.gain == 0.0f); // em 2 bandas a média é muda
+    const auto high = lynx::patcherBranchHead ("Frequency Splitter", split, 3);
+    CHECK (high.valid && std::abs (high.gain - std::pow (10.0f, -6.0f / 20.0f)) < 1e-4f);
+    CHECK (! lynx::patcherBranchHead ("Frequency Splitter", split, 7).valid);
+
+    // Stereo Shaper com matriz identidade: a diferença (destino 4) é zero
+    const auto shaper = words ({ 3, 0, 12800, 12800, 0, 0, 0, 4, 0 });
+    const auto diff = lynx::patcherBranchHead ("Fruity Stereo Shaper", shaper, 4);
+    CHECK (diff.valid && diff.slot && std::abs (diff.slot->params[2] - 0.5f) < 1e-6f && std::abs (diff.slot->params[5] - 0.5f) < 1e-6f);
+    CHECK (! lynx::patcherBranchHead ("Fruity Stereo Shaper", shaper, 2).valid);
+}
+
 TEST (parallel_container_sums_branches)
 {
     // dois ramos: seco com ganho 0,5 e um utilitário que inverte a fase (matriz −1) com ganho 0,5 -> silêncio

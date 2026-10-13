@@ -1259,4 +1259,108 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
     out.slots.push_back (std::move (container));
     return out;
 }
+PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vector<std::uint8_t>& d, int bus)
+{
+    PatcherBranchHead head;
+    std::string name = plugin;
+    std::transform (name.begin(), name.end(), name.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+
+    if (name == "frequency splitter")
+    {
+        if (d.size() < 18 * 4)
+            return head;
+        auto word = [&] (int i) { return i32At (d, 4 * (std::size_t) i); };
+        if (bus == 0)
+        {
+            auto slot = makeEffectSlot (EffectKind::parametricEq);
+            if (frequencySplitter (d, slot))
+            {
+                head.valid = true;
+                head.slot = slot;
+            }
+            return head;
+        }
+        int band = -1;
+        for (int i = 0; i < 3; ++i)
+            if (word (15 + i) == bus)
+                band = i;
+        if (band < 0)
+            return head;
+        head.valid = true;
+        const auto threeBands = word (6) != 0;
+        if (! threeBands && band == 1)
+        {
+            head.gain = 0.0f; // em 2 bandas o barramento da média é mudo
+            return head;
+        }
+        // inclinação: combo 0…7 = 6/12/18/24/36/48/72/96 dB/oit; o EQ do LYNX tem 12/24/36/48 (aproxima 6, 18, 72, 96)
+        auto stages = [&] (int combo, bool& exact) {
+            static constexpr int dbPerOctave[8] = { 6, 12, 18, 24, 36, 48, 72, 96 };
+            const auto db = dbPerOctave[std::clamp (combo, 0, 7)];
+            exact = db % 12 == 0 && db <= 48;
+            return std::clamp ((db + 6) / 12, 1, 4);
+        };
+        auto hz = [] (int v) { return 30.0 * std::pow (16000.0 / 30.0, std::clamp (v, 0, 65536) / 65536.0); };
+        auto slot = makeEffectSlot (EffectKind::parametricEq);
+        for (int b = 0; b < peq::bands; ++b)
+            slot.params[(std::size_t) peq::param (b, 0)] = peq::typeValue (peq::BandType::off);
+        int used = 0;
+        bool allExact = true;
+        auto cut = [&] (peq::BandType type, double f, int combo) {
+            bool exact = true;
+            slot.params[(std::size_t) peq::param (used, 0)] = peq::typeValue (type);
+            slot.params[(std::size_t) peq::param (used, 1)] = peq::hzValue (f);
+            slot.params[(std::size_t) peq::param (used, 3)] = peq::qValue (0.707);
+            slot.params[(std::size_t) (peq::slopeParam + used)] = peq::slopeValue (stages (combo, exact));
+            allExact = allExact && exact;
+            ++used;
+        };
+        const auto f1 = hz (word (1)), f2 = hz (word (2));
+        if (band == 0)
+            cut (peq::BandType::highCut, f1, word (3));
+        else if (band == 1)
+        {
+            cut (peq::BandType::lowCut, f1, word (3));
+            cut (peq::BandType::highCut, f2, word (4));
+        }
+        else if (threeBands)
+            cut (peq::BandType::lowCut, f2, word (4));
+        else
+            cut (peq::BandType::lowCut, f1, word (3));
+        slot.params[peq::outputParam] = peq::gainValue (0.0);
+        head.slot = slot;
+        head.gain = (float) std::pow (10.0, std::clamp (word (9 + band), -6000, 1800) / 100.0 / 20.0); // nível de envio (centésimos de dB)
+        if (! allExact)
+            head.note = "Frequency Splitter: inclinação aproximada pelo EQ";
+        return head;
+    }
+
+    if (name == "fruity stereo shaper")
+    {
+        if (d.size() < 4 + 8 * 4)
+            return head;
+        auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+        auto slot = makeEffectSlot (EffectKind::utility);
+        if (bus == 0)
+        {
+            stereoShaper (d, slot);
+            head.valid = true;
+            head.slot = slot;
+            return head;
+        }
+        if (bus != param (6) || param (4) != 0 || param (5) != 0)
+            return head; // com delay/fase a diferença não é uma matriz: fora
+        // entrada − saída da matriz M = (I − M)
+        const auto rl = param (0) / 12800.0, l = param (1) / 12800.0, r = param (2) / 12800.0, lr = param (3) / 12800.0;
+        slot.params[2] = utilityMatrixValue (1.0 - l);
+        slot.params[3] = utilityMatrixValue (-rl);
+        slot.params[5] = utilityMatrixValue (1.0 - r);
+        slot.params[4] = utilityMatrixValue (-lr);
+        head.valid = true;
+        head.slot = slot;
+        return head;
+    }
+
+    return head;
+}
 } // namespace lynx
