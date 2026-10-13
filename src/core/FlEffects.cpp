@@ -1061,6 +1061,7 @@ struct PhilterBand
     double hz = 1000.0, q = 0.707, gainDb = 0.0;
     int stages = 1;
     bool ok = false;
+    std::vector<double> stageHz; // modos alternate: corte de cada estágio
 };
 
 // tipo, corte e Q de uma unidade com corte c e ressonância r (0..1), a 44,1 kHz (k = 1)
@@ -1077,13 +1078,16 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
     const auto lowGain = scurve11 (std::clamp (u.params[3], 0, 128) / 128.0);
     const auto bandGain = scurve11 (std::clamp (u.params[4], 0, 128) / 128.0);
     const auto highGain = scurve11 (std::clamp (u.params[5], 0, 128) / 128.0);
+    double x = 0.0;
+    std::function<double (double)> hzOf;
 
     switch (u.type)
     {
         case 0: // SVF de Chamberlin: fc = (x + 0,005)·44100/π; saída = L·LP + B·BP + H·HP
         {
-            const auto x = (std::pow (51.0, c) - 1.0) * 0.0159;
-            b.hz = (x + 0.005) * 44100.0 / 3.141592653589793;
+            x = (std::pow (51.0, c) - 1.0) * 0.0159;
+            hzOf = [] (double v) { return (v + 0.005) * 44100.0 / 3.141592653589793; };
+            b.hz = hzOf (x);
             auto d = r <= 0.0 ? 1.0 : r >= 1.0 ? 0.2 : 1.0 - 0.9 * r;
             if (u.alt)
                 d *= d;
@@ -1105,8 +1109,9 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
         }
         case 1: case 2: // Lime: ω = (x + 0,007)·π/2 -> fc = (x + 0,007)·44100/4
         {
-            const auto x = std::min (1.6, (std::pow (76.0, c) - 1.0) * 0.01324);
-            b.hz = (x + 0.007) * 44100.0 / 4.0;
+            x = std::min (1.6, (std::pow (76.0, c) - 1.0) * 0.01324);
+            hzOf = [] (double v) { return (v + 0.007) * 44100.0 / 4.0; };
+            b.hz = hzOf (x);
             b.q = std::min (50.0, std::pow (1001.0, r));
             b.type = u.type == 1 ? peq::BandType::highCut : peq::BandType::lowCut; // o slot L é "drive" aqui: fica de fora
             b.ok = true;
@@ -1114,8 +1119,9 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
         }
         case 3: // Vanilla LP: fc = (x + 0,003)·44100
         {
-            const auto x = (std::pow (1501.0, c) - 1.0) * 0.000664667;
-            b.hz = (x + 0.003) * 44100.0;
+            x = (std::pow (1501.0, c) - 1.0) * 0.000664667;
+            hzOf = [] (double v) { return (v + 0.003) * 44100.0; };
+            b.hz = hzOf (x);
             b.q = lpQ (r);
             b.type = peq::BandType::highCut;
             b.ok = true;
@@ -1123,10 +1129,11 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
         }
         case 6: case 8: case 9: case 10: // família Vanilla 4…10: fc = (x + 0,0001)·44100
         {
-            auto x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
+            x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
             if (u.type == 6)
                 x = std::min (x, 0.6001);
-            b.hz = (x + 0.0001) * 44100.0;
+            hzOf = [] (double v) { return (v + 0.0001) * 44100.0; };
+            b.hz = hzOf (x);
             if (u.type == 6)
             {
                 b.type = peq::BandType::lowCut;
@@ -1152,6 +1159,17 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
     }
     if (b.stages > 1)
         b.q = std::pow (b.q, 1.0 / b.stages);
+    // alternate (modos 4/5): a variável de frequência de cada estágio é x, x^E, x^(E²), E = 0,5 / 0,75
+    if ((mode == 4 || mode == 5) && hzOf)
+    {
+        const auto e = mode == 4 ? 0.5 : 0.75;
+        auto stageX = x;
+        for (int i = 0; i < b.stages; ++i)
+        {
+            b.stageHz.push_back (std::clamp (hzOf (stageX), 20.0, 20000.0));
+            stageX = std::pow (std::max (0.0, stageX), e);
+        }
+    }
     b.hz = std::clamp (b.hz, 20.0, 20000.0);
     return b;
 }
@@ -1165,15 +1183,16 @@ EffectSlot philterSlot (const PhilterBand& band, double unitGain)
     if (band.ok)
     {
         const auto cut = band.type == peq::BandType::highCut || band.type == peq::BandType::lowCut;
-        // cortes: estágios = inclinação do EQ; os outros tipos repetem a banda (cascata)
-        const auto copies = cut ? 1 : std::min (band.stages, peq::bands);
+        const auto alternate = ! band.stageHz.empty();
+        // cortes: estágios = inclinação do EQ; os outros tipos (e os alternate) repetem a banda (cascata)
+        const auto copies = cut && ! alternate ? 1 : std::min (band.stages, peq::bands);
         for (int i = 0; i < copies; ++i)
         {
             slot.params[(std::size_t) peq::param (i, 0)] = peq::typeValue (band.type);
-            slot.params[(std::size_t) peq::param (i, 1)] = peq::hzValue (band.hz);
+            slot.params[(std::size_t) peq::param (i, 1)] = peq::hzValue (alternate ? band.stageHz[(std::size_t) i] : band.hz);
             slot.params[(std::size_t) peq::param (i, 2)] = peq::gainValue (std::clamp (band.gainDb, -18.0, 18.0));
             slot.params[(std::size_t) peq::param (i, 3)] = peq::qValue (band.q);
-            slot.params[(std::size_t) (peq::slopeParam + i)] = peq::slopeValue (cut ? std::clamp (band.stages, 1, 4) : 1);
+            slot.params[(std::size_t) (peq::slopeParam + i)] = peq::slopeValue (cut && ! alternate ? std::clamp (band.stages, 1, 4) : 1);
         }
         if (cut) // nos cortes o ganho do slot L/H multiplica a saída
             outputDb += band.gainDb;
