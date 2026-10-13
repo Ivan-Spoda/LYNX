@@ -6,6 +6,11 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
+ #include <emmintrin.h>
+ #define LYNX_BIQUAD_SSE2 1
+#endif
+
 namespace lynx
 {
 struct Biquad
@@ -21,6 +26,51 @@ struct Biquad
         z1[ch] = b1 * x - a1 * y + z2[ch];
         z2[ch] = b2 * x - a2 * y;
         return (float) y;
+    }
+
+    // os dois canais de um bloco, com o estado em locais (o mesmo resultado de process() por amostra)
+    void processBlock (float* l, float* r, int n) noexcept
+    {
+       #if LYNX_BIQUAD_SSE2
+        // os dois canais lado a lado num registrador de 2 doubles (mesmas contas, mesma ordem)
+        auto s1 = _mm_set_pd (z1[1], z1[0]), s2 = _mm_set_pd (z2[1], z2[0]);
+        const auto c0 = _mm_set1_pd (b0), c1 = _mm_set1_pd (b1), c2 = _mm_set1_pd (b2), d1 = _mm_set1_pd (a1), d2 = _mm_set1_pd (a2);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = _mm_set_pd ((double) r[i], (double) l[i]);
+            const auto y = _mm_add_pd (_mm_mul_pd (c0, x), s1);
+            s1 = _mm_add_pd (_mm_sub_pd (_mm_mul_pd (c1, x), _mm_mul_pd (d1, y)), s2);
+            s2 = _mm_sub_pd (_mm_mul_pd (c2, x), _mm_mul_pd (d2, y));
+            double out[2];
+            _mm_storeu_pd (out, y);
+            l[i] = (float) out[0];
+            r[i] = (float) out[1];
+        }
+
+        double a[2], b[2];
+        _mm_storeu_pd (a, s1);
+        _mm_storeu_pd (b, s2);
+        z1[0] = a[0]; z1[1] = a[1]; z2[0] = b[0]; z2[1] = b[1];
+       #else
+        auto l1 = z1[0], l2 = z2[0], r1 = z1[1], r2 = z2[1];
+        const auto c0 = b0, c1 = b1, c2 = b2, d1 = a1, d2 = a2;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const double xl = l[i], xr = r[i];
+            const auto yl = c0 * xl + l1;
+            const auto yr = c0 * xr + r1;
+            l1 = c1 * xl - d1 * yl + l2;
+            r1 = c1 * xr - d1 * yr + r2;
+            l2 = c2 * xl - d2 * yl;
+            r2 = c2 * xr - d2 * yr;
+            l[i] = (float) yl;
+            r[i] = (float) yr;
+        }
+
+        z1[0] = l1; z2[0] = l2; z1[1] = r1; z2[1] = r2;
+       #endif
     }
 
     void set (double nb0, double nb1, double nb2, double a0, double na1, double na2) noexcept

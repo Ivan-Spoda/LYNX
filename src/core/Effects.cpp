@@ -829,15 +829,7 @@ public:
         }
 
         for (int k = 0; k < active; ++k)
-        {
-            auto& stage = *order[(std::size_t) k];
-
-            for (int i = 0; i < n; ++i)
-            {
-                l[i] = stage.process (l[i], 0);
-                r[i] = stage.process (r[i], 1);
-            }
-        }
+            order[(std::size_t) k]->processBlock (l, r, n);
 
         if (output != 1.0f)
             for (int i = 0; i < n; ++i)

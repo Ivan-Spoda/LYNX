@@ -671,13 +671,7 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
         if (eq.settings.gainDb[b] == 0.0f)
             continue; // banda em 0 dB: não processa (como o FL)
 
-        auto& band = eq.bands[b];
-
-        for (int i = 0; i < n; ++i)
-        {
-            l[i] = band.process (l[i], 0);
-            r[i] = band.process (r[i], 1);
-        }
+        eq.bands[b].processBlock (l, r, n);
     }
 }
 
