@@ -77,6 +77,7 @@ if(LYNX_BUILD_APP)
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
         src/ui/PluginWindow.cpp
+        src/ui/ParametricEqEditor.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ChannelSettings.cpp

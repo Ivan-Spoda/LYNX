@@ -32,6 +32,33 @@ std::string formatEffectParam (EffectKind kind, int param, float value01, double
 
 EffectSlot makeEffectSlot (EffectKind kind);
 
+// EQ paramétrico de 7 bandas. Parâmetros: banda b usa [4b .. 4b+3] = tipo, frequência, ganho, Q;
+// [28] = saída; [29 + b] = inclinação dos cortes (12/24/48 dB por oitava).
+namespace peq
+{
+constexpr int bands = 7;
+constexpr int outputParam = 28;
+constexpr int slopeParam = 29;
+
+enum class BandType { off, peak, lowShelf, highShelf, lowCut, highCut, bandPass, notch };
+constexpr int bandTypes = 8;
+
+inline int param (int band, int field) noexcept { return band * 4 + field; } // field: 0 tipo, 1 freq, 2 ganho, 3 Q
+BandType type (float v) noexcept;
+float typeValue (BandType t) noexcept;
+double hz (float v) noexcept;      // 20 Hz .. 20 kHz (log)
+float hzValue (double hz) noexcept;
+double gainDb (float v) noexcept;  // ±18 dB
+float gainValue (double db) noexcept;
+double q (float v) noexcept;       // 0,1 .. 18 (log)
+float qValue (double q) noexcept;
+int slopeStages (float v) noexcept; // 1, 2 ou 4 biquads (12/24/48 dB/oit)
+const char* typeName (BandType t) noexcept;
+
+// Resposta do EQ inteiro (todas as bandas e a saída) em dB, para o gráfico do editor.
+double responseDb (const EffectParams& params, double sampleRate, double hz);
+} // namespace peq
+
 class Effect
 {
 public:

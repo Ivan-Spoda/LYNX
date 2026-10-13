@@ -182,7 +182,8 @@ enum class EffectKind : std::uint8_t
     limiter,
     filter,
     distortion,
-    chorus
+    chorus,
+    parametricEq // 7 bandas (como o Parametric EQ 2 do FL)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

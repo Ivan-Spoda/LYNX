@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 
 namespace lynx
@@ -728,7 +729,179 @@ private:
     int length = 1, write = 0;
     double phase = 0.0;
 };
+
+// ---------------------------------------------------------------------------
+// EQ paramétrico de 7 bandas: cada banda é um biquad do cookbook (ou até 4 em série nos cortes,
+// com os Q de um Butterworth da ordem pedida).
+
+constexpr std::array<std::array<double, 4>, 3> butterworthQ { { { 0.70710678, 0, 0, 0 },
+                                                                { 0.54119610, 1.30656296, 0, 0 },
+                                                                { 0.50979558, 0.60134489, 0.89997622, 2.56291545 } } };
+
+// Coeficientes das etapas de uma banda; retorna quantas etapas (0 = banda desligada/transparente).
+int bandStages (const EffectParams& p, int band, double sr, std::array<Biquad, 4>& out) noexcept
+{
+    const auto t = peq::type (p[(std::size_t) peq::param (band, 0)]);
+    const auto hz = std::min (peq::hz (p[(std::size_t) peq::param (band, 1)]), sr * 0.45);
+    const auto db = peq::gainDb (p[(std::size_t) peq::param (band, 2)]);
+    const auto q = peq::q (p[(std::size_t) peq::param (band, 3)]);
+
+    switch (t)
+    {
+        case peq::BandType::off: return 0;
+        case peq::BandType::peak:
+            if (std::abs (db) < 0.01)
+                return 0;
+            out[0].peaking (sr, hz, q, db);
+            return 1;
+        case peq::BandType::lowShelf:
+        case peq::BandType::highShelf:
+            if (std::abs (db) < 0.01)
+                return 0;
+            out[0].shelf (sr, hz, db, t == peq::BandType::highShelf);
+            return 1;
+        case peq::BandType::lowCut:
+        case peq::BandType::highCut:
+        {
+            const auto stages = peq::slopeStages (p[(std::size_t) (peq::slopeParam + band)]);
+            const auto& qs = butterworthQ[(std::size_t) (stages == 1 ? 0 : stages == 2 ? 1 : 2)];
+            for (int s = 0; s < stages; ++s)
+                out[(std::size_t) s].filter (sr, t == peq::BandType::lowCut ? 1 : 0, hz, stages == 1 ? q : qs[(std::size_t) s]);
+            return stages;
+        }
+        case peq::BandType::bandPass:
+            out[0].filter (sr, 2, hz, q);
+            return 1;
+        case peq::BandType::notch:
+        {
+            const auto w = 2.0 * pi * hz / sr;
+            const auto alpha = std::sin (w) / (2.0 * q);
+            out[0].set (1, -2 * std::cos (w), 1, 1 + alpha, -2 * std::cos (w), 1 - alpha);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+class ParametricEq final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        lastParams.fill (-1.0f);
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        for (auto& band : stages)
+            for (auto& s : band)
+                s.reset();
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        if (params != lastParams)
+        {
+            lastParams = params;
+            active = 0;
+
+            for (int b = 0; b < peq::bands; ++b)
+            {
+                std::array<Biquad, 4> fresh;
+                const auto count = bandStages (params, b, sampleRate, fresh);
+
+                // mantém o estado dos filtros que continuam (sem estalo ao mexer num knob)
+                for (int s = 0; s < count; ++s)
+                {
+                    auto& stage = stages[(std::size_t) b][(std::size_t) s];
+                    stage.b0 = fresh[(std::size_t) s].b0; stage.b1 = fresh[(std::size_t) s].b1; stage.b2 = fresh[(std::size_t) s].b2;
+                    stage.a1 = fresh[(std::size_t) s].a1; stage.a2 = fresh[(std::size_t) s].a2;
+                }
+
+                for (int s = count; s < 4; ++s)
+                    stages[(std::size_t) b][(std::size_t) s].reset();
+
+                for (int s = 0; s < count; ++s)
+                    order[(std::size_t) active++] = &stages[(std::size_t) b][(std::size_t) s];
+            }
+
+            output = (float) std::pow (10.0, peq::gainDb (params[peq::outputParam]) / 20.0);
+        }
+
+        for (int k = 0; k < active; ++k)
+        {
+            auto& stage = *order[(std::size_t) k];
+
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] = stage.process (l[i], 0);
+                r[i] = stage.process (r[i], 1);
+            }
+        }
+
+        if (output != 1.0f)
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] *= output;
+                r[i] *= output;
+            }
+    }
+
+private:
+    double sampleRate = 44100.0;
+    std::array<std::array<Biquad, 4>, peq::bands> stages;
+    std::array<Biquad*, peq::bands * 4> order {};
+    int active = 0;
+    float output = 1.0f;
+    EffectParams lastParams {};
+};
 } // namespace
+
+namespace peq
+{
+BandType type (float v) noexcept { return (BandType) std::clamp ((int) std::lround (v * (bandTypes - 1)), 0, bandTypes - 1); }
+float typeValue (BandType t) noexcept { return (float) (int) t / (float) (bandTypes - 1); }
+double hz (float v) noexcept { return 20.0 * std::pow (1000.0, std::clamp ((double) v, 0.0, 1.0)); }
+float hzValue (double f) noexcept { return (float) std::clamp (std::log (std::max (f, 1.0) / 20.0) / std::log (1000.0), 0.0, 1.0); }
+double gainDb (float v) noexcept { return (std::clamp ((double) v, 0.0, 1.0) - 0.5) * 36.0; }
+float gainValue (double db) noexcept { return (float) std::clamp (db / 36.0 + 0.5, 0.0, 1.0); }
+double q (float v) noexcept { return 0.1 * std::pow (180.0, std::clamp ((double) v, 0.0, 1.0)); }
+float qValue (double value) noexcept { return (float) std::clamp (std::log (std::max (value, 0.01) / 0.1) / std::log (180.0), 0.0, 1.0); }
+int slopeStages (float v) noexcept { return v < 0.25f ? 1 : v < 0.75f ? 2 : 4; }
+
+const char* typeName (BandType t) noexcept
+{
+    static constexpr const char* names[] = { "Desligada", "Pico", "Prateleira grave", "Prateleira aguda", "Corta graves",
+                                             "Corta agudos", "Passa-banda", "Rejeita-faixa" };
+    return names[(int) t];
+}
+
+double responseDb (const EffectParams& params, double sr, double f)
+{
+    // |H(e^jw)| de cada etapa, somado em dB
+    const auto w = 2.0 * pi * std::clamp (f, 1.0, sr * 0.499) / sr;
+    const std::complex<double> z1 = std::polar (1.0, -w), z2 = std::polar (1.0, -2.0 * w);
+    auto total = gainDb (params[outputParam]);
+
+    for (int b = 0; b < bands; ++b)
+    {
+        std::array<Biquad, 4> st;
+        const auto count = bandStages (params, b, sr, st);
+
+        for (int s = 0; s < count; ++s)
+        {
+            const auto& c = st[(std::size_t) s];
+            const auto h = (c.b0 + c.b1 * z1 + c.b2 * z2) / (1.0 + c.a1 * z1 + c.a2 * z2);
+            total += 20.0 * std::log10 (std::max (std::abs (h), 1.0e-9));
+        }
+    }
+
+    return total;
+}
+} // namespace peq
 
 const EffectInfo& effectInfo (EffectKind kind)
 {
@@ -741,6 +914,34 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
     static const EffectInfo distortion { "Distorção", { { "Drive", 0.4f }, { "Tom", 0.7f }, { "Mix", 1.0f }, { "Saída", 0.5f } } };
     static const EffectInfo chorus { "Chorus", { { "Velocidade", 0.45f }, { "Profund.", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
+    static const EffectInfo parametric = [] {
+        // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
+        constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
+                                            peq::BandType::peak, peq::BandType::peak, peq::BandType::highShelf };
+        constexpr double freqs[] = { 80.0, 200.0, 500.0, 1200.0, 3000.0, 6000.0, 12000.0 };
+        static const char* names[peq::bands][4] = {
+            { "B1 tipo", "B1 freq.", "B1 ganho", "B1 Q" }, { "B2 tipo", "B2 freq.", "B2 ganho", "B2 Q" },
+            { "B3 tipo", "B3 freq.", "B3 ganho", "B3 Q" }, { "B4 tipo", "B4 freq.", "B4 ganho", "B4 Q" },
+            { "B5 tipo", "B5 freq.", "B5 ganho", "B5 Q" }, { "B6 tipo", "B6 freq.", "B6 ganho", "B6 Q" },
+            { "B7 tipo", "B7 freq.", "B7 ganho", "B7 Q" } };
+        static const char* slopes[peq::bands] = { "B1 inclin.", "B2 inclin.", "B3 inclin.", "B4 inclin.", "B5 inclin.", "B6 inclin.", "B7 inclin." };
+        EffectInfo info { "EQ paramétrico", {} };
+
+        for (int b = 0; b < peq::bands; ++b)
+        {
+            info.params.push_back ({ names[b][0], peq::typeValue (types[b]) });
+            info.params.push_back ({ names[b][1], peq::hzValue (freqs[b]) });
+            info.params.push_back ({ names[b][2], 0.5f });
+            info.params.push_back ({ names[b][3], peq::qValue (1.0) });
+        }
+
+        info.params.push_back ({ "Saída", 0.5f });
+
+        for (int b = 0; b < peq::bands; ++b)
+            info.params.push_back ({ slopes[b], 0.0f });
+
+        return info;
+    }();
 
     switch (kind)
     {
@@ -753,6 +954,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::filter: return filter;
         case EffectKind::distortion: return distortion;
         case EffectKind::chorus: return chorus;
+        case EffectKind::parametricEq: return parametric;
     }
     return eq;
 }
@@ -836,6 +1038,31 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             }
             return text;
 
+        case EffectKind::parametricEq:
+        {
+            if (param == peq::outputParam)
+                std::snprintf (text, sizeof (text), "%+.1f dB", peq::gainDb (v));
+            else if (param > peq::outputParam)
+                std::snprintf (text, sizeof (text), "%d dB/oit", 12 * peq::slopeStages (v));
+            else
+                switch (param % 4)
+                {
+                    case 0: return peq::typeName (peq::type (v));
+                    case 1:
+                    {
+                        const auto f = peq::hz (v);
+                        if (f >= 1000.0)
+                            std::snprintf (text, sizeof (text), "%.2f kHz", f / 1000.0);
+                        else
+                            std::snprintf (text, sizeof (text), "%.0f Hz", f);
+                        break;
+                    }
+                    case 2: std::snprintf (text, sizeof (text), "%+.1f dB", peq::gainDb (v)); break;
+                    default: std::snprintf (text, sizeof (text), "Q %.2f", peq::q (v)); break;
+                }
+            return text;
+        }
+
         case EffectKind::plugin:
             break;
     }
@@ -867,6 +1094,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::filter: return std::make_unique<Filter>();
         case EffectKind::distortion: return std::make_unique<Distortion>();
         case EffectKind::chorus: return std::make_unique<Chorus>();
+        case EffectKind::parametricEq: return std::make_unique<ParametricEq>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

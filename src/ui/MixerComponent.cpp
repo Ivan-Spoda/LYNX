@@ -5,6 +5,7 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
@@ -581,8 +582,9 @@ namespace
 {
 constexpr int panelHeader = 30;
 constexpr int slotHeight = 24;
-constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::compressor, EffectKind::limiter,    EffectKind::delay,
-                                      EffectKind::reverb, EffectKind::chorus,     EffectKind::filter, EffectKind::distortion };
+constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
+                                      EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
+                                      EffectKind::distortion };
 } // namespace
 
 EffectsPanel::EffectsPanel (AudioEngine& e)
@@ -635,6 +637,9 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
 
     if (s == nullptr || selectedSlot < 0 || selectedSlot >= (int) s->size())
         return -1;
+
+    if ((*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq)
+        return -1; // editado na janela própria
 
     const auto count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
 
@@ -719,6 +724,19 @@ void EffectsPanel::paint (juce::Graphics& g)
         return;
     }
 
+    if (slot.kind == EffectKind::parametricEq)
+    {
+        const auto button = pluginButtonBounds();
+        g.setColour (theme::channelButton);
+        g.fillRoundedRectangle (button.toFloat(), 4.0f);
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (13.0f));
+        g.drawText (utf8 ("Abrir EQ paramétrico"), button, juce::Justification::centred);
+        const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
+        drawParametricEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
+        return;
+    }
+
     const auto& info = effectInfo (slot.kind);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (14.0f));
@@ -796,6 +814,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         && pluginButtonBounds().contains (e.getPosition()))
     {
         openPluginWindow (selectedSlot);
+        return;
+    }
+
+    if (selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq
+        && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
+    {
+        ParametricEqWindows::open (engine, track, selectedSlot);
         return;
     }
 

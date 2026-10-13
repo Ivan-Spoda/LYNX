@@ -8,6 +8,7 @@
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/ExportDialog.h"
+#include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 
@@ -176,6 +177,7 @@ MainComponent::MainComponent (AudioEngine& e)
 MainComponent::~MainComponent()
 {
     PluginWindows::closeAll(); // interfaces de plugin antes do engine
+    ParametricEqWindows::closeAll();
     closeAutomationEditors();
     closeChannelSettings();
     engine.removeChangeListener (this);

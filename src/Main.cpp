@@ -10,6 +10,7 @@
 #include "ui/ChannelSettings.h"
 #include "ui/ExportDialog.h"
 #include "ui/MainComponent.h"
+#include "ui/ParametricEqEditor.h"
 #include "ui/Theme.h"
 
 namespace
@@ -673,6 +674,24 @@ private:
                     saveWindow (lynx::makeChannelSettingsPanel (offline, c), "-synth.png");
                     break;
                 }
+
+            // EQ paramétrico: no primeiro slot que tiver um (com uma curva de exemplo para ver o desenho)
+            for (int t = 0; t < (int) offline.getSong().mixer.size(); ++t)
+                for (int s = 0; s < (int) offline.getSong().mixer[(std::size_t) t].effects.size(); ++s)
+                    if (offline.getSong().mixer[(std::size_t) t].effects[(std::size_t) s].kind == lynx::EffectKind::parametricEq)
+                    {
+                        offline.editSong ([t, s] (lynx::Song& song) {
+                            auto& p = song.mixer[(std::size_t) t].effects[(std::size_t) s].params;
+                            p[(std::size_t) lynx::peq::param (0, 0)] = lynx::peq::typeValue (lynx::peq::BandType::lowCut);
+                            p[(std::size_t) lynx::peq::param (0, 1)] = lynx::peq::hzValue (40.0);
+                            p[(std::size_t) lynx::peq::param (2, 2)] = lynx::peq::gainValue (-6.0);
+                            p[(std::size_t) lynx::peq::param (4, 2)] = lynx::peq::gainValue (4.5);
+                            p[(std::size_t) lynx::peq::param (6, 2)] = lynx::peq::gainValue (3.0);
+                        });
+                        saveWindow (lynx::makeParametricEqEditor (offline, t, s), "-peq.png");
+                        t = (int) offline.getSong().mixer.size();
+                        break;
+                    }
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

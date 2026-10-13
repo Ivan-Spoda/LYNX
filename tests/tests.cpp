@@ -1323,6 +1323,39 @@ float runEffectOnSine (lynx::EffectKind kind, const std::function<void (lynx::Ef
 }
 } // namespace
 
+TEST (parametric_eq_bands_and_response)
+{
+    // padrão: transparente
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::parametricEq);
+    CHECK (std::abs (lynx::peq::responseDb (slot.params, 48000.0, 1000.0)) < 0.01);
+    CHECK (std::abs (runEffectOnSine (lynx::EffectKind::parametricEq, [] (auto&) {}, 1000.0, 0.5f) - 0.5f) < 0.005f);
+
+    // pico de +12 dB em 1 kHz na banda 4: a resposta e o sinal concordam
+    auto boost = [] (lynx::EffectSlot& s) {
+        s.params[(std::size_t) lynx::peq::param (3, 1)] = lynx::peq::hzValue (1000.0);
+        s.params[(std::size_t) lynx::peq::param (3, 2)] = lynx::peq::gainValue (12.0);
+    };
+    boost (slot);
+    CHECK (std::abs (lynx::peq::responseDb (slot.params, 48000.0, 1000.0) - 12.0) < 0.2);
+    CHECK (std::abs (lynx::peq::responseDb (slot.params, 48000.0, 100.0)) < 1.0);
+    const auto peak = runEffectOnSine (lynx::EffectKind::parametricEq, boost, 1000.0, 0.1f);
+    CHECK (std::abs (peak - 0.1f * std::pow (10.0f, 12.0f / 20.0f)) < 0.01f);
+
+    // corta graves a 48 dB/oit em 200 Hz: 50 Hz (2 oitavas abaixo) cai ~96 dB; 2 kHz passa
+    auto cut = lynx::makeEffectSlot (lynx::EffectKind::parametricEq);
+    cut.params[(std::size_t) lynx::peq::param (0, 0)] = lynx::peq::typeValue (lynx::peq::BandType::lowCut);
+    cut.params[(std::size_t) lynx::peq::param (0, 1)] = lynx::peq::hzValue (200.0);
+    cut.params[(std::size_t) (lynx::peq::slopeParam + 0)] = 1.0f;
+    CHECK (lynx::peq::responseDb (cut.params, 48000.0, 50.0) < -80.0);
+    CHECK (std::abs (lynx::peq::responseDb (cut.params, 48000.0, 200.0) + 3.0) < 0.5); // -3 dB no corte (Butterworth)
+    CHECK (std::abs (lynx::peq::responseDb (cut.params, 48000.0, 2000.0)) < 0.1);
+
+    // conversões ida e volta
+    CHECK (std::abs (lynx::peq::hz (lynx::peq::hzValue (440.0)) - 440.0) < 0.5);
+    CHECK (std::abs (lynx::peq::q (lynx::peq::qValue (2.5)) - 2.5) < 0.01);
+    CHECK (lynx::peq::type (lynx::peq::typeValue (lynx::peq::BandType::notch)) == lynx::peq::BandType::notch);
+}
+
 TEST (effects_eq_compressor_behave)
 {
     // EQ no padrão é transparente

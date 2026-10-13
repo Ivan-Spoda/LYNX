@@ -67,7 +67,8 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
 std::optional<EffectKind> effectForFlPlugin (const std::string& name)
 {
     static const std::pair<const char*, EffectKind> table[] = {
-        { "Fruity Parametric EQ 2", EffectKind::eq },  { "Fruity Parametric EQ", EffectKind::eq },  { "Fruity 7 Band EQ", EffectKind::eq },
+        { "Fruity Parametric EQ 2", EffectKind::parametricEq }, { "Fruity Parametric EQ", EffectKind::parametricEq },
+        { "Fruity 7 Band EQ", EffectKind::parametricEq },
         { "Fruity Limiter", EffectKind::limiter },     { "Maximus", EffectKind::limiter },           { "Fruity Soft Clipper", EffectKind::distortion },
         { "Fruity Reeverb 2", EffectKind::reverb },    { "Fruity Reeverb", EffectKind::reverb },     { "LuxeVerb", EffectKind::reverb },
         { "Fruity Delay 3", EffectKind::delay },       { "Fruity Delay 2", EffectKind::delay },      { "Fruity Delay Bank", EffectKind::delay },
