@@ -733,6 +733,7 @@ TEST (flp_real_files)
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, sytrus = 0, sytrusDecoded = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
+    int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
@@ -911,7 +912,20 @@ TEST (flp_real_files)
                 else if (c.pluginName == "GMS")
                     decoded = lynx::synthFromGms (c.pluginState, 128.0, gs, g);
                 else if (c.pluginName == "Ogun" || c.pluginName == "Autogun")
+                {
                     decoded = lynx::synthFromOgun (c.pluginState, gs, g);
+                    // REA_rodada24 §1.9: the "Trumpet" preset (richness 7, no seeds) has partials 0.9087, 0.8610,
+                    // 0.8151… at the fixed seed-3 phases 0.919, 0.380, 0.130
+                    if (decoded && gs.osc[0].wave == lynx::Waveform::spectral)
+                    {
+                        CHECK (std::all_of (gs.spectrum.begin(), gs.spectrum.end(), [] (float a) { return std::isfinite (a) && a >= 0.0f; }));
+                        static constexpr float trumpet[3] { 0.9087f, 0.8610f, 0.8151f }, phases[3] { 0.919f, 0.380f, 0.130f };
+                        auto match = true;
+                        for (std::size_t k = 0; k < 3; ++k)
+                            match = match && std::abs (gs.spectrum[k] * 2.0f / 3.14159265f - trumpet[k]) < 1e-3f && std::abs (gs.spectrumPhase[k] - phases[k]) < 1e-3f;
+                        ogunTrumpet += match ? 1 : 0;
+                    }
+                }
                 else if (c.pluginName == "Sakura")
                     decoded = lynx::synthFromSakura (c.pluginState, gs);
                 else if (c.pluginName == "Kepler")
@@ -1028,6 +1042,8 @@ TEST (flp_real_files)
         std::printf ("  %s: %d channels, %d decoded\n", name.c_str(), counter.first, counter.second);
         CHECK (counter.second == counter.first);
     }
+    std::printf ("  Ogun spectra matching the Trumpet reference: %d\n", ogunTrumpet);
+    CHECK (ogunTrumpet >= 1);
 
     // demo Gross Beat: the volume slot becomes the gate (those using an envelope slot get steps < 1)
     {

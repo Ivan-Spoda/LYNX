@@ -5,10 +5,12 @@
 #include "core/Inflate.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace lynx
 {
@@ -72,6 +74,348 @@ double gmsCutoffHz (double u)
 }
 
 int truncf32 (float x) { return (int) x; }
+// ---- Ogun's timbre engine (REA_rodada24 §1) ----
+
+// IPP-style uniform generator (§1.3): subtract-with-borrow + congruential sequence, our own implementation
+std::vector<float> ogunUniform (int count, float lo, float hi, std::int32_t seed)
+{
+    constexpr std::uint32_t a = 69069u, c = 0x3c6ef373u;
+    const auto s = (std::uint32_t) seed;
+    std::uint32_t e3 = (s * a + c) * a + c, e2 = s * a + c, e1 = s; // e[k−3], e[k−2], e[k−1]
+    std::uint32_t l = 0x436cbae9u;
+    std::int32_t borrow = -1;
+    const auto scale = (double) (hi - lo) * std::ldexp (1.0, -32);
+    const auto offset = (double) (lo + hi) * 0.5;
+    std::vector<float> out ((std::size_t) std::max (0, count));
+    for (auto& o : out)
+    {
+        auto v = (std::int32_t) (e2 - e3 + (std::uint32_t) borrow);
+        borrow = v < 0 ? -1 : 0;
+        if (v < 0)
+            v = (std::int32_t) ((std::uint32_t) v - 18u);
+        e3 = e2;
+        e2 = e1;
+        e1 = (std::uint32_t) v;
+        l = l * a + c;
+        o = (float) ((double) (std::int32_t) ((std::uint32_t) v + l) * scale + offset);
+    }
+    return out;
+}
+
+// 32-bit integer mix used for the seeds (§1.4)
+std::int32_t ogunMix (std::int32_t value, std::uint32_t k1)
+{
+    const auto a = (std::uint32_t) value;
+    std::uint32_t u6 = (0u - a - k1) ^ (a << 8);
+    std::uint32_t u7 = (0x1eefu - a - u6) ^ (u6 >> 13);
+    std::uint32_t u5 = (a - u6 - u7) ^ (u7 >> 12);
+    u6 = (u6 - u7 - u5) ^ (u5 << 16);
+    u7 = (u7 - u5 - u6) ^ (u6 >> 5);
+    u5 = (u5 - u6 - u7) ^ (u7 >> 3);
+    u6 = (u6 - u7 - u5) ^ (u5 << 10);
+    u6 = (u7 - u5 - u6) ^ (u6 >> 15);
+    const auto r = (std::int32_t) u6;
+    return r == INT32_MIN ? INT32_MAX : std::abs (r);
+}
+
+struct OgunPoint
+{
+    double dx = 0.0, y = 0.0;
+    float tension = 0.0f;
+    int mode = 0;
+};
+using OgunEnvelope = std::vector<OgunPoint>;
+
+// The state's envelopes (`i32 type, i32 version 3, i32 n`, n × 24 B points, 20 B trailer), in order
+std::vector<OgunEnvelope> ogunEnvelopes (const std::vector<std::uint8_t>& body)
+{
+    std::vector<OgunEnvelope> out;
+    auto i32 = [&] (std::size_t at) { std::int32_t v; std::memcpy (&v, body.data() + at, 4); return v; };
+    std::size_t i = 0x110;
+    while (i + 12 <= body.size())
+    {
+        const auto kind = i32 (i), version = i32 (i + 4), n = i32 (i + 8);
+        if (kind >= 0 && kind < 64 && version == 3 && n >= 1 && n <= 70000 && i + 12 + (std::size_t) n * 24 + 20 <= body.size())
+        {
+            OgunEnvelope env;
+            auto ok = true;
+            auto j = i + 12;
+            for (int k = 0; k < n && ok; ++k, j += 24)
+            {
+                OgunPoint p;
+                std::memcpy (&p.dx, body.data() + j, 8);
+                std::memcpy (&p.y, body.data() + j + 8, 8);
+                std::memcpy (&p.tension, body.data() + j + 16, 4);
+                p.mode = body[j + 20];
+                ok = std::isfinite (p.dx) && std::isfinite (p.y) && p.dx >= -1e-9 && p.dx <= 1e6 && std::abs (p.y) < 1e6 && std::abs (p.tension) <= 1.0001f;
+                env.push_back (p);
+            }
+            if (ok)
+            {
+                out.push_back (std::move (env));
+                i = j + 20;
+                continue;
+            }
+        }
+        ++i;
+    }
+    return out;
+}
+
+// Segment shape t → 0..1 of FL's envelope library (REA_rodada23 §1.2). Modes 1 and 10 (not transcribed) are linear.
+double ogunSegment (double t, int mode, double tension)
+{
+    const auto sign = tension > 0.0 ? 1 : tension < 0.0 ? -1 : 0;
+    auto count = [&] { return std::round ((std::pow (1000001.0, 1.0 - 0.6 * std::abs (tension)) - 1.0) * 0.001); };
+    switch (mode)
+    {
+        case 0:
+        {
+            if (tension == 0.0)
+                return t;
+            const auto k = std::pow (1000001.0, std::abs (tension)) - 1.0;
+            const auto l = std::log (k + 1.0);
+            return tension > 0.0 ? 1.0 - (std::exp ((1.0 - t) * l) - 1.0) / k : (std::exp (t * l) - 1.0) / k;
+        }
+        case 2: return 0.0;
+        case 5:
+        {
+            const auto c10 = 2.0 * (count() + 1.0);
+            return (double) ((long long) std::round (t * c10 - (tension < 0.0 ? -0.5 : 0.5)) & 1);
+        }
+        case 6:
+        {
+            const auto c10 = count() + 0.5;
+            if (sign > 0 && count() == 0.0)
+                return t;
+            if (sign < 0)
+                return (std::sin ((t * c10 + 0.75) * 2.0 * pi) + 1.0) * 0.5;
+            const auto v = t * c10 - 0.5;
+            const auto r = std::round (v - 0.5);
+            return std::abs ((v - r) * 2.0 - 1.0);
+        }
+        case 7:
+        {
+            const auto u = sign > 0 ? 1.0 - t : t;
+            return t - (std::pow (u, 6.0) - u) * tension;
+        }
+        default: return t;
+    }
+}
+
+double ogunEnvelopeAt (const OgunEnvelope& env, double x)
+{
+    if (env.empty())
+        return 0.0;
+    double total = 0.0;
+    for (std::size_t j = 1; j < env.size(); ++j)
+        total += env[j].dx;
+    if (total <= 0.0)
+        total = 1.0;
+    if (x <= 0.0)
+        return env[0].y;
+    double start = 0.0;
+    for (std::size_t j = 1; j < env.size(); ++j)
+    {
+        const auto end = start + env[j].dx / total;
+        if (x < end || j + 1 == env.size())
+        {
+            if (x >= end)
+                return env[j].y;
+            const auto t = end > start ? (x - start) / (end - start) : 0.0;
+            return env[j - 1].y + ogunSegment (t, env[j].mode, env[j].tension) * (env[j].y - env[j - 1].y);
+        }
+        start = end;
+    }
+    return env.back().y;
+}
+
+// Ogun's initial spectrum (§1.5–§1.7) in the "spectral" oscillator. Partial h of an Ogun note of frequency f sounds
+// at h·f·2^(7 − P52); the oscillator runs at f·2^o, o = max(−2, 7 − P52), so partial h lands on index h/stride,
+// stride = 2^(P52 − 7 + o). With P52 ≤ 9 every partial is an exact index; above, partials are binned (energy) to the
+// nearest index. Returns false if the maps cannot be read. `decaySeconds`/`releaseSeconds` = time for the whole
+// spectrum to fall 40 dB with the per-partial times (< 0 = no decay).
+struct OgunSpectrum
+{
+    std::array<float, SynthSettings::spectrumSize> amplitude {}, phase {};
+    int octave = 0;
+    double decaySeconds = -1.0, releaseSeconds = -1.0;
+};
+
+bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body, OgunSpectrum& out)
+{
+    const auto envelopes = ogunEnvelopes (body);
+    if (envelopes.size() != 82 || body.size() < 0xFC)
+        return false;
+    const auto& forced = envelopes[78];
+    const auto& impulseMap = envelopes[79];
+    const auto& decayMap = envelopes[80];
+    const auto& releaseMap = envelopes[81];
+    const bool perNoteSeed = body[0xE0] != 0, logAxis = body[0xE7] != 0, altDecay = body[0xF8] != 0,
+               normalise = body[0xF9] != 0, invSqrt = body[0xFA] != 0;
+    std::int32_t pattern[4];
+    std::memcpy (pattern, body.data() + 0xE8, sizeof (pattern));
+
+    const auto richness = std::clamp (p[52], 6, 16);
+    const auto m = (1 << (richness - 1)) - 1; // partials 1…M
+    const auto mapLength = std::min (m * 3 / 2, 0x8000);
+
+    // map sampling (§1.6): x = i/32767 or log2(i + 1)/15; EQs use (3^(2y) − 1)/2
+    auto sample = [&] (const OgunEnvelope& env, int length, bool eq, bool sqrtScaled, int patternValue)
+    {
+        std::vector<double> v ((std::size_t) length);
+        for (int i = 0; i < length; ++i)
+        {
+            const auto x = (logAxis ? std::log2 (i + 1.0) / 15.0 : i / 32767.0) + 5.96e-8;
+            auto y = std::clamp (ogunEnvelopeAt (env, x), 0.0, 1.0);
+            if (eq)
+                y = y * 2.0 == 1.0 ? 1.0 : (std::pow (3.0, 2.0 * y) - 1.0) / 2.0;
+            if (sqrtScaled)
+                y /= std::sqrt (i + 1.0);
+            if (patternValue > 0 && ((patternValue < 5 && i % (patternValue + 1) == patternValue) || (patternValue >= 5 && i % (patternValue - 2) != 0)))
+                y = 0.0;
+            v[(std::size_t) i] = y;
+        }
+        return v;
+    };
+    const auto forcedOn = std::any_of (forced.begin(), forced.end(), [] (const OgunPoint& pt) { return pt.y != 0.0; });
+    const auto forcedValues = forcedOn ? sample (forced, m, false, invSqrt, pattern[0]) : std::vector<double> {};
+    const auto impulse = sample (impulseMap, mapLength, true, invSqrt, pattern[1]);
+    const auto decayEq = sample (decayMap, mapLength, true, invSqrt && altDecay, pattern[2]);
+    const auto releaseEq = sample (releaseMap, mapLength, true, false, pattern[3]);
+    auto mapAt = [] (const std::vector<double>& v, int i) { return v.empty() ? 1.0 : v[(std::size_t) std::min (i, (int) v.size() - 1)]; };
+
+    // articulators at their neutral values (§1.8): art6 = art7 = art10 = 1, art9 = art11 = art12 = 0
+    const auto fullness = std::clamp (p[8] / 1000.0, -1.0, 1.0);
+    const auto shape = (std::pow (10000001.0, std::abs (fullness)) - 1.0) * 0.01 * (fullness > 0.0 ? -1.0 : fullness < 0.0 ? 1.0 : 0.0);
+    const auto morph = p[9] / 1000.0;
+    const auto preDecay = std::max (0.001, p[5] / 1000.0);
+    auto seedOf = [] (std::int32_t v) { return v - 1 < 0 ? -1 : ogunMix (v - 0x20cf, 0x1cfc); };
+    // Seed 1 per key: key 60 (C5) is used; Seed 2 = "Random" draws a new seed on every note in FL — LYNX keeps one
+    // fixed draw (counter 0)
+    const auto seed1 = perNoteSeed ? ogunMix (p[10] + 60 - 0x1f88, 0x1e42) : seedOf (p[10]);
+    const auto seed2 = p[11] - 1 < 0 ? ogunMix (0 - 0x200e, 0x1dbc) : seedOf (p[11]);
+
+    auto weights = [&] (std::int32_t seed)
+    {
+        auto u = ogunUniform (m, 0.0f, 1.0f, seed);
+        std::vector<double> g ((std::size_t) m);
+        for (int i = 0; i < m; ++i)
+        {
+            const double x = u[(std::size_t) i];
+            if (shape == 0.0)
+                g[(std::size_t) i] = x;
+            else if (shape > 0.0)
+                g[(std::size_t) i] = (std::pow (1.0 + shape, x) - 1.0) / shape;
+            else
+                g[(std::size_t) i] = ((1.0 - shape) - std::pow (1.0 - shape, 1.0 - x)) / -shape;
+        }
+        return g;
+    };
+    std::vector<double> b ((std::size_t) m, 0.0);
+    if (morph != 0.0)
+    {
+        const auto g = weights (seed2);
+        for (int i = 0; i < m; ++i)
+            b[(std::size_t) i] += morph * g[(std::size_t) i];
+    }
+    if (morph < 1.0)
+    {
+        const auto g = seed1 < 0 ? std::vector<double> ((std::size_t) m, 1.0) : weights (seed1);
+        for (int i = 0; i < m; ++i)
+            b[(std::size_t) i] += (1.0 - morph) * g[(std::size_t) i];
+    }
+    for (int i = 0; i < m; ++i)
+    {
+        auto& w = b[(std::size_t) i];
+        w = std::max (0.0, w);
+        if (forcedOn)
+            w = 1.0 - forcedValues[(std::size_t) i] * (1.0 - w);
+    }
+
+    // pre-decayed amplitudes and RMS normalisation (§1.7)
+    std::vector<double> d ((std::size_t) m);
+    double sumD = 0.0;
+    for (int i = 0; i < m; ++i)
+    {
+        d[(std::size_t) i] = std::pow (0.01, 1.0 / (b[(std::size_t) i] / preDecay + 0.001));
+        sumD += d[(std::size_t) i] * d[(std::size_t) i];
+    }
+    const auto rms = std::sqrt (sumD / m);
+    if (rms <= 0.0)
+        return false;
+    auto gain = 1.0;
+    if (normalise)
+    {
+        auto mapRms = [&] (const std::vector<double>& v) { double s = 0.0; for (int i = 0; i < m; ++i) s += v[(std::size_t) i] * v[(std::size_t) i]; return std::sqrt (s / m); };
+        auto r = mapRms (impulse);
+        if (altDecay)
+            r = std::max (r, mapRms (decayEq));
+        if (r > 5.96e-8)
+            gain = 0.5 / r;
+    }
+    int first = m, last = -1;
+    for (int i = 0; i < (int) impulse.size(); ++i)
+        if (impulse[(std::size_t) i] > 5.96e-8)
+            first = std::min (first, i), last = i;
+
+    const auto theta = ogunUniform (m, 0.0f, 6.2831855f, 3); // fixed phase table (§1.2)
+    const auto decayKnob = p[6] >= 10000 ? -1.0 : ((std::pow (21.0, std::clamp (p[6], 0, 10000) / 10000.0) - 1.0) * 997.5 + 50.0) / 1000.0;
+    const auto releaseKnob = p[7] >= 10000 ? 20.0 : ((std::pow (21.0, std::clamp (p[7], 0, 10000) / 10000.0) - 1.0) * 997.5 + 50.0) / 1000.0;
+
+    out.octave = std::max (-2, 7 - richness);
+    const auto stride = 1 << (richness - 7 + out.octave);
+    std::array<double, SynthSettings::spectrumSize> energy {}, strongest {};
+    std::vector<double> amp ((std::size_t) m, 0.0);
+    for (int i = 0; i < m; ++i)
+    {
+        if (i < first || i > last)
+            continue;
+        const auto a = 2.0 / std::sqrt ((double) m) * d[(std::size_t) i] * gain / rms * mapAt (impulse, i);
+        amp[(std::size_t) i] = a;
+        const auto index = (int) std::lround ((i + 1.0) / stride);
+        if (index < 1 || index > SynthSettings::spectrumSize)
+            continue;
+        const auto k = (std::size_t) index - 1;
+        energy[k] += a * a;
+        if (a > strongest[k])
+        {
+            strongest[k] = a;
+            out.phase[k] = (float) std::fmod (theta[(std::size_t) i] / (2.0 * pi) + 0.25, 1.0);
+        }
+    }
+    for (std::size_t k = 0; k < energy.size(); ++k)
+        out.amplitude[k] = (float) (std::sqrt (energy[k]) * pi / 2.0); // physical level (round 23 convention)
+
+    // time for the summed energy to fall 40 dB when partial h falls 40 dB in τ_h = (t − 0.025)·B·E + 0.025
+    auto overall = [&] (double knob, const std::vector<double>& eq)
+    {
+        std::vector<std::pair<double, double>> parts;
+        double total = 0.0;
+        for (int i = 0; i < m; ++i)
+            if (amp[(std::size_t) i] > 0.0)
+            {
+                const auto tau = std::max (0.001, (knob - 0.025) * b[(std::size_t) i] * mapAt (eq, i) + 0.025);
+                parts.emplace_back (amp[(std::size_t) i] * amp[(std::size_t) i], tau);
+                total += parts.back().first;
+            }
+        if (total <= 0.0)
+            return knob;
+        double lo = 0.0, hi = 60.0;
+        for (int it = 0; it < 50; ++it)
+        {
+            const auto t = (lo + hi) / 2.0;
+            double e = 0.0;
+            for (const auto& [a2, tau] : parts)
+                e += a2 * std::pow (10.0, -4.0 * t / tau);
+            (e > total * 1e-4 ? lo : hi) = t;
+        }
+        return hi;
+    };
+    out.decaySeconds = decayKnob < 0.0 ? -1.0 : overall (decayKnob, decayEq);
+    out.releaseSeconds = overall (releaseKnob, releaseEq);
+    return true;
+}
 } // namespace
 
 bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain)
@@ -314,15 +658,35 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     const auto wave = fullness <= -800 && richness <= 3 ? Waveform::sine : fullness < -300 ? Waveform::triangle : Waveform::saw;
     const auto transpose = std::clamp (p[1], -24, 24) + std::clamp (p[2], -50, 50) / 100.0;
 
-    s.osc = { SynthOscillator { wave, 0, 0.0f, 0.8f }, SynthOscillator {}, SynthOscillator {} };
-    setPitch (s.osc[0], transpose);
-    if (fullness > 300) // "metallic" timbre: a partial one octave up
+    // REA_rodada24 §1: Ogun is an inverse-FFT spectral synth; its initial spectrum goes into the "spectral"
+    // oscillator. Approximations: one static spectrum (per-partial decay → one overall envelope, ALT DECAY's
+    // morph towards the Decay EQ is not reproduced), articulators at their neutral values, Seed 2 "Random" = one
+    // fixed draw, partials of dense spectra (richness > 4) binned onto the nearest harmonic of f/4.
+    // Without readable maps the old waveform approximation is used.
+    OgunSpectrum spectrum;
+    const auto spectral = ogunSpectrum (p, *body, spectrum);
+    if (spectral)
     {
-        s.osc[1] = { Waveform::sine, 0, 0.0f, 0.3f };
-        setPitch (s.osc[1], transpose + 12.0);
+        s.spectrum = spectrum.amplitude;
+        s.spectrumPhase = spectrum.phase;
+        s.osc = { SynthOscillator { Waveform::spectral, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+        setPitch (s.osc[0], transpose);
+        s.osc[0].octave = std::clamp (s.osc[0].octave + spectrum.octave, -3, 3);
+    }
+    else
+    {
+        s.osc = { SynthOscillator { wave, 0, 0.0f, 0.8f }, SynthOscillator {}, SynthOscillator {} };
+        setPitch (s.osc[0], transpose);
+        if (fullness > 300) // "metallic" timbre: a partial one octave up
+        {
+            s.osc[1] = { Waveform::sine, 0, 0.0f, 0.3f };
+            setPitch (s.osc[1], transpose + 12.0);
+        }
     }
 
-    const auto decay = seconds (p[6]), release = seconds (p[7]);
+    // spectral: the 40 dB fall of the whole spectrum → LYNX's 60 dB times (×1.5)
+    const auto decay = spectral ? (spectrum.decaySeconds < 0.0 ? -1.0 : 1.5 * spectrum.decaySeconds) : seconds (p[6]);
+    const auto release = spectral ? 1.5 * spectrum.releaseSeconds : seconds (p[7]);
     s.attack = 0.0f;
     if (decay < 0.0)
     {

@@ -78,5 +78,5 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20)
 - [x] Sidechain links (round 22)
 - [ ] Vocodex (needs two side inputs or its internal synth)
-- [ ] Ogun's FFT spectral engine (round 24)
+- [x] Ogun's FFT spectral engine: initial spectrum (round 24); per-partial decay still approximated
 - [x] FLEX by preset name only (its packs are encrypted and never opened)
