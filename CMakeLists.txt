@@ -82,6 +82,7 @@ if(LYNX_BUILD_APP)
     src/engine/WavPackFormat.cpp
         src/engine/ProjectFile.cpp
         src/engine/PluginHost.cpp
+        src/engine/PluginSandbox.cpp
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
         src/engine/ClapFormat.cpp

@@ -49,7 +49,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] CLAP (formato próprio sobre o JUCE: parâmetros, estado, latência, interface)
 - [x] Compensação de latência (PDC) por aresta, como o FL; export descarta a latência do início
 - [x] Processamento multi-thread: canais em paralelo e mixer por camadas (sem locks)
-- [ ] Plugins em processo separado (sandbox), estilo ilbridge
+- [x] Plugins em processo separado (sandbox, opcional em Opções), estilo ilbridge
 
 ## Extras já feitos
 - [x] Swing, ajustes do sampler, trilhas da Playlist com nome/mute, dividir clip

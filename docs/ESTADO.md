@@ -187,6 +187,14 @@ Confirmadas empiricamente nos demos:
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
 ## Hosting de plugins
+- Plugins em processo separado (opcional, `Opções > Plugins em processo separado`, padrão desligado):
+  cada plugin roda num `LYNX.exe --lynx-plugin-host` filho. Áudio (até 8 canais × 4096), MIDI (até 1024
+  eventos) e mudanças de parâmetro (até 512 por bloco, nos dois sentidos) passam por memória
+  compartilhada com um par de eventos por bloco; estado e janela por mensagens (ChildProcessCoordinator).
+  Se o filho não responder em 0,5 s ou fechar, o plugin fica mudo, um aviso aparece e o LYNX continua.
+  A janela do plugin é do filho (sempre no topo). Verificado com `LYNX.exe --sandboxtest plugin.vst3
+  relatorio.txt` (Surge XT: toca, 1 s em ~13 ms, parâmetro → estado → plugin no processo igual, filho
+  travado → 0,5 s, mudo, marcado como morto). `LYNX_SANDBOX_LOG=arquivo` registra os passos.
 - O VST3 SDK que vem com o JUCE compila com Zig/MinGW; basta pôr
   `juce_audio_processors/format_types/VST3_SDK` no include path.
 - Plugins são preparados numa taxa fixa; quando o dispositivo muda de taxa, o engine recria as
@@ -197,4 +205,4 @@ Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`
 que o tempo real. Harmor (100 canais) entra como aproximação grosseira (partes A/B como serras, filtro,
 envelopes, uníssono). Sem equivalente ainda (tocam com preset do synth pelo nome): FLEX (57; pelo nome do preset) (Morphine, PoiZone, BassDrum, Toxic, BooBass e Drumpad já entram aproximados). Efeitos sem equivalente mais comuns: Pitcher,
 Pitcher (correção de afinação), Patcher em paralelo, Vocodex. Também em aberto: ASIO (licença do SDK
-da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.
+da Steinberg: GPLv3 ou proprietária).

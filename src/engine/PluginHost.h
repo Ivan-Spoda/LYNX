@@ -108,6 +108,9 @@ private:
     bool persistent = true;
 };
 
+// Layout estéreo (se o plugin aceitar), taxa e bloco; chama prepareToPlay.
+void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize);
+
 // Estado atual do plugin em base64 (para salvar no projeto).
 std::string capturePluginState (juce::AudioPluginInstance& plugin);
 } // namespace lynx

@@ -3,10 +3,9 @@
 #include "core/FlWrapper.h"
 
 #include "engine/ClapFormat.h"
+#include "engine/PluginSandbox.h"
 
 namespace lynx
-{
-namespace
 {
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize)
 {
@@ -28,6 +27,8 @@ void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int bl
     plugin.prepareToPlay (sampleRate, blockSize);
 }
 
+namespace
+{
 void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float value) noexcept
 {
     const auto& params = plugin.getParameters();
@@ -414,6 +415,16 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
     }
 
     juce::String message;
+    if (pluginSandboxEnabled())
+    {
+        // processo separado: o filho prepara o plugin e aplica o estado
+        if (auto remote = createSandboxedPlugin (*description, sampleRate, maxBlockSize, ref.state, message))
+            return remote;
+        if (error != nullptr)
+            *error = juce::String::fromUTF8 (ref.name.c_str()) + ": " + message;
+        return nullptr;
+    }
+
     auto instance = formats.createPluginInstance (*description, sampleRate, maxBlockSize, message);
 
     if (instance == nullptr)

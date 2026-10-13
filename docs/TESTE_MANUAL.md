@@ -40,6 +40,10 @@ de teste fica em `C:\Users\kauan\lynx-test\LYNX.exe` (copiado a cada build).
 ## 4. Plugins de terceiros
 - `Plugins > Procurar plugins` e depois abrir um `.flp` que use VST3/CLAP pelo Fruity Wrapper: o
   plugin deve abrir com o mesmo preset do FL. Plugins que faltarem aparecem num aviso.
+- `Opções > Plugins em processo separado`: ligar, reabrir o projeto e tocar. Cada plugin vira um
+  `LYNX.exe` filho no Gerenciador de Tarefas; a janela do plugin abre separada (botão "Mostrar a janela
+  do plugin"). Conferir CPU/estalos comparado com a opção desligada. Se um plugin travar, ele fica mudo
+  com um aviso e o LYNX segue tocando.
 
 ## 5. Áudio
 - `Audio...`: os tipos "Windows Audio", "Windows Audio (Exclusive Mode)" e "Low Latency Mode"

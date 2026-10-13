@@ -1,5 +1,7 @@
 #include "ui/MainComponent.h"
 
+#include "engine/PluginSandbox.h"
+
 #include "engine/Text.h"
 
 #include "core/Templates.h"
@@ -897,6 +899,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
                                                         juce::String (found) + utf8 (" plugin(s) novo(s) encontrado(s)."));
             });
+        });
+        menu.addItem (utf8 ("Plugins em processo separado (protege o LYNX de travamentos)"), true, pluginSandboxEnabled(), [] {
+            setPluginSandboxEnabled (! pluginSandboxEnabled());
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
+                                                    utf8 (pluginSandboxEnabled()
+                                                              ? "Ligado: os plugins abertos daqui em diante rodam num processo separado. "
+                                                                "Se um travar, ele fica mudo e o LYNX continua. Reabra o projeto para aplicar aos já abertos."
+                                                              : "Desligado: os plugins abertos daqui em diante rodam dentro do LYNX."));
         });
         menu.addItem (utf8 ("Gravar áudio da entrada"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());

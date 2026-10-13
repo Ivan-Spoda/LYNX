@@ -4,6 +4,8 @@
 #include "engine/AudioEngine.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
+#include "engine/PluginHost.h"
+#include "engine/PluginSandbox.h"
 #include "engine/ProjectFile.h"
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
@@ -44,7 +46,18 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // processo filho de um plugin em sandbox: sem janela nem áudio próprios
+        if (lynx::runPluginSandboxWorker (commandLine))
+            return;
+
         const auto args = juce::StringArray::fromTokens (commandLine, true);
+
+        if (args.contains ("--sandboxtest"))
+        {
+            const auto i = args.indexOf ("--sandboxtest");
+            runSandboxTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
 
         if (args.contains ("--selftest"))
         {
@@ -209,6 +222,7 @@ public:
 
     void shutdown() override
     {
+        lynx::shutdownPluginSandboxWorker();
         mainWindow = nullptr; // a UI sai antes do engine
         crashEngine = nullptr;
         engine = nullptr;
@@ -490,8 +504,9 @@ private:
             auto& host = offline.getPluginHost();
             host.addPluginFile (juce::File (pluginPath));
             const juce::PluginDescription* vst3 = nullptr;
+            const auto types = host.getKnownPlugins().getTypes(); // cópia: o ponteiro abaixo aponta para ela
 
-            for (const auto& type : host.getKnownPlugins().getTypes())
+            for (const auto& type : types)
                 if (type.pluginFormatName == "VST3" && type.isInstrument)
                     vst3 = &type;
 
@@ -550,6 +565,97 @@ private:
                         ok = adopted == 1 && std::abs (value - target) < 0.02f;
                     }
                 }
+            }
+        }
+
+        report << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
+        juce::File (reportPath).replaceWithText (report);
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
+    // LYNX.exe --sandboxtest plugin.vst3 relatorio.txt: abre o instrumento em processo separado, toca uma
+    // nota, muda um parâmetro, confere o estado (de volta num plugin no processo) e faz o filho travar
+    // para conferir que o LYNX segue em frente (silêncio, sem esperar mais que o tempo-limite).
+    void runSandboxTest (const juce::String& pluginPath, const juce::String& reportPath)
+    {
+        juce::String report;
+        bool ok = false;
+        lynx::setPluginSandboxAlerts (false);
+        const juce::File log (reportPath + ".log");
+        auto step = [&] (const char* what) { log.appendText (juce::String (what) + "\n"); };
+        log.deleteFile();
+        {
+            lynx::PluginHost host (false);
+            host.addPluginFile (juce::File (pluginPath));
+            const auto types = host.getKnownPlugins().getTypes(); // getTypes() devolve uma cópia
+            const juce::PluginDescription* instrument = nullptr;
+            for (const auto& type : types)
+                if (type.isInstrument)
+                    instrument = &type;
+
+            step ("host");
+            juce::String error;
+            auto remote = instrument != nullptr ? lynx::createSandboxedPlugin (*instrument, 48000.0, 512, {}, error) : nullptr;
+            report << "abriu=" << (remote != nullptr ? 1 : 0) << " erro=" << error << "\n";
+
+            step ("criado");
+            if (remote != nullptr)
+            {
+                auto& proxy = *remote;
+                lynx::PluginInstrument voice (std::move (remote), 512);
+                std::vector<float> l (48000), r (48000);
+                auto peakOf = [&] {
+                    float peak = 0.0f;
+                    for (std::size_t k = 0; k < l.size(); ++k)
+                        peak = std::max ({ peak, std::abs (l[k]), std::abs (r[k]) });
+                    return peak;
+                };
+
+                const auto start = juce::Time::getMillisecondCounterHiRes();
+                voice.noteOn (60, 0.9f);
+                voice.render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+                const auto renderMs = juce::Time::getMillisecondCounterHiRes() - start;
+                const auto peak = peakOf();
+                step ("tocou");
+                report << "parametros=" << proxy.getParameters().size() << " pico=" << peak << " render_1s_ms=" << renderMs << "\n";
+
+                // parâmetro -> estado -> plugin no processo
+                bool stateOk = false;
+                if (! proxy.getParameters().isEmpty())
+                {
+                    auto* p = proxy.getParameters()[0];
+                    const auto target = p->getValue() > 0.5f ? 0.13f : 0.87f;
+                    p->setValue (target);
+                    std::fill (l.begin(), l.end(), 0.0f);
+                    voice.render (l.data(), r.data(), 512, 1.0f, 1.0f); // leva a mudança ao filho
+                    juce::MemoryBlock state;
+                    proxy.getStateInformation (state);
+                    if (auto local = host.getFormats().createPluginInstance (*instrument, 48000.0, 512, error))
+                    {
+                        local->setStateInformation (state.getData(), (int) state.getSize());
+                        const auto back = local->getParameters()[0]->getValue();
+                        report << "estado_bytes=" << (int) state.getSize() << " alvo=" << target << " no_processo=" << back << "\n";
+                        stateOk = std::abs (back - target) < 0.02f;
+                    }
+                }
+
+                step ("estado");
+                // filho travado: o bloco volta em ~0,5 s, mudo, e o plugin fica marcado como morto
+                lynx::hangSandboxedPluginForTest (proxy);
+                juce::Thread::sleep (200);
+                std::fill (l.begin(), l.end(), 1.0f);
+                std::fill (r.begin(), r.end(), 1.0f);
+                const auto hangStart = juce::Time::getMillisecondCounterHiRes();
+                voice.render (l.data(), r.data(), 4096, 0.0f, 0.0f);
+                std::fill (l.begin(), l.end(), 0.0f);
+                std::fill (r.begin(), r.end(), 0.0f);
+                voice.render (l.data(), r.data(), 4096, 1.0f, 1.0f);
+                const auto hangMs = juce::Time::getMillisecondCounterHiRes() - hangStart;
+                const auto dead = lynx::isSandboxedPluginDead (proxy);
+                report << "travado_ms=" << hangMs << " morto=" << (dead ? 1 : 0) << " pico_depois=" << peakOf() << "\n";
+
+                ok = peak > 1e-4f && stateOk && dead && hangMs < 1500.0 && peakOf() == 0.0f;
             }
         }
 
