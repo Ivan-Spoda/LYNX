@@ -360,7 +360,7 @@ General rule: identify by `0xC9` (accept UTF-16LE **and** ASCII), read `0xD5`, c
 with the formulas above and only then to the 0…1 of the internal parameters (`peq::hzValue`,
 `peq::gainValue`, `peq::qValue` etc.). Always ignore the backup state (A/B).
 
-1. **Parametric EQ 2 → "EQ paramétrico" (7 bands, already exists in `src/core/Effects.*`).** It is the mapping
+1. **Parametric EQ 2 → "Parametric EQ" (7 bands, already exists in `src/core/Effects.*`).** It is the mapping
    with the highest payoff (1,138 slots, ~3,600 active bands).
    - Type: 0 → `off`; 1 → `highCut`; 2 → `bandPass`; 3 → `lowCut`; 4 → `notch`; 5 → `lowShelf`;
      6 → `peak`; 7 → `highShelf`. Band with bit 0 in the mask (v ≥ 4) → `off`.
@@ -373,24 +373,24 @@ with the formulas above and only then to the 0…1 of the internal parameters (`
      It needs to become a per-band parameter (stages = |order|+1, or at least 1/2/4 with |order| 0 → 1, 1 → 2,
      2…3 → 4). "Steep 8" on HP/LP (537 bands) ≈ 4 Butterworth biquads (48 dB/oct). For peaking/shelf
      with order ≠ 0 (≈ 40 cases), cascading with split gain is sufficient.
-   - Main level → "Saída" parameter (`outputParam`), `v/100` dB.
+   - Main level → "Output" parameter (`outputParam`), `v/100` dB.
 2. **Limiter → Limiter (lookahead) + Compressor.** Fruity Limiter runs *gain → compressor → limiter →
    gate* all at once; the saved tab is only visual.
-   - Ceiling `L3(v/1000)` → "Teto" (if ≥ +0 dB and gain 0 dB, the limiter is practically transparent);
-     Gain `L7(v/1000)` → "Ganho"; Release `4·(501^(v/10000)−1)` ms → "Release".
+   - Ceiling `L3(v/1000)` → "Ceiling" (if ≥ +0 dB and gain 0 dB, the limiter is practically transparent);
+     Gain `L7(v/1000)` → "Gain"; Release `4·(501^(v/10000)−1)` ms → "Release".
    - If ratio > 0 and threshold < 1000: also instantiate the internal **Compressor** before the limiter
      (threshold `20·log10 L7`, ratio by formula 2.2, attack/release `T`/`2T`, knee `v/10` %).
    - Noise gate (threshold > 0) has no equivalent; ignore (demos: always 0). Sidechain: ignore and
      warn in the log.
 3. **Reeverb 2 → Reverb (Freeverb).** Room ← `room/100` combined with decay (Freeverb has no decay in
-   seconds: approximate `roomsize` from RT60 = decay·bass mult in the lows); "Abafar" ← high damping
-   (kHz → 0…1, 221 = no damping); "Largura" ← `1 − |sep|/64` **[HYP]**; Mix: the internal effect is
+   seconds: approximate `roomsize` from RT60 = decay·bass mult in the lows); "Damping" ← high damping
+   (kHz → 0…1, 221 = no damping); "Width" ← `1 − |sep|/64` **[HYP]**; Mix: the internal effect is
    wet/dry, so use `wet_lin = L11(wet/256) + 0.5·L11(er/256)` and `dry_lin = L11(dry/128)`; dry = 0
    (39 slots) indicates reverb on a send → mix 100 % wet. Low cut/high cut: apply an HP/LP on the wet if LYNX
    gains these parameters (low cut on in 308 of the 333 slots); predelay likewise (cheap new parameter).
 4. **Delay 2/Delay 3 → Delay.** Time in note beats: Delay 2 `v/48`, Delay 3 (sync) `v/96`; ping pong
    = mode 2 in both. Feedback: Delay 2 `v/127`, Delay 3 `v/6000`. Mix: Delay 2 dry `L11(dry/128)` and wet
-   from the input; Delay 3 output wet/dry `v/6000`. "Abafar" ← cutoff (Delay 2 `v/128`, Delay 3 `v/6000`,
+   from the input; Delay 3 output wet/dry `v/6000`. "Damping" ← cutoff (Delay 2 `v/128`, Delay 3 `v/6000`,
    inverted). Delay 3 without sync: keep the default until the engine is decoded.
 5. **Compressor → Compressor.** Direct and exact mapping: threshold `v/10` dB, ratio `v/10`, makeup
    `v/10` dB, attack `v/10` ms, release `v` ms; Soft/Medium types suggest a soft knee. The
