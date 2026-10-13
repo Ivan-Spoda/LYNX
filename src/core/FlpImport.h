@@ -24,6 +24,12 @@ struct FlpImportOptions
 {
     FlPathRoots roots;
     std::function<bool (const std::string& path)> fileExists; // sem isto, nenhum sample é usado
+
+    // Opcionais (fatias do Fruity Slicer/Slicex): bytes de um arquivo, duração de um sample em
+    // quadros (0 = desconhecida) e gravação de um WAV embutido no projeto (devolve o caminho).
+    std::function<std::vector<std::uint8_t> (const std::string& path)> readFile;
+    std::function<std::int64_t (const std::string& path)> sampleFrames;
+    std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
 };
 
 // Converte um projeto do FL Studio para o nosso modelo. Canais sampler cujo

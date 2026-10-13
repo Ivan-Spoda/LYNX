@@ -535,6 +535,53 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 }
             }
 
+        // Fruity Slicer / Slicex: sampler com as fatias (a fatia i toca na tecla 60 + i, na altura do sample)
+        {
+            const auto name = lowercase (c.pluginName);
+            std::optional<SlicedSample> sliced;
+
+            if (name == "fruity slicer")
+                sliced = fruitySlicer (c.pluginState);
+            else if (name == "slicex")
+                sliced = slicex (c.pluginState);
+
+            if (sliced)
+            {
+                std::string path;
+
+                if (! sliced->embeddedWav.empty() && options.saveEmbedded) // o áudio que só existe dentro do projeto
+                    path = options.saveEmbedded (sliced->embeddedWav, def.name);
+                if (path.empty())
+                    path = existing (sliced->path);
+
+                if (! path.empty())
+                {
+                    auto positions = sliced->positions;
+                    std::int64_t frames = 0;
+
+                    if (positions.empty()) // Slicex: as fatias são os pontos "cue" do WAV
+                    {
+                        const auto bytes = ! sliced->embeddedWav.empty() ? sliced->embeddedWav
+                                                                         : options.readFile ? options.readFile (path) : std::vector<std::uint8_t> {};
+                        positions = wavCuePoints (bytes, frames);
+                    }
+
+                    if (frames <= 0 && options.sampleFrames)
+                        frames = options.sampleFrames (path);
+
+                    def.instrument = InstrumentKind::sampler;
+                    def.samplePath = path;
+                    def.sampler.pitch = std::clamp (def.sampler.pitch + sliced->pitchCents / 100.0f, -24.0f, 24.0f);
+
+                    if (frames > 0)
+                        for (auto p : positions)
+                            if (p >= 0 && p < frames)
+                                def.sampler.slices.push_back ((float) ((double) p / (double) frames));
+
+                }
+            }
+        }
+
         if (c.pluginName == "FPC")
             if (auto pads = fpcPads (c.pluginState))
             {

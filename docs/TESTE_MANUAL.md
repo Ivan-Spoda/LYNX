@@ -39,4 +39,10 @@ de teste fica em `C:\Users\kauan\lynx-test\LYNX.exe` (copiado a cada build).
 - `Audio...`: os tipos "Windows Audio", "Windows Audio (Exclusive Mode)" e "Low Latency Mode"
   aparecem; conferir latência e estalos com um projeto pesado.
 
+## 6. Comparação automática com o FL (opcional, ajuda muito)
+O FL traz 82 projetos curtos de teste, um por plugin, em
+`C:\Program Files\Image-Line\FL Studio 2026\Data\System\Render tests`. Se você exportar cada um
+no FL (WAV 24 bits, 44,1 kHz, mesmo nome do projeto) para `C:\Users\kauan\lynx-test\fl-render`,
+eu comparo com o render do LYNX (nível, espectro, envelope) e ajusto o que estiver longe.
+
 Anote o que soar diferente do FL (canal/efeito/trecho) que eu ajusto.

@@ -643,6 +643,30 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
         FlpImportOptions options;
         options.roots = findFlStudioRoots();
         options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+        options.readFile = [] (const std::string& path) {
+            juce::MemoryBlock data;
+            juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (data);
+            const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+            return std::vector<std::uint8_t> (bytes, bytes + data.getSize());
+        };
+        options.sampleFrames = [this] (const std::string& path) -> std::int64_t {
+            const auto sample = samples.load (juce::String::fromUTF8 (path.c_str()));
+            return sample != nullptr ? (std::int64_t) sample->frames() : 0;
+        };
+        // WAV que só existe dentro do .flp (Slicex): vai para %APPDATA%\LYNX\flp-embedded, pelo conteúdo
+        options.saveEmbedded = [] (const std::vector<std::uint8_t>& wav, const std::string& name) -> std::string {
+            const auto folder = PluginHost::settingsFolder().getChildFile ("flp-embedded");
+            folder.createDirectory();
+            const auto hash = juce::String::toHexString ((juce::int64) juce::DefaultHashFunctions::generateHash (
+                juce::String::createStringFromData (wav.data(), (int) juce::jmin<std::size_t> (wav.size(), 65536)) + juce::String ((juce::int64) wav.size()),
+                0x7FFFFFFF));
+            const auto file = folder.getChildFile (juce::File::createLegalFileName (juce::String::fromUTF8 (name.c_str())) + "-" + hash + ".wav");
+
+            if (! file.existsAsFile() && ! file.replaceWithData (wav.data(), wav.size()))
+                return {};
+
+            return file.getFullPathName().toStdString();
+        };
 
         auto imported = importFlp (project, options);
         juce::StringArray missing;

@@ -380,6 +380,18 @@ TEST (flp_real_files)
         std::replace (local.begin(), local.end(), '\\', '/');
         return std::filesystem::exists (local);
     };
+    withFiles.readFile = [] (const std::string& path) {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        std::ifstream in (local, std::ios::binary);
+        return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    };
+    int embeddedSaved = 0;
+    withFiles.saveEmbedded = [&embeddedSaved] (const std::vector<std::uint8_t>& wav, const std::string&) {
+        ++embeddedSaved;
+        return wav.size() > 44 ? std::string ("embutido.wav") : std::string();
+    };
+    int slicedChannels = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -406,6 +418,12 @@ TEST (flp_real_files)
                     hasFpc = hasFpc || c.pluginName == "FPC";
                 for (const auto& c : full.channels)
                 {
+                    if (c.sampler.slices.size() >= 4)
+                    {
+                        ++slicedChannels;
+                        CHECK (std::is_sorted (c.sampler.slices.begin(), c.sampler.slices.end()));
+                        CHECK (c.sampler.slices.back() < 1.0f);
+                    }
                     if (! c.zones.empty() && c.name.find (" - ") == std::string::npos)
                     {
                         ++dwChannels;
@@ -586,6 +604,8 @@ TEST (flp_real_files)
     std::printf ("  DirectWave: %d canais, %d zonas; FPC: %d projetos, %d canais de pad, %d notas nos pads\n", dwChannels, dwZones, fpcKits,
                  padChannels, padNotes);
     CHECK (dwZones > 1000 && padChannels > 250 && padNotes > 500);
+    std::printf ("  canais fatiados (Slicer/Slicex): %d; WAVs embutidos gravados: %d\n", slicedChannels, embeddedSaved);
+    CHECK (slicedChannels >= 25 && embeddedSaved >= 10); // sem decodificar Ogg aqui, parte dos loops fica sem duração
     CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20 && reverbsLowCut > 250);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);

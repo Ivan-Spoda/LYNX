@@ -245,4 +245,160 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
 
     return result;
 }
+namespace
+{
+// leitor sequencial com limite (o blob pode estar truncado)
+struct Stream
+{
+    const std::vector<std::uint8_t>& d;
+    std::size_t pos = 0;
+    bool ok = true;
+
+    template <typename T>
+    T read()
+    {
+        T v {};
+        if (pos + sizeof (T) > d.size())
+        {
+            ok = false;
+            return v;
+        }
+        std::memcpy (&v, d.data() + pos, sizeof (T));
+        pos += sizeof (T);
+        return v;
+    }
+
+    std::string str8() // u8 comprimento + bytes ANSI
+    {
+        const auto n = read<std::uint8_t>();
+        if (! ok || pos + n > d.size())
+        {
+            ok = false;
+            return {};
+        }
+        std::string s (reinterpret_cast<const char*> (d.data() + pos), n);
+        pos += n;
+        return s;
+    }
+
+    void skip (std::size_t n)
+    {
+        if (pos + n > d.size())
+            ok = false;
+        else
+            pos += n;
+    }
+};
+} // namespace
+
+std::optional<SlicedSample> fruitySlicer (const std::vector<std::uint8_t>& d)
+{
+    Stream in { d };
+    const auto version = in.read<std::uint32_t>();
+
+    if (version < 13 || version > 16)
+        return std::nullopt;
+
+    SlicedSample result;
+    in.skip (8); // comprimento em tempos, BPM originais
+    result.pitchCents = (float) std::clamp (in.read<std::int32_t>(), -1200, 1200);
+    in.skip (16); // estiramento, método, fades
+    result.path = in.str8();
+    const auto count = in.read<std::uint32_t>();
+
+    if (! in.ok || count > 4096)
+        return std::nullopt;
+
+    for (std::uint32_t i = 0; i < count && in.ok; ++i)
+    {
+        in.str8(); // nome
+        const auto position = in.read<std::int32_t>();
+        in.skip (4 + 4 + 1);
+        if (in.ok && position >= 0)
+            result.positions.push_back (position);
+    }
+
+    if (! in.ok || result.path.empty() || result.positions.empty())
+        return std::nullopt;
+
+    std::sort (result.positions.begin(), result.positions.end());
+    return result;
+}
+
+std::optional<SlicedSample> slicex (const std::vector<std::uint8_t>& d)
+{
+    Stream in { d };
+    const auto version = in.read<std::uint32_t>();
+
+    if (version != 0x00060003u && version != 6u)
+        return std::nullopt;
+
+    SlicedSample result;
+    std::int32_t master[8] {};
+    for (auto& m : master)
+        m = in.read<std::int32_t>();
+    result.pitchCents = (float) std::clamp (master[5], -1200, 1200);
+    in.skip (47 + 12); // opções e estado de UI: o deck A começa em 0x5F
+
+    const auto referenceOnly = in.read<std::uint8_t>(); // 0 = WAV embutido a seguir
+    result.path = in.str8();
+
+    if (in.ok && referenceOnly == 0)
+    {
+        const auto size = in.read<std::uint32_t>();
+        if (in.ok && size > 0 && in.pos + size <= d.size())
+            result.embeddedWav.assign (d.begin() + (std::ptrdiff_t) in.pos, d.begin() + (std::ptrdiff_t) (in.pos + size));
+    }
+
+    if (! in.ok || (result.path.empty() && result.embeddedWav.empty()))
+        return std::nullopt;
+
+    return result;
+}
+
+std::vector<std::int64_t> wavCuePoints (const std::vector<std::uint8_t>& w, std::int64_t& frames)
+{
+    std::vector<std::int64_t> cues;
+    frames = 0;
+
+    if (w.size() < 12 || std::memcmp (w.data(), "RIFF", 4) != 0 || std::memcmp (w.data() + 8, "WAVE", 4) != 0)
+        return cues;
+
+    std::uint16_t format = 0, blockAlign = 0;
+    std::size_t pos = 12;
+
+    while (pos + 8 <= w.size())
+    {
+        std::uint32_t size = 0;
+        std::memcpy (&size, w.data() + pos + 4, 4);
+        const auto* body = w.data() + pos + 8;
+        const auto available = std::min<std::size_t> (size, w.size() - pos - 8);
+
+        if (std::memcmp (w.data() + pos, "fmt ", 4) == 0 && available >= 16)
+        {
+            std::memcpy (&format, body, 2);
+            std::memcpy (&blockAlign, body + 12, 2);
+        }
+        else if (std::memcmp (w.data() + pos, "data", 4) == 0 && blockAlign > 0 && (format == 1 || format == 3 || format == 0xFFFE))
+            frames = (std::int64_t) (size / blockAlign);
+        else if (std::memcmp (w.data() + pos, "cue ", 4) == 0 && available >= 4)
+        {
+            std::uint32_t count = 0;
+            std::memcpy (&count, body, 4);
+
+            for (std::uint32_t i = 0; i < count && 4 + (std::size_t) (i + 1) * 24 <= available; ++i)
+            {
+                std::uint32_t sampleOffset = 0;
+                std::memcpy (&sampleOffset, body + 4 + (std::size_t) i * 24 + 20, 4);
+                cues.push_back (sampleOffset);
+            }
+        }
+
+        pos += 8 + size + (size & 1); // chunks alinhados em 2
+    }
+
+    std::sort (cues.begin(), cues.end());
+    cues.erase (std::unique (cues.begin(), cues.end()), cues.end());
+    return cues;
+}
 } // namespace lynx
