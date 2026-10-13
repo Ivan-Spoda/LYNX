@@ -505,6 +505,7 @@ struct SamplerVoice
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
     int glideLeft = 0;
+    float lowL = 0.0f, bandL = 0.0f, lowR = 0.0f, bandR = 0.0f; // filtro do canal
 };
 
 class SamplerInstrument final : public Instrument
@@ -534,6 +535,8 @@ public:
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
         regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
+        cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
+        resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
         for (int i = 0; i < table.count; ++i)
@@ -706,6 +709,21 @@ public:
         const auto* r = sample->rightData();
         const auto last = (double) (sample->frames() - 1);
 
+        // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto e sem ressonância
+        const auto fc = cutoff.load(), res = resonance.load();
+        const auto filtered = fc < 19500.0f || res > 0.0f;
+
+        if (filtered && (fc != filterCutoff || res != filterResonance))
+        {
+            filterCutoff = fc;
+            filterResonance = res;
+            const auto g = (float) std::tan (3.14159265358979 * std::min ((double) fc, sampleRate * 0.45) / sampleRate);
+            const auto k = 2.0f - 1.9f * res;
+            fa1 = 1.0f / (1.0f + g * (g + k));
+            fa2 = g * fa1;
+            fa3 = g * fa2;
+        }
+
         for (auto& v : voices)
         {
             if (! v.active)
@@ -721,8 +739,15 @@ public:
 
                 const auto index = (std::size_t) v.position;
                 const auto frac = (float) (v.position - (double) index);
-                const auto sl = l[index] + frac * (l[index + 1] - l[index]);
-                const auto sr = r[index] + frac * (r[index + 1] - r[index]);
+                auto sl = l[index] + frac * (l[index + 1] - l[index]);
+                auto sr = r[index] + frac * (r[index + 1] - r[index]);
+
+                if (filtered)
+                {
+                    sl = svf (sl, v.lowL, v.bandL);
+                    sr = svf (sr, v.lowR, v.bandR);
+                }
+
                 auto gain = v.velocity * v.fade * v.env;
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
@@ -801,6 +826,19 @@ private:
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
+    std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
+    float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
+    float fa1 = 1.0f, fa2 = 0.0f, fa3 = 0.0f;
+
+    float svf (float in, float& low, float& band) const noexcept
+    {
+        const auto v3 = in - low;
+        const auto v1 = fa1 * band + fa2 * v3;
+        const auto v2 = low + fa2 * band + fa3 * v3;
+        band = 2.0f * v1 - band;
+        low = 2.0f * v2 - low;
+        return v2;
+    }
     std::array<float, 4> nextClip {}; // fades do próximo noteOn (só a thread de áudio mexe)
 
     struct SliceTable

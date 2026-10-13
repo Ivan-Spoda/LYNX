@@ -62,6 +62,8 @@ struct SamplerSettings
     float regionStart = 0.0f;  // trecho tocado do sample (frações 0..1)
     float regionEnd = 1.0f;
     std::vector<float> slices; // fatias (inícios em frações): a tecla 60 + i toca a fatia i, na altura original
+    float cutoff = 20000.0f;   // passa-baixas do canal (Hz); 20 kHz e sem ressonância = desligado
+    float resonance = 0.0f;    // 0..1
 
     bool operator== (const SamplerSettings&) const = default;
 };

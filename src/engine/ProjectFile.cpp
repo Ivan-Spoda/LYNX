@@ -252,6 +252,7 @@ juce::String toJson (const Song& song)
             }
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
+            sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance });
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
         }
 
@@ -547,6 +548,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
                 def.sampler.reverse = (bool) s.getProperty ("reverse", false);
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
+
+                if (const auto& filter = s["filter"]; filter.isArray() && filter.size() == 2)
+                {
+                    def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
+                    def.sampler.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) filter[1]);
+                }
             }
 
             song.channels.push_back (std::move (def));

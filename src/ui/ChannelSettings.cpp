@@ -24,6 +24,11 @@ public:
         setup (stretch, stretchLabel, "Esticar", 0.0, 64.0, 0.25, " tempos");
         setup (regionStart, regionStartLabel, "Início", 0.0, 1.0, 0.001, "");
         setup (regionEnd, regionEndLabel, "Fim", 0.0, 1.0, 0.001, "");
+        setup (cutoff, cutoffLabel, "Corte", 20.0, 20000.0, 1.0, " Hz");
+        setup (resonance, resonanceLabel, "Ressonância", 0.0, 1.0, 0.01, "");
+        cutoff.setSkewFactorFromMidPoint (1000.0);
+        cutoff.setDoubleClickReturnValue (true, 20000.0);
+        cutoff.setTooltip (utf8 ("Passa-baixas do canal (no máximo e sem ressonância fica desligado)"));
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
@@ -50,7 +55,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (420, 420);
+        setSize (420, 536);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -86,6 +91,8 @@ public:
         area.removeFromTop (8);
         area.removeFromTop (6);
         place (area.removeFromTop (110), { { &regionStart, &regionStartLabel }, { &regionEnd, &regionEndLabel } });
+        area.removeFromTop (6);
+        place (area.removeFromTop (110), { { &cutoff, &cutoffLabel }, { &resonance, &resonanceLabel } });
         area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
         cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
@@ -127,6 +134,8 @@ private:
             keepPitch.setToggleState (c->sampler.keepPitch, juce::dontSendNotification);
             regionStart.setValue (c->sampler.regionStart, juce::dontSendNotification);
             regionEnd.setValue (c->sampler.regionEnd, juce::dontSendNotification);
+            cutoff.setValue (c->sampler.cutoff, juce::dontSendNotification);
+            resonance.setValue (c->sampler.resonance, juce::dontSendNotification);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -142,7 +151,7 @@ private:
         if (updating || current() == nullptr)
             return;
 
-        SamplerSettings s;
+        auto s = current()->sampler; // mantém o que o painel não mostra (fatias)
         s.pitch = (float) pitch.getValue();
         s.attack = (float) attack.getValue();
         s.decay = (float) decay.getValue();
@@ -154,6 +163,8 @@ private:
         s.release = (float) release.getValue();
         s.reverse = reverse.getToggleState();
         s.cut = cut.getToggleState();
+        s.cutoff = (float) cutoff.getValue();
+        s.resonance = (float) resonance.getValue();
 
         if (s == current()->sampler)
             return;
@@ -179,8 +190,9 @@ private:
     AudioEngine& engine;
     int channel;
     bool updating = false;
-    juce::Slider pitch, attack, release, decay, sustain, stretch, regionStart, regionEnd;
-    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel;
+    juce::Slider pitch, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
+    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
+        cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch;
 };
 

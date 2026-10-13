@@ -317,6 +317,9 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope ligado: a nota acaba
         }
 
+        // filtro do canal (Mod X/Y + tipo do 0xDB) vale para o sampler também
+        synthFilterFromChannel (c.modX, c.modY, c.filterType, def.sampler.cutoff, def.sampler.resonance);
+
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
         if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
         {

@@ -778,6 +778,38 @@ TEST (flp_import_3x_osc_state_and_channel_filter)
     CHECK (hz >= 19999.0f);
 }
 
+TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
+{
+    // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    data->left.resize (48000);
+    std::uint32_t seed = 7;
+    for (auto& v : data->left)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        v = ((float) (seed >> 8) / 16777216.0f - 0.5f);
+    }
+    data->right = data->left;
+    auto energy = [&] (float cutoff) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.sampler.cutoff = cutoff;
+        inst->configure (c, 120.0);
+        inst->noteOn (60, 1.0f);
+        std::vector<float> l (24000), r (24000);
+        inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+        double e = 0.0;
+        for (auto v : l)
+            e += (double) v * v;
+        return e;
+    };
+    const auto open = energy (20000.0f), dark = energy (300.0f);
+    CHECK (open > 100.0);
+    CHECK (dark < open * 0.05);
+}
+
 TEST (synth_oscillator_pan_and_semitones)
 {
     auto render = [] (lynx::SynthSettings s, std::vector<float>& l, std::vector<float>& r) {
