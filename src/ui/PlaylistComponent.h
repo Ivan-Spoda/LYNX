@@ -21,7 +21,8 @@ namespace lynx
 //  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
 //  - Ctrl+arrastar seleciona com retângulo; Shift+clique soma; clips selecionados andam juntos
 //  - arrastar na régua marca a região de loop; clique direito na régua desliga o loop
-//  - clique direito na faixa do nome de um clip abre o menu dele (tornar única etc.)
+//  - clique direito na faixa do nome de um clip abre o menu dele (dividir, tornar única etc.)
+//  - cabeçalho da trilha: LED muta a trilha; clique direito renomeia
 //  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
 class PlaylistComponent final : public juce::Component,
                                 public juce::FileDragAndDropTarget,
@@ -94,6 +95,7 @@ private:
     void refreshArrangementBox();
     void arrangementChosen();
     void renameArrangement();
+    void renameTrack (int track);
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };

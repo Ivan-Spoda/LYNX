@@ -96,6 +96,9 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
     for (const auto& clip : song.playlist)
     {
+        if (song.isTrackMuted (clip.track))
+            continue;
+
         if (clip.kind == ClipKind::audio)
         {
             if (clip.channel < 0 || clip.channel >= (int) song.channels.size() || clip.length <= 0)

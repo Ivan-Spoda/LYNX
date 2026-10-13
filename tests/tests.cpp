@@ -1748,6 +1748,27 @@ TEST (sampler_settings_pitch_reverse_envelope_cut)
     CHECK (std::abs (l[1999] - 1999.0f / 48000.0f) < 1e-4f); // só a nota nova
 }
 
+TEST (playlist_split_and_track_mute)
+{
+    lynx::Clip c { 0, 3, 960, 3840, 480 };
+    const auto rest = lynx::splitClip (c, 2000);
+    CHECK (c.start == 960 && c.length == 1040 && c.offset == 480);
+    CHECK (rest.start == 2000 && rest.length == 2800 && rest.offset == 480 + 1040 && rest.track == 3);
+
+    auto s = lynx::Song::makeDefault();
+    s.mode = lynx::PlayMode::song;
+    s.playlist = { { 0, 0, 0, 3840, 0 } };
+    lynx::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::scheduleSong (s, 0.0, 48000, tps, ev);
+    CHECK (ev.size() > 0);
+    s.playlistTracks.resize (1);
+    s.playlistTracks[0].muted = true;
+    ev.clear();
+    lynx::scheduleSong (s, 0.0, 48000, tps, ev);
+    CHECK (ev.size() == 0);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

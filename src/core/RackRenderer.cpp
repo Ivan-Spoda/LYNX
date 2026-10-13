@@ -264,7 +264,7 @@ void RackState::buildAutomationTables()
     {
         const auto& c = song.playlist[(std::size_t) i];
 
-        if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0)
+        if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0 && ! song.isTrackMuted (c.track))
             automationClips[(std::size_t) c.automation].push_back (i);
     }
 

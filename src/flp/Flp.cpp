@@ -35,6 +35,8 @@ enum : std::uint32_t
     evAutomationLink = 0xE3,    // registros de 20 B {u32 canal<<16, u32 0, u32 controlID, u32 flags, u32 ?}
     evAutomationPoints = 0xEA,  // header 21 B + 24 B por ponto + 112 B
     evMixerRoutes = 0xEB,       // um byte por trilha de destino
+    evPlaylistTrack = 0xEE,     // u32 índice (1..500), u32 cor, u32 ícone, u8 habilitada, ...
+    evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
     evMixerInsertParams = 0xEC, // abre um novo insert do mixer
     evArrangementName = 0xF1,
@@ -504,6 +506,21 @@ Project parseProject (std::span<const std::uint8_t> file)
                 }
                 break;
             }
+
+            case evPlaylistTrack:
+                if (currentArrangement >= 0 && e.data.size() >= 13)
+                {
+                    PlaylistTrackInfo t;
+                    t.index = (int) readLE<std::uint32_t> (e.data, 0) - 1;
+                    t.enabled = e.data[12] != 0;
+                    arrangement().tracks.push_back (t);
+                }
+                break;
+
+            case evPlaylistTrackName:
+                if (currentArrangement >= 0 && ! arrangement().tracks.empty())
+                    arrangement().tracks.back().name = text (e);
+                break;
 
             case evControlValues:
                 for (std::size_t o = 0; o + 12 <= e.data.size(); o += 12)

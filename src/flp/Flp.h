@@ -167,11 +167,19 @@ struct PlaylistItem
     float endOffset = 0.0f;
 };
 
+struct PlaylistTrackInfo
+{
+    int index = 0;        // 0 = primeira trilha
+    std::string name;
+    bool enabled = true;  // false = trilha mutada
+};
+
 struct Arrangement
 {
     int index = 0;
     std::string name;
     std::vector<PlaylistItem> items;
+    std::vector<PlaylistTrackInfo> tracks; // só as que o arquivo descreve
 };
 
 struct MixerInsert

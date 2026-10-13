@@ -414,10 +414,16 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (y > headers.getBottom() || y + trackHeight < headers.getY())
                 continue;
 
-            g.setColour (theme::channelButton);
+            const auto muted = song.isTrackMuted (t);
+            const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
+            g.setColour (theme::channelButton.darker (muted ? 0.4f : 0.0f));
             g.fillRect (2, y + 1, headerWidth - 4, trackHeight - 3);
-            g.setColour (theme::text.withAlpha (0.8f));
-            g.drawText ("Track " + juce::String (t + 1), 8, y, headerWidth - 12, trackHeight, juce::Justification::centredLeft);
+            g.setColour (theme::muteLed (muted));
+            g.fillEllipse (6.0f, (float) y + trackHeight / 2.0f - 5.0f, 10.0f, 10.0f);
+            g.setColour (theme::text.withAlpha (muted ? 0.4f : 0.8f));
+            g.drawFittedText (custom ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
+                                     : "Track " + juce::String (t + 1),
+                              20, y, headerWidth - 24, trackHeight, juce::Justification::centredLeft, 2, 0.8f);
         }
     }
 
@@ -626,6 +632,22 @@ void PlaylistComponent::sortClips()
 
 void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 {
+    // cabeçalho da trilha: LED muta; clique direito renomeia
+    if (e.x < headerWidth && e.y >= timelineHeight && e.y < gridArea().getBottom())
+    {
+        const auto track = yToTrack (e.y);
+
+        if (e.mods.isPopupMenu())
+            renameTrack (track);
+        else if (e.x < 20)
+            engine.editSong ([track] (Song& s) {
+                if ((int) s.playlistTracks.size() <= track)
+                    s.playlistTracks.resize ((std::size_t) track + 1);
+                s.playlistTracks[(std::size_t) track].muted = ! s.playlistTracks[(std::size_t) track].muted;
+            });
+        return;
+    }
+
     if (e.y < timelineHeight && e.x >= headerWidth)
     {
         if (e.mods.isPopupMenu())
@@ -855,11 +877,46 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent&)
     repaint();
 }
 
+void PlaylistComponent::renameTrack (int track)
+{
+    const auto& tracks = engine.getSong().playlistTracks;
+    const auto current = track < (int) tracks.size() ? juce::String::fromUTF8 (tracks[(std::size_t) track].name.c_str()) : juce::String();
+    auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", current.isNotEmpty() ? current : "Track " + juce::String (track + 1));
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, track, window] (int result) {
+                                 if (result != 1)
+                                     return;
+
+                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
+                                 engine.editSong ([track, name] (Song& s) {
+                                     if ((int) s.playlistTracks.size() <= track)
+                                         s.playlistTracks.resize ((std::size_t) track + 1);
+                                     s.playlistTracks[(std::size_t) track].name = name;
+                                 });
+                             }),
+                             true);
+}
+
 void PlaylistComponent::showClipMenu (int index)
 {
     const auto& clip = engine.getSong().playlist[(std::size_t) index];
     const auto targets = isSelected (index) ? selection : std::vector<int> { index };
     juce::PopupMenu menu;
+
+    // dividir no ponto clicado (na grade de 1 tempo)
+    const auto splitAt = snap (xToTick (getMouseXYRelative().x) + ppq / 2.0, true);
+
+    if (splitAt > clip.start && splitAt < clip.end())
+        menu.addItem (utf8 ("Dividir aqui"), [this, index, splitAt] {
+            setSelection ({});
+            engine.editSong ([index, splitAt] (Song& s) {
+                auto rest = splitClip (s.playlist[(std::size_t) index], splitAt);
+                s.playlist.push_back (rest);
+            });
+            sortClips();
+        });
 
     if (clip.kind == ClipKind::pattern)
     {

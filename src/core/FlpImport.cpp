@@ -308,6 +308,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
     }
 
     // Playlist: todos os arrangements (o primeiro fica aberto); clips de pattern, de áudio e de automação.
+    std::vector<const std::vector<flp::PlaylistTrackInfo>*> importedTracks;
+
     if (! project.arrangements.empty())
         song.arrangements.clear();
 
@@ -386,6 +388,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         Arrangement a;
         a.name = arrangement.name.empty() ? "Arrangement " + std::to_string (song.arrangements.size() + 1) : arrangement.name;
+        importedTracks.push_back (&arrangement.tracks);
 
         if (song.arrangements.empty())
             song.playlist = std::move (clips); // o primeiro é o atual
@@ -408,6 +411,17 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             }
 
         song.selectArrangement (fullest);
+
+        // nomes e mute das trilhas da Playlist (do arrangement aberto)
+        if (fullest < (int) importedTracks.size())
+            for (const auto& t : *importedTracks[(std::size_t) fullest])
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled))
+                {
+                    if ((int) song.playlistTracks.size() <= t.index)
+                        song.playlistTracks.resize ((std::size_t) t.index + 1);
+
+                    song.playlistTracks[(std::size_t) t.index] = { t.name, ! t.enabled };
+                }
     }
 
     if (! song.playlist.empty())

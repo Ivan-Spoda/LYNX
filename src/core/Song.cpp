@@ -484,6 +484,17 @@ std::int64_t Automation::length() const noexcept
     return points.empty() ? 1 : std::max<std::int64_t> (1, points.back().tick);
 }
 
+Clip splitClip (Clip& clip, std::int64_t tick)
+{
+    Clip rest = clip;
+    const auto head = std::clamp<std::int64_t> (tick - clip.start, 1, std::max<std::int64_t> (1, clip.length - 1));
+    clip.length = head;
+    rest.start = clip.start + head;
+    rest.offset = clip.offset + head;
+    rest.length -= head;
+    return rest;
+}
+
 std::int64_t swingDelay (std::int64_t start, float swing) noexcept
 {
     if (swing <= 0.0f || start % (2 * ticksPerStep) != ticksPerStep)

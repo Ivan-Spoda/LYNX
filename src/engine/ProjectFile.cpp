@@ -248,6 +248,17 @@ juce::String toJson (const Song& song)
 
     root->setProperty ("playlist", clipsToVar (song.playlist));
 
+    {
+        juce::Array<juce::var> tracks;
+
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (const auto& t = song.playlistTracks[i]; ! t.name.empty() || t.muted)
+                tracks.add (juce::Array<juce::var> { (int) i, str (t.name), t.muted });
+
+        if (! tracks.isEmpty())
+            root->setProperty ("playlistTracks", tracks);
+    }
+
     if (song.arrangements.size() > 1)
     {
         juce::Array<juce::var> arrangements;
@@ -442,6 +453,18 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         }
 
     song.playlist = clipsFromVar (root["playlist"], song);
+
+    if (auto* tracks = root["playlistTracks"].getArray())
+        for (const auto& t : *tracks)
+            if (t.isArray() && t.size() == 3 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                song.playlistTracks[index] = { t[1].toString().toStdString(), (bool) t[2] };
+            }
 
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())
     {

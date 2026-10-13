@@ -209,6 +209,17 @@ enum class PlayMode : std::uint8_t
     song     // toca a Playlist (como o "SONG" do FL)
 };
 
+// Cabeçalho de uma trilha da Playlist.
+struct PlaylistTrack
+{
+    std::string name;  // vazio = "Track N"
+    bool muted = false; // clips desta trilha não tocam
+};
+
+// Divide um clip em `tick` (absoluto): o original fica com o começo e o retorno é o resto.
+// `tick` precisa estar dentro do clip.
+Clip splitClip (Clip& clip, std::int64_t tick);
+
 // Um arranjo da Playlist (o FL permite vários por projeto).
 struct Arrangement
 {
@@ -251,6 +262,12 @@ struct Song
 
     std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
     std::vector<Automation> automations;
+    std::vector<PlaylistTrack> playlistTracks; // índice = trilha; trilhas além do fim usam o padrão
+
+    bool isTrackMuted (int track) const noexcept
+    {
+        return track >= 0 && track < (int) playlistTracks.size() && playlistTracks[(std::size_t) track].muted;
+    }
 
     static std::vector<MixerTrack> defaultMixer (int inserts = 16);
     // Primeiro insert que nenhum canal usa (ou o último, se todos estiverem ocupados).
