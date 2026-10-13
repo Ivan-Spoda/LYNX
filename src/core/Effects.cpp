@@ -1029,7 +1029,6 @@ double levels (float v) { return 65536.0 / (2048.0 * v * v + 1.0); }
 namespace xover
 {
 double hz (float v) { return 30.0 * std::pow (2.0, 9.0589 * std::clamp (v, 0.0f, 1.0f)); }
-float hzValue (double hz) { return (float) std::clamp (std::log2 (hz / 30.0) / 9.0589, 0.0, 1.0); }
 int combo (float v) { return std::clamp ((int) std::lround (v * 7.0f), 0, 7); }
 constexpr int dbPerOctave[8] { 6, 12, 18, 24, 36, 48, 72, 96 };
 

@@ -17,7 +17,14 @@ CORE="src/flp/Flp.cpp src/core/Song.cpp src/core/NoteEdit.cpp src/core/Recorder.
 
 mkdir -p build-local build-local/wavpack
 # decodificador WavPack (C)
-CC="${CC:-${CXX/c++/cc}}"
+if [[ -z "${CC:-}" ]]; then
+    case "$CXX" in
+        *zig*) CC="${CXX/c++/cc}" ;;
+        *clang++*) CC="${CXX/clang++/clang}" ;;
+        *g++*) CC="${CXX/g++/gcc}" ;;
+        *) CC=cc ;;
+    esac
+fi
 for f in third_party/wavpack/src/*.c; do
     obj="build-local/wavpack/$(basename "$f" .c).o"
     [[ -f "$obj" && "$obj" -nt "$f" ]] || $CC -c -O2 -w -DHAVE___BUILTIN_CLZ=1 -Ithird_party/wavpack/include -Ithird_party/wavpack/src "$f" -o "$obj"
