@@ -783,4 +783,189 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     synth = s;
     return true;
 }
+// ---- Morphine (REA_rodada16 §3): aditivo de até 4 geradores; cada um vira um oscilador pela forma do
+// espectro médio (quadros ponderados por duração × ganho). Envelope, nível e afinação: o bloco mestre ----
+
+namespace
+{
+std::uint32_t tagAt (const std::uint8_t* d, std::size_t o) { return u32At (d, o); }
+constexpr std::uint32_t morTag (const char (&t)[5]) { return (std::uint32_t) t[3] << 24 | (std::uint32_t) t[2] << 16 | (std::uint32_t) t[1] << 8 | (std::uint32_t) t[0]; }
+
+struct MorphineGenerator
+{
+    std::array<double, 128> energy {}; // energia média de cada harmônico
+    double weight = 0.0;
+    float mix = 0.0f;
+};
+
+// MBP0: 3 vetores de 128 valores em 16 grupos de 8 (máscara + um f32 por bit ligado); o 1º é a amplitude
+bool readPartials (const std::vector<std::uint8_t>& d, std::size_t& o, std::size_t end, std::array<float, 128>& amplitude)
+{
+    if (o + 4 > end || tagAt (d.data(), o) != morTag ("0PBM"))
+        return false;
+    o += 4;
+    for (int a = 0; a < 3; ++a)
+        for (int g = 0; g < 16; ++g)
+        {
+            if (o >= end)
+                return false;
+            const auto mask = d[o++];
+            for (int b = 0; b < 8; ++b)
+                if ((mask >> b) & 1)
+                {
+                    if (o + 4 > end)
+                        return false;
+                    float v = 0.0f;
+                    std::memcpy (&v, d.data() + o, 4);
+                    o += 4;
+                    if (a == 0)
+                        amplitude[(std::size_t) (g * 8 + b)] = std::isfinite (v) ? v : 0.0f;
+                }
+        }
+    return true;
+}
+
+bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size_t end, MorphineGenerator& gen)
+{
+    // MVC0 · i32 · MZH0 · i32 zonas · { i32, f32 nível, i32 n, MSP0 } · i32 n · 6 × i32 (o 1º é o Mix, f32)
+    if (o + 8 > end || tagAt (d.data(), o) != morTag ("0CVM"))
+        return false;
+    o += 8;
+    if (o + 8 > end || tagAt (d.data(), o) != morTag ("0HZM"))
+        return false;
+    const auto zones = (int) u32At (d.data(), o + 4);
+    o += 8;
+    for (int z = 0; z < zones; ++z)
+    {
+        if (o + 12 > end)
+            return false;
+        const auto zoneEnd = o + 12 + (std::size_t) u32At (d.data(), o + 8); // inclui o próprio campo de tamanho [DADOS]
+        o += 12;
+        if (o + 8 > end || tagAt (d.data(), o) != morTag ("0PSM"))
+            return false;
+        const auto frames = (int) u32At (d.data(), o + 4);
+        o += 8;
+        for (int f = 0; f < frames; ++f)
+        {
+            if (o + 12 > end)
+                return false;
+            const auto duration = (double) (std::int32_t) u32At (d.data(), o);
+            float frameGain = 0.0f;
+            std::memcpy (&frameGain, d.data() + o + 4, 4);
+            const auto next = o + 12 + (std::size_t) u32At (d.data(), o + 8);
+            o += 12;
+            std::array<float, 128> amplitude {};
+            if (! readPartials (d, o, end, amplitude) || o != next)
+                return false;
+            const auto w = std::max (0.0, duration) * std::abs ((double) frameGain);
+            for (std::size_t n = 0; n < 128; ++n)
+                gen.energy[n] += w * (double) amplitude[n] * amplitude[n];
+            gen.weight += w;
+        }
+        o = zoneEnd > o ? zoneEnd : o;
+        if (o > end)
+            return false;
+    }
+    if (o + 8 > end)
+        return false;
+    std::memcpy (&gen.mix, d.data() + o + 4, 4);
+    gen.mix = std::isfinite (gen.mix) ? std::clamp (gen.mix, 0.0f, 1.0f) : 0.0f;
+    return true;
+}
+
+// forma de onda pelo espectro: fundamental dominante -> seno; só ímpares -> quadrada (queda lenta) ou
+// triângulo (queda rápida, ~1/n²); o resto -> serra
+Waveform waveFromSpectrum (const std::array<double, 128>& e)
+{
+    double total = 0.0, odd = 0.0, peak = 0.0;
+    for (std::size_t n = 0; n < e.size(); ++n)
+    {
+        total += e[n];
+        if (n % 2 == 0)
+            odd += e[n];
+        peak = std::max (peak, e[n]);
+    }
+    if (total <= 0.0)
+        return Waveform::sine;
+    int strong = 0;
+    for (auto v : e)
+        strong += std::sqrt (v / peak) > 0.05 ? 1 : 0;
+    if (e[0] / total >= 0.7 && strong <= 6)
+        return Waveform::sine;
+    if (odd / total >= 0.8)
+    {
+        // inclinação log-log das amplitudes dos harmônicos ímpares presentes
+        double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+        int count = 0;
+        for (std::size_t n = 0; n < e.size(); n += 2)
+            if (e[n] > peak * 1e-6)
+            {
+                const auto x = std::log ((double) n + 1.0), y = 0.5 * std::log (e[n]);
+                sx += x, sy += y, sxx += x * x, sxy += x * y, ++count;
+            }
+        const auto slope = count >= 2 ? (count * sxy - sx * sy) / std::max (1e-12, count * sxx - sx * sx) : -1.0;
+        return slope >= -1.4 ? Waveform::square : Waveform::triangle;
+    }
+    return Waveform::saw;
+}
+} // namespace
+
+bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth, float& gain)
+{
+    if (d.size() < 32 || std::memcmp (d.data(), "SSLF", 4) != 0 || tagAt (d.data(), 8) != morTag ("0roM") || tagAt (d.data(), 12) != morTag ("0RPM"))
+        return false;
+
+    std::size_t o = 16;
+    std::array<MorphineGenerator, 4> gens {};
+    for (auto& g : gens)
+    {
+        if (o + 4 > d.size())
+            return false;
+        const auto n = (std::size_t) u32At (d.data(), o);
+        if (n > d.size() - o - 4 || ! readGenerator (d, o + 4, o + 4 + n, g))
+            return false;
+        o += 4 + n;
+    }
+    for (int block = 0; block < 2; ++block) // MML0 (linha de morph) e MMD0 (envelopes de modulação)
+    {
+        if (o + 8 > d.size())
+            return false;
+        o += 4 + (std::size_t) u32At (d.data(), o);
+    }
+    if (o + 4 + 40 * 4 > d.size() || u32At (d.data(), o) != 0x5C4)
+        return false;
+    float a[40];
+    std::memcpy (a, d.data() + o + 4, sizeof (a));
+    for (auto& v : a)
+        v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
+
+    // os geradores com som, pelo Mix
+    std::vector<int> active;
+    for (int g = 0; g < 4; ++g)
+        if (gens[(std::size_t) g].weight > 0.0 && std::any_of (gens[(std::size_t) g].energy.begin(), gens[(std::size_t) g].energy.end(), [] (double v) { return v > 0.0; }))
+            active.push_back (g);
+    std::stable_sort (active.begin(), active.end(), [&] (int x, int y) { return gens[(std::size_t) x].mix > gens[(std::size_t) y].mix; });
+
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    const auto transpose = (double) (int) ((a[5] - 0.5f) * 48.0f) + (double) (int) ((a[6] - 0.5f) * 200.0f) / 100.0;
+    for (std::size_t k = 0; k < active.size() && k < 3; ++k)
+    {
+        const auto& g = gens[(std::size_t) active[k]];
+        s.osc[k] = { waveFromSpectrum (g.energy), 0, 0.0f, std::max (0.05f, g.mix) };
+        setPitch (s.osc[k], transpose);
+    }
+    if (active.empty())
+        setPitch (s.osc[0], transpose);
+
+    // envelope mestre (s): A 15·v^3,5, D 30·v³, S v², R 10·v³ (mín. 3 ms)
+    s.attack = (float) (15.0 * std::pow ((double) a[9], 3.5));
+    s.decay = (float) (30.0 * std::pow ((double) a[10], 3.0));
+    s.sustain = a[11] * a[11];
+    s.release = (float) std::max (0.003, 10.0 * std::pow ((double) a[12], 3.0));
+    s.cutoff = 20000.0f;
+    gain = (float) std::pow (10.0, (48.0 * a[0] - 24.0) / 20.0);
+    synth = s;
+    return true;
+}
 } // namespace lynx

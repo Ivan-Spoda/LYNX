@@ -768,6 +768,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
                 adopt();
+            else if (name == "morphine" && synthFromMorphine (c.pluginState, fromPlugin, pluginGain))
+                adopt();
             else if (name == "drumpad")
                 if (const auto patch = drumpadPatchName (c.pluginState))
                 {
@@ -842,7 +844,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
-                         || plugin == "toxic biohazard") && adoptedFromPlugin)
+                         || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];

@@ -87,6 +87,10 @@ bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& sy
 bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
 bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
 
+// Morphine (REA_rodada16 §3): cada gerador aditivo com som vira um oscilador (forma pelo espectro
+// médio, nível pelo Mix); envelope, nível e afinação do bloco mestre.
+bool synthFromMorphine (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+
 // BooBass (REA_rodada10 §5): serra + seno grave, corte pelo Treble.
 bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& synth);
 

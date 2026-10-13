@@ -366,7 +366,8 @@ TEST (plugin_state_decoders_survive_garbage)
         if (auto wave = lynx::waveTravellerSample (blob))
             CHECK (! wave->first.empty() && wave->second >= 0 && wave->second <= 127);
         lynx::synthFromBooBass (blob, synth);
-        if (lynx::synthFromPoiZone (blob, synth, harmlessGain) || lynx::synthFromBassDrum (blob, synth, harmlessGain) || lynx::synthFromToxic (blob, synth, harmlessGain))
+        if (lynx::synthFromPoiZone (blob, synth, harmlessGain) || lynx::synthFromBassDrum (blob, synth, harmlessGain) || lynx::synthFromToxic (blob, synth, harmlessGain)
+            || lynx::synthFromMorphine (blob, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (harmlessGain));
         if (auto patch = lynx::drumpadPatchName (blob))
             CHECK (patch->size() <= 0x30 && std::isfinite (lynx::drumToneForName (*patch).decay));
@@ -866,6 +867,8 @@ TEST (flp_real_files)
                     decoded = lynx::synthFromBassDrum (c.pluginState, gs, g);
                 else if (c.pluginName == "Toxic Biohazard")
                     decoded = lynx::synthFromToxic (c.pluginState, gs, g);
+                else if (c.pluginName == "Morphine")
+                    decoded = lynx::synthFromMorphine (c.pluginState, gs, g);
                 else if (c.pluginName == "BooBass")
                     decoded = lynx::synthFromBooBass (c.pluginState, gs);
                 else if (c.pluginName == "Drumpad" || c.pluginName == "DrumPad")
