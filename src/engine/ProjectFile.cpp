@@ -228,6 +228,10 @@ juce::String toJson (const Song& song)
             synth->setProperty ("osc", oscs);
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance });
+
+            for (auto [name, env] : { std::pair { "filterEnv", &c.synth.filterEnv }, { "pitchEnv", &c.synth.pitchEnv } })
+                if (env->amount != 0.0f)
+                    synth->setProperty (name, juce::Array<juce::var> { env->amount, env->attack, env->hold, env->decay, env->sustain, env->release });
             o->setProperty ("synthSettings", juce::var (synth.release()));
         }
 
@@ -525,6 +529,14 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
                     def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
                 }
+
+                for (auto [name, env, limit] : { std::tuple { "filterEnv", &def.synth.filterEnv, 10.0f }, { "pitchEnv", &def.synth.pitchEnv, 48.0f } })
+                    if (const auto& e = s[name]; e.isArray() && e.size() == 6)
+                    {
+                        auto time = [&] (int i) { return juce::jlimit (0.0f, 20.0f, (float) (double) e[i]); };
+                        *env = { juce::jlimit (-limit, limit, (float) (double) e[0]), time (1), time (2), time (3),
+                                 juce::jlimit (0.0f, 1.0f, (float) (double) e[4]), time (5) };
+                    }
             }
 
             if (const auto& s = c["samplerSettings"]; s.isObject())

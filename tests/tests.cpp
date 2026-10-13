@@ -778,6 +778,51 @@ TEST (flp_import_3x_osc_state_and_channel_filter)
     CHECK (hz >= 19999.0f);
 }
 
+TEST (synth_pitch_and_filter_envelopes)
+{
+    auto render = [] (const lynx::SynthSettings& s, int frames) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c, 120.0);
+        inst->noteOn (45, 1.0f); // A2 = 110 Hz
+        std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
+        inst->render (l.data(), r.data(), frames, 1.0f, 1.0f);
+        return l;
+    };
+    auto crossings = [] (const std::vector<float>& b, int from, int to) {
+        int n = 0;
+        for (int i = from + 1; i < to; ++i)
+            n += (b[(std::size_t) i - 1] < 0.0f) != (b[(std::size_t) i] < 0.0f);
+        return n;
+    };
+
+    // "kick" do 3x Osc: seno com envelope de afinação +24 st caindo rápido
+    lynx::SynthSettings kick;
+    kick.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    kick.cutoff = 20000.0f;
+    kick.pitchEnv = { 24.0f, 0.0f, 0.0f, 0.05f, 0.0f, 0.05f };
+    const auto k = render (kick, 48000);
+    const auto early = crossings (k, 0, 2400);        // 50 ms iniciais: bem acima de 110 Hz
+    const auto late = crossings (k, 24000, 48000);    // depois volta aos 110 Hz (~110 cruzamentos em 0,5 s)
+    CHECK (early > 20); // reta de +24 st em 50 ms: ~2,2x a frequência média (11 cruzamentos sem envelope)
+    CHECK (std::abs (late - 110) < 4);
+
+    // envelope de corte: serra fechada em 200 Hz abre +5 oitavas no ataque e fecha de novo
+    lynx::SynthSettings pluck;
+    pluck.cutoff = 200.0f;
+    pluck.filterEnv = { 5.0f, 0.0f, 0.0f, 0.1f, 0.0f, 0.1f };
+    const auto p = render (pluck, 48000);
+    auto hf = [&] (int from, int to) { // energia da diferença (agudos)
+        double e = 0.0;
+        for (int i = from + 1; i < to; ++i)
+            e += std::pow ((double) p[(std::size_t) i] - p[(std::size_t) i - 1], 2.0);
+        return e;
+    };
+    CHECK (hf (0, 2400) > 4.0 * hf (40000, 42400));
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual

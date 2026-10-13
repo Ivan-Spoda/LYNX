@@ -191,45 +191,52 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synt
     return true;
 }
 
-void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance)
+namespace
+{
+// Corte (Hz) do filtro do canal do FL para Mod X normalizado `x` (REA_rodada4 §3); 20 kHz = aberto.
+double channelFilterHz (int type, double x)
 {
     constexpr double twoPi = 6.283185307179586;
-    const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
-    const auto r = std::clamp (modY / 256.0, 0.0, 1.0);
-    auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // o SVF do synth: k = 1/Q
-    double hz = 20000.0;
-    resonance = 0.0f;
+    x = std::clamp (x, 0.0, 1.0);
 
     switch (type)
     {
-        case 0: // Fast LP: 1 polo + realimentação; aberto com Mod X no máximo e sem ressonância
-        {
-            if (x >= 1.0 && r <= 0.0)
-                break;
-
-            const auto c = std::min ((std::pow (601.0, x) - 1.0) / 600.0, 0.999);
-            hz = x >= 1.0 ? 20000.0 : -44100.0 / twoPi * std::log (1.0 - c);
-            resonance = (float) (r * 0.9); // aproximação: a realimentação cresce com Mod Y
-            break;
-        }
+        case 0:
+            return x >= 1.0 ? 20000.0 : -44100.0 / twoPi * std::log (1.0 - std::min ((std::pow (601.0, x) - 1.0) / 600.0, 0.999));
         case 1:
-        case 5: // biquad LP (LPx2 = o mesmo duas vezes)
-            hz = ((std::pow (51.0, x) - 1.0) * 0.0596 + 0.02) * 44100.0 / twoPi;
-            resonance = fromQ (r <= 0.0 ? 0.1 : (std::pow (51.0, 0.625 * r) - 1.0) * 0.4 + 0.1);
-            break;
+        case 5: return ((std::pow (51.0, x) - 1.0) * 0.0596 + 0.02) * 44100.0 / twoPi;
         case 6:
-        case 7: // SVF de Chamberlin
-        {
-            const auto f = std::min (1.0, (std::pow (26.0, x) - 1.0) * 0.04);
-            hz = 44100.0 / (twoPi / 2.0) * std::asin (f / 2.0);
-            const auto d = r <= 0.0 ? 1.0 : (r < 1.0 ? 1.0 - 0.8 * r : 0.2);
-            resonance = fromQ (1.0 / d);
-            break;
-        }
-        default: break; // BP/HP/BS: o synth só tem passa-baixas, melhor deixar aberto
+        case 7: return 44100.0 / (twoPi / 2.0) * std::asin (std::min (1.0, (std::pow (26.0, x) - 1.0) * 0.04) / 2.0);
+        default: return 20000.0;
     }
+}
+} // namespace
 
-    cutoffHz = (float) std::clamp (hz, 20.0, 20000.0);
+float filterEnvelopeOctaves (int modX, int type, int amount)
+{
+    const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
+    const auto from = std::clamp (channelFilterHz (type, x), 20.0, 20000.0);
+    const auto to = std::clamp (channelFilterHz (type, x + amount / 128.0), 20.0, 20000.0);
+    return (float) std::log2 (to / from);
+}
+
+void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance)
+{
+    const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
+    const auto r = std::clamp (modY / 256.0, 0.0, 1.0);
+    auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // o SVF do synth: k = 1/Q
+    const auto lowPass = type <= 1 || type >= 5;
+    resonance = 0.0f;
+
+    if (type == 0) // Fast LP: 1 polo + realimentação; a realimentação cresce com Mod Y (aproximação)
+        resonance = (float) (r * 0.9);
+    else if (type == 1 || type == 5) // biquad LP (LPx2 = o mesmo duas vezes)
+        resonance = fromQ (r <= 0.0 ? 0.1 : (std::pow (51.0, 0.625 * r) - 1.0) * 0.4 + 0.1);
+    else if (type == 6 || type == 7) // SVF de Chamberlin
+        resonance = fromQ (1.0 / (r <= 0.0 ? 1.0 : (r < 1.0 ? 1.0 - 0.8 * r : 0.2)));
+
+    // BP/HP/BS: o synth só tem passa-baixas, melhor deixar aberto
+    cutoffHz = lowPass ? (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0) : 20000.0f;
 }
 
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
@@ -340,6 +347,30 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             }
 
             synthFilterFromChannel (c.modX, c.modY, c.filterType, def.synth.cutoff, def.synth.resonance);
+
+            // envelopes de corte (registro 2) e de afinação (registro 4) do canal
+            auto modEnvelope = [&] (const flp::Channel::Envelope& env, float amount) {
+                ModEnvelope m;
+                if (! env.present || ! env.enabled || amount == 0.0f)
+                    return m;
+
+                const auto beats = (env.flags & 1) != 0;
+                auto seconds = [&] (int v) {
+                    const auto t = flp::Channel::envelopeTime (v);
+                    return (float) std::clamp (beats ? t * 2.0 * 60.0 / song.bpm : t, 0.0, 20.0);
+                };
+                m.amount = amount;
+                m.attack = seconds (env.attack);
+                m.hold = seconds (env.hold);
+                m.decay = seconds (env.decay);
+                m.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
+                m.release = seconds (env.release);
+                return m;
+            };
+
+            if (c.filterType <= 1 || c.filterType >= 5) // tipos com passa-baixas
+                def.synth.filterEnv = modEnvelope (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].amount));
+            def.synth.pitchEnv = modEnvelope (c.envelopes[4], std::clamp (c.envelopes[4].amount, -2400, 2400) / 100.0f);
         }
 
         // trecho do sample e start offset

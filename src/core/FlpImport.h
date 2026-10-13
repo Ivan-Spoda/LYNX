@@ -41,6 +41,9 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& base
 // do passa-baixas do synth interno (REA_rodada4 §3). Tipos sem passa-baixas ficam abertos.
 void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance);
 
+// Oitavas que o envelope de corte do FL (amount ±128 em unidades de Mod X) desloca a partir do Mod X do canal.
+float filterEnvelopeOctaves (int modX, int type, int amount);
+
 // Efeito interno parecido com um efeito nativo do FL (pelo nome interno do plugin).
 std::optional<EffectKind> effectForFlPlugin (const std::string& name);
 

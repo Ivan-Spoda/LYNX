@@ -413,6 +413,9 @@ Project parseProject (std::span<const std::uint8_t> file)
                         env.decay = readLE<std::int32_t> (e.data, 20);
                         env.sustain = readLE<std::int32_t> (e.data, 24);
                         env.release = readLE<std::int32_t> (e.data, 28);
+
+                        if (e.data.size() >= 36)
+                            env.amount = readLE<std::int32_t> (e.data, 32);
                     }
 
                     ++c.envelopeCount;

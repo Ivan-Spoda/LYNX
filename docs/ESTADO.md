@@ -51,8 +51,11 @@ Atualizado em 2026-10-13.
 - **3x Osc do FL importado (REA rodada 4, `docs/analise/REA_rodada4.md`)**: o estado do plugin (`0xD5`,
   versões 10-14) vira os 3 osciladores (forma, coarse/fine, pan, níveis com a regra de mix do FL);
   envelope de volume do canal vira o ADSR e o filtro do canal (Mod X/Y + tipo, `0xDB`) vira corte/
-  ressonância. Os 152 canais 3x Osc dos demos decodificam. Ainda não: AM do osc 3, inverter fase,
-  SPO/phase rand, filtros BP/HP/BS.
+  ressonância; envelopes de corte e de afinação do canal (registros 2 e 4 do `0xDA`, segmentos retos
+  como a tensão 0 do FL) viram os envelopes de modulação do synth (kicks e plucks feitos no 3x Osc).
+  Os 152 canais 3x Osc dos demos decodificam. Ainda não: AM do osc 3, inverter fase, SPO/phase rand,
+  filtros BP/HP/BS, LFOs do canal.
+- **Filtro do canal no sampler** (corte/ressonância), importado do Mod X/Y do FL.
 - **Render mais leve**: PDC em uma passada, reverb por blocos, limiter O(1), FTZ/DAZ; o export do
   SHINE (110 s, 60 efeitos importados) caiu de 4,4 s para 2,4 s.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".

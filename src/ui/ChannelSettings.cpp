@@ -227,6 +227,33 @@ public:
         knob (cutoff, 20.0, 20000.0, 1.0, " Hz");
         knob (resonance, 0.0, 1.0, 0.01, "");
 
+        const juce::String envTitles[] = { "Env. corte", utf8 ("Env. afinação") };
+        for (int e = 0; e < 2; ++e)
+        {
+            auto& row = envRows[(std::size_t) e];
+            row.title.setText (envTitles[e], juce::dontSendNotification);
+            row.title.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (row.title);
+            knob (row.amount, e == 0 ? -10.0 : -48.0, e == 0 ? 10.0 : 48.0, 0.01, e == 0 ? " oit" : " st");
+            row.amount.setDoubleClickReturnValue (true, 0.0);
+            row.amount.setTooltip (utf8 ("0 = desligado"));
+            for (auto* s : { &row.attack, &row.hold, &row.decay, &row.release })
+            {
+                knob (*s, 0.0, 10.0, 0.001, " s");
+                s->setSkewFactorFromMidPoint (0.5);
+            }
+            knob (row.sustain, 0.0, 1.0, 0.01, "");
+        }
+
+        const char* envNames[] = { "Quantidade", "Ataque", "Hold", "Decaimento", "Sustentação", "Release" };
+        for (int i = 0; i < 6; ++i)
+        {
+            envLabels[(std::size_t) i].setText (utf8 (envNames[i]), juce::dontSendNotification);
+            envLabels[(std::size_t) i].setJustificationType (juce::Justification::centred);
+            envLabels[(std::size_t) i].setFont (juce::FontOptions (11.0f));
+            addAndMakeVisible (envLabels[(std::size_t) i]);
+        }
+
         for (auto* s : { &attack, &decay, &release })
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
@@ -258,7 +285,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (620, 430);
+        setSize (620, 590);
     }
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
@@ -292,8 +319,24 @@ public:
         for (int i = oscKnobs; i < (int) labels.size(); ++i)
             labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
 
+        auto knobsRow = area.removeFromTop (80);
         for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance })
-            s->setBounds (area.removeFromLeft (w).removeFromTop (80));
+            s->setBounds (knobsRow.removeFromLeft (w));
+
+        area.removeFromTop (8);
+        auto envHeader = area.removeFromTop (16);
+        envHeader.removeFromLeft (80);
+        const auto ew = envHeader.getWidth() / 6;
+        for (auto& l : envLabels)
+            l.setBounds (envHeader.removeFromLeft (ew));
+
+        for (auto& row : envRows)
+        {
+            auto line = area.removeFromTop (62);
+            row.title.setBounds (line.removeFromLeft (80).withSizeKeepingCentre (80, 24));
+            for (auto* s : { &row.amount, &row.attack, &row.hold, &row.decay, &row.sustain, &row.release })
+                s->setBounds (line.removeFromLeft (ew));
+        }
     }
 
 private:
@@ -305,6 +348,31 @@ private:
     };
 
     static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
+
+    struct EnvRow
+    {
+        juce::Label title;
+        juce::Slider amount, attack, hold, decay, sustain, release;
+
+        void show (const ModEnvelope& e)
+        {
+            amount.setValue (e.amount, juce::dontSendNotification);
+            attack.setValue (e.attack, juce::dontSendNotification);
+            hold.setValue (e.hold, juce::dontSendNotification);
+            decay.setValue (e.decay, juce::dontSendNotification);
+            sustain.setValue (e.sustain, juce::dontSendNotification);
+            release.setValue (e.release, juce::dontSendNotification);
+        }
+
+        ModEnvelope read() const
+        {
+            return { (float) amount.getValue(), (float) attack.getValue(), (float) hold.getValue(),
+                     (float) decay.getValue(), (float) sustain.getValue(), (float) release.getValue() };
+        }
+    };
+
+    std::array<EnvRow, 2> envRows; // corte, afinação
+    std::array<juce::Label, 6> envLabels;
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
     {
@@ -348,6 +416,8 @@ private:
         release.setValue (s.release, juce::dontSendNotification);
         cutoff.setValue (s.cutoff, juce::dontSendNotification);
         resonance.setValue (s.resonance, juce::dontSendNotification);
+        envRows[0].show (s.filterEnv);
+        envRows[1].show (s.pitchEnv);
         updating = false;
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
@@ -372,6 +442,8 @@ private:
         s.release = (float) release.getValue();
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
+        s.filterEnv = envRows[0].read();
+        s.pitchEnv = envRows[1].read();
 
         if (s == current()->synth)
             return;

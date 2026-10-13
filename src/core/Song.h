@@ -103,6 +103,19 @@ struct SynthOscillator
     bool operator== (const SynthOscillator&) const = default;
 };
 
+// Envelope de modulação (corte ou afinação), como os envelopes do canal no FL.
+struct ModEnvelope
+{
+    float amount = 0.0f;  // filtro: oitavas (±); afinação: semitons (±). 0 = desligado
+    float attack = 0.0f;  // segundos
+    float hold = 0.0f;
+    float decay = 0.3f;
+    float sustain = 0.0f; // 0..1
+    float release = 0.2f;
+
+    bool operator== (const ModEnvelope&) const = default;
+};
+
 struct SynthSettings
 {
     std::array<SynthOscillator, 3> osc { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
@@ -112,6 +125,8 @@ struct SynthSettings
     float release = 0.25f;
     float cutoff = 2500.0f;  // Hz
     float resonance = 0.0f;  // 0..1
+    ModEnvelope filterEnv;   // desloca o corte (oitavas)
+    ModEnvelope pitchEnv;    // desloca a afinação (semitons)
 
     bool operator== (const SynthSettings&) const = default;
 };

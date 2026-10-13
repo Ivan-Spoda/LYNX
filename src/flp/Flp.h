@@ -110,6 +110,7 @@ struct Channel
     {
         bool present = false, enabled = false;
         int flags = 0, delay = 100, attack = 20000, hold = 20000, decay = 30000, sustain = 128, release = 20000;
+        int amount = 0; // alvo: ±128 (corte/ressonância/volume), ±64 (pan), ±2400 centésimos (afinação)
     };
     std::array<Envelope, 5> envelopes {};
     int envelopeCount = 0;
