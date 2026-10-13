@@ -530,6 +530,33 @@ TEST (volume_gate_follows_bar_position)
     CHECK (l3[4000] > 0.99f);
 }
 
+TEST (parallel_container_sums_branches)
+{
+    // dois ramos: seco com ganho 0,5 e um utilitário que inverte a fase (matriz −1) com ganho 0,5 -> silêncio
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::parallel);
+    lynx::EffectBranch dry;
+    dry.gain = 0.5f;
+    lynx::EffectBranch inverted;
+    inverted.gain = 0.5f;
+    auto flip = lynx::makeEffectSlot (lynx::EffectKind::utility);
+    flip.params[2] = flip.params[5] = 0.25f; // (−1 + 2)/4
+    inverted.chain.push_back (flip);
+    slot.branches = { dry, inverted };
+    auto fx = lynx::makeParallelEffect (slot);
+    fx->prepare (48000.0);
+    std::vector<float> l (9000, 0.8f), r (9000, -0.4f);
+    fx->process (l.data(), r.data(), 9000, slot.params, 120.0);
+    CHECK (std::abs (l[100]) < 1e-5f && std::abs (r[8999]) < 1e-5f);
+
+    // só o ramo seco com ganho 2: dobra
+    slot.branches = { lynx::EffectBranch { {}, 2.0f } };
+    auto doubler = lynx::makeParallelEffect (slot);
+    doubler->prepare (48000.0);
+    std::fill (l.begin(), l.end(), 0.25f);
+    doubler->process (l.data(), r.data(), 9000, slot.params, 120.0);
+    CHECK (std::abs (l[5000] - 0.5f) < 1e-6f);
+}
+
 TEST (fl_controller_constant_outputs)
 {
     std::vector<std::int32_t> xy { 2, 32768, 0, 65536, 0, 16384, 0, 65536, 0, 1024, 256 };
@@ -897,7 +924,7 @@ TEST (flp_real_files)
 
     // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
     {
-        int gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, generatorPatchers = 0;
+        int gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
             {
@@ -925,6 +952,8 @@ TEST (flp_real_files)
                                 ++patchers;
                                 if (graph && ! graph->serialChain.empty())
                                     ++serial;
+                                if (graph && ! graph->branches.empty())
+                                    ++parallel;
                             }
                     for (const auto& c : project.channels)
                         if (c.pluginName == "Patcher")
@@ -937,7 +966,8 @@ TEST (flp_real_files)
                 catch (const flp::Error&) {}
             }
         std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos\n", gates, shaped, effectors);
-        std::printf ("  Patcher: %d no mixer (%d em série), %d como instrumento com gerador\n", patchers, serial, generatorPatchers);
+        std::printf ("  Patcher: %d no mixer (%d em série, %d em ramos paralelos simples), %d como instrumento com gerador\n", patchers, serial,
+                     parallel, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);
     }
 

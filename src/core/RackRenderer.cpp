@@ -134,7 +134,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
             if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
-                && previous->song.mixer[t].effects[i].kind == kind
+                && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::parallel // o contêiner é refeito
                 && (kind != EffectKind::plugin
                     || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate)))
             {
@@ -154,7 +154,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             }
             else
             {
-                effect = makeEffect (kind);
+                effect = kind == EffectKind::parallel ? makeParallelEffect (slots[i]) : makeEffect (kind);
                 effect->prepare (sampleRate);
             }
 

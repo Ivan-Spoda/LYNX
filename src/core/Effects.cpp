@@ -1078,6 +1078,119 @@ private:
     double sampleRate = 44100.0, phase = 0.0;
 };
 
+// Contêiner de ramos paralelos (Patcher do FL): cada ramo processa uma cópia da entrada pela sua
+// cadeia de efeitos internos e a saída é a soma dos ramos com os ganhos.
+class ParallelEffect final : public Effect
+{
+public:
+    static constexpr int capacity = 4096; // amostras por pedaço (blocos maiores são divididos)
+
+    explicit ParallelEffect (const EffectSlot& slot)
+    {
+        for (const auto& b : slot.branches)
+        {
+            Branch branch;
+            branch.gain = b.gain;
+            for (const auto& child : b.chain)
+                if (child.kind != EffectKind::plugin && child.kind != EffectKind::parallel)
+                    branch.chain.push_back ({ makeEffect (child.kind), child });
+            branches.push_back (std::move (branch));
+        }
+        for (auto& buffer : scratch)
+            buffer.assign ((std::size_t) capacity, 0.0f);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->prepare (sr);
+    }
+
+    void reset() noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->reset();
+    }
+
+    void setSongPosition (double ticks) noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->setSongPosition (ticks);
+    }
+
+    void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
+    {
+        for (int done = 0; done < n; done += capacity)
+            processPiece (l + done, r + done, std::min (capacity, n - done), bpm);
+    }
+
+private:
+    struct Child
+    {
+        std::unique_ptr<Effect> effect;
+        EffectSlot slot;
+    };
+    struct Branch
+    {
+        std::vector<Child> chain;
+        float gain = 1.0f;
+    };
+
+    void processPiece (float* l, float* r, int n, double bpm) noexcept
+    {
+        auto* inL = scratch[0].data();
+        auto* inR = scratch[1].data();
+        auto* sumL = scratch[2].data();
+        auto* sumR = scratch[3].data();
+        auto* wL = scratch[4].data();
+        auto* wR = scratch[5].data();
+        auto* dryL = scratch[6].data();
+        auto* dryR = scratch[7].data();
+        std::copy (l, l + n, inL);
+        std::copy (r, r + n, inR);
+        std::fill (sumL, sumL + n, 0.0f);
+        std::fill (sumR, sumR + n, 0.0f);
+
+        for (auto& b : branches)
+        {
+            std::copy (inL, inL + n, wL);
+            std::copy (inR, inR + n, wR);
+            for (auto& c : b.chain)
+            {
+                if (! c.slot.enabled || c.slot.mix <= 0.0f)
+                    continue;
+                const auto partial = c.slot.mix < 0.999f;
+                if (partial)
+                {
+                    std::copy (wL, wL + n, dryL);
+                    std::copy (wR, wR + n, dryR);
+                }
+                c.effect->process (wL, wR, n, c.slot.params, bpm);
+                if (partial)
+                    for (int i = 0; i < n; ++i)
+                    {
+                        wL[i] = dryL[i] + (wL[i] - dryL[i]) * c.slot.mix;
+                        wR[i] = dryR[i] + (wR[i] - dryR[i]) * c.slot.mix;
+                    }
+            }
+            for (int i = 0; i < n; ++i)
+            {
+                sumL[i] += wL[i] * b.gain;
+                sumR[i] += wR[i] * b.gain;
+            }
+        }
+
+        std::copy (sumL, sumL + n, l);
+        std::copy (sumR, sumR + n, r);
+    }
+
+    std::vector<Branch> branches;
+    std::array<std::vector<float>, 8> scratch;
+};
+
 // Peak Controller: o som passa direto; um seguidor de pico (ataque imediato, queda pelo "decay")
 // vira as saídas de controle: 0 = base + quantidade·pico (com tensão), 1 = base, 2 = igual à 0.
 class PeakController final : public Effect
@@ -1206,6 +1319,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     }();
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
     static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
+    static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.85f }, { "Tensão", 0.5f }, { "Decaimento", 0.48f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
@@ -1254,6 +1368,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::peakController: return peakController;
         case EffectKind::pitchShift: return pitchShift;
         case EffectKind::freqShift: return freqShift;
+        case EffectKind::parallel: return parallelInfo;
     }
     return eq;
 }
@@ -1417,6 +1532,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
 
         case EffectKind::plugin:
+        case EffectKind::parallel:
             break;
     }
 
@@ -1433,6 +1549,11 @@ EffectSlot makeEffectSlot (EffectKind kind)
         slot.params[i] = info.params[i].defaultValue;
 
     return slot;
+}
+
+std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)
+{
+    return std::make_unique<ParallelEffect> (slot);
 }
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind)
@@ -1453,6 +1574,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::peakController: return std::make_unique<PeakController>();
         case EffectKind::pitchShift: return std::make_unique<PitchShift>();
         case EffectKind::freqShift: return std::make_unique<FreqShift>();
+        case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // vazio: use makeParallelEffect
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

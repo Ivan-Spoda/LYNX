@@ -93,7 +93,8 @@ Atualizado em 2026-10-13.
   (Mod X/Y) ainda ficam de fora; o canal controlador ainda não tem editor próprio.
 - **Patcher**: o grafo do estado é lido; uma cadeia simples em série vira slots seguidos no mixer e um
   Patcher usado como instrumento toca o gerador principal de dentro (ex.: Harmor dentro do Patcher).
-  Patchers em paralelo (M/S, multibanda) ainda ficam de fora.
+  Patchers com ramos paralelos simples viram o contêiner "Patcher (paralelo)" (cada ramo uma cadeia de
+  efeitos internos, somados com o ganho dos cabos). Os de M/S e multibanda (saídas extras) ainda ficam de fora.
 - **Efeitos novos**: pitch shift e frequency shifter. Da rodada 15: Pitch Shifter e Frequency Shifter do FL
   viram esses efeitos; Emphasis vira limiter (ganho de entrada + teto); Low Lifter vira EQ paramétrico
   (corta-graves + prateleira); Send/Transporter viram ganho; Squeeze vira distorção leve; Vintage Phaser,

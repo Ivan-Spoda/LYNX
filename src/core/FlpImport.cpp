@@ -915,6 +915,32 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             // Patcher com uma cadeia simples em série: os plugins de dentro viram slots seguidos
             std::vector<flp::MixerInsert::Slot> expanded { original };
+            // Patcher em ramos paralelos simples: um contêiner com as cadeias de cada ramo
+            if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
+                if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && ! graph->branches.empty())
+                {
+                    auto container = makeEffectSlot (EffectKind::parallel);
+                    for (const auto& b : graph->branches)
+                    {
+                        EffectBranch branch;
+                        branch.gain = std::clamp (b.gain, 0.0f, 4.0f);
+                        for (const auto n : b.nodes)
+                        {
+                            const auto& node = graph->nodes[(std::size_t) n];
+                            if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
+                                branch.chain.push_back (std::move (*fx));
+                            else if (options.report != nullptr)
+                                ++options.report->droppedEffects[node.plugin + " (no Patcher)"];
+                        }
+                        container.branches.push_back (std::move (branch));
+                    }
+                    effectSlotMap.insert ({ { insert.index, original.index }, { (int) track.effects.size(), original.plugin } });
+                    track.effects.push_back (std::move (container));
+                    if (options.report != nullptr)
+                        ++options.report->converted["Patcher (paralelo)"];
+                    continue;
+                }
+
             if (lowercase (original.plugin) == "patcher")
                 if (const auto graph = parsePatcher (original.state); graph && ! graph->serialChain.empty())
                 {

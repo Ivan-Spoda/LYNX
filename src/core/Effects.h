@@ -82,4 +82,6 @@ public:
 };
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind);
+// Contêiner `parallel` com os efeitos dos ramos do slot.
+std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot);
 } // namespace lynx

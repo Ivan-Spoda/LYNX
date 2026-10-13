@@ -894,6 +894,27 @@ void EffectsPanel::paint (juce::Graphics& g)
         return;
     }
 
+    if (slot.kind == EffectKind::parallel) // contêiner: lista os ramos
+    {
+        auto y = knobBounds (0).getY() - 28;
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (14.0f));
+        g.drawText (utf8 (effectInfo (slot.kind).name), 10, y, getWidth() - 20, 20, juce::Justification::centredLeft);
+        g.setFont (juce::FontOptions (12.0f));
+        for (std::size_t b = 0; b < slot.branches.size(); ++b)
+        {
+            y += 22;
+            juce::String line = "Ramo " + juce::String ((int) b + 1) + juce::String::formatted (" (x%.2f): ", slot.branches[b].gain);
+            if (slot.branches[b].chain.empty())
+                line += "seco";
+            for (std::size_t c = 0; c < slot.branches[b].chain.size(); ++c)
+                line += (c > 0 ? " -> " : "") + utf8 (effectInfo (slot.branches[b].chain[c].kind).name);
+            g.setColour (theme::text.withAlpha (0.8f));
+            g.drawText (line, 14, y, getWidth() - 28, 20, juce::Justification::centredLeft, true);
+        }
+        return;
+    }
+
     const auto& info = effectInfo (slot.kind);
     const auto gate = slot.kind == EffectKind::volumeGate;
     g.setColour (theme::text);

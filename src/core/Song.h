@@ -234,12 +234,23 @@ enum class EffectKind : std::uint8_t
     volumeGate,   // ganho por passo sincronizado ao compasso (o volume do Gross Beat)
     peakController, // não muda o som: mede o pico e serve de fonte para automações ao vivo (Peak Controller do FL)
     pitchShift,   // muda a afinação sem mudar a duração (duas cabeças de leitura em crossfade)
-    freqShift     // desloca todas as frequências em Hz (banda lateral única, sem preservar harmonia)
+    freqShift,    // desloca todas as frequências em Hz (banda lateral única, sem preservar harmonia)
+    parallel      // contêiner: ramos de efeitos em paralelo somados (o Patcher do FL); ver EffectSlot::branches
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte
 constexpr int maxEffectSlots = 10; // como no FL
 using EffectParams = std::array<float, maxEffectParams>;
+
+struct EffectSlot;
+
+// Um ramo do contêiner `parallel`: uma cadeia de efeitos internos e o ganho com que entra na soma
+// (cadeia vazia = o sinal seco).
+struct EffectBranch
+{
+    std::vector<EffectSlot> chain;
+    float gain = 1.0f;
+};
 
 struct EffectSlot
 {
@@ -248,6 +259,7 @@ struct EffectSlot
     EffectParams params {}; // 0..1; o significado depende do efeito
     float mix = 1.0f;       // dry/wet do slot (como no FL): 0 = só o sinal seco
     PluginRef plugin;                             // usado quando kind == plugin
+    std::vector<EffectBranch> branches;           // usado quando kind == parallel
 };
 
 // Envio de uma trilha para outra (pós-fader), como o roteamento entre inserts do FL.

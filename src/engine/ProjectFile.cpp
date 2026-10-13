@@ -101,6 +101,7 @@ const char* effectId (EffectKind k)
         case EffectKind::peakController: return "peakController";
         case EffectKind::pitchShift: return "pitchShift";
         case EffectKind::freqShift: return "freqShift";
+        case EffectKind::parallel: return "parallel";
     }
     return "eq";
 }
@@ -123,10 +124,80 @@ PluginRef pluginFromVar (const juce::var& v)
     return p;
 }
 
+std::optional<EffectKind> effectFromId (const juce::String& id);
+
+juce::var effectToVar (const EffectSlot& slot)
+{
+    auto e = std::make_unique<juce::DynamicObject>();
+    e->setProperty ("kind", effectId (slot.kind));
+    e->setProperty ("on", slot.enabled);
+    juce::Array<juce::var> params;
+    const auto used = slot.kind == EffectKind::plugin ? 0 : effectInfo (slot.kind).params.size();
+    for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
+        params.add (juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
+    e->setProperty ("params", params);
+
+    if (slot.mix < 1.0f)
+        e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
+
+    if (slot.kind == EffectKind::plugin)
+        e->setProperty ("plugin", pluginToVar (slot.plugin));
+
+    if (slot.kind == EffectKind::parallel) // ramos do contêiner, cada um com a sua cadeia
+    {
+        juce::Array<juce::var> branches;
+        for (const auto& b : slot.branches)
+        {
+            auto o = std::make_unique<juce::DynamicObject>();
+            o->setProperty ("gain", b.gain);
+            juce::Array<juce::var> chain;
+            for (const auto& child : b.chain)
+                chain.add (effectToVar (child));
+            o->setProperty ("chain", chain);
+            branches.add (juce::var (o.release()));
+        }
+        e->setProperty ("branches", branches);
+    }
+    return juce::var (e.release());
+}
+
+std::optional<EffectSlot> effectFromVar (const juce::var& e)
+{
+    const auto kind = effectFromId (e["kind"].toString());
+    if (! kind)
+        return std::nullopt;
+
+    // parte dos padrões do efeito: parâmetros que não estão no arquivo (efeito ganhou parâmetro
+    // depois) ficam no padrão em vez de 0
+    auto slot = *kind == EffectKind::plugin ? EffectSlot {} : makeEffectSlot (*kind);
+    slot.kind = *kind;
+    slot.enabled = (bool) e.getProperty ("on", true);
+    slot.mix = juce::jlimit (0.0f, 1.0f, (float) (double) e.getProperty ("mix", 1.0));
+
+    if (auto* params = e["params"].getArray())
+        for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
+            slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
+
+    slot.plugin = pluginFromVar (e["plugin"]);
+
+    if (auto* branches = e["branches"].getArray())
+        for (const auto& b : *branches)
+        {
+            EffectBranch branch;
+            branch.gain = juce::jlimit (0.0f, 4.0f, (float) (double) b.getProperty ("gain", 1.0));
+            if (auto* chain = b["chain"].getArray())
+                for (const auto& child : *chain)
+                    if (auto c = effectFromVar (child); c && c->kind != EffectKind::parallel)
+                        branch.chain.push_back (std::move (*c));
+            slot.branches.push_back (std::move (branch));
+        }
+    return slot;
+}
+
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel })
         if (id == effectId (k))
             return k;
 
@@ -514,23 +585,7 @@ juce::String toJson (const Song& song)
         juce::Array<juce::var> effects;
 
         for (const auto& slot : t.effects)
-        {
-            auto e = std::make_unique<juce::DynamicObject>();
-            e->setProperty ("kind", effectId (slot.kind));
-            e->setProperty ("on", slot.enabled);
-            juce::Array<juce::var> params;
-            const auto used = slot.kind == EffectKind::plugin ? 0 : effectInfo (slot.kind).params.size();
-            for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
-                params.add (juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
-            e->setProperty ("params", params);
-
-            if (slot.mix < 1.0f)
-                e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
-
-            if (slot.kind == EffectKind::plugin)
-                e->setProperty ("plugin", pluginToVar (slot.plugin));
-            effects.add (juce::var (e.release()));
-        }
+            effects.add (effectToVar (slot));
 
         if (! effects.isEmpty())
             o->setProperty ("effects", effects);
@@ -880,24 +935,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             if (auto* effects = t["effects"].getArray())
                 for (const auto& e : *effects)
                 {
-                    const auto kind = effectFromId (e["kind"].toString());
-
-                    if (! kind || (int) track.effects.size() >= maxEffectSlots)
+                    if ((int) track.effects.size() >= maxEffectSlots)
                         continue;
-
-                    // parte dos padrões do efeito: parâmetros que não estão no arquivo (efeito ganhou
-                    // parâmetro depois) ficam no padrão em vez de 0
-                    auto slot = *kind == EffectKind::plugin ? EffectSlot {} : makeEffectSlot (*kind);
-                    slot.kind = *kind;
-                    slot.enabled = (bool) e.getProperty ("on", true);
-                    slot.mix = juce::jlimit (0.0f, 1.0f, (float) (double) e.getProperty ("mix", 1.0));
-
-                    if (auto* params = e["params"].getArray())
-                        for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
-                            slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
-
-                    slot.plugin = pluginFromVar (e["plugin"]);
-                    track.effects.push_back (slot);
+                    if (auto slot = effectFromVar (e))
+                        track.effects.push_back (std::move (*slot));
                 }
 
             song.mixer.push_back (std::move (track));

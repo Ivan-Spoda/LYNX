@@ -1,5 +1,6 @@
 #include "core/FlPatcher.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -173,6 +174,65 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
         }
         if (simple && cursor == -2 && audioEdges == (int) chain.size() + 1)
             graph.serialChain = std::move (chain);
+    }
+
+    // ramos em paralelo: de IN, cada saída segue uma cadeia de nós com 1 entrada e 1 saída até OUT
+    if (hasInput && hasOutput)
+    {
+        struct Edge
+        {
+            int from, to;
+            float gain;
+        };
+        std::vector<Edge> edges;
+        bool ok = true;
+        for (const auto& c : connections)
+        {
+            if (c.kind != 0)
+                continue;
+            const auto src = ports.find (c.source), dst = ports.find (c.destination);
+            if (src == ports.end() || dst == ports.end())
+                continue;
+            if (src->second.bus != 0 || dst->second.bus != 0)
+                ok = false; // M/S, bandas, sidechain: fora
+            const auto from = src->second.node >= 0 ? src->second.node : (c.source == inputPin ? -1 : -3);
+            const auto to = dst->second.node >= 0 ? dst->second.node : (c.destination == outputPin ? -2 : -3);
+            if (from == -3 || to == -3)
+                ok = false;
+            edges.push_back ({ from, to, std::isfinite (c.gain) ? c.gain : 1.0f });
+        }
+
+        auto countFrom = [&] (int n) { return (int) std::count_if (edges.begin(), edges.end(), [n] (const Edge& e) { return e.from == n; }); };
+        auto countTo = [&] (int n) { return (int) std::count_if (edges.begin(), edges.end(), [n] (const Edge& e) { return e.to == n; }); };
+        std::size_t used = 0;
+        for (const auto& start : edges)
+        {
+            if (! ok || start.from != -1)
+                continue;
+            PatcherGraph::Branch branch;
+            branch.gain = start.gain;
+            auto cursor = start.to;
+            ++used;
+            while (ok && cursor >= 0)
+            {
+                if (graph.nodes[(std::size_t) cursor].generator || countTo (cursor) != 1 || countFrom (cursor) != 1
+                    || branch.nodes.size() > graph.nodes.size())
+                {
+                    ok = false;
+                    break;
+                }
+                branch.nodes.push_back (cursor);
+                const auto next = std::find_if (edges.begin(), edges.end(), [cursor] (const Edge& e) { return e.from == cursor; });
+                branch.gain *= next->gain;
+                cursor = next->to;
+                ++used;
+            }
+            if (cursor != -2)
+                ok = false;
+            graph.branches.push_back (std::move (branch));
+        }
+        if (! ok || used != edges.size() || graph.branches.size() < 2)
+            graph.branches.clear();
     }
 
     return graph;

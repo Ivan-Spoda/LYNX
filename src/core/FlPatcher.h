@@ -22,6 +22,15 @@ struct PatcherGraph
 {
     std::vector<PatcherNode> nodes;
     std::vector<int> serialChain; // nós da entrada à saída, se o áudio for uma cadeia simples
+
+    // Ramos em paralelo da entrada à saída (todos no barramento 0, cada um uma cadeia simples; ramo
+    // vazio = sinal seco), com o ganho dos cabos multiplicado. Vazio se o grafo for outro.
+    struct Branch
+    {
+        std::vector<int> nodes;
+        float gain = 1.0f;
+    };
+    std::vector<Branch> branches;
     int mainGenerator = -1;       // gerador ligado à saída com mais ganho
 };
 
