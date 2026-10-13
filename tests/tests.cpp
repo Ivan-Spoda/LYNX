@@ -414,6 +414,35 @@ TEST (inflate_zlib)
     CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
 }
 
+TEST (fl_round15_effects_convert_known_values)
+{
+    auto blob = [] (std::vector<std::int32_t> words) {
+        std::vector<std::uint8_t> b (words.size() * 4);
+        std::memcpy (b.data(), words.data(), b.size());
+        return b;
+    };
+    // Frequency Shifter "+800 Hz": frequência 51542 na faixa de 20 kHz, 100% úmido
+    const auto fs = lynx::effectFromFl ("Frequency Shifter", blob ({ 4, 10000, 0, 51542, 0, 10000, 10000, 5000, 10000, 0, 5000, 0, 0 }));
+    CHECK (fs && fs->kind == lynx::EffectKind::freqShift);
+    if (fs)
+    {
+        const auto x = (fs->params[0] - 0.5) * 2.0;
+        CHECK (std::abs (2000.0 * x * std::abs (x) - 800.0) < 10.0);
+        CHECK (std::abs (fs->params[1] - 1.0f) < 1e-4f);
+    }
+    // Emphasis: entrada 0,0625 (= +1,5 dB) e teto 0,9308 (≈ −1,6 dB) -> limiter
+    const auto em = lynx::effectFromFl ("Emphasis", blob ({ 8, 0, 0, 2, 1, 0, 0, 625, 10000, 10000, 9308, 0, 2, 7, 0 }));
+    CHECK (em && em->kind == lynx::EffectKind::limiter && em->enabled);
+    if (em)
+    {
+        CHECK (std::abs (em->params[1] * 24.0f - 1.5f) < 0.05f);
+        CHECK (std::abs (em->params[0] * 12.0f - 12.0f + 1.6f) < 0.1f);
+    }
+    // Pitch Shifter +12 st, mix 100%
+    const auto ps = lynx::effectFromFl ("Pitch Shifter", blob ({ 7, 1200, 0, 0, 2400, 8500, 200, 0, 0, 768, 0, 0, 65536, 0, 65536, 0, 0, 0, 0 }));
+    CHECK (ps && ps->kind == lynx::EffectKind::pitchShift && std::abs (ps->params[0] - (0.5f + 12.0f / 48.0f)) < 1e-4f);
+}
+
 TEST (frequency_shifter_moves_spectrum_by_hz)
 {
     auto fx = lynx::makeEffect (lynx::EffectKind::freqShift);

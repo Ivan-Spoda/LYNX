@@ -91,7 +91,10 @@ Atualizado em 2026-10-13.
 - **Patcher**: o grafo do estado é lido; uma cadeia simples em série vira slots seguidos no mixer e um
   Patcher usado como instrumento toca o gerador principal de dentro (ex.: Harmor dentro do Patcher).
   Patchers em paralelo (M/S, multibanda) ainda ficam de fora.
-- **Efeitos novos**: pitch shift e frequency shifter (base para o Pitch Shifter / Frequency Shifter do FL).
+- **Efeitos novos**: pitch shift e frequency shifter. Da rodada 15: Pitch Shifter e Frequency Shifter do FL
+  viram esses efeitos; Emphasis vira limiter (ganho de entrada + teto); Low Lifter vira EQ paramétrico
+  (corta-graves + prateleira); Send/Transporter viram ganho; Squeeze vira distorção leve; Vintage Phaser,
+  chorus.
 - **Sytrus (REA rodada 11)**: estado zlib (inflate próprio no núcleo) com a matriz FM/RM, 10 unidades e
   articuladores; as 3 portadoras mais fortes viram os osciladores, FM forte vira onda mais rica +
   envelope de filtro, RM vira AM, o primeiro filtro ativo (com o envelope de cutoff) vira o filtro.
@@ -165,5 +168,5 @@ Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`
 que o tempo real. Harmor (100 canais) entra como aproximação grosseira (partes A/B como serras, filtro,
 envelopes, uníssono). Sem equivalente ainda (tocam com preset do synth pelo nome): FLEX (57; pelo nome do preset),
 Morphine, PoiZone, Toxic Biohazard, BassDrum (BooBass e Drumpad já entram aproximados). Efeitos sem equivalente mais comuns: Pitcher,
-Patcher (contêiner; formato na rodada 14), Pitch Shifter, Vocodex. Também em aberto: ASIO (licença do SDK
+Pitcher (correção de afinação), Patcher em paralelo, Vocodex. Também em aberto: ASIO (licença do SDK
 da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.

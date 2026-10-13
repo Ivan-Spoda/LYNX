@@ -95,6 +95,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Gross Beat (gate de volume), Frequency Splitter, Effector (rodada 14)
 - [x] Links do Peak Controller (automação ao vivo)
 - [x] Patcher: cadeia em série vira slots seguidos; Patcher instrumento usa o gerador de dentro
+- [x] Pitch Shifter, Frequency Shifter, Emphasis, Low Lifter, Send, Transporter, Squeeze (rodada 15)
 - [ ] Patcher em paralelo (submix / M-S / multibanda), Envelope/X-Y Controller
 - [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
 - [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)

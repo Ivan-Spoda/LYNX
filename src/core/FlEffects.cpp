@@ -627,6 +627,112 @@ bool peakController (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
+// --- REA_rodada15: Pitch Shifter, Frequency Shifter, Emphasis, Low Lifter, Send, Transporter -----
+
+bool pitchShifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 13 * 4)
+        return false;
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+    const auto cents = std::clamp (param (0), -1200, 1200);
+    const auto semis = (int) std::lround (cents / 100.0);
+    slot.params[0] = clamp01 (0.5 + semis / 48.0);
+    slot.params[1] = clamp01 (0.5 + (cents - semis * 100) / 200.0);
+    slot.params[2] = clamp01 (std::clamp (param (3), 0, 2400) / 2400.0);
+    const auto granular = d.size() >= 65 && i32At (d, 61) == 1;
+    const auto grainMs = granular ? 20.0 + 130.0 * (std::clamp (param (4), 2000, 15000) - 2000) / 13000.0 : 60.0;
+    slot.params[3] = clamp01 ((grainMs - 20.0) / 100.0);
+    return true;
+}
+
+bool frequencyShifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 10 * 4)
+        return false;
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+    const auto s = std::clamp (param (2), -70000, 70000) / 70000.0;
+    const auto k = param (8) == 0 ? 17.6096 : 10.9658; // faixa 20 kHz / 200 Hz (a "Tempo" fica como 200 Hz)
+    const auto hz = s == 0.0 ? 0.0 : (s < 0.0 ? -1.0 : 1.0) * 0.1 * std::pow (2.0, k * std::abs (s));
+    // a nossa escala: 2000·x·|x| Hz
+    const auto x = std::clamp ((hz < 0.0 ? -1.0 : 1.0) * std::sqrt (std::min (1.0, std::abs (hz) / 2000.0)), -1.0, 1.0);
+    slot.params[0] = clamp01 (0.5 + x / 2.0);
+    slot.params[1] = clamp01 (std::clamp (param (0), 0, 10000) / 10000.0);
+    slot.params[2] = 0.0f;
+    return true;
+}
+
+bool emphasis (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 13 * 4)
+        return false;
+    auto x = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), 0, 10000) / 10000.0; };
+    const auto ceilingDb = toDb (curve (11.0, x (9)));
+    slot.params[0] = clamp01 ((std::min (ceilingDb, 0.0) + 12.0) / 12.0);
+    slot.params[1] = clamp01 (x (6)); // ganho de entrada 24x dB = a nossa escala de 0..24 dB
+    slot.enabled = i32At (d, 4) == 0;
+    return true;
+}
+
+bool lowLifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 15 * 4)
+        return false;
+    auto x = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), 0, 10000) / 10000.0; };
+    auto hz = [] (double v) { return 20.0 + 100.0 * v * v; };
+    const auto mix = x (1);
+    const auto lowDb = std::clamp ((x (2) - 0.5) * 24.0, -18.0, 12.0);
+    const auto highDb = std::clamp (100.0 * std::log10 (std::max (1e-3, x (9))), -18.0, 0.0);
+    const auto boost = 0.25 * 18.0 * x (6) * mix; // os harmônicos soam como alguns dB a mais de grave [HIP]
+
+    for (int b = 0; b < peq::bands; ++b)
+        slot.params[(std::size_t) peq::param (b, 0)] = peq::typeValue (peq::BandType::off);
+    if (hz (x (11)) > 21.0)
+    {
+        slot.params[(std::size_t) peq::param (0, 0)] = peq::typeValue (peq::BandType::lowCut);
+        slot.params[(std::size_t) peq::param (0, 1)] = peq::hzValue (hz (x (11)));
+        slot.params[(std::size_t) peq::param (0, 3)] = peq::qValue (0.707);
+    }
+    slot.params[(std::size_t) peq::param (1, 0)] = peq::typeValue (peq::BandType::lowShelf);
+    slot.params[(std::size_t) peq::param (1, 1)] = peq::hzValue (hz (x (10)));
+    slot.params[(std::size_t) peq::param (1, 2)] = peq::gainValue (std::clamp ((lowDb - highDb) * mix + boost, -18.0, 18.0));
+    slot.params[(std::size_t) peq::param (1, 3)] = peq::qValue (1.0);
+    slot.params[peq::outputParam] = peq::gainValue (highDb * mix);
+    slot.enabled = i32At (d, 4) != 0;
+    return true;
+}
+
+bool fruitySend (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 12)
+        return false;
+    slot.params[0] = utilityGainValue (std::clamp (i32At (d, 8), 0, 256) / 256.0); // o que segue na trilha
+    slot.params[1] = 0.5f;
+    return true;
+}
+
+// Squeeze: quantização (poucos bits) + filtro; aproximado por distorção leve, com o mix dele
+bool squeeze (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 12 * 4)
+        return false;
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+    const auto levels = std::pow (32768.0, 1.0 - std::clamp (param (2), 1, 32768) / 32768.0);
+    slot.params[0] = clamp01 (0.6 * (1.0 - std::log2 (std::max (2.0, levels)) / 15.0)); // menos níveis, mais "sujeira"
+    slot.params[1] = param (3) != 0 ? clamp01 (std::clamp (param (6), 0, 65536) / 65536.0) : 0.8f;
+    slot.params[2] = 1.0f;
+    slot.params[3] = 0.5f;
+    slot.mix = clamp01 (std::clamp (param (1), 0, 128) / 128.0);
+    return true;
+}
+
+bool transporter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 8)
+        return false;
+    slot.params[0] = utilityGainValue (curve (11.0, std::clamp (i32At (d, 4), 0, 16000) / 12800.0)); // dry level
+    return true;
+}
+
 // Effector: o algoritmo escolhido vira o efeito interno parecido (escalas de X/Y aproximadas)
 std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
 {
@@ -753,6 +859,20 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         grossBeat (state, slot);
     else if (is ("Fruity Peak Controller"))
         peakController (state, slot);
+    else if (is ("Pitch Shifter"))
+        pitchShifter (state, slot);
+    else if (is ("Frequency Shifter"))
+        frequencyShifter (state, slot);
+    else if (is ("Emphasis"))
+        emphasis (state, slot);
+    else if (is ("Low Lifter"))
+        lowLifter (state, slot);
+    else if (is ("Fruity Send"))
+        fruitySend (state, slot);
+    else if (is ("Transporter"))
+        transporter (state, slot);
+    else if (is ("Fruity Squeeze"))
+        squeeze (state, slot);
     else if (is ("Frequency Splitter"))
         frequencySplitter (state, slot);
     else if (is ("Fruity Phase Inverter"))
