@@ -760,12 +760,7 @@ void MainComponent::openFile (const juce::File& file)
         if (auto* window = getTopLevelComponent())
             window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
 
-        if (const auto& missing = engine.getMissingPlugins(); ! missing.isEmpty())
-            juce::AlertWindow::showMessageBoxAsync (
-                juce::MessageBoxIconType::InfoIcon, utf8 ("Plugins não encontrados"),
-                utf8 ("Estes plugins do projeto não estão entre os escaneados (Plugins > Procurar plugins). "
-                      "Os canais tocam com o synth interno e os efeitos ficaram de fora:\n\n")
-                    + missing.joinIntoString ("\n"));
+        showImportReport();
         return;
     }
 
@@ -967,6 +962,39 @@ void MainComponent::showHelp()
     options.resizable = true;
     options.escapeKeyTriggersCloseButton = true;
     options.launchAsync();
+}
+
+void MainComponent::showImportReport()
+{
+    // resumo do que o .flp tinha e o LYNX não reproduz igual (só quando há algo a dizer)
+    const auto& r = engine.getImportReport();
+    const auto& missing = engine.getMissingPlugins();
+    auto list = [] (const std::map<std::string, int>& items) {
+        std::vector<std::pair<int, std::string>> sorted;
+        for (const auto& [name, count] : items)
+            sorted.push_back ({ count, name });
+        std::sort (sorted.rbegin(), sorted.rend());
+        juce::StringArray lines;
+        for (const auto& [count, name] : sorted)
+            lines.add ("  " + juce::String::fromUTF8 (name.c_str()) + (count > 1 ? " (" + juce::String (count) + ")" : juce::String()));
+        return lines.joinIntoString ("\n");
+    };
+
+    juce::String text;
+
+    if (! r.approximated.empty())
+        text << utf8 ("Aproximados pelo synth interno:\n") << list (r.approximated) << "\n\n";
+    if (! r.unsupported.empty())
+        text << utf8 ("Sem equivalente (tocam com um preset do synth):\n") << list (r.unsupported) << "\n\n";
+    if (! missing.isEmpty())
+        text << utf8 ("Plugins não encontrados (Plugins > Procurar plugins):\n  ") << missing.joinIntoString ("\n  ") << "\n\n";
+    if (! r.droppedEffects.empty())
+        text << utf8 ("Efeitos sem equivalente (ficaram de fora):\n") << list (r.droppedEffects) << "\n\n";
+    if (r.missingSamples > 0)
+        text << utf8 ("Samples que não estão nesta máquina: ") << r.missingSamples << "\n";
+
+    if (text.isNotEmpty())
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Importação do FL Studio"), text.trimEnd());
 }
 
 void MainComponent::showAudioSettings()

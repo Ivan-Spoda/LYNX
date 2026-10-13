@@ -20,6 +20,17 @@ struct FlPathRoots
 
 std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots);
 
+// O que o import fez com cada coisa do FL que não é "nota e sample": para o usuário saber por que
+// algo soa diferente.
+struct FlpImportReport
+{
+    std::map<std::string, int> converted;    // geradores convertidos de verdade (3x Osc, FPC, DirectWave...)
+    std::map<std::string, int> approximated; // aproximados pelo synth interno (Harmless, DX10...)
+    std::map<std::string, int> unsupported;  // sem equivalente: tocam com um preset do synth pelo nome
+    std::map<std::string, int> droppedEffects; // efeitos sem equivalente (saem do mixer)
+    int missingSamples = 0;
+};
+
 struct FlpImportOptions
 {
     FlPathRoots roots;
@@ -30,6 +41,8 @@ struct FlpImportOptions
     std::function<std::vector<std::uint8_t> (const std::string& path)> readFile;
     std::function<std::int64_t (const std::string& path)> sampleFrames;
     std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
+
+    FlpImportReport* report = nullptr; // opcional
 };
 
 // Converte um projeto do FL Studio para o nosso modelo. Canais sampler cujo

@@ -83,6 +83,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Vintage Chorus", EffectKind::chorus },      { "Fruity Flanger", EffectKind::chorus },
         { "Fruity Balance", EffectKind::utility },    { "Fruity PanOMatic", EffectKind::utility },  { "Fruity Stereo Shaper", EffectKind::utility },
         { "Fruity Center", EffectKind::utility },     { "Fruity Phase Inverter", EffectKind::utility },
+        { "Fruity Stereo Enhancer", EffectKind::utility }, { "Fruity Convolver", EffectKind::reverb }, { "EQUO", EffectKind::parametricEq },
         { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
     };
@@ -702,6 +703,24 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
             def.sampler.keepPitch = c.stretchMode != 0; // só o "Resample" do FL muda a altura
         }
+        // relatório: o que aconteceu com o gerador/sample deste canal
+        if (options.report != nullptr)
+        {
+            auto& r = *options.report;
+            const auto plugin = lowercase (c.pluginName);
+
+            if (plugin.empty())
+                r.missingSamples += ! c.samplePath.empty() && def.samplePath.empty() ? 1 : 0;
+            else if (plugin == "3x osc" || ((plugin == "directwave" || plugin == "fl keys") && ! def.zones.empty())
+                     || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
+                     || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
+                ++r.converted[c.pluginName];
+            else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick")
+                ++r.approximated[c.pluginName];
+            else if (plugin != "fruity wrapper" && def.instrument == InstrumentKind::synth)
+                ++r.unsupported[c.pluginName];
+        }
+
         song.channels.push_back (std::move (def));
     }
 
@@ -783,7 +802,11 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 made = effectFromFl (slot.plugin, slot.state, song.bpm); // efeito nativo com os ajustes salvos (REA_rodada7)
 
             if (! made)
+            {
+                if (options.report != nullptr && slot.plugin != "Fruity Wrapper")
+                    ++options.report->droppedEffects[slot.plugin];
                 continue;
+            }
 
             auto fx = std::move (*made);
 

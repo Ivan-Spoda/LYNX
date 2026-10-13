@@ -639,6 +639,18 @@ private:
                     lastPercent = (int) (p * 100.0);
                     return true;
                 }, error);
+                auto joined = [] (const std::map<std::string, int>& items) {
+                    juce::StringArray names;
+                    for (const auto& [name, count] : items)
+                        names.add (juce::String::fromUTF8 (name.c_str()) + "x" + juce::String (count));
+                    return names.joinIntoString (", ");
+                };
+                const auto& importReport = loader.getImportReport();
+                report << "convertidos=" << joined (importReport.converted) << "\n"
+                       << "aproximados=" << joined (importReport.approximated) << "\n"
+                       << "sem_equivalente=" << joined (importReport.unsupported) << "\n"
+                       << "efeitos_fora=" << joined (importReport.droppedEffects) << "\n"
+                       << "samples_faltando=" << importReport.missingSamples << "\n";
                 report << "abrir_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "preparar_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"

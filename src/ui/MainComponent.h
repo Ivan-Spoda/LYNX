@@ -43,6 +43,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void togglePlay();
     void showAudioSettings();
+    void showImportReport();
     void showHelp();
 
     // barra de menus

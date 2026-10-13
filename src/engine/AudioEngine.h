@@ -45,6 +45,8 @@ public:
 
     // Plugins de terceiros do último .flp importado que não foram achados entre os escaneados.
     const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
+    // O que o último .flp importado converteu, aproximou ou deixou de fora.
+    const FlpImportReport& getImportReport() const noexcept { return importReport; }
 
     // Instâncias vivas (para abrir a janela do plugin). nullptr se não for plugin.
     std::shared_ptr<Instrument> getChannelInstrument (int channel) const;
@@ -214,6 +216,7 @@ private:
     MeterBank meters;
     PluginHost plugins;
     juce::StringArray missingPlugins;
+    FlpImportReport importReport;
     RenderStats lastRenderStats;
     class ChannelRackProcessor* rackProcessor = nullptr; // nó do grafo (dono: o grafo)
 

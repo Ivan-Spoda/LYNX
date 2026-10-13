@@ -668,6 +668,8 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
             return file.getFullPathName().toStdString();
         };
 
+        importReport = {};
+        options.report = &importReport;
         auto imported = importFlp (project, options);
         juce::StringArray missing;
         plugins.adoptFlPlugins (imported, &missing);
