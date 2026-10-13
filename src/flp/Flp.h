@@ -88,6 +88,11 @@ struct Channel
     std::string samplePath;
     int mixerTrack = -1;
     std::vector<AutomationPoint> automation; // canais do tipo automationClip
+
+    // evento 0xDB ("níveis" do canal): pan 0..12800 (6400 = centro), volume 0..12800
+    // (10000 = 78%, o padrão), afinação em centésimos
+    bool hasLevels = false;
+    int pan = 6400, volume = 10000, pitchCents = 0;
 };
 
 // Endereço de um parâmetro automatizável (controlID do FL), já no formato atual:

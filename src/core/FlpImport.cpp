@@ -150,6 +150,13 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.instrument = InstrumentKind::audioClip; // sem arquivo: fica mudo, mas o clip continua na playlist
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
+
+        if (c.hasLevels)
+        {
+            def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f);
+            def.pan = std::clamp ((c.pan - 6400) / 6400.0f, -1.0f, 1.0f);
+            def.sampler.pitch = std::clamp (c.pitchCents / 100.0f, -24.0f, 24.0f);
+        }
         song.channels.push_back (std::move (def));
     }
 

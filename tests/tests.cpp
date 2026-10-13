@@ -206,6 +206,12 @@ TEST (flp_parses_project_model)
     b.u8 (0x40); b.u16 (0);
     b.u8 (0x15); b.u8 (0);
     b.utf16 (0xCB, u"Kick");
+    {
+        std::vector<std::uint8_t> levels (24, 0);
+        const std::int32_t lv[] = { 3200, 12800, -150 };
+        std::memcpy (levels.data(), lv, sizeof (lv));
+        b.data (0xDB, levels);
+    }
     b.u8 (0x68); b.u16 (5);
     b.u8 (0x40); b.u16 (1);
     b.u8 (0x15); b.u8 (2);
@@ -232,6 +238,7 @@ TEST (flp_parses_project_model)
     CHECK (p.title == "Título");
     CHECK (p.channels.size() == 2);
     CHECK (p.channels[0].name == "Kick" && p.channels[0].mixerTrack == 5);
+    CHECK (p.channels[0].hasLevels && p.channels[0].pan == 3200 && p.channels[0].volume == 12800 && p.channels[0].pitchCents == -150);
     CHECK (p.channels[1].type == flp::ChannelType::instrument && p.channels[1].pluginName == "FLEX");
     CHECK (p.patterns.size() == 1 && p.patterns[0].index == 3);
     CHECK (p.patterns[0].colour && *p.patterns[0].colour == 0x4745A1);
