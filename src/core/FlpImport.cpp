@@ -192,7 +192,10 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         // time-stretch (só reamostrando, por enquanto): o sample dura TIME/192 tempos × MUL
         if (c.stretchTime > 0.0f)
+        {
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
+            def.sampler.keepPitch = c.stretchMode != 0; // só o "Resample" do FL muda a altura
+        }
         song.channels.push_back (std::move (def));
     }
 

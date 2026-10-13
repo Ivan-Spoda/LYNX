@@ -87,9 +87,13 @@ struct RackState
     using PluginInstrumentFactory = std::function<std::shared_ptr<Instrument> (const PluginRef&, double sampleRate)>;
     using PluginEffectFactory = std::function<std::shared_ptr<Effect> (const PluginRef&, double sampleRate)>;
 
+    // Sample esticado sem mudar a altura (razão = duração nova / original); com cache no app.
+    using StretchedSampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path, double ratio)>;
+
     struct Factories
     {
         SampleProvider samples;
+        StretchedSampleProvider stretchedSamples;
         PluginInstrumentFactory pluginInstruments;
         PluginEffectFactory pluginEffects;
     };

@@ -1,5 +1,7 @@
 #include "engine/SampleLibrary.h"
 
+#include "core/TimeStretch.h"
+
 namespace lynx
 {
 namespace
@@ -72,6 +74,28 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     }
 
     return nullptr;
+}
+
+std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio)
+{
+    const auto key = path + "|" + juce::String (ratio, 4);
+
+    if (auto it = stretchedCache.find (key); it != stretchedCache.end())
+        return it->second;
+
+    auto original = load (path);
+
+    if (original == nullptr)
+        return nullptr;
+
+    std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio);
+
+    // só um tamanho por arquivo fica guardado (mudar o BPM troca o esticado)
+    for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
+        it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
+
+    stretchedCache[key] = stretched;
+    return stretched;
 }
 
 juce::File SampleLibrary::cacheFolder()

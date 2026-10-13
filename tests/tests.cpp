@@ -19,6 +19,7 @@
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
+#include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
@@ -2111,6 +2112,34 @@ TEST (cut_groups_stretch_and_envelope_import)
 
     // tempo do envelope do FL: 32950 = 2 s; < 101 = 0
     CHECK (std::abs (flp::Channel::envelopeTime (32950) - 2.0) < 0.01 && flp::Channel::envelopeTime (50) == 0.0);
+}
+
+TEST (time_stretch_keeps_pitch)
+{
+    lynx::SampleData sine;
+    sine.sampleRate = 48000.0;
+    for (int i = 0; i < 48000; ++i)
+        sine.left.push_back (0.5f * std::sin (2.0f * 3.14159265f * 440.0f * (float) i / 48000.0f));
+
+    auto crossingsPerSecond = [] (const lynx::SampleData& d) {
+        int c = 0;
+        const auto n = (int) d.frames();
+        for (int i = 4800; i < n - 4800; ++i)
+            c += (d.left[(std::size_t) i - 1] < 0.0f) != (d.left[(std::size_t) i] < 0.0f);
+        return (double) c / ((double) (n - 9600) / d.sampleRate);
+    };
+
+    for (double ratio : { 2.0, 0.5, 1.37 })
+    {
+        const auto out = lynx::timeStretch (sine, ratio);
+        CHECK (std::abs ((double) out->frames() - 48000.0 * ratio) < 2.0);
+        CHECK (std::abs (crossingsPerSecond (*out) - 880.0) < 15.0); // 440 Hz continua 440 Hz
+
+        float peak = 0.0f;
+        for (std::size_t i = 4800; i + 4800 < out->frames(); ++i)
+            peak = std::max (peak, std::abs (out->left[i]));
+        CHECK (peak > 0.4f && peak < 0.6f); // sem buracos nem estouro na sobreposição
+    }
 }
 
 int main (int argc, char** argv)

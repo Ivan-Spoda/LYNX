@@ -641,6 +641,9 @@ void AudioEngine::publishSong()
 
     RackState::Factories factories;
     factories.samples = [this] (const std::string& path) { return samples.load (juce::String::fromUTF8 (path.c_str())); };
+    factories.stretchedSamples = [this] (const std::string& path, double ratio) {
+        return samples.loadStretched (juce::String::fromUTF8 (path.c_str()), ratio);
+    };
     factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };
     factories.pluginEffects = [this] (const PluginRef& ref, double sr) { return plugins.makeEffect (ref, sr); };
 

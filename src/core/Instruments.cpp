@@ -500,7 +500,8 @@ public:
         release.store (std::clamp (s.release, 0.0f, 4.0f));
         reverse.store (s.reverse);
         cut.store (s.cut);
-        stretchBeats.store (std::max (0.0f, s.stretchBeats));
+        // com "manter altura" o sample já chega esticado (RackState): toca em velocidade normal
+        stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
         bpm.store (std::max (1.0, songBpm));
     }
 

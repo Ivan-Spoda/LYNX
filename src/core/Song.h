@@ -57,7 +57,8 @@ struct SamplerSettings
     float release = 0.0f; // segundos, 0..4; 0 = toca o sample inteiro (one-shot)
     bool reverse = false;
     bool cut = false;     // nota nova corta a anterior ("cut itself")
-    float stretchBeats = 0.0f; // > 0: o sample inteiro dura isto (em tempos), acompanhando o BPM (reamostrando)
+    float stretchBeats = 0.0f; // > 0: o sample inteiro dura isto (em tempos), acompanhando o BPM
+    bool keepPitch = false;    // com stretch: estica sem mudar a altura (WSOLA); senão reamostra
 
     bool operator== (const SamplerSettings&) const = default;
 };

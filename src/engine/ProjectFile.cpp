@@ -219,6 +219,7 @@ juce::String toJson (const Song& song)
             sampler->setProperty ("sustain", c.sampler.sustain);
             sampler->setProperty ("release", c.sampler.release);
             sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
+            sampler->setProperty ("keepPitch", c.sampler.keepPitch);
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -490,6 +491,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.decay = juce::jlimit (0.0f, 10.0f, (float) (double) s.getProperty ("decay", 0.0));
                 def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
                 def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
+                def.sampler.keepPitch = (bool) s.getProperty ("keepPitch", false);
                 def.sampler.reverse = (bool) s.getProperty ("reverse", false);
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
             }

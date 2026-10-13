@@ -60,7 +60,11 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
             && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip)
-                || previous->song.channels[i].samplePath == channel.samplePath)
+                || (previous->song.channels[i].samplePath == channel.samplePath
+                    && previous->song.channels[i].sampler.keepPitch == channel.sampler.keepPitch
+                    && (! channel.sampler.keepPitch
+                        || (previous->song.channels[i].sampler.stretchBeats == channel.sampler.stretchBeats
+                            && previous->song.bpm == song.bpm))))
             && (kind != InstrumentKind::plugin
                 || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate)))
         {
@@ -84,6 +88,17 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip) && samples && ! channel.samplePath.empty())
             sample = samples (channel.samplePath);
+
+        // stretch que mantém a altura: o sample já vem esticado para o andamento atual
+        if (sample != nullptr && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f && factories.stretchedSamples
+            && sample->frames() > 0)
+        {
+            const auto target = channel.sampler.stretchBeats * 60.0 / std::max (1.0, song.bpm);
+            const auto ratio = target / ((double) sample->frames() / sample->sampleRate);
+
+            if (auto stretched = factories.stretchedSamples (channel.samplePath, ratio))
+                sample = std::move (stretched);
+        }
 
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
         instrument->prepare (sampleRate);

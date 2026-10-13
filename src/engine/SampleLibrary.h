@@ -18,6 +18,9 @@ public:
 
     std::shared_ptr<const SampleData> load (const juce::String& path);
 
+    // O sample esticado sem mudar a altura (WSOLA), com cache por (caminho, razão).
+    std::shared_ptr<const SampleData> loadStretched (const juce::String& path, double ratio);
+
     // Acima disto o áudio vai para um cache em disco mapeado na memória, em vez de ficar todo
     // na RAM (o "streaming do disco"). O cache é reaproveitado entre sessões.
     static constexpr double streamAboveSeconds = 30.0;
@@ -32,6 +35,7 @@ private:
 
     juce::AudioFormatManager formats;
     std::map<juce::String, std::weak_ptr<const SampleData>> cache;
+    std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // segura o último de cada caminho
 };
 // Traz do disco o trecho [from, to) (segundos) de um sample mapeado. Thread qualquer, menos a de áudio.
 void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds);

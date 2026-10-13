@@ -28,6 +28,11 @@ public:
         release.setSkewFactorFromMidPoint (0.4);
         release.setTooltip (utf8 ("0 = o sample toca inteiro (one-shot), como os steps do FL"));
 
+        keepPitch.setButtonText (utf8 ("Esticar mantendo a altura"));
+        keepPitch.setTooltip (utf8 ("Com \"Esticar\": muda a duração sem mudar a altura (como os modos Stretch do FL)"));
+        keepPitch.onClick = [this] { apply(); };
+        addAndMakeVisible (keepPitch);
+
         reverse.setButtonText (utf8 ("Ao contrário"));
         cut.setButtonText ("Cut itself");
         cut.setTooltip (utf8 ("Uma nota nova corta a anterior (bom para hi-hats e 808)"));
@@ -59,7 +64,9 @@ public:
             }
         };
 
-        place (area.removeFromTop (110), { { &pitch, &pitchLabel }, { &stretch, &stretchLabel } });
+        auto top = area.removeFromTop (110);
+        keepPitch.setBounds (top.removeFromRight (top.getWidth() / 3).withSizeKeepingCentre (130, 40));
+        place (top, { { &pitch, &pitchLabel }, { &stretch, &stretchLabel } });
         area.removeFromTop (6);
         auto envelope = area.removeFromTop (110);
         const auto w = envelope.getWidth() / 4;
@@ -109,6 +116,7 @@ private:
             decay.setValue (c->sampler.decay, juce::dontSendNotification);
             sustain.setValue (c->sampler.sustain, juce::dontSendNotification);
             stretch.setValue (c->sampler.stretchBeats, juce::dontSendNotification);
+            keepPitch.setToggleState (c->sampler.keepPitch, juce::dontSendNotification);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -130,6 +138,7 @@ private:
         s.decay = (float) decay.getValue();
         s.sustain = (float) sustain.getValue();
         s.stretchBeats = (float) stretch.getValue();
+        s.keepPitch = keepPitch.getToggleState();
         s.release = (float) release.getValue();
         s.reverse = reverse.getToggleState();
         s.cut = cut.getToggleState();
@@ -160,7 +169,7 @@ private:
     bool updating = false;
     juce::Slider pitch, attack, release, decay, sustain, stretch;
     juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel;
-    juce::ToggleButton reverse, cut;
+    juce::ToggleButton reverse, cut, keepPitch;
 };
 
 // Presets do synth interno.

@@ -71,7 +71,7 @@ APP_SOURCES=(src/Main.cpp
              src/engine/SampleLibrary.cpp src/engine/ProjectFile.cpp src/engine/PluginHost.cpp src/engine/Exporter.cpp src/engine/StreamPrefetcher.cpp src/engine/ClapFormat.cpp src/engine/MidiFileIo.cpp src/engine/PreviewPlayer.cpp
              src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp src/ui/PianoRollComponent.cpp src/ui/PlaylistComponent.cpp src/ui/MixerComponent.cpp src/ui/PluginWindow.cpp src/ui/ExportDialog.cpp src/ui/AutomationUi.cpp src/ui/ChannelSettings.cpp src/ui/BrowserComponent.cpp
              src/core/Song.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp
-             src/core/FlpImport.cpp src/core/Effects.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/flp/Flp.cpp
+             src/core/FlpImport.cpp src/core/Effects.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/flp/Flp.cpp
              src/platform/MingwFixes.cpp)
 
 echo "Compilando o app..."
