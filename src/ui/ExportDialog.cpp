@@ -10,10 +10,13 @@ namespace
 class ExportThread final : public juce::ThreadWithProgressWindow
 {
 public:
-    explicit ExportThread (std::unique_ptr<ExportJob> j, juce::File f)
-        : juce::ThreadWithProgressWindow (utf8 ("Exportando áudio..."), true, true),
+    // onDone (na thread da UI): se vazio, mostra o resultado numa mensagem
+    ExportThread (std::unique_ptr<ExportJob> j, juce::File f, std::function<void (bool)> done = {},
+                  const juce::String& title = utf8 ("Exportando áudio..."))
+        : juce::ThreadWithProgressWindow (title, true, true),
           job (std::move (j)),
-          file (std::move (f))
+          file (std::move (f)),
+          onDone (std::move (done))
     {
     }
 
@@ -27,7 +30,14 @@ public:
 
     void threadComplete (bool userPressedCancel) override
     {
-        if (ok)
+        if (onDone)
+        {
+            if (! ok && ! userPressedCancel)
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível renderizar"), error);
+
+            onDone (ok);
+        }
+        else if (ok)
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Exportação concluída"),
                                                     file.getFullPathName() + "\n\n"
                                                         + utf8 ("Pico: ") + juce::String (juce::Decibels::gainToDecibels (job->getPeak()), 1) + " dBFS");
@@ -41,6 +51,7 @@ public:
 private:
     std::unique_ptr<ExportJob> job;
     juce::File file;
+    std::function<void (bool)> onDone;
     juce::String error;
     bool ok = false;
 };
@@ -169,6 +180,39 @@ private:
     static inline juce::File lastFolder;
 };
 } // namespace
+
+void bounceInsertToAudio (AudioEngine& engine, int track)
+{
+    const auto& song = engine.getSong();
+
+    if (track <= 0 || track >= (int) song.mixer.size())
+        return;
+
+    engine.capturePluginStates();
+    const auto name = juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str());
+    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Renders");
+    folder.createDirectory();
+    const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav");
+
+    ExportSettings settings;
+    settings.format = ExportSettings::Format::wav32Float;
+    settings.sampleRate = engine.getTransport().sampleRate.load();
+    settings.tailSeconds = 4.0;
+
+    // comprimento do clip: a música + a cauda, no andamento do fim
+    std::int64_t musicTicks = 0;
+    makeExportSong (song, true, 0, musicTicks);
+    const auto length = musicTicks + (std::int64_t) (settings.tailSeconds * song.tempoAt ((double) musicTicks) * ppq / 60.0);
+
+    auto job = std::make_unique<ExportJob> (makeBounceSong (song, track), settings, file);
+    auto* engineRef = &engine;
+    (new ExportThread (std::move (job), file, [engineRef, track, file, length] (bool ok) {
+        if (! ok)
+            return;
+
+        engineRef->editSong ([&] (Song& s) { applyBounce (s, track, file.getFullPathName().toStdString(), length); });
+    }, utf8 ("Renderizando o insert para áudio...")))->launchThread();
+}
 
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine)
 {

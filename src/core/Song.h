@@ -327,4 +327,13 @@ struct Song
 // para releases e reverbs soarem sem a música recomeçar. `musicLength` recebe o fim da
 // parte musical (sem a cauda), em ticks.
 Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength);
+
+// Cópia da música em que só se ouve a saída (pós-fader) do insert `track`, direto no Master
+// sem efeitos nem fader: é o que se renderiza para "transformar o insert em áudio".
+Song makeBounceSong (const Song& song, int track);
+
+// Depois de renderizar o insert para `samplePath` (`length` ticks a partir do começo): cria um
+// canal de clip de áudio num insert novo com o mesmo roteamento, põe o clip na Playlist e muta
+// o insert original. Retorna o insert novo.
+int applyBounce (Song& song, int track, const std::string& samplePath, std::int64_t length);
 } // namespace lynx

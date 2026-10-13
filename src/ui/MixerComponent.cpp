@@ -1,6 +1,7 @@
 #include "ui/MixerComponent.h"
 
 #include "ui/AutomationUi.h"
+#include "ui/ExportDialog.h"
 
 #include "core/Effects.h"
 #include "engine/Text.h"
@@ -480,6 +481,9 @@ void MixerStrips::showMenu (int t)
                 s.mixer[(std::size_t) t].toMaster = true;
             });
         });
+
+    if (t > 0)
+        menu.addItem (utf8 ("Renderizar para áudio (congelar)..."), [this, t] { bounceInsertToAudio (engine, t); });
 
     menu.addItem ("Renomear...", [this, t] {
         auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);

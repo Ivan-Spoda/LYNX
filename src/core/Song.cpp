@@ -624,6 +624,66 @@ Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, s
     return out;
 }
 
+Song makeBounceSong (const Song& song, int track)
+{
+    Song out = song;
+
+    if (track <= 0 || track >= (int) out.mixer.size())
+        return out;
+
+    for (auto& t : out.mixer)
+        t.solo = false;
+
+    auto& insert = out.mixer[(std::size_t) track];
+    insert.sends.clear();
+    insert.toMaster = true;
+    insert.muted = false;
+    insert.solo = true; // soam ele e quem chega nele
+
+    auto& master = out.mixer[0];
+    master.effects.clear();
+    master.volume = unityFader;
+    master.pan = 0.0f;
+    master.muted = false;
+    out.mode = PlayMode::song;
+    return out;
+}
+
+int applyBounce (Song& song, int track, const std::string& samplePath, std::int64_t length)
+{
+    if (track <= 0 || track >= (int) song.mixer.size() || (int) song.mixer.size() >= maxMixerTracks)
+        return -1;
+
+    auto& original = song.mixer[(std::size_t) track];
+    MixerTrack copy;
+    copy.name = original.name + " (áudio)";
+    copy.toMaster = original.toMaster;
+    copy.sends = original.sends;
+    original.muted = true;
+    song.mixer.push_back (copy);
+    const auto newTrack = (int) song.mixer.size() - 1;
+
+    ChannelDef c;
+    c.name = copy.name;
+    c.instrument = InstrumentKind::audioClip;
+    c.samplePath = samplePath;
+    c.mixerTrack = newTrack;
+    c.volume = 1.0f;
+    song.channels.push_back (c);
+
+    int lane = 0;
+    for (const auto& clip : song.playlist)
+        lane = std::max (lane, clip.track + 1);
+
+    Clip clip;
+    clip.kind = ClipKind::audio;
+    clip.channel = (int) song.channels.size() - 1;
+    clip.track = lane;
+    clip.length = length;
+    song.playlist.push_back (clip);
+    return newTrack;
+}
+
 Song Song::makeDefault()
 {
     Song song;

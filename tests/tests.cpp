@@ -1836,6 +1836,28 @@ TEST (tempo_automation_changes_speed_and_duration)
     CHECK (std::abs (r.currentBpm() - 240.0) < 0.01);
 }
 
+TEST (bounce_insert_song_and_apply)
+{
+    auto s = lynx::Song::makeDefault();
+    s.setRoute (3, 7, true, 0.5f);
+    s.mixer[0].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::reverb));
+    s.mixer[2].solo = true;
+
+    const auto b = lynx::makeBounceSong (s, 3);
+    CHECK (b.mixer[3].solo && ! b.mixer[2].solo && b.mixer[3].toMaster && b.mixer[3].sends.empty());
+    CHECK (b.mixer[0].effects.empty() && b.mode == lynx::PlayMode::song);
+    const auto audible = b.soloAudible();
+    CHECK (audible[3] && ! audible[1] && ! audible[7]);
+
+    const auto channels = s.channels.size();
+    const auto inserts = s.mixer.size();
+    const auto created = lynx::applyBounce (s, 3, "C:/x.wav", 3840);
+    CHECK (created == (int) inserts && s.mixer.size() == inserts + 1 && s.mixer[3].muted);
+    CHECK (s.mixer[(std::size_t) created].sends.size() == 1 && s.mixer[(std::size_t) created].sends[0].target == 7);
+    CHECK (s.channels.size() == channels + 1 && s.channels.back().mixerTrack == created);
+    CHECK (s.playlist.back().kind == lynx::ClipKind::audio && s.playlist.back().length == 3840);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

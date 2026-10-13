@@ -79,7 +79,8 @@ public:
         if (args.contains ("--export"))
         {
             const auto i = args.indexOf ("--export");
-            runExport (args[i + 1].unquoted(), args[i + 2].unquoted(), args.contains ("--pattern"));
+            const auto insert = args.contains ("--insert") ? args[args.indexOf ("--insert") + 1].getIntValue() : 0;
+            runExport (args[i + 1].unquoted(), args[i + 2].unquoted(), args.contains ("--pattern"), insert);
             return;
         }
 
@@ -355,9 +356,9 @@ private:
         quit();
     }
 
-    // LYNX.exe --export projeto.(flp|lynx) saida.(wav|flac|ogg) [--pattern]
+    // LYNX.exe --export projeto.(flp|lynx) saida.(wav|flac|ogg) [--pattern] [--insert N]
     // O mesmo caminho do "Exportar" da interface: música inteira (ou a pattern atual) com cauda.
-    void runExport (const juce::String& inputPath, const juce::String& outputPath, bool patternOnly)
+    void runExport (const juce::String& inputPath, const juce::String& outputPath, bool patternOnly, int insert)
     {
         juce::String error, report;
         bool ok = false;
@@ -381,7 +382,8 @@ private:
                 settings.format = output.hasFileExtension ("flac") ? lynx::ExportSettings::Format::flac24
                                   : output.hasFileExtension ("ogg") ? lynx::ExportSettings::Format::ogg
                                                                     : lynx::ExportSettings::Format::wav24;
-                lynx::ExportJob job (loader.getSong(), settings, output);
+                // --insert N: só a saída daquele insert (o que o "Renderizar para áudio" grava)
+                lynx::ExportJob job (insert > 0 ? lynx::makeBounceSong (loader.getSong(), insert) : loader.getSong(), settings, output);
                 int lastPercent = -1;
                 ok = job.run ([&lastPercent] (double p) {
                     lastPercent = (int) (p * 100.0);
