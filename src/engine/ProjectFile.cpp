@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "core/Effects.h"
 #include "engine/Text.h"
 
 namespace lynx::ProjectFile
@@ -447,8 +448,9 @@ juce::String toJson (const Song& song)
             e->setProperty ("kind", effectId (slot.kind));
             e->setProperty ("on", slot.enabled);
             juce::Array<juce::var> params;
-            for (auto v : slot.params)
-                params.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+            const auto used = slot.kind == EffectKind::plugin ? 0 : effectInfo (slot.kind).params.size();
+            for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
+                params.add (juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
             e->setProperty ("params", params);
 
             if (slot.mix < 1.0f)

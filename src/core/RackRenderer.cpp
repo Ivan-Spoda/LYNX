@@ -672,10 +672,11 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         if (state.hasAutomation && ! isPlugin)
         {
-            auto params = slots[i].params; // cópia de 6 floats, sem alocação
+            auto params = slots[i].params; // cópia sem alocação
             const auto& autos = state.effectParamAuto[(std::size_t) track][i];
+            const auto used = std::min (params.size(), effectInfo (slots[i].kind).params.size());
 
-            for (std::size_t p = 0; p < params.size(); ++p)
+            for (std::size_t p = 0; p < used; ++p)
                 params[p] = automated (autos[p], params[p]);
 
             effects[i]->process (l, r, n, params, bpm);

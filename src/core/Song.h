@@ -185,7 +185,7 @@ enum class EffectKind : std::uint8_t
     chorus
 };
 
-constexpr int maxEffectParams = 6;
+constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte
 constexpr int maxEffectSlots = 10; // como no FL
 using EffectParams = std::array<float, maxEffectParams>;
 
