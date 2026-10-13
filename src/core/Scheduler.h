@@ -57,7 +57,8 @@ void schedulePatternLoop (const Pattern& pattern,
                           double startTick,
                           int numSamples,
                           double ticksPerSampleValue,
-                          EventBuffer& out) noexcept;
+                          EventBuffer& out,
+                          float swing = 0.0f) noexcept;
 // Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip de pattern
 // toca as notas da pattern que caem em [offset, offset + length); notas são cortadas no
 // fim do clip. Clips de áudio disparam o sample do canal no início e param no fim.

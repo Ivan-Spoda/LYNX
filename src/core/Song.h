@@ -107,6 +107,10 @@ struct Note
     float velocity = 0.78f;   // 0..1
 };
 
+// Atraso de swing para uma nota que começa em `start` (ticks na pattern): só as que caem
+// exatamente num step ímpar (o "e" de cada colcheia) andam, até meio step com swing 1.
+std::int64_t swingDelay (std::int64_t start, float swing) noexcept;
+
 struct Pattern
 {
     std::string name;
@@ -204,6 +208,7 @@ struct Song
 {
     double bpm = 130.0;
     int beatsPerBar = 4;
+    float swing = 0.0f; // 0..1: atrasa as semicolcheias dos contratempos (como o swing do Channel Rack do FL)
     std::vector<ChannelDef> channels;
     std::vector<Pattern> patterns;
     int currentPattern = 0;

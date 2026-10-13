@@ -688,7 +688,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         const auto patternIndex = std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1);
         const auto& pattern = song.patterns[(std::size_t) patternIndex];
         schedulePatternLoop (pattern, pattern.effectiveLength (song.beatsPerBar), startTick, numSamples,
-                             ticksPerSample (song.bpm, sampleRate), events);
+                             ticksPerSample (song.bpm, sampleRate), events, song.swing);
     }
 
     // 1) canais, cada um com as próprias notas no sample exato (em paralelo quando vale a pena)

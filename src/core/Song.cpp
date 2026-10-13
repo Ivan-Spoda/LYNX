@@ -484,6 +484,14 @@ std::int64_t Automation::length() const noexcept
     return points.empty() ? 1 : std::max<std::int64_t> (1, points.back().tick);
 }
 
+std::int64_t swingDelay (std::int64_t start, float swing) noexcept
+{
+    if (swing <= 0.0f || start % (2 * ticksPerStep) != ticksPerStep)
+        return 0;
+
+    return (std::int64_t) std::llround (std::clamp (swing, 0.0f, 1.0f) * ticksPerStep * 0.5f);
+}
+
 float faderGain (float position) noexcept
 {
     const auto v = std::clamp (position, 0.0f, 1.0f) * 1.25f;

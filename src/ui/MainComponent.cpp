@@ -85,12 +85,26 @@ MainComponent::MainComponent (AudioEngine& e)
         });
     };
 
+    swingSlider.setRange (0.0, 1.0, 0.01);
+    swingSlider.setDoubleClickReturnValue (true, 0.0);
+    swingSlider.setValue (engine.getSong().swing, juce::dontSendNotification);
+    swingSlider.onValueChange = [this] {
+        engine.editSong ([v = (float) swingSlider.getValue()] (Song& s) { s.swing = v; });
+        swingSlider.setTooltip ("Swing: " + juce::String (juce::roundToInt (swingSlider.getValue() * 100.0)) + "%");
+    };
+    swingSlider.setTooltip ("Swing: 0%");
+    swingLabel.setText ("Swing", juce::dontSendNotification);
+    swingLabel.setFont (juce::FontOptions (11.0f));
+    swingLabel.setJustificationType (juce::Justification::centredRight);
+
     patternMenuButton.setTooltip ("Pattern: renomear, cor, clonar, comprimento, remover");
     patternMenuButton.onClick = [this] { showPatternMenu(); };
 
-    positionLabel.setFont (juce::FontOptions (20.0f));
+    positionLabel.setFont (juce::FontOptions (18.0f));
     positionLabel.setJustificationType (juce::Justification::centred);
     cpuLabel.setJustificationType (juce::Justification::centredRight);
+    cpuLabel.setFont (juce::FontOptions (12.0f));
+    cpuLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
     hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
@@ -109,7 +123,7 @@ MainComponent::MainComponent (AudioEngine& e)
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton,
-                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton,
+                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton, &swingLabel, &swingSlider,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
         addAndMakeVisible (c);
@@ -153,25 +167,28 @@ void MainComponent::resized()
         toolbar.removeFromLeft (gapAfter);
     };
 
-    place (newButton, 56);
-    place (openButton, 56);
-    place (saveButton, 60);
-    place (exportButton, 70, 16);
-    place (playButton, 60);
-    place (stopButton, 60, 4);
-    place (recordButton, 44, 4);
-    place (modeButton, 58, 8);
-    place (metronomeButton, 70);
-    place (bpmSlider, 150, 12);
-    place (patternBox, 170);
-    place (newPatternButton, 30);
-    place (patternMenuButton, 30);
+    place (newButton, 50);
+    place (openButton, 52);
+    place (saveButton, 56);
+    place (exportButton, 66, 12);
+    place (playButton, 54);
+    place (stopButton, 50, 4);
+    place (recordButton, 40, 4);
+    place (modeButton, 52, 8);
+    place (metronomeButton, 64);
+    place (bpmSlider, 124, 10);
+    place (patternBox, 140);
+    place (newPatternButton, 28);
+    place (patternMenuButton, 28, 6);
+    place (swingLabel, 38, 0);
+    place (swingSlider, 30);
 
-    settingsButton.setBounds (toolbar.removeFromRight (80));
-    cpuLabel.setBounds (toolbar.removeFromRight (90));
+    settingsButton.setBounds (toolbar.removeFromRight (74));
     positionLabel.setBounds (toolbar);
 
-    hintLabel.setBounds (area.removeFromBottom (20).reduced (8, 0));
+    auto status = area.removeFromBottom (20).reduced (8, 0);
+    cpuLabel.setBounds (status.removeFromRight (90));
+    hintLabel.setBounds (status);
     tabs.setBounds (area.reduced (6, 4));
 }
 
@@ -341,6 +358,7 @@ void MainComponent::refreshToolbar()
 
     patternBox.setSelectedItemIndex (song.currentPattern, juce::dontSendNotification);
     bpmSlider.setValue (song.bpm, juce::dontSendNotification);
+    swingSlider.setValue (song.swing, juce::dontSendNotification);
     refreshModeButton();
 }
 
@@ -449,7 +467,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
     refreshModeButton();
 
-    if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (bpmSlider.getValue() - song.bpm) > 1e-9)
+    if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (bpmSlider.getValue() - song.bpm) > 1e-9
+        || std::abs (swingSlider.getValue() - song.swing) > 1e-6)
         refreshToolbar();
 }
 

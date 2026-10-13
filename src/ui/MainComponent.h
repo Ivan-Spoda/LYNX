@@ -60,6 +60,8 @@ private:
     juce::ComboBox patternBox;
     juce::TextButton newPatternButton { "+" };
     juce::TextButton patternMenuButton { "..." };
+    juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
+    juce::Label swingLabel;
     juce::TextButton settingsButton { "Audio..." };
     juce::Label positionLabel;
     juce::Label cpuLabel;

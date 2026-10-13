@@ -46,7 +46,8 @@ void schedulePatternLoop (const Pattern& pattern,
                           double startTick,
                           int numSamples,
                           double tps,
-                          EventBuffer& out) noexcept
+                          EventBuffer& out,
+                          float swing) noexcept
 {
     if (numSamples <= 0 || patternLength <= 0 || tps <= 0.0)
         return;
@@ -63,13 +64,14 @@ void schedulePatternLoop (const Pattern& pattern,
         on.channel = note.channel;
         on.key = note.key;
         on.velocity = note.velocity;
-        emitOccurrences ((double) note.start, patternLength, startTick, endTick, tps, numSamples, on, out);
+        const auto start = note.start + swingDelay (note.start, swing);
+        emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
 
         NoteEvent off = on;
         off.type = NoteEvent::Type::off;
         off.velocity = 0.0f;
         const auto length = std::max<std::int64_t> (note.length, 1);
-        emitOccurrences ((double) (note.start + length), patternLength, startTick, endTick, tps, numSamples, off, out);
+        emitOccurrences ((double) (start + length), patternLength, startTick, endTick, tps, numSamples, off, out);
     }
 
     out.sortByOffset();
@@ -136,7 +138,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             if (note.start < clip.offset || note.start >= clip.offset + clip.length)
                 continue;
 
-            const auto on = clip.start + (note.start - clip.offset);
+            const auto on = std::min (clip.start + (note.start - clip.offset) + swingDelay (note.start, song.swing), clip.end() - 1);
             const auto off = std::min (on + std::max<std::int64_t> (note.length, 1), clip.end());
 
             NoteEvent e;

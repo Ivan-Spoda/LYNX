@@ -1671,6 +1671,26 @@ TEST (effect_slot_dry_wet_and_smart_disable)
     CHECK (inverter->calls == callsAfterSilence + 1 && std::abs (l[100] - 0.25f) < 1e-4f);
 }
 
+TEST (swing_delays_offbeat_sixteenths)
+{
+    CHECK (lynx::swingDelay (0, 1.0f) == 0);
+    CHECK (lynx::swingDelay (lynx::ticksPerStep, 1.0f) == lynx::ticksPerStep / 2);
+    CHECK (lynx::swingDelay (lynx::ticksPerStep * 2, 1.0f) == 0);
+    CHECK (lynx::swingDelay (lynx::ticksPerStep + 10, 1.0f) == 0); // fora da grade: não mexe
+    CHECK (lynx::swingDelay (lynx::ticksPerStep * 3, 0.5f) == lynx::ticksPerStep / 4);
+
+    lynx::Pattern p;
+    p.notes = { { 0, 100, 0, 60 }, { lynx::ticksPerStep, 100, 0, 62 } };
+    lynx::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::schedulePatternLoop (p, p.effectiveLength (4), 0.0, 12000, tps, ev, 1.0f);
+    int onOffset = -1;
+    for (auto& e : ev)
+        if (e.type == lynx::NoteEvent::Type::on && e.key == 62)
+            onOffset = e.sampleOffset;
+    CHECK (onOffset == (int) std::floor ((lynx::ticksPerStep * 1.5) / tps));
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

@@ -51,6 +51,9 @@ public:
         setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
         setColour (juce::TabbedButtonBar::tabTextColourId, text.withAlpha (0.6f));
         setColour (juce::TabbedButtonBar::frontTextColourId, accentOrange);
+        setColour (juce::Slider::rotarySliderFillColourId, accentOrange);
+        setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff4a525b));
+        setColour (juce::Slider::thumbColourId, juce::Colours::white);
     }
 };
 } // namespace lynx::theme
