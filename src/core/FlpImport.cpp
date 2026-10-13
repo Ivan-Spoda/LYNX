@@ -89,6 +89,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
         { "Gross Beat", EffectKind::volumeGate },     { "Frequency Splitter", EffectKind::parametricEq },
+        { "Fruity Peak Controller", EffectKind::peakController },
     };
 
     // presets antigos (FL 3) gravam o nome com outra caixa ("Fruity delay 2")
@@ -1009,6 +1010,37 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         }
     }
 
+    // Alvo nosso para um controlID do FL: o slot do FL (0..9, com buracos) vira o índice do nosso
+    // efeito (efeito que não veio = sem alvo); parâmetro de efeito interno só com o mapa do FL para o
+    // nosso (`valueMap` recebe a conversão do valor).
+    auto resolveTarget = [&] (flp::ControlId id, std::function<float (float)>& valueMap) {
+        auto target = automationTargetFor (id, channelMap, (int) song.mixer.size());
+
+        if (target.kind == AutomationTargetKind::effectParam || target.kind == AutomationTargetKind::effectMix)
+        {
+            const auto found = effectSlotMap.find ({ target.index, target.slot });
+            if (found == effectSlotMap.end())
+                target.kind = AutomationTargetKind::none;
+            else
+            {
+                target.slot = found->second.first;
+                const auto& fx = song.mixer[(std::size_t) target.index].effects[(std::size_t) target.slot];
+
+                if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
+                {
+                    if (const auto mapped = effectParamFromFl (found->second.second, target.param))
+                    {
+                        target.param = mapped->param;
+                        valueMap = mapped->convert;
+                    }
+                    else
+                        target.kind = AutomationTargetKind::none;
+                }
+            }
+        }
+        return target;
+    };
+
     // Clips de automação: um Automation por canal de automação do FL, com o alvo do link 0xE3.
     std::map<int, int> automationMap; // canal do FL -> índice em song.automations
 
@@ -1024,32 +1056,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         for (const auto& link : project.automationLinks)
             if (link.channel == c.index)
             {
-                a.target = automationTargetFor (link.target, channelMap, (int) song.mixer.size());
-
-                // o slot do FL (0..9, com buracos) vira o índice do nosso efeito; efeito que não veio = sem alvo
-                if (a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix)
-                {
-                    const auto found = effectSlotMap.find ({ a.target.index, a.target.slot });
-                    if (found == effectSlotMap.end())
-                        a.target.kind = AutomationTargetKind::none;
-                    else
-                    {
-                        a.target.slot = found->second.first;
-                        const auto& fx = song.mixer[(std::size_t) a.target.index].effects[(std::size_t) a.target.slot];
-
-                        // parâmetro de efeito interno: só com o mapa do parâmetro do FL para o nosso
-                        if (a.target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
-                        {
-                            if (const auto mapped = effectParamFromFl (found->second.second, a.target.param))
-                            {
-                                a.target.param = mapped->param;
-                                valueMap = mapped->convert;
-                            }
-                            else
-                                a.target.kind = AutomationTargetKind::none;
-                        }
-                    }
-                }
+                a.target = resolveTarget (link.target, valueMap);
                 break;
             }
 
@@ -1081,6 +1088,33 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         automationMap[c.index] = (int) song.automations.size();
         song.automations.push_back (std::move (a));
+    }
+
+    // Links de controlador (REA_rodada14 §7): Peak Controller num slot do mixer -> automação ao vivo do
+    // alvo (a saída do efeito é lida a cada bloco). Os outros controladores ainda ficam de fora.
+    for (const auto& link : project.controllerLinks)
+    {
+        if (! link.source.isMixer() || link.source.track() < 0 || link.source.track() >= (int) song.mixer.size())
+            continue;
+        const auto found = effectSlotMap.find ({ link.source.track(), link.source.slot() });
+        if (found == effectSlotMap.end()
+            || song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::peakController)
+            continue;
+
+        Automation a;
+        std::function<float (float)> valueMap;
+        a.target = resolveTarget (link.target, valueMap);
+        if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
+            continue;
+
+        a.name = "Peak Controller (" + song.mixer[(std::size_t) link.source.track()].name + ")";
+        a.source = { link.source.track(), found->second.first, link.source.param() - flp::ControlId::pluginParamBase };
+        if (valueMap)
+            for (int i = 0; i <= 32; ++i)
+                a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
+        song.automations.push_back (std::move (a));
+        if (options.report != nullptr)
+            ++options.report->converted["Peak Controller (link)"];
     }
 
     // Playlist: todos os arrangements (o primeiro fica aberto); clips de pattern, de áudio e de automação.

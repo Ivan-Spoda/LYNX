@@ -732,7 +732,7 @@ TEST (flp_real_files)
             {
                 ++automations;
                 automationsWithTarget += a.target.kind != lynx::AutomationTargetKind::none;
-                CHECK (! a.points.empty());
+                CHECK (a.isLive() || ! a.points.empty());
 
                 for (std::size_t i = 1; i < a.points.size(); ++i)
                     CHECK (a.points[i].tick >= a.points[i - 1].tick);
@@ -3074,6 +3074,63 @@ public:
     int calls = 0;
 };
 } // namespace
+
+TEST (peak_controller_drives_live_automation)
+{
+    // trilha 1: fonte (DC 0,5) com Peak Controller; trilha 2: DC 0,5 com o volume ligado ao controlador
+    auto render = [] (bool linked) {
+        lynx::Song s;
+        s.mixer = lynx::Song::defaultMixer (2);
+        for (int t = 1; t <= 2; ++t)
+        {
+            lynx::ChannelDef c;
+            c.instrument = lynx::InstrumentKind::sampler;
+            c.samplePath = "dc";
+            c.volume = 1.0f;
+            c.mixerTrack = t;
+            s.channels.push_back (c);
+        }
+        s.patterns.emplace_back();
+        auto peak = lynx::makeEffectSlot (lynx::EffectKind::peakController);
+        peak.params[0] = 1.0f; // base 1
+        peak.params[1] = 0.0f; // quantidade −1: 1 − pico
+        peak.params[2] = 0.5f; // sem tensão
+        s.mixer[1].effects.push_back (peak);
+        if (linked)
+        {
+            lynx::Automation a;
+            a.name = "Peak";
+            a.target = { lynx::AutomationTargetKind::mixerVolume, 2 };
+            a.source = { 1, 0, 0 };
+            s.automations.push_back (a);
+        }
+
+        lynx::RackState::Factories f;
+        f.samples = [] (const std::string&) {
+            auto d = std::make_shared<lynx::SampleData>();
+            d->left.assign (48000, 0.5f);
+            return std::shared_ptr<const lynx::SampleData> (d);
+        };
+        auto state = lynx::RackState::build (s, nullptr, 48000.0, f);
+        lynx::RackRenderer r;
+        r.prepare (48000.0, 512);
+        lynx::LiveEventQueue live;
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            lynx::NoteEvent on;
+            on.channel = ch;
+            on.velocity = 1.0f;
+            live.push (on);
+        }
+        std::vector<float> l (4800), rr (4800);
+        r.process (state.get(), false, 0.0, 4800, l.data(), rr.data(), &live);
+        return l[4000];
+    };
+
+    const auto free = render (false), ducked = render (true);
+    CHECK (std::isfinite (ducked) && ducked > 0.0f);
+    CHECK (ducked < free - 0.05f); // o pico de 0,5 na trilha 1 abaixa o volume da trilha 2
+}
 
 TEST (effect_slot_dry_wet_and_smart_disable)
 {

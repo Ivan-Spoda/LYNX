@@ -327,6 +327,11 @@ void RackState::buildAutomationTables()
         std::sort (clips.begin(), clips.end(),
                    [this] (int a, int b) { return song.playlist[(std::size_t) a].start < song.playlist[(std::size_t) b].start; });
 
+    liveAutomations.clear();
+    for (int a = 0; a < count; ++a)
+        if (automations[(std::size_t) a].isLive())
+            liveAutomations.push_back (a);
+
     channelVolumeAuto.assign (song.channels.size(), -1);
     channelPanAuto.assign (song.channels.size(), -1);
     mixerVolumeAuto.assign (song.mixer.size(), -1);
@@ -349,7 +354,7 @@ void RackState::buildAutomationTables()
     // a última automação de um mesmo alvo ganha
     for (int a = 0; a < count; ++a)
     {
-        if (automationClips[(std::size_t) a].empty())
+        if (automationClips[(std::size_t) a].empty() && ! automations[(std::size_t) a].isLive())
             continue;
 
         const auto& t = automations[(std::size_t) a].target;
@@ -523,6 +528,16 @@ float automationValueAt (const Song& song, const Automation& automation, const s
 void RackRenderer::updateAutomation (const RackState& state, double startTick) noexcept
 {
     const auto& song = state.song;
+
+    // controladores (fontes ao vivo): a saída do efeito no fim do bloco anterior, em qualquer modo
+    for (const auto a : state.liveAutomations)
+    {
+        const auto& automation = song.automations[(std::size_t) a];
+        const auto& src = automation.source;
+        if (src.track < (int) state.effects.size() && src.slot >= 0 && src.slot < (int) state.effects[(std::size_t) src.track].size()
+            && state.effects[(std::size_t) src.track][(std::size_t) src.slot] != nullptr)
+            automationValues[(std::size_t) a] = automation.mapLive (state.effects[(std::size_t) src.track][(std::size_t) src.slot]->controlOutput (src.output));
+    }
 
     // no modo pattern a Playlist não toca: os valores ficam como estavam
     if (song.mode != PlayMode::song)

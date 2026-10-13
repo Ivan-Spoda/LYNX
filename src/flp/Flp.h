@@ -169,6 +169,15 @@ struct AutomationLink
     ControlId target;
 };
 
+// Liga a saída de um controlador (Peak Controller num slot do mixer, Envelope Controller num canal...)
+// a um parâmetro (mesmo evento 0xE3, com a origem apontando para "parâmetro" >= 0x8000 do plugin;
+// REA_rodada14 §7). `source.param() - 0x8000` = número da saída.
+struct ControllerLink
+{
+    ControlId source;
+    ControlId target;
+};
+
 struct Note
 {
     std::uint32_t position = 0;  // em ticks do PPQ do arquivo
@@ -280,6 +289,7 @@ struct Project
     std::vector<MixerInsert> mixer;
     std::vector<ControlValue> controls;       // volumes, pans, níveis de envio...
     std::vector<AutomationLink> automationLinks;
+    std::vector<ControllerLink> controllerLinks;
 
     std::vector<std::string> warnings; // coisas ignoradas ou suspeitas, para diagnóstico
 

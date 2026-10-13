@@ -85,6 +85,9 @@ Atualizado em 2026-10-13.
   ataque/release; o slot de volume escolhido é amostrado), Frequency Splitter vira prateleiras no EQ
   paramétrico, Effector vira distorção/filtro/chorus/delay/reverb/largura conforme o algoritmo.
   Automações do FL seguem o slot certo e o mix (wet) do slot é automatizável.
+- **Links de controlador**: o Peak Controller do FL vira um efeito que mede o pico da trilha, e o link dele
+  vira uma automação "ao vivo" do alvo (lida a cada bloco): o *sidechain pumping* dos demos funciona.
+  Envelope/X-Y/Formula Controller ainda ficam de fora.
 - **Sytrus (REA rodada 11)**: estado zlib (inflate próprio no núcleo) com a matriz FM/RM, 10 unidades e
   articuladores; as 3 portadoras mais fortes viram os osciladores, FM forte vira onda mais rica +
   envelope de filtro, RM vira AM, o primeiro filtro ativo (com o envelope de cutoff) vira o filtro.

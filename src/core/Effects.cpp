@@ -899,6 +899,37 @@ private:
     float gain = 1.0f;
 };
 
+// Peak Controller: o som passa direto; um seguidor de pico (ataque imediato, queda pelo "decay")
+// vira as saídas de controle: 0 = base + quantidade·pico (com tensão), 1 = base, 2 = igual à 0.
+class PeakController final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override { sampleRate = sr; }
+    void reset() noexcept override { peak = 0.0f; }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        // decay: velocidade 5..128 do FL; ~0,3 s até −60 dB no padrão [HIP]
+        const auto speed = 5.0 + 123.0 * std::clamp ((double) p[3], 0.0, 1.0);
+        const auto fall = (float) std::exp (std::log (0.001) / (std::max (0.01, 20.0 / speed) * sampleRate));
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = std::max (std::abs (l[i]), std::abs (r[i]));
+            peak = x > peak ? x : peak * fall;
+        }
+        const auto tension = (double) (p[2] * 2.0f - 1.0f);
+        const auto shaped = std::pow ((double) std::clamp (peak, 0.0f, 1.0f), std::exp2 (-2.0 * tension));
+        base = p[0];
+        value = std::clamp (base + (p[1] * 2.0f - 1.0f) * (float) shaped, 0.0f, 1.0f);
+    }
+
+    float controlOutput (int output) const noexcept override { return output == 1 ? base : value; }
+
+private:
+    double sampleRate = 44100.0;
+    float peak = 0.0f, value = 0.0f, base = 0.0f;
+};
+
 class Utility final : public Effect
 {
 public:
@@ -994,6 +1025,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         info.params.push_back ({ "Release", 0.5f });    // ~43 ms
         return info;
     }();
+    static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.85f }, { "Tensão", 0.5f }, { "Decaimento", 0.48f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
         constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
@@ -1038,6 +1070,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::parametricEq: return parametric;
         case EffectKind::utility: return utility;
         case EffectKind::volumeGate: return volumeGate;
+        case EffectKind::peakController: return peakController;
     }
     return eq;
 }
@@ -1174,6 +1207,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.1f ms", param == gate::attackParam ? gate::attackMs (v) : gate::releaseMs (v));
             return text;
 
+        case EffectKind::peakController:
+            if (param == 1)
+                std::snprintf (text, sizeof (text), "%+.0f%%", (v * 2.0f - 1.0f) * 100.0f);
+            else if (param == 3)
+                std::snprintf (text, sizeof (text), "%.2f s", 20.0 / (5.0 + 123.0 * v));
+            else
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            return text;
+
         case EffectKind::plugin:
             break;
     }
@@ -1208,6 +1250,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::parametricEq: return std::make_unique<ParametricEq>();
         case EffectKind::utility: return std::make_unique<Utility>();
         case EffectKind::volumeGate: return std::make_unique<VolumeGate>();
+        case EffectKind::peakController: return std::make_unique<PeakController>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

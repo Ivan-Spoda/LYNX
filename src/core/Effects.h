@@ -73,6 +73,8 @@ public:
     virtual void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept = 0;
     // Parâmetro automatizado de plugin (os internos recebem os parâmetros em process()). 0..1.
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
+    // Saída de controle (efeitos "controladores", como o Peak Controller), 0..1. Lida a cada bloco.
+    virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
     // Posição da música no começo do bloco, em ticks (efeitos sincronizados ao compasso).
     virtual void setSongPosition (double /*ticks*/) noexcept {}
     // Latência que o efeito introduz (plugins), em samples. Para o PDC.

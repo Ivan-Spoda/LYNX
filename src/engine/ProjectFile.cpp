@@ -97,6 +97,7 @@ const char* effectId (EffectKind k)
         case EffectKind::parametricEq: return "peq";
         case EffectKind::utility: return "utility";
         case EffectKind::volumeGate: return "volumeGate";
+        case EffectKind::peakController: return "peakController";
     }
     return "eq";
 }
@@ -122,7 +123,7 @@ PluginRef pluginFromVar (const juce::var& v)
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController })
         if (id == effectId (k))
             return k;
 
@@ -396,6 +397,14 @@ juce::String toJson (const Song& song)
                                                  juce::roundToInt (pt.tension * 1000.0f) / 1000.0 });
 
         o->setProperty ("points", points);
+        if (a.isLive())
+        {
+            o->setProperty ("source", juce::Array<juce::var> { a.source.track, a.source.slot, a.source.output });
+            juce::Array<juce::var> curve;
+            for (auto v : a.curve)
+                curve.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+            o->setProperty ("curve", curve);
+        }
         automations.add (juce::var (o.release()));
     }
 
@@ -749,6 +758,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         automation.points.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) pt[0]),
                                                        juce::jlimit (0.0f, 1.0f, (float) (double) pt[1]),
                                                        pt.size() >= 3 ? juce::jlimit (-1.0f, 1.0f, (float) (double) pt[2]) : 0.0f });
+
+            if (const auto& source = a["source"]; source.isArray() && source.size() == 3)
+                automation.source = { (int) source[0], (int) source[1], (int) source[2] };
+            if (auto* curve = a["curve"].getArray())
+                for (const auto& v : *curve)
+                    automation.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));
 
             std::stable_sort (automation.points.begin(), automation.points.end(),
                               [] (const AutomationPoint& x, const AutomationPoint& y) { return x.tick < y.tick; });

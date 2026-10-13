@@ -727,8 +727,15 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
             case evAutomationLink:
                 for (std::size_t o = 0; o + 20 <= e.data.size(); o += 20)
                     if ((readLE<std::uint32_t> (e.data, o + 12) & 8) != 0) // 8 = clip de automação (4 = controle remoto)
-                        project.automationLinks.push_back ({ (int) (readLE<std::uint32_t> (e.data, o) >> 16),
-                                                             normalizeControlId (readLE<std::uint32_t> (e.data, o + 8)) });
+                    {
+                        const auto source = readLE<std::uint32_t> (e.data, o);
+                        const auto target = normalizeControlId (readLE<std::uint32_t> (e.data, o + 8));
+
+                        if ((source & 0xFFFFu) >= 0x8000u) // saída de um controlador, não um clip
+                            project.controllerLinks.push_back ({ normalizeControlId (source), target });
+                        else
+                            project.automationLinks.push_back ({ (int) (source >> 16), target });
+                    }
                 break;
 
             case evAutomationPoints:

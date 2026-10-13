@@ -338,6 +338,10 @@ void Song::swapEffectSlots (int track, int a, int b)
 
     std::swap (fx[(std::size_t) a], fx[(std::size_t) b]);
 
+    for (auto& automation : automations)
+        if (automation.source.track == track)
+            automation.source.slot = automation.source.slot == a ? b : automation.source.slot == b ? a : automation.source.slot;
+
     forEachTarget ([track, a, b] (AutomationTarget& t) {
         if ((t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix) && t.index == track)
             t.slot = t.slot == a ? b : t.slot == b ? a : t.slot;
@@ -351,6 +355,15 @@ void Song::removeEffectSlot (int track, int slot)
 
     auto& fx = mixer[(std::size_t) track].effects;
     fx.erase (fx.begin() + slot);
+
+    for (auto& automation : automations)
+        if (automation.source.track == track)
+        {
+            if (automation.source.slot == slot)
+                automation.source.track = -1, automation.target.kind = AutomationTargetKind::none; // a fonte sumiu
+            else if (automation.source.slot > slot)
+                --automation.source.slot;
+        }
 
     forEachTarget ([track, slot] (AutomationTarget& t) {
         if ((t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix) && t.index == track)
@@ -639,6 +652,17 @@ double Song::secondsForTicks (std::int64_t ticks) const
     }
 
     return seconds;
+}
+
+float Automation::mapLive (float v) const noexcept
+{
+    v = std::clamp (v, 0.0f, 1.0f);
+    if (curve.size() < 2)
+        return v;
+    const auto x = v * (float) (curve.size() - 1);
+    const auto i = std::min ((std::size_t) x, curve.size() - 2);
+    const auto f = x - (float) i;
+    return std::clamp (curve[i] + (curve[i + 1] - curve[i]) * f, 0.0f, 1.0f);
 }
 
 float Automation::valueAt (double tick) const noexcept

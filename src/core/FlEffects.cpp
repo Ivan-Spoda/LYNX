@@ -615,6 +615,18 @@ bool frequencySplitter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
+// Peak Controller (§7.3): base, quantidade, tensão e velocidade de queda
+bool peakController (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 40)
+        return false;
+    slot.params[0] = clamp01 (i32At (d, 0) / 65536.0);
+    slot.params[1] = clamp01 ((std::clamp (i32At (d, 4), -256, 256) / 256.0 + 1.0) / 2.0);
+    slot.params[2] = clamp01 ((std::clamp (i32At (d, 8), -128, 128) / 128.0 + 1.0) / 2.0);
+    slot.params[3] = clamp01 ((std::clamp (i32At (d, 12), 5, 128) - 5) / 123.0);
+    return true;
+}
+
 // Effector: o algoritmo escolhido vira o efeito interno parecido (escalas de X/Y aproximadas)
 std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
 {
@@ -739,6 +751,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         flangus (state, slot);
     else if (is ("Gross Beat"))
         grossBeat (state, slot);
+    else if (is ("Fruity Peak Controller"))
+        peakController (state, slot);
     else if (is ("Frequency Splitter"))
         frequencySplitter (state, slot);
     else if (is ("Fruity Phase Inverter"))

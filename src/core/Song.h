@@ -229,7 +229,8 @@ enum class EffectKind : std::uint8_t
     chorus,
     parametricEq, // 7 bandas (como o Parametric EQ 2 do FL)
     utility,      // ganho, pan e matriz estéreo (Balance, PanOMatic, Stereo Shaper do FL)
-    volumeGate    // ganho por passo sincronizado ao compasso (o volume do Gross Beat)
+    volumeGate,   // ganho por passo sincronizado ao compasso (o volume do Gross Beat)
+    peakController // não muda o som: mede o pico e serve de fonte para automações ao vivo (Peak Controller do FL)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte
@@ -369,6 +370,17 @@ struct Automation
     std::string name;
     AutomationTarget target;
     std::vector<AutomationPoint> points; // ordenados por tick (mantido por quem edita)
+
+    // Fonte ao vivo (link de controlador do FL, REA_rodada14 §7): o valor vem da saída `output` do efeito
+    // controlador no slot (track, slot), passado pela curva (pontos igualmente espaçados em 0..1; vazia =
+    // direto). Não usa clips nem pontos.
+    struct LiveSource
+    {
+        int track = -1, slot = 0, output = 0;
+    } source;
+    std::vector<float> curve;
+    bool isLive() const noexcept { return source.track >= 0; }
+    float mapLive (float v) const noexcept; // aplica a curva
 
     // Valor em `tick` (antes do primeiro ponto = primeiro valor; depois do último = último).
     float valueAt (double tick) const noexcept;
