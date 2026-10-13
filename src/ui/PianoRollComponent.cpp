@@ -123,6 +123,13 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     scaleBox.setSelectedId (1, juce::dontSendNotification);
     scaleBox.setTooltip (utf8 ("Destaca as notas de uma escala"));
 
+    slideButton.setClickingTogglesState (true);
+    slideButton.setTooltip (utf8 ("Notas novas são \"slide\": a nota que está soando desliza até elas (glide de 808)"));
+    slideButton.setWantsKeyboardFocus (false);
+    slideButton.setMouseClickGrabsKeyboardFocus (false);
+    slideButton.setColour (juce::TextButton::buttonOnColourId, theme::accentOrange.darker (0.2f));
+    addAndMakeVisible (slideButton);
+
     for (auto* box : { &chordBox, &scaleBox })
     {
         box->setWantsKeyboardFocus (false);
@@ -232,7 +239,8 @@ void PianoRollComponent::resized()
 {
     snapBox.setBounds (keyboardWidth + 4, 3, 130, toolbarHeight - 6);
     midiButton.setBounds (snapBox.getRight() + 6, 3, 50, toolbarHeight - 6);
-    chordBox.setBounds (midiButton.getRight() + 6, 3, 90, toolbarHeight - 6);
+    slideButton.setBounds (midiButton.getRight() + 6, 3, 50, toolbarHeight - 6);
+    chordBox.setBounds (slideButton.getRight() + 6, 3, 90, toolbarHeight - 6);
     scaleBox.setBounds (chordBox.getRight() + 6, 3, 170, toolbarHeight - 6);
     hintLabel.setBounds (scaleBox.getRight() + 10, 0, getWidth() - scaleBox.getRight() - 14, toolbarHeight);
     laneBox.setBounds (2, velocityArea().getY() + 4, keyboardWidth - 4, 20);
@@ -425,11 +433,19 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.setColour (selected ? juce::Colours::white : juce::Colours::black.withAlpha (0.5f));
             g.drawRoundedRectangle (r, 2.5f, selected ? 1.5f : 1.0f);
 
+            if (n.slide) // seta de slide no começo da nota
+            {
+                juce::Path arrow;
+                arrow.addTriangle (r.getX() + 2.0f, r.getBottom() - 2.0f, r.getX() + 2.0f, r.getY() + 2.0f, r.getX() + 9.0f, r.getCentreY());
+                g.setColour (juce::Colours::black.withAlpha (0.6f));
+                g.fillPath (arrow);
+            }
+
             if (r.getWidth() > 30)
             {
                 g.setColour (juce::Colours::black.withAlpha (0.7f));
                 g.setFont (juce::FontOptions (10.0f));
-                g.drawText (keyName (n.key), r.reduced (3, 0), juce::Justification::centredLeft, false);
+                g.drawText (keyName (n.key), r.reduced (n.slide ? 11 : 3, 0), juce::Justification::centredLeft, false);
             }
         }
 
@@ -771,6 +787,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     n.length = lastLength;
     n.key = yToKey (e.y);
     n.channel = engine.getSelectedChannel();
+    n.slide = slideButton.getToggleState();
 
     std::vector<Note> stamp;
     for (auto interval : chordIntervals())

@@ -1942,6 +1942,48 @@ TEST (effects_limiter_filter_distortion_chorus)
     }
 }
 
+TEST (slide_notes_glide_without_retrigger)
+{
+    // sampler com rampa: a velocidade de leitura dobra depois do slide de uma oitava
+    auto ramp = std::make_shared<lynx::SampleData>();
+    for (int i = 0; i < 96000; ++i)
+        ramp->left.push_back ((float) i / 96000.0f);
+    ramp->sampleRate = 48000.0;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+    inst->prepare (48000.0);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (2000), r (2000);
+    inst->render (l.data(), r.data(), 1000, 1.0f, 1.0f);
+    const auto stepBefore = l[999] - l[998];
+    inst->slideTo (72, 0.0f, 100.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    inst->render (l.data(), r.data(), 1000, 1.0f, 1.0f);
+    const auto stepAfter = l[999] - l[998];
+    CHECK (std::abs (stepAfter / stepBefore - 2.0f) < 0.01f);
+
+    // o sequenciador manda "slide" (sem off) para a nota slide
+    lynx::Pattern p;
+    lynx::Note base { 0, 960, 0, 48 };
+    lynx::Note glide { 480, 240, 0, 55 };
+    glide.slide = true;
+    p.notes = { base, glide };
+    lynx::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::schedulePatternLoop (p, p.effectiveLength (4), 0.0, 30000, tps, ev);
+    int ons = 0, offs = 0, slides = 0;
+    for (auto& e : ev)
+    {
+        ons += e.type == lynx::NoteEvent::Type::on;
+        offs += e.type == lynx::NoteEvent::Type::off;
+        if (e.type == lynx::NoteEvent::Type::slide)
+        {
+            ++slides;
+            CHECK (e.key == 55 && std::abs (e.slideSamples - 240.0f / (float) tps) < 1.0f);
+        }
+    }
+    CHECK (ons == 1 && offs == 1 && slides == 1);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

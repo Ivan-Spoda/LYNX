@@ -504,6 +504,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
             }
         }
+        else if (e.type == NoteEvent::Type::slide)
+        {
+            instrument.slideTo (e.key, e.cents, e.slideSamples);
+        }
         else
             instrument.noteOff (e.key);
     }

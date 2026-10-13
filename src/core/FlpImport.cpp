@@ -279,6 +279,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             note.pan = std::clamp ((n.pan - 64) / 64.0f, -1.0f, 1.0f);
             note.finePitch = (float) std::clamp ((int) n.finePitch - 120, -120, 120);
             note.muted = n.muted();
+            note.slide = n.slide();
             p.notes.push_back (note);
         }
 

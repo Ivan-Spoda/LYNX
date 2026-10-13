@@ -67,6 +67,15 @@ void schedulePatternLoop (const Pattern& pattern,
         on.pan = note.pan;
         on.cents = note.finePitch;
         const auto start = note.start + swingDelay (note.start, swing);
+
+        if (note.slide)
+        {
+            on.type = NoteEvent::Type::slide;
+            on.slideSamples = (float) ((double) std::max<std::int64_t> (note.length, 1) / tps);
+            emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
+            continue; // slide não tem "off": a nota original continua até o fim dela
+        }
+
         emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
 
         NoteEvent off = on;
@@ -153,6 +162,15 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.velocity = note.velocity;
             e.pan = note.pan;
             e.cents = note.finePitch;
+
+            if (note.slide)
+            {
+                e.type = NoteEvent::Type::slide;
+                e.slideSamples = (float) ((double) (off - on) / tps);
+                emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
+                continue;
+            }
+
             emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
 
             e.type = NoteEvent::Type::off;

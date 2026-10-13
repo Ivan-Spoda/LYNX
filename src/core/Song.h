@@ -130,6 +130,7 @@ struct Note
     float pan = 0.0f;         // -1..1 (por nota, como no FL)
     float finePitch = 0.0f;   // centésimos de semitom, -120..120
     bool muted = false;       // nota desligada (não toca, continua na pattern)
+    bool slide = false;       // desliza a nota que está soando até esta altura (sem reatacar), como no FL
 };
 
 // Atraso de swing para uma nota que começa em `start` (ticks na pattern): só as que caem

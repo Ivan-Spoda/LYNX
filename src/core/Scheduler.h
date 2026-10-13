@@ -12,7 +12,7 @@ namespace lynx
 {
 struct NoteEvent
 {
-    enum class Type : std::uint8_t { on, off };
+    enum class Type : std::uint8_t { on, off, slide }; // slide: desliza as notas soando até `key`
 
     int sampleOffset = 0;   // 0 .. numSamples-1 dentro do bloco
     Type type = Type::on;
@@ -22,6 +22,7 @@ struct NoteEvent
     double startSeconds = 0.0; // clips de áudio: de onde o sample começa a tocar
     float pan = 0.0f;          // -1..1, da nota
     float cents = 0.0f;        // afinação fina da nota
+    float slideSamples = 0.0f; // slide: duração do deslize
 };
 
 // Buffer de capacidade fixa. Eventos além da capacidade são descartados

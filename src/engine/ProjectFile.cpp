@@ -232,11 +232,12 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, afinação fina, mutada] só quando não são o padrão
-            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted)
+            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
                 note.add (juce::roundToInt (n.finePitch * 10.0f) / 10.0);
                 note.add (n.muted);
+                note.add (n.slide);
             }
 
             notes.add (note);
@@ -458,6 +459,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         note.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) n[5]);
                         note.finePitch = juce::jlimit (-120.0f, 120.0f, (float) (double) n[6]);
                         note.muted = (bool) n[7];
+                        note.slide = n.size() >= 9 && (bool) n[8];
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

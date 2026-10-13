@@ -97,6 +97,7 @@ private:
     juce::TextButton midiButton { "MIDI" };
     juce::ComboBox laneBox; // o que a faixa de baixo edita: velocity, pan ou afinação fina
     juce::ComboBox chordBox; // acorde criado a cada clique (como o "stamp" do FL)
+    juce::TextButton slideButton { "Slide" }; // notas novas deslizam (como a ferramenta slide do FL)
     juce::ComboBox scaleBox; // escala destacada nas linhas do teclado
     std::vector<int> chordIntervals() const;
     bool inScale (int key) const;

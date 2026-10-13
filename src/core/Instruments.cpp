@@ -197,6 +197,8 @@ inline void voicePan (float pan, float& left, float& right) noexcept
 struct SynthVoice
 {
     float panL = 1.0f, panR = 1.0f;
+    double glideRatio = 1.0;  // multiplica phaseDelta a cada sample durante um slide
+    int glideLeft = 0;
     bool active = false;
     bool releasing = false;
     int key = 0;
@@ -251,6 +253,19 @@ public:
         nextCents = cents;
     }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto target = midiToHz (key) / sampleRate * std::pow (2.0, cents / 1200.0);
+        const auto steps = std::max (1, (int) samples);
+
+        for (auto& v : voices)
+            if (v.active && ! v.releasing && v.phaseDelta > 0.0)
+            {
+                v.glideRatio = std::pow (target / v.phaseDelta, 1.0 / steps);
+                v.glideLeft = steps; // a voz mantém a chave original: o "off" dela é que encerra a nota
+            }
+    }
+
     void noteOff (int key) noexcept override
     {
         for (auto& v : voices)
@@ -277,6 +292,12 @@ public:
                     v.level *= release;
                 else if (v.level < 1.0f)
                     v.level = std::fmin (1.0f, v.level + attackStep);
+
+                if (v.glideLeft > 0)
+                {
+                    v.phaseDelta *= v.glideRatio;
+                    --v.glideLeft;
+                }
 
                 v.phase += v.phaseDelta;
                 v.phase -= std::floor (v.phase);
@@ -319,6 +340,8 @@ struct SamplerVoice
     float env = 1.0f;      // envelope de ataque/release
     float envStep = 0.0f;  // > 0 subindo (ataque), < 0 descendo (release)
     float panL = 1.0f, panR = 1.0f;
+    double glideRatio = 1.0;
+    int glideLeft = 0;
 };
 
 class SamplerInstrument final : public Instrument
@@ -404,6 +427,23 @@ public:
         nextCents = cents;
     }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        if (clipMode || sample == nullptr)
+            return;
+
+        const auto semitones = (key - 60) + (double) pitch.load() + cents / 100.0;
+        const auto steps = std::max (1, (int) samples);
+
+        for (auto& v : voices)
+            if (v.active && ! v.stolen && v.rate != 0.0)
+            {
+                const auto target = sample->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (v.rate < 0.0 ? -1.0 : 1.0);
+                v.glideRatio = std::pow (target / v.rate, 1.0 / steps);
+                v.glideLeft = steps;
+            }
+    }
+
     void noteOff (int key) noexcept override
     {
         if (clipMode)
@@ -463,6 +503,12 @@ public:
 
                 v.position += v.rate;
                 ++v.age;
+
+                if (v.glideLeft > 0)
+                {
+                    v.rate *= v.glideRatio;
+                    --v.glideLeft;
+                }
 
                 if (v.envStep != 0.0f)
                 {
