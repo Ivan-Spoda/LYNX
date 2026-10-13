@@ -190,7 +190,19 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope ligado: a nota acaba
         }
 
-        // time-stretch (só reamostrando, por enquanto): o sample dura TIME/192 tempos × MUL
+        // trecho do sample e start offset
+        if (std::isfinite (c.sampleStart) && std::isfinite (c.sampleEnd) && std::isfinite (c.startOffset))
+        {
+            const auto start = std::clamp (c.sampleStart, 0.0, 1.0), end = std::clamp (c.sampleEnd, 0.0, 1.0);
+
+            if (end > start)
+            {
+                def.sampler.regionStart = (float) std::clamp (start + std::clamp (c.startOffset, 0.0, 1.0) * (end - start), 0.0, 1.0);
+                def.sampler.regionEnd = (float) end;
+            }
+        }
+
+        // time-stretch: o sample dura TIME/192 tempos × MUL
         if (c.stretchTime > 0.0f)
         {
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));

@@ -116,6 +116,7 @@ struct Channel
     int stretchMul = 0;               // fator = 2^(v/10000)
     int stretchMode = 0;              // 0 resample, < 0 stretch em tempo real, >= 1 offline
     float stretchTime = 0.0f;         // já decodificado (1/192 de tempo)
+    double sampleStart = 0.0, sampleEnd = 1.0, startOffset = 0.0; // frações do sample
 
     // Segundos de um tempo do envelope (docs/analise/REA_rodada3.md §1.4). Com sincronia (flags & 1), em tempos.
     static double envelopeTime (int v) noexcept;

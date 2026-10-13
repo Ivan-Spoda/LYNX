@@ -423,6 +423,13 @@ Project parseProject (std::span<const std::uint8_t> file)
                     c.stretchTimeRaw = readLE<std::uint32_t> (e.data, 0x60);
                     c.stretchMul = readLE<std::int32_t> (e.data, 0x68);
                     c.stretchMode = readLE<std::int32_t> (e.data, 0x6C);
+
+                    if (e.data.size() >= 0x98)
+                    {
+                        c.sampleStart = readLE<double> (e.data, 0x80);
+                        c.sampleEnd = readLE<double> (e.data, 0x88);
+                        c.startOffset = readLE<double> (e.data, 0x90);
+                    }
                 }
                 break;
 

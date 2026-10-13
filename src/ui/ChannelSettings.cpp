@@ -21,6 +21,10 @@ public:
         setup (decay, decayLabel, "Decaimento", 0.0, 10.0, 0.001, " s");
         setup (sustain, sustainLabel, "Sustentação", 0.0, 1.0, 0.01, "");
         setup (stretch, stretchLabel, "Esticar", 0.0, 64.0, 0.25, " tempos");
+        setup (regionStart, regionStartLabel, "Início", 0.0, 1.0, 0.001, "");
+        setup (regionEnd, regionEndLabel, "Fim", 0.0, 1.0, 0.001, "");
+        regionEnd.setDoubleClickReturnValue (true, 1.0);
+        regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
         decay.setSkewFactorFromMidPoint (0.5);
         stretch.setTooltip (utf8 ("0 = desligado. Senão o sample inteiro dura este tanto de tempos e acompanha o BPM (reamostrando, como o modo Resample do FL)"));
@@ -45,7 +49,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (420, 300);
+        setSize (420, 420);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -79,6 +83,9 @@ public:
         }
 
         area.removeFromTop (8);
+        area.removeFromTop (6);
+        place (area.removeFromTop (110), { { &regionStart, &regionStartLabel }, { &regionEnd, &regionEndLabel } });
+        area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
         cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
     }
@@ -117,6 +124,8 @@ private:
             sustain.setValue (c->sampler.sustain, juce::dontSendNotification);
             stretch.setValue (c->sampler.stretchBeats, juce::dontSendNotification);
             keepPitch.setToggleState (c->sampler.keepPitch, juce::dontSendNotification);
+            regionStart.setValue (c->sampler.regionStart, juce::dontSendNotification);
+            regionEnd.setValue (c->sampler.regionEnd, juce::dontSendNotification);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -139,6 +148,8 @@ private:
         s.sustain = (float) sustain.getValue();
         s.stretchBeats = (float) stretch.getValue();
         s.keepPitch = keepPitch.getToggleState();
+        s.regionStart = (float) regionStart.getValue();
+        s.regionEnd = (float) regionEnd.getValue();
         s.release = (float) release.getValue();
         s.reverse = reverse.getToggleState();
         s.cut = cut.getToggleState();
@@ -167,8 +178,8 @@ private:
     AudioEngine& engine;
     int channel;
     bool updating = false;
-    juce::Slider pitch, attack, release, decay, sustain, stretch;
-    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel;
+    juce::Slider pitch, attack, release, decay, sustain, stretch, regionStart, regionEnd;
+    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel;
     juce::ToggleButton reverse, cut, keepPitch;
 };
 

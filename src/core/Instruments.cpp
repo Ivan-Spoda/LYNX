@@ -472,6 +472,7 @@ struct SamplerVoice
     float env = 1.0f;      // envelope
     float envStep = 0.0f;  // passo do ataque (> 0) ou do release (< 0)
     int stage = 1;         // 0 ataque, 1 decaimento, 2 sustentação, 3 release
+    double first = 0.0, last = 0.0; // trecho tocado
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
     int glideLeft = 0;
@@ -502,6 +503,8 @@ public:
         cut.store (s.cut);
         // com "manter altura" o sample já chega esticado (RackState): toca em velocidade normal
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
+        regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
+        regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
         bpm.store (std::max (1.0, songBpm));
     }
 
@@ -526,16 +529,19 @@ public:
             return;
 
         const auto backwards = ! clipMode && reverse.load();
-        const auto last = (double) (sample->frames() - 1);
+        const auto total = (double) (sample->frames() - 1);
+        // trecho do sample (o início vale como "start offset"); clips de áudio usam o arquivo todo
+        const auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
+        const auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
         const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate();
-        auto startFrame = std::max (0.0, startSeconds * sampleRate * base);
+        auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
 
         if (startFrame >= last)
             return;
 
         if (backwards)
-            startFrame = last - 1.0 - startFrame; // o par [index, index + 1] tem que caber
+            startFrame = last - 1.0 - (startFrame - first); // o par [index, index + 1] tem que caber
 
         if (! clipMode && cut.load())
             for (auto& v : voices)
@@ -569,6 +575,8 @@ public:
         target->key = key;
         target->velocity = velocity;
         target->position = startFrame;
+        target->first = first;
+        target->last = last;
         target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
@@ -646,7 +654,7 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
-                if (v.position >= last || v.position < 0.0 || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
+                if (v.position >= std::min (last, v.last) || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
                 {
                     v.active = false;
                     break;
@@ -722,6 +730,7 @@ private:
     std::array<SamplerVoice, 16> voices {};
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
+    std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     float nextPan = 0.0f, nextCents = 0.0f;
     std::atomic<bool> reverse { false }, cut { false };
 };

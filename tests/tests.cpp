@@ -2142,6 +2142,25 @@ TEST (time_stretch_keeps_pitch)
     }
 }
 
+TEST (sampler_region_start_and_end)
+{
+    auto ramp = std::make_shared<lynx::SampleData>();
+    for (int i = 0; i < 10000; ++i)
+        ramp->left.push_back ((float) i / 10000.0f);
+    ramp->sampleRate = 48000.0;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.regionStart = 0.25f;
+    c.sampler.regionEnd = 0.5f;
+    inst->configure (c, 120.0);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (6000), r (6000);
+    inst->render (l.data(), r.data(), 6000, 1.0f, 1.0f);
+    CHECK (std::abs (l[0] - 0.25f) < 0.001f);   // começa no início do trecho
+    CHECK (l[2400] > 0.48f && l[2600] == 0.0f); // e para no fim dele
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)
