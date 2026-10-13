@@ -1130,6 +1130,95 @@ private:
     std::array<float, 6> last {};
 };
 
+// Envelope rítmico (REA_rodada20 §1.2/§1.3): período em tempos, até 12 pontos (posição 0..1 no período, nível,
+// tensão); o valor entre dois pontos segue a curva do ponto de chegada. Parâmetros: 0 período/64 tempos,
+// 1 nº de pontos/12, depois 3 por ponto (posição, nível, (tensão + 1)/2).
+namespace rhythm
+{
+constexpr int maxPoints = 12;
+double curve (double x, double t) noexcept
+{
+    if (std::abs (t) < 1e-6)
+        return x;
+    const auto q = std::pow (1000001.0, std::abs (t)) - 1.0;
+    return t > 0.0 ? 1.0 - (std::pow (1.0 + q, 1.0 - x) - 1.0) / q : (std::pow (1.0 + q, x) - 1.0) / q;
+}
+
+double valueAt (const EffectParams& p, double u) noexcept
+{
+    const auto count = std::clamp ((int) std::lround (p[1] * maxPoints), 0, maxPoints);
+    if (count == 0)
+        return 1.0;
+    auto prevX = 0.0, prevY = (double) p[3];
+    for (int k = 0; k < count; ++k)
+    {
+        const auto x = (double) p[(std::size_t) (2 + 3 * k)], y = (double) p[(std::size_t) (3 + 3 * k)];
+        if (u < x)
+        {
+            const auto f = x > prevX ? (u - prevX) / (x - prevX) : 1.0;
+            return prevY + (y - prevY) * curve (f, 2.0 * p[(std::size_t) (4 + 3 * k)] - 1.0);
+        }
+        prevX = x;
+        prevY = y;
+    }
+    return prevY;
+}
+} // namespace rhythm
+
+class RhythmGain final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override { sampleRate = sr; }
+    void reset() noexcept override {}
+    void setSongPosition (double ticks) noexcept override { beats = ticks / 960.0; }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        const auto period = std::max (1e-3, (double) p[0] * 64.0);
+        const auto step = std::max (bpm, 1.0) / 60.0 / sampleRate;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto t = beats + step * i;
+            const auto g = (float) rhythm::valueAt (p, (t - std::floor (t / period) * period) / period);
+            l[i] *= g;
+            r[i] *= g;
+        }
+    }
+
+private:
+    double sampleRate = 44100.0, beats = 0.0;
+};
+
+// Auto-pan (REA_rodada20 §1.5): triângulo (+1 em φ = 0, −1 em 0,5) com fase 0,75 + deslocamento + tempos/período.
+// Parâmetros: 0 período/64 tempos, 1 profundidade ((a + 1)/2, a = deslocamento máximo do pan), 2 deslocamento de
+// fase (ciclos), 3 pan fixo ((p + 1)/2). Lei do pan: o balanço do utilitário (a do FL não foi decodificada).
+class AutoPan final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override { sampleRate = sr; }
+    void reset() noexcept override {}
+    void setSongPosition (double ticks) noexcept override { beats = ticks / 960.0; }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        const auto period = std::max (1e-3, (double) p[0] * 64.0);
+        const auto depth = 2.0 * p[1] - 1.0, fixed = 2.0 * p[3] - 1.0;
+        const auto step = std::max (bpm, 1.0) / 60.0 / sampleRate / period;
+        auto phase = 0.75 + p[2] + beats / period;
+        for (int i = 0; i < n; ++i, phase += step)
+        {
+            const auto f = phase - std::floor (phase);
+            const auto w = f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f;
+            const auto pan = std::clamp (fixed + depth * w, -1.0, 1.0);
+            l[i] *= (float) (pan > 0.0 ? 1.0 - pan : 1.0);
+            r[i] *= (float) (pan < 0.0 ? 1.0 + pan : 1.0);
+        }
+    }
+
+private:
+    double sampleRate = 44100.0, beats = 0.0;
+};
+
 class LoFi final : public Effect
 {
 public:
@@ -1506,6 +1595,17 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
     static const EffectInfo crossoverInfo { "Crossover", { { "Passa-altas", 0.0f }, { "Corte PA", 0.3f }, { "Incl. PA", 3.0f / 7.0f },
                                                            { "Passa-baixas", 0.0f }, { "Corte PB", 0.7f }, { "Incl. PB", 3.0f / 7.0f } } };
+    static const EffectInfo rhythmInfo = [] {
+        EffectInfo info { "Envelope rítmico", { { "Período", 1.0f / 64.0f }, { "Pontos", 0.0f } } };
+        static const char* names[] = { "P1 pos", "P1 nível", "P1 tensão", "P2 pos", "P2 nível", "P2 tensão", "P3 pos", "P3 nível", "P3 tensão",
+                                       "P4 pos", "P4 nível", "P4 tensão", "P5 pos", "P5 nível", "P5 tensão", "P6 pos", "P6 nível", "P6 tensão",
+                                       "P7 pos", "P7 nível", "P7 tensão", "P8 pos", "P8 nível", "P8 tensão", "P9 pos", "P9 nível", "P9 tensão",
+                                       "P10 pos", "P10 nível", "P10 tensão", "P11 pos", "P11 nível", "P11 tensão", "P12 pos", "P12 nível", "P12 tensão" };
+        for (int i = 0; i < 36; ++i)
+            info.params.push_back ({ names[i], i % 3 == 2 ? 0.5f : 1.0f });
+        return info;
+    }();
+    static const EffectInfo autoPanInfo { "Auto-pan", { { "Período", 1.0f / 64.0f }, { "Profund.", 0.75f }, { "Fase", 0.0f }, { "Pan", 0.5f } } };
     static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
     static const EffectInfo effectorInfo { "Effector", { { "Tipo", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
@@ -1563,6 +1663,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::lofi: return lofiInfo;
         case EffectKind::effector: return effectorInfo;
         case EffectKind::crossover: return crossoverInfo;
+        case EffectKind::rhythmGain: return rhythmInfo;
+        case EffectKind::autoPan: return autoPanInfo;
     }
     return eq;
 }
@@ -1746,6 +1848,18 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::effector:
             return effector::formatParam (param, v, bpm);
 
+        case EffectKind::rhythmGain:
+        case EffectKind::autoPan:
+            if (param == 0)
+                std::snprintf (text, sizeof (text), "%.3g tempos", v * 64.0f);
+            else if (kind == EffectKind::rhythmGain && param == 1)
+                std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * rhythm::maxPoints));
+            else if (kind == EffectKind::autoPan && (param == 1 || param == 3))
+                std::snprintf (text, sizeof (text), "%+.0f%%", (2.0f * v - 1.0f) * 100.0f);
+            else
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            return text;
+
         case EffectKind::crossover:
             if (param == 0 || param == 3)
                 return v > 0.5f ? "ligado" : "desligado";
@@ -1802,6 +1916,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::lofi: return std::make_unique<LoFi>();
         case EffectKind::effector: return effector::make();
         case EffectKind::crossover: return std::make_unique<Crossover>();
+        case EffectKind::rhythmGain: return std::make_unique<RhythmGain>();
+        case EffectKind::autoPan: return std::make_unique<AutoPan>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

@@ -129,7 +129,9 @@ e 19 verificaram as hipóteses (decompilação + manual oficial) e o código foi
 - Kepler: LFO1 (taxa, vibrato e corte em picos ±, atraso). BassDrum: Peak `1 + 100x³·s⁴`. Sakura: ADSR, Tune,
   Mix, Hi-Cut. BooBass: EQ de 3 bandas. Drumpad: Pitch e Mallet Amplitude.
 - Love Philter: base do articulador, Mod X/Y → volume (com automação/links), tipos 4/5 (largura em oitavas),
-  7 (passa-tudo) e 11 (Mango).
+  7 (passa-tudo) e 11 (Mango); envelopes de pattern no volume (efeito "Envelope rítmico", em tempos, em loop,
+  travado na música, curva de tensão) e LFO de pan (efeito "Auto-pan", triângulo travado na música).
+- Patcher: qualquer grafo dos demos reduzido a série/paralelo (contêineres aninhados), cabos com a classe certa.
 
 O que **ainda não tem confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
 - Harmor: ressonância (curva por harmônica sem equivalente); com o envelope de volume desligado o FL mantém a
@@ -142,7 +144,8 @@ O que **ainda não tem confirmação** e por isso é uma aproximação declarada
   físico não é reproduzido.
 - Toxic: o filtro do FL tem 4 polos (o do LYNX, 2); ressonância sem escala; envelope do filtro linear no LYNX.
 - Kepler: chorus (o synth do LYNX não tem chorus); "Range" ×10 só no Exo; BPM Sync do LFO.
-- Love Philter: Mango em Hz é inferido do polo; envelopes/LFOs ligados; Mod X com várias unidades só no
+- Love Philter: Mango em Hz é inferido do polo; envelope/LFO de corte e ressonância não aplicados; curva de
+  envelope tipo 5 tratada como simples; lei do pan e tensão do LFO de pan; Mod X com várias unidades só no
   valor fixo.
 - Pitcher: sem equivalente estático (a correção depende do detector de altura): passa reto.
 - Squeeze, Vintage Phaser: aproximações.

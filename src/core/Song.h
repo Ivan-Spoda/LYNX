@@ -247,7 +247,9 @@ enum class EffectKind : std::uint8_t
     parallel,     // contêiner: ramos de efeitos em paralelo somados (o Patcher do FL); ver EffectSlot::branches
     lofi,         // redução de taxa (segura amostras) e de bits (o Lo-fi do Effector do FL)
     effector,     // o Effector do FL: 12 algoritmos com X/Y, LFO e Mod Rate (core/Effector.h)
-    crossover     // banda de um divisor de frequências (Frequency Splitter do FL): passa-altas e/ou passa-baixas Linkwitz-Riley
+    crossover,    // banda de um divisor de frequências (Frequency Splitter do FL): passa-altas e/ou passa-baixas Linkwitz-Riley
+    rhythmGain,   // ganho que segue uma curva de pontos em tempos, em loop, travada na música (envelopes do Love Philter)
+    autoPan       // pan movido por um LFO triangular travado na música (LFO de pan do Love Philter)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

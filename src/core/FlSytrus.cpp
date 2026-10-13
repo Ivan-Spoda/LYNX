@@ -47,6 +47,8 @@ struct Reader
 struct Envelope
 {
     std::vector<std::pair<double, double>> points; // (Δt, nível)
+    std::vector<float> tensions;                   // por ponto (curva do ponto de chegada)
+    std::vector<int> curves;                       // tipo de curva por ponto (0 = single curve)
     int flags = 0;
     bool on = false;
     int sustain = -1;
@@ -94,9 +96,13 @@ bool readEnvelope (Reader& r, Envelope& e)
         return false;
 
     e.points.clear();
+    e.tensions.clear();
+    e.curves.clear();
     for (int k = 0; k < n; ++k)
     {
         double x = 0.0, y = 0.0;
+        float tension = 0.0f;
+        int curve = 0;
         if (version < 2)
         {
             x = kind == 6 ? r.get<double>() : (double) r.get<float>();
@@ -107,8 +113,12 @@ bool readEnvelope (Reader& r, Envelope& e)
         {
             x = r.get<double>();
             y = r.get<double>();
-            r.raw (8);
+            tension = r.get<float>();
+            curve = r.u8();
+            r.raw (3);
         }
+        e.tensions.push_back (std::isfinite (tension) ? std::clamp (tension, -1.0f, 1.0f) : 0.0f);
+        e.curves.push_back (curve);
         if (r.failed)
             return false;
         e.points.emplace_back (std::isfinite (x) ? std::clamp (x, 0.0, 1000.0) : 0.0, std::isfinite (y) ? std::clamp (y, 0.0, 1.0) : 0.0);
@@ -1183,11 +1193,20 @@ std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t
             r.i32(); // versão
             a.base = r.get<float>();
             a.envDepth = r.get<float>();
-            r.get<float>(); // profundidade do LFO
+            a.lfoDepth = r.get<float>();
+            // só o envelope do pattern escolhido (global 5, PatNum 1…10) toca (REA_rodada20 §1.2)
+            const auto patNum = std::clamp (out.globals[5], 1, 10) - 1;
             for (int pattern = 0; pattern < 10; ++pattern)
             {
                 if (! readEnvelope (r, e))
                     return std::nullopt;
+                if (pattern == patNum && e.on)
+                {
+                    a.pattern.on = true;
+                    a.pattern.tempo = (e.flags & 1) != 0;
+                    for (std::size_t k = 0; k < e.points.size(); ++k)
+                        a.pattern.points.push_back ({ e.points[k].first, e.points[k].second, e.tensions[k], e.curves[k] });
+                }
                 r.raw (16);
             }
             const auto lfoVersionAt = r.pos + 4;
@@ -1195,7 +1214,24 @@ std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t
                 return std::nullopt;
             std::int32_t lfoVersion = 0;
             std::memcpy (&lfoVersion, r.data + lfoVersionAt, 4);
+            if (e.on)
+            {
+                a.lfo.on = true;
+                a.lfo.tempo = (e.flags & 1) != 0;
+                a.lfo.frozen = (e.flags & 8) != 0;
+                a.lfo.amplitude = e.points.empty() ? 0.5f : (float) (e.points.front().second - 0.5);
+            }
+            const auto knobsAt = r.pos;
             r.raw (lfoVersion >= 3 ? 20 : 16);
+            if (! r.failed && e.on)
+            {
+                std::int32_t k[5] {};
+                std::memcpy (k, r.data + knobsAt, lfoVersion >= 3 ? 20 : 16);
+                a.lfo.speed = k[0];
+                a.lfo.skew = k[2];
+                a.lfo.width = k[3];
+                a.lfo.phase = (std::uint32_t) k[4];
+            }
             for (int m = 0; m < 3; ++m) // X, Y, seguidor de envelope
             {
                 if (! readEnvelope (r, e))

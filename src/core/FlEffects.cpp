@@ -1236,12 +1236,62 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             utility.params[0] = utilityGainValue (volumeFactor (unit, modX, modY));
             chain.push_back (utility);
         }
-        if (const auto pan = std::clamp (unit.params[8], -128, 128) / 128.0; std::abs (pan) > 1e-3)
+        // envelope do pattern no volume (modo 0: ganho × y·d_E), em tempos e em loop (REA_rodada20 §1.2–1.4)
+        if (const auto& env = vol.pattern; env.on)
+        {
+            double period = 0.0;
+            for (std::size_t k = 1; k < env.points.size(); ++k)
+                period += env.points[k].dt;
+            const auto points = env.points.size();
+            if (! env.tempo || period <= 1e-6 || points > 12 || points == 0)
+                out.notes.push_back ("Love Philter: envelope de volume fora do formato suportado");
+            else
+            {
+                auto gate = makeEffectSlot (EffectKind::rhythmGain);
+                gate.params[0] = (float) std::min (1.0, period / 64.0);
+                gate.params[1] = (float) points / 12.0f;
+                double x = 0.0;
+                for (std::size_t k = 0; k < points; ++k)
+                {
+                    if (k > 0)
+                        x += env.points[k].dt;
+                    gate.params[2 + 3 * k] = (float) clamp01 (x / period);
+                    gate.params[3 + 3 * k] = (float) clamp01 (env.points[k].y * std::clamp ((double) vol.envDepth, 0.0, 1.0));
+                    gate.params[4 + 3 * k] = (float) clamp01 ((env.points[k].tension + 1.0) / 2.0);
+                    if (env.points[k].curve != 0 && k > 0)
+                        out.notes.push_back ("Love Philter: curva de envelope de tipo " + std::to_string (env.points[k].curve) + " tratada como simples");
+                }
+                chain.push_back (gate);
+            }
+        }
+
+        const auto pan = std::clamp (unit.params[8], -128, 128) / 128.0;
+        if (const auto& lfo = unit.articulators[0].lfo; lfo.on && ! lfo.frozen && lfo.tempo)
+        {
+            // pan = PAN/128 + 2·A·d_L·W(φ), período 625/(10001^(S/65536) − 1) tempos (REA_rodada20 §1.5)
+            auto autoPan = makeEffectSlot (EffectKind::autoPan);
+            const auto period = 625.0 / (std::pow (10001.0, std::clamp (lfo.speed, 1, 65536) / 65536.0) - 1.0);
+            const auto depth = std::clamp (2.0 * lfo.amplitude * unit.articulators[0].lfoDepth, -1.0, 1.0);
+            autoPan.params[0] = (float) std::clamp (period / 64.0, 1e-4, 1.0);
+            autoPan.params[1] = (float) clamp01 (depth * 0.5 + 0.5);
+            autoPan.params[2] = (float) (lfo.phase / 4294967296.0);
+            autoPan.params[3] = (float) clamp01 (pan * 0.5 + 0.5);
+            chain.push_back (autoPan);
+            if (lfo.skew != 0 || lfo.width != 0)
+                out.notes.push_back ("Love Philter: forma do LFO de pan aproximada por triângulo");
+        }
+        else if (std::abs (pan) > 1e-3)
         {
             auto utility = makeEffectSlot (EffectKind::utility);
             utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
             chain.push_back (utility);
         }
+        for (const int a : { 2, 3 })
+            if (unit.articulators[(std::size_t) a].pattern.on || unit.articulators[(std::size_t) a].lfo.on)
+            {
+                out.notes.push_back ("Love Philter: envelope/LFO de corte ou ressonância não aplicado");
+                break;
+            }
         return chain;
     };
 

@@ -4622,3 +4622,38 @@ TEST (crossover_linkwitz_riley_sums_flat)
         peak = std::max (peak, std::abs (l[i]));
     CHECK (peak < 1e-4f);
 }
+
+TEST (rhythm_gain_and_autopan)
+{
+    // gate de 1 tempo: 1 → 0 em 0,5 tempo (linear) → 1 no fim; a 120 BPM 1 tempo = 24000 amostras a 48 kHz
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::rhythmGain);
+    slot.params[0] = 1.0f / 64.0f;
+    slot.params[1] = 3.0f / 12.0f;
+    const float pts[3][3] = { { 0.0f, 1.0f, 0.5f }, { 0.5f, 0.0f, 0.5f }, { 1.0f, 1.0f, 0.5f } };
+    for (int k = 0; k < 3; ++k)
+        for (int j = 0; j < 3; ++j)
+            slot.params[(std::size_t) (2 + 3 * k + j)] = pts[k][j];
+    auto fx = lynx::makeEffect (lynx::EffectKind::rhythmGain);
+    fx->prepare (48000.0);
+    fx->setSongPosition (960.0 * 2.0); // tempo 2: fase 0
+    std::vector<float> l (24000, 1.0f), r (24000, 1.0f);
+    fx->process (l.data(), r.data(), 24000, slot.params, 120.0);
+    CHECK (std::abs (l[0] - 1.0f) < 1e-3f);
+    CHECK (std::abs (l[6000] - 0.5f) < 1e-3f);
+    CHECK (l[12000] < 1e-3f);
+    CHECK (std::abs (l[18000] - 0.5f) < 1e-3f);
+    // tensão positiva: muda depressa no começo do segmento
+    CHECK (lynx::effectInfo (lynx::EffectKind::rhythmGain).params.size() == 38);
+
+    // auto-pan: período de 1 tempo, profundidade total; fase inicial 0,75 -> W = 0 subindo (pan no centro)
+    auto pan = lynx::makeEffectSlot (lynx::EffectKind::autoPan);
+    pan.params[0] = 1.0f / 64.0f;
+    pan.params[1] = 1.0f;
+    auto ap = lynx::makeEffect (lynx::EffectKind::autoPan);
+    ap->prepare (48000.0);
+    ap->setSongPosition (0.0);
+    std::vector<float> a (24000, 1.0f), b (24000, 1.0f);
+    ap->process (a.data(), b.data(), 24000, pan.params, 120.0);
+    CHECK (std::abs (a[0] - 1.0f) < 1e-3f && std::abs (b[0] - 1.0f) < 1e-3f);
+    CHECK (a[6000] < 0.01f && std::abs (b[6000] - 1.0f) < 1e-3f); // ¼ de ciclo depois: todo à direita
+}

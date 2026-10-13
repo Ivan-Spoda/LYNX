@@ -70,8 +70,30 @@ struct LovePhilterMap
 struct LovePhilterArticulator
 {
     float base = 1.0f;
-    float envDepth = 0.0f;
+    float envDepth = 0.0f, lfoDepth = 0.0f;
     LovePhilterMap mapX, mapY;
+
+    // envelope do pattern escolhido (REA_rodada20 §1.2/§1.3): Δt em tempos com `tempo`, curva do ponto de chegada
+    struct Point
+    {
+        double dt, y;
+        float tension;
+        int curve;
+    };
+    struct
+    {
+        bool on = false, tempo = false;
+        std::vector<Point> points;
+    } pattern;
+
+    // LFO (§1.5): período 625/(10001^(speed/65536) − 1) tempos; saída amplitude·onda, amplitude = y − 0,5
+    struct
+    {
+        bool on = false, tempo = false, frozen = false;
+        float amplitude = 0.5f;
+        std::int32_t speed = 0, skew = 0, width = 0;
+        std::uint32_t phase = 0; // deslocamento em 2^−32 ciclos
+    } lfo;
 };
 struct LovePhilterUnit
 {

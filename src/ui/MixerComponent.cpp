@@ -679,7 +679,7 @@ constexpr int slotHeight = 24;
 constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
-                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover };
+                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan };
 } // namespace
 
 EffectsPanel::EffectsPanel (AudioEngine& e)
@@ -719,13 +719,25 @@ juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
     return { 8, panelHeader + slot * slotHeight, getWidth() - 16, slotHeight - 3 };
 }
 
+namespace
+{
+// parâmetros mostrados como knob: no envelope rítmico, só os dos pontos usados
+int shownParams (const EffectSlot& slot)
+{
+    const auto all = (int) effectInfo (slot.kind).params.size();
+    if (slot.kind == EffectKind::rhythmGain)
+        return std::min (all, 2 + 3 * (int) std::lround (slot.params[1] * 12.0f));
+    return all;
+}
+} // namespace
+
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
     auto top = panelHeader + maxEffectSlots * slotHeight + 40;
     // muitos parâmetros (Effector: 12): 4 colunas e linhas mais baixas para caber na altura
     int count = 0;
     if (const auto* s = slots(); ! gateSelected() && s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size())
-        count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
+        count = shownParams ((*s)[(std::size_t) selectedSlot]);
     const auto columns = count > 9 ? 4 : 3;
     const auto w = (getWidth() - 16) / columns;
     const auto rows = juce::jmax (1, (count + columns - 1) / columns);
@@ -805,7 +817,7 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
     if ((*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq)
         return -1; // editado na janela própria
 
-    const auto count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
+    const auto count = shownParams ((*s)[(std::size_t) selectedSlot]);
 
     for (int i = gateSelected() ? 32 : 0; i < count; ++i)
         if (knobBounds (i).contains (p))
@@ -950,7 +962,7 @@ void EffectsPanel::paint (juce::Graphics& g)
                     juce::Justification::centredLeft);
     }
 
-    for (int p = gate ? 32 : 0; p < (int) info.params.size(); ++p)
+    for (int p = gate ? 32 : 0; p < shownParams (slot); ++p)
     {
         const auto r = knobBounds (p);
         const auto value = slot.params[(std::size_t) p];
