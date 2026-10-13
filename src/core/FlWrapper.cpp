@@ -103,7 +103,14 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
             case 0x36: out.name = text (p, n, utf8); break;
             case 0x37: out.path = text (p, n, utf8); break;
             case 0x35: out.state.assign (p, p + n); break;
-            default: break; // portas MIDI, opções do wrapper, pinos: o LYNX não precisa
+            case 0x01: // portas MIDI de entrada e saída (REA_rodada16 §1.2)
+                if (n >= 8)
+                {
+                    std::memcpy (&out.midiInPort, p, 4);
+                    std::memcpy (&out.midiOutPort, p + 4, 4);
+                }
+                break;
+            default: break; // opções do wrapper, pinos: o LYNX não precisa
         }
     });
 

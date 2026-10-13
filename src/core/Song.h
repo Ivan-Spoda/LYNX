@@ -51,6 +51,7 @@ struct ForeignPlugin
     bool hasClassId = false;
     std::string clapId, name, path;           // path: binário na máquina que salvou
     std::vector<std::uint8_t> state;          // registro 0x35 cru (formato depende de `format`)
+    int midiInPort = -1, midiOutPort = -1;     // portas MIDI do wrapper (registro 0x01; −1 = nenhuma)
 
     bool operator== (const ForeignPlugin&) const = default;
 };

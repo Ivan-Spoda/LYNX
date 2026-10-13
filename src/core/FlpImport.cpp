@@ -848,7 +848,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.approximated[c.pluginName];
             else if (plugin == "fruity envelope controller" && def.instrument == InstrumentKind::controller)
                 ++r.converted[c.pluginName];
-            else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)
+            else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
+                     && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)
         }
 
@@ -1409,6 +1410,38 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     for (int i = 0; i < (int) song.patterns.size(); ++i)
         if (song.patterns[(std::size_t) i].notes.size() > song.patterns[(std::size_t) song.currentPattern].notes.size())
             song.currentPattern = i;
+
+    // MIDI Out (REA_rodada16 §1): o canal não toca som; as notas dele vão para os plugins (Fruity
+    // Wrapper) que escutam a mesma porta MIDI
+    for (const auto& c : project.channels)
+    {
+        if (lowercase (c.pluginName) != "midi out" || c.pluginState.size() < 28)
+            continue;
+        const auto from = channelMap.find (c.index);
+        if (from == channelMap.end())
+            continue;
+        std::int32_t port = -1;
+        std::memcpy (&port, c.pluginState.data() + 24, 4);
+        auto& source = song.channels[(std::size_t) from->second];
+        source.muted = true;
+        for (int target = 0; target < (int) song.channels.size(); ++target)
+        {
+            const auto& t = song.channels[(std::size_t) target];
+            if (target == from->second || port < 0 || t.plugin.foreign.midiInPort != port)
+                continue;
+            for (auto& pattern : song.patterns)
+            {
+                const auto count = pattern.notes.size();
+                for (std::size_t n = 0; n < count; ++n)
+                    if (pattern.notes[n].channel == from->second)
+                    {
+                        auto copy = pattern.notes[n];
+                        copy.channel = target;
+                        pattern.notes.push_back (copy);
+                    }
+            }
+        }
+    }
 
     // kits do FPC: um canal por pad (do último para o primeiro, para os índices não andarem)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)

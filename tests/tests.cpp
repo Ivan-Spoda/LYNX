@@ -586,6 +586,53 @@ TEST (fl_controller_constant_outputs)
     CHECK (! lynx::controllerConstantOutput ("Control Surface", cs, 0).has_value());
 }
 
+TEST (flp_midi_out_notes_reach_wrapper_on_same_port)
+{
+    auto record = [] (std::vector<std::uint8_t>& out, std::uint32_t id, std::vector<std::uint8_t> body) {
+        const auto size = (std::uint64_t) body.size();
+        out.insert (out.end(), reinterpret_cast<const std::uint8_t*> (&id), reinterpret_cast<const std::uint8_t*> (&id) + 4);
+        out.insert (out.end(), reinterpret_cast<const std::uint8_t*> (&size), reinterpret_cast<const std::uint8_t*> (&size) + 8);
+        out.insert (out.end(), body.begin(), body.end());
+    };
+    auto i32s = [] (std::vector<std::int32_t> v) {
+        std::vector<std::uint8_t> b (v.size() * 4);
+        std::memcpy (b.data(), v.data(), b.size());
+        return b;
+    };
+
+    flp::Project p;
+    flp::Channel midiOut;
+    midiOut.index = 0;
+    midiOut.type = flp::ChannelType::native;
+    midiOut.pluginName = "MIDI Out";
+    midiOut.pluginState = i32s ({ 7, 0, -1, -1, -1, 0, 3, 0 }); // canal 1, porta 3 (@24)
+    flp::Channel wrapper;
+    wrapper.index = 1;
+    wrapper.type = flp::ChannelType::native;
+    wrapper.pluginName = "Fruity Wrapper";
+    wrapper.pluginState = i32s ({ 9 });
+    record (wrapper.pluginState, 0x32, i32s ({ 7 }));      // VST3
+    record (wrapper.pluginState, 0x01, i32s ({ 3, -1, 0, 0, 0 })); // porta de entrada 3
+    p.channels = { midiOut, wrapper };
+    flp::Pattern pattern;
+    pattern.index = 1;
+    flp::Note note;
+    note.channel = 0;
+    note.key = 64;
+    note.length = 96;
+    pattern.notes.push_back (note);
+    p.patterns.push_back (pattern);
+
+    const auto song = lynx::importFlp (p);
+    CHECK (song.channels.size() == 2 && song.channels[0].muted);
+    CHECK (song.channels[1].plugin.foreign.midiInPort == 3);
+    int toWrapper = 0;
+    for (const auto& pat : song.patterns)
+        for (const auto& n : pat.notes)
+            toWrapper += n.channel == 1 && n.key == 64;
+    CHECK (toWrapper == 1);
+}
+
 TEST (flp_effect_automation_follows_slots_and_params)
 {
     // trilha 1: slot 0 com um efeito sem equivalente (sai), slot 2 com o Parametric EQ 2
