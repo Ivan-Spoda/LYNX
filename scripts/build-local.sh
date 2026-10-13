@@ -20,5 +20,6 @@ $CXX $FLAGS $CORE tests/tests.cpp -o build-local/lynx_tests 2> >(grep -v 'glibc 
 $CXX $FLAGS src/flp/Flp.cpp tools/flpdump.cpp -o build-local/flpdump 2> >(grep -v 'glibc version' >&2)
 
 $CXX $FLAGS $CORE tools/renderwav.cpp -o build-local/renderwav 2> >(grep -v 'glibc version' >&2)
+$CXX $FLAGS $CORE tools/comparewav.cpp -o build-local/comparewav 2> >(grep -v 'glibc version' >&2)
 
 ./build-local/lynx_tests "$@"
