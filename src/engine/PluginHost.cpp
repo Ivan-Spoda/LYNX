@@ -1,5 +1,7 @@
 #include "engine/PluginHost.h"
 
+#include "engine/ClapFormat.h"
+
 namespace lynx
 {
 namespace
@@ -140,7 +142,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 PluginHost::PluginHost (bool keep)
     : persistent (keep)
 {
-    formats.addDefaultFormats();
+    addPluginFormats (formats);
 
     if (persistent)
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
@@ -160,6 +162,8 @@ juce::FileSearchPath PluginHost::defaultSearchPath()
 
     // Mesmo lugar que o JUCE/Steinberg usam por padrão no Windows.
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/VST3"));
+    paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
+    paths.add (juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("Programs/Common/CLAP"));
     paths.add (settingsFolder().getChildFile ("Plugins"));
     return paths;
 }
@@ -232,7 +236,7 @@ int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<boo
 int PluginHost::scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output)
 {
     juce::AudioPluginFormatManager manager;
-    manager.addDefaultFormats();
+    addPluginFormats (manager);
     juce::OwnedArray<juce::PluginDescription> found;
 
     for (auto* format : manager.getFormats())
