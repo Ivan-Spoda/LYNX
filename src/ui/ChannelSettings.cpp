@@ -495,7 +495,8 @@ private:
             updating = false;
 
             if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-                w->setName (utf8 ("Ajustes do sampler - ") + juce::String::fromUTF8 (c->name.c_str()));
+                w->setName (utf8 ("Ajustes do sampler - ") + juce::String::fromUTF8 (c->name.c_str())
+                            + (c->zones.empty() ? juce::String() : " (multi-sample: " + juce::String ((int) c->zones.size()) + " zonas)"));
         }
     }
 
