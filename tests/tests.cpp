@@ -256,6 +256,67 @@ TEST (flp_parses_project_model)
     CHECK (p.warnings.empty());
 }
 
+TEST (flp_fuzz_corrupted_files_do_not_crash)
+{
+    if (realFlpDir.empty())
+        return;
+
+    // alguns .flp reais, corrompidos de várias formas: o parser pode recusar (flp::Error), mas
+    // nunca travar, ler fora do buffer ou produzir um Song com índices inválidos
+    std::vector<std::vector<std::uint8_t>> sources;
+    for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
+        if (entry.path().extension() == ".flp" && sources.size() < 6 && std::filesystem::file_size (entry.path()) < 3'000'000)
+        {
+            std::ifstream in (entry.path(), std::ios::binary);
+            sources.emplace_back ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        }
+
+    std::uint32_t seed = 2024;
+    auto rnd = [&] (std::uint32_t n) { seed = seed * 1664525u + 1013904223u; return n == 0 ? 0u : (seed >> 8) % n; };
+    int parsed = 0, rejected = 0;
+
+    for (int round = 0; round < 240 && ! sources.empty(); ++round)
+    {
+        auto bytes = sources[(std::size_t) rnd ((std::uint32_t) sources.size())];
+
+        switch (round % 4)
+        {
+            case 0: bytes.resize (rnd ((std::uint32_t) bytes.size())); break;                          // truncado
+            case 1: for (int k = 0; k < 20; ++k) bytes[(std::size_t) rnd ((std::uint32_t) bytes.size())] ^= (std::uint8_t) (1 + rnd (255)); break;
+            case 2: // tamanho de evento absurdo
+                for (int k = 0; k < 5; ++k)
+                    bytes[(std::size_t) rnd ((std::uint32_t) bytes.size())] = 0xFF;
+                break;
+            default: // bloco embaralhado
+            {
+                const auto a = rnd ((std::uint32_t) bytes.size()), b = rnd ((std::uint32_t) bytes.size());
+                std::reverse (bytes.begin() + std::min (a, b), bytes.begin() + std::max (a, b));
+                break;
+            }
+        }
+
+        try
+        {
+            const auto project = flp::parseProject (bytes);
+            const auto song = lynx::importFlp (project);
+            ++parsed;
+
+            for (const auto& p : song.patterns)
+                for (const auto& n : p.notes)
+                    CHECK (n.channel >= 0 && n.channel < (int) song.channels.size());
+            for (const auto& c : song.playlist)
+                CHECK (c.kind != lynx::ClipKind::pattern || (c.pattern >= 0 && c.pattern < (int) song.patterns.size()));
+        }
+        catch (const flp::Error&)
+        {
+            ++rejected;
+        }
+    }
+
+    std::printf ("  fuzz: %d importados, %d recusados\n", parsed, rejected);
+    CHECK (parsed + rejected == 240);
+}
+
 TEST (flp_real_files)
 {
     if (realFlpDir.empty())
