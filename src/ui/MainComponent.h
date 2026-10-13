@@ -45,6 +45,8 @@ private:
     void openPianoRoll();
     void toggleMode();
     void refreshModeButton();
+    void showPatternMenu();
+    void renamePattern (int index);
 
     AudioEngine& engine;
 
@@ -56,6 +58,7 @@ private:
     juce::Slider bpmSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
     juce::ComboBox patternBox;
     juce::TextButton newPatternButton { "+" };
+    juce::TextButton patternMenuButton { "..." };
     juce::TextButton settingsButton { "Audio..." };
     juce::Label positionLabel;
     juce::Label cpuLabel;

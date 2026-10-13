@@ -119,6 +119,9 @@ juce::String toJson (const Song& song)
         if (p.lengthTicks > 0)
             o->setProperty ("length", (juce::int64) p.lengthTicks);
 
+        if (p.colour != 0)
+            o->setProperty ("colour", juce::String::toHexString ((juce::int64) (p.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+
         juce::Array<juce::var> notes;
 
         for (const auto& n : p.notes)
@@ -228,6 +231,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             Pattern pattern;
             pattern.name = p["name"].toString().toStdString();
             pattern.lengthTicks = (juce::int64) p.getProperty ("length", 0);
+
+            if (p.hasProperty ("colour"))
+                pattern.colour = 0xFF000000u | (std::uint32_t) p["colour"].toString().getHexValue32();
 
             if (auto* notes = p["notes"].getArray())
                 for (const auto& n : *notes)

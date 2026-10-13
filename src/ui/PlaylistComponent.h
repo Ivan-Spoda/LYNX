@@ -49,7 +49,7 @@ public:
     static constexpr int trackHeight = 38;
     static constexpr int scrollBarSize = 12;
 
-    static juce::Colour patternColour (int pattern);
+    static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
     enum class Drag { none, move, resize, erase, seek };

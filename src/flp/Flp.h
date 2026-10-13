@@ -99,6 +99,7 @@ struct Pattern
 {
     int index = 0;
     std::string name;
+    std::optional<std::uint32_t> colour; // 0xRRGGBB (no arquivo vem como 0x00BBGGRR)
     std::vector<Note> notes;
 };
 

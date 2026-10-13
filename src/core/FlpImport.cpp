@@ -121,6 +121,9 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         Pattern p;
         p.name = src.name.empty() ? "Pattern " + std::to_string (src.index) : src.name;
 
+        if (src.colour && *src.colour != 0x485156) // o cinza padrão do FL vira cor automática
+            p.colour = 0xFF000000u | *src.colour;
+
         for (const auto& n : src.notes)
         {
             const auto it = channelMap.find (n.channel);

@@ -26,8 +26,11 @@ PlaylistComponent::~PlaylistComponent()
     engine.removeChangeListener (this);
 }
 
-juce::Colour PlaylistComponent::patternColour (int pattern)
+juce::Colour PlaylistComponent::patternColour (const Song& song, int pattern)
 {
+    if (pattern >= 0 && pattern < (int) song.patterns.size() && song.patterns[(std::size_t) pattern].colour != 0)
+        return juce::Colour (song.patterns[(std::size_t) pattern].colour);
+
     // matizes espalhados pela razão áurea: patterns vizinhas ficam com cores bem diferentes
     const auto hue = std::fmod (0.08f + (float) pattern * 0.618034f, 1.0f);
     return juce::Colour::fromHSV (hue, 0.45f, 0.75f, 1.0f);
@@ -155,7 +158,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 continue;
             }
 
-            const auto colour = patternColour (c.pattern);
+            const auto colour = patternColour (song, c.pattern);
             const auto selected = c.pattern == song.currentPattern;
 
             g.setColour (colour.withAlpha (0.85f));

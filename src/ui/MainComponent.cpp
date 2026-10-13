@@ -81,6 +81,9 @@ MainComponent::MainComponent (AudioEngine& e)
         });
     };
 
+    patternMenuButton.setTooltip ("Pattern: renomear, cor, clonar, comprimento, remover");
+    patternMenuButton.onClick = [this] { showPatternMenu(); };
+
     positionLabel.setFont (juce::FontOptions (20.0f));
     positionLabel.setJustificationType (juce::Justification::centred);
     cpuLabel.setJustificationType (juce::Justification::centredRight);
@@ -102,7 +105,7 @@ MainComponent::MainComponent (AudioEngine& e)
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
-                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton,
+                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
         addAndMakeVisible (c);
@@ -110,7 +113,7 @@ MainComponent::MainComponent (AudioEngine& e)
     }
 
     for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
-                                                             &modeButton, &metronomeButton, &newPatternButton, &settingsButton })
+                                                             &modeButton, &metronomeButton, &newPatternButton, &patternMenuButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
 
     engine.addChangeListener (this);
@@ -156,6 +159,7 @@ void MainComponent::resized()
     place (bpmSlider, 150, 12);
     place (patternBox, 170);
     place (newPatternButton, 30);
+    place (patternMenuButton, 30);
 
     settingsButton.setBounds (toolbar.removeFromRight (80));
     cpuLabel.setBounds (toolbar.removeFromRight (90));
@@ -329,6 +333,86 @@ void MainComponent::refreshToolbar()
     patternBox.setSelectedItemIndex (song.currentPattern, juce::dontSendNotification);
     bpmSlider.setValue (song.bpm, juce::dontSendNotification);
     refreshModeButton();
+}
+
+void MainComponent::showPatternMenu()
+{
+    const auto& song = engine.getSong();
+    const auto index = song.currentPattern;
+    const auto& pattern = song.patterns[(std::size_t) index];
+
+    juce::PopupMenu colours;
+    colours.addItem (utf8 ("Automática"), true, pattern.colour == 0,
+                     [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].colour = 0; }); });
+    colours.addSeparator();
+
+    // paleta no espírito da do FL
+    static const std::uint32_t palette[] = { 0xff485156, 0xffa14547, 0xffa16f45, 0xffa19d45, 0xff6ca145, 0xff45a175,
+                                             0xff45a1a0, 0xff457ca1, 0xff4f45a1, 0xff8a5096, 0xffa1458a, 0xff6b3866 };
+
+    for (auto c : palette)
+    {
+        juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+        juce::Graphics (swatch).fillAll (juce::Colour (c));
+        juce::PopupMenu::Item item;
+        item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+        item.image = std::make_unique<juce::DrawableImage> (swatch);
+        item.isTicked = pattern.colour == c;
+        item.action = [this, index, c] { engine.editSong ([index, c] (Song& s) { s.patterns[(std::size_t) index].colour = c; }); };
+        colours.addItem (std::move (item));
+    }
+
+    juce::PopupMenu lengths;
+    lengths.addItem (utf8 ("Automático (pelas notas)"), true, pattern.lengthTicks == 0,
+                     [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = 0; }); });
+
+    for (int bars : { 1, 2, 4, 8, 16, 32 })
+    {
+        const auto ticks = (std::int64_t) bars * ppq * juce::jmax (1, song.beatsPerBar);
+        lengths.addItem (juce::String (bars) + (bars == 1 ? " compasso" : " compassos"), true, pattern.lengthTicks == ticks,
+                         [this, index, ticks] { engine.editSong ([index, ticks] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = ticks; }); });
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (juce::String::fromUTF8 (pattern.name.c_str()));
+    menu.addItem ("Renomear...", [this, index] { renamePattern (index); });
+    menu.addSubMenu ("Cor", colours);
+    menu.addSubMenu ("Comprimento", lengths);
+    menu.addItem ("Clonar", [this, index] {
+        engine.editSong ([index] (Song& s) {
+            auto copy = s.patterns[(std::size_t) index];
+            copy.name += " (cópia)";
+            s.patterns.insert (s.patterns.begin() + index + 1, std::move (copy));
+
+            // os clips que apontam para patterns depois da nova andam uma posição
+            for (auto& c : s.playlist)
+                if (c.kind == ClipKind::pattern && c.pattern > index)
+                    ++c.pattern;
+
+            s.currentPattern = index + 1;
+        });
+    });
+    menu.addSeparator();
+    menu.addItem ("Remover pattern", song.patterns.size() > 1, false,
+                  [this, index] { engine.editSong ([index] (Song& s) { s.removePattern (index); }); });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patternMenuButton));
+}
+
+void MainComponent::renamePattern (int index)
+{
+    auto* window = new juce::AlertWindow ("Renomear pattern", {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) index].name.c_str()));
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
+                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
+
+                                 if (result == 1 && ! name.empty() && index < (int) engine.getSong().patterns.size())
+                                     engine.editSong ([index, name] (Song& s) { s.patterns[(std::size_t) index].name = name; });
+                             }),
+                             true);
 }
 
 void MainComponent::refreshModeButton()

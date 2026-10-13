@@ -194,6 +194,7 @@ TEST (flp_parses_project_model)
     b.u8 (0x9C); b.u32 (174500);
     b.utf16 (0xC2, u"Título");
     b.u8 (0x41); b.u16 (3);
+    b.u8 (0x96); b.u32 (0x00A14547); // BGR no arquivo
     auto notes = noteRecord (96, 1, 48, 64, 100);
     auto n2 = noteRecord (0, 0, 0, 60, 128);
     notes.insert (notes.end(), n2.begin(), n2.end());
@@ -229,6 +230,7 @@ TEST (flp_parses_project_model)
     CHECK (p.channels[0].name == "Kick" && p.channels[0].mixerTrack == 5);
     CHECK (p.channels[1].type == flp::ChannelType::instrument && p.channels[1].pluginName == "FLEX");
     CHECK (p.patterns.size() == 1 && p.patterns[0].index == 3);
+    CHECK (p.patterns[0].colour && *p.patterns[0].colour == 0x4745A1);
     CHECK (p.patterns[0].notes.size() == 2 && p.patterns[0].notes[0].position == 0); // ordenadas
     CHECK (p.patterns[0].notes[1].key == 64 && p.patterns[0].notes[1].length == 48);
     CHECK (p.arrangements.size() == 1 && p.arrangements[0].items.size() == 1);

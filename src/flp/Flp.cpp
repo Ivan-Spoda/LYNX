@@ -17,6 +17,7 @@ enum : std::uint32_t
     evTempoCoarse = 0x42,       // legado: BPM inteiro
     evArrangement = 0x63,
     evChannelMixerTrack = 0x68,    // u16
+    evPatternColour = 0x96,     // u32 0x00BBGGRR; 0x565148 = cinza padrão
     evTempo = 0x9C,             // BPM * 1000
     evChannelNameOld = 0xC0,    // FL <= 11
     evPatternName = 0xC1,
@@ -336,6 +337,11 @@ Project parseProject (std::span<const std::uint8_t> file)
             case evPatternName:
                 if (currentPattern >= 0)
                     pattern().name = text (e);
+                break;
+
+            case evPatternColour:
+                if (currentPattern >= 0)
+                    pattern().colour = ((e.value & 0xFF) << 16) | (e.value & 0xFF00) | ((e.value >> 16) & 0xFF);
                 break;
 
             case evPatternNotes:

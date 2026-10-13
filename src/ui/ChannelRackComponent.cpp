@@ -250,7 +250,21 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
             return;
 
         case Area::mute:
-            engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].muted = ! s.channels[(std::size_t) row].muted; });
+            if (e.mods.isPopupMenu() || e.mods.isCtrlDown())
+            {
+                // solo como no FL: só este canal toca; repetir no canal que já está sozinho libera todos
+                engine.editSong ([row] (Song& s) {
+                    const auto alone = ! s.channels[(std::size_t) row].muted
+                                       && std::all_of (s.channels.begin(), s.channels.end(), [&] (const ChannelDef& c) {
+                                              return &c == &s.channels[(std::size_t) row] || c.muted;
+                                          });
+
+                    for (std::size_t i = 0; i < s.channels.size(); ++i)
+                        s.channels[i].muted = alone ? false : i != (std::size_t) row;
+                });
+            }
+            else
+                engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].muted = ! s.channels[(std::size_t) row].muted; });
             return;
 
         case Area::pan:

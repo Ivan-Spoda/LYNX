@@ -95,6 +95,7 @@ struct Pattern
     std::string name;
     std::vector<Note> notes;  // ordenadas por start (mantido por sortNotes)
     std::int64_t lengthTicks = 0; // 0 = automático (arredonda para compassos)
+    std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automática (pelo índice)
 
     void sortNotes();
     std::int64_t effectiveLength (int beatsPerBar) const noexcept;
