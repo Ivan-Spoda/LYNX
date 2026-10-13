@@ -829,25 +829,31 @@ public:
             sample = zones.front().sample;
     }
 
-    // a zona da tecla/velocity; sem nenhuma que cubra, a de nota-raiz mais próxima
-    const LoadedZone* zoneFor (int key, float velocity) const noexcept
+    // a zona da tecla/velocity; várias cobrindo a mesma nota se revezam (round-robin, como as
+    // camadas em ciclo do FPC); sem nenhuma que cubra, a de nota-raiz mais próxima
+    const LoadedZone* zoneFor (int key, float velocity) noexcept
     {
         if (zones.empty())
             return nullptr;
 
         const auto vel = (int) std::lround (std::clamp (velocity, 0.0f, 1.0f) * 127.0f);
         const LoadedZone* nearest = nullptr;
+        const LoadedZone* matches[16] {};
+        int matchCount = 0;
 
         for (const auto& z : zones)
         {
-            if (key >= z.zone.lowKey && key <= z.zone.highKey && vel >= z.zone.lowVelocity && vel <= z.zone.highVelocity)
-                return &z;
+            if (key >= z.zone.lowKey && key <= z.zone.highKey && vel >= z.zone.lowVelocity && vel <= z.zone.highVelocity && matchCount < 16)
+                matches[matchCount++] = &z;
 
             if (nearest == nullptr || std::abs (z.zone.rootKey - key) < std::abs (nearest->zone.rootKey - key))
                 nearest = &z;
         }
 
-        return nearest;
+        if (matchCount == 0)
+            return nearest;
+
+        return matches[(roundRobin++) % (unsigned) matchCount];
     }
 
     void prepare (double sr) noexcept override
@@ -1258,6 +1264,7 @@ private:
     std::atomic<bool> porta { false };
     std::atomic<float> portaBeats { 0.125f };
     std::vector<LoadedZone> zones; // multi-sample (fixo depois de criado)
+    unsigned roundRobin = 0;        // vez da próxima camada sobreposta
     double lastRate = 0.0; // velocidade de leitura da última nota (de onde o porta parte)
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos

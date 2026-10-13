@@ -1288,6 +1288,24 @@ TEST (zoned_sampler_picks_zone_by_key_and_velocity)
     CHECK (std::abs (soft.first - 880) < 6);
     const auto hard = play (81, 0.95f);  // velocity alta: camada forte
     CHECK (hard.second > soft.second * 2.0f);
+
+    // camadas sobrepostas se revezam: duas zonas iguais de níveis diferentes, notas alternam
+    auto rr = lynx::makeZonedSampler ({ { { "a.wav", 60 }, sine (440.0, 0.2f) }, { { "b.wav", 60 }, sine (440.0, 0.8f) } });
+    rr->prepare (48000.0);
+    rr->configure (lynx::ChannelDef {}, 120.0);
+    float peaks[2] {};
+    for (int k = 0; k < 2; ++k)
+    {
+        rr->allNotesOff();
+        std::vector<float> l (4800), r (4800);
+        rr->render (l.data(), r.data(), 2000, 1.0f, 1.0f);
+        std::fill (l.begin(), l.end(), 0.0f);
+        rr->noteOn (60, 1.0f);
+        rr->render (l.data(), r.data(), 4800, 1.0f, 1.0f);
+        for (auto v : l)
+            peaks[k] = std::max (peaks[k], std::abs (v));
+    }
+    CHECK (std::abs (peaks[0] - peaks[1]) > 0.3f);
 }
 
 TEST (zoned_sampler_loops_while_held)
