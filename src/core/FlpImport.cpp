@@ -653,6 +653,10 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 adopt();
             else if (name == "fruit kick" && synthFromFruitKick (c.pluginState, fromPlugin))
                 adopt();
+            else if (name == "minisynth" && synthFromMiniSynth (c.pluginState, song.bpm, fromPlugin))
+                adopt();
+            else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
+                adopt();
         }
 
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)

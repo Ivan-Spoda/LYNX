@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 namespace lynx
 {
@@ -189,6 +190,189 @@ bool synthFromFruitKick (const std::vector<std::uint8_t>& d, SynthSettings& synt
     s.sustain = 0.0f;
     s.release = 0.02f;
     s.pitchEnv = { (float) sweep, 0.0f, 0.0f, (float) std::clamp (4.6 * pitchTau, 0.005, 2.0), 0.0f, 0.02f };
+    synth = s;
+    return true;
+}
+bool synthFromMiniSynth (const std::vector<std::uint8_t>& d, double bpm, SynthSettings& synth)
+{
+    // "SSLF" ... chunk "DATA": "0rev" + 43 floats 0..1
+    if (d.size() < 16 || std::memcmp (d.data(), "SSLF", 4) != 0)
+        return false;
+
+    std::size_t pos = std::string::npos;
+    for (std::size_t i = 8; i + 8 + 4 + 43 * 4 <= d.size(); ++i)
+        if (std::memcmp (d.data() + i, "DATA", 4) == 0 && std::memcmp (d.data() + i + 8, "0rev", 4) == 0)
+        {
+            pos = i + 12;
+            break;
+        }
+
+    if (pos == std::string::npos)
+        return false;
+
+    float v[43] {};
+    std::memcpy (v, d.data() + pos, sizeof (v));
+    for (auto& f : v)
+        f = std::isfinite (f) ? std::clamp (f, 0.0f, 1.0f) : 0.0f;
+
+    SynthSettings s;
+    const auto kind = std::clamp ((int) (9.0f * v[5]), 0, 9);
+    const auto m = v[6];
+    auto& o = s.osc;
+    o = { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+
+    switch (kind)
+    {
+        case 1: o[0].level = o[1].level = 0.5f; o[1] = { Waveform::saw, 0, 10.0f * (0.2f + m), 0.5f }; break;            // serra + serra
+        case 2: o[0].wave = Waveform::square; break;                                                                    // pulso (sem PWM)
+        case 3: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = { Waveform::saw, 0, 10.0f * m, 0.5f }; break;           // quadrada + serra
+        case 4: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = { Waveform::square, 0, 10.0f * (0.2f + m), 0.5f }; break;
+        case 5: // supersaw: 3 serras com o espalhamento de ±5 %·m
+        {
+            const auto cents = (float) std::min (100.0, 1200.0 * std::log2 (1.0 + 0.05 * std::max (0.1f, m)));
+            o[0].level = o[1].level = o[2].level = 1.0f / 3.0f;
+            o[1] = { Waveform::saw, 0, cents, 1.0f / 3.0f };
+            o[2] = { Waveform::saw, 0, -cents, 1.0f / 3.0f };
+            break;
+        }
+        case 8:
+        case 9: // serras espalhadas em oitavas
+            o[0] = { Waveform::saw, 0, 0.0f, 0.4f };
+            o[1] = { Waveform::saw, kind == 8 ? -1 : 0, 0.0f, 0.3f, kind == 8 ? 0 : 7 };
+            o[2] = { Waveform::saw, 1, 0.0f, 0.3f };
+            break;
+        default: break; // serra (as variações de fase soam parecidas)
+    }
+
+    if (v[7] > 0.01f && o[2].level == 0.0f) // ruído
+        o[2] = { Waveform::noise, 0, 0.0f, std::min (1.0f, v[7] * v[7]) };
+
+    const auto transpose = (int) ((v[1] - 0.5f) * 24.0f);
+    for (auto& osc : o)
+        osc.semitones = std::clamp (osc.semitones + transpose, -11, 11);
+
+    // filtro ladder 24 dB: fc = 2^(4 + 10,3·F) Hz
+    s.cutoff = (float) std::clamp (std::pow (2.0, 4.0 + 10.3 * v[8]), 20.0, 20000.0);
+    s.resonance = std::clamp (0.99f * v[9], 0.0f, 1.0f);
+
+    // envelopes (amostras a 44,1 kHz): k = 0,95p + 0,05
+    auto k = [] (float p) { return 0.95 * p + 0.05; };
+    auto attack = [&] (float p) { return p < 0.001f ? 0.0005 : 0.288 * 500.0 * std::pow (k (p), 4.0) / 0.0002 / 44100.0; };
+    auto tau = [&] (float p) { return 50.0 * std::pow (k (p), 4.0) / 0.0002 / 44100.0; };
+    s.attack = (float) std::min (5.0, attack (v[21]));
+    s.sustain = v[23];
+    s.decay = (float) std::min (10.0, 6.9 * tau (v[22]));
+    s.release = (float) std::min (10.0, 6.9 * tau ((float) (0.95 * k (v[24]) + 0.05)) / 10.0);
+
+    if (const auto amount = 10.0f * (2.0f * v[16] - 1.0f); std::abs (amount) > 0.05f)
+        s.filterEnv = { amount, (float) std::min (5.0, attack (v[12])), 0.0f, (float) std::min (10.0, 4.6 * tau (v[13])), v[14],
+                        (float) std::min (10.0, 4.6 * tau (v[15])) };
+
+    // LFO: rótulos 1/4 … 16 bars (duração em tempos)
+    constexpr float lfoBeats[] = { 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 16.0f, 32.0f, 64.0f };
+    const auto amount = 2.0f * v[20] - 1.0f;
+    const auto dest = std::clamp ((int) (2.0f * v[18]), 0, 2);
+
+    if (std::abs (amount) > 0.02f && dest < 2)
+    {
+        const auto shape = std::clamp ((int) (2.0f * v[17]), 0, 2) == 0 ? 0 : (std::clamp ((int) (2.0f * v[17]), 0, 2) == 1 ? 1 : 2);
+        const auto period = lfoBeats[std::clamp ((int) (11.0f * v[19]), 0, 11)];
+        if (dest == 0)
+            s.lfo[lfoCutoff] = { 4.0f * amount, period, true, shape, 0.0f, 0.0f };
+        else
+            s.lfo[lfoPitch] = { 12.0f * amount, period, true, shape, 0.0f, 0.0f };
+    }
+
+    const auto voices = std::clamp ((int) (2.0f * v[0]), 0, 2);
+    s.mono = voices >= 1;
+    s.porta = voices == 2 || v[2] > 0.01f;
+    s.portaBeats = (float) std::clamp (v[2] * 0.5 * std::max (1.0, bpm) / 60.0, 0.01, 2.0);
+    synth = s;
+    return true;
+}
+
+bool synthFromDX10 (const std::vector<std::uint8_t>& d, SynthSettings& synth)
+{
+    const auto version = i32At (d, 0);
+
+    if (version < 1 || version > 2 || d.size() < 4 + 22 * 4)
+        return false;
+
+    auto p = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), 0, 65536) / 65536.0; };
+    const auto octave = std::clamp (i32At (d, 4 + 4 * 21), -3, 3);
+
+    // razão do modulador: inteira + fina
+    auto ratio = [&] (int coarse, int fine) {
+        auto r = std::floor (40.1 * p (coarse) * p (coarse));
+        const auto f = p (fine);
+        if (f < 0.5)
+            r += 0.2 * f * f;
+        else
+        {
+            const auto step = (int) std::lround (8.9 * f);
+            r += step == 4 ? 0.25 : step == 5 ? 1.0 / 3.0 : step == 6 ? 0.5 : step == 7 ? 2.0 / 3.0 : step >= 8 ? 0.75 : 0.0;
+        }
+        return std::max (0.125, r);
+    };
+    const auto r = ratio (3, 4);
+    const auto index = p (5);
+
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::sine, std::clamp (octave + 1, -3, 3), 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+
+    // o brilho do FM vira o osc 2: serra (razão 1), quadrada (2), seno no harmônico (inteira) ou desafinado
+    if (index > 0.01)
+    {
+        auto& o2 = s.osc[1];
+        const auto level = (float) std::min (1.0, 2.0 * index) * 0.6f;
+        const auto nearest = std::round (r);
+
+        if (std::abs (r - 1.0) < 0.05)
+            o2 = { Waveform::saw, s.osc[0].octave, 0.0f, level };
+        else if (std::abs (r - 2.0) < 0.05)
+            o2 = { Waveform::square, s.osc[0].octave, 0.0f, level };
+        else
+        {
+            o2 = { Waveform::sine, s.osc[0].octave, 0.0f, level * 0.6f };
+            const auto semis = 12.0 * std::log2 (std::abs (r - nearest) < 0.05 ? nearest : r);
+            transpose (o2, semis);
+            if (std::abs (r - nearest) >= 0.05) // razão não inteira: um resto em centésimos
+                o2.detune = (float) std::clamp ((semis - std::round (semis)) * 100.0, -50.0, 50.0);
+        }
+        s.osc[0].level = 1.0f - 0.4f * std::min (1.0f, level);
+    }
+
+    if (const auto thru = 0.25 * p (12) * p (12); thru > 0.01) // o modulador direto na saída
+    {
+        s.osc[2] = { Waveform::sine, s.osc[0].octave, 0.0f, (float) std::min (0.5, thru * 2.0) };
+        transpose (s.osc[2], 12.0 * std::log2 (r));
+    }
+
+    // amplitude
+    s.attack = (float) std::min (5.0, 3.0 * std::exp (8.0 * p (0) - 8.0));
+    if (p (1) > 0.98)
+    {
+        s.decay = 0.0f;
+        s.sustain = 1.0f;
+    }
+    else
+    {
+        s.decay = (float) std::min (10.0, 6.9 * std::exp (8.0 * p (1) - 5.0));
+        s.sustain = 0.0f;
+    }
+    s.release = (float) std::min (10.0, 6.9 * std::exp (5.0 * p (2) - 5.0));
+
+    // o índice que decai (init -> sustain) vira um envelope de filtro
+    s.cutoff = 1500.0f;
+    if (index > 0.01)
+        s.filterEnv = { (float) (4.0 * index), 0.0f, 0.0f, (float) std::min (10.0, 4.6 * std::exp (7.0 * p (6) - 6.0)),
+                        (float) std::clamp (p (7) / std::max (0.01, index), 0.0, 1.0), (float) std::min (10.0, 4.6 * std::exp (8.0 * p (8) - 5.0)) };
+    else
+        s.cutoff = 20000.0f;
+
+    if (p (10) > 0.01) // vibrato
+        s.lfo[lfoPitch] = { (float) (0.3 * p (10)), (float) (1.0 / std::max (0.1, 25.0 * p (13) * p (13))), false, 0, 0.0f, 0.0f };
+
     synth = s;
     return true;
 }

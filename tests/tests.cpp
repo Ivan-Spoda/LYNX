@@ -356,6 +356,19 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromFruitKick (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
+        if (lynx::synthFromDX10 (blob, synth))
+            CHECK (std::isfinite (synth.decay) && std::isfinite (synth.release) && std::isfinite (synth.osc[1].level));
+        if (blob.size() >= 4 && round % 5 == 0) // cabeçalho do MiniSynth com o resto lixo
+        {
+            std::memcpy (blob.data(), "SSLF", 4);
+            if (blob.size() > 220)
+            {
+                std::memcpy (blob.data() + 40, "DATA", 4);
+                std::memcpy (blob.data() + 48, "0rev", 4);
+            }
+        }
+        if (lynx::synthFromMiniSynth (blob, 120.0, synth))
+            CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.decay) && std::isfinite (synth.attack));
 
         lynx::ForeignPlugin foreign;
         lynx::parseFlWrapper (blob, foreign);

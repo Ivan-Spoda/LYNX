@@ -17,4 +17,12 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& state, double bpm, Synt
 
 // Fruit Kick: seno com envelope de afinação e decaimento de amplitude.
 bool synthFromFruitKick (const std::vector<std::uint8_t>& state, SynthSettings& synth);
+
+// MiniSynth (do FL Studio Mobile; contêiner "SSLF" com 43 floats): tipo de oscilador, filtro
+// ladder, envelopes, LFO, mono.
+bool synthFromMiniSynth (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth);
+
+// Fruity DX10 (FM de 2 operadores): sem FM no LYNX, a portadora vira um seno, o modulador escolhe a
+// forma/harmônico do osc 2 e o índice que decai vira um envelope de filtro.
+bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth);
 } // namespace lynx
