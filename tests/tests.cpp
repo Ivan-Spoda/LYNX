@@ -4742,3 +4742,28 @@ TEST (compressor_sidechain_ducks_and_orders_mixer)
     const auto at = [&] (int t) { return std::find (order.begin(), order.end(), t) - order.begin(); };
     CHECK (at (7) < at (5));
 }
+
+TEST (pitch_correction_pulls_to_allowed_note)
+{
+    auto run = [] (const lynx::EffectParams& p, double hz) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::pitchCorrect);
+        fx->prepare (48000.0);
+        std::vector<float> l (48000 * 2), r;
+        for (std::size_t i = 0; i < l.size(); ++i)
+            l[i] = 0.5f * (float) std::sin (2.0 * 3.141592653589793 * hz * (double) i / 48000.0);
+        r = l;
+        fx->process (l.data(), r.data(), (int) l.size(), p, 120.0);
+        // frequência pelos cruzamentos por zero no último segundo
+        int crossings = 0;
+        for (std::size_t i = 48000 + 1; i < l.size(); ++i)
+            crossings += (l[i - 1] < 0.0f) != (l[i] < 0.0f);
+        return crossings / 2.0;
+    };
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchCorrect); // cromática, instantânea, Lá 440
+    CHECK (std::abs (run (slot.params, 452.0) - 440.0) < 4.0);
+    for (int k = 0; k < 12; ++k)
+        slot.params[(std::size_t) (5 + k)] = k == 0 ? 1.0f : 0.0f; // só Dó
+    CHECK (std::abs (run (slot.params, 452.0) - 523.25) < 5.0);  // Dó5 (523 Hz) é mais perto que Dó4 (262)
+    slot.params[2] = 1.0f; // desligar tudo: passa sem mudar
+    CHECK (std::abs (run (slot.params, 452.0) - 452.0) < 4.0);
+}

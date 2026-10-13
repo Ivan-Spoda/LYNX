@@ -255,7 +255,8 @@ enum class EffectKind : std::uint8_t
     crossover,    // banda de um divisor de frequências (Frequency Splitter do FL): passa-altas e/ou passa-baixas Linkwitz-Riley
     rhythmGain,   // ganho que segue uma curva de pontos em tempos, em loop, travada na música (envelopes do Love Philter)
     autoPan,      // pan movido por um LFO triangular travado na música (LFO de pan do Love Philter)
-    vocoder       // vocoder de canal do Fruity Vocoder: L modula, R é a portadora (saída mono)
+    vocoder,      // vocoder de canal do Fruity Vocoder: L modula, R é a portadora (saída mono)
+    pitchCorrect  // correção de afinação (o Pitcher do FL): detecta a altura e puxa para a nota permitida mais próxima
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

@@ -679,7 +679,7 @@ constexpr int slotHeight = 24;
 constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
-                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan, EffectKind::vocoder };
+                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect };
 } // namespace
 
 EffectsPanel::EffectsPanel (AudioEngine& e)

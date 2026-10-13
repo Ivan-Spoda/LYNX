@@ -161,7 +161,9 @@ O que **ainda não tem confirmação** e por isso é uma aproximação declarada
 - Harmless: EQ de timbre (6 bandas), Sub 3/4, proteção de graves e o filtro como curva por parcial (o LYNX usa
   um biquad); p39 fora de ±1200/±2400; tremolo estéreo de 2,5 Hz (p25) e vibrato de 6 Hz (p41) fora; ressonância (largura do pico).
   Ogun: timbre e articuladores; o filtro em cascata vira 1 estágio. MiniSynth: velocidade → corte; LFO serra.
-- Pitcher: sem equivalente estático (a correção depende do detector de altura): passa reto.
+- Pitcher: efeito "Correção de afinação" com as leis do FL (velocidade, Fine, Lá de referência, máscara de notas
+  gravada no estado, Key Bypass, faixa); o detector (YIN) e o deslocador (duas cabeças) são do LYNX, não os do FL.
+  Formant/Gender, Harmonize e MIDI ficam de fora.
 - Squeeze, Vintage Phaser: aproximações.
 - FLEX: os pacotes são protegidos; o LYNX não os abre (patch do synth pelo nome do preset).
 

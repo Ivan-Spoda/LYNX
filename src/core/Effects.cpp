@@ -1401,6 +1401,182 @@ private:
     double bandwidthPercent = 50.0, attackCoeff = 0.99, releaseCoeff = 0.999;
 };
 
+// Correção de afinação (Pitcher do FL; leis em REA_rodada15 §1 e rodada19 §6). Parâmetros: 0 Correction Speed,
+// 1 Fine Tune, 2 Bypass All, 3 Note A Freq, 4 faixa (índice/5: f mín. 220/170/110/80/55/25 Hz), 5…16 máscara de
+// notas C…B (1 = permitida), 17…28 Key Bypass C…B. O detector (YIN) e o deslocador (duas cabeças) são do LYNX:
+// os do FL não foram decodificados.
+namespace pcorr
+{
+constexpr double minHz[6] { 220.0, 170.0, 110.0, 80.0, 55.0, 25.0 };
+int range (float v) { return std::clamp ((int) std::lround (v * 5.0f), 0, 5); }
+double noteA (float v) { return 55.0 * std::pow (2.0, (2.0 * v - 1.0) / 12.0); } // ×8 = Lá 440 em v = 0,5
+} // namespace pcorr
+
+class PitchCorrect final : public Effect
+{
+public:
+    static constexpr int decimation = 4, history = 4096, hop = 256;
+    static constexpr double windowSeconds = 0.04;
+
+    PitchCorrect()
+    {
+        ring.assign ((std::size_t) history, 0.0f);
+        diff.assign ((std::size_t) history, 0.0f);
+        const auto size = (std::size_t) (0.13 * maxSampleRate) + 8;
+        buffer[0].assign (size, 0.0f);
+        buffer[1].assign (size, 0.0f);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        length = (int) std::min<std::size_t> (buffer[0].size(), (std::size_t) (0.13 * sr) + 8);
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        std::fill (ring.begin(), ring.end(), 0.0f);
+        std::fill (buffer[0].begin(), buffer[0].end(), 0.0f);
+        std::fill (buffer[1].begin(), buffer[1].end(), 0.0f);
+        ringWrite = 0;
+        decimCount = 0;
+        decimSum = 0.0f;
+        hopCount = 0;
+        detectedHz = 0.0;
+        correction = 0.0;
+        write = 0;
+        phase = 0.0;
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        const auto u = 1.0 - (double) std::clamp (p[0], 0.0f, 1.0f);
+        const auto coeff = u < 0.01 ? 1.0 : std::min (1.0, 8.82 / (sampleRate * (3.0 * u * u * u + 0.001)));
+        const auto fine = 2.0 * p[1] - 1.0;
+        const auto window = std::min (windowSeconds * sampleRate, (double) length - 4.0);
+
+        for (int i = 0; i < n; ++i)
+        {
+            // detector: mono decimado por 4, YIN a cada `hop` amostras
+            decimSum += 0.5f * (l[i] + r[i]);
+            if (++decimCount == decimation)
+            {
+                ring[(std::size_t) ringWrite] = decimSum / decimation;
+                ringWrite = (ringWrite + 1) % history;
+                decimCount = 0;
+                decimSum = 0.0f;
+            }
+            if (++hopCount >= hop)
+            {
+                hopCount = 0;
+                detectedHz = detect (pcorr::minHz[pcorr::range (p[4])]);
+                target = targetFor (p);
+            }
+
+            // correção suavizada pelo polo da Correction Speed; sem altura detectada volta a zero
+            correction += coeff * ((detectedHz > 0.0 ? target : 0.0) - correction);
+            const auto ratio = std::pow (2.0, (correction + fine) / 12.0);
+            const auto step = (1.0 - ratio) / window;
+
+            float* io[2] = { l + i, r + i };
+            buffer[0][(std::size_t) write] = *io[0];
+            buffer[1][(std::size_t) write] = *io[1];
+            const auto phaseB = phase + 0.5 >= 1.0 ? phase - 0.5 : phase + 0.5;
+            const auto gainA = (float) std::sin (3.141592653589793 * phase);
+            const auto gainB = (float) std::sin (3.141592653589793 * phaseB);
+            for (int c = 0; c < 2; ++c)
+                *io[c] = gainA * read (c, 1.0 + phase * window) + gainB * read (c, 1.0 + phaseB * window);
+            phase += step;
+            phase -= std::floor (phase);
+            if (++write >= length)
+                write = 0;
+        }
+    }
+
+private:
+    // YIN (de Cheveigné & Kawahara) no sinal decimado: período com a diferença normalizada abaixo de 0,15
+    double detect (double fmin) noexcept
+    {
+        const auto fs = sampleRate / decimation;
+        const auto maxLag = std::min (history / 2 - 2, (int) std::ceil (fs / fmin));
+        const auto minLag = std::max (2, (int) (fs / 1200.0));
+        const auto w = std::min (history - maxLag - 1, maxLag * 2);
+        if (maxLag <= minLag || w <= 0)
+            return 0.0;
+        auto at = [this] (int back) { return ring[(std::size_t) ((ringWrite - 1 - back + 2 * history) % history)]; };
+        double energy = 0.0;
+        for (int j = 0; j < w; ++j)
+            energy += (double) at (j) * at (j);
+        if (energy / w < 1e-6)
+            return 0.0; // silêncio
+        double running = 0.0;
+        diff[0] = 1.0f;
+        for (int tau = 1; tau <= maxLag; ++tau)
+        {
+            double d = 0.0;
+            for (int j = 0; j < w; ++j)
+            {
+                const auto x = (double) at (j) - at (j + tau);
+                d += x * x;
+            }
+            running += d;
+            diff[(std::size_t) tau] = (float) (running > 0.0 ? d * tau / running : 1.0);
+        }
+        for (int tau = minLag; tau < maxLag; ++tau)
+            if (diff[(std::size_t) tau] < 0.15f)
+            {
+                while (tau + 1 < maxLag && diff[(std::size_t) tau + 1] < diff[(std::size_t) tau])
+                    ++tau;
+                // interpolação parabólica do mínimo
+                const double a = diff[(std::size_t) tau - 1], b = diff[(std::size_t) tau], c = diff[(std::size_t) tau + 1];
+                const auto den = a + c - 2.0 * b;
+                const auto t = tau + (std::abs (den) > 1e-12 ? 0.5 * (a - c) / den : 0.0);
+                return fs / t;
+            }
+        return 0.0;
+    }
+
+    // nota permitida mais próxima: n = 9 + 12·log2(f/A); Key Bypass na nota escolhida = sem correção
+    double targetFor (const EffectParams& p) const noexcept
+    {
+        if (detectedHz <= 0.0 || p[2] > 0.5f)
+            return 0.0;
+        const auto noteNumber = 9.0 + 12.0 * std::log2 (detectedHz / pcorr::noteA (p[3]));
+        auto best = 0.0, bestDistance = 1e9;
+        for (int k = (int) std::floor (noteNumber) - 12; k <= (int) std::ceil (noteNumber) + 12; ++k)
+            if (p[(std::size_t) (5 + ((k % 12) + 12) % 12)] > 0.5f && std::abs (k - noteNumber) < bestDistance)
+            {
+                bestDistance = std::abs (k - noteNumber);
+                best = k;
+            }
+        if (bestDistance > 100.0 || p[(std::size_t) (17 + (((int) best % 12) + 12) % 12)] > 0.5f)
+            return 0.0;
+        return best - noteNumber;
+    }
+
+    float read (int c, double delay) const noexcept
+    {
+        auto position = (double) write - delay;
+        while (position < 0.0)
+            position += length;
+        const auto i0 = (int) position;
+        const auto frac = (float) (position - i0);
+        const auto i1 = i0 + 1 >= length ? 0 : i0 + 1;
+        const auto& b = buffer[(std::size_t) c];
+        return b[(std::size_t) i0] + (b[(std::size_t) i1] - b[(std::size_t) i0]) * frac;
+    }
+
+    double sampleRate = 44100.0;
+    std::vector<float> ring, diff;
+    int ringWrite = 0, decimCount = 0, hopCount = 0;
+    float decimSum = 0.0f;
+    double detectedHz = 0.0, target = 0.0, correction = 0.0;
+    std::array<std::vector<float>, 2> buffer;
+    int length = 1, write = 0;
+    double phase = 0.0;
+};
+
 class LoFi final : public Effect
 {
 public:
@@ -1822,6 +1998,17 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Formante", 0.5f }, { "Largura", 45.0f / 195.0f }, { "Ataque", 10.0f / 990.0f },
                                                        { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulador", 0.0f },
                                                        { "Portadora", 0.0f }, { "Wet", 0.8f } } };
+    static const EffectInfo pitchCorrectInfo = [] {
+        EffectInfo info { "Correção de afinação", { { "Velocidade", 1.0f }, { "Fino", 0.5f }, { "Desligar tudo", 0.0f }, { "Lá", 0.5f },
+                                                     { "Faixa", 0.4f } } };
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        for (const auto* name : names)
+            info.params.push_back ({ name, 1.0f });
+        static const char* bypass[] = { "C off", "C# off", "D off", "D# off", "E off", "F off", "F# off", "G off", "G# off", "A off", "A# off", "B off" };
+        for (const auto* name : bypass)
+            info.params.push_back ({ name, 0.0f });
+        return info;
+    }();
     static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
     static const EffectInfo effectorInfo { "Effector", { { "Tipo", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
@@ -1882,6 +2069,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::rhythmGain: return rhythmInfo;
         case EffectKind::autoPan: return autoPanInfo;
         case EffectKind::vocoder: return vocoderInfo;
+        case EffectKind::pitchCorrect: return pitchCorrectInfo;
     }
     return eq;
 }
@@ -2065,6 +2253,24 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::effector:
             return effector::formatParam (param, v, bpm);
 
+        case EffectKind::pitchCorrect:
+            switch (param)
+            {
+                case 0:
+                {
+                    const auto u = 1.0 - v;
+                    if (u < 0.01)
+                        return "instantânea";
+                    std::snprintf (text, sizeof (text), "%.1f ms", (3.0 * u * u * u + 0.001) / 8.82 * 1000.0);
+                    break;
+                }
+                case 1: std::snprintf (text, sizeof (text), "%+.0f ct", (2.0f * v - 1.0f) * 100.0f); break;
+                case 3: std::snprintf (text, sizeof (text), "%.1f Hz", pcorr::noteA (v) * 8.0); break;
+                case 4: std::snprintf (text, sizeof (text), "%.0f Hz mín.", pcorr::minHz[pcorr::range (v)]); break;
+                default: return v > 0.5f ? (param >= 17 ? "fora" : "sim") : (param >= 17 ? "-" : (param == 2 ? "não" : "não"));
+            }
+            return text;
+
         case EffectKind::vocoder:
             switch (param)
             {
@@ -2152,6 +2358,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::rhythmGain: return std::make_unique<RhythmGain>();
         case EffectKind::autoPan: return std::make_unique<AutoPan>();
         case EffectKind::vocoder: return std::make_unique<Vocoder>();
+        case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

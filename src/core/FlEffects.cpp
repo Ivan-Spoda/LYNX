@@ -812,6 +812,29 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder")
         return fruityVocoder (state, nullptr);
+    if (pluginName == "Pitcher")
+    {
+        // "SSLF" + u32 + "1RTP" + 33 f32 (parâmetros 0…32 crus) + 12 B de máscara de notas + f32 (REA_rodada19 §6)
+        if (state.size() < 12 + 33 * 4 + 12 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, "1RTP", 4) != 0)
+            return std::nullopt;
+        float p[33];
+        std::memcpy (p, state.data() + 12, sizeof (p));
+        for (auto& v : p)
+            v = std::isfinite (v) ? v : 0.0f;
+        auto slot = makeEffectSlot (EffectKind::pitchCorrect);
+        slot.params[0] = std::clamp (p[0], 0.0f, 1.0f);
+        slot.params[1] = std::clamp (p[3], 0.0f, 1.0f);
+        slot.params[2] = p[4] != 0.0f ? 1.0f : 0.0f;
+        slot.params[3] = std::clamp (p[23], 0.0f, 1.0f);
+        slot.params[4] = (float) std::clamp ((int) p[32], 0, 5) / 5.0f;
+        const auto* mask = state.data() + 12 + 33 * 4;
+        for (int k = 0; k < 12; ++k)
+        {
+            slot.params[(std::size_t) (5 + k)] = mask[k] != 0 ? 1.0f : 0.0f;
+            slot.params[(std::size_t) (17 + k)] = p[5 + k] != 0.0f ? 1.0f : 0.0f;
+        }
+        return slot;
+    }
 
     const auto kind = effectForFlPlugin (pluginName);
 
