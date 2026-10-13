@@ -706,7 +706,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         {
                             auto& osc = def.synth.osc[(std::size_t) i];
                             osc = { (Waveform) juce::jlimit (0, 4, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
-                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 1.0f, (float) (double) o[3]) };
+                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor com volume acima de 0 dB
 
                             if (o.size() >= 6) // semitons e pan (desde o import do 3x Osc)
                             {

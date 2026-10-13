@@ -681,7 +681,8 @@ public:
             knob (row.semitones, -11.0, 11.0, 1.0, " st");
             knob (row.detune, -100.0, 100.0, 1.0, " ct");
             knob (row.pan, -1.0, 1.0, 0.01, "");
-            knob (row.level, 0.0, 1.0, 0.01, "");
+            knob (row.level, 0.0, 4.0, 0.01, "");
+            row.level.setSkewFactorFromMidPoint (1.0); // acima de 1: ganho (o Harmor chega a +12 dB)
             addAndMakeVisible (row.title);
             addAndMakeVisible (row.wave);
         }

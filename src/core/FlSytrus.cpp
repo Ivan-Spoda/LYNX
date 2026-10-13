@@ -879,8 +879,9 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         const auto mix = k == 0 ? 1.0 - abMix : abMix;
         // volume da parte (REA_rodada18 §1.3): g(x) = (3^x − 1)/2, x = |p11|/1000 (1000 → 1,0; 2000 → 4,0)
         // × p12 "Frequency domain envelope volume" na mesma curva (multiplica o nível do articulador de volume)
-        osc.level = (float) std::clamp (harmorGain (std::abs (p[11]) / 1000.0) * harmorGain (std::clamp (p[12], 0, 2000) / 1000.0) * mix, 0.0, 1.0); // A&B mix = crossfade
+        osc.level = (float) std::clamp (harmorGain (std::abs (p[11]) / 1000.0) * harmorGain (std::clamp (p[12], 0, 2000) / 1000.0) * mix, 0.0, 4.0); // A&B mix = crossfade (até +12 dB)
     }
+
     if (out.osc[0].level + out.osc[1].level < 0.01f)
         out.osc[0].level = 1.0f;
 
@@ -955,7 +956,7 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     out.porta = g[5] != 0;
     out.mono = g[4] != 0;
     // volume principal (global 11) na mesma curva do volume da parte (REA_rodada18 §1.3)
-    gain = (float) std::clamp ((mask & 4) != 0 ? harmorGain (std::clamp (g[11], 0, 2000) / 1000.0) : 1.0, 0.0, 4.0);
+    gain = (float) std::clamp (((mask & 4) != 0 ? harmorGain (std::clamp (g[11], 0, 2000) / 1000.0) : 1.0), 0.0, 4.0);
     if (gain <= 0.0f)
         gain = 1.0f;
     synth = out;

@@ -932,7 +932,7 @@ TEST (flp_real_files)
                     CHECK (std::isfinite (g) && g >= 0.0f && gs.cutoff >= 20.0f && gs.cutoff <= 20000.0f && gs.sustain >= 0.0f && gs.sustain <= 1.0f);
                     CHECK (std::isfinite (gs.attack) && std::isfinite (gs.decay) && std::isfinite (gs.release) && std::isfinite (gs.filterEnv.amount) && std::isfinite (gs.lfo[lynx::lfoCutoff].amount));
                     for (const auto& o : gs.osc)
-                        CHECK (o.level >= 0.0f && o.level <= 1.0f && std::isfinite (o.detune) && std::isfinite (o.pan));
+                        CHECK (o.level >= 0.0f && o.level <= 4.0f && std::isfinite (o.detune) && std::isfinite (o.pan));
                 }
             }
 
