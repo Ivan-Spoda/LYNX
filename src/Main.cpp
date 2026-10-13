@@ -642,6 +642,8 @@ private:
                 report << "abrir_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "preparar_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
+                       << "grafo_ms=" << juce::roundToInt (job.getEngine().getLastRenderStats().graphMs) << "\n"
+                       << "gravar_ms=" << juce::roundToInt (job.getEngine().getLastRenderStats().writeMs) << "\n"
                        << "musica_segundos=" << job.getMusicSeconds() << "\n"
                        << "pico=" << job.getPeak() << "\n"
                        << "progresso_final=" << lastPercent << "\n"

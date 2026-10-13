@@ -170,13 +170,17 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     const auto totalSamples = musicSamples + (std::int64_t) (juce::jmax (0.0, tailSeconds) * sampleRate);
     std::int64_t quietSamples = 0;
     bool cancelled = false;
+    lastRenderStats = {};
 
     for (std::int64_t done = 0; done < totalSamples; done += blockSize)
     {
         const auto n = (int) juce::jmin<std::int64_t> (blockSize, totalSamples - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), 2, n);
         view.clear();
+        const auto before = juce::Time::getMillisecondCounterHiRes();
         graph.processBlock (view, midi);
+        const auto afterGraph = juce::Time::getMillisecondCounterHiRes();
+        lastRenderStats.graphMs += afterGraph - before;
 
         for (int ch = 0; ch < view.getNumChannels(); ++ch)
             softClip (view.getWritePointer (ch), n);
@@ -192,7 +196,9 @@ float AudioEngine::renderOffline (const RenderOptions& options)
         if (output != nullptr && done + n > trim)
         {
             const auto skip = (int) juce::jmax<std::int64_t> (0, trim - done);
+            const auto beforeWrite = juce::Time::getMillisecondCounterHiRes();
             output->writeFromAudioSampleBuffer (view, skip, n - skip);
+            lastRenderStats.writeMs += juce::Time::getMillisecondCounterHiRes() - beforeWrite;
         }
 
         transport.positionTicks.store (transport.positionTicks.load() + n * transport.ticksPerSample());

@@ -125,6 +125,13 @@ public:
     };
 
     float renderOffline (const RenderOptions& options);
+
+    // tempos do último renderOffline (diagnóstico): o grafo de áudio e a gravação do arquivo
+    struct RenderStats
+    {
+        double graphMs = 0.0, writeMs = 0.0;
+    };
+    RenderStats getLastRenderStats() const noexcept { return lastRenderStats; }
     float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr)
     {
         RenderOptions o;
@@ -207,6 +214,7 @@ private:
     MeterBank meters;
     PluginHost plugins;
     juce::StringArray missingPlugins;
+    RenderStats lastRenderStats;
 
     Song song;
     int selectedChannel = 0;

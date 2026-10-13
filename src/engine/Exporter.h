@@ -45,6 +45,7 @@ public:
 
     double getMusicSeconds() const noexcept { return musicSeconds; }
     float getPeak() const noexcept { return peak; }
+    AudioEngine& getEngine() noexcept { return *engine; }
 
 private:
     std::unique_ptr<AudioEngine> engine;
