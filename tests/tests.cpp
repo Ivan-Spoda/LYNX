@@ -16,6 +16,7 @@
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
 #include "core/FlPatcher.h"
+#include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
 #include "core/FlWrapper.h"
@@ -1058,6 +1059,66 @@ TEST (flp_real_files)
                 CHECK (ducked < 0.3f && recovered > 0.9f);
             }
         }
+    }
+
+    // fuzz por mutação: estados reais com bytes trocados e cortados não podem derrubar os leitores
+    {
+        std::map<std::string, std::vector<std::uint8_t>> samples; // um blob real por plugin
+        for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
+        {
+            if (entry.path().extension() != ".flp")
+                continue;
+            std::ifstream in (entry.path(), std::ios::binary);
+            const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+            try
+            {
+                const auto project = flp::parseProject (file);
+                for (const auto& c : project.channels)
+                    if (! c.pluginState.empty())
+                        samples.emplace (c.pluginName, c.pluginState);
+                for (const auto& insert : project.mixer)
+                    for (const auto& slot : insert.slots)
+                        if (! slot.state.empty())
+                            samples.emplace (slot.plugin, slot.state);
+            }
+            catch (const flp::Error&) {}
+        }
+
+        std::uint32_t seed = 12345;
+        auto rnd = [&seed] { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
+        int mutations = 0;
+        for (const auto& [name, original] : samples)
+            for (int round = 0; round < 40; ++round)
+            {
+                auto blob = original;
+                if (round % 4 == 3 && ! blob.empty())
+                    blob.resize (rnd() % blob.size()); // cortado
+                else
+                    for (int k = 0; k < 1 + (int) (rnd() % 8) && ! blob.empty(); ++k)
+                        blob[rnd() % blob.size()] = (std::uint8_t) rnd();
+                ++mutations;
+                lynx::SynthSettings synth;
+                float gain = 1.0f;
+                lynx::synthFromSytrus (blob, 120.0, synth, gain);
+                lynx::synthFromHarmor (blob, synth, gain);
+                lynx::synthFromGms (blob, 120.0, synth, gain);
+                lynx::synthFromOgun (blob, synth, gain);
+                lynx::synthFromMorphine (blob, synth, gain);
+                lynx::synthFromKepler (blob, synth, gain);
+                lynx::synthFromPoiZone (blob, synth, gain);
+                lynx::synthFromToxic (blob, synth, gain);
+                lynx::synthFromBassDrum (blob, synth, gain);
+                lynx::synthFromHarmless (blob, 120.0, synth, gain);
+                lynx::parseEnvelopeController (blob);
+                lynx::parseKeyboardController (blob);
+                lynx::parseLovePhilter (blob);
+                lynx::parsePatcher (blob);
+                lynx::effectFromFl (name, blob);
+                lynx::fpcPads (blob);
+                lynx::directWaveProgram (blob);
+                CHECK (std::isfinite (gain) && std::isfinite (synth.cutoff));
+            }
+        std::printf ("  fuzz por mutação: %d blobs de %d plugins\n", mutations, (int) samples.size());
     }
 
     // presets nativos do GMS (.gmsynth = o conteúdo do 0xD5 sem o "SSLF")
