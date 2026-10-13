@@ -28,7 +28,10 @@ public:
         setup (resonance, resonanceLabel, "Ressonância", 0.0, 1.0, 0.01, "");
         cutoff.setSkewFactorFromMidPoint (1000.0);
         cutoff.setDoubleClickReturnValue (true, 20000.0);
-        cutoff.setTooltip (utf8 ("Passa-baixas do canal (no máximo e sem ressonância fica desligado)"));
+        cutoff.setTooltip (utf8 ("Corte do filtro do canal (passa-baixas no máximo e sem ressonância = desligado)"));
+        filterType.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
+        filterType.onChange = [this] { apply(); };
+        addAndMakeVisible (filterType);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
@@ -92,7 +95,11 @@ public:
         area.removeFromTop (6);
         place (area.removeFromTop (110), { { &regionStart, &regionStartLabel }, { &regionEnd, &regionEndLabel } });
         area.removeFromTop (6);
-        place (area.removeFromTop (110), { { &cutoff, &cutoffLabel }, { &resonance, &resonanceLabel } });
+        {
+            auto filterRow = area.removeFromTop (110);
+            filterType.setBounds (filterRow.removeFromRight (filterRow.getWidth() / 3).withSizeKeepingCentre (124, 24));
+            place (filterRow.withWidth (filterRow.getWidth() * 3 / 2), { { &cutoff, &cutoffLabel }, { &resonance, &resonanceLabel } });
+        }
         area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
         cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
@@ -136,6 +143,7 @@ private:
             regionEnd.setValue (c->sampler.regionEnd, juce::dontSendNotification);
             cutoff.setValue (c->sampler.cutoff, juce::dontSendNotification);
             resonance.setValue (c->sampler.resonance, juce::dontSendNotification);
+            filterType.setSelectedId (c->sampler.filterType + 1, juce::dontSendNotification);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -165,6 +173,7 @@ private:
         s.cut = cut.getToggleState();
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
+        s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
 
         if (s == current()->sampler)
             return;
@@ -194,6 +203,7 @@ private:
     juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch;
+    juce::ComboBox filterType;
 };
 
 // Página do synth interno: 3 osciladores, envelope e filtro.
@@ -283,6 +293,11 @@ public:
         };
         addAndMakeVisible (presetBox);
 
+        filterTypeBox.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
+        filterTypeBox.setTooltip ("Tipo do filtro");
+        filterTypeBox.onChange = [this] { apply(); };
+        addAndMakeVisible (filterTypeBox);
+
         mono.setButtonText ("Mono");
         mono.setTooltip (utf8 ("Uma voz só: a nota nova assume a que está soando (baixos e leads)"));
         mono.onClick = [this] { apply(); };
@@ -303,6 +318,7 @@ public:
         auto topRow = area.removeFromTop (24);
         presetBox.setBounds (topRow.removeFromLeft (200));
         mono.setBounds (topRow.removeFromLeft (100).withTrimmedLeft (16));
+        filterTypeBox.setBounds (topRow.removeFromRight (140));
         area.removeFromTop (6);
         auto header = area.removeFromTop (16);
         header.removeFromLeft (150);
@@ -380,6 +396,7 @@ private:
 
     std::array<EnvRow, 2> envRows; // corte, afinação
     juce::ToggleButton mono;
+    juce::ComboBox filterTypeBox;
     std::array<juce::Label, 6> envLabels;
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
@@ -425,6 +442,7 @@ private:
         cutoff.setValue (s.cutoff, juce::dontSendNotification);
         resonance.setValue (s.resonance, juce::dontSendNotification);
         mono.setToggleState (s.mono, juce::dontSendNotification);
+        filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
         envRows[0].show (s.filterEnv);
         envRows[1].show (s.pitchEnv);
         updating = false;
@@ -454,6 +472,7 @@ private:
         s.filterEnv = envRows[0].read();
         s.pitchEnv = envRows[1].read();
         s.mono = mono.getToggleState();
+        s.filterType = juce::jlimit (0, 3, filterTypeBox.getSelectedId() - 1);
 
         if (s == current()->synth)
             return;

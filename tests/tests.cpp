@@ -793,16 +793,20 @@ TEST (flp_import_3x_osc_state_and_channel_filter)
 
     // filtro do canal: padrão aberto; LP com Mod X 128 ~ 2,71 kHz; Fast LP com Mod X 128 ~ 280 Hz
     float hz = 0.0f, res = 1.0f;
-    lynx::synthFilterFromChannel (256, 0, 0, hz, res);
+    int mode = -1;
+    lynx::synthFilterFromChannel (256, 0, 0, hz, res, mode);
     CHECK (hz >= 19999.0f && res == 0.0f);
-    lynx::synthFilterFromChannel (128, 0, 1, hz, res);
+    lynx::synthFilterFromChannel (128, 0, 1, hz, res, mode);
     CHECK (std::abs (hz - 2710.0f) < 30.0f && res == 0.0f);
-    lynx::synthFilterFromChannel (128, 0, 0, hz, res);
+    lynx::synthFilterFromChannel (128, 0, 0, hz, res, mode);
     CHECK (hz > 240.0f && hz < 320.0f);
-    lynx::synthFilterFromChannel (128, 256, 1, hz, res);
+    lynx::synthFilterFromChannel (128, 256, 1, hz, res, mode);
     CHECK (res > 0.8f);
-    lynx::synthFilterFromChannel (64, 0, 3, hz, res); // passa-altas: o synth não tem, fica aberto
-    CHECK (hz >= 19999.0f);
+    CHECK (mode == 0);
+    lynx::synthFilterFromChannel (64, 0, 3, hz, res, mode); // passa-altas em ~840 Hz
+    CHECK (mode == 2 && std::abs (hz - 840.0f) < 40.0f);
+    lynx::synthFilterFromChannel (128, 0, 2, hz, res, mode); // passa-banda
+    CHECK (mode == 1);
 }
 
 TEST (synth_pitch_and_filter_envelopes)
@@ -908,6 +912,28 @@ TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
         return e;
     };
     const auto open = energy (20000.0f), dark = energy (300.0f);
+    {
+        // passa-altas em 10 kHz: tira a maior parte da energia do ruído também, mas pelo outro lado
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+        inst->prepare (48000.0);
+        lynx::ChannelDef hp;
+        hp.sampler.cutoff = 10000.0f;
+        hp.sampler.filterType = 2;
+        inst->configure (hp, 120.0);
+        inst->noteOn (60, 1.0f);
+        std::vector<float> l (24000), r (24000);
+        inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+        double e = 0.0, lowE = 0.0;
+        float lp = 0.0f;
+        for (auto v : l)
+        {
+            e += (double) v * v;
+            lp += 0.01f * (v - lp); // passa-baixas grosseiro: quase nada deve sobrar embaixo
+            lowE += (double) lp * lp;
+        }
+        CHECK (e > 10.0 && e < 0.7 * energy (20000.0f));
+        CHECK (lowE < e * 0.01);
+    }
     CHECK (open > 100.0);
     CHECK (dark < open * 0.05);
 

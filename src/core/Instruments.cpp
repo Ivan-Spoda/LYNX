@@ -252,18 +252,22 @@ struct ModCoefficients
 };
 
 // Coeficientes do passa-baixas SVF "TPT" (estável em qualquer corte), compartilhado pelo synth e o sampler.
+// O mesmo filtro dá as quatro respostas (mode: 0 passa-baixas, 1 passa-banda, 2 passa-altas,
+// 3 rejeita-faixa), como os tipos LP/BP/HP/BS do filtro do canal do FL.
 struct SvfCoefficients
 {
-    float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f;
+    float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f, k = 2.0f;
+    int mode = 0;
 
-    void set (double cutoffHz, float resonance, double sampleRate) noexcept
+    void set (double cutoffHz, float resonance, double sampleRate, int filterMode = 0) noexcept
     {
         const auto fc = std::clamp (cutoffHz, 20.0, sampleRate * 0.45);
         const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
-        const auto k = 2.0f - 1.9f * std::clamp (resonance, 0.0f, 1.0f); // 2 = sem ressonância
+        k = 2.0f - 1.9f * std::clamp (resonance, 0.0f, 1.0f); // 2 = sem ressonância
         a1 = 1.0f / (1.0f + g * (g + k));
         a2 = g * a1;
         a3 = g * a2;
+        mode = std::clamp (filterMode, 0, 3);
     }
 
     float process (float in, float& low, float& band) const noexcept
@@ -273,7 +277,14 @@ struct SvfCoefficients
         const auto v2 = low + a2 * band + a3 * v3;
         band = 2.0f * v1 - band;
         low = 2.0f * v2 - low;
-        return v2;
+
+        switch (mode)
+        {
+            case 1: return v1;
+            case 2: return in - k * v1 - v2;
+            case 3: return in - k * v1;
+            default: return v2;
+        }
     }
 };
 
@@ -492,7 +503,8 @@ public:
                         v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
 
                         if (modEnv[0].active)
-                            v.filter.set (settings.cutoff * std::exp2 (modEnv[0].amount * v.mod[0].level), settings.resonance, sampleRate);
+                            v.filter.set (settings.cutoff * std::exp2 (modEnv[0].amount * v.mod[0].level), settings.resonance, sampleRate,
+                                          settings.filterType);
                     }
                 }
 
@@ -594,7 +606,7 @@ private:
 
         stereoOscillators = std::any_of (settings.osc.begin(), settings.osc.end(), [] (const SynthOscillator& o) { return o.pan != 0.0f; });
 
-        sharedFilter.set (settings.cutoff, settings.resonance, sampleRate);
+        sharedFilter.set (settings.cutoff, settings.resonance, sampleRate, settings.filterType);
         modEnv[0] = ModCoefficients::make (settings.filterEnv, sampleRate);
         modEnv[1] = ModCoefficients::make (settings.pitchEnv, sampleRate);
         modulated = modEnv[0].active || modEnv[1].active;
@@ -677,6 +689,7 @@ public:
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
         cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
+        filterType.store (std::clamp (s.filterType, 0, 3));
         envelopeMailbox.write ({ s.filterEnv, s.pitchEnv });
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
@@ -862,14 +875,15 @@ public:
 
         // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto, sem ressonância e sem envelope
         const auto fc = cutoff.load(), res = resonance.load();
-        const auto filtered = fc < 19500.0f || res > 0.0f || modEnv[0].active;
+        const auto type = filterType.load();
+        const auto filtered = fc < 19500.0f || res > 0.0f || type != 0 || modEnv[0].active;
         const auto modulated = modEnv[0].active || modEnv[1].active;
 
-        if (filtered && (fc != filterCutoff || res != filterResonance))
+        if (filtered && (fc != filterCutoff || res != filterResonance || type != sharedFilter.mode))
         {
             filterCutoff = fc;
             filterResonance = res;
-            sharedFilter.set (fc, res, sampleRate);
+            sharedFilter.set (fc, res, sampleRate, type);
         }
 
         for (auto& v : voices)
@@ -902,7 +916,7 @@ public:
                         v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
 
                         if (modEnv[0].active)
-                            v.filter.set (fc * std::exp2 (modEnv[0].amount * v.mod[0].level), res, sampleRate);
+                            v.filter.set (fc * std::exp2 (modEnv[0].amount * v.mod[0].level), res, sampleRate, type);
                     }
                 }
 
@@ -992,6 +1006,7 @@ private:
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
+    std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
     SvfCoefficients sharedFilter;
     SettingsMailbox<std::array<ModEnvelope, 2>> envelopeMailbox;

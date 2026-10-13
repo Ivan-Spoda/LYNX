@@ -54,7 +54,7 @@ Atualizado em 2026-10-13.
   ressonância; envelopes de corte e de afinação do canal (registros 2 e 4 do `0xDA`, segmentos retos
   como a tensão 0 do FL) viram os envelopes de modulação do synth (kicks e plucks feitos no 3x Osc).
   Os 152 canais 3x Osc dos demos decodificam. Ainda não: AM do osc 3, inverter fase, SPO/phase rand,
-  filtros BP/HP/BS, LFOs do canal.
+  LFOs do canal. Filtro do canal com os tipos passa-baixas/banda/altas/rejeita-faixa.
 - **Filtro do canal no sampler** (corte/ressonância), importado do Mod X/Y do FL; envelopes de corte e
   de afinação também no sampler.
 - **VSTs de terceiros do FL (REA rodada 5, `docs/analise/REA_rodada5.md`)**: o blob do "Fruity Wrapper"

@@ -205,6 +205,9 @@ double channelFilterHz (int type, double x)
         case 0:
             return x >= 1.0 ? 20000.0 : -44100.0 / twoPi * std::log (1.0 - std::min ((std::pow (601.0, x) - 1.0) / 600.0, 0.999));
         case 1:
+        case 2:
+        case 3:
+        case 4:
         case 5: return ((std::pow (51.0, x) - 1.0) * 0.0596 + 0.02) * 44100.0 / twoPi;
         case 6:
         case 7: return 44100.0 / (twoPi / 2.0) * std::asin (std::min (1.0, (std::pow (26.0, x) - 1.0) * 0.04) / 2.0);
@@ -221,23 +224,22 @@ float filterEnvelopeOctaves (int modX, int type, int amount)
     return (float) std::log2 (to / from);
 }
 
-void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance)
+void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance, int& mode)
 {
+    mode = type == 2 ? 1 : type == 3 ? 2 : type == 4 ? 3 : 0; // BP, HP, BS; o resto é passa-baixas
     const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
     const auto r = std::clamp (modY / 256.0, 0.0, 1.0);
     auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // o SVF do synth: k = 1/Q
-    const auto lowPass = type <= 1 || type >= 5;
     resonance = 0.0f;
 
     if (type == 0) // Fast LP: 1 polo + realimentação; a realimentação cresce com Mod Y (aproximação)
         resonance = (float) (r * 0.9);
-    else if (type == 1 || type == 5) // biquad LP (LPx2 = o mesmo duas vezes)
+    else if (type >= 1 && type <= 5) // biquads LP/BP/HP/BS (LPx2 = o LP duas vezes)
         resonance = fromQ (r <= 0.0 ? 0.1 : (std::pow (51.0, 0.625 * r) - 1.0) * 0.4 + 0.1);
     else if (type == 6 || type == 7) // SVF de Chamberlin
         resonance = fromQ (1.0 / (r <= 0.0 ? 1.0 : (r < 1.0 ? 1.0 - 0.8 * r : 0.2)));
 
-    // BP/HP/BS: o synth só tem passa-baixas, melhor deixar aberto
-    cutoffHz = lowPass ? (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0) : 20000.0f;
+    cutoffHz = (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0);
 }
 
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
@@ -328,7 +330,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         }
 
         // filtro do canal (Mod X/Y + tipo do 0xDB) vale para o sampler também
-        synthFilterFromChannel (c.modX, c.modY, c.filterType, def.sampler.cutoff, def.sampler.resonance);
+        synthFilterFromChannel (c.modX, c.modY, c.filterType, def.sampler.cutoff, def.sampler.resonance, def.sampler.filterType);
 
         // envelopes de corte (registro 2) e de afinação (registro 4) do canal
         auto modEnvelope = [&] (const flp::Channel::Envelope& env, float amount) {
@@ -350,9 +352,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             return m;
         };
 
-        const auto lowPassFilter = c.filterType <= 1 || c.filterType >= 5;
-        const auto filterEnv = lowPassFilter ? modEnvelope (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].amount))
-                                             : ModEnvelope {};
+        const auto filterEnv = modEnvelope (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].amount));
         const auto pitchEnv = modEnvelope (c.envelopes[4], std::clamp (c.envelopes[4].amount, -2400, 2400) / 100.0f);
         def.sampler.filterEnv = filterEnv;
         def.sampler.pitchEnv = pitchEnv;
@@ -381,7 +381,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 def.synth.release = 0.02f;
             }
 
-            synthFilterFromChannel (c.modX, c.modY, c.filterType, def.synth.cutoff, def.synth.resonance);
+            synthFilterFromChannel (c.modX, c.modY, c.filterType, def.synth.cutoff, def.synth.resonance, def.synth.filterType);
 
             def.synth.filterEnv = filterEnv;
             def.synth.pitchEnv = pitchEnv;

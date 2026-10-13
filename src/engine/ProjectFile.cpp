@@ -248,7 +248,7 @@ juce::String toJson (const Song& song)
 
             synth->setProperty ("osc", oscs);
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
-            synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance });
+            synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
 
@@ -277,7 +277,7 @@ juce::String toJson (const Song& song)
             }
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
-            sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance });
+            sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
         }
@@ -557,10 +557,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.synth.release = juce::jlimit (0.0f, 10.0f, (float) (double) a[3]);
                 }
 
-                if (const auto& f = s["filter"]; f.isArray() && f.size() == 2)
+                if (const auto& f = s["filter"]; f.isArray() && f.size() >= 2)
                 {
                     def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
                     def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
+                    def.synth.filterType = f.size() >= 3 ? juce::jlimit (0, 3, (int) f[2]) : 0;
                 }
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);
@@ -590,10 +591,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.reverse = (bool) s.getProperty ("reverse", false);
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
 
-                if (const auto& filter = s["filter"]; filter.isArray() && filter.size() == 2)
+                if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {
                     def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
                     def.sampler.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) filter[1]);
+                    def.sampler.filterType = filter.size() >= 3 ? juce::jlimit (0, 3, (int) filter[2]) : 0;
                 }
 
                 readEnvelopes (s, def.sampler.filterEnv, def.sampler.pitchEnv);

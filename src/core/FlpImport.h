@@ -38,8 +38,8 @@ InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType
 bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& base);
 
 // Filtro do canal do FL (Mod X/Y 0..256, tipo 0..7 do 0xDB) como corte em Hz e ressonância 0..1
-// do passa-baixas do synth interno (REA_rodada4 §3). Tipos sem passa-baixas ficam abertos.
-void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance);
+// do filtro do synth/sampler (REA_rodada4 §3); `mode` 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa.
+void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance, int& mode);
 
 // Oitavas que o envelope de corte do FL (amount ±128 em unidades de Mod X) desloca a partir do Mod X do canal.
 float filterEnvelopeOctaves (int modX, int type, int amount);

@@ -78,5 +78,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Efeitos nativos do FL nos slots do mixer viram efeitos internos parecidos
 - [x] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado VST3 (rodada 5)
 - [ ] Estado CLAP do wrapper e mapa de parâmetros VST3 para automação (formatos ainda em aberto)
-- [ ] LFOs do canal, AM do 3x Osc, filtros BP/HP do canal
-- [ ] Notas "porta" e mudança de compasso
+- [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)
+- [ ] LFOs do canal, AM do 3x Osc
+- [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)
+- [ ] Notas "porta"; metrônomo seguindo as mudanças de compasso

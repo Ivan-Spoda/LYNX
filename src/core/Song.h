@@ -92,8 +92,9 @@ struct SamplerSettings
     float regionStart = 0.0f;  // trecho tocado do sample (frações 0..1)
     float regionEnd = 1.0f;
     std::vector<float> slices; // fatias (inícios em frações): a tecla 60 + i toca a fatia i, na altura original
-    float cutoff = 20000.0f;   // passa-baixas do canal (Hz); 20 kHz e sem ressonância = desligado
+    float cutoff = 20000.0f;   // filtro do canal (Hz); passa-baixas em 20 kHz sem ressonância = desligado
     float resonance = 0.0f;    // 0..1
+    int filterType = 0;        // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
     ModEnvelope filterEnv;     // desloca o corte (oitavas)
     ModEnvelope pitchEnv;      // desloca a afinação (semitons)
 
@@ -144,6 +145,7 @@ struct SynthSettings
     float release = 0.25f;
     float cutoff = 2500.0f;  // Hz
     float resonance = 0.0f;  // 0..1
+    int filterType = 0;      // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
     bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
