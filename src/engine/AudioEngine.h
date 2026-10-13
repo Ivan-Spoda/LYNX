@@ -86,10 +86,14 @@ public:
     // Depois de `seconds`, continua por até `tailSeconds` enquanto ainda houver som.
     // `progress(0..1)` retorna false para cancelar. Retorna o pico (usado pelo autoteste),
     // ou -1 se cancelado.
+    // `trimSamples` (PDC) descarta esse tanto do começo e renderiza o mesmo tanto a mais no fim.
     float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr,
-                         const std::function<bool (double)>& progress = {}, double tailSeconds = 0.0);
+                         const std::function<bool (double)>& progress = {}, double tailSeconds = 0.0, int trimSamples = 0);
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
+
+    // Latência total compensada pelo PDC (na saída do Master), em samples.
+    int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
 
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,

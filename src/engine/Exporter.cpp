@@ -71,7 +71,8 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     stream.release(); // agora pertence ao writer
 
-    peak = engine->renderOffline (musicSeconds, settings.sampleRate, writer.get(), progress, settings.tailSeconds);
+    peak = engine->renderOffline (musicSeconds, settings.sampleRate, writer.get(), progress, settings.tailSeconds,
+                                  engine->getLatencySamples());
     writer.reset(); // fecha o arquivo (o cabeçalho do WAV é finalizado aqui)
 
     if (peak < 0.0f)

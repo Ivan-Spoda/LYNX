@@ -1289,6 +1289,135 @@ TEST (automation_curve_and_playback)
     CHECK (song.automations.empty() && song.playlist.size() == 3);
 }
 
+TEST (mixer_sends_between_inserts)
+{
+    // insert 1 vai só para o 3; o 3 vai ao Master: soma igual (0,5 + 0,5)
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true); s.setRoute (1, 0, false); }) - 1.0f) < 1e-4f);
+
+    // envio a 50% e destino mudo
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true, 0.5f); s.setRoute (1, 0, false); }) - 0.75f) < 1e-4f);
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true); s.setRoute (1, 0, false); s.mixer[3].muted = true; }) - 0.5f) < 1e-4f);
+
+    // indo ao Master e ao 3: o sinal dobra
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true); }) - 1.5f) < 1e-4f);
+
+    // solo no 3 deixa soar quem chega nele (insert 1), mas não o 2
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true); s.setRoute (1, 0, false); s.mixer[3].solo = true; }) - 0.5f) < 1e-4f);
+    // solo no 1 deixa soar o caminho até o Master (o 3)
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRoute (1, 3, true); s.setRoute (1, 0, false); s.mixer[1].solo = true; }) - 0.5f) < 1e-4f);
+
+    // ordem e ciclos
+    auto song = lynx::Song::makeDefault();
+    song.setRoute (4, 2, true);
+    song.setRoute (2, 1, true);
+    CHECK (! song.canRoute (1, 4) && ! song.canRoute (1, 2) && song.canRoute (1, 5));
+    song.setRoute (1, 4, true); // ignorado: criaria ciclo
+    CHECK (! song.routes (1, 4));
+    const auto order = song.mixerOrder();
+    const auto pos = [&] (int t) { return std::find (order.begin(), order.end(), t) - order.begin(); };
+    CHECK ((int) order.size() == (int) song.mixer.size() - 1);
+    CHECK (pos (4) < pos (2) && pos (2) < pos (1));
+    song.setRoute (4, 2, false);
+    CHECK (! song.routes (4, 2) && song.routes (4, 0));
+}
+
+namespace
+{
+// Efeito de teste: atrasa o sinal em `latency` samples e informa essa latência (como um plugin com lookahead).
+class LatentEffect final : public lynx::Effect
+{
+public:
+    explicit LatentEffect (int samples) : latency (samples), line (samples) {}
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+    void process (float* l, float* r, int n, const lynx::EffectParams&, double) noexcept override { line.process (l, r, n); }
+    int latencySamples() const noexcept override { return latency; }
+
+private:
+    int latency;
+    lynx::DelayLine line;
+};
+} // namespace
+
+TEST (pdc_aligns_paths_through_latent_effects)
+{
+    // plano: canal 0 -> insert 1 (efeito de 100) -> insert 3; canal 1 -> insert 2 -> Master
+    lynx::Song s;
+    s.mixer = lynx::Song::defaultMixer (4);
+    s.channels.resize (3);
+    s.channels[0].mixerTrack = 1;
+    s.channels[1].mixerTrack = 2;
+    s.channels[2].mixerTrack = 3;
+    s.mixer[1].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::eq));
+    s.setRoute (1, 3, true);
+    s.setRoute (1, 0, false);
+
+    auto plan = lynx::computePdc (s, { 0, 0, 30 }, { {}, { 100 } });
+    CHECK (plan.inAlign[1] == 0 && plan.outLat[1] == 100);
+    CHECK (plan.inAlign[3] == 100 && plan.channelDelay[2] == 70); // instrumento de 30 no insert 3
+    CHECK (plan.sendDelay[1][1] == 0);                             // o caminho mais lento não atrasa
+    CHECK (plan.sendDelay[2][0] == 100 && plan.sendDelay[3][0] == 0 && plan.total == 100);
+
+    // bypass zera a latência do slot
+    s.mixer[1].effects[0].enabled = false;
+    CHECK (lynx::computePdc (s, { 0, 0, 30 }, { {}, { 100 } }).total == 30);
+
+    // renderizado: dois impulsos tocados juntos saem juntos
+    lynx::Song r;
+    r.mixer = lynx::Song::defaultMixer (2);
+    for (int i = 0; i < 2; ++i)
+    {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::sampler;
+        c.samplePath = "impulso";
+        c.volume = 1.0f;
+        c.mixerTrack = i + 1;
+        r.channels.push_back (c);
+    }
+    r.patterns.emplace_back();
+    lynx::EffectSlot fx;
+    fx.kind = lynx::EffectKind::plugin;
+    fx.plugin.id = "latente";
+    r.mixer[1].effects.push_back (fx);
+
+    lynx::RackState::Factories f;
+    f.samples = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (64, 0.0f);
+        d->left[0] = 1.0f;
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    f.pluginEffects = [] (const lynx::PluginRef&, double) -> std::shared_ptr<lynx::Effect> { return std::make_shared<LatentEffect> (100); };
+
+    auto state = lynx::RackState::build (r, nullptr, 48000.0, f);
+    CHECK (state->pdc.total == 100 && state->sendDelays[2][0] != nullptr && state->sendDelays[2][0]->length() == 100);
+
+    lynx::RackRenderer renderer;
+    renderer.prepare (48000.0, 256);
+    lynx::LiveEventQueue live;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        lynx::NoteEvent on;
+        on.channel = ch;
+        on.key = 60;
+        on.velocity = 1.0f;
+        live.push (on);
+    }
+
+    std::vector<float> l (256), rr (256);
+    renderer.process (state.get(), false, 0.0, 256, l.data(), rr.data(), &live);
+    int first = -1;
+    for (int i = 0; i < 256 && first < 0; ++i)
+        if (std::abs (l[(std::size_t) i]) > 0.01f)
+            first = i;
+    CHECK (first == 100 && std::abs (l[100] - 2.0f) < 1e-3f); // os dois impulsos chegam juntos, somados
+
+    // editar sem mudar as latências reaproveita as linhas
+    r.channels[0].volume = 0.5f;
+    auto next = lynx::RackState::build (r, state.get(), 48000.0, f);
+    CHECK (next->sendDelays[2][0] == state->sendDelays[2][0]);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

@@ -200,6 +200,19 @@ juce::String toJson (const Song& song)
         o->setProperty ("muted", t.muted);
         o->setProperty ("solo", t.solo);
 
+        if (! t.toMaster)
+            o->setProperty ("toMaster", false);
+
+        if (! t.sends.empty())
+        {
+            juce::Array<juce::var> sends;
+
+            for (const auto& send : t.sends)
+                sends.add (juce::Array<juce::var> { send.target, juce::roundToInt (send.level * 10000.0f) / 10000.0 });
+
+            o->setProperty ("sends", sends);
+        }
+
         juce::Array<juce::var> effects;
 
         for (const auto& slot : t.effects)
@@ -383,6 +396,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
             track.muted = (bool) t.getProperty ("muted", false);
             track.solo = (bool) t.getProperty ("solo", false);
+            track.toMaster = (bool) t.getProperty ("toMaster", true);
+
+            if (auto* sends = t["sends"].getArray())
+                for (const auto& send : *sends)
+                    if (send.isArray() && send.size() == 2)
+                        track.sends.push_back ({ (int) send[0], juce::jlimit (0.0f, 1.0f, (float) (double) send[1]) });
 
             if (auto* effects = t["effects"].getArray())
                 for (const auto& e : *effects)
@@ -409,6 +428,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if (song.mixer.empty()) // projetos de antes do mixer
         song.mixer = Song::defaultMixer();
+
+    // envios para trilhas que não existem são descartados
+    for (auto& t : song.mixer)
+        t.sends.erase (std::remove_if (t.sends.begin(), t.sends.end(),
+                                       [n = (int) song.mixer.size()] (const MixerSend& s) { return s.target <= 0 || s.target >= n; }),
+                       t.sends.end());
 
     song.currentPattern = juce::jlimit (0, (int) song.patterns.size() - 1, song.currentPattern);
     return song;

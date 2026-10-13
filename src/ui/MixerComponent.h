@@ -16,6 +16,8 @@ namespace lynx
 //  - clique numa faixa seleciona; clique direito abre o menu (renomear, rotear o canal
 //    selecionado para esta trilha); "+" no fim adiciona um insert
 //  - embaixo de cada faixa aparecem os canais que chegam nela
+//  - botão de envio (seta) na base: liga/desliga o envio da trilha selecionada para esta;
+//    arrastar na vertical muda o nível do envio
 class MixerStrips final : public juce::Component,
                           private juce::ChangeListener,
                           private juce::Timer
@@ -41,7 +43,7 @@ public:
     static constexpr int masterWidth = 86;
 
 private:
-    enum class Part { none, pan, fader, mute, solo, body, add };
+    enum class Part { none, pan, fader, mute, solo, route, body, add };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -54,6 +56,7 @@ private:
     juce::Rectangle<int> panArea (int track) const;
     juce::Rectangle<int> muteArea (int track) const;
     juce::Rectangle<int> soloArea (int track) const;
+    juce::Rectangle<int> routeArea (int track) const;
     void showMenu (int track);
 
     AudioEngine& engine;

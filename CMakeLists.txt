@@ -17,7 +17,8 @@ add_library(lynx_core STATIC
     src/core/FlpImport.cpp
     src/core/Effects.cpp
     src/core/NoteEdit.cpp
-    src/core/Recorder.cpp)
+    src/core/Recorder.cpp
+    src/core/Pdc.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)

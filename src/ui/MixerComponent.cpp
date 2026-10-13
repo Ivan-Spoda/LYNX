@@ -93,6 +93,11 @@ juce::Rectangle<int> MixerStrips::soloArea (int t) const
     return { stripX (t) + stripWidthOf (t) - 32, headerHeight + panHeight, 26, buttonsHeight };
 }
 
+juce::Rectangle<int> MixerStrips::routeArea (int t) const
+{
+    return { stripX (t) + 6, getHeight() - feedsHeight - 2, stripWidthOf (t) - 16, 16 };
+}
+
 juce::Rectangle<int> MixerStrips::faderArea (int t) const
 {
     const auto top = headerHeight + panHeight + buttonsHeight + 8;
@@ -110,6 +115,8 @@ MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
         return Part::mute;
     if (t > 0 && soloArea (t).contains (p))
         return Part::solo;
+    if (routeArea (t).contains (p) && selected > 0 && t != selected)
+        return Part::route;
     if (faderArea (t).expanded (0, 6).contains (p))
         return Part::fader;
 
@@ -235,6 +242,30 @@ void MixerStrips::paint (juce::Graphics& g)
             g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, 14, juce::Justification::centred);
         }
 
+        // envio da trilha selecionada para esta
+        if (selected > 0 && t != selected && selected < tracks)
+        {
+            const auto r = routeArea (t).toFloat();
+            const auto on = song.routes (selected, t);
+            const auto possible = on || song.canRoute (selected, t);
+
+            if (possible)
+            {
+                g.setColour (on ? theme::accentOrange.withAlpha (0.85f) : theme::knobBackground);
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (on ? juce::Colours::black : theme::text.withAlpha (0.45f));
+                g.setFont (juce::FontOptions (10.0f));
+                juce::String label = juce::String::fromUTF8 ("\xe2\x86\x92"); // seta
+
+                if (on && t > 0)
+                    for (const auto& send : song.mixer[(std::size_t) selected].sends)
+                        if (send.target == t)
+                            label << " " << juce::roundToInt (send.level * 100.0f) << "%";
+
+                g.drawText (label, r.toNearestInt(), juce::Justification::centred);
+            }
+        }
+
         // canais que chegam nesta trilha
         {
             juce::StringArray feeds;
@@ -245,7 +276,7 @@ void MixerStrips::paint (juce::Graphics& g)
             g.setColour (theme::accentOrange.withAlpha (0.8f));
             g.setFont (juce::FontOptions (10.0f));
             const auto text = feeds.size() > 3 ? feeds[0] + ", " + feeds[1] + " +" + juce::String (feeds.size() - 2) : feeds.joinIntoString (", ");
-            g.drawFittedText (text, x + 3, getHeight() - feedsHeight, w - 10, feedsHeight - 6, juce::Justification::centredTop, 3, 0.8f);
+            g.drawFittedText (text, x + 3, getHeight() - feedsHeight + 16, w - 10, feedsHeight - 20, juce::Justification::centredTop, 2, 0.8f);
         }
     }
 
@@ -279,6 +310,22 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             auto& track = s.mixer.emplace_back();
             track.name = "Insert " + std::to_string (s.mixer.size() - 1);
         });
+        return;
+    }
+
+    if (part == Part::route)
+    {
+        // a seleção é a origem do envio: não muda
+        const auto from = selected;
+        const auto on = engine.getSong().routes (from, t);
+        engine.editSong ([from, t, on] (Song& s) { s.setRoute (from, t, ! on); });
+
+        if (! on && t > 0) // acabou de ligar: arrastar ajusta o nível
+        {
+            dragPart = Part::route;
+            dragTrack = t;
+            dragStartValue = 1.0f;
+        }
         return;
     }
 
@@ -336,6 +383,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             }
             return;
 
+        case Part::route:
         case Part::body:
         case Part::none:
         case Part::add:
@@ -349,6 +397,14 @@ void MixerStrips::mouseDrag (const juce::MouseEvent& e)
         return;
 
     const auto t = dragTrack;
+
+    if (dragPart == Part::route)
+    {
+        const auto from = selected;
+        const auto v = juce::jlimit (0.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / 120.0f);
+        engine.editSong ([from, t, v] (Song& s) { s.setRoute (from, t, true, v); });
+        return;
+    }
 
     if (dragPart == Part::fader)
     {
@@ -405,6 +461,25 @@ void MixerStrips::showMenu (int t)
         menu.addItem (utf8 ("Rotear o canal \"") + juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str())
                           + utf8 ("\" para cá"),
                       [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
+
+    if (selected > 0 && selected != t && (t == 0 || song.canRoute (selected, t) || song.routes (selected, t)))
+        menu.addItem (utf8 ("Enviar \"") + juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str())
+                          + utf8 ("\" só para esta trilha"),
+                      [this, from = selected, t] {
+                          engine.editSong ([from, t] (Song& s) {
+                              s.mixer[(std::size_t) from].sends.clear();
+                              s.mixer[(std::size_t) from].toMaster = false;
+                              s.setRoute (from, t, true);
+                          });
+                      });
+
+    if (t > 0 && (! song.mixer[(std::size_t) t].sends.empty() || ! song.mixer[(std::size_t) t].toMaster))
+        menu.addItem (utf8 ("Voltar a enviar só para o Master"), [this, t] {
+            engine.editSong ([t] (Song& s) {
+                s.mixer[(std::size_t) t].sends.clear();
+                s.mixer[(std::size_t) t].toMaster = true;
+            });
+        });
 
     menu.addItem ("Renomear...", [this, t] {
         auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);

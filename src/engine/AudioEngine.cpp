@@ -92,7 +92,7 @@ void AudioEngine::buildInitialGraph()
 }
 
 float AudioEngine::renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output,
-                                  const std::function<bool (double)>& progress, double tailSeconds)
+                                  const std::function<bool (double)>& progress, double tailSeconds, int trimSamples)
 {
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
@@ -104,7 +104,8 @@ float AudioEngine::renderOffline (double seconds, double sampleRate, juce::Audio
     juce::AudioBuffer<float> buffer (2, blockSize);
     juce::MidiBuffer midi;
     float peak = 0.0f;
-    const auto musicSamples = (std::int64_t) (seconds * sampleRate);
+    const auto trim = (std::int64_t) juce::jmax (0, trimSamples);
+    const auto musicSamples = (std::int64_t) (seconds * sampleRate) + trim;
     const auto totalSamples = musicSamples + (std::int64_t) (juce::jmax (0.0, tailSeconds) * sampleRate);
     std::int64_t quietSamples = 0;
     bool cancelled = false;
@@ -122,8 +123,12 @@ float AudioEngine::renderOffline (double seconds, double sampleRate, juce::Audio
         const auto blockPeak = view.getMagnitude (0, n);
         peak = juce::jmax (peak, blockPeak);
 
-        if (output != nullptr)
-            output->writeFromAudioSampleBuffer (view, 0, n);
+        // PDC: o começo é o silêncio da latência; o fim da música chega `trim` samples depois
+        if (output != nullptr && done + n > trim)
+        {
+            const auto skip = (int) juce::jmax<std::int64_t> (0, trim - done);
+            output->writeFromAudioSampleBuffer (view, skip, n - skip);
+        }
 
         transport.positionTicks.store (transport.positionTicks.load() + n * transport.ticksPerSample());
 
@@ -410,6 +415,10 @@ void AudioEngine::publishSong()
     lastPublishedShape.instruments = state->instruments;
     lastPublishedShape.effects = state->effects;
     lastPublishedShape.sampleRate = state->sampleRate;
+    lastPublishedShape.latencies = state->latencies;
+    lastPublishedShape.pdc = state->pdc;
+    lastPublishedShape.channelDelays = state->channelDelays;
+    lastPublishedShape.sendDelays = state->sendDelays;
 
     rackExchange.publish (std::move (state));
     sendChangeMessage();
@@ -421,7 +430,9 @@ void AudioEngine::timerCallback()
     rackExchange.collectGarbage();
 
     // Plugins são preparados numa taxa fixa; se o dispositivo mudou de taxa, recria.
-    if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5)
+    // Um plugin que mudou de latência (troca de preset, lookahead) pede um novo plano de PDC.
+    if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5
+        || lastPublishedShape.currentLatencies() != lastPublishedShape.latencies)
         publishSong();
 }
 

@@ -13,6 +13,7 @@
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
 #include "core/Meters.h"
+#include "core/Pdc.h"
 #include "core/Scheduler.h"
 #include "core/Song.h"
 
@@ -44,6 +45,20 @@ struct RackState
     };
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
+
+    // PDC: atrasos por aresta (nullptr = sem atraso) e as latências usadas para montar o plano.
+    PdcPlan pdc;
+    std::vector<std::shared_ptr<DelayLine>> channelDelays;
+    std::vector<std::vector<std::shared_ptr<DelayLine>>> sendDelays; // [trilha][k] como PdcPlan::sendDelay
+    std::vector<int> latencies; // canais, depois slots de todas as trilhas
+
+    // Latências atuais dos instrumentos e efeitos, no mesmo formato de `latencies`.
+    std::vector<int> currentLatencies() const;
+    void buildPdc (const RackState* previous);
+
+    // Mixer: ordem de processamento dos inserts e quem soa com o solo atual.
+    std::vector<int> mixerOrder;
+    std::vector<char> mixerAudible;
 
     void buildAutomationTables();
 
@@ -114,6 +129,7 @@ private:
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = ainda não avaliada
+    std::vector<float> scratch; // 2 * blockCapacity, para atrasar um canal ou um envio
     int blockCapacity = 0;
 };
 } // namespace lynx

@@ -29,6 +29,8 @@ public:
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
     // Parâmetro automatizado (plugins). 0..1. Thread de áudio.
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
+    // Latência que o instrumento introduz (plugins), em samples. Para o PDC.
+    virtual int latencySamples() const noexcept { return 0; }
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio).

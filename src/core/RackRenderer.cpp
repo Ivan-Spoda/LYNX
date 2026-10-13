@@ -130,7 +130,72 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     state->song = std::move (song);
     state->sampleRate = sampleRate;
     state->buildAutomationTables();
+    state->buildPdc (previous);
+    state->mixerOrder = state->song.mixerOrder();
+    const auto audible = state->song.soloAudible();
+    state->mixerAudible.assign (audible.begin(), audible.end());
     return state;
+}
+
+std::vector<int> RackState::currentLatencies() const
+{
+    std::vector<int> out;
+
+    for (const auto& i : instruments)
+        out.push_back (i->latencySamples());
+
+    for (const auto& track : effects)
+        for (const auto& e : track)
+            out.push_back (e->latencySamples());
+
+    return out;
+}
+
+void RackState::buildPdc (const RackState* previous)
+{
+    latencies = currentLatencies();
+
+    std::vector<int> channelLatency (latencies.begin(), latencies.begin() + (std::ptrdiff_t) instruments.size());
+    std::vector<std::vector<int>> slotLatency (effects.size());
+    auto next = latencies.begin() + (std::ptrdiff_t) instruments.size();
+
+    for (std::size_t t = 0; t < effects.size(); ++t)
+        for (std::size_t s = 0; s < effects[t].size(); ++s)
+            slotLatency[t].push_back (*next++);
+
+    pdc = computePdc (song, channelLatency, slotLatency);
+
+    // reaproveita as linhas de mesmo comprimento: editar a música não pode estalar o áudio
+    auto line = [] (int length, const std::shared_ptr<DelayLine>* old) -> std::shared_ptr<DelayLine> {
+        if (length <= 0)
+            return nullptr;
+        if (old != nullptr && *old != nullptr && (*old)->length() == length)
+            return *old;
+        return std::make_shared<DelayLine> (length);
+    };
+
+    channelDelays.resize (pdc.channelDelay.size());
+
+    for (std::size_t c = 0; c < pdc.channelDelay.size(); ++c)
+        channelDelays[c] = line (pdc.channelDelay[c],
+                                 previous != nullptr && c < previous->channelDelays.size() ? &previous->channelDelays[c] : nullptr);
+
+    sendDelays.resize (pdc.sendDelay.size());
+
+    for (std::size_t t = 0; t < pdc.sendDelay.size(); ++t)
+    {
+        sendDelays[t].resize (pdc.sendDelay[t].size());
+
+        for (std::size_t k = 0; k < pdc.sendDelay[t].size(); ++k)
+        {
+            const std::shared_ptr<DelayLine>* old = nullptr;
+
+            if (previous != nullptr && t < previous->sendDelays.size() && k < previous->sendDelays[t].size())
+                old = &previous->sendDelays[t][k];
+
+            sendDelays[t][k] = line (pdc.sendDelay[t][k], old);
+        }
+    }
 }
 
 void RackState::buildAutomationTables()
@@ -239,6 +304,7 @@ float peakOf (const float* data, int n) noexcept
 void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
+    scratch.assign ((std::size_t) std::max (64, maxBlockSize) * 2, 0.0f);
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
@@ -344,7 +410,28 @@ void RackRenderer::renderSegment (const RackState& state, int offset, int n) noe
         const auto pan = automation ? automated (state.channelPanAuto[i], (c.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : c.pan;
         float gl = 0.0f, gr = 0.0f;
         panGains (pan, volume, gl, gr);
-        state.instruments[i]->render (trackBuffer (track, 0) + offset, trackBuffer (track, 1) + offset, n, gl, gr);
+
+        if (i < state.channelDelays.size() && state.channelDelays[i] != nullptr)
+        {
+            // PDC: este canal chega antes dos outros da trilha; atrasa até alinhar
+            auto* sl = scratch.data();
+            auto* sr = scratch.data() + blockCapacity;
+            std::memset (sl, 0, sizeof (float) * (std::size_t) n);
+            std::memset (sr, 0, sizeof (float) * (std::size_t) n);
+            state.instruments[i]->render (sl, sr, n, gl, gr);
+            state.channelDelays[i]->process (sl, sr, n);
+
+            auto* dl = trackBuffer (track, 0) + offset;
+            auto* dr = trackBuffer (track, 1) + offset;
+
+            for (int k = 0; k < n; ++k)
+            {
+                dl[k] += sl[k];
+                dr[k] += sr[k];
+            }
+        }
+        else
+            state.instruments[i]->render (trackBuffer (track, 0) + offset, trackBuffer (track, 1) + offset, n, gl, gr);
     }
 }
 
@@ -514,18 +601,18 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     if (position < numSamples)
         renderSegment (state, position, numSamples - position);
 
-    // 2) inserts -> Master (com mute/solo)
-    const auto anySolo = std::any_of (song.mixer.begin() + std::min<std::ptrdiff_t> (1, (std::ptrdiff_t) song.mixer.size()),
-                                      song.mixer.end(), [] (const MixerTrack& t) { return t.solo; });
-
+    // 2) inserts em ordem de roteamento (quem envia antes de quem recebe) -> destinos
     float* masterL = trackBuffer (0, 0);
     float* masterR = trackBuffer (0, 1);
 
-    for (int t = 1; t < tracks; ++t)
+    for (const auto t : state.mixerOrder)
     {
+        if (t <= 0 || t >= tracks)
+            continue;
+
         const auto& track = song.mixer[(std::size_t) t];
 
-        if (track.muted || (anySolo && ! track.solo))
+        if (track.muted || ! state.mixerAudible[(std::size_t) t])
             continue;
 
         runEffects (state, t, numSamples);
@@ -538,10 +625,50 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         const auto* l = trackBuffer (t, 0);
         const auto* r = trackBuffer (t, 1);
 
-        for (int i = 0; i < numSamples; ++i)
+        const auto* delays = (std::size_t) t < state.sendDelays.size() ? &state.sendDelays[(std::size_t) t] : nullptr;
+
+        auto sendTo = [&] (float* dl, float* dr, float level, std::size_t k) {
+            const auto sl = gl * level, sr = gr * level;
+            DelayLine* delay = delays != nullptr && k < delays->size() ? (*delays)[k].get() : nullptr;
+
+            if (delay == nullptr)
+            {
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    dl[i] += l[i] * sl;
+                    dr[i] += r[i] * sr;
+                }
+                return;
+            }
+
+            // PDC: esta aresta é mais curta que a mais lenta que chega no destino
+            auto* xl = scratch.data();
+            auto* xr = scratch.data() + blockCapacity;
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                xl[i] = l[i] * sl;
+                xr[i] = r[i] * sr;
+            }
+
+            delay->process (xl, xr, numSamples);
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                dl[i] += xl[i];
+                dr[i] += xr[i];
+            }
+        };
+
+        if (track.toMaster)
+            sendTo (masterL, masterR, 1.0f, 0);
+
+        for (std::size_t k = 0; k < track.sends.size(); ++k)
         {
-            masterL[i] += l[i] * gl;
-            masterR[i] += r[i] * gr;
+            const auto& send = track.sends[k];
+
+            if (send.target > 0 && send.target < tracks && send.target != t)
+                sendTo (trackBuffer (send.target, 0), trackBuffer (send.target, 1), send.level, k + 1);
         }
 
         if (meters != nullptr)

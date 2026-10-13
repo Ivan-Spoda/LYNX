@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace lynx
 {
@@ -137,6 +138,179 @@ void Song::removeChannel (int index)
         else if (onChannel && t.index > index)
             --t.index;
     }
+}
+
+bool Song::routes (int from, int to) const noexcept
+{
+    if (from <= 0 || from >= (int) mixer.size())
+        return false;
+
+    const auto& t = mixer[(std::size_t) from];
+
+    if (to == 0)
+        return t.toMaster;
+
+    return std::any_of (t.sends.begin(), t.sends.end(), [to] (const MixerSend& s) { return s.target == to; });
+}
+
+bool Song::canRoute (int from, int to) const
+{
+    const auto n = (int) mixer.size();
+
+    if (from <= 0 || from >= n || to < 0 || to >= n || from == to)
+        return false;
+
+    if (to == 0)
+        return true;
+
+    // ciclo se `from` já for alcançável a partir de `to`
+    std::vector<int> stack { to };
+    std::vector<bool> seen ((std::size_t) n, false);
+
+    while (! stack.empty())
+    {
+        const auto t = stack.back();
+        stack.pop_back();
+
+        if (t == from)
+            return false;
+
+        if (seen[(std::size_t) t])
+            continue;
+
+        seen[(std::size_t) t] = true;
+
+        for (const auto& s : mixer[(std::size_t) t].sends)
+            if (s.target > 0 && s.target < n)
+                stack.push_back (s.target);
+    }
+
+    return true;
+}
+
+void Song::setRoute (int from, int to, bool enabled, float level)
+{
+    if (from <= 0 || from >= (int) mixer.size() || to < 0 || to >= (int) mixer.size())
+        return;
+
+    auto& t = mixer[(std::size_t) from];
+
+    if (to == 0)
+    {
+        t.toMaster = enabled;
+        return;
+    }
+
+    auto it = std::find_if (t.sends.begin(), t.sends.end(), [to] (const MixerSend& s) { return s.target == to; });
+
+    if (! enabled)
+    {
+        if (it != t.sends.end())
+            t.sends.erase (it);
+        return;
+    }
+
+    if (it != t.sends.end())
+        it->level = std::clamp (level, 0.0f, 1.0f);
+    else if (canRoute (from, to))
+        t.sends.push_back ({ to, std::clamp (level, 0.0f, 1.0f) });
+}
+
+std::vector<int> Song::mixerOrder() const
+{
+    const auto n = (int) mixer.size();
+    std::vector<int> incoming ((std::size_t) std::max (0, n), 0);
+
+    for (int t = 1; t < n; ++t)
+        for (const auto& s : mixer[(std::size_t) t].sends)
+            if (s.target > 0 && s.target < n)
+                ++incoming[(std::size_t) s.target];
+
+    // Kahn: começa pelas trilhas que ninguém alimenta (em ordem de número)
+    std::vector<int> order, ready;
+
+    for (int t = n - 1; t >= 1; --t)
+        if (incoming[(std::size_t) t] == 0)
+            ready.push_back (t);
+
+    while (! ready.empty())
+    {
+        const auto t = ready.back();
+        ready.pop_back();
+        order.push_back (t);
+
+        for (const auto& s : mixer[(std::size_t) t].sends)
+            if (s.target > 0 && s.target < n && --incoming[(std::size_t) s.target] == 0)
+            {
+                // mantém a ordem numérica entre as que ficam prontas juntas
+                auto pos = std::upper_bound (ready.begin(), ready.end(), s.target, std::greater<int>());
+                ready.insert (pos, s.target);
+            }
+    }
+
+    // ciclo (arquivo estragado): as que sobraram vão no fim, sem os envios que fecham o ciclo
+    for (int t = 1; t < n; ++t)
+        if (std::find (order.begin(), order.end(), t) == order.end())
+            order.push_back (t);
+
+    return order;
+}
+
+std::vector<bool> Song::soloAudible() const
+{
+    const auto n = mixer.size();
+    std::vector<bool> audible (n, true);
+    std::vector<int> soloed;
+
+    for (std::size_t t = 1; t < n; ++t)
+        if (mixer[t].solo)
+            soloed.push_back ((int) t);
+
+    if (soloed.empty())
+        return audible;
+
+    std::fill (audible.begin(), audible.end(), false);
+
+    if (n > 0)
+        audible[0] = true;
+
+    // para baixo: o caminho do sinal das trilhas solo até o Master
+    std::vector<int> stack = soloed;
+
+    while (! stack.empty())
+    {
+        const auto t = stack.back();
+        stack.pop_back();
+
+        if (audible[(std::size_t) t])
+            continue;
+
+        audible[(std::size_t) t] = true;
+
+        for (const auto& s : mixer[(std::size_t) t].sends)
+            if (s.target > 0 && s.target < (int) n)
+                stack.push_back (s.target);
+    }
+
+    // para cima: quem alimenta as trilhas solo
+    std::vector<bool> feeds (n, false);
+    stack = soloed;
+
+    while (! stack.empty())
+    {
+        const auto t = stack.back();
+        stack.pop_back();
+
+        for (std::size_t src = 1; src < n; ++src)
+            if (! feeds[src] && routes ((int) src, t))
+            {
+                feeds[src] = true;
+                audible[src] = true;
+                stack.push_back ((int) src);
+            }
+    }
+
+    return audible;
 }
 
 void Song::swapEffectSlots (int track, int a, int b)

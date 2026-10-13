@@ -72,6 +72,15 @@ struct EffectSlot
     PluginRef plugin;                             // usado quando kind == plugin
 };
 
+// Envio de uma trilha para outra (pós-fader), como o roteamento entre inserts do FL.
+struct MixerSend
+{
+    int target = 0;      // trilha de destino (> 0; o Master é `toMaster`)
+    float level = 1.0f;  // 0..1 (ganho linear)
+
+    bool operator== (const MixerSend& o) const noexcept { return target == o.target && level == o.level; }
+};
+
 struct MixerTrack
 {
     std::string name;
@@ -80,6 +89,8 @@ struct MixerTrack
     bool muted = false;
     bool solo = false;
     std::vector<EffectSlot> effects; // até maxEffectSlots, processados em ordem
+    bool toMaster = true;            // inserts: sai no Master (além dos envios)
+    std::vector<MixerSend> sends;    // para outros inserts
 };
 
 struct Note
@@ -206,6 +217,17 @@ struct Song
     // Remove um canal com as notas e clips de áudio dele, e reindexa os demais.
     // Automações desse canal ficam sem alvo.
     void removeChannel (int index);
+
+    // Roteamento entre inserts. canRoute = destino válido e sem criar ciclo.
+    bool canRoute (int from, int to) const;
+    // Liga/desliga o envio from -> to (to == 0 = Master). Não faz nada se criar ciclo.
+    void setRoute (int from, int to, bool enabled, float level = 1.0f);
+    bool routes (int from, int to) const noexcept;
+    // Inserts (1..N) em ordem de processamento: quem envia vem antes de quem recebe.
+    std::vector<int> mixerOrder() const;
+    // Trilhas que soam com o solo atual: as solo, as que chegam nelas e o caminho até o Master.
+    // Sem solo, todas. Índice = trilha.
+    std::vector<bool> soloAudible() const;
 
     // Troca/remove slots de efeito mantendo as automações apontando para o efeito certo.
     void swapEffectSlots (int track, int a, int b);
