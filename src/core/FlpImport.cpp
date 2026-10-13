@@ -179,6 +179,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             track.name = insert.name;
 
         track.muted = (insert.flags & 0x08) == 0;
+        track.invertPhase = (insert.flags & 0x01) != 0;
+        track.swapChannels = (insert.flags & 0x02) != 0;
         track.solo = insert.index > 0 && (insert.flags & 0x1000) != 0;
 
         if (insert.index > 0 && insert.hasRoutes)
@@ -221,6 +223,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             track.volume = std::clamp (control.value / 16000.0f, 0.0f, 1.0f);
         else if (p == flp::ControlId::mixerPan)
             track.pan = std::clamp (control.value / 6400.0f, -1.0f, 1.0f);
+        else if (p == flp::ControlId::mixerStereo)
+            track.stereo = std::clamp (control.value / 64.0f, -1.0f, 1.0f);
         else if (p >= flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
             for (auto& send : track.sends)
                 if (send.target == p - flp::ControlId::mixerSendBase)

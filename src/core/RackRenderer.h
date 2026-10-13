@@ -127,6 +127,8 @@ public:
                   MeterBank* meters = nullptr,
                   LiveEventQueue* moreLive = nullptr) noexcept;
 
+    static void applyStereoForTest (const MixerTrack& t, float* l, float* r, int n) noexcept { applyStereo (t, l, r, n); }
+
     // Andamento usado no último bloco (muda com automação de tempo). O transporte avança com ele.
     double currentBpm() const noexcept { return bpm; }
 
@@ -139,6 +141,7 @@ private:
     void renderChannel (const RackState& state, int channel, int n) noexcept;
     void processTrack (const RackState& state, int track, int n, MeterBank* meters) noexcept;
     void pullInputs (const RackState& state, int track, int n) noexcept;
+    static void applyStereo (const MixerTrack& track, float* l, float* r, int n) noexcept;
     float* channelBuffer (int channel, int side) noexcept;
     float* trackScratch (int track, int side) noexcept;
     void runEffects (const RackState& state, int track, int n) noexcept;

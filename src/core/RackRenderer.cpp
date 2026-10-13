@@ -755,6 +755,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     pullInputs (state, 0, numSamples);
     runEffects (state, 0, numSamples);
 
+    if (! song.mixer.empty())
+        applyStereo (song.mixer[0], trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
+
     float gl = 1.0f, gr = 1.0f;
 
     if (! song.mixer.empty())
@@ -783,6 +786,37 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (meters != nullptr)
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
+}
+
+// Separação estéreo, fase e troca de canais da trilha (antes do fader, como o FL).
+// Estreitar usa a curva exponencial do FL, alargar é linear (docs/analise/REA_rodada2.md §2.2).
+void RackRenderer::applyStereo (const MixerTrack& track, float* l, float* r, int n) noexcept
+{
+    if (track.stereo != 0.0f)
+    {
+        const auto s = track.stereo > 0.0f ? (std::pow (5.0f, std::min (track.stereo, 1.0f)) - 1.0f) / 4.0f
+                                           : std::max (track.stereo, -1.0f);
+        // s = 1: mono; s = -1: lado dobrado
+        const auto keep = 1.0f - 0.5f * s, cross = 0.5f * s;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto a = l[i], b = r[i];
+            l[i] = keep * a + cross * b;
+            r[i] = keep * b + cross * a;
+        }
+    }
+
+    if (track.swapChannels)
+        for (int i = 0; i < n; ++i)
+            std::swap (l[i], r[i]);
+
+    if (track.invertPhase)
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] = -l[i];
+            r[i] = -r[i];
+        }
 }
 
 void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
@@ -865,6 +899,7 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
 
     auto* l = trackBuffer (t, 0);
     auto* r = trackBuffer (t, 1);
+    applyStereo (track, l, r, n);
     const auto stepL = (gl - fromL) / (float) n, stepR = (gr - fromR) / (float) n;
 
     for (int i = 0; i < n; ++i)

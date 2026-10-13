@@ -1858,6 +1858,29 @@ TEST (bounce_insert_song_and_apply)
     CHECK (s.playlist.back().kind == lynx::ClipKind::audio && s.playlist.back().length == 3840);
 }
 
+TEST (mixer_stereo_separation_phase_swap)
+{
+    lynx::MixerTrack t;
+    std::vector<float> l { 1.0f }, r { 0.0f };
+    t.stereo = 1.0f; // mono
+    lynx::RackRenderer::applyStereoForTest (t, l.data(), r.data(), 1);
+    CHECK (std::abs (l[0] - 0.5f) < 1e-6f && std::abs (r[0] - 0.5f) < 1e-6f);
+
+    l = { 1.0f };
+    r = { 0.0f };
+    t.stereo = -1.0f; // lado dobrado: 1,5 L - 0,5 R
+    lynx::RackRenderer::applyStereoForTest (t, l.data(), r.data(), 1);
+    CHECK (std::abs (l[0] - 1.5f) < 1e-6f && std::abs (r[0] + 0.5f) < 1e-6f);
+
+    l = { 1.0f };
+    r = { 0.25f };
+    t.stereo = 0.0f;
+    t.swapChannels = true;
+    t.invertPhase = true;
+    lynx::RackRenderer::applyStereoForTest (t, l.data(), r.data(), 1);
+    CHECK (l[0] == -0.25f && r[0] == -1.0f);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

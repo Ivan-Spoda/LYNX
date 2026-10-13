@@ -482,6 +482,26 @@ void MixerStrips::showMenu (int t)
             });
         });
 
+    {
+        const auto& track = song.mixer[(std::size_t) t];
+        juce::PopupMenu stereo;
+        const std::pair<const char*, float> widths[] = { { "Mono", 1.0f }, { "Mais estreito", 0.5f }, { "Normal", 0.0f },
+                                                          { "Mais largo", -0.5f }, { "Bem largo", -1.0f } };
+
+        for (const auto& [label, value] : widths)
+            stereo.addItem (juce::String::fromUTF8 (label), true, std::abs (track.stereo - value) < 0.01f,
+                            [this, t, v = value] { engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].stereo = v; }); });
+
+        menu.addSubMenu (utf8 ("Separação estéreo"), stereo);
+        menu.addItem (utf8 ("Inverter fase"), true, track.invertPhase, [this, t] {
+            engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].invertPhase = ! s.mixer[(std::size_t) t].invertPhase; });
+        });
+        menu.addItem (utf8 ("Trocar esquerda/direita"), true, track.swapChannels, [this, t] {
+            engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].swapChannels = ! s.mixer[(std::size_t) t].swapChannels; });
+        });
+        menu.addSeparator();
+    }
+
     if (t > 0)
         menu.addItem (utf8 ("Renderizar para áudio (congelar)..."), [this, t] { bounceInsertToAudio (engine, t); });
 

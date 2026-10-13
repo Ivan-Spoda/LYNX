@@ -311,6 +311,12 @@ juce::String toJson (const Song& song)
 
         if (! t.toMaster)
             o->setProperty ("toMaster", false);
+        if (t.stereo != 0.0f)
+            o->setProperty ("stereo", juce::roundToInt (t.stereo * 1000.0f) / 1000.0);
+        if (t.invertPhase)
+            o->setProperty ("invertPhase", true);
+        if (t.swapChannels)
+            o->setProperty ("swap", true);
 
         if (! t.sends.empty())
         {
@@ -531,6 +537,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.muted = (bool) t.getProperty ("muted", false);
             track.solo = (bool) t.getProperty ("solo", false);
             track.toMaster = (bool) t.getProperty ("toMaster", true);
+            track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
+            track.invertPhase = (bool) t.getProperty ("invertPhase", false);
+            track.swapChannels = (bool) t.getProperty ("swap", false);
 
             if (auto* sends = t["sends"].getArray())
                 for (const auto& send : *sends)
