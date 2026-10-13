@@ -148,6 +148,11 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     }
 
     state->song = std::move (song);
+
+    // agendamento: notas ordenadas por início (a ordem entre notas no mesmo tick é mantida)
+    for (auto& p : state->song.patterns)
+        std::stable_sort (p.notes.begin(), p.notes.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
+    state->schedule = makeScheduleIndex (state->song);
     state->sampleRate = sampleRate;
     state->buildAutomationTables();
     state->buildPdc (previous);
@@ -387,9 +392,40 @@ float peakOf (const float* data, int n) noexcept
     float peak = 0.0f;
 
     for (int i = 0; i < n; ++i)
-        peak = std::max (peak, std::abs (data[i]));
+    {
+        const auto a = std::abs (data[i]);
+        peak = a > peak ? a : peak; // forma que o compilador vetoriza
+    }
 
     return peak;
+}
+
+// Algum sample acima de `level`? Para no primeiro: com som (o caso comum) custa quase nada.
+bool anyAbove (const float* l, const float* r, int n, float level) noexcept
+{
+    // em blocos de 32: o laço de dentro vetoriza; trechos em silêncio (os que varrem tudo) ficam baratos
+    int i = 0;
+
+    for (; i + 32 <= n; i += 32)
+    {
+        float m = 0.0f;
+
+        for (int k = i; k < i + 32; ++k)
+        {
+            const auto a = std::abs (l[k]), b = std::abs (r[k]);
+            m = a > m ? a : m;
+            m = b > m ? b : m;
+        }
+
+        if (m > level)
+            return true;
+    }
+
+    for (; i < n; ++i)
+        if (std::abs (l[i]) > level || std::abs (r[i]) > level)
+            return true;
+
+    return false;
 }
 } // namespace
 
@@ -467,7 +503,7 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     if (song.mode != PlayMode::song)
         return;
 
-    const auto length = (double) std::max<std::int64_t> (1, song.songLength());
+    const auto length = (double) std::max<std::int64_t> (1, state.schedule.songLength);
     const auto tick = std::fmod (std::max (0.0, startTick), length);
 
     for (std::size_t a = 0; a < state.automationClips.size(); ++a)
@@ -594,6 +630,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
     auto* l = trackBuffer (track, 0);
     auto* r = trackBuffer (track, 1);
+    int audible = -1; // -1 = ainda não medido; a saída de um efeito é a entrada do próximo
 
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
     {
@@ -613,7 +650,10 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             if (sd.effect != effects[i].get())
                 sd = { effects[i].get(), 0 };
 
-            if (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel)
+            if (audible < 0)
+                audible = anyAbove (l, r, n, silenceLevel) ? 1 : 0;
+
+            if (audible == 1)
                 sd.silentSamples = 0;
             else if (sd.silentSamples >= hold)
                 continue;
@@ -643,8 +683,6 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         else
             effects[i]->process (l, r, n, slots[i].params, bpm);
 
-        if (key < smartDisable.size() && (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel))
-            smartDisable[key].silentSamples = 0; // cauda (reverb, delay): continua processando
 
         if (partial)
         {
@@ -658,6 +696,12 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 r[k] = dr[k] + (r[k] - dr[k]) * wet;
             }
         }
+
+        // o efeito mudou o sinal: mede de novo (vale como entrada do próximo slot)
+        audible = anyAbove (l, r, n, silenceLevel) ? 1 : 0;
+
+        if (audible == 1 && key < smartDisable.size())
+            smartDisable[key].silentSamples = 0; // cauda (reverb, delay): continua processando
     }
 }
 
@@ -715,7 +759,7 @@ void RackRenderer::process (const RackState* state,
 
     if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song)
     {
-        const auto length = (double) std::max<std::int64_t> (1, state->song.songLength());
+        const auto length = (double) std::max<std::int64_t> (1, state->schedule.songLength);
         const auto& clips = state->automationClips[(std::size_t) state->tempoAutomation];
 
         if (! clips.empty())
@@ -781,7 +825,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (playing && song.mode == PlayMode::song)
     {
-        scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio);
+        scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio, &state.schedule);
     }
     else if (playing && ! song.patterns.empty())
     {

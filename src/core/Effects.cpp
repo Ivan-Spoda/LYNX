@@ -195,19 +195,22 @@ public:
         const auto attack = (float) std::exp (-1.0 / (compAttackMs (params[2]) * 0.001 * sampleRate));
         const auto release = (float) std::exp (-1.0 / (compReleaseMs (params[3]) * 0.001 * sampleRate));
         const auto makeup = dbToGain (compMakeupDb (params[4]));
+        const auto thresholdGain = dbToGain (threshold);
 
         for (int i = 0; i < n; ++i)
         {
-            // detector de pico estéreo ligado, curva "hard knee"
-            const auto level = gainToDb (std::max (std::abs (l[i]), std::abs (r[i])));
-            const auto over = level - threshold;
-            const auto reductionDb = over > 0.0f ? over * (1.0f - 1.0f / ratio) : 0.0f;
+            // detector de pico estéreo ligado, curva "hard knee"; abaixo do threshold não precisa do log
+            const auto peak = std::max (std::abs (l[i]), std::abs (r[i]));
+            const auto reductionDb = peak > thresholdGain ? (gainToDb (peak) - threshold) * (1.0f - 1.0f / ratio) : 0.0f;
 
             // o envelope sobe com o attack e desce com o release
             const auto coeff = reductionDb > envelopeDb ? attack : release;
             envelopeDb = reductionDb + coeff * (envelopeDb - reductionDb);
 
-            const auto gain = dbToGain (-envelopeDb) * makeup;
+            if (envelopeDb < 1.0e-4f)
+                envelopeDb = 0.0f; // sem redução audível: dispensa o pow
+
+            const auto gain = envelopeDb > 0.0f ? dbToGain (-envelopeDb) * makeup : makeup;
             l[i] *= gain;
             r[i] *= gain;
         }
@@ -376,8 +379,10 @@ public:
             {
                 std::fill (out[ch], out[ch] + m, 0.0f);
 
-                for (auto& c : combs[ch])
-                    c.process (input, out[ch], m, feedback, damping);
+                // 4 combs por laço: as cadeias de realimentação são independentes e a CPU as
+                // intercala (um comb sozinho fica preso na latência do filtro de amortecimento)
+                for (std::size_t c = 0; c + 4 <= combs[ch].size(); c += 4)
+                    Comb::process4 (&combs[ch][c], input, out[ch], m, feedback, damping);
 
                 for (auto& a : allpasses[ch])
                     a.process (out[ch], m);
@@ -398,31 +403,39 @@ private:
         std::size_t length = 1, index = 0;
         float store = 0.0f;
 
-        // soma a saída em `out`
-        void process (const float* input, float* out, int n, float feedback, float damping) noexcept
+        // quatro combs de uma vez; soma em `out` na mesma ordem que um por um
+        static void process4 (Comb* c, const float* input, float* out, int n, float feedback, float damping) noexcept
         {
-            // estado em locais: sem isso o compilador relê/grava os membros a cada sample
-            auto* buf = buffer.data();
-            auto idx = index;
-            auto st = store;
-            const auto len = length;
+            float* buf[4] = { c[0].buffer.data(), c[1].buffer.data(), c[2].buffer.data(), c[3].buffer.data() };
+            std::size_t idx[4] = { c[0].index, c[1].index, c[2].index, c[3].index };
+            const std::size_t len[4] = { c[0].length, c[1].length, c[2].length, c[3].length };
+            float st[4] = { c[0].store, c[1].store, c[2].store, c[3].store };
             const auto keep = 1.0f - damping;
 
             for (int i = 0; i < n; ++i)
             {
-                const auto output = buf[idx];
-                st = output * keep + st * damping;
-                buf[idx] = input[i] + st * feedback;
+                float o[4];
 
-                if (++idx == len)
-                    idx = 0;
+                for (int k = 0; k < 4; ++k)
+                {
+                    o[k] = buf[k][idx[k]];
+                    st[k] = o[k] * keep + st[k] * damping;
+                    buf[k][idx[k]] = input[i] + st[k] * feedback;
 
-                out[i] += output;
+                    if (++idx[k] == len[k])
+                        idx[k] = 0;
+                }
+
+                out[i] = out[i] + o[0] + o[1] + o[2] + o[3];
             }
 
-            index = idx;
-            store = st;
+            for (int k = 0; k < 4; ++k)
+            {
+                c[k].index = idx[k];
+                c[k].store = st[k];
+            }
         }
+
     };
 
     struct Allpass

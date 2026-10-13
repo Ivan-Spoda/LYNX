@@ -1032,6 +1032,72 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     CHECK (! lynx::parseFlWrapper ({ 12, 0, 0, 0 }, p));
 }
 
+TEST (schedule_index_matches_full_scan)
+{
+    // música aleatória (notas longas, swing, clips com offset); o agendamento com índice tem que dar
+    // exatamente os mesmos eventos que a varredura completa, inclusive no bloco que dá a volta
+    lynx::Song s = lynx::Song::makeDefault();
+    s.swing = 0.6f;
+    std::uint32_t seed = 12345;
+    auto rnd = [&] (int n) { seed = seed * 1664525u + 1013904223u; return (int) ((seed >> 8) % (std::uint32_t) n); };
+    s.patterns.resize (3);
+    for (auto& p : s.patterns)
+    {
+        p.notes.clear();
+        for (int i = 0; i < 60; ++i)
+        {
+            lynx::Note n;
+            n.start = rnd (16 * lynx::ppq);
+            n.length = rnd (5) == 0 ? rnd (12 * lynx::ppq) + 1 : rnd (lynx::ppq) + 1;
+            n.channel = rnd (4);
+            n.key = 40 + rnd (40);
+            n.slide = rnd (20) == 0;
+            p.notes.push_back (n);
+        }
+        p.sortNotes();
+    }
+    s.playlist.clear();
+    for (int i = 0; i < 12; ++i)
+    {
+        lynx::Clip c;
+        c.pattern = rnd (3);
+        c.track = rnd (4);
+        c.start = rnd (40) * lynx::ppq;
+        c.length = (rnd (12) + 1) * lynx::ppq;
+        c.offset = rnd (4) * lynx::ppq;
+        s.playlist.push_back (c);
+    }
+    s.mode = lynx::PlayMode::song;
+    const auto index = lynx::makeScheduleIndex (s);
+    const auto tps = lynx::ticksPerSample (140.0, 48000.0);
+    const auto loop = (double) s.songLength();
+    int mismatches = 0, events = 0;
+
+    for (int block = 0; block < 400; ++block)
+    {
+        const auto start = block == 0 ? loop - 100.0 * tps : (double) rnd ((int) loop * 2);
+        const auto samples = 64 + rnd (24000); // até ~1 tempo por bloco
+        lynx::EventBuffer a, b;
+        lynx::scheduleSong (s, start, samples, tps, a, false, nullptr);
+        lynx::scheduleSong (s, start, samples, tps, b, false, &index);
+        events += a.size();
+        if (a.size() != b.size())
+        {
+            ++mismatches;
+            continue;
+        }
+        for (int i = 0; i < a.size(); ++i)
+        {
+            const auto& x = *(a.begin() + i);
+            const auto& y = *(b.begin() + i);
+            mismatches += x.sampleOffset != y.sampleOffset || x.type != y.type || x.key != y.key || x.channel != y.channel;
+        }
+    }
+
+    CHECK (events > 500);
+    CHECK (mismatches == 0);
+}
+
 TEST (bars_follow_time_signature_markers)
 {
     lynx::Song song;

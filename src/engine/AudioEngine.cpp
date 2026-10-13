@@ -69,6 +69,10 @@ void raiseAudioThreadPriority()
 
 int workerCount()
 {
+    // diagnóstico: LYNX_WORKERS=n fixa o número de threads extras
+    if (const auto forced = juce::SystemStats::getEnvironmentVariable ("LYNX_WORKERS", {}); forced.isNotEmpty())
+        return juce::jlimit (0, 31, forced.getIntValue());
+
     // a thread de áudio também trabalha; deixa um núcleo livre para a interface
     const auto cores = (int) std::thread::hardware_concurrency();
     return juce::jlimit (0, 7, cores - 2);

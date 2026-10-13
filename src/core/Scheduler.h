@@ -66,6 +66,16 @@ void schedulePatternLoop (const Pattern& pattern,
                           EventBuffer& out,
                           float swing = 0.0f,
                           const std::vector<ChannelDef>* channels = nullptr) noexcept;
+// Índice feito uma vez por snapshot para o scheduleSong não varrer todas as notas a cada bloco:
+// duração da música e a nota mais longa de cada pattern. Exige notas ordenadas por início.
+struct ScheduleIndex
+{
+    std::int64_t songLength = 0;
+    std::vector<std::int64_t> maxNoteLength; // por pattern
+};
+
+ScheduleIndex makeScheduleIndex (const Song& song);
+
 // Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip de pattern
 // toca as notas da pattern que caem em [offset, offset + length); notas são cortadas no
 // fim do clip. Clips de áudio disparam o sample do canal no início e param no fim.
@@ -76,5 +86,6 @@ void scheduleSong (const Song& song,
                    int numSamples,
                    double ticksPerSampleValue,
                    EventBuffer& out,
-                   bool resume = false) noexcept;
+                   bool resume = false,
+                   const ScheduleIndex* index = nullptr) noexcept;
 } // namespace lynx

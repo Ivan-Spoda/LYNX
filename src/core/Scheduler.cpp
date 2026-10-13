@@ -91,12 +91,30 @@ void schedulePatternLoop (const Pattern& pattern,
 
     out.sortByOffset();
 }
-void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume) noexcept
+ScheduleIndex makeScheduleIndex (const Song& song)
+{
+    ScheduleIndex index;
+    index.songLength = song.songLength();
+    index.maxNoteLength.reserve (song.patterns.size());
+
+    for (const auto& p : song.patterns)
+    {
+        std::int64_t longest = 0;
+        for (const auto& n : p.notes)
+            longest = std::max (longest, n.length);
+        index.maxNoteLength.push_back (longest);
+    }
+
+    return index;
+}
+
+void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume,
+                   const ScheduleIndex* index) noexcept
 {
     if (numSamples <= 0 || tps <= 0.0 || song.playlist.empty())
         return;
 
-    const auto loop = song.songLength();
+    const auto loop = index != nullptr ? index->songLength : song.songLength();
     const auto endTick = startTick + numSamples * tps;
 
     // Janela do bloco dentro do loop; se atravessar o fim, vira duas janelas.
@@ -157,8 +175,24 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
         if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
             continue;
 
-        for (const auto& note : song.patterns[(std::size_t) clip.pattern].notes)
+        const auto& notes = song.patterns[(std::size_t) clip.pattern].notes;
+        auto first = notes.begin(), last = notes.end();
+
+        // com o índice e sem o bloco dar a volta no fim da música: só as notas cujo "on" ou "off"
+        // pode cair no bloco (o swing atrasa no máximo meio step)
+        if (index != nullptr && loopEnd <= (double) loop && (std::size_t) clip.pattern < index->maxNoteLength.size())
         {
+            const auto local = (double) (clip.offset - clip.start);
+            const auto from = loopStart + local - (double) (ticksPerStep + index->maxNoteLength[(std::size_t) clip.pattern]) - 1.0;
+            const auto to = loopEnd + local + 1.0;
+            first = std::lower_bound (notes.begin(), notes.end(), from, [] (const Note& n, double t) { return (double) n.start < t; });
+            last = std::upper_bound (first, notes.end(), to, [] (double t, const Note& n) { return t < (double) n.start; });
+        }
+
+        for (auto it = first; it != last; ++it)
+        {
+            const auto& note = *it;
+
             if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
                 continue;
 

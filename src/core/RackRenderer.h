@@ -46,6 +46,7 @@ struct RackState
     };
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
+    ScheduleIndex schedule; // índice para agendar a Playlist sem varrer todas as notas
     int tempoAutomation = -1; // automação do andamento, se houver
 
     // PDC: atrasos por aresta (nullptr = sem atraso) e as latências usadas para montar o plano.

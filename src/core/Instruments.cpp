@@ -522,7 +522,8 @@ public:
                     sum += value * oscPanL[o];
                     sumR += value * oscPanR[o];
                     v.phase[o] += delta;
-                    v.phase[o] -= std::floor (v.phase[o]);
+                    if (v.phase[o] >= 1.0) // delta < 0,5: no máximo uma volta (sem floor, que é chamada de função em CPUs sem SSE4)
+                        v.phase[o] -= 1.0;
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
@@ -579,7 +580,7 @@ private:
             {
                 auto s = phase < 0.5 ? 1.0f : -1.0f;
                 s += polyBlep (phase, dt);
-                s -= polyBlep (std::fmod (phase + 0.5, 1.0), dt);
+                s -= polyBlep (phase < 0.5 ? phase + 0.5 : phase - 0.5, dt);
                 return s;
             }
             case Waveform::noise: return noise.next();
