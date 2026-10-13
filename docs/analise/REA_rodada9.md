@@ -1,517 +1,517 @@
-# Análise comportamental do FL Studio 2026: rodada 9 (REA) — estado dos geradores baseados em sample
+# FL Studio 2026 behavioural analysis: round 9 (REA) — state of the sample-based generators
 
-> **Natureza deste documento.** Continuação das rodadas 2–7 (a rodada 8, feita em paralelo, trata de
-> Maximus/Soundgoodizer/Fast Dist/Filter/Flangus e não é tocada aqui). Engenharia reversa *clean-room*,
-> apenas comportamental. Nenhum código nem pseudocódigo da Image-Line foi copiado: o que está aqui são
-> descrições, layouts de dados e fórmulas escritas com palavras nossas. Endereços (`FUN_xxxxxxxx`), offsets e
-> globais servem só para rastrear a evidência.
+> **Nature of this document.** Continuation of rounds 2–7 (round 8, done in parallel, covers
+> Maximus/Soundgoodizer/Fast Dist/Filter/Flangus and is not touched here). *Clean-room* reverse engineering,
+> behavioural only. No Image-Line code or pseudocode has been copied: what is here are
+> descriptions, data layouts and formulas written in our own words. Addresses (`FUN_xxxxxxxx`), offsets and
+> globals serve only to trace the evidence.
 
-- **Alvos** (todos em `Plugins/Fruity/Generators/<nome>/`):
+- **Targets** (all in `Plugins/Fruity/Generators/<name>/`):
 
-  | Plugin | DLL (SHA-256) | Linguagem | `SaveRestoreState` (VMT/vtable + 3) |
+  | Plugin | DLL (SHA-256) | Language | `SaveRestoreState` (VMT/vtable + 3) |
   |---|---|---|---|
   | FPC | `5990885c…6f04` | Delphi (`TTestPlug`, VMT `0x868d48`) | `FUN_0086d4c0` |
   | DirectWave | `3432775d…6570` | C++ MSVC (`CDirectWaveFL`, vtable `0x1800d0418`) | `FUN_180016140` |
   | Fruity Slicer | `7616d1f8…2ed6` | Delphi (`TTestPlug`, VMT `0x766188`) | `FUN_00766c40` |
   | Slicex | `401b5ece…857b` | Delphi (`TTestPlug`, VMT `0x879d40`) | `FUN_0087a8a0` |
-  | FL Keys / Drumpad | `56ca1209…822e` / `28a0a642…a361` | — | só dados (§5) |
+  | FL Keys / Drumpad | `56ca1209…822e` / `28a0a642…a361` | — | data only (§5) |
 
-  A VMT segue a ordem do SDK já usada nas rodadas 4 e 7 (3 = `SaveRestoreState`, 4 = `GetName`,
-  6 = `ProcessParam`, 9 = `TriggerVoice`). Nas DLLs Delphi a VMT foi achada pelo nome da classe
-  (`TTestPlug`, o ponteiro de nome fica em VMT−0x88); na DirectWave, pelo RTTI do MSVC
-  (`.?AVCDirectWaveFL@@` → *Complete Object Locator* → vtable). Os formulários DFM foram lidos com o parser
-  de `TPF0` da rodada 7. **Método:** o servidor REA estava ocupado pela rodada 8 (alvo único por sessão), então
-  as decompilações foram feitas com o mesmo Ghidra 12.1.4 em modo *headless* num projeto próprio
-  (scripts de decompilação/xref/grep em `tmp/r9/gh/`); endereços no espaço de imagem padrão de cada DLL.
-- **Validação de formato:** 165 `.flp` de `FL Studio 2026/Data`, **seção de canais** (antes do 1º `0xEC`):
-  `0xC9` (nome do plugin) → `0xD5` (blob). Contagens reais: **FPC 25** (20 arquivos), **DirectWave 57**
-  (18 arquivos), **Slicex 43** (21 arquivos), **Fruity Slicer 10** (6 com o nome `"Fruity Slicer"` +
-  4 com o nome antigo `"Fruity slicer"` — o importador precisa aceitar os dois), FL Keys 11, Drumpad 10
+  The VMT follows the SDK order already used in rounds 4 and 7 (3 = `SaveRestoreState`, 4 = `GetName`,
+  6 = `ProcessParam`, 9 = `TriggerVoice`). In the Delphi DLLs the VMT was found by the class name
+  (`TTestPlug`, the name pointer sits at VMT−0x88); in DirectWave, via the MSVC RTTI
+  (`.?AVCDirectWaveFL@@` → *Complete Object Locator* → vtable). The DFM forms were read with the round 7
+  `TPF0` parser. **Method:** the REA server was busy with round 8 (single target per session), so
+  the decompilations were done with the same Ghidra 12.1.4 in *headless* mode in a separate project
+  (decompilation/xref/grep scripts in `tmp/r9/gh/`); addresses in each DLL's default image space.
+- **Format validation:** 165 `.flp` files in `FL Studio 2026/Data`, **channel section** (before the 1st `0xEC`):
+  `0xC9` (plugin name) → `0xD5` (blob). Actual counts: **FPC 25** (20 files), **DirectWave 57**
+  (18 files), **Slicex 43** (21 files), **Fruity Slicer 10** (6 with the name `"Fruity Slicer"` +
+  4 with the old name `"Fruity slicer"` — the importer must accept both), FL Keys 11, Drumpad 10
   (+1 `"DrumPad"`).
-- **Data:** 2026-10-13
+- **Date:** 2026-10-13
 
-| Marca | Significado |
+| Mark | Meaning |
 |---|---|
-| **[DECOMP]** | Confirmado lendo a decompilação da(s) função(ões) citada(s) |
-| **[STR]** | Inferido de strings, RTTI ou formulários DFM |
-| **[DADOS]** | Confirmado estatisticamente nos `.flp` de demonstração |
-| **[HIP]** | Hipótese (plausível, ainda não verificada) |
+| **[DECOMP]** | Confirmed by reading the decompilation of the cited function(s) |
+| **[STR]** | Inferred from strings, RTTI or DFM forms |
+| **[DATA]** | Statistically confirmed in the demo `.flp` files |
+| **[HYP]** | Hypothesis (plausible, not yet verified) |
 
-Convenções: tudo little-endian; `i32` com sinal; `P+0xNN` = offset no objeto do plugin; caminhos com
-`%FLStudioFactoryData%` = raiz da instalação e `%FLStudioData%` = `<instalação>\Data` (ambos resolvidos
-contra `/mnt/c/Program Files/Image-Line/FL Studio 2026` na validação).
+Conventions: everything little-endian; `i32` signed; `P+0xNN` = offset into the plugin object; paths with
+`%FLStudioFactoryData%` = installation root and `%FLStudioData%` = `<installation>\Data` (both resolved
+against `/mnt/c/Program Files/Image-Line/FL Studio 2026` during validation).
 
-### Formato de "chunks" comum a FPC e DirectWave **[DECOMP+DADOS]**
+### "Chunk" format shared by FPC and DirectWave **[DECOMP+DATA]**
 
-FPC e DirectWave usam o mesmo contêiner (escritor `FUN_0083c4a0` no FPC, `FUN_180003f70` na DirectWave;
-leitor `FUN_0083c750` / `FUN_180003ea0`):
+FPC and DirectWave use the same container (writer `FUN_0083c4a0` in FPC, `FUN_180003f70` in DirectWave;
+reader `FUN_0083c750` / `FUN_180003ea0`):
 
 ```
-chunk = id:u32  tamanho:u64  corpo[tamanho]       (sem alinhamento; corpo pode conter sub-chunks)
+chunk = id:u32  size:u64  body[size]       (no alignment; body may contain sub-chunks)
 ```
 
-O id de fim de lista é um chunk de tamanho 0 (`0x6A` para pad do FPC, `0x12E` para layer, `4` para zona da
-DirectWave, `2` para programa da DirectWave). Um leitor genérico que só pula chunks desconhecidos lê os 82
-blobs sem sobra de bytes **[DADOS]**.
+The end-of-list id is a chunk of size 0 (`0x6A` for an FPC pad, `0x12E` for a layer, `4` for a DirectWave
+zone, `2` for a DirectWave program). A generic reader that just skips unknown chunks reads all 82
+blobs with no leftover bytes **[DATA]**.
 
 ---
 
-## 1. FPC (25 canais) **[DECOMP+STR+DADOS]**
+## 1. FPC (25 channels) **[DECOMP+STR+DATA]**
 
-### 1.1 Layout do `0xD5`
+### 1.1 Layout of `0xD5`
 
-| Off | Tipo | Conteúdo |
+| Off | Type | Content |
 |---|---|---|
-| 0x00 | u32 | **versão** `0x1E84E403` (os 25 blobs). O leitor recusa > `0x1E84E403`; se ≥ `0x200000` desloca 8 bits (→ 2.000.100); tamanhos de chunk em u64 a partir de 2.000.014 |
-| 0x04 | chunks | sequência de chunks de topo (tabela abaixo) |
+| 0x00 | u32 | **version** `0x1E84E403` (all 25 blobs). The reader rejects > `0x1E84E403`; if ≥ `0x200000` it shifts by 8 bits (→ 2,000,100); chunk sizes are u64 from 2,000,014 onwards |
+| 0x04 | chunks | sequence of top-level chunks (table below) |
 
-Chunks de topo (`FUN_0086d4c0`):
+Top-level chunks (`FUN_0086d4c0`):
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `2` | var. | **um pad** (contêiner, até 32; sempre 32 nos demos: pads 0–15 = banco A, 16–31 = banco B) |
-| `1` | var. | nome do loop MIDI de bateria selecionado (UTF-16, ex. `World Loops\Polka\fpc_polka_10.mid`); ignorar |
-| `3` | 1 | opção de UI (`P+0xC9C`) |
-| `4` | 32 | estado de UI (2 × u32 em `+0xE74/+0xE78`); ignorar |
-| `5` | 1 | opção de UI (`+0xB50`), só 3 demos |
+| `2` | var. | **one pad** (container, up to 32; always 32 in the demos: pads 0–15 = bank A, 16–31 = bank B) |
+| `1` | var. | name of the selected MIDI drum loop (UTF-16, e.g. `World Loops\Polka\fpc_polka_10.mid`); ignore |
+| `3` | 1 | UI option (`P+0xC9C`) |
+| `4` | 32 | UI state (2 × u32 at `+0xE74/+0xE78`); ignore |
+| `5` | 1 | UI option (`+0xB50`), only 3 demos |
 
-Versões antigas (< 0xF424B) gravavam um contador de pads e um bloco por pad sem chunks
-(`FUN_0086c5e0`); não aparecem nos demos.
+Old versions (< 0xF424B) stored a pad counter and one block per pad without chunks
+(`FUN_0086c5e0`); they do not appear in the demos.
 
-### 1.2 Pad (chunk `2`, leitor/escritor `FUN_0086cc50`)
+### 1.2 Pad (chunk `2`, reader/writer `FUN_0086cc50`)
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `0x64` | 64 | **16 × i32 de parâmetros do pad** (tabela 1.3) |
-| `0x65` | var. | **nome do pad**, UTF-16LE sem terminador (vazio em pads sem sample) |
-| `0x66` | 32 | 8 × i32; só o 1º é usado: **modo de disparo aleatório** (`pad+0x45`, tabela 1.5) |
-| `0x69` | var. | **layer** (contêiner, 0..n; tabela 1.4) |
-| `0x67` | 8 | índice do envelope que vem a seguir (0 = volume, 1 = pan) + 0 |
-| `0x68` | var. | envelope serializado (§1.6) |
-| `0x6A` | 0 | fim do pad |
+| `0x64` | 64 | **16 × i32 pad parameters** (table 1.3) |
+| `0x65` | var. | **pad name**, UTF-16LE without terminator (empty in pads without a sample) |
+| `0x66` | 32 | 8 × i32; only the 1st is used: **random trigger mode** (`pad+0x45`, table 1.5) |
+| `0x69` | var. | **layer** (container, 0..n; table 1.4) |
+| `0x67` | 8 | index of the envelope that follows (0 = volume, 1 = pan) + 0 |
+| `0x68` | var. | serialised envelope (§1.6) |
+| `0x6A` | 0 | end of pad |
 
-### 1.3 Parâmetros do pad (`0x64`) **[DECOMP+STR+DADOS]**
+### 1.3 Pad parameters (`0x64`) **[DECOMP+STR+DATA]**
 
-A estrutura do pad fica em `P+0x14C + 0x56·i`. Mapeamento i32 → campo (lido em `FUN_0086cc50`; nomes
-pelos *handlers* do DFM `WheelChange FUN_00857990`, `CutGroupChange FUN_0085f410`,
-`OutputSelectorChange FUN_0085e490` e pelo `TriggerVoice FUN_008698a0`):
+The pad structure lives at `P+0x14C + 0x56·i`. Mapping i32 → field (read in `FUN_0086cc50`; names
+from the DFM *handlers* `WheelChange FUN_00857990`, `CutGroupChange FUN_0085f410`,
+`OutputSelectorChange FUN_0085e490` and from `TriggerVoice FUN_008698a0`):
 
-| i | Campo | Faixa / unidade | Demos (352 pads com sample) |
+| i | Field | Range / unit | Demos (352 pads with a sample) |
 |---|---|---|---|
-| 0 | **volume do pad** (`pad+2`) | 0…128 (`PadVolWheel` Max 127, default 127; 128 aparece nos pads vazios e em 51 pads usados). Ganho = `L11(v/127) = (11^(v/127) − 1)/10` **[DECOMP]** | 99 ×72, 128 ×51, 92, 64, 127… |
-| 1 | **pan do pad** (`pad+6`) | −128…+128, 0 = centro | 0 ×257, ±4…±24 |
-| 2 | **flags**: bit0 = **mute** (`pad+0`), bit1 = **solo** (`pad+1`), bit2 = `pad+0x26` **[HIP: "escalar volume com a velocity"]**, bit3 = **disparo aleatório/ciclo de layers sobrepostos** (`pad+0x44`) | — | 0 ×183, 8 ×112, 4 ×57 |
-| 3 | **nota MIDI que dispara o pad** (`pad+0x22`) | 0…127 (mapa GM: 36 bumbo, 38 caixa, 42 chimbal fechado, 46 aberto…) | 36–51 típicos |
-| 4 | **offset de saída do mixer** (`pad+0x1E`) | −99…103 (`PadOutputWheel`); 0 = mesma pista do canal | 0 ×130, 1…6 |
-| 5 | **"Cut" (grupo que este pad corta)** (`pad+0x27`) | −1 (nenhum)…99 | −1 ×290, 0 ×58, 1 ×4 |
-| 6 | **"Cut by" (grupo que corta este pad)** (`pad+0x2B`) | −1…99 | −1 ×291, 0 ×58, 1 ×3 |
-| 7 | **afinação do pad** (`pad+0xA`) | −128…+128; cents = `v · 9,375` (= 1200/128, ±1 oitava) **[DECOMP]** | 0 ×345 |
-| 8 | `pad+0x4E` | cor do pad em RGB **[HIP]** | 0 ou 0x47A145… |
-| 9 | `pad+0x52` | **[HIP: índice de ícone/estilo]** | 0, 4…7, 239 |
-| 10–15 | — | reservados (0) | — |
+| 0 | **pad volume** (`pad+2`) | 0…128 (`PadVolWheel` Max 127, default 127; 128 appears in empty pads and in 51 used pads). Gain = `L11(v/127) = (11^(v/127) − 1)/10` **[DECOMP]** | 99 ×72, 128 ×51, 92, 64, 127… |
+| 1 | **pad pan** (`pad+6`) | −128…+128, 0 = centre | 0 ×257, ±4…±24 |
+| 2 | **flags**: bit0 = **mute** (`pad+0`), bit1 = **solo** (`pad+1`), bit2 = `pad+0x26` **[HYP: "scale volume with velocity"]**, bit3 = **random trigger/cycling of overlapping layers** (`pad+0x44`) | — | 0 ×183, 8 ×112, 4 ×57 |
+| 3 | **MIDI note that triggers the pad** (`pad+0x22`) | 0…127 (GM map: 36 kick, 38 snare, 42 closed hi-hat, 46 open…) | 36–51 typical |
+| 4 | **mixer output offset** (`pad+0x1E`) | −99…103 (`PadOutputWheel`); 0 = same track as the channel | 0 ×130, 1…6 |
+| 5 | **"Cut" (group this pad cuts)** (`pad+0x27`) | −1 (none)…99 | −1 ×290, 0 ×58, 1 ×4 |
+| 6 | **"Cut by" (group that cuts this pad)** (`pad+0x2B`) | −1…99 | −1 ×291, 0 ×58, 1 ×3 |
+| 7 | **pad tuning** (`pad+0xA`) | −128…+128; cents = `v · 9.375` (= 1200/128, ±1 octave) **[DECOMP]** | 0 ×345 |
+| 8 | `pad+0x4E` | pad colour in RGB **[HYP]** | 0 or 0x47A145… |
+| 9 | `pad+0x52` | **[HYP: icon/style index]** | 0, 4…7, 239 |
+| 10–15 | — | reserved (0) | — |
 
-Disparo (`FUN_008698a0` → `FUN_0086b480`) **[DECOMP]**:
-- A nota recebida dispara **todos** os pads cuja nota (`i=3`) é igual; pads mutados não tocam; se algum pad
-  estiver em solo, só os em solo tocam. Validação: as **648 notas** de padrão dos canais FPC dos demos caem
-  todas num pad com sample e nota igual, sem nenhuma nota ambígua (dois pads na mesma nota) **[DADOS]**.
-- **A altura não segue a nota**: o FPC soma `(60 − nota)·100` cents ao pitch da voz, cancelando a
-  transposição do host; o pad soa na altura original do sample + afinações (pad + layer).
-- **Choke**: quando um pad P dispara, toda voz ativa de um pad Q com `cutBy(Q) = cut(P)` e `cutBy(Q) ≠ −1`
-  é cortada (`P+0x173`/`P+0x177` em `FUN_0086b480`). Ex. típico: chimbal fechado com cut=0 e chimbal aberto
-  com cut-by=0 (os 58 pares "0/0" dos demos).
-- Ganho da voz = `L11(volPad/127)` (no grupo do pad) × `L11(volLayer/127)` (na voz da layer) **[DECOMP: as
-  duas leis; HIP: a multiplicação simples]**. Pan = pan do pad + pan da layer, cada um em −128…128
-  **[HIP: soma e limite]**.
+Triggering (`FUN_008698a0` → `FUN_0086b480`) **[DECOMP]**:
+- The incoming note triggers **all** pads whose note (`i=3`) is equal; muted pads do not play; if any pad
+  is soloed, only the soloed ones play. Validation: the **648 pattern notes** of the FPC channels in the demos all
+  land on a pad with a sample and the same note, with no ambiguous note (two pads on the same note) **[DATA]**.
+- **Pitch does not follow the note**: FPC adds `(60 − note)·100` cents to the voice pitch, cancelling the
+  host's transposition; the pad sounds at the sample's original pitch + tunings (pad + layer).
+- **Choke**: when a pad P triggers, every active voice of a pad Q with `cutBy(Q) = cut(P)` and `cutBy(Q) ≠ −1`
+  is cut (`P+0x173`/`P+0x177` in `FUN_0086b480`). Typical example: closed hi-hat with cut=0 and open hi-hat
+  with cut-by=0 (the 58 "0/0" pairs in the demos).
+- Voice gain = `L11(volPad/127)` (in the pad group) × `L11(volLayer/127)` (in the layer voice) **[DECOMP: both
+  laws; HYP: simple multiplication]**. Pan = pad pan + layer pan, each in −128…128
+  **[HYP: sum and clamp]**.
 
 ### 1.4 Layer (chunk `0x69`, `FUN_0086c8f0`)
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `0x12C` | var. | **caminho do sample**, UTF-16LE sem terminador (vazio = layer sem sample) |
-| `0x12D` | 28 | 7 × i32 (abaixo) |
-| `0x12E` | 0 | fim da layer |
+| `0x12C` | var. | **sample path**, UTF-16LE without terminator (empty = layer without sample) |
+| `0x12D` | 28 | 7 × i32 (below) |
+| `0x12E` | 0 | end of layer |
 
-| i | Campo (offset na layer) | Faixa / unidade | Demos (1.269 layers) |
+| i | Field (offset in the layer) | Range / unit | Demos (1,269 layers) |
 |---|---|---|---|
-| 0 | **volume da layer** (`+0x1C`) | 0…127 (DFM default 100; layer nova = 127). Ganho `L11(v/127)` | 127 ×1.112, 99 ×121 |
-| 1 | **pan da layer** (`+0x20`) | −128…128 | 0 ×1.265 |
-| 2 | **velocity mínima** (`+0x2C`) | 0…127, inclusiva | 0, 16, 32, 48, 64… |
-| 3 | **velocity máxima** (`+0x30`) | 0…127, **exclusiva** (exceto 127, que inclui 127) | 127 ×464 |
-| 4 | flags: bit0 → `+0x34` (sempre 1; copiado para a voz) **[HIP: "layer habilitada"]**; bit1 → `+0x3D` **[HIP: reverso, `SampleReverseBtn`]** | — | 1 ×1.269 |
-| 5 | **afinação da layer** (`+0x38`) | −128…128 → `v·9,375` cents (somada à do pad) | 0 ×1.240; −54…+75 |
-| 6 | **região do sample** (`+0x44`) | −1 = sample inteiro; ≥0 = índice da região/marcador do WAV (início/fim tirados da lista de regiões do arquivo) | −1 ×1.269 |
+| 0 | **layer volume** (`+0x1C`) | 0…127 (DFM default 100; new layer = 127). Gain `L11(v/127)` | 127 ×1,112, 99 ×121 |
+| 1 | **layer pan** (`+0x20`) | −128…128 | 0 ×1,265 |
+| 2 | **minimum velocity** (`+0x2C`) | 0…127, inclusive | 0, 16, 32, 48, 64… |
+| 3 | **maximum velocity** (`+0x30`) | 0…127, **exclusive** (except 127, which includes 127) | 127 ×464 |
+| 4 | flags: bit0 → `+0x34` (always 1; copied to the voice) **[HYP: "layer enabled"]**; bit1 → `+0x3D` **[HYP: reverse, `SampleReverseBtn`]** | — | 1 ×1,269 |
+| 5 | **layer tuning** (`+0x38`) | −128…128 → `v·9.375` cents (added to the pad's) | 0 ×1,240; −54…+75 |
+| 6 | **sample region** (`+0x44`) | −1 = whole sample; ≥0 = index of the WAV region/marker (start/end taken from the file's region list) | −1 ×1,269 |
 
-Seleção de layer na nota **[DECOMP]**: sem o bit3 do pad, **todas** as layers com `vmin ≤ vel < vmax`
-tocam juntas. Com o bit3, só uma delas toca, escolhida pelo modo da tabela 1.5 entre as que cobrem a
-velocity (`FUN_00869db0`, a última escolhida fica em `pad+0x49`). A velocity vem do host (0…1 × 128,
-limitada a 0…127).
+Layer selection on a note **[DECOMP]**: without pad bit3, **all** layers with `vmin ≤ vel < vmax`
+play together. With bit3, only one of them plays, chosen by the mode of table 1.5 among those covering the
+velocity (`FUN_00869db0`, the last one chosen is kept in `pad+0x49`). The velocity comes from the host (0…1 × 128,
+clamped to 0…127).
 
-### 1.5 Modo de disparo de layers sobrepostas (`0x66`[0]) **[DECOMP+STR]**
+### 1.5 Trigger mode for overlapping layers (`0x66`[0]) **[DECOMP+STR]**
 
-| Valor | Menu (`RandomBtnMenu`) | Comportamento |
+| Value | Menu (`RandomBtnMenu`) | Behaviour |
 |---|---|---|
-| 0 | Random | sorteio uniforme |
-| 1 | Random (avoid previous) | sorteio entre as outras (padrão em pads novos; 240 pads) |
-| 2 | Cycle backward | a anterior da lista, com volta |
-| 3 | Cycle | a próxima da lista, com volta (os 112 pads "HQ Kit" de 8 layers) |
+| 0 | Random | uniform draw |
+| 1 | Random (avoid previous) | draw among the others (default in new pads; 240 pads) |
+| 2 | Cycle backward | the previous one in the list, wrapping |
+| 3 | Cycle | the next one in the list, wrapping (the 112 "HQ Kit" pads with 8 layers) |
 
-Os kits "HQ" dos demos têm 8 layers com faixas **sobrepostas** (0–32, 16–47, 32–64, 48–80, …, 111–127):
-com o bit3 ligado e modo 3 isso vira *round-robin* dentro da faixa de velocity.
+The "HQ" kits in the demos have 8 layers with **overlapping** ranges (0–32, 16–47, 32–64, 48–80, …, 111–127):
+with bit3 on and mode 3 this becomes *round-robin* within the velocity range.
 
-### 1.6 Envelopes do pad (`0x67`/`0x68`) **[DECOMP parcial + DADOS; semântica HIP]**
+### 1.6 Pad envelopes (`0x67`/`0x68`) **[partial DECOMP + DATA; semantics HYP]**
 
-Dois por pad (0 = volume, 1 = pan), objetos `TFPCVolEnvelope`/`TFPCPanEnvelope`. Blob:
-`u32 1, u32 3, u32 nPontos`, depois `nPontos × { f64 Δtempo (s) **[HIP]**, f64 valor 0…1, f32 tensão,
-u32 tipo }` e um trailer de 9 × i32 (pontos de sustain/loop, −1 = nenhum, e 128,128,0,128). Demos: o de
-pan é sempre o padrão (2 pontos); o de volume tem 2 pontos (1,0 → 0 em 1,25 s, tensão 0,2) em 283 pads e
-4 pontos (0 → 1 em 0,75, → 0,5 em +1,5, → 0 em +0,25; sustain no ponto 2) em 377. Só há efeito quando o
-objeto do envelope está "ativo" (`+0x48 ≠ 0`, testado em `FUN_0086b480`); qual campo do blob liga isso
-não foi isolado **[HIP: o padrão é desligado — os pads soam como *one-shot* do sample inteiro]**.
+Two per pad (0 = volume, 1 = pan), objects `TFPCVolEnvelope`/`TFPCPanEnvelope`. Blob:
+`u32 1, u32 3, u32 nPoints`, then `nPoints × { f64 Δtime (s) **[HYP]**, f64 value 0…1, f32 tension,
+u32 type }` and a trailer of 9 × i32 (sustain/loop points, −1 = none, and 128,128,0,128). Demos: the pan
+one is always the default (2 points); the volume one has 2 points (1.0 → 0 in 1.25 s, tension 0.2) in 283 pads and
+4 points (0 → 1 in 0.75, → 0.5 in +1.5, → 0 in +0.25; sustain at point 2) in 377. There is only an effect when the
+envelope object is "active" (`+0x48 ≠ 0`, tested in `FUN_0086b480`); which blob field turns this on
+was not isolated **[HYP: the default is off — the pads sound as a *one-shot* of the whole sample]**.
 
-### 1.7 Estatística e existência dos samples **[DADOS]**
+### 1.7 Statistics and sample existence **[DATA]**
 
-- 25 blobs, todos versão 0x1E84E403, todos com 32 pads; **352 pads com sample**; layers por pad:
+- 25 blobs, all version 0x1E84E403, all with 32 pads; **352 pads with a sample**; layers per pad:
   1 ×185, 8 ×112, 4 ×24, 2 ×15, 3 ×9, 5 ×7.
-- **1.269 caminhos, 1.269 existem** na instalação (todos `%FLStudioData%\Patches\Packs\Drums\…`).
+- **1,269 paths, 1,269 exist** in the installation (all `%FLStudioData%\Patches\Packs\Drums\…`).
 
 ---
 
-## 2. DirectWave (57 canais) **[DECOMP+STR+DADOS]**
+## 2. DirectWave (57 channels) **[DECOMP+STR+DATA]**
 
-### 2.1 Layout do `0xD5`
+### 2.1 Layout of `0xD5`
 
-`u32 versão` (38 ×49, 37 ×8; o leitor `FUN_18003dcd0` recusa > 38 e usa outro caminho para < 36) seguido
-de chunks de topo (escritor `FUN_180040610`):
+`u32 version` (38 ×49, 37 ×8; the reader `FUN_18003dcd0` rejects > 38 and uses another path for < 36) followed
+by top-level chunks (writer `FUN_180040610`):
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `6` | 16 | flags globais (u64): bits 0–2 opções, bit3 = "não registrado", bit4/bit5 = modo (`+0x90`) |
-| `0x206` | 7 (5 em 6 blobs) | opções globais de UI/qualidade; ignorar |
-| `5` | 628 | ×16: um por **canal MIDI/slot de multitimbralidade** (índice + nº do programa atribuído, ex. `0, 0x45` / `1, 0x3C`…) **[HIP]** |
-| `1` | var. | **programa** (contêiner) ×128 — banco inteiro de 128 programas é sempre gravado |
+| `6` | 16 | global flags (u64): bits 0–2 options, bit3 = "unregistered", bit4/bit5 = mode (`+0x90`) |
+| `0x206` | 7 (5 in 6 blobs) | global UI/quality options; ignore |
+| `5` | 628 | ×16: one per **MIDI channel/multitimbral slot** (index + no. of the assigned program, e.g. `0, 0x45` / `1, 0x3C`…) **[HYP]** |
+| `1` | var. | **program** (container) ×128 — the whole bank of 128 programs is always stored |
 
-**Só o programa 0 tem zonas** nos 57 blobs (os outros 127 são `"---"`, 2.819 B cada — por isso um blob de
-"1 piano" tem ~380 KB) **[DADOS]**. O importador deve usar o programa selecionado do slot 0 (chunk `5`,
-[HIP]) e, na prática, o primeiro programa com zonas.
+**Only program 0 has zones** in the 57 blobs (the other 127 are `"---"`, 2,819 B each — which is why a
+"1 piano" blob is ~380 KB) **[DATA]**. The importer should use the selected program of slot 0 (chunk `5`,
+[HYP]) and, in practice, the first program with zones.
 
-### 2.2 Programa (chunk `1`, `FUN_180040c50` / leitor `FUN_18003f130`)
+### 2.2 Program (chunk `1`, `FUN_180040c50` / reader `FUN_18003f130`)
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `0x64` | 30 | índice do programa (i32) + nº de zonas, polifonia, modo de voz etc. |
-| `0x66` | var. | **nome do programa** (ASCII sem terminador; ex. `Close Grand`) |
-| `0x67` | var. | nome do arquivo de origem (`Steinway Grand.dwp`), ASCII |
-| `0x68`…`0x6B` | 10/18/17/17 | glide, LFOs e efeitos do programa (floats 0…1) |
-| `0x6C` ×2, `0x6D` ×4 | 20 / 4 | moduladores/valores de modulação |
-| `0x6E` ×100 | 13 | matriz de modulação (índice + fonte + destino + quantidade) |
-| `3` | var. | **zona** (contêiner), uma por zona |
-| `2` | 0 | fim do programa |
+| `0x64` | 30 | program index (i32) + no. of zones, polyphony, voice mode etc. |
+| `0x66` | var. | **program name** (ASCII without terminator; e.g. `Close Grand`) |
+| `0x67` | var. | source file name (`Steinway Grand.dwp`), ASCII |
+| `0x68`…`0x6B` | 10/18/17/17 | program glide, LFOs and effects (floats 0…1) |
+| `0x6C` ×2, `0x6D` ×4 | 20 / 4 | modulators/modulation values |
+| `0x6E` ×100 | 13 | modulation matrix (index + source + destination + amount) |
+| `3` | var. | **zone** (container), one per zone |
+| `2` | 0 | end of program |
 
-Modo de voz do programa: `Poly / Mono / Legato` e seleção de zonas sobrepostas `Normal / Cycle / Random /
-Avoid prev.` são tabelas de nomes em `0x180107238…` **[STR]** (o campo exato no `0x64` não foi isolado).
+Program voice mode: `Poly / Mono / Legato` and overlapping-zone selection `Normal / Cycle / Random /
+Avoid prev.` are name tables at `0x180107238…` **[STR]** (the exact field in `0x64` was not isolated).
 
-### 2.3 Zona (chunk `3`, escritor `FUN_1800410d0`, leitor `FUN_18003f840`)
+### 2.3 Zone (chunk `3`, writer `FUN_1800410d0`, reader `FUN_18003f840`)
 
-| id | Tamanho | Conteúdo |
+| id | Size | Content |
 |---|---|---|
-| `0x1F4` | 25 | **cabeçalho da zona** (abaixo) |
-| `0x1F5` | var. | nome da zona (ASCII, ex. `Close Grand 27`) |
-| `0x1F6` | var. | **caminho do sample**, ASCII (`%FLStudioFactoryData%\Data\Patches\Packs\Instruments\Keyboard\Close Grand\Close Grand 27.wav`) |
-| `0x1F7` | 40 | **formato e pontos do sample** (abaixo) |
+| `0x1F4` | 25 | **zone header** (below) |
+| `0x1F5` | var. | zone name (ASCII, e.g. `Close Grand 27`) |
+| `0x1F6` | var. | **sample path**, ASCII (`%FLStudioFactoryData%\Data\Patches\Packs\Instruments\Keyboard\Close Grand\Close Grand 27.wav`) |
+| `0x1F7` | 40 | **sample format and points** (below) |
 | `0x1F8` | 8 | f32 **Pitch** (`Z+0x2EE`), u8 `Z+0x2BC`, u8 `Z+0x2BD`, u16 `Z+0x2BE` (=100) |
-| `0x1F9` | 14 | u8 `Z+0x2C2` (modo de *time-stretch*), u8 `Z+0x2C3` (sync por ticks), 3 × f32 do *stretch* |
-| `0x1FA` | 48 | 4 × f32: envios Delay/Chorus/Reverb/Dry da zona (0,5/0,5/0,35/1,0 típicos) + 32 B zerados |
-| `0x1FB` ×2 | 20 | **filtro A e B**: u8 tipo (0 Off, 1 Lowpass, 2 Highpass, 3 Bandpass, 4 Notch, 5 Allpass **[STR]**), 3 bytes, f32 cutoff, f32 res, f32 forma, f32 |
-| `0x1FC` | 2 | u8 `Z+0x2C0` (sincronizar ao tempo), u8 `Z+0x2C1` (fatiar pelo teclado) |
-| `0x1FD` | 16 | **envelope de amplitude**: 4 × f32 A, D, S, R (`Z+0x2F2…0x2FE`) |
-| `0x1FE`…`0x201` | 9 cada | 2 envelopes de modulação e 2 LFOs da zona |
-| `0x202` ×2, `0x203` ×2 | 16 / 20 | parâmetros dos envelopes/LFOs de modulação |
-| `0x204` ×16 | 8 | rotas de modulação da zona |
-| `0x205` | var. | **áudio embutido, PCM cru** (opcional, §2.5) |
-| `0x206` | var. | **áudio embutido comprimido em FLAC** (opcional; não aparece nos demos) |
-| `4` | 0 | fim da zona |
+| `0x1F9` | 14 | u8 `Z+0x2C2` (*time-stretch* mode), u8 `Z+0x2C3` (sync by ticks), 3 × f32 of the *stretch* |
+| `0x1FA` | 48 | 4 × f32: zone Delay/Chorus/Reverb/Dry sends (0.5/0.5/0.35/1.0 typical) + 32 zeroed B |
+| `0x1FB` ×2 | 20 | **filter A and B**: u8 type (0 Off, 1 Lowpass, 2 Highpass, 3 Bandpass, 4 Notch, 5 Allpass **[STR]**), 3 bytes, f32 cutoff, f32 res, f32 shape, f32 |
+| `0x1FC` | 2 | u8 `Z+0x2C0` (sync to tempo), u8 `Z+0x2C1` (slice across the keyboard) |
+| `0x1FD` | 16 | **amplitude envelope**: 4 × f32 A, D, S, R (`Z+0x2F2…0x2FE`) |
+| `0x1FE`…`0x201` | 9 each | 2 modulation envelopes and 2 zone LFOs |
+| `0x202` ×2, `0x203` ×2 | 16 / 20 | parameters of the modulation envelopes/LFOs |
+| `0x204` ×16 | 8 | zone modulation routes |
+| `0x205` | var. | **embedded audio, raw PCM** (optional, §2.5) |
+| `0x206` | var. | **embedded audio compressed as FLAC** (optional; does not appear in the demos) |
+| `4` | 0 | end of zone |
 
-**Cabeçalho `0x1F4` (25 B)** **[DECOMP+DADOS]**:
+**Header `0x1F4` (25 B)** **[DECOMP+DATA]**:
 
-| Off | Tipo | Campo | Demos (1.287 zonas) |
+| Off | Type | Field | Demos (1,287 zones) |
 |---|---|---|---|
-| 0 | u8 | **nota raiz** (`Z+0x2B4`) | 36…96 |
-| 1 | u8 | **tecla mínima** (inclusiva) | 0…127 |
-| 2 | u8 | **tecla máxima** (inclusiva) | |
-| 3 | u8 | **velocity mínima** | 0 em todas |
-| 4 | u8 | **velocity máxima** | 127 em todas |
-| 5, 6 | u8 | `Z+0x2B9` (grupo de zona/"key group" **[HIP]**), `Z+0x2BA` (grupo de saída **[HIP]**) | 0 |
-| 7 | u8 | sem uso (lido e descartado; contém lixo 0/64/255) | |
+| 0 | u8 | **root note** (`Z+0x2B4`) | 36…96 |
+| 1 | u8 | **minimum key** (inclusive) | 0…127 |
+| 2 | u8 | **maximum key** (inclusive) | |
+| 3 | u8 | **minimum velocity** | 0 in all |
+| 4 | u8 | **maximum velocity** | 127 in all |
+| 5, 6 | u8 | `Z+0x2B9` (zone group/"key group" **[HYP]**), `Z+0x2BA` (output group **[HYP]**) | 0 |
+| 7 | u8 | unused (read and discarded; contains garbage 0/64/255) | |
 | 8 | u8 | `Z+0x2C4` | 0 |
-| 9 | f32 | **Amp Gain** 0…1 (`Z+0x302`) | 1,0 ×1.238; 0,675 ×49 |
-| 13 | f32 | **Amp Pan** 0…1 (`Z+0x306`), 0,5 = centro | 0,5 |
-| 17 | u32 | `Z+0x396` (0/1) — índice de alternância/rodízio **[HIP]** | 0 ×1.265, 1 ×22 |
-| 21 | u32 | 512 (constante: quadros de folga do buffer, §2.5) | 512 |
+| 9 | f32 | **Amp Gain** 0…1 (`Z+0x302`) | 1.0 ×1,238; 0.675 ×49 |
+| 13 | f32 | **Amp Pan** 0…1 (`Z+0x306`), 0.5 = centre | 0.5 |
+| 17 | u32 | `Z+0x396` (0/1) — alternation/rotation index **[HYP]** | 0 ×1,265, 1 ×22 |
+| 21 | u32 | 512 (constant: buffer slack frames, §2.5) | 512 |
 
-**Formato `0x1F7` (40 B)**: `i64 quadros` · `i32 canais` · `i32 Z[2]` (nº de tempos/fatias usado por
-"sync"/"fatiar pelo teclado"; 4…128) · `f32 taxa de amostragem` · `i32 modo de loop` · `i32 Loop A` ·
-`i32 Loop B` · `i32 Sample Offset` · `i32 bits por amostra` (16/32). Pontos em quadros do sample.
+**Format `0x1F7` (40 B)**: `i64 frames` · `i32 channels` · `i32 Z[2]` (no. of beats/slices used by
+"sync"/"slice across the keyboard"; 4…128) · `f32 sample rate` · `i32 loop mode` · `i32 Loop A` ·
+`i32 Loop B` · `i32 Sample Offset` · `i32 bits per sample` (16/32). Points in sample frames.
 
-**Modo de loop** (`Z[7]`, decisão no início/fim da voz em `FUN_180030090`) **[DECOMP+STR+DADOS]**:
-0 = *Disabled* (toca uma vez, para no fim), 1 = *One-Shot* (toca até o fim mesmo após o note-off),
-2 = *Forward* (loop A→B contínuo), 3 = *Sustained* (loop enquanto a nota está pressionada, depois segue até
-o fim), 4 = *Bounce* (vai e volta). Demos: 0 ×907, **2 ×373**, 3 ×7. Zonas com loop: `LoopA > 0`
-em 356, `LoopB > LoopA` em 380.
+**Loop mode** (`Z[7]`, decision at voice start/end in `FUN_180030090`) **[DECOMP+STR+DATA]**:
+0 = *Disabled* (plays once, stops at the end), 1 = *One-Shot* (plays to the end even after note-off),
+2 = *Forward* (continuous A→B loop), 3 = *Sustained* (loops while the note is held, then continues to
+the end), 4 = *Bounce* (back and forth). Demos: 0 ×907, **2 ×373**, 3 ×7. Zones with a loop: `LoopA > 0`
+in 356, `LoopB > LoopA` in 380.
 
-### 2.4 Conversões **[DECOMP]** (texto do parâmetro, `FUN_180027740`)
+### 2.4 Conversions **[DECOMP]** (parameter text, `FUN_180027740`)
 
-Os parâmetros da zona são floats normalizados 0…1 (o host vê `valor·100`, `FUN_180016070`; o nº do
-parâmetro de host = `128·programa + índice`, nomes em `FUN_180029f30`).
+The zone parameters are normalised floats 0…1 (the host sees `value·100`, `FUN_180016070`; host
+parameter no. = `128·program + index`, names in `FUN_180029f30`).
 
-| Parâmetro | Lei |
+| Parameter | Law |
 |---|---|
-| Pitch | `cents = (v − 0,5)·2400` (±1 oitava); 0,5 = sem transposição |
-| Amp Gain | `dB = 20·log10(v²)` → **amplitude linear = v²** (1,0 = 0 dB; 0,675 → −6,8 dB) |
+| Pitch | `cents = (v − 0.5)·2400` (±1 octave); 0.5 = no transposition |
+| Amp Gain | `dB = 20·log10(v²)` → **linear amplitude = v²** (1.0 = 0 dB; 0.675 → −6.8 dB) |
 | Amp Pan | `(v·100 − 50)` → "L/R"; pan −1…+1 = `2v − 1` |
-| Amp Env Att / Dec / Rel | `t = 10·v⁴` s (0,5 → 0,625 s; 0,505 → 0,65 s; 0,25 → 0,039 s) |
+| Amp Env Att / Dec / Rel | `t = 10·v⁴` s (0.5 → 0.625 s; 0.505 → 0.65 s; 0.25 → 0.039 s) |
 | Amp Env Sus | `v·100` % |
-| Smpl Offset / Loop A / Loop B | em quadros (`Z[10]`, `Z[8]`, `Z[9]`; o host vê `quadro/quadros`) |
+| Smpl Offset / Loop A / Loop B | in frames (`Z[10]`, `Z[8]`, `Z[9]`; the host sees `frame/frames`) |
 
-Afinação por nota: taxa de leitura = `2^((nota − raiz)/12 + cents/1200) · taxa_do_sample / taxa_de_saída`
-**[DECOMP: raiz e taxa; HIP: forma exata]**. Demos: envelope típico A=0, D=0,5, S=1,0, R=0,25…0,505
-(piano: release 0,04…0,65 s); 90 zonas com D=1,0/S=0 (decai sem sustain).
+Per-note tuning: playback rate = `2^((note − root)/12 + cents/1200) · sample_rate / output_rate`
+**[DECOMP: root and rate; HYP: exact form]**. Demos: typical envelope A=0, D=0.5, S=1.0, R=0.25…0.505
+(piano: release 0.04…0.65 s); 90 zones with D=1.0/S=0 (decays without sustain).
 
-### 2.5 Áudio embutido **[DECOMP+DADOS]**
+### 2.5 Embedded audio **[DECOMP+DATA]**
 
-Quando a opção de salvar o sample no projeto está ligada, cada zona ganha `0x205` com os canais **em
-blocos separados (planar)**, cada bloco com `(quadros + 512) × bits/8` bytes (float32 quando bits = 32; o
-`Z[2]=4` dessas zonas sugere "formato float" **[HIP]**). Ex.: 61.322 quadros × 2 canais × 4 B + 2×512×4 =
-494.672 B. Alternativa `0x206` = o mesmo áudio como arquivo FLAC temporário embutido. Nos demos: **12 zonas
-embutidas** (todas de um projeto, "Mehdi Ebrahiminejad – Never Out"), justamente as **12 cujo caminho
-aponta para `D:\00 Projects\…` e não existe**.
+When the option to save the sample in the project is on, each zone gets `0x205` with the channels **in
+separate blocks (planar)**, each block with `(frames + 512) × bits/8` bytes (float32 when bits = 32; the
+`Z[2]=4` of these zones suggests "float format" **[HYP]**). E.g.: 61,322 frames × 2 channels × 4 B + 2×512×4 =
+494,672 B. Alternative `0x206` = the same audio as an embedded temporary FLAC file. In the demos: **12 embedded
+zones** (all from one project, "Mehdi Ebrahiminejad – Never Out"), precisely the **12 whose path
+points to `D:\00 Projects\…` and does not exist**.
 
-### 2.6 Estatística **[DADOS]**
+### 2.6 Statistics **[DATA]**
 
-- 57 blobs, 57 programas com zonas (sempre o programa 0); zonas por programa: 6–12 (maioria), 17–18, 32,
-  35, 45 ×3, 88 ×7. Total **1.287 zonas**, todas com `velocity 0–127` (sem camadas de velocity nos demos).
-- **1.287 caminhos, 1.275 existem**; os 12 restantes têm áudio embutido.
-- As **2.224 notas** de padrão dos canais DirectWave caem todas em exatamente uma zona (sem sobreposição de
-  faixas de tecla) **[DADOS]**.
-
----
-
-## 3. Fruity Slicer (10 canais) **[DECOMP+STR+DADOS]**
-
-### 3.1 Layout do `0xD5` (`FUN_00766c40`, formato "stream" sequencial, sem chunks)
-
-| Off | Tipo | Campo |
-|---|---|---|
-| 0x00 | u32 | **versão** (15 ×4, 16 ×6; grava 16) |
-| 0x04 | f32 | **comprimento original em tempos** (`LengthSelect`; 4, 8, 16) |
-| 0x08 | f32 | **BPM original** (`TempoSelect`; 60, 100, 174, 175) |
-| 0x0C | i32 | `P+0x128` **[HIP: pitch em cents, `PitchWheel` −1200…1200]** (0) |
-| 0x10 | i32 | `P+0x12C` **[HIP: "fit length"/estiramento, `FGLengthWheel` −20000…20000]** (0, 83, 167, 766) |
-| 0x14 | i32 | **método de time-stretch** `P+0x130` (0 Fill gaps, 1 Alt fill gaps, 2 Pro default, 3 Pro transient, 4 Transient, 5 Tonal, 6 Monophonic, 7 Speech **[STR]**; v<15 somava 2 se >1) |
-| 0x18 | i32 | `P+0x134` **[HIP: fade in 0…100]** |
-| 0x1C | i32 | `P+0x138` **[HIP: fade out 0…100]** |
-| 0x20 | str8 | **caminho do sample**: u8 comprimento + bytes ANSI (ex. `%FLStudioFactoryData%\Data\Patches\Packs\Loops\DL Breaker.wav`) |
-| … | u32 | **nº de fatias** N |
-| … | N × fatia | `str8 nome` (pode ser vazio; `Kick`, `Snare`, `HiHat`…) · `i32 posição em amostras` · `i32 −1` · `f32 −1,0` · `u8 flags` (bit0 **[HIP: reverso, `InvertBtn`]**) |
-| … | u8 | `P+0x141` (opção booleana de UI) |
-| … | i32 | **nota da 1ª fatia** `P+0x144` (padrão 60) |
-| … | u8 | **"play to end"** `P+0x13E` (1 = a fatia toca até o fim do sample; 0 = até a próxima fatia) **[DECOMP]** |
-| … | i32 | taxa de amostragem do sample no momento de salvar (44100) **[HIP]** |
-| … | u8 ×3 | `P+0x13F`, `P+0x13C`, `P+0x140` (auto-dump / declick / auto-fit **[HIP]**) |
-| … | i32 | modo de exibição |
-| … | 364 B | só v16: bloco de envelope/filtro da voz (`FUN_00757d10`) — ignorar |
-
-Versões < 13 gravavam a fatia só com a posição (4 B) e, de 6 a 12, +1 byte de flag; < 9 gravavam os 3
-floats do cabeçalho como 2.
-
-### 3.2 Disparo (`TriggerVoice` `FUN_00768230`) **[DECOMP+DADOS]**
-
-- Nota → fatia por uma tabela de 125 entradas (`P+0x198`); a fatia *i* fica na nota `nota1 + i`
-  (`nota1` = `P+0x144` = 60 em todos os demos) **[DECOMP parcial; DADOS: as notas usadas nos padrões dos
-  canais Slicer começam em 60 e vão até 60+N−1]**.
-- A fatia toca **na altura original** (a voz recebe `(60 − nota)·100` cents, cancelando o host).
-- Fim da fatia: início da próxima (ou o fim do sample se "play to end").
-
-### 3.3 Estatística **[DADOS]**
-
-10 blobs; fatias por canal: 9, 9, 18, 20, 22, 29, 32, 52 ×3; 9 dos 10 caminhos existem (o que falta é um
-`.ogg` de um projeto de usuário). Posições em amostras a 44,1 kHz (ex. DL Breaker: 0, 22050, 44100…).
+- 57 blobs, 57 programs with zones (always program 0); zones per program: 6–12 (majority), 17–18, 32,
+  35, 45 ×3, 88 ×7. Total **1,287 zones**, all with `velocity 0–127` (no velocity layers in the demos).
+- **1,287 paths, 1,275 exist**; the remaining 12 have embedded audio.
+- The **2,224 pattern notes** of the DirectWave channels all land in exactly one zone (no overlapping
+  key ranges) **[DATA]**.
 
 ---
 
-## 4. Slicex (43 canais) **[DECOMP+STR+DADOS]**
+## 3. Fruity Slicer (10 channels) **[DECOMP+STR+DATA]**
 
-### 4.1 Layout do `0xD5` (`FUN_0087a8a0`, stream sequencial)
+### 3.1 Layout of `0xD5` (`FUN_00766c40`, sequential "stream" format, no chunks)
 
-| Off | Tipo | Campo |
+| Off | Type | Field |
 |---|---|---|
-| 0x00 | u32 | **versão**: `0x00060003` (35 blobs) ou `6` (8 blobs antigos, mesmo layout) |
-| 0x04 | 8 × i32 | **parâmetros mestres** (índice = `Tag` do DFM): [0] env. do filtro, [1] cutoff, [2] **volume mestre** (0…16000, padrão 12800), [3] aleatoriedade (256), [4] LFO, [5] **pitch mestre em cents** (−1200…1200; demos 0, 455, 687, 760), [6] Mod X (256), [7] Mod Y (256) |
-| 0x24 | 47 B | opções (`P+0x12F0`): u32 [0] = **modo de camadas** (0 All, 1 All gain-comp., 2 Velocity, 3 Mod X, 4 Mod Y, 5 Random, 6 Cycle, 7 Song-time **[DECOMP+STR]**), demais flags/seletores de UI |
-| 0x53 | 3 × u32 | estado de UI (o 3º = oitava exibida no teclado, `BaseNoteSel`; só visual) |
-| 0x5F | **deck A**, depois **deck B** | (abaixo) |
-| fim | 8 × (20 B + 6 objetos) | grupos de articuladores (envelopes/LFOs); ignorar |
+| 0x00 | u32 | **version** (15 ×4, 16 ×6; writes 16) |
+| 0x04 | f32 | **original length in beats** (`LengthSelect`; 4, 8, 16) |
+| 0x08 | f32 | **original BPM** (`TempoSelect`; 60, 100, 174, 175) |
+| 0x0C | i32 | `P+0x128` **[HYP: pitch in cents, `PitchWheel` −1200…1200]** (0) |
+| 0x10 | i32 | `P+0x12C` **[HYP: "fit length"/stretching, `FGLengthWheel` −20000…20000]** (0, 83, 167, 766) |
+| 0x14 | i32 | **time-stretch method** `P+0x130` (0 Fill gaps, 1 Alt fill gaps, 2 Pro default, 3 Pro transient, 4 Transient, 5 Tonal, 6 Monophonic, 7 Speech **[STR]**; v<15 added 2 if >1) |
+| 0x18 | i32 | `P+0x134` **[HYP: fade in 0…100]** |
+| 0x1C | i32 | `P+0x138` **[HYP: fade out 0…100]** |
+| 0x20 | str8 | **sample path**: u8 length + ANSI bytes (e.g. `%FLStudioFactoryData%\Data\Patches\Packs\Loops\DL Breaker.wav`) |
+| … | u32 | **no. of slices** N |
+| … | N × slice | `str8 name` (may be empty; `Kick`, `Snare`, `HiHat`…) · `i32 position in samples` · `i32 −1` · `f32 −1.0` · `u8 flags` (bit0 **[HYP: reverse, `InvertBtn`]**) |
+| … | u8 | `P+0x141` (boolean UI option) |
+| … | i32 | **note of the 1st slice** `P+0x144` (default 60) |
+| … | u8 | **"play to end"** `P+0x13E` (1 = the slice plays to the end of the sample; 0 = up to the next slice) **[DECOMP]** |
+| … | i32 | sample rate of the sample at save time (44100) **[HYP]** |
+| … | u8 ×3 | `P+0x13F`, `P+0x13C`, `P+0x140` (auto-dump / declick / auto-fit **[HYP]**) |
+| … | i32 | display mode |
+| … | 364 B | v16 only: voice envelope/filter block (`FUN_00757d10`) — ignore |
 
-Cada **deck** (o Slicex tem dois, A e B; nos demos só o A tem fatias):
+Versions < 13 stored the slice with only the position (4 B) and, from 6 to 12, +1 flag byte; < 9 stored the 3
+header floats as 2.
 
-| Campo | Conteúdo |
+### 3.2 Triggering (`TriggerVoice` `FUN_00768230`) **[DECOMP+DATA]**
+
+- Note → slice via a table of 125 entries (`P+0x198`); slice *i* sits at note `note1 + i`
+  (`note1` = `P+0x144` = 60 in all demos) **[partial DECOMP; DATA: the notes used in the patterns of the
+  Slicer channels start at 60 and go up to 60+N−1]**.
+- The slice plays **at the original pitch** (the voice receives `(60 − note)·100` cents, cancelling the host).
+- End of slice: start of the next one (or the end of the sample if "play to end").
+
+### 3.3 Statistics **[DATA]**
+
+10 blobs; slices per channel: 9, 9, 18, 20, 22, 29, 32, 52 ×3; 9 of the 10 paths exist (the missing one is an
+`.ogg` from a user project). Positions in samples at 44.1 kHz (e.g. DL Breaker: 0, 22050, 44100…).
+
+---
+
+## 4. Slicex (43 channels) **[DECOMP+STR+DATA]**
+
+### 4.1 Layout of `0xD5` (`FUN_0087a8a0`, sequential stream)
+
+| Off | Type | Field |
+|---|---|---|
+| 0x00 | u32 | **version**: `0x00060003` (35 blobs) or `6` (8 old blobs, same layout) |
+| 0x04 | 8 × i32 | **master parameters** (index = DFM `Tag`): [0] filter env., [1] cutoff, [2] **master volume** (0…16000, default 12800), [3] randomness (256), [4] LFO, [5] **master pitch in cents** (−1200…1200; demos 0, 455, 687, 760), [6] Mod X (256), [7] Mod Y (256) |
+| 0x24 | 47 B | options (`P+0x12F0`): u32 [0] = **layering mode** (0 All, 1 All gain-comp., 2 Velocity, 3 Mod X, 4 Mod Y, 5 Random, 6 Cycle, 7 Song-time **[DECOMP+STR]**), other UI flags/selectors |
+| 0x53 | 3 × u32 | UI state (the 3rd = octave shown on the keyboard, `BaseNoteSel`; visual only) |
+| 0x5F | **deck A**, then **deck B** | (below) |
+| end | 8 × (20 B + 6 objects) | articulator groups (envelopes/LFOs); ignore |
+
+Each **deck** (Slicex has two, A and B; in the demos only A has slices):
+
+| Field | Content |
 |---|---|
-| u8 | **0 = áudio embutido segue; 1 = só referência ao arquivo** |
-| str8 | caminho do arquivo (u8 comprimento + ANSI; pode ser vazio) |
-| (se 0) u32 + bytes | **WAV completo** (RIFF/WAVE) de `tamanho` bytes |
-| 76 B | parâmetros do deck: 2 × f64 (−1 = automático), f64 início e f64 fim da região em **tempos**, 5 × i32, 6 × u8 |
-| k objetos | envelopes/LFOs do deck (`FUN_00790720`) |
-| u32 + N × 68 B | **parâmetros por região/fatia** (17 × i32; padrões do DFM: volume 8000 de 16000, pan 0 de ±6400, pitch 0 de ±1200 cents, cutoff 128, res 128, articuladores 12800, início 0, atraso 0) **[STR+DADOS; ordem exata dos campos HIP]** |
+| u8 | **0 = embedded audio follows; 1 = file reference only** |
+| str8 | file path (u8 length + ANSI; may be empty) |
+| (if 0) u32 + bytes | **complete WAV** (RIFF/WAVE) of `size` bytes |
+| 76 B | deck parameters: 2 × f64 (−1 = automatic), f64 start and f64 end of the region in **beats**, 5 × i32, 6 × u8 |
+| k objects | deck envelopes/LFOs (`FUN_00790720`) |
+| u32 + N × 68 B | **per-region/slice parameters** (17 × i32; DFM defaults: volume 8000 of 16000, pan 0 of ±6400, pitch 0 of ±1200 cents, cutoff 128, res 128, articulators 12800, start 0, delay 0) **[STR+DATA; exact field order HYP]** |
 
-O áudio embutido é o WAV que o próprio Slicex/Edison gera: `fmt` (PCM 16 bits ou float 32), `data`,
-`smpl` (nota raiz 60), `inst`, `acid` (tempos e BPM), `strc`, **`cue ` (um ponto por fatia, posição em
-amostras)**, `LIST/adtl` com **`labl` (nome da fatia)** e `ltxt` (comprimento da região). Quando o deck só
-referencia o arquivo, **os loops da instalação (`DL *.wav`) trazem exatamente os mesmos chunks** — ou seja,
-**as fatias do Slicex vêm do WAV, não do blob**; o blob só guarda a contagem e os parâmetros de cada fatia
-**[DADOS]**.
+The embedded audio is the WAV that Slicex/Edison itself generates: `fmt` (16-bit PCM or 32-bit float), `data`,
+`smpl` (root note 60), `inst`, `acid` (beats and BPM), `strc`, **`cue ` (one point per slice, position in
+samples)**, `LIST/adtl` with **`labl` (slice name)** and `ltxt` (region length). When the deck only
+references the file, **the installation's loops (`DL *.wav`) carry exactly the same chunks** — that is,
+**Slicex slices come from the WAV, not from the blob**; the blob only stores the count and the parameters of each slice
+**[DATA]**.
 
-### 4.2 Mapeamento de teclas e altura **[DECOMP+DADOS]**
+### 4.2 Key mapping and pitch **[DECOMP+DATA]**
 
-`TriggerVoice` (`FUN_00881d70`): a nota indexa uma lista de (deck, região) por tecla; se houver mais de uma
-região na tecla, o modo de camadas escolhe. A voz soa na altura original + pitch da região + pitch mestre
-(`(60 − nota)·100` cents cancelam o host). Nas notas de padrão dos 43 canais, as teclas usadas começam em
-**60** e sobem (60…91) — **fatia *i* ↔ nota 60+i** **[DADOS; a tabela é derivada, não salva]**.
+`TriggerVoice` (`FUN_00881d70`): the note indexes a list of (deck, region) per key; if there is more than one
+region on the key, the layering mode chooses. The voice sounds at the original pitch + region pitch + master pitch
+(`(60 − note)·100` cents cancel the host). In the pattern notes of the 43 channels, the keys used start at
+**60** and go up (60…91) — **slice *i* ↔ note 60+i** **[DATA; the table is derived, not saved]**.
 
-### 4.3 Estatística **[DADOS]**
+### 4.3 Statistics **[DATA]**
 
-- 43 blobs; **14 com WAV embutido** (o maior com 3,0 MB), **29 só com referência**; 8 na versão antiga 6.
-- Fatias por deck A: 6…24 (DL loops: 19–24; legados: 8–11; "!westand out": 10–12); raiz sempre 60.
-- Referências: todos os 29 arquivos existem. Embutidos: 11 dos 14 têm caminho que **não existe**
-  (`!westand out.wav` ×8, `DL_The Funk.wav`, `DL_Ghost Break.wav`, um caminho da área de trabalho de um
-  usuário) — o WAV embutido é a única fonte nesses casos; 2 apontam para arquivos que existem.
-- 1 blob (`Video chopping.flp`) tem WAV embutido vazio (`data` de 0 bytes) e nenhum caminho.
-
----
-
-## 5. FL Keys e Drumpad (baratos) **[DADOS+STR]**
-
-**FL Keys** (11): `u32 1` · `str8 nome do conjunto` (`Grand Piano` ×8, `mda Piano` ×3) · 15 × i32
-(−1000…1000; os 15 parâmetros do plugin: decay, release, hardness, vel→hardness, muffle, vel→muffle,
-sensibilidade a velocity, estéreo, tune, detune, stretch, treble, pan/trêmolo, taxa do LFO, overdrive
-**[STR, ordem; HIP: escala `p = (v + 1000)/2000`]**). O nome indexa
-`Plugins/Fruity/Generators/FL Keys/Wavtables/<nome>.wti`, um INI com `[info]` (taxa, tipo `riff` ou `raw`,
-pasta), `[velocitylayers]` (limiares de velocity) e um `[sampleN]` por amostra com `root` (nota base e
-**início** da faixa), `high` (fim da faixa), `pos/end/loop` (para `.dat` cru). `Grand Piano` = 30 WAVs
-(`CHANGPIANOHARD_A1.wav`…, raízes de 3 em 3 semitons, uma camada); `mda Piano` = 15 amostras num `.dat`
-cru a 22.050 Hz **[HIP: PCM 16 bits mono]**; `Rhodes` = `.dat` cru a 32 kHz, 3 camadas. Ambos os conjuntos
-usados nos demos existem.
-
-**Drumpad** (10+1): blob `"SSLF"` + u32 tamanho + `"3PMD"` + nome do preset (`War Drum Lo 01`,
-`Hi Bongo 01`, `Dance Kick 01`…) + ~60 floats. É **síntese por modelagem física, sem samples** — fora do
-escopo do sampler; tratar como gerador não suportado (ou um bumbo/tom genérico).
+- 43 blobs; **14 with an embedded WAV** (the largest at 3.0 MB), **29 with a reference only**; 8 in old version 6.
+- Slices per deck A: 6…24 (DL loops: 19–24; legacy: 8–11; "!westand out": 10–12); root always 60.
+- References: all 29 files exist. Embedded: 11 of the 14 have a path that **does not exist**
+  (`!westand out.wav` ×8, `DL_The Funk.wav`, `DL_Ghost Break.wav`, a path on a user's
+  desktop) — the embedded WAV is the only source in those cases; 2 point to files that exist.
+- 1 blob (`Video chopping.flp`) has an empty embedded WAV (`data` of 0 bytes) and no path.
 
 ---
 
-## Recomendações para o LYNX
+## 5. FL Keys and Drumpad (cheap) **[DATA+STR]**
 
-O LYNX tem: sampler de 1 sample por canal (pitch, ADSR, região início/fim, reverso, *cut*, fatias com
-início fracionário e "nota 60+i toca a fatia i", filtro), canais roteados para pistas do mixer e padrões
-com notas por canal. Com isso:
+**FL Keys** (11): `u32 1` · `str8 set name` (`Grand Piano` ×8, `mda Piano` ×3) · 15 × i32
+(−1000…1000; the plugin's 15 parameters: decay, release, hardness, vel→hardness, muffle, vel→muffle,
+velocity sensitivity, stereo, tune, detune, stretch, treble, pan/tremolo, LFO rate, overdrive
+**[STR, order; HYP: scale `p = (v + 1000)/2000`]**). The name indexes
+`Plugins/Fruity/Generators/FL Keys/Wavtables/<name>.wti`, an INI with `[info]` (rate, type `riff` or `raw`,
+folder), `[velocitylayers]` (velocity thresholds) and one `[sampleN]` per sample with `root` (base note and
+**start** of the range), `high` (end of the range), `pos/end/loop` (for raw `.dat`). `Grand Piano` = 30 WAVs
+(`CHANGPIANOHARD_A1.wav`…, roots every 3 semitones, one layer); `mda Piano` = 15 samples in a raw `.dat`
+at 22,050 Hz **[HYP: 16-bit mono PCM]**; `Rhodes` = raw `.dat` at 32 kHz, 3 layers. Both sets
+used in the demos exist.
 
-1. **Resolução de caminhos (comum).** `%FLStudioFactoryData%` → raiz da instalação do FL (ou pasta
-   configurada pelo usuário); `%FLStudioData%` → `<raiz>\Data`; demais caminhos absolutos como estão; se o
-   arquivo não existir, procurar pelo nome do arquivo na mesma pasta do `.flp`. Strings: FPC em UTF-16,
-   DirectWave em ASCII, Slicer/Slicex em `str8` ANSI. Áudio embutido tem prioridade quando o arquivo não
-   existe (DirectWave `0x205`, Slicex deck flag 0).
-
-2. **FPC → um canal LYNX por pad com sample** (352 pads em 25 canais).
-   - Para cada pad com ≥1 layer com caminho: criar um canal "*<nome do canal FPC> – <nome do pad>*" com o
-     sample da **layer escolhida** (regra abaixo), mesma pista de mixer do canal FPC + `offset de saída`
-     (i=4; limitar ao intervalo de pistas).
-   - Nível do canal = `L11(volPad/127) · L11(volLayer/127)`; pan = `(panPad + panLayer)/128` limitado a ±1;
-     pitch = `(tunePad + tuneLayer)·9,375` cents. **Sem key tracking**: o sampler deve tocar o sample na
-     altura original qualquer que seja a nota (gerar as notas do novo canal sempre em 60, ou ligar uma opção
-     "altura fixa" no canal).
-   - **Divisão das notas:** cada nota do padrão do canal FPC vai para o(s) canal(is) cujo pad tem
-     `nota == i3` (pads mutados descartados; se houver solo, só os em solo). Nos demos isso cobre 100 % das
-     648 notas e nunca há dois pads na mesma nota.
-   - **Velocity layers:** se o pad tem 1 layer, usar ela. Com várias e bit3 desligado, criar um canal por
-     layer e mandar cada nota aos canais cuja faixa `[vmin, vmax)` contém a velocity (127 inclusivo). Com o
-     bit3 ligado (kits HQ de 8 layers), o mais barato e fiel é **um canal com a layer que cobre a velocity
-     média** (ou, se o LYNX ganhar *round-robin*, alternar entre as layers que cobrem a velocity — modo 3 =
-     ciclo).
-   - **Choke:** mapear `cut`/`cutBy` para o *cut* do LYNX: pads com `cutBy = g ≥ 0` entram no grupo de corte
-     de quem tem `cut = g` (caso típico: chimbal aberto cortado pelo fechado). Se o *cut* do LYNX for
-     "grupo simétrico", usar o mesmo número de grupo para os dois lados.
-   - Envelope: ADSR "one-shot" (A=0, D/S irrelevantes, R curto) e região = sample inteiro (`i6 = −1` em
-     todos os demos); reverso se bit1 da layer.
-
-3. **DirectWave → um canal por zona** (ou, se o sampler ganhar *multi-zona*, um canal só).
-   - Programa: o primeiro com zonas (sempre o 0 nos demos). Para cada zona: sample (arquivo ou `0x205`
-     planar float32/int16 → WAV temporário), **nota raiz** (byte 0), **faixa de teclas** [b1, b2],
-     **velocity** [b3, b4], pitch `(v−0,5)·2400` cents, ganho `v²`, pan `2v−1`, ADSR `t = 10·v⁴` s e
-     sustain `v`, loop = modo `Z[7]` com A/B em quadros (Forward → loop contínuo; Sustained → loop até o
-     note-off; Disabled/One-Shot → sem loop), início em `Sample Offset`.
-   - **Divisão das notas:** cada nota do canal DirectWave vai para o canal da zona cuja faixa de tecla a
-     contém (no máximo uma nos demos), **mantendo a nota** — esses canais *seguem* o teclado com pitch
-     relativo à raiz: `semitons = nota − raiz`. Como o sampler do LYNX trata 60 como altura original, somar
-     `(60 − raiz)·100` cents ao pitch do canal e manter a nota original no padrão.
-   - Custo: os pianos dos demos têm 6–12 zonas por canal (88 em 7 canais); aceitável como canais ocultos
-     agrupados, mas **um sampler multi-zona no LYNX** (lista de {sample, raiz, tecla lo/hi, vel lo/hi,
-     ganho, pan, pitch, loop}) é o caminho certo e serve também para o FL Keys.
-
-4. **Fruity Slicer → 1 canal com fatias.** Sample = caminho; fatias = `posição / nº de quadros do arquivo`
-   (frações de início, na ordem gravada); nota 60+i = fatia i (se `nota1 ≠ 60`, transpor as notas do padrão
-   por `60 − nota1`). Sem key tracking (a fatia toca na altura original). Fim = próxima fatia (ou o fim do
-   sample se "play to end"). Pitch global `P+0x128` em cents **[HIP]**; ignorar time-stretch (BPM/tempos
-   originais só são necessários se o LYNX ganhar estiramento).
-
-5. **Slicex → 1 canal com fatias.** Fonte = WAV embutido (deck A, flag 0) ou arquivo referenciado; ler do
-   WAV os `cue ` (posições → frações de início, ordenadas), `labl` (nomes), `smpl` (raiz 60) e `acid`
-   (tempos/BPM, opcional). Nota 60+i = fatia i (confirmado pelos padrões). Volume do canal ← parâmetro
-   mestre [2] (`12800` = 100 %, **[HIP] linear `v/12800`**), pitch ← mestre [5] em cents; parâmetros por
-   fatia (volume/pan/pitch) só se o sampler ganhar valores por fatia. Deck B: ignorar (vazio nos demos).
-
-6. **FL Keys → instrumento multi-zona a partir do `.wti`** (quando houver multi-zona; até lá, um canal com
-   a amostra `.wti` mais próxima de C5 e key tracking normal). **Drumpad**: não suportado (síntese).
-
-7. **Ordem de implementação sugerida (retorno/custo):** (a) FPC por pad (25 canais, 100 % dos samples
-   existem, notas exatas); (b) Slicex via chunks do WAV (43 canais; extração de WAV embutido + leitor de
-   `cue`/`labl`); (c) DirectWave como canais por zona e, depois, sampler multi-zona; (d) Fruity Slicer
-   (trivial depois de (b)); (e) FL Keys via `.wti`.
+**Drumpad** (10+1): blob `"SSLF"` + u32 size + `"3PMD"` + preset name (`War Drum Lo 01`,
+`Hi Bongo 01`, `Dance Kick 01`…) + ~60 floats. It is **physical-modelling synthesis, without samples** — outside the
+sampler's scope; treat as an unsupported generator (or a generic kick/tom).
 
 ---
 
-## Índice de evidências
+## Recommendations for LYNX
 
-| Função / dado | O que faz | Marca |
+LYNX has: a 1-sample-per-channel sampler (pitch, ADSR, start/end region, reverse, *cut*, slices with
+fractional start and "note 60+i plays slice i", filter), channels routed to mixer tracks and patterns
+with notes per channel. Given that:
+
+1. **Path resolution (common).** `%FLStudioFactoryData%` → FL installation root (or a folder
+   configured by the user); `%FLStudioData%` → `<root>\Data`; other absolute paths as they are; if the
+   file does not exist, search by file name in the same folder as the `.flp`. Strings: FPC in UTF-16,
+   DirectWave in ASCII, Slicer/Slicex in ANSI `str8`. Embedded audio takes priority when the file does not
+   exist (DirectWave `0x205`, Slicex deck flag 0).
+
+2. **FPC → one LYNX channel per pad with a sample** (352 pads in 25 channels).
+   - For each pad with ≥1 layer with a path: create a channel "*<FPC channel name> – <pad name>*" with the
+     sample of the **chosen layer** (rule below), same mixer track as the FPC channel + `output offset`
+     (i=4; clamp to the track range).
+   - Channel level = `L11(volPad/127) · L11(volLayer/127)`; pan = `(panPad + panLayer)/128` clamped to ±1;
+     pitch = `(tunePad + tuneLayer)·9.375` cents. **No key tracking**: the sampler must play the sample at the
+     original pitch whatever the note (always generate the new channel's notes at 60, or enable a
+     "fixed pitch" option on the channel).
+   - **Note splitting:** each note in the FPC channel's pattern goes to the channel(s) whose pad has
+     `note == i3` (muted pads discarded; if there is a solo, only the soloed ones). In the demos this covers 100 % of the
+     648 notes and there are never two pads on the same note.
+   - **Velocity layers:** if the pad has 1 layer, use it. With several and bit3 off, create one channel per
+     layer and send each note to the channels whose range `[vmin, vmax)` contains the velocity (127 inclusive). With
+     bit3 on (8-layer HQ kits), the cheapest and most faithful option is **one channel with the layer covering the average
+     velocity** (or, if LYNX gains *round-robin*, alternate between the layers covering the velocity — mode 3 =
+     cycle).
+   - **Choke:** map `cut`/`cutBy` to the LYNX *cut*: pads with `cutBy = g ≥ 0` join the cut group
+     of whoever has `cut = g` (typical case: open hi-hat cut by the closed one). If the LYNX *cut* is a
+     "symmetric group", use the same group number for both sides.
+   - Envelope: "one-shot" ADSR (A=0, D/S irrelevant, short R) and region = whole sample (`i6 = −1` in
+     all demos); reverse if layer bit1.
+
+3. **DirectWave → one channel per zone** (or, if the sampler gains *multi-zone*, a single channel).
+   - Program: the first one with zones (always 0 in the demos). For each zone: sample (file or `0x205`
+     planar float32/int16 → temporary WAV), **root note** (byte 0), **key range** [b1, b2],
+     **velocity** [b3, b4], pitch `(v−0.5)·2400` cents, gain `v²`, pan `2v−1`, ADSR `t = 10·v⁴` s and
+     sustain `v`, loop = mode `Z[7]` with A/B in frames (Forward → continuous loop; Sustained → loop until
+     note-off; Disabled/One-Shot → no loop), start at `Sample Offset`.
+   - **Note splitting:** each note of the DirectWave channel goes to the channel of the zone whose key range
+     contains it (at most one in the demos), **keeping the note** — these channels *follow* the keyboard with pitch
+     relative to the root: `semitones = note − root`. Since the LYNX sampler treats 60 as the original pitch, add
+     `(60 − root)·100` cents to the channel pitch and keep the original note in the pattern.
+   - Cost: the pianos in the demos have 6–12 zones per channel (88 in 7 channels); acceptable as grouped hidden
+     channels, but **a multi-zone sampler in LYNX** (list of {sample, root, key lo/hi, vel lo/hi,
+     gain, pan, pitch, loop}) is the right path and also serves FL Keys.
+
+4. **Fruity Slicer → 1 channel with slices.** Sample = path; slices = `position / no. of frames in the file`
+   (start fractions, in stored order); note 60+i = slice i (if `note1 ≠ 60`, transpose the pattern notes
+   by `60 − note1`). No key tracking (the slice plays at the original pitch). End = next slice (or the end of the
+   sample if "play to end"). Global pitch `P+0x128` in cents **[HYP]**; ignore time-stretch (original BPM/beats
+   are only needed if LYNX gains stretching).
+
+5. **Slicex → 1 channel with slices.** Source = embedded WAV (deck A, flag 0) or referenced file; read from the
+   WAV the `cue ` (positions → start fractions, sorted), `labl` (names), `smpl` (root 60) and `acid`
+   (beats/BPM, optional). Note 60+i = slice i (confirmed by the patterns). Channel volume ← master
+   parameter [2] (`12800` = 100 %, **[HYP] linear `v/12800`**), pitch ← master [5] in cents; per-slice
+   parameters (volume/pan/pitch) only if the sampler gains per-slice values. Deck B: ignore (empty in the demos).
+
+6. **FL Keys → multi-zone instrument from the `.wti`** (once multi-zone exists; until then, one channel with
+   the `.wti` sample closest to C5 and normal key tracking). **Drumpad**: unsupported (synthesis).
+
+7. **Suggested implementation order (return/cost):** (a) FPC per pad (25 channels, 100 % of the samples
+   exist, exact notes); (b) Slicex via WAV chunks (43 channels; embedded WAV extraction + reader of
+   `cue`/`labl`); (c) DirectWave as per-zone channels and, later, a multi-zone sampler; (d) Fruity Slicer
+   (trivial after (b)); (e) FL Keys via `.wti`.
+
+---
+
+## Evidence index
+
+| Function / data | What it does | Mark |
 |---|---|---|
-| FPC `FUN_0086d4c0` (VMT+3) | `SaveRestoreState`: versão, chunks de topo `1…5`, 32 pads | DECOMP |
-| FPC `FUN_0086cc50` | Pad: chunks `0x64…0x6A`, mapeamento dos 16 i32 → campos | DECOMP |
-| FPC `FUN_0086c8f0`, `FUN_00870430` | Layer: `0x12C/0x12D/0x12E`, 7 i32, defaults (vol 127, vel 0–127, região −1) | DECOMP |
-| FPC `FUN_0083c4a0`, `FUN_0083c750` | Contêiner `id:u32 + tamanho:u64` | DECOMP |
-| FPC `FUN_008698a0` (VMT+9), `FUN_0086b480` | Nota → pads (mute/solo), velocity → layer, leis L11, tune ×9,375, cut/cut-by, cancelamento da altura | DECOMP |
-| FPC `FUN_00869db0` | Modos random / avoid previous / cycle back / cycle | DECOMP |
-| FPC `FUN_00857990`, `FUN_0085c3b0/450/4d0`, `FUN_0085f410`, `FUN_0085e490`, `FUN_0086eb80` | Handlers do DFM → campos; texto "cents" (`v/128·1200`) | DECOMP |
-| FPC DFM `TSynthEditorForm` @`0x5beb84` | Faixas de vol/pan/tune de pad e layer, cut/cut-by, output, menu de modos | STR |
+| FPC `FUN_0086d4c0` (VMT+3) | `SaveRestoreState`: version, top-level chunks `1…5`, 32 pads | DECOMP |
+| FPC `FUN_0086cc50` | Pad: chunks `0x64…0x6A`, mapping of the 16 i32 → fields | DECOMP |
+| FPC `FUN_0086c8f0`, `FUN_00870430` | Layer: `0x12C/0x12D/0x12E`, 7 i32, defaults (vol 127, vel 0–127, region −1) | DECOMP |
+| FPC `FUN_0083c4a0`, `FUN_0083c750` | Container `id:u32 + size:u64` | DECOMP |
+| FPC `FUN_008698a0` (VMT+9), `FUN_0086b480` | Note → pads (mute/solo), velocity → layer, L11 laws, tune ×9.375, cut/cut-by, pitch cancellation | DECOMP |
+| FPC `FUN_00869db0` | Modes random / avoid previous / cycle back / cycle | DECOMP |
+| FPC `FUN_00857990`, `FUN_0085c3b0/450/4d0`, `FUN_0085f410`, `FUN_0085e490`, `FUN_0086eb80` | DFM handlers → fields; "cents" text (`v/128·1200`) | DECOMP |
+| FPC DFM `TSynthEditorForm` @`0x5beb84` | Pad and layer vol/pan/tune ranges, cut/cut-by, output, mode menu | STR |
 | DirectWave RTTI `CDirectWaveFL` → vtable `0x1800d0418` | `SaveRestoreState` `FUN_180016140` | DECOMP |
-| DirectWave `FUN_180040610`, `FUN_180040750`, `FUN_18003dcd0` | Topo: versão 38, chunks `6`, `0x206`, `5`×16, `1`×128 | DECOMP |
-| DirectWave `FUN_180040c50`, `FUN_18003f130` | Programa: chunks `0x64…0x6E`, zonas | DECOMP |
-| DirectWave `FUN_1800410d0`, `FUN_18003f840` | Zona: `0x1F4…0x206`, campos do cabeçalho e do formato, áudio planar + 512 | DECOMP |
-| DirectWave `FUN_180026e10`, `FUN_180029f30`, `FUN_180027740`, `FUN_180028080/283d0/28ca0` | Parâmetro de host ↔ campo; leis de pitch/ganho/pan/tempo | DECOMP |
-| DirectWave `FUN_180030090` | Início da voz: modo de loop `Z[7]`, sync, fatiar pelo teclado | DECOMP |
-| DirectWave strings `0x105968…0x105a7c` | Tipos de filtro, modos de loop, modos de voz | STR |
+| DirectWave `FUN_180040610`, `FUN_180040750`, `FUN_18003dcd0` | Top level: version 38, chunks `6`, `0x206`, `5`×16, `1`×128 | DECOMP |
+| DirectWave `FUN_180040c50`, `FUN_18003f130` | Program: chunks `0x64…0x6E`, zones | DECOMP |
+| DirectWave `FUN_1800410d0`, `FUN_18003f840` | Zone: `0x1F4…0x206`, header and format fields, planar audio + 512 | DECOMP |
+| DirectWave `FUN_180026e10`, `FUN_180029f30`, `FUN_180027740`, `FUN_180028080/283d0/28ca0` | Host parameter ↔ field; pitch/gain/pan/time laws | DECOMP |
+| DirectWave `FUN_180030090` | Voice start: loop mode `Z[7]`, sync, slice across the keyboard | DECOMP |
+| DirectWave strings `0x105968…0x105a7c` | Filter types, loop modes, voice modes | STR |
 | Fruity Slicer `FUN_00766c40` (VMT+3) | Layout v1…16 | DECOMP |
-| Fruity Slicer `FUN_00768230` (VMT+9) | Tabela nota→fatia, play to end, altura fixa | DECOMP |
-| Fruity Slicer DFM `TSynthEditorForm` | Tempo, comprimento, pitch, fades, métodos de stretch | STR |
-| Slicex `FUN_0087a8a0` (VMT+3) | Layout v6/0x60003, 2 decks, WAV embutido, registros de 68 B | DECOMP |
-| Slicex `FUN_00881d70` (VMT+9), `FUN_00896c10` | Nota → (deck, região), modos de camada; seletor de nota base só visual | DECOMP |
-| Slicex DFM | Parâmetros mestres por `Tag`, defaults por região | STR |
-| WAVs `DL *.wav` da instalação / embutidos | `cue`, `labl`, `ltxt`, `smpl`, `acid` = fatias | DADOS |
-| FL Keys `Wavtables/*.wti` | Mapa de amostras (root/high/camadas) | DADOS+STR |
-| 165 `.flp` (seção de canais + notas `0xE0`) | Contagens, versões, existência de arquivos, notas usadas | DADOS |
+| Fruity Slicer `FUN_00768230` (VMT+9) | Note→slice table, play to end, fixed pitch | DECOMP |
+| Fruity Slicer DFM `TSynthEditorForm` | Tempo, length, pitch, fades, stretch methods | STR |
+| Slicex `FUN_0087a8a0` (VMT+3) | Layout v6/0x60003, 2 decks, embedded WAV, 68 B records | DECOMP |
+| Slicex `FUN_00881d70` (VMT+9), `FUN_00896c10` | Note → (deck, region), layering modes; base-note selector visual only | DECOMP |
+| Slicex DFM | Master parameters by `Tag`, per-region defaults | STR |
+| Installation / embedded `DL *.wav` WAVs | `cue`, `labl`, `ltxt`, `smpl`, `acid` = slices | DATA |
+| FL Keys `Wavtables/*.wti` | Sample map (root/high/layers) | DATA+STR |
+| 165 `.flp` (channel section + `0xE0` notes) | Counts, versions, file existence, notes used | DATA |
 
-### Pendências
+### Pending items
 
-- FPC: qual bit/campo do blob do envelope (`0x68`) liga o envelope de volume/pan; confirmar bit2 do pad
-  ("escalar volume com velocity") e bit1 da layer (reverso); lei de pan.
-- DirectWave: campo do programa com o modo Poly/Mono/Legato e a escolha de zonas sobrepostas; significado de
-  `Z+0x2B9/0x2BA` e `Z+0x396`; curva de cutoff dos filtros.
-- Fruity Slicer: nomes exatos dos campos `P+0x128/0x12C/0x134/0x138` e dos 3 booleanos finais (ordem dos
-  campos publicados do formulário).
-- Slicex: ordem dos 17 i32 por região e unidade do volume mestre; papel do deck B.
-- FL Keys: escala dos 15 parâmetros e formato do `.dat` cru.
+- FPC: which bit/field of the envelope blob (`0x68`) turns on the volume/pan envelope; confirm pad bit2
+  ("scale volume with velocity") and layer bit1 (reverse); pan law.
+- DirectWave: program field with the Poly/Mono/Legato mode and the overlapping-zone choice; meaning of
+  `Z+0x2B9/0x2BA` and `Z+0x396`; filter cutoff curve.
+- Fruity Slicer: exact names of fields `P+0x128/0x12C/0x134/0x138` and of the 3 final booleans (order of the
+  form's published fields).
+- Slicex: order of the 17 i32 per region and unit of the master volume; role of deck B.
+- FL Keys: scale of the 15 parameters and format of the raw `.dat`.

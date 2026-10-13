@@ -1,700 +1,700 @@
-# Análise comportamental do FL Studio 2026: rodada 20 (REA) — envelopes de *pattern* e LFO do Love Philter, Fruity Scratcher, grafos restantes do Patcher, Vocodex e Fruity Vocoder
+# Behavioural analysis of FL Studio 2026: round 20 (REA) — Love Philter *pattern* envelopes and LFO, Fruity Scratcher, remaining Patcher graphs, Vocodex and Fruity Vocoder
 
-> **Natureza deste documento.** Continuação de `REA_rodada19.md`. Engenharia reversa *clean-room*, apenas
-> comportamental. Nenhum código nem pseudocódigo da Image-Line foi copiado: o que está aqui são fórmulas e
-> comportamentos descritos com palavras nossas. Endereços (`FUN_xxxxxxxx`), offsets e globais servem só para
-> rastrear a evidência. Nenhum conteúdo cifrado foi tocado (nenhum pacote FLEX foi aberto).
+> **Nature of this document.** Continuation of `REA_rodada19.md`. *Clean-room* reverse engineering, behavioural
+> only. No Image-Line code or pseudocode was copied: what is here are formulas and behaviours described in our own
+> words. Addresses (`FUN_xxxxxxxx`), offsets and globals serve only to trace the evidence. No encrypted content was
+> touched (no FLEX package was opened).
 >
-> **Regra desta rodada (pedido do usuário): nada de especulação.** Cada valor vem de decompilação
-> (**[DECOMP]**), do manual oficial da Image-Line (**[DOC]**, com URL) ou dos dados (**[DADOS]**). Onde não
-> houve evidência suficiente, o item está marcado **"não confirmado"**. Inferências feitas *a partir* do código
-> (ex.: "esta rotina é `exp` porque é sempre chamada logo após multiplicar por ln 2") estão explicitadas no texto.
+> **Rule for this round (user request): no speculation.** Every value comes from decompilation
+> (**[DECOMP]**), from the official Image-Line manual (**[DOC]**, with URL) or from the data (**[DATA]**). Where
+> there was not enough evidence, the item is marked **"not confirmed"**. Inferences made *from* the code
+> (e.g. "this routine is `exp` because it is always called right after multiplying by ln 2") are made explicit in the text.
 
-- **Alvos:**
+- **Targets:**
 
-  | Plugin | DLL (SHA-256) | Linguagem | Funções-chave novas |
+  | Plugin | DLL (SHA-256) | Language | New key functions |
   |---|---|---|---|
-  | Fruity Love Philter | `b9f11d63…ba2ff547` (= rodadas 16…19) | Delphi | *tick* `FUN_00856690`/`FUN_00856570`, escala de tempo `FUN_00788080`, articulador VMT `0x853B18` (`FUN_008543d0`, `FUN_00854540`), troca de *pattern* `FUN_0085d050`, sincronismo `FUN_0085cc80`/`FUN_0085cfa0`, `TMEnvelope` VMT `0x77F9A8` (`FUN_00786350`, `FUN_00783ec0`, `FUN_00787ba0`, `FUN_00787fd0`), `TMLFO` VMT `0x77FB48` (`FUN_00788b70`, `FUN_007886b0`, `FUN_00788830`), onda `FUN_0060e450`/`FUN_0060e610` |
-  | Fruity Scratcher | `Fruity Scratcher_x64.dll` `52c126ad3e8b684a24a9bff7b8bc77de73984732d14a3e882e01b00366b09b42`; `engine_x64.dll` `104a1f410f8018bea64f2ae1449ebf7e8383f744baf6be0278d0c34ee3d8ab1b` | Delphi (+ motor C++ só de timecode) | estado `FUN_00728d80`, `ProcessParam` `FUN_00729fe0`, aplicação `FUN_0072a630`, *reset* `FUN_00729f10`, render `FUN_0072add0`, carga do sample `FUN_0072be20`, DC `FUN_0072c660`/`FUN_0072c6d0` |
-  | Patcher | `cb4212c4…c64b` (= rodada 14) | Delphi | mistura das entradas `FUN_0079bf20`, leitura do cabo `FUN_00952440`, atraso `FUN_0079f0b0`, IPP por nome `FUN_005da820` |
-  | Fruity Vocoder | `Fruity Vocoder_x64.dll` `bfc3bec3…a63961b6` (= rodada 19) | Delphi (`TTestPlug`, VMT `0x6cf210`) | estado `FUN_006cf810` (slot 3), parâmetros `FUN_006d08c0` (slot 6), render `FUN_006d0fb0` (slot 7), preparo `FUN_006d03a0`/`FUN_006cff90`/`FUN_006d00b0`, biquad `FUN_005dbb00`/`FUN_005db530`, seguidor `FUN_006d0e70`, UI `FUN_006d4cf0`/`FUN_006d4d50`/`FUN_006d4a20`/`FUN_006d5070` |
-  | Vocodex | `Vocodex_x64.dll` `43d10692…22ca714bb0` (SHA-256 completo `43d10692ea04457018138110a1a3035d99ed8b40a7f52e67a3109c22ca714bb0`) | Delphi (`TTestPlug`, VMT `0x84e438`) | construtor `FUN_0084f730`, estado `FUN_0084efb0` (slot 3), parâmetros `FUN_00853e80` (slot 6), render `FUN_00856350` (slot 7), bandas `FUN_00851dd0`, escala de frequência `FUN_0062cb20`/`FUN_0062cd90` |
+  | Fruity Love Philter | `b9f11d63…ba2ff547` (= rounds 16…19) | Delphi | *tick* `FUN_00856690`/`FUN_00856570`, time scale `FUN_00788080`, articulator VMT `0x853B18` (`FUN_008543d0`, `FUN_00854540`), *pattern* switch `FUN_0085d050`, sync `FUN_0085cc80`/`FUN_0085cfa0`, `TMEnvelope` VMT `0x77F9A8` (`FUN_00786350`, `FUN_00783ec0`, `FUN_00787ba0`, `FUN_00787fd0`), `TMLFO` VMT `0x77FB48` (`FUN_00788b70`, `FUN_007886b0`, `FUN_00788830`), waveform `FUN_0060e450`/`FUN_0060e610` |
+  | Fruity Scratcher | `Fruity Scratcher_x64.dll` `52c126ad3e8b684a24a9bff7b8bc77de73984732d14a3e882e01b00366b09b42`; `engine_x64.dll` `104a1f410f8018bea64f2ae1449ebf7e8383f744baf6be0278d0c34ee3d8ab1b` | Delphi (+ C++ engine for timecode only) | state `FUN_00728d80`, `ProcessParam` `FUN_00729fe0`, application `FUN_0072a630`, *reset* `FUN_00729f10`, render `FUN_0072add0`, sample loading `FUN_0072be20`, DC `FUN_0072c660`/`FUN_0072c6d0` |
+  | Patcher | `cb4212c4…c64b` (= round 14) | Delphi | input mixing `FUN_0079bf20`, cable reading `FUN_00952440`, delay `FUN_0079f0b0`, IPP by name `FUN_005da820` |
+  | Fruity Vocoder | `Fruity Vocoder_x64.dll` `bfc3bec3…a63961b6` (= round 19) | Delphi (`TTestPlug`, VMT `0x6cf210`) | state `FUN_006cf810` (slot 3), parameters `FUN_006d08c0` (slot 6), render `FUN_006d0fb0` (slot 7), setup `FUN_006d03a0`/`FUN_006cff90`/`FUN_006d00b0`, biquad `FUN_005dbb00`/`FUN_005db530`, follower `FUN_006d0e70`, UI `FUN_006d4cf0`/`FUN_006d4d50`/`FUN_006d4a20`/`FUN_006d5070` |
+  | Vocodex | `Vocodex_x64.dll` `43d10692…22ca714bb0` (full SHA-256 `43d10692ea04457018138110a1a3035d99ed8b40a7f52e67a3109c22ca714bb0`) | Delphi (`TTestPlug`, VMT `0x84e438`) | constructor `FUN_0084f730`, state `FUN_0084efb0` (slot 3), parameters `FUN_00853e80` (slot 6), render `FUN_00856350` (slot 7), bands `FUN_00851dd0`, frequency scale `FUN_0062cb20`/`FUN_0062cd90` |
 
-- **Ferramentas:** Ghidra 12.1.4 *headless* (projetos anteriores abertos só para leitura: `/tmp/r17gh_LP`,
-  `/tmp/r14gh_Patcher_x64.dll`; novos: `/tmp/r20gh_Scratch`, `/tmp/r20gh_Vocoder`, `/tmp/r20gh_Vocodex`; scripts do Vocodex/Vocoder em `tmp/r20/voc/`); scripts em `tmp/r18/gh/scripts/`; `tmp/r18/k.py`
-  e `tmp/r18/vmtname.py` para constantes e VMTs; dados com `tmp/r16/lp.py`, `tmp/r20/py/lpenv.py`,
-  `tmp/r20/py/pat.py` (port do classificador do `FlPatcher.cpp`) e `tmp/r20/py/sp.py` (redução série-paralelo).
-  Manual oficial lido via web.
-- **Data:** 2026-10-13.
-- **Numeração de trilhas:** os pares (trilha, slot) dos §1 e §3 são os do *pickle* da rodada 14
-  (`blobs14.pkl`); o §4 conta os `0xEC` a partir do Master = 0 e encontrou, para as trilhas com Vocoder/Vocodex,
-  uma diferença de 1 em relação ao *pickle* (§4.1.5). Ao cruzar com o `.flp`, conferir pelo nome da trilha.
+- **Tools:** Ghidra 12.1.4 *headless* (previous projects opened read-only: `/tmp/r17gh_LP`,
+  `/tmp/r14gh_Patcher_x64.dll`; new: `/tmp/r20gh_Scratch`, `/tmp/r20gh_Vocoder`, `/tmp/r20gh_Vocodex`; Vocodex/Vocoder scripts in `tmp/r20/voc/`); scripts in `tmp/r18/gh/scripts/`; `tmp/r18/k.py`
+  and `tmp/r18/vmtname.py` for constants and VMTs; data with `tmp/r16/lp.py`, `tmp/r20/py/lpenv.py`,
+  `tmp/r20/py/pat.py` (port of the `FlPatcher.cpp` classifier) and `tmp/r20/py/sp.py` (series-parallel reduction).
+  Official manual read via the web.
+- **Date:** 2026-10-13.
+- **Track numbering:** the (track, slot) pairs in §1 and §3 are those of the round 14 *pickle*
+  (`blobs14.pkl`); §4 counts the `0xEC` events starting from Master = 0 and found, for the tracks with Vocoder/Vocodex,
+  an offset of 1 relative to the *pickle* (§4.1.5). When cross-checking with the `.flp`, verify by track name.
 
-| Marca | Significado |
+| Marker | Meaning |
 |---|---|
-| **[DECOMP]** | lido no código decompilado/desmontado |
-| **[DOC]** | manual oficial da Image-Line (URL citada) |
-| **[DADOS]** | conferido em `.flp`/`.fst`/arquivos da instalação |
-| **não confirmado** | sem evidência suficiente nesta rodada |
+| **[DECOMP]** | read in the decompiled/disassembled code |
+| **[DOC]** | official Image-Line manual (URL cited) |
+| **[DATA]** | checked against `.flp`/`.fst`/installation files |
+| **not confirmed** | not enough evidence in this round |
 
-Base das URLs do manual: `https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/plugins/`
-(abreviada como `…/plugins/` abaixo). As citações do manual vieram de leitura web resumida; os trechos citados
-são curtos e devem ser reconferidos na página antes de virar texto de interface.
+Base of the manual URLs: `https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/plugins/`
+(abbreviated as `…/plugins/` below). The manual quotations came from a summarised web reading; the quoted passages
+are short and must be re-checked on the page before becoming interface text.
 
 ---
 
-## 1. Fruity Love Philter — envelopes de *pattern*, LFO dos articuladores e seguidor de envelope **[DECOMP + DADOS + DOC]**
+## 1. Fruity Love Philter — *pattern* envelopes, articulator LFO and envelope follower **[DECOMP + DATA + DOC]**
 
-**O que o LYNX supõe / precisa:** reproduzir os 9 *gates* rítmicos "envelope → volume" e os 7 + 7 LFOs → pan/cutoff
-dos demos (rodada 16 §2.6). Faltavam: unidade de tempo dos pontos, qual *pattern* toca, *loop*, forma das curvas,
-lei do LFO, sincronismo e o papel do seguidor de envelope.
+**What LYNX assumes / needs:** reproduce the 9 rhythmic "envelope → volume" *gates* and the 7 + 7 LFOs → pan/cutoff
+of the demos (round 16 §2.6). Missing were: time unit of the points, which *pattern* plays, *loop*, curve shapes,
+LFO law, synchronisation and the role of the envelope follower.
 
-### 1.1 Relógio de controle (*tick*) e escala de tempo **[DECOMP `FUN_00856690`, `FUN_00856570`, `FUN_00854e20`, render `FUN_0085aa10`]**
+### 1.1 Control clock (*tick*) and time scale **[DECOMP `FUN_00856690`, `FUN_00856570`, `FUN_00854e20`, render `FUN_0085aa10`]**
 
-- Os articuladores **não são avaliados por amostra**: o render conta um *tick* a cada `N` amostras internas
-  (contador `+0x169C`, recarregado com `+0x16A0`). Em cada *tick* percorre a lista de articuladores ativos
-  (`+0x1760`), calcula a saída de cada um (mapas X/Y/IEF e depois envelope/LFO, §1.4) e o valor resultante é
-  aplicado ao áudio com uma **rampa linear ao longo do bloco** até o próximo *tick* (`FUN_0062aee0`: passo
-  `(alvo − anterior)/n` por amostra, limitado em módulo pelo campo `+0x38` do objeto `+0xCC`; o valor desse limite
-  **não foi identificado**).
-- `N` vem de `FUN_00856690(v)`, com `v` = **64** (HQ envelopes desligado) ou **8** (ligado, ou quando o bit 1 do
-  valor do evento de host 1 liga `+0x16D2`) — tabela `0x8D1A08` = `{64, 8}` indexada por `+0x154 | +0x16D2`:
-  **`N = max(4; 4·round(v·fs_int/44100/4))`**, onde `fs_int` = campo `+8` do objeto `+0xCC` (inicializado com
-  `fs·oversampling` em `FUN_00854E20`; que seja a taxa interna é **inferência** por esse uso). A 44,1 kHz sem
-  *oversampling*: **N = 64 amostras ≈ 1,45 ms** (HQ: 8 amostras ≈ 0,18 ms). O *tick* tem sempre ≈ 64/44100 s,
-  qualquer que seja a taxa.
-- Em `FUN_00856570`, com `τ = N/fs_int` (segundos por *tick*, pela dedução acima) e `BPM` = campo `+0x1690`
-  (escrito pelo evento de host 0 em `FUN_00857990`; que seja o andamento em BPM é **inferência** pela fórmula):
-  - escala "livre" = **`2·τ`**;
-  - escala "tempo" = **`τ·BPM/60`** (= tempos por *tick*).
-  Ambas são passadas a todos os envelopes e ao LFO de cada articulador (`FUN_00854540` → método 15 de
-  `TMEnvelope` `FUN_00788080`), que **escolhe a escala "tempo" se o bit 0 das *flags* do envelope (TEMPO) estiver
-  ligado**, senão a "livre".
-- Em cada *tick* o envelope avança uma unidade (constante 1,0 em `0x85C2A0`) e a posição no segmento cresce
-  `escala / (Δt·k)` (`FUN_00786350`; `k` = fator do *knob* A/D/S/R do segmento, abaixo). Logo:
-  - **com TEMPO: Δt está em tempos (semínimas)** — um segmento de Δt = 1 dura exatamente 1 tempo;
-  - sem TEMPO: um Δt = 1 dura `1/(2τ)` *ticks* = **0,5 s** (dedução das duas fórmulas; nenhum dado dos demos usa
-    esse caso — **não conferido por render**).
-- *Knobs* A/D/S/R do envelope (`+0x98…+0xA4`, i32, padrão 128/128/0/128) → fatores `v/128`
-  (`FUN_00788250`, constante `PTR 0x8D3970` = 1/128) copiados para o estado ao iniciar (`FUN_00788300`).
-  **Todos os envelopes ligados dos demos têm 128/128/0/128 → fator 1** **[DADOS]**.
-- **Dados:** os 11 envelopes de *pattern* ligados e os 14 LFOs ligados das unidades ativas dos demos têm **todos o
-  bit TEMPO ligado** (*flags* = 1, ou 3 em 2 LFOs) **[DADOS `tmp/r20/py/lpenv.py`]**.
+- The articulators **are not evaluated per sample**: the render counts one *tick* every `N` internal samples
+  (counter `+0x169C`, reloaded with `+0x16A0`). On each *tick* it walks the list of active articulators
+  (`+0x1760`), computes the output of each one (X/Y/IEF maps and then envelope/LFO, §1.4) and the resulting value is
+  applied to the audio with a **linear ramp across the block** up to the next *tick* (`FUN_0062aee0`: step
+  `(target − previous)/n` per sample, limited in magnitude by field `+0x38` of object `+0xCC`; the value of that limit
+  **was not identified**).
+- `N` comes from `FUN_00856690(v)`, with `v` = **64** (HQ envelopes off) or **8** (on, or when bit 1 of the
+  value of host event 1 sets `+0x16D2`) — table `0x8D1A08` = `{64, 8}` indexed by `+0x154 | +0x16D2`:
+  **`N = max(4; 4·round(v·fs_int/44100/4))`**, where `fs_int` = field `+8` of object `+0xCC` (initialised with
+  `fs·oversampling` in `FUN_00854E20`; that it is the internal rate is an **inference** from this use). At 44.1 kHz without
+  *oversampling*: **N = 64 samples ≈ 1.45 ms** (HQ: 8 samples ≈ 0.18 ms). The *tick* is always ≈ 64/44100 s,
+  whatever the rate.
+- In `FUN_00856570`, with `τ = N/fs_int` (seconds per *tick*, by the deduction above) and `BPM` = field `+0x1690`
+  (written by host event 0 in `FUN_00857990`; that it is the tempo in BPM is an **inference** from the formula):
+  - "free" scale = **`2·τ`**;
+  - "tempo" scale = **`τ·BPM/60`** (= beats per *tick*).
+  Both are passed to all envelopes and to the LFO of each articulator (`FUN_00854540` → method 15 of
+  `TMEnvelope` `FUN_00788080`), which **chooses the "tempo" scale if bit 0 of the envelope *flags* (TEMPO) is
+  set**, otherwise the "free" one.
+- On each *tick* the envelope advances one unit (constant 1.0 at `0x85C2A0`) and the position within the segment grows by
+  `scale / (Δt·k)` (`FUN_00786350`; `k` = the segment's A/D/S/R *knob* factor, below). Therefore:
+  - **with TEMPO: Δt is in beats (quarter notes)** — a segment with Δt = 1 lasts exactly 1 beat;
+  - without TEMPO: a Δt = 1 lasts `1/(2τ)` *ticks* = **0.5 s** (deduced from the two formulas; no demo data uses
+    this case — **not checked by render**).
+- Envelope A/D/S/R *knobs* (`+0x98…+0xA4`, i32, default 128/128/0/128) → factors `v/128`
+  (`FUN_00788250`, constant `PTR 0x8D3970` = 1/128) copied into the state at start (`FUN_00788300`).
+  **All enabled envelopes in the demos have 128/128/0/128 → factor 1** **[DATA]**.
+- **Data:** the 11 enabled *pattern* envelopes and the 14 enabled LFOs of the active units in the demos **all have the
+  TEMPO bit set** (*flags* = 1, or 3 in 2 LFOs) **[DATA `tmp/r20/py/lpenv.py`]**.
 
-### 1.2 Qual *pattern* toca, *loop* e sincronismo com a música **[DECOMP `FUN_0085d050`, `FUN_0085cc80`, `FUN_00787ba0`, `FUN_00787fd0`, `FUN_00786350` + DOC + DADOS]**
+### 1.2 Which *pattern* plays, *loop* and synchronisation with the song **[DECOMP `FUN_0085d050`, `FUN_0085cc80`, `FUN_00787ba0`, `FUN_00787fd0`, `FUN_00786350` + DOC + DATA]**
 
-- **Só um *pattern* toca por articulador:** ao mudar o parâmetro global 5 (PatNum, recortado em 1…10;
-  `FUN_008579e0` → `FUN_0085d050`) cada articulador passa a apontar (`+0x10`) para o envelope de índice PatNum
-  (`+0x28 + 8·PatNum`). Os outros 9 envelopes não são avaliados. Manual: "Use the selector to the left of the tab
-  to change Modulation pattern" e "MIDI notes C5 to E6 can be used to change patterns on-the-fly" **[DOC
-  `…/plugins/Fruity%20Love%20Philter.htm`]**. **Dados:** PatNum = 1 nos 43 slots e só o envelope 1 está ligado
-  **[DADOS]**.
-- **Loop** (`FUN_00786350`): ao chegar ao ponto "fim de *loop*" (campo `+0x88`, preparado a partir do cabeçalho do
-  envelope) o envelope **volta ao ponto de início de *loop*** (`+0x50`) se ele for ≥ 0; senão fica parado no
-  último valor. Nos demos o cabeçalho é sempre `ligado = −1, decay = −1, loop = 0, sustain/fim = último ponto`
-  **[DADOS]** → **o *pattern* inteiro repete em *loop***, com período `T = ΣΔt` (soma dos Δt dos pontos 1…n):
-  **1 tempo** em 8 dos 9 envelopes de volume, 0,25 tempo em 1 ("Drumloop Masher"), 4 tempos no de cutoff
+- **Only one *pattern* plays per articulator:** when global parameter 5 changes (PatNum, clipped to 1…10;
+  `FUN_008579e0` → `FUN_0085d050`) each articulator starts pointing (`+0x10`) to the envelope with index PatNum
+  (`+0x28 + 8·PatNum`). The other 9 envelopes are not evaluated. Manual: "Use the selector to the left of the tab
+  to change Modulation pattern" and "MIDI notes C5 to E6 can be used to change patterns on-the-fly" **[DOC
+  `…/plugins/Fruity%20Love%20Philter.htm`]**. **Data:** PatNum = 1 in all 43 slots and only envelope 1 is enabled
+  **[DATA]**.
+- **Loop** (`FUN_00786350`): on reaching the "loop end" point (field `+0x88`, prepared from the envelope
+  header) the envelope **jumps back to the loop start point** (`+0x50`) if it is ≥ 0; otherwise it stays at the
+  last value. In the demos the header is always `enabled = −1, decay = −1, loop = 0, sustain/end = last point`
+  **[DATA]** → **the whole *pattern* repeats in a *loop***, with period `T = ΣΔt` (sum of the Δt of points 1…n):
+  **1 beat** in 8 of the 9 volume envelopes, 0.25 beat in 1 ("Drumloop Masher"), 4 beats in the cutoff one
   ("LollieVox").
-- **Sincronismo com a posição da música** (`FUN_0085cc80`): quando o evento de host 12 chega com valor 1
-  (`+0x16D1`; que seja "tocando" é **inferência**) é chamado `FUN_0085cfa0`, que zera o contador de *tick* e
-  reposiciona **todos os envelopes e LFOs** na posição atual da música: a posição vem de uma consulta ao host
-  (código 0x24) convertida em amostras (`×fs_int×240 / (BPM·…)`; o formato exato da consulta **não foi
-  confirmado**) e depois em *ticks*. O envelope é posicionado em `t·escala` (= tempos, com TEMPO) **reduzido ao
-  intervalo de *loop*** (`FUN_00787fd0`: `t ← t − ⌊(t − T₀)/T_L⌋·T_L`, com T₀ = tempo do ponto de início e T_L
-  = duração do *loop*). Conclusão: **com TEMPO, a fase do *pattern* é `posição da música (tempos) mod T`** a partir
-  do início do *loop*.
-- Na troca de *pattern* o reposicionamento é feito com a *flag* `+0x15E` (padrão 1 no construtor; é um dos 3 bytes
-  de opção do bloco global — que seja "Sync pattern changes" é **inferência** pelo manual: "Envelopes are synced
-  to song/pattern position when selected") e **só os envelopes** (o LFO não é reiniciado nesse caso).
-- Fora do transporte (sem a *flag* `+0x16D1`) a posição de partida é 0 e o envelope corre livre a partir daí.
+- **Synchronisation with the song position** (`FUN_0085cc80`): when host event 12 arrives with value 1
+  (`+0x16D1`; that it means "playing" is an **inference**) `FUN_0085cfa0` is called, which resets the *tick* counter and
+  repositions **all envelopes and LFOs** at the current song position: the position comes from a query to the host
+  (code 0x24) converted to samples (`×fs_int×240 / (BPM·…)`; the exact format of the query **was not
+  confirmed**) and then to *ticks*. The envelope is positioned at `t·scale` (= beats, with TEMPO) **reduced to the
+  *loop* interval** (`FUN_00787fd0`: `t ← t − ⌊(t − T₀)/T_L⌋·T_L`, with T₀ = time of the start point and T_L
+  = *loop* duration). Conclusion: **with TEMPO, the *pattern* phase is `song position (beats) mod T`** from the
+  *loop* start.
+- On a *pattern* switch the repositioning is done with *flag* `+0x15E` (default 1 in the constructor; it is one of the 3 option
+  bytes of the global block — that it is "Sync pattern changes" is an **inference** from the manual: "Envelopes are synced
+  to song/pattern position when selected") and **only the envelopes** (the LFO is not restarted in this case).
+- Outside the transport (without *flag* `+0x16D1`) the starting position is 0 and the envelope runs freely from there.
 
-### 1.3 Valor do envelope e forma das curvas **[DECOMP `FUN_00786350`, `FUN_00785730`, `FUN_00783ec0` (`0x78411f…0x784196`), `FUN_0060e3c0`, método 0 `FUN_007800c0`/`FUN_00780090`]**
+### 1.3 Envelope value and curve shapes **[DECOMP `FUN_00786350`, `FUN_00785730`, `FUN_00783ec0` (`0x78411f…0x784196`), `FUN_0060e3c0`, method 0 `FUN_007800c0`/`FUN_00780090`]**
 
-- **Centro:** o valor de cada ponto é `y − c`, com `c` = campo `+0x18` do envelope = **`modo × 0,5`**
-  (`FUN_008544d0` → `FUN_00780090` → método 0; constante `0x7800B8` = 0,5). Articuladores aditivos (modo 1: **pan,
-  cutoff, ressonância**) → valor `y − 0,5` ∈ [−0,5; 0,5]; multiplicativos (modo 0: **volume**, L/B/H, WS) →
-  valor `y` ∈ [0; 1]. Esta chamada **não é feita para o LFO** (ver §1.5).
-- **Interpolação** entre o ponto anterior (valor `a`) e o ponto atual (`b`), com posição `x` ∈ [0; 1] no
-  segmento: `valor = a + (b − a)·v(x)`. A curva é a do **ponto de chegada**. Para o tipo de curva 0 (*single
-  curve*, byte `+0xC` = 0; é o tipo de todos os pontos dos *gates* dos demos, salvo um) com tensão `t`:
-  - `q = sinal(t)·(1000001^|t| − 1)` (constante `0x784998` = 1 000 001; `FUN_0040c090`/`FUN_0040ad30` = ln/exp
-    por **inferência** pelo padrão `a^x`);
+- **Centre:** the value of each point is `y − c`, with `c` = envelope field `+0x18` = **`mode × 0.5`**
+  (`FUN_008544d0` → `FUN_00780090` → method 0; constant `0x7800B8` = 0.5). Additive articulators (mode 1: **pan,
+  cutoff, resonance**) → value `y − 0.5` ∈ [−0.5; 0.5]; multiplicative ones (mode 0: **volume**, L/B/H, WS) →
+  value `y` ∈ [0; 1]. This call **is not made for the LFO** (see §1.5).
+- **Interpolation** between the previous point (value `a`) and the current point (`b`), with position `x` ∈ [0; 1] in the
+  segment: `value = a + (b − a)·v(x)`. The curve is that of the **arrival point**. For curve type 0 (*single
+  curve*, byte `+0xC` = 0; it is the type of all points of the demo *gates*, except one) with tension `t`:
+  - `q = sign(t)·(1000001^|t| − 1)` (constant `0x784998` = 1,000,001; `FUN_0040c090`/`FUN_0040ad30` = ln/exp
+    by **inference** from the `a^x` pattern);
   - `t = 0` → **linear** `v = x`;
-  - `t > 0` → **`v = 1 − ((1 + q)^(1 − x) − 1)/q`** (muda depressa no começo do segmento);
-  - `t < 0` → **`v = ((1 + |q|)^x − 1)/|q|`** (muda devagar no começo).
-  Ex.: t = 0,285 → q ≈ 50 → v(0,5) = 0,877; t = 0,67 → q ≈ 1,05·10⁴ → v(0,5) = 0,990; t = −0,365 → v(0,5) =
-  0,074 (cálculo a partir da fórmula).
-- Outros tipos (1 *double*, 2 *hold*, 3/4 *stairs*, 5 *pulse*, 6 *wave*, 7…12) têm ramos próprios; nos demos só
-  aparece o **tipo 5** em 1 ponto ("Drumloop Masher", unidade 8) — a forma exata dele **não foi decodificada**.
-- **Formato no arquivo** (confere com a rodada 11 §1.6): por ponto `f64 Δt`, `f64 y`, `f32 tensão`, 4 B (o 1.º
-  byte = tipo de curva) **[DADOS]**.
+  - `t > 0` → **`v = 1 − ((1 + q)^(1 − x) − 1)/q`** (changes quickly at the start of the segment);
+  - `t < 0` → **`v = ((1 + |q|)^x − 1)/|q|`** (changes slowly at the start).
+  E.g.: t = 0.285 → q ≈ 50 → v(0.5) = 0.877; t = 0.67 → q ≈ 1.05·10⁴ → v(0.5) = 0.990; t = −0.365 → v(0.5) =
+  0.074 (computed from the formula).
+- Other types (1 *double*, 2 *hold*, 3/4 *stairs*, 5 *pulse*, 6 *wave*, 7…12) have their own branches; in the demos only
+  **type 5** appears in 1 point ("Drumloop Masher", unit 8) — its exact shape **was not decoded**.
+- **File format** (matches round 11 §1.6): per point `f64 Δt`, `f64 y`, `f32 tension`, 4 B (the 1st
+  byte = curve type) **[DATA]**.
 
-### 1.4 Combinação no articulador **[DECOMP `FUN_0085aa10` (laço de *tick*), `FUN_008543d0`; complementa a rodada 18 §4]**
+### 1.4 Combination in the articulator **[DECOMP `FUN_0085aa10` (*tick* loop), `FUN_008543d0`; complements round 18 §4]**
 
-A cada *tick*, para cada articulador ativo: `s = base` (campo `+0x20` = o `f32` gravado: 1,0 nos alvos
-multiplicativos, 0 nos aditivos) → aplica os mapas X, Y e IEF (cada um: modo 0 `s ← s·m`, modo 1 `s ← s + m`,
-o mapa IEF ainda multiplicado pela profundidade do envelope `+0x24`) → **envelope** (se ligado): modo 1
-`s ← s + E·d_E`, modo 0 `s ← s·E·d_E` → **LFO** (se ligado): modo 1 `s ← s + L·d_L`, modo 0
-`s ← s·(1 + 2·L·d_L)` (constantes `0x8544C4` = 2, `0x8544C8` = 1). `d_E` = `+0x24` e `d_L` = `+0x28` (os dois
-`f32` seguintes do arquivo). Nos demos, `d_E = d_L = 1` em todos os articuladores com envelope/LFO ligados, salvo
-dois LFOs de cutoff (0,516 e 0,641) **[DADOS]**.
+On each *tick*, for each active articulator: `s = base` (field `+0x20` = the stored `f32`: 1.0 on multiplicative
+targets, 0 on additive ones) → applies maps X, Y and IEF (each: mode 0 `s ← s·m`, mode 1 `s ← s + m`,
+the IEF map additionally multiplied by the envelope depth `+0x24`) → **envelope** (if enabled): mode 1
+`s ← s + E·d_E`, mode 0 `s ← s·E·d_E` → **LFO** (if enabled): mode 1 `s ← s + L·d_L`, mode 0
+`s ← s·(1 + 2·L·d_L)` (constants `0x8544C4` = 2, `0x8544C8` = 1). `d_E` = `+0x24` and `d_L` = `+0x28` (the two
+following `f32` in the file). In the demos, `d_E = d_L = 1` in all articulators with envelope/LFO enabled, except
+two cutoff LFOs (0.516 and 0.641) **[DATA]**.
 
-Aplicação no áudio (render): cutoff `c = CUT/256 + s_cut`; ressonância `r = RES/256 + s_res`; ganhos L/B/H =
-parâmetro × `s`; **pan e volume** vão para `FUN_00616620(pan = PAN/128 + 2·s_pan, vol = (+0x48)·s_vol)`, onde
-`+0x48` é o volume da unidade (rodada 16: `curve11(VOL/128)·curve11(Master/128)`) — a lei do pan dentro de
-`FUN_00616620` **não foi decodificada**.
+Application to the audio (render): cutoff `c = CUT/256 + s_cut`; resonance `r = RES/256 + s_res`; L/B/H gains =
+parameter × `s`; **pan and volume** go to `FUN_00616620(pan = PAN/128 + 2·s_pan, vol = (+0x48)·s_vol)`, where
+`+0x48` is the unit volume (round 16: `curve11(VOL/128)·curve11(Master/128)`) — the pan law inside
+`FUN_00616620` **was not decoded**.
 
-Consequências diretas (fórmulas acima):
+Direct consequences (formulas above):
 
-- **Gate de volume** (modo 0, base 1, `d_E = 1`): **ganho da unidade × y(t)**, com `y(t)` = o envelope do
-  *pattern* (valores 0…1 dos pontos, sem centro).
-- **Envelope de cutoff** (modo 1): `c = CUT/256 + (y − 0,5)·d_E`, e para o cutoff `d_E` = ENV/128 (rodada 16).
+- **Volume gate** (mode 0, base 1, `d_E = 1`): **unit gain × y(t)**, with `y(t)` = the *pattern*
+  envelope (point values 0…1, no centre).
+- **Cutoff envelope** (mode 1): `c = CUT/256 + (y − 0.5)·d_E`, and for the cutoff `d_E` = ENV/128 (round 16).
 
-### 1.5 LFO **[DECOMP `TMLFO` VMT `0x77FB48`: `FUN_00788b70` (avaliação), `FUN_007886b0` (forma), `FUN_00788830` (taxa), `FUN_00788a20`/`FUN_0060e870` (fase inicial), `FUN_00788aa0` (posicionamento), `FUN_0060e450`/`FUN_0060e610` (onda), construtor `FUN_00788410`]**
+### 1.5 LFO **[DECOMP `TMLFO` VMT `0x77FB48`: `FUN_00788b70` (evaluation), `FUN_007886b0` (shape), `FUN_00788830` (rate), `FUN_00788a20`/`FUN_0060e870` (initial phase), `FUN_00788aa0` (positioning), `FUN_0060e450`/`FUN_0060e610` (waveform), constructor `FUN_00788410`]**
 
-- **Saída: `L = A(t)·W(φ)`**, onde `A(t)` é o "envelope do LFO" (os pontos gravados no LFO) avaliado como em §1.3,
-  mas com **centro fixo 0,5** (o construtor do `TMLFO` põe `+0x18 = 0,5` e o método 0 não é chamado para ele) →
-  `A = y − 0,5` ∈ [−0,5; 0,5]; e `W` ∈ [−1; 1] é a onda abaixo. Dados: os LFOs dos demos têm 1–2 pontos de nível
-  constante (`y` = 1,0 → A = 0,5; 0,625 → 0,125; 0,6875; 0,875; 0,9375; 0,75; 0,25; 0,0 → A = −0,5, onda
-  invertida) **[DADOS]**.
-- **Taxa** (`FUN_00788830`): incremento de fase por *tick* (fase de 32 bits, 2³² = 1 ciclo) =
-  `round(min((10001^(S/65536) − 1)·(2³²/625)·escala; 0,1875·2³²))` (constantes `0x7888C8` = 10001,
-  `0x7888D8` = 6 871 947,67 = 2³²/625, `0x7888E0` = 805 306 368), S = velocidade (`+0xD0`, 1.º *knob* do LFO no
-  arquivo). Com TEMPO: **período `P = 625/(10001^(S/65536) − 1)` tempos** (sem TEMPO: metade disso em segundos,
-  pela escala livre `2τ` — não conferido por render). Valores dos demos **[DADOS + cálculo]**: S = 45819 → **1
-  tempo**; 40898 → **2**; 35989 → **4**; 31102 → **8**; 26259 → **16**; 21502 → **32 tempos**.
-- **Forma** (`FUN_0060e450`/`FUN_0060e610`), com *skew* `k = S₂/256` (`+0xD8`, ±128 → ±0,5) e largura de pulso
-  `w = S₃/128` (`+0xDC`): fase φ ∈ [0; 1) dividida em: descida linear de +1 a −1 até `φ₆`; patamar −1 até `φ₅`;
-  subida de −1 a +1 até `φ₇`; patamar +1 até o fim. `φ₇ = 1 − w` (se `w > 1/128`, senão 1);
-  `φ₅ = clamp((1 − w)/2 − k·(1 − |w|))`; `φ₆ = φ₅ + w` se `w < 1/128` (largura negativa = patamar embaixo), senão
-  `φ₆ = φ₅`. **Com k = w = 0 (todos os LFOs dos demos): triângulo simétrico** que começa em +1, vale −1 em φ = 0,5.
-- **Tensão** (`FUN_007886b0`): `a = (21^(|T|/128) − 1)·0,05`, `q = sinal(T)·(10¹⁸^a − 1)`; aplicada a `|W|` com a
-  mesma família de curvas de §1.3 e o sinal preservado (bit 2 das *flags* desligado, caso de todos os demos); com o
-  bit 2 ligado, aplicada a `(W + 1)/2` e reescalada. Demos: T = 0 (10 LFOs), 34, 40, 42, 81 (pan) → q ≈ 12, 26,
-  34, 1,9·10⁵ (cálculo). Manual: "Bipolar LFO tension: The LFO shape is mirrored above and below 0" **[DOC]** — qual
-  valor do bit corresponde ao rótulo **não foi confirmado**.
-- **Fase inicial e sincronismo:** ao (re)iniciar, a fase vai para o ponto médio da subida (`FUN_0060e870`:
-  `φ₅ + (φ₇ − φ₅)/2`, que no triângulo simétrico é **0,75 → W = 0 subindo**) **mais o deslocamento de fase**
-  (`+0xE0`, 5.º inteiro do LFO no arquivo, em 2⁻³² ciclos; demos: 0 ou ±2³⁰ = ±¼ de ciclo). No início do transporte
-  (§1.2) o LFO é reposicionado: **fase = fase inicial + (posição em *ticks*)·incremento** → **LFO travado na
-  posição da música**. Na troca de *pattern* o LFO não é reiniciado.
-- O bit 3 das *flags* zera o incremento ("Frozen LFO: The first LFO value is held" **[DOC]**). A fase só começa a
-  andar depois do primeiro segmento de `A(t)` (atraso = Δt do 1.º ponto; 0 nos demos).
-- **Profundidade:** `d_L` = 3.º `f32` do articulador (rodada 16: profundidade do envelope × `scurve11(Master
+- **Output: `L = A(t)·W(φ)`**, where `A(t)` is the "LFO envelope" (the points stored in the LFO) evaluated as in §1.3,
+  but with a **fixed centre of 0.5** (the `TMLFO` constructor sets `+0x18 = 0.5` and method 0 is not called for it) →
+  `A = y − 0.5` ∈ [−0.5; 0.5]; and `W` ∈ [−1; 1] is the waveform below. Data: the demo LFOs have 1–2 points of constant
+  level (`y` = 1.0 → A = 0.5; 0.625 → 0.125; 0.6875; 0.875; 0.9375; 0.75; 0.25; 0.0 → A = −0.5, inverted
+  waveform) **[DATA]**.
+- **Rate** (`FUN_00788830`): phase increment per *tick* (32-bit phase, 2³² = 1 cycle) =
+  `round(min((10001^(S/65536) − 1)·(2³²/625)·scale; 0.1875·2³²))` (constants `0x7888C8` = 10001,
+  `0x7888D8` = 6,871,947.67 = 2³²/625, `0x7888E0` = 805,306,368), S = speed (`+0xD0`, 1st LFO *knob* in the
+  file). With TEMPO: **period `P = 625/(10001^(S/65536) − 1)` beats** (without TEMPO: half of that in seconds,
+  through the free scale `2τ` — not checked by render). Demo values **[DATA + computation]**: S = 45819 → **1
+  beat**; 40898 → **2**; 35989 → **4**; 31102 → **8**; 26259 → **16**; 21502 → **32 beats**.
+- **Shape** (`FUN_0060e450`/`FUN_0060e610`), with *skew* `k = S₂/256` (`+0xD8`, ±128 → ±0.5) and pulse width
+  `w = S₃/128` (`+0xDC`): phase φ ∈ [0; 1) divided into: linear descent from +1 to −1 up to `φ₆`; plateau at −1 up to `φ₅`;
+  rise from −1 to +1 up to `φ₇`; plateau at +1 until the end. `φ₇ = 1 − w` (if `w > 1/128`, otherwise 1);
+  `φ₅ = clamp((1 − w)/2 − k·(1 − |w|))`; `φ₆ = φ₅ + w` if `w < 1/128` (negative width = plateau at the bottom), otherwise
+  `φ₆ = φ₅`. **With k = w = 0 (all demo LFOs): symmetric triangle** that starts at +1 and is −1 at φ = 0.5.
+- **Tension** (`FUN_007886b0`): `a = (21^(|T|/128) − 1)·0.05`, `q = sign(T)·(10¹⁸^a − 1)`; applied to `|W|` with the
+  same family of curves as §1.3 and the sign preserved (bit 2 of the *flags* clear, the case for all demos); with
+  bit 2 set, applied to `(W + 1)/2` and rescaled. Demos: T = 0 (10 LFOs), 34, 40, 42, 81 (pan) → q ≈ 12, 26,
+  34, 1.9·10⁵ (computed). Manual: "Bipolar LFO tension: The LFO shape is mirrored above and below 0" **[DOC]** — which
+  bit value corresponds to the label **was not confirmed**.
+- **Initial phase and synchronisation:** on (re)start, the phase goes to the midpoint of the rise (`FUN_0060e870`:
+  `φ₅ + (φ₇ − φ₅)/2`, which in the symmetric triangle is **0.75 → W = 0 rising**) **plus the phase offset**
+  (`+0xE0`, 5th LFO integer in the file, in 2⁻³² cycles; demos: 0 or ±2³⁰ = ±¼ cycle). At transport start
+  (§1.2) the LFO is repositioned: **phase = initial phase + (position in *ticks*)·increment** → **LFO locked to the
+  song position**. On a *pattern* switch the LFO is not restarted.
+- Bit 3 of the *flags* zeroes the increment ("Frozen LFO: The first LFO value is held" **[DOC]**). The phase only starts
+  moving after the first segment of `A(t)` (delay = Δt of the 1st point; 0 in the demos).
+- **Depth:** `d_L` = 3rd `f32` of the articulator (round 16: envelope depth × `scurve11(Master
   LFO/128)`).
-- **Consequências:** pan `= PAN/128 + 2·A·d_L·W(φ)` (ex.: "With You": A = 0,125 → ±0,25); cutoff
-  `c = CUT/256 + A·d_L·W(φ)` (A = 0,5 → ±0,5 em `c`).
+- **Consequences:** pan `= PAN/128 + 2·A·d_L·W(φ)` (e.g. "With You": A = 0.125 → ±0.25); cutoff
+  `c = CUT/256 + A·d_L·W(φ)` (A = 0.5 → ±0.5 in `c`).
 
-### 1.6 Seguidor de envelope de entrada (IEF) **[DECOMP + DADOS]**
+### 1.6 Input envelope follower (IEF) **[DECOMP + DATA]**
 
-- Os mapas IEF só entram no cálculo quando `+0x16B8 > 0`; o nível do seguidor (`+0x16B4`) é convertido em índice
-  `round(1024·nível)` da tabela do mapa (constante `0x85C294` = 1024). Ataque/release: rodada 16 §2.4.
-- **Dados:** nenhum mapa IEF não neutro nas 63 unidades ligadas dos demos (neutro = 0,5 aditivo / 1,0
-  multiplicativo) **[DADOS]** → **o IEF é irrelevante para os demos**.
+- The IEF maps only enter the computation when `+0x16B8 > 0`; the follower level (`+0x16B4`) is converted into the index
+  `round(1024·level)` of the map table (constant `0x85C294` = 1024). Attack/release: round 16 §2.4.
+- **Data:** no non-neutral IEF map in the 63 enabled units of the demos (neutral = 0.5 additive / 1.0
+  multiplicative) **[DATA]** → **the IEF is irrelevant for the demos**.
 
-### 1.7 Os 9 + 1 envelopes e os 14 LFOs dos demos **[DADOS `tmp/r20/py/lpenv.py`; Δt em tempos]**
+### 1.7 The 9 + 1 envelopes and the 14 LFOs of the demos **[DATA `tmp/r20/py/lpenv.py`; Δt in beats]**
 
-| Projeto (trilha, slot) | Unid. | Alvo | Pontos `(Δt; y; tensão)` | Leitura |
+| Project (track, slot) | Unit | Target | Points `(Δt; y; tension)` | Reading |
 |---|---|---|---|---|
-| "Atthar" (20,9), (21,6) | 1 | vol | (0;1) (0,059 / 0,055; 0,08 / 0; +0,285) (0,294 / 0,298; idem; 0) (0,647; 1; +0,67) | queda rápida, patamar, volta — período 1 tempo |
-| "Atthar" (54,3) | 1 | vol | (0;1) (0,096;0,13;+0,285) (0,154;0,125;0) (0,75;1;+0,67) | idem |
-| "With You" (26,0), (27,2), (40,1) | 1 | vol | (0;1) (≈0,33;≈0,31;+0,768) (≈0,67;1;+0,438) | *pump* de 1 tempo |
-| "With You" (8,5) | 1 | vol | (0;1) (0,5;1) (0,5;1) | constante 1 (sem efeito) |
-| "Drumloop Masher" (2,3) | 8 | vol | (0;1) (0,25;0; tipo 5, +1,0) (0;1) | 0,25 tempo, curva tipo 5 (não decodificada) |
-| "SFX transitions" (2,6) | 1 | vol | (0;1) (0;0) (0,5;1;−0,365) (0,5;1) | corta, sobe em ½ tempo, mantém ½ |
-| "LollieVox" (24,2) | 1 | cut | (0;1) (4;0,5) (0;1) | rampa de 4 tempos (−0,5·d_E → 0) |
-| "Drumloop Masher" (2,3) | 3 | res | (0;0,5) (0;0,5) | nulo |
-| LFO → pan (7): "With You" (8,5) u2, "Use Me" (8,6), "Masher" (2,3) u7, (2,4) u2/u3, "Lightning" (26,3), "Oxygen" (44,4) | | pan | S = 45819/31102/35989/21502/26259/40898 | 1…32 tempos |
-| LFO → cutoff (7): "Masher" (2,3) u2…u6, (2,4) u2/u3 | | cut | S = 40898/45819/35989/26259 | 2, 1, 4, 16 tempos |
+| "Atthar" (20,9), (21,6) | 1 | vol | (0;1) (0.059 / 0.055; 0.08 / 0; +0.285) (0.294 / 0.298; same; 0) (0.647; 1; +0.67) | fast drop, plateau, return — period 1 beat |
+| "Atthar" (54,3) | 1 | vol | (0;1) (0.096;0.13;+0.285) (0.154;0.125;0) (0.75;1;+0.67) | same |
+| "With You" (26,0), (27,2), (40,1) | 1 | vol | (0;1) (≈0.33;≈0.31;+0.768) (≈0.67;1;+0.438) | 1-beat *pump* |
+| "With You" (8,5) | 1 | vol | (0;1) (0.5;1) (0.5;1) | constant 1 (no effect) |
+| "Drumloop Masher" (2,3) | 8 | vol | (0;1) (0.25;0; type 5, +1.0) (0;1) | 0.25 beat, type 5 curve (not decoded) |
+| "SFX transitions" (2,6) | 1 | vol | (0;1) (0;0) (0.5;1;−0.365) (0.5;1) | cuts, rises over ½ beat, holds ½ |
+| "LollieVox" (24,2) | 1 | cut | (0;1) (4;0.5) (0;1) | 4-beat ramp (−0.5·d_E → 0) |
+| "Drumloop Masher" (2,3) | 3 | res | (0;0.5) (0;0.5) | null |
+| LFO → pan (7): "With You" (8,5) u2, "Use Me" (8,6), "Masher" (2,3) u7, (2,4) u2/u3, "Lightning" (26,3), "Oxygen" (44,4) | | pan | S = 45819/31102/35989/21502/26259/40898 | 1…32 beats |
+| LFO → cutoff (7): "Masher" (2,3) u2…u6, (2,4) u2/u3 | | cut | S = 40898/45819/35989/26259 | 2, 1, 4, 16 beats |
 
 ---
 
-## 2. Fruity Scratcher — toca-discos sobre um sample, somado à entrada **[DECOMP + DADOS + DOC]**
+## 2. Fruity Scratcher — turntable over a sample, added to the input **[DECOMP + DATA + DOC]**
 
-**Onde está:** `Plugins/Fruity/Effects/Fruity Scratcher/` (é um **efeito**, não um gerador). Dois binários:
-`Fruity Scratcher_x64.dll` (Delphi; classe do plugin **`TTestPlug`**, VMT `0x7285a8`, filha de
-`TDelphiFruityPlug`; unidade `Scratcher\TestPlug.pas`) e `engine_x64.dll` (C++), que exporta só
-`createTimecodeDecoder`, `destroyTimecodeDecoder`, `gotSignal`, `getPosition` e `process` — é o
-**decodificador de timecode (DVS)**, usado apenas no modo vinil de controle **[DECOMP: exportações e
-`FUN_1800010e0…`; não detalhado, irrelevante para o import]**.
+**Where it is:** `Plugins/Fruity/Effects/Fruity Scratcher/` (it is an **effect**, not a generator). Two binaries:
+`Fruity Scratcher_x64.dll` (Delphi; plugin class **`TTestPlug`**, VMT `0x7285a8`, child of
+`TDelphiFruityPlug`; unit `Scratcher\TestPlug.pas`) and `engine_x64.dll` (C++), which exports only
+`createTimecodeDecoder`, `destroyTimecodeDecoder`, `gotSignal`, `getPosition` and `process` — it is the
+**timecode decoder (DVS)**, used only in control-vinyl mode **[DECOMP: exports and
+`FUN_1800010e0…`; not detailed, irrelevant for the import]**.
 
-**O que é** **[DOC `…/plugins/Fruity%20Scratcher.htm`]**: "vinyl turntable simulator"; carrega-se um sample e
-o *scratch* é gravado em tempo real (prato arrastado com o mouse, ligado a controlador ou automatizado). Controles
-citados: Smooth 1…4, Pan, Vol, Hold ("Stops the platter from turning … when linking the platter to a MIDI
-controller"), Mute, prato, transporte "Play Backwards / Pause / Play Forward", SPD (padrão 1×), ACC, SEN, DVS
-(Serato/Traktor/Timecode CD). O manual não dá unidades.
+**What it is** **[DOC `…/plugins/Fruity%20Scratcher.htm`]**: "vinyl turntable simulator"; a sample is loaded and
+the *scratch* is recorded in real time (platter dragged with the mouse, linked to a controller or automated). Controls
+mentioned: Smooth 1…4, Pan, Vol, Hold ("Stops the platter from turning … when linking the platter to a MIDI
+controller"), Mute, platter, transport "Play Backwards / Pause / Play Forward", SPD (default 1×), ACC, SEN, DVS
+(Serato/Traktor/Timecode CD). The manual gives no units.
 
-**Dados:** **nenhum demo usa o plugin.** Há 1 blob no teste de renderização
-`Data/System/Render tests/Fruity Scratcher.flp` (trilha 1 do mixer, slot 0) e 4 `.fst` idênticos (o preset
-padrão do banco de plugins) **[DADOS]**.
+**Data:** **no demo uses the plugin.** There is 1 blob in the render test
+`Data/System/Render tests/Fruity Scratcher.flp` (mixer track 1, slot 0) and 4 identical `.fst` (the default
+preset of the plugin database) **[DATA]**.
 
-### 2.1 Parâmetros (Tag do DFM `TSynthEditorForm` = índice) **[DFM + DECOMP `FUN_0072a630`, `FUN_00729fe0`, *reset* `FUN_00729f10`]**
+### 2.1 Parameters (DFM `TSynthEditorForm` Tag = index) **[DFM + DECOMP `FUN_0072a630`, `FUN_00729fe0`, *reset* `FUN_00729f10`]**
 
-`FUN_00729fe0` tem a assinatura (índice, valor, *flags*) e o tratamento de *flags* do `ProcessParam` do SDK
-(inferência pela forma); converte o valor do host (0…2³⁰, constante 2⁻³⁰) para o inteiro do controle e chama
-`FUN_0072a630`, que guarda o **valor normalizado** em `+0x2E4 + 4i` (é o que vai para o estado) e o aplica:
+`FUN_00729fe0` has the signature (index, value, *flags*) and the *flags* handling of the SDK `ProcessParam`
+(inference from its shape); it converts the host value (0…2³⁰, constant 2⁻³⁰) to the control integer and calls
+`FUN_0072a630`, which stores the **normalised value** at `+0x2E4 + 4i` (this is what goes into the state) and applies it:
 
-| i | Controle (DFM) | Faixa do controle (padrão) | Valor interno (normalizado v) | Campo |
+| i | Control (DFM) | Control range (default) | Internal value (normalised v) | Field |
 |---|---|---|---|---|
-| 0 | Wave position (`WavePosWheel`, sem Tag → 0) | 0…30000 | `v` ∈ [0; 1] = posição no sample (ver §2.3) | `+0x134` → `+0x130` |
-| 1 | Mute | caixa | **guardado invertido**: o `ProcessParam` grava `|host − 1|`; interno ≠ 0 → **audível** | `+0x16C` |
+| 0 | Wave position (`WavePosWheel`, no Tag → 0) | 0…30000 | `v` ∈ [0; 1] = position in the sample (see §2.3) | `+0x134` → `+0x130` |
+| 1 | Mute | checkbox | **stored inverted**: `ProcessParam` writes `|host − 1|`; internal ≠ 0 → **audible** | `+0x16C` |
 | 2 | Turntable speed (SPD) | 0…100 (50) | `v` | `+0x14C` |
 | 3 | Turntable acceleration (ACC) | 0…100 (25) | `v` | `+0x150` |
 | 4 | Pan | −128…128 (0) | `2v − 1` | `+0x140` |
-| 5 | Volume | 0…255 (199; *reset* = 200/255) | `v` (ganho linear) | `+0x13C` |
-| 6 | Turntable hold | caixa | booleano | `+0x16D` |
-| 7 | Turntable sensitivity (SEN) | 0…100 (50) | `v`; o editor recebe `0,0025·v` (`+0x800`) — **o render não o lê** | `+0x148` |
-| 8 | Transport | seletor de 3 (índice 1) | **inteiro = índice − 1** (o `ProcessParam` subtrai 1 e o texto soma 1) → **−1 / 0 / +1** | `+0x170` |
+| 5 | Volume | 0…255 (199; *reset* = 200/255) | `v` (linear gain) | `+0x13C` |
+| 6 | Turntable hold | checkbox | boolean | `+0x16D` |
+| 7 | Turntable sensitivity (SEN) | 0…100 (50) | `v`; the editor receives `0.0025·v` (`+0x800`) — **the render does not read it** | `+0x148` |
+| 8 | Transport | 3-way selector (index 1) | **integer = index − 1** (`ProcessParam` subtracts 1 and the text adds 1) → **−1 / 0 / +1** | `+0x170` |
 | 9…12 | Smooth 1…4 | 0…1000 (500, 908, 999, 400) | `v` | `+0x15C…+0x168` |
-| 13 | Rotations (`RotationsDummyWheel`) | 0…18 (9) | inteiro | `+0x174` |
+| 13 | Rotations (`RotationsDummyWheel`) | 0…18 (9) | integer | `+0x174` |
 
-- **Transporte:** o render multiplica a velocidade-alvo por esse inteiro (§2.3) → −1 = para trás, 0 = parado,
-  +1 = para frente **[DECOMP]**; coerente com a ordem do manual "Play Backwards / Pause / Play Forward". As dicas
-  do DFM do seletor dizem `off / on / inverted` (divergência de rótulo; o código manda). Padrão = índice 1 =
-  **parado** (o *reset* põe 0).
-- O leitor de versões antigas (< `0xF4628`) grava inteiros e divide por 100 (SPD, SEN, ACC), 255 (Vol), 1000
-  (Smooth) e faz `(p/128 + 1)/2` (Pan) **[DECOMP `FUN_00728d80`, constantes `0x7298f0…0x729918`]** — confirma as
-  faixas acima.
+- **Transport:** the render multiplies the target speed by this integer (§2.3) → −1 = backwards, 0 = stopped,
+  +1 = forwards **[DECOMP]**; consistent with the manual order "Play Backwards / Pause / Play Forward". The DFM hints
+  of the selector say `off / on / inverted` (label divergence; the code rules). Default = index 1 =
+  **stopped** (the *reset* sets 0).
+- The reader for old versions (< `0xF4628`) stores integers and divides by 100 (SPD, SEN, ACC), 255 (Vol), 1000
+  (Smooth) and computes `(p/128 + 1)/2` (Pan) **[DECOMP `FUN_00728d80`, constants `0x7298f0…0x729918`]** — confirms the
+  ranges above.
 
-### 2.2 Estado (`0xD5`) **[DECOMP `FUN_00728d80` (VMT slot 10, leitura/gravação) + DADOS 5/5]**
+### 2.2 State (`0xD5`) **[DECOMP `FUN_00728d80` (VMT slot 10, read/write) + DATA 5/5]**
 
-| Off | Tipo | Conteúdo |
+| Off | Type | Content |
 |---|---|---|
-| 0 | u32 | versão: grava **`0xF462A`**; os 5 blobs são **`0xF4628`** |
-| 4 | 14 × f32 | **parâmetros 0…13 normalizados** (tabela §2.1; p8 e p13 como inteiros em *float*; p1 = interno "audível") |
-| 60 | i32 n + n B | **caminho do sample em ANSI**; passa por uma chamada do host (código 0xE) antes de carregar — no blob do teste: `%FLStudioFactoryData%\Data\Patches\Packs\Loops\DL Breaker.wav` (a expansão da macro pelo host é inferência) |
-| (v > `0xF4628`) | u8 | opção do editor (`+0x8EC`; usada pelo *dispatcher* para o tamanho da janela — inferência: "Toggle Scratcher size") |
-| (v ≥ `0xF462A`) | i32 + u8 | `+0x204` = índice do timecode (−1 = desligado; ≠ −1 liga o modo DVS) + 1 *flag* do objeto de entrada (`+0x48E`; aplicado como filtro à entrada no modo DVS — que seja o "RIAA Preamp" do manual é inferência) |
+| 0 | u32 | version: writes **`0xF462A`**; the 5 blobs are **`0xF4628`** |
+| 4 | 14 × f32 | **parameters 0…13 normalised** (table §2.1; p8 and p13 as integers in *float*; p1 = internal "audible") |
+| 60 | i32 n + n B | **sample path in ANSI**; goes through a host call (code 0xE) before loading — in the test blob: `%FLStudioFactoryData%\Data\Patches\Packs\Loops\DL Breaker.wav` (macro expansion by the host is an inference) |
+| (v > `0xF4628`) | u8 | editor option (`+0x8EC`; used by the *dispatcher* for the window size — inference: "Toggle Scratcher size") |
+| (v ≥ `0xF462A`) | i32 + u8 | `+0x204` = timecode index (−1 = off; ≠ −1 enables DVS mode) + 1 *flag* of the input object (`+0x48E`; applied as a filter to the input in DVS mode — that it is the manual's "RIAA Preamp" is an inference) |
 
-- Para versões < `0xF462B` o leitor ainda tenta ler **56 B** para a tabela de inteiros `+0x2AC`; nenhum dos 5
-  blobs tem esses bytes (terminam no caminho) — o efeito disso **não foi confirmado** (o laço seguinte recalcula a
-  UI a partir do `ProcessParam`).
-- **Dados** **[DADOS]**:
+- For versions < `0xF462B` the reader still tries to read **56 B** into the integer table `+0x2AC`; none of the 5
+  blobs has these bytes (they end at the path) — the effect of this **was not confirmed** (the following loop recomputes the
+  UI from `ProcessParam`).
+- **Data** **[DATA]**:
 
-  | Origem | p0 | p1 | SPD | ACC | Pan | Vol | Hold | SEN | Transp. | Smooth 1…4 | Rot. | Sample |
+  | Source | p0 | p1 | SPD | ACC | Pan | Vol | Hold | SEN | Transp. | Smooth 1…4 | Rot. | Sample |
   |---|---|---|---|---|---|---|---|---|---|---|---|---|
-  | Render test (125 B) | **0,111** | 1 | 0,5 | 0,25 | 0,5 (0) | 0,78 | **1** | 0,5 | 0 (parado) | 0,5 / 0,908 / 0,999 / 0,4 | 9 | DL Breaker.wav |
-  | 4 × `.fst` (64 B) | 0 | 1 | 0,5 | 0,25 | 0,5 | 0,78 | 0 | 0,5 | 0 | idem | 9 | nenhum (n = 0) |
+  | Render test (125 B) | **0.111** | 1 | 0.5 | 0.25 | 0.5 (0) | 0.78 | **1** | 0.5 | 0 (stopped) | 0.5 / 0.908 / 0.999 / 0.4 | 9 | DL Breaker.wav |
+  | 4 × `.fst` (64 B) | 0 | 1 | 0.5 | 0.25 | 0.5 | 0.78 | 0 | 0.5 | 0 | same | 9 | none (n = 0) |
 
-### 2.3 DSP (`FUN_0072add0`, render do efeito, VMT slot 14) **[DECOMP]**
+### 2.3 DSP (`FUN_0072add0`, effect render, VMT slot 14) **[DECOMP]**
 
-**Sample** (`FUN_0072be20`): pedido ao host com o formato **PCM 16 bits, 2 canais, 44 100 Hz** (estrutura
-`WAVEFORMATEX` montada no código); convertido para *float* `/32768`; um quadro extra é anexado no fim para a
-interpolação; `N` = nº de quadros. A troca de sample é aplicada no fim de um bloco. Se o host converte a taxa do
-arquivo para 44,1 kHz **não foi confirmado** (é o formato pedido).
+**Sample** (`FUN_0072be20`): requested from the host in the format **16-bit PCM, 2 channels, 44,100 Hz** (`WAVEFORMATEX`
+structure built in the code); converted to *float* `/32768`; one extra frame is appended at the end for
+interpolation; `N` = number of frames. A sample change is applied at the end of a block. Whether the host converts the
+file's rate to 44.1 kHz **was not confirmed** (it is the requested format).
 
-**Sem sample carregado:** a saída é a entrada (cópia).
+**No sample loaded:** the output is the input (copy).
 
-**Leitura do sample (comum aos dois modos):** posição `φ` em "voltas" — **1 volta = o sample inteiro**; usa-se a
-parte fracionária (o sample **dá a volta / faz *loop***); índice `x = frac(φ)·N`, quadro `⌊x⌋` (arredondamento
-por `FUN_0072ab70`, *floor* por inferência pela construção) e interpolação linear com o seguinte. Cada canal passa
-por **`y = (s − s_ant) + 0,99·y_ant`** (`FUN_0072c660`/`FUN_0072c6d0`: bloqueio de DC; dedução: corte ≈
-`0,01·fs/2π` ≈ 70 Hz a 44,1 kHz) e por *flush* de desnormais (< 1e−14).
+**Sample reading (common to both modes):** position `φ` in "turns" — **1 turn = the whole sample**; the
+fractional part is used (the sample **wraps around / *loops***); index `x = frac(φ)·N`, frame `⌊x⌋` (rounding
+by `FUN_0072ab70`, *floor* by inference from the construction) and linear interpolation with the next one. Each channel goes
+through **`y = (s − s_prev) + 0.99·y_prev`** (`FUN_0072c660`/`FUN_0072c6d0`: DC blocking; deduction: cutoff ≈
+`0.01·fs/2π` ≈ 70 Hz at 44.1 kHz) and through a denormal *flush* (< 1e−14).
 
-**Volume e pan:** alvo de volume = `Vol` (ou 0 se Mute), suavizado por amostra `g ← 0,99·g + 0,01·alvo`; pan
-`p = 2v − 1` suavizado igual. **Balanço linear:** `p ≤ 0` → L·1, R·(1 + p); `p > 0` → L·(1 − p), R·1.
+**Volume and pan:** volume target = `Vol` (or 0 if Mute), smoothed per sample `g ← 0.99·g + 0.01·target`; pan
+`p = 2v − 1` smoothed the same way. **Linear balance:** `p ≤ 0` → L·1, R·(1 + p); `p > 0` → L·(1 − p), R·1.
 
-**Saída = entrada + sample processado** (o sinal que entra no slot passa com ganho 1; o Scratcher **soma**).
-Exceção: no modo DVS (timecode ligado) a saída é só o sample, sem a entrada.
+**Output = input + processed sample** (the signal entering the slot passes with gain 1; the Scratcher **adds**).
+Exception: in DVS mode (timecode on) the output is only the sample, without the input.
 
-**Modo "motor" (Hold desligado, sem timecode)** — toca o sample como um toca-discos:
+**"Motor" mode (Hold off, no timecode)** — plays the sample like a turntable:
 
-- velocidade-alvo por amostra **`s = (2/(N − 1))·SPD·T`** (T = −1/0/+1 do transporte; `+0x1A8 = 2/(N−1)`):
-  **SPD = 0,5 → 1 quadro por amostra (1×)**; a lei é linear, **rate = 2·SPD** (0…2×), sem compensação da taxa do
-  host no código lido;
-- inércia: **`v ← a·(v − s) + s`** com **`a = 0,99999 − 0,0005·ACC`** (constante de tempo `1/(1 − a)` amostras:
-  ACC = 0 → 100 000; 0,25 → 7 407 ≈ 0,17 s a 44,1 kHz; 1 → 1 961 ≈ 44 ms);
-- `φ ← φ + v`, `φ` mantido em (0; 1]; a posição é publicada em p0 (o *idle* `FUN_0072a890` empurra `+0x130`
-  para o parâmetro 0 com a *flag* de UI). **Neste modo automatizar p0 não tem efeito** (p0 é sobrescrito a cada
-  amostra) — dedução do fluxo.
+- target speed per sample **`s = (2/(N − 1))·SPD·T`** (T = −1/0/+1 from the transport; `+0x1A8 = 2/(N−1)`):
+  **SPD = 0.5 → 1 frame per sample (1×)**; the law is linear, **rate = 2·SPD** (0…2×), with no compensation for the host
+  rate in the code read;
+- inertia: **`v ← a·(v − s) + s`** with **`a = 0.99999 − 0.0005·ACC`** (time constant `1/(1 − a)` samples:
+  ACC = 0 → 100,000; 0.25 → 7,407 ≈ 0.17 s at 44.1 kHz; 1 → 1,961 ≈ 44 ms);
+- `φ ← φ + v`, `φ` kept in (0; 1]; the position is published to p0 (the *idle* `FUN_0072a890` pushes `+0x130`
+  to parameter 0 with the UI *flag*). **In this mode automating p0 has no effect** (p0 is overwritten every
+  sample) — deduced from the flow.
 
-**Modo "scratch" (Hold ligado, sem timecode)** — a posição segue o parâmetro 0 (o prato):
+**"Scratch" mode (Hold on, no timecode)** — the position follows parameter 0 (the platter):
 
-- alvo `P = p0 + (Rot − 9)` (Rotations soma voltas inteiras, −9…+9); erro `e = P − φ`;
+- target `P = p0 + (Rot − 9)` (Rotations adds whole turns, −9…+9); error `e = P − φ`;
 - `v ← c₂·v + ((1 − c₂)/(n₁ + 250))·e`; `d = S₄·v + (1 − c₃)·(1 − S₄)·e`; `φ ← φ + d`;
-- **`n₁ = ⌊2500·S₁⌋`, `c₂ = 0,99 + 0,0099·S₂`, `c₃ = 0,99 + 0,00999·S₃`** (S = Smooth 1…4; padrões →
-  n₁ = 1250, c₂ ≈ 0,99899, c₃ ≈ 0,99998, S₄ = 0,4); p0 é lido no início de cada bloco (`+0x130 ← +0x134` no fim do
-  bloco anterior).
-- Consequência (dedução): com p0 **constante** a posição converge e o sample pára num ponto → o bloqueio de DC
-  leva a saída do sample a **zero**; só há som enquanto p0 se move.
+- **`n₁ = ⌊2500·S₁⌋`, `c₂ = 0.99 + 0.0099·S₂`, `c₃ = 0.99 + 0.00999·S₃`** (S = Smooth 1…4; defaults →
+  n₁ = 1250, c₂ ≈ 0.99899, c₃ ≈ 0.99998, S₄ = 0.4); p0 is read at the start of each block (`+0x130 ← +0x134` at the end of the
+  previous block).
+- Consequence (deduction): with **constant** p0 the position converges and the sample stops at one point → the DC blocker
+  brings the sample output to **zero**; there is only sound while p0 is moving.
 
-### 2.4 Uso no teste de renderização e o que é preciso para reproduzir **[DADOS + DECOMP]**
+### 2.4 Use in the render test and what is needed to reproduce it **[DATA + DECOMP]**
 
-- O `.flp` de teste tem **Hold = 1, transporte parado, p0 = 0,111** e, no pattern 1, um evento de controle
-  `0xDF` com **259 registros** `{u32 tick, u32 controlID, i32 valor}` (formato da rodada 2 §2.7), todos com
-  `controlID = 0x20408000` = `(1 << 22) + (0 << 16) + 0x8000 + 0` → **trilha 1, slot 0, parâmetro 0 (Wave
-  position)** na codificação `trilha<<22 + slot<<16 + 0x8000+k` (o nibble alto aqui é **2**, não 7 como no `0xE1`;
-  a diferença **não foi decodificada**). Valores: rampa **4 → 131 em 192 ticks e volta a 0 em 384 ticks** (PPQ =
-  96 → 4 tempos). A escala desses valores para p0 **não foi confirmada**. Nenhum clipe de automação (`0xEA`).
-- Ou seja, o uso "típico" visto é: **sample de referência + automação do prato (p0) com Hold ligado**. Um uso
-  estático só produz som no modo motor (transporte ±1): o sample em *loop* a `2·SPD`×, com inércia, somado à
-  entrada.
+- The test `.flp` has **Hold = 1, transport stopped, p0 = 0.111** and, in pattern 1, a control event
+  `0xDF` with **259 records** `{u32 tick, u32 controlID, i32 value}` (format from round 2 §2.7), all with
+  `controlID = 0x20408000` = `(1 << 22) + (0 << 16) + 0x8000 + 0` → **track 1, slot 0, parameter 0 (Wave
+  position)** in the encoding `track<<22 + slot<<16 + 0x8000+k` (the high nibble here is **2**, not 7 as in `0xE1`;
+  the difference **was not decoded**). Values: ramp **4 → 131 over 192 ticks and back to 0 at 384 ticks** (PPQ =
+  96 → 4 beats). The scaling of these values to p0 **was not confirmed**. No automation clip (`0xEA`).
+- In other words, the "typical" use seen is: **reference sample + platter automation (p0) with Hold on**. A static
+  use only produces sound in motor mode (transport ±1): the sample *looping* at `2·SPD`×, with inertia, added to the
+  input.
 
 ---
 
-## 3. Patcher — os grafos dos demos que o LYNX ainda não cobre **[DECOMP + DADOS]**
+## 3. Patcher — the demo graphs that LYNX does not cover yet **[DECOMP + DATA]**
 
-**O que o LYNX faz** (`src/core/FlPatcher.cpp`): (a) cadeia em série pura no barramento 0, ganhos 1; (b) "ramos":
-trecho em série a partir de IN, depois ramos que são cadeias simples até OUT, partindo de IN, de um nó com várias
-saídas ou das bandas de um Frequency Splitter/Stereo Shaper; entradas de *sidechain* ignoradas. A classe do cabo é
-lida do byte 24 do registro `1300`.
+**What LYNX does** (`src/core/FlPatcher.cpp`): (a) pure series chain on bus 0, gains 1; (b) "branches":
+a series section starting from IN, then branches that are simple chains up to OUT, starting from IN, from a node with several
+outputs or from the bands of a Frequency Splitter/Stereo Shaper; *sidechain* inputs ignored. The cable class is
+read from byte 24 of record `1300`.
 
-### 3.1 Como o Patcher mistura os cabos **[DECOMP `FUN_0079bf20`, `FUN_0079f0b0`, `FUN_00952440`, `FUN_0079ca50`, `FUN_0079b790`, `FUN_0079ef40`, resolvedor `FUN_005da820`]**
+### 3.1 How the Patcher mixes cables **[DECOMP `FUN_0079bf20`, `FUN_0079f0b0`, `FUN_00952440`, `FUN_0079ca50`, `FUN_0079b790`, `FUN_0079ef40`, resolver `FUN_005da820`]**
 
-- **Soma com ganho linear (confirmado):** para cada porta de entrada de áudio, o 1.º cabo ativo escreve
-  `destino = origem × ganho` e cada cabo seguinte faz **`destino += origem × ganho`**; sem cabo ativo o *buffer* é
-  **zerado**. As três rotinas são da Intel IPP, resolvidas por nome em `FUN_005da820`: `ippsMulC_32f`
-  (ponteiro `0x9F30B8`), `ippsAddProductC_32f` (`0x9F3320`) e `ippsZero_32f` (`0x9F2F28`) — a semântica é a
-  documentada dessas funções da IPP (inferência pelo nome); o tamanho é `2·amostras` (estéreo intercalado).
-  `ganho` = campo `+0x18` do cabo (nasce 1,0 em `FUN_0079ef40`). **Isto fecha o [HIP forte] da rodada 14 §1.5.**
-- **Cabo desligado:** o byte `+0x1C` do cabo ≠ 0 faz o cabo ser ignorado na soma. Na leitura do arquivo
-  (`FUN_00952440`) esse byte = **bit 0 das *flags*** (offset 20) do registro `1300`; o **bit 1** diz se o byte de
-  classe (offset 24) é válido (convertido por `FUN_0094a150`, não lido) — **sem o bit 1, a classe deve vir da porta**
-  (`FUN_0079b790` procura então a ligação pelas portas).
-- **Compensação de atraso:** se a latência acumulada da origem for menor que a do destino, o cabo passa por uma
-  linha de atraso da diferença (`FUN_0079f0b0` → `FUN_0079f480`/`FUN_0079f350`) antes da soma.
-- **Dados:** nos slots do mixer, 571 cabos têm *flags* = 2 (classe válida) e **203 têm *flags* = 0**, dos quais
-  **128 são cabos de controle** (porta de classe 2) com byte de classe = 0 — o LYNX os lê hoje como áudio. Nenhum
-  cabo dos demos tem o bit 0 (desligado); nos `.fst` há 6 **[DADOS `tmp/r20/py/pat.py`]**.
+- **Sum with linear gain (confirmed):** for each audio input port, the 1st active cable writes
+  `destination = source × gain` and each following cable does **`destination += source × gain`**; with no active cable the *buffer* is
+  **zeroed**. The three routines are from Intel IPP, resolved by name in `FUN_005da820`: `ippsMulC_32f`
+  (pointer `0x9F30B8`), `ippsAddProductC_32f` (`0x9F3320`) and `ippsZero_32f` (`0x9F2F28`) — the semantics are the
+  documented ones for those IPP functions (inference from the name); the length is `2·samples` (interleaved stereo).
+  `gain` = cable field `+0x18` (created as 1.0 in `FUN_0079ef40`). **This closes the [strong HYP] of round 14 §1.5.**
+- **Disabled cable:** cable byte `+0x1C` ≠ 0 makes the cable be ignored in the sum. When reading the file
+  (`FUN_00952440`) that byte = **bit 0 of the *flags*** (offset 20) of record `1300`; **bit 1** says whether the class
+  byte (offset 24) is valid (converted by `FUN_0094a150`, not read) — **without bit 1, the class must come from the port**
+  (`FUN_0079b790` then looks up the connection through the ports).
+- **Delay compensation:** if the accumulated latency of the source is lower than that of the destination, the cable goes through a
+  delay line of the difference (`FUN_0079f0b0` → `FUN_0079f480`/`FUN_0079f350`) before the sum.
+- **Data:** in the mixer slots, 571 cables have *flags* = 2 (valid class) and **203 have *flags* = 0**, of which
+  **128 are control cables** (class 2 port) with class byte = 0 — LYNX currently reads them as audio. No
+  demo cable has bit 0 (disabled); in the `.fst` there are 6 **[DATA `tmp/r20/py/pat.py`]**.
 
-### 3.2 Quais grafos ficam de fora **[DADOS: port fiel do classificador do `FlPatcher.cpp` em `tmp/r20/py/pat.py`]**
+### 3.2 Which graphs are left out **[DATA: faithful port of the `FlPatcher.cpp` classifier in `tmp/r20/py/pat.py`]**
 
-Dos 30 Patchers de slot do mixer em `blobs14.pkl` (24 em demos + 6 em *templates*): **série 4, ramos 12, não
-cobertos 14** (12 blobs distintos, 7 topologias; os 4 Patchers de canal não têm IN/OUT de áudio — são geradores). Usando a classe
-da porta (§3.1) o resultado é o mesmo. Depois de **remover os nós fora de todo caminho IN→OUT** (só alimentam
-controladores/analisadores) e reduzir o grafo por **série** (nó com 1 entrada e 1 saída) e **paralelo** (cabos com as
-mesmas pontas), **todos os 14 se reduzem a uma única expressão série-paralelo** **[DADOS `tmp/r20/py/sp.py`]**.
-Notação: `→` série, `‖` paralelo somado, `×g` ganho do cabo, `saída1` = barramento 1 do nó.
+Of the 30 mixer-slot Patchers in `blobs14.pkl` (24 in demos + 6 in *templates*): **series 4, branches 12, not
+covered 14** (12 distinct blobs, 7 topologies; the 4 channel Patchers have no audio IN/OUT — they are generators). Using the
+port class (§3.1) the result is the same. After **removing the nodes outside every IN→OUT path** (they only feed
+controllers/analysers) and reducing the graph by **series** (node with 1 input and 1 output) and **parallel** (cables with the
+same endpoints), **all 14 reduce to a single series-parallel expression** **[DATA `tmp/r20/py/sp.py`]**.
+Notation: `→` series, `‖` summed parallel, `×g` cable gain, `out1` = bus 1 of the node.
 
-| Projeto (trilha, slot) | Expressão IN ⇒ OUT | Nós fora do caminho | Por que o LYNX não cobre |
+| Project (track, slot) | Expression IN ⇒ OUT | Nodes outside the path | Why LYNX does not cover it |
 |---|---|---|---|
-| "Bien Duro" (2,4), (3,4), (9,3), (12,2) (40 178 B; (3,4) = (12,2)) | `Limiter "Limiter 2" → ( PEQ2 "detector" ‖ Fruity parametric EQ "EQ 3" → PEQ2 "main" )` | `IN → Fruity parametric EQ → Limiter → 2 × PEQ2 → 2 × Peak Controller` (ramo de detecção) + 8 Formula, 5 X-Y, Control Surface, NoteBook | divisão depois de um nó interno; ramo morto |
-| "Exoplanet" (101,0) | `Stereo Shaper "Mid Side Splitter" → ( saída1 → Reeverb 2 ‖ Reeverb 2 ) → Maximus` | 2 Limiters "MID"/"SIDE" sem cabo de entrada | junção antes do último nó; ramo da saída 1 |
-| "With You" (1,0) | `( Stereo Shaper "Side" → PEQ2 "Side EQ" ‖ Stereo Shaper "Mid" → PEQ2 "Mid EQ" )` | Control Surface | Stereo Shaper no meio do ramo é tratado como divisor |
-| "Stroll Up" (1,6) (103 210 B) | `( PanOMatic "dryin" ‖ Stereo Shaper "IN" → ( 4 × [PEQ2 "bandN" → Soft Clipper → PEQ2 "bandNp" → PanOMatic "bNout"] ) → Stereo Shaper "OUT" → PanOMatic "wetin" )` | X-Y-Z, Control Surface | aninhado; Stereo Shaper como nó comum |
-| "Stroll Up" (1,2) (451 240 B) | igual na casca; cada banda N = `PEQ2 "bandN" → ( PanOMatic "bNdry" → PanOMatic "dryN" ‖ ( ×≈0,5 → PanOMatic → Flangus ‖ ×≈0,5 → PanOMatic → Flanger → PanOMatic ‖ ×≈0,5 → PanOMatic → Chorus → PanOMatic ) → PanOMatic "wetN" → Stereo Enhancer ) → PEQ2 "bandNout" → Limiter → PanOMatic "Nout"`, as 4 bandas → PanOMatic "merger" → Stereo Shaper "OUT" | X-Y-Z, Control Surface | 3 níveis de aninhamento; na banda 1 os cabos Flangus/Flanger/Chorus → soma têm ×0,333/0,328/0,328 |
-| *Templates* Funk/Jazz/Metal/Rock (125,1) (28 690 B) | `( PanOMatic "dryin" ‖ PanOMatic "wetin" → Stereo Shaper "IN" → Limiter "Gater" → Stereo Shaper "OUT" )` | 4 X-Y-Z (mapeadores), NoteBook 2, Control Surface | cabos de controle sem bit 1 lidos como áudio; Stereo Shaper como nó comum |
-| *Templates* Metal (12,0), Rock (13,0) (108 377 B) | `( Stereo Shaper → PEQ2 → WaveShaper → ( Stereo Shaper → Convolver → ×0,376 ‖ Stereo Shaper → PEQ2 → Convolver → ×0,199 ) → Delay 3 → ×2 → Delay 3 → ×2 → Stereo Shaper → PanOMatic "wet" ‖ PanOMatic "dry" )` | 6 Formula, X-Y-Z, Control Surface | idem + junção antes do último nó + ganhos ≠ 1 |
+| "Bien Duro" (2,4), (3,4), (9,3), (12,2) (40,178 B; (3,4) = (12,2)) | `Limiter "Limiter 2" → ( PEQ2 "detector" ‖ Fruity parametric EQ "EQ 3" → PEQ2 "main" )` | `IN → Fruity parametric EQ → Limiter → 2 × PEQ2 → 2 × Peak Controller` (detection branch) + 8 Formula, 5 X-Y, Control Surface, NoteBook | split after an internal node; dead branch |
+| "Exoplanet" (101,0) | `Stereo Shaper "Mid Side Splitter" → ( out1 → Reeverb 2 ‖ Reeverb 2 ) → Maximus` | 2 Limiters "MID"/"SIDE" with no input cable | join before the last node; output-1 branch |
+| "With You" (1,0) | `( Stereo Shaper "Side" → PEQ2 "Side EQ" ‖ Stereo Shaper "Mid" → PEQ2 "Mid EQ" )` | Control Surface | Stereo Shaper in the middle of the branch is treated as a splitter |
+| "Stroll Up" (1,6) (103,210 B) | `( PanOMatic "dryin" ‖ Stereo Shaper "IN" → ( 4 × [PEQ2 "bandN" → Soft Clipper → PEQ2 "bandNp" → PanOMatic "bNout"] ) → Stereo Shaper "OUT" → PanOMatic "wetin" )` | X-Y-Z, Control Surface | nested; Stereo Shaper as an ordinary node |
+| "Stroll Up" (1,2) (451,240 B) | same outer shell; each band N = `PEQ2 "bandN" → ( PanOMatic "bNdry" → PanOMatic "dryN" ‖ ( ×≈0.5 → PanOMatic → Flangus ‖ ×≈0.5 → PanOMatic → Flanger → PanOMatic ‖ ×≈0.5 → PanOMatic → Chorus → PanOMatic ) → PanOMatic "wetN" → Stereo Enhancer ) → PEQ2 "bandNout" → Limiter → PanOMatic "Nout"`, the 4 bands → PanOMatic "merger" → Stereo Shaper "OUT" | X-Y-Z, Control Surface | 3 nesting levels; in band 1 the Flangus/Flanger/Chorus → sum cables have ×0.333/0.328/0.328 |
+| Funk/Jazz/Metal/Rock *templates* (125,1) (28,690 B) | `( PanOMatic "dryin" ‖ PanOMatic "wetin" → Stereo Shaper "IN" → Limiter "Gater" → Stereo Shaper "OUT" )` | 4 X-Y-Z (mappers), NoteBook 2, Control Surface | control cables without bit 1 read as audio; Stereo Shaper as an ordinary node |
+| Metal (12,0), Rock (13,0) *templates* (108,377 B) | `( Stereo Shaper → PEQ2 → WaveShaper → ( Stereo Shaper → Convolver → ×0.376 ‖ Stereo Shaper → PEQ2 → Convolver → ×0.199 ) → Delay 3 → ×2 → Delay 3 → ×2 → Stereo Shaper → PanOMatic "wet" ‖ PanOMatic "dry" )` | 6 Formula, X-Y-Z, Control Surface | same + join before the last node + gains ≠ 1 |
 
-Observações sobre esses grafos **[DADOS]**:
+Remarks on these graphs **[DATA]**:
 
-- **Nenhum usa barramentos ≠ 0 nas entradas** (sem *sidechain*); a única saída ≠ 0 usada é a `saída1` do Stereo
-  Shaper do "Exoplanet" (101) — pela rodada 17 §2, o barramento do parâmetro 6 do Stereo Shaper carrega
-  `entrada − saída da matriz`.
-- Nos casos "dry/wet" (Stroll Up, *templates*), os nós de entrada/saída são **PanOMatic e Stereo Shaper usados como
-  ganho/matriz**; os parâmetros deles são movidos por cabos de controle vindos de X-Y-Z/Control Surface. O valor
-  estático a usar é o que está no estado `5005` de cada nó (rodada 14 §1.7: o FL grava o valor corrente).
-- **"Bien Duro" é um EQ dinâmico:** os Peak Controllers medem o ramo de detecção (`IN → EQ → Limiter → PEQ2`) e,
-  via Formula/X-Y, movem parâmetros dos PEQ2 do caminho de áudio (PEQ2 "detector": parâmetros 6, 11, 12, 13; PEQ2
-  "main": 12; "EQ 3": 28) — **não tem equivalente estático** além dos valores gravados.
-- Os Limiters "MID"/"SIDE" do "Exoplanet" (101) não têm cabo de entrada: pela §3.1 a entrada deles é **zerada**; a
-  saída deles vai a OUT (somando o que um Limiter produz com entrada nula — supostamente silêncio; **não
-  conferido**).
-- Bit 3 das *flags* do nó (`5000`) = 1 em todos os nós de "With You" (1,0): significado **não confirmado**.
+- **None uses buses ≠ 0 on the inputs** (no *sidechain*); the only output ≠ 0 used is `out1` of the Stereo
+  Shaper in "Exoplanet" (101) — per round 17 §2, the bus of Stereo Shaper parameter 6 carries
+  `input − matrix output`.
+- In the "dry/wet" cases (Stroll Up, *templates*), the input/output nodes are **PanOMatic and Stereo Shaper used as
+  gain/matrix**; their parameters are moved by control cables coming from X-Y-Z/Control Surface. The static
+  value to use is the one in the `5005` state of each node (round 14 §1.7: FL stores the current value).
+- **"Bien Duro" is a dynamic EQ:** the Peak Controllers measure the detection branch (`IN → EQ → Limiter → PEQ2`) and,
+  via Formula/X-Y, move parameters of the PEQ2s on the audio path (PEQ2 "detector": parameters 6, 11, 12, 13; PEQ2
+  "main": 12; "EQ 3": 28) — **it has no static equivalent** beyond the stored values.
+- The "MID"/"SIDE" Limiters in "Exoplanet" (101) have no input cable: per §3.1 their input is **zeroed**; their
+  output goes to OUT (adding whatever a Limiter produces with a null input — presumably silence; **not
+  checked**).
+- Bit 3 of the node *flags* (`5000`) = 1 on all nodes of "With You" (1,0): meaning **not confirmed**.
 
-### 3.3 Mapeamento para cadeias série/paralelo (procedimento) **[DECOMP §3.1 + DADOS §3.2]**
+### 3.3 Mapping to series/parallel chains (procedure) **[DECOMP §3.1 + DATA §3.2]**
 
-1. Classe do cabo: byte 24 só se o bit 1 das *flags* estiver ligado; senão a classe da porta de destino. Ignorar
-   cabos com o bit 0 (desligados).
-2. Montar as arestas de áudio no barramento 0 de destino; descartar nós que não estão em nenhum caminho IN→OUT.
-3. Reduzir: série (nó com uma entrada e uma saída) e paralelo (arestas com as mesmas pontas = **soma**), levando o
-   ganho de cada cabo como fator da aresta (`×g`); repetir até sobrar `IN ⇒ OUT`.
-4. Frequency Splitter / Stereo Shaper só "dividem" quando alguma aresta sai deles por barramento ≠ 0; caso
-   contrário são nós comuns da cadeia.
-5. Os 14 casos acima reduzem completamente; um contêiner `parallel` aninhável (ramos = cadeias que podem conter
-   outros `parallel`) com ganho por ramo cobre todos.
+1. Cable class: byte 24 only if bit 1 of the *flags* is set; otherwise the class of the destination port. Ignore
+   cables with bit 0 (disabled).
+2. Build the audio edges on destination bus 0; discard nodes that are not on any IN→OUT path.
+3. Reduce: series (node with one input and one output) and parallel (edges with the same endpoints = **sum**), carrying the
+   gain of each cable as an edge factor (`×g`); repeat until only `IN ⇒ OUT` remains.
+4. Frequency Splitter / Stereo Shaper only "split" when some edge leaves them through a bus ≠ 0; otherwise
+   they are ordinary chain nodes.
+5. The 14 cases above reduce completely; a nestable `parallel` container (branches = chains that may contain
+   other `parallel`s) with per-branch gain covers all of them.
 
 ---
 
-## 4. Vocodex e Fruity Vocoder — estado, bandas, seguidor de envelope e entradas **[DECOMP + DOC + DADOS]**
+## 4. Vocodex and Fruity Vocoder — state, bands, envelope follower and inputs **[DECOMP + DOC + DATA]**
 
-**O que o LYNX supõe:** nada (os dois são descartados; rodada 14 §6: "sem aproximação útil"; rodada 19 §6b: layout do
-Fruity Vocoder só por inferência). No código do LYNX não há entrada de *sidechain* de áudio (busca por "sidechain"
-em `src/` só acha um rótulo de rampa no `MixerComponent.cpp`) **[DADOS: repositório]**.
+**What LYNX assumes:** nothing (both are dropped; round 14 §6: "no useful approximation"; round 19 §6b: Fruity
+Vocoder layout only by inference). In the LYNX code there is no audio *sidechain* input (searching for "sidechain"
+in `src/` only finds a ramp label in `MixerComponent.cpp`) **[DATA: repository]**.
 
-Convenções desta seção (inferências declaradas): nas duas DLLs `FUN_00408810`/`FUN_0040ad30` = `exp` e
-`FUN_00409870`/`FUN_0040bf50` = `ln` (são chamadas com 2, 11, 101, 10000… e o resultado bate com os dados: ver a
-verificação da escala do Vocodex em §4.2.3); os globais de execução foram lidos nas rotinas de inicialização
-(`FUN_005e2260` no Vocoder, `FUN_0062f250` no Vocodex): `ln 2`, `ln 2/2`, `ln 2/12`, `ln 2/1200`, `ln 7`, `ln 11`.
-`curve11(x) = (11^x − 1)/10` (1 exato quando x = 1), a mesma do Love Philter.
+Conventions for this section (declared inferences): in both DLLs `FUN_00408810`/`FUN_0040ad30` = `exp` and
+`FUN_00409870`/`FUN_0040bf50` = `ln` (they are called with 2, 11, 101, 10000… and the result matches the data: see the
+check of the Vocodex scale in §4.2.3); the runtime globals were read in the initialisation routines
+(`FUN_005e2260` in the Vocoder, `FUN_0062f250` in the Vocodex): `ln 2`, `ln 2/2`, `ln 2/12`, `ln 2/1200`, `ln 7`, `ln 11`.
+`curve11(x) = (11^x − 1)/10` (exactly 1 when x = 1), the same as in Love Philter.
 
-### 4.1 Fruity Vocoder (classe `TTestPlug`, VMT `0x6cf210`, instância `0x15190` B)
+### 4.1 Fruity Vocoder (class `TTestPlug`, VMT `0x6cf210`, instance `0x15190` B)
 
-#### 4.1.1 Estado (`FUN_006cf810`, slot 3) — **confirma e corrige a rodada 19 §6b**
+#### 4.1.1 State (`FUN_006cf810`, slot 3) — **confirms and corrects round 19 §6b**
 
-| Campo | Tipo | Conteúdo |
+| Field | Type | Content |
 |---|---|---|
-| versão | i32 | 2 (gravada); carga só se > 1 |
-| bandas | i32 (`+0x15170`) | **N = 4, 8, 16, 32, 64 ou 128** (seletor = índice i, `N = 4 << i`, `FUN_006d4cf0`; rótulos "4…128" na tabela `0x723a00`); padrão 16 (construtor `FUN_006cfb20`) |
-| ordem | i32 (`+0x15174`) | **ordem do filtro 1…3** (seletor = ordem − 1, `FUN_006d4d50`; rótulos "1/2/3" em `0x723a30`); padrão 2 |
-| listen | i32 (`+0x15178`) | **0 = só modulador, 1 = só portadora, 2 = mistura** (`FUN_006d4a20` → `FUN_006cfe50`); padrão 2 |
-| troca | u8 (`+0x1517c`) | **troca modulador/portadora** (`SwapModCarSelect`, `FUN_006d5070`) — é o "byte extra" da rodada 19 |
-| níveis | N × f32 | **ganho por banda** do banco de análise (campo `+0x144` de cada banda; zerado para 1,0 antes da leitura) |
-| parâmetros | 12 × i32 (`+0x120…+0x14c`) | tags 0…11 do DFM, valores crus |
+| version | i32 | 2 (written); loads only if > 1 |
+| bands | i32 (`+0x15170`) | **N = 4, 8, 16, 32, 64 or 128** (selector = index i, `N = 4 << i`, `FUN_006d4cf0`; labels "4…128" in table `0x723a00`); default 16 (constructor `FUN_006cfb20`) |
+| order | i32 (`+0x15174`) | **filter order 1…3** (selector = order − 1, `FUN_006d4d50`; labels "1/2/3" at `0x723a30`); default 2 |
+| listen | i32 (`+0x15178`) | **0 = modulator only, 1 = carrier only, 2 = mix** (`FUN_006d4a20` → `FUN_006cfe50`); default 2 |
+| swap | u8 (`+0x1517c`) | **modulator/carrier swap** (`SwapModCarSelect`, `FUN_006d5070`) — it is the "extra byte" of round 19 |
+| levels | N × f32 | **per-band gain** of the analysis bank (field `+0x144` of each band; reset to 1.0 before reading) |
+| parameters | 12 × i32 (`+0x120…+0x14c`) | DFM tags 0…11, raw values |
 
-Dados: os 10 blobs (1 demo + 9 `.fst`) seguem exatamente essa ordem (ordem = 2, listen = 2, troca = 0) **[DADOS]**.
-Os índices de automação são os tags 0…11 (`FUN_006d08c0` só aceita índice < 12) **[DECOMP]**.
+Data: the 10 blobs (1 demo + 9 `.fst`) follow exactly this order (order = 2, listen = 2, swap = 0) **[DATA]**.
+The automation indices are tags 0…11 (`FUN_006d08c0` only accepts index < 12) **[DECOMP]**.
 
-#### 4.1.2 Leis dos parâmetros (`FUN_006d03a0`, `FUN_006cff90`) **[DECOMP]**
+#### 4.1.2 Parameter laws (`FUN_006d03a0`, `FUN_006cff90`) **[DECOMP]**
 
-| Tag | Nome | Lei |
+| Tag | Name | Law |
 |---|---|---|
-| 0/1 | FreqMin / FreqMax (0…65 536) | **`f = 10 + 159,9·(101^(v/65536) − 1)` Hz** (0 → 10 Hz; 65 536 → 16 000 Hz); se min ≥ max, min = max − 1 Hz |
-| 2 | FreqScale (0…128, 64) | **`S = int(10000^(v/128) − 1) + 1`** (0 → 1; 64 → 100; 128 → 10 000; a conversão para inteiro é `FUN_00409d00`, arredondamento não conferido) |
-| 3 | Invert | inverte a ordem das bandas do banco da portadora (§4.1.3) |
-| 4 | Formant (−1200…1200) | **centésimos** somados às bordas do banco da portadora |
-| 5 | Bandwidth (5…200, 50) | largura relativa em % (fórmula em §4.1.3) e normalização de ganho `1500/BW` |
-| 6/7 | Attack / Release (10…1000) | **milissegundos**: coeficiente por amostra **`c = 0,01^(1/(ms·0,001·fs))`** (polo que cai a −40 dB em `ms`) |
-| 8 | Hold | ≠ 0 → congela os níveis (sem análise; usa o último envelope) |
-| 9/10/11 | Modulator / Carrier / Wet level (0…160) | **`curve11(v/128)`** (128 → 1,0; 160 → 1,89) — só no modo listen 2; listen 0 → mod = 1, resto 0; listen 1 → car = 1, resto 0 |
+| 0/1 | FreqMin / FreqMax (0…65,536) | **`f = 10 + 159.9·(101^(v/65536) − 1)` Hz** (0 → 10 Hz; 65,536 → 16,000 Hz); if min ≥ max, min = max − 1 Hz |
+| 2 | FreqScale (0…128, 64) | **`S = int(10000^(v/128) − 1) + 1`** (0 → 1; 64 → 100; 128 → 10,000; the integer conversion is `FUN_00409d00`, rounding not checked) |
+| 3 | Invert | reverses the band order of the carrier bank (§4.1.3) |
+| 4 | Formant (−1200…1200) | **cents** added to the carrier bank edges |
+| 5 | Bandwidth (5…200, 50) | relative width in % (formula in §4.1.3) and gain normalisation `1500/BW` |
+| 6/7 | Attack / Release (10…1000) | **milliseconds**: per-sample coefficient **`c = 0.01^(1/(ms·0.001·fs))`** (pole that decays to −40 dB in `ms`) |
+| 8 | Hold | ≠ 0 → freezes the levels (no analysis; uses the last envelope) |
+| 9/10/11 | Modulator / Carrier / Wet level (0…160) | **`curve11(v/128)`** (128 → 1.0; 160 → 1.89) — only in listen mode 2; listen 0 → mod = 1, rest 0; listen 1 → car = 1, rest 0 |
 
-#### 4.1.3 Bandas e filtros (`FUN_006d00b0`, `FUN_005dbb00`, `FUN_005db530`) **[DECOMP]**
+#### 4.1.3 Bands and filters (`FUN_006d00b0`, `FUN_005dbb00`, `FUN_005db530`) **[DECOMP]**
 
-- **Bordas** (i = 0…N): `f_i = fmin + (fmax − fmin)·((S + 1)^(i/N) − 1)/S` Hz, convertidas para centésimos
-  `c_i = 1200·log2(f_i/440) + 5700` (`FUN_006cff40`; 0 = Dó 16,35 Hz). Banda k = [c_(k−1), c_k].
-- **Dois bancos:** análise (`+0x150`, sinal do modulador) com as bordas cruas; síntese (`+0xA950`) com `c_i +
-  Formant` e, com Invert, índice espelhado (`N − k`). A banda só existe se o centro dos **dois** bancos ficar em
+- **Edges** (i = 0…N): `f_i = fmin + (fmax − fmin)·((S + 1)^(i/N) − 1)/S` Hz, converted to cents
+  `c_i = 1200·log2(f_i/440) + 5700` (`FUN_006cff40`; 0 = C at 16.35 Hz). Band k = [c_(k−1), c_k].
+- **Two banks:** analysis (`+0x150`, modulator signal) with the raw edges; synthesis (`+0xA950`) with `c_i +
+  Formant` and, with Invert, mirrored index (`N − k`). The band only exists if the centre of **both** banks falls within
   **[10 Hz; 20 000·fs/44 100)**.
-- **Centro** = média das bordas em centésimos (média geométrica em Hz): `fc = 440·2^(((c_(k−1) + c_k)/2 − 5700)/1200)`.
-- **Filtro**: passa-faixa RBJ de ganho de pico 0 dB (código tipo 2: `b0 = α/(1+α)`, `b1 = 0`, `b2 = −α/(1+α)`,
-  `a1 = −2cos ω/(1+α)`, `a2 = (1−α)/(1+α)`), com **largura em oitavas** `α = sen ω·senh((ln 2/2)·BW_oct·ω/sen ω)`
-  (global `ln 2/2`; `senh` = `FUN_0045d4d0` por inferência, calcula `exp(x)` e `exp(−x)`) e
-  **`BW_oct = (BW/100)·ordem·(c_k − c_(k−1))/1200`**. A **ordem = nº de cópias idênticas em cascata** (1…3), nos dois
-  bancos.
-- Exemplo (padrão: 16 bandas, 10…16 000 Hz, S = 100): bordas 10, 63, 135, 230, 357, 526, 753, 1054, 1457, 1994,
-  2711, 3668, 4944, 6648, 8921, 11 953, 16 000 Hz; centros 25, 92, 176, 287 … 13 829 Hz (calculado).
+- **Centre** = mean of the edges in cents (geometric mean in Hz): `fc = 440·2^(((c_(k−1) + c_k)/2 − 5700)/1200)`.
+- **Filter**: RBJ band-pass with 0 dB peak gain (code type 2: `b0 = α/(1+α)`, `b1 = 0`, `b2 = −α/(1+α)`,
+  `a1 = −2cos ω/(1+α)`, `a2 = (1−α)/(1+α)`), with **width in octaves** `α = sin ω·sinh((ln 2/2)·BW_oct·ω/sin ω)`
+  (global `ln 2/2`; `sinh` = `FUN_0045d4d0` by inference, it computes `exp(x)` and `exp(−x)`) and
+  **`BW_oct = (BW/100)·order·(c_k − c_(k−1))/1200`**. The **order = number of identical copies in cascade** (1…3), in both
+  banks.
+- Example (default: 16 bands, 10…16,000 Hz, S = 100): edges 10, 63, 135, 230, 357, 526, 753, 1054, 1457, 1994,
+  2711, 3668, 4944, 6648, 8921, 11,953, 16,000 Hz; centres 25, 92, 176, 287 … 13,829 Hz (computed).
 
-#### 4.1.4 Processamento (`FUN_006d0fb0`, slot 7) **[DECOMP]**
+#### 4.1.4 Processing (`FUN_006d0fb0`, slot 7) **[DECOMP]**
 
-1. A entrada estéreo é separada: **L = modulador, R = portadora** (`FUN_005e0a60`); com o byte de troca, invertidos.
-2. Por banda ativa (e não em Hold): o modulador passa pela cascata do banco de análise; o **seguidor**
-   (`FUN_006d0e70`) faz, por amostra, `x = |y|·G_k` e `env ← x + (env − x)·c` com `c = c_att` se `x > env`, senão
-   `c_rel`; abaixo de um limiar de denormal o envelope vai a 0 (a banda é marcada "silenciosa" e pulada).
-   **`G_k = nível_k · Wet · 1500/BW`** (o Wet entra só aqui).
-3. A portadora passa pela cascata do banco de síntese da mesma banda; a saída acumula **`Σ_k port_k · env_k`**
+1. The stereo input is split: **L = modulator, R = carrier** (`FUN_005e0a60`); with the swap byte, reversed.
+2. For each active band (and not in Hold): the modulator goes through the analysis bank cascade; the **follower**
+   (`FUN_006d0e70`) computes, per sample, `x = |y|·G_k` and `env ← x + (env − x)·c` with `c = c_att` if `x > env`, otherwise
+   `c_rel`; below a denormal threshold the envelope goes to 0 (the band is marked "silent" and skipped).
+   **`G_k = level_k · Wet · 1500/BW`** (Wet enters only here).
+3. The carrier goes through the synthesis bank cascade of the same band; the output accumulates **`Σ_k car_k · env_k`**
    (`FUN_005df640`).
-4. Soma `mod·g_mod + port·g_car` (níveis do §4.1.2).
-5. **A saída é mono: a mesma amostra vai para L e R** (`FUN_005e0aa0`).
-- Coerente com o manual: "left channel is the modulator and the right channel is the carrier"; "processes a mono
-  input and outputs stereo"; "L and R labels in the MIX section swap the assignments"; bandas "4 to 128"
-  **[DOC `…/plugins/Fruity%20Vocoder.htm`]**. (O manual chama o Release de "Decay"; o DFM diz "Release".)
+4. Adds `mod·g_mod + car·g_car` (levels from §4.1.2).
+5. **The output is mono: the same sample goes to L and R** (`FUN_005e0aa0`).
+- Consistent with the manual: "left channel is the modulator and the right channel is the carrier"; "processes a mono
+  input and outputs stereo"; "L and R labels in the MIX section swap the assignments"; bands "4 to 128"
+  **[DOC `…/plugins/Fruity%20Vocoder.htm`]**. (The manual calls Release "Decay"; the DFM says "Release".)
 
-#### 4.1.5 Uso nos demos **[DADOS `tmp/r20/voc/all.py`]**
+#### 4.1.5 Use in the demos **[DATA `tmp/r20/voc/all.py`]**
 
-- 1 instância: "Edlan & Ella Noël – Song For You", trilha **9 "Crusty Piano"** (contagem de `0xEC` a partir de 0 =
-  Master; o pickle da rodada 14 numera essa mesma trilha como 10), alimentada pelo canal FL Keys "Crusty Piano";
-  **nenhuma outra trilha roteia para ela**. Estado: 16 bandas, ordem 2, listen 2, sem troca, níveis 1,0, FreqMin 0,
-  FreqMax 65 536, Scale 64, Formant 0, BW 50, A 20 ms, R 100 ms, Mod 0, Car 0, **Wet 147 (→ 1,47)**.
-  Ou seja: o piano vocoda a si mesmo (L do piano como modulador, R como portadora).
-- `.fst` "Mono/Stereo tape simulation" (4 bandas, Formant −700, BW 95) e "Outside the club" (Formant −10, BW 142)
-  são os únicos presets fora do padrão.
+- 1 instance: "Edlan & Ella Noël – Song For You", track **9 "Crusty Piano"** (counting `0xEC` from 0 =
+  Master; the round 14 pickle numbers this same track as 10), fed by the FL Keys channel "Crusty Piano";
+  **no other track routes to it**. State: 16 bands, order 2, listen 2, no swap, levels 1.0, FreqMin 0,
+  FreqMax 65,536, Scale 64, Formant 0, BW 50, A 20 ms, R 100 ms, Mod 0, Car 0, **Wet 147 (→ 1.47)**.
+  In other words: the piano vocodes itself (the piano's L as modulator, R as carrier).
+- `.fst` "Mono/Stereo tape simulation" (4 bands, Formant −700, BW 95) and "Outside the club" (Formant −10, BW 142)
+  are the only non-default presets.
 
-### 4.2 Vocodex (classe `TTestPlug`, VMT `0x84e438`, instância `0x528` B)
+### 4.2 Vocodex (class `TTestPlug`, VMT `0x84e438`, instance `0x528` B)
 
-#### 4.2.1 Estado (`FUN_0084efb0`, slot 3) **[DECOMP + DADOS]**
+#### 4.2.1 State (`FUN_0084efb0`, slot 3) **[DECOMP + DATA]**
 
-| Bloco | Tamanho | Conteúdo |
+| Block | Size | Content |
 |---|---|---|
-| versão | u32 | gravada `0x00080003` → **8** (palavra alta); presets antigos 2, 3, 5; carga só se 1 < v < `0x80004` |
-| **13 mapas** | var. | objetos de envelope (mesmo formato dos `.fnv` de `Data/Maps`): `i32` versão (3), `i32`, `i32 n`, n × {`f64` Δx, `f64` y, `f32` tensão, `u32` flags}, + 20 B finais |
-| parâmetros | 20 × i32 (`+0x120…+0x16C`) | tags 0…19 do DFM (v < 3: 7 + 12 valores, com o tag 7 inserido = 58 000) |
-| bloco | 0x24 B (`+0x170`; v4: 0x23, v < 5: −3) | ver abaixo |
-| (v ≥ 4) | 13 B (`+0x1FC`) | bytes de opção (nos dados sempre `00 00 00 01 01 00…`; significado **não confirmado**) |
-| tom da portadora | `u8 n` + n bytes | nome do preset do sintetizador interno (ex.: `"PWM"`, `"Ensemble"`, `"Robot saw"`); vazio = nenhum |
-| notas | `i32 k` + k × i32 | **notas MIDI travadas no teclado** da portadora interna (padrão: 1 nota, 60) |
+| version | u32 | written `0x00080003` → **8** (high word); old presets 2, 3, 5; loads only if 1 < v < `0x80004` |
+| **13 maps** | var. | envelope objects (same format as the `.fnv` in `Data/Maps`): `i32` version (3), `i32`, `i32 n`, n × {`f64` Δx, `f64` y, `f32` tension, `u32` flags}, + 20 trailing B |
+| parameters | 20 × i32 (`+0x120…+0x16C`) | DFM tags 0…19 (v < 3: 7 + 12 values, with tag 7 inserted = 58,000) |
+| block | 0x24 B (`+0x170`; v4: 0x23, v < 5: −3) | see below |
+| (v ≥ 4) | 13 B (`+0x1FC`) | option bytes (always `00 00 00 01 01 00…` in the data; meaning **not confirmed**) |
+| carrier tone | `u8 n` + n bytes | name of the internal synthesizer preset (e.g. `"PWM"`, `"Ensemble"`, `"Robot saw"`); empty = none |
+| notes | `i32 k` + k × i32 | **MIDI notes latched on the keyboard** of the internal carrier (default: 1 note, 60) |
 
-Bloco `+0x170` (nomes pela tabela de campos do `TSynthEditorForm` e pelo que a carga escreve em cada controle):
-`i32` **modo Hold** (`HoldModeSel`; PEAK/RMS — qual valor é qual **não confirmado**), `i32` **ordem** (`OrderSelect`
-= valor − 1; 1…4), `i32` **ordem do uníssono** (`FatOrderSelect` = valor + 1; 0 = desligado nos dados), `i32`
-**nº de bandas** (5…100, padrão 47), `i32` (`DraftBtn` marcado quando o campo = 0), `i32` **ModIn**, `i32` **CarIn**,
-`u8` **L-R encoding**, `u8` MIN TIMES, `u8` contorno→MOD, `u8` THREADED, `u8` (posto em 1), `u8` contorno→NOISE,
-`u8` contorno de CAR, `u8` contorno de CONSONANTS.
+Block `+0x170` (names from the `TSynthEditorForm` field table and from what the loader writes to each control):
+`i32` **Hold mode** (`HoldModeSel`; PEAK/RMS — which value is which **not confirmed**), `i32` **order** (`OrderSelect`
+= value − 1; 1…4), `i32` **unison order** (`FatOrderSelect` = value + 1; 0 = off in the data), `i32`
+**number of bands** (5…100, default 47), `i32` (`DraftBtn` checked when the field = 0), `i32` **ModIn**, `i32` **CarIn**,
+`u8` **L-R encoding**, `u8` MIN TIMES, `u8` contour→MOD, `u8` THREADED, `u8` (set to 1), `u8` contour→NOISE,
+`u8` CAR contour, `u8` CONSONANTS contour.
 
-Mapas (ordem fixa do construtor `FUN_0084f730`, nomes pelo manual): 0 ganho por banda, 1 pan por banda, 2 offset de
-ganho, 3 nível de ruído do modulador, 4 *pass-through* do modulador, 5 Hold, 6 Attack, 7 Release, **8 distribuição
-das bandas**, 9 largura de banda, 10 *pitch shift* do modulador, 11 mistura de saturação, 12 curva de saturação
+Maps (fixed order from constructor `FUN_0084f730`, names from the manual): 0 per-band gain, 1 per-band pan, 2 gain
+offset, 3 modulator noise level, 4 modulator *pass-through*, 5 Hold, 6 Attack, 7 Release, **8 band
+distribution**, 9 bandwidth, 10 modulator *pitch shift*, 11 saturation mix, 12 saturation curve
 **[DECOMP + DOC `…/plugins/Vocodex_parameters.htm`]**.
 
-#### 4.2.2 Parâmetros (`FUN_00853e80`; tags = DFM) **[DECOMP]**
+#### 4.2.2 Parameters (`FUN_00853e80`; tags = DFM) **[DECOMP]**
 
-| Tag | Nome (DFM) | Lei |
+| Tag | Name (DFM) | Law |
 |---|---|---|
-| 0 | Wet (0…2000, 1000) | **`(7^(v/1000) − 1)/6`** (1000 → 1,0; 2000 → 8,0 = +18 dB) |
-| 1 | Soundgoodizing (0…1000) | repassado ao Soundgoodizer interno (`SG.dll`, parâmetro 5) — lei **não lida** |
-| 2 / 4 | Mod / Car pass-through (0…16 000) | **`curve11(v/12800)`** (12 800 → 1,0) |
-| 3 / 7 | Mod HP / Car noise HP (0…65 536) | 0 = filtro desligado; senão **`f = 40·375^(v/65536)` Hz** (até 15 kHz; 55 000 → 5,78 kHz) |
-| 5 | Car LP (0…65 536) | 65 536 = desligado; senão a mesma lei (28 000 → 503 Hz) |
-| 6 | Carrier noise (0…12 800) | `0,5·(7^(v/12800) − 1)/6` (×4 com contorno CAR→NOISE) |
-| 8 | Hold (0…10 000) | janela `(501^(v/10000) − 1)·0,5 ms` × mapa 5 (1666 → 0,91 ms; máx. 250 ms) |
-| 9 | Attack (0…10 000) | `(501^(v/10000) − 1)·2 ms` × mapa 6 (1115 → 2,0 ms; máx. 1 s) |
-| 11 | Release (0…10 000) | `(501^(v/10000) − 1)·4 ms` × mapa 7 (3500 → 31,2 ms; máx. 2 s) |
-| 10 / 12 | Attack / Release curve (0…2000) | passam por `FUN_005fd490(2, v/1000)` (forma **não confirmada**) |
-| 14 | Band width (5…1000) | fator **`0,5·(5^(v/1000) − 1)`** (349 → 0,377) |
-| 15 | Flatness (0…100) | `v/100` (espalha as sub-bandas da ordem) |
-| 17 | Mod pitch (−1200…1200) | **centésimos**: o banco de análise é multiplicado por `2^(−v/1200)` |
-| 16, 18, 19 | Mod BW, uníssono pitch/pan | recalculam as bandas (`FUN_00851dd0`); leis **não lidas** |
+| 0 | Wet (0…2000, 1000) | **`(7^(v/1000) − 1)/6`** (1000 → 1.0; 2000 → 8.0 = +18 dB) |
+| 1 | Soundgoodizing (0…1000) | passed to the internal Soundgoodizer (`SG.dll`, parameter 5) — law **not read** |
+| 2 / 4 | Mod / Car pass-through (0…16,000) | **`curve11(v/12800)`** (12,800 → 1.0) |
+| 3 / 7 | Mod HP / Car noise HP (0…65,536) | 0 = filter off; otherwise **`f = 40·375^(v/65536)` Hz** (up to 15 kHz; 55,000 → 5.78 kHz) |
+| 5 | Car LP (0…65,536) | 65,536 = off; otherwise the same law (28,000 → 503 Hz) |
+| 6 | Carrier noise (0…12,800) | `0.5·(7^(v/12800) − 1)/6` (×4 with CAR→NOISE contour) |
+| 8 | Hold (0…10,000) | window `(501^(v/10000) − 1)·0.5 ms` × map 5 (1666 → 0.91 ms; max. 250 ms) |
+| 9 | Attack (0…10,000) | `(501^(v/10000) − 1)·2 ms` × map 6 (1115 → 2.0 ms; max. 1 s) |
+| 11 | Release (0…10,000) | `(501^(v/10000) − 1)·4 ms` × map 7 (3500 → 31.2 ms; max. 2 s) |
+| 10 / 12 | Attack / Release curve (0…2000) | go through `FUN_005fd490(2, v/1000)` (shape **not confirmed**) |
+| 14 | Band width (5…1000) | factor **`0.5·(5^(v/1000) − 1)`** (349 → 0.377) |
+| 15 | Flatness (0…100) | `v/100` (spreads the sub-bands of the order) |
+| 17 | Mod pitch (−1200…1200) | **cents**: the analysis bank is multiplied by `2^(−v/1200)` |
+| 16, 18, 19 | Mod BW, unison pitch/pan | recompute the bands (`FUN_00851dd0`); laws **not read** |
 
-Unidades em ms são dedução: o código multiplica por `0,001·fs` e usa o resultado como contagem de amostras
-(atack/release/hold), cujo significado exato (constante de tempo ou tempo total, forma da curva) **não foi
-confirmado**. Os mapas 5/6/7 multiplicam ×0,125…×8 (×1 no meio) **[DOC]**.
+Units in ms are a deduction: the code multiplies by `0.001·fs` and uses the result as a sample count
+(attack/release/hold), whose exact meaning (time constant or total time, curve shape) **was not
+confirmed**. Maps 5/6/7 multiply by ×0.125…×8 (×1 in the middle) **[DOC]**.
 
-#### 4.2.3 Distribuição das bandas (`FUN_00851dd0`, `FUN_0062cb20`, `FUN_0062cd90`) **[DECOMP + DADOS]**
+#### 4.2.3 Band distribution (`FUN_00851dd0`, `FUN_0062cb20`, `FUN_0062cd90`) **[DECOMP + DATA]**
 
-- Banda k (0…N − 1) lê o **mapa 8 em x = k/(N − 1)**; o y (0…1) vira Hz pela inversa da escala do objeto
-  `+0x464`, montada no construtor com `a = 440·2^(−33/12) = 65,41 Hz` e `b = 440·2^(67/12) = 21 096 Hz`:
-  **`y(f) = p + (1 − p)·ln(1 + (f − a)/(b − a)·b/a)/ln(1 + b/a)`** para f ≥ a, `y = p·f/a` abaixo, com
-  `p = ln 2/ln(2b/a) = 3/28`. A frequência é limitada a **≥ 20 Hz**.
-- **Verificação [DADOS]:** o mapa padrão (`Band distribution - default.fnv` e todos os blobs) vai de y = 0,1429 a
-  0,9918, que pela fórmula são **82,4 Hz** (`440·2^(−29/12)`, o valor que o construtor usa para o 1º ponto) e
-  **20 000 Hz** (2º ponto). O mapa "Bark scale (24 bands)" dá 60, 150, 250 … 13 753 Hz (centros de Bark). Logo o
-  padrão de 47 bandas é uma reta em y entre 82 Hz e 20 kHz (meio = 1,28 kHz).
-- Largura de cada banda: distância (em log2) aos vizinhos, média dos dois lados, × mapa 9 × fator do tag 14 ×
-  0,25, limitada a **[1/60; 8]**; cada banda tem `ordem` sub-filtros, deslocados em ±0,5·Flatness·largura
-  (ordens 3/4 com correções extras); o desenho do sub-filtro (`FUN_00626690`) **não foi lido**.
+- Band k (0…N − 1) reads **map 8 at x = k/(N − 1)**; the y (0…1) becomes Hz through the inverse of the scale of object
+  `+0x464`, built in the constructor with `a = 440·2^(−33/12) = 65.41 Hz` and `b = 440·2^(67/12) = 21 096 Hz`:
+  **`y(f) = p + (1 − p)·ln(1 + (f − a)/(b − a)·b/a)/ln(1 + b/a)`** for f ≥ a, `y = p·f/a` below, with
+  `p = ln 2/ln(2b/a) = 3/28`. The frequency is limited to **≥ 20 Hz**.
+- **Check [DATA]:** the default map (`Band distribution - default.fnv` and all blobs) goes from y = 0.1429 to
+  0.9918, which by the formula are **82.4 Hz** (`440·2^(−29/12)`, the value the constructor uses for the 1st point) and
+  **20,000 Hz** (2nd point). The "Bark scale (24 bands)" map gives 60, 150, 250 … 13,753 Hz (Bark centres). Hence the
+  47-band default is a straight line in y between 82 Hz and 20 kHz (middle = 1.28 kHz).
+- Width of each band: distance (in log2) to the neighbours, mean of both sides, × map 9 × tag 14 factor ×
+  0.25, limited to **[1/60; 8]**; each band has `order` sub-filters, shifted by ±0.5·Flatness·width
+  (orders 3/4 with extra corrections); the sub-filter design (`FUN_00626690`) **was not read**.
 
-#### 4.2.4 Entradas (render `FUN_00856350`) **[DECOMP + DOC + DADOS]**
+#### 4.2.4 Inputs (render `FUN_00856350`) **[DECOMP + DOC + DATA]**
 
-- **L-R encoding desligado:** modulador = entrada da própria trilha se **ModIn = 0**; senão é pedido ao host
-  (método `+0x120` do host) o *buffer* lateral, voltando à entrada própria se não vier. Portadora: **CarIn < 0** →
-  *buffer* interno zerado e preenchido pelo sintetizador interno (o `Sytrus_x64.dll` da pasta `Synthesizer`, via
-  `TFPForwarder_Vocodex`; manual: "built on the Sytrus synthesis engine"); **CarIn = 0** → entrada própria; > 0 →
-  *buffer* lateral do host.
-- **L-R encoding ligado:** a entrada é separada por `FUN_008554b0` (L = modulador, R = portadora segundo o manual
-  e o *hint* do DFM "Left (modulator) / right (carrier) interlaced input").
+- **L-R encoding off:** modulator = the track's own input if **ModIn = 0**; otherwise the side *buffer* is requested from the host
+  (host method `+0x120`), falling back to the own input if it does not arrive. Carrier: **CarIn < 0** →
+  internal *buffer* zeroed and filled by the internal synthesizer (the `Sytrus_x64.dll` in the `Synthesizer` folder, via
+  `TFPForwarder_Vocodex`; manual: "built on the Sytrus synthesis engine"); **CarIn = 0** → own input; > 0 →
+  host side *buffer*.
+- **L-R encoding on:** the input is split by `FUN_008554b0` (L = modulator, R = carrier according to the manual
+  and the DFM *hint* "Left (modulator) / right (carrier) interlaced input").
 - Manual: "Value 0: the input uses audio passing through Vocodex's own Mixer track"; "---: external inputs are
-  blocked"; com a portadora interna "CAR to ---"; o modulador é analisado em mono (L+R) **[DOC
+  blocked"; with the internal carrier "CAR to ---"; the modulator is analysed in mono (L+R) **[DOC
   `…/plugins/Vocodex_inputs.htm`]**.
-- **Qual trilha é a entrada lateral n** não foi lido no host; nos dados, as 4 instâncias com n ≥ 1 batem com "n-ésima
-  trilha que roteia para a trilha do Vocodex, em ordem de índice" (ver tabela) — **inferência dos dados, não
-  confirmado**.
+- **Which track is side input n** was not read in the host; in the data, the 4 instances with n ≥ 1 match "n-th
+  track that routes to the Vocodex track, in index order" (see table) — **inference from the data, not
+  confirmed**.
 
-| Demo (trilha, contagem `0xEC`) | Entram na trilha | ModIn / CarIn | Bandas / ordem | Wet / ModVol | Observação |
+| Demo (track, `0xEC` count) | Feeding the track | ModIn / CarIn | Bands / order | Wet / ModVol | Remark |
 |---|---|---|---|---|---|
-| "Ookay – Thief" 27 e "NewStuff" 27 | 24 "Main Vox" | 0 / **−1** | 47 / 2 | 2000 / 12 800 | portadora interna `"PWM"`, notas 51, 63, 66, 73 |
-| "SeamlessR – Bass Antics" 3 "Voc" | 1 "Mod", 2 "Car" | 1 / 2 | 47 / 2 | 1000 / 0 | mapa 0 editado; ModPitch −1200 |
-| "Olbaid – Harmless Essentials" 71 | 72 "Carrier", 73 "Modulador" | 2 / 1 | 47 / 2 | 1000 / 12 800 | |
-| "JuiceBass – Menagerie" 7 | 5 "Carrier", 6 "Modulator" | 2 / 1 | 47 / **4** | 1000 / 0 | mapas 0 e 9 desenhados |
-| "Treben – RawFL" 15 | 2 "GHOSTKICK", 16 "BASS 6" | 0 / 2 | 47 / 1 | 1268 / 13 400 | |
-| "Treben – All the same" 27/29/30 | 45 "SC" | 0 / 0 | 14 e 32 / 3 | 1000 / 16 000 | Att = Rel = Hold = 0 |
-| "Vocodex demo" 2 "VCX" / template "Vocoder" 2 | 1 "Vocals" / 1 "Voice in" | 1/0 e 0/0 | 47 e 24 (Bark) / 2–3 | ≈1000 | |
+| "Ookay – Thief" 27 and "NewStuff" 27 | 24 "Main Vox" | 0 / **−1** | 47 / 2 | 2000 / 12,800 | internal carrier `"PWM"`, notes 51, 63, 66, 73 |
+| "SeamlessR – Bass Antics" 3 "Voc" | 1 "Mod", 2 "Car" | 1 / 2 | 47 / 2 | 1000 / 0 | map 0 edited; ModPitch −1200 |
+| "Olbaid – Harmless Essentials" 71 | 72 "Carrier", 73 "Modulador" | 2 / 1 | 47 / 2 | 1000 / 12,800 | |
+| "JuiceBass – Menagerie" 7 | 5 "Carrier", 6 "Modulator" | 2 / 1 | 47 / **4** | 1000 / 0 | maps 0 and 9 drawn |
+| "Treben – RawFL" 15 | 2 "GHOSTKICK", 16 "BASS 6" | 0 / 2 | 47 / 1 | 1268 / 13,400 | |
+| "Treben – All the same" 27/29/30 | 45 "SC" | 0 / 0 | 14 and 32 / 3 | 1000 / 16,000 | Att = Rel = Hold = 0 |
+| "Vocodex demo" 2 "VCX" / template "Vocoder" 2 | 1 "Vocals" / 1 "Voice in" | 1/0 and 0/0 | 47 and 24 (Bark) / 2–3 | ≈1000 | |
 
-### 4.3 Dá para aproximar no LYNX? (só o que ficou confirmado)
+### 4.3 Can it be approximated in LYNX? (only what was confirmed)
 
-- **Fruity Vocoder: sim, de forma fiel** — todas as leis necessárias estão no §4.1 (bordas, BP RBJ em cascata,
-  seguidor com `0,01^(1/(ms·fs/1000))`, ganhos `curve11`, `G_k = nível·Wet·1500/BW`, saída mono) e a entrada é o
-  próprio estéreo da trilha (L/R), sem precisar de *sidechain*. O único demo (Song For You) cabe nisso.
-- **Vocodex: só parcialmente.** Confirmados: layout do estado, nº de bandas, escala de frequências (fórmula
-  verificada contra os mapas), leis de Wet/pass-through/HP/LP, tempos A/R/H em ms (por dedução) e a seleção de
-  entradas. Não confirmados: desenho do sub-filtro e forma das curvas de A/R, ganho/normalização final por banda,
-  Soundgoodizer, uníssono. Além disso **todo uso nos demos depende de *sidechain*** (5 casos) ou do sintetizador
-  interno com preset Sytrus (2 casos), e o LYNX não tem entrada lateral.
+- **Fruity Vocoder: yes, faithfully** — all the required laws are in §4.1 (edges, cascaded RBJ BP,
+  follower with `0.01^(1/(ms·fs/1000))`, `curve11` gains, `G_k = level·Wet·1500/BW`, mono output) and the input is the
+  track's own stereo (L/R), with no need for a *sidechain*. The only demo (Song For You) fits this.
+- **Vocodex: only partially.** Confirmed: state layout, number of bands, frequency scale (formula
+  verified against the maps), Wet/pass-through/HP/LP laws, A/R/H times in ms (by deduction) and input
+  selection. Not confirmed: sub-filter design and A/R curve shape, final per-band gain/normalisation,
+  Soundgoodizer, unison. Moreover **every use in the demos depends on a *sidechain*** (5 cases) or on the internal
+  synthesizer with a Sytrus preset (2 cases), and LYNX has no side input.
 
 ---
 
-## Tabela-resumo (item → resultado)
+## Summary table (item → result)
 
-| # | Item | Resultado |
+| # | Item | Result |
 |---|---|---|
-| 1a | Love Philter: tempo dos pontos | *tick* de controle a cada `N = max(4, 4·round(v·fs_int/44100/4))` amostras (v = 64, ou 8 com HQ) ≈ 1,45 ms, rampa linear entre *ticks*; **com o bit TEMPO (todos os demos): Δt em tempos**; sem TEMPO, Δt = 1 → 0,5 s (dedução, não conferida) **[DECOMP+DADOS]** |
-| 1b | Love Philter: *pattern*, *loop*, sincronismo | só o envelope de índice PatNum toca (demos: 1); *loop* do ponto 0 ao último → período `ΣΔt` (1 tempo em 8 de 9 gates); no início do transporte envelopes e LFOs são reposicionados na posição da música (fase = posição mod período) **[DECOMP+DADOS+DOC]** |
-| 1c | Love Philter: curvas | valor `y − 0,5·modo`; tipo 0: `q = sinal(t)(1000001^|t| − 1)`, t > 0 → `1 − ((1+q)^(1−x) − 1)/q`, t < 0 → `((1+|q|)^x − 1)/|q|` **[DECOMP]**; tipo 5 (1 caso) não decodificado |
-| 1d | Love Philter: combinação | modo 0 `s·E·d_E` e `s·(1 + 2L·d_L)`; modo 1 `s + E·d_E`, `s + L·d_L`; pan = `PAN/128 + 2·s_pan`; vol = ganho da unidade × `s_vol` **[DECOMP]** |
-| 1e | Love Philter: LFO | `L = (y − 0,5)·W(φ)`; período `625/(10001^(S/65536) − 1)` tempos (demos: 1, 2, 4, 8, 16, 32); triângulo (com *skew*/largura de pulso/tensão), começa em W = 0 subindo + deslocamento; travado na posição da música **[DECOMP+DADOS]** |
-| 1f | Love Philter: IEF | nenhum mapa IEF não neutro nos demos → irrelevante **[DADOS]** |
-| 2 | Fruity Scratcher | efeito: **saída = entrada + sample** (16 bits/2 canais/44,1 kHz pedido ao host, em *loop*, bloqueio DC 0,99, Vol linear, pan balanço); estado `u32 0xF4628/0xF462A` + **14 f32** + caminho ANSI (+ u8, i32, u8); modo motor: rate `2·SPD·T` (T = −1/0/+1), inércia `a = 0,99999 − 0,0005·ACC`; modo Hold: posição segue p0 + (Rot − 9) por suavizador de 2ª ordem (Smooth 1…4); demos: **0 usos**; render test automatiza p0 por `0xDF` **[DECOMP+DADOS+DOC]**; escala do `0xDF`, conversão de taxa pelo host **não confirmadas** |
-| 3a | Patcher: soma dos cabos | `destino = Σ origem·ganho` (IPP `MulC`/`AddProductC`), sem cabo → zero; bit 0 das *flags* = cabo desligado; bit 1 = byte de classe válido; compensação de atraso por cabo **[DECOMP]** |
-| 3b | Patcher: grafos não cobertos | 14 slots (7 topologias); após podar nós fora de IN→OUT, **todos** reduzem a série-paralelo aninhado; 128 cabos de controle sem bit 1 são lidos como áudio pelo LYNX **[DADOS]** |
-| 4a | Fruity Vocoder | estado `v2; N; ordem 1…3; listen 0/1/2; troca u8; N×f32 níveis; 12×i32` (confirmado no leitor); bordas `fmin + (fmax−fmin)((S+1)^(i/N)−1)/S` (10…16 000 Hz, `S = int(10000^(v/128)−1)+1`); BP RBJ com `BW_oct = BW/100·ordem·largura`, cascata de `ordem` cópias; seguidor `0,01^(1/(ms·fs/1000))`; `G = nível·Wet·1500/BW`; níveis `curve11(v/128)`; L = mod, R = port., saída mono **[DECOMP+DOC+DADOS]** |
-| 4b | Vocodex | estado `v8; 13 mapas; 20×i32; bloco 0x24 (modo hold, ordem, uníssono, bandas, ModIn, CarIn, L-R, contornos); 13 B; nome do tom; notas`; bandas 5…100 em x = k/(N−1) do mapa 8 com a escala `a = 65,4 Hz, b = 21 096 Hz` (verificada: padrão 82 Hz…20 kHz); Wet `(7^(v/1000)−1)/6`; pass-through `curve11(v/12800)`; HP/LP `40·375^(v/65536)` Hz; A/R/H `(501^(v/10000)−1)·{2;4;0,5}` ms; entradas 0 = própria, −1 = sintetizador interno, n = lateral **[DECOMP+DOC+DADOS]**; filtros das sub-bandas e curvas **não confirmados** |
+| 1a | Love Philter: point timing | control *tick* every `N = max(4, 4·round(v·fs_int/44100/4))` samples (v = 64, or 8 with HQ) ≈ 1.45 ms, linear ramp between *ticks*; **with the TEMPO bit (all demos): Δt in beats**; without TEMPO, Δt = 1 → 0.5 s (deduction, not checked) **[DECOMP+DATA]** |
+| 1b | Love Philter: *pattern*, *loop*, synchronisation | only the envelope with index PatNum plays (demos: 1); *loop* from point 0 to the last → period `ΣΔt` (1 beat in 8 of 9 gates); at transport start envelopes and LFOs are repositioned at the song position (phase = position mod period) **[DECOMP+DATA+DOC]** |
+| 1c | Love Philter: curves | value `y − 0.5·mode`; type 0: `q = sign(t)(1000001^|t| − 1)`, t > 0 → `1 − ((1+q)^(1−x) − 1)/q`, t < 0 → `((1+|q|)^x − 1)/|q|` **[DECOMP]**; type 5 (1 case) not decoded |
+| 1d | Love Philter: combination | mode 0 `s·E·d_E` and `s·(1 + 2L·d_L)`; mode 1 `s + E·d_E`, `s + L·d_L`; pan = `PAN/128 + 2·s_pan`; vol = unit gain × `s_vol` **[DECOMP]** |
+| 1e | Love Philter: LFO | `L = (y − 0.5)·W(φ)`; period `625/(10001^(S/65536) − 1)` beats (demos: 1, 2, 4, 8, 16, 32); triangle (with *skew*/pulse width/tension), starts at W = 0 rising + offset; locked to the song position **[DECOMP+DATA]** |
+| 1f | Love Philter: IEF | no non-neutral IEF map in the demos → irrelevant **[DATA]** |
+| 2 | Fruity Scratcher | effect: **output = input + sample** (16 bits/2 channels/44.1 kHz requested from the host, *looped*, DC blocker 0.99, linear Vol, balance pan); state `u32 0xF4628/0xF462A` + **14 f32** + ANSI path (+ u8, i32, u8); motor mode: rate `2·SPD·T` (T = −1/0/+1), inertia `a = 0.99999 − 0.0005·ACC`; Hold mode: position follows p0 + (Rot − 9) through a 2nd-order smoother (Smooth 1…4); demos: **0 uses**; render test automates p0 via `0xDF` **[DECOMP+DATA+DOC]**; `0xDF` scaling, rate conversion by the host **not confirmed** |
+| 3a | Patcher: cable sum | `destination = Σ source·gain` (IPP `MulC`/`AddProductC`), no cable → zero; *flags* bit 0 = cable disabled; bit 1 = class byte valid; per-cable delay compensation **[DECOMP]** |
+| 3b | Patcher: uncovered graphs | 14 slots (7 topologies); after pruning nodes outside IN→OUT, **all** reduce to nested series-parallel; 128 control cables without bit 1 are read as audio by LYNX **[DATA]** |
+| 4a | Fruity Vocoder | state `v2; N; order 1…3; listen 0/1/2; swap u8; N×f32 levels; 12×i32` (confirmed in the reader); edges `fmin + (fmax−fmin)((S+1)^(i/N)−1)/S` (10…16,000 Hz, `S = int(10000^(v/128)−1)+1`); RBJ BP with `BW_oct = BW/100·order·width`, cascade of `order` copies; follower `0.01^(1/(ms·fs/1000))`; `G = level·Wet·1500/BW`; levels `curve11(v/128)`; L = mod, R = car., mono output **[DECOMP+DOC+DATA]** |
+| 4b | Vocodex | state `v8; 13 maps; 20×i32; block 0x24 (hold mode, order, unison, bands, ModIn, CarIn, L-R, contours); 13 B; tone name; notes`; bands 5…100 at x = k/(N−1) of map 8 with the scale `a = 65.4 Hz, b = 21 096 Hz` (verified: default 82 Hz…20 kHz); Wet `(7^(v/1000)−1)/6`; pass-through `curve11(v/12800)`; HP/LP `40·375^(v/65536)` Hz; A/R/H `(501^(v/10000)−1)·{2;4;0.5}` ms; inputs 0 = own, −1 = internal synthesizer, n = side **[DECOMP+DOC+DATA]**; sub-band filters and curves **not confirmed** |
 
 ---
 
-## Recomendações para o LYNX (só o que ficou confirmado)
+## Recommendations for LYNX (only what was confirmed)
 
-1. **Love Philter — gates e LFOs:**
-   - Gate de volume: ganho da unidade × `y(t)`, com `t` = posição da música em tempos **mod `T = ΣΔt`**
-     (a partir do ponto de início do *loop*), interpolação por ponto de chegada com a curva do §1.3 (linear se
-     t = 0); avaliar a cada ≈ 1,45 ms com rampa linear, ou por amostra (diferença ≤ 1 *tick*).
-   - Envelope de cutoff: `c = CUT/256 + (y − 0,5)·ENV/128`, depois a lei de Hz do tipo (rodadas 16/19).
-   - LFO: período `625/(10001^(S/65536) − 1)` **tempos** (TEMPO ligado), triângulo simétrico (k = w = 0 nos
-     demos) com fase inicial ¾ de ciclo (W = 0 subindo) + deslocamento `+0xE0/2³²`, travado na posição da música;
-     amplitude `(y − 0,5)·d_L`; pan `+2·L`, cutoff `+L` (em `c`). Para os 4 LFOs de pan com tensão ≠ 0, aplicar a
-     curva da tensão em `|W|` (q do §1.5).
-   - Só o envelope do PatNum (1 em todos os demos); ignorar o IEF.
-2. **Fruity Scratcher:** sem uso nos demos — importar como *bypass* (passar a entrada) com aviso, a menos que
-   Transport ≠ 0 com Hold = 0 (aí: tocar o sample do caminho em *loop* a `2·SPD`×, sentido pelo sinal, com
-   `y = Δs + 0,99·y`, ganho Vol linear e pan balanço, **somado** à entrada). Com Hold = 1 o som depende da automação
-   de p0 (não reproduzir sem ela; p0 constante = silêncio do sample).
+1. **Love Philter — gates and LFOs:**
+   - Volume gate: unit gain × `y(t)`, with `t` = song position in beats **mod `T = ΣΔt`**
+     (from the *loop* start point), interpolation by arrival point with the curve from §1.3 (linear if
+     t = 0); evaluate every ≈ 1.45 ms with a linear ramp, or per sample (difference ≤ 1 *tick*).
+   - Cutoff envelope: `c = CUT/256 + (y − 0.5)·ENV/128`, then the type's Hz law (rounds 16/19).
+   - LFO: period `625/(10001^(S/65536) − 1)` **beats** (TEMPO on), symmetric triangle (k = w = 0 in the
+     demos) with initial phase ¾ cycle (W = 0 rising) + offset `+0xE0/2³²`, locked to the song position;
+     amplitude `(y − 0.5)·d_L`; pan `+2·L`, cutoff `+L` (in `c`). For the 4 pan LFOs with tension ≠ 0, apply the
+     tension curve to `|W|` (q from §1.5).
+   - Only the PatNum envelope (1 in all demos); ignore the IEF.
+2. **Fruity Scratcher:** unused in the demos — import as *bypass* (pass the input through) with a warning, unless
+   Transport ≠ 0 with Hold = 0 (then: play the sample from the path in a *loop* at `2·SPD`×, direction from the sign, with
+   `y = Δs + 0.99·y`, linear Vol gain and balance pan, **added** to the input). With Hold = 1 the sound depends on the
+   p0 automation (do not reproduce without it; constant p0 = sample silence).
 3. **Patcher:**
-   - Ler a classe do cabo do byte 24 **só com o bit 1** das *flags*; caso contrário, usar a classe da porta. Pular
-     cabos com o bit 0.
-   - Podar nós fora de qualquer caminho IN→OUT e substituir as heurísticas "série"/"ramos" por uma redução
-     série-paralelo recursiva (§3.3) com soma e ganho por cabo; tratar Stereo Shaper/Frequency Splitter como nó
-     comum quando nenhuma aresta sai dele por barramento ≠ 0. Isso cobre os 14 slots restantes.
-   - Controladores (Peak/Formula/X-Y/X-Y-Z/Control Surface) não entram no áudio; usar os valores gravados dos
-     parâmetros ("Bien Duro" vira um EQ estático).
-4. **Vocodex e Fruity Vocoder:**
-   - **Fruity Vocoder:** implementar como efeito de inserção com o algoritmo do §4.1.4 (entrada estéreo da própria
-     trilha: L modula, R é portadora, com o byte de troca), bordas pelo §4.1.3, BP RBJ em cascata de `ordem` cópias,
-     seguidor por banda com os coeficientes de A/R em ms, ganho `nível·curve11(Wet/128)·1500/BW`, pass-through
-     `curve11(Mod/128)`/`curve11(Car/128)` e listen 0/1/2; saída mono duplicada em L/R. Importar o estado pelo leitor
-     do §4.1.1.
-   - **Vocodex:** sem *sidechain* no LYNX, importar como *bypass* com aviso (como hoje); registrar no log ModIn/CarIn,
-     nº de bandas e o nome do tom interno. Se o LYNX ganhar entrada lateral, o §4.2 dá o suficiente para um vocoder de
-     canal aproximado (bandas pela escala do §4.2.3, A/R em ms, Wet e pass-through com HP), deixando explícito que o
-     formato das sub-bandas, as curvas de A/R e o Soundgoodizer são aproximações.
-   - Corrigir a numeração de trilhas usada no pickle da rodada 14 ao cruzar com o `.flp` (as trilhas com Vocodex/Vocoder
-     estão 1 abaixo do número do pickle quando se conta o `0xEC` a partir do Master = 0).
+   - Read the cable class from byte 24 **only with bit 1** of the *flags*; otherwise, use the port class. Skip
+     cables with bit 0.
+   - Prune nodes outside any IN→OUT path and replace the "series"/"branches" heuristics with a recursive
+     series-parallel reduction (§3.3) with summing and per-cable gain; treat Stereo Shaper/Frequency Splitter as an ordinary
+     node when no edge leaves it through a bus ≠ 0. This covers the 14 remaining slots.
+   - Controllers (Peak/Formula/X-Y/X-Y-Z/Control Surface) do not enter the audio; use the stored parameter
+     values ("Bien Duro" becomes a static EQ).
+4. **Vocodex and Fruity Vocoder:**
+   - **Fruity Vocoder:** implement as an insert effect with the algorithm from §4.1.4 (stereo input of the track
+     itself: L modulates, R is the carrier, with the swap byte), edges per §4.1.3, RBJ BP in a cascade of `order` copies,
+     per-band follower with the A/R coefficients in ms, gain `level·curve11(Wet/128)·1500/BW`, pass-through
+     `curve11(Mod/128)`/`curve11(Car/128)` and listen 0/1/2; mono output duplicated to L/R. Import the state with the reader
+     from §4.1.1.
+   - **Vocodex:** with no *sidechain* in LYNX, import as *bypass* with a warning (as today); log ModIn/CarIn,
+     number of bands and the internal tone name. If LYNX gains a side input, §4.2 gives enough for an approximate
+     channel vocoder (bands from the §4.2.3 scale, A/R in ms, Wet and pass-through with HP), making it explicit that the
+     sub-band shape, the A/R curves and the Soundgoodizer are approximations.
+   - Correct the track numbering used in the round 14 pickle when cross-checking with the `.flp` (the tracks with Vocodex/Vocoder
+     are 1 below the pickle number when `0xEC` is counted from Master = 0).
 
 ---
 
-## Índice de evidências
+## Evidence index
 
-| Função / dado | O que mostra | Marca |
+| Function / data | What it shows | Marker |
 |---|---|---|
-| LP `FUN_00856690`, `FUN_00856570`, `FUN_00854e20`, tabela `0x8D1A08` = {64, 8}, constantes `0x856670…0x856770` (96, 44100, 2, 60, 4) | *tick*, escalas livre (`2τ`) e tempo (`τ·BPM/60`) | DECOMP |
-| LP `FUN_00854540`, `TMEnvelope` slot 15 `FUN_00788080` (bit 0 = TEMPO), `FUN_00857990` (evento 0 → BPM) | escolha da escala | DECOMP |
-| LP render `FUN_0085aa10` (laço de *tick*, mapas X/Y/IEF, `+0x169C/+0x16A0`, 1,0 em `0x85C2A0`), `FUN_0062aee0` (rampa), `FUN_00616620` (pan/vol) | avaliação e aplicação | DECOMP |
-| LP articulador VMT `0x853B18`: `FUN_008543d0` (2 e 1 em `0x8544C4/C8`), `FUN_008544d0`, `FUN_008541f0`, `FUN_008542e0` | combinação, centro, *reset*, carga | DECOMP |
-| LP `FUN_0085d050` (PatNum → `+0x10`), `FUN_008579e0` (parâmetro 5), `FUN_0085cc80`/`FUN_0085cfa0` (sincronismo, consulta 0x24, 240), evento 12 → `+0x16D1` | *pattern* ativo, sincronismo | DECOMP |
-| LP `FUN_00786350`, `FUN_00785f40`, `FUN_00785730`, `FUN_007857f0`, `FUN_00787ba0`, `FUN_00787fd0`, `FUN_00788250`/`FUN_00788300` (*knobs* /128), `FUN_00783ec0` (`0x78411F…0x784196`, 1 000 001), `FUN_0060e3c0`, `FUN_007800c0`/`FUN_00780090` (0,5) | avanço, *loop*, centro, curvas | DECOMP |
-| LP `TMLFO` VMT `0x77FB48`: `FUN_00788410` (+0x18 = 0,5), `FUN_00788b70`, `FUN_007886b0` (21, 0,05, 10¹⁸, 1/256, 1/128), `FUN_00788830` (10001, 2³²/625, 805 306 368), `FUN_00788a20`/`FUN_0060e870`, `FUN_00788aa0`, `FUN_00788540`, `FUN_00788600`, `FUN_0060e450`/`FUN_0060e610` | LFO: taxa, forma, fase | DECOMP |
-| 43 slots LP dos demos (`tmp/r20/py/lpenv.py`) | TEMPO em todos, PatNum = 1, pontos, tensões, velocidades, IEF neutro | DADOS |
-| Manual Fruity Love Philter | *pattern*, notas C5–E6, *Sync pattern changes*, LFO *bipolar/frozen*, IEF | DOC `…/plugins/Fruity%20Love%20Philter.htm` |
-| Scratcher `TTestPlug` VMT `0x7285a8`; `FUN_00728d80` (estado), `FUN_00729fe0` (`ProcessParam`), `FUN_0072a630` (aplica parâmetro), `FUN_00729f10` (*reset*), `FUN_00728760` (*dispatcher*), `FUN_0072a890` (*idle*), constantes `0x7298f0…0x729918`, `0x72a350…0x72a888` | estado, parâmetros, escalas | DECOMP |
-| Scratcher `FUN_0072add0` (constantes `0x72bd48` = 2500, `0x72bd50` = 0,0099, `0x72bd58` = 0,99, `0x72bd60` = 0,00999, `0x72bd80` = 0,01, `0x72bd88` = 0,99999, `0x72bd90` = 0,0005), `FUN_0072c660`/`FUN_0072c6d0` (0,99), `FUN_0072ab70`, `FUN_0072be20` (formato 44 100/16/2, `/32768`, `2/(N−1)`) | render, modos motor/scratch | DECOMP |
-| Scratcher `engine_x64.dll` (exportações de timecode) | DVS | DECOMP |
-| `Render tests/Fruity Scratcher.flp` (blob 125 B, `0xDF` 259 registros, `controlID 0x20408000`) + 4 `.fst` | valores, automação de p0 | DADOS |
-| DFM `TSynthEditorForm` do Scratcher | nomes, Tags, faixas | DADOS (DFM) |
-| Manual Fruity Scratcher | função, controles | DOC `…/plugins/Fruity%20Scratcher.htm` |
-| Patcher `FUN_0079bf20`, `FUN_005da820` (`ippsMulC_32f`, `ippsAddProductC_32f`, `ippsZero_32f`; ponteiros `0x9F30B8`, `0x9F3320`, `0x9F2F28`) | soma ponderada das entradas | DECOMP |
-| Patcher `FUN_00952440`, `FUN_0079ca50`, `FUN_0079b790`, `FUN_0079ef40`, `FUN_0079f0b0` | bits das *flags* do cabo, ganho, atraso | DECOMP |
-| 30 Patchers de slot em `blobs14.pkl` (`tmp/r20/py/pat.py`, `sp.py`) | classificação, redução série-paralelo, contagem de *flags* | DADOS |
-| Fruity Vocoder `FUN_006cf810` (slot 3 da VMT `0x6cf210`), construtor `FUN_006cfb20`, `FUN_006d4cf0`/`FUN_006d4d50`/`FUN_006d4a20`/`FUN_006d5070`, tabelas `0x723a00`/`0x723a30`; 10 blobs | layout do estado, seletores | DECOMP+DADOS |
-| Fruity Vocoder `FUN_006d03a0` (0,0078125; 1500; 120 000; 10 000; 44 100; 0,001; 0,01), `FUN_006cff90` (101; 159,9; 10), `FUN_006d00b0` (0,5; 10), `FUN_006cff40`/`FUN_006cfef0` (440; 5700), `FUN_005e2260` (ln 2, ln 11…) | leis de parâmetros e bandas | DECOMP |
-| Fruity Vocoder `FUN_005dbb00`, `FUN_005db530` tipo 2 (1; −2), `FUN_0045d4d0` | BP RBJ com largura em oitavas | DECOMP |
-| Fruity Vocoder `FUN_006d0fb0`, `FUN_006d0ef0`, `FUN_006d0e70` (via `FUN_006d1a70`), `FUN_005df640`, `FUN_005df500`, `FUN_005e0a60`, `FUN_005e0aa0` | processamento, seguidor, saída mono | DECOMP |
-| Vocodex `FUN_0084efb0` (slot 3 da VMT `0x84e438`), `FUN_0084f730`, tabela de campos do `TSynthEditorForm` (`0x85a1f8`); 34 blobs (`vx.py`) | layout do estado, mapas, bloco `+0x170` | DECOMP+DADOS |
-| Vocodex `FUN_00853e80` (0,001; 1/12 800; 1/6; 0,5; 375; 40; 65 536; 5), `FUN_0062f250` (ln 2, ln 7, ln 11) | leis dos parâmetros | DECOMP |
-| Vocodex `FUN_00851dd0` (−33; 440; 20; 501; 0,001; 1/60; 8), `FUN_0062cb20`/`FUN_0062cd90` (2; 1); `Data/Maps/*.fnv` | bandas, escala, tempos | DECOMP+DADOS |
-| Vocodex `FUN_00856350`, `FUN_008554b0` | seleção de entradas, L-R | DECOMP |
-| Demos: `0xEB`/`0xEC`/`0xE1` (`tmp/r20/voc/all.py`) | trilhas e envios das instâncias | DADOS |
-| Manual: Fruity Vocoder; Vocodex (parâmetros, entradas, portadora) | nomes, faixas dos mapas, roteamento | DOC `…/plugins/Fruity%20Vocoder.htm`, `…/plugins/Vocodex_parameters.htm`, `…/plugins/Vocodex_inputs.htm`, `…/plugins/Vocodex_carrier.htm` |
+| LP `FUN_00856690`, `FUN_00856570`, `FUN_00854e20`, table `0x8D1A08` = {64, 8}, constants `0x856670…0x856770` (96, 44100, 2, 60, 4) | *tick*, free (`2τ`) and tempo (`τ·BPM/60`) scales | DECOMP |
+| LP `FUN_00854540`, `TMEnvelope` slot 15 `FUN_00788080` (bit 0 = TEMPO), `FUN_00857990` (event 0 → BPM) | scale selection | DECOMP |
+| LP render `FUN_0085aa10` (*tick* loop, X/Y/IEF maps, `+0x169C/+0x16A0`, 1.0 at `0x85C2A0`), `FUN_0062aee0` (ramp), `FUN_00616620` (pan/vol) | evaluation and application | DECOMP |
+| LP articulator VMT `0x853B18`: `FUN_008543d0` (2 and 1 at `0x8544C4/C8`), `FUN_008544d0`, `FUN_008541f0`, `FUN_008542e0` | combination, centre, *reset*, loading | DECOMP |
+| LP `FUN_0085d050` (PatNum → `+0x10`), `FUN_008579e0` (parameter 5), `FUN_0085cc80`/`FUN_0085cfa0` (sync, query 0x24, 240), event 12 → `+0x16D1` | active *pattern*, sync | DECOMP |
+| LP `FUN_00786350`, `FUN_00785f40`, `FUN_00785730`, `FUN_007857f0`, `FUN_00787ba0`, `FUN_00787fd0`, `FUN_00788250`/`FUN_00788300` (*knobs* /128), `FUN_00783ec0` (`0x78411F…0x784196`, 1,000,001), `FUN_0060e3c0`, `FUN_007800c0`/`FUN_00780090` (0.5) | advance, *loop*, centre, curves | DECOMP |
+| LP `TMLFO` VMT `0x77FB48`: `FUN_00788410` (+0x18 = 0.5), `FUN_00788b70`, `FUN_007886b0` (21, 0.05, 10¹⁸, 1/256, 1/128), `FUN_00788830` (10001, 2³²/625, 805,306,368), `FUN_00788a20`/`FUN_0060e870`, `FUN_00788aa0`, `FUN_00788540`, `FUN_00788600`, `FUN_0060e450`/`FUN_0060e610` | LFO: rate, shape, phase | DECOMP |
+| 43 LP slots in the demos (`tmp/r20/py/lpenv.py`) | TEMPO in all, PatNum = 1, points, tensions, speeds, neutral IEF | DATA |
+| Fruity Love Philter manual | *pattern*, notes C5–E6, *Sync pattern changes*, *bipolar/frozen* LFO, IEF | DOC `…/plugins/Fruity%20Love%20Philter.htm` |
+| Scratcher `TTestPlug` VMT `0x7285a8`; `FUN_00728d80` (state), `FUN_00729fe0` (`ProcessParam`), `FUN_0072a630` (applies parameter), `FUN_00729f10` (*reset*), `FUN_00728760` (*dispatcher*), `FUN_0072a890` (*idle*), constants `0x7298f0…0x729918`, `0x72a350…0x72a888` | state, parameters, scales | DECOMP |
+| Scratcher `FUN_0072add0` (constants `0x72bd48` = 2500, `0x72bd50` = 0.0099, `0x72bd58` = 0.99, `0x72bd60` = 0.00999, `0x72bd80` = 0.01, `0x72bd88` = 0.99999, `0x72bd90` = 0.0005), `FUN_0072c660`/`FUN_0072c6d0` (0.99), `FUN_0072ab70`, `FUN_0072be20` (format 44,100/16/2, `/32768`, `2/(N−1)`) | render, motor/scratch modes | DECOMP |
+| Scratcher `engine_x64.dll` (timecode exports) | DVS | DECOMP |
+| `Render tests/Fruity Scratcher.flp` (125 B blob, `0xDF` 259 records, `controlID 0x20408000`) + 4 `.fst` | values, p0 automation | DATA |
+| Scratcher DFM `TSynthEditorForm` | names, Tags, ranges | DATA (DFM) |
+| Fruity Scratcher manual | function, controls | DOC `…/plugins/Fruity%20Scratcher.htm` |
+| Patcher `FUN_0079bf20`, `FUN_005da820` (`ippsMulC_32f`, `ippsAddProductC_32f`, `ippsZero_32f`; pointers `0x9F30B8`, `0x9F3320`, `0x9F2F28`) | weighted sum of the inputs | DECOMP |
+| Patcher `FUN_00952440`, `FUN_0079ca50`, `FUN_0079b790`, `FUN_0079ef40`, `FUN_0079f0b0` | cable *flags* bits, gain, delay | DECOMP |
+| 30 slot Patchers in `blobs14.pkl` (`tmp/r20/py/pat.py`, `sp.py`) | classification, series-parallel reduction, *flags* count | DATA |
+| Fruity Vocoder `FUN_006cf810` (slot 3 of VMT `0x6cf210`), constructor `FUN_006cfb20`, `FUN_006d4cf0`/`FUN_006d4d50`/`FUN_006d4a20`/`FUN_006d5070`, tables `0x723a00`/`0x723a30`; 10 blobs | state layout, selectors | DECOMP+DATA |
+| Fruity Vocoder `FUN_006d03a0` (0.0078125; 1500; 120,000; 10,000; 44,100; 0.001; 0.01), `FUN_006cff90` (101; 159.9; 10), `FUN_006d00b0` (0.5; 10), `FUN_006cff40`/`FUN_006cfef0` (440; 5700), `FUN_005e2260` (ln 2, ln 11…) | parameter and band laws | DECOMP |
+| Fruity Vocoder `FUN_005dbb00`, `FUN_005db530` type 2 (1; −2), `FUN_0045d4d0` | RBJ BP with width in octaves | DECOMP |
+| Fruity Vocoder `FUN_006d0fb0`, `FUN_006d0ef0`, `FUN_006d0e70` (via `FUN_006d1a70`), `FUN_005df640`, `FUN_005df500`, `FUN_005e0a60`, `FUN_005e0aa0` | processing, follower, mono output | DECOMP |
+| Vocodex `FUN_0084efb0` (slot 3 of VMT `0x84e438`), `FUN_0084f730`, `TSynthEditorForm` field table (`0x85a1f8`); 34 blobs (`vx.py`) | state layout, maps, block `+0x170` | DECOMP+DATA |
+| Vocodex `FUN_00853e80` (0.001; 1/12,800; 1/6; 0.5; 375; 40; 65,536; 5), `FUN_0062f250` (ln 2, ln 7, ln 11) | parameter laws | DECOMP |
+| Vocodex `FUN_00851dd0` (−33; 440; 20; 501; 0.001; 1/60; 8), `FUN_0062cb20`/`FUN_0062cd90` (2; 1); `Data/Maps/*.fnv` | bands, scale, times | DECOMP+DATA |
+| Vocodex `FUN_00856350`, `FUN_008554b0` | input selection, L-R | DECOMP |
+| Demos: `0xEB`/`0xEC`/`0xE1` (`tmp/r20/voc/all.py`) | tracks and sends of the instances | DATA |
+| Manual: Fruity Vocoder; Vocodex (parameters, inputs, carrier) | names, map ranges, routing | DOC `…/plugins/Fruity%20Vocoder.htm`, `…/plugins/Vocodex_parameters.htm`, `…/plugins/Vocodex_inputs.htm`, `…/plugins/Vocodex_carrier.htm` |
 
-### Questões em aberto
+### Open questions
 
-- Love Philter: valor do limite de inclinação da rampa (`+0x38` do objeto `+0xCC`); escala "livre" (0,5 s por
-  unidade) não conferida por render; forma do tipo de curva 5 (*pulse*) e demais tipos; lei do pan em
-  `FUN_00616620`; formato da consulta de posição 0x24 ao host; rótulo do bit 2 (tensão bipolar) e significado do
-  bit 1 das *flags* do LFO; nomes exatos dos eventos de host 0/1/12.
-- Fruity Scratcher: escala dos valores do `0xDF` (0…131) → p0 e o nibble alto 2 do `controlID`; se o host
-  reamostra o sample para 44,1 kHz e se a velocidade compensa a taxa do projeto; efeito da leitura extra de 56 B
-  nas versões < `0xF462B`; significado exato dos bytes de UI/timecode.
-- Patcher: saída de um Limiter com entrada zerada ("Exoplanet" 101); significado do bit 3 das *flags* do nó;
-  conversão do byte de classe por `FUN_0094a150`.
-- Fruity Vocoder: se `FUN_00409d00` arredonda ou trunca (S do FreqScale); o *buffer* exato que o banco de síntese
-  filtra é deduzido pelo fluxo (o de análise usa o L, confirmado).
-- Vocodex: desenho dos sub-filtros (`FUN_00626690`) e da largura final; forma das curvas de A/R (`FUN_005fd490`,
-  `FUN_00606730`); significado PEAK/RMS dos valores 0/1; normalização de ganho por banda; Soundgoodizer interno;
-  uníssono (tags 16/18/19); os 13 bytes `+0x1FC`; como o host numera as entradas laterais (a regra "ordem das
-  trilhas" é só dos dados); versões de estado < 3 (presets antigos).
+- Love Philter: value of the ramp slope limit (`+0x38` of object `+0xCC`); "free" scale (0.5 s per
+  unit) not checked by render; shape of curve type 5 (*pulse*) and the other types; pan law in
+  `FUN_00616620`; format of the 0x24 position query to the host; label of bit 2 (bipolar tension) and meaning of
+  bit 1 of the LFO *flags*; exact names of host events 0/1/12.
+- Fruity Scratcher: scaling of the `0xDF` values (0…131) → p0 and the high nibble 2 of `controlID`; whether the host
+  resamples the sample to 44.1 kHz and whether the speed compensates for the project rate; effect of the extra 56 B read
+  in versions < `0xF462B`; exact meaning of the UI/timecode bytes.
+- Patcher: output of a Limiter with zeroed input ("Exoplanet" 101); meaning of bit 3 of the node *flags*;
+  conversion of the class byte by `FUN_0094a150`.
+- Fruity Vocoder: whether `FUN_00409d00` rounds or truncates (S of FreqScale); the exact *buffer* that the synthesis bank
+  filters is deduced from the flow (the analysis one uses L, confirmed).
+- Vocodex: design of the sub-filters (`FUN_00626690`) and of the final width; shape of the A/R curves (`FUN_005fd490`,
+  `FUN_00606730`); PEAK/RMS meaning of values 0/1; per-band gain normalisation; internal Soundgoodizer;
+  unison (tags 16/18/19); the 13 bytes `+0x1FC`; how the host numbers the side inputs (the "track
+  order" rule comes only from the data); state versions < 3 (old presets).

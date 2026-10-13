@@ -1,673 +1,673 @@
-# Análise comportamental do FL Studio 2026: rodada 2 (REA)
+# Behavioural analysis of FL Studio 2026: round 2 (REA)
 
-> **Natureza deste documento.** Continuação de `docs/ANALISE_FL_STUDIO.md`. É engenharia reversa
-> *clean-room*, apenas comportamental. Nenhum código nem pseudocódigo da Image-Line foi copiado: o que está
-> aqui são descrições, layouts de dados e fórmulas escritas com palavras nossas. Endereços (`FUN_xxxxxxxx`),
-> offsets e globais servem só para rastrear a evidência.
+> **Nature of this document.** Continuation of `docs/ANALISE_FL_STUDIO.md`. It is *clean-room* reverse
+> engineering, behavioural only. No Image-Line code or pseudocode has been copied: what is here are
+> descriptions, data layouts and formulas written in our own words. Addresses (`FUN_xxxxxxxx`),
+> offsets and globals serve only to trace the evidence.
 
-- **Alvo:** `~/projetos/daw-analise/FLEngine_x64.dll` (SHA-256 `6d9c5ab0…8e02`), Ghidra 12.1.4 via REA
-- **Validação de formato:** os 165 `.flp` de `FL Studio 2026/Data` (versões 10.9 … 26.1), lidos por um
-  parser próprio de eventos
-- **Data:** 2026-10-13
+- **Target:** `~/projetos/daw-analise/FLEngine_x64.dll` (SHA-256 `6d9c5ab0…8e02`), Ghidra 12.1.4 via REA
+- **Format validation:** the 165 `.flp` files in `FL Studio 2026/Data` (versions 10.9 … 26.1), read by our
+  own event parser
+- **Date:** 2026-10-13
 
-| Marca | Significado |
+| Marker | Meaning |
 |---|---|
-| **[DECOMP]** | Confirmado lendo a decompilação da(s) função(ões) citada(s) |
-| **[STR]** | Inferido de strings, RTTI ou formulários DFM |
-| **[DADOS]** | Confirmado estatisticamente nos `.flp` de demonstração |
-| **[HIP]** | Hipótese (plausível, ainda não verificada) |
+| **[DECOMP]** | Confirmed by reading the decompilation of the cited function(s) |
+| **[STR]** | Inferred from strings, RTTI or DFM forms |
+| **[DATA]** | Confirmed statistically in the demo `.flp` files |
+| **[HYP]** | Hypothesis (plausible, not yet verified) |
 
-Convenção: `T+0xNN` é um offset no registro de trilha do mixer (array global `G[0x15e06a0]`, stride 0x1478).
+Convention: `T+0xNN` is an offset into the mixer track record (global array `G[0x15e06a0]`, stride 0x1478).
 
 ---
 
-## 1. Compensação de latência (PDC)
+## 1. Latency compensation (PDC)
 
-Responde à pergunta em aberto nº 1 do documento principal.
+Answers open question no. 1 of the main document.
 
-### 1.1 Funções
+### 1.1 Functions
 
-| Função | Papel |
+| Function | Role |
 |---|---|
-| `FUN_01100530` | Ponto de entrada do recálculo: snapshot das latências → propagação → compensação → total global **[DECOMP]** |
-| `FUN_010fef10` | Snapshot: guarda a latência reportada por cada plugin (gerador ou slot) em `plugin+0xC8`. Plugin bypassado reporta **0** (`FUN_012b6930` / `FUN_013308f0`) **[DECOMP]** |
-| `FUN_010ff820` → `FUN_010ff3b0` | Propagação recursiva pelo grafo de roteamento (DFS com memo; o sentinela `0x7FFFFFFF` em `T+0xC4` marca "não calculado") **[DECOMP]** |
-| `FUN_010ffca0` | Compensação: calcula o comprimento de todas as linhas de atraso **[DECOMP]** |
-| `FUN_01100b10(track, flags)` | Latência em ms para a UI e para o total do master (bit 1 = recursivo pelas entradas, bit 2 = soma dos slots, bit 4 = sem manual-out) **[DECOMP]** |
-| `FUN_006a3a90` / `FUN_006a3ac0` | Conversão amostras↔ms **[DECOMP]** |
-| `FUN_009289b0` (`TBasicDelay_32FS`) | Linha de atraso **[DECOMP+STR]** |
+| `FUN_01100530` | Entry point of the recalculation: latency snapshot → propagation → compensation → global total **[DECOMP]** |
+| `FUN_010fef10` | Snapshot: stores the latency reported by each plugin (generator or slot) in `plugin+0xC8`. A bypassed plugin reports **0** (`FUN_012b6930` / `FUN_013308f0`) **[DECOMP]** |
+| `FUN_010ff820` → `FUN_010ff3b0` | Recursive propagation through the routing graph (DFS with memo; the sentinel `0x7FFFFFFF` in `T+0xC4` marks "not computed") **[DECOMP]** |
+| `FUN_010ffca0` | Compensation: computes the length of every delay line **[DECOMP]** |
+| `FUN_01100b10(track, flags)` | Latency in ms for the UI and for the master total (bit 1 = recursive through inputs, bit 2 = sum of slots, bit 4 = without manual-out) **[DECOMP]** |
+| `FUN_006a3a90` / `FUN_006a3ac0` | Samples↔ms conversion **[DECOMP]** |
+| `FUN_009289b0` (`TBasicDelay_32FS`) | Delay line **[DECOMP+STR]** |
 
-### 1.2 Campos da trilha usados no PDC **[DECOMP]**
+### 1.2 Track fields used by PDC **[DECOMP]**
 
-| Campo | Tipo | Significado |
+| Field | Type | Meaning |
 |---|---|---|
-| `T+0x1C8` | float ms | **Latência manual de entrada.** Se ≥ 0, funciona como piso: `max(manual, latência dos geradores)`. Se < 0, o módulo é *somado* e a entrada da trilha é atrasada por ele |
-| `T+0x1CC` | float ms | **Latência manual de saída**, sempre somada |
-| `T+0xBC` | int smp | Latência própria de entrada (geradores roteados + manual) |
-| `T+0xB8` | int smp | **Alinhamento de entrada** = `max(T+0xBC, max sobre as fontes S→T de S+0xC4)` |
-| `T+0xC0` | int smp | Soma das latências dos slots + manual-out |
-| `T+0xC4` | int smp | **Latência de saída** (instante de chegada na saída da trilha) |
-| `T+0xA0/0xA8/0xB0` | delay | Linhas de atraso: meter/visual, entrada (manual < 0), saída física |
-| `T+0x1D1` | byte (padrão 1) | "Delay the output of this track by the total mixer latency when it has an external output" |
-| `T+0x1D0` | byte (padrão 1) | Compensação de latência na gravação de entrada externa |
-| `T+0x1472` | tri-estado | Trilha **excluída** do PDC (0 = não, 1 = sim, 2 = condicional) **[DECOMP; nome HIP]** |
+| `T+0x1C8` | float ms | **Manual input latency.** If ≥ 0, it acts as a floor: `max(manual, generator latency)`. If < 0, its magnitude is *added* and the track input is delayed by it |
+| `T+0x1CC` | float ms | **Manual output latency**, always added |
+| `T+0xBC` | int smp | Own input latency (routed generators + manual) |
+| `T+0xB8` | int smp | **Input alignment** = `max(T+0xBC, max over sources S→T of S+0xC4)` |
+| `T+0xC0` | int smp | Sum of slot latencies + manual-out |
+| `T+0xC4` | int smp | **Output latency** (arrival time at the track output) |
+| `T+0xA0/0xA8/0xB0` | delay | Delay lines: meter/visual, input (manual < 0), physical output |
+| `T+0x1D1` | byte (default 1) | "Delay the output of this track by the total mixer latency when it has an external output" |
+| `T+0x1D0` | byte (default 1) | Latency compensation when recording external input |
+| `T+0x1472` | tri-state | Track **excluded** from PDC (0 = no, 1 = yes, 2 = conditional) **[DECOMP; name HYP]** |
 
-Os dois floats de latência manual são exatamente os campos que o evento `0xEC` grava (ver §2.6). O
-"campo ofuscado por XOR" do documento principal **não é ofuscação**: em arquivos < 12.9.0 o valor era
-gravado com o bit de sinal invertido (XOR `0x80000000`, `DAT_00f50e60`).
+The two manual latency floats are exactly the fields that event `0xEC` stores (see §2.6). The
+"XOR-obfuscated field" of the main document **is not obfuscation**: in files < 12.9.0 the value was
+stored with the sign bit flipped (XOR `0x80000000`, `DAT_00f50e60`).
 
-### 1.3 Algoritmo de propagação (`FUN_010ff3b0`) **[DECOMP]**
+### 1.3 Propagation algorithm (`FUN_010ff3b0`) **[DECOMP]**
 
-Para cada trilha T, em DFS:
+For each track T, in DFS:
 
-1. `genLat` = maior latência entre os geradores cujo destino é T (campo do canal `+0x258`, ou saídas
-   extras do plugin na lista `+0x128`).
+1. `genLat` = largest latency among the generators whose destination is T (channel field `+0x258`, or extra
+   plugin outputs in the list `+0x128`).
 2. `T.inOwn = smp(manual ≥ 0 ? max(ms(genLat), manual) : ms(genLat) + |manual|)`.
-3. `T.inAlign = max(T.inOwn, max(S.outLat para cada S com rota S→T))`. A rota existe quando o byte
-   `S+0x398+T*8` é ≠ 0. Se S ainda não foi resolvida, recursa nela.
-4. Se o PDC global está ligado, percorre os slots ativos em ordem acumulando `run`, que começa em
+3. `T.inAlign = max(T.inOwn, max(S.outLat for each S with route S→T))`. The route exists when the byte
+   `S+0x398+T*8` is ≠ 0. If S has not been resolved yet, it recurses into it.
+4. If global PDC is on, it walks the active slots in order accumulating `run`, which starts at
    `inAlign`:
    - `slot.inPos = run`
-   - `slot.align = max(run, latência das fontes de *sidechain* que entram nesse plugin)`
+   - `slot.align = max(run, latency of the *sidechain* sources feeding that plugin)`
    - `run = slot.align + slot.lat`
-5. `T.outLat = run + smp(manualOut)` e `T.sumLat = Σslot.lat + smp(manualOut)`.
-6. `M` = máximo de `outLat` entre todas as trilhas (exceto a 501), que é a latência total do mixer.
+5. `T.outLat = run + smp(manualOut)` and `T.sumLat = Σslot.lat + smp(manualOut)`.
+6. `M` = maximum `outLat` over all tracks (except 501), which is the total mixer latency.
 
-### 1.4 Onde ficam as linhas de atraso: compensação **por aresta** (`FUN_010ffca0`) **[DECOMP]**
+### 1.4 Where the delay lines live: **per-edge** compensation (`FUN_010ffca0`) **[DECOMP]**
 
-O Auto PDC aplica a regra "máximo das entradas menos a latência de cada caminho" **em cada aresta do
-grafo**, e não na entrada da trilha:
+Auto PDC applies the rule "maximum of the inputs minus the latency of each path" **on each edge of the
+graph**, not at the track input:
 
-| Local | Comprimento do atraso |
+| Location | Delay length |
 |---|---|
-| **Cada send/rota S→D** (array em `T+0x1344`, entradas de 0x18 B `{dest, level, levelRamp, delay*, tailCounter}`) | `D.inAlign − S.outLat`. Só é criado se > 0, com PDC ligado e a trilha não excluída |
-| **Cada saída de gerador ou saída extra de plugin** (lista `TFXTrackSideIOList` em `T+0x128`, entradas de 0x28 B) | `destino.inAlign − (plugin.align + plugin.lat)` |
-| **Cada sidechain** (lista em `T+0x130`) | `plugin.align − fonte.outLat` |
-| Saída física da trilha (`T+0xB0`) | `M − T.outLat`, se a trilha tem saída externa e `T+0x1D1` |
-| Meter/visual (`T+0xA0`) | `M − T.outLat`, só para alinhar o medidor |
-| Entrada (`T+0xA8`) | só quando a latência manual de entrada é negativa |
+| **Each send/route S→D** (array at `T+0x1344`, 0x18 B entries `{dest, level, levelRamp, delay*, tailCounter}`) | `D.inAlign − S.outLat`. Only created if > 0, with PDC on and the track not excluded |
+| **Each generator output or extra plugin output** (list `TFXTrackSideIOList` at `T+0x128`, 0x28 B entries) | `destination.inAlign − (plugin.align + plugin.lat)` |
+| **Each sidechain** (list at `T+0x130`) | `plugin.align − source.outLat` |
+| Physical track output (`T+0xB0`) | `M − T.outLat`, if the track has an external output and `T+0x1D1` |
+| Meter/visual (`T+0xA0`) | `M − T.outLat`, only to align the meter |
+| Input (`T+0xA8`) | only when the manual input latency is negative |
 
-Quando um comprimento muda, a linha é zerada e uma flag de "mudou" é marcada.
+When a length changes, the line is cleared and a "changed" flag is set.
 
-**A linha de atraso** (`TBasicDelay_32FS`) é um ring buffer de frames estéreo float32 intercalados
-(8 B/frame). O atraso é inteiro em amostras, sem interpolação. Cada amostra é trocada in-place entre o
-buffer e o fluxo **[DECOMP]**.
+**The delay line** (`TBasicDelay_32FS`) is a ring buffer of interleaved float32 stereo frames
+(8 B/frame). The delay is an integer number of samples, without interpolation. Each sample is swapped in place between the
+buffer and the stream **[DECOMP]**.
 
-### 1.5 Totais, plugins e opções
+### 1.5 Totals, plugins and options
 
-- O total em ms é `FUN_01100b10(0, 3)` e vai para `*PTR_DAT_015e2b30`. O total em amostras, incluindo a
-  latência de saída do driver, vai para `*PTR_DAT_015e3408` **[DECOMP]**.
-- O plugin é informado (opcode 0x1E) do seu deslocamento de entrada `inLat + slot.align` e da latência
-  restante até o fim da cadeia **[DECOMP]**. É isso que os plugins *PDC-aware* usam.
-- **Hold de cauda:** `T+0x36C = T.inOwn + T.sumLat (+ SR/5 se o EQ da trilha estiver ativo)`. Mantém a
-  trilha processando depois que o sinal some, para que as linhas de atraso esvaziem **[DECOMP]**.
-- "Compensate for master latency" e "Delay never bypass latency comp": as strings só aparecem em
-  DFM/tabelas, sem xref direto. O candidato para a segunda é `T+0x1472` **[HIP]**.
+- The total in ms is `FUN_01100b10(0, 3)` and goes to `*PTR_DAT_015e2b30`. The total in samples, including the
+  driver output latency, goes to `*PTR_DAT_015e3408` **[DECOMP]**.
+- The plugin is informed (opcode 0x1E) of its input offset `inLat + slot.align` and of the remaining
+  latency until the end of the chain **[DECOMP]**. This is what *PDC-aware* plugins use.
+- **Tail hold:** `T+0x36C = T.inOwn + T.sumLat (+ SR/5 if the track EQ is active)`. Keeps the
+  track processing after the signal disappears, so that the delay lines drain **[DECOMP]**.
+- "Compensate for master latency" and "Delay never bypass latency comp": the strings only appear in
+  DFM/tables, with no direct xref. The candidate for the second one is `T+0x1472` **[HYP]**.
 
-### 1.6 "Trim PDC silence" no export (`FUN_00d18130`, `FUN_00d175b0`) **[DECOMP]**
+### 1.6 "Trim PDC silence" on export (`FUN_00d18130`, `FUN_00d175b0`) **[DECOMP]**
 
-- No início do render, cada *writer* (um por stem; ver §5) recebe a latência acumulada da sua trilha em
-  amostras.
-- As primeiras `latência` amostras são **descartadas**. O bloco em que o contador cruza zero é escrito a
-  partir do ponto exato.
-- Depois do fim da música, o render continua por **mais `latência` amostras**, para o final não ser
-  cortado.
-- Sem a opção, o contador vale 0 e o silêncio do PDC fica no arquivo.
-- Sem split, o master usa contadores globais (`0x15e4d90`/`0x15e3688`).
+- At the start of the render, each *writer* (one per stem; see §5) receives the accumulated latency of its track in
+  samples.
+- The first `latency` samples are **discarded**. The block in which the counter crosses zero is written from
+  the exact point.
+- After the end of the song, the render continues for **another `latency` samples**, so the ending is not
+  cut off.
+- Without the option, the counter is 0 and the PDC silence stays in the file.
+- Without split, the master uses global counters (`0x15e4d90`/`0x15e3688`).
 
-### Recomendações para o LYNX (PDC)
+### Recommendations for LYNX (PDC)
 
-1. **Modelo por aresta.** Em ordem topológica, calcule `inAlign[T] = max(inOwn[T], outLat[S] ∀ S→T)` e
-   `outLat[T] = inAlign[T] + Σlat(slots ativos) + manualOut[T]`. Coloque um `DelayLine` em **cada aresta**
-   S→T de comprimento `inAlign[T] − outLat[S]`, e o mesmo para gerador→trilha e para sidechains. O caminho
-   mais longo nunca leva atraso.
-2. **Plugin bypassado conta como latência 0.** Bypass, adição ou remoção de plugin e mudança de
-   `getLatencySamples()` disparam um recálculo fora da thread de áudio. O resultado vai para a thread de
-   áudio por swap atômico, e as linhas cujo comprimento mudou são zeradas.
-3. A linha de atraso é um ring buffer estéreo float com atraso inteiro. Basta `juce::AudioBuffer` + índice
-   circular.
-4. Ofereça latência manual por trilha (entrada e saída, em ms) e a opção "alinhar saída física à latência
-   total M".
-5. No export, descarte `outLat` amostras do início de cada stem e renderize o mesmo tanto a mais no fim.
-   Deixe ligado por padrão.
-6. Mantenha a trilha viva por `latência + cauda` depois do silêncio (hold), senão o fim do material
-   atrasado é cortado.
+1. **Per-edge model.** In topological order, compute `inAlign[T] = max(inOwn[T], outLat[S] ∀ S→T)` and
+   `outLat[T] = inAlign[T] + Σlat(active slots) + manualOut[T]`. Put a `DelayLine` on **each edge**
+   S→T of length `inAlign[T] − outLat[S]`, and the same for generator→track and for sidechains. The longest
+   path never gets a delay.
+2. **A bypassed plugin counts as latency 0.** Bypass, adding or removing a plugin, and a change of
+   `getLatencySamples()` trigger a recalculation outside the audio thread. The result goes to the audio
+   thread via atomic swap, and the lines whose length changed are cleared.
+3. The delay line is a float stereo ring buffer with an integer delay. `juce::AudioBuffer` + a circular
+   index is enough.
+4. Offer per-track manual latency (input and output, in ms) and the option "align physical output to the total
+   latency M".
+5. On export, discard `outLat` samples from the start of each stem and render the same amount extra at the end.
+   Leave it on by default.
+6. Keep the track alive for `latency + tail` after silence (hold), otherwise the end of the delayed material
+   is cut off.
 
 ---
 
-## 2. Mixer: ordem de processamento, sends, pan, solo, smart disable
+## 2. Mixer: processing order, sends, pan, solo, smart disable
 
-O processador da trilha é `TMixerTrackModule` (unit `Mixer.TrackModule`, VMT `0x1276868`).
+The track processor is `TMixerTrackModule` (unit `Mixer.TrackModule`, VMT `0x1276868`).
 `Process` = `FUN_01276ce0` → **`FUN_01276ee0`** **[DECOMP+STR]**.
 
-### 2.1 Ordem dentro da trilha **[DECOMP]**
+### 2.1 Order inside the track **[DECOMP]**
 
-Antes das trilhas, em `FUN_00d0d4c0`, cada gerador passa pela sua linha de PDC e é **somado** no buffer da
-trilha de destino (sob o lock da trilha), que fica marcada com "tem sinal". Depois, dentro da trilha:
+Before the tracks, in `FUN_00d0d4c0`, each generator goes through its PDC line and is **summed** into the buffer of the
+destination track (under the track lock), which gets marked as "has signal". Then, inside the track:
 
-1. **Monitoramento de entrada física** (`FUN_01276b40`): soma a entrada de hardware. Modo em `T+0x30`:
-   0 = off, 1 = quando armada, 2 = auto, 3 = sempre.
-2. Atualiza "tem sinal" e verifica se há cauda pendente nas linhas de PDC.
-3. Tap de gravação (`T+0x2F`): 0 = entrada, 1 = pré-FX, 2 = pós-FX, 3 = pós-EQ, 4 = pós-fader,
+1. **Physical input monitoring** (`FUN_01276b40`): adds the hardware input. Mode in `T+0x30`:
+   0 = off, 1 = when armed, 2 = auto, 3 = always.
+2. Updates "has signal" and checks whether there is a pending tail in the PDC lines.
+3. Recording tap (`T+0x2F`): 0 = input, 1 = pre-FX, 2 = post-FX, 3 = post-EQ, 4 = post-fader,
    5 = final.
-4. **Caminho silencioso:** sem sinal, sem cauda e com hold zerado, a trilha pula tudo, zera a saída e os
-   ramps dão *snap* para o alvo.
-5. **10 slots em série** (`TPluginRackModule`, `FUN_00cf2a90`). Cada slot faz **mix dry/wet com ramp**
-   (parâmetro "mix" do slot, 0..12800).
-6. **EQ paramétrico de 3 bandas embutido** (`T+0x1D4 + i*0x88`; freq =
-   `10 + 159,9·(100^(x/65536) − 1)` Hz).
-7. **Volume / pan / separação estéreo / polaridade / swap**, como **matriz 2×2 com ramp** (§2.2).
-8. **Mute** (`T+0x18 == 0` zera) com **fade de mute** (`FUN_01277350`, ≈ 1 ms **[HIP]**).
-9. Meter (com atraso de alinhamento `T+0xA0`).
-10. **Sends/rotas** (`FUN_01277980`): para cada rota, o ganho é suavizado por bloco (ramp linear com passo
-    máximo). Em seguida copia, passa pela linha de PDC da aresta e **soma no destino** sob o lock do
-    destino. **Todas as rotas são pós-fader e pós-mute; não há pré-fader neste caminho.**
-11. Sidechains (`FUN_01277bd0`), saídas extras de plugins (`FUN_012777e0`) e saída física (`T+0x74`).
+4. **Silent path:** with no signal, no tail and the hold at zero, the track skips everything, clears the output and the
+   ramps *snap* to the target.
+5. **10 slots in series** (`TPluginRackModule`, `FUN_00cf2a90`). Each slot does a **ramped dry/wet mix**
+   (slot "mix" parameter, 0..12800).
+6. **Built-in 3-band parametric EQ** (`T+0x1D4 + i*0x88`; freq =
+   `10 + 159.9·(100^(x/65536) − 1)` Hz).
+7. **Volume / pan / stereo separation / polarity / swap**, as a **ramped 2×2 matrix** (§2.2).
+8. **Mute** (`T+0x18 == 0` clears) with a **mute fade** (`FUN_01277350`, ≈ 1 ms **[HYP]**).
+9. Meter (with alignment delay `T+0xA0`).
+10. **Sends/routes** (`FUN_01277980`): for each route, the gain is smoothed per block (linear ramp with a maximum
+    step). It then copies, goes through the edge's PDC line and **sums into the destination** under the
+    destination's lock. **All routes are post-fader and post-mute; there is no pre-fader on this path.**
+11. Sidechains (`FUN_01277bd0`), extra plugin outputs (`FUN_012777e0`) and physical output (`T+0x74`).
 
-Ordem resumida: **entrada → 10 FX (dry/wet) → EQ → fader/pan/sep → mute → meter → sends pós-fader**.
+Summarised order: **input → 10 FX (dry/wet) → EQ → fader/pan/sep → mute → meter → post-fader sends**.
 
-### 2.2 Volume, pan e separação estéreo (`FUN_0127b050`, aplicado em `FUN_006a13a0`) **[DECOMP]**
+### 2.2 Volume, pan and stereo separation (`FUN_0127b050`, applied in `FUN_006a13a0`) **[DECOMP]**
 
-Campos: `T+0x384` volume (int, **unity = 12800**, máx 16000), `T+0x388` pan (int ±6400),
-`T+0x38C` separação (int ±64), `T+0x390` polaridade, `T+0x391` swap L/R.
+Fields: `T+0x384` volume (int, **unity = 12800**, max 16000), `T+0x388` pan (int ±6400),
+`T+0x38C` separation (int ±64), `T+0x390` polarity, `T+0x391` L/R swap.
 
-Saída: `Lout = a·L + c·R`, `Rout = b·R + d·L`.
+Output: `Lout = a·L + c·R`, `Rout = b·R + d·L`.
 
-1. **Curva do fader:** com `v = vol/12800`, `g = (11^v − 1)/10`. Em v = 1, g = 1 (0 dB); em 16000
-   (v = 1,25), ≈ +5,6 dB. A polaridade nega g.
-2. **Lei de pan** (global, `DAT_015f49a4`):
-   - **Potência constante** (padrão): `θ = (1+p)·π/4`, `gL = cos θ·g√2`, `gR = sin θ·g√2`. Dá 0 dB no
-     centro e +3 dB no lado para onde se panoreia.
-   - **Linear** (modo 1): para p ≥ 0, `gR = g` e `gL = (1−p)·g`, e o simétrico para p < 0.
-3. **Fold estéreo:** o canal atenuado não some; metade dele é dobrada para o outro lado. Com
-   `f = 1 − g_lado/g`, a matriz recebe `(1 − 0,5f)` direto e `0,5f` cruzado. No hard pan isso dá soma mono.
-4. **Separação:**
-   - `sep > 0` (estreitar): `s = (5^(sep/64) − 1)/4`. Em +64 o sinal fica mono.
-   - `sep < 0` (alargar): `s = sep/64`. Em −64, `L' = 1,5L − 0,5R` (Side ×2).
-   - `s` é somado ao `f` dos dois lados, com clamp ≤ 1.
-5. **Swap** troca as linhas da matriz. Fast path: unity + centro + sep 0 = identidade.
+1. **Fader curve:** with `v = vol/12800`, `g = (11^v − 1)/10`. At v = 1, g = 1 (0 dB); at 16000
+   (v = 1.25), ≈ +5.6 dB. Polarity negates g.
+2. **Pan law** (global, `DAT_015f49a4`):
+   - **Constant power** (default): `θ = (1+p)·π/4`, `gL = cos θ·g√2`, `gR = sin θ·g√2`. Gives 0 dB at the
+     centre and +3 dB on the side being panned to.
+   - **Linear** (mode 1): for p ≥ 0, `gR = g` and `gL = (1−p)·g`, and the symmetric case for p < 0.
+3. **Stereo fold:** the attenuated channel does not vanish; half of it is folded to the other side. With
+   `f = 1 − g_side/g`, the matrix gets `(1 − 0.5f)` direct and `0.5f` crossed. At hard pan this yields a mono sum.
+4. **Separation:**
+   - `sep > 0` (narrow): `s = (5^(sep/64) − 1)/4`. At +64 the signal becomes mono.
+   - `sep < 0` (widen): `s = sep/64`. At −64, `L' = 1.5L − 0.5R` (Side ×2).
+   - `s` is added to `f` on both sides, clamped ≤ 1.
+5. **Swap** swaps the matrix rows. Fast path: unity + centre + sep 0 = identity.
 
-### 2.3 Solo e mute **[DECOMP]**
+### 2.3 Solo and mute **[DECOMP]**
 
-- Bytes: `T+0x18` enabled, `T+0x1A` solo, `T+0x1B` *mute-lock*, `T+0x1C` estado salvo.
-- **Solo não é uma máscara de áudio.** Ele reescreve o `enabled` de todas as trilhas (`FUN_0127c2a0` →
-  `FUN_0127bb10`). Uma trilha T fica ativa se:
-  - T é a trilha solada, ou
-  - (modo & 2) e **T roteia transitivamente para a solada** (fontes a montante), ou
-  - (modo & 1) e **a solada roteia transitivamente para T** (destinos a jusante, ex.: master/bus).
-- O fecho transitivo é uma DFS sobre os bytes de rota (`FUN_0127c640`/`FUN_0127c6f0`). O modo padrão
-  (API) é 2, que inclui as fontes.
-- Trilhas com mute-lock não mudam.
-- Ao tirar o solo, restaura o estado salvo (se uma opção global estiver ligada) ou reativa tudo.
+- Bytes: `T+0x18` enabled, `T+0x1A` solo, `T+0x1B` *mute-lock*, `T+0x1C` saved state.
+- **Solo is not an audio mask.** It rewrites the `enabled` of every track (`FUN_0127c2a0` →
+  `FUN_0127bb10`). A track T stays active if:
+  - T is the soloed track, or
+  - (mode & 2) and **T routes transitively to the soloed one** (upstream sources), or
+  - (mode & 1) and **the soloed one routes transitively to T** (downstream destinations, e.g. master/bus).
+- The transitive closure is a DFS over the route bytes (`FUN_0127c640`/`FUN_0127c6f0`). The default mode
+  (API) is 2, which includes the sources.
+- Tracks with mute-lock do not change.
+- On un-solo, it restores the saved state (if a global option is on) or re-enables everything.
 
-**Resposta à pergunta:** sim, o solo mantém audíveis as trilhas que roteiam *para* a solada. O caminho
-até o master continua funcionando porque o próprio master não é mutado.
+**Answer to the question:** yes, solo keeps audible the tracks that route *to* the soloed one. The path
+to the master keeps working because the master itself is not muted.
 
 ### 2.4 Smart disable (`FUN_00cf2f90` / `FUN_00cf3020`) **[DECOMP]**
 
-- Só vale se o plugin tem "Allow smart disable" (`plugin+0xF7`).
-- Teste de silêncio: todas as amostras do bloco (L e R) com |x| ≤ **1,5849e-5 (≈ −96 dBFS)**.
-- Com entrada silenciosa, o contador acumula o tamanho do bloco. Ao chegar em **SR × 4 (4 s de hold)**,
-  o slot é **pulado**.
-- O contador é zerado se a entrada **ou a saída** não estiverem em silêncio, o que preserva caudas de
-  reverb e delay.
-- A trilha inteira só para de processar quando não tem sinal **e** o hold de latência/cauda (`T+0x36C`)
-  zerou.
+- Only applies if the plugin has "Allow smart disable" (`plugin+0xF7`).
+- Silence test: all samples of the block (L and R) with |x| ≤ **1.5849e-5 (≈ −96 dBFS)**.
+- With silent input, the counter accumulates the block size. When it reaches **SR × 4 (4 s hold)**,
+  the slot is **skipped**.
+- The counter is reset if the input **or the output** is not silent, which preserves reverb and delay
+  tails.
+- The whole track only stops processing when it has no signal **and** the latency/tail hold (`T+0x36C`)
+  has reached zero.
 
-### 2.5 Roteamento: evento `0xEB` **[DECOMP+DADOS]** (dispatcher `FUN_00f46490`)
+### 2.5 Routing: event `0xEB` **[DECOMP+DATA]** (dispatcher `FUN_00f46490`)
 
-- O payload é um **array de bytes booleanos**, um por trilha de destino, truncado no último destino
-  usado. Tamanhos vistos: 1…39 B.
-- O byte i ≠ 0 significa "esta trilha envia para a trilha i". Vai para `T+0x398 + i*8`.
-- **O nível do send não está aqui.** Ele está no evento `0xE1` (§2.7).
-- Remapeamento de índices em arquivos antigos:
-  - `< 8.5.0`: destino > 64 soma 35.
-  - `< 12.9.0`: destino > 103 soma 397.
-  - `< 24.2.99`, ou sem a flag de arquivo `+0x4447`: destino > 125 soma 375.
-  - Assim os antigos "Current"/extras caem em 500/501.
+- The payload is an **array of boolean bytes**, one per destination track, truncated at the last destination
+  used. Sizes seen: 1…39 B.
+- Byte i ≠ 0 means "this track sends to track i". It goes to `T+0x398 + i*8`.
+- **The send level is not here.** It is in event `0xE1` (§2.7).
+- Index remapping in old files:
+  - `< 8.5.0`: destination > 64 adds 35.
+  - `< 12.9.0`: destination > 103 adds 397.
+  - `< 24.2.99`, or without the file flag `+0x4447`: destination > 125 adds 375.
+  - That way the old "Current"/extras land on 500/501.
 
-### 2.6 Flags e latência da trilha: evento `0xEC` **[DECOMP+DADOS]**
+### 2.6 Track flags and latency: event `0xEC` **[DECOMP+DATA]**
 
-Payload de **12 bytes** em versões ≥ 12.9.0 (5 bytes em arquivos muito antigos): `f32 latOut_ms`,
+**12-byte** payload in versions ≥ 12.9.0 (5 bytes in very old files): `f32 latOut_ms`,
 `u32 flags`, `f32 latIn_ms`.
 
-| Bit de `flags` | Campo | Significado |
+| `flags` bit | Field | Meaning |
 |---|---|---|
-| 0x0001 | `T+0x390` | Polaridade invertida |
-| 0x0002 | `T+0x391` | Swap L/R |
-| 0x0004 | `T+0x13F5` | ? (quase sempre ligado) |
-| 0x0008 | `FUN_012c1810` → `T+0x18` | **Habilitada** (bit apagado = mutada) |
-| 0x0010 | `T+0x380 = !bit` | **Efeitos desligados** (os 10 slots) |
-| 0x00C0 | `T+0x2D` | Dock: 0 = esquerda, 1 = meio, 2 = direita |
-| 0x0400 | `T+0x2C` | Separador visual |
+| 0x0001 | `T+0x390` | Polarity inverted |
+| 0x0002 | `T+0x391` | L/R swap |
+| 0x0004 | `T+0x13F5` | ? (almost always on) |
+| 0x0008 | `FUN_012c1810` → `T+0x18` | **Enabled** (bit cleared = muted) |
+| 0x0010 | `T+0x380 = !bit` | **Effects off** (the 10 slots) |
+| 0x00C0 | `T+0x2D` | Dock: 0 = left, 1 = middle, 2 = right |
+| 0x0400 | `T+0x2C` | Visual separator |
 | 0x0800 | `T+0x1B` | Mute-lock |
 | 0x1000 | `T+0x1A` | Solo |
-| 0x2000 | `T+0x2E` | ? Em arquivos < 20.9 define o tap de gravação (1 se ligado, senão 3/5) **[HIP: "audio track/armada"]** |
-| 0x4000 | `T+0x1D1 = !bit` | **Não** atrasar a saída física pela latência total |
-| 0x8000 | `T+0x1D0 = !bit` | **Não** compensar a latência de gravação |
+| 0x2000 | `T+0x2E` | ? In files < 20.9 it sets the recording tap (1 if on, otherwise 3/5) **[HYP: "audio track/armed"]** |
+| 0x4000 | `T+0x1D1 = !bit` | Do **not** delay the physical output by the total latency |
+| 0x8000 | `T+0x1D0 = !bit` | Do **not** compensate recording latency |
 
-Valores mais comuns nos demos: `0x4C` (habilitada + dock meio + bit 4), `0x44C` (com separador), `0x204C`.
-Em arquivos < 12.9.0 havia um só float de latência com o sinal invertido; o bit 0x20 escolhia se ele era
-de saída ou de entrada.
+Most common values in the demos: `0x4C` (enabled + dock middle + bit 4), `0x44C` (with separator), `0x204C`.
+In files < 12.9.0 there was a single latency float with the sign flipped; bit 0x20 chose whether it was
+output or input latency.
 
-### 2.7 Parâmetros do mixer e níveis de send: evento `0xE1` + IDs de controle **[DECOMP+DADOS]**
+### 2.7 Mixer parameters and send levels: event `0xE1` + control IDs **[DECOMP+DATA]**
 
-`0xE1` é um array de registros de **12 bytes** `{u32 reservado, u32 controlID, i32 valor}` (o mesmo
-formato dos eventos de controle `0xD8`/`0xDF`, tipo 0 em `FUN_00f558e0`). No fim do load, cada registro é
-aplicado com `FUN_01046a70(controlID, valor, 0x10011)`, o **setter universal de parâmetro automatizável**.
+`0xE1` is an array of **12-byte** records `{u32 reserved, u32 controlID, i32 value}` (the same
+format as the control events `0xD8`/`0xDF`, type 0 in `FUN_00f558e0`). At the end of the load, each record is
+applied with `FUN_01046a70(controlID, value, 0x10011)`, the **universal automatable-parameter setter**.
 
-**Codificação do `controlID` (u32)**, que é o mesmo endereço usado pelos links de automação (§3.3):
+**Encoding of the `controlID` (u32)**, which is the same address used by the automation links (§3.3):
 
-| Faixa | Alvo |
+| Range | Target |
 |---|---|
-| `< 0x10000000` | Canal do Channel Rack: `canal = id>>16`, `param = id & 0xFFFF` (0…12 = parâmetros genéricos do canal; 0x10…0x14, 0x103… etc.) |
-| `0x40000000 + n` | Parâmetros globais (tempo, master pitch…) **[HIP para cada n]** |
-| `0x70000000 + (trilha << 22) + (slot << 16) + p` | **Mixer**: trilha 0…501, slot 0…9 |
+| `< 0x10000000` | Channel Rack channel: `channel = id>>16`, `param = id & 0xFFFF` (0…12 = generic channel parameters; 0x10…0x14, 0x103… etc.) |
+| `0x40000000 + n` | Global parameters (tempo, master pitch…) **[HYP for each n]** |
+| `0x70000000 + (track << 22) + (slot << 16) + p` | **Mixer**: track 0…501, slot 0…9 |
 
-Valores de `p` para o mixer:
+Values of `p` for the mixer:
 
-| `p` | Significado | Faixa / padrão |
+| `p` | Meaning | Range / default |
 |---|---|---|
-| `0x1F00` | Slot ligado | 0/1 |
-| `0x1F01` | Mix (wet) do slot | 0…12800, unity 12800 |
-| `0x1FC0` | Volume da trilha | unity 12800, máx 16000 |
+| `0x1F00` | Slot on | 0/1 |
+| `0x1F01` | Slot mix (wet) | 0…12800, unity 12800 |
+| `0x1FC0` | Track volume | unity 12800, max 16000 |
 | `0x1FC1` | Pan | ±6400 |
-| `0x1FC2` | Separação estéreo | ±64 |
-| `0x1FD0…0x1FD2` | Ganho das 3 bandas do EQ | |
-| `0x1FD8…0x1FDA` | Frequência das 3 bandas | |
-| `0x1FE0…0x1FE2` | Q das 3 bandas | |
-| `0x2000 + d` | **Nível do send para a trilha d** (d até 0x1FF) | 0…16000, unity 12800 |
-| `0x8000 + k` | Parâmetro k do plugin no slot | |
+| `0x1FC2` | Stereo separation | ±64 |
+| `0x1FD0…0x1FD2` | Gain of the 3 EQ bands | |
+| `0x1FD8…0x1FDA` | Frequency of the 3 bands | |
+| `0x1FE0…0x1FE2` | Q of the 3 bands | |
+| `0x2000 + d` | **Send level to track d** (d up to 0x1FF) | 0…16000, unity 12800 |
+| `0x8000 + k` | Parameter k of the plugin in the slot | |
 
-- Em arquivos < 24.2.99 a classe do mixer era `0x2…` com trilha em 6 bits. O conversor `FUN_00f45460`
-  soma `0x50000000`, move os sends `0x1F40+d` para `0x2000+d` e manda a antiga trilha 126 para a 501.
-- Na memória, o send fica em `T+0x394 + d*8 = {i32 level, u8 enabled}` **[DECOMP]**.
-- Com a flag `0x20` no setter, o valor chega **normalizado** (0…2³⁰) e é mapeado linearmente para
-  `[min, max]` do parâmetro. É esse o caminho da automação **[DECOMP]**.
+- In files < 24.2.99 the mixer class was `0x2…` with the track in 6 bits. The converter `FUN_00f45460`
+  adds `0x50000000`, moves sends `0x1F40+d` to `0x2000+d` and sends the old track 126 to 501.
+- In memory, the send lives at `T+0x394 + d*8 = {i32 level, u8 enabled}` **[DECOMP]**.
+- With flag `0x20` in the setter, the value arrives **normalised** (0…2³⁰) and is mapped linearly to
+  the parameter's `[min, max]`. This is the automation path **[DECOMP]**.
 
-**Ordem dos eventos de uma trilha no FLP [DADOS]:** `0x95` (cor), `0x5F` (ícone), `0xCC` (nome),
-`0xEC` (flags/latência), 10× [plugin opcional: `0xC9` nome padrão, `0xD4` cabeçalho, `0xCB` nome,
-`0x80` cor, `0xD5` estado] seguido de `0x62` (índice do slot), depois `0xEB` (rotas), `0xA5`, `0xA6`,
-`0x31`, `0x9A` (entrada física), `0x93` (saída física). O registro da trilha **fecha** em `0x93`. O
-master não tem nome; o `0xCC` que vem logo depois dele já pertence à trilha 1.
+**Order of a track's events in the FLP [DATA]:** `0x95` (colour), `0x5F` (icon), `0xCC` (name),
+`0xEC` (flags/latency), 10× [optional plugin: `0xC9` default name, `0xD4` header, `0xCB` name,
+`0x80` colour, `0xD5` state] followed by `0x62` (slot index), then `0xEB` (routes), `0xA5`, `0xA6`,
+`0x31`, `0x9A` (physical input), `0x93` (physical output). The track record **closes** at `0x93`. The
+master has no name; the `0xCC` that comes right after it already belongs to track 1.
 
-### Recomendações para o LYNX (mixer)
+### Recommendations for LYNX (mixer)
 
-1. Ordem fixa: **soma de entradas → 10 slots (cada um com dry/wet) → EQ de 3 bandas opcional → matriz
-   2×2 (vol/pan/sep/fase/swap) com ramp → mute com fade de ~1 ms → meters → sends pós-fader**. Se for
-   oferecer send pré-fader, é extensão nossa; o FL não tem.
-2. Fader: `g = (11^v − 1)/10`, com `v = valor/12800` ∈ [0; 1,25] e unity em 0,8 do curso (12800/16000).
-3. Duas leis de pan: "constant power" (sin/cos × √2) e "linear". Implemente o fold de 50% do canal
-   atenuado, porque é isso que dá o som característico do pan do FL.
-4. Separação: fórmula exponencial para estreitar e linear para alargar.
-5. Solo: calcule `enabled` pelo fecho transitivo do grafo, incluindo as fontes por padrão. Respeite o
-   mute-lock e salve o estado para restaurar.
-6. Smart disable: −96 dBFS, hold de 4 s, testando entrada **e** saída.
-7. Importador FLP: rotas vêm de `0xEB` (booleanos) e os níveis vêm de `0xE1` com `p = 0x2000+d`. Faça o
-   parse do `controlID` exatamente como na tabela acima; ele também serve para resolver os alvos da
-   automação.
+1. Fixed order: **sum of inputs → 10 slots (each with dry/wet) → optional 3-band EQ → ramped 2×2
+   matrix (vol/pan/sep/phase/swap) → mute with ~1 ms fade → meters → post-fader sends**. If we
+   offer a pre-fader send, it is our own extension; FL does not have it.
+2. Fader: `g = (11^v − 1)/10`, with `v = value/12800` ∈ [0; 1.25] and unity at 0.8 of the travel (12800/16000).
+3. Two pan laws: "constant power" (sin/cos × √2) and "linear". Implement the 50% fold of the attenuated
+   channel, because that is what gives FL's pan its characteristic sound.
+4. Separation: exponential formula for narrowing and linear for widening.
+5. Solo: compute `enabled` from the transitive closure of the graph, including sources by default. Respect
+   mute-lock and save the state for restoring.
+6. Smart disable: −96 dBFS, 4 s hold, testing input **and** output.
+7. FLP importer: routes come from `0xEB` (booleans) and levels come from `0xE1` with `p = 0x2000+d`. Parse
+   the `controlID` exactly as in the table above; it also serves to resolve automation
+   targets.
 
 ---
 
 ## 3. Automation clips
 
-### 3.1 Onde ficam no FLP **[DECOMP+DADOS]**
+### 3.1 Where they live in the FLP **[DECOMP+DATA]**
 
-- Cada automation clip é um **canal do Channel Rack** com `ChanType` (evento `0x15`) = **5**. Os tipos
-  vistos nos demos são 2 = plugin gerador, 4 = audio clip, 5 = automation clip.
-- Os pontos vêm no evento **`0xEA`** dentro do bloco do canal. O load passa o blob ao objeto de
-  automação do canal (`canal+0x360`, método virtual +0x10 = stream). O save é `FUN_00f3e190`, que
-  serializa esse objeto e grava `0xEA` **[DECOMP]**.
-- O **alvo** vem no evento **`0xE3`** (registro de 20 B, um por link; vários links por clip são
-  possíveis) **[DADOS]**:
+- Each automation clip is a **Channel Rack channel** with `ChanType` (event `0x15`) = **5**. The types
+  seen in the demos are 2 = generator plugin, 4 = audio clip, 5 = automation clip.
+- The points come in event **`0xEA`** inside the channel block. The load passes the blob to the channel's
+  automation object (`channel+0x360`, virtual method +0x10 = stream). The save is `FUN_00f3e190`, which
+  serialises that object and writes `0xEA` **[DECOMP]**.
+- The **target** comes in event **`0xE3`** (20 B record, one per link; several links per clip are
+  possible) **[DATA]**:
 
-| Offset | Tipo | Campo |
+| Offset | Type | Field |
 |---|---|---|
-| 0 | u32 | `(canal_do_clip << 16)`, onde o u16 alto é o índice do canal de automação |
+| 0 | u32 | `(clip_channel << 16)`, where the high u16 is the index of the automation channel |
 | 4 | u32 | 0 |
-| 8 | u32 | **`controlID` do alvo**, mesma codificação da §2.7 (ex.: `0x72C51F01` = mix do slot 5 da trilha 11; `0x73068001` = parâmetro 1 do plugin no slot 6 da trilha 12; `0x000D0004` = parâmetro 4 do canal 13) |
-| 12 | u32 | Flags (8 nos links de automation clip) |
-| 16 | u32 | ? (constante `0x1D5` nos demos) |
+| 8 | u32 | **Target `controlID`**, same encoding as §2.7 (e.g. `0x72C51F01` = mix of slot 5 of track 11; `0x73068001` = parameter 1 of the plugin in slot 6 of track 12; `0x000D0004` = parameter 4 of channel 13) |
+| 12 | u32 | Flags (8 in automation clip links) |
+| 16 | u32 | ? (constant `0x1D5` in the demos) |
 
-- O evento `0xE2` tem o mesmo layout com flags 4. São os links de **controle remoto/MIDI** (ex.: campo 0 =
-  número do controlador). Ambos vão para listas globais (`PTR_DAT_015e0a00[id−0xE2]`) **[DECOMP]**.
+- Event `0xE2` has the same layout with flags 4. These are the **remote control/MIDI** links (e.g. field 0 =
+  controller number). Both go to global lists (`PTR_DAT_015e0a00[id−0xE2]`) **[DECOMP]**.
 
-### 3.2 Layout do evento `0xEA` **[DADOS + DECOMP do registro de ponto]**
+### 3.2 Layout of event `0xEA` **[DATA + DECOMP of the point record]**
 
 ```
-Offset  Tam   Conteúdo
-0       4     u32 = 1     (versão?)
+Offset  Size  Content
+0       4     u32 = 1     (version?)
 4       4     u32 = 0x40
-8       4     u32 = 0x400 ou 0x401   (flags?)
+8       4     u32 = 0x400 or 0x401   (flags?)
 12      1     u8  = 0
 13      4     u32 = 3
-17      4     u32 N = número de pontos
-21      24·N  pontos
-21+24N  112   bloco final (configuração de LFO/clip; igual em todos os clips de um projeto) [HIP]
+17      4     u32 N = number of points
+21      24·N  points
+21+24N  112   trailing block (LFO/clip configuration; identical in all clips of a project) [HYP]
 ```
 
-Tamanho total = 133 + 24·N. Nos demos aparecem 157, 181, 205… **[DADOS]**.
+Total size = 133 + 24·N. In the demos 157, 181, 205… appear **[DATA]**.
 
-**Ponto (24 B)**, mesmo layout de ponto da família `TCustomMEnvelope` (`FUN_00b97c40`):
+**Point (24 B)**, same point layout as the `TCustomMEnvelope` family (`FUN_00b97c40`):
 
-| Offset | Tipo | Campo |
+| Offset | Type | Field |
 |---|---|---|
-| 0 | f64 | **Δx: distância até o ponto anterior** (não é posição absoluta). O primeiro ponto tem Δx = 0 |
-| 8 | f64 | **Valor y normalizado, 0…1** |
-| 16 | f32 | **Tensão**, −1…+1 |
-| 20 | u8 | **Tipo de curva** do segmento que *termina* neste ponto (ver tabela) |
-| 21 | u8 | Selecionado (zerado no load) |
+| 0 | f64 | **Δx: distance to the previous point** (not an absolute position). The first point has Δx = 0 |
+| 8 | f64 | **Normalised y value, 0…1** |
+| 16 | f32 | **Tension**, −1…+1 |
+| 20 | u8 | **Curve type** of the segment that *ends* at this point (see table) |
+| 21 | u8 | Selected (cleared on load) |
 | 22 | u8 | ? |
-| 23 | i8 | Direção, um cache derivado: 0, +1 (tensão > 0), −1 (tensão < 0), 2 (reta) |
+| 23 | i8 | Direction, a derived cache: 0, +1 (tension > 0), −1 (tension < 0), 2 (straight) |
 
-- Posições absolutas = soma acumulada de Δx. Nos demos, Δx tem frações de 1/96 (PPQ 96), o que indica
-  **unidade de beats (semínimas)** **[HIP forte]**.
-- O byte de direção é recalculado no load (`FUN_00b9ba60`) a partir do sinal da tensão. Se a tensão é 0
-  e o tipo é uma curva, vira 2 (reta). Não precisa ser confiável no arquivo.
-- Na memória, cada ponto ocupa 0x20 B. Os campos `+0x10/+0x14/+0x18` são coeficientes pré-calculados a
-  partir da tensão e `+0x1C` é a posição relativa **[DECOMP]**.
+- Absolute positions = cumulative sum of Δx. In the demos, Δx has fractions of 1/96 (PPQ 96), which indicates
+  **units of beats (quarter notes)** **[HYP, strong]**.
+- The direction byte is recomputed on load (`FUN_00b9ba60`) from the sign of the tension. If the tension is 0
+  and the type is a curve, it becomes 2 (straight). It need not be reliable in the file.
+- In memory, each point takes 0x20 B. The fields `+0x10/+0x14/+0x18` are coefficients precomputed
+  from the tension and `+0x1C` is the relative position **[DECOMP]**.
 
-### 3.3 Tipos de curva e fórmulas (`FUN_00b9def0`, coeficientes em `FUN_00b9ba60`) **[DECOMP+STR]**
+### 3.3 Curve types and formulas (`FUN_00b9def0`, coefficients in `FUN_00b9ba60`) **[DECOMP+STR]**
 
-Os nomes vêm do menu `PtCurveNMenu` (DFM). `t` ∈ [0,1] é a fase dentro do segmento, `y0` e `y1` os
-valores das pontas e `v = y0 + F(t)·(y1 − y0)`:
+The names come from the `PtCurveNMenu` menu (DFM). `t` ∈ [0,1] is the phase within the segment, `y0` and `y1` the
+endpoint values and `v = y0 + F(t)·(y1 − y0)`:
 
-| Tipo | Nome | F(t), descrição nossa |
+| Type | Name | F(t), our description |
 |---|---|---|
-| 0 | Single curve | Exponencial: `k = |tensão|·ln(≈10⁶)`, `F = (e^{k t} − 1)/(e^k − 1)` com tensão < 0, e o espelho `1 − (e^{k(1−t)} − 1)/(e^k − 1)` com tensão > 0. Tensão 0 → reta |
-| 1 | Double curve | A mesma curva aplicada em duas metades simétricas (S) |
-| 2 | Hold | F = 0: mantém y0 até o próximo ponto (degrau) |
-| 3 | Stairs | Degraus: `round(t·n − offset)/n`, com n de degraus derivado da tensão |
-| 4 | Smooth stairs | Degraus com transição cúbica entre eles |
-| 5 | Pulse | Onda quadrada entre y0 e y1, com nº de ciclos derivado da tensão |
-| 6 | Wave | Senoide (ou triângulo, conforme o sinal) entre y0 e y1, com ciclos pela tensão |
-| 7 | Single curve 2 | Curva polinomial: `t − (u⁶ − u)·tensão`, com u = t ou 1−t conforme o sinal |
-| 8 | Double curve 2 | Versão em duas metades do tipo 7 |
-| 9 | Half sine | Mistura entre reta e meio seno, com peso = tensão |
-| 10 | Smooth | Hermite cúbico usando as inclinações dos segmentos vizinhos (spline suave através dos pontos) |
-| 11 | Single curve 3 | Hiperbólica: `A/(1 − B·t) − C`, com B derivado de `1 − (1 − 0,9|tensão|)³` |
-| 12 | Double curve 3 | Versão em duas metades do tipo 11 |
+| 0 | Single curve | Exponential: `k = |tension|·ln(≈10⁶)`, `F = (e^{k t} − 1)/(e^k − 1)` with tension < 0, and the mirror `1 − (e^{k(1−t)} − 1)/(e^k − 1)` with tension > 0. Tension 0 → straight line |
+| 1 | Double curve | The same curve applied on two symmetric halves (S) |
+| 2 | Hold | F = 0: holds y0 until the next point (step) |
+| 3 | Stairs | Steps: `round(t·n − offset)/n`, with the number of steps n derived from the tension |
+| 4 | Smooth stairs | Steps with a cubic transition between them |
+| 5 | Pulse | Square wave between y0 and y1, with the number of cycles derived from the tension |
+| 6 | Wave | Sine (or triangle, depending on the sign) between y0 and y1, with cycles set by the tension |
+| 7 | Single curve 2 | Polynomial curve: `t − (u⁶ − u)·tension`, with u = t or 1−t depending on the sign |
+| 8 | Double curve 2 | Two-half version of type 7 |
+| 9 | Half sine | Blend between straight line and half sine, with weight = tension |
+| 10 | Smooth | Cubic Hermite using the slopes of the neighbouring segments (smooth spline through the points) |
+| 11 | Single curve 3 | Hyperbolic: `A/(1 − B·t) − C`, with B derived from `1 − (1 − 0.9|tension|)³` |
+| 12 | Double curve 3 | Two-half version of type 11 |
 
-Nos demos todos os pontos de clip usam o tipo 0 com tensões variadas **[DADOS]**. Para importar, basta
-implementar 0, 1, 2 e 10; os demais podem cair em reta como fallback.
+In the demos all clip points use type 0 with varied tensions **[DATA]**. For importing, it is enough to
+implement 0, 1, 2 and 10; the others can fall back to a straight line.
 
-### 3.4 Agendamento na reprodução **[DECOMP]**
+### 3.4 Playback scheduling **[DECOMP]**
 
-- O clip na playlist gera uma **voz** `TMixVoiceAutomationClip` (unit `Mixer.Voices`, VMT `0xd1ff48`),
-  com pool próprio (`TDynamicVoiceArray<…AutomationClip>`).
-- **Início** (`FUN_00d2a930`):
-  - o comprimento é `fimOffset − inícioOffset` do item da playlist (floats do item, §4.2);
-  - posiciona o envelope em `inícioOffset / velocidade`.
-- **Por sub-bloco** (`FUN_00d24d80`): `elapsed += nAmostras × velocidade`, onde a velocidade
-  (amostras → unidades do envelope) é um double do objeto de automação, recalculado com o tempo.
-  - Enquanto `elapsed < comprimento`, avança o estado do envelope (método virtual +0x38), que interpola
-    o segmento corrente.
-  - Quando passa, a voz termina (`FUN_00d244e0`).
-- O avanço do envelope (`FUN_00b9def0`) cruza fronteiras de ponto dentro de um bloco, recalcula a taxa do
-  segmento como `velocidade/Δx` e trata laço e sustain (índices `+0x4C/+0x50/+0x54` do envelope).
-- O valor resultante vai para o alvo pelo setter universal `FUN_01046a70(controlID, valor, flags)`. Com a
-  flag `0x20` o valor é normalizado (×2³⁰) e mapeado para `[min, max]` do parâmetro.
-- **Granularidade:** a automação é aplicada nas fronteiras de sub-bloco. O motor fatia o buffer nos
-  ticks (ver documento principal §1.1), então a resolução efetiva é de **1 tick**.
+- The clip in the playlist spawns a **voice** `TMixVoiceAutomationClip` (unit `Mixer.Voices`, VMT `0xd1ff48`),
+  with its own pool (`TDynamicVoiceArray<…AutomationClip>`).
+- **Start** (`FUN_00d2a930`):
+  - the length is `endOffset − startOffset` of the playlist item (item floats, §4.2);
+  - positions the envelope at `startOffset / speed`.
+- **Per sub-block** (`FUN_00d24d80`): `elapsed += nSamples × speed`, where the speed
+  (samples → envelope units) is a double of the automation object, recomputed with the tempo.
+  - While `elapsed < length`, it advances the envelope state (virtual method +0x38), which interpolates
+    the current segment.
+  - When it passes, the voice ends (`FUN_00d244e0`).
+- The envelope advance (`FUN_00b9def0`) crosses point boundaries within a block, recomputes the segment
+  rate as `speed/Δx` and handles loop and sustain (envelope indices `+0x4C/+0x50/+0x54`).
+- The resulting value goes to the target through the universal setter `FUN_01046a70(controlID, value, flags)`. With
+  flag `0x20` the value is normalised (×2³⁰) and mapped to the parameter's `[min, max]`.
+- **Granularity:** automation is applied at sub-block boundaries. The engine slices the buffer at
+  ticks (see main document §1.1), so the effective resolution is **1 tick**.
 
-### Recomendações para o LYNX (automação)
+### Recommendations for LYNX (automation)
 
-1. **Modelo:** `AutomationClip { vector<Ponto{double dx_beats; double y01; float tensao; uint8 tipo;}>;
-   vector<ControlID> alvos; }`. Em memória use posições absolutas e converta para Δx só no import/export.
-2. **Endereço de alvo único (`ControlID`)** no estilo FL (classe | trilha | slot | parâmetro). Isso
-   simplifica serialização, links de automação, MIDI learn e o importador de FLP ao mesmo tempo.
-3. **Valores normalizados 0…1** em toda a automação, mapeados para a faixa do parâmetro no setter. O FL
-   faz isso para todo parâmetro, inclusive volume, que é 0…16000 com unity 12800.
-4. **Avaliação:** pré-calcule os coeficientes por segmento ao editar (como `FUN_00b9ba60`) e avalie por
-   bloco ou sub-bloco. Comece por Single curve (exponencial), Double curve, Hold e Smooth.
-5. **Agendamento:** um "voice" por clip ativo, avançando `nAmostras × (beats/amostra)` e aplicando o
-   valor no início de cada sub-bloco. Para plugins com parameter automation sample-accurate, emita os
-   pontos com offset dentro do bloco.
-6. **Importador FLP:** canal com ChanType 5 → clip; pontos de `0xEA` (header de 21 B + 24·N + 112);
-   alvos de `0xE3` (`controlID` em +8); posição e comprimento na playlist (§4.2).
+1. **Model:** `AutomationClip { vector<Ponto{double dx_beats; double y01; float tensao; uint8 tipo;}>;
+   vector<ControlID> alvos; }`. In memory use absolute positions and convert to Δx only on import/export.
+2. **Single target address (`ControlID`)** in FL style (class | track | slot | parameter). This
+   simplifies serialisation, automation links, MIDI learn and the FLP importer all at once.
+3. **Normalised 0…1 values** throughout automation, mapped to the parameter range in the setter. FL
+   does this for every parameter, including volume, which is 0…16000 with unity 12800.
+4. **Evaluation:** precompute per-segment coefficients on edit (like `FUN_00b9ba60`) and evaluate per
+   block or sub-block. Start with Single curve (exponential), Double curve, Hold and Smooth.
+5. **Scheduling:** one "voice" per active clip, advancing `nSamples × (beats/sample)` and applying the
+   value at the start of each sub-block. For plugins with sample-accurate parameter automation, emit the
+   points with an offset within the block.
+6. **FLP importer:** channel with ChanType 5 → clip; points from `0xEA` (21 B header + 24·N + 112);
+   targets from `0xE3` (`controlID` at +8); position and length in the playlist (§4.2).
 
 ---
 
-## 4. Registros de nota e de playlist nas versões novas
+## 4. Note and playlist records in the new versions
 
-### 4.1 Nota: evento `0xE0`, **24 bytes em todas as versões** **[DECOMP+DADOS]**
+### 4.1 Note: event `0xE0`, **24 bytes in all versions** **[DECOMP+DATA]**
 
-Nos 165 demos, **todos** os eventos `0xE0` têm tamanho múltiplo de 24, inclusive os de 24.x, 25.x e 26.x.
-O mapeamento abaixo vem da conversão nota→objeto da API de scripts do Piano Roll (`FUN_00c3ed10`, nomes
+In the 165 demos, **all** `0xE0` events have a size that is a multiple of 24, including those from 24.x, 25.x and 26.x.
+The mapping below comes from the note→object conversion of the Piano Roll scripting API (`FUN_00c3ed10`, names
 `number time length pan velocity color fcut fres pitchofs slide porta group muted selected release repeats`)
 **[DECOMP]**:
 
-| Off | Tipo | Campo | Faixa / padrão |
+| Off | Type | Field | Range / default |
 |---|---|---|---|
-| 0x00 | u32 | Posição (ticks) | |
-| 0x04 | u16 | Flags: **slide = `(flags & 0xF) == 8`**. O bit 0x4000 está sempre ligado em arquivos novos | `0x4000` / `0x4008` |
-| 0x06 | u16 | Índice do canal no rack | |
-| 0x08 | u32 | Duração (ticks) | |
-| 0x0C | u16 | Tecla (`number`) | 0…131 |
-| 0x0E | u16 | Grupo (`group`, id de agrupamento de notas) | 0 |
-| 0x10 | u8 | Fine pitch: `pitchofs = valor − 120` | 120 = centro |
-| 0x11 | u8 | `repeats` (repetições/ratchet) | 0 |
+| 0x00 | u32 | Position (ticks) | |
+| 0x04 | u16 | Flags: **slide = `(flags & 0xF) == 8`**. Bit 0x4000 is always on in new files | `0x4000` / `0x4008` |
+| 0x06 | u16 | Channel index in the rack | |
+| 0x08 | u32 | Duration (ticks) | |
+| 0x0C | u16 | Key (`number`) | 0…131 |
+| 0x0E | u16 | Group (`group`, note grouping id) | 0 |
+| 0x10 | u8 | Fine pitch: `pitchofs = value − 120` | 120 = centre |
+| 0x11 | u8 | `repeats` (repetitions/ratchet) | 0 |
 | 0x12 | u8 | Release (/128) | 64 |
-| 0x13 | u8 | bits 0–3 **cor/canal MIDI (0…15)**; 0x10 **porta**; 0x20 **muted**; 0x80 **selected** | |
+| 0x13 | u8 | bits 0–3 **colour/MIDI channel (0…15)**; 0x10 **porta**; 0x20 **muted**; 0x80 **selected** | |
 | 0x14 | u8 | Pan (/128) | 64 |
 | 0x15 | u8 | Velocity (/128) | 100 |
 | 0x16 | u8 | Mod X / "fcut" (/255) | 128 |
 | 0x17 | u8 | Mod Y / "fres" (/255) | 128 |
 
-Conversões de arquivos antigos no load **[DECOMP]**:
+Conversions of old files on load **[DECOMP]**:
 - `< 3.1.6`: fine pitch = 120.
-- `< 5.3.0`: o nibble baixo de `+0x13` é deslocado `<<2`.
+- `< 5.3.0`: the low nibble of `+0x13` is shifted `<<2`.
 - `< 6.5.0`: release = 64.
 
-**[DADOS]** Nos demos ≥ 24: flags `0x4000` (13.282 notas) e `0x4008` (slide, 156); `+0x13` com 0x20
-(muted, 364) e 0x80 (selected, 72); `repeats` com valores 4, 10, 11, 12, 13.
+**[DATA]** In demos ≥ 24: flags `0x4000` (13,282 notes) and `0x4008` (slide, 156); `+0x13` with 0x20
+(muted, 364) and 0x80 (selected, 72); `repeats` with values 4, 10, 11, 12, 13.
 
-### 4.2 Item de playlist: evento `0xE9` **[DECOMP+DADOS]**
+### 4.2 Playlist item: event `0xE9` **[DECOMP+DATA]**
 
-O tamanho do registro (`FUN_00f558e0`, tipo 2) é decidido pela versão e por um **u32 de flags do arquivo
-no evento `0xA9`**:
+The record size (`FUN_00f558e0`, type 2) is decided by the version and by a **u32 of file flags
+in event `0xA9`**:
 
-| Condição | Tamanho |
+| Condition | Size |
 |---|---|
-| versão < 20.99.1 | 32 B |
-| ≥ 20.99.1 e `(flagsA9 & 2) == 0` (inclui arquivos sem `0xA9`) | **60 B** |
-| ≥ 20.99.1, bit 2 ligado e `(flagsA9 & 8) == 0` | **80 B** |
-| ≥ 20.99.1, bits 2 e 8 ligados | tamanho nativo atual (≥ 0x58 = 88 B **[HIP]**) |
+| version < 20.99.1 | 32 B |
+| ≥ 20.99.1 and `(flagsA9 & 2) == 0` (includes files without `0xA9`) | **60 B** |
+| ≥ 20.99.1, bit 2 on and `(flagsA9 & 8) == 0` | **80 B** |
+| ≥ 20.99.1, bits 2 and 8 on | current native size (≥ 0x58 = 88 B **[HYP]**) |
 
-Nos demos: sem `0xA9` → 60 B; `0xA9 = 7` → 80 B (24.2…25.2); `0xA9 = 15` (25.2.99/26.1) → nativo,
-mas os dois arquivos estão vazios **[DADOS]**. O bit 1 do `0xA9` também converte um campo de canal
+In the demos: without `0xA9` → 60 B; `0xA9 = 7` → 80 B (24.2…25.2); `0xA9 = 15` (25.2.99/26.1) → native,
+but both files are empty **[DATA]**. Bit 1 of `0xA9` also converts a channel field
 int→float.
 
-Layout (validado em 10.576 registros de 80 B):
+Layout (validated on 10,576 records of 80 B):
 
-| Off | Tipo | Campo |
+| Off | Type | Field |
 |---|---|---|
-| 0x00 | u32 | Posição (ticks) |
+| 0x00 | u32 | Position (ticks) |
 | 0x04 | u16 | `0x5000` (base) |
-| 0x06 | u16 | **Item:** < 0x5000 → índice do canal (audio clip ou automation clip); ≥ 0x5000 → pattern `idx − 0x5000` |
-| 0x08 | u32 | Comprimento (ticks) |
-| 0x0C | u16 | Trilha da playlist, invertida: `trilha = 499 − valor` **[HIP pelo valor; o load soma +100 em arquivos < 9.?]** |
-| 0x0E | u16 | Grupo |
-| 0x10 | u16 | 120 (fine pitch padrão do clip) |
-| 0x12 | u16 | Flags: 0x0040 padrão; **0x2000 = mutado/desabilitado** **[HIP]** (205 casos) |
-| 0x14 | 4×u8 | 64, 100, 128, 128: pan, vel, modX, modY padrão do clip |
-| 0x18 | f32 | **Início do offset** (−1 = nenhum). Em automation clips, é o ponto inicial dentro do envelope |
-| 0x1C | f32 | **Fim do offset** (−1 = nenhum) |
-| 0x20 | u32 | **ID único do clip**, regenerado no load por contador atômico (`FUN_0105f2e0`) |
-| 0x24 | f32 | Fade-in? Zerado no load quando `(flagsA9 & 4) == 0` e o item é de um tipo específico **[HIP]** |
-| 0x28 | f32 | Tensão do fade-in? **[HIP]** |
-| 0x2C | f32 | Fade-out? **[HIP]** |
-| 0x30 | f32 | Tensão do fade-out? **[HIP]** |
-| 0x34 | f32 | Ganho do clip, linear (padrão 1,0) **[HIP forte]** |
-| 0x38 | u32 | Flags de fade/crossfade (0…3, `0x8008`, `0x800A`) **[HIP]** |
-| **60–79: só no registro de 80 B** | | Inicializado em `FUN_01064e20` quando ausente |
+| 0x06 | u16 | **Item:** < 0x5000 → channel index (audio clip or automation clip); ≥ 0x5000 → pattern `idx − 0x5000` |
+| 0x08 | u32 | Length (ticks) |
+| 0x0C | u16 | Playlist track, inverted: `track = 499 − value` **[HYP from the value; the load adds +100 in files < 9.?]** |
+| 0x0E | u16 | Group |
+| 0x10 | u16 | 120 (default clip fine pitch) |
+| 0x12 | u16 | Flags: 0x0040 default; **0x2000 = muted/disabled** **[HYP]** (205 cases) |
+| 0x14 | 4×u8 | 64, 100, 128, 128: default clip pan, vel, modX, modY |
+| 0x18 | f32 | **Offset start** (−1 = none). In automation clips, it is the start point within the envelope |
+| 0x1C | f32 | **Offset end** (−1 = none) |
+| 0x20 | u32 | **Unique clip ID**, regenerated on load by an atomic counter (`FUN_0105f2e0`) |
+| 0x24 | f32 | Fade-in? Cleared on load when `(flagsA9 & 4) == 0` and the item is of a specific type **[HYP]** |
+| 0x28 | f32 | Fade-in tension? **[HYP]** |
+| 0x2C | f32 | Fade-out? **[HYP]** |
+| 0x30 | f32 | Fade-out tension? **[HYP]** |
+| 0x34 | f32 | Clip gain, linear (default 1.0) **[HYP, strong]** |
+| 0x38 | u32 | Fade/crossfade flags (0…3, `0x8008`, `0x800A`) **[HYP]** |
+| **60–79: only in the 80 B record** | | Initialised in `FUN_01064e20` when absent |
 | 0x3C | u32 | 0 |
-| 0x40 | f64 | **1,0** por padrão: fator de tempo/stretch do clip **[HIP]** |
+| 0x40 | f64 | **1.0** by default: clip time/stretch factor **[HYP]** |
 | 0x48 | u32 | 0 |
-| 0x4C | i32 | −1 (no nativo; ignorado no de 80 B) |
-| 0x50 | u32 | 0 (só no nativo) |
+| 0x4C | i32 | −1 (in native; ignored in the 80 B one) |
+| 0x50 | u32 | 0 (native only) |
 
-### 4.3 Trilha da playlist: evento `0xEE` (70 B) + nome em `0xEF` **[DECOMP+DADOS]**
+### 4.3 Playlist track: event `0xEE` (70 B) + name in `0xEF` **[DECOMP+DATA]**
 
-- Há 500 registros por arquivo, cada um seguido de um `0x2B` (u8).
-- Campos:
-  - `u32 índice` (1…500)
-  - `u32 cor` (se for `0x565148`, a trilha usa a cor padrão)
-  - `u32 ícone`
-  - `u8 habilitada`
-  - `f32 altura` (1,0)
-  - `f32` (−32 / −16) em +0x11
-  - `u8` em +0x15
-  - bloco em +0x16
-  - u8 em +0x2E…+0x30
-  - u32 em +0x31/+0x35/+0x39
-  - u8 em +0x3D
-  - bit 0 de +0x42
-- O load aceita versões mais curtas do registro, conforme o tamanho.
+- There are 500 records per file, each followed by a `0x2B` (u8).
+- Fields:
+  - `u32 index` (1…500)
+  - `u32 colour` (if it is `0x565148`, the track uses the default colour)
+  - `u32 icon`
+  - `u8 enabled`
+  - `f32 height` (1.0)
+  - `f32` (−32 / −16) at +0x11
+  - `u8` at +0x15
+  - block at +0x16
+  - u8 at +0x2E…+0x30
+  - u32 at +0x31/+0x35/+0x39
+  - u8 at +0x3D
+  - bit 0 of +0x42
+- The load accepts shorter versions of the record, depending on the size.
 
-### Recomendações para o LYNX (formato)
+### Recommendations for LYNX (format)
 
-1. Nota: 24 B fixos. Implemente slide (`flags&0xF==8`), porta (bit 0x10 de +0x13), muted (0x20), cor
-   (nibble baixo) e repeats (+0x11). No `flpdump`, imprima esses campos para validar.
-2. Playlist: escolha o tamanho do registro por **versão + `0xA9`**, e não por "tamanho÷N", porque 80×3 e
-   60×4 são ambíguos (os dois dão 240). Os testes de regressão devem cobrir os 3 tamanhos.
-3. Item ≥ 0x5000 = pattern; < 0x5000 = canal (clip de áudio ou de automação).
-4. Para clips de automação, use os offsets de início e fim (+0x18/+0x1C) para recortar o envelope.
+1. Note: fixed 24 B. Implement slide (`flags&0xF==8`), porta (bit 0x10 of +0x13), muted (0x20), colour
+   (low nibble) and repeats (+0x11). In `flpdump`, print these fields for validation.
+2. Playlist: choose the record size by **version + `0xA9`**, not by "size÷N", because 80×3 and
+   60×4 are ambiguous (both give 240). Regression tests must cover the 3 sizes.
+3. Item ≥ 0x5000 = pattern; < 0x5000 = channel (audio or automation clip).
+4. For automation clips, use the start and end offsets (+0x18/+0x1C) to trim the envelope.
 
 ---
 
-## 5. Diálogo de export / render
+## 5. Export / render dialog
 
-Fonte: formulários `TRenderForm` (novo) e `TWAVRenderForm` (antigo, lido pelo driver de render
-`FUN_00d18130`) decodificados dos DFM **[STR]**, mais a decompilação do render **[DECOMP]**.
+Source: the `TRenderForm` (new) and `TWAVRenderForm` (old, read by the render driver
+`FUN_00d18130`) forms decoded from the DFM **[STR]**, plus the decompilation of the render **[DECOMP]**.
 
-### 5.1 Opções (valor padrão entre parênteses) **[STR]**
+### 5.1 Options (default value in parentheses) **[STR]**
 
-| Grupo | Opções |
+| Group | Options |
 |---|---|
 | Mode | Song, Pattern |
-| **Tail** | **Cut remainder** (0, padrão), **Leave remainder** (1), **Wrap remainder** (2) |
-| Processamento | Enable master effects (on), Enable insert effects (on), **Trim PDC silence (on)**, Split mixer tracks (off; sub-opções "Include Master" (on) e "Include Current" (off)) |
-| Quality: resampling | 2-point linear, 6-point Hermite, 16/24/32/64/128/256/512-point sinc (grupos Low/Average/High) |
-| Quality: outros | Dithering (off, "Dithered 16Bit output"), HQ for all plugins (on), Disable maximum polyphony (on) |
-| Formato | WAV (16 int / 24 int / 32 float), FLAC (16/24, compressão 0–8, padrão 5), MP3 (bitrate 0–13), OGG (0–15), M4A |
-| Canais | Stereo, Mono (merged), Mono (left only), Mono (right only) |
-| Extras | Tempo info (chunk tipo ACID), note markers, loop markers (on), playlist markers (on) |
-| **Mastering** | No lugar da normalização: alvo LUFS de −25 a −8, padrão −9; presets por plataforma (Spotify, Apple Music, YouTube, CD…); exige FL Cloud |
+| **Tail** | **Cut remainder** (0, default), **Leave remainder** (1), **Wrap remainder** (2) |
+| Processing | Enable master effects (on), Enable insert effects (on), **Trim PDC silence (on)**, Split mixer tracks (off; sub-options "Include Master" (on) and "Include Current" (off)) |
+| Quality: resampling | 2-point linear, 6-point Hermite, 16/24/32/64/128/256/512-point sinc (groups Low/Average/High) |
+| Quality: other | Dithering (off, "Dithered 16Bit output"), HQ for all plugins (on), Disable maximum polyphony (on) |
+| Format | WAV (16 int / 24 int / 32 float), FLAC (16/24, compression 0–8, default 5), MP3 (bitrate 0–13), OGG (0–15), M4A |
+| Channels | Stereo, Mono (merged), Mono (left only), Mono (right only) |
+| Extras | Tempo info (ACID-type chunk), note markers, loop markers (on), playlist markers (on) |
+| **Mastering** | In place of normalisation: LUFS target from −25 to −8, default −9; per-platform presets (Spotify, Apple Music, YouTube, CD…); requires FL Cloud |
 
-**Não existe normalização por pico no render de 2026** **[STR]**. "Normalize" aparece só em clips, no
-Edison e em knobs.
+**There is no peak normalisation in the 2026 render** **[STR]**. "Normalize" only appears in clips, in
+Edison and in knobs.
 
-### 5.2 Comportamento **[DECOMP]**
+### 5.2 Behaviour **[DECOMP]**
 
-- **Cut (0):** no tick em que a música acaba (`FUN_00d0e840`), o estado vai para "parar". Só os
-  contadores de PDC continuam rodando.
-- **Leave (1):** depois do fim, segue renderizando a cauda até o **primeiro bloco em que todo o master
-  está abaixo de ≈ −96 dBFS de pico** (`FUN_00d0eb10`/`FUN_00c4d260`; limiar `exp(k·−96)`), com **teto de
-  30 s** (constante 30000 ms).
-- **Wrap (2):** **não** é mixar a cauda sobre o início do arquivo. É **pré-roll**:
-  - o render começa com a escrita desligada;
-  - no primeiro fim, a escrita liga (`FUN_00d14880`) e o loop volta ao início;
-  - o arquivo recebe a **segunda passada**, que já contém as caudas da primeira;
-  - o segundo fim corta.
-- **Trim PDC:** ver §1.6.
-- **Qualidade** (`FUN_01366a70`): grava o modo de interpolação em todos os canais. Com "HQ for all
-  plugins", usa as flags 0x13 em vez de 0x11.
-- **Disable max poly:** salva o limite de polifonia de cada canal, zera (ilimitado) e restaura no fim.
-- **Master/insert FX:** liga ou desliga os efeitos via `FUN_0127c3e0`.
+- **Cut (0):** at the tick where the song ends (`FUN_00d0e840`), the state goes to "stop". Only the
+  PDC counters keep running.
+- **Leave (1):** after the end, it keeps rendering the tail until the **first block in which the whole master
+  is below ≈ −96 dBFS peak** (`FUN_00d0eb10`/`FUN_00c4d260`; threshold `exp(k·−96)`), with a **cap of
+  30 s** (constant 30000 ms).
+- **Wrap (2):** it is **not** mixing the tail over the start of the file. It is **pre-roll**:
+  - the render starts with writing turned off;
+  - at the first end, writing turns on (`FUN_00d14880`) and the loop goes back to the start;
+  - the file receives the **second pass**, which already contains the tails of the first;
+  - the second end cuts.
+- **Trim PDC:** see §1.6.
+- **Quality** (`FUN_01366a70`): writes the interpolation mode into all channels. With "HQ for all
+  plugins", it uses flags 0x13 instead of 0x11.
+- **Disable max poly:** saves each channel's polyphony limit, zeroes it (unlimited) and restores it at the end.
+- **Master/insert FX:** turns the effects on or off via `FUN_0127c3e0`.
 - **Split:**
-  - um writer por trilha (1…N; master e Current opcionais);
-  - nome do arquivo = base + nome da trilha;
-  - o writer fica no registro do mixer em `+0x118`.
-- **Mono:** merged soma (provavelmente (L+R)/2 **[HIP]**); left/right extraem um canal.
-- **Dither** (`FUN_012c7510`), só no caminho de **16 bits**: TPDF (diferença de dois uniformes,
-  ±1 LSB) com **noise shaping de 2ª ordem por realimentação de erro**,
-  `tmp = x·32767 + 0,5·(2e₁ − e₂)`, depois `q = round(tmp + ruído)`, `e₂ = e₁`, `e₁ = tmp − q`, e
-  saturação. Sem dither, só faz clamp e escala por 32767.
+  - one writer per track (1…N; master and Current optional);
+  - file name = base + track name;
+  - the writer lives in the mixer record at `+0x118`.
+- **Mono:** merged sums (probably (L+R)/2 **[HYP]**); left/right extract one channel.
+- **Dither** (`FUN_012c7510`), only on the **16-bit** path: TPDF (difference of two uniforms,
+  ±1 LSB) with **2nd-order noise shaping via error feedback**,
+  `tmp = x·32767 + 0.5·(2e₁ − e₂)`, then `q = round(tmp + noise)`, `e₂ = e₁`, `e₁ = tmp − q`, and
+  saturation. Without dither, it only clamps and scales by 32767.
 
-### Recomendações para o LYNX (export)
+### Recommendations for LYNX (export)
 
-1. Implemente o **Wrap como pré-roll**: renderize uma passada sem gravar e grave a segunda. É simples e
-   fiel ao FL.
-2. Leave: pare no primeiro bloco com pico < −96 dBFS, com teto de 30 s.
-3. Trim PDC por stem, ligado por padrão (§1.6).
-4. Dither TPDF + shaping de 2ª ordem apenas para inteiros de 16 bits. Guarde o erro em float.
-5. Durante o render, troque a interpolação dos samplers para a qualidade escolhida, ligue o HQ dos
-   plugins e desligue os limites de polifonia; restaure tudo no fim.
-6. Normalização é opcional. Se for feita, use um pico em dois passes. O FL atual usa um alvo LUFS, mas
-   depende do serviço de nuvem.
+1. Implement **Wrap as pre-roll**: render one pass without writing and write the second. It is simple and
+   faithful to FL.
+2. Leave: stop at the first block with peak < −96 dBFS, with a 30 s cap.
+3. Trim PDC per stem, on by default (§1.6).
+4. TPDF dither + 2nd-order shaping only for 16-bit integers. Keep the error in float.
+5. During the render, switch the samplers' interpolation to the chosen quality, turn on plugin HQ
+   and disable polyphony limits; restore everything at the end.
+6. Normalisation is optional. If done, use a two-pass peak. Current FL uses a LUFS target, but
+   it depends on the cloud service.
 
 ---
 
-## 6. Piano roll: parâmetros das ferramentas **[STR]**
+## 6. Piano roll: tool parameters **[STR]**
 
-Só o que foi barato extrair dos formulários. Não há algoritmos decompilados aqui.
+Only what was cheap to extract from the forms. There are no decompiled algorithms here.
 
-- **Propriedades de nota:** pitch fino 0…240 (120 = centro), Mod X/Y 0…255 (128), release 0…128 (64),
-  vel 0…128 (100), pan 0…128 (64), slide, porta, cor/canal MIDI 1…16, repeat 0…96.
+- **Note properties:** fine pitch 0…240 (120 = centre), Mod X/Y 0…255 (128), release 0…128 (64),
+  vel 0…128 (100), pan 0…128 (64), slide, porta, colour/MIDI channel 1…16, repeat 0…96.
 - **Quantize:**
-  - strength por propriedade (pan, vel, modX, rel, modY, pitch) 0…128 (128);
-  - start 0…128 (64), duration 0…128 (64), sensibilidade/janela 12…192 (36);
-  - modos de duração: Leave duration, Leave end time, Quantize duration, Quantize end time;
-  - template de groove;
-  - atalhos "Quick quantize" e "Quick quantize start times".
+  - strength per property (pan, vel, modX, rel, modY, pitch) 0…128 (128);
+  - start 0…128 (64), duration 0…128 (64), sensitivity/window 12…192 (36);
+  - duration modes: Leave duration, Leave end time, Quantize duration, Quantize end time;
+  - groove template;
+  - shortcuts "Quick quantize" and "Quick quantize start times".
 - **Arpeggiator:**
-  - range Normal/Flip/Alternate, 0…6 oitavas;
+  - range Normal/Flip/Alternate, 0…6 octaves;
   - sync Time/Block/Chord;
   - time mul 1…7, gate 0…48, "Group notes".
-- **Chop:** pattern, time mul, Absolute; chop rápido em bars/beats/1/2…1/32.
+- **Chop:** pattern, time mul, Absolute; quick chop at bars/beats/1/2…1/32.
 - **Flam:** time −192…192 (−64), vel 0…128 (85); presets Flam/Early flam/Double stroke.
 - **Articulator (Legato):**
   - multiply 10…100%, variation, gap 0…240 ticks, chop chords;
   - presets Legato/Portato/Staccato.
-- **Strumizer:** start/vel/end com strength e tension; preserve end; trigger ahead.
-- **Randomizer:** níveis ±128 bipolar, seed, escala/acorde, octave, range, population, length,
+- **Strumizer:** start/vel/end with strength and tension; preserve end; trigger ahead.
+- **Randomizer:** levels ±128 bipolar, seed, scale/chord, octave, range, population, length,
   "Glue same notes", "Random portamento".
-- **Level scaling:** center, multiply (8192 = 1,0), offset, tension.
-- **Outras:** Flip, Claw machine, LFO (seno/tri/quadrada, lin/log), Fill (Euclidean).
+- **Level scaling:** center, multiply (8192 = 1.0), offset, tension.
+- **Others:** Flip, Claw machine, LFO (sine/tri/square, lin/log), Fill (Euclidean).
 
-Recomendação: para o LYNX, priorize Quantize (start + duration + strength + janela) e o editor de
-eventos com as propriedades acima. Arp, Strum, Flam e Chop podem ser implementados depois como
-transformações puras sobre a lista de notas.
+Recommendation: for LYNX, prioritise Quantize (start + duration + strength + window) and the event
+editor with the properties above. Arp, Strum, Flam and Chop can be implemented later as
+pure transformations over the note list.
 
 ---
 
-## 7. Perguntas que continuam em aberto
+## 7. Questions that remain open
 
-1. O significado exato do header (21 B) e do trailer (112 B) do `0xEA`, e a classe do objeto
-   `canal+0x360`. O ponto é idêntico ao `TCustomMEnvelope`, mas o header não bate com o stream de
+1. The exact meaning of the header (21 B) and trailer (112 B) of `0xEA`, and the class of the object
+   `channel+0x360`. The point is identical to `TCustomMEnvelope`, but the header does not match the stream of
    `TMEnvelope`.
-2. Campos 0x24…0x38 do item de playlist (fades e ganho do clip): confirmar por decompilação.
-3. "Compensate for master latency", "Delay never bypass latency comp" e o valor de UI que corresponde a
-   cada lei de pan.
-4. A constante exata do limiar de −96 dB do tail (lida em runtime) e o posicionamento do pré-roll do Wrap.
-5. Bit 0x4000 nas flags de nota, bit 0x4 do `0xEC` e o campo +16 (`0x1D5`) dos links de automação.
+2. Fields 0x24…0x38 of the playlist item (fades and clip gain): confirm by decompilation.
+3. "Compensate for master latency", "Delay never bypass latency comp" and the UI value that corresponds to
+   each pan law.
+4. The exact constant of the tail's −96 dB threshold (read at runtime) and the placement of the Wrap pre-roll.
+5. Bit 0x4000 in the note flags, bit 0x4 of `0xEC` and field +16 (`0x1D5`) of the automation links.
 
-## Apêndice B: funções novas (rastreabilidade)
+## Appendix B: new functions (traceability)
 
-| Endereço | Papel inferido | Confiança |
+| Address | Inferred role | Confidence |
 |---|---|---|
-| `FUN_01100530` | Recalcula o PDC (snapshot → propagação → compensação) | DECOMP |
-| `FUN_010ff3b0` | Propagação de latência por trilha (inAlign/outLat) | DECOMP |
-| `FUN_010ffca0` | Comprimentos das linhas de atraso por aresta | DECOMP |
-| `FUN_01100b10` | Latência em ms da trilha/master | DECOMP |
-| `FUN_009289b0` | `TBasicDelay_32FS` (ring buffer estéreo) | DECOMP |
-| `FUN_01276ee0` | `TMixerTrackModule.Process`: ordem interna da trilha | DECOMP |
-| `FUN_0127b050` / `FUN_006a13a0` | Matriz vol/pan/sep/fase/swap e aplicação | DECOMP |
-| `FUN_01277980` | Sends pós-fader com ramp + PDC por aresta | DECOMP |
-| `FUN_0127bb10` | Solo por fecho transitivo do grafo | DECOMP |
-| `FUN_00cf2f90` / `FUN_00cf3020` | Smart disable (−96 dB, hold de 4 s) | DECOMP |
-| `FUN_01046a70` | Setter universal por `controlID` (load de `0xE1`, automação, MIDI) | DECOMP |
-| `FUN_00f45460` | Converte `controlID` antigos do mixer para o esquema de 500 trilhas | DECOMP |
-| `FUN_00f558e0` | Tamanho do registro de arrays (nota 24, controle 12, playlist 32/60/80/nativo) | DECOMP |
-| `FUN_00f55690` | Pós-load da playlist (IDs de clip, defaults das extensões) | DECOMP |
-| `FUN_01064e20` | Defaults do bloco estendido do item de playlist (+0x3C…) | DECOMP |
-| `FUN_00c3ed10` | Nota (24 B) → objeto da API de script (mapa de campos) | DECOMP |
-| `FUN_00b97c40` | Stream de `TCustomMEnvelope` (pontos de 24 B) | DECOMP |
-| `FUN_00b9ba60` | Pré-cálculo dos coeficientes de curva por ponto | DECOMP |
-| `FUN_00b9def0` | Avanço e avaliação do envelope (13 tipos de curva) | DECOMP |
-| `FUN_00d24d80` / `FUN_00d2a930` | `TMixVoiceAutomationClip`: avanço por bloco e início com offset | DECOMP |
-| `FUN_00f3e190` | Save do canal (grava `0xEA`) | DECOMP |
-| `FUN_00d18130` / `FUN_00d175b0` | Driver de render: tail, Trim PDC, split | DECOMP |
-| `FUN_012c7510` | Dither TPDF com shaping de 2ª ordem (16 bits) | DECOMP |
-| `FUN_01366a70` | Qualidade de interpolação e HQ no render | DECOMP |
+| `FUN_01100530` | Recomputes PDC (snapshot → propagation → compensation) | DECOMP |
+| `FUN_010ff3b0` | Per-track latency propagation (inAlign/outLat) | DECOMP |
+| `FUN_010ffca0` | Per-edge delay line lengths | DECOMP |
+| `FUN_01100b10` | Latency in ms of track/master | DECOMP |
+| `FUN_009289b0` | `TBasicDelay_32FS` (stereo ring buffer) | DECOMP |
+| `FUN_01276ee0` | `TMixerTrackModule.Process`: internal track order | DECOMP |
+| `FUN_0127b050` / `FUN_006a13a0` | Vol/pan/sep/phase/swap matrix and its application | DECOMP |
+| `FUN_01277980` | Post-fader sends with ramp + per-edge PDC | DECOMP |
+| `FUN_0127bb10` | Solo via transitive closure of the graph | DECOMP |
+| `FUN_00cf2f90` / `FUN_00cf3020` | Smart disable (−96 dB, 4 s hold) | DECOMP |
+| `FUN_01046a70` | Universal setter by `controlID` (load of `0xE1`, automation, MIDI) | DECOMP |
+| `FUN_00f45460` | Converts old mixer `controlID`s to the 500-track scheme | DECOMP |
+| `FUN_00f558e0` | Array record size (note 24, control 12, playlist 32/60/80/native) | DECOMP |
+| `FUN_00f55690` | Playlist post-load (clip IDs, extension defaults) | DECOMP |
+| `FUN_01064e20` | Defaults of the playlist item's extended block (+0x3C…) | DECOMP |
+| `FUN_00c3ed10` | Note (24 B) → scripting API object (field map) | DECOMP |
+| `FUN_00b97c40` | `TCustomMEnvelope` stream (24 B points) | DECOMP |
+| `FUN_00b9ba60` | Per-point curve coefficient precomputation | DECOMP |
+| `FUN_00b9def0` | Envelope advance and evaluation (13 curve types) | DECOMP |
+| `FUN_00d24d80` / `FUN_00d2a930` | `TMixVoiceAutomationClip`: per-block advance and start with offset | DECOMP |
+| `FUN_00f3e190` | Channel save (writes `0xEA`) | DECOMP |
+| `FUN_00d18130` / `FUN_00d175b0` | Render driver: tail, Trim PDC, split | DECOMP |
+| `FUN_012c7510` | TPDF dither with 2nd-order shaping (16 bits) | DECOMP |
+| `FUN_01366a70` | Interpolation quality and HQ in the render | DECOMP |
