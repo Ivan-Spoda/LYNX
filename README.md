@@ -16,7 +16,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#opens-fl-studio-projects">FL projects</a> ·
   <a href="#building">Building</a> ·
-  <a href="docs/ESTADO.md">Status</a> ·
+  <a href="docs/STATUS.md">Status</a> ·
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
 
@@ -168,7 +168,7 @@ LYNX reads the `.flp` format directly and converts everything that has an equiva
 A report lists what was converted, what is approximated and what was left out. FLEX packs are encrypted and are never opened (the channel gets a synth patch chosen by preset name).
 
 > [!NOTE]
-> Every conversion rule comes from **behavioural** reverse engineering (decompilation studied, official manual and project data), recorded in [`docs/analise/`](docs/analise). Anything not confirmed is flagged as an approximation in [`docs/ESTADO.md`](docs/ESTADO.md).
+> Every conversion rule comes from **behavioural** reverse engineering (decompilation studied, official manual and project data), recorded in [`docs/analise/`](docs/analise). Anything not confirmed is flagged as an approximation in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Download
 
@@ -253,16 +253,16 @@ docs/         architecture, status, roadmap and the behavioural analysis of FL S
 - **Isolated plugins:** plugin scanning always runs in separate processes; optionally the plugins themselves do too (a plugin that hangs goes silent and LYNX keeps playing).
 
 > [!IMPORTANT]
-> LYNX is in **alpha**. It already opens, plays and exports whole projects, but it is not yet a replacement for a daily-driver DAW. What works and what is missing is in [`docs/ESTADO.md`](docs/ESTADO.md); the plan in [`docs/ROADMAP.md`](docs/ROADMAP.md); and a manual test script in [`docs/TESTE_MANUAL.md`](docs/TESTE_MANUAL.md).
+> LYNX is in **alpha**. It already opens, plays and exports whole projects, but it is not yet a replacement for a daily-driver DAW. What works and what is missing is in [`docs/STATUS.md`](docs/STATUS.md); the plan in [`docs/ROADMAP.md`](docs/ROADMAP.md); and a manual test script in [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [`docs/ESTADO.md`](docs/ESTADO.md) | what works, what is approximated and what is missing |
+| [`docs/STATUS.md`](docs/STATUS.md) | what works, what is approximated and what is missing |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | project phases |
-| [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) | how the engine and the UI are organised |
-| [`docs/TESTE_MANUAL.md`](docs/TESTE_MANUAL.md) | a script for listening to and poking at what the automated tests don't cover |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how the engine and the UI are organised |
+| [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) | a script for listening to and poking at what the automated tests don't cover |
 | [`docs/analise/`](docs/analise) | FL Studio's behaviour, documented round by round (clean-room) |
 
 > [!NOTE]

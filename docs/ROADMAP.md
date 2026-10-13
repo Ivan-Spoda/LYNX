@@ -1,106 +1,82 @@
 # Roadmap
 
-Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do motor de áudio
-(sem alocação, locks ou I/O na thread de áudio).
+Ordered to get something usable as early as possible without ever breaking the audio-engine rule
+(no allocation, locks or I/O on the audio thread).
 
-## Fase 1: base tocável ✅
-- [x] Transporte, motor de áudio, grafo JUCE
-- [x] Modelo de música (canais, patterns, notas, PPQ 960)
-- [x] Scheduler com precisão de sample
-- [x] Instrumentos internos sintetizados
-- [x] Channel Rack com step sequencer
-- [x] Leitor de `.flp` + importação de canais/patterns/notas
-- [x] Build Windows sem Visual Studio (Zig) e testes do núcleo
+## Phase 1: a playable base ✅
+- [x] Transport, audio engine, JUCE graph
+- [x] Song model (channels, patterns, notes, 960 PPQ)
+- [x] Sample-accurate scheduler
+- [x] Built-in synthesized instruments
+- [x] Channel Rack with step sequencer
+- [x] `.flp` reader + channel/pattern/note import
+- [x] Windows build without Visual Studio (Zig) and core tests
 
-## Fase 2: compor de verdade
-- [x] Sampler: `.wav`/`.flac`/`.ogg`/`.mp3`/`.aiff` por canal, inclusive os WAV-com-Ogg do FL
-- [x] Projetos `.flp` importados tocam com os samples reais da instalação do FL
-- [x] Piano Roll (criar, mover, redimensionar, apagar, snap, zoom, preview, ghost notes)
-- [x] Salvar/abrir projeto no formato próprio (`.lynx`, JSON versionado)
-- [x] Volume, pan e mute por canal; teclado do PC como teclado musical
-- [x] Exportar para WAV (`LYNX.exe --render`)
-- [x] Desfazer/refazer (Ctrl+Z / Ctrl+Y), um passo por gesto do mouse
-- [x] Velocity no Piano Roll (faixa embaixo), seleção múltipla, copiar/colar/duplicar, quantizar, snap
-- [x] Solo por canal (clique direito no LED), renomear/colorir/clonar patterns (cores importadas do .flp)
-- [x] Entrada MIDI e gravação de notas (MIDI e teclado do PC)
-- [x] Exportar pela interface: WAV 16/24/32f, FLAC, OGG, com cauda e progresso (Ctrl+R)
+## Phase 2: real composing ✅
+- [x] Sampler: `.wav`/`.flac`/`.ogg`/`.mp3`/`.aiff` per channel, including FL's Ogg-in-WAV files
+- [x] Imported `.flp` projects play with the real samples from the FL installation
+- [x] Piano Roll (create, move, resize, delete, snap, zoom, preview, ghost notes)
+- [x] Save/open in LYNX's own format (`.lynx`, versioned JSON)
+- [x] Per-channel volume, pan and mute; PC keyboard as a musical keyboard
+- [x] Render to WAV (`LYNX.exe --render`)
+- [x] Undo/redo (Ctrl+Z / Ctrl+Y), one step per mouse gesture
+- [x] Velocity lane, multi-selection, copy/paste/duplicate, quantize, snap
+- [x] Channel solo, rename/colour/clone patterns (colours imported from `.flp`)
+- [x] MIDI input and note recording (MIDI and PC keyboard)
+- [x] Export from the UI: WAV 16/24/32f, FLAC, OGG, with tail and progress (Ctrl+R)
 
-## Fase 3: arranjo
-- [x] Playlist: clips de pattern no tempo, trilhas, modo PAT/SONG, seek pela régua
-- [x] Importar a playlist do `.flp` (clips de pattern, com recorte de início/fim)
-- [x] Clips de áudio na playlist (forma de onda, arrastar arquivo, recorte, retomada no meio após seek)
-- [x] Importar clips de áudio do `.flp` (offsets em tempos ou em ms, detectado por clip)
-- [x] Streaming do disco para áudios longos (cache mapeado em memória + prefetch)
-- [x] Time-stretch/resample de clips de áudio (WSOLA mantendo a altura ou reamostrando)
-- [x] Loop region, seleção múltipla, copiar/colar/duplicar clips, clips "únicos"
-- [x] Vários arrangements (seletor na Playlist; importados do `.flp`)
-- [x] Automação: clips na Playlist, editor de pontos com curva; volume/pan, efeitos e parâmetros de plugins
-- [x] Importar automação do `.flp` (pontos, curva, alvo: volume/pan de canal e mixer, parâmetros)
+## Phase 3: arrangement ✅
+- [x] Playlist: pattern clips in time, tracks, PAT/SONG mode, seek from the ruler
+- [x] Import the `.flp` playlist (pattern clips with start/end slices)
+- [x] Audio clips (waveform, drag a file in, trimming, resume mid-clip after a seek)
+- [x] Import audio clips from `.flp` (offsets in beats or ms, detected per clip)
+- [x] Disk streaming for long audio (memory-mapped cache + prefetch)
+- [x] Time-stretch/resample of audio clips (pitch-preserving WSOLA or resampling)
+- [x] Loop region, multi-selection, copy/paste/duplicate clips, "make unique"
+- [x] Multiple arrangements (selector in the Playlist; imported from `.flp`)
+- [x] Automation clips with a point/curve editor; volume/pan, effects and plugin parameters
+- [x] Import automation from `.flp` (points, curves, targets)
 
-## Fase 4: mixer e plugins
-- [x] Mixer: Master + até 127 inserts, fader com a curva do FL (0,8 = 0 dB), pan, mute, solo, medidores estéreo, rampas sem estalo
-- [x] Roteamento canal → insert (caixinha no Channel Rack, menu do mixer); importado do `.flp`
-- [x] Envios entre inserts com nível, "só para esta trilha", solo pelo caminho do sinal; importados do `.flp`
-- [x] 10 slots de efeito por insert (e no Master), com bypass, trocar, mover, remover
-- [x] Efeitos internos: EQ de 3 bandas, compressor, delay sincronizado (ping-pong), reverb
-- [x] Hosting de VST3: instrumentos nos canais e efeitos nos slots, janela do plugin, estado salvo no projeto
-- [x] Busca de plugins com janela de progresso, lista salva em %APPDATA%\LYNX, "dead man's pedal"
-- [x] Busca em processo separado, com lista negra
-- [x] CLAP (formato próprio sobre o JUCE: parâmetros, estado, latência, interface)
-- [x] Compensação de latência (PDC) por aresta, como o FL; export descarta a latência do início
-- [x] Processamento multi-thread: canais em paralelo e mixer por camadas (sem locks)
-- [x] Plugins em processo separado (sandbox, opcional em Opções), estilo ilbridge
+## Phase 4: mixer and plugins ✅
+- [x] Mixer: Master + up to 127 inserts, FL fader curve (0.8 = 0 dB), pan, mute, solo, stereo meters, click-free ramps
+- [x] Channel → insert routing; imported from `.flp`
+- [x] Sends between inserts with levels, "route to this track only", solo along the signal path
+- [x] 10 effect slots per insert (and on the Master) with bypass, replace, move, remove
+- [x] Built-in effects (EQ, parametric EQ, compressor, limiter, delay, reverb, chorus, filter, distortion, ...)
+- [x] VST3 hosting: instruments and effects, plugin window, state saved in the project
+- [x] Plugin scan with progress window, list saved in %APPDATA%\LYNX, "dead man's pedal"
+- [x] Scanning in separate processes, with a blacklist
+- [x] CLAP (own format on top of JUCE: parameters, state, latency, editor)
+- [x] Per-edge latency compensation (PDC), like FL; export drops the initial latency
+- [x] Multithreaded processing: channels in parallel and the mixer in layers (lock-free)
+- [x] Optional separate-process plugins (sandbox, in Options), ilbridge-style
+- [x] Sidechain inputs (compressor), configurable per slot
 
-## Extras já feitos
-- [x] Swing, ajustes do sampler, trilhas da Playlist com nome/mute, dividir clip
-- [x] Importar/exportar MIDI, gravação de áudio da entrada
-- [x] Dry/wet por slot e smart disable
+## Phase 5: scale
+- [x] Render an insert to audio (freeze)
+- [x] Render/export to WAV/FLAC/OGG (no MP3: JUCE has no MP3 encoder)
+- [x] WASAPI exclusive and "Low Latency" (from JUCE; listed in Audio settings)
+- [ ] ASIO (needs Steinberg's SDK; license decision pending)
+- [x] GPU UI: JUCE 8 draws with Direct2D on Windows
+- [x] Idle channels skipped by the renderer
 
-## Ainda por fazer (além da fase 5)
-- [x] Automação de tempo (mudança de compasso ainda não)
-- [x] Propriedades de nota (pan, afinação fina, mute, slide) importadas do `.flp` (porta ainda não)
-- [x] Time-stretch/resample de clips de áudio (WSOLA mantendo a altura ou reamostrando)
-- [x] Renderizar insert para áudio (congelar)
-
-## Fase 5: escalar
-- [x] Renderizar insert para áudio (congelar)
-- [x] Render/export para WAV/FLAC/OGG (MP3 não: o JUCE não codifica MP3)
-- [x] WASAPI exclusivo e "Low Latency" (já vêm do JUCE; aparecem em Configurações de áudio,
-      conferido com `LYNX.exe --dispositivos saida.txt`)
-- [ ] ASIO (precisa do SDK da Steinberg; decisão de licença pendente)
-- [x] UI na GPU: o JUCE 8 já desenha com Direct2D no Windows
-
-## Fase 6: fidelidade ao FL (com o REA)
-- [x] Curvas de volume/fader, swing, envelopes, time-stretch, cut groups (rodada 3)
-- [x] 3x Osc → synth interno: osciladores, níveis, pan, semitons (rodada 4)
-- [x] Filtro do canal (Mod X/Y, 8 tipos) no synth e no sampler
-- [x] Envelopes de corte e de afinação do canal no synth
-- [x] Efeitos nativos do FL nos slots do mixer viram efeitos internos parecidos
-- [x] ... com os ajustes salvos: Parametric EQ 2, Limiter, Reeverb 2, Delay 2/3, Compressor (rodada 7)
-- [x] EQ embutido das trilhas do mixer, LFOs do canal, porta, AM do 3x Osc (rodada 6)
-- [x] Corte de graves/agudos e predelay no reverb; efeito de matriz estéreo (Stereo Shaper); Maximus
-- [x] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado VST3 (rodada 5)
-- [x] Estado CLAP do wrapper (rodada 22)
-- [ ] Mapa de parâmetros VST3 (registro 4: slot k → ParamID) nas automações de plugins de terceiros (nenhum demo usa)
-- [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)
-- [x] LFOs do canal, AM do 3x Osc
-- [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)
-- [x] Metrônomo seguindo as mudanças de compasso (modo song)
-- [x] Notas "porta" (por nota e do canal, synth e sampler)
-- [x] FPC, DirectWave, FL Keys, Fruity Slicer/Slicex como sampler (rodadas 8–9)
-- [x] Harmless, MiniSynth, DX10, Fruit Kick aproximados pelo synth interno (rodada 10)
-- [x] FM no synth interno (osc 3 modula a fase de osc 1 + 2, índice com decaimento)
-- [x] Sytrus (matriz FM/RM, filtros, articuladores) aproximado pelo synth interno (rodada 11)
-- [x] GMS; Ogun/Autogun e Sakura (grosseiros); DrumSynth Live por sample (rodada 12)
-- [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)
-- [x] Gross Beat (gate de volume), Frequency Splitter, Effector (rodada 14)
-- [x] Links do Peak Controller (automação ao vivo)
-- [x] Patcher: cadeia em série vira slots seguidos; Patcher instrumento usa o gerador de dentro
-- [x] Pitch Shifter, Frequency Shifter, Emphasis, Low Lifter, Send, Transporter, Squeeze (rodada 15)
-- [x] Envelope Controller (canal controlador + automação ao vivo)
-- [x] Patcher em ramos paralelos simples (contêiner); links de X-Y Controller / Control Surface (valor fixo)
-- [ ] Patcher M/S e multibanda
-- [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
-- [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)
-- [x] PoiZone, BassDrum, Toxic Biohazard (rodada 15)
-- [x] Morphine (rodada 16); MIDI Out roteado por porta
+## Phase 6: FL fidelity (with REA)
+- [x] Volume/fader curves, swing, envelopes, time-stretch, cut groups (round 3)
+- [x] 3x Osc → built-in synth (round 4); channel filter, envelopes, LFOs, AM, porta (round 6)
+- [x] FL native effects with their saved settings (rounds 7–8, 14–15, 18–20, 22)
+- [x] Third-party VST3/CLAP plugins in the Fruity Wrapper, with state (rounds 5, 22)
+- [ ] VST3 parameter map (record 4: slot k → ParamID) for automation of wrapped plugins (no demo uses it)
+- [x] Playlist markers and time-signature changes; metronome following them
+- [x] FPC, DirectWave, FL Keys, Fruity Slicer/Slicex as samplers (rounds 8–9)
+- [x] Harmless, MiniSynth, DX10, Fruit Kick (rounds 10, 21, 24)
+- [x] Sytrus and Harmor with exact timbres on the harmonics oscillator (rounds 11, 18, 19, 23, 24)
+- [x] GMS, Ogun/Autogun, Sakura, DrumSynth Live (round 12), Kepler, Wave Traveller (round 13)
+- [x] Gross Beat, Frequency Splitter, Effector (round 14); Effector rebuilt with all 12 algorithms (rounds 18–19)
+- [x] Controller links: Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface
+- [x] Patcher graphs of any shape (round 20)
+- [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs (rounds 16–20)
+- [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20)
+- [x] Sidechain links (round 22)
+- [ ] Vocodex (needs two side inputs or its internal synth)
+- [ ] Ogun's FFT spectral engine (round 24)
+- [x] FLEX by preset name only (its packs are encrypted and never opened)
