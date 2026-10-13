@@ -9,11 +9,14 @@ qualquer PC, independente do tamanho do projeto.
 ## O que já funciona
 
 - **Channel Rack** com step sequencer, pan/volume/mute/solo por canal, swing, várias patterns
-  (renomear, cor, comprimento, clonar), ajustes do sampler (afinação, envelope, ao contrário, cut)
+  (renomear, cor, comprimento, clonar), ajustes do sampler (afinação, envelope, ao contrário, cut,
+  filtro do canal com envelopes de corte e afinação), synth interno de 3 osciladores (pan e
+  semitom por oscilador, filtro LP/BP/HP/BS, envelopes de corte e afinação, modo mono)
 - **Piano Roll**: notas com snap configurável, seleção múltipla, mover/redimensionar em grupo,
   copiar/colar/duplicar, quantizar, faixa de velocity, importar/exportar `.mid`
 - **Playlist**: clips de pattern, áudio e automação; vários arrangements; região de loop;
-  seleção múltipla, copiar/colar/duplicar, dividir, "tornar única"; trilhas com nome e mute
+  seleção múltipla, copiar/colar/duplicar, dividir, "tornar única"; trilhas com nome e mute;
+  marcadores e mudanças de compasso na régua; normalizar clips de áudio
 - **Automação**: qualquer knob/fader (canal, mixer, efeitos, parâmetros de plugins) vira um clip
   com editor de pontos e curvas
 - **Mixer**: até 127 inserts, envios entre inserts com nível, solo pelo caminho do sinal, curva do
@@ -23,7 +26,9 @@ qualquer PC, independente do tamanho do projeto.
 - **Gravação**: notas (teclado do PC e MIDI) e áudio da entrada da placa
 - **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
 - **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
-  patterns, arrangements, mixer com roteamento, automação) e `.mid`
+  patterns, arrangements, marcadores, mixer com roteamento e efeitos nativos aproximados, automação,
+  3x Osc, filtro/envelopes do canal, VST3/CLAP de terceiros com estado quando estiverem instalados)
+  e `.mid`
 - **Desempenho**: motor sem locks, canais e mixer em várias threads, áudios longos lidos do disco
   sob demanda
 - **Desfazer/refazer** em todas as edições; **teclado do PC como piano** (layout do FL)
@@ -51,6 +56,8 @@ LYNX.exe --selftest relatorio.txt [demo.lynx]  autoteste sem placa de som
 LYNX.exe --snapshot prefixo projeto.flp        desenha a interface (e as janelas) em PNG
 LYNX.exe --plugintest plugin.vst3 rel.txt      testa um plugin VST3 ou CLAP
 LYNX.exe --scantest pasta rel.txt              busca plugins numa pasta (processos separados)
+LYNX.exe --wrappertest plugin.vst3 rel.txt     confere o import de um VST3 salvo pelo Fruity Wrapper do FL
+LYNX.exe --dispositivos rel.txt                lista drivers e saídas de áudio (WASAPI, exclusivo, DirectSound)
 ```
 
 ## Compilar
