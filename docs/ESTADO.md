@@ -69,6 +69,11 @@ Atualizado em 2026-10-13.
   feedback, ping-pong, corte), Compressor (threshold, ratio, ganho, attack, release).
 - **EQ embutido das trilhas do mixer** (3 bandas do FL, REA rodada 6) e **LFOs do canal**; porta e AM
   do 3x Osc; tipos de marcador conhecidos.
+- **Presets do FL**: os 169 presets de canal do 3x Osc (botão "Presets do FL..." no synth) e 93
+  presets de efeito (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 2/3, Stereo Shaper; menu
+  do slot do mixer) são lidos dos `.fst` da instalação.
+- **Sampler multi-sample** (zonas por tecla/velocity) e divisão de kits de bateria em um canal por
+  pad (base para DirectWave/FPC); notas porta (glide de 808); Picker de patterns na Playlist.
 - **Render mais leve**: PDC em uma passada, reverb por blocos, limiter O(1), FTZ/DAZ; o export do
   SHINE (110 s, 60 efeitos importados) caiu de 4,4 s para 2,4 s.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
