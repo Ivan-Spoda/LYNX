@@ -31,4 +31,8 @@ struct FlParamMap
     std::function<float (float)> convert;
 };
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int flParam);
+
+// Valor atual (0..1) da saída `output` de um controlador parado (Fruity X-Y Controller, Control
+// Surface; REA_rodada15 §11): um link dele vira um valor fixo no alvo. nullopt se não der para ler.
+std::optional<float> controllerConstantOutput (const std::string& pluginName, const std::vector<std::uint8_t>& state, int output);
 } // namespace lynx

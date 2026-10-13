@@ -1,6 +1,7 @@
 #include "core/FlEffects.h"
 
 #include <algorithm>
+#include <functional>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -987,6 +988,54 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
             return FlParamMap { 2, [] (float v) { return clamp01 (v * 0.5); } };
         if (k == 16)
             return FlParamMap { 4, [] (float v) { return clamp01 (1.0 - v); } };
+    }
+
+    return std::nullopt;
+}
+std::optional<float> controllerConstantOutput (const std::string& pluginName, const std::vector<std::uint8_t>& d, int output)
+{
+    if (pluginName == "Fruity X-Y Controller")
+    {
+        if (d.size() < 44 || output < 0 || output > 1)
+            return std::nullopt;
+        auto param = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), -65536, 65536) / 65536.0; };
+        const auto axis = output * 4;
+        const auto level = std::clamp (param (axis), 0.0, 1.0);
+        const auto tension = std::clamp (i32At (d, 4 + 4 * (std::size_t) (axis + 3)), -128, 128) / 128.0;
+        const auto shaped = std::pow (level, std::exp2 (-2.0 * tension)); // tensão: curva (0 = reta) [HIP]
+        return (float) std::clamp (param (axis + 1) + (param (axis + 2) - param (axis + 1)) * shaped, 0.0, 1.0);
+    }
+
+    if (pluginName == "Control Surface")
+    {
+        if (d.size() < 16)
+            return std::nullopt;
+        std::optional<float> found;
+        // chunks u32 id + u64 tamanho (id 0 = grupo); 0x836 = valor de um controle e a saída publicada
+        std::function<void (std::size_t, std::size_t)> walk = [&] (std::size_t pos, std::size_t end) {
+            while (pos + 12 <= end && ! found)
+            {
+                std::uint32_t id = 0;
+                std::uint64_t size = 0;
+                std::memcpy (&id, d.data() + pos, 4);
+                std::memcpy (&size, d.data() + pos + 4, 8);
+                if (size > end - pos - 12)
+                    return;
+                const auto body = pos + 12;
+                if (id == 0)
+                    walk (body, body + (std::size_t) size);
+                else if (id == 0x836 && size >= 12 && i32At (d, body + 8) == output)
+                {
+                    float v = 0.0f;
+                    std::memcpy (&v, d.data() + body, 4);
+                    if (std::isfinite (v))
+                        found = std::clamp (v, 0.0f, 1.0f);
+                }
+                pos = body + (std::size_t) size;
+            }
+        };
+        walk (4, d.size());
+        return found;
     }
 
     return std::nullopt;

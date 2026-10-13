@@ -1187,6 +1187,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if (! link.source.isMixer() || link.source.track() < 0 || link.source.track() >= (int) song.mixer.size())
             continue;
+
+        // X-Y Controller / Control Surface parados: o valor atual vai para o alvo uma vez
+        {
+            const flp::MixerInsert::Slot* source = nullptr;
+            for (const auto& insert : project.mixer)
+                if (insert.index == link.source.track())
+                    for (const auto& slot : insert.slots)
+                        if (slot.index == link.source.slot())
+                            source = &slot;
+            if (source != nullptr)
+                if (const auto value = controllerConstantOutput (source->plugin, source->state, link.source.param() - flp::ControlId::pluginParamBase))
+                {
+                    std::function<float (float)> valueMap;
+                    const auto target = resolveTarget (link.target, valueMap);
+                    if (target.kind != AutomationTargetKind::none && target.kind != AutomationTargetKind::tempo
+                        && song.setTargetValue (target, valueMap ? valueMap (*value) : *value) && options.report != nullptr)
+                        ++options.report->converted[source->plugin + " (link)"];
+                    continue;
+                }
+        }
+
         const auto found = effectSlotMap.find ({ link.source.track(), link.source.slot() });
         if (found == effectSlotMap.end()
             || song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::peakController)

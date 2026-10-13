@@ -530,6 +530,35 @@ TEST (volume_gate_follows_bar_position)
     CHECK (l3[4000] > 0.99f);
 }
 
+TEST (fl_controller_constant_outputs)
+{
+    std::vector<std::int32_t> xy { 2, 32768, 0, 65536, 0, 16384, 0, 65536, 0, 1024, 256 };
+    std::vector<std::uint8_t> blob (xy.size() * 4 + 8, 0);
+    std::memcpy (blob.data(), xy.data(), xy.size() * 4);
+    CHECK (std::abs (lynx::controllerConstantOutput ("Fruity X-Y Controller", blob, 0).value_or (-1.0f) - 0.5f) < 1e-4f);
+    CHECK (std::abs (lynx::controllerConstantOutput ("Fruity X-Y Controller", blob, 1).value_or (-1.0f) - 0.25f) < 1e-4f);
+
+    // Control Surface: versão + grupo { 0x836: valor 0,75, -, saída 2 }
+    std::vector<std::uint8_t> cs (4, 0);
+    cs[0] = 1;
+    auto chunk = [] (std::vector<std::uint8_t>& out, std::uint32_t id, const std::vector<std::uint8_t>& body) {
+        const auto size = (std::uint64_t) body.size();
+        out.insert (out.end(), reinterpret_cast<const std::uint8_t*> (&id), reinterpret_cast<const std::uint8_t*> (&id) + 4);
+        out.insert (out.end(), reinterpret_cast<const std::uint8_t*> (&size), reinterpret_cast<const std::uint8_t*> (&size) + 8);
+        out.insert (out.end(), body.begin(), body.end());
+    };
+    std::vector<std::uint8_t> value (12, 0);
+    const float v = 0.75f;
+    const std::int32_t out = 2;
+    std::memcpy (value.data(), &v, 4);
+    std::memcpy (value.data() + 8, &out, 4);
+    std::vector<std::uint8_t> group;
+    chunk (group, 0x836, value);
+    chunk (cs, 0, group);
+    CHECK (std::abs (lynx::controllerConstantOutput ("Control Surface", cs, 2).value_or (-1.0f) - 0.75f) < 1e-6f);
+    CHECK (! lynx::controllerConstantOutput ("Control Surface", cs, 0).has_value());
+}
+
 TEST (flp_effect_automation_follows_slots_and_params)
 {
     // trilha 1: slot 0 com um efeito sem equivalente (sai), slot 2 com o Parametric EQ 2
