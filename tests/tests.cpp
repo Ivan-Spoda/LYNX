@@ -317,6 +317,48 @@ TEST (flp_fuzz_corrupted_files_do_not_crash)
     CHECK (parsed + rejected == 240);
 }
 
+TEST (plugin_state_decoders_survive_garbage)
+{
+    // blobs aleatórios (tamanhos variados, incluindo cabeçalhos válidos com o resto lixo)
+    std::uint32_t seed = 77;
+    auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
+    const char* plugins[] = { "Fruity Parametric EQ 2", "Fruity Limiter", "Fruity Reeverb 2", "Fruity Delay 2", "Fruity Delay 3",
+                              "Fruity Compressor", "Fruity Balance", "Fruity PanOMatic", "Fruity Stereo Shaper", "Fruity Phase Inverter" };
+    int decoded = 0;
+
+    for (int round = 0; round < 3000; ++round)
+    {
+        std::vector<std::uint8_t> blob ((std::size_t) (rnd() % 600));
+        for (auto& b : blob)
+            b = (std::uint8_t) rnd();
+        if (blob.size() >= 4 && round % 3 == 0) // versões que os leitores aceitam
+        {
+            const std::uint32_t versions[] = { 8, 10001, 10000, 12, 14, 6, 1 };
+            const auto v = versions[rnd() % 7];
+            std::memcpy (blob.data(), &v, 4);
+        }
+
+        if (auto fx = lynx::effectFromFl (plugins[rnd() % 10], blob))
+        {
+            ++decoded;
+            for (auto v : fx->params)
+                CHECK (std::isfinite (v) && v >= 0.0f && v <= 1.0f);
+        }
+
+        lynx::SynthSettings synth;
+        if (lynx::synthFrom3xOsc (blob, synth))
+            for (const auto& o : synth.osc)
+                CHECK (std::isfinite (o.level) && o.level >= 0.0f && o.level <= 1.0f);
+
+        lynx::ForeignPlugin foreign;
+        lynx::parseFlWrapper (blob, foreign);
+        std::vector<std::uint8_t> component, controller;
+        lynx::splitFlVst3State (blob, component, controller);
+    }
+
+    CHECK (decoded == 3000); // todo nome conhecido dá um efeito (padrão quando o blob não serve)
+}
+
 TEST (flp_real_files)
 {
     if (realFlpDir.empty())
