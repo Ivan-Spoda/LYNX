@@ -109,6 +109,50 @@ public:
             return;
         }
 
+        if (args.contains ("--stems"))
+        {
+            // LYNX.exe --stems projeto base.wav: um WAV por insert com som (como o "Exportar stems")
+            const auto i = args.indexOf ("--stems");
+            juce::String error, report;
+            int written = 0;
+            {
+                lynx::AudioEngine loader (false);
+                const juce::File input (args[i + 1].unquoted()), base (args[i + 2].unquoted());
+                auto ok = input.hasFileExtension ("flp") ? loader.importFlpFile (input, error) : false;
+
+                if (! input.hasFileExtension ("flp"))
+                    if (auto song = lynx::ProjectFile::load (input, error))
+                    {
+                        loader.setSong (std::move (*song));
+                        ok = true;
+                    }
+
+                const auto& song = loader.getSong();
+
+                for (int t = 1; ok && t < (int) song.mixer.size(); ++t)
+                {
+                    if (std::none_of (song.channels.begin(), song.channels.end(), [t] (const lynx::ChannelDef& c) { return c.mixerTrack == t; }))
+                        continue;
+
+                    const auto file = base.getSiblingFile (base.getFileNameWithoutExtension() + " - " + juce::String (t) + ".wav");
+                    lynx::ExportSettings settings;
+                    lynx::ExportJob job (lynx::makeBounceSong (song, t), settings, file);
+
+                    if (job.run ({}, error))
+                    {
+                        ++written;
+                        report << file.getFileName() << " pico=" << job.getPeak() << "\n";
+                    }
+                }
+            }
+
+            report << "stems=" << written << "\n";
+            juce::File (args[i + 2].unquoted() + ".txt").replaceWithText (report);
+            setApplicationReturnValue (written > 0 ? 0 : 1);
+            quit();
+            return;
+        }
+
         if (args.contains ("--export"))
         {
             const auto i = args.indexOf ("--export");
