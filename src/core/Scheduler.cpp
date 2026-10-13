@@ -56,14 +56,16 @@ void schedulePatternLoop (const Pattern& pattern,
 
     for (const auto& note : pattern.notes)
     {
-        if (note.start >= patternLength)
-            continue; // fora do loop
+        if (note.start >= patternLength || note.muted)
+            continue; // fora do loop / nota desligada
 
         NoteEvent on;
         on.type = NoteEvent::Type::on;
         on.channel = note.channel;
         on.key = note.key;
         on.velocity = note.velocity;
+        on.pan = note.pan;
+        on.cents = note.finePitch;
         const auto start = note.start + swingDelay (note.start, swing);
         emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
 
@@ -138,7 +140,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
         for (const auto& note : song.patterns[(std::size_t) clip.pattern].notes)
         {
-            if (note.start < clip.offset || note.start >= clip.offset + clip.length)
+            if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
                 continue;
 
             const auto on = std::min (clip.start + (note.start - clip.offset) + swingDelay (note.start, song.swing), clip.end() - 1);
@@ -149,6 +151,8 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.channel = note.channel;
             e.key = note.key;
             e.velocity = note.velocity;
+            e.pan = note.pan;
+            e.cents = note.finePitch;
             emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
 
             e.type = NoteEvent::Type::off;

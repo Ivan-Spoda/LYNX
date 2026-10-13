@@ -391,6 +391,8 @@ Project parseProject (std::span<const std::uint8_t> file)
                     n.length = readLE<std::uint32_t> (e.data, o + 8);
                     n.key = readLE<std::uint16_t> (e.data, o + 12);
                     n.finePitch = e.data[o + 16];
+                    n.repeats = e.data[o + 17];
+                    n.extra = e.data[o + 19];
                     n.release = e.data[o + 18];
                     n.pan = e.data[o + 20];
                     n.velocity = e.data[o + 21];

@@ -31,6 +31,8 @@ public:
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
     // Latência que o instrumento introduz (plugins), em samples. Para o PDC.
     virtual int latencySamples() const noexcept { return 0; }
+    // Pan e afinação fina da próxima nota (chamado logo antes do noteOn). Quem não suporta ignora.
+    virtual void setNextNoteExpression (float /*pan*/, float /*cents*/) noexcept {}
     // Ajustes do canal (ex.: sampler). Thread da UI, a cada snapshot; o instrumento guarda em atomics.
     virtual void configure (const SamplerSettings&) noexcept {}
 };

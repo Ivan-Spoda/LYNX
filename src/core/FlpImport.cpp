@@ -253,6 +253,9 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             note.channel = it->second;
             note.key = n.key; // FL e MIDI usam a mesma numeração; só o nome da oitava difere
             note.velocity = std::clamp (n.velocity / 128.0f, 0.0f, 1.0f);
+            note.pan = std::clamp ((n.pan - 64) / 64.0f, -1.0f, 1.0f);
+            note.finePitch = (float) std::clamp ((int) n.finePitch - 120, -120, 120);
+            note.muted = n.muted();
             p.notes.push_back (note);
         }
 

@@ -497,7 +497,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         if (e.type == NoteEvent::Type::on)
         {
             if (! c.muted)
+            {
+                instrument.setNextNoteExpression (e.pan, e.cents);
                 instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
+            }
         }
         else
             instrument.noteOff (e.key);

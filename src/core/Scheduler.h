@@ -20,6 +20,8 @@ struct NoteEvent
     int key = 60;
     float velocity = 0.0f;
     double startSeconds = 0.0; // clips de áudio: de onde o sample começa a tocar
+    float pan = 0.0f;          // -1..1, da nota
+    float cents = 0.0f;        // afinação fina da nota
 };
 
 // Buffer de capacidade fixa. Eventos além da capacidade são descartados

@@ -1,5 +1,6 @@
 #include "core/Instruments.h"
 
+#include <algorithm>
 #include <atomic>
 
 #include <cmath>
@@ -182,11 +183,20 @@ private:
     Noise noiseGen;
 };
 
+// Ganhos de pan por voz (potência constante, 1 no centro).
+inline void voicePan (float pan, float& left, float& right) noexcept
+{
+    const auto angle = (std::clamp (pan, -1.0f, 1.0f) + 1.0f) * 0.25f * 3.14159265f;
+    left = std::cos (angle) * 1.41421356f;
+    right = std::sin (angle) * 1.41421356f;
+}
+
 // ---------------------------------------------------------------------------
 // Synth polifônico simples: dente-de-serra com passa-baixas e envelope AR.
 
 struct SynthVoice
 {
+    float panL = 1.0f, panR = 1.0f;
     bool active = false;
     bool releasing = false;
     int key = 0;
@@ -230,7 +240,15 @@ public:
         target->active = true;
         target->key = key;
         target->velocity = velocity;
-        target->phaseDelta = midiToHz (key) / sampleRate;
+        target->phaseDelta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+        voicePan (nextPan, target->panL, target->panR);
+        nextPan = nextCents = 0.0f;
+    }
+
+    void setNextNoteExpression (float pan, float cents) noexcept override
+    {
+        nextPan = pan;
+        nextCents = cents;
     }
 
     void noteOff (int key) noexcept override
@@ -266,8 +284,8 @@ public:
                 v.filter += filterCoeff * (saw - v.filter);
 
                 const auto s = 0.3f * v.filter * v.level * v.velocity;
-                left[i] += s * gl;
-                right[i] += s * gr;
+                left[i] += s * gl * v.panL;
+                right[i] += s * gr * v.panR;
                 ++v.age;
             }
 
@@ -281,6 +299,7 @@ private:
     float attackStep = 0.01f;
     float release = 0.999f;
     float filterCoeff = 0.3f;
+    float nextPan = 0.0f, nextCents = 0.0f;
     std::array<SynthVoice, 16> voices {};
 };
 // ---------------------------------------------------------------------------
@@ -299,6 +318,7 @@ struct SamplerVoice
     int key = 60;
     float env = 1.0f;      // envelope de ataque/release
     float envStep = 0.0f;  // > 0 subindo (ataque), < 0 descendo (release)
+    float panL = 1.0f, panR = 1.0f;
 };
 
 class SamplerInstrument final : public Instrument
@@ -363,7 +383,7 @@ public:
                     target = &v;
         }
 
-        const auto semitones = clipMode ? 0.0 : (key - 60) + (double) pitch.load();
+        const auto semitones = clipMode ? 0.0 : (key - 60) + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
@@ -374,6 +394,14 @@ public:
         target->rate = sample->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
+        voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
+        nextPan = nextCents = 0.0f;
+    }
+
+    void setNextNoteExpression (float pan, float cents) noexcept override
+    {
+        nextPan = pan;
+        nextCents = cents;
     }
 
     void noteOff (int key) noexcept override
@@ -430,8 +458,8 @@ public:
                 const auto sr = r[index] + frac * (r[index + 1] - r[index]);
                 const auto gain = v.velocity * v.fade * v.env;
 
-                left[i] += sl * gain * gl;
-                right[i] += sr * gain * gr;
+                left[i] += sl * gain * gl * v.panL;
+                right[i] += sr * gain * gr * v.panR;
 
                 v.position += v.rate;
                 ++v.age;
@@ -460,6 +488,7 @@ private:
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, release { 0.0f };
+    float nextPan = 0.0f, nextCents = 0.0f;
     std::atomic<bool> reverse { false }, cut { false };
 };
 } // namespace

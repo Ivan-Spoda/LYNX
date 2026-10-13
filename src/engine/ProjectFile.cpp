@@ -217,8 +217,20 @@ juce::String toJson (const Song& song)
         juce::Array<juce::var> notes;
 
         for (const auto& n : p.notes)
-            notes.add (juce::Array<juce::var> { (juce::int64) n.start, (juce::int64) n.length, n.channel, n.key,
-                                                juce::roundToInt (n.velocity * 1000.0f) / 1000.0 });
+        {
+            juce::Array<juce::var> note { (juce::int64) n.start, (juce::int64) n.length, n.channel, n.key,
+                                          juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
+
+            // [.., pan, afinação fina, mutada] só quando não são o padrão
+            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted)
+            {
+                note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
+                note.add (juce::roundToInt (n.finePitch * 10.0f) / 10.0);
+                note.add (n.muted);
+            }
+
+            notes.add (note);
+        }
 
         o->setProperty ("notes", notes);
         patterns.add (juce::var (o.release()));
@@ -419,6 +431,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     note.channel = (int) n[2];
                     note.key = juce::jlimit (0, 127, (int) n[3]);
                     note.velocity = juce::jlimit (0.0f, 1.0f, (float) (double) n[4]);
+
+                    if (n.size() >= 8)
+                    {
+                        note.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) n[5]);
+                        note.finePitch = juce::jlimit (-120.0f, 120.0f, (float) (double) n[6]);
+                        note.muted = (bool) n[7];
+                    }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())
                         pattern.notes.push_back (note);

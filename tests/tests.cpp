@@ -1769,6 +1769,39 @@ TEST (playlist_split_and_track_mute)
     CHECK (ev.size() == 0);
 }
 
+TEST (note_pan_pitch_and_mute)
+{
+    lynx::Pattern p;
+    lynx::Note a { 0, 240, 0, 60 };
+    a.pan = -1.0f;
+    a.finePitch = 50.0f;
+    lynx::Note b { 240, 240, 0, 62 };
+    b.muted = true;
+    p.notes = { a, b };
+    lynx::EventBuffer ev;
+    const auto tps = lynx::ticksPerSample (120.0, 48000.0);
+    lynx::schedulePatternLoop (p, p.effectiveLength (4), 0.0, 48000, tps, ev);
+    int ons = 0;
+    for (auto& e : ev)
+        if (e.type == lynx::NoteEvent::Type::on)
+        {
+            ++ons;
+            CHECK (e.key == 60 && e.pan == -1.0f && e.cents == 50.0f);
+        }
+    CHECK (ons == 1); // a mutada não toca
+
+    // pan da nota no sampler: tudo à esquerda
+    auto dc = std::make_shared<lynx::SampleData>();
+    dc->left.assign (4800, 0.5f);
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, dc);
+    inst->prepare (48000.0);
+    inst->setNextNoteExpression (-1.0f, 0.0f);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (100), r (100);
+    inst->render (l.data(), r.data(), 100, 1.0f, 1.0f);
+    CHECK (l[50] > 0.6f && std::abs (r[50]) < 1e-6f);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

@@ -70,6 +70,15 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     snapBox.onChange = [this] { repaint(); };
     addAndMakeVisible (snapBox);
 
+    laneBox.addItem ("Velocity", 1);
+    laneBox.addItem ("Pan", 2);
+    laneBox.addItem (utf8 ("Afinação"), 3);
+    laneBox.setSelectedId (1, juce::dontSendNotification);
+    laneBox.setWantsKeyboardFocus (false);
+    laneBox.setMouseClickGrabsKeyboardFocus (false);
+    laneBox.onChange = [this] { repaint(); };
+    addAndMakeVisible (laneBox);
+
     midiButton.setTooltip (utf8 ("Importar um .mid para este canal ou exportar a pattern"));
     midiButton.setWantsKeyboardFocus (false);
     midiButton.setMouseClickGrabsKeyboardFocus (false);
@@ -79,7 +88,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     hintLabel.setFont (juce::FontOptions (11.0f));
     hintLabel.setColour (juce::Label::textColourId, theme::text.withAlpha (0.45f));
     hintLabel.setText (utf8 ("Ctrl+arrastar seleciona · Shift+clique soma · Del apaga · Ctrl+C/X/V copiar · "
-                             "Ctrl+B duplicar · Ctrl+Q quantizar · setas movem (Shift = oitava)"),
+                             "Ctrl+B duplicar · Ctrl+Q quantizar · Ctrl+M mutar · setas movem (Shift = oitava)"),
                        juce::dontSendNotification);
     hintLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (hintLabel);
@@ -163,6 +172,7 @@ void PianoRollComponent::resized()
     snapBox.setBounds (keyboardWidth + 4, 3, 130, toolbarHeight - 6);
     midiButton.setBounds (snapBox.getRight() + 6, 3, 50, toolbarHeight - 6);
     hintLabel.setBounds (midiButton.getRight() + 10, 0, getWidth() - midiButton.getRight() - 14, toolbarHeight);
+    laneBox.setBounds (2, velocityArea().getY() + 4, keyboardWidth - 4, 20);
     hBar.setBounds (keyboardWidth, getHeight() - scrollBarSize, getWidth() - keyboardWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize,
                     getHeight() - headerHeight - scrollBarSize - velocityHeight);
@@ -326,7 +336,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             const auto selected = isSelected (i);
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
                                                    juce::jmax (4.0f, (float) (n.length * pixelsPerTick) - 1.0f), (float) rowHeight - 2);
-            g.setColour (selected ? juce::Colour (0xffff6f6f) : theme::noteColour (n.velocity));
+            g.setColour (selected ? juce::Colour (0xffff6f6f) : n.muted ? juce::Colour (0xff6a6f75) : theme::noteColour (n.velocity));
             g.fillRoundedRectangle (r, 2.5f);
             g.setColour (selected ? juce::Colours::white : juce::Colours::black.withAlpha (0.5f));
             g.drawRoundedRectangle (r, 2.5f, selected ? 1.5f : 1.0f);
@@ -366,6 +376,14 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.drawHorizontalLine (lane.getY(), (float) lane.getX(), (float) lane.getRight());
 
         const auto usable = (float) lane.getHeight() - 8.0f;
+        const auto bipolar = laneIsBipolar();
+        const auto base = bipolar ? (float) lane.getBottom() - 2.0f - usable * 0.5f : (float) lane.getBottom();
+
+        if (bipolar)
+        {
+            g.setColour (theme::text.withAlpha (0.15f));
+            g.drawHorizontalLine ((int) base, (float) lane.getX(), (float) lane.getRight());
+        }
 
         for (int i = 0; i < (int) pattern.notes.size(); ++i)
         {
@@ -375,10 +393,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto x = (float) tickToX ((double) n.start);
-            const auto top = (float) lane.getBottom() - 2.0f - usable * n.velocity;
-            const auto colour = isSelected (i) ? juce::Colour (0xffff6f6f) : theme::noteColour (n.velocity);
+            const auto top = (float) lane.getBottom() - 2.0f - usable * laneValue (n);
+            auto colour = isSelected (i) ? juce::Colour (0xffff6f6f) : theme::noteColour (n.velocity);
+            if (n.muted)
+                colour = juce::Colours::grey;
             g.setColour (colour.withAlpha (0.8f));
-            g.fillRect (juce::Rectangle<float> (x, top, 2.0f, (float) lane.getBottom() - top));
+            g.fillRect (juce::Rectangle<float> (x, juce::jmin (top, base), 2.0f, std::abs (base - top)));
             g.fillEllipse (x - 3.0f, top - 3.0f, 7.0f, 7.0f);
         }
     }
@@ -447,9 +467,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         const auto lane = velocityArea();
         g.setColour (theme::toolbar);
         g.fillRect (0, lane.getY(), keyboardWidth, lane.getHeight());
-        g.setColour (theme::text.withAlpha (0.6f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText ("Velocity", 4, lane.getY() + 4, keyboardWidth - 8, 16, juce::Justification::centredLeft);
+        juce::ignoreUnused (lane); // o combo da propriedade fica aqui
     }
 
     // canto superior esquerdo: nome do canal
@@ -512,10 +530,37 @@ void PianoRollComponent::previewOff()
     }
 }
 
+float PianoRollComponent::laneValue (const Note& n) const
+{
+    switch (laneBox.getSelectedId())
+    {
+        case 2: return (n.pan + 1.0f) * 0.5f;
+        case 3: return (n.finePitch + 120.0f) / 240.0f;
+        default: return n.velocity;
+    }
+}
+
+void PianoRollComponent::setLaneValue (Note& n, float v) const
+{
+    v = juce::jlimit (0.0f, 1.0f, v);
+
+    switch (laneBox.getSelectedId())
+    {
+        case 2: n.pan = std::abs (v - 0.5f) < 0.02f ? 0.0f : v * 2.0f - 1.0f; break;   // gruda no centro
+        case 3: n.finePitch = std::round (v * 240.0f - 120.0f); break;
+        default: n.velocity = v; break;
+    }
+}
+
+bool PianoRollComponent::laneIsBipolar() const
+{
+    return laneBox.getSelectedId() != 1;
+}
+
 void PianoRollComponent::applyVelocity (int fromX, int toX, int y)
 {
     const auto lane = velocityArea();
-    const auto velocity = juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - y) / (float) (lane.getHeight() - 8));
+    const auto value = juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - y) / (float) (lane.getHeight() - 8));
     const auto lo = juce::jmin (fromX, toX) - 3, hi = juce::jmax (fromX, toX) + 3;
     const auto& notes = currentPattern (engine.getSong()).notes;
     std::vector<int> hits;
@@ -524,15 +569,31 @@ void PianoRollComponent::applyVelocity (int fromX, int toX, int y)
     {
         const auto x = (int) tickToX ((double) notes[(std::size_t) i].start);
 
-        if (x >= lo && x <= hi && notes[(std::size_t) i].velocity != velocity)
+        if (x >= lo && x <= hi)
             hits.push_back (i);
     }
 
     if (! hits.empty())
-        editNotes ([&hits, velocity] (Pattern& p) {
+        editNotes ([this, &hits, value] (Pattern& p) {
             for (auto i : hits)
-                p.notes[(std::size_t) i].velocity = velocity;
+                setLaneValue (p.notes[(std::size_t) i], value);
         });
+}
+
+void PianoRollComponent::toggleMute()
+{
+    const auto target = selectionOrAll();
+
+    if (target.empty())
+        return;
+
+    // se alguma está tocando, muta todas; senão desmuta
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto mute = std::any_of (target.begin(), target.end(), [&notes] (int i) { return ! notes[(std::size_t) i].muted; });
+    editNotes ([&target, mute] (Pattern& p) {
+        for (auto i : target)
+            p.notes[(std::size_t) i].muted = mute;
+    });
 }
 
 void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
@@ -904,6 +965,12 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
     if (cmd && code == 'Q')
     {
         quantizeSelection();
+        return true;
+    }
+
+    if (cmd && code == 'M')
+    {
+        toggleMute();
         return true;
     }
 

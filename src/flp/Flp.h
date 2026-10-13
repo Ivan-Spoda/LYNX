@@ -137,6 +137,11 @@ struct Note
     std::uint8_t velocity = 100; // 0..128
     std::uint8_t modX = 128;
     std::uint8_t modY = 128;
+    std::uint8_t extra = 0;      // bits 0-3 cor/canal MIDI; 0x10 porta; 0x20 mutada; 0x80 selecionada
+    std::uint8_t repeats = 0;
+
+    bool muted() const noexcept { return (extra & 0x20) != 0; }
+    bool slide() const noexcept { return (flags & 0xF) == 8; }
 };
 
 struct Pattern

@@ -118,6 +118,9 @@ struct Note
     int channel = 0;
     int key = 60;             // MIDI; 60 = C4 (o C5 do FL)
     float velocity = 0.78f;   // 0..1
+    float pan = 0.0f;         // -1..1 (por nota, como no FL)
+    float finePitch = 0.0f;   // centésimos de semitom, -120..120
+    bool muted = false;       // nota desligada (não toca, continua na pattern)
 };
 
 // Atraso de swing para uma nota que começa em `start` (ticks na pattern): só as que caem

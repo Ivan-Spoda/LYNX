@@ -14,7 +14,8 @@ namespace lynx
 //  - faixa de velocity embaixo: clicar/arrastar desenha a velocity (só nas selecionadas, se houver)
 //  - Alt desliga o snap; roda do mouse rola, Shift+roda rola na horizontal, Ctrl+roda dá zoom
 //  - teclado à esquerda toca a nota
-//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Esc, setas (Shift = oitava/compasso)
+//  - a faixa de baixo edita velocity, pan ou afinação fina (combo no canto dela)
+//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Ctrl+M (mutar), Esc, setas (Shift = oitava/compasso)
 // Notas de outros canais aparecem apagadas ao fundo, como "ghost notes" no FL.
 class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener,
@@ -78,6 +79,10 @@ private:
     void sortNotes();                                // ordena mantendo a seleção (sem passo de desfazer)
     void editNotes (const std::function<void (Pattern&)>& edit);
     void applyVelocity (int fromX, int toX, int y);
+    float laneValue (const Note& n) const;          // 0..1 da propriedade escolhida
+    void setLaneValue (Note& n, float value) const; // inverso
+    bool laneIsBipolar() const;
+    void toggleMute();
 
     void deleteSelection();
     void copySelection();
@@ -90,6 +95,7 @@ private:
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox snapBox;
     juce::TextButton midiButton { "MIDI" };
+    juce::ComboBox laneBox; // o que a faixa de baixo edita: velocity, pan ou afinação fina
     std::unique_ptr<juce::FileChooser> chooser;
     void showMidiMenu();
     juce::Label hintLabel;
