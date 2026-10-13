@@ -1290,6 +1290,39 @@ TEST (zoned_sampler_picks_zone_by_key_and_velocity)
     CHECK (hard.second > soft.second * 2.0f);
 }
 
+TEST (zoned_sampler_loops_while_held)
+{
+    // sample de 0,1 s com loop no meio: segurando a nota ela continua soando muito além do fim do arquivo;
+    // soltando, sai do loop e acaba
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    data->left.resize (4800);
+    for (std::size_t i = 0; i < data->left.size(); ++i)
+        data->left[i] = 0.5f * (float) std::sin (6.283185307 * 480.0 * (double) i / 48000.0); // 100 quadros por ciclo
+    lynx::SampleZone zone { "loop.wav", 60 };
+    zone.loopStart = 1000;
+    zone.loopEnd = 3000;
+    zone.loopMode = 2;
+    auto inst = lynx::makeZonedSampler ({ { zone, data } });
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.release = 0.01f;
+    inst->configure (c, 120.0);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (48000), r (48000);
+    inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f); // 0,5 s segurando
+    float held = 0.0f;
+    for (std::size_t i = 20000; i < 24000; ++i)
+        held = std::max (held, std::abs (l[i]));
+    CHECK (held > 0.3f);
+    inst->noteOff (60);
+    inst->render (l.data() + 24000, r.data() + 24000, 24000, 1.0f, 1.0f);
+    float after = 0.0f;
+    for (std::size_t i = 40000; i < 48000; ++i)
+        after = std::max (after, std::abs (l[i]));
+    CHECK (after == 0.0f);
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual

@@ -805,6 +805,8 @@ struct SamplerVoice
     float basePan = 0.0f;
     const SampleData* data = nullptr; // o sample desta voz (a zona escolhida, no multi-sample)
     float zoneGain = 1.0f;
+    double loopStart = 0.0, loopEnd = 0.0; // loopEnd > loopStart: a voz volta ao início do loop
+    bool loopWhileHeld = false;
     SvfCoefficients filter;         // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     int controlCountdown = 0;
@@ -973,6 +975,15 @@ public:
         target->velocity = velocity;
         target->data = data;
         target->zoneGain = zone != nullptr ? zone->zone.gain : 1.0f;
+
+        // loop da zona (DirectWave): só tocando para frente e com o loop dentro do trecho
+        if (zone != nullptr && zone->zone.loopMode != 0 && ! backwards && zone->zone.loopEnd > zone->zone.loopStart + 16
+            && (double) zone->zone.loopEnd <= last && (double) zone->zone.loopStart >= first)
+        {
+            target->loopStart = (double) zone->zone.loopStart;
+            target->loopEnd = (double) zone->zone.loopEnd;
+            target->loopWhileHeld = zone->zone.loopMode == 2;
+        }
         target->position = startFrame;
         target->first = first;
         target->last = last;
@@ -1110,6 +1121,10 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
+                // loop: volta ao começo dele (o "enquanto pressionada" para de voltar no release)
+                if (v.loopEnd > v.loopStart && v.position >= v.loopEnd && (! v.loopWhileHeld || v.stage < 3))
+                    v.position -= v.loopEnd - v.loopStart;
+
                 if (v.position >= std::min (last, v.last) || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
                 {
                     v.active = false;

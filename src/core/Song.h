@@ -186,6 +186,8 @@ struct SampleZone
     int lowVelocity = 0, highVelocity = 127; // 0..127
     float tune = 0.0f;  // semitons
     float gain = 1.0f;
+    std::int64_t loopStart = 0, loopEnd = 0; // em quadros do sample; loopEnd <= loopStart = sem loop
+    int loopMode = 0;   // 0 sem loop, 1 contínuo, 2 enquanto a nota está pressionada
 
     bool operator== (const SampleZone&) const = default;
 };

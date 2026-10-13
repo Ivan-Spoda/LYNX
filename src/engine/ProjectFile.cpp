@@ -258,7 +258,8 @@ juce::String toJson (const Song& song)
         {
             juce::Array<juce::var> zones;
             for (const auto& z : c.zones)
-                zones.add (juce::Array<juce::var> { str (z.path), z.rootKey, z.lowKey, z.highKey, z.lowVelocity, z.highVelocity, z.tune, z.gain });
+                zones.add (juce::Array<juce::var> { str (z.path), z.rootKey, z.lowKey, z.highKey, z.lowVelocity, z.highVelocity, z.tune, z.gain,
+                                                    (juce::int64) z.loopStart, (juce::int64) z.loopEnd, z.loopMode });
             o->setProperty ("zones", zones);
         }
 
@@ -569,10 +570,19 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             if (auto* zones = c["zones"].getArray())
                 for (const auto& z : *zones)
-                    if (z.isArray() && z.size() == 8)
+                    if (z.isArray() && z.size() >= 8)
+                    {
                         def.zones.push_back ({ z[0].toString().toStdString(), juce::jlimit (0, 127, (int) z[1]), juce::jlimit (0, 127, (int) z[2]),
                                                juce::jlimit (0, 127, (int) z[3]), juce::jlimit (0, 127, (int) z[4]), juce::jlimit (0, 127, (int) z[5]),
                                                juce::jlimit (-48.0f, 48.0f, (float) (double) z[6]), juce::jlimit (0.0f, 4.0f, (float) (double) z[7]) });
+
+                        if (z.size() >= 11) // loop
+                        {
+                            def.zones.back().loopStart = juce::jmax<juce::int64> (0, (juce::int64) z[8]);
+                            def.zones.back().loopEnd = juce::jmax<juce::int64> (0, (juce::int64) z[9]);
+                            def.zones.back().loopMode = juce::jlimit (0, 2, (int) z[10]);
+                        }
+                    }
             def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
             def.plugin = pluginFromVar (c["plugin"]);
 

@@ -213,6 +213,21 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                 }
                 else if (c.id == 0x1F6)
                     zone.path = ascii (c);
+                else if (c.id == 0x1F7 && c.size >= 32) // quadros, canais, ?, taxa, modo de loop, loop A, loop B
+                {
+                    std::int64_t frames = 0;
+                    std::memcpy (&frames, c.data, 8);
+                    const auto mode = i32 (c, 5);
+                    const auto a = (std::int64_t) i32 (c, 6), b = (std::int64_t) i32 (c, 7);
+
+                    // 2 contínuo, 3 enquanto pressionada, 4 vai-e-volta (aqui: contínuo); 0/1 sem loop
+                    if ((mode == 2 || mode == 3 || mode == 4) && b > a && a >= 0 && (frames <= 0 || b <= frames))
+                    {
+                        zone.loopStart = a;
+                        zone.loopEnd = b;
+                        zone.loopMode = mode == 3 ? 2 : 1;
+                    }
+                }
                 else if (c.id == 0x1F8 && c.size >= 4)
                     zone.tune = (std::clamp (f32 (c.data), 0.0f, 1.0f) - 0.5f) * 24.0f; // (v − 0,5)·2400 cents
                 else if (c.id == 0x1FD && c.size >= 16)
