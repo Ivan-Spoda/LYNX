@@ -65,5 +65,17 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 ## Fase 5: escalar
 - [x] Renderizar insert para áudio (congelar)
 - [x] Render/export para WAV/FLAC/OGG (MP3 não: o JUCE não codifica MP3)
-- [ ] ASIO (precisa do SDK da Steinberg) e WASAPI exclusivo
+- [x] WASAPI exclusivo e "Low Latency" (já vêm do JUCE; aparecem em Configurações de áudio,
+      conferido com `LYNX.exe --dispositivos saida.txt`)
+- [ ] ASIO (precisa do SDK da Steinberg; decisão de licença pendente)
 - [x] UI na GPU: o JUCE 8 já desenha com Direct2D no Windows
+
+## Fase 6: fidelidade ao FL (com o REA)
+- [x] Curvas de volume/fader, swing, envelopes, time-stretch, cut groups (rodada 3)
+- [x] 3x Osc → synth interno: osciladores, níveis, pan, semitons (rodada 4)
+- [x] Filtro do canal (Mod X/Y, 8 tipos) no synth e no sampler
+- [x] Envelopes de corte e de afinação do canal no synth
+- [x] Efeitos nativos do FL nos slots do mixer viram efeitos internos parecidos
+- [ ] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado (rodada 5)
+- [ ] LFOs do canal, AM do 3x Osc, filtros BP/HP do canal
+- [ ] Notas "porta" e mudança de compasso

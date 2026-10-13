@@ -74,6 +74,25 @@ public:
             return;
         }
 
+        if (args.contains ("--dispositivos"))
+        {
+            // diagnóstico: tipos de driver e dispositivos de saída que o JUCE oferece (sem abrir nenhum)
+            juce::AudioDeviceManager manager;
+            juce::String report;
+
+            for (auto* type : manager.getAvailableDeviceTypes())
+            {
+                type->scanForDevices();
+                report << "tipo=" << type->getTypeName() << "\n";
+                for (const auto& name : type->getDeviceNames (false))
+                    report << "  saida=" << name << "\n";
+            }
+
+            juce::File (args[args.indexOf ("--dispositivos") + 1].unquoted()).replaceWithText (report);
+            quit();
+            return;
+        }
+
         if (args.contains ("--scantest"))
         {
             // LYNX.exe --scantest pasta relatorio.txt: busca (em processos filhos) sem tocar na lista do usuário
