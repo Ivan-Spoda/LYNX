@@ -775,7 +775,8 @@ private:
         };
 
         const auto generators = patches.getChildFile ("Plugin presets/Generators");
-        for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "MiniSynth", "Fruity DX10", "Fruit Kick", "Ogun", "Sakura" })
+        for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "MiniSynth", "Fruity DX10", "Fruit Kick", "Ogun", "Sakura", "Kepler",
+                                 "PoiZone", "Toxic Biohazard", "BassDrum" })
             if (auto sub = folderMenu (generators.getChildFile (name), 0); sub.getNumItems() > 0)
                 menu.addSubMenu (name, sub);
 

@@ -366,6 +366,8 @@ TEST (plugin_state_decoders_survive_garbage)
         if (auto wave = lynx::waveTravellerSample (blob))
             CHECK (! wave->first.empty() && wave->second >= 0 && wave->second <= 127);
         lynx::synthFromBooBass (blob, synth);
+        if (lynx::synthFromPoiZone (blob, synth, harmlessGain) || lynx::synthFromBassDrum (blob, synth, harmlessGain) || lynx::synthFromToxic (blob, synth, harmlessGain))
+            CHECK (std::isfinite (synth.cutoff) && std::isfinite (harmlessGain));
         if (auto patch = lynx::drumpadPatchName (blob))
             CHECK (patch->size() <= 0x30 && std::isfinite (lynx::drumToneForName (*patch).decay));
         if (auto flex = lynx::flexPresetName (blob))
@@ -755,6 +757,12 @@ TEST (flp_real_files)
                     decoded = lynx::synthFromKepler (c.pluginState, gs, g);
                 else if (c.pluginName == "Wave Traveller")
                     decoded = lynx::waveTravellerSample (c.pluginState).has_value() ? 2 : 0;
+                else if (c.pluginName == "PoiZone")
+                    decoded = lynx::synthFromPoiZone (c.pluginState, gs, g);
+                else if (c.pluginName == "BassDrum")
+                    decoded = lynx::synthFromBassDrum (c.pluginState, gs, g);
+                else if (c.pluginName == "Toxic Biohazard")
+                    decoded = lynx::synthFromToxic (c.pluginState, gs, g);
                 else if (c.pluginName == "BooBass")
                     decoded = lynx::synthFromBooBass (c.pluginState, gs);
                 else if (c.pluginName == "Drumpad" || c.pluginName == "DrumPad")
@@ -962,7 +970,8 @@ TEST (flp_real_files)
 
     // o botão "Presets do FL" do synth: .fst de Sytrus/Harmor e .gmsynth viram ajustes do synth
     int presetFiles = 0, presetsRead = 0;
-    for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "Ogun", "Sakura", "Fruit Kick", "Fruity DX10", "MiniSynth" })
+    for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "Ogun", "Sakura", "Fruit Kick", "Fruity DX10", "MiniSynth", "Kepler",
+                              "PoiZone", "Toxic Biohazard", "BassDrum" })
     {
         const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / name;
         if (! std::filesystem::exists (folder))

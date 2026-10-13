@@ -100,4 +100,5 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [ ] Patcher em paralelo (submix / M-S / multibanda), X-Y Controller, editor do canal controlador
 - [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
 - [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)
-- [ ] Morphine, PoiZone, Toxic Biohazard, BassDrum
+- [x] PoiZone, BassDrum, Toxic Biohazard (rodada 15)
+- [ ] Morphine

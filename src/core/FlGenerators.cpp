@@ -645,4 +645,142 @@ SynthSettings drumToneForName (const std::string& patchName)
     }
     return s;
 }
+// ---- PoiZone, BassDrum, Toxic Biohazard (REA_rodada15 §12) ----
+
+namespace
+{
+bool sslfFloats (const std::vector<std::uint8_t>& state, const char* tag, std::size_t offset, float* out, int count)
+{
+    if (state.size() < offset + (std::size_t) count * 4 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, tag, 4) != 0)
+        return false;
+    std::memcpy (out, state.data() + offset, (std::size_t) count * 4);
+    for (int i = 0; i < count; ++i)
+        out[i] = std::isfinite (out[i]) ? std::clamp (out[i], 0.0f, 1.0f) : 0.0f;
+    return true;
+}
+
+double ms4 (double lo, double span, float x) { return (lo + span * std::pow ((double) x, 4.0)) / 1000.0; }
+} // namespace
+
+bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
+{
+    float p[74];
+    if (! sslfFloats (state, "4reV", 12, p, 74))
+        return false;
+
+    SynthSettings s;
+    const auto transpose = std::floor (48.0f * p[17]) - 24.0 + (200.0 * p[16] - 100.0) / 100.0;
+    const auto waveA = p[0] > 0.0f ? Waveform::square : Waveform::saw;
+    const auto waveB = p[4] > 0.0f ? Waveform::square : Waveform::saw;
+    s.osc[0] = { waveA, 0, 0.0f, std::clamp (1.0f - p[8], 0.0f, 1.0f) };
+    s.osc[1] = { waveB, 0, (float) (50.0 * p[7]), std::clamp (p[8], 0.0f, 1.0f) };
+    s.osc[2] = { Waveform::noise, 0, 0.0f, p[9] * 0.5f };
+    setPitch (s.osc[0], transpose);
+    setPitch (s.osc[1], transpose + std::floor (48.0f * p[6]) - 24.0);
+    s.osc[1].detune = (float) std::clamp (s.osc[1].detune + 50.0 * p[7], -100.0, 100.0);
+
+    s.attack = (float) ms4 (1.0, 4999.0, p[22]);
+    s.decay = (float) ms4 (1.0, 19999.0, p[23]);
+    s.sustain = p[24];
+    s.release = (float) ms4 (15.0, 9985.0, p[25]);
+    s.cutoff = (float) std::clamp (20.0 * std::pow (1000.0, (double) p[18]), 20.0, 20000.0);
+    s.resonance = std::min (0.95f, p[19]);
+    s.filterType = std::clamp ((int) (2.0f * p[66]), 0, 2) == 0 ? 0 : (int) (2.0f * p[66]) == 1 ? 1 : 2;
+    if ((int) (4.0f * p[65]) == 0 && std::abs (p[10] - 0.5f) > 0.01f) // envelope do filtro no corte
+        s.filterEnv = { (2.0f * p[10] - 1.0f) * 4.0f, (float) ms4 (5.0, 49995.0, p[11]), 0.0f, (float) ms4 (5.0, 49995.0, p[12]), p[13],
+                        (float) ms4 (5.0, 49995.0, p[14]) };
+    if (std::abs (p[26] - 0.5f) > 0.01f && p[28] > 0.0f)
+    {
+        ChannelLfo lfo;
+        lfo.period = (float) (1.0 / std::max (0.02, 30.0 * std::pow ((double) p[28], 5.0)));
+        const auto shape = std::clamp ((int) (4.0f * p[68]), 0, 4);
+        lfo.shape = shape == 1 ? 2 : shape == 2 ? 1 : 0;
+        const auto amount = 2.0f * p[26] - 1.0f;
+        switch (std::clamp ((int) (5.0f * p[67]), 0, 5))
+        {
+            case 0: lfo.amount = amount * 3.0f; s.lfo[lfoCutoff] = lfo; break;
+            case 1: case 2: lfo.amount = amount * 1.0f; s.lfo[lfoPitch] = lfo; break;
+            case 5: lfo.amount = amount; s.lfo[lfoPan] = lfo; break;
+            default: break;
+        }
+    }
+    s.mono = p[44] >= 0.5f;
+    s.porta = p[46] > 0.0f;
+    gain = (float) std::pow (10.0, (30.0 * p[15] - 20.0) / 20.0);
+    synth = s;
+    return true;
+}
+
+bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
+{
+    float p[23];
+    if (! sslfFloats (state, "1kiK", 0x50C, p, 23) && ! sslfFloats (state, "2kiK", 0x50C, p, 23))
+        return false;
+
+    // seno que desce do "peak" ao "base" no slide, com clique/ruído no ataque
+    const auto baseHz = std::pow (2.0, 4.0 * p[6] + 4.0);
+    const auto sweep = 12.0 * 6.0 * p[7]; // até 6 oitavas acima [HIP]
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f },
+              SynthOscillator { Waveform::noise, 0, 0.0f, std::min (0.5f, 0.15f * p[21] + 0.1f * p[15]) },
+              SynthOscillator {} };
+    setPitch (s.osc[0], 12.0 * std::log2 (baseHz / 261.63));
+    s.attack = 0.0005f;
+    s.decay = 0.05f + 1.5f * p[2];
+    s.sustain = 0.0f;
+    s.release = 0.02f;
+    s.cutoff = 20000.0f;
+    if (sweep > 0.1)
+        s.pitchEnv = { (float) sweep, 0.0f, 0.0f, 0.01f + 0.3f * p[8], 0.0f, 0.02f };
+    gain = (float) std::pow (10.0, 40.0 * (p[0] - 0.5) / 20.0);
+    synth = s;
+    return true;
+}
+
+bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
+{
+    float p[294];
+    if (! sslfFloats (state, "2iBT", 0x204C, p, 294))
+        return false;
+
+    // portadora = operador ligado com mais "Mix"; modulador = quem mais modula a portadora
+    int carrier = -1;
+    for (int i = 0; i < 6; ++i)
+        if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
+            carrier = i;
+    if (carrier < 0)
+        carrier = 0;
+    int modulator = -1;
+    float strongest = 0.0f;
+    for (int j = 0; j < 6; ++j)
+        if (j != carrier && p[25 + j] >= 0.5f && p[109 + 6 * j + carrier] > strongest)
+            strongest = p[109 + 6 * j + carrier], modulator = j;
+
+    auto ratioSemis = [&] (int op) { return std::round ((p[31 + op] - 0.5) * 48.0) + (p[37 + op] - 0.5) * 2.0; };
+    auto seconds = [] (float x) { return 10.0f * x * x * x; };
+
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    setPitch (s.osc[0], ratioSemis (carrier) + std::round ((p[2] - 0.5) * 48.0));
+    if (modulator >= 0 && strongest > 0.01f)
+    {
+        s.osc[2] = { Waveform::sine, 0, 0.0f, 1.0f };
+        setPitch (s.osc[2], ratioSemis (modulator) + std::round ((p[2] - 0.5) * 48.0));
+        s.fm = std::min (8.0f, strongest * 4.0f);
+        if (p[85 + modulator] < 0.9f)
+        {
+            s.fmDecay = std::max (0.01f, seconds (p[79 + modulator]));
+            s.fmSustain = p[85 + modulator];
+        }
+    }
+    s.attack = seconds (p[3]);
+    s.decay = seconds (p[4]);
+    s.sustain = p[5];
+    s.release = std::max (0.01f, seconds (p[6]));
+    s.cutoff = (float) std::clamp (20.0 * std::pow (1000.0, (double) p[15]), 20.0, 20000.0);
+    s.resonance = std::min (0.95f, p[16]);
+    gain = std::clamp (p[0] * 2.0f, 0.0f, 2.0f);
+    synth = s;
+    return true;
+}
 } // namespace lynx

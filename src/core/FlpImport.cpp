@@ -350,7 +350,8 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
 bool isFlSynthPresetPlugin (const std::string& pluginName)
 {
     static const char* const supported[] = { "3x osc", "sytrus", "harmor", "gms", "harmless", "minisynth", "fruity dx10", "dx10",
-                                             "fruit kick", "ogun", "autogun", "sakura" };
+                                             "fruit kick", "ogun", "autogun", "sakura", "kepler", "boobass", "poizone", "bassdrum",
+                                             "toxic biohazard" };
     const auto name = lowercase (pluginName);
     return std::any_of (std::begin (supported), std::end (supported), [&] (const char* n) { return name == n; });
 }
@@ -761,6 +762,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if (name == "boobass" && synthFromBooBass (c.pluginState, fromPlugin))
                 adopt();
+            else if (name == "poizone" && synthFromPoiZone (c.pluginState, fromPlugin, pluginGain))
+                adopt();
+            else if (name == "bassdrum" && synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
+                adopt();
+            else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
+                adopt();
             else if (name == "drumpad")
                 if (const auto patch = drumpadPatchName (c.pluginState))
                 {
@@ -834,7 +841,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad") && adoptedFromPlugin)
+                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
+                         || plugin == "toxic biohazard") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];

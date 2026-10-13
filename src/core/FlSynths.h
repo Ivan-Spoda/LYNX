@@ -81,6 +81,12 @@ std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vecto
 // LYNX não os abre: o canal ganha um patch do synth escolhido por esses nomes.
 std::optional<std::pair<std::string, std::string>> flexPresetName (const std::vector<std::uint8_t>& state);
 
+// PoiZone, BassDrum, Toxic Biohazard (REA_rodada15 §12): PoiZone mapeia bem (2 osc + ruído, 2 ADSR,
+// filtro, LFO); BassDrum vira um bumbo (seno com queda de afinação + ruído); Toxic, FM de 2 operadores.
+bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+
 // BooBass (REA_rodada10 §5): serra + seno grave, corte pelo Treble.
 bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& synth);
 
