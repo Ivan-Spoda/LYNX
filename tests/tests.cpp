@@ -2034,6 +2034,25 @@ TEST (synth_three_oscillators_adsr_filter)
     CHECK (peakIn (c, 100, 2000) > peakIn (b, 100, 2000) && peakIn (c, 30000, 40000) < 1e-3f);
 }
 
+TEST (set_target_value_round_trips)
+{
+    auto s = lynx::Song::makeDefault();
+    s.mixer[2].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::delay));
+    const lynx::AutomationTarget targets[] = {
+        { lynx::AutomationTargetKind::channelVolume, 1 }, { lynx::AutomationTargetKind::channelPan, 2 },
+        { lynx::AutomationTargetKind::mixerVolume, 3 },   { lynx::AutomationTargetKind::mixerPan, 0 },
+        { lynx::AutomationTargetKind::effectParam, 2, 0, 1 }, { lynx::AutomationTargetKind::tempo, 0 },
+    };
+
+    for (const auto& t : targets)
+    {
+        CHECK (s.setTargetValue (t, 0.25f));
+        CHECK (std::abs (s.targetValue (t) - 0.25f) < 1e-5f);
+    }
+
+    CHECK (! s.setTargetValue ({ lynx::AutomationTargetKind::channelParam, 0, 0, 3 }, 0.5f)); // mora no plugin
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

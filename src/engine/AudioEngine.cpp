@@ -1,5 +1,7 @@
 #include "engine/AudioEngine.h"
 
+#include <map>
+
 #include "engine/Text.h"
 
 #include "core/FlpImport.h"
@@ -379,6 +381,12 @@ void AudioEngine::finishAudioTake()
 void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
     // thread MIDI: só filas e atomics
+    if (m.isController())
+    {
+        controllerQueue.push ({ m.getControllerNumber(), m.getChannel() - 1, m.getControllerValue() });
+        return;
+    }
+
     if (! m.isNoteOnOrOff())
         return;
 
@@ -657,8 +665,73 @@ void AudioEngine::publishSong()
     sendChangeMessage();
 }
 
+void AudioEngine::learnMidiController (const AutomationTarget& target)
+{
+    learning = target;
+    sendChangeMessage();
+}
+
+void AudioEngine::applyControllers()
+{
+    ControllerEvent e;
+    std::map<std::pair<int, int>, int> latest; // (cc, canal) -> último valor deste quadro
+
+    while (controllerQueue.pop (e))
+    {
+        if (learning.kind != AutomationTargetKind::none)
+        {
+            // MIDI learn: troca o vínculo antigo do mesmo alvo pelo novo
+            editSong ([t = learning, e] (Song& s) {
+                s.midiLinks.erase (std::remove_if (s.midiLinks.begin(), s.midiLinks.end(), [&] (const MidiLink& l) { return l.target == t; }),
+                                   s.midiLinks.end());
+                s.midiLinks.push_back ({ e.cc, e.channel, t });
+            });
+            learning = {};
+        }
+
+        latest[{ e.cc, e.channel }] = e.value;
+    }
+
+    if (latest.empty() || song.midiLinks.empty())
+        return;
+
+    // um snapshot por quadro, fora do histórico de desfazer (é como girar o knob)
+    std::vector<std::pair<AutomationTarget, float>> changes;
+
+    for (const auto& [key, value] : latest)
+        for (const auto& link : song.midiLinks)
+            if (link.cc == key.first && (link.channel < 0 || link.channel == key.second))
+                changes.push_back ({ link.target, value / 127.0f });
+
+    std::vector<std::pair<AutomationTarget, float>> pluginChanges;
+
+    editSong ([&] (Song& s) {
+        for (const auto& [target, v] : changes)
+            if (! s.setTargetValue (target, v))
+                pluginChanges.push_back ({ target, v });
+    }, false);
+
+    // parâmetros de plugin moram no plugin
+    for (const auto& [target, v] : pluginChanges)
+    {
+        juce::AudioPluginInstance* plugin = nullptr;
+
+        if (target.kind == AutomationTargetKind::channelParam)
+            if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (target.index).get()))
+                plugin = &p->getInstance();
+
+        if (target.kind == AutomationTargetKind::effectParam)
+            if (auto* p = dynamic_cast<PluginEffect*> (getEffect (target.index, target.slot).get()))
+                plugin = &p->getInstance();
+
+        if (plugin != nullptr && target.param >= 0 && target.param < plugin->getParameters().size())
+            plugin->getParameters()[target.param]->setValueNotifyingHost (v);
+    }
+}
+
 void AudioEngine::timerCallback()
 {
+    applyControllers();
     updateRecording();
     rackExchange.collectGarbage();
 

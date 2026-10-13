@@ -452,6 +452,35 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
     return -1.0f;
 }
 
+bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
+{
+    v = std::clamp (v, 0.0f, 1.0f);
+    const auto validChannel = t.index >= 0 && t.index < (int) channels.size();
+    const auto validTrack = t.index >= 0 && t.index < (int) mixer.size();
+
+    switch (t.kind)
+    {
+        case AutomationTargetKind::channelVolume: if (! validChannel) return false; channels[(std::size_t) t.index].volume = v; return true;
+        case AutomationTargetKind::channelPan: if (! validChannel) return false; channels[(std::size_t) t.index].pan = v * 2.0f - 1.0f; return true;
+        case AutomationTargetKind::mixerVolume: if (! validTrack) return false; mixer[(std::size_t) t.index].volume = v; return true;
+        case AutomationTargetKind::mixerPan: if (! validTrack) return false; mixer[(std::size_t) t.index].pan = v * 2.0f - 1.0f; return true;
+        case AutomationTargetKind::tempo: bpm = tempoFromValue (v); return true;
+        case AutomationTargetKind::effectParam:
+            if (validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
+                && mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind != EffectKind::plugin && t.param >= 0
+                && t.param < maxEffectParams)
+            {
+                mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param] = v;
+                return true;
+            }
+            return false;
+        case AutomationTargetKind::channelParam:
+        case AutomationTargetKind::none: break;
+    }
+
+    return false;
+}
+
 float Song::automationValueAt (int index, double tick) const
 {
     if (index < 0 || index >= (int) automations.size())

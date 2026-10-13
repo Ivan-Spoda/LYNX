@@ -261,6 +261,14 @@ enum class PlayMode : std::uint8_t
     song     // toca a Playlist (como o "SONG" do FL)
 };
 
+// Controlador MIDI (CC) ligado a um parâmetro ("Link to controller" do FL).
+struct MidiLink
+{
+    int cc = 0;       // 0..127
+    int channel = -1; // canal MIDI 0..15, -1 = qualquer
+    AutomationTarget target;
+};
+
 // Cabeçalho de uma trilha da Playlist.
 struct PlaylistTrack
 {
@@ -315,6 +323,7 @@ struct Song
     std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
     std::vector<Automation> automations;
     std::vector<PlaylistTrack> playlistTracks; // índice = trilha; trilhas além do fim usam o padrão
+    std::vector<MidiLink> midiLinks;
 
     bool isTrackMuted (int track) const noexcept
     {
@@ -355,6 +364,8 @@ struct Song
 
     // Valor atual (do modelo, sem automação) do alvo, 0..1; -1 se o alvo não existir.
     float targetValue (const AutomationTarget& target) const noexcept;
+    // Muda o valor do alvo no modelo (0..1). Parâmetros de plugin não moram aqui: retorna false.
+    bool setTargetValue (const AutomationTarget& target, float value) noexcept;
 
     // Valor de uma automação numa posição da música (o mesmo que a reprodução usa); NaN sem clips.
     float automationValueAt (int automation, double tick) const;

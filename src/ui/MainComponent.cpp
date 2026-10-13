@@ -551,6 +551,12 @@ void MainComponent::timerCallback()
     const auto step = (int) (std::fmod (beats, 1.0) * stepsPerBeat) + 1;
 
     positionLabel.setText (juce::String::formatted ("%d : %d : %d", bar, beat, step), juce::dontSendNotification);
+
+    // MIDI learn esperando um controlador
+    static const auto normalHint = hintLabel.getText();
+    const auto hint = engine.isLearningMidi() ? utf8 ("Mexa um knob/fader do controlador MIDI para ligar ao parâmetro...") : normalHint;
+    if (hintLabel.getText() != hint)
+        hintLabel.setText (hint, juce::dontSendNotification);
     playButton.setButtonText (transport.playing.load() ? "Pause" : "Play");
     cpuLabel.setText ("CPU " + juce::String (engine.getDeviceManager().getCpuUsage() * 100.0, 1) + "%",
                       juce::dontSendNotification);

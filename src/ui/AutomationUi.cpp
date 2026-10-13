@@ -489,6 +489,20 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
     menu.addItem (utf8 ("Criar clip de automação"), [&engine, target] { createAutomationClip (engine, target); });
+    menu.addItem (utf8 ("Ligar a controlador MIDI (mexa um knob do controlador)"), [&engine, target] {
+        engine.learnMidiController (target);
+    });
+
+    const auto& links = engine.getSong().midiLinks;
+    const auto linked = std::find_if (links.begin(), links.end(), [&] (const MidiLink& l) { return l.target == target; });
+
+    if (linked != links.end())
+        menu.addItem (utf8 ("Desligar controlador (CC ") + juce::String (linked->cc) + ")", [&engine, target] {
+            engine.editSong ([target] (Song& s) {
+                s.midiLinks.erase (std::remove_if (s.midiLinks.begin(), s.midiLinks.end(), [&] (const MidiLink& l) { return l.target == target; }),
+                                   s.midiLinks.end());
+            });
+        });
 }
 
 void addPluginParameterItems (juce::PopupMenu& menu, AudioEngine& engine, juce::AudioPluginInstance& plugin,
@@ -501,7 +515,9 @@ void addPluginParameterItems (juce::PopupMenu& menu, AudioEngine& engine, juce::
     {
         auto target = base;
         target.param = i;
-        params.addItem (list[i]->getName (60), [&engine, target] { createAutomationClip (engine, target); });
+        juce::PopupMenu param;
+        addAutomationItem (param, engine, target);
+        params.addSubMenu (list[i]->getName (60), param);
     }
 
     if (list.isEmpty())

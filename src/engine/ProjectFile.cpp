@@ -283,6 +283,16 @@ juce::String toJson (const Song& song)
     if (! automations.isEmpty())
         root->setProperty ("automations", automations);
 
+    if (! song.midiLinks.empty())
+    {
+        juce::Array<juce::var> links;
+
+        for (const auto& l : song.midiLinks)
+            links.add (juce::Array<juce::var> { l.cc, l.channel, targetKindName (l.target.kind), l.target.index, l.target.slot, l.target.param });
+
+        root->setProperty ("midiLinks", links);
+    }
+
     root->setProperty ("playlist", clipsToVar (song.playlist));
 
     {
@@ -533,6 +543,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         }
 
     song.playlist = clipsFromVar (root["playlist"], song);
+
+    if (auto* links = root["midiLinks"].getArray())
+        for (const auto& l : *links)
+            if (l.isArray() && l.size() == 6)
+                song.midiLinks.push_back ({ juce::jlimit (0, 127, (int) l[0]), juce::jlimit (-1, 15, (int) l[1]),
+                                            { targetKindFromName (l[2].toString()), (int) l[3], (int) l[4], (int) l[5] } });
 
     if (auto* tracks = root["playlistTracks"].getArray())
         for (const auto& t : *tracks)

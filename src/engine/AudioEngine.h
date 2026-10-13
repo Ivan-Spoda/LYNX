@@ -69,6 +69,10 @@ public:
     bool isAudioRecordingArmed() const noexcept { return audioArmed; }
     juce::String getLastRecordingError() const { return recordingError; }
 
+    // MIDI learn: o próximo CC recebido vira um controlador ligado a `target`.
+    void learnMidiController (const AutomationTarget& target);
+    bool isLearningMidi() const noexcept { return learning.kind != AutomationTargetKind::none; }
+
     // Entradas MIDI: todas as disponíveis ficam ligadas e tocam o canal selecionado.
     juce::StringArray getActiveMidiInputs() const;
 
@@ -159,6 +163,14 @@ private:
     LiveEventQueue liveEvents;   // UI -> áudio
     LiveEventQueue midiEvents;   // thread MIDI -> áudio
     SpscQueue<RecordedEvent, 1024> midiRecordQueue; // thread MIDI -> UI (gravação)
+
+    struct ControllerEvent
+    {
+        int cc = 0, channel = 0, value = 0;
+    };
+    SpscQueue<ControllerEvent, 1024> controllerQueue; // thread MIDI -> UI (controladores)
+    AutomationTarget learning;
+    void applyControllers();
     std::vector<RecordedEvent> uiRecorded;           // teclado do PC -> gravação
     NoteRecorder recorder;
     bool takeHasUndoStep = false;
