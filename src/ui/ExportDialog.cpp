@@ -56,6 +56,84 @@ private:
     bool ok = false;
 };
 
+// Stems: um arquivo por insert com som (como o "split mixer tracks" do FL). Cada render cria
+// o seu engine; os plugins nascem e morrem na thread da UI, então a thread de fundo pede isso a ela.
+class StemsThread final : public juce::ThreadWithProgressWindow
+{
+public:
+    StemsThread (const AudioEngine& e, ExportSettings s, juce::File base)
+        : juce::ThreadWithProgressWindow (utf8 ("Exportando stems..."), true, true),
+          settings (s),
+          baseFile (std::move (base)),
+          song (e.getSong())
+    {
+        // inserts que recebem canal ou envio
+        for (int t = 1; t < (int) song.mixer.size(); ++t)
+        {
+            auto used = std::any_of (song.channels.begin(), song.channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; });
+
+            for (int src = 1; src < (int) song.mixer.size() && ! used; ++src)
+                used = song.routes (src, t) && src != t;
+
+            if (used)
+                inserts.push_back (t);
+        }
+    }
+
+    void run() override
+    {
+        for (std::size_t i = 0; i < inserts.size() && ! threadShouldExit(); ++i)
+        {
+            const auto t = inserts[i];
+            const auto name = juce::File::createLegalFileName (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
+            const auto file = baseFile.getSiblingFile (baseFile.getFileNameWithoutExtension() + " - " + juce::String (t) + " " + name
+                                                       + exportExtension (settings.format));
+            setStatusMessage (name);
+
+            std::unique_ptr<ExportJob> job;
+            juce::WaitableEvent ready;
+            juce::MessageManager::callAsync ([&] {
+                job = std::make_unique<ExportJob> (makeBounceSong (song, t), settings, file);
+                ready.signal();
+            });
+            ready.wait();
+
+            juce::String error;
+            const auto base = (double) i / (double) inserts.size();
+            const auto ok = job->run ([this, base] (double p) {
+                setProgress (base + p / (double) inserts.size());
+                return ! threadShouldExit();
+            }, error);
+
+            if (ok)
+                ++written;
+
+            juce::WaitableEvent gone;
+            juce::MessageManager::callAsync ([&] {
+                job.reset();
+                gone.signal();
+            });
+            gone.wait();
+        }
+    }
+
+    void threadComplete (bool cancelled) override
+    {
+        if (! cancelled)
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Stems exportados"),
+                                                    juce::String (written) + utf8 (" arquivo(s) em ") + baseFile.getParentDirectory().getFullPathName());
+
+        juce::MessageManager::callAsync ([this] { delete this; });
+    }
+
+private:
+    ExportSettings settings;
+    juce::File baseFile;
+    Song song;
+    std::vector<int> inserts;
+    int written = 0;
+};
+
 class ExportPanel final : public juce::Component
 {
 public:
@@ -86,11 +164,13 @@ public:
         for (auto* c : { &formatBox, &rateBox, &whatBox, &tailBox })
             addAndMakeVisible (c);
 
+        stemsToggle.setButtonText (utf8 ("Um arquivo por insert do mixer (stems)"));
+        addAndMakeVisible (stemsToggle);
         addAndMakeVisible (exportButton);
         addAndMakeVisible (cancelButton);
         exportButton.onClick = [this] { chooseFile(); };
         cancelButton.onClick = [this] { close(); };
-        setSize (380, 220);
+        setSize (380, 252);
     }
 
     void resized() override
@@ -107,6 +187,7 @@ public:
         row (formatLabel, formatBox);
         row (rateLabel, rateBox);
         row (tailLabel, tailBox);
+        stemsToggle.setBounds (area.removeFromTop (24));
 
         auto buttons = area.removeFromBottom (30);
         cancelButton.setBounds (buttons.removeFromRight (100));
@@ -161,6 +242,16 @@ private:
 
                                   lastFolder = file.getParentDirectory();
                                   engineRef.capturePluginStates(); // a cópia leva o estado atual dos plugins
+
+                                  if (stemsToggle.getToggleState())
+                                  {
+                                      auto stemSettings = s;
+                                      stemSettings.wholeSong = true;
+                                      close();
+                                      (new StemsThread (engineRef, stemSettings, file))->launchThread();
+                                      return;
+                                  }
+
                                   auto job = std::make_unique<ExportJob> (engineRef.getSong(), s, file);
                                   close(); // apaga este painel: nada de `this` depois daqui
                                   (new ExportThread (std::move (job), file))->launchThread();
@@ -173,6 +264,7 @@ private:
     juce::Label formatLabel, rateLabel, whatLabel, tailLabel;
     juce::ComboBox formatBox, rateBox, whatBox, tailBox;
     juce::TextButton exportButton { "Exportar..." }, cancelButton { "Cancelar" };
+    juce::ToggleButton stemsToggle;
     std::unique_ptr<juce::FileChooser> chooser;
 
     // lembra a última escolha enquanto o app está aberto
