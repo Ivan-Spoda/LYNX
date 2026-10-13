@@ -718,8 +718,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick")
                 ++r.approximated[c.pluginName];
-            else if (plugin != "fruity wrapper" && def.instrument == InstrumentKind::synth)
-                ++r.unsupported[c.pluginName];
+            else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)
+                ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)
         }
 
         song.channels.push_back (std::move (def));
