@@ -133,9 +133,7 @@ void Song::removeChannel (int index)
                 --c.channel;
     });
 
-    for (auto& a : automations)
-    {
-        auto& t = a.target;
+    forEachTarget ([index] (AutomationTarget& t) {
         const auto onChannel = t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
                                || t.kind == AutomationTargetKind::channelParam;
 
@@ -143,7 +141,16 @@ void Song::removeChannel (int index)
             t.kind = AutomationTargetKind::none;
         else if (onChannel && t.index > index)
             --t.index;
-    }
+    });
+
+    removeDeadMidiLinks();
+}
+
+void Song::removeDeadMidiLinks()
+{
+    midiLinks.erase (std::remove_if (midiLinks.begin(), midiLinks.end(),
+                                     [] (const MidiLink& l) { return l.target.kind == AutomationTargetKind::none; }),
+                     midiLinks.end());
 }
 
 bool Song::routes (int from, int to) const noexcept
@@ -331,9 +338,10 @@ void Song::swapEffectSlots (int track, int a, int b)
 
     std::swap (fx[(std::size_t) a], fx[(std::size_t) b]);
 
-    for (auto& au : automations)
-        if (au.target.kind == AutomationTargetKind::effectParam && au.target.index == track)
-            au.target.slot = au.target.slot == a ? b : au.target.slot == b ? a : au.target.slot;
+    forEachTarget ([track, a, b] (AutomationTarget& t) {
+        if (t.kind == AutomationTargetKind::effectParam && t.index == track)
+            t.slot = t.slot == a ? b : t.slot == b ? a : t.slot;
+    });
 }
 
 void Song::removeEffectSlot (int track, int slot)
@@ -344,14 +352,17 @@ void Song::removeEffectSlot (int track, int slot)
     auto& fx = mixer[(std::size_t) track].effects;
     fx.erase (fx.begin() + slot);
 
-    for (auto& au : automations)
-        if (au.target.kind == AutomationTargetKind::effectParam && au.target.index == track)
+    forEachTarget ([track, slot] (AutomationTarget& t) {
+        if (t.kind == AutomationTargetKind::effectParam && t.index == track)
         {
-            if (au.target.slot == slot)
-                au.target.kind = AutomationTargetKind::none;
-            else if (au.target.slot > slot)
-                --au.target.slot;
+            if (t.slot == slot)
+                t.kind = AutomationTargetKind::none;
+            else if (t.slot > slot)
+                --t.slot;
         }
+    });
+
+    removeDeadMidiLinks();
 }
 
 void Song::removeAutomation (int index)

@@ -308,6 +308,17 @@ struct Song
     void selectArrangement (int index);
     int addArrangement (const std::string& name, bool copyCurrent = false); // retorna o índice (já selecionado)
     void removeArrangement (int index);
+    // Aplica `fn` a todos os alvos (automações e controladores MIDI).
+    template <typename Fn>
+    void forEachTarget (Fn&& fn)
+    {
+        for (auto& a : automations)
+            fn (a.target);
+        for (auto& l : midiLinks)
+            fn (l.target);
+    }
+    void removeDeadMidiLinks();
+
     // Aplica `fn` a todas as listas de clips (a atual e as guardadas).
     template <typename Fn>
     void forEachClipList (Fn&& fn)
