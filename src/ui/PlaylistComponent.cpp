@@ -1173,6 +1173,46 @@ void PlaylistComponent::showClipMenu (int index)
 
         menu.addSubMenu ("Volume do clip", gains);
 
+        menu.addItem ("Normalizar", [this, targets] {
+            // ganho do clip para o pico do trecho tocado chegar a 0 dB (no máximo +24 dB)
+            const auto& song = engine.getSong();
+            const auto secondsPerTick = 60.0 / (juce::jmax (1.0, song.bpm) * ppq);
+            std::vector<std::pair<int, float>> gainsFor;
+
+            for (auto i : targets)
+            {
+                const auto& c = song.playlist[(std::size_t) i];
+
+                if (c.kind != ClipKind::audio || c.channel < 0 || c.channel >= (int) song.channels.size())
+                    continue;
+
+                const auto sample = engine.getSampleLibrary().load (juce::String::fromUTF8 (song.channels[(std::size_t) c.channel].samplePath.c_str()));
+
+                if (sample == nullptr || sample->frames() == 0)
+                    continue;
+
+                const auto from = (std::size_t) juce::jlimit (0.0, (double) sample->frames(), (double) c.offset * secondsPerTick * sample->sampleRate);
+                const auto to = (std::size_t) juce::jlimit ((double) from, (double) sample->frames(),
+                                                            (double) (c.offset + c.length) * secondsPerTick * sample->sampleRate);
+                float peak = 0.0f;
+
+                for (auto* data : { sample->leftData(), sample->rightData() })
+                    if (data != nullptr)
+                        for (auto f = from; f < to; ++f)
+                            peak = juce::jmax (peak, std::abs (data[f]));
+
+                if (peak > 1.0e-6f)
+                    gainsFor.push_back ({ i, juce::jmin (1.0f / peak, juce::Decibels::decibelsToGain (24.0f)) });
+            }
+
+            if (! gainsFor.empty())
+                engine.editSong ([gainsFor] (Song& s) {
+                    for (auto [i, g] : gainsFor)
+                        if (i < (int) s.playlist.size())
+                            s.playlist[(std::size_t) i].gain = g;
+                });
+        });
+
         if (clip.fadeIn > 0 || clip.fadeOut > 0)
             menu.addItem ("Tirar os fades", [this, targets] {
                 engine.editSong ([targets] (Song& s) {
