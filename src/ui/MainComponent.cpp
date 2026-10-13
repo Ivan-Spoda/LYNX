@@ -54,6 +54,9 @@ MainComponent::MainComponent (AudioEngine& e)
         engine.stop();
         engine.rewind();
     };
+    recordButton.setClickingTogglesState (false);
+    recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
+
     modeButton.setTooltip ("Pattern ou Song (tecla L)");
     modeButton.onClick = [this] { toggleMode(); };
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
@@ -104,7 +107,7 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
+    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton,
                                                              &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
     {
@@ -112,7 +115,7 @@ MainComponent::MainComponent (AudioEngine& e)
         c->setMouseClickGrabsKeyboardFocus (false); // o teclado do PC fica com a janela principal
     }
 
-    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton,
+    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton,
                                                              &modeButton, &metronomeButton, &newPatternButton, &patternMenuButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
 
@@ -154,6 +157,7 @@ void MainComponent::resized()
     place (exportButton, 70, 16);
     place (playButton, 60);
     place (stopButton, 60, 4);
+    place (recordButton, 44, 4);
     place (modeButton, 58, 8);
     place (metronomeButton, 70);
     place (bpmSlider, 150, 12);
@@ -255,7 +259,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         if (note >= 0)
         {
             if (heldKeys.insert (key.getKeyCode()).second)
-                engine.sendLiveNote (engine.getSelectedChannel(), note, 0.8f, true);
+                engine.sendLiveNote (engine.getSelectedChannel(), note, 0.8f, true, true);
             return true;
         }
     }
@@ -270,7 +274,7 @@ bool MainComponent::keyStateChanged (bool)
     {
         if (! juce::KeyPress::isKeyCurrentlyDown (*it))
         {
-            engine.sendLiveNote (engine.getSelectedChannel(), keyCodeToNote (*it), 0.0f, false);
+            engine.sendLiveNote (engine.getSelectedChannel(), keyCodeToNote (*it), 0.0f, false, true);
             it = heldKeys.erase (it);
         }
         else
@@ -417,6 +421,12 @@ void MainComponent::renamePattern (int index)
 
 void MainComponent::refreshModeButton()
 {
+    const auto recording = engine.isRecording();
+    recordButton.setColour (juce::TextButton::buttonColourId, recording ? juce::Colour (0xffd03030) : theme::toolbar.brighter (0.1f));
+    const auto inputs = engine.getActiveMidiInputs();
+    recordButton.setTooltip (utf8 ("Gravar notas na pattern atual enquanto toca (teclado do PC e MIDI)\nEntradas MIDI: ")
+                             + (inputs.isEmpty() ? utf8 ("nenhuma") : inputs.joinIntoString (", ")));
+
     const auto songMode = engine.getSong().mode == PlayMode::song;
     modeButton.setButtonText (songMode ? "SONG" : "PAT");
     modeButton.setColour (juce::TextButton::buttonColourId, songMode ? theme::accentGreen.darker (0.5f) : theme::accentOrange.darker (0.5f));

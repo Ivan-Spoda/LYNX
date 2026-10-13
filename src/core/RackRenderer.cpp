@@ -209,7 +209,8 @@ void RackRenderer::process (const RackState* state,
                             float* left,
                             float* right,
                             LiveEventQueue* live,
-                            MeterBank* meters) noexcept
+                            MeterBank* meters,
+                            LiveEventQueue* moreLive) noexcept
 {
     std::memset (left, 0, sizeof (float) * (std::size_t) numSamples);
     std::memset (right, 0, sizeof (float) * (std::size_t) numSamples);
@@ -246,11 +247,14 @@ void RackRenderer::process (const RackState* state,
     const auto tps = ticksPerSample (state->song.bpm, sampleRate);
     expectedTick = startTick + numSamples * tps;
 
-    if (live != nullptr)
+    for (auto* queue : { live, moreLive })
     {
+        if (queue == nullptr)
+            continue;
+
         NoteEvent e;
 
-        while (live->pop (e))
+        while (queue->pop (e))
         {
             if (e.channel < 0 || e.channel >= (int) state->instruments.size())
                 continue;

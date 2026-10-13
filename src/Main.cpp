@@ -106,13 +106,32 @@ private:
         offline.redo();
         const auto undoOk = afterUndo == 99.0 && offline.getSong().bpm == 101.0 && offline.canUndo() && ! offline.canRedo();
 
-        const auto ok = audioOk && projectOk && undoOk;
+        // gravação pelo teclado do PC: uma nota de um tempo entra na pattern, num passo de desfazer
+        const auto notesBefore = offline.getSong().patterns[0].notes.size();
+        offline.setRecording (true);
+        offline.play();
+        offline.getTransport().positionTicks.store (960.0);
+        offline.sendLiveNote (2, 72, 0.9f, true, true);
+        offline.getTransport().positionTicks.store (1920.0);
+        offline.sendLiveNote (2, 72, 0.0f, false, true);
+        offline.setRecording (false);
+        offline.stop();
+        const auto& recorded = offline.getSong().patterns[0].notes;
+        const auto recordOk = recorded.size() == notesBefore + 1
+                              && std::any_of (recorded.begin(), recorded.end(), [] (const lynx::Note& n) {
+                                     return n.key == 72 && n.channel == 2 && n.length == 960 && n.start >= 960 && n.start < 3840;
+                                 });
+        offline.undo();
+        const auto recordUndoOk = offline.getSong().patterns[0].notes.size() == notesBefore;
+
+        const auto ok = audioOk && projectOk && undoOk && recordOk && recordUndoOk;
 
         juce::String report;
         report << "conexoes=" << offline.getNumGraphConnections() << "\n"
                << "pico=" << peak << "\n"
                << "projeto=" << (projectOk ? "OK" : "ERRO " + error) << "\n"
                << "desfazer=" << (undoOk ? "OK" : "ERRO") << "\n"
+               << "gravacao=" << (recordOk && recordUndoOk ? "OK" : "ERRO") << "\n"
                << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
 
         if (reportPath.isNotEmpty())

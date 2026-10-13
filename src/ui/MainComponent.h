@@ -54,6 +54,7 @@ private:
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::TextButton modeButton { "PAT" };
+    juce::TextButton recordButton { "Rec" };
     juce::ToggleButton metronomeButton { "Metro" };
     juce::Slider bpmSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
     juce::ComboBox patternBox;

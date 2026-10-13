@@ -3,11 +3,12 @@
 namespace lynx
 {
 ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l,
-                                            MeterBank& m)
+                                            LiveEventQueue& midi, MeterBank& m)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       transport (t),
       exchange (x),
       live (l),
+      midiLive (midi),
       meters (m)
 {
 }
@@ -27,11 +28,11 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     if (buffer.getNumChannels() >= 2)
     {
-        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1), &live, &meters);
+        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1), &live, &meters, &midiLive);
     }
     else if (numSamples <= scratch.getNumSamples())
     {
-        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1), &live, &meters);
+        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1), &live, &meters, &midiLive);
 
         if (buffer.getNumChannels() == 1)
         {

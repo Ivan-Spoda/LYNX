@@ -15,7 +15,7 @@ class ChannelRackProcessor final : public juce::AudioProcessor
 {
 public:
     ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange, LiveEventQueue& live,
-                          MeterBank& meters);
+                          LiveEventQueue& midiLive, MeterBank& meters);
 
     const juce::String getName() const override { return "Channel Rack"; }
 
@@ -43,6 +43,7 @@ private:
     const Transport& transport;
     SnapshotExchange<RackState>& exchange;
     LiveEventQueue& live;
+    LiveEventQueue& midiLive;
     MeterBank& meters;
     RackRenderer renderer;
     juce::AudioBuffer<float> scratch; // para saída mono

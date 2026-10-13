@@ -6,6 +6,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "core/LiveEventQueue.h"
+#include "core/Recorder.h"
 #include "core/RackRenderer.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
@@ -22,6 +23,7 @@ namespace lynx
 // O Song só é tocado pela thread da UI; cada edição publica um snapshot
 // imutável (RackState) para a thread de áudio.
 class AudioEngine final : private juce::AudioIODeviceCallback,
+                          private juce::MidiInputCallback,
                           public juce::ChangeBroadcaster,
                           private juce::Timer
 {
@@ -48,7 +50,15 @@ public:
     void seek (double ticks) noexcept;
 
     // Nota tocada ao vivo (teclado do PC, preview). Thread da UI.
-    void sendLiveNote (int channel, int key, float velocity, bool on);
+    // `record` = entra na gravação se ela estiver ligada (o preview do Piano Roll não entra).
+    void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
+
+    // Gravação de notas (MIDI e teclado do PC) na pattern atual enquanto toca. Thread da UI.
+    void setRecording (bool shouldRecord);
+    bool isRecording() const noexcept { return transport.recording.load(); }
+
+    // Entradas MIDI: todas as disponíveis ficam ligadas e tocam o canal selecionado.
+    juce::StringArray getActiveMidiInputs() const;
 
     // Documento (thread da UI)
     const Song& getSong() const noexcept { return song; }
@@ -91,6 +101,10 @@ private:
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
     void timerCallback() override;
+    void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
+    void enableAllMidiInputs();
+    void updateRecording();
+    double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
     void publishSong();
@@ -100,7 +114,16 @@ private:
     juce::AudioProcessorPlayer player;
     Transport transport;
     SampleLibrary samples;
-    LiveEventQueue liveEvents;
+    LiveEventQueue liveEvents;   // UI -> áudio
+    LiveEventQueue midiEvents;   // thread MIDI -> áudio
+    SpscQueue<RecordedEvent, 1024> midiRecordQueue; // thread MIDI -> UI (gravação)
+    std::vector<RecordedEvent> uiRecorded;           // teclado do PC -> gravação
+    NoteRecorder recorder;
+    bool takeHasUndoStep = false;
+    double lastPlayingTick = 0.0;
+    std::atomic<int> liveChannel { 0 };              // canal selecionado, lido pela thread MIDI
+    std::atomic<double> blockTimeMs { 0.0 };         // quando positionTicks foi atualizado por último
+    juce::MidiDeviceListConnection midiDevicesChanged;
     MeterBank meters;
     PluginHost plugins;
 

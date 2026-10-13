@@ -19,6 +19,7 @@
 #include "core/SoftClip.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
+#include "core/Recorder.h"
 #include "flp/Flp.h"
 
 namespace
@@ -1202,6 +1203,31 @@ TEST (note_edit_selection_operations)
     const auto before = q.notes.size();
     ne::remove (q, { 1, 0, 1 });
     CHECK (q.notes.size() == before - 2);
+}
+
+TEST (recorder_builds_notes_in_pattern_and_song_mode)
+{
+    auto song = lynx::Song::makeDefault();
+    const auto loop = song.patterns[0].effectiveLength (4); // 1 compasso = 3840
+    lynx::NoteRecorder r;
+    r.add (song, { 100.0, 4, 60, 0.5f, true }); // sem tomada: ignorado
+    CHECK (r.takeFinished().empty());
+
+    r.begin (loop);
+    r.add (song, { 4000.0, 4, 60, 0.5f, true });   // segunda volta do loop
+    r.add (song, { 4480.0, 4, 60, 0.0f, false });
+    r.add (song, { 5000.0, 4, 64, 0.9f, true });   // presa até parar
+    r.end (song, 5240.0);
+    const auto notes = r.takeFinished();
+    CHECK (notes.size() == 2);
+    CHECK (notes[0].start == 4000 - 3840 && notes[0].length == 480 && notes[0].velocity == 0.5f && notes[0].channel == 4);
+    CHECK (notes[1].key == 64 && notes[1].start == 5000 - 3840 && notes[1].length == 240);
+
+    // modo song: posição dentro do clip da pattern atual (com offset)
+    song.mode = lynx::PlayMode::song;
+    song.playlist = { { 0, 0, 7680, 3840, 960 } };
+    CHECK (lynx::patternPositionForTick (song, 7680.0 + 100.0, loop) == 1060);
+    CHECK (lynx::patternPositionForTick (song, 100.0, loop) == 100); // fora do clip: como loop
 }
 
 int main (int argc, char** argv)

@@ -13,6 +13,7 @@ struct Transport
 {
     std::atomic<bool> playing { false };
     std::atomic<bool> metronome { false };
+    std::atomic<bool> recording { false };
     std::atomic<double> bpm { 130.0 };
     std::atomic<int> beatsPerBar { 4 };
     std::atomic<double> sampleRate { 44100.0 };

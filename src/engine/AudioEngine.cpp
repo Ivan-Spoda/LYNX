@@ -53,14 +53,20 @@ AudioEngine::AudioEngine (bool openAudioDevice)
         // 0 entradas, 2 saídas, sem estado salvo ainda, usa o dispositivo padrão.
         deviceManager.initialise (0, 2, nullptr, true);
         deviceManager.addAudioCallback (this);
+
+        enableAllMidiInputs();
+        deviceManager.addMidiInputDeviceCallback ({}, this); // {} = todas as entradas ligadas
+        midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
     }
 
-    startTimerHz (10); // coleta de snapshots aposentados
+    startTimerHz (30); // gravação e coleta de snapshots aposentados
 }
 
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+    midiDevicesChanged = {};
+    deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     player.setProcessor (nullptr);
     graph.clear(); // os nós referenciam rackExchange e transport
@@ -73,7 +79,7 @@ void AudioEngine::buildInitialGraph()
     graph.setPlayConfigDetails (0, 2, transport.sampleRate.load(), 512);
 
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
-    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, meters));
+    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters));
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
 
     for (int channel = 0; channel < 2; ++channel)
@@ -147,7 +153,7 @@ void AudioEngine::stop() noexcept { transport.playing.store (false); }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
 void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
 
-void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on)
+void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
     NoteEvent e;
     e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
@@ -155,6 +161,121 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on)
     e.key = key;
     e.velocity = velocity;
     liveEvents.push (e);
+
+    if (record && transport.recording.load() && transport.playing.load())
+        uiRecorded.push_back ({ estimatedPositionNow(), channel, key, velocity, on });
+}
+
+double AudioEngine::estimatedPositionNow() const noexcept
+{
+    // a posição só anda de bloco em bloco; interpola pelo tempo desde o último bloco
+    auto tick = transport.positionTicks.load (std::memory_order_relaxed);
+
+    if (transport.playing.load (std::memory_order_relaxed))
+    {
+        const auto elapsedMs = juce::jlimit (0.0, 100.0, juce::Time::getMillisecondCounterHiRes() - blockTimeMs.load());
+        tick += elapsedMs * 0.001 * transport.sampleRate.load() * transport.ticksPerSample();
+    }
+
+    return tick;
+}
+
+void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
+{
+    // thread MIDI: só filas e atomics
+    if (! m.isNoteOnOrOff())
+        return;
+
+    const auto on = m.isNoteOn();
+    NoteEvent e;
+    e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
+    e.channel = liveChannel.load();
+    e.key = m.getNoteNumber();
+    e.velocity = on ? m.getFloatVelocity() : 0.0f;
+    midiEvents.push (e);
+
+    if (transport.recording.load() && transport.playing.load())
+        midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, on });
+}
+
+void AudioEngine::enableAllMidiInputs()
+{
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        if (! deviceManager.isMidiInputDeviceEnabled (device.identifier))
+            deviceManager.setMidiInputDeviceEnabled (device.identifier, true);
+}
+
+juce::StringArray AudioEngine::getActiveMidiInputs() const
+{
+    juce::StringArray names;
+
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        if (deviceManager.isMidiInputDeviceEnabled (device.identifier))
+            names.add (device.name);
+
+    return names;
+}
+
+void AudioEngine::setRecording (bool shouldRecord)
+{
+    transport.recording.store (shouldRecord);
+    updateRecording();
+    sendChangeMessage();
+}
+
+void AudioEngine::updateRecording()
+{
+    const auto playing = transport.playing.load();
+    const auto active = transport.recording.load() && playing;
+
+    if (playing)
+        lastPlayingTick = estimatedPositionNow();
+
+    // a tomada começa ao tocar com a gravação ligada, ou no primeiro evento gravado
+    // (que só é enfileirado nessa situação, mesmo que este timer ainda não tenha visto)
+    auto beginTake = [this] {
+        if (recorder.isActive())
+            return;
+
+        const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
+        recorder.begin (pattern.effectiveLength (song.beatsPerBar));
+        takeHasUndoStep = false;
+    };
+
+    if (active)
+        beginTake();
+
+    RecordedEvent e;
+
+    while (midiRecordQueue.pop (e))
+    {
+        beginTake();
+        recorder.add (song, e);
+    }
+
+    for (const auto& ui : uiRecorded)
+    {
+        beginTake();
+        recorder.add (song, ui);
+    }
+
+    uiRecorded.clear();
+
+    if (! active && recorder.isActive())
+        recorder.end (song, lastPlayingTick);
+
+    auto notes = recorder.takeFinished();
+
+    if (notes.empty())
+        return;
+
+    // a tomada inteira é um passo só no desfazer
+    editSong ([&notes] (Song& s) {
+        auto& p = s.patterns[(std::size_t) s.currentPattern];
+        p.notes.insert (p.notes.end(), notes.begin(), notes.end());
+        p.sortNotes();
+    }, ! takeHasUndoStep);
+    takeHasUndoStep = true;
 }
 
 void AudioEngine::setSong (Song newSong)
@@ -226,6 +347,8 @@ void AudioEngine::setSelectedChannel (int channel)
 {
     channel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), channel);
 
+    liveChannel.store (channel);
+
     if (channel != selectedChannel)
     {
         selectedChannel = channel;
@@ -267,6 +390,7 @@ void AudioEngine::publishSong()
 {
     song.currentPattern = juce::jlimit (0, juce::jmax (0, (int) song.patterns.size() - 1), song.currentPattern);
     selectedChannel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), selectedChannel);
+    liveChannel.store (selectedChannel);
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
 
@@ -290,6 +414,7 @@ void AudioEngine::publishSong()
 
 void AudioEngine::timerCallback()
 {
+    updateRecording();
     rackExchange.collectGarbage();
 
     // Plugins são preparados numa taxa fixa; se o dispositivo mudou de taxa, recria.
@@ -356,6 +481,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         transport.positionTicks.store (transport.positionTicks.load (std::memory_order_relaxed)
                                            + numSamples * transport.ticksPerSample(),
                                        std::memory_order_relaxed);
+
+    blockTimeMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)

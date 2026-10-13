@@ -70,7 +70,8 @@ public:
                   float* left,
                   float* right,
                   LiveEventQueue* live = nullptr,
-                  MeterBank* meters = nullptr) noexcept;
+                  MeterBank* meters = nullptr,
+                  LiveEventQueue* moreLive = nullptr) noexcept;
 
     // Eventos do último bloco (para testes e diagnóstico).
     const EventBuffer& lastEvents() const noexcept { return events; }
