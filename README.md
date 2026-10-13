@@ -8,6 +8,11 @@
 Channel Rack, Piano Roll, Playlist e Mixer em C++20 + JUCE 8, feita para rodar bem em qualquer PC.</p>
 
 <p align="center">
+  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Baixar%20para%20Windows-0.1.0%20alfa-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Baixar o LYNX para Windows"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><strong>Download</strong></a> ·
   <a href="#recursos"><strong>Recursos</strong></a> ·
   <a href="#abre-projetos-do-fl-studio">Projetos do FL</a> ·
   <a href="#compilar">Compilar</a> ·
@@ -194,6 +199,12 @@ LYNX.exe --dispositivos rel.txt                lista drivers e saídas de áudio
 | Ctrl+R | Exportar áudio |
 | `Z`..`M`, `Q`..`P` | Tocar o canal selecionado |
 | Piano Roll / Playlist | Ctrl+A/C/X/V, Ctrl+B duplicar, Delete; no Piano Roll também Ctrl+Q e as setas |
+
+## Baixar
+
+Baixe o `.zip` da [última versão](https://github.com/Ka1-S/LYNX/releases/latest), extraia e abra o `LYNX.exe`
+(Windows 10/11, 64 bits; não precisa instalar). O zip traz um projeto de demonstração (`Demo.lynx`). O executável
+ainda não é assinado: na primeira execução o SmartScreen pode avisar (*Mais informações* → *Executar assim mesmo*).
 
 ## Compilar
 
