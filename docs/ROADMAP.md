@@ -30,7 +30,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Importar a playlist do `.flp` (clips de pattern, com recorte de início/fim)
 - [x] Clips de áudio na playlist (forma de onda, arrastar arquivo, recorte, retomada no meio após seek)
 - [x] Importar clips de áudio do `.flp` (offsets em tempos ou em ms, detectado por clip)
-- [ ] Streaming do disco para áudios longos (hoje o arquivo inteiro vai para a memória)
+- [x] Streaming do disco para áudios longos (cache mapeado em memória + prefetch)
 - [ ] Time-stretch/resample de clips de áudio
 - [x] Loop region, seleção múltipla, copiar/colar/duplicar clips, clips "únicos"
 - [x] Vários arrangements (seletor na Playlist; importados do `.flp`)
@@ -45,14 +45,25 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Efeitos internos: EQ de 3 bandas, compressor, delay sincronizado (ping-pong), reverb
 - [x] Hosting de VST3: instrumentos nos canais e efeitos nos slots, janela do plugin, estado salvo no projeto
 - [x] Busca de plugins com janela de progresso, lista salva em %APPDATA%\LYNX, "dead man's pedal"
-- [ ] Busca em processo separado (hoje um plugin que trave na busca derruba o LYNX; ele é pulado na próxima)
-- [ ] CLAP
+- [x] Busca em processo separado, com lista negra
+- [x] CLAP (formato próprio sobre o JUCE: parâmetros, estado, latência, interface)
 - [x] Compensação de latência (PDC) por aresta, como o FL; export descarta a latência do início
 - [x] Processamento multi-thread: canais em paralelo e mixer por camadas (sem locks)
 - [ ] Plugins em processo separado (sandbox), estilo ilbridge
+
+## Extras já feitos
+- [x] Swing, ajustes do sampler, trilhas da Playlist com nome/mute, dividir clip
+- [x] Importar/exportar MIDI, gravação de áudio da entrada
+- [x] Dry/wet por slot e smart disable
+
+## Ainda por fazer (além da fase 5)
+- [ ] Automação de tempo e mudanças de compasso
+- [ ] Propriedades de nota (pan, fine pitch, slide/porta) e importá-las do `.flp`
+- [ ] Time-stretch/resample de clips de áudio
+- [ ] Freeze/bounce de trilhas
 
 ## Fase 5: escalar
 - [ ] Freeze/bounce de trilhas
 - [ ] Render/export para WAV/MP3/FLAC
 - [ ] ASIO (precisa do SDK da Steinberg) e WASAPI exclusivo
-- [ ] UI na GPU para projetos enormes
+- [x] UI na GPU: o JUCE 8 já desenha com Direct2D no Windows

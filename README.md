@@ -8,18 +8,25 @@ qualquer PC, independente do tamanho do projeto.
 
 ## O que já funciona
 
-- **Channel Rack** com step sequencer, pan/volume/mute por canal, várias patterns
-- **Piano Roll**: criar, mover, redimensionar e apagar notas, snap, zoom, preview e ghost notes
-- **Playlist** com clips de pattern e de áudio, modo PAT/SONG
-- **Mixer** com inserts, medidores, mute/solo e 10 slots de efeito (EQ, compressor, delay, reverb)
-- **Plugins VST3**: instrumentos e efeitos, com a interface própria de cada plugin
-- **Desfazer/refazer** em todas as edições
-- **Instrumentos**: sampler (`.wav`, `.flac`, `.ogg`, `.mp3`, `.aiff`) e bateria/synth sintetizados
-- **Teclado do PC como piano** (layout do FL: `Z`..`M` e `Q`..`P`)
-- **Projetos**: formato próprio `.lynx` (JSON) e importação de `.flp` do FL Studio com os samples
-  reais da instalação do FL
-- **Exportar para WAV** pela linha de comando
-- Motor de áudio sem locks: notas no sample exato, a interface nunca trava o áudio
+- **Channel Rack** com step sequencer, pan/volume/mute/solo por canal, swing, várias patterns
+  (renomear, cor, comprimento, clonar), ajustes do sampler (afinação, envelope, ao contrário, cut)
+- **Piano Roll**: notas com snap configurável, seleção múltipla, mover/redimensionar em grupo,
+  copiar/colar/duplicar, quantizar, faixa de velocity, importar/exportar `.mid`
+- **Playlist**: clips de pattern, áudio e automação; vários arrangements; região de loop;
+  seleção múltipla, copiar/colar/duplicar, dividir, "tornar única"; trilhas com nome e mute
+- **Automação**: qualquer knob/fader (canal, mixer, efeitos, parâmetros de plugins) vira um clip
+  com editor de pontos e curvas
+- **Mixer**: até 127 inserts, envios entre inserts com nível, solo pelo caminho do sinal, curva do
+  fader do FL, 10 slots de efeito com dry/wet (EQ, compressor, delay, reverb, plugins)
+- **Plugins VST3 e CLAP**: instrumentos e efeitos com a interface própria; busca em processo
+  separado (um plugin que trave não derruba o LYNX); PDC; "smart disable"
+- **Gravação**: notas (teclado do PC e MIDI) e áudio da entrada da placa
+- **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
+- **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
+  patterns, arrangements, mixer com roteamento, automação) e `.mid`
+- **Desempenho**: motor sem locks, canais e mixer em várias threads, áudios longos lidos do disco
+  sob demanda
+- **Desfazer/refazer** em todas as edições; **teclado do PC como piano** (layout do FL)
 
 ## Atalhos
 
@@ -30,16 +37,20 @@ qualquer PC, independente do tamanho do projeto.
 | L | Alterna Pattern / Song |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer |
 | Ctrl+N / Ctrl+O / Ctrl+S | Novo / Abrir / Salvar (Ctrl+Shift+S: salvar como) |
+| Ctrl+R | Exportar áudio |
 | `Z`..`M`, `Q`..`P` | Tocar o canal selecionado |
+| Piano Roll / Playlist | Ctrl+A/C/X/V, Ctrl+B duplicar, Delete, Esc; no Piano Roll também Ctrl+Q e setas |
 
 ## Linha de comando
 
 ```
-LYNX.exe projeto.lynx                         abre um projeto (.lynx ou .flp)
-LYNX.exe --render projeto.flp saida.wav 20    exporta 20 s para WAV 24 bits
-LYNX.exe --selftest relatorio.txt             autoteste sem placa de som
-LYNX.exe --snapshot prefixo projeto.flp       desenha a interface em PNG
-LYNX.exe --plugintest plugin.vst3 rel.txt     testa um plugin VST3
+LYNX.exe projeto.lynx                          abre um projeto (.lynx, .flp ou .mid)
+LYNX.exe --export projeto.flp saida.flac       exporta a música (wav/flac/ogg) como o botão Exportar
+LYNX.exe --render projeto.flp saida.wav 20     exporta 20 s da pattern atual para WAV 24 bits
+LYNX.exe --selftest relatorio.txt [demo.lynx]  autoteste sem placa de som
+LYNX.exe --snapshot prefixo projeto.flp        desenha a interface (e as janelas) em PNG
+LYNX.exe --plugintest plugin.vst3 rel.txt      testa um plugin VST3 ou CLAP
+LYNX.exe --scantest pasta rel.txt              busca plugins numa pasta (processos separados)
 ```
 
 ## Compilar
@@ -77,7 +88,8 @@ Também gera `build-local/flpdump` (mostra o conteúdo de um `.flp`) e `build-lo
 src/core/     modelo, sequenciador, instrumentos, leitor de .flp (C++ puro, testável sem JUCE)
 src/flp/      leitor do formato .flp
 src/engine/   motor de áudio (JUCE): dispositivo, grafo, samples, arquivo de projeto
-src/ui/       interface: Channel Rack, Piano Roll, janela principal
+src/ui/       interface: Channel Rack, Piano Roll, Playlist, Mixer, janelas
+third_party/  headers do CLAP (MIT)
 tests/        testes do núcleo
 tools/        flpdump, renderwav
 docs/         arquitetura, estado, roadmap e a análise comportamental do FL Studio

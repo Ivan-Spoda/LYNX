@@ -20,6 +20,15 @@ Atualizado em 2026-10-13.
   caminho do sinal, curva do fader do FL, rampas de ganho. Roteamento/volumes/mute/solo importados do `.flp`.
 - **PDC** por aresta (modelo do FL, ver `docs/analise/REA_rodada2.md`); o export descarta a latência inicial.
 - **Multi-thread**: canais em paralelo e mixer por camadas; export ~2x mais rápido nos demos.
+- **CLAP**: formato próprio sobre o JUCE; Surge XT e Surge XT Effects (CLAP) tocam, salvam estado e
+  passam áudio (`--plugintest`). A busca de plugins roda em processo separado (`--scan-one`).
+- **Streaming do disco**: áudios acima de 30 s vão para um cache em `%TEMP%\LYNX-cache` mapeado
+  em memória, com prefetch à frente da reprodução (testado com um WAV de 60 s).
+- **Mixer**: dry/wet por slot (knob na linha do slot), smart disable de plugins (4 s de silêncio).
+- **Swing** (knob na barra), **ajustes do sampler** (menu do canal), **trilhas da Playlist** com nome e
+  mute (LED; nomes importados do `.flp`), **dividir clip**, **MIDI** (abrir `.mid`; botão MIDI no
+  Piano Roll), **dither** no WAV 16 bits.
+- **Gravação de áudio** da entrada (menu "v" ao lado do Rec): o take vira clip na Playlist.
 
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
@@ -60,6 +69,9 @@ Confirmadas empiricamente nos demos:
   (= instalação\Data) e `%FLStudioUserData%` (= Documentos\Image-Line\FL Studio).
 
 ## Ainda não verificado por um humano
+- Gravação de áudio da entrada (depende de microfone/placa; o código foi revisado, não testado).
+- Interface do plugin CLAP na janela (o hosting de áudio foi testado; a janela não, para não abrir
+  nada na tela do usuário).
 - Ouvir o app tocando (o autoteste prova que o grafo gera áudio; falta confirmar na placa do usuário).
 - Interações de mouse/teclado (arrastar notas, knobs, teclado do PC): conferidas só por leitura do código.
 
@@ -70,5 +82,5 @@ Confirmadas empiricamente nos demos:
   instâncias. Latência de plugin (PDC) ainda não é compensada.
 
 ## Próximo passo
-Streaming do disco para áudios longos, freeze/bounce, busca de plugins em processo separado, dry/wet por
-slot e smart disable, time-stretch de clips de áudio.
+Automação de tempo, propriedades de nota (pan/pitch/slide) com importação do `.flp`, freeze/bounce,
+time-stretch de clips de áudio, ASIO.
