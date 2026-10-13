@@ -391,7 +391,7 @@ TEST (flp_real_files)
         ++embeddedSaved;
         return wav.size() > 44 ? std::string ("embutido.wav") : std::string();
     };
-    int slicedChannels = 0;
+    int slicedChannels = 0, flKeysChannels = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -418,6 +418,7 @@ TEST (flp_real_files)
                     hasFpc = hasFpc || c.pluginName == "FPC";
                 for (const auto& c : full.channels)
                 {
+                    flKeysChannels += c.zones.size() == 30 && c.zones.front().path.find ("CHANGPIANO") != std::string::npos ? 1 : 0;
                     if (c.sampler.slices.size() >= 4)
                     {
                         ++slicedChannels;
@@ -606,6 +607,8 @@ TEST (flp_real_files)
     CHECK (dwZones > 1000 && padChannels > 250 && padNotes > 500);
     std::printf ("  canais fatiados (Slicer/Slicex): %d; WAVs embutidos gravados: %d\n", slicedChannels, embeddedSaved);
     CHECK (slicedChannels >= 25 && embeddedSaved >= 10); // sem decodificar Ogg aqui, parte dos loops fica sem duração
+    std::printf ("  FL Keys (Grand Piano, 30 zonas): %d canais\n", flKeysChannels);
+    CHECK (flKeysChannels >= 8);
     CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20 && reverbsLowCut > 250);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);

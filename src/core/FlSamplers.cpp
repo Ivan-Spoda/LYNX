@@ -1,9 +1,11 @@
 #include "core/FlSamplers.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <string>
 
 namespace lynx
@@ -400,5 +402,127 @@ std::vector<std::int64_t> wavCuePoints (const std::vector<std::uint8_t>& w, std:
     std::sort (cues.begin(), cues.end());
     cues.erase (std::unique (cues.begin(), cues.end()), cues.end());
     return cues;
+}
+std::optional<std::string> flKeysSet (const std::vector<std::uint8_t>& d)
+{
+    Stream in { d };
+
+    if (in.read<std::uint32_t>() != 1)
+        return std::nullopt;
+
+    auto name = in.str8();
+    name.erase (std::find (name.begin(), name.end(), '\0'), name.end());
+
+    if (! in.ok || name.empty() || name.find_first_of ("\\/:") != std::string::npos)
+        return std::nullopt;
+
+    return name;
+}
+
+std::vector<std::uint8_t> makeWav16Mono (const std::int16_t* samples, std::size_t count, int sampleRate)
+{
+    std::vector<std::uint8_t> wav;
+    auto u32 = [&] (std::uint32_t v) { for (int i = 0; i < 4; ++i) wav.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto u16 = [&] (std::uint16_t v) { wav.push_back ((std::uint8_t) v); wav.push_back ((std::uint8_t) (v >> 8)); };
+    auto tag = [&] (const char* t) { wav.insert (wav.end(), t, t + 4); };
+    const auto bytes = (std::uint32_t) (count * 2);
+    tag ("RIFF"); u32 (36 + bytes); tag ("WAVE");
+    tag ("fmt "); u32 (16); u16 (1); u16 (1); u32 ((std::uint32_t) sampleRate); u32 ((std::uint32_t) sampleRate * 2); u16 (2); u16 (16);
+    tag ("data"); u32 (bytes);
+    const auto* raw = reinterpret_cast<const std::uint8_t*> (samples);
+    wav.insert (wav.end(), raw, raw + bytes);
+    return wav;
+}
+
+std::vector<SampleZone> flKeysZones (const std::string& wti, const std::string& folder, const std::vector<std::uint8_t>& rawData,
+                                     const std::function<std::string (const std::vector<std::uint8_t>&, const std::string&)>& saveWav)
+{
+    // INI simples: [seção] e chave=valor
+    std::map<std::string, std::map<std::string, std::string>> ini;
+    std::string section;
+    std::size_t start = 0;
+
+    while (start < wti.size())
+    {
+        auto end = wti.find ('\n', start);
+        if (end == std::string::npos)
+            end = wti.size();
+        auto line = wti.substr (start, end - start);
+        start = end + 1;
+        line.erase (std::remove (line.begin(), line.end(), '\r'), line.end());
+
+        if (line.size() >= 2 && line.front() == '[' && line.back() == ']')
+        {
+            section = line.substr (1, line.size() - 2);
+            std::transform (section.begin(), section.end(), section.begin(), [] (unsigned char ch) { return (char) std::tolower (ch); });
+        }
+        else if (const auto eq = line.find ('='); eq != std::string::npos)
+            ini[section][line.substr (0, eq)] = line.substr (eq + 1);
+    }
+
+    auto value = [&] (const std::string& sec, const std::string& key, int fallback) {
+        const auto s = ini.find (sec);
+        if (s == ini.end())
+            return fallback;
+        const auto k = s->second.find (key);
+        if (k == s->second.end() || k->second.empty())
+            return fallback;
+        try { return std::stoi (k->second); } catch (...) { return fallback; }
+    };
+    auto text = [&] (const std::string& sec, const std::string& key) {
+        const auto s = ini.find (sec);
+        if (s == ini.end())
+            return std::string();
+        const auto k = s->second.find (key);
+        return k == s->second.end() ? std::string() : k->second;
+    };
+
+    const auto count = std::clamp (value ("info", "samples", 0), 0, 512);
+    const auto raw = text ("info", "filetype") == "raw";
+    const auto rate = std::clamp (value ("info", "samplerate", 44100), 8000, 192000);
+    const auto subfolder = text ("info", "path");
+    const auto layers = std::clamp (value ("velocitylayers", "count", 1), 1, 16);
+    std::vector<int> thresholds;
+    for (int l = 0; l < layers; ++l)
+        thresholds.push_back (std::clamp (value ("velocitylayers", std::to_string (l), 0), 0, 127));
+
+    std::vector<SampleZone> zones;
+    std::string lastName;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto sec = "sample" + std::to_string (i);
+        SampleZone zone;
+        zone.rootKey = zone.lowKey = std::clamp (value (sec, "root", 60), 0, 127); // a raiz é também o começo da faixa
+        zone.highKey = std::clamp (value (sec, "high", 127), zone.lowKey, 127);
+        const auto layer = i % layers;
+        zone.lowVelocity = thresholds[(std::size_t) layer];
+        zone.highVelocity = layer + 1 < layers ? std::max (zone.lowVelocity, thresholds[(std::size_t) layer + 1] - 1) : 127;
+
+        if (raw)
+        {
+            const auto from = (std::size_t) std::max (0, value (sec, "pos", 0));
+            const auto to = (std::size_t) std::max (0, value (sec, "end", 0));
+
+            if (to <= from || to * 2 > rawData.size() || ! saveWav)
+                continue;
+
+            const auto wav = makeWav16Mono (reinterpret_cast<const std::int16_t*> (rawData.data()) + from, to - from, rate);
+            zone.path = saveWav (wav, "FL Keys " + std::to_string (i));
+        }
+        else
+        {
+            if (const auto name = text (sec, "name"); ! name.empty())
+                lastName = name;
+            if (lastName.empty())
+                continue;
+            zone.path = folder + "\\" + (subfolder.empty() ? std::string() : subfolder + "\\") + lastName;
+        }
+
+        if (! zone.path.empty())
+            zones.push_back (std::move (zone));
+    }
+
+    return zones;
 }
 } // namespace lynx

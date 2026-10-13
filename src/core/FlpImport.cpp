@@ -582,6 +582,35 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             }
         }
 
+        // FL Keys: os samples do conjunto (.wti) que vem com o FL
+        if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())
+            if (const auto set = flKeysSet (c.pluginState))
+            {
+                const auto folder = options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables";
+                const auto wtiBytes = options.readFile (folder + "\\" + *set + ".wti");
+                const std::string wti (wtiBytes.begin(), wtiBytes.end());
+                std::vector<std::uint8_t> rawData;
+
+                if (wti.find ("filetype=raw") != std::string::npos)
+                    if (const auto file = wti.find ("samplefile="); file != std::string::npos)
+                    {
+                        auto name = wti.substr (file + 11, wti.find_first_of ("\r\n", file) - file - 11);
+                        rawData = options.readFile (folder + "\\" + name);
+                    }
+
+                std::vector<SampleZone> zones;
+                for (auto z : flKeysZones (wti, folder, rawData, options.saveEmbedded))
+                    if (z.path = existing (z.path); ! z.path.empty())
+                        zones.push_back (std::move (z));
+
+                if (! zones.empty())
+                {
+                    def.instrument = InstrumentKind::sampler;
+                    def.zones = std::move (zones);
+                    def.sampler.release = 0.4f; // o piano solta a nota com um release curto
+                }
+            }
+
         if (c.pluginName == "FPC")
             if (auto pads = fpcPads (c.pluginState))
             {

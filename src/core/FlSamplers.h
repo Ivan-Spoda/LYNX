@@ -4,6 +4,7 @@
 // (multi-sample). Formatos em docs/analise/REA_rodada9.md (clean-room).
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -35,6 +36,17 @@ struct SlicedSample
 };
 std::optional<SlicedSample> fruitySlicer (const std::vector<std::uint8_t>& state);
 std::optional<SlicedSample> slicex (const std::vector<std::uint8_t>& state);
+
+// FL Keys: o nome do conjunto de samples (o .wti em Plugins\Fruity\Generators\FL Keys\Wavtables).
+std::optional<std::string> flKeysSet (const std::vector<std::uint8_t>& state);
+
+// Zonas de um .wti (INI) do FL Keys. `folder` é a pasta do .wti; amostras "raw" (um .dat só) são
+// recortadas de `rawData` e entregues a `saveWav` (que devolve o caminho do WAV gravado).
+std::vector<SampleZone> flKeysZones (const std::string& wti, const std::string& folder, const std::vector<std::uint8_t>& rawData,
+                                     const std::function<std::string (const std::vector<std::uint8_t>&, const std::string&)>& saveWav);
+
+// WAV PCM 16 bits mono com estas amostras (para os samples "raw").
+std::vector<std::uint8_t> makeWav16Mono (const std::int16_t* samples, std::size_t count, int sampleRate);
 
 // Pontos "cue" (quadros) de um WAV, em ordem; `frames` recebe a duração quando o áudio é PCM/float.
 std::vector<std::int64_t> wavCuePoints (const std::vector<std::uint8_t>& wav, std::int64_t& frames);
