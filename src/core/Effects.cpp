@@ -57,6 +57,9 @@ constexpr std::array<const char*, 8> delayNames { "1/16", "1/8", "1/8 pont.", "1
 
 int delayIndex (float v) { return std::clamp ((int) (v * (float) delayDivisions.size()), 0, (int) delayDivisions.size() - 1); }
 
+float reverbLowCutHz (float v) { return logRange (v, 20.0f, 3000.0f); }    // 0 = desligado
+float reverbHighCutHz (float v) { return logRange (v, 500.0f, 22000.0f); } // 1 = desligado
+
 float limiterCeilingDb (float v) { return -12.0f + v * 12.0f; }
 float limiterGainDb (float v) { return v * 24.0f; }
 float limiterReleaseMs (float v) { return logRange (v, 10.0f, 1000.0f); }
@@ -253,10 +256,16 @@ public:
             for (std::size_t i = 0; i < allpassTunings.size(); ++i)
                 allpasses[ch][i].buffer.assign ((std::size_t) ((allpassTunings[i] + stereoSpread) * scale) + 2, 0.0f);
         }
+
+        predelayBuffer.assign ((std::size_t) (maxPredelaySeconds * maxSampleRate) + 4, 0.0f);
     }
+
+    static constexpr double maxPredelaySeconds = 1.0;
 
     void prepare (double sr) noexcept override
     {
+        sampleRate = sr;
+        lastLowCut = lastHighCut = -1.0f;
         const auto scale = sr / 44100.0;
 
         for (int ch = 0; ch < 2; ++ch)
@@ -289,6 +298,11 @@ public:
                 std::fill (a.buffer.begin(), a.buffer.end(), 0.0f);
                 a.index = 0;
             }
+
+        std::fill (predelayBuffer.begin(), predelayBuffer.end(), 0.0f);
+        predelayWrite = 0;
+        lowCut.reset();
+        highCut.reset();
     }
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
@@ -302,6 +316,21 @@ public:
         const auto wet2 = (1.0f - width) / 2.0f;
         constexpr float inputGain = 0.015f;
 
+        // na entrada do molhado: corte de graves/agudos (nas pontas = desligado) e predelay
+        const auto lowCutHz = params[5], highCutHz = params[6];
+        const auto useLowCut = lowCutHz > 0.001f, useHighCut = highCutHz < 0.999f;
+
+        if (lowCutHz != lastLowCut || highCutHz != lastHighCut)
+        {
+            lastLowCut = lowCutHz;
+            lastHighCut = highCutHz;
+            lowCut.filter (sampleRate, 1, reverbLowCutHz (lowCutHz), 0.7071);
+            highCut.filter (sampleRate, 0, reverbHighCutHz (highCutHz), 0.7071);
+        }
+
+        const auto predelay = std::min ((int) (params[7] * maxPredelaySeconds * sampleRate), (int) predelayBuffer.size() - 1);
+        const auto predelayLength = (int) predelayBuffer.size();
+
         // filtro a filtro sobre um trecho (cada comb/allpass inteiro no cache), na mesma ordem
         // de soma do processamento amostra a amostra
         constexpr int span = 256;
@@ -314,7 +343,28 @@ public:
             auto* br = r + start;
 
             for (int i = 0; i < m; ++i)
-                input[i] = (bl[i] + br[i]) * inputGain;
+            {
+                auto x = (bl[i] + br[i]) * inputGain;
+
+                if (useLowCut)
+                    x = lowCut.process (x, 0);
+                if (useHighCut)
+                    x = highCut.process (x, 0);
+
+                if (predelay > 0)
+                {
+                    predelayBuffer[(std::size_t) predelayWrite] = x;
+                    auto read = predelayWrite - predelay;
+                    if (read < 0)
+                        read += predelayLength;
+                    x = predelayBuffer[(std::size_t) read];
+
+                    if (++predelayWrite == predelayLength)
+                        predelayWrite = 0;
+                }
+
+                input[i] = x;
+            }
 
             for (int ch = 0; ch < 2; ++ch)
             {
@@ -411,6 +461,11 @@ private:
 
     std::array<std::array<Comb, 8>, 2> combs;
     std::array<std::array<Allpass, 4>, 2> allpasses;
+    double sampleRate = 44100.0;
+    Biquad lowCut, highCut;
+    float lastLowCut = -1.0f, lastHighCut = -1.0f;
+    std::vector<float> predelayBuffer;
+    int predelayWrite = 0;
 };
 // ---------------------------------------------------------------------------
 // Limiter com lookahead: o ganho já começa a cair antes do pico chegar (atraso de 1,5 ms,
@@ -851,7 +906,8 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo eq { "EQ", { { "Graves", 0.5f }, { "Médios", 0.5f }, { "Freq. médios", 0.5f }, { "Agudos", 0.5f }, { "Saída", 0.5f } } };
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Tempo", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Abafar", 0.3f } } };
-    static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f }, { "Seco", 1.0f } } };
+    static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f }, { "Seco", 1.0f },
+                                                 { "Corta graves", 0.0f }, { "Corta agudos", 1.0f }, { "Predelay", 0.0f } } };
     static const EffectInfo plugin { "Plugin", {} };
     static const EffectInfo limiter { "Limiter", { { "Teto", 0.975f }, { "Ganho", 0.0f }, { "Release", 0.5f } } };
     static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
@@ -941,7 +997,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
 
         case EffectKind::reverb:
-            std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            if (param == 5)
+                return v <= 0.001f ? std::string ("desligado") : (std::snprintf (text, sizeof (text), "%.0f Hz", reverbLowCutHz (v)), std::string (text));
+            if (param == 6)
+                return v >= 0.999f ? std::string ("desligado") : (std::snprintf (text, sizeof (text), "%.1f kHz", reverbHighCutHz (v) / 1000.0f), std::string (text));
+            if (param == 7)
+                std::snprintf (text, sizeof (text), "%.0f ms", v * 1000.0f);
+            else
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
         case EffectKind::limiter:

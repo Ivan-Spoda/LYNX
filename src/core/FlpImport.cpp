@@ -518,7 +518,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 made->plugin.foreign = std::move (foreign);
             }
             else
-                made = effectFromFl (slot.plugin, slot.state); // efeito nativo com os ajustes salvos (REA_rodada7)
+                made = effectFromFl (slot.plugin, slot.state, song.bpm); // efeito nativo com os ajustes salvos (REA_rodada7)
 
             if (! made)
                 continue;

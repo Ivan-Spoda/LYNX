@@ -130,7 +130,7 @@ bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 
 // --- Fruity Reeverb 2 (§3) --------------------------------------------------------------------
 
-bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot, double bpm)
 {
     const auto version = i32At (d, 0);
     const auto count = version == 10001 ? 15 : version == 10000 ? 13 : 0;
@@ -152,6 +152,14 @@ bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[2] = clamp01 (1.0 + std::min (0.0, separation));                           // separação negativa estreita
     slot.params[3] = clamp01 (wet / 0.25);
     slot.params[4] = clamp01 (dry);
+
+    // corte de graves (< 20 Hz = desligado), de agudos (>= 22,1 kHz = desligado) e predelay
+    const auto lowCutHz = param (0);
+    slot.params[5] = lowCutHz < 20 ? 0.0f : std::max (0.002f, fromLog (lowCutHz, 20.0, 3000.0));
+    slot.params[6] = param (1) >= 221 ? 1.0f : std::min (0.998f, fromLog (param (1) * 100.0, 500.0, 22000.0));
+    const auto tempoPredelay = d.size() > 4 + (std::size_t) count * 4 && d[4 + (std::size_t) count * 4] != 0;
+    const auto predelayMs = tempoPredelay ? param (2) / 48.0 * 60000.0 / std::max (1.0, bpm) : param (2) * 1000.0 / 384.0;
+    slot.params[7] = clamp01 (predelayMs / 1000.0);
     return true;
 }
 
@@ -216,7 +224,7 @@ bool compressor (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 }
 } // namespace
 
-std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     const auto kind = effectForFlPlugin (pluginName);
 
@@ -236,7 +244,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     else if (pluginName == "Fruity Limiter")
         limiter (state, slot);
     else if (pluginName == "Fruity Reeverb 2")
-        reeverb2 (state, slot);
+        reeverb2 (state, slot, bpm);
     else if (pluginName == "Fruity Delay 2")
         delay2 (state, slot);
     else if (pluginName == "Fruity Delay 3")

@@ -14,5 +14,6 @@ namespace lynx
 {
 // Monta o slot a partir do nome do plugin do FL e do blob. Sem blob utilizável, devolve o efeito
 // interno parecido com os parâmetros padrão; nullopt quando não há efeito parecido.
-std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state);
+// `bpm` converte tempos sincronizados (ex.: predelay do Reeverb 2) para milissegundos.
+std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm = 120.0);
 } // namespace lynx

@@ -266,7 +266,7 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
-    int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0;
+    int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -301,6 +301,7 @@ TEST (flp_real_files)
                     {
                         ++reverbs;
                         reverbsDryless += fx.params[4] < 0.01f;
+                        reverbsLowCut += fx.params[5] > 0.0f;
                     }
                 }
 
@@ -406,7 +407,7 @@ TEST (flp_real_files)
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);
     std::printf ("  %d EQs paramétricos (%d com ajustes do FL), %d reverbs (%d sem seco)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
-    CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20);
+    CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20 && reverbsLowCut > 250);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
@@ -1561,6 +1562,38 @@ TEST (fl_parametric_eq2_state_maps_to_bands)
     put (0x13E, 0x7F & ~(1 << 3));
     const auto muted = lynx::effectFromFl ("Fruity Parametric EQ 2", blob);
     CHECK (lynx::peq::type (muted->params[(std::size_t) lynx::peq::param (3, 0)]) == lynx::peq::BandType::off);
+}
+
+TEST (reverb_low_cut_and_predelay)
+{
+    // impulso: com predelay de 100 ms o molhado só começa depois; com corte de graves em 3 kHz um
+    // seno de 100 Hz quase não entra no reverb
+    auto run = [] (const std::function<void (lynx::EffectSlot&)>& tweak, double hz, bool impulse) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::reverb);
+        fx->prepare (48000.0);
+        auto slot = lynx::makeEffectSlot (lynx::EffectKind::reverb);
+        slot.params[4] = 0.0f; // só o molhado
+        slot.params[3] = 1.0f;
+        tweak (slot);
+        std::vector<float> l (48000), r (48000);
+        for (int i = 0; i < 48000; ++i)
+            l[(std::size_t) i] = r[(std::size_t) i] = impulse ? (i == 0 ? 1.0f : 0.0f) : 0.5f * (float) std::sin (6.283185307 * hz * i / 48000.0);
+        for (int i = 0; i < 48000; i += 480)
+            fx->process (l.data() + i, r.data() + i, 480, slot.params, 120.0);
+        return l;
+    };
+    const auto delayed = run ([] (auto& s) { s.params[7] = 0.1f; }, 0.0, true);
+    float early = 0.0f, later = 0.0f;
+    for (std::size_t i = 0; i < 4800; ++i)
+        early = std::max (early, std::abs (delayed[i]));
+    for (std::size_t i = 4800; i < 24000; ++i)
+        later = std::max (later, std::abs (delayed[i]));
+    CHECK (early == 0.0f && later > 0.0f);
+
+    auto energy = [] (const std::vector<float>& b) { double e = 0.0; for (std::size_t i = 24000; i < 48000; ++i) e += (double) b[i] * b[i]; return e; };
+    const auto open = energy (run ([] (auto&) {}, 100.0, false));
+    const auto cut = energy (run ([] (auto& s) { s.params[5] = 1.0f; }, 100.0, false));
+    CHECK (cut < open * 0.01);
 }
 
 TEST (effects_eq_compressor_behave)
