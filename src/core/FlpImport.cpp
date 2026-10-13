@@ -888,6 +888,12 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 marker.denominator = m.denominator;
             }
 
+            // sem nome: o tipo do marcador no FL (REA_rodada6 §5)
+            static const char* typeNames[] = { "", "Loop (marcador)", "Pular", "Pausa", "Loop", "Início", "Tamanho da pattern", "",
+                                               "", "Começar gravação", "Parar gravação", "Tamanho do loop", "Tom/escala" };
+            if (marker.name.empty() && m.type > 0 && m.type < 13 && m.type != 8)
+                marker.name = typeNames[m.type];
+
             a.markers.push_back (std::move (marker));
         }
 
