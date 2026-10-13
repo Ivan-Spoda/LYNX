@@ -708,6 +708,12 @@ Song Song::makeDefault()
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         song.channels[i].mixerTrack = (int) i + 1;
 
+    // como o template do FL: um limiter no Master (transparente até -0,3 dB)
+    EffectSlot limiter;
+    limiter.kind = EffectKind::limiter;
+    limiter.params = { 11.7f / 12.0f, 0.0f, 0.5f };
+    song.mixer[0].effects.push_back (limiter);
+
     auto& p = song.patterns.emplace_back();
     p.name = "Pattern 1";
 
