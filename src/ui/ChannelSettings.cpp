@@ -18,6 +18,12 @@ public:
         setup (pitch, pitchLabel, "Afinação", -24.0, 24.0, 0.01, " st");
         setup (attack, attackLabel, "Ataque", 0.0, 2.0, 0.001, " s");
         setup (release, releaseLabel, "Release", 0.0, 4.0, 0.001, " s");
+        setup (decay, decayLabel, "Decaimento", 0.0, 10.0, 0.001, " s");
+        setup (sustain, sustainLabel, "Sustentação", 0.0, 1.0, 0.01, "");
+        setup (stretch, stretchLabel, "Esticar", 0.0, 64.0, 0.25, " tempos");
+        sustain.setDoubleClickReturnValue (true, 1.0);
+        decay.setSkewFactorFromMidPoint (0.5);
+        stretch.setTooltip (utf8 ("0 = desligado. Senão o sample inteiro dura este tanto de tempos e acompanha o BPM (reamostrando, como o modo Resample do FL)"));
         attack.setSkewFactorFromMidPoint (0.2);
         release.setSkewFactorFromMidPoint (0.4);
         release.setTooltip (utf8 ("0 = o sample toca inteiro (one-shot), como os steps do FL"));
@@ -34,7 +40,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (360, 170);
+        setSize (420, 300);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -42,12 +48,25 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (12);
-        auto knobs = area.removeFromTop (110);
-        const auto w = knobs.getWidth() / 3;
+        auto place = [] (juce::Rectangle<int> row, std::initializer_list<std::pair<juce::Slider*, juce::Label*>> items) {
+            const auto w = row.getWidth() / 3;
 
-        for (auto [slider, label] : { std::pair { &pitch, &pitchLabel }, { &attack, &attackLabel }, { &release, &releaseLabel } })
+            for (auto [slider, label] : items)
+            {
+                auto column = row.removeFromLeft (w);
+                label->setBounds (column.removeFromTop (18));
+                slider->setBounds (column);
+            }
+        };
+
+        place (area.removeFromTop (110), { { &pitch, &pitchLabel }, { &stretch, &stretchLabel } });
+        area.removeFromTop (6);
+        auto envelope = area.removeFromTop (110);
+        const auto w = envelope.getWidth() / 4;
+
+        for (auto [slider, label] : { std::pair { &attack, &attackLabel }, { &decay, &decayLabel }, { &sustain, &sustainLabel }, { &release, &releaseLabel } })
         {
-            auto column = knobs.removeFromLeft (w);
+            auto column = envelope.removeFromLeft (w);
             label->setBounds (column.removeFromTop (18));
             slider->setBounds (column);
         }
@@ -87,6 +106,9 @@ private:
             updating = true;
             pitch.setValue (c->sampler.pitch, juce::dontSendNotification);
             attack.setValue (c->sampler.attack, juce::dontSendNotification);
+            decay.setValue (c->sampler.decay, juce::dontSendNotification);
+            sustain.setValue (c->sampler.sustain, juce::dontSendNotification);
+            stretch.setValue (c->sampler.stretchBeats, juce::dontSendNotification);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -105,6 +127,9 @@ private:
         SamplerSettings s;
         s.pitch = (float) pitch.getValue();
         s.attack = (float) attack.getValue();
+        s.decay = (float) decay.getValue();
+        s.sustain = (float) sustain.getValue();
+        s.stretchBeats = (float) stretch.getValue();
         s.release = (float) release.getValue();
         s.reverse = reverse.getToggleState();
         s.cut = cut.getToggleState();
@@ -133,8 +158,8 @@ private:
     AudioEngine& engine;
     int channel;
     bool updating = false;
-    juce::Slider pitch, attack, release;
-    juce::Label pitchLabel, attackLabel, releaseLabel;
+    juce::Slider pitch, attack, release, decay, sustain, stretch;
+    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel;
     juce::ToggleButton reverse, cut;
 };
 
