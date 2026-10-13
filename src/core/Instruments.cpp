@@ -364,8 +364,8 @@ public:
         if (sample == nullptr)
             return;
 
-        const auto& l = sample->left;
-        const auto& r = sample->right.empty() ? sample->left : sample->right;
+        const auto* l = sample->leftData();
+        const auto* r = sample->rightData();
         const auto last = (double) (sample->frames() - 1);
 
         for (auto& v : voices)

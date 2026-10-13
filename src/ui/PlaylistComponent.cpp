@@ -439,9 +439,9 @@ const std::vector<float>* PlaylistComponent::waveformFor (const std::string& pat
 
         for (std::size_t i = 0; i < frames; ++i)
         {
-            auto v = std::abs (data->left[i]);
-            if (! data->right.empty())
-                v = std::max (v, std::abs (data->right[i]));
+            auto v = std::abs (data->leftData()[i]);
+            if (data->isStereo())
+                v = std::max (v, std::abs (data->rightData()[i]));
             auto& peak = peaks[i / waveformBucket];
             peak = std::max (peak, v);
         }

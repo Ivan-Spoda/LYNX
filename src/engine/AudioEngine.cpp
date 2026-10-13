@@ -87,6 +87,8 @@ AudioEngine::AudioEngine (bool openAudioDevice)
         deviceManager.initialise (0, 2, nullptr, true);
         deviceManager.addAudioCallback (this);
 
+        prefetcher = std::make_unique<StreamPrefetcher> (transport);
+        prefetcher->update (song, samples);
         enableAllMidiInputs();
         deviceManager.addMidiInputDeviceCallback ({}, this); // {} = todas as entradas ligadas
         midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
@@ -98,6 +100,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+    prefetcher = nullptr;
     midiDevicesChanged = {};
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
@@ -468,6 +471,10 @@ void AudioEngine::publishSong()
     lastPublishedShape.sendDelays = state->sendDelays;
 
     rackExchange.publish (std::move (state));
+
+    if (prefetcher != nullptr)
+        prefetcher->update (song, samples);
+
     sendChangeMessage();
 }
 

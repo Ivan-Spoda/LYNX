@@ -74,6 +74,143 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     return nullptr;
 }
 
+juce::File SampleLibrary::cacheFolder()
+{
+    auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("LYNX-cache");
+    folder.createDirectory();
+    return folder;
+}
+
+namespace
+{
+// Arquivo de cache por canal: cabeçalho de 32 bytes + float32 contínuos.
+constexpr char cacheMagic[8] = { 'L', 'Y', 'N', 'X', 'P', 'C', 'M', '1' };
+constexpr int cacheHeader = 32;
+
+struct Mapped
+{
+    std::unique_ptr<juce::MemoryMappedFile> left, right;
+};
+
+bool writeHeader (juce::OutputStream& out, double sampleRate, juce::int64 frames)
+{
+    out.write (cacheMagic, 8);
+    out.writeDouble (sampleRate);
+    out.writeInt64 (frames);
+    out.writeInt64 (0);
+    return out.getPosition() == cacheHeader;
+}
+
+std::unique_ptr<juce::MemoryMappedFile> mapChannel (const juce::File& file, double sampleRate, juce::int64 frames)
+{
+    if (file.getSize() != cacheHeader + frames * (juce::int64) sizeof (float))
+        return nullptr;
+
+    auto mapped = std::make_unique<juce::MemoryMappedFile> (file, juce::MemoryMappedFile::readOnly);
+    const auto* d = static_cast<const char*> (mapped->getData());
+
+    if (d == nullptr || (juce::int64) mapped->getSize() != file.getSize() || std::memcmp (d, cacheMagic, 8) != 0)
+        return nullptr;
+
+    double rate = 0.0;
+    juce::int64 count = 0;
+    std::memcpy (&rate, d + 8, 8);
+    std::memcpy (&count, d + 16, 8);
+    return rate == sampleRate && count == frames ? std::move (mapped) : nullptr;
+}
+
+// Lê uma amostra a cada página para o sistema trazer o trecho do disco agora (fora da thread de áudio).
+float touch (const float* data, std::size_t from, std::size_t to)
+{
+    float sum = 0.0f;
+    for (auto i = from; i < to; i += 1024)
+        sum += data[i];
+    return sum;
+}
+} // namespace
+
+std::shared_ptr<const SampleData> SampleLibrary::loadStreamed (const juce::File& file, juce::AudioFormatReader& reader)
+{
+    const auto frames = reader.lengthInSamples;
+    const auto channels = juce::jmin (2, (int) reader.numChannels);
+    const auto key = juce::String::toHexString ((file.getFullPathName() + "|" + juce::String (file.getSize()) + "|"
+                                                 + juce::String (file.getLastModificationTime().toMilliseconds()))
+                                                    .hashCode64());
+    const auto leftFile = cacheFolder().getChildFile (key + ".L.pcm");
+    const auto rightFile = cacheFolder().getChildFile (key + ".R.pcm");
+
+    auto mapped = std::make_shared<Mapped>();
+    mapped->left = mapChannel (leftFile, reader.sampleRate, frames);
+    mapped->right = channels > 1 ? mapChannel (rightFile, reader.sampleRate, frames) : nullptr;
+
+    if (mapped->left == nullptr || (channels > 1 && mapped->right == nullptr))
+    {
+        // decodifica uma vez, em pedaços, direto para os arquivos de cache
+        leftFile.deleteFile();
+        rightFile.deleteFile();
+        {
+            juce::FileOutputStream outL (leftFile);
+            std::unique_ptr<juce::FileOutputStream> outR;
+
+            if (channels > 1)
+                outR = std::make_unique<juce::FileOutputStream> (rightFile);
+
+            if (outL.failedToOpen() || (outR != nullptr && outR->failedToOpen()) || ! writeHeader (outL, reader.sampleRate, frames)
+                || (outR != nullptr && ! writeHeader (*outR, reader.sampleRate, frames)))
+                return nullptr;
+
+            constexpr int block = 1 << 16;
+            juce::AudioBuffer<float> buffer (channels, block);
+
+            for (juce::int64 done = 0; done < frames; done += block)
+            {
+                const auto n = (int) juce::jmin<juce::int64> (block, frames - done);
+                reader.read (&buffer, 0, n, done, true, channels > 1);
+                outL.write (buffer.getReadPointer (0), (size_t) n * sizeof (float));
+
+                if (outR != nullptr)
+                    outR->write (buffer.getReadPointer (1), (size_t) n * sizeof (float));
+            }
+
+            outL.flush();
+            if (outR != nullptr)
+                outR->flush();
+        }
+
+        mapped->left = mapChannel (leftFile, reader.sampleRate, frames);
+        mapped->right = channels > 1 ? mapChannel (rightFile, reader.sampleRate, frames) : nullptr;
+
+        if (mapped->left == nullptr || (channels > 1 && mapped->right == nullptr))
+            return nullptr;
+    }
+
+    auto data = std::make_shared<SampleData>();
+    data->sampleRate = reader.sampleRate;
+    data->mappedFrames = (std::size_t) frames;
+    data->mappedLeft = reinterpret_cast<const float*> (static_cast<const char*> (mapped->left->getData()) + cacheHeader);
+    data->mappedRight = mapped->right != nullptr
+                            ? reinterpret_cast<const float*> (static_cast<const char*> (mapped->right->getData()) + cacheHeader)
+                            : nullptr;
+    data->mapping = mapped;
+
+    // os primeiros segundos já na memória: o começo do clip não espera o disco
+    const auto head = juce::jmin ((std::size_t) frames, (std::size_t) (reader.sampleRate * 3.0));
+    volatile float sink = touch (data->leftData(), 0, head) + touch (data->rightData(), 0, head);
+    juce::ignoreUnused (sink);
+    return data;
+}
+
+void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds)
+{
+    if (! data.isMapped())
+        return;
+
+    const auto from = (std::size_t) juce::jlimit (0.0, (double) data.frames(), fromSeconds * data.sampleRate);
+    const auto to = (std::size_t) juce::jlimit (0.0, (double) data.frames(), toSeconds * data.sampleRate);
+    volatile float sink = touch (data.leftData(), from, to) + (data.isStereo() ? touch (data.rightData(), from, to) : 0.0f);
+    juce::ignoreUnused (sink);
+}
+
 std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 {
     if (auto cached = cache[path].lock())
@@ -89,7 +226,14 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
         return nullptr;
 
-    // Limite de segurança: 10 minutos. Samples maiores vão precisar de streaming do disco.
+    if ((double) reader->lengthInSamples > reader->sampleRate * streamAboveSeconds)
+        if (auto streamed = loadStreamed (file, *reader))
+        {
+            cache[path] = streamed;
+            return streamed;
+        }
+
+    // Na memória: limite de segurança de 10 minutos (os longos vão pelo cache em disco).
     const auto frames = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 600.0));
     const auto channels = juce::jmin (2, (int) reader->numChannels);
 

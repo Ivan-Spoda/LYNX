@@ -13,6 +13,7 @@
 #include "core/Song.h"
 #include "engine/PluginHost.h"
 #include "engine/SampleLibrary.h"
+#include "engine/StreamPrefetcher.h"
 #include "engine/Transport.h"
 
 namespace lynx
@@ -152,6 +153,7 @@ private:
 
     Song song;
     int selectedChannel = 0;
+    std::unique_ptr<StreamPrefetcher> prefetcher; // só com dispositivo de áudio (tocando ao vivo)
 
     static constexpr std::size_t maxUndoSteps = 100;
     std::deque<Song> undoStack, redoStack;

@@ -33,13 +33,29 @@ public:
     virtual int latencySamples() const noexcept { return 0; }
 };
 
-// Áudio de um sample já decodificado (carregado fora da thread de áudio).
+// Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos
+// ficam nos vetores; os longos ficam num arquivo de cache mapeado na memória (o sistema lê
+// do disco sob demanda) e usam os ponteiros `mapped*`.
 struct SampleData
 {
     std::vector<float> left, right; // right vazio = mono
     double sampleRate = 44100.0;
 
-    std::size_t frames() const noexcept { return left.size(); }
+    const float* mappedLeft = nullptr;
+    const float* mappedRight = nullptr; // nullptr = mono
+    std::size_t mappedFrames = 0;
+    std::shared_ptr<const void> mapping; // dono do mapeamento
+
+    bool isMapped() const noexcept { return mappedLeft != nullptr; }
+    std::size_t frames() const noexcept { return isMapped() ? mappedFrames : left.size(); }
+    const float* leftData() const noexcept { return isMapped() ? mappedLeft : left.data(); }
+    const float* rightData() const noexcept
+    {
+        if (isMapped())
+            return mappedRight != nullptr ? mappedRight : mappedLeft;
+        return right.empty() ? left.data() : right.data();
+    }
+    bool isStereo() const noexcept { return isMapped() ? mappedRight != nullptr : ! right.empty(); }
 };
 
 // `sample` só é usado pelo sampler; sem sample o sampler fica mudo.
