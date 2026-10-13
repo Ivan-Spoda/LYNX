@@ -81,4 +81,5 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)
 - [ ] LFOs do canal, AM do 3x Osc
 - [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)
-- [ ] Notas "porta"; metrônomo seguindo as mudanças de compasso
+- [x] Metrônomo seguindo as mudanças de compasso (modo song)
+- [ ] Notas "porta"

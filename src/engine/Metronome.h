@@ -43,6 +43,11 @@ private:
     double clickPhaseDelta = 0.0;
     int clickSamplesLeft = 0;
 
+    // cópia local da tabela de compassos do Transport (início, duração do compasso em ticks)
+    std::array<std::pair<std::int64_t, std::int64_t>, Transport::maxSignatures> signatures {};
+    int signatureCount = 0;
+    std::uint32_t signatureVersion = 0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Metronome)
 };
 } // namespace lynx

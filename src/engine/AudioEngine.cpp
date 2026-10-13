@@ -652,6 +652,27 @@ void AudioEngine::publishSong()
     liveChannel.store (selectedChannel);
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
+
+    {
+        // tabela de compassos para o metrônomo: o começo (beatsPerBar/4) e cada mudança de compasso
+        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // ímpar: escrevendo
+        int count = 0;
+        transport.signatureTick[0].store (0, std::memory_order_relaxed);
+        transport.signatureLength[0].store ((std::int64_t) ppq * juce::jmax (1, song.beatsPerBar), std::memory_order_relaxed);
+        ++count;
+
+        for (const auto& m : song.markers())
+            if (m.isSignature() && count < Transport::maxSignatures)
+            {
+                const auto length = juce::jmax<std::int64_t> (1, (std::int64_t) ppq * 4 * m.numerator / juce::jmax (1, m.denominator));
+                const auto slot = m.tick <= 0 ? 0 : count++; // na posição 0 substitui o padrão
+                transport.signatureTick[(std::size_t) slot].store (juce::jmax<std::int64_t> (0, m.tick), std::memory_order_relaxed);
+                transport.signatureLength[(std::size_t) slot].store (length, std::memory_order_relaxed);
+            }
+
+        transport.signatureCount.store (count, std::memory_order_relaxed);
+        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // par: pronto
+    }
     transport.songMode.store (song.mode == PlayMode::song);
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
