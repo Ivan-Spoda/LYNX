@@ -27,6 +27,8 @@ public:
 
     // Soma (não sobrescreve) n samples em left/right, já aplicando os ganhos.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
+    // Parâmetro automatizado (plugins). 0..1. Thread de áudio.
+    virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio).

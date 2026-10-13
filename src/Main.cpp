@@ -21,7 +21,8 @@ public:
 
         if (args.contains ("--selftest"))
         {
-            runSelfTest (args[args.indexOf ("--selftest") + 1].unquoted());
+            const auto i = args.indexOf ("--selftest");
+            runSelfTest (args[i + 1].unquoted(), args[i + 2].unquoted());
             return;
         }
 
@@ -74,7 +75,7 @@ public:
 private:
     // LYNX.exe --selftest relatorio.txt: renderiza 2 s sem placa de som e grava o resultado.
     // Código de saída 0 = saiu áudio, 1 = silêncio.
-    void runSelfTest (const juce::String& reportPath)
+    void runSelfTest (const juce::String& reportPath, const juce::String& demoProjectPath)
     {
         lynx::AudioEngine offline (false);
         const auto peak = offline.renderOffline (2.0, 48000.0);
@@ -87,13 +88,35 @@ private:
         original.mode = lynx::PlayMode::song;
         original.mixer[3].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::delay));
         original.mixer[3].effects[0].params[1] = 0.25f;
+        lynx::Automation automation;
+        automation.name = "Pan";
+        automation.target = { lynx::AutomationTargetKind::effectParam, 3, 0, 1 };
+        automation.points = { { 0, 0.25f, 0.5f }, { 3840, 1.0f, 0.0f } };
+        original.automations.push_back (automation);
+        lynx::Clip automationClip;
+        automationClip.kind = lynx::ClipKind::automation;
+        automationClip.automation = 0;
+        automationClip.track = 4;
+        automationClip.length = 3840;
+        original.playlist.push_back (automationClip);
+        original.loopStart = 960;
+        original.loopEnd = 7680;
         juce::String error;
+
+        if (demoProjectPath.isNotEmpty()) // projeto de exemplo para conferir a UI com --snapshot
+            lynx::ProjectFile::save (original, juce::File (demoProjectPath), error);
+
         const auto reloaded = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (original), error);
         const auto projectOk = reloaded && reloaded->channels.size() == original.channels.size()
                                && reloaded->channels[0].name == original.channels[0].name
                                && reloaded->patterns[0].notes.size() == original.patterns[0].notes.size()
                                && reloaded->patterns[0].notes[3].start == original.patterns[0].notes[3].start
-                               && reloaded->mode == lynx::PlayMode::song && reloaded->playlist.size() == 1
+                               && reloaded->mode == lynx::PlayMode::song && reloaded->playlist.size() == 2
+                               && reloaded->playlist[1].kind == lynx::ClipKind::automation && reloaded->playlist[1].automation == 0
+                               && reloaded->automations.size() == 1 && reloaded->automations[0].target == automation.target
+                               && reloaded->automations[0].points.size() == 2 && reloaded->automations[0].points[0].tension == 0.5f
+                               && reloaded->automations[0].points[1].tick == 3840
+                               && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay

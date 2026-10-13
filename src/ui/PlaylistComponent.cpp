@@ -2,6 +2,7 @@
 
 #include "core/NoteEdit.h"
 #include "engine/Text.h"
+#include "ui/AutomationUi.h"
 
 #include "ui/Theme.h"
 
@@ -165,6 +166,18 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
+
+            if (c.kind == ClipKind::automation)
+            {
+                paintAutomationClip (g, c, r);
+
+                if (isSelected (i))
+                {
+                    g.setColour (juce::Colour (0xffff6f6f));
+                    g.drawRoundedRectangle (r, 3.0f, 2.0f);
+                }
+                continue;
+            }
 
             if (c.kind == ClipKind::audio)
             {
@@ -405,6 +418,54 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         const auto h = std::min (1.0f, peak) * halfHeight;
         g.drawVerticalLine ((int) x, centreY - h, centreY + h);
     }
+}
+
+void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
+{
+    const auto& song = engine.getSong();
+
+    if (c.automation < 0 || c.automation >= (int) song.automations.size())
+        return;
+
+    const auto& automation = song.automations[(std::size_t) c.automation];
+    const auto colour = automation.target.kind == AutomationTargetKind::none ? juce::Colour (0xff555555) : juce::Colour (0xff5f7a5a);
+
+    g.setColour (colour.withAlpha (0.55f));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (colour.darker (0.6f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+
+    const auto title = r.withHeight (13.0f);
+    g.setColour (colour.darker (0.4f));
+    g.fillRoundedRectangle (title, 3.0f);
+
+    if (r.getWidth() > 24)
+    {
+        g.setColour (juce::Colours::white);
+        g.drawText (juce::String::fromUTF8 (automation.name.c_str()), title.reduced (3, 0).toNearestInt(), juce::Justification::centredLeft, true);
+    }
+
+    // curva da automação no trecho do clip
+    const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 2.0f);
+    const auto clip = g.getClipBounds().toFloat();
+    juce::Path curve;
+    bool started = false;
+
+    for (auto x = std::max (body.getX(), clip.getX()); x <= std::min (body.getRight(), clip.getRight()); x += 2.0f)
+    {
+        const auto value = automation.valueAt ((double) c.offset + xToTick ((int) x) - (double) c.start);
+        const auto y = body.getBottom() - value * body.getHeight();
+
+        if (! started)
+            curve.startNewSubPath (x, y);
+        else
+            curve.lineTo (x, y);
+
+        started = true;
+    }
+
+    g.setColour (juce::Colour (0xffb8f0a8));
+    g.strokePath (curve, juce::PathStrokeType (1.5f));
 }
 
 int PlaylistComponent::clipAt (int x, int y, bool& onRightEdge) const
@@ -747,6 +808,25 @@ void PlaylistComponent::showClipMenu (int index)
         });
     }
 
+    if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) engine.getSong().automations.size())
+    {
+        menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().automations[(std::size_t) clip.automation].name.c_str()));
+        menu.addItem (utf8 ("Editar pontos..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
+        menu.addItem (utf8 ("Tornar única"), [this, index] {
+            engine.editSong ([index] (Song& s) {
+                auto& c = s.playlist[(std::size_t) index];
+                auto copy = s.automations[(std::size_t) c.automation];
+                copy.name += " #2";
+                s.automations.push_back (std::move (copy));
+                c.automation = (int) s.automations.size() - 1;
+            });
+        });
+        menu.addItem (utf8 ("Apagar a automação (todos os clips dela)"), [this, a = clip.automation] {
+            setSelection ({});
+            engine.editSong ([a] (Song& s) { s.removeAutomation (a); });
+        });
+    }
+
     menu.addItem (targets.size() > 1 ? "Apagar selecionados" : "Apagar", [this, targets] {
         setSelection ({});
         engine.editSong ([targets] (Song& s) {
@@ -804,6 +884,8 @@ void PlaylistComponent::pasteClips()
             if (c.kind == ClipKind::pattern && c.pattern >= (int) s.patterns.size())
                 continue;
             if (c.kind == ClipKind::audio && c.channel >= (int) s.channels.size())
+                continue;
+            if (c.kind == ClipKind::automation && c.automation >= (int) s.automations.size())
                 continue;
 
             c.start = c.start - first + target;
@@ -914,7 +996,14 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
     bool edge = false;
     const auto hit = gridArea().contains (e.getPosition()) ? clipAt (e.x, e.y, edge) : -1;
 
-    if (hit >= 0 && engine.getSong().playlist[(std::size_t) hit].kind == ClipKind::pattern && onOpenPattern)
+    if (hit < 0)
+        return;
+
+    const auto& clip = engine.getSong().playlist[(std::size_t) hit];
+
+    if (clip.kind == ClipKind::automation)
+        openAutomationEditor (engine, clip.automation);
+    else if (clip.kind == ClipKind::pattern && onOpenPattern)
         onOpenPattern();
 }
 

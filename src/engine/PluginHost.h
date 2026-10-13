@@ -26,6 +26,7 @@ public:
     void noteOff (int key) noexcept override;
     void allNotesOff() noexcept override;
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
+    void setParameter (int index, float value) noexcept override;
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;
@@ -44,7 +45,8 @@ public:
 
     void prepare (double) noexcept override {}
     void reset() noexcept override {}
-    void process (float* left, float* right, int n, const EffectSlot& slot, double bpm) noexcept override;
+    void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override;
+    void setParameter (int index, float value) noexcept override;
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;

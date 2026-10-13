@@ -1,6 +1,7 @@
 #include "core/Song.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace lynx
 {
@@ -124,6 +125,126 @@ void Song::removeChannel (int index)
     for (auto& c : playlist)
         if (c.kind == ClipKind::audio && c.channel > index)
             --c.channel;
+
+    for (auto& a : automations)
+    {
+        auto& t = a.target;
+        const auto onChannel = t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
+                               || t.kind == AutomationTargetKind::channelParam;
+
+        if (onChannel && t.index == index)
+            t.kind = AutomationTargetKind::none;
+        else if (onChannel && t.index > index)
+            --t.index;
+    }
+}
+
+void Song::swapEffectSlots (int track, int a, int b)
+{
+    if (track < 0 || track >= (int) mixer.size())
+        return;
+
+    auto& fx = mixer[(std::size_t) track].effects;
+
+    if (a < 0 || b < 0 || a >= (int) fx.size() || b >= (int) fx.size())
+        return;
+
+    std::swap (fx[(std::size_t) a], fx[(std::size_t) b]);
+
+    for (auto& au : automations)
+        if (au.target.kind == AutomationTargetKind::effectParam && au.target.index == track)
+            au.target.slot = au.target.slot == a ? b : au.target.slot == b ? a : au.target.slot;
+}
+
+void Song::removeEffectSlot (int track, int slot)
+{
+    if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
+        return;
+
+    auto& fx = mixer[(std::size_t) track].effects;
+    fx.erase (fx.begin() + slot);
+
+    for (auto& au : automations)
+        if (au.target.kind == AutomationTargetKind::effectParam && au.target.index == track)
+        {
+            if (au.target.slot == slot)
+                au.target.kind = AutomationTargetKind::none;
+            else if (au.target.slot > slot)
+                --au.target.slot;
+        }
+}
+
+void Song::removeAutomation (int index)
+{
+    if (index < 0 || index >= (int) automations.size())
+        return;
+
+    automations.erase (automations.begin() + index);
+    playlist.erase (std::remove_if (playlist.begin(), playlist.end(),
+                                    [index] (const Clip& c) { return c.kind == ClipKind::automation && c.automation == index; }),
+                    playlist.end());
+
+    for (auto& c : playlist)
+        if (c.kind == ClipKind::automation && c.automation > index)
+            --c.automation;
+}
+
+float Song::targetValue (const AutomationTarget& t) const noexcept
+{
+    const auto validChannel = t.index >= 0 && t.index < (int) channels.size();
+    const auto validTrack = t.index >= 0 && t.index < (int) mixer.size();
+
+    switch (t.kind)
+    {
+        case AutomationTargetKind::channelVolume: return validChannel ? channels[(std::size_t) t.index].volume : -1.0f;
+        case AutomationTargetKind::channelPan: return validChannel ? (channels[(std::size_t) t.index].pan + 1.0f) * 0.5f : -1.0f;
+        case AutomationTargetKind::mixerVolume: return validTrack ? mixer[(std::size_t) t.index].volume : -1.0f;
+        case AutomationTargetKind::mixerPan: return validTrack ? (mixer[(std::size_t) t.index].pan + 1.0f) * 0.5f : -1.0f;
+        case AutomationTargetKind::effectParam:
+            if (validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
+                && mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind != EffectKind::plugin && t.param >= 0
+                && t.param < maxEffectParams)
+                return mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param];
+            return validTrack ? 0.5f : -1.0f; // parâmetro de plugin: o valor mora no plugin
+        case AutomationTargetKind::channelParam: return validChannel ? 0.5f : -1.0f;
+        case AutomationTargetKind::none: break;
+    }
+
+    return -1.0f;
+}
+
+float Automation::valueAt (double tick) const noexcept
+{
+    if (points.empty())
+        return 0.5f;
+
+    if (tick <= (double) points.front().tick)
+        return points.front().value;
+
+    for (std::size_t i = 1; i < points.size(); ++i)
+    {
+        const auto& a = points[i - 1];
+        const auto& b = points[i];
+
+        if (tick < (double) b.tick)
+        {
+            const auto span = (double) std::max<std::int64_t> (1, b.tick - a.tick);
+            auto t = (float) ((tick - (double) a.tick) / span);
+
+            // tensão: expoente da curva (positiva = sobe devagar e acelera)
+            if (a.tension != 0.0f)
+                t = std::pow (t, std::pow (2.0f, a.tension * 3.0f));
+
+            return a.value + (b.value - a.value) * t;
+        }
+    }
+
+    return points.back().value;
+}
+
+std::int64_t Automation::length() const noexcept
+{
+    return points.empty() ? 1 : std::max<std::int64_t> (1, points.back().tick);
 }
 
 Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength)

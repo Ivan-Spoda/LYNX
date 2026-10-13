@@ -24,6 +24,15 @@ void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int bl
     plugin.prepareToPlay (sampleRate, blockSize);
 }
 
+void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float value) noexcept
+{
+    const auto& params = plugin.getParameters();
+
+    if (index >= 0 && index < params.size())
+        if (auto* p = params[index]; p->getValue() != value)
+            p->setValue (value);
+}
+
 int bufferChannels (const juce::AudioPluginInstance& plugin)
 {
     return juce::jmax (2, plugin.getTotalNumInputChannels(), plugin.getTotalNumOutputChannels());
@@ -59,6 +68,11 @@ void PluginInstrument::allNotesOff() noexcept
 {
     midi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
     midi.addEvent (juce::MidiMessage::allSoundOff (1), 0);
+}
+
+void PluginInstrument::setParameter (int index, float value) noexcept
+{
+    setPluginParameter (*plugin, index, value);
 }
 
 void PluginInstrument::render (float* left, float* right, int n, float gl, float gr) noexcept
@@ -98,7 +112,12 @@ PluginEffect::~PluginEffect()
     plugin->releaseResources();
 }
 
-void PluginEffect::process (float* left, float* right, int n, const EffectSlot&, double) noexcept
+void PluginEffect::setParameter (int index, float value) noexcept
+{
+    setPluginParameter (*plugin, index, value);
+}
+
+void PluginEffect::process (float* left, float* right, int n, const EffectParams&, double) noexcept
 {
     for (int done = 0; done < n;)
     {

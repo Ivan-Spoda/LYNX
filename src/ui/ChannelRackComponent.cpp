@@ -1,5 +1,7 @@
 #include "ui/ChannelRackComponent.h"
 
+#include "ui/AutomationUi.h"
+
 #include "engine/Text.h"
 
 #include "ui/PluginWindow.h"
@@ -269,6 +271,14 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 
         case Area::pan:
         case Area::volume:
+            if (e.mods.isPopupMenu())
+            {
+                juce::PopupMenu menu;
+                addAutomationItem (menu, engine, { area == Area::pan ? AutomationTargetKind::channelPan : AutomationTargetKind::channelVolume, row });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+                return;
+            }
+
             knobDrag = area;
             knobRow = row;
             knobStartValue = area == Area::pan ? song.channels[(std::size_t) row].pan : song.channels[(std::size_t) row].volume;
@@ -421,7 +431,12 @@ void ChannelRackComponent::showChannelMenu (int channel)
                       false, false, [] {});
 
     if (c.instrument == InstrumentKind::plugin)
+    {
         menu.addItem (utf8 ("Abrir interface do plugin"), [this, channel] { openPluginWindow (channel); });
+
+        if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
+            addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::channelParam, channel, 0, 0 });
+    }
 
     menu.addItem ("Piano Roll", [this] {
         if (onOpenPianoRoll)

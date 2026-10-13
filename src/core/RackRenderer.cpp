@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace lynx
 {
@@ -25,7 +26,7 @@ class BypassEffect final : public Effect
 public:
     void prepare (double) noexcept override {}
     void reset() noexcept override {}
-    void process (float*, float*, int, const EffectSlot&, double) noexcept override {}
+    void process (float*, float*, int, const EffectParams&, double) noexcept override {}
 };
 } // namespace
 
@@ -128,7 +129,90 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
     state->song = std::move (song);
     state->sampleRate = sampleRate;
+    state->buildAutomationTables();
     return state;
+}
+
+void RackState::buildAutomationTables()
+{
+    const auto& automations = song.automations;
+    const auto count = std::min<int> ((int) automations.size(), maxAutomations);
+
+    automationClips.assign ((std::size_t) count, {});
+
+    for (int i = 0; i < (int) song.playlist.size(); ++i)
+    {
+        const auto& c = song.playlist[(std::size_t) i];
+
+        if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0)
+            automationClips[(std::size_t) c.automation].push_back (i);
+    }
+
+    for (auto& clips : automationClips)
+        std::sort (clips.begin(), clips.end(),
+                   [this] (int a, int b) { return song.playlist[(std::size_t) a].start < song.playlist[(std::size_t) b].start; });
+
+    channelVolumeAuto.assign (song.channels.size(), -1);
+    channelPanAuto.assign (song.channels.size(), -1);
+    mixerVolumeAuto.assign (song.mixer.size(), -1);
+    mixerPanAuto.assign (song.mixer.size(), -1);
+    effectParamAuto.assign (song.mixer.size(), {});
+
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+    {
+        std::array<int, maxEffectParams> none;
+        none.fill (-1);
+        effectParamAuto[t].assign (song.mixer[t].effects.size(), none);
+    }
+
+    pluginParams.clear();
+    hasAutomation = false;
+
+    // a última automação de um mesmo alvo ganha
+    for (int a = 0; a < count; ++a)
+    {
+        if (automationClips[(std::size_t) a].empty())
+            continue;
+
+        const auto& t = automations[(std::size_t) a].target;
+        const auto channelOk = t.index >= 0 && t.index < (int) song.channels.size();
+        const auto trackOk = t.index >= 0 && t.index < (int) song.mixer.size();
+        auto used = true;
+
+        switch (t.kind)
+        {
+            case AutomationTargetKind::channelVolume: if (channelOk) channelVolumeAuto[(std::size_t) t.index] = a; else used = false; break;
+            case AutomationTargetKind::channelPan: if (channelOk) channelPanAuto[(std::size_t) t.index] = a; else used = false; break;
+            case AutomationTargetKind::mixerVolume: if (trackOk) mixerVolumeAuto[(std::size_t) t.index] = a; else used = false; break;
+            case AutomationTargetKind::mixerPan: if (trackOk) mixerPanAuto[(std::size_t) t.index] = a; else used = false; break;
+
+            case AutomationTargetKind::channelParam:
+                if (channelOk && song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin)
+                    pluginParams.push_back ({ a, t.index, 0, 0, t.param });
+                else
+                    used = false;
+                break;
+
+            case AutomationTargetKind::effectParam:
+            {
+                const auto slotOk = trackOk && t.slot >= 0 && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size();
+
+                if (! slotOk)
+                    used = false;
+                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin)
+                    pluginParams.push_back ({ a, -1, t.index, t.slot, t.param });
+                else if (t.param >= 0 && t.param < maxEffectParams)
+                    effectParamAuto[(std::size_t) t.index][(std::size_t) t.slot][(std::size_t) t.param] = a;
+                else
+                    used = false;
+                break;
+            }
+
+            case AutomationTargetKind::none: used = false; break;
+        }
+
+        hasAutomation = hasAutomation || used;
+    }
 }
 
 namespace
@@ -154,6 +238,7 @@ float peakOf (const float* data, int n) noexcept
 
 void RackRenderer::prepare (double sr, int maxBlockSize)
 {
+    automationValues.fill (std::numeric_limits<float>::quiet_NaN());
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
@@ -174,17 +259,91 @@ float* RackRenderer::trackBuffer (int track, int channel) noexcept
     return mixBuffers.data() + ((std::size_t) track * 2 + (std::size_t) channel) * (std::size_t) blockCapacity;
 }
 
+float RackRenderer::automated (int automation, float base) const noexcept
+{
+    if (automation < 0)
+        return base;
+
+    const auto v = automationValues[(std::size_t) automation];
+    return std::isnan (v) ? base : v;
+}
+
+namespace
+{
+// Valor de uma automação numa posição da música: dentro de um clip, a curva; entre clips,
+// o último valor do clip anterior; antes do primeiro, o valor inicial dele. Só depende da
+// posição, então tocar de qualquer ponto (ou exportar) dá o mesmo resultado.
+float automationValueAt (const Song& song, const Automation& automation, const std::vector<int>& clips, double tick) noexcept
+{
+    const Clip* before = nullptr;
+
+    for (auto i : clips) // ordenados por início
+    {
+        const auto& c = song.playlist[(std::size_t) i];
+
+        if (tick < (double) c.start)
+            break;
+
+        if (tick < (double) c.end())
+            return automation.valueAt (tick - (double) c.start + (double) c.offset);
+
+        before = &c;
+    }
+
+    if (before != nullptr)
+        return automation.valueAt ((double) (before->length + before->offset));
+
+    const auto& first = song.playlist[(std::size_t) clips.front()];
+    return automation.valueAt ((double) first.offset);
+}
+} // namespace
+
+void RackRenderer::updateAutomation (const RackState& state, double startTick) noexcept
+{
+    const auto& song = state.song;
+
+    // no modo pattern a Playlist não toca: os valores ficam como estavam
+    if (song.mode != PlayMode::song)
+        return;
+
+    const auto length = (double) std::max<std::int64_t> (1, song.songLength());
+    const auto tick = std::fmod (std::max (0.0, startTick), length);
+
+    for (std::size_t a = 0; a < state.automationClips.size(); ++a)
+        if (! state.automationClips[a].empty())
+            automationValues[a] = automationValueAt (song, song.automations[a], state.automationClips[a], tick);
+
+    for (const auto& b : state.pluginParams)
+    {
+        const auto v = automationValues[(std::size_t) b.automation];
+
+        if (std::isnan (v))
+            continue;
+
+        if (b.channel >= 0)
+        {
+            if (b.channel < (int) state.instruments.size())
+                state.instruments[(std::size_t) b.channel]->setParameter (b.param, v);
+        }
+        else if (b.track < (int) state.effects.size() && b.slot < (int) state.effects[(std::size_t) b.track].size())
+            state.effects[(std::size_t) b.track][(std::size_t) b.slot]->setParameter (b.param, v);
+    }
+}
+
 void RackRenderer::renderSegment (const RackState& state, int offset, int n) noexcept
 {
     const auto& channels = state.song.channels;
     const auto tracks = std::max<int> (1, (int) state.song.mixer.size());
+    const auto automation = state.hasAutomation;
 
     for (std::size_t i = 0; i < state.instruments.size() && i < channels.size(); ++i)
     {
         const auto& c = channels[i];
         const auto track = std::clamp (c.mixerTrack, 0, tracks - 1);
+        const auto volume = automation ? automated (state.channelVolumeAuto[i], c.volume) : c.volume;
+        const auto pan = automation ? automated (state.channelPanAuto[i], (c.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : c.pan;
         float gl = 0.0f, gr = 0.0f;
-        panGains (c.pan, c.volume, gl, gr);
+        panGains (pan, volume, gl, gr);
         state.instruments[i]->render (trackBuffer (track, 0) + offset, trackBuffer (track, 1) + offset, n, gl, gr);
     }
 }
@@ -198,8 +357,23 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
     const auto& effects = state.effects[(std::size_t) track];
 
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
-        if (slots[i].enabled)
-            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, slots[i], state.song.bpm);
+    {
+        if (! slots[i].enabled)
+            continue;
+
+        if (state.hasAutomation && slots[i].kind != EffectKind::plugin)
+        {
+            auto params = slots[i].params; // cópia de 6 floats, sem alocação
+            const auto& autos = state.effectParamAuto[(std::size_t) track][i];
+
+            for (std::size_t p = 0; p < params.size(); ++p)
+                params[p] = automated (autos[p], params[p]);
+
+            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, params, state.song.bpm);
+        }
+        else
+            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, slots[i].params, state.song.bpm);
+    }
 }
 
 void RackRenderer::process (const RackState* state,
@@ -268,10 +442,13 @@ void RackRenderer::process (const RackState* state,
         }
     }
 
-    // Blocos maiores que os buffers do mixer são feitos em pedaços.
-    for (int done = 0; done < numSamples; done += blockCapacity)
+    // Blocos maiores que os buffers do mixer são feitos em pedaços. Com automação, pedaços
+    // pequenos para os valores andarem suavemente.
+    const auto chunk = state->hasAutomation ? std::min (blockCapacity, 128) : blockCapacity;
+
+    for (int done = 0; done < numSamples; done += chunk)
     {
-        const auto n = std::min (blockCapacity, numSamples - done);
+        const auto n = std::min (chunk, numSamples - done);
         processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
         resumeAudio = false;
     }
@@ -282,6 +459,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 {
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
+
+    if (state.hasAutomation)
+        updateAutomation (state, startTick);
 
     for (int t = 0; t < tracks; ++t)
     {
@@ -350,8 +530,11 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
         runEffects (state, t, numSamples);
 
+        const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[(std::size_t) t], track.volume) : track.volume;
+        const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[(std::size_t) t], (track.pan + 1.0f) * 0.5f) * 2.0f - 1.0f
+                                             : track.pan;
         float gl = 0.0f, gr = 0.0f;
-        panGains (track.pan, track.volume / unityFader, gl, gr);
+        panGains (pan, volume / unityFader, gl, gr);
         const auto* l = trackBuffer (t, 0);
         const auto* r = trackBuffer (t, 1);
 
@@ -373,7 +556,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     if (! song.mixer.empty())
     {
         const auto& master = song.mixer[0];
-        panGains (master.pan, master.muted ? 0.0f : master.volume / unityFader, gl, gr);
+        const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[0], master.volume) : master.volume;
+        const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[0], (master.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : master.pan;
+        panGains (pan, master.muted ? 0.0f : volume / unityFader, gl, gr);
     }
 
     for (int i = 0; i < numSamples; ++i)

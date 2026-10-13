@@ -74,6 +74,31 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
 
     return std::nullopt; // efeito de uma versão futura: ignorado
 }
+
+const char* targetKindName (AutomationTargetKind k)
+{
+    switch (k)
+    {
+        case AutomationTargetKind::channelVolume: return "channelVolume";
+        case AutomationTargetKind::channelPan: return "channelPan";
+        case AutomationTargetKind::channelParam: return "channelParam";
+        case AutomationTargetKind::mixerVolume: return "mixerVolume";
+        case AutomationTargetKind::mixerPan: return "mixerPan";
+        case AutomationTargetKind::effectParam: return "effectParam";
+        case AutomationTargetKind::none: break;
+    }
+    return "none";
+}
+
+AutomationTargetKind targetKindFromName (const juce::String& name)
+{
+    for (auto k : { AutomationTargetKind::channelVolume, AutomationTargetKind::channelPan, AutomationTargetKind::channelParam,
+                    AutomationTargetKind::mixerVolume, AutomationTargetKind::mixerPan, AutomationTargetKind::effectParam })
+        if (name == targetKindName (k))
+            return k;
+
+    return AutomationTargetKind::none;
+}
 } // namespace
 
 juce::String toJson (const Song& song)
@@ -134,11 +159,33 @@ juce::String toJson (const Song& song)
 
     root->setProperty ("patterns", patterns);
 
+    juce::Array<juce::var> automations;
+
+    for (const auto& a : song.automations)
+    {
+        auto o = std::make_unique<juce::DynamicObject>();
+        o->setProperty ("name", str (a.name));
+        o->setProperty ("target", juce::Array<juce::var> { targetKindName (a.target.kind), a.target.index, a.target.slot, a.target.param });
+        juce::Array<juce::var> points;
+
+        for (const auto& pt : a.points)
+            points.add (juce::Array<juce::var> { (juce::int64) pt.tick, juce::roundToInt (pt.value * 10000.0f) / 10000.0,
+                                                 juce::roundToInt (pt.tension * 1000.0f) / 1000.0 });
+
+        o->setProperty ("points", points);
+        automations.add (juce::var (o.release()));
+    }
+
+    if (! automations.isEmpty())
+        root->setProperty ("automations", automations);
+
     juce::Array<juce::var> clips;
 
+    // [pattern, trilha, início, duração, offset, tipo (0 pattern, 1 áudio, 2 automação), canal ou automação]
     for (const auto& c : song.playlist)
         clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
-                                            (juce::int64) c.offset, c.kind == ClipKind::audio ? 1 : 0, c.channel });
+                                            (juce::int64) c.offset, (int) c.kind,
+                                            c.kind == ClipKind::automation ? c.automation : c.channel });
 
     root->setProperty ("playlist", clips);
 
@@ -262,6 +309,27 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     if (song.patterns.empty())
         song.patterns.emplace_back().name = "Pattern 1";
 
+    if (auto* automations = root["automations"].getArray())
+        for (const auto& a : *automations)
+        {
+            Automation automation;
+            automation.name = a["name"].toString().toStdString();
+
+            if (const auto& t = a["target"]; t.isArray() && t.size() == 4)
+                automation.target = { targetKindFromName (t[0].toString()), (int) t[1], (int) t[2], (int) t[3] };
+
+            if (auto* points = a["points"].getArray())
+                for (const auto& pt : *points)
+                    if (pt.isArray() && pt.size() >= 2)
+                        automation.points.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) pt[0]),
+                                                       juce::jlimit (0.0f, 1.0f, (float) (double) pt[1]),
+                                                       pt.size() >= 3 ? juce::jlimit (-1.0f, 1.0f, (float) (double) pt[2]) : 0.0f });
+
+            std::stable_sort (automation.points.begin(), automation.points.end(),
+                              [] (const AutomationPoint& x, const AutomationPoint& y) { return x.tick < y.tick; });
+            song.automations.push_back (std::move (automation));
+        }
+
     if (auto* clips = root["playlist"].getArray())
         for (const auto& c : *clips)
         {
@@ -275,7 +343,15 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             clip.length = (juce::int64) c[3];
             clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
 
-            if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
+            if (c.size() >= 7 && (int) c[5] == 2)
+            {
+                clip.kind = ClipKind::automation;
+                clip.automation = (int) c[6];
+
+                if (clip.automation >= 0 && clip.automation < (int) song.automations.size() && clip.length > 0)
+                    song.playlist.push_back (clip);
+            }
+            else if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
             {
                 clip.kind = ClipKind::audio;
                 clip.channel = (int) c[6];

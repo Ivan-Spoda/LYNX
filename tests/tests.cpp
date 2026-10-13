@@ -859,7 +859,7 @@ float runEffectOnSine (lynx::EffectKind kind, const std::function<void (lynx::Ef
     for (int i = 0; i < frames; ++i)
         l[(std::size_t) i] = r[(std::size_t) i] = amp * (float) std::sin (6.283185307 * hz * i / 48000.0);
     for (int i = 0; i < frames; i += 480)
-        fx->process (l.data() + i, r.data() + i, std::min (480, frames - i), slot, 120.0);
+        fx->process (l.data() + i, r.data() + i, std::min (480, frames - i), slot.params, 120.0);
     float peak = 0.0f;
     for (int i = frames / 2; i < frames; ++i) // segunda metade: já estabilizado
     {
@@ -898,7 +898,7 @@ TEST (effects_delay_echoes_on_tempo_and_reverb_has_tail)
     slot.params[4] = 0.0f;        // sem abafar
     std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
     l[0] = r[0] = 1.0f;
-    delay->process (l.data(), r.data(), 48000, slot, 120.0);
+    delay->process (l.data(), r.data(), 48000, slot.params, 120.0);
     CHECK (std::abs (l[24000] - 1.0f) < 1e-4f);
     CHECK (std::abs (l[12000]) < 1e-6f);
 
@@ -909,7 +909,7 @@ TEST (effects_delay_echoes_on_tempo_and_reverb_has_tail)
     std::fill (l.begin(), l.end(), 0.0f);
     std::fill (r.begin(), r.end(), 0.0f);
     l[0] = r[0] = 1.0f;
-    reverb->process (l.data(), r.data(), 48000, rs, 120.0);
+    reverb->process (l.data(), r.data(), 48000, rs.params, 120.0);
     float tail = 0.0f;
     for (int i = 4800; i < 9600; ++i) // entre 100 e 200 ms depois do impulso
         tail = std::max (tail, std::abs (l[(std::size_t) i]));
@@ -1228,6 +1228,65 @@ TEST (recorder_builds_notes_in_pattern_and_song_mode)
     song.playlist = { { 0, 0, 7680, 3840, 960 } };
     CHECK (lynx::patternPositionForTick (song, 7680.0 + 100.0, loop) == 1060);
     CHECK (lynx::patternPositionForTick (song, 100.0, loop) == 100); // fora do clip: como loop
+}
+
+TEST (automation_curve_and_playback)
+{
+    lynx::Automation a;
+    a.points = { { 0, 0.0f }, { 960, 1.0f }, { 1920, 0.5f, 0.0f } };
+    CHECK (a.valueAt (-10.0) == 0.0f && a.valueAt (480.0) == 0.5f && a.valueAt (5000.0) == 0.5f);
+    CHECK (a.length() == 1920);
+    a.points[0].tension = 1.0f; // curva: começa devagar
+    CHECK (a.valueAt (480.0) < 0.2f && a.valueAt (480.0) > 0.0f);
+
+    // Master automatizado: silêncio no primeiro compasso, som no segundo, e o último valor
+    // fica valendo depois do fim do clip de automação
+    auto song = lynx::Song::makeDefault();
+    song.bpm = 120.0;
+    song.mode = lynx::PlayMode::song;
+    const auto bar = (std::int64_t) lynx::ppq * 4;
+    for (int b = 0; b < 3; ++b)
+        song.playlist.push_back ({ 0, 0, bar * b, bar, 0 });
+    lynx::Automation master;
+    master.target = { lynx::AutomationTargetKind::mixerVolume, 0 };
+    master.points = { { 0, 0.0f }, { bar - 1, 0.0f }, { bar, 0.8f } };
+    song.automations.push_back (master);
+    lynx::Clip ac;
+    ac.kind = lynx::ClipKind::automation;
+    ac.automation = 0;
+    ac.track = 1;
+    ac.length = bar + bar / 2;
+    song.playlist.push_back (ac);
+
+    const double sr = 48000.0;
+    auto state = lynx::RackState::build (song, nullptr, sr);
+    CHECK (state->hasAutomation && state->mixerVolumeAuto[0] == 0 && state->automationClips[0].size() == 1);
+
+    lynx::RackRenderer r;
+    r.prepare (sr, 512);
+    std::vector<float> l (512), rr (512);
+    const auto tps = lynx::ticksPerSample (song.bpm, sr);
+    float peakBar1 = 0.0f, peakBar2 = 0.0f, peakBar3 = 0.0f;
+
+    for (double tick = 0.0; tick < (double) (bar * 3); tick += 512 * tps)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+        auto& peak = tick < (double) bar - 512 * tps ? peakBar1 : tick < (double) bar * 2 ? peakBar2 : peakBar3;
+        for (auto v : l)
+            peak = std::max (peak, std::abs (v));
+    }
+
+    CHECK (peakBar1 < 1.0e-6f);
+    CHECK (peakBar2 > 0.05f);
+    CHECK (peakBar3 > 0.05f); // depois do clip: segue no último valor
+
+    // alvo removido: automação some das tabelas
+    song.removeChannel (0);
+    song.automations[0].target = { lynx::AutomationTargetKind::channelVolume, 0 };
+    song.removeChannel (0);
+    CHECK (song.automations[0].target.kind == lynx::AutomationTargetKind::none);
+    song.removeAutomation (0);
+    CHECK (song.automations.empty() && song.playlist.size() == 3);
 }
 
 int main (int argc, char** argv)

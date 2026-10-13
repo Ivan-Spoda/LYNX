@@ -3,6 +3,7 @@
 // Junta Song + instrumentos + scheduler: dado o estado do transporte, gera o
 // áudio estéreo de um bloco com as notas disparadas no sample exato.
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -25,6 +26,26 @@ struct RackState
     std::vector<std::shared_ptr<Instrument>> instruments; // um por canal
     std::vector<std::vector<std::shared_ptr<Effect>>> effects; // [trilha do mixer][slot]
     double sampleRate = 44100.0; // taxa com que os instrumentos novos foram preparados
+
+    // Automação, pré-processada para a thread de áudio só consultar tabelas.
+    // Índices em song.automations, ou -1 = sem automação.
+    static constexpr int maxAutomations = 1024;
+    std::vector<std::vector<int>> automationClips; // por automação: clips na Playlist
+    std::vector<int> channelVolumeAuto, channelPanAuto;
+    std::vector<int> mixerVolumeAuto, mixerPanAuto;
+    std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [trilha][slot][param] (internos)
+
+    struct PluginParamBinding
+    {
+        int automation = 0;
+        int channel = -1;       // instrumento do canal, ou
+        int track = 0, slot = 0; // efeito no slot
+        int param = 0;
+    };
+    std::vector<PluginParamBinding> pluginParams;
+    bool hasAutomation = false;
+
+    void buildAutomationTables();
 
     // Carrega (ou pega do cache) o áudio de um arquivo; nullptr se não conseguir.
     using SampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path)>;
@@ -81,6 +102,8 @@ private:
                        float* left, float* right, MeterBank* meters) noexcept;
     void renderSegment (const RackState& state, int offset, int n) noexcept;
     void runEffects (const RackState& state, int track, int n) noexcept;
+    void updateAutomation (const RackState& state, double startTick) noexcept;
+    float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;
 
     double sampleRate = 44100.0;
@@ -90,6 +113,7 @@ private:
     const RackState* lastState = nullptr;
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
+    std::array<float, RackState::maxAutomations> automationValues {}; // NaN = ainda não avaliada
     int blockCapacity = 0;
 };
 } // namespace lynx

@@ -100,15 +100,15 @@ public:
             b.reset();
     }
 
-    void process (float* l, float* r, int n, const EffectSlot& slot, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
-        if (slot.params != lastParams)
+        if (params != lastParams)
         {
-            lastParams = slot.params;
-            bands[0].shelf (sampleRate, 120.0, eqGainDb (slot.params[0]), false);
-            bands[1].peaking (sampleRate, eqMidHz (slot.params[2]), 0.8, eqGainDb (slot.params[1]));
-            bands[2].shelf (sampleRate, 8000.0, eqGainDb (slot.params[3]), true);
-            output = dbToGain (eqGainDb (slot.params[4]));
+            lastParams = params;
+            bands[0].shelf (sampleRate, 120.0, eqGainDb (params[0]), false);
+            bands[1].peaking (sampleRate, eqMidHz (params[2]), 0.8, eqGainDb (params[1]));
+            bands[2].shelf (sampleRate, 8000.0, eqGainDb (params[3]), true);
+            output = dbToGain (eqGainDb (params[4]));
         }
 
         for (int i = 0; i < n; ++i)
@@ -141,13 +141,13 @@ public:
     void prepare (double sr) noexcept override { sampleRate = sr; reset(); }
     void reset() noexcept override { envelopeDb = 0.0f; }
 
-    void process (float* l, float* r, int n, const EffectSlot& slot, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
-        const auto threshold = compThresholdDb (slot.params[0]);
-        const auto ratio = compRatio (slot.params[1]);
-        const auto attack = (float) std::exp (-1.0 / (compAttackMs (slot.params[2]) * 0.001 * sampleRate));
-        const auto release = (float) std::exp (-1.0 / (compReleaseMs (slot.params[3]) * 0.001 * sampleRate));
-        const auto makeup = dbToGain (compMakeupDb (slot.params[4]));
+        const auto threshold = compThresholdDb (params[0]);
+        const auto ratio = compRatio (params[1]);
+        const auto attack = (float) std::exp (-1.0 / (compAttackMs (params[2]) * 0.001 * sampleRate));
+        const auto release = (float) std::exp (-1.0 / (compReleaseMs (params[3]) * 0.001 * sampleRate));
+        const auto makeup = dbToGain (compMakeupDb (params[4]));
 
         for (int i = 0; i < n; ++i)
         {
@@ -195,15 +195,15 @@ public:
         write = 0;
     }
 
-    void process (float* l, float* r, int n, const EffectSlot& slot, double bpm) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& params, double bpm) noexcept override
     {
-        const auto beats = delayDivisions[(std::size_t) delayIndex (slot.params[0])];
+        const auto beats = delayDivisions[(std::size_t) delayIndex (params[0])];
         const auto seconds = std::min (maxSeconds - 0.01, beats * 60.0 / std::max (bpm, 20.0));
         const auto delaySamples = std::max<std::size_t> (1, (std::size_t) (seconds * sampleRate));
-        const auto feedback = slot.params[1] * 0.95f;
-        const auto mix = slot.params[2];
-        const auto pingPong = slot.params[3] > 0.5f;
-        const auto dampCoeff = 1.0f - slot.params[4] * 0.9f; // 1 = sem filtro no retorno
+        const auto feedback = params[1] * 0.95f;
+        const auto mix = params[2];
+        const auto pingPong = params[3] > 0.5f;
+        const auto dampCoeff = 1.0f - params[4] * 0.9f; // 1 = sem filtro no retorno
         const auto size = buffer[0].size();
 
         for (int i = 0; i < n; ++i)
@@ -301,12 +301,12 @@ public:
             }
     }
 
-    void process (float* l, float* r, int n, const EffectSlot& slot, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
-        const auto feedback = 0.7f + slot.params[0] * 0.28f; // tamanho da sala
-        const auto damping = slot.params[1] * 0.4f;
-        const auto width = slot.params[2];
-        const auto mix = slot.params[3];
+        const auto feedback = 0.7f + params[0] * 0.28f; // tamanho da sala
+        const auto damping = params[1] * 0.4f;
+        const auto width = params[2];
+        const auto mix = params[3];
         const auto wet1 = width / 2.0f + 0.5f;
         const auto wet2 = (1.0f - width) / 2.0f;
         constexpr float inputGain = 0.015f;

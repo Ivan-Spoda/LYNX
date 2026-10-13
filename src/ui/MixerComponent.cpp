@@ -1,5 +1,7 @@
 #include "ui/MixerComponent.h"
 
+#include "ui/AutomationUi.h"
+
 #include "core/Effects.h"
 #include "engine/Text.h"
 #include "ui/PluginWindow.h"
@@ -287,6 +289,14 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
         if (onSelectionChanged)
             onSelectionChanged (t);
+    }
+
+    if (e.mods.isPopupMenu() && (part == Part::pan || part == Part::fader))
+    {
+        juce::PopupMenu menu;
+        addAutomationItem (menu, engine, { part == Part::pan ? AutomationTargetKind::mixerPan : AutomationTargetKind::mixerVolume, t });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        return;
     }
 
     if (e.mods.isPopupMenu())
@@ -647,6 +657,15 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
     dragParam = knobAt (e.getPosition());
 
+    if (dragParam >= 0 && e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        addAutomationItem (menu, engine, { AutomationTargetKind::effectParam, track, selectedSlot, dragParam });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        dragParam = -1;
+        return;
+    }
+
     if (dragParam >= 0)
         dragStart = (*s)[(std::size_t) selectedSlot].params[(std::size_t) dragParam];
 }
@@ -751,25 +770,22 @@ void EffectsPanel::showSlotMenu (int slot)
     juce::PopupMenu menu;
     menu.addSubMenu ("Trocar por", replace);
     menu.addItem ("Mover para cima", slot > 0, false, [this, slot] {
-        engine.editSong ([t = track, slot] (Song& song) {
-            auto& fx = song.mixer[(std::size_t) t].effects;
-            std::swap (fx[(std::size_t) slot], fx[(std::size_t) slot - 1]);
-        });
+        engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;
     });
     menu.addItem ("Mover para baixo", slot < count - 1, false, [this, slot] {
-        engine.editSong ([t = track, slot] (Song& song) {
-            auto& fx = song.mixer[(std::size_t) t].effects;
-            std::swap (fx[(std::size_t) slot], fx[(std::size_t) slot + 1]);
-        });
+        engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot + 1); });
         selectedSlot = slot + 1;
     });
+    if ((*slots())[(std::size_t) slot].kind == EffectKind::plugin)
+    {
+        if (auto* p = dynamic_cast<PluginEffect*> (engine.getEffect (track, slot).get()))
+            addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::effectParam, track, slot, 0 });
+    }
+
     menu.addSeparator();
     menu.addItem ("Remover", [this, slot] {
-        engine.editSong ([t = track, slot] (Song& song) {
-            auto& fx = song.mixer[(std::size_t) t].effects;
-            fx.erase (fx.begin() + slot);
-        });
+        engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
         selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
         repaint();
     });

@@ -124,7 +124,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             continue;
         }
 
-        if (clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
+        if (clip.kind != ClipKind::pattern || clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
             continue;
 
         // folga de um tick para pegar o "off" que cai exatamente no fim do clip

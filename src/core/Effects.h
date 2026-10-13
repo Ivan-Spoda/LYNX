@@ -41,7 +41,9 @@ public:
     virtual void reset() noexcept = 0;
 
     // Processa no lugar. Os parâmetros chegam a cada bloco (podem mudar a qualquer momento).
-    virtual void process (float* left, float* right, int n, const EffectSlot& slot, double bpm) noexcept = 0;
+    virtual void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept = 0;
+    // Parâmetro automatizado de plugin (os internos recebem os parâmetros em process()). 0..1.
+    virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
 };
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind);

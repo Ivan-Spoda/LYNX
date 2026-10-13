@@ -62,12 +62,13 @@ enum class EffectKind : std::uint8_t
 
 constexpr int maxEffectParams = 6;
 constexpr int maxEffectSlots = 10; // como no FL
+using EffectParams = std::array<float, maxEffectParams>;
 
 struct EffectSlot
 {
     EffectKind kind = EffectKind::eq;
     bool enabled = true;
-    std::array<float, maxEffectParams> params {}; // 0..1; o significado depende do efeito
+    EffectParams params {}; // 0..1; o significado depende do efeito
     PluginRef plugin;                             // usado quando kind == plugin
 };
 
@@ -107,7 +108,51 @@ struct Pattern
 enum class ClipKind : std::uint8_t
 {
     pattern,
-    audio
+    audio,
+    automation
+};
+
+// O que um clip de automação controla. Valores sempre 0..1 (como os knobs do modelo).
+enum class AutomationTargetKind : std::uint8_t
+{
+    none,          // alvo removido (o clip fica mudo)
+    channelVolume, // index = canal
+    channelPan,    // index = canal (0..1 -> -1..1)
+    channelParam,  // index = canal com plugin; param = índice do parâmetro do plugin
+    mixerVolume,   // index = trilha do mixer (0 = Master)
+    mixerPan,      // index = trilha
+    effectParam    // index = trilha, slot, param (efeito interno ou plugin)
+};
+
+struct AutomationTarget
+{
+    AutomationTargetKind kind = AutomationTargetKind::none;
+    int index = 0;
+    int slot = 0;
+    int param = 0;
+
+    bool operator== (const AutomationTarget& o) const noexcept
+    {
+        return kind == o.kind && index == o.index && slot == o.slot && param == o.param;
+    }
+};
+
+struct AutomationPoint
+{
+    std::int64_t tick = 0; // a partir do início da automação
+    float value = 0.5f;    // 0..1
+    float tension = 0.0f;  // curva até o próximo ponto: -1..1 (0 = reta)
+};
+
+struct Automation
+{
+    std::string name;
+    AutomationTarget target;
+    std::vector<AutomationPoint> points; // ordenados por tick (mantido por quem edita)
+
+    // Valor em `tick` (antes do primeiro ponto = primeiro valor; depois do último = último).
+    float valueAt (double tick) const noexcept;
+    std::int64_t length() const noexcept; // tick do último ponto (mínimo 1)
 };
 
 // Um bloco na Playlist: um trecho de uma pattern, ou um trecho do áudio de um canal audioClip.
@@ -120,6 +165,7 @@ struct Clip
     std::int64_t offset = 0;  // quanto do começo da pattern/áudio é pulado (ticks)
     ClipKind kind = ClipKind::pattern;
     int channel = -1;         // clips de áudio: canal (audioClip) que tem o sample
+    int automation = -1;      // clips de automação: índice em Song::automations
 
     std::int64_t end() const noexcept { return start + length; }
 };
@@ -145,6 +191,7 @@ struct Song
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
 
     std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
+    std::vector<Automation> automations;
 
     static std::vector<MixerTrack> defaultMixer (int inserts = 16);
     // Primeiro insert que nenhum canal usa (ou o último, se todos estiverem ocupados).
@@ -157,7 +204,18 @@ struct Song
     void removePattern (int index);
 
     // Remove um canal com as notas e clips de áudio dele, e reindexa os demais.
+    // Automações desse canal ficam sem alvo.
     void removeChannel (int index);
+
+    // Troca/remove slots de efeito mantendo as automações apontando para o efeito certo.
+    void swapEffectSlots (int track, int a, int b);
+    void removeEffectSlot (int track, int slot);
+
+    // Remove uma automação e os clips dela.
+    void removeAutomation (int index);
+
+    // Valor atual (do modelo, sem automação) do alvo, 0..1; -1 se o alvo não existir.
+    float targetValue (const AutomationTarget& target) const noexcept;
 
     static Song makeDefault();
 };

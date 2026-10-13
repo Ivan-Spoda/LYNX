@@ -84,6 +84,7 @@ private:
     void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
+    void paintAutomationClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
     const std::vector<float>* waveformFor (const std::string& path);
 
     static constexpr std::size_t waveformBucket = 256; // frames por ponto da forma de onda
