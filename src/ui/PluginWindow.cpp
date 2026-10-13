@@ -62,7 +62,7 @@ class ScanThread final : public juce::ThreadWithProgressWindow
 {
 public:
     ScanThread (AudioEngine& e, std::function<void (int)> done)
-        : juce::ThreadWithProgressWindow (utf8 ("Procurando plugins VST3..."), true, true),
+        : juce::ThreadWithProgressWindow (utf8 ("Procurando plugins (VST3 e CLAP)..."), true, true),
           engine (e),
           onDone (std::move (done))
     {
@@ -134,7 +134,7 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
         PluginRef ref;
         ref.id = type.createIdentifierString().toStdString();
         ref.name = type.name.toStdString();
-        menu.addItem (type.name + " (" + type.manufacturerName + ")", [ref, onChosen] { onChosen (ref); });
+        menu.addItem (type.name + " (" + type.manufacturerName + ")  [" + type.pluginFormatName + "]", [ref, onChosen] { onChosen (ref); });
         ++added;
     }
 
@@ -142,7 +142,7 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
         menu.addItem (utf8 ("(nenhum plugin encontrado; use \"Procurar plugins\")"), false, false, [] {});
 
     menu.addSeparator();
-    menu.addItem (utf8 ("Procurar plugins VST3..."), [&engine] {
+    menu.addItem (utf8 ("Procurar plugins (VST3 e CLAP)..."), [&engine] {
         scanPluginsWithProgress (engine, [] (int found) {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
                                                     juce::String (found) + utf8 (" plugin(s) novo(s) encontrado(s)."));

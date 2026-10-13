@@ -421,7 +421,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
         });
         openPluginWindow (channel);
     });
-    instruments.addSubMenu ("Plugin VST3", plugins);
+    instruments.addSubMenu ("Plugin (VST3/CLAP)", plugins);
 
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
@@ -492,7 +492,7 @@ void ChannelRackComponent::showAddChannelMenu()
         engine.setSelectedChannel (added);
         openPluginWindow (added); // como no FL: o plugin abre ao ser adicionado
     });
-    menu.addSubMenu ("Plugin VST3", plugins);
+    menu.addSubMenu ("Plugin (VST3/CLAP)", plugins);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }

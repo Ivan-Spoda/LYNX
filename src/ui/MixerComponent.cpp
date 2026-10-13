@@ -864,7 +864,7 @@ void EffectsPanel::showAddMenu (int)
         repaint();
     });
     menu.addSeparator();
-    menu.addSubMenu ("Plugin VST3", plugins);
+    menu.addSubMenu ("Plugin (VST3/CLAP)", plugins);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
