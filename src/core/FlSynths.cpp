@@ -104,6 +104,34 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
         offset = detune == -1200 ? 2 : 4; // parcial k em f/m·(k + m − 1): série de f/m
         octaveShift = detune == -1200 ? -1 : -2;
     }
+    // EQ de timbre (REA_rodada24 §2.1/2.2): 6 janelas de Hann de ±1 oitava em log2 da razão, centradas nas harmônicas
+    // 1, 2, 4, 8, 16, 32 (a 1ª vale 1 abaixo e a última acima); ganho da banda k = (3^((p(5+k) + 1024)/1024) − 1)/2
+    double eqGain[6] {};
+    for (int b = 0; b < 6; ++b)
+        eqGain[b] = (std::pow (3.0, (std::clamp (p (5 + b), -1024, 1024) + 1024) / 1024.0) - 1.0) / 2.0;
+    auto timbreEq = [&eqGain] (double ratio) {
+        double sum = 0.0;
+        for (int b = 0; b < 6; ++b)
+        {
+            const auto x = std::log2 (ratio) - b;
+            double w = (std::cos (3.141592653589793 * std::clamp (x, -1.0, 1.0)) + 1.0) / 2.0;
+            if ((b == 0 && x < 0.0) || (b == 5 && x > 0.0))
+                w = 1.0;
+            sum += eqGain[b] * w;
+        }
+        return sum;
+    };
+    // Low Harmonics Protection (§2.4): nas harmônicas 1…4 desfaz a máscara por p_n·w, w = (11^(p1/1024) − 1)/10
+    const auto protection = (std::pow (11.0, std::clamp (p (1), 0, 2048) / 1024.0) - 1.0) / 10.0;
+    static constexpr double protectionCurve[4] { 1.0, 0.0831, 0.000625, 2e-7 };
+    // Subs 3/4 (1,5f e 2,5f) só cabem na série de f/2: com elas (e sem "detune") o espectro desce meia série
+    const auto halfSeries = detune == 0 && (p (3) > 0 || p (4) > 0);
+    if (halfSeries)
+    {
+        stride = 2;
+        offset = 2;
+        octaveShift = -1;
+    }
     for (int k = 1; k <= SynthSettings::spectrumSize; ++k)
     {
         const auto index = offset + (k - 1) * stride; // posição na série do oscilador
@@ -117,7 +145,9 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
         }
         else
             amplitude = colorAmplitude (k), phase = colorPhase (k);
-        amplitude *= maskGain[(k - 1) % 12] * mask + (1.0 - mask);
+        const auto maskFactor = maskGain[(k - 1) % 12] * mask + (1.0 - mask);
+        amplitude *= timbreEq ((double) k);
+        amplitude *= k <= 4 ? maskFactor + (1.0 - maskFactor) * protectionCurve[k - 1] * protection : maskFactor;
         s.spectrum[(std::size_t) index - 1] = (float) amplitude;
         s.spectrumPhase[(std::size_t) index - 1] = (float) phase;
     }
@@ -134,11 +164,19 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
         s.osc[1] = { wave, octaveShift, (float) std::min (100.0, spread), 1.0f / 3.0f, 0, pan };
         s.osc[2] = { wave, octaveShift, (float) -std::min (100.0, spread), 1.0f / 3.0f, 0, -pan };
     }
-    else if (p (2) > 0) // Sub 1: seno uma oitava abaixo com amplitude (p2/1024)·A(1) (serra ±1 = 2/π na fundamental)
+    // Subs (§2.3): Sub 1 = (p2/1024)·A(1)·g₀; Sub 3 = (p3/1024)·A(1,5)·(0,3681g₀ + 0,6319g₁);
+    // Sub 4 = (p4/1024)·A(2,5)·(0,7654g₁ + 0,2346g₂); a máscara não age nelas
+    const auto a1 = color == 11 ? (customAmplitude.empty() ? 0.0 : (double) customAmplitude[0]) : colorAmplitude (1.0);
+    const auto sub1 = std::clamp (p (2), 0, 2048) / 1024.0 * a1 * eqGain[0];
+    if (halfSeries) // série de f/2: Sub 1 = índice 1, Sub 3 = índice 3, Sub 4 = índice 5
     {
-        const auto a1 = color == 11 ? (customAmplitude.empty() ? 0.0 : (double) customAmplitude[0]) : colorAmplitude (1.0);
-        s.osc[2] = { Waveform::sine, -1, 0.0f, (float) std::clamp (std::clamp (p (2), 0, 2048) / 1024.0 * a1 * 2.0 / 3.141592653589793, 0.0, 4.0) };
+        s.spectrum[0] = (float) std::clamp (sub1, 0.0, 64.0);
+        s.spectrum[2] = (float) std::clamp (std::clamp (p (3), 0, 2048) / 1024.0 * colorAmplitude (1.5) * (0.3681 * eqGain[0] + 0.6319 * eqGain[1]), 0.0, 64.0);
+        s.spectrum[4] = (float) std::clamp (std::clamp (p (4), 0, 2048) / 1024.0 * colorAmplitude (2.5) * (0.7654 * eqGain[1] + 0.2346 * eqGain[2]), 0.0, 64.0);
+        s.spectrumPhase[0] = s.spectrumPhase[2] = s.spectrumPhase[4] = 0.0f;
     }
+    else if (voices < 2 && p (2) > 0) // Sub 1: seno uma oitava abaixo (serra ±1 = 2/π na fundamental)
+        s.osc[2] = { Waveform::sine, -1, 0.0f, (float) std::clamp (sub1 * 2.0 / 3.141592653589793, 0.0, 4.0) };
 
     for (auto& o : s.osc)
         transpose (o, std::clamp (p (38), -2400, 2400) / 100.0); // afinação mestre em centésimos

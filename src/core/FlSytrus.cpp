@@ -1234,22 +1234,60 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         }
     }
 
-    // uníssono: cópia desafinada da parte principal no oscilador livre
+    // uníssono (REA_rodada24 §3): desvio da voz k = d_k·s centésimos (s = (41^(p38/256) − 1)·1,875), pan linear
+    // (2k/(n − 1) − 1)·pan, ganho por voz 1 − (3^(1 − 1/n) − 1)/2. O LYNX tem até 3 osciladores: com n ≤ 3 as
+    // vozes são exatas; com mais, as duas pontas e a do meio, com o ganho compensando a energia das que faltam
     if (const auto order = std::clamp (p[34], 1, 9); order >= 2)
     {
-        const auto spread = std::max (5.0, (std::pow (41.0, std::clamp (p[38], 0, 256) / 256.0) - 1.0) * 1.875);
-        const auto pan = (float) (std::clamp (p[37], 0, 256) / 256.0);
-        auto copy = out.osc[(std::size_t) lead];
-        copy.detune = (float) std::clamp (copy.detune + spread, -100.0, 100.0);
-        copy.pan = pan;
-        out.osc[(std::size_t) lead].detune = (float) std::clamp (out.osc[(std::size_t) lead].detune - spread, -100.0, 100.0);
-        out.osc[(std::size_t) lead].pan = -pan;
-        out.osc[2] = copy;
-        if (out.osc[(std::size_t) (1 - lead)].level < 0.05f) // a outra parte calada: três vozes
+        const auto n = order;
+        const auto type = std::clamp (p[35], 0, 4);
+        std::vector<double> d ((std::size_t) n);
+        for (int k = 0; k < n; ++k)
         {
-            out.osc[(std::size_t) (1 - lead)] = out.osc[(std::size_t) lead];
-            out.osc[(std::size_t) (1 - lead)].detune = copy.detune - (float) spread;
-            out.osc[(std::size_t) (1 - lead)].pan = 0.0f;
+            auto base = std::abs (2.0 * k / (n - 1) - 1.0);
+            if (k % 2 == 1)
+                base = -base;
+            if (n % 2 == 1 && 2 * k > n)
+                base = -base;
+            d[(std::size_t) k] = base;
+        }
+        static constexpr double j0[9] { 0.306931, -0.28972, 0.392405, -0.223022, 0.508197, -0.236641, 0.43662, -0.348315, 0.274336 };
+        static constexpr double j1[9] { 0.890472, 1.076426, 0.911577, 1.102536, 1.034126, 1.166861, 0.853971, 1.206273, 1.0 };
+        if (type == 0 || type == 1)
+        {
+            double mean = 0.0;
+            for (int k = 0; k < n; ++k)
+            {
+                d[(std::size_t) k] = type == 0 ? d[(std::size_t) k] + j0[k] / (n - 1) : d[(std::size_t) k] * j1[k];
+                mean += d[(std::size_t) k] / n;
+            }
+            for (auto& v : d)
+                v -= mean;
+        }
+        const auto spread = (std::pow (41.0, std::clamp (p[38], 0, 256) / 256.0) - 1.0) * 1.875;
+        const auto panRaw = std::clamp (p[37], 0, 256);
+        const auto pan = panRaw <= 192 ? panRaw / 192.0 : 1.0 + (panRaw - 192) * 0.046875;
+        const auto voiceGain = 1.0 - (std::pow (3.0, 1.0 - 1.0 / n) - 1.0) / 2.0;
+        const auto free = out.osc[(std::size_t) (1 - lead)].level < 0.05f ? 3 : 2;
+        std::vector<int> picks;
+        if (n <= free)
+            for (int k = 0; k < n; ++k)
+                picks.push_back (k);
+        else if (free == 3)
+            picks = { 0, n / 2, n - 1 };
+        else
+            picks = { 0, n - 1 };
+        const auto energy = std::sqrt ((double) n / (double) picks.size()); // vozes descorrelacionadas
+        const auto source = out.osc[(std::size_t) lead];
+        const int slots[3] { lead, 2, 1 - lead };
+        for (std::size_t i = 0; i < picks.size(); ++i)
+        {
+            const auto k = picks[i];
+            auto voice = source;
+            voice.detune = (float) std::clamp (source.detune + d[(std::size_t) k] * spread, -100.0, 100.0);
+            voice.pan = (float) std::clamp ((2.0 * k / (n - 1) - 1.0) * pan, -1.0, 1.0);
+            voice.level = (float) std::min (4.0, source.level * voiceGain * energy);
+            out.osc[(std::size_t) slots[i]] = voice;
         }
     }
 
