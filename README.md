@@ -21,6 +21,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 </p>
 
 <p align="center">
+  <a href="https://github.com/Ka1-S/LYNX/actions/workflows/tests.yml"><img src="https://github.com/Ka1-S/LYNX/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-ef7b22" alt="C++20">
   <img src="https://img.shields.io/badge/JUCE-8-8a8a8a" alt="JUCE 8">
   <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-24292f" alt="Windows 10 and 11">
