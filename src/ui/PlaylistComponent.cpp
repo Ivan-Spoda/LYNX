@@ -1571,4 +1571,87 @@ void PlaylistComponent::itemDropped (const SourceDetails& details)
         if (tree->getSelectedFile().existsAsFile())
             filesDropped ({ tree->getSelectedFile().getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }
+// ---------------------------------------------------------------------------
+
+PatternPicker::PatternPicker (AudioEngine& e)
+    : engine (e)
+{
+    engine.addChangeListener (this);
+}
+
+PatternPicker::~PatternPicker()
+{
+    engine.removeChangeListener (this);
+}
+
+void PatternPicker::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    repaint();
+}
+
+int PatternPicker::patternAt (int y) const
+{
+    if (y < headerHeight)
+        return -1;
+
+    const auto index = (y - headerHeight) / rowHeight + scroll;
+    return index < (int) engine.getSong().patterns.size() ? index : -1;
+}
+
+void PatternPicker::paint (juce::Graphics& g)
+{
+    const auto& song = engine.getSong();
+    g.fillAll (theme::panel);
+    g.setColour (theme::toolbar);
+    g.fillRect (0, 0, getWidth(), headerHeight);
+    g.setColour (theme::text.withAlpha (0.8f));
+    g.setFont (juce::FontOptions (12.0f));
+    g.drawText ("Patterns", 8, 0, getWidth() - 16, headerHeight, juce::Justification::centredLeft);
+
+    for (int i = scroll; i < (int) song.patterns.size(); ++i)
+    {
+        const auto y = headerHeight + (i - scroll) * rowHeight;
+
+        if (y > getHeight())
+            break;
+
+        const auto r = juce::Rectangle<int> (4, y + 2, getWidth() - 8, rowHeight - 4);
+        const auto colour = PlaylistComponent::patternColour (song, i);
+        const auto current = i == song.currentPattern;
+        g.setColour (current ? colour.withAlpha (0.9f) : colour.withAlpha (0.35f));
+        g.fillRoundedRectangle (r.toFloat(), 3.0f);
+
+        if (current)
+        {
+            g.setColour (juce::Colours::white);
+            g.drawRoundedRectangle (r.toFloat(), 3.0f, 1.2f);
+        }
+
+        g.setColour (current ? juce::Colours::white : theme::text.withAlpha (0.85f));
+        g.drawText (juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()), r.reduced (6, 0), juce::Justification::centredLeft, true);
+    }
+
+    g.setColour (theme::window);
+    g.drawVerticalLine (getWidth() - 1, 0.0f, (float) getHeight());
+}
+
+void PatternPicker::mouseDown (const juce::MouseEvent& e)
+{
+    if (const auto p = patternAt (e.y); p >= 0 && p != engine.getSong().currentPattern)
+        engine.editSong ([p] (Song& s) { s.currentPattern = p; }, false);
+}
+
+void PatternPicker::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (patternAt (e.y) >= 0 && onOpenPattern)
+        onOpenPattern();
+}
+
+void PatternPicker::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    const auto rows = (int) engine.getSong().patterns.size();
+    const auto visible = juce::jmax (1, (getHeight() - headerHeight) / rowHeight);
+    scroll = juce::jlimit (0, juce::jmax (0, rows - visible), scroll - (int) std::round (wheel.deltaY * 6.0f));
+    repaint();
+}
 } // namespace lynx

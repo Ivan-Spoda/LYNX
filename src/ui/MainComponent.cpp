@@ -145,9 +145,10 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.setOutline (0);
     tabs.addTab ("Channel Rack", theme::toolbar, &rackViewport, false);
     tabs.addTab ("Piano Roll", theme::toolbar, &pianoRoll, false);
-    tabs.addTab ("Playlist", theme::toolbar, &playlist, false);
+    tabs.addTab ("Playlist", theme::toolbar, &playlistArea, false);
     tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
+    picker.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
     // arquivos recentes (guardados em %APPDATA%\LYNX)
     recent.setMaxNumberOfItems (12);

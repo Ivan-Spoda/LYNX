@@ -107,6 +107,8 @@ private:
     juce::Viewport rackViewport;
     PianoRollComponent pianoRoll;
     PlaylistComponent playlist;
+    PatternPicker picker { engine };
+    PlaylistArea playlistArea { picker, playlist };
     MixerComponent mixer;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
     BrowserComponent browser;

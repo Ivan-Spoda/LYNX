@@ -130,4 +130,51 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaylistComponent)
 };
+// "Picker" da Playlist (como no FL): lista das patterns com a cor delas; clicar escolhe a
+// pattern que o lápis da Playlist pinta; duplo clique abre no Channel Rack.
+class PatternPicker final : public juce::Component,
+                            private juce::ChangeListener
+{
+public:
+    explicit PatternPicker (AudioEngine& engine);
+    ~PatternPicker() override;
+
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+
+    std::function<void()> onOpenPattern;
+    static constexpr int width = 150;
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    int patternAt (int y) const;
+
+    AudioEngine& engine;
+    int scroll = 0; // em linhas
+    static constexpr int rowHeight = 22, headerHeight = 24;
+};
+
+// A aba da Playlist: o Picker à esquerda e a Playlist (não é dono deles).
+class PlaylistArea final : public juce::Component
+{
+public:
+    PlaylistArea (PatternPicker& p, PlaylistComponent& l) : picker (p), playlist (l)
+    {
+        addAndMakeVisible (picker);
+        addAndMakeVisible (playlist);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        picker.setBounds (area.removeFromLeft (PatternPicker::width));
+        playlist.setBounds (area);
+    }
+
+private:
+    PatternPicker& picker;
+    PlaylistComponent& playlist;
+};
 } // namespace lynx
