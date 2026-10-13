@@ -294,6 +294,11 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         panOMatic (state, slot);
     else if (pluginName == "Fruity Stereo Shaper")
         stereoShaper (state, slot);
+    else if (pluginName == "Fruity Phase Inverter")
+    {
+        slot.params[2] = utilityMatrixValue (-1.0); // inverte os dois lados
+        slot.params[5] = utilityMatrixValue (-1.0);
+    }
 
     return slot;
 }

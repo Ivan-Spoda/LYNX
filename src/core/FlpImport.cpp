@@ -80,6 +80,8 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Flangus", EffectKind::chorus },      { "Fruity Chorus", EffectKind::chorus },      { "Hyper Chorus", EffectKind::chorus },
         { "Vintage Chorus", EffectKind::chorus },      { "Fruity Flanger", EffectKind::chorus },
         { "Fruity Balance", EffectKind::utility },    { "Fruity PanOMatic", EffectKind::utility },  { "Fruity Stereo Shaper", EffectKind::utility },
+        { "Fruity Center", EffectKind::utility },     { "Fruity Phase Inverter", EffectKind::utility },
+        { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
     };
 
@@ -512,7 +514,12 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             ForeignPlugin foreign;
             std::optional<EffectSlot> made;
 
-            if (slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign))
+            const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
+
+            // FL antigo salvava os próprios efeitos Fruity como VST2 dentro do wrapper: vira o efeito interno
+            if (wrapped && foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
+                made = effectFromFl (foreign.name, {}, song.bpm);
+            else if (wrapped)
             {
                 // o app troca pelo plugin instalado; sem ele, o slot sai
                 made = makeEffectSlot (EffectKind::plugin);
