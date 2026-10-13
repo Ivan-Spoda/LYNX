@@ -20,10 +20,10 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Volume, pan e mute por canal; teclado do PC como teclado musical
 - [x] Exportar para WAV (`LYNX.exe --render`)
 - [x] Desfazer/refazer (Ctrl+Z / Ctrl+Y), um passo por gesto do mouse
-- [ ] Velocity no Piano Roll, seleção múltipla, copiar/colar
-- [ ] Solo por canal, renomear/colorir patterns
-- [ ] Entrada MIDI e gravação de notas
-- [ ] Exportar pela interface (hoje só pela linha de comando)
+- [x] Velocity no Piano Roll (faixa embaixo), seleção múltipla, copiar/colar/duplicar, quantizar, snap
+- [x] Solo por canal (clique direito no LED), renomear/colorir/clonar patterns (cores importadas do .flp)
+- [x] Entrada MIDI e gravação de notas (MIDI e teclado do PC)
+- [x] Exportar pela interface: WAV 16/24/32f, FLAC, OGG, com cauda e progresso (Ctrl+R)
 
 ## Fase 3: arranjo
 - [x] Playlist: clips de pattern no tempo, trilhas, modo PAT/SONG, seek pela régua
@@ -32,9 +32,10 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Importar clips de áudio do `.flp` (offsets em tempos ou em ms, detectado por clip)
 - [ ] Streaming do disco para áudios longos (hoje o arquivo inteiro vai para a memória)
 - [ ] Time-stretch/resample de clips de áudio
-- [ ] Loop region, seleção múltipla, copiar/colar clips, clips "únicos"
+- [x] Loop region, seleção múltipla, copiar/colar/duplicar clips, clips "únicos"
 - [ ] Vários arrangements
-- [ ] Automação (clips de automação)
+- [x] Automação: clips na Playlist, editor de pontos com curva; volume/pan, efeitos e parâmetros de plugins
+- [ ] Importar automação do `.flp`
 
 ## Fase 4: mixer e plugins
 - [x] Mixer: Master + até 127 inserts, fader (0,8 = 0 dB), pan, mute, solo, medidores estéreo
