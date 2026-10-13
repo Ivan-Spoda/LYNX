@@ -1,14 +1,13 @@
-# Componentes de terceiros
+# Third-party components
 
-O LYNX é distribuído sob a [GNU AGPL-3.0](LICENSE). Ele usa os componentes abaixo, cada um com a sua
-própria licença:
+LYNX is distributed under the [GNU AGPL-3.0](LICENSE). It uses the components below, each under its own license:
 
-| Componente | Uso | Licença |
+| Component | Used for | License |
 |---|---|---|
-| [JUCE 8](https://juce.com) | interface, áudio, hosting de plugins VST3 | AGPLv3 (ou licença comercial JUCE) |
-| [CLAP](https://github.com/free-audio/clap) (headers em `third_party/clap`) | hosting de plugins CLAP | MIT |
-| [WavPack](https://www.wavpack.com) (decodificador em `third_party/wavpack`) | leitura de samples `.wv` | BSD de 3 cláusulas (`third_party/wavpack/COPYING`) |
-| [VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) (incluído no JUCE) | hosting de plugins VST3 | conforme a licença distribuída com o JUCE |
+| [JUCE 8](https://juce.com) | UI, audio, VST3 plugin hosting | AGPLv3 (or a commercial JUCE license) |
+| [CLAP](https://github.com/free-audio/clap) (headers in `third_party/clap`) | CLAP plugin hosting | MIT |
+| [WavPack](https://www.wavpack.com) (decoder in `third_party/wavpack`) | reading `.wv` samples | 3-clause BSD (`third_party/wavpack/COPYING`) |
+| [VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) (bundled with JUCE) | VST3 plugin hosting | as licensed in the copy shipped with JUCE |
 
-VST é marca registrada da Steinberg Media Technologies GmbH. FL Studio é marca registrada da Image-Line
-Software; o LYNX não tem relação com a Image-Line.
+VST is a registered trademark of Steinberg Media Technologies GmbH. FL Studio is a registered trademark of
+Image-Line Software; LYNX is not affiliated with Image-Line.
