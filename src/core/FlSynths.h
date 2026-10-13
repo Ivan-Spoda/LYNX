@@ -65,9 +65,11 @@ struct LovePhilterMap
 {
     std::vector<std::pair<double, double>> points; // (Δx, y)
 };
+// O modo de combinação não é gravado: é fixo por alvo (REA_rodada18 §4). Pan, corte e ressonância
+// somam (base 0); os demais multiplicam (base 1). O f32 do arquivo é a base.
 struct LovePhilterArticulator
 {
-    bool unipolar = false; // multiplicador (true) ou deslocamento (false)
+    float base = 1.0f;
     float envDepth = 0.0f;
     LovePhilterMap mapX, mapY;
 };
@@ -87,6 +89,9 @@ struct LovePhilterState
     std::array<LovePhilterUnit, 8> units {};
 };
 std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t>& state);
+
+// valor de um mapa X/Y em x (0..1): segmentos retos entre os pontos (a tensão não é aplicada)
+double lovePhilterMapAt (const LovePhilterMap& map, double x) noexcept;
 
 // Valor (0..1) do articulador `sinceOn` depois do disparo; `sinceRelease` < 0 = tecla ainda presa.
 // Tempos na unidade do articulador (segundos, ou tempos com `tempo`).
@@ -138,5 +143,7 @@ bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& sy
 // (os bumbos/caixas/chimbais usam os instrumentos de bateria do LYNX).
 std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& state);
 SynthSettings drumToneForName (const std::string& patchName);
+// Drumpad: os 38 parâmetros do estado (2 Mallet Amplitude, 29 Pitch, …; REA_rodada18 §12)
+std::optional<std::array<float, 38>> drumpadParams (const std::vector<std::uint8_t>& state);
 std::vector<std::string> drumSampleCandidates (const std::string& soundName);
 } // namespace lynx

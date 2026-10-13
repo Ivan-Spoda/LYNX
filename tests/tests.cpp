@@ -4354,3 +4354,112 @@ int main (int argc, char** argv)
     std::printf ("\n%d verificações, %d falhas\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
+
+TEST (synth_cutoff_keytrack)
+{
+    // o corte acompanha a nota a partir da tecla 48 (130,81 Hz), como o "Key to filter frequency" do Harmor
+    auto rms = [] (float keyTrack, int key) {
+        lynx::SynthSettings s;
+        s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+        s.cutoff = 130.81f;
+        s.keyTrack = keyTrack;
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c, 120.0);
+        inst->noteOn (key, 1.0f);
+        std::vector<float> l (24000), r (24000);
+        inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+        double e = 0.0;
+        for (int i = 4800; i < 24000; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        return std::sqrt (e / 19200.0);
+    };
+    const auto fixed = rms (0.0f, 72), tracked = rms (1.0f, 72);
+    CHECK (tracked > 4.0 * fixed);            // 2 oitavas acima: sem keytrack o passa-baixas corta
+    CHECK (std::abs (rms (1.0f, 48) - rms (0.0f, 48)) < 0.05 * rms (0.0f, 48)); // na tecla de referência não muda
+}
+
+namespace
+{
+std::vector<float> renderSynthNote (const lynx::SynthSettings& s, int key, int frames)
+{
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.synth = s;
+    inst->configure (c, 120.0);
+    inst->noteOn (key, 1.0f);
+    std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
+    inst->render (l.data(), r.data(), frames, 1.0f, 1.0f);
+    return l;
+}
+
+double goertzel (const std::vector<float>& x, double f, int from, int to)
+{
+    const auto w = 2.0 * 3.141592653589793 * f / 48000.0, k = 2.0 * std::cos (w);
+    double s1 = 0.0, s2 = 0.0;
+    for (int i = from; i < to; ++i)
+    {
+        const auto s0 = x[(std::size_t) i] + k * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - k * s1 * s2;
+}
+} // namespace
+
+TEST (synth_pitch_sweep_ring_and_bands)
+{
+    lynx::SynthSettings sine;
+    sine.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    sine.cutoff = 20000.0f;
+
+    // varredura: começa em f·(1 + sweep) e volta a f (constante de tempo de s = 10 ms; s⁴ cai 4× mais rápido)
+    auto sweep = sine;
+    sweep.sweep = 1.0f;
+    sweep.sweepTime = 0.01f;
+    const auto a = renderSynthNote (sweep, 69, 24000);
+    auto crossings = [] (const std::vector<float>& x, int to) {
+        int n = 0;
+        for (int i = 1; i < to; ++i)
+            n += (x[(std::size_t) i - 1] < 0.0f) != (x[(std::size_t) i] < 0.0f);
+        return n;
+    };
+    CHECK (crossings (a, 480) > 1.3 * crossings (renderSynthNote (sine, 69, 480), 480)); // 10 ms: bem mais agudo
+    CHECK (goertzel (a, 440.0, 12000, 24000) > 100.0 * goertzel (a, 880.0, 12000, 24000));
+
+    // anel com |a| = 1: portadora 440 × modulador 110 -> só 330 e 550, sem 440
+    auto ring = sine;
+    ring.am = ring.ring = true;
+    ring.osc[2] = { lynx::Waveform::sine, -2, 0.0f, 1.0f };
+    const auto b = renderSynthNote (ring, 69, 24000);
+    CHECK (goertzel (b, 330.0, 4800, 24000) > 100.0 * goertzel (b, 440.0, 4800, 24000));
+    CHECK (goertzel (b, 550.0, 4800, 24000) > 100.0 * goertzel (b, 440.0, 4800, 24000));
+
+    // 3 bandas: calar o agudo derruba uma nota de 4 kHz e quase não mexe numa de 80 Hz
+    auto bands = sine;
+    bands.bandGain = { 1.0f, 1.0f, 0.0f };
+    auto rms = [] (const std::vector<float>& x) {
+        double e = 0.0;
+        for (std::size_t i = 4800; i < x.size(); ++i)
+            e += (double) x[i] * x[i];
+        return std::sqrt (e / (double) (x.size() - 4800));
+    };
+    CHECK (rms (renderSynthNote (bands, 107, 24000)) < 0.3 * rms (renderSynthNote (sine, 107, 24000)));
+    CHECK (rms (renderSynthNote (bands, 28, 24000)) > 0.85 * rms (renderSynthNote (sine, 28, 24000)));
+}
+
+TEST (love_philter_map_evaluation)
+{
+    lynx::LovePhilterMap line { { { 0.0, 0.0 }, { 1.0, 1.0 } } };
+    CHECK (std::abs (lynx::lovePhilterMapAt (line, 0.5) - 0.5) < 1e-9);
+    CHECK (std::abs (lynx::lovePhilterMapAt (line, 1.0) - 1.0) < 1e-9);
+    // degraus (Δx = 0): 1 até 0,4375, rampa até 0 em 0,5, depois 0
+    lynx::LovePhilterMap steps { { { 0.0, 1.0 }, { 0.4375, 1.0 }, { 0.0625, 0.0 }, { 0.5, 0.0 } } };
+    CHECK (lynx::lovePhilterMapAt (steps, 0.27) == 1.0);
+    CHECK (lynx::lovePhilterMapAt (steps, 0.75) == 0.0);
+    CHECK (std::abs (lynx::lovePhilterMapAt (steps, 0.46875) - 0.5) < 1e-9);
+    CHECK (lynx::lovePhilterMapAt ({}, 0.3) == 1.0);
+}

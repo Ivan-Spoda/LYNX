@@ -738,8 +738,9 @@ bool transporter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Effector: o algoritmo escolhido vira o efeito interno parecido (escalas de X/Y aproximadas)
-std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
+// Effector: o algoritmo escolhido vira o efeito interno parecido. Leis de X/Y do Delay, do Filter e do
+// Reverb: REA_rodada18 §3; as demais continuam aproximadas.
+std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double bpm)
 {
     // "SSLF" + tamanho + "10XF" + 64 floats reservados + os 12 parâmetros
     if (d.size() < 12 + 76 * 4 || std::memcmp (d.data(), "SSLF", 4) != 0)
@@ -769,21 +770,46 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
             slot->params[3] = y;
             slot->params[2] = 1.0f;
             break;
-        case 4: // Filter
+        case 4: // Filter: s = 2(0,8X + 0,1); s ≤ 1 passa-baixas (polo s³), s > 1 passa-altas (polo 0,5(s − 1)³)
+        {
             slot = makeEffectSlot (EffectKind::filter);
-            slot->params[1] = x;
+            const auto sx = 2.0 * (0.8 * x + 0.1);
+            const auto hp = sx > 1.0;
+            const auto c = std::clamp (hp ? 0.5 * std::pow (sx - 1.0, 3.0) : std::pow (sx, 3.0), 1e-6, 0.999);
+            // corte de um polo com esse coeficiente a 44,1 kHz (o da cascata inteira não foi tabelado)
+            const auto hz = std::clamp (-44100.0 * std::log (1.0 - c) / (2.0 * 3.141592653589793), 20.0, 20000.0);
+            slot->params[0] = hp ? 0.5f : 0.0f;
+            slot->params[1] = (float) (std::log (hz / 20.0) / std::log (1000.0)); // filterHz: 20…20 000 em log
             slot->params[2] = y;
             break;
-        case 5: // Delay
+        }
+        case 5: // Delay: tempo = período do Mod Rate, realimentação e nível do eco X², seco + w·eco
+        {
             slot = makeEffectSlot (EffectKind::delay);
-            slot->params[0] = x;
-            slot->params[1] = y * 0.9f;
-            slot->params[2] = 0.5f;
-            break;
-        case 6: // Reverb
+            static constexpr double rates[] { 0.125, 0.25, 0.375, 0.5, 0.75, 1.0, 2.0, 4.0, 8.0 };
+            auto beats = rates[std::clamp ((int) (p[5] * 8.0f + 0.5f), 0, 8)];
+            while (beats * 60.0 / std::max (bpm, 20.0) > 1.5)
+                beats *= 0.5;
+            // divisão mais próxima do delay do LYNX (1/16 … 1 compasso)
+            static constexpr double divisions[] { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
+            int best = 0;
+            for (int k = 1; k < 8; ++k)
+                if (std::abs (std::log (divisions[k] / beats)) < std::abs (std::log (divisions[best] / beats)))
+                    best = k;
+            slot->params[0] = ((float) best + 0.5f) / 8.0f;
+            slot->params[1] = std::min (1.0f, x * x / 0.95f);
+            slot->params[2] = p[2] * x * x;
+            slot->params[3] = 0.0f;
+            // Y < 0,5 escurece o eco (passa-baixas de 1 polo 0,99·2Y + 0,01); o passa-altas de Y > 0,5 não existe aqui
+            slot->params[4] = y < 0.5f ? std::clamp ((1.0f - (0.99f * 2.0f * y + 0.01f)) / 0.9f, 0.0f, 1.0f) : 0.0f;
+            slot->mix = 1.0f;
+            slot->enabled = p[1] == 0.0f;
+            return slot;
+        }
+        case 6: // Reverb: decaimento cresce com X³; Y = abafamento dos agudos (Y²)
             slot = makeEffectSlot (EffectKind::reverb);
-            slot->params[0] = x;
-            slot->params[1] = y;
+            slot->params[0] = x * x * x;
+            slot->params[1] = y * y;
             slot->params[3] = 1.0f;
             slot->params[4] = 0.0f; // só o molhado: o dry/wet do slot faz a mistura
             break;
@@ -799,7 +825,7 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
     }
 
     slot->mix = p[2];
-    slot->enabled = p[1] < 0.5f;
+    slot->enabled = p[1] == 0.0f; // bypass = qualquer valor ≠ 0
     return slot;
 }
 
@@ -808,7 +834,7 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (pluginName == "Effector")
-        return effector (state);
+        return effector (state, bpm);
 
     const auto kind = effectForFlPlugin (pluginName);
 
@@ -1215,6 +1241,17 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             active.push_back (u);
 
     LovePhilterConversion out;
+    // articulador de volume (multiplicativo, REA_rodada17 §15.3 + rodada18 §4): base × mapaX(x) × mapaY(y);
+    // envelope/LFO desligados são neutros (os ligados ficam de fora)
+    const auto modX = std::clamp (state->modX, 0, 1024) / 1024.0, modY = std::clamp (state->modY, 0, 1024) / 1024.0;
+    auto volumeFactor = [] (const LovePhilterUnit& unit, double x, double y) {
+        const auto& a = unit.articulators[1];
+        const auto base = std::isfinite (a.base) ? std::clamp ((double) a.base, 0.0, 4.0) : 1.0;
+        return std::max (0.0, base * lovePhilterMapAt (a.mapX, x) * lovePhilterMapAt (a.mapY, y));
+    };
+    auto mapsNeutral = [] (const LovePhilterMap& m) {
+        return std::all_of (m.points.begin(), m.points.end(), [] (const auto& pt) { return std::abs (pt.second - 1.0) < 1e-6; });
+    };
     for (const auto u : active)
         if (u + 1 < 8 && state->units[(std::size_t) u + 1].enabled && state->units[(std::size_t) u].params[11] != 0)
         {
@@ -1229,6 +1266,13 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             out.notes.push_back ("Love Philter: filtro tipo " + std::to_string (unit.type) + " sem equivalente");
         const auto gain = scurve11 (std::clamp (unit.params[9], 0, 160) / 128.0) * master * std::abs (scurve11 (std::clamp (unit.params[10], -160, 160) / 128.0));
         std::vector<EffectSlot> chain { philterSlot (band, gain) };
+        const auto& vol = unit.articulators[1];
+        if (! mapsNeutral (vol.mapX) || ! mapsNeutral (vol.mapY) || std::abs (vol.base - 1.0f) > 1e-6f)
+        {
+            auto utility = makeEffectSlot (EffectKind::utility); // volume controlado por Mod X/Y
+            utility.params[0] = utilityGainValue (volumeFactor (unit, modX, modY));
+            chain.push_back (utility);
+        }
         if (const auto pan = std::clamp (unit.params[8], -128, 128) / 128.0; std::abs (pan) > 1e-3)
         {
             auto utility = makeEffectSlot (EffectKind::utility);
@@ -1251,7 +1295,13 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         const auto& unit = state->units[(std::size_t) u];
         const auto base = 8 + 44 * u;
         const auto masterGain = master;
-        out.paramMap = [unit, base, masterGain] (int k) -> std::optional<std::tuple<int, int, std::function<float (float)>>> {
+        // Mod X (k = 6) / Mod Y (k = 7) movem o utilitário de volume, se houver
+        const auto modSlot = out.slots.size() >= 2 && out.slots[1].kind == EffectKind::utility && out.slots[1].params[1] == 0.5f ? 1 : -1;
+        out.paramMap = [unit, base, masterGain, modSlot, modX, modY, volumeFactor] (int k) -> std::optional<std::tuple<int, int, std::function<float (float)>>> {
+            if ((k == 6 || k == 7) && modSlot >= 0)
+                return std::make_tuple (modSlot, 0, std::function<float (float)> ([unit, k, modX, modY, volumeFactor] (float v) {
+                                            return utilityGainValue (k == 6 ? volumeFactor (unit, v, modY) : volumeFactor (unit, modX, v));
+                                        }));
             if (k == base + 1) // CUT: c = valor
                 return std::make_tuple (0, peq::param (0, 1), std::function<float (float)> ([unit] (float v) {
                                             const auto b = philterBand (unit, v, std::clamp (unit.params[2], 0, 256) / 256.0);

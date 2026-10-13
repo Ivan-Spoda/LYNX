@@ -548,7 +548,8 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         }
     }
 
-    // RM forte na portadora principal: AM do LYNX com o modulador no osc 3
+    // RM forte na portadora principal: anel com o modulador no osc 3, portadora × (1 − |a| + |a|·mod)
+    // (REA_rodada18 §2; o sinal de a inverte a fase do modulador e não é reproduzido)
     if (carriers.size() < 3)
     {
         const auto i = carriers[0];
@@ -556,6 +557,7 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
             if (j != i && std::abs (curve (s.cell (1, i, j))) >= 0.2)
             {
                 out.am = true;
+                out.ring = true;
                 out.osc[2] = { Waveform::sine, 0, 0.0f, (float) std::min (1.0, std::abs (curve (s.cell (1, i, j)))) };
                 setPitch (out.osc[2], opSemitones (s.units[(std::size_t) j]) + masterPitch);
                 break;
@@ -782,6 +784,15 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
 // Harmor (REA_rodada11 §4): aditivo de 2 partes; cada parte vira um oscilador serra, com o filtro 1
 // (ou o 2), o envelope de volume, o envelope do filtro e o uníssono. Imagem, blur, prism,
 // harmonizador, phaser e FX ficam de fora.
+namespace
+{
+// curva de volume do Harmor (REA_rodada18 §1.3): exatamente 1 em x = 1; senão (3^x − 1)/2
+double harmorGain (double x)
+{
+    return x == 1.0 ? 1.0 : (std::pow (3.0, x) - 1.0) / 2.0;
+}
+} // namespace
+
 bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
     if (state.size() < 12)
@@ -866,7 +877,9 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         osc.detune = 0.0f;
         setPitch (osc, partSemis[k]);
         const auto mix = k == 0 ? 1.0 - abMix : abMix;
-        osc.level = (float) std::clamp (std::abs (p[11]) / 1000.0 * mix, 0.0, 1.0); // A&B mix = crossfade
+        // volume da parte (REA_rodada18 §1.3): g(x) = (3^x − 1)/2, x = |p11|/1000 (1000 → 1,0; 2000 → 4,0)
+        // × p12 "Frequency domain envelope volume" na mesma curva (multiplica o nível do articulador de volume)
+        osc.level = (float) std::clamp (harmorGain (std::abs (p[11]) / 1000.0) * harmorGain (std::clamp (p[12], 0, 2000) / 1000.0) * mix, 0.0, 1.0); // A&B mix = crossfade
     }
     if (out.osc[0].level + out.osc[1].level < 0.01f)
         out.osc[0].level = 1.0f;
@@ -874,7 +887,9 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     const auto lead = out.osc[0].level >= out.osc[1].level ? 0 : 1;
     const auto& main = parts[lead];
 
-    // envelope de volume (articulador 1); desligado = portão com release curto
+    // envelope de volume (articulador 1). Desligado, o FL não aplica envelope nenhum (nível constante,
+    // REA_rodada18 §1.1); o A 2 ms / R 0,1 s abaixo é só o declick do LYNX. Ligado, o nível usado é o
+    // quadrado da saída do articulador: sustain S² (o ataque/decay mantêm os tempos).
     out.attack = 0.002f;
     out.decay = 0.0f;
     out.sustain = 1.0f;
@@ -884,11 +899,15 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         const auto adsr = adsrOf (main.art[1].env, main.art[1].knobs, 1.0);
         out.attack = (float) adsr.a;
         out.decay = (float) adsr.d;
-        out.sustain = (float) adsr.s;
+        out.sustain = (float) (adsr.s * adsr.s);
         out.release = (float) adsr.r;
     }
 
-    // filtro 1 (ou o 2 se o 1 estiver aberto): escala de corte do Harmless
+    // filtro 1 (ou o 2 se o 1 estiver aberto). REA_rodada18 §1.2/§1.4: o knob é linear em log2(Hz) entre
+    // 73,416 Hz e 17 739,7 Hz para uma nota de 130,81 Hz (tecla 48) e acompanha o teclado com
+    // KT = p55/1000 (p67 no filtro 2). Tipos 0…18 = combo sem separadores; só os passa-baixas/faixa/altas
+    // e rejeita-faixa têm equivalente. A ressonância e o envelope do filtro não têm escala confirmada:
+    // ficam de fora (relatado como aproximação no import).
     const auto& p = main.p;
     int which = p[52] < 8192 ? 0 : p[64] < 8192 ? 1 : -1;
     out.cutoff = 20000.0f;
@@ -898,39 +917,19 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         int lynxType = -1;
         switch (type)
         {
-            case 0: case 4: case 13: lynxType = 0; break;
-            case 1: case 16: lynxType = 1; break;
-            case 2: lynxType = 3; break;
-            case 3: lynxType = 2; break;
-            default: lynxType = type >= 5 && type <= 12 ? 0 : -1; break;
+            case 0: case 4: case 8: case 9: case 10: case 11: case 12: case 13: lynxType = 0; break;
+            case 1: case 5: case 16: lynxType = 1; break;
+            case 2: case 6: lynxType = 3; break;
+            case 3: case 7: lynxType = 2; break;
+            default: break;
         }
         if (lynxType >= 0)
         {
             const auto freq = std::clamp (which == 0 ? p[52] : p[64], 0, 8192);
-            const auto base = 73.4 * std::pow (2.0, 7.855 * freq / 8192.0);
+            const auto lo = std::log2 (73.416), hi = std::log2 (17739.7);
             out.filterType = lynxType;
-            out.cutoff = (float) std::clamp (base, 20.0, 20000.0);
-            out.resonance = (float) std::clamp (0.9 * std::clamp (which == 0 ? p[57] : p[69], 0, 1000) / 1000.0, 0.0, 0.95);
-
-            // envelope da frequência (articulador 4/5) × "env amount" (±1000 = ±7,9 oitavas)
-            const auto& art = main.art.empty() ? Articulator {} : main.art[(std::size_t) (4 + which)];
-            const auto amount = std::clamp (which == 0 ? p[56] : p[68], -1000, 1000) / 1000.0 * 7.9;
-            if (! main.art.empty() && art.env.on && ! art.env.points.empty() && std::abs (amount) > 0.01)
-            {
-                const auto adsr = adsrOf (art.env, art.knobs, 1.0);
-                const auto startLevel = art.env.points.front().second;
-                double peak = startLevel;
-                for (const auto& pt : art.env.points)
-                    peak = std::max (peak, pt.second);
-                const auto susLevel = adsr.s * peak;
-                const auto low = std::min (startLevel, susLevel);
-                // o corte do knob é o nível 0,5 do envelope (bipolar, como no Sytrus) [HIP]
-                out.cutoff = (float) std::clamp (base * std::exp2 ((low - 0.5) * amount), 20.0, 20000.0);
-                const auto span = (peak - low) * amount;
-                if (std::abs (span) > 0.05)
-                    out.filterEnv = { (float) std::clamp (span, -10.0, 10.0), (float) adsr.a, 0.0f, (float) adsr.d,
-                                      (float) std::clamp ((susLevel - low) / std::max (1e-6, peak - low), 0.0, 1.0), (float) adsr.r };
-            }
+            out.cutoff = (float) std::clamp (std::exp2 (lo + freq / 8192.0 * (hi - lo)), 20.0, 20000.0);
+            out.keyTrack = (float) std::clamp ((which == 0 ? p[55] : p[67]) / 1000.0, -2.0, 2.0);
         }
     }
 
@@ -955,7 +954,8 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
 
     out.porta = g[5] != 0;
     out.mono = g[4] != 0;
-    gain = (float) std::clamp ((mask & 4) != 0 ? std::clamp (g[11], 0, 2000) / 1000.0 : 1.0, 0.0, 2.0);
+    // volume principal (global 11) na mesma curva do volume da parte (REA_rodada18 §1.3)
+    gain = (float) std::clamp ((mask & 4) != 0 ? harmorGain (std::clamp (g[11], 0, 2000) / 1000.0) : 1.0, 0.0, 4.0);
     if (gain <= 0.0f)
         gain = 1.0f;
     synth = out;
@@ -1056,6 +1056,23 @@ float controllerValue (const ControllerArticulator& a, double sinceOn, double si
     const auto v = a.bipolar ? a.base + (env - 0.5) * a.envLevel : a.base + env * a.envLevel;
     return (float) std::clamp (v, 0.0, 1.0);
 }
+double lovePhilterMapAt (const LovePhilterMap& map, double x) noexcept
+{
+    if (map.points.empty())
+        return 1.0;
+    double t = 0.0, prevT = 0.0, prevY = map.points.front().second;
+    for (std::size_t i = 0; i < map.points.size(); ++i)
+    {
+        t += map.points[i].first;
+        const auto y = map.points[i].second;
+        if (x < t)
+            return i == 0 ? y : prevY + (y - prevY) * (x - prevT) / std::max (1e-12, t - prevT);
+        prevT = t;
+        prevY = y;
+    }
+    return prevY;
+}
+
 std::optional<KeyboardControllerData> parseKeyboardController (const std::vector<std::uint8_t>& d)
 {
     if (d.size() < 553)
@@ -1143,7 +1160,7 @@ std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t
         for (auto& a : unit.articulators)
         {
             r.i32(); // versão
-            a.unipolar = r.get<float>() > 0.5f;
+            a.base = r.get<float>();
             a.envDepth = r.get<float>();
             r.get<float>(); // profundidade do LFO
             for (int pattern = 0; pattern < 10; ++pattern)

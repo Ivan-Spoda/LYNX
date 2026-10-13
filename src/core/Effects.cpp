@@ -1244,7 +1244,7 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
-        const auto gain = std::pow (10.0f, utilityGainDb (p[0]) / 20.0f);
+        const auto gain = p[0] <= 0.0f ? 0.0f : std::pow (10.0f, utilityGainDb (p[0]) / 20.0f); // no fundo = mudo
         const auto pan = std::clamp (p[1] * 2.0f - 1.0f, -1.0f, 1.0f);
         const auto gl = gain * (pan > 0.0f ? 1.0f - pan : 1.0f); // balanço: abaixa o lado oposto
         const auto gr = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
@@ -1501,7 +1501,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::utility:
             if (param == 0)
+            {
+                if (v <= 0.0f)
+                    return "mudo";
                 std::snprintf (text, sizeof (text), "%+.1f dB", utilityGainDb (v));
+            }
             else if (param == 1)
             {
                 const auto pan = v * 2.0f - 1.0f;

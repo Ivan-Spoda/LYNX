@@ -117,19 +117,28 @@ Atualizado em 2026-10-13.
 - **Compasso** da música (menu da pattern), importado do `.flp`.
 
 ## Confirmado x aproximado (import do FL)
-Tudo o que o import faz com plugins do FL vem dos documentos `docs/analise/REA_rodada*.md`. A rodada 17
-verificou as hipóteses (decompilação + manual oficial) e o código foi corrigido. O que **ainda não tem
-confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
-- Sakura (escalas do ADSR, Hi-Cut, decay da corda): aproximação pelo nome dos controles.
-- Harmor: escala de frequência dos filtros (herdada do Harmless) e o comportamento com o envelope de
-  volume desligado (o LYNX usa portão com release curto).
-- Sytrus: unidade da profundidade do FM (o LYNX usa 4·g ciclos).
-- Toxic Biohazard: sem FM e sem filtro (índice e corte não confirmados); BassDrum: sem a queda de afinação e
-  o clique; Kepler: sem LFO e chorus (profundidades/taxas não confirmadas).
-- BooBass, Drumpad, Effector (X/Y), Squeeze, Vintage Phaser, GMS (FM): aproximações; a rodada 18 está
-  verificando.
-- Love Philter: tipos BP/notch (largura), passa-tudo e Mango não são aplicados; o Mod Y -> volume
-  (sidechain) espera a confirmação do modo do articulador.
+Tudo o que o import faz com plugins do FL vem dos documentos `docs/analise/REA_rodada*.md`. As rodadas 17 e
+18 verificaram as hipóteses (decompilação + manual oficial) e o código foi corrigido. Aplicado da rodada 18:
+Harmor (corte em log2 Hz 73,4 Hz…17,7 kHz com keytrack a partir de 130,81 Hz, tipos 0…18, volume
+`(3^x − 1)/2`, nível²), Sytrus (FM 4·g ciclos confirmada; RM em anel `1 − |a| + a·mod`), Effector (Delay com
+tempo do Mod Rate e realimentação X², Filter LP/HP, Reverb com abafamento Y²), Love Philter (base do arquivo,
+modo fixo por alvo; Mod X/Y → volume, inclusive automação/links de Mod X/Y), Toxic (FM 2·célula, sentido da
+matriz lido no código), BassDrum (Peak `1 + 100x³·s⁴`), Sakura (ADSR, Tune, Mix), BooBass (EQ de 3 bandas),
+Drumpad (Pitch e Mallet Amplitude).
+
+O que **ainda não tem confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
+- Harmor: ressonância e envelope do filtro (faixa do envelope não confirmada: ficam de fora); nível depois do
+  note-off com o envelope de volume desligado (o LYNX usa um release curto de declick); imagem/blur/prism/FX.
+- Sakura: as cordas físicas viram serra + triângulo; decaimento da corda calculado na tecla 60; Hi-Cut fora.
+- BooBass: a fonte é uma amostra interna (não está no projeto): o LYNX usa uma serra uma oitava abaixo.
+- Drumpad: o modelo físico (malha) não é reproduzido; timbre pelo nome do patch.
+- Toxic: filtro aberto (o índice do modo do filtro não foi localizado); ataque do envelope do modulador fora.
+- Kepler: profundidade do LFO e chorus (o synth do LYNX não tem chorus).
+- Effector: Distort/Lo-fi/Flanger/Phaser/Stereo continuam aproximados; corte em Hz do Filter estimado por um
+  polo a 44,1 kHz; Delay com Y > 0,5 (passa-altas no eco) fora.
+- Love Philter: tipos BP/notch (largura), passa-tudo e Mango; envelopes/LFOs ligados; Mod X com várias
+  unidades só no valor fixo.
+- Squeeze, Vintage Phaser: aproximações.
 - FLEX: os pacotes são protegidos; o LYNX não os abre (patch do synth pelo nome do preset).
 
 ## Funcionando e verificado

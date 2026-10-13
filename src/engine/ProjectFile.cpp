@@ -373,6 +373,17 @@ juce::String toJson (const Song& song)
                 synth->setProperty ("portaTime", c.synth.portaBeats);
             if (c.synth.am)
                 synth->setProperty ("am", true);
+            if (c.synth.ring)
+                synth->setProperty ("ring", true);
+            if (c.synth.keyTrack != 0.0f)
+                synth->setProperty ("keyTrack", c.synth.keyTrack);
+            if (c.synth.bandGain != std::array<float, 3> { 1.0f, 1.0f, 1.0f })
+                synth->setProperty ("bands", juce::String (c.synth.bandGain[0]) + " " + juce::String (c.synth.bandGain[1]) + " " + juce::String (c.synth.bandGain[2]));
+            if (c.synth.sweep > 0.0f)
+            {
+                synth->setProperty ("sweep", c.synth.sweep);
+                synth->setProperty ("sweepTime", c.synth.sweepTime);
+            }
             if (c.synth.fm > 0.0f)
                 synth->setProperty ("fm", juce::Array<juce::var> { c.synth.fm, c.synth.fmDecay, c.synth.fmSustain });
 
@@ -722,6 +733,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.synth.porta = (bool) s.getProperty ("porta", false);
                 def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
                 def.synth.am = (bool) s.getProperty ("am", false);
+                def.synth.ring = (bool) s.getProperty ("ring", false);
+                def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
+                if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)
+                    for (int b = 0; b < 3; ++b)
+                        def.synth.bandGain[(std::size_t) b] = juce::jlimit (0.0f, 4.0f, bands[b].getFloatValue());
+                def.synth.sweep = juce::jlimit (0.0f, 200.0f, (float) (double) s.getProperty ("sweep", 0.0));
+                def.synth.sweepTime = juce::jlimit (0.0005f, 30.0f, (float) (double) s.getProperty ("sweepTime", 0.1));
                 if (const auto* fm = s.getProperty ("fm", {}).getArray(); fm != nullptr && fm->size() >= 3)
                 {
                     def.synth.fm = juce::jlimit (0.0f, 16.0f, (float) (double) (*fm)[0]);

@@ -386,6 +386,8 @@ struct SynthVoice
     SvfCoefficients filter; // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     float fmLevel = 1.0f;   // envelope do índice de FM (1 -> fmSustain)
+    double sweep = 1.0;     // s da varredura de afinação (1 -> 0)
+    float tone[2][2] {};    // estados dos dois passa-baixas da tonalidade de 3 bandas (por lado)
     int controlCountdown = 0;
     int age = 0;
 };
@@ -449,6 +451,8 @@ public:
         v.basePan = pan;
         v.lfoGain = 1.0f;
         v.lfoGainStep = 0.0f;
+        v.sweep = 1.0;
+        std::fill (&v.tone[0][0], &v.tone[0][0] + 4, 0.0f);
         v.controlCountdown = 0;
 
         for (std::size_t i = 0; i < lfoTargets; ++i)
@@ -628,6 +632,7 @@ public:
                         v.controlCountdown = 16;
                         auto semitones = modEnv[1].active ? modEnv[1].amount * v.mod[1].level : 0.0f;
                         auto octaves = modEnv[0].active ? modEnv[0].amount * v.mod[0].level : 0.0f;
+                        octaves += settings.keyTrack * (float) (v.key - 48) / 12.0f;
 
                         if (lfos[lfoPitch].active)
                             semitones += lfos[lfoPitch].amount * lfos[lfoPitch].tick (v.lfo[lfoPitch], 16);
@@ -642,6 +647,12 @@ public:
                             voicePan (v.basePan + lfos[lfoPan].amount * lfos[lfoPan].tick (v.lfo[lfoPan], 16), v.panL, v.panR);
 
                         v.pitchMul = semitones != 0.0f ? std::exp2 (semitones / 12.0) : 1.0;
+                        if (settings.sweep > 0.0f)
+                        {
+                            const auto s2 = v.sweep * v.sweep;
+                            v.pitchMul *= 1.0 + settings.sweep * s2 * s2;
+                            v.sweep *= sweepCoeff;
+                        }
 
                         if (filterModulated)
                             v.filter.set (settings.cutoff * std::exp2 (octaves), settings.resonance, sampleRate, settings.filterType);
@@ -694,16 +705,28 @@ public:
                         v.phase[o] -= 1.0;
                 }
 
-                if (settings.am) // (o1·g1 + o2·g2)·(1 − g3·o3), REA_rodada6 §3
+                if (settings.am) // (o1·g1 + o2·g2)·(1 − g3·o3), REA_rodada6 §3; anel (Sytrus): 1 − g3 + g3·o3, rodada18 §2
                 {
-                    sum *= 1.0f - modulator;
-                    sumR *= 1.0f - modulator;
+                    const auto factor = settings.ring ? 1.0f - settings.osc[2].level + modulator : 1.0f - modulator;
+                    sum *= factor;
+                    sumR *= factor;
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
                 const auto& f = filterModulated ? v.filter : sharedFilter;
-                const auto outL = f.process (sum, v.low, v.band);
-                const auto outR = stereoOscillators ? f.process (sumR, v.lowR, v.bandR) : outL;
+                auto outL = f.process (sum, v.low, v.band);
+                auto outR = stereoOscillators ? f.process (sumR, v.lowR, v.bandR) : outL;
+
+                if (useBands)
+                {
+                    auto bands = [&] (float x, float* st) {
+                        st[0] += toneCoeff[0] * (x - st[0]);
+                        st[1] += toneCoeff[1] * (x - st[1]);
+                        return st[0] * settings.bandGain[0] + (st[1] - st[0]) * settings.bandGain[1] + (x - st[1]) * settings.bandGain[2];
+                    };
+                    outL = bands (outL, v.tone[0]);
+                    outR = stereoOscillators ? bands (outR, v.tone[1]) : outL;
+                }
 
                 const auto s = 0.3f * v.level * v.velocity * v.lfoGain;
                 left[i] += outL * s * gl * v.panL;
@@ -794,8 +817,12 @@ private:
             anyLfo = anyLfo || lfos[i].active;
         }
 
-        filterModulated = modEnv[0].active || lfos[lfoCutoff].active;
-        modulated = modEnv[0].active || modEnv[1].active || anyLfo;
+        filterModulated = modEnv[0].active || lfos[lfoCutoff].active || settings.keyTrack != 0.0f;
+        modulated = modEnv[0].active || modEnv[1].active || anyLfo || settings.keyTrack != 0.0f || settings.sweep > 0.0f;
+        sweepCoeff = std::exp (-16.0 / (std::max (0.0005, (double) settings.sweepTime) * sampleRate)); // por tick de 16
+        useBands = settings.bandGain != std::array<float, 3> { 1.0f, 1.0f, 1.0f };
+        toneCoeff[0] = (float) std::min (1.0, 0.025 * 44100.0 / sampleRate); // ≈ 178 Hz (REA_rodada18 §11)
+        toneCoeff[1] = (float) std::min (1.0, 0.155 * 44100.0 / sampleRate); // ≈ 1,18 kHz
     }
 
     double sampleRate = 44100.0;
@@ -816,6 +843,9 @@ private:
     bool stereoOscillators = false;
     bool osc3Modulates = false; // AM ou FM: o osc 3 não soma
     float fmDecayCoeff = 1.0f;
+    double sweepCoeff = 1.0;
+    bool useBands = false;
+    float toneCoeff[2] { 0.025f, 0.155f };
     float nextPan = 0.0f, nextCents = 0.0f;
     bool nextPorta = false;
     Noise noise;

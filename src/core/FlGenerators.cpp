@@ -380,22 +380,32 @@ bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& syn
     for (auto& v : t)
         v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
 
-    // corda: serra + triângulo, Hi-Cut como passa-baixas, ADSR com as curvas do Harmless [HIP]
+    // As cordas do Sakura são físicas (excitador + guia de onda): aqui viram serra (corda 1) + triângulo
+    // (corda 2) — a troca de modelo é aproximação. Confirmados (REA_rodada18 §10): Amp A = 35x⁵ + 0,001 s,
+    // D = 50x⁵ + 0,001 s e R = 10x⁵ + 0,1 s com polos de constante T/8,82 (o LYNX mede o tempo até −60 dB:
+    // ×6,908/8,82), sustain x², Tune trunc(198x − 99)·0,01 semitom, String Mix linear (corda 1 ∝ 1 − mix).
+    // O decaimento da corda (realimentação d^0,05 por período → T60 ≈ 60/(f·(−log10 d)) s) depende da
+    // nota: usa-se o T60 da tecla 60 (aproximação). O Hi-Cut fica de fora (a conversão para Hz não foi lida).
     SynthSettings s;
-    s.osc = { SynthOscillator { Waveform::saw, 0, 0.0f, 0.6f }, SynthOscillator { Waveform::triangle, 0, 0.0f, 0.4f * (1.0f - t[17]) + 0.2f }, SynthOscillator {} };
-    setPitch (s.osc[0], (t[1] - 0.5) * 24.0);
-    setPitch (s.osc[1], (t[1] - 0.5) * 24.0);
-    s.attack = (float) std::min (5.0, 0.05 * (std::pow (101.0, (double) t[2]) - 1.0));
-    s.decay = (float) std::min (10.0, 0.12 * (std::pow (101.0, (double) t[3]) - 1.0) + 0.05);
-    s.sustain = t[4];
-    s.release = (float) std::min (10.0, 0.0249 * (std::pow (101.0, (double) t[5]) - 1.0) + 0.01);
-    if (t[6] < 0.5f && s.sustain > 0.3f) // corda pinçada de decaimento curto
+    const auto mix = t[17];
+    s.osc = { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f - mix }, SynthOscillator { Waveform::triangle, 0, 0.0f, mix }, SynthOscillator {} };
+    const auto tune = std::clamp ((int) (198.0f * t[1] - 99.0f), -99, 99) * 0.01;
+    setPitch (s.osc[0], tune);
+    setPitch (s.osc[1], tune);
+    auto p5 = [] (float x) { return std::pow ((double) x, 5.0); };
+    constexpr double toLynx = 6.907755 / 8.82;
+    s.attack = (float) (35.0 * p5 (t[2]) + 0.001);
+    s.decay = (float) ((50.0 * p5 (t[3]) + 0.001) * toLynx);
+    s.sustain = t[4] * t[4];
+    s.release = (float) ((10.0 * p5 (t[5]) + 0.1) * toLynx);
+    const auto d = std::clamp ((double) t[6], 0.0, 0.999999);
+    const auto stringT60 = d <= 0.0 ? 0.01 : 60.0 / (261.63 * -std::log10 (d));
+    if (stringT60 < 30.0 && (s.sustain > 0.0f || stringT60 < s.decay))
     {
         s.sustain = 0.0f;
-        s.decay = (float) std::max (0.15, 4.0 * t[6]);
+        s.decay = (float) std::max (0.01, stringT60);
     }
-    s.cutoff = (float) std::clamp (73.4 * std::pow (2.0, 7.855 * t[29]), 20.0, 20000.0);
-    s.resonance = std::clamp (0.9f * t[30], 0.0f, 0.95f);
+    s.cutoff = 20000.0f;
     synth = s;
     return true;
 }
@@ -582,12 +592,15 @@ bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& sy
     auto knob = [&] (std::size_t i) { return std::clamp ((int) u32At (state.data(), 4 + 4 * i), 0, 65535) / 65535.0; };
     const auto bass = knob (0), mid = knob (1), treble = knob (2);
 
+    // REA_rodada18 §11: o som do BooBass é uma amostra (ataque + laço) que não está nos dados do projeto;
+    // aqui a fonte é uma serra uma oitava abaixo com decaimento (aproximação). Os três knobs são o EQ de 3
+    // bandas confirmado: abaixo de 0,1 a banda cala; Bass 10^((12x − 12)/20), Mid 10^((10x − 10)/20),
+    // Treble 10^((12x − 9)/20). A 2ª etapa (saturação no grave, ×3, limitador) fica de fora.
+    auto band = [] (double x, double range, double top) { return x < 0.1 ? 0.0f : (float) std::pow (10.0, (range * x - range + top) / 20.0); };
     SynthSettings s;
-    s.osc = { SynthOscillator { Waveform::saw, -1, 0.0f, (float) (0.3 + 0.7 * mid) },
-              SynthOscillator { Waveform::sine, -2, 0.0f, (float) (0.2 + 0.8 * bass) },
-              SynthOscillator {} };
-    s.cutoff = (float) std::clamp (300.0 * std::pow (2.0, 4.0 * treble), 20.0, 20000.0);
-    s.resonance = 0.2f;
+    s.osc = { SynthOscillator { Waveform::saw, -1, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    s.cutoff = 20000.0f;
+    s.bandGain = { band (bass, 12.0, 0.0), band (mid, 10.0, 0.0), band (treble, 12.0, 3.0) };
     s.attack = 0.002f;
     s.decay = 0.6f;
     s.sustain = 0.5f;
@@ -607,6 +620,19 @@ std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& st
     if (name.empty())
         return std::nullopt;
     return name;
+}
+
+std::optional<std::array<float, 38>> drumpadParams (const std::vector<std::uint8_t>& state)
+{
+    // "SSLF" + tamanho + "3PMD" + 128 B de nome + 38 floats (parâmetros 0…37 na ordem), REA_rodada18 §12
+    if (state.size() < 140 + 38 * 4 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, "3PMD", 4) != 0)
+        return std::nullopt;
+    std::array<float, 38> p {};
+    std::memcpy (p.data(), state.data() + 140, sizeof (float) * 38);
+    for (auto& v : p)
+        if (! std::isfinite (v))
+            return std::nullopt;
+    return p;
 }
 
 SynthSettings drumToneForName (const std::string& patchName)
@@ -718,9 +744,10 @@ bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& s
     if (! sslfFloats (state, "1kiK", 0x50C, p, 23) && ! sslfFloats (state, "2kiK", 0x50C, p, 23))
         return false;
 
-    // seno na frequência "Base" (2^(4x + 4) Hz). Confirmados (REA_rodada17 §7): duração = rampa linear de
-    // (x³ + 0,001) s, sem release. A escala do "Peak" (o tamanho da queda de afinação), o clique e a camada
-    // de amostra não foram confirmados e ficam de fora.
+    // seno na frequência "Base" (2^(4x + 4) Hz). Confirmados (REA_rodada17 §7 + rodada18 §9): duração = rampa
+    // linear de (x³ + 0,001) s, sem release; Peak f = base·(1 + 100·peak³·s⁴), com s caindo por
+    // (1 − 0,0002/T_s) a cada amostra (a 44,1 kHz), T_s = 20·slide³ + 0,001. O clique e a camada de amostra
+    // ficam de fora (a tabela do oscilador é quase senoidal).
     const auto baseHz = std::pow (2.0, 4.0 * p[6] + 4.0);
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
@@ -731,6 +758,9 @@ bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& s
     s.sustain = 0.0f;
     s.release = duration; // sem release: soltar a nota não corta
     s.cutoff = 20000.0f;
+    s.sweep = (float) (100.0 * std::pow ((double) p[7], 3.0));
+    const auto slide = 20.0 * std::pow ((double) p[8], 3.0) + 0.001;
+    s.sweepTime = (float) (-1.0 / (44100.0 * std::log (1.0 - 0.0002 / slide))); // constante de tempo de s
     gain = (float) std::pow (10.0, 40.0 * (p[0] - 0.5) / 20.0);
     synth = s;
     return true;
@@ -742,8 +772,9 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     if (! sslfFloats (state, "2iBT", 0x204C, p, 294))
         return false;
 
-    // portadora = operador ligado com mais "Mix" (REA_rodada17 §9). O índice de FM e a escala do corte
-    // em Hz não foram confirmados: o LYNX toca só a portadora, com o filtro aberto.
+    // portadora = operador ligado com mais "Mix" (REA_rodada17 §9) + o modulador ligado com a maior célula
+    // da matriz para ela (REA_rodada18 §8: o operador alvo t recebe da fonte j a célula 109 + 6j + t,
+    // desvio de fase = 2·célula·saída ciclos). O filtro fica aberto (o modo do filtro não foi localizado).
     int carrier = -1;
     for (int i = 0; i < 6; ++i)
         if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
@@ -758,6 +789,23 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
     setPitch (s.osc[0], semis);
+
+    int modulator = -1;
+    for (int j = 0; j < 6; ++j)
+        if (j != carrier && p[25 + j] >= 0.5f && p[109 + 6 * j + carrier] > 0.005f
+            && (modulator < 0 || p[109 + 6 * j + carrier] > p[109 + 6 * modulator + carrier]))
+            modulator = j;
+    if (modulator >= 0)
+    {
+        const auto cell = std::floor (100.0f * p[109 + 6 * modulator + carrier]) * 0.01f;
+        s.osc[2] = SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f };
+        setPitch (s.osc[2], steps (p[31 + modulator]) + steps (p[37 + modulator]) * 0.01 + (double) (int) (48.0f * p[2] - 24.0f));
+        s.fm = 2.0f * cell * cell;
+        // o envelope do modulador escala a saída dele: decay até o sustain (o ataque fica de fora)
+        s.fmDecay = seconds (p[79 + modulator]);
+        s.fmSustain = p[85 + modulator] * p[85 + modulator];
+    }
+
     s.attack = seconds (p[3]);
     s.decay = seconds (p[4]);
     s.sustain = p[5] * p[5];

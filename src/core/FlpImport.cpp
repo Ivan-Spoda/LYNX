@@ -793,6 +793,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     else
                     {
                         fromPlugin = drumToneForName (*patch);
+                        // confirmados: Pitch ×2^(2x − 1) e Mallet Amplitude 10^(−4(1 − x)) (o modelo físico não)
+                        if (const auto dp = drumpadParams (c.pluginState))
+                        {
+                            const auto semis = 12.0f * (2.0f * std::clamp ((*dp)[29], 0.0f, 1.0f) - 1.0f);
+                            for (auto& o : fromPlugin.osc)
+                            {
+                                o.semitones += (int) std::lround (semis);
+                                o.detune += 100.0f * (semis - (float) std::lround (semis));
+                            }
+                            pluginGain = (float) std::pow (10.0, -4.0 * (1.0 - std::clamp ((double) (*dp)[2], 0.0, 1.0)));
+                        }
                         adopt();
                     }
                 }

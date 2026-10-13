@@ -168,13 +168,21 @@ struct SynthSettings
     float cutoff = 2500.0f;  // Hz
     float resonance = 0.0f;  // 0..1
     int filterType = 0;      // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
+    float keyTrack = 0.0f;   // o corte acompanha a nota: oitavas por oitava a partir da tecla 48 (C3, 130,81 Hz)
+    // varredura de afinação de bumbo: f = f_nota·(1 + sweep·s⁴), s = e^(−t/sweepTime) (o "Peak"/"Slide" do BassDrum)
+    float sweep = 0.0f;      // 0 = desligada
+    float sweepTime = 0.1f;  // segundos (constante de tempo de s)
+    // tonalidade de 3 bandas depois do filtro (o EQ do BooBass): grave < ~178 Hz < médio < ~1,18 kHz < agudo,
+    // separados por passa-baixas de 1 polo; ganhos lineares (1, 1, 1 = desligado)
+    std::array<float, 3> bandGain { 1.0f, 1.0f, 1.0f };
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
     std::array<ChannelLfo, lfoTargets> lfo {}; // por LfoTarget
     bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
     bool porta = false;       // portamento: a nota nova desliza a partir da anterior
     float portaBeats = 0.125f; // tempo do deslize, em tempos (o padrão do FL: meio step)
-    bool am = false;         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
+    bool am = false;
+    bool ring = false;       // com `am`: modulação em anel do Sytrus, (osc 1 + 2)·(1 − g3 + g3·osc 3) em vez de 1 − g3·osc 3         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
     float fm = 0.0f;         // índice de FM: o osc 3 (calado) desloca a fase de osc 1 + 2 em fm·saída ciclos; 0 = desligado
     float fmDecay = 0.0f;    // segundos para o índice cair até fmSustain (0 = índice constante)
     float fmSustain = 1.0f;  // fração do índice que fica depois do decay
