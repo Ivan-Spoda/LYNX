@@ -605,13 +605,24 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
     auto* l = channelBuffer (i, 0);
     auto* r = channelBuffer (i, 1);
-    std::memset (l, 0, sizeof (float) * (std::size_t) n);
-    std::memset (r, 0, sizeof (float) * (std::size_t) n);
 
     if ((std::size_t) i < state.instruments.size() && state.instruments[(std::size_t) i] != nullptr)
         state.instruments[(std::size_t) i]->setSongPosition (chunkTick);
 
     auto& instrument = *state.instruments[(std::size_t) i];
+
+    // canal ocioso, sem notas neste trecho e sem PDC: nada a fazer (nem zerar nem somar no mixer)
+    const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
+    const auto hasArp = (std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr;
+    if (! hasDelay && ! hasArp && instrument.idle()
+        && std::none_of (events.begin(), events.end(), [i] (const NoteEvent& e) { return e.channel == i; }))
+    {
+        channelSilent[(std::size_t) i] = 1;
+        return;
+    }
+    channelSilent[(std::size_t) i] = 0;
+    std::memset (l, 0, sizeof (float) * (std::size_t) n);
+    std::memset (r, 0, sizeof (float) * (std::size_t) n);
     int position = 0;
 
     // arpejador: as notas do canal viram a sequência do arpejo
@@ -991,6 +1002,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     for (int c = 0; c < channels; ++c)
     {
+        if (channelSilent[(std::size_t) c])
+            continue;
         const auto t = std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1);
         auto* dl = trackBuffer (t, 0);
         auto* dr = trackBuffer (t, 1);

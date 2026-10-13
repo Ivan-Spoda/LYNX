@@ -45,6 +45,8 @@ public:
     virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
     // Posição da música (ticks) no começo do bloco, para os LFOs globais. Thread de áudio.
     virtual void setSongPosition (double /*ticks*/) noexcept {}
+    // Sem nenhuma voz soando: o render daria só silêncio (o mixer pula o canal até chegar uma nota).
+    virtual bool idle() const noexcept { return false; }
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos

@@ -138,6 +138,11 @@ public:
         }
     }
 
+    bool idle() const noexcept override
+    {
+        return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
+    }
+
 private:
     float nextSample (DrumVoice& v) noexcept
     {
@@ -768,6 +773,11 @@ public:
             if (v.stage == 3 && v.level < 0.0005f)
                 v.active = false;
         }
+    }
+
+    bool idle() const noexcept override
+    {
+        return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
     }
 
 private:
@@ -1405,6 +1415,11 @@ public:
                     v.fade -= fadeStep;
             }
         }
+    }
+
+    bool idle() const noexcept override
+    {
+        return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
     }
 
 private:

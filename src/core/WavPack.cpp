@@ -1,5 +1,6 @@
 #include "core/WavPack.h"
 
+#include <cstdio>
 #include <algorithm>
 #include <cmath>
 #include <cstring>

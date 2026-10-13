@@ -178,6 +178,7 @@ private:
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // ganho L/R do bloco anterior, para a rampa
     std::array<char, maxMixerTracks> trackActive {};        // a saída da trilha tem som neste bloco
     static constexpr int maxChannels = 1024;
+    std::array<char, maxChannels> channelSilent {};          // canal pulado neste trecho (ocioso, sem notas)
     static constexpr int chunkCapacity = 512;               // trechos processados de uma vez
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
