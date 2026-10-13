@@ -14,6 +14,7 @@
 #include "core/Dither.h"
 #include "core/Effects.h"
 #include "core/FlpImport.h"
+#include "core/FlWrapper.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -263,7 +264,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -282,6 +283,20 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            // Fruity Wrapper (canais e slots do mixer): todo blob dos demos é lido
+            auto countWrapper = [&] (const std::string& plugin, const std::vector<std::uint8_t>& state) {
+                if (plugin != "Fruity Wrapper")
+                    return;
+                ++wrapped;
+                lynx::ForeignPlugin f;
+                wrappedParsed += lynx::parseFlWrapper (state, f) && f.format != lynx::ForeignPlugin::Format::none && ! f.name.empty();
+            };
+            for (const auto& c : p.channels)
+                countWrapper (c.pluginName, c.pluginState);
+            for (const auto& insert : p.mixer)
+                for (const auto& slot : insert.slots)
+                    countWrapper (slot.plugin, slot.state);
 
             // 3x Osc: todo estado dos demos decodifica, com níveis que somam no máximo 1
             for (const auto& c : p.channels)
@@ -350,6 +365,8 @@ TEST (flp_real_files)
     }
 
     CHECK (threeOscDecoded == threeOsc);
+    CHECK (wrappedParsed == wrapped);
+    std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
                  files, withNotes, withPlaylist, automations, automationsWithTarget, sends);
@@ -932,6 +949,51 @@ TEST (synth_oscillator_pan_and_semitones)
     CHECK (peakL < 1e-4f && peakR > 0.1f);
     // 440 * 2^(7/12) = 659,3 Hz; 0,4 s = 263,7 ciclos = ~527 cruzamentos
     CHECK (std::abs (crossings - 527) < 6);
+}
+
+TEST (fl_wrapper_state_parses_records_and_vst3_state)
+{
+    // blob do Fruity Wrapper (versão 12): tipo VST3 gerador, class ID, nome, caminho e estado
+    std::vector<std::uint8_t> blob;
+    auto u32 = [] (std::vector<std::uint8_t>& b, std::uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto record = [&] (std::vector<std::uint8_t>& b, std::uint32_t id, const std::vector<std::uint8_t>& payload) {
+        u32 (b, id);
+        u32 (b, (std::uint32_t) payload.size());
+        u32 (b, 0);
+        b.insert (b.end(), payload.begin(), payload.end());
+    };
+    auto bytes = [] (const std::string& s) { return std::vector<std::uint8_t> (s.begin(), s.end()); };
+
+    std::vector<std::uint8_t> vst3State;
+    u32 (vst3State, 1);
+    record (vst3State, 1, std::vector<std::uint8_t> (64, 0));
+    record (vst3State, 3, bytes ("COMPONENTE"));
+    record (vst3State, 2, bytes ("CONTROLADOR"));
+
+    u32 (blob, 12);
+    record (blob, 0x01, std::vector<std::uint8_t> (20, 0xFF));
+    record (blob, 0x32, { 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+    std::vector<std::uint8_t> cid;
+    for (int i = 0; i < 16; ++i)
+        cid.push_back ((std::uint8_t) (0xA0 + i));
+    record (blob, 0x34, cid);
+    record (blob, 0x36, bytes ("Surge XT"));
+    record (blob, 0x37, bytes ("C:/Program Files/Common Files/VST3/Surge XT.vst3"));
+    record (blob, 0x35, vst3State);
+
+    lynx::ForeignPlugin p;
+    CHECK (lynx::parseFlWrapper (blob, p));
+    CHECK (p.format == lynx::ForeignPlugin::Format::vst3);
+    CHECK (p.hasClassId && p.classId[0] == 0xA0 && p.classId[15] == 0xAF);
+    CHECK (p.name == "Surge XT" && p.path.find ("Surge XT.vst3") != std::string::npos);
+    std::vector<std::uint8_t> component, controller;
+    CHECK (lynx::splitFlVst3State (p.state, component, controller));
+    CHECK (component == bytes ("COMPONENTE") && controller == bytes ("CONTROLADOR"));
+
+    // versão fora da faixa ou sem tipo: não é um wrapper que dá para usar
+    blob[0] = 13;
+    CHECK (! lynx::parseFlWrapper (blob, p));
+    CHECK (! lynx::parseFlWrapper ({ 12, 0, 0, 0 }, p));
 }
 
 TEST (flp_import_brings_playlist)

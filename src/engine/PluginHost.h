@@ -87,6 +87,13 @@ public:
 
     std::unique_ptr<juce::PluginDescription> find (const juce::String& id) const;
 
+    // Plugins de terceiros de um .flp importado (ForeignPlugin): acha o mesmo plugin entre os
+    // escaneados (VST3 pelo class ID, CLAP pelo id, e pelo nome como plano B, também para os VST2
+    // que o LYNX não hospeda) e converte o estado VST3 para o formato do JUCE. Canais achados viram
+    // canais de plugin; slots de efeito não achados saem. Retorna quantos foram achados.
+    int adoptFlPlugins (Song& song, juce::StringArray* missing = nullptr) const;
+    const juce::PluginDescription* findForeign (const ForeignPlugin& plugin, bool instrument) const;
+
     std::shared_ptr<Instrument> makeInstrument (const PluginRef& ref, double sampleRate, juce::String* error = nullptr);
     std::shared_ptr<Effect> makeEffect (const PluginRef& ref, double sampleRate, juce::String* error = nullptr);
 

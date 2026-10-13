@@ -743,6 +743,13 @@ void MainComponent::openFile (const juce::File& file)
         rememberRecent (file);
         if (auto* window = getTopLevelComponent())
             window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
+
+        if (const auto& missing = engine.getMissingPlugins(); ! missing.isEmpty())
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::InfoIcon, utf8 ("Plugins não encontrados"),
+                utf8 ("Estes plugins do projeto não estão entre os escaneados (Plugins > Procurar plugins). "
+                      "Os canais tocam com o synth interno e os efeitos ficaram de fora:\n\n")
+                    + missing.joinIntoString ("\n"));
         return;
     }
 

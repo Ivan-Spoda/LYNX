@@ -1,6 +1,7 @@
 #include "core/FlpImport.h"
 
 #include "core/Effects.h"
+#include "core/FlWrapper.h"
 #include "core/SynthPresets.h"
 
 #include <algorithm>
@@ -356,6 +357,11 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         def.sampler.filterEnv = filterEnv;
         def.sampler.pitchEnv = pitchEnv;
 
+        // plugin de terceiros (VST/CLAP) no Fruity Wrapper: o app procura o mesmo plugin instalado;
+        // até lá (ou se não achar) o canal fica no synth interno
+        if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
+            def.plugin.name = def.plugin.foreign.name;
+
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
         if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
         {
@@ -458,12 +464,20 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         for (const auto& slot : insert.slots)
         {
-            const auto kind = effectForFlPlugin (slot.plugin);
+            ForeignPlugin foreign;
+            const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
+            const auto kind = wrapped ? std::optional<EffectKind> (EffectKind::plugin) : effectForFlPlugin (slot.plugin);
 
             if (! kind || (int) track.effects.size() >= maxEffectSlots)
                 continue;
 
             auto fx = makeEffectSlot (*kind);
+
+            if (wrapped) // o app troca pelo plugin instalado; sem ele, o slot sai
+            {
+                fx.plugin.name = foreign.name;
+                fx.plugin.foreign = std::move (foreign);
+            }
 
             if (*kind == EffectKind::filter)
                 fx.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar

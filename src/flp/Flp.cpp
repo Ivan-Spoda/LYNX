@@ -339,6 +339,7 @@ Project parseProject (std::span<const std::uint8_t> file)
     bool hasTimeSignature = false;
     std::string pendingInsertName;
     std::string pendingSlotPlugin;
+    std::vector<std::uint8_t> pendingSlotState;
     std::uint32_t pendingInsertColour = 0;
 
     auto text = [&] (const Event& e)
@@ -548,13 +549,16 @@ Project parseProject (std::span<const std::uint8_t> file)
 
             case evMixerSlotIndex:
                 if (section == Section::mixer && ! project.mixer.empty() && ! pendingSlotPlugin.empty())
-                    project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin });
+                    project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin, std::move (pendingSlotState) });
                 pendingSlotPlugin.clear();
+                pendingSlotState.clear();
                 break;
 
             case evPluginState:
                 if (section == Section::channel && channel().pluginState.empty())
                     channel().pluginState.assign (e.data.begin(), e.data.end());
+                else if (section == Section::mixer)
+                    pendingSlotState.assign (e.data.begin(), e.data.end());
                 break;
 
             case evSamplePath:

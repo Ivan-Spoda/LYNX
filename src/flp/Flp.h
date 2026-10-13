@@ -240,6 +240,7 @@ struct MixerInsert
     {
         int index = 0;      // 0..9
         std::string plugin; // nome interno (0xC9), ex.: "Fruity Limiter"
+        std::vector<std::uint8_t> state; // 0xD5 do plugin (ex.: blob do Fruity Wrapper)
     };
     std::vector<Slot> slots;
 };

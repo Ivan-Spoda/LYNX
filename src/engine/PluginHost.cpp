@@ -1,5 +1,7 @@
 #include "engine/PluginHost.h"
 
+#include "core/FlWrapper.h"
+
 #include "engine/ClapFormat.h"
 
 namespace lynx
@@ -267,6 +269,137 @@ int PluginHost::addPluginFile (const juce::File& file)
 std::unique_ptr<juce::PluginDescription> PluginHost::find (const juce::String& id) const
 {
     return known.getTypeForIdentifierString (id);
+}
+
+namespace
+{
+// O deprecatedUid que o JUCE dá a uma classe VST3: hash 31 sobre os 16 bytes do TUID como `char`
+// (com sinal, como o TUID do SDK). O FL guarda o TUID na mesma ordem de memória.
+int vst3Hash (const std::array<std::uint8_t, 16>& tuid)
+{
+    juce::uint32 value = 0;
+
+    for (auto b : tuid)
+        value = value * 31 + (juce::uint32) (int) (signed char) b;
+
+    return (int) value;
+}
+
+// O uniqueId "normalizado" do JUCE: o mesmo hash sobre os 4 inteiros do FUID (layout COM no Windows).
+int vst3NormalisedHash (const std::array<std::uint8_t, 16>& d)
+{
+    auto make = [] (juce::uint32 a, juce::uint32 b, juce::uint32 c, juce::uint32 e) { return (a << 24) | (b << 16) | (c << 8) | e; };
+    const juce::uint32 longs[] = { make (d[3], d[2], d[1], d[0]), make (d[5], d[4], d[7], d[6]),
+                                   make (d[8], d[9], d[10], d[11]), make (d[12], d[13], d[14], d[15]) };
+    juce::uint32 value = 0;
+
+    for (auto l : longs)
+        value = value * 31 + l;
+
+    return (int) value;
+}
+
+juce::String plainName (const juce::String& s)
+{
+    return s.toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz0123456789");
+}
+} // namespace
+
+const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plugin, bool instrument) const
+{
+    const auto& types = known.getTypes();
+    const auto fileName = plainName (juce::File::createFileWithoutCheckingPath (
+        juce::String::fromUTF8 (plugin.path.c_str()).replaceCharacter ('\\', '/')).getFileNameWithoutExtension());
+    const auto name = plainName (juce::String::fromUTF8 (plugin.name.c_str()));
+
+    // 1) o mesmo plugin, pelo identificador do formato
+    for (const auto& d : types)
+    {
+        if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
+            && (d.deprecatedUid == vst3Hash (plugin.classId) || d.uniqueId == vst3NormalisedHash (plugin.classId)))
+            return &d;
+
+        if (plugin.format == ForeignPlugin::Format::clap && ! plugin.clapId.empty() && d.pluginFormatName == ClapPluginFormat::formatName
+            && d.uniqueId == juce::String::fromUTF8 (plugin.clapId.c_str()).hashCode())
+            return &d;
+    }
+
+    // 2) plano B, como o FL troca VST2 <-> VST3: mesmo nome (do plugin ou do arquivo), mesmo papel
+    if (name.isEmpty() && fileName.isEmpty())
+        return nullptr;
+
+    for (const auto& d : types)
+    {
+        if (d.isInstrument != instrument)
+            continue;
+
+        const auto candidate = plainName (d.name);
+        const auto candidateFile = plainName (juce::File (d.fileOrIdentifier).getFileNameWithoutExtension());
+
+        if ((name.isNotEmpty() && (candidate == name || candidateFile == name))
+            || (fileName.isNotEmpty() && (candidate == fileName || candidateFile == fileName)))
+            return &d;
+    }
+
+    return nullptr;
+}
+
+int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
+{
+    int found = 0;
+
+    // devolve o estado no formato do JUCE, ou vazio quando não dá para levar o estado
+    auto convertState = [] (const ForeignPlugin& f, const juce::PluginDescription& d) -> std::string {
+        if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3")
+            return {}; // VST2 -> VST3 e CLAP: formato do estado diferente ou desconhecido; plugin no padrão
+
+        std::vector<std::uint8_t> component, controller;
+
+        if (! splitFlVst3State (f.state, component, controller))
+            return {};
+
+        juce::XmlElement xml ("VST3PluginState");
+
+        if (! component.empty())
+            xml.createNewChildElement ("IComponent")->addTextElement (juce::MemoryBlock (component.data(), component.size()).toBase64Encoding());
+        if (! controller.empty())
+            xml.createNewChildElement ("IEditController")->addTextElement (juce::MemoryBlock (controller.data(), controller.size()).toBase64Encoding());
+
+        juce::MemoryBlock binary;
+        juce::AudioProcessor::copyXmlToBinary (xml, binary);
+        return binary.toBase64Encoding().toStdString();
+    };
+
+    auto adopt = [&] (PluginRef& ref, bool instrument) {
+        const auto* d = findForeign (ref.foreign, instrument);
+
+        if (d == nullptr)
+        {
+            if (missing != nullptr)
+                missing->addIfNotAlreadyThere (juce::String::fromUTF8 (ref.foreign.name.c_str()));
+            ref.foreign = {};
+            return false;
+        }
+
+        ref.id = d->createIdentifierString().toStdString();
+        ref.name = d->name.toStdString();
+        ref.state = convertState (ref.foreign, *d);
+        ref.foreign = {};
+        ++found;
+        return true;
+    };
+
+    for (auto& channel : song.channels)
+        if (channel.plugin.foreign.format != ForeignPlugin::Format::none && adopt (channel.plugin, true))
+            channel.instrument = InstrumentKind::plugin;
+
+    for (auto& track : song.mixer)
+        std::erase_if (track.effects, [&] (EffectSlot& slot) {
+            return slot.kind == EffectKind::plugin && slot.plugin.foreign.format != ForeignPlugin::Format::none
+                   && ! adopt (slot.plugin, false);
+        });
+
+    return found;
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const PluginRef& ref, double sampleRate, juce::String* error)

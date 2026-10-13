@@ -628,9 +628,14 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
         options.roots = findFlStudioRoots();
         options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
 
+        auto imported = importFlp (project, options);
+        juce::StringArray missing;
+        plugins.adoptFlPlugins (imported, &missing);
+        missingPlugins = missing;
+
         stop();
         rewind();
-        setSong (importFlp (project, options));
+        setSong (std::move (imported));
         return true;
     }
     catch (const flp::Error& e)

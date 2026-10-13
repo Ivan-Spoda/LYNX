@@ -55,7 +55,13 @@ Atualizado em 2026-10-13.
   como a tensão 0 do FL) viram os envelopes de modulação do synth (kicks e plucks feitos no 3x Osc).
   Os 152 canais 3x Osc dos demos decodificam. Ainda não: AM do osc 3, inverter fase, SPO/phase rand,
   filtros BP/HP/BS, LFOs do canal.
-- **Filtro do canal no sampler** (corte/ressonância), importado do Mod X/Y do FL.
+- **Filtro do canal no sampler** (corte/ressonância), importado do Mod X/Y do FL; envelopes de corte e
+  de afinação também no sampler.
+- **VSTs de terceiros do FL (REA rodada 5, `docs/analise/REA_rodada5.md`)**: o blob do "Fruity Wrapper"
+  (canais e slots do mixer) é lido; ao importar, o LYNX procura o mesmo plugin entre os escaneados
+  (VST3 pelo class ID, CLAP pelo id, ou pelo nome, que também cobre VST2 → VST3/CLAP do mesmo produto)
+  e restaura o estado VST3. Os não achados aparecem num aviso; os canais ficam no synth interno.
+  Conferido com `LYNX.exe --wrappertest "Surge XT.vst3" relatorio.txt`. VST2 o LYNX não hospeda.
 - **Render mais leve**: PDC em uma passada, reverb por blocos, limiter O(1), FTZ/DAZ; o export do
   SHINE (110 s, 60 efeitos importados) caiu de 4,4 s para 2,4 s.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
@@ -110,7 +116,7 @@ Confirmadas empiricamente nos demos:
 - O VST3 SDK que vem com o JUCE compila com Zig/MinGW; basta pôr
   `juce_audio_processors/format_types/VST3_SDK` no include path.
 - Plugins são preparados numa taxa fixa; quando o dispositivo muda de taxa, o engine recria as
-  instâncias. Latência de plugin (PDC) ainda não é compensada.
+  instâncias. A latência dos plugins entra no PDC.
 
 ## Próximo passo
 Arpejador do canal (layout em hipótese no `0xD7`), envelopes de pitch/corte do sampler, porta, ASIO

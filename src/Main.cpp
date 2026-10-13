@@ -114,6 +114,13 @@ public:
             return;
         }
 
+        if (args.contains ("--wrappertest"))
+        {
+            const auto i = args.indexOf ("--wrappertest");
+            runWrapperTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
         if (args.contains ("--plugintest"))
         {
             const auto i = args.indexOf ("--plugintest");
@@ -399,6 +406,87 @@ private:
 
             ok = (hasInstrument || hasEffect) && (! hasInstrument || loadedInstrument != nullptr)
                  && (! hasEffect || loadedEffect != nullptr) && peak > 0.001f && peak < 10.0f;
+        }
+
+        report << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
+        juce::File (reportPath).replaceWithText (report);
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
+    // LYNX.exe --wrappertest plugin.vst3 relatorio.txt: monta o estado de um VST3 como o Fruity
+    // Wrapper do FL guarda (REA_rodada5 §3.2), passa pelo import (adoptFlPlugins) e confere se o
+    // plugin volta com o parâmetro mudado.
+    void runWrapperTest (const juce::String& pluginPath, const juce::String& reportPath)
+    {
+        juce::String report;
+        bool ok = false;
+        {
+            lynx::AudioEngine offline (false);
+            auto& host = offline.getPluginHost();
+            host.addPluginFile (juce::File (pluginPath));
+            const juce::PluginDescription* vst3 = nullptr;
+
+            for (const auto& type : host.getKnownPlugins().getTypes())
+                if (type.pluginFormatName == "VST3" && type.isInstrument)
+                    vst3 = &type;
+
+            if (vst3 != nullptr)
+            {
+                juce::String error;
+                auto plugin = host.getFormats().createPluginInstance (*vst3, 48000.0, 512, error);
+                auto* parameter = plugin != nullptr && ! plugin->getParameters().isEmpty() ? plugin->getParameters()[0] : nullptr;
+
+                if (parameter != nullptr)
+                {
+                    const auto target = parameter->getValue() > 0.5f ? 0.13f : 0.87f;
+                    parameter->setValueNotifyingHost (target);
+                    juce::MemoryBlock juceState;
+                    plugin->getStateInformation (juceState);
+                    report << "parametro=" << parameter->getName (64) << " alvo=" << target << "\n";
+
+                    // estado do JUCE -> contêiner do FL: u32 1 + registros 1 (flags), 3 (componente), 2 (controlador)
+                    std::vector<std::uint8_t> flState;
+                    auto put32 = [&] (std::uint32_t v) { for (int b = 0; b < 4; ++b) flState.push_back ((std::uint8_t) (v >> (8 * b))); };
+                    auto record = [&] (std::uint32_t id, const juce::MemoryBlock& data) {
+                        put32 (id);
+                        put32 ((std::uint32_t) data.getSize());
+                        put32 (0);
+                        flState.insert (flState.end(), (const std::uint8_t*) data.getData(), (const std::uint8_t*) data.getData() + data.getSize());
+                    };
+                    put32 (1);
+                    record (1, juce::MemoryBlock (64, true));
+
+                    if (auto xml = juce::AudioProcessor::getXmlFromBinary (juceState.getData(), (int) juceState.getSize()))
+                        for (auto [tag, id] : { std::pair { "IComponent", 3u }, { "IEditController", 2u } })
+                            if (auto* child = xml->getChildByName (tag))
+                            {
+                                juce::MemoryBlock data;
+                                data.fromBase64Encoding (child->getAllSubText());
+                                record (id, data);
+                                report << tag << "_bytes=" << (int) data.getSize() << "\n";
+                            }
+
+                    plugin.reset();
+
+                    auto song = lynx::Song::makeDefault();
+                    auto& f = song.channels[4].plugin.foreign;
+                    f.format = lynx::ForeignPlugin::Format::vst3;
+                    f.name = vst3->name.toStdString(); // sem class ID: acha pelo nome (plano B)
+                    f.state = flState;
+                    const auto adopted = host.adoptFlPlugins (song);
+                    report << "adotados=" << adopted << "\n";
+
+                    offline.setSong (song);
+
+                    if (auto* loaded = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get()))
+                    {
+                        const auto value = loaded->getInstance().getParameters()[0]->getValue();
+                        report << "valor_restaurado=" << value << "\n";
+                        ok = adopted == 1 && std::abs (value - target) < 0.02f;
+                    }
+                }
+            }
         }
 
         report << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";

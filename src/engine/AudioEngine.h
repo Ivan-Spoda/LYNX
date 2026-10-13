@@ -39,6 +39,9 @@ public:
     MeterBank& getMeters() noexcept { return meters; }
     PluginHost& getPluginHost() noexcept { return plugins; }
 
+    // Plugins de terceiros do último .flp importado que não foram achados entre os escaneados.
+    const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
+
     // Instâncias vivas (para abrir a janela do plugin). nullptr se não for plugin.
     std::shared_ptr<Instrument> getChannelInstrument (int channel) const;
     std::shared_ptr<Effect> getEffect (int track, int slot) const;
@@ -199,6 +202,7 @@ private:
     int takeLatency = 0;                           // entrada + saída, em samples
     MeterBank meters;
     PluginHost plugins;
+    juce::StringArray missingPlugins;
 
     Song song;
     int selectedChannel = 0;

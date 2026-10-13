@@ -38,13 +38,30 @@ enum class InstrumentKind : std::uint8_t
 };
 
 // Plugin externo: identificador do formato (o app sabe achar o arquivo) + estado salvo.
+// Plugin de terceiros vindo de um projeto do FL ("Fruity Wrapper"), antes de achar o mesmo
+// plugin instalado (docs/analise/REA_rodada5.md). Não é salvo no .lynx: o app resolve ao importar.
+struct ForeignPlugin
+{
+    enum class Format : std::uint8_t { none, vst2, vst3, clap, other };
+
+    Format format = Format::none;
+    std::uint32_t vst2Id = 0;                 // AEffect::uniqueID
+    std::array<std::uint8_t, 16> classId {};  // TUID da classe VST3, como na memória
+    bool hasClassId = false;
+    std::string clapId, name, path;           // path: binário na máquina que salvou
+    std::vector<std::uint8_t> state;          // registro 0x35 cru (formato depende de `format`)
+
+    bool operator== (const ForeignPlugin&) const = default;
+};
+
 struct PluginRef
 {
     std::string id;    // identificador único do plugin (formato-nome-hash do JUCE)
     std::string name;  // para mostrar mesmo quando o plugin não estiver instalado
     std::string state; // estado do plugin em base64 (o que o plugin devolve ao salvar)
+    ForeignPlugin foreign; // import do FL ainda não resolvido (format == none: nada pendente)
 
-    bool operator== (const PluginRef& o) const { return id == o.id && state == o.state; }
+    bool operator== (const PluginRef& o) const { return id == o.id && state == o.state && foreign == o.foreign; }
 };
 
 // Ajustes do sampler do canal (a janela "Channel settings" do FL).
