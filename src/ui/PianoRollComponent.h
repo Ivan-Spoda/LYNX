@@ -9,7 +9,8 @@ namespace lynx
 // Piano Roll do canal selecionado na pattern atual.
 //  - clique esquerdo no vazio cria uma nota (com a última duração usada) e já permite arrastar
 //  - arrastar o corpo move; arrastar a borda direita muda a duração (as notas selecionadas juntas)
-//  - Ctrl+arrastar seleciona com um retângulo; Shift+clique põe/tira uma nota da seleção
+//  - Ctrl+arrastar seleciona com um retângulo; Ctrl+clique põe/tira uma nota da seleção;
+//    Shift+arrastar uma nota arrasta uma cópia (como no FL)
 //  - clique direito apaga (arrastar apaga várias)
 //  - faixa de velocity embaixo: clicar/arrastar desenha a velocity (só nas selecionadas, se houver)
 //  - Alt desliga o snap; roda do mouse rola, Shift+roda rola na horizontal, Ctrl+roda dá zoom

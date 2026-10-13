@@ -742,25 +742,9 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (e.mods.isCtrlDown() || (e.mods.isShiftDown() && hit < 0))
-    {
-        drag = Drag::select;
-        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
-        rubberBand = { e.x, e.y, 0, 0 };
-        setSelection (selectionBefore);
-        return;
-    }
-
-    // alças de fade dos clips de áudio
-    if (hit >= 0 && ! e.mods.isAnyModifierKeyDown())
-        if (const auto handle = fadeHandleAt (hit, e.getPosition()))
-        {
-            dragClip = hit;
-            drag = handle == 1 ? Drag::fadeIn : Drag::fadeOut;
-            return;
-        }
-
-    if (hit >= 0 && e.mods.isShiftDown())
+    // como no FL: Ctrl+clique num clip soma/tira da seleção; Ctrl+arrastar no vazio seleciona
+    // (com Shift, somando); Shift+arrastar um clip arrasta uma cópia
+    if (hit >= 0 && e.mods.isCtrlDown())
     {
         auto s = selection;
 
@@ -773,7 +757,42 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (hit < 0 && (e.mods.isCtrlDown() || e.mods.isShiftDown()))
+    {
+        drag = Drag::select;
+        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
+        rubberBand = { e.x, e.y, 0, 0 };
+        setSelection (selectionBefore);
+        return;
+    }
+
     const auto snapOn = ! e.mods.isAltDown();
+
+    if (hit >= 0 && e.mods.isShiftDown() && ! rightEdge)
+    {
+        const auto sources = isSelected (hit) ? selection : std::vector<int> { hit };
+        const auto grabbedAt = (std::size_t) (std::find (sources.begin(), sources.end(), hit) - sources.begin());
+        std::vector<Clip> copies;
+        std::vector<int> added;
+
+        for (auto i : sources)
+            copies.push_back (engine.getSong().playlist[(std::size_t) i]);
+
+        engine.editSong ([&] (Song& s) {
+            for (const auto& c : copies)
+            {
+                added.push_back ((int) s.playlist.size());
+                s.playlist.push_back (c);
+            }
+        });
+        setSelection (added);
+        dragIndices = added;
+        dragOriginals = copies;
+        dragClip = added[grabbedAt];
+        drag = Drag::move;
+        grabOffset = copies[grabbedAt].start - snap (xToTick (e.x), snapOn);
+        return;
+    }
 
     if (hit >= 0)
     {

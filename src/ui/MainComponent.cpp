@@ -901,7 +901,7 @@ void MainComponent::showHelp()
         "  Z..M e Q..P   teclado do PC como piano (canal selecionado)\n\n"
         "PIANO ROLL\n"
         "  clique cria nota (ou acorde, no seletor), arrastar move, borda direita muda a duração\n"
-        "  clique direito apaga   Ctrl+arrastar seleciona   Shift+clique soma à seleção\n"
+        "  clique direito apaga   Ctrl+arrastar seleciona   Ctrl+clique soma à seleção   Shift+arrastar copia\n"
         "  Ctrl+A/C/X/V   Ctrl+B duplicar   Ctrl+Q quantizar   Ctrl+M mutar   Delete apagar\n"
         "  setas movem (Shift = oitava/compasso)   Alt desliga o snap   Ctrl+roda zoom\n"
         "  faixa de baixo: velocity / pan / afinação   botão Slide: notas que deslizam\n\n"

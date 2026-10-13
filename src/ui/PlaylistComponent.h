@@ -19,7 +19,8 @@ namespace lynx
 //  - clicar na régua posiciona a reprodução e liga o modo Song
 //  - arrastar um arquivo de áudio para a Playlist cria um clip de áudio
 //  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
-//  - Ctrl+arrastar seleciona com retângulo; Shift+clique soma; clips selecionados andam juntos
+//  - Ctrl+arrastar seleciona com retângulo; Ctrl+clique soma; clips selecionados andam juntos;
+//    Shift+arrastar um clip arrasta uma cópia
 //  - arrastar na régua marca a região de loop; clique direito na régua desliga o loop
 //  - clique direito na faixa do nome de um clip abre o menu dele (dividir, tornar única etc.)
 //  - cabeçalho da trilha: LED muta a trilha; clique direito renomeia

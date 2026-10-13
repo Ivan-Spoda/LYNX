@@ -155,7 +155,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
 
     hintLabel.setFont (juce::FontOptions (11.0f));
     hintLabel.setColour (juce::Label::textColourId, theme::text.withAlpha (0.45f));
-    hintLabel.setText (utf8 ("Ctrl+arrastar seleciona · Shift+clique soma · Del apaga · Ctrl+C/X/V copiar · "
+    hintLabel.setText (utf8 ("Ctrl+arrastar seleciona · Ctrl+clique soma · Shift+arrastar copia · Del apaga · Ctrl+C/X/V copiar · "
                              "Ctrl+B duplicar · Ctrl+Q quantizar · Ctrl+M mutar · setas movem (Shift = oitava)"),
                        juce::dontSendNotification);
     hintLabel.setInterceptsMouseClicks (false, false);
@@ -734,17 +734,9 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // Ctrl+arrastar (ou Shift no vazio): retângulo de seleção
-    if (e.mods.isCtrlDown() || (e.mods.isShiftDown() && hit < 0))
-    {
-        drag = Drag::select;
-        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
-        rubberBand = { e.x, e.y, 0, 0 };
-        setSelection (selectionBefore);
-        return;
-    }
-
-    if (hit >= 0 && e.mods.isShiftDown())
+    // como no FL: Ctrl+clique numa nota soma/tira da seleção; Ctrl+arrastar no vazio seleciona
+    // (com Shift, somando); Shift+arrastar uma nota arrasta uma cópia
+    if (hit >= 0 && e.mods.isCtrlDown())
     {
         auto s = selection;
 
@@ -757,7 +749,38 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (hit < 0 && (e.mods.isCtrlDown() || e.mods.isShiftDown()))
+    {
+        drag = Drag::select;
+        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
+        rubberBand = { e.x, e.y, 0, 0 };
+        setSelection (selectionBefore);
+        return;
+    }
+
     const auto snapOn = ! e.mods.isAltDown();
+
+    if (hit >= 0 && e.mods.isShiftDown() && ! rightEdge)
+    {
+        const auto sources = isSelected (hit) ? selection : std::vector<int> { hit };
+        const auto grabbedAt = (std::size_t) (std::find (sources.begin(), sources.end(), hit) - sources.begin());
+        std::vector<int> added;
+
+        // a cópia sai na mesma ordem das originais (copy ordena por início)
+        std::vector<Note> ordered;
+        for (auto i : sources)
+            ordered.push_back (currentPattern (engine.getSong()).notes[(std::size_t) i]);
+
+        editNotes ([&] (Pattern& p) { added = noteedit::paste (p, ordered, 0); });
+        setSelection (added);
+        dragIndices = added;
+        dragOriginals = ordered;
+        dragNote = added[grabbedAt];
+        drag = Drag::move;
+        grabOffset = ordered[grabbedAt].start - snap (xToTick (e.x), snapOn);
+        previewOn (ordered[grabbedAt].key, ordered[grabbedAt].velocity);
+        return;
+    }
 
     if (hit >= 0)
     {
