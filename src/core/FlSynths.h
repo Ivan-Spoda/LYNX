@@ -3,6 +3,7 @@
 // Estado (0xD5) de sintetizadores simples do FL aproximados pelo synth interno de 3 osciladores.
 // Formatos e fórmulas em docs/analise/REA_rodada10.md (clean-room).
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -33,6 +34,23 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth
 // viram os osciladores, FM forte vira onda mais rica + envelope de filtro, o primeiro filtro ativo
 // vira o filtro do synth. `gain` recebe o Master level (linear).
 bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
+
+// Fruity Envelope Controller (REA_rodada15 §10): 8 articuladores; a saída k é o articulador k, que
+// segue a última nota do canal dentro da sua faixa de teclas. Até 64 pontos por envelope.
+struct ControllerArticulator
+{
+    bool bipolar = false, envOn = false, tempo = false; // tempo: tempos (semínimas) em vez de segundos
+    float base = 0.5f, envLevel = 1.0f;
+    int sustain = -1, lowKey = 0, highKey = 256;
+    int count = 0;
+    std::array<float, 64> time {}, level {}; // tempo acumulado de cada ponto e nível 0..1
+};
+using EnvelopeControllerData = std::array<ControllerArticulator, 8>;
+std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state);
+
+// Valor (0..1) do articulador `sinceOn` depois do disparo; `sinceRelease` < 0 = tecla ainda presa.
+// Tempos na unidade do articulador (segundos, ou tempos com `tempo`).
+float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept;
 
 // Harmor (REA_rodada11 §4), aproximação grosseira: cada parte (A/B) vira uma serra com a razão de
 // frequência, filtro 1 (ou 2) com o envelope, envelope de volume, uníssono, mono/porta.

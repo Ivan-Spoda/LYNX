@@ -534,7 +534,12 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     {
         const auto& automation = song.automations[(std::size_t) a];
         const auto& src = automation.source;
-        if (src.track < (int) state.effects.size() && src.slot >= 0 && src.slot < (int) state.effects[(std::size_t) src.track].size()
+        if (src.channel >= 0)
+        {
+            if (src.channel < (int) state.instruments.size() && state.instruments[(std::size_t) src.channel] != nullptr)
+                automationValues[(std::size_t) a] = automation.mapLive (state.instruments[(std::size_t) src.channel]->controlOutput (src.output));
+        }
+        else if (src.track < (int) state.effects.size() && src.slot >= 0 && src.slot < (int) state.effects[(std::size_t) src.track].size()
             && state.effects[(std::size_t) src.track][(std::size_t) src.slot] != nullptr)
             automationValues[(std::size_t) a] = automation.mapLive (state.effects[(std::size_t) src.track][(std::size_t) src.slot]->controlOutput (src.output));
     }

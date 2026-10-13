@@ -41,6 +41,8 @@ public:
     // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
     // forma que a thread de áudio leia sem esperar.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}
+    // Saída de controle (instrumentos "controladores"), 0..1. Thread de áudio.
+    virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
     // Posição da música (ticks) no começo do bloco, para os LFOs globais. Thread de áudio.
     virtual void setSongPosition (double /*ticks*/) noexcept {}
 };

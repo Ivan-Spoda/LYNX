@@ -143,6 +143,12 @@ void Song::removeChannel (int index)
             --t.index;
     });
 
+    for (auto& automation : automations) // fonte ao vivo num canal controlador
+        if (automation.source.channel == index)
+            automation.source.channel = -1, automation.target.kind = AutomationTargetKind::none;
+        else if (automation.source.channel > index)
+            --automation.source.channel;
+
     removeDeadMidiLinks();
 }
 

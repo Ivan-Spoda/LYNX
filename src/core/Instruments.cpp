@@ -1,4 +1,5 @@
 #include "core/Instruments.h"
+#include "core/FlSynths.h"
 
 #include <algorithm>
 #include <atomic>
@@ -148,6 +149,7 @@ private:
             case InstrumentKind::sampler:
             case InstrumentKind::audioClip:
             case InstrumentKind::plugin:
+            case InstrumentKind::controller:
                 break;
         }
 
@@ -1365,8 +1367,107 @@ std::unique_ptr<Instrument> makeZonedSampler (std::vector<LoadedZone> zones)
     return sampler;
 }
 
+namespace
+{
+// Envelope Controller do FL: sem áudio; cada articulador segue a última nota da sua faixa de teclas e
+// a saída fica no último valor quando não há nota.
+class ControllerInstrument final : public Instrument
+{
+public:
+    void prepare (double sr) noexcept override { sampleRate = sr; }
+
+    void configure (const ChannelDef& channel, double bpm) noexcept override
+    {
+        Data data {};
+        if (auto parsed = parseEnvelopeController (channel.controllerState))
+        {
+            data.articulators = *parsed;
+            const auto beat = 60.0 / std::max (1.0, bpm);
+            for (auto& a : data.articulators)
+                if (a.tempo)
+                {
+                    for (int i = 0; i < a.count; ++i)
+                        a.time[(std::size_t) i] = (float) (a.time[(std::size_t) i] * beat);
+                    a.tempo = false;
+                }
+        }
+        mailbox.write (data);
+    }
+
+    void noteOn (int key, float) noexcept override
+    {
+        mailbox.read (data);
+        for (std::size_t k = 0; k < voices.size(); ++k)
+        {
+            const auto& a = data.articulators[k];
+            if (key >= a.lowKey && key <= a.highKey)
+                voices[k] = { true, key, 0.0, -1.0 };
+        }
+    }
+
+    void noteOff (int key) noexcept override
+    {
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.sinceRelease < 0.0)
+                v.sinceRelease = 0.0;
+    }
+
+    void allNotesOff() noexcept override
+    {
+        for (auto& v : voices)
+            if (v.active && v.sinceRelease < 0.0)
+                v.sinceRelease = 0.0;
+    }
+
+    void render (float*, float*, int n, float, float) noexcept override
+    {
+        if (mailbox.read (data))
+            for (std::size_t k = 0; k < values.size(); ++k)
+                if (! voices[k].active)
+                    values[k] = data.articulators[k].base;
+        const auto seconds = n / sampleRate;
+        for (std::size_t k = 0; k < voices.size(); ++k)
+        {
+            auto& v = voices[k];
+            if (! v.active)
+                continue;
+            v.sinceOn += seconds;
+            if (v.sinceRelease >= 0.0)
+                v.sinceRelease += seconds;
+            values[k] = controllerValue (data.articulators[k], v.sinceOn, v.sinceRelease);
+        }
+    }
+
+    float controlOutput (int output) const noexcept override
+    {
+        return output >= 0 && output < (int) values.size() ? values[(std::size_t) output] : 0.0f;
+    }
+
+private:
+    struct Data
+    {
+        EnvelopeControllerData articulators {};
+    };
+    struct Voice
+    {
+        bool active = false;
+        int key = 0;
+        double sinceOn = 0.0, sinceRelease = -1.0;
+    };
+
+    SettingsMailbox<Data> mailbox;
+    Data data {};
+    std::array<Voice, 8> voices {};
+    std::array<float, 8> values { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+    double sampleRate = 44100.0;
+};
+} // namespace
+
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
+    if (kind == InstrumentKind::controller)
+        return std::make_unique<ControllerInstrument>();
+
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);
 

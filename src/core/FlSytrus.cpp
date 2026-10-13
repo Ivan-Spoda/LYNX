@@ -961,4 +961,99 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     synth = out;
     return true;
 }
+// --- Fruity Envelope Controller (REA_rodada15 §10) ---
+
+std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state)
+{
+    Reader r { state.data(), state.size() };
+    auto version = (std::uint32_t) r.i32();
+    if (version > 0xffff)
+        version >>= 16;
+    if (r.failed || version < 1 || version > 16)
+        return std::nullopt;
+    const auto articulators = version >= 6 ? 8 : 4;
+    const auto maps = version >= 6 ? 5 : 2;
+    r.raw ((std::size_t) (articulators * 11 + 2) * 4); // parâmetros (os mesmos valores vêm nos articuladores)
+    r.raw (4 * 4);                                       // estado da UI e flags globais
+
+    EnvelopeControllerData out {};
+    for (int k = 0; k < articulators && ! r.failed; ++k)
+    {
+        auto& a = out[(std::size_t) k];
+        const auto flags = version >= 2 ? r.i32() : 0;
+        a.bipolar = (flags & 1) != 0;
+        r.i32(); // versão do articulador
+        a.base = std::clamp (r.get<float>(), 0.0f, 1.0f);
+        a.envLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
+        r.get<float>(); // nível do LFO (o LFO fica de fora)
+
+        Envelope env, lfo, map;
+        if (! readEnvelope (r, env))
+            return std::nullopt;
+        r.raw (16);
+        const auto lfoVersionAt = r.pos + 4;
+        if (! readEnvelope (r, lfo))
+            return std::nullopt;
+        std::int32_t lfoVersion = 0;
+        std::memcpy (&lfoVersion, r.data + lfoVersionAt, 4);
+        r.raw (16);
+        if (lfoVersion >= 3)
+            r.i32();
+        for (int m = 0; m < maps; ++m)
+            if (! readEnvelope (r, map))
+                return std::nullopt;
+        a.lowKey = r.i32();
+        a.highKey = r.i32();
+
+        a.envOn = env.on && ! env.points.empty();
+        a.tempo = (env.flags & 1) != 0;
+        a.sustain = env.sustain;
+        double t = 0.0;
+        for (const auto& [dx, y] : env.points)
+        {
+            if (a.count >= (int) a.time.size())
+                break;
+            t += dx;
+            a.time[(std::size_t) a.count] = (float) t;
+            a.level[(std::size_t) a.count] = (float) y;
+            ++a.count;
+        }
+        if (a.sustain >= a.count)
+            a.sustain = -1;
+    }
+    if (r.failed)
+        return std::nullopt;
+    return out;
+}
+
+float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept
+{
+    if (! a.envOn || a.count == 0)
+        return a.base;
+
+    auto at = [&] (double t) {
+        if (t <= a.time[0])
+            return (double) a.level[0];
+        for (int i = 1; i < a.count; ++i)
+            if (t < a.time[(std::size_t) i])
+            {
+                const auto t0 = a.time[(std::size_t) i - 1], t1 = a.time[(std::size_t) i];
+                const auto f = t1 > t0 ? (t - t0) / (t1 - t0) : 1.0;
+                return a.level[(std::size_t) i - 1] + (a.level[(std::size_t) i] - a.level[(std::size_t) i - 1]) * f;
+            }
+        return (double) a.level[(std::size_t) a.count - 1];
+    };
+
+    double env = 0.0;
+    if (a.sustain >= 0)
+    {
+        const auto sustainTime = (double) a.time[(std::size_t) a.sustain];
+        env = sinceRelease < 0.0 ? at (std::min (sinceOn, sustainTime)) : at (sustainTime + sinceRelease);
+    }
+    else
+        env = at (sinceOn); // sem sustain: corre até o fim mesmo com a tecla presa
+
+    const auto v = a.bipolar ? a.base + (env - 0.5) * a.envLevel : a.base + env * a.envLevel;
+    return (float) std::clamp (v, 0.0, 1.0);
+}
 } // namespace lynx

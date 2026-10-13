@@ -967,6 +967,15 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return std::nullopt;
     }
 
+    if (is ("Pitch Shifter"))
+    {
+        if (k == 0) // afinação: −12..+12 st (em centésimos) -> os nossos ±24 st
+            return FlParamMap { 0, [] (float v) { return (float) clamp01 (0.5 + std::round (24.0 * v - 12.0) / 48.0); } };
+        if (k == 3)
+            return FlParamMap { 2, [] (float v) { return v; } };
+        return std::nullopt;
+    }
+
     if (is ("Fruity Delay 2") && k == 1) // wet
         return FlParamMap { 2, [] (float v) { return clamp01 (curve (11.0, (double) v) * 0.5); } };
 

@@ -682,6 +682,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - wave->second), -24.0f, 24.0f);
                 }
 
+        // Fruity Envelope Controller: canal "controlador" (sem som) que dispara os envelopes pelas notas
+        if (c.pluginName == "Fruity Envelope Controller" && parseEnvelopeController (c.pluginState))
+        {
+            def.instrument = InstrumentKind::controller;
+            def.controllerState = c.pluginState;
+        }
+
         // Fruity DrumSynth Live: o sample de bateria do FL com o mesmo nome do som escolhido
         if (c.pluginName == "Fruity DrumSynth Live")
             if (const auto sound = drumSynthLiveSound (c.pluginState))
@@ -831,6 +838,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
+            else if (plugin == "fruity envelope controller" && def.instrument == InstrumentKind::controller)
+                ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)
         }
@@ -1145,6 +1154,29 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     // alvo (a saída do efeito é lida a cada bloco). Os outros controladores ainda ficam de fora.
     for (const auto& link : project.controllerLinks)
     {
+        // Envelope Controller num canal: a saída k segue o articulador k
+        if (link.source.isChannel())
+        {
+            const auto channel = channelMap.find (link.source.channel());
+            if (channel == channelMap.end() || song.channels[(std::size_t) channel->second].instrument != InstrumentKind::controller)
+                continue;
+            Automation a;
+            std::function<float (float)> valueMap;
+            a.target = resolveTarget (link.target, valueMap);
+            if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
+                continue;
+            a.name = "Envelope Controller (" + song.channels[(std::size_t) channel->second].name + ")";
+            a.source.channel = channel->second;
+            a.source.output = link.source.param() - flp::ControlId::pluginParamBase;
+            if (valueMap)
+                for (int i = 0; i <= 32; ++i)
+                    a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
+            song.automations.push_back (std::move (a));
+            if (options.report != nullptr)
+                ++options.report->converted["Envelope Controller (link)"];
+            continue;
+        }
+
         if (! link.source.isMixer() || link.source.track() < 0 || link.source.track() >= (int) song.mixer.size())
             continue;
         const auto found = effectSlotMap.find ({ link.source.track(), link.source.slot() });

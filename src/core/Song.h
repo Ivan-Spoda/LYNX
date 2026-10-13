@@ -34,7 +34,8 @@ enum class InstrumentKind : std::uint8_t
     synth,
     sampler,
     audioClip, // sampler sem transposição que para no fim do clip (canal de clip de áudio, como no FL)
-    plugin     // instrumento externo (VST3), criado pelo app
+    plugin,    // instrumento externo (VST3), criado pelo app
+    controller // não toca som: as notas disparam envelopes que modulam outros parâmetros (Envelope Controller do FL)
 };
 
 // Plugin externo: identificador do formato (o app sabe achar o arquivo) + estado salvo.
@@ -207,6 +208,7 @@ struct ChannelDef
     std::vector<SampleZone> zones; // sampler multi-sample (vazio: só samplePath)
     int mixerTrack = 0;     // 0 = direto no Master
     PluginRef plugin;       // usado quando instrument == plugin
+    std::vector<std::uint8_t> controllerState; // instrument == controller: estado do Envelope Controller do FL
     SamplerSettings sampler; // usado quando instrument == sampler
     SynthSettings synth;     // usado quando instrument == synth
     float swingMix = 1.0f;   // quanto do swing global vale para este canal (0..1), como no FL
@@ -379,9 +381,10 @@ struct Automation
     struct LiveSource
     {
         int track = -1, slot = 0, output = 0;
+        int channel = -1; // em vez de um efeito: o instrumento "controlador" deste canal
     } source;
     std::vector<float> curve;
-    bool isLive() const noexcept { return source.track >= 0; }
+    bool isLive() const noexcept { return source.track >= 0 || source.channel >= 0; }
     float mapLive (float v) const noexcept; // aplica a curva
 
     // Valor em `tick` (antes do primeiro ponto = primeiro valor; depois do último = último).

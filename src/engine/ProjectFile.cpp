@@ -64,6 +64,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::sampler: return "sampler";
         case InstrumentKind::audioClip: return "audioClip";
         case InstrumentKind::plugin: return "plugin";
+        case InstrumentKind::controller: return "controller";
     }
     return "synth";
 }
@@ -72,7 +73,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
-                    InstrumentKind::plugin })
+                    InstrumentKind::plugin, InstrumentKind::controller })
         if (id == instrumentId (k))
             return k;
 
@@ -259,6 +260,9 @@ juce::String toJson (const Song& song)
         if (! c.samplePath.empty())
             o->setProperty ("sample", str (c.samplePath));
 
+        if (! c.controllerState.empty())
+            o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
+
         if (! c.zones.empty()) // [arquivo, raiz, tecla mín., máx., velocity mín., máx., afinação, ganho]
         {
             juce::Array<juce::var> zones;
@@ -401,7 +405,7 @@ juce::String toJson (const Song& song)
         o->setProperty ("points", points);
         if (a.isLive())
         {
-            o->setProperty ("source", juce::Array<juce::var> { a.source.track, a.source.slot, a.source.output });
+            o->setProperty ("source", juce::Array<juce::var> { a.source.track, a.source.slot, a.source.output, a.source.channel });
             juce::Array<juce::var> curve;
             for (auto v : a.curve)
                 curve.add (juce::roundToInt (v * 10000.0f) / 10000.0);
@@ -583,6 +587,16 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.muted = (bool) c.getProperty ("muted", false);
             def.samplePath = c["sample"].toString().toStdString();
 
+            if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())
+            {
+                juce::MemoryOutputStream decoded;
+                if (juce::Base64::convertFromBase64 (decoded, encoded))
+                {
+                    const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
+                    def.controllerState.assign (bytes, bytes + decoded.getDataSize());
+                }
+            }
+
             if (auto* zones = c["zones"].getArray())
                 for (const auto& z : *zones)
                     if (z.isArray() && z.size() >= 8)
@@ -761,8 +775,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                                                        juce::jlimit (0.0f, 1.0f, (float) (double) pt[1]),
                                                        pt.size() >= 3 ? juce::jlimit (-1.0f, 1.0f, (float) (double) pt[2]) : 0.0f });
 
-            if (const auto& source = a["source"]; source.isArray() && source.size() == 3)
-                automation.source = { (int) source[0], (int) source[1], (int) source[2] };
+            if (const auto& source = a["source"]; source.isArray() && source.size() >= 3)
+                automation.source = { (int) source[0], (int) source[1], (int) source[2], source.size() >= 4 ? (int) source[3] : -1 };
             if (auto* curve = a["curve"].getArray())
                 for (const auto& v : *curve)
                     automation.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));

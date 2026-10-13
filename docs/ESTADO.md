@@ -87,7 +87,10 @@ Atualizado em 2026-10-13.
   Automações do FL seguem o slot certo e o mix (wet) do slot é automatizável.
 - **Links de controlador**: o Peak Controller do FL vira um efeito que mede o pico da trilha, e o link dele
   vira uma automação "ao vivo" do alvo (lida a cada bloco): o *sidechain pumping* dos demos funciona.
-  Envelope/X-Y/Formula Controller ainda ficam de fora.
+  O Envelope Controller vira um canal "controlador" (sem som): cada nota dispara os envelopes dos 8
+  articuladores e os links dele viram automações ao vivo com fonte no canal (ex.: *Basic Sidechain* do
+  Future House cai na nota e volta em ~1/3 s). X-Y/Formula Controller e os alvos internos do Love Philter
+  (Mod X/Y) ainda ficam de fora; o canal controlador ainda não tem editor próprio.
 - **Patcher**: o grafo do estado é lido; uma cadeia simples em série vira slots seguidos no mixer e um
   Patcher usado como instrumento toca o gerador principal de dentro (ex.: Harmor dentro do Patcher).
   Patchers em paralelo (M/S, multibanda) ainda ficam de fora.

@@ -26,6 +26,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::sampler: return "Sampler";
         case InstrumentKind::audioClip: return utf8 ("Clip de áudio");
         case InstrumentKind::plugin: return "Plugin";
+        case InstrumentKind::controller: return "Controlador";
     }
     return "?";
 }

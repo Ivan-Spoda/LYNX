@@ -759,6 +759,8 @@ TEST (flp_real_files)
                     decoded = lynx::synthFromBooBass (c.pluginState, gs);
                 else if (c.pluginName == "Drumpad" || c.pluginName == "DrumPad")
                     decoded = lynx::drumpadPatchName (c.pluginState).has_value() ? 2 : 0;
+                else if (c.pluginName == "Fruity Envelope Controller" && c.pluginState.size() >= 4 && c.pluginState[2] >= 6) // v >= 6
+                    decoded = lynx::parseEnvelopeController (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "FLEX")
                     decoded = lynx::flexPresetName (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "Fruity DrumSynth Live")
@@ -900,6 +902,38 @@ TEST (flp_real_files)
         std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos\n", gates, shaped, effectors);
         std::printf ("  Patcher: %d no mixer (%d em série), %d como instrumento com gerador\n", patchers, serial, generatorPatchers);
         CHECK (gates == 0 || shaped > 0);
+    }
+
+    // Envelope Controller "Basic Sidechain" (Future House): cai na nota e volta a ~1 em ~1/3 s
+    {
+        const auto path = std::filesystem::path (realFlpDir) / "Demo projects" / "Demo songs" / "Asher Postman - Future House.flp";
+        if (std::filesystem::exists (path))
+        {
+            std::ifstream in (path, std::ios::binary);
+            const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+            const auto song = lynx::importFlp (flp::parseProject (file));
+            const lynx::ChannelDef* controller = nullptr;
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::controller)
+                    controller = &c;
+            CHECK (controller != nullptr);
+            if (controller != nullptr)
+            {
+                auto inst = lynx::makeInstrument (lynx::InstrumentKind::controller);
+                inst->prepare (48000.0);
+                inst->configure (*controller, song.bpm);
+                std::vector<float> l (480), r (480);
+                inst->render (l.data(), r.data(), 480, 1.0f, 1.0f);
+                inst->noteOn (60, 1.0f);
+                inst->render (l.data(), r.data(), 480, 1.0f, 1.0f); // 10 ms
+                const auto ducked = inst->controlOutput (0);
+                for (int i = 0; i < 100; ++i) // +1 s
+                    inst->render (l.data(), r.data(), 480, 1.0f, 1.0f);
+                const auto recovered = inst->controlOutput (0);
+                std::printf ("  Envelope Controller (Basic Sidechain): %.2f na nota, %.2f depois de 1 s\n", ducked, recovered);
+                CHECK (ducked < 0.3f && recovered > 0.9f);
+            }
+        }
     }
 
     // presets nativos do GMS (.gmsynth = o conteúdo do 0xD5 sem o "SSLF")
@@ -3180,6 +3214,28 @@ public:
     int calls = 0;
 };
 } // namespace
+
+TEST (envelope_controller_ducks_on_each_note)
+{
+    // um articulador unipolar como o "Basic Sidechain": base 0,05, cai a 0 na nota e sobe a 1 em 0,3 s
+    lynx::ControllerArticulator a;
+    a.envOn = true;
+    a.base = 0.05f;
+    a.envLevel = 1.0f;
+    a.count = 3;
+    a.time = { 0.0f, 0.2f, 0.3f };
+    a.level = { 0.0f, 0.75f, 1.0f };
+    CHECK (std::abs (lynx::controllerValue (a, 0.0, -1.0) - 0.05f) < 1e-4f);
+    CHECK (std::abs (lynx::controllerValue (a, 0.1, -1.0) - 0.425f) < 1e-3f);
+    CHECK (lynx::controllerValue (a, 1.0, -1.0) > 0.99f);  // sem sustain: corre até o fim e fica
+    a.sustain = 1;
+    CHECK (std::abs (lynx::controllerValue (a, 1.0, -1.0) - 0.8f) < 1e-3f);  // preso no sustain
+    CHECK (lynx::controllerValue (a, 1.0, 0.5) > 0.99f);                     // soltou: segue até o fim
+    a.bipolar = true;
+    a.base = 0.5f;
+    a.sustain = -1;
+    CHECK (std::abs (lynx::controllerValue (a, 0.0, -1.0) - 0.0f) < 1e-4f); // bipolar: 0,5 + (0 − 0,5)
+}
 
 TEST (peak_controller_drives_live_automation)
 {
