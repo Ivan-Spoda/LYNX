@@ -1056,4 +1056,21 @@ float controllerValue (const ControllerArticulator& a, double sinceOn, double si
     const auto v = a.bipolar ? a.base + (env - 0.5) * a.envLevel : a.base + env * a.envLevel;
     return (float) std::clamp (v, 0.0, 1.0);
 }
+std::optional<KeyboardControllerData> parseKeyboardController (const std::vector<std::uint8_t>& d)
+{
+    if (d.size() < 553)
+        return std::nullopt;
+    std::uint32_t version = 0;
+    std::memcpy (&version, d.data(), 4);
+    if (version < 2 || version > 3)
+        return std::nullopt; // v0/v1 têm outro layout (120 teclas, um tempo só)
+    KeyboardControllerData out;
+    std::memcpy (out.keys.data(), d.data() + 12, 132 * 4);
+    for (auto& v : out.keys)
+        v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
+    std::memcpy (&out.noteOffValue, d.data() + 548, 4);
+    out.noteOffValue = std::isfinite (out.noteOffValue) ? std::clamp (out.noteOffValue, 0.0f, 1.0f) : 0.0f;
+    out.autoRelease = d[552] != 0;
+    return out;
+}
 } // namespace lynx

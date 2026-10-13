@@ -48,6 +48,16 @@ struct ControllerArticulator
 using EnvelopeControllerData = std::array<ControllerArticulator, 8>;
 std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state);
 
+// Fruity Keyboard Controller (REA_rodada16 §1.4): valor de cada tecla (0..131) e o valor de note-off
+// (com auto release). A suavização dele (ataque/release 0..256) não tem escala de tempo conhecida e fica de fora.
+struct KeyboardControllerData
+{
+    std::array<float, 132> keys {};
+    float noteOffValue = 0.0f;
+    bool autoRelease = false;
+};
+std::optional<KeyboardControllerData> parseKeyboardController (const std::vector<std::uint8_t>& state);
+
 // Valor (0..1) do articulador `sinceOn` depois do disparo; `sinceRelease` < 0 = tecla ainda presa.
 // Tempos na unidade do articulador (segundos, ou tempos com `tempo`).
 float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept;

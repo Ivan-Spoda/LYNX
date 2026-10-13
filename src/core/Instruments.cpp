@@ -1379,7 +1379,12 @@ public:
     void configure (const ChannelDef& channel, double bpm) noexcept override
     {
         Data data {};
-        if (auto parsed = parseEnvelopeController (channel.controllerState))
+        if (auto keyboard = parseKeyboardController (channel.controllerState))
+        {
+            data.keyboard = true;
+            data.keys = *keyboard;
+        }
+        else if (auto parsed = parseEnvelopeController (channel.controllerState))
         {
             data.articulators = *parsed;
             const auto beat = 60.0 / std::max (1.0, bpm);
@@ -1397,6 +1402,13 @@ public:
     void noteOn (int key, float) noexcept override
     {
         mailbox.read (data);
+        if (data.keyboard) // Keyboard Controller: a saída 0 é o valor da tecla
+        {
+            heldKey = key;
+            if (key >= 0 && key < (int) data.keys.keys.size())
+                values[0] = data.keys.keys[(std::size_t) key];
+            return;
+        }
         for (std::size_t k = 0; k < voices.size(); ++k)
         {
             const auto& a = data.articulators[k];
@@ -1407,6 +1419,12 @@ public:
 
     void noteOff (int key) noexcept override
     {
+        if (data.keyboard)
+        {
+            if (key == heldKey && data.keys.autoRelease)
+                values[0] = data.keys.noteOffValue;
+            return;
+        }
         for (auto& v : voices)
             if (v.active && v.key == key && v.sinceRelease < 0.0)
                 v.sinceRelease = 0.0;
@@ -1421,10 +1439,12 @@ public:
 
     void render (float*, float*, int n, float, float) noexcept override
     {
-        if (mailbox.read (data))
+        if (mailbox.read (data) && ! data.keyboard)
             for (std::size_t k = 0; k < values.size(); ++k)
                 if (! voices[k].active)
                     values[k] = data.articulators[k].base;
+        if (data.keyboard)
+            return;
         const auto seconds = n / sampleRate;
         for (std::size_t k = 0; k < voices.size(); ++k)
         {
@@ -1447,7 +1467,10 @@ private:
     struct Data
     {
         EnvelopeControllerData articulators {};
+        bool keyboard = false;
+        KeyboardControllerData keys {};
     };
+    int heldKey = -1;
     struct Voice
     {
         bool active = false;

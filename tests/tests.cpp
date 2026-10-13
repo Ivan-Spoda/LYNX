@@ -3333,6 +3333,29 @@ public:
 };
 } // namespace
 
+TEST (keyboard_controller_outputs_key_value)
+{
+    std::vector<std::uint8_t> blob (554, 0);
+    const std::uint32_t version = 3;
+    std::memcpy (blob.data(), &version, 4);
+    const float key60 = 0.7f, off = 0.2f;
+    std::memcpy (blob.data() + 12 + 60 * 4, &key60, 4);
+    std::memcpy (blob.data() + 548, &off, 4);
+    blob[552] = 1; // auto release
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::controller;
+    c.controllerState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::controller);
+    inst->prepare (48000.0);
+    inst->configure (c, 120.0);
+    std::vector<float> l (64), r (64);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 64, 1.0f, 1.0f);
+    CHECK (std::abs (inst->controlOutput (0) - 0.7f) < 1e-6f);
+    inst->noteOff (60);
+    CHECK (std::abs (inst->controlOutput (0) - 0.2f) < 1e-6f);
+}
+
 TEST (envelope_controller_ducks_on_each_note)
 {
     // um articulador unipolar como o "Basic Sidechain": base 0,05, cai a 0 na nota e sobe a 1 em 0,3 s

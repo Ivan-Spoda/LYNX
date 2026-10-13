@@ -684,7 +684,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
 
         // Fruity Envelope Controller: canal "controlador" (sem som) que dispara os envelopes pelas notas
-        if (c.pluginName == "Fruity Envelope Controller" && parseEnvelopeController (c.pluginState))
+        if ((c.pluginName == "Fruity Envelope Controller" && parseEnvelopeController (c.pluginState))
+            || (c.pluginName == "Fruity Keyboard Controller" && parseKeyboardController (c.pluginState)))
         {
             def.instrument = InstrumentKind::controller;
             def.controllerState = c.pluginState;
@@ -848,7 +849,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
-            else if (plugin == "fruity envelope controller" && def.instrument == InstrumentKind::controller)
+            else if ((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
@@ -1202,7 +1203,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             a.target = resolveTarget (link.target, valueMap);
             if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
                 continue;
-            a.name = "Envelope Controller (" + song.channels[(std::size_t) channel->second].name + ")";
+            a.name = "Controlador (" + song.channels[(std::size_t) channel->second].name + ")";
             a.source.channel = channel->second;
             a.source.output = link.source.param() - flp::ControlId::pluginParamBase;
             if (valueMap)
@@ -1210,7 +1211,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
             song.automations.push_back (std::move (a));
             if (options.report != nullptr)
-                ++options.report->converted["Envelope Controller (link)"];
+                ++options.report->converted["Controlador de canal (link)"];
             continue;
         }
 
