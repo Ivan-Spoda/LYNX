@@ -319,6 +319,8 @@ juce::String toJson (const Song& song)
 
         if (! t.toMaster)
             o->setProperty ("toMaster", false);
+        if (t.colour != 0)
+            o->setProperty ("colour", juce::String::toHexString ((juce::int64) (t.colour & 0xFFFFFF)).paddedLeft ('0', 6));
         if (t.stereo != 0.0f)
             o->setProperty ("stereo", juce::roundToInt (t.stereo * 1000.0f) / 1000.0);
         if (t.invertPhase)
@@ -549,6 +551,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.solo = (bool) t.getProperty ("solo", false);
             track.toMaster = (bool) t.getProperty ("toMaster", true);
             track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
+
+            if (t.hasProperty ("colour"))
+                track.colour = 0xFF000000u | (std::uint32_t) t["colour"].toString().getHexValue32();
             track.invertPhase = (bool) t.getProperty ("invertPhase", false);
             track.swapChannels = (bool) t.getProperty ("swap", false);
 

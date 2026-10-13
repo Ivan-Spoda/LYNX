@@ -145,6 +145,12 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setColour (t == selected ? juce::Colour (0xff3c444d) : (t == 0 ? juce::Colour (0xff343a41) : theme::panel));
         g.fillRoundedRectangle (strip.toFloat(), 4.0f);
 
+        if (track.colour != 0) // faixa colorida no topo, como no mixer do FL
+        {
+            g.setColour (juce::Colour (track.colour));
+            g.fillRoundedRectangle (strip.toFloat().withHeight (4.0f), 2.0f);
+        }
+
         if (t == selected)
         {
             g.setColour (theme::accentOrange);

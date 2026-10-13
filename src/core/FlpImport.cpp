@@ -188,6 +188,9 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         if (insert.index > 0 && ! insert.name.empty())
             track.name = insert.name;
 
+        if (insert.colour != 0 && insert.colour != 0x485156) // o cinza padrão do FL
+            track.colour = 0xFF000000u | insert.colour;
+
         track.muted = (insert.flags & 0x08) == 0;
         track.invertPhase = (insert.flags & 0x01) != 0;
         track.swapChannels = (insert.flags & 0x02) != 0;

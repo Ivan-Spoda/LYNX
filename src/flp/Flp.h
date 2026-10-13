@@ -202,6 +202,7 @@ struct MixerInsert
     int index = 0;
     std::string name;
     std::uint32_t flags = 0x4C;  // 0x08 = habilitada (apagado = mutada), 0x1000 = solo
+    std::uint32_t colour = 0;    // 0xRRGGBB (0 = sem cor gravada)
     std::vector<int> routes;      // trilhas de destino (0 = Master)
     bool hasRoutes = false;
 };

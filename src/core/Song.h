@@ -114,6 +114,7 @@ struct MixerTrack
     std::vector<EffectSlot> effects; // até maxEffectSlots, processados em ordem
     bool toMaster = true;            // inserts: sai no Master (além dos envios)
     float stereo = 0.0f;             // separação: -1 = alarga ao máximo, 0 = normal, +1 = mono (como no FL)
+    std::uint32_t colour = 0;        // 0xFFRRGGBB; 0 = padrão do tema
     bool invertPhase = false;
     bool swapChannels = false;
     std::vector<MixerSend> sends;    // para outros inserts

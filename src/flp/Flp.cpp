@@ -36,7 +36,8 @@ enum : std::uint32_t
     evAutomationPoints = 0xEA,  // header 21 B + 24 B por ponto + 112 B
     evMixerRoutes = 0xEB,       // um byte por trilha de destino
     evChannelLevels = 0xDB,
-    evChannelColour = 0x80,     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
+    evChannelColour = 0x80,
+    evMixerInsertColour = 0x95, // u32 0x00BBGGRR; vem antes do 0xEC que abre o insert     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
     evPlaylistTrack = 0xEE,     // u32 índice (1..500), u32 cor, u32 ícone, u8 habilitada, ...
     evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
@@ -320,6 +321,7 @@ Project parseProject (std::span<const std::uint8_t> file)
     int currentChannel = -1, currentPattern = -1, currentArrangement = -1;
     bool hasFineTempo = false;
     std::string pendingInsertName;
+    std::uint32_t pendingInsertColour = 0;
 
     auto text = [&] (const Event& e)
     {
@@ -612,6 +614,10 @@ Project parseProject (std::span<const std::uint8_t> file)
                 }
                 break;
 
+            case evMixerInsertColour:
+                pendingInsertColour = ((e.value & 0xFF) << 16) | (e.value & 0xFF00) | ((e.value >> 16) & 0xFF);
+                break;
+
             case evMixerInsertName:
                 // O nome vem antes do evento que abre o insert ao qual pertence
                 // (confirmado cruzando com a rota dos canais nos demos).
@@ -625,6 +631,8 @@ Project parseProject (std::span<const std::uint8_t> file)
                 insert.index = (int) project.mixer.size() - 1;
                 insert.name = std::move (pendingInsertName);
                 pendingInsertName.clear();
+                insert.colour = pendingInsertColour;
+                pendingInsertColour = 0;
 
                 if (e.data.size() >= 8)
                     insert.flags = readLE<std::uint32_t> (e.data, 4);
