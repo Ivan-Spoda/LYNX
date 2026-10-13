@@ -85,4 +85,4 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] LFOs do canal, AM do 3x Osc
 - [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)
 - [x] Metrônomo seguindo as mudanças de compasso (modo song)
-- [ ] Notas "porta"
+- [x] Notas "porta" (por nota e do canal, synth e sampler)
