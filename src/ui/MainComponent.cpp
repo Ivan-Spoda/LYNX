@@ -908,6 +908,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     else
     {
         menu.addItem ("Atalhos\tF1", [this] { showHelp(); });
+        menu.addItem (utf8 ("Relatório da última importação do FL"), [this] {
+            const auto& r = engine.getImportReport();
+            if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
+                && engine.getMissingPlugins().isEmpty())
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Importação do FL Studio"),
+                                                        utf8 ("Nada a relatar (nenhum .flp importado nesta sessão, ou tudo foi convertido)."));
+            else
+                showImportReport();
+        });
         menu.addItem ("Sobre o LYNX", [] {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "LYNX",
                                                     utf8 ("LYNX " JUCE_APPLICATION_VERSION_STRING "\nDAW leve em C++/JUCE, com o fluxo de trabalho do FL Studio.\n"
