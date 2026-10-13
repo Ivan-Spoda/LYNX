@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "core/Arpeggiator.h"
 #include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
@@ -56,6 +57,9 @@ struct RackState
     // Latências atuais dos instrumentos e efeitos, no mesmo formato de `latencies`.
     std::vector<int> currentLatencies() const;
     void buildPdc (const RackState* previous);
+
+    // Arpejadores dos canais com arpejo ligado (nullptr nos outros); reaproveitados entre snapshots.
+    std::vector<std::shared_ptr<Arpeggiator>> arpeggiators;
 
     // Cut groups: canais que cada canal corta ao tocar (cutBy == cutGroup dele).
     std::vector<std::vector<int>> cutTargets;
@@ -172,6 +176,7 @@ private:
     static constexpr int chunkCapacity = 512;               // trechos processados de uma vez
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
+    double chunkStartTick = 0.0, chunkTps = 1.0;            // do trecho sendo renderizado (para o arpejador)
     WorkerPool* workers = nullptr;
 
     struct SmartDisableState

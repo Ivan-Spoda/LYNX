@@ -193,6 +193,8 @@ juce::String toJson (const Song& song)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
         if (c.swingMix != 1.0f)
             o->setProperty ("swingMix", c.swingMix);
+        if (c.arp.enabled())
+            o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
         if (c.cutGroup != 0 || c.cutBy != 0)
             o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
 
@@ -453,6 +455,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
 
             def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+
+            if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
+                def.arp = { juce::jlimit (0, 4, (int) arp[0]), juce::jlimit (1, 4, (int) arp[1]),
+                            juce::jlimit (1.0f / 32.0f, 4.0f, (float) (double) arp[2]), juce::jlimit (0.05f, 1.0f, (float) (double) arp[3]),
+                            juce::jlimit (1, 16, (int) arp[4]) };
 
             if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
             {

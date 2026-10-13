@@ -2161,6 +2161,59 @@ TEST (sampler_region_start_and_end)
     CHECK (l[2400] > 0.48f && l[2600] == 0.0f); // e para no fim dele
 }
 
+TEST (arpeggiator_plays_held_chord_in_steps)
+{
+    auto song = lynx::Song::makeDefault();
+    song.bpm = 120.0;
+    song.patterns[0].notes.clear();
+    for (int key : { 60, 64, 67 })
+        song.patterns[0].notes.push_back ({ 0, lynx::ppq * 4, 4, key, 0.8f }); // acorde segurado 1 compasso
+    song.channels[4].arp.direction = 1; // sobe
+    song.channels[4].arp.stepBeats = 0.25f;
+
+    auto state = lynx::RackState::build (song, nullptr, 48000.0);
+    CHECK (state->arpeggiators[4] != nullptr && state->arpeggiators[0] == nullptr);
+
+    // o arpejador gera as notas; contamos o que ele entrega ao instrumento
+    auto& arp = *state->arpeggiators[4];
+    const auto tps = lynx::ticksPerSample (song.bpm, 48000.0);
+    std::vector<int> keys;
+    lynx::EventBuffer ev;
+
+    for (double tick = 0.0; tick < lynx::ppq * 2.0; tick += 512 * tps)
+    {
+        ev.clear();
+        lynx::schedulePatternLoop (song.patterns[0], song.patterns[0].effectiveLength (4), tick, 512, tps, ev);
+        int in = 0, out = 0;
+        for (auto& e : ev)
+            if (e.channel == 4)
+                arp.input[(std::size_t) in++] = e;
+        arp.process (4, arp.input.data(), in, tick, tps, 512, song.channels[4].arp, arp.output.data(), out);
+        for (int i = 0; i < out; ++i)
+            if (arp.output[(std::size_t) i].type == lynx::NoteEvent::Type::on)
+                keys.push_back (arp.output[(std::size_t) i].key);
+    }
+
+    // 2 tempos = 8 passos de semicolcheia: 60 64 67 60 64 67 60 64
+    CHECK (keys.size() >= 8); // o último bloco passa um pouco dos 2 tempos
+    const int expected[] = { 60, 64, 67, 60, 64, 67, 60, 64 };
+    for (std::size_t i = 0; i < keys.size() && i < 8; ++i)
+        CHECK (keys[i] == expected[i]);
+
+    // renderizando de verdade também soa
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> l (512), rr (512);
+    float peak = 0.0f;
+    for (double tick = 0.0; tick < lynx::ppq; tick += 512 * tps)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+        for (auto v : l)
+            peak = std::max (peak, std::abs (v));
+    }
+    CHECK (peak > 0.01f);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

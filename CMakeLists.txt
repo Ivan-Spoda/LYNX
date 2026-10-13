@@ -20,7 +20,8 @@ add_library(lynx_core STATIC
     src/core/Recorder.cpp
     src/core/Pdc.cpp
     src/core/WorkerPool.cpp
-    src/core/TimeStretch.cpp)
+    src/core/TimeStretch.cpp
+    src/core/Arpeggiator.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)

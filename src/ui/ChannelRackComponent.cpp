@@ -456,6 +456,42 @@ void ChannelRackComponent::showChannelMenu (int channel)
             onOpenPianoRoll();
     });
     menu.addSubMenu ("Instrumento", instruments);
+    {
+        // arpejador do canal
+        const auto arp = c.arp;
+        auto set = [this, channel] (std::function<void (ArpSettings&)> change) {
+            engine.editSong ([channel, change] (Song& s) { change (s.channels[(std::size_t) channel].arp); });
+        };
+        juce::PopupMenu arpMenu;
+        const char* directions[] = { "Desligado", "Sobe", "Desce", "Sobe e desce", "Aleatório" };
+
+        for (int d = 0; d < 5; ++d)
+            arpMenu.addItem (utf8 (directions[d]), true, arp.direction == d, [set, d] { set ([d] (ArpSettings& a) { a.direction = d; }); });
+
+        arpMenu.addSeparator();
+        juce::PopupMenu range, speed, gate, repeat;
+
+        for (int o = 1; o <= 4; ++o)
+            range.addItem (juce::String (o) + (o == 1 ? " oitava" : " oitavas"), true, arp.range == o, [set, o] { set ([o] (ArpSettings& a) { a.range = o; }); });
+
+        const std::pair<const char*, float> speeds[] = { { "1/4", 1.0f }, { "1/8", 0.5f }, { "1/8 tercina", 1.0f / 3.0f },
+                                                          { "1/16", 0.25f }, { "1/16 tercina", 1.0f / 6.0f }, { "1/32", 0.125f } };
+        for (const auto& [name, beats] : speeds)
+            speed.addItem (name, true, std::abs (arp.stepBeats - beats) < 1e-4f, [set, b = beats] { set ([b] (ArpSettings& a) { a.stepBeats = b; }); });
+
+        for (int g : { 25, 50, 75, 100 })
+            gate.addItem (juce::String (g) + "%", true, std::abs (arp.gate - g / 100.0f) < 1e-4f, [set, g] { set ([g] (ArpSettings& a) { a.gate = g / 100.0f; }); });
+
+        for (int n : { 1, 2, 3, 4 })
+            repeat.addItem (juce::String (n) + "x", true, arp.repeat == n, [set, n] { set ([n] (ArpSettings& a) { a.repeat = n; }); });
+
+        arpMenu.addSubMenu (utf8 ("Extensão"), range);
+        arpMenu.addSubMenu ("Velocidade", speed);
+        arpMenu.addSubMenu ("Gate", gate);
+        arpMenu.addSubMenu (utf8 ("Repetição"), repeat);
+        menu.addSubMenu (arp.enabled() ? utf8 ("Arpejador (ligado)") : utf8 ("Arpejador"), arpMenu);
+    }
+
     menu.addItem ("Renomear...", [this, channel] { rename (channel); });
     {
         juce::PopupMenu colours;

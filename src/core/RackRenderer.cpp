@@ -154,6 +154,13 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
     const auto& channels = state->song.channels;
     state->cutTargets.assign (channels.size(), {});
+    state->arpeggiators.assign (channels.size(), nullptr);
+
+    for (std::size_t c = 0; c < channels.size(); ++c)
+        if (channels[c].arp.enabled())
+            state->arpeggiators[c] = previous != nullptr && c < previous->arpeggiators.size() && previous->arpeggiators[c] != nullptr
+                                         ? previous->arpeggiators[c]
+                                         : std::make_shared<Arpeggiator>();
 
     for (std::size_t c = 0; c < channels.size(); ++c)
         if (channels[c].cutGroup > 0)
@@ -512,8 +519,29 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
     auto& instrument = *state.instruments[(std::size_t) i];
     int position = 0;
 
-    for (const auto& e : events)
+    // arpejador: as notas do canal viram a sequência do arpejo
+    const NoteEvent* list = events.begin();
+    int listCount = events.size();
+
+    if ((std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr)
     {
+        auto& arp = *state.arpeggiators[(std::size_t) i];
+        int inCount = 0;
+
+        for (const auto& e : events)
+            if (e.channel == i && inCount < Arpeggiator::maxEvents)
+                arp.input[(std::size_t) inCount++] = e;
+
+        int outCount = 0;
+        arp.process (i, arp.input.data(), inCount, chunkStartTick, chunkTps, n, c.arp, arp.output.data(), outCount);
+        list = arp.output.data();
+        listCount = outCount;
+    }
+
+    for (int index = 0; index < listCount; ++index)
+    {
+        const auto& e = list[index];
+
         if (e.channel != i)
             continue;
 
@@ -662,8 +690,14 @@ void RackRenderer::process (const RackState* state,
     const auto jumped = playing && wasPlaying && std::abs (startTick - expectedTick) > 1.0;
 
     if ((wasPlaying && ! playing) || jumped)
+    {
         for (auto& instrument : state->instruments)
             instrument->allNotesOff();
+
+        for (auto& arp : state->arpeggiators)
+            if (arp != nullptr)
+                arp->reset();
+    }
 
     // começou a tocar ou pulou: clips de áudio em andamento precisam começar no meio
     resumeAudio = playing && (! wasPlaying || jumped);
@@ -725,6 +759,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (state.hasAutomation)
         updateAutomation (state, startTick);
+
+    chunkStartTick = startTick;
+    chunkTps = ticksPerSample (bpm, sampleRate);
 
     for (int t = 0; t < tracks; ++t)
     {

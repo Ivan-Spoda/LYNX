@@ -65,6 +65,19 @@ struct SamplerSettings
     bool operator== (const SamplerSettings&) const = default;
 };
 
+// Arpejador do canal (Channel settings do FL).
+struct ArpSettings
+{
+    int direction = 0;       // 0 desligado, 1 sobe, 2 desce, 3 sobe e desce, 4 aleatório
+    int range = 1;           // oitavas, 1..4
+    float stepBeats = 0.25f; // duração de cada passo em tempos (0,25 = semicolcheia)
+    float gate = 0.5f;       // fração do passo em que a nota fica soando
+    int repeat = 1;          // vezes que cada nota toca antes da próxima
+
+    bool enabled() const noexcept { return direction > 0; }
+    bool operator== (const ArpSettings&) const = default;
+};
+
 // Synth interno de 3 osciladores (no espírito do 3xOsc do FL).
 enum class Waveform : std::uint8_t
 {
@@ -111,6 +124,7 @@ struct ChannelDef
     SamplerSettings sampler; // usado quando instrument == sampler
     SynthSettings synth;     // usado quando instrument == synth
     float swingMix = 1.0f;   // quanto do swing global vale para este canal (0..1), como no FL
+    ArpSettings arp;
     int cutGroup = 0;        // tocar este canal corta os canais com cutBy igual (0 = nenhum)
     int cutBy = 0;
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = padrão do tema
