@@ -44,6 +44,21 @@ void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, floa
 // Oitavas que o envelope de corte do FL (amount ±128 em unidades de Mod X) desloca a partir do Mod X do canal.
 float filterEnvelopeOctaves (int modX, int type, int amount);
 
+// Um pad de um sampler de bateria do FL (FPC e afins) que vira um canal próprio.
+struct DrumPad
+{
+    std::string name;
+    int key = 60;                   // tecla que dispara o pad no canal original
+    std::vector<SampleZone> layers; // camadas por velocity (a nota-raiz de cada uma é a nota tocada)
+    float volume = 0.78f, pan = 0.0f, tune = 0.0f; // volume na curva do canal; afinação em semitons
+    int cutGroup = 0;               // pads com o mesmo grupo cortam uns aos outros (0 = nenhum)
+};
+
+// Troca o canal `channel` por um canal sampler por pad (logo depois dele, no mesmo insert do mixer)
+// e move as notas pela tecla: a nota do pad vai para o canal dele, na tecla 60. Notas de teclas sem
+// pad somem. Os índices de canal das patterns, automações e clips são ajustados.
+void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads);
+
 // Efeito interno parecido com um efeito nativo do FL (pelo nome interno do plugin).
 std::optional<EffectKind> effectForFlPlugin (const std::string& name);
 

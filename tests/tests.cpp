@@ -1371,6 +1371,40 @@ TEST (bars_follow_time_signature_markers)
     CHECK ((lynx::ppq * 3000 - far[0].tick) < far[0].length);
 }
 
+TEST (split_drum_channel_moves_notes_to_pads)
+{
+    lynx::Song song = lynx::Song::makeDefault();
+    const auto channels = (int) song.channels.size();
+    song.patterns[0].notes.clear();
+    song.patterns[0].notes.push_back ({ 0, 240, 1, 36, 0.9f });   // kick do kit (canal 1)
+    song.patterns[0].notes.push_back ({ 240, 240, 1, 38, 0.8f }); // caixa
+    song.patterns[0].notes.push_back ({ 480, 240, 1, 50, 0.8f }); // tecla sem pad: some
+    song.patterns[0].notes.push_back ({ 480, 240, 3, 60, 0.8f }); // outro canal: anda 1 posição
+    lynx::Automation a;
+    a.target = { lynx::AutomationTargetKind::channelVolume, 3, 0, 0 };
+    song.automations.push_back (a);
+
+    std::vector<lynx::DrumPad> pads (2);
+    pads[0].name = "Kick";
+    pads[0].key = 36;
+    pads[0].layers = { { "kick.wav" } };
+    pads[1].name = "Snare";
+    pads[1].key = 38;
+    pads[1].layers = { { "snare soft.wav", 60, 0, 127, 0, 90 }, { "snare hard.wav", 60, 0, 127, 91, 127 } };
+    pads[1].cutGroup = 2;
+    lynx::splitDrumChannel (song, 1, pads);
+
+    CHECK ((int) song.channels.size() == channels + 1);
+    CHECK (song.channels[1].samplePath == "kick.wav" && song.channels[1].instrument == lynx::InstrumentKind::sampler);
+    CHECK (song.channels[2].zones.size() == 2 && song.channels[2].cutGroup == song.channels[2].cutBy && song.channels[2].cutGroup != 0);
+    const auto& notes = song.patterns[0].notes;
+    CHECK (notes.size() == 3);
+    CHECK (notes[0].channel == 1 && notes[0].key == 60);
+    CHECK (notes[1].channel == 2 && notes[1].key == 60);
+    CHECK (notes[2].channel == 4); // o antigo canal 3
+    CHECK (song.automations[0].target.index == 4);
+}
+
 TEST (flp_import_brings_playlist)
 {
     flp::Project p;

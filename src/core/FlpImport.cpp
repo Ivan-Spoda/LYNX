@@ -249,6 +249,78 @@ void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, floa
     cutoffHz = (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0);
 }
 
+void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads)
+{
+    if (channel < 0 || channel >= (int) song.channels.size() || pads.empty())
+        return;
+
+    const auto original = song.channels[(std::size_t) channel];
+    const auto inserted = (int) pads.size() - 1; // o primeiro pad ocupa o lugar do canal original
+    std::vector<ChannelDef> padChannels;
+
+    for (const auto& pad : pads)
+    {
+        ChannelDef def = original;
+        def.name = original.name + " - " + pad.name;
+        def.instrument = InstrumentKind::sampler;
+        def.plugin = {};
+        def.samplePath = pad.layers.size() == 1 ? pad.layers.front().path : std::string();
+        def.zones = pad.layers.size() > 1 ? pad.layers : std::vector<SampleZone> {};
+        for (auto& z : def.zones)
+            z.rootKey = 60, z.lowKey = 0, z.highKey = 127;
+        def.volume = std::clamp (original.volume * pad.volume / 0.78f, 0.0f, 1.0f);
+        def.pan = std::clamp (original.pan + pad.pan, -1.0f, 1.0f);
+        def.sampler = {};
+        def.sampler.pitch = std::clamp (original.sampler.pitch + pad.tune, -24.0f, 24.0f);
+        def.cutGroup = def.cutBy = pad.cutGroup > 0 ? 1000 + pad.cutGroup : 0; // grupos próprios do kit
+        padChannels.push_back (std::move (def));
+    }
+
+    song.channels[(std::size_t) channel] = padChannels.front();
+    song.channels.insert (song.channels.begin() + channel + 1, padChannels.begin() + 1, padChannels.end());
+
+    // canais depois do original andam `inserted` posições
+    auto shift = [&] (int c) { return c > channel ? c + inserted : c; };
+
+    for (auto& p : song.patterns)
+    {
+        std::vector<Note> kept;
+
+        for (auto n : p.notes)
+        {
+            if (n.channel != channel)
+            {
+                n.channel = shift (n.channel);
+                kept.push_back (n);
+                continue;
+            }
+
+            for (int i = 0; i < (int) pads.size(); ++i)
+                if (pads[(std::size_t) i].key == n.key)
+                {
+                    n.channel = channel + i;
+                    n.key = 60;
+                    kept.push_back (n);
+                    break;
+                }
+        }
+
+        p.notes = std::move (kept);
+        p.sortNotes();
+    }
+
+    song.forEachClipList ([&] (std::vector<Clip>& clips) {
+        for (auto& c : clips)
+            c.channel = c.channel >= 0 ? shift (c.channel) : c.channel;
+    });
+
+    song.forEachTarget ([&] (AutomationTarget& t) {
+        if ((t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
+             || t.kind == AutomationTargetKind::channelParam) && t.index >= 0)
+            t.index = shift (t.index);
+    });
+}
+
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
