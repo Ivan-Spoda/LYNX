@@ -108,6 +108,9 @@ struct ControlId
     static constexpr int mixerPan = 0x1FC1;
     static constexpr int mixerSendBase = 0x2000; // + trilha de destino
     static constexpr int pluginParamBase = 0x8000;
+    static constexpr std::uint32_t tempo = 0x40000005; // automação de tempo: 0..1 = 60..180 BPM (conferido nos demos)
+
+    bool isTempo() const noexcept { return raw == tempo; }
 };
 
 // Valor gravado de um parâmetro (evento 0xE1).

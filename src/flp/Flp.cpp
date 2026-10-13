@@ -261,8 +261,8 @@ std::uint32_t parseVersionNumber (const std::string& text)
 ControlId normalizeControlId (std::uint32_t raw)
 {
     // antes do 24.2.99 a classe do mixer era 0x2... (o FL soma 0x50000000 ao carregar) e os
-    // envios ficavam em 0x1F40 + destino
-    if ((raw >> 28) == 2)
+    // envios ficavam em 0x1F40 + destino. Trilhas >= 64 transbordam para 0x3... (mesma conta).
+    if ((raw >> 28) == 2 || (raw >> 28) == 3)
     {
         raw += 0x50000000u;
         const auto p = raw & 0xFFFF;

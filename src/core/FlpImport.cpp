@@ -64,6 +64,12 @@ AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int
 {
     AutomationTarget t;
 
+    if (id.isTempo())
+    {
+        t.kind = AutomationTargetKind::tempo;
+        return t;
+    }
+
     if (id.isChannel())
     {
         const auto channel = channelMap.find (id.channel());
@@ -290,7 +296,11 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         {
             const auto& p = c.automation[i];
             const auto tick = (std::int64_t) std::llround (p.position * ppq);
-            const auto value = (float) std::clamp (p.value, 0.0, 1.0);
+            auto value = (float) std::clamp (p.value, 0.0, 1.0);
+
+            // o FL automatiza o tempo de 60 a 180 BPM; o nosso alvo cobre a faixa inteira do andamento
+            if (a.target.kind == AutomationTargetKind::tempo)
+                value = valueFromTempo (60.0 + 120.0 * value);
 
             // a curva do FL é do trecho que termina no ponto; a nossa fica no ponto da esquerda
             if (i > 0)
