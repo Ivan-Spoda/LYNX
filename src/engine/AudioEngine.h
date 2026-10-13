@@ -51,6 +51,9 @@ public:
     void rewind() noexcept;
     void seek (double ticks) noexcept;
 
+    // Prévia de um arquivo de áudio (navegador). Arquivo inválido/vazio para a prévia.
+    void previewFile (const juce::File& file);
+
     // Nota tocada ao vivo (teclado do PC, preview). Thread da UI.
     // `record` = entra na gravação se ela estiver ligada (o preview do Piano Roll não entra).
     void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
@@ -144,6 +147,7 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
+    class PreviewPlayer* preview = nullptr; // nó do grafo (o grafo é o dono)
     void publishSong();
 
     std::unique_ptr<WorkerPool> workers; // threads extras do renderer (antes do grafo, que as usa)

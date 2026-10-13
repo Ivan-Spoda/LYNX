@@ -26,6 +26,7 @@ namespace lynx
 //  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
 class PlaylistComponent final : public juce::Component,
                                 public juce::FileDragAndDropTarget,
+                                public juce::DragAndDropTarget,
                                 private juce::ChangeListener,
                                 private juce::Timer,
                                 private juce::ScrollBar::Listener
@@ -51,6 +52,10 @@ public:
     // arrastar arquivos de áudio cria clips de áudio (e um canal para cada um)
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
+
+    // arquivos arrastados do navegador do LYNX
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
 
     static constexpr int headerWidth = 96;
     static constexpr int timelineHeight = 24;

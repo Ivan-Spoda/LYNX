@@ -5,6 +5,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
+#include "ui/BrowserComponent.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/PianoRollComponent.h"
 #include "ui/MixerComponent.h"
@@ -13,6 +14,7 @@
 namespace lynx
 {
 class MainComponent final : public juce::Component,
+                            public juce::DragAndDropContainer,
                             private juce::Timer,
                             private juce::ChangeListener
 {
@@ -82,6 +84,8 @@ private:
     PlaylistComponent playlist;
     MixerComponent mixer;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
+    BrowserComponent browser;
+    bool browserVisible = true;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;

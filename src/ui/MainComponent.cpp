@@ -44,8 +44,11 @@ MainComponent::MainComponent (AudioEngine& e)
       rack (e),
       pianoRoll (e),
       playlist (e),
-      mixer (e)
+      mixer (e),
+      browser (e)
 {
+    browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
+    addAndMakeVisible (browser);
     newButton.onClick = [this] { newProject(); };
     openButton.onClick = [this] { chooseFileToOpen(); };
     saveButton.onClick = [this] { save (false); };
@@ -129,7 +132,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
+    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F8 navegador   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -213,6 +216,10 @@ void MainComponent::resized()
     auto status = area.removeFromBottom (20).reduced (8, 0);
     cpuLabel.setBounds (status.removeFromRight (90));
     hintLabel.setBounds (status);
+    if (browserVisible)
+        browser.setBounds (area.removeFromLeft (240).reduced (4, 4));
+
+    browser.setVisible (browserVisible);
     tabs.setBounds (area.reduced (6, 4));
 }
 
@@ -277,6 +284,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (! cmd && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
     {
         toggleMode();
+        return true;
+    }
+
+    if (key.getKeyCode() == juce::KeyPress::F8Key)
+    {
+        browserVisible = ! browserVisible;
+        resized();
         return true;
     }
 

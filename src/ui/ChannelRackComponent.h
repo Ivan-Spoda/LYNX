@@ -17,6 +17,7 @@ namespace lynx
 //  - arrastar um arquivo de áudio para uma linha transforma o canal em sampler
 class ChannelRackComponent final : public juce::Component,
                                    public juce::FileDragAndDropTarget,
+                                   public juce::DragAndDropTarget,
                                    private juce::ChangeListener,
                                    private juce::Timer
 {
@@ -34,6 +35,10 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
+
+    // arquivos arrastados do navegador do LYNX
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
 
     void updateSize();
 

@@ -4,6 +4,7 @@
 #include "ui/ChannelSettings.h"
 
 #include "engine/Text.h"
+#include "ui/BrowserComponent.h"
 
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
@@ -627,5 +628,17 @@ void ChannelRackComponent::timerCallback()
         playheadStep = step;
         dirty (playheadStep);
     }
+}
+
+bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)
+{
+    return details.description.toString() == BrowserComponent::dragDescription;
+}
+
+void ChannelRackComponent::itemDropped (const SourceDetails& details)
+{
+    if (auto* tree = dynamic_cast<juce::FileTreeComponent*> (details.sourceComponent.get()))
+        if (tree->getSelectedFile().existsAsFile())
+            filesDropped ({ tree->getSelectedFile().getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }
 } // namespace lynx

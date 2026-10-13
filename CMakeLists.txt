@@ -64,6 +64,7 @@ if(LYNX_BUILD_APP)
         src/engine/StreamPrefetcher.cpp
         src/engine/ClapFormat.cpp
         src/engine/MidiFileIo.cpp
+        src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
         src/ui/PianoRollComponent.cpp
@@ -72,7 +73,8 @@ if(LYNX_BUILD_APP)
         src/ui/PluginWindow.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
-        src/ui/ChannelSettings.cpp)
+        src/ui/ChannelSettings.cpp
+        src/ui/BrowserComponent.cpp)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0

@@ -2,6 +2,7 @@
 
 #include "core/NoteEdit.h"
 #include "engine/Text.h"
+#include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
 
 #include "ui/Theme.h"
@@ -1284,5 +1285,17 @@ void PlaylistComponent::timerCallback()
 
         repaint();
     }
+}
+
+bool PlaylistComponent::isInterestedInDragSource (const SourceDetails& details)
+{
+    return details.description.toString() == BrowserComponent::dragDescription;
+}
+
+void PlaylistComponent::itemDropped (const SourceDetails& details)
+{
+    if (auto* tree = dynamic_cast<juce::FileTreeComponent*> (details.sourceComponent.get()))
+        if (tree->getSelectedFile().existsAsFile())
+            filesDropped ({ tree->getSelectedFile().getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }
 } // namespace lynx

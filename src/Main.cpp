@@ -41,6 +41,19 @@ public:
             return;
         }
 
+        if (args.contains ("--paths"))
+        {
+            // diagnóstico: pastas que o LYNX procura
+            const auto programs = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
+            juce::String report;
+            report << "programas=" << programs.getFullPathName() << "\n";
+            for (const auto& dir : programs.getChildFile ("Image-Line").findChildFiles (juce::File::findDirectories, false, "FL Studio*"))
+                report << "fl=" << dir.getFullPathName() << " packs=" << (int) dir.getChildFile ("Data").getChildFile ("Patches").getChildFile ("Packs").isDirectory() << "\n";
+            juce::File (args[args.indexOf ("--paths") + 1].unquoted()).replaceWithText (report);
+            quit();
+            return;
+        }
+
         if (args.contains ("--scantest"))
         {
             // LYNX.exe --scantest pasta relatorio.txt: busca (em processos filhos) sem tocar na lista do usuário

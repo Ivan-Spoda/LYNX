@@ -7,6 +7,7 @@
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/Metronome.h"
+#include "engine/PreviewPlayer.h"
 #include "flp/Flp.h"
 
 #if JUCE_WINDOWS
@@ -124,14 +125,18 @@ void AudioEngine::buildInitialGraph()
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
     auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters, workers.get()));
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
+    auto previewOwned = std::make_unique<PreviewPlayer>();
+    preview = previewOwned.get();
+    auto previewNode = graph.addNode (std::move (previewOwned));
 
     for (int channel = 0; channel < 2; ++channel)
     {
         graph.addConnection ({ { rack->nodeID, channel }, { output->nodeID, channel } });
         graph.addConnection ({ { metronome->nodeID, channel }, { output->nodeID, channel } });
+        graph.addConnection ({ { previewNode->nodeID, channel }, { output->nodeID, channel } });
     }
 
-    jassert (graph.getConnections().size() == 4);
+    jassert (graph.getConnections().size() == 6);
 }
 
 float AudioEngine::renderOffline (const RenderOptions& options)
@@ -214,6 +219,12 @@ void AudioEngine::play() noexcept { transport.playing.store (true); }
 void AudioEngine::stop() noexcept { transport.playing.store (false); }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
 void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
+
+void AudioEngine::previewFile (const juce::File& file)
+{
+    if (preview != nullptr)
+        preview->play (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
+}
 
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
