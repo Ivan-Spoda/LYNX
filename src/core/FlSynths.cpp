@@ -50,8 +50,10 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
     // --- osciladores: timbre, máscara (ímpares -> quadrada), sub, uníssono ---
     const auto mask = std::clamp (x (23), 0.0, 1.0);
     auto wave = (color == 5 || color == 6) ? Waveform::square : color == 7 ? Waveform::triangle : Waveform::saw;
-    if (mask >= 0.5)
-        wave = Waveform::square;
+    // máscara padrão (ímpares 1, pares 0): pares × (1 − m) = serra·(1 − m) + quadrada·(m/2) (REA_rodada21 §1.2)
+    bool oddMask = true;
+    for (int j = 0; j < 12; ++j)
+        oddMask = oddMask && p (11 + j) == (j % 2 == 0 ? 1000 : 0);
 
     const auto voices = std::clamp (p (65), 1, 9);
     s.osc = { SynthOscillator { wave, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
@@ -72,10 +74,10 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
             s.osc[1] = { Waveform::saw, 0, 7.0f, 0.3f };
             s.osc[2] = { Waveform::saw, 0, -7.0f, 0.3f };
         }
-        else if (mask > 0.05 && mask < 0.5) // meio caminho entre serra e quadrada
+        else if (mask > 0.001 && oddMask && wave == Waveform::saw)
         {
             s.osc[0].level = (float) (1.0 - mask);
-            s.osc[1] = { Waveform::square, 0, 0.0f, (float) mask };
+            s.osc[1] = { Waveform::square, 0, 0.0f, (float) (mask / 2.0) };
         }
 
         if (p (2) > 0) // sub-harmônica: seno uma oitava abaixo
@@ -101,11 +103,8 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
 
     s.release = (float) std::min (10.0, 1.5 * (0.0249 * (std::pow (101.0, std::clamp (x (28), 0.0, 1.0)) - 1.0) + 0.01));
 
-    // --- filtro: curva numa escala log de 73 Hz a 17 kHz ---
-    const auto cutoff = 73.4 * std::pow (2.0, 7.855 * std::clamp (p (54), 0, 8192) / 8192.0);
-    s.cutoff = (float) std::clamp (cutoff, 20.0, 20000.0);
-    s.resonance = (float) std::clamp (0.9 * x (59) + (p (62) > 0 ? 0.1 : 0.0), 0.0, 1.0);
-
+    // --- filtro (REA_rodada21 §1.6): faixa em log2 Hz de 73,42 Hz a 17 kHz alargada por M = (2/3)·2^(0,004·p56 − 1)
+    // conforme as extensões (eL, eR) do tipo; corte = lo + p54/8192·(hi − lo); keytracking p57/1000 a partir de 128 Hz ---
     switch (filterType)
     {
         case 1: case 5: case 14: case 15: case 16: s.filterType = 1; break; // passa-banda (os phasers, largos)
@@ -113,18 +112,39 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
         case 3: case 7: s.filterType = 2; break;                            // passa-altas
         default: s.filterType = 0; break;                                   // os passa-baixas
     }
+    const auto band = filterType == 1 || filterType == 2 || filterType == 5 || filterType == 6 || (filterType >= 14 && filterType <= 16);
+    const auto eL = filterType == 3 || filterType == 7 ? 0.0 : 1.0, eR = band || filterType == 3 || filterType == 7 ? 1.0 : 0.0;
+    const auto margin = 2.0 / 3.0 * std::pow (2.0, 0.004 * std::clamp (p (56), 0, 1000) - 1.0);
+    const auto lo = std::log2 (440.0 * std::pow (2.0, -31.0 / 12.0)) - std::max (0.0, margin * eL - 1.0);
+    const auto hi = std::log2 (17000.0) + std::max (0.0, margin * eR - 1.0);
+    auto position = lo + std::clamp (p (54), 0, 8192) / 8192.0 * (hi - lo);
+    const auto keyTrack = std::clamp (p (57), -2000, 2000) / 1000.0;
+    position += keyTrack * std::log2 (130.81 / 128.0); // o LYNX mede o keytracking a partir da tecla 48
+    s.keyTrack = (float) keyTrack;
+    s.resonance = (float) std::clamp (0.9 * x (59) + (p (62) > 0 ? 0.1 : 0.0), 0.0, 1.0); // aproximação (largura do pico não decodificada)
 
-    // --- envelope de filtro: deslocamento de a·faixa (não adaptativo) ou da faixa que resta ---
-    if (const auto amount = std::clamp (x (52), -1.0, 1.0); std::abs (amount) > 0.01)
+    // --- envelope de filtro: não adaptativo centrado ((E − 0,5)·x52·(hi − lo)); adaptativo até o limite ---
+    if (const auto amount = std::clamp (x (52), -1.0, 1.0); std::abs (amount) > 0.01 && p (48) < 1000)
     {
         const auto adaptive = p (47) != 0;
-        const auto octaves = ! adaptive ? amount * 7.9
-                                        : amount > 0.0 ? amount * std::log2 (17000.0 / cutoff) : amount * std::log2 (cutoff / 73.4);
-        auto envTime = [] (double v) { return v >= 1.0 ? 20.0 : 0.12 * (std::pow (1001.0, std::clamp (v, 0.0, 1.0)) - 1.0); };
-        s.filterEnv = { (float) std::clamp (octaves, -10.0, 10.0), (float) envTime (x (48)), 0.0f, (float) envTime (x (49)), 0.0f, s.release };
+        double octaves = 0.0;
+        if (adaptive)
+            octaves = amount > 0.0 ? amount * (hi - position) : amount * (position - lo);
+        else
+        {
+            octaves = amount * (hi - lo);
+            position -= 0.5 * octaves;
+        }
+        auto envTime = [] (double v) { return 0.12 * (std::pow (1001.0, std::clamp (v, 0.0, 1.0)) - 1.0); };
+        const auto holds = p (49) >= 1000; // decay que segura em 1
+        s.filterEnv = { (float) std::clamp (octaves, -10.0, 10.0), (float) envTime (x (48)), 0.0f, holds ? 0.0f : (float) envTime (x (49)),
+                        holds ? 1.0f : 0.0f, s.release };
     }
+    else if (std::abs (amount) > 0.01 && p (47) == 0) // ataque que nunca sobe: E = 0, só o deslocamento
+        position -= 0.5 * amount * (hi - lo);
 
-    // --- LFO: período 64/2^(|v|/1000) tempos; formas aproximadas; destinos pitch, corte, volume ---
+    // --- LFO: período 64/2^(|v|/1000) tempos; fase presa à música com p87; destinos pitch (bipolar, ct) e corte
+    // (unipolar: 0…6·x58 oitavas = deslocamento de A/2 ± A/2); o p25 é um tremolo próprio de 2,5 Hz, não o LFO ---
     const auto shape = std::clamp (p (86), 0, 13);
     const auto speed = std::abs (std::clamp (p (89), -8000, 8000));
 
@@ -141,11 +161,16 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
         }
 
         if (std::abs (p (58)) > 0)
-            s.lfo[lfoCutoff] = { (float) std::clamp (6.0 * x (58), -8.0, 8.0), period, true, lfoShape, 0.0f, attackBeats };
+        {
+            const auto a = std::clamp (6.0 * x (58), -8.0, 8.0);
+            position += a / 2.0;
+            s.lfo[lfoCutoff] = { (float) (a / 2.0), period, true, lfoShape, 0.0f, attackBeats };
+        }
 
-        if (p (25) > 0)
-            s.lfo[lfoVolume] = { (float) std::clamp (x (25), 0.0, 1.0), period, true, lfoShape, 0.0f, attackBeats };
+        for (auto& lfo : s.lfo)
+            lfo.global = p (87) > 0;
     }
+    s.cutoff = (float) std::clamp (std::exp2 (position), 20.0, 20000.0);
 
     // --- mono / portamento ---
     s.mono = p (44) != 0;
@@ -221,12 +246,20 @@ bool synthFromMiniSynth (const std::vector<std::uint8_t>& d, double bpm, SynthSe
     auto& o = s.osc;
     o = { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
 
+    // 2ª voz dos tipos duplos: trunc(24m − 12) semitons + 7,5 centésimos (REA_rodada21 §3.2)
+    auto second = [&] (Waveform w) {
+        SynthOscillator osc { w, 0, 7.5f, 0.5f };
+        const auto semis = std::clamp ((int) (24.0f * m - 12.0f), -12, 12);
+        osc.octave = semis / 12;
+        osc.semitones = semis - 12 * osc.octave;
+        return osc;
+    };
     switch (kind)
     {
-        case 1: o[0].level = o[1].level = 0.5f; o[1] = { Waveform::saw, 0, 10.0f * (0.2f + m), 0.5f }; break;            // serra + serra
-        case 2: o[0].wave = Waveform::square; break;                                                                    // pulso (sem PWM)
-        case 3: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = { Waveform::saw, 0, 10.0f * m, 0.5f }; break;           // quadrada + serra
-        case 4: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = { Waveform::square, 0, 10.0f * (0.2f + m), 0.5f }; break;
+        case 1: o[0].level = 0.5f; o[1] = second (Waveform::saw); break;                                   // serra + serra
+        case 2: o[0].wave = Waveform::square; break;                                                       // pulso (sem PWM)
+        case 3: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = second (Waveform::saw); break;          // quadrada + serra
+        case 4: o[0] = { Waveform::square, 0, 0.0f, 0.5f }; o[1] = second (Waveform::square); break;       // quadrada + quadrada
         case 5: // supersaw: 3 serras com o espalhamento de ±5 %·m
         {
             const auto cents = (float) std::min (100.0, 1200.0 * std::log2 (1.0 + 0.05 * std::max (0.1f, m)));
@@ -262,25 +295,26 @@ bool synthFromMiniSynth (const std::vector<std::uint8_t>& d, double bpm, SynthSe
     s.attack = (float) std::min (5.0, attack (v[21]));
     s.sustain = v[23];
     s.decay = (float) std::min (10.0, 6.9 * tau (v[22]));
-    s.release = (float) std::min (10.0, 6.9 * tau ((float) (0.95 * k (v[24]) + 0.05)) / 10.0);
+    s.release = (float) std::min (10.0, 6.9 * tau ((float) (0.95 * v[24] + 0.05)) / 10.0); // k aplicado duas vezes (REA_rodada21 §3.4)
 
     if (const auto amount = 10.0f * (2.0f * v[16] - 1.0f); std::abs (amount) > 0.05f)
         s.filterEnv = { amount, (float) std::min (5.0, attack (v[12])), 0.0f, (float) std::min (10.0, 4.6 * tau (v[13])), v[14],
                         (float) std::min (10.0, 4.6 * tau (v[15])) };
 
-    // LFO: rótulos 1/4 … 16 bars (duração em tempos)
-    constexpr float lfoBeats[] = { 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 16.0f, 32.0f, 64.0f };
-    const auto amount = 2.0f * v[20] - 1.0f;
+    // LFO (REA_rodada21 §3.5): período R tempos, fase presa à música, quantidade sinal·a²
+    constexpr float lfoBeats[] = { 0.25f, 0.375f, 0.5f, 0.75f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 64.0f, 128.0f, 256.0f };
+    const auto a = 2.0f * v[20] - 1.0f;
+    const auto amount = a < 0.0f ? -a * a : a * a;
     const auto dest = std::clamp ((int) (2.0f * v[18]), 0, 2);
 
-    if (std::abs (amount) > 0.02f && dest < 2)
+    if (std::abs (amount) > 1e-4f && dest < 2)
     {
         const auto shape = std::clamp ((int) (2.0f * v[17]), 0, 2) == 0 ? 0 : (std::clamp ((int) (2.0f * v[17]), 0, 2) == 1 ? 1 : 2);
         const auto period = lfoBeats[std::clamp ((int) (11.0f * v[19]), 0, 11)];
         if (dest == 0)
-            s.lfo[lfoCutoff] = { 4.0f * amount, period, true, shape, 0.0f, 0.0f };
+            s.lfo[lfoCutoff] = { 4.0f * amount, period, true, shape, 0.0f, 0.0f, true };
         else
-            s.lfo[lfoPitch] = { 12.0f * amount, period, true, shape, 0.0f, 0.0f };
+            s.lfo[lfoPitch] = { 12.0f * amount, period, true, shape, 0.0f, 0.0f, true };
     }
 
     const auto voices = std::clamp ((int) (2.0f * v[0]), 0, 2);

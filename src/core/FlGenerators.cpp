@@ -283,6 +283,12 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
 
 // ---- Ogun / Autogun ----
 
+// ressonância 0..1 do synth do LYNX para um Q (o SVF usa k = 1/Q = 2 − 1,9·res; Q < 0,5 vira 0)
+float synthResonanceForQ (double q)
+{
+    return (float) std::clamp ((2.0 - 1.0 / std::max (q, 1e-3)) / 1.9, 0.0, 1.0);
+}
+
 bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
     if (state.size() < 8)
@@ -328,7 +334,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
         s.decay = (float) std::min (30.0, decay);
         s.sustain = 0.0f;
     }
-    s.release = (float) std::clamp (release < 0.0 ? 30.0 : release, 0.005, 30.0);
+    s.release = (float) std::clamp (release < 0.0 ? 20.0 : release, 0.005, 30.0); // P7 = 10000 → 20 s (REA_rodada21 §2.2)
 
     if (const auto voices = std::clamp (p[12], 1, 9); voices >= 2)
     {
@@ -337,7 +343,9 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
             if (s.osc[k].level == 0.0f)
             {
                 s.osc[k] = s.osc[0];
-                s.osc[k].detune = std::clamp (s.osc[0].detune + (k == 1 ? 10.0f : -10.0f), -100.0f, 100.0f);
+                // desvio ±5·(11^(P15/256) − 1) centésimos (REA_rodada21 §2.4)
+                const auto spread = (float) (5.0 * (std::pow (11.0, std::clamp (p[15], 0, 256) / 256.0) - 1.0));
+                s.osc[k].detune = std::clamp (s.osc[0].detune + (k == 1 ? spread : -spread), -100.0f, 100.0f);
                 s.osc[k].pan = k == 1 ? pan : -pan;
             }
         for (auto& o : s.osc)
@@ -350,18 +358,27 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     {
         const auto type = std::clamp (p[49], 0, 3);
         const auto u = std::clamp (p[17], 0, 256) / 256.0;
-        double c = 0.0;
-        if (type == 1 || type == 2)
-            c = std::min (1.0001, (std::pow (1501.0, u) - 1.0) * 0.0004);
+        // REA_rodada21 §2.5: fc = 44100·(c + c₀) Hz (ω limitado a 2,8495 rad); ordem = biquads iguais em cascata
+        // (o LYNX tem um só: inclinação aproximada); LP/HP com Q^(1/ordem) por estágio, BP/BS com largura em oitavas
+        double c = 0.0, c0 = 0.0;
+        if (type == 0)
+            c = 0.0006646667 * (std::pow (1501.0, u) - 1.0), c0 = 0.003;
+        else
+            c = std::min (type == 3 ? 0.6001 : 1.0001, 0.00039993 * (std::pow (1501.0, u) - 1.0)), c0 = 0.0001;
+        s.filterType = type == 0 ? 0 : type == 1 ? 1 : type == 2 ? 3 : 2;
+        s.cutoff = (float) std::clamp (44100.0 * (c + c0), 20.0, std::min (20000.0, 2.8495 / (2.0 * 3.141592653589793) * 44100.0));
+        auto r = std::clamp (p[18], 0, 256) / 256.0;
+        if (p[51] != 0) // FLAT
+            r *= (u + 1.0) / 2.0;
+        double q = 0.707;
+        if (type == 0 || type == 3)
+            q = std::pow (r <= 0.0 ? 0.1 : r >= 1.0 ? 50.0 : 0.02495 * (std::pow (2001.0, r) - 1.0) + 0.1, 1.0 / order);
         else
         {
-            c = (std::pow (1501.0, u) - 1.0) * 0.000665 + 0.003;
-            if (type == 3)
-                c = std::min (c, 0.6);
+            const auto bw = r <= 0.0 ? 0.01 : r >= 1.0 ? 12.0 : 0.1199 * (std::pow (101.0, r) - 1.0) + 0.01;
+            q = 1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * bw));
         }
-        s.filterType = type == 0 ? 0 : type == 1 ? 1 : type == 2 ? 3 : 2;
-        s.cutoff = (float) std::clamp (22050.0 * c * std::pow (0.9, order - 1), 20.0, 20000.0);
-        s.resonance = std::min (0.95f, std::clamp (p[18], 0, 256) / 256.0f);
+        s.resonance = synthResonanceForQ (q);
     }
 
     gain = (float) std::clamp ((std::pow (3.0, std::clamp (p[0], 0, 256) / 128.0) - 1.0) / 2.0, 0.0, 4.0); // (3^(P0/128) − 1)/2

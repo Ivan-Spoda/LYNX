@@ -1671,11 +1671,36 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
-        const auto gain = p[0] <= 0.0f ? 0.0f : std::pow (10.0f, utilityGainDb (p[0]) / 20.0f); // no fundo = mudo
+        if (p[0] != lastGainParam) // pow só quando o parâmetro muda (os Patchers têm dezenas de utilitários)
+        {
+            lastGainParam = p[0];
+            cachedGain = p[0] <= 0.0f ? 0.0f : std::pow (10.0f, utilityGainDb (p[0]) / 20.0f); // no fundo = mudo
+        }
+        const auto gain = cachedGain;
         const auto pan = std::clamp (p[1] * 2.0f - 1.0f, -1.0f, 1.0f);
         const auto gl = gain * (pan > 0.0f ? 1.0f - pan : 1.0f); // balanço: abaixa o lado oposto
         const auto gr = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
         const auto ll = utilityMatrix (p[2]), rl = utilityMatrix (p[3]), lr = utilityMatrix (p[4]), rr = utilityMatrix (p[5]);
+
+        // atalhos: identidade (comum nos PanOMatic/Stereo Shaper dos Patchers) e mudo
+        if (gl == 0.0f && gr == 0.0f)
+        {
+            std::fill (l, l + n, 0.0f);
+            std::fill (r, r + n, 0.0f);
+            return;
+        }
+        if (rl == 0.0f && lr == 0.0f)
+        {
+            const auto fl = ll * gl, fr = rr * gr;
+            if (fl == 1.0f && fr == 1.0f)
+                return;
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] *= fl;
+                r[i] *= fr;
+            }
+            return;
+        }
 
         for (int i = 0; i < n; ++i)
         {
@@ -1684,6 +1709,9 @@ public:
             r[i] = (lr * a + rr * b) * gr;
         }
     }
+
+private:
+    float lastGainParam = -1.0f, cachedGain = 1.0f;
 };
 } // namespace
 
