@@ -85,6 +85,11 @@ public:
     ~EffectsPanel() override;
 
     void setTrack (int track);
+    void selectSlot (int slot)
+    {
+        selectedSlot = slot;
+        repaint();
+    }
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
@@ -127,6 +132,8 @@ public:
 
     // Seleciona a primeira trilha que tem efeitos (usado pelo modo --snapshot).
     void selectFirstTrackWithEffects();
+    void selectTrack (int track) { strips.selectTrack (track); }
+    void selectSlot (int slot) { effects.selectSlot (slot); }
 
     static constexpr int effectsWidth = 300;
 

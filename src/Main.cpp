@@ -818,6 +818,13 @@ private:
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
             ui.selectTabForSnapshot (3);
+            // LYNX_SNAPSHOT_TRACK=n: mostra os efeitos dessa trilha do mixer
+            if (const auto track = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_TRACK", {}); track.isNotEmpty())
+            {
+                ui.selectMixerTrackForSnapshot (track.getIntValue(),
+                                                juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_SLOT", "-1").getIntValue());
+                offline.dispatchPendingMessages();
+            }
             saveSnapshot (ui, prefix + "-mixer.png");
 
             // janelas avulsas, com fundo do tema

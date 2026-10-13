@@ -37,6 +37,12 @@ public:
 
     // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist, 3 = Mixer.
     void selectTabForSnapshot (int tab);
+    void selectMixerTrackForSnapshot (int track, int slot = -1)
+    {
+        mixer.selectTrack (track);
+        if (slot >= 0)
+            mixer.selectSlot (slot);
+    }
 
 private:
     void timerCallback() override;

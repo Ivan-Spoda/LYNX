@@ -722,7 +722,14 @@ juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
     auto top = panelHeader + maxEffectSlots * slotHeight + 40;
-    const auto w = (getWidth() - 16) / 3;
+    // muitos parâmetros (Effector: 12): 4 colunas e linhas mais baixas para caber na altura
+    int count = 0;
+    if (const auto* s = slots(); ! gateSelected() && s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size())
+        count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
+    const auto columns = count > 9 ? 4 : 3;
+    const auto w = (getWidth() - 16) / columns;
+    const auto rows = juce::jmax (1, (count + columns - 1) / columns);
+    const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (getHeight() - top - 4) / rows) : 86;
 
     // gate de volume: os 32 passos são barras (gateStepsBounds); os knobs são mix/ataque/release
     if (gateSelected())
@@ -733,7 +740,7 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
         top = gateStepsBounds().getBottom() + 22;
     }
 
-    return { 8 + (param % 3) * w, top + (param / 3) * 86, w, 82 };
+    return { 8 + (param % columns) * w, top + (param / columns) * rowHeight, w, rowHeight - 4 };
 }
 
 bool EffectsPanel::gateSelected() const
@@ -947,7 +954,10 @@ void EffectsPanel::paint (juce::Graphics& g)
     {
         const auto r = knobBounds (p);
         const auto value = slot.params[(std::size_t) p];
-        const auto area = r.withHeight (44).toFloat().withSizeKeepingCentre (38.0f, 38.0f);
+        // knob de 38 px; em grades apertadas (Effector) diminui para caber nome e valor embaixo
+        const auto knobHeight = juce::jlimit (30, 44, r.getHeight() - 30);
+        const auto diameter = (float) knobHeight - 6.0f;
+        const auto area = r.withHeight (knobHeight).toFloat().withSizeKeepingCentre (diameter, diameter);
         const auto centre = area.getCentre();
         constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
         constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
@@ -956,17 +966,18 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.setColour (theme::knobBackground);
         g.fillEllipse (area);
         juce::Path arc;
-        arc.addCentredArc (centre.x, centre.y, 17.0f, 17.0f, 0.0f, start, to, true);
+        arc.addCentredArc (centre.x, centre.y, diameter / 2.0f - 2.0f, diameter / 2.0f - 2.0f, 0.0f, start, to, true);
         g.setColour (slot.enabled ? theme::accentOrange : juce::Colours::grey);
         g.strokePath (arc, juce::PathStrokeType (3.0f));
         g.setColour (juce::Colours::white);
-        g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * 13.0f, centre.y - std::cos (to) * 13.0f, 2.0f);
+        const auto needle = diameter / 2.0f - 6.0f;
+        g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * needle, centre.y - std::cos (to) * needle, 2.0f);
 
         g.setColour (theme::text.withAlpha (0.8f));
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + 46, r.getWidth(), 14, juce::Justification::centred);
+        g.drawText (utf8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14, juce::Justification::centred);
         g.setColour (theme::accentBlue);
-        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm).c_str()), r.getX(), r.getY() + 60,
+        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm).c_str()), r.getX(), r.getY() + knobHeight + 16,
                     r.getWidth(), 14, juce::Justification::centred);
     }
 }
