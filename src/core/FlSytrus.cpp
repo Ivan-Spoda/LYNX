@@ -1,0 +1,751 @@
+// Sytrus (FM/RM de 6 operadores + 3 filtros) aproximado pelo synth de 3 osciladores.
+// Formato e conversões em docs/analise/REA_rodada11.md §1-3 (clean-room: só o comportamento).
+
+#include "core/FlSynths.h"
+#include "core/Inflate.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
+
+namespace lynx
+{
+namespace
+{
+struct Reader
+{
+    const std::uint8_t* data;
+    std::size_t size, pos = 0;
+    bool failed = false;
+
+    const std::uint8_t* raw (std::size_t n)
+    {
+        if (failed || n > size - pos)
+        {
+            failed = true;
+            return nullptr;
+        }
+        const auto* p = data + pos;
+        pos += n;
+        return p;
+    }
+
+    template <typename T>
+    T get()
+    {
+        T v {};
+        if (const auto* p = raw (sizeof (T)))
+            std::memcpy (&v, p, sizeof (T));
+        return v;
+    }
+
+    std::int32_t i32() { return get<std::int32_t>(); }
+    std::uint8_t u8() { return get<std::uint8_t>(); }
+};
+
+struct Envelope
+{
+    std::vector<std::pair<double, double>> points; // (Δt, nível)
+    int flags = 0;
+    bool on = false;
+    int sustain = -1;
+};
+
+struct Articulator
+{
+    Envelope env, lfo;
+    std::array<std::int32_t, 4> knobs { 128, 128, 0, 128 }; // A, D, S, R do envelope
+    std::int32_t lfoSpeed = 0;
+    float envDepth = 1.0f, lfoDepth = 0.0f;
+};
+
+struct Unit
+{
+    std::array<std::int32_t, 10> p {};
+    // operadores
+    double ratio = 1.0, offsetHz = 0.0;
+    std::vector<float> harmonics;
+    int shape = 0;
+    // filtros
+    int filterKind = 3;
+    std::vector<Articulator> art;
+};
+
+struct State
+{
+    int version = 0;
+    std::array<std::int32_t, 200> main {};
+    std::array<std::uint8_t, 162> mute {};
+    bool porta = false, altUnisonPitch = false;
+    std::array<Unit, 10> units;
+
+    int cell (int layer, int row, int col) const
+    {
+        const auto i = (std::size_t) (layer * 81 + row * 9 + col);
+        return mute[i] != 0 ? 0 : main[3 + i];
+    }
+};
+
+bool readEnvelope (Reader& r, Envelope& e)
+{
+    const auto kind = r.i32(), version = r.i32(), n = r.i32();
+    if (r.failed || n < 0 || n > 5000 || version < 0 || version > 3)
+        return false;
+
+    e.points.clear();
+    for (int k = 0; k < n; ++k)
+    {
+        double x = 0.0, y = 0.0;
+        if (version < 2)
+        {
+            x = kind == 6 ? r.get<double>() : (double) r.get<float>();
+            y = r.get<float>();
+            r.raw (version < 1 ? 4 : 8);
+        }
+        else
+        {
+            x = r.get<double>();
+            y = r.get<double>();
+            r.raw (8);
+        }
+        if (r.failed)
+            return false;
+        e.points.emplace_back (std::isfinite (x) ? std::clamp (x, 0.0, 1000.0) : 0.0, std::isfinite (y) ? std::clamp (y, 0.0, 1.0) : 0.0);
+    }
+
+    e.flags = r.i32();
+    e.on = r.i32() != 0;
+    r.i32(); // ponto de decay
+    r.i32(); // início do loop
+    e.sustain = r.i32();
+    return ! r.failed;
+}
+
+bool readArticulator (Reader& r, Articulator& a)
+{
+    r.i32();
+    r.i32();
+    a.envDepth = r.get<float>();
+    a.lfoDepth = r.get<float>();
+    if (! readEnvelope (r, a.env))
+        return false;
+    for (auto& k : a.knobs)
+        k = r.i32();
+
+    // a versão do LFO decide se há um inteiro a mais: ler a versão antes de consumir o envelope
+    const auto lfoVersionAt = r.pos + 4;
+    if (! readEnvelope (r, a.lfo))
+        return false;
+    std::int32_t lfoVersion = 0;
+    std::memcpy (&lfoVersion, r.data + lfoVersionAt, 4);
+    a.lfoSpeed = r.i32();
+    r.raw (12);
+    if (lfoVersion >= 3)
+        r.i32();
+
+    Envelope map;
+    for (int k = 0; k < 6; ++k) // mapas de teclado, velocity, X, Y, aleatório, uníssono
+        if (! readEnvelope (r, map))
+            return false;
+    return ! r.failed;
+}
+
+bool parse (const std::vector<std::uint8_t>& blob, State& s)
+{
+    if (blob.size() < 8)
+        return false;
+
+    std::uint32_t version = 0;
+    std::memcpy (&version, blob.data(), 4);
+    if (version > 0xffff)
+        version >>= 16;
+    if (version > 64)
+        return false;
+    s.version = (int) version;
+    const auto v = s.version;
+
+    std::vector<std::uint8_t> body;
+    if (v >= 5)
+    {
+        auto inflated = inflateZlib (blob.data() + 4, blob.size() - 4, false, 4u << 20);
+        if (! inflated)
+            return false;
+        body = std::move (*inflated);
+    }
+    else
+        body.assign (blob.begin() + 4, blob.end());
+
+    Reader r { body.data(), body.size() };
+    const auto mainSize = (std::size_t) (962 - (v < 1 ? 9 : 0) - (v < 2 ? 162 : 0));
+    const auto* main = r.raw (mainSize);
+    if (main == nullptr)
+        return false;
+    std::memcpy (s.main.data(), main, std::min (mainSize / 4 * 4, s.main.size() * 4));
+    if (v >= 2)
+        std::memcpy (s.mute.data(), main + 0x320, s.mute.size());
+
+    if (v > 3)
+        r.i32();
+    if (v > 5)
+        r.u8();
+    if (v > 6)
+        r.u8();
+    if (v > 12)
+        r.u8();
+    if (v > 13)
+    {
+        const auto k = (std::size_t) (1 + (v > 14 ? 4 : 0) + (v > 17 ? 3 : 0) + (v > 18 ? 1 : 0));
+        if (const auto* flags = r.raw (k))
+        {
+            s.porta = k > 1 && flags[1] != 0;
+            s.altUnisonPitch = k > 8 && flags[8] != 0;
+        }
+    }
+    r.raw (3 * 23); // delays
+    if (v >= 10)
+        r.raw (0x25 + (v > 10 ? 1 : 0)); // reverb
+    if (v > 2)
+    {
+        r.i32();
+        r.raw (3 * 4 * (v > 13 ? 4 : 3)); // EQ
+    }
+    // texto de info
+    if (v < 0x17)
+    {
+        const auto n = r.i32();
+        if (n < 0)
+            return false;
+        r.raw ((std::size_t) n);
+    }
+    else
+    {
+        std::size_t n = r.u8();
+        if (n == 255)
+        {
+            const auto big = r.i32();
+            if (big < 0)
+                return false;
+            n = (std::size_t) big;
+        }
+        r.raw (2 * n);
+    }
+
+    for (int u = 0; u < 10 && ! r.failed; ++u)
+    {
+        auto& unit = s.units[(std::size_t) u];
+        for (auto& p : unit.p)
+            p = r.i32();
+
+        if (u < 6)
+        {
+            const std::size_t blockSize = v < 8 ? 0xe7 : v < 0x11 ? 0x428 : 0x828;
+            const auto* op = r.raw (blockSize);
+            if (op == nullptr)
+                return false;
+            std::int32_t ratio = 0, offset = 0;
+            std::memcpy (&ratio, op, 4);
+            std::memcpy (&offset, op + 4, 4);
+            unit.ratio = ratio / 20000.0;
+            unit.offsetHz = offset / 100.0;
+            const std::size_t harmonicsAt = v < 8 ? 8 : 0xc, count = v < 8 ? 24 : v < 0x11 ? 128 : 256;
+            unit.harmonics.resize (count);
+            std::memcpy (unit.harmonics.data(), op + harmonicsAt, count * 4);
+            if (v >= 0x11)
+                std::memcpy (&unit.shape, op + 0x80c, 4);
+        }
+        else if (u < 9)
+        {
+            const auto* f = r.raw (v < 9 ? 0x29 : 0x30);
+            if (f == nullptr)
+                return false;
+            if (v >= 9)
+                std::memcpy (&unit.filterKind, f + 0x2c, 4);
+            Envelope shaper;
+            if (! readEnvelope (r, shaper))
+                return false;
+            if (v >= 12)
+                r.u8();
+        }
+
+        unit.art.resize (u < 6 ? 6 : u < 9 ? 8 : 2);
+        for (auto& a : unit.art)
+            if (! readArticulator (r, a))
+                return false;
+    }
+
+    return ! r.failed;
+}
+
+double curve (int v, double full = 256.0)
+{
+    const auto g = (std::pow (11.0, std::min (std::abs (v) / full, 2.0)) - 1.0) / 10.0;
+    return v < 0 ? -g : g;
+}
+
+// forma da onda do operador: pela tabela de harmônicas (§1.4) ou, se só tem a fundamental, pela Shape
+Waveform waveOf (const Unit& op)
+{
+    std::vector<double> a (std::min<std::size_t> (32, op.harmonics.size()));
+    double peak = 0.0;
+    for (std::size_t k = 0; k < a.size(); ++k)
+    {
+        const auto h = op.harmonics[k];
+        a[k] = std::isfinite (h) ? std::abs ((double) h) : 0.0;
+        peak = std::max (peak, a[k]);
+    }
+
+    int nonzero = 0;
+    for (auto& x : a)
+    {
+        x /= std::max (peak, 1e-12);
+        nonzero += x > 0.02 ? 1 : 0;
+    }
+
+    if (peak <= 0.0 || (nonzero == 1 && a[0] > 0.02))
+    {
+        const auto x = std::clamp (op.shape, 0, 512);
+        return x == 0 ? Waveform::sine : x < 192 ? Waveform::triangle : x < 320 ? Waveform::saw : Waveform::square;
+    }
+
+    // perto de serra (1/k), quadrada (ímpares 1/k) ou triângulo (ímpares 1/k²)?
+    auto error = [&] (int kind) {
+        double refSum = 0.0, sum = 0.0, e = 0.0;
+        std::vector<double> ref (a.size());
+        for (std::size_t k = 0; k < a.size(); ++k)
+        {
+            const auto h = (double) k + 1.0;
+            const bool odd = (k % 2) == 0;
+            ref[k] = kind == 0 ? 1.0 / h : ! odd ? 0.0 : kind == 1 ? 1.0 / h : 1.0 / (h * h);
+            refSum += ref[k];
+            sum += a[k];
+        }
+        for (std::size_t k = 0; k < a.size(); ++k)
+            e += std::abs (a[k] / std::max (sum, 1e-9) - ref[k] / refSum);
+        return e;
+    };
+    const double errors[] = { error (0), error (1), error (2) };
+    const auto best = (int) (std::min_element (std::begin (errors), std::end (errors)) - std::begin (errors));
+    if (errors[best] < 0.35)
+        return best == 0 ? Waveform::saw : best == 1 ? Waveform::square : Waveform::triangle;
+
+    double high = 0.0;
+    for (std::size_t k = 4; k < a.size(); ++k)
+        high += a[k];
+    return high > 1.0 ? Waveform::saw : Waveform::triangle;
+}
+
+struct Adsr
+{
+    double a = 0.0, d = 0.0, s = 1.0, r = 0.01, peak = 1.0;
+};
+
+// envelope de pontos -> ADSR (§1.6); `knobs` = A/D/S/R do articulador, `timeScale` = s por unidade
+Adsr adsrOf (const Envelope& e, const std::array<std::int32_t, 4>& knobs, double timeScale)
+{
+    Adsr out;
+    if (e.points.empty())
+        return out;
+
+    std::vector<double> t (e.points.size());
+    double acc = 0.0;
+    std::size_t peak = 0;
+    for (std::size_t i = 0; i < e.points.size(); ++i)
+    {
+        acc += e.points[i].first;
+        t[i] = acc;
+        if (e.points[i].second > e.points[peak].second)
+            peak = i;
+    }
+
+    const auto last = e.points.size() - 1;
+    const auto oneShot = e.sustain < 0 || (std::size_t) e.sustain > last;
+    const auto sus = oneShot ? last : (std::size_t) e.sustain;
+    const auto peakLevel = std::max (1e-6, e.points[peak].second);
+
+    out.peak = e.points[peak].second;
+    out.a = t[peak] - t[0];
+    if (oneShot)
+    {
+        out.d = t[last] - t[peak];
+        out.s = e.points[last].second / peakLevel;
+        out.r = out.d; // continua caindo depois de soltar a tecla
+    }
+    else
+    {
+        out.d = sus > peak ? t[sus] - t[peak] : 0.0;
+        out.s = e.points[sus].second / peakLevel;
+        out.r = t[last] - t[sus];
+    }
+
+    auto knob = [&] (int i) { return std::clamp (knobs[(std::size_t) i], 0, 1024) / 128.0; };
+    out.a *= knob (0) * timeScale;
+    out.d *= knob (1) * timeScale;
+    out.r *= knob (3) * timeScale;
+    out.s = std::clamp (out.s + std::clamp (knobs[2], -128, 128) / 128.0, 0.0, 1.0);
+    out.a = std::min (out.a, 20.0);
+    out.d = std::min (out.d, 20.0);
+    out.r = std::clamp (out.r, 0.003, 20.0);
+    return out;
+}
+
+// cutoff em Hz pela curva do tipo de filtro (§1.7), c = 0..1
+double cutoffHz (int kind, double c)
+{
+    c = std::clamp (c, 0.0, 1.0);
+    double hz = 0.0;
+    switch (kind)
+    {
+        case 0: hz = 22050.0 * 0.0396 * (std::pow (26.0, c) - 1.0); break;
+        case 1: case 2: hz = std::min (17640.0, 22050.0 * (0.007 + 0.01324 * (std::pow (76.0, c) - 1.0))); break;
+        case 3: case 11: hz = 44100.0 * (0.003 + 0.000665 * (std::pow (1501.0, c) - 1.0)); break;
+        default: hz = 44100.0 * (0.0001 + 0.0004 * (std::pow (1501.0, c) - 1.0)); break;
+    }
+    return std::clamp (hz, 20.0, 20000.0);
+}
+
+// fora do alcance do oscilador (±47 semitons) desloca por oitavas, mantendo a nota
+void setPitch (SynthOscillator& osc, double semitones)
+{
+    if (! std::isfinite (semitones))
+        semitones = 0.0;
+    while (semitones < -47.0)
+        semitones += 12.0;
+    while (semitones > 47.0)
+        semitones -= 12.0;
+    const auto whole = (int) std::lround (semitones);
+    osc.octave = std::clamp (whole / 12, -3, 3);
+    osc.semitones = std::clamp (whole - osc.octave * 12, -11, 11);
+    osc.detune = (float) std::clamp ((semitones - whole) * 100.0, -100.0, 100.0);
+}
+
+// afinação do operador em semitons relativos à nota (ratio + offset; ratio 0 = frequência fixa)
+double opSemitones (const Unit& op)
+{
+    if (op.ratio <= 1e-6)
+        return 12.0 * std::log2 (std::max (1.0, std::abs (op.offsetHz)) / 261.63);
+    auto semis = 12.0 * std::log2 (op.ratio);
+    if (std::abs (op.offsetHz) > 1e-6)
+        semis += 12.0 * std::log2 (std::max (0.01, 1.0 + op.offsetHz / (261.63 * op.ratio)));
+    return semis;
+}
+} // namespace
+
+bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain)
+{
+    State s;
+    if (! parse (state, s))
+        return false;
+
+    const auto beatSeconds = 60.0 / std::max (1.0, bpm);
+    auto timeScale = [&] (const Envelope& e) { return (e.flags & 1) != 0 ? beatSeconds : 1.0; };
+    auto opVolume = [&] (int i) { return s.units[(std::size_t) i].p[1] / 256.0; };
+
+    // saída efetiva de cada filtro (direto no OUT ou pelo "to next filter"); filtro desligado passa o som
+    std::array<double, 3> filterOut {};
+    for (int f = 2; f >= 0; --f)
+    {
+        filterOut[(std::size_t) f] = curve (s.cell (0, 6 + f, 8));
+        if (f < 2)
+            filterOut[(std::size_t) f] += curve (s.units[(std::size_t) (6 + f)].p[9]) * filterOut[(std::size_t) f + 1];
+    }
+
+    // 1. portadoras: nível direto + nível passando pelos filtros
+    std::array<double, 6> direct {}, viaFilter {};
+    for (int i = 0; i < 6; ++i)
+    {
+        direct[(std::size_t) i] = curve (s.cell (0, i, 8)) * opVolume (i);
+        for (int f = 0; f < 3; ++f)
+            viaFilter[(std::size_t) i] += curve (s.cell (0, 6 + f, i)) * filterOut[(std::size_t) f] * opVolume (i);
+    }
+
+    std::array<int, 6> order { 0, 1, 2, 3, 4, 5 };
+    auto amp = [&] (int i) { return std::abs (direct[(std::size_t) i] + viaFilter[(std::size_t) i]); };
+    std::stable_sort (order.begin(), order.end(), [&] (int a, int b) { return amp (a) > amp (b); });
+
+    std::vector<int> carriers;
+    for (auto i : order)
+        if (amp (i) > 0.01 && carriers.size() < 3)
+            carriers.push_back (i);
+
+    SynthSettings out;
+    out.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    out.attack = 0.0f;
+    out.decay = 0.0f;
+    out.sustain = 1.0f;
+    out.release = 0.1f;
+    out.cutoff = 20000.0f;
+    out.porta = s.porta;
+
+    auto masterPitch = (double) std::clamp (s.main[2], -48, 48);
+    gain = (float) std::clamp (curve (std::clamp (s.main[0], 0, 256), 128.0), 0.0, 4.0);
+
+    if (carriers.empty()) // nada chega à saída: patch padrão
+    {
+        synth = out;
+        return true;
+    }
+
+    // patches graves demais (ratio 0,25 com Master pitch −24...): sobe tudo por oitavas para caber
+    double lowest = 0.0;
+    for (auto i : carriers)
+        lowest = std::min (lowest, opSemitones (s.units[(std::size_t) i]) + masterPitch);
+    while (lowest < -47.0)
+    {
+        lowest += 12.0;
+        masterPitch += 12.0;
+    }
+
+    // 2-4. osciladores: afinação, onda, FM -> brilho, nível e pan
+    double fmIndex = 0.0; // soma das FMs fortes (para o envelope de filtro)
+    int fmModulator = -1;
+    for (std::size_t k = 0; k < carriers.size(); ++k)
+    {
+        const auto i = carriers[k];
+        const auto& op = s.units[(std::size_t) i];
+        auto& osc = out.osc[k];
+        osc.wave = waveOf (op);
+        setPitch (osc, opSemitones (op) + masterPitch);
+        osc.level = (float) std::min (1.0, amp (i));
+        osc.pan = (float) std::clamp (2.0 * s.cell (0, i, 6) / 512.0, -1.0, 1.0);
+
+        double fm = 0.0, strongest = 0.0;
+        int modulator = -1;
+        for (int j = 0; j < 6; ++j)
+        {
+            if (j == i)
+                continue;
+            const auto g = std::abs (curve (s.cell (0, i, j)) * opVolume (j));
+            fm += g;
+            if (g > strongest)
+                strongest = g, modulator = j;
+        }
+
+        const auto feedback = std::abs (curve (s.cell (0, i, i)));
+        if (feedback > 0.3 && osc.wave == Waveform::sine)
+            osc.wave = Waveform::saw;
+
+        if (fm >= 0.15 && modulator >= 0)
+        {
+            const auto ratio = s.units[(std::size_t) modulator].ratio / std::max (1e-6, op.ratio);
+            const auto nearest = std::round (ratio);
+            if (std::abs (ratio - nearest) < 0.02 && nearest >= 1.0)
+            {
+                if (osc.wave == Waveform::sine || osc.wave == Waveform::triangle)
+                    osc.wave = ((int) nearest % 2 == 0) ? Waveform::square : Waveform::saw;
+            }
+            else if (carriers.size() < 3 && out.osc[2].level == 0.0f) // inarmônico: seno extra no ratio do modulador
+            {
+                out.osc[2] = { Waveform::sine, 0, 0.0f, (float) std::min (1.0, fm) * osc.level * 0.5f };
+                setPitch (out.osc[2], opSemitones (s.units[(std::size_t) modulator]) + masterPitch);
+            }
+
+            if (k == 0)
+            {
+                fmIndex = fm;
+                fmModulator = modulator;
+            }
+        }
+    }
+
+    // RM forte na portadora principal: AM do LYNX com o modulador no osc 3
+    if (carriers.size() < 3)
+    {
+        const auto i = carriers[0];
+        for (int j = 0; j < 6; ++j)
+            if (j != i && std::abs (curve (s.cell (1, i, j))) >= 0.2)
+            {
+                out.am = true;
+                out.osc[2] = { Waveform::sine, 0, 0.0f, (float) std::min (1.0, std::abs (curve (s.cell (1, i, j)))) };
+                setPitch (out.osc[2], opSemitones (s.units[(std::size_t) j]) + masterPitch);
+                break;
+            }
+    }
+
+    // 5. envelope de amplitude da portadora principal (articulador 1) + escalas globais
+    const auto& main = s.units[(std::size_t) carriers[0]];
+    if (const auto& vol = main.art[1]; vol.env.on)
+    {
+        auto adsr = adsrOf (vol.env, vol.knobs, timeScale (vol.env));
+        auto global = [&] (int i) { return std::clamp (s.main[165 + (std::size_t) i], 0, 1024) / 128.0; };
+        out.attack = (float) std::min (20.0, adsr.a * global (0));
+        out.decay = (float) std::min (20.0, adsr.d * global (1));
+        out.sustain = (float) adsr.s;
+        out.release = (float) std::clamp (adsr.r * global (3), 0.003, 20.0);
+        for (auto& o : out.osc)
+            o.level = (float) std::clamp (o.level * adsr.peak, 0.0, 1.0);
+    }
+    else
+    {
+        out.attack = 0.002f;
+        out.release = 0.01f;
+    }
+
+    // 6-7. filtro: o primeiro ativo que recebe alguma portadora, se a maior parte do som passa por ele
+    double total = 0.0, filtered = 0.0;
+    for (auto i : carriers)
+    {
+        total += amp (i);
+        filtered += std::abs (viaFilter[(std::size_t) i]);
+    }
+
+    bool hasFilter = false;
+    for (int f = 0; f < 3 && filtered >= 0.5 * total; ++f)
+    {
+        const auto& unit = s.units[(std::size_t) (6 + f)];
+        const auto mode = std::clamp (unit.p[0], 0, 5);
+        bool fed = false;
+        for (auto i : carriers)
+            fed = fed || s.cell (0, 6 + f, i) != 0;
+        if (mode == 0 || ! fed || std::abs (filterOut[(std::size_t) f]) < 1e-4)
+            continue;
+
+        const auto kind = std::clamp (unit.filterKind, 0, 12);
+        int lynxType = 0;
+        switch (kind)
+        {
+            case 1: case 3: case 11: lynxType = 0; break;
+            case 2: case 6: lynxType = 2; break;
+            case 4: lynxType = 1; break;
+            case 5: lynxType = 3; break;
+            case 0:
+            {
+                const auto low = unit.p[4], band = unit.p[5], high = unit.p[6];
+                lynxType = low >= band && low >= high ? 0 : band >= high ? 1 : 2;
+                break;
+            }
+            default: lynxType = -1; break; // all pass, shelf, peak, phaser: sem filtro
+        }
+        if (lynxType < 0)
+            break;
+
+        const auto c = std::clamp (unit.p[2], 0, 256) / 256.0;
+        const auto r = std::clamp (unit.p[3], 0, 256) / 256.0;
+        const int stages[] = { 1, 1, 2, 3, 2, 3 };
+        const auto stageFactor = std::pow (0.9, stages[mode] - 1);
+
+        double q = 0.0;
+        if (kind == 0)
+            out.resonance = (float) std::clamp (0.8 * r, 0.0, 0.95);
+        else
+        {
+            q = kind <= 2 ? 1.0 + 0.049 * (std::pow (1001.0, r) - 1.0) : 0.1 + 0.02495 * (std::pow (2001.0, r) - 1.0);
+            out.resonance = (float) std::clamp ((q - 0.707) / 8.0, 0.0, 0.95);
+        }
+        out.filterType = lynxType;
+
+        const auto& cutArt = unit.art[2];
+        const auto depth = std::clamp (unit.p[1], 0, 256) / 128.0;
+        if (cutArt.env.on && ! cutArt.env.points.empty() && depth > 0.0)
+        {
+            const auto adsr = adsrOf (cutArt.env, cutArt.knobs, timeScale (cutArt.env));
+            // o articulador de cutoff é bipolar como o de afinação: nível 0,5 = o knob Cutoff
+            const auto start = cutArt.env.points.front().second;
+            double peak = start;
+            for (const auto& p : cutArt.env.points)
+                peak = std::max (peak, p.second);
+            auto at = [&] (double level) { return cutoffHz (kind, c + depth * (level - 0.5)); };
+            const auto susLevel = adsr.s * peak; // (o LYNX parte de `base`: um envelope que fecha abaixo do começo parte do fundo)
+            const auto base = at (std::min (start, susLevel));
+            const auto top = at (peak);
+            const auto susHz = at (susLevel);
+            const auto octaves = std::log2 (top / base);
+            out.cutoff = (float) std::clamp (base * stageFactor, 20.0, 20000.0);
+            if (octaves > 0.05)
+                out.filterEnv = { (float) std::min (10.0, octaves), (float) adsr.a, 0.0f, (float) adsr.d,
+                                  (float) std::clamp (std::log2 (susHz / base) / octaves, 0.0, 1.0), (float) adsr.r };
+        }
+        else
+            out.cutoff = (float) std::clamp (cutoffHz (kind, c) * stageFactor, 20.0, 20000.0);
+
+        hasFilter = true;
+        break;
+    }
+
+    // FM forte sem filtro do Sytrus: o índice que cai vira um passa-baixas com envelope
+    if (fmIndex >= 0.15 && fmModulator >= 0 && (! hasFilter || (out.filterType == 0 && out.filterEnv.amount == 0.0f)))
+    {
+        const auto octaves = std::min (6.0, 4.0 * fmIndex);
+        const auto& modVol = s.units[(std::size_t) fmModulator].art[1];
+        if (modVol.env.on)
+        {
+            const auto adsr = adsrOf (modVol.env, modVol.knobs, timeScale (modVol.env));
+            if (! hasFilter)
+                out.cutoff = 400.0f;
+            out.filterEnv = { (float) octaves, (float) adsr.a, 0.0f, (float) std::max (0.02, adsr.d), (float) adsr.s, (float) adsr.r };
+        }
+        else if (! hasFilter)
+            out.cutoff = (float) std::clamp (400.0 * std::exp2 (octaves), 20.0, 20000.0);
+    }
+
+    // 8. envelope de afinação da portadora principal (articulador 3): nível 0,5 = sem desvio
+    if (const auto& pitch = main.art[3]; pitch.env.on && pitch.env.points.size() >= 2)
+    {
+        const auto start = pitch.env.points.front().second;
+        const auto semis = (start - 0.5) * 2.0 * std::clamp (main.p[2], 0, 4800) / 100.0;
+        if (std::abs (semis) > 0.1)
+        {
+            double t = 0.0, settle = 0.0;
+            for (const auto& p : pitch.env.points)
+            {
+                t += p.first;
+                settle = t;
+                if (std::abs (p.second - 0.5) < 0.02)
+                    break;
+            }
+            out.pitchEnv = { (float) std::clamp (semis, -48.0, 48.0), 0.0f, 0.0f, (float) std::min (20.0, settle * timeScale (pitch.env)), 0.0f, 0.05f };
+        }
+    }
+
+    // 9. LFOs ligados: volume da portadora, cutoff do filtro, afinação, pan
+    auto lfoFrom = [&] (const Articulator& a, float amount) {
+        ChannelLfo lfo;
+        const auto speed = std::clamp (a.lfoSpeed, 512, 65536);
+        lfo.period = (float) std::clamp (625.0 / (std::pow (10001.0, speed / 65536.0) - 1.0), 0.01, 600.0);
+        lfo.sync = (a.lfo.flags & 1) != 0;
+        lfo.global = (a.lfo.flags & 2) != 0;
+        lfo.amount = amount;
+        return lfo;
+    };
+    auto depthOf = [] (const Articulator& a) { return std::isfinite (a.lfoDepth) ? std::clamp ((double) std::abs (a.lfoDepth), 0.0, 1.0) : 0.5; };
+    if (main.art[1].lfo.on)
+        out.lfo[lfoVolume] = lfoFrom (main.art[1], (float) (0.5 * depthOf (main.art[1])));
+    if (main.art[3].lfo.on)
+        out.lfo[lfoPitch] = lfoFrom (main.art[3], (float) (std::clamp (main.p[2], 0, 4800) / 100.0 * depthOf (main.art[3])));
+    if (main.art[0].lfo.on)
+        out.lfo[lfoPan] = lfoFrom (main.art[0], (float) depthOf (main.art[0]));
+    for (int f = 0; f < 3 && hasFilter; ++f)
+        if (const auto& a = s.units[(std::size_t) (6 + f)].art[2]; s.units[(std::size_t) (6 + f)].p[0] != 0 && a.lfo.on)
+        {
+            out.lfo[lfoCutoff] = lfoFrom (a, (float) (3.0 * depthOf (a)));
+            break;
+        }
+
+    // 10. uníssono: só 1 portadora -> três cópias desafinadas e abertas
+    const auto unison = std::clamp (s.main[173], 1, 9);
+    if (unison >= 2 && carriers.size() == 1 && ! out.am)
+    {
+        const auto pv = std::clamp (s.main[176], 0, 256) / 256.0;
+        const auto spread = std::max (5.0, s.altUnisonPitch ? (std::pow (41.0, pv) - 1.0) * 1.875 : (std::pow (11.0, pv) - 1.0) * 5.0);
+        const auto pan = (float) (std::clamp (s.main[174], 0, 128) / 128.0);
+        const auto base = out.osc[0];
+        const auto level = base.level / 3.0f * 1.5f;
+        for (int k = 0; k < 3; ++k)
+        {
+            out.osc[(std::size_t) k] = base;
+            out.osc[(std::size_t) k].level = std::min (1.0f, level);
+        }
+        out.osc[1].detune = (float) std::clamp (base.detune + spread, -100.0, 100.0);
+        out.osc[1].pan = std::clamp (base.pan + pan, -1.0f, 1.0f);
+        out.osc[2].detune = (float) std::clamp (base.detune - spread, -100.0, 100.0);
+        out.osc[2].pan = std::clamp (base.pan - pan, -1.0f, 1.0f);
+    }
+
+    for (auto& o : out.osc)
+        if (! std::isfinite (o.level) || ! std::isfinite (o.detune) || ! std::isfinite (o.pan))
+            return false;
+
+    synth = out;
+    return true;
+}
+} // namespace lynx

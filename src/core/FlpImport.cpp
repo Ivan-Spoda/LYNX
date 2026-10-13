@@ -660,6 +660,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 adopt();
             else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
                 adopt();
+            else if (name == "sytrus" && synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                adopt();
         }
 
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
@@ -717,7 +719,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                      || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
-            else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick")
+            else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
+                     || (plugin == "sytrus" && def.instrument == InstrumentKind::synth))
                 ++r.approximated[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)

@@ -28,7 +28,9 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlEffects.cpp
     src/core/FlSamplers.cpp
-    src/core/FlSynths.cpp)
+    src/core/FlSynths.cpp
+    src/core/FlSytrus.cpp
+    src/core/Inflate.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)

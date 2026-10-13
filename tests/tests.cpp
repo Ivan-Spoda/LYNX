@@ -16,6 +16,7 @@
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
 #include "core/FlSynths.h"
+#include "core/Inflate.h"
 #include "core/FlWrapper.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -356,6 +357,8 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromFruitKick (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
+        if (lynx::synthFromSytrus (blob, 120.0, synth, harmlessGain))
+            CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromDX10 (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.release) && std::isfinite (synth.osc[1].level));
         if (blob.size() >= 4 && round % 5 == 0) // cabeçalho do MiniSynth com o resto lixo
@@ -379,6 +382,25 @@ TEST (plugin_state_decoders_survive_garbage)
     CHECK (decoded == 3000); // todo nome conhecido dá um efeito (padrão quando o blob não serve)
 }
 
+TEST (inflate_zlib)
+{
+    // Huffman fixo com cópias para trás
+    const std::uint8_t fixed[] = { 0x78, 0xda, 0x4b, 0x4c, 0x4a, 0x4e, 0xc4, 0x86, 0x22, 0x00, 0x7c, 0x69, 0x09, 0x89 };
+    const auto a = lynx::inflateZlib (fixed, sizeof (fixed));
+    CHECK (a && std::string (a->begin(), a->end()) == "abcabcabcabcabcabcabcabcX");
+
+    // bloco sem compressão
+    const std::uint8_t stored[] = { 0x78, 0x01, 0x01, 0x03, 0x00, 0xfc, 0xff, 'L', 'Y', 'N', 0x00, 0x00, 0x00, 0x00 };
+    const auto b = lynx::inflateZlib (stored, sizeof (stored));
+    CHECK (b && std::string (b->begin(), b->end()) == "LYN");
+
+    // truncado, cabeçalho errado e limite de tamanho
+    CHECK (! lynx::inflateZlib (fixed, 6));
+    const std::uint8_t bad[] = { 0x12, 0x34, 0x00 };
+    CHECK (! lynx::inflateZlib (bad, sizeof (bad)));
+    CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
+}
+
 TEST (flp_real_files)
 {
     if (realFlpDir.empty())
@@ -389,7 +411,7 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
-    int harmless = 0, harmlessDecoded = 0;
+    int harmless = 0, harmlessDecoded = 0, sytrus = 0, sytrusDecoded = 0;
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     // import com os samples da instalação (o realFlpDir é ...\Data): para DirectWave/FPC
@@ -525,6 +547,23 @@ TEST (flp_real_files)
                     }
                 }
 
+            // Sytrus: todo estado dos demos (zlib + 10 unidades) decodifica, com valores finitos
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Sytrus")
+                {
+                    ++sytrus;
+                    lynx::SynthSettings ss;
+                    float g = 1.0f;
+                    if (lynx::synthFromSytrus (c.pluginState, 128.0, ss, g))
+                    {
+                        ++sytrusDecoded;
+                        CHECK (std::isfinite (g) && ss.cutoff >= 20.0f && ss.cutoff <= 20000.0f && std::isfinite (ss.attack) && std::isfinite (ss.decay)
+                               && std::isfinite (ss.release) && ss.sustain >= 0.0f && ss.sustain <= 1.0f && std::isfinite (ss.filterEnv.amount));
+                        for (const auto& o : ss.osc)
+                            CHECK (o.level >= 0.0f && o.level <= 1.0f && o.octave >= -3 && o.octave <= 3);
+                    }
+                }
+
             // 3x Osc: todo estado dos demos decodifica, com níveis que somam no máximo 1
             for (const auto& c : p.channels)
                 if (c.pluginName == "3x Osc")
@@ -594,6 +633,8 @@ TEST (flp_real_files)
 
     CHECK (threeOscDecoded == threeOsc);
     std::printf ("  Harmless: %d canais, %d decodificados\n", harmless, harmlessDecoded);
+    std::printf ("  Sytrus: %d canais, %d decodificados\n", sytrus, sytrusDecoded);
+    CHECK (sytrusDecoded == sytrus);
     CHECK (harmlessDecoded == harmless && harmless > 100);
 
     // presets de canal do 3x Osc que vêm com o FL (.fst): todos viram ajustes do synth

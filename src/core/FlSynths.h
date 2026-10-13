@@ -25,4 +25,9 @@ bool synthFromMiniSynth (const std::vector<std::uint8_t>& state, double bpm, Syn
 // Fruity DX10 (FM de 2 operadores): sem FM no LYNX, a portadora vira um seno, o modulador escolhe a
 // forma/harmônico do osc 2 e o índice que decai vira um envelope de filtro.
 bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth);
+
+// Sytrus (6 operadores FM/RM + 3 filtros, estado zlib; REA_rodada11): as 3 portadoras mais fortes
+// viram os osciladores, FM forte vira onda mais rica + envelope de filtro, o primeiro filtro ativo
+// vira o filtro do synth. `gain` recebe o Master level (linear).
+bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
 } // namespace lynx
