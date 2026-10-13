@@ -303,6 +303,11 @@ LYNX com X/Y mapeados "aproximadamente"; mix do slot = p2; bypass = p1 ≥ 0,5.
   inteiro de ciclos, sem efeito na fase). As rotas somam `M_alvo += q·out_fonte` (`FUN_180029cc0`), com
   **`q = 2·célula`** (`FUN_180039b30`) e `célula = (⌊100x⌋/100)²`. Logo **desvio de fase = 2·célula·out ciclos**
   (β = 4π·célula·|out| rad; `out` inclui envelope e nível do operador).
+- **Sentido da matriz** (complemento, `FUN_18003e730` da rodada 17 + `FUN_180039b30`): o *setter* do operador
+  alvo `t` grava os parâmetros `109 + 6j + t` (j = 0…5) nos campos `+0x40 + 4j` do registro de `t`; na montagem
+  das rotas, para o alvo `t`, a fonte `j` entra se o operador `j` estiver ligado e a célula `+0x40 + 4j` for
+  maior que um limiar, com quantidade `2·célula`. Logo **o parâmetro `109 + 6j + t` é "fonte j → alvo t"**
+  (0-based) **[DECOMP]**; coerente com os dados (moduladores com Mix 0 aparecem como fonte) **[DADOS]**.
 - **Corte do filtro (param 15):** o alvo por voz (`FUN_1800395b0`) é
   `u = corte + KT·(nota − 60)·0,01 + VelAmt·(vel − 1)·0,5 + EGAmt·env`, convertido em índice `u·65535` de uma
   tabela de 65536 coeficientes construída em `FUN_180038890` com **`fc = 2^(9u + 5)` Hz** (u = 0 → 32 Hz;
