@@ -17,6 +17,10 @@ constexpr int ticksPerStep = ppq / stepsPerBeat;
 constexpr int maxMixerTracks = 128;   // 0 = Master, 1..127 = inserts (o FL tem 125 + master)
 constexpr float unityFader = 0.8f;    // posição do fader que dá 0 dB, como no FL
 
+// Curva do fader do mixer do FL: g = (11^v - 1) / 10 com v = posição * 1,25 (0 dB em 0,8;
+// +5,6 dB no máximo). docs/analise/REA_rodada2.md §2.2.
+float faderGain (float position) noexcept;
+
 enum class InstrumentKind : std::uint8_t
 {
     kick,

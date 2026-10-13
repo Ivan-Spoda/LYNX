@@ -22,7 +22,7 @@ juce::String faderToDb (float volume)
     if (volume <= 0.0001f)
         return "-inf";
 
-    const auto db = juce::Decibels::gainToDecibels (volume / unityFader);
+    const auto db = juce::Decibels::gainToDecibels (faderGain (volume));
     return (db > 0 ? "+" : "") + juce::String (db, 1);
 }
 

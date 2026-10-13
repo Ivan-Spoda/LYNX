@@ -130,6 +130,7 @@ private:
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = ainda não avaliada
     std::vector<float> scratch; // 2 * blockCapacity, para atrasar um canal ou um envio
+    std::array<float, maxMixerTracks * 2> lastTrackGain {}; // ganho L/R do bloco anterior, para a rampa
     int blockCapacity = 0;
 };
 } // namespace lynx

@@ -305,6 +305,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
     scratch.assign ((std::size_t) std::max (64, maxBlockSize) * 2, 0.0f);
+    lastTrackGain.fill (std::numeric_limits<float>::quiet_NaN());
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
@@ -611,32 +612,46 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
             continue;
 
         const auto& track = song.mixer[(std::size_t) t];
+        const auto silent = track.muted || ! state.mixerAudible[(std::size_t) t];
 
-        if (track.muted || ! state.mixerAudible[(std::size_t) t])
+        // ganho alvo; a rampa a partir do bloco anterior evita estalo em mute e fader
+        float gl = 0.0f, gr = 0.0f;
+
+        if (! silent)
+        {
+            const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[(std::size_t) t], track.volume) : track.volume;
+            const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[(std::size_t) t], (track.pan + 1.0f) * 0.5f) * 2.0f - 1.0f
+                                                 : track.pan;
+            panGains (pan, faderGain (volume), gl, gr);
+        }
+
+        auto& lastL = lastTrackGain[(std::size_t) t * 2];
+        auto& lastR = lastTrackGain[(std::size_t) t * 2 + 1];
+        const auto fromL = std::isnan (lastL) ? gl : lastL;
+        const auto fromR = std::isnan (lastR) ? gr : lastR;
+        lastL = gl;
+        lastR = gr;
+
+        if (silent && fromL == 0.0f && fromR == 0.0f)
             continue;
 
         runEffects (state, t, numSamples);
 
-        const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[(std::size_t) t], track.volume) : track.volume;
-        const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[(std::size_t) t], (track.pan + 1.0f) * 0.5f) * 2.0f - 1.0f
-                                             : track.pan;
-        float gl = 0.0f, gr = 0.0f;
-        panGains (pan, volume / unityFader, gl, gr);
         const auto* l = trackBuffer (t, 0);
         const auto* r = trackBuffer (t, 1);
 
         const auto* delays = (std::size_t) t < state.sendDelays.size() ? &state.sendDelays[(std::size_t) t] : nullptr;
+        const auto stepL = (gl - fromL) / (float) numSamples, stepR = (gr - fromR) / (float) numSamples;
 
         auto sendTo = [&] (float* dl, float* dr, float level, std::size_t k) {
-            const auto sl = gl * level, sr = gr * level;
             DelayLine* delay = delays != nullptr && k < delays->size() ? (*delays)[k].get() : nullptr;
 
             if (delay == nullptr)
             {
                 for (int i = 0; i < numSamples; ++i)
                 {
-                    dl[i] += l[i] * sl;
-                    dr[i] += r[i] * sr;
+                    dl[i] += l[i] * (fromL + stepL * (float) (i + 1)) * level;
+                    dr[i] += r[i] * (fromR + stepR * (float) (i + 1)) * level;
                 }
                 return;
             }
@@ -647,8 +662,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
             for (int i = 0; i < numSamples; ++i)
             {
-                xl[i] = l[i] * sl;
-                xr[i] = r[i] * sr;
+                xl[i] = l[i] * (fromL + stepL * (float) (i + 1)) * level;
+                xr[i] = r[i] * (fromR + stepR * (float) (i + 1)) * level;
             }
 
             delay->process (xl, xr, numSamples);
@@ -685,13 +700,21 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         const auto& master = song.mixer[0];
         const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[0], master.volume) : master.volume;
         const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[0], (master.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : master.pan;
-        panGains (pan, master.muted ? 0.0f : volume / unityFader, gl, gr);
+        panGains (pan, master.muted ? 0.0f : faderGain (volume), gl, gr);
     }
+
+    auto& lastL = lastTrackGain[0];
+    auto& lastR = lastTrackGain[1];
+    const auto fromL = std::isnan (lastL) ? gl : lastL;
+    const auto fromR = std::isnan (lastR) ? gr : lastR;
+    lastL = gl;
+    lastR = gr;
+    const auto stepL = (gl - fromL) / (float) numSamples, stepR = (gr - fromR) / (float) numSamples;
 
     for (int i = 0; i < numSamples; ++i)
     {
-        left[i] = masterL[i] * gl;
-        right[i] = masterR[i] * gr;
+        left[i] = masterL[i] * (fromL + stepL * (float) (i + 1));
+        right[i] = masterR[i] * (fromR + stepR * (float) (i + 1));
     }
 
     if (meters != nullptr)

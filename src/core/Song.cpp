@@ -421,6 +421,12 @@ std::int64_t Automation::length() const noexcept
     return points.empty() ? 1 : std::max<std::int64_t> (1, points.back().tick);
 }
 
+float faderGain (float position) noexcept
+{
+    const auto v = std::clamp (position, 0.0f, 1.0f) * 1.25f;
+    return (std::pow (11.0f, v) - 1.0f) / 10.0f;
+}
+
 Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength)
 {
     Song out = song;
