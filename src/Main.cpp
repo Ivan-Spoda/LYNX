@@ -12,6 +12,26 @@
 #include "ui/MainComponent.h"
 #include "ui/Theme.h"
 
+namespace
+{
+lynx::AudioEngine* crashEngine = nullptr;
+
+// Travou: tenta salvar o projeto e grava o backtrace (como o "emergency save" do FL).
+void onCrash (void*)
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    folder.createDirectory();
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
+    folder.getChildFile ("travamento " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());
+
+    if (crashEngine != nullptr)
+    {
+        juce::String error;
+        lynx::ProjectFile::save (crashEngine->getSong(), folder.getChildFile ("recuperado " + stamp + lynx::ProjectFile::extension), error);
+    }
+}
+} // namespace
+
 class LynxApplication final : public juce::JUCEApplication
 {
 public:
@@ -106,6 +126,8 @@ public:
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+        juce::SystemStats::setApplicationCrashHandler (onCrash);
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
 
         // Duplo clique num .lynx/.flp abre o LYNX com o arquivo como argumento.
@@ -116,6 +138,7 @@ public:
     void shutdown() override
     {
         mainWindow = nullptr; // a UI sai antes do engine
+        crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
