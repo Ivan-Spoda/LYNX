@@ -35,7 +35,8 @@ enum : std::uint32_t
     evAutomationLink = 0xE3,    // registros de 20 B {u32 canal<<16, u32 0, u32 controlID, u32 flags, u32 ?}
     evAutomationPoints = 0xEA,  // header 21 B + 24 B por ponto + 112 B
     evMixerRoutes = 0xEB,       // um byte por trilha de destino
-    evChannelLevels = 0xDB,     // i32 pan, i32 volume, i32 afinação (centésimos), ...
+    evChannelLevels = 0xDB,
+    evChannelColour = 0x80,     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
     evPlaylistTrack = 0xEE,     // u32 índice (1..500), u32 cor, u32 ícone, u8 habilitada, ...
     evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
@@ -509,6 +510,11 @@ Project parseProject (std::span<const std::uint8_t> file)
                 }
                 break;
             }
+
+            case evChannelColour:
+                if (section == Section::channel)
+                    channel().colour = ((e.value & 0xFF) << 16) | (e.value & 0xFF00) | ((e.value >> 16) & 0xFF);
+                break;
 
             case evChannelLevels:
                 if (section == Section::channel && e.data.size() >= 12)

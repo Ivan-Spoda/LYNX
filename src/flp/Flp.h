@@ -91,6 +91,7 @@ struct Channel
 
     // evento 0xDB ("níveis" do canal): pan 0..12800 (6400 = centro), volume 0..12800
     // (10000 = 78%, o padrão), afinação em centésimos
+    std::uint32_t colour = 0; // 0xRRGGBB (0 = sem cor gravada)
     bool hasLevels = false;
     int pan = 6400, volume = 10000, pitchCents = 0;
 };

@@ -190,7 +190,11 @@ void ChannelRackComponent::paint (juce::Graphics& g)
                     juce::Justification::centred);
         g.setFont (juce::FontOptions (14.0f));
 
-        g.setColour (row == selected ? theme::channelButtonSelected : theme::channelButton);
+        // cor do canal (do .flp ou escolhida) misturada ao botão, como no FL
+        auto button = row == selected ? theme::channelButtonSelected : theme::channelButton;
+        if (channel.colour != 0)
+            button = button.interpolatedWith (juce::Colour (channel.colour), 0.55f);
+        g.setColour (button);
         g.fillRoundedRectangle (nameArea, 4.0f);
 
         if (row == selected)
@@ -450,6 +454,24 @@ void ChannelRackComponent::showChannelMenu (int channel)
     });
     menu.addSubMenu ("Instrumento", instruments);
     menu.addItem ("Renomear...", [this, channel] { rename (channel); });
+    {
+        juce::PopupMenu colours;
+        colours.addItem (utf8 ("Padrão"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
+
+        for (auto c : { 0xff485156u, 0xffa14547u, 0xffa16f45u, 0xffa19d45u, 0xff6ca145u, 0xff45a175u, 0xff45a1a0u, 0xff457ca1u,
+                        0xff4f45a1u, 0xff8a5096u, 0xffa1458au })
+        {
+            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+            juce::Graphics (swatch).fillAll (juce::Colour (c));
+            juce::PopupMenu::Item item;
+            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.image = std::make_unique<juce::DrawableImage> (swatch);
+            item.action = [this, channel, c] { engine.editSong ([channel, c] (Song& s) { s.channels[(std::size_t) channel].colour = c; }); };
+            colours.addItem (std::move (item));
+        }
+
+        menu.addSubMenu ("Cor", colours);
+    }
     menu.addItem ("Limpar notas desta pattern", [this, channel] {
         engine.editSong ([channel] (Song& s) {
             auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;

@@ -151,6 +151,9 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
 
+        if (c.colour != 0)
+            def.colour = 0xFF000000u | c.colour;
+
         if (c.hasLevels)
         {
             def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f);

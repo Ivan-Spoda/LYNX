@@ -189,6 +189,9 @@ juce::String toJson (const Song& song)
 
         o->setProperty ("mixer", c.mixerTrack);
 
+        if (c.colour != 0)
+            o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+
         if (! (c.sampler == SamplerSettings {}))
         {
             auto sampler = std::make_unique<juce::DynamicObject>();
@@ -409,6 +412,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.samplePath = c["sample"].toString().toStdString();
             def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
             def.plugin = pluginFromVar (c["plugin"]);
+
+            if (c.hasProperty ("colour"))
+                def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
 
             if (const auto& s = c["samplerSettings"]; s.isObject())
             {

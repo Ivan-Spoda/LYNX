@@ -66,6 +66,7 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = direto no Master
     PluginRef plugin;       // usado quando instrument == plugin
     SamplerSettings sampler; // usado quando instrument == sampler
+    std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = padrão do tema
 };
 
 enum class EffectKind : std::uint8_t
