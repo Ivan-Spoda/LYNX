@@ -57,13 +57,13 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Dry/wet por slot e smart disable
 
 ## Ainda por fazer (além da fase 5)
-- [ ] Automação de tempo e mudanças de compasso
-- [ ] Propriedades de nota (pan, fine pitch, slide/porta) e importá-las do `.flp`
+- [x] Automação de tempo (mudança de compasso ainda não)
+- [x] Propriedades de nota (pan, afinação fina, mute, slide) importadas do `.flp` (porta ainda não)
 - [ ] Time-stretch/resample de clips de áudio
-- [ ] Freeze/bounce de trilhas
+- [x] Renderizar insert para áudio (congelar)
 
 ## Fase 5: escalar
-- [ ] Freeze/bounce de trilhas
-- [ ] Render/export para WAV/MP3/FLAC
+- [x] Renderizar insert para áudio (congelar)
+- [x] Render/export para WAV/FLAC/OGG (MP3 não: o JUCE não codifica MP3)
 - [ ] ASIO (precisa do SDK da Steinberg) e WASAPI exclusivo
 - [x] UI na GPU: o JUCE 8 já desenha com Direct2D no Windows

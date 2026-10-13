@@ -29,6 +29,19 @@ Atualizado em 2026-10-13.
   mute (LED; nomes importados do `.flp`), **dividir clip**, **MIDI** (abrir `.mid`; botão MIDI no
   Piano Roll), **dither** no WAV 16 bits.
 - **Gravação de áudio** da entrada (menu "v" ao lado do Rec): o take vira clip na Playlist.
+- **Automação de tempo** (clique direito no BPM), importada do `.flp` (`0x40000005`, 60..180 BPM);
+  o export integra o tempo (testado: compasso a 120 e outro a 240 BPM).
+- **Notas**: pan, afinação fina, mute (Ctrl+M) e **slide** (glide de 808) por nota, importados do
+  `.flp`; a faixa do Piano Roll edita velocity/pan/afinação; acordes com um clique e destaque de escala.
+- **Renderizar insert para áudio** (menu do insert) e `--export --insert N`.
+- **Efeitos novos**: limiter (lookahead, com PDC), filtro LP/HP/BP, distorção, chorus; projeto novo já
+  vem com limiter no Master.
+- **Mixer**: separação estéreo, inverter fase, trocar L/R; cores dos inserts e dos canais (do `.flp`).
+- **Importação do `.flp`**: volume, pan e afinação dos canais (`0xDB`), cores, nomes/mute das trilhas.
+- **Navegador** (F8): pastas do FL e do usuário, prévia ao clicar, duplo clique cria sampler, arrastar.
+- **Segurança**: "*" no título, "salvar alterações?", autosave a cada 2 min e salvamento de emergência
+  se travar (`%APPDATA%\LYNX\autosave`).
+- **Interface mais leve**: só o cursor e os medidores que mudaram são redesenhados.
 
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
@@ -82,5 +95,5 @@ Confirmadas empiricamente nos demos:
   instâncias. Latência de plugin (PDC) ainda não é compensada.
 
 ## Próximo passo
-Automação de tempo, propriedades de nota (pan/pitch/slide) com importação do `.flp`, freeze/bounce,
-time-stretch de clips de áudio, ASIO.
+Importar envelopes/ajustes do sampler do `.flp` (análise REA rodada 3 em andamento), time-stretch de
+clips de áudio, ASIO (depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária).
