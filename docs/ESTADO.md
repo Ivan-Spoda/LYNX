@@ -1,6 +1,25 @@
 # Estado atual
 
-Atualizado em 2026-10-12.
+Atualizado em 2026-10-13.
+
+## Novidades de 2026-10-13 (verificadas por testes, autoteste e capturas fora da tela)
+- **Exportar áudio pela interface** (botão Exportar / Ctrl+R): WAV 16/24/32f, FLAC, OGG; música inteira ou
+  pattern; cauda até o som acabar; 16 bits com dither TPDF + noise shaping. `LYNX.exe --export proj saida.wav`
+  usa o mesmo caminho.
+- **Piano Roll**: seleção (Ctrl+arrastar, Shift+clique, Ctrl+A), mover/redimensionar em grupo, Ctrl+C/X/V,
+  Ctrl+B duplicar, Ctrl+Q quantizar, setas (Shift = oitava/compasso), Delete, seletor de snap, faixa de velocity.
+- **Patterns**: menu "..." na barra (renomear, cor, comprimento, clonar, remover); cores importadas do `.flp`.
+- **Solo de canal**: clique direito (ou Ctrl+clique) no LED de mute.
+- **Gravação**: botão Rec grava notas do teclado do PC e de todas as entradas MIDI na pattern atual (um passo
+  de desfazer por tomada). MIDI toca o canal selecionado.
+- **Playlist**: região de loop (arrastar na régua; clique direito apaga), seleção múltipla, copiar/colar/duplicar,
+  "Tornar única", **vários arrangements** (combo no canto da Playlist).
+- **Automação**: clique direito em qualquer knob/fader (canal, mixer, efeitos) ou "Automatizar parâmetro do
+  plugin" → clip na Playlist + editor de pontos com curva (Alt+arrastar). Importada do `.flp` (1105 clips nos demos).
+- **Mixer**: envios entre inserts com nível (botão de seta na base da faixa), "só para esta trilha", solo pelo
+  caminho do sinal, curva do fader do FL, rampas de ganho. Roteamento/volumes/mute/solo importados do `.flp`.
+- **PDC** por aresta (modelo do FL, ver `docs/analise/REA_rodada2.md`); o export descarta a latência inicial.
+- **Multi-thread**: canais em paralelo e mixer por camadas; export ~2x mais rápido nos demos.
 
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
@@ -51,5 +70,5 @@ Confirmadas empiricamente nos demos:
   instâncias. Latência de plugin (PDC) ainda não é compensada.
 
 ## Próximo passo
-Exportar pela interface (WAV), velocity e seleção múltipla no Piano Roll, compensação de
-latência dos plugins.
+Streaming do disco para áudios longos, freeze/bounce, busca de plugins em processo separado, dry/wet por
+slot e smart disable, time-stretch de clips de áudio.

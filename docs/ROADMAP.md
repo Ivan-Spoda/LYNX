@@ -33,22 +33,22 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [ ] Streaming do disco para áudios longos (hoje o arquivo inteiro vai para a memória)
 - [ ] Time-stretch/resample de clips de áudio
 - [x] Loop region, seleção múltipla, copiar/colar/duplicar clips, clips "únicos"
-- [ ] Vários arrangements
+- [x] Vários arrangements (seletor na Playlist; importados do `.flp`)
 - [x] Automação: clips na Playlist, editor de pontos com curva; volume/pan, efeitos e parâmetros de plugins
-- [ ] Importar automação do `.flp`
+- [x] Importar automação do `.flp` (pontos, curva, alvo: volume/pan de canal e mixer, parâmetros)
 
 ## Fase 4: mixer e plugins
-- [x] Mixer: Master + até 127 inserts, fader (0,8 = 0 dB), pan, mute, solo, medidores estéreo
+- [x] Mixer: Master + até 127 inserts, fader com a curva do FL (0,8 = 0 dB), pan, mute, solo, medidores estéreo, rampas sem estalo
 - [x] Roteamento canal → insert (caixinha no Channel Rack, menu do mixer); importado do `.flp`
-- [ ] Sends entre inserts e roteamento insert → insert (hoje todo insert vai para o Master)
+- [x] Envios entre inserts com nível, "só para esta trilha", solo pelo caminho do sinal; importados do `.flp`
 - [x] 10 slots de efeito por insert (e no Master), com bypass, trocar, mover, remover
 - [x] Efeitos internos: EQ de 3 bandas, compressor, delay sincronizado (ping-pong), reverb
 - [x] Hosting de VST3: instrumentos nos canais e efeitos nos slots, janela do plugin, estado salvo no projeto
 - [x] Busca de plugins com janela de progresso, lista salva em %APPDATA%\LYNX, "dead man's pedal"
 - [ ] Busca em processo separado (hoje um plugin que trave na busca derruba o LYNX; ele é pulado na próxima)
 - [ ] CLAP
-- [ ] Compensação de latência (PDC)
-- [ ] Processamento multi-thread do grafo por camadas de dependência (como o FL, ver análise)
+- [x] Compensação de latência (PDC) por aresta, como o FL; export descarta a latência do início
+- [x] Processamento multi-thread: canais em paralelo e mixer por camadas (sem locks)
 - [ ] Plugins em processo separado (sandbox), estilo ilbridge
 
 ## Fase 5: escalar
