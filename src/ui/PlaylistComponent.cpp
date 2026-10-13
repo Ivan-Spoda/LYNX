@@ -509,6 +509,24 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
                     juce::Justification::centredLeft, true);
     }
 
+    // fades: rampas e alças nos cantos de cima
+    {
+        const auto inX = r.getX() + (float) (c.fadeIn * pixelsPerTick);
+        const auto outX = r.getRight() - (float) (c.fadeOut * pixelsPerTick);
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+
+        if (c.fadeIn > 0)
+            g.drawLine (r.getX(), r.getBottom(), inX, r.getY() + 14.0f, 1.2f);
+        if (c.fadeOut > 0)
+            g.drawLine (outX, r.getY() + 14.0f, r.getRight(), r.getBottom(), 1.2f);
+
+        if (r.getWidth() > 20.0f)
+        {
+            g.fillRect (juce::Rectangle<float> (inX, r.getY() + 13.0f, 5.0f, 5.0f));
+            g.fillRect (juce::Rectangle<float> (outX - 5.0f, r.getY() + 13.0f, 5.0f, 5.0f));
+        }
+    }
+
     const auto* peaks = waveformFor (channel.samplePath);
 
     if (peaks == nullptr)
@@ -589,6 +607,26 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
 
     g.setColour (juce::Colour (0xffb8f0a8));
     g.strokePath (curve, juce::PathStrokeType (1.5f));
+}
+
+int PlaylistComponent::fadeHandleAt (int index, juce::Point<int> p) const
+{
+    const auto& c = engine.getSong().playlist[(std::size_t) index];
+
+    if (c.kind != ClipKind::audio)
+        return 0;
+
+    const auto y = trackToY (c.track) + 1 + 15;
+    const auto inX = tickToX ((double) c.start) + c.fadeIn * pixelsPerTick;
+    const auto outX = tickToX ((double) c.end()) - c.fadeOut * pixelsPerTick;
+
+    if (std::abs (p.y - y) > 6)
+        return 0;
+    if (std::abs (p.x - (inX + 2.0)) <= 6.0)
+        return 1;
+    if (std::abs (p.x - (outX - 2.0)) <= 6.0)
+        return 2;
+    return 0;
 }
 
 int PlaylistComponent::clipAt (int x, int y, bool& onRightEdge) const
@@ -713,6 +751,15 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // alças de fade dos clips de áudio
+    if (hit >= 0 && ! e.mods.isAnyModifierKeyDown())
+        if (const auto handle = fadeHandleAt (hit, e.getPosition()))
+        {
+            dragClip = hit;
+            drag = handle == 1 ? Drag::fadeIn : Drag::fadeOut;
+            return;
+        }
+
     if (hit >= 0 && e.mods.isShiftDown())
     {
         auto s = selection;
@@ -799,6 +846,22 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
                 s.loopEnd = to;
                 s.mode = PlayMode::song;
             }, false);
+            return;
+        }
+
+        case Drag::fadeIn:
+        case Drag::fadeOut:
+        {
+            const auto& clip = engine.getSong().playlist[(std::size_t) dragClip];
+            const auto tick = (std::int64_t) xToTick (e.x);
+            auto length = drag == Drag::fadeIn ? tick - clip.start : clip.end() - tick;
+            length = juce::jlimit<std::int64_t> (0, clip.length, length);
+            const auto in = drag == Drag::fadeIn;
+
+            engine.editSong ([i = dragClip, length, in] (Song& s) {
+                auto& c = s.playlist[(std::size_t) i];
+                (in ? c.fadeIn : c.fadeOut) = std::min (length, c.length - (in ? c.fadeOut : c.fadeIn));
+            });
             return;
         }
 
@@ -982,6 +1045,33 @@ void PlaylistComponent::showClipMenu (int index)
         });
     }
 
+    if (clip.kind == ClipKind::audio)
+    {
+        juce::PopupMenu gains;
+
+        for (auto db : { 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -12.0f })
+        {
+            const auto g = juce::Decibels::decibelsToGain (db);
+            gains.addItem ((db > 0 ? "+" : "") + juce::String (db, 0) + " dB", true, std::abs (clip.gain - g) < 0.01f, [this, targets, g] {
+                engine.editSong ([targets, g] (Song& s) {
+                    for (auto i : targets)
+                        if (s.playlist[(std::size_t) i].kind == ClipKind::audio)
+                            s.playlist[(std::size_t) i].gain = g;
+                });
+            });
+        }
+
+        menu.addSubMenu ("Volume do clip", gains);
+
+        if (clip.fadeIn > 0 || clip.fadeOut > 0)
+            menu.addItem ("Tirar os fades", [this, targets] {
+                engine.editSong ([targets] (Song& s) {
+                    for (auto i : targets)
+                        s.playlist[(std::size_t) i].fadeIn = s.playlist[(std::size_t) i].fadeOut = 0;
+                });
+            });
+    }
+
     if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) engine.getSong().automations.size())
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().automations[(std::size_t) clip.automation].name.c_str()));
@@ -1161,6 +1251,13 @@ void PlaylistComponent::mouseMove (const juce::MouseEvent& e)
 {
     bool rightEdge = false;
     const auto hit = gridArea().contains (e.getPosition()) ? clipAt (e.x, e.y, rightEdge) : -1;
+
+    if (hit >= 0 && fadeHandleAt (hit, e.getPosition()) != 0)
+    {
+        setMouseCursor (juce::MouseCursor::UpDownLeftRightResizeCursor);
+        return;
+    }
+
     setMouseCursor (hit >= 0 ? (rightEdge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::DraggingHandCursor)
                              : juce::MouseCursor::NormalCursor);
 }

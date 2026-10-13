@@ -473,6 +473,7 @@ struct SamplerVoice
     float envStep = 0.0f;  // passo do ataque (> 0) ou do release (< 0)
     int stage = 1;         // 0 ataque, 1 decaimento, 2 sustentação, 3 release
     double first = 0.0, last = 0.0; // trecho tocado
+    float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f; // fades de clip
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
     int glideLeft = 0;
@@ -577,6 +578,11 @@ public:
         target->position = startFrame;
         target->first = first;
         target->last = last;
+        target->clipElapsed = nextClip[0];
+        target->clipRemaining = nextClip[1];
+        target->fadeIn = nextClip[2];
+        target->fadeOut = nextClip[3];
+        nextClip = {};
         target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
@@ -589,6 +595,11 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void setNextClipFades (float elapsed, float remaining, float in, float out) noexcept override
+    {
+        nextClip = { elapsed, remaining, in, out };
     }
 
     void slideTo (int key, float cents, float samples) noexcept override
@@ -664,7 +675,18 @@ public:
                 const auto frac = (float) (v.position - (double) index);
                 const auto sl = l[index] + frac * (l[index + 1] - l[index]);
                 const auto sr = r[index] + frac * (r[index + 1] - r[index]);
-                const auto gain = v.velocity * v.fade * v.env;
+                auto gain = v.velocity * v.fade * v.env;
+
+                if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
+                {
+                    if (v.fadeIn > 0.0f && v.clipElapsed < v.fadeIn)
+                        gain *= v.clipElapsed / v.fadeIn;
+                    if (v.fadeOut > 0.0f && v.clipRemaining < v.fadeOut)
+                        gain *= std::max (0.0f, v.clipRemaining) / v.fadeOut;
+
+                    v.clipElapsed += 1.0f;
+                    v.clipRemaining -= 1.0f;
+                }
 
                 left[i] += sl * gain * gl * v.panL;
                 right[i] += sr * gain * gr * v.panR;
@@ -731,6 +753,7 @@ private:
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
+    std::array<float, 4> nextClip {}; // fades do próximo noteOn (só a thread de áudio mexe)
     float nextPan = 0.0f, nextCents = 0.0f;
     std::atomic<bool> reverse { false }, cut { false };
 };

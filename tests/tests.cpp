@@ -2214,6 +2214,52 @@ TEST (arpeggiator_plays_held_chord_in_steps)
     CHECK (peak > 0.01f);
 }
 
+TEST (audio_clip_fades_and_gain)
+{
+    lynx::Song s;
+    s.bpm = 120.0;
+    s.mode = lynx::PlayMode::song;
+    s.mixer = lynx::Song::defaultMixer (1);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::audioClip;
+    c.samplePath = "dc";
+    c.volume = 1.0f;
+    c.mixerTrack = 1;
+    s.channels.push_back (c);
+    s.patterns.emplace_back();
+    lynx::Clip clip;
+    clip.kind = lynx::ClipKind::audio;
+    clip.channel = 0;
+    clip.length = lynx::ppq * 4;  // 2 s a 120 BPM
+    clip.fadeIn = lynx::ppq;      // 0,5 s
+    clip.fadeOut = lynx::ppq;
+    clip.gain = 0.5f;
+    s.playlist.push_back (clip);
+
+    auto provider = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (48000 * 4, 1.0f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, provider);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> all;
+    std::vector<float> l (512), rr (512);
+    const auto tps = lynx::ticksPerSample (s.bpm, 48000.0);
+
+    for (double tick = 0.0; tick < lynx::ppq * 4.0; tick += 512 * tps)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+        all.insert (all.end(), l.begin(), l.end());
+    }
+
+    CHECK (all[100] < 0.01f);                            // começo do fade-in
+    CHECK (std::abs (all[12000] - 0.25f) < 0.02f);       // meio do fade-in: metade de 0,5
+    CHECK (std::abs (all[48000] - 0.5f) < 0.01f);        // corpo: o ganho do clip
+    CHECK (std::abs (all[96000 - 12000] - 0.25f) < 0.02f); // meio do fade-out
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

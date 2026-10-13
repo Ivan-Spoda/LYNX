@@ -278,6 +278,8 @@ struct Clip
     ClipKind kind = ClipKind::pattern;
     int channel = -1;         // clips de áudio: canal (audioClip) que tem o sample
     int automation = -1;      // clips de automação: índice em Song::automations
+    std::int64_t fadeIn = 0, fadeOut = 0; // clips de áudio: fades (ticks)
+    float gain = 1.0f;        // clips de áudio: volume do clip
 
     std::int64_t end() const noexcept { return start + length; }
 };

@@ -65,7 +65,7 @@ public:
     static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
-    enum class Drag { none, move, resize, erase, seek, loop, select };
+    enum class Drag { none, move, resize, erase, seek, loop, select, fadeIn, fadeOut };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -79,6 +79,8 @@ private:
     int numTracks() const;
     std::int64_t snap (double tick, bool enabled) const;
     int clipAt (int x, int y, bool& onRightEdge) const;
+    // alça de fade de um clip de áudio sob o mouse: 1 = fade-in, 2 = fade-out, 0 = nenhuma
+    int fadeHandleAt (int clip, juce::Point<int> p) const;
     void updateScrollBars();
     bool isSelected (int index) const;
     void setSelection (std::vector<int> indices);

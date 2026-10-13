@@ -33,6 +33,8 @@ public:
     virtual int latencySamples() const noexcept { return 0; }
     // Nota "slide": as notas soando deslizam até `key` em `samples`, sem reatacar. Quem não suporta ignora.
     virtual void slideTo (int /*key*/, float /*cents*/, float /*samples*/) noexcept {}
+    // Clip de áudio: fades e posição no clip da próxima nota (antes do noteOn), em samples.
+    virtual void setNextClipFades (float /*elapsed*/, float /*remaining*/, float /*fadeIn*/, float /*fadeOut*/) noexcept {}
     // Pan e afinação fina da próxima nota (chamado logo antes do noteOn). Quem não suporta ignora.
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/) noexcept {}
     // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de

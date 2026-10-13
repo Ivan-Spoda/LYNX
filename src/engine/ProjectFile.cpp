@@ -112,9 +112,21 @@ juce::var clipsToVar (const std::vector<Clip>& list)
 
     // [pattern, trilha, início, duração, offset, tipo (0 pattern, 1 áudio, 2 automação), canal ou automação]
     for (const auto& c : list)
-        clips.add (juce::Array<juce::var> { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
-                                            (juce::int64) c.offset, (int) c.kind,
-                                            c.kind == ClipKind::automation ? c.automation : c.channel });
+    {
+        juce::Array<juce::var> clip { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
+                                      (juce::int64) c.offset, (int) c.kind,
+                                      c.kind == ClipKind::automation ? c.automation : c.channel };
+
+        // [.., fade-in, fade-out, ganho] só quando não são o padrão
+        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f)
+        {
+            clip.add ((juce::int64) c.fadeIn);
+            clip.add ((juce::int64) c.fadeOut);
+            clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
+        }
+
+        clips.add (clip);
+    }
 
     return clips;
 }
@@ -136,6 +148,13 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
             clip.start = juce::jmax<juce::int64> (0, (juce::int64) c[2]);
             clip.length = (juce::int64) c[3];
             clip.offset = juce::jmax<juce::int64> (0, (juce::int64) c[4]);
+
+            if (c.size() >= 10)
+            {
+                clip.fadeIn = juce::jmax<juce::int64> (0, (juce::int64) c[7]);
+                clip.fadeOut = juce::jmax<juce::int64> (0, (juce::int64) c[8]);
+                clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
+            }
 
             if (c.size() >= 7 && (int) c[5] == 2)
             {

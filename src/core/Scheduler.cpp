@@ -121,13 +121,17 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
             NoteEvent e;
             e.channel = clip.channel;
-            e.velocity = 1.0f;
+            e.velocity = clip.gain;
+            e.fadeIn = (float) ((double) clip.fadeIn / tps);
+            e.fadeOut = (float) ((double) clip.fadeOut / tps);
 
             if (resume && loopStart > (double) clip.start && loopStart < (double) clip.end())
             {
                 e.type = NoteEvent::Type::on;
                 e.sampleOffset = 0;
                 e.startSeconds = ((double) clip.offset + loopStart - (double) clip.start) * secondsPerTick;
+                e.clipElapsed = (float) ((loopStart - (double) clip.start) / tps);
+                e.clipRemaining = (float) (((double) clip.end() - loopStart) / tps);
                 out.add (e);
             }
 
@@ -136,6 +140,8 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
             e.type = NoteEvent::Type::on;
             e.startSeconds = (double) clip.offset * secondsPerTick;
+            e.clipElapsed = 0.0f;
+            e.clipRemaining = (float) ((double) clip.length / tps);
             emitOccurrences ((double) clip.start, loop, startTick, endTick, tps, numSamples, e, out);
 
             e.type = NoteEvent::Type::off;
