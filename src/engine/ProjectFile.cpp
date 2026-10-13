@@ -191,6 +191,10 @@ juce::String toJson (const Song& song)
 
         if (c.colour != 0)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+        if (c.swingMix != 1.0f)
+            o->setProperty ("swingMix", c.swingMix);
+        if (c.cutGroup != 0 || c.cutBy != 0)
+            o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
 
         if (! (c.synth == SynthSettings {}))
         {
@@ -211,7 +215,10 @@ juce::String toJson (const Song& song)
             auto sampler = std::make_unique<juce::DynamicObject>();
             sampler->setProperty ("pitch", c.sampler.pitch);
             sampler->setProperty ("attack", c.sampler.attack);
+            sampler->setProperty ("decay", c.sampler.decay);
+            sampler->setProperty ("sustain", c.sampler.sustain);
             sampler->setProperty ("release", c.sampler.release);
+            sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -443,6 +450,14 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             if (c.hasProperty ("colour"))
                 def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
 
+            def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+
+            if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
+            {
+                def.cutGroup = (int) cut[0];
+                def.cutBy = (int) cut[1];
+            }
+
             if (const auto& s = c["synthSettings"]; s.isObject())
             {
                 if (auto* oscs = s["osc"].getArray())
@@ -472,6 +487,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.pitch = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("pitch", 0.0));
                 def.sampler.attack = juce::jlimit (0.0f, 2.0f, (float) (double) s.getProperty ("attack", 0.0));
                 def.sampler.release = juce::jlimit (0.0f, 4.0f, (float) (double) s.getProperty ("release", 0.0));
+                def.sampler.decay = juce::jlimit (0.0f, 10.0f, (float) (double) s.getProperty ("decay", 0.0));
+                def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
+                def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
                 def.sampler.reverse = (bool) s.getProperty ("reverse", false);
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
             }

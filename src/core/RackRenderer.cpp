@@ -65,7 +65,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate)))
         {
             state->instruments.push_back (previous->instruments[i]);
-            state->instruments.back()->configure (channel);
+            state->instruments.back()->configure (channel, song.bpm);
             continue;
         }
 
@@ -87,7 +87,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
         instrument->prepare (sampleRate);
-        instrument->configure (channel);
+        instrument->configure (channel, song.bpm);
         state->instruments.push_back (std::move (instrument));
     }
 
@@ -136,6 +136,18 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     state->buildAutomationTables();
     state->buildPdc (previous);
     state->buildMixerGraph();
+
+    const auto& channels = state->song.channels;
+    state->cutTargets.assign (channels.size(), {});
+
+    for (std::size_t c = 0; c < channels.size(); ++c)
+        if (channels[c].cutGroup > 0)
+            for (std::size_t d = 0; d < channels.size(); ++d)
+                if (channels[d].cutBy == channels[c].cutGroup)
+                {
+                    state->cutTargets[c].push_back ((int) d);
+                    state->hasCutGroups = true;
+                }
     const auto audible = state->song.soloAudible();
     state->mixerAudible.assign (audible.begin(), audible.end());
     return state;
@@ -472,7 +484,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 {
     const auto& c = state.song.channels[(std::size_t) i];
     const auto automation = state.hasAutomation;
-    const auto volume = automation ? automated (state.channelVolumeAuto[(std::size_t) i], c.volume) : c.volume;
+    const auto volume = channelGain (automation ? automated (state.channelVolumeAuto[(std::size_t) i], c.volume) : c.volume);
     const auto pan = automation ? automated (state.channelPanAuto[(std::size_t) i], (c.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : c.pan;
     float gl = 0.0f, gr = 0.0f;
     panGains (pan, volume, gl, gr);
@@ -507,6 +519,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         else if (e.type == NoteEvent::Type::slide)
         {
             instrument.slideTo (e.key, e.cents, e.slideSamples);
+        }
+        else if (e.type == NoteEvent::Type::choke)
+        {
+            instrument.allNotesOff(); // fade curto, como o "cut" do FL
         }
         else
             instrument.noteOff (e.key);
@@ -712,7 +728,32 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         const auto patternIndex = std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1);
         const auto& pattern = song.patterns[(std::size_t) patternIndex];
         schedulePatternLoop (pattern, pattern.effectiveLength (song.beatsPerBar), startTick, numSamples,
-                             ticksPerSample (bpm, sampleRate), events, song.swing);
+                             ticksPerSample (bpm, sampleRate), events, song.swing, &song.channels);
+    }
+
+    // cut groups: cada nota de um canal "corta" os canais ligados a ele, no mesmo sample
+    if (state.hasCutGroups)
+    {
+        const auto count = events.size();
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto e = events[i];
+
+            if (e.type != NoteEvent::Type::on || e.channel < 0 || e.channel >= (int) state.cutTargets.size())
+                continue;
+
+            for (auto target : state.cutTargets[(std::size_t) e.channel])
+            {
+                NoteEvent choke;
+                choke.type = NoteEvent::Type::choke;
+                choke.channel = target;
+                choke.sampleOffset = e.sampleOffset;
+                events.add (choke);
+            }
+        }
+
+        events.sortByOffset();
     }
 
     // 1) canais, cada um com as próprias notas no sample exato (em paralelo quando vale a pena)

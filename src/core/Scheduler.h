@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "core/Song.h"
 
@@ -12,7 +13,7 @@ namespace lynx
 {
 struct NoteEvent
 {
-    enum class Type : std::uint8_t { on, off, slide }; // slide: desliza as notas soando até `key`
+    enum class Type : std::uint8_t { on, off, slide, choke }; // slide: desliza as notas soando até `key`; choke: cut group
 
     int sampleOffset = 0;   // 0 .. numSamples-1 dentro do bloco
     Type type = Type::on;
@@ -61,7 +62,8 @@ void schedulePatternLoop (const Pattern& pattern,
                           int numSamples,
                           double ticksPerSampleValue,
                           EventBuffer& out,
-                          float swing = 0.0f) noexcept;
+                          float swing = 0.0f,
+                          const std::vector<ChannelDef>* channels = nullptr) noexcept;
 // Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip de pattern
 // toca as notas da pattern que caem em [offset, offset + length); notas são cortadas no
 // fim do clip. Clips de áudio disparam o sample do canal no início e param no fim.

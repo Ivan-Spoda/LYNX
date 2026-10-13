@@ -258,7 +258,7 @@ public:
         allNotesOff();
     }
 
-    void configure (const ChannelDef& channel) noexcept override { mailbox.write (channel.synth); }
+    void configure (const ChannelDef& channel, double) noexcept override { mailbox.write (channel.synth); }
 
     void noteOn (int key, float velocity) noexcept override
     {
@@ -469,8 +469,9 @@ struct SamplerVoice
     bool stolen = false;
     int age = 0;
     int key = 60;
-    float env = 1.0f;      // envelope de ataque/release
-    float envStep = 0.0f;  // > 0 subindo (ataque), < 0 descendo (release)
+    float env = 1.0f;      // envelope
+    float envStep = 0.0f;  // passo do ataque (> 0) ou do release (< 0)
+    int stage = 1;         // 0 ataque, 1 decaimento, 2 sustentação, 3 release
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
     int glideLeft = 0;
@@ -489,14 +490,31 @@ public:
         allNotesOff();
     }
 
-    void configure (const ChannelDef& channel) noexcept override
+    void configure (const ChannelDef& channel, double songBpm) noexcept override
     {
         const auto& s = channel.sampler;
         pitch.store (std::clamp (s.pitch, -24.0f, 24.0f));
         attack.store (std::clamp (s.attack, 0.0f, 2.0f));
+        decay.store (std::clamp (s.decay, 0.0f, 10.0f));
+        sustain.store (std::clamp (s.sustain, 0.0f, 1.0f));
         release.store (std::clamp (s.release, 0.0f, 4.0f));
         reverse.store (s.reverse);
         cut.store (s.cut);
+        stretchBeats.store (std::max (0.0f, s.stretchBeats));
+        bpm.store (std::max (1.0, songBpm));
+    }
+
+    // Leitura em frames do sample por sample de saída (antes da afinação das notas). Com
+    // stretch, o sample inteiro dura `stretchBeats` no andamento atual (reamostrando, como o
+    // modo "resample" do FL: a altura acompanha).
+    double baseRate() const noexcept
+    {
+        const auto beats = stretchBeats.load();
+
+        if (beats > 0.0f && sample != nullptr)
+            return (double) sample->frames() / ((double) beats * 60.0 / bpm.load() * sampleRate);
+
+        return sample->sampleRate / sampleRate;
     }
 
     void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
@@ -508,7 +526,9 @@ public:
 
         const auto backwards = ! clipMode && reverse.load();
         const auto last = (double) (sample->frames() - 1);
-        auto startFrame = std::max (0.0, startSeconds * sample->sampleRate);
+        const auto stretched = stretchBeats.load() > 0.0f;
+        const auto base = baseRate();
+        auto startFrame = std::max (0.0, startSeconds * sampleRate * base);
 
         if (startFrame >= last)
             return;
@@ -539,7 +559,8 @@ public:
                     target = &v;
         }
 
-        const auto semitones = clipMode ? 0.0 : (key - 60) + (double) pitch.load() + nextCents / 100.0;
+        // com stretch ("resample" do FL) a altura da nota não muda a velocidade
+        const auto semitones = clipMode || stretched ? 0.0 : (key - 60) + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
@@ -547,9 +568,10 @@ public:
         target->key = key;
         target->velocity = velocity;
         target->position = startFrame;
-        target->rate = sample->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
+        target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
+        target->stage = attackSeconds > 0.0f ? 0 : 1;
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         nextPan = nextCents = 0.0f;
     }
@@ -591,9 +613,13 @@ public:
         if (seconds <= 0.0f)
             return;
 
+        // release linear a partir do nível atual (como o FL)
         for (auto& v : voices)
-            if (v.active && v.key == key && v.envStep >= 0.0f)
-                v.envStep = -(float) (1.0 / (seconds * sampleRate));
+            if (v.active && v.key == key && v.stage < 3)
+            {
+                v.stage = 3;
+                v.envStep = -(float) (std::max (v.env, 0.001f) / (seconds * sampleRate));
+            }
     }
 
     void allNotesOff() noexcept override
@@ -619,7 +645,7 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
-                if (v.position >= last || v.position < 0.0 || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.envStep < 0.0f))
+                if (v.position >= last || v.position < 0.0 || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
                 {
                     v.active = false;
                     break;
@@ -643,16 +669,43 @@ public:
                     --v.glideLeft;
                 }
 
-                if (v.envStep != 0.0f)
+                // envelope: 0 ataque, 1 decaimento, 2 sustentação, 3 release
+                if (v.stage == 0)
                 {
                     v.env += v.envStep;
 
-                    if (v.env >= 1.0f && v.envStep > 0.0f)
+                    if (v.env >= 1.0f)
                     {
                         v.env = 1.0f;
-                        v.envStep = 0.0f;
+                        v.stage = 1;
                     }
                 }
+                else if (v.stage == 1)
+                {
+                    const auto s = sustain.load (std::memory_order_relaxed);
+                    const auto d = decay.load (std::memory_order_relaxed);
+
+                    if (s >= 1.0f)
+                        v.stage = 2;
+                    else if (d <= 0.0f)
+                    {
+                        v.env = s;
+                        v.stage = 2;
+                    }
+                    else
+                    {
+                        // a rampa vai de 1 a 0 em `decay` e para no sustain (como no FL)
+                        v.env -= (float) (1.0 / (d * sampleRate));
+
+                        if (v.env <= s)
+                        {
+                            v.env = s;
+                            v.stage = 2;
+                        }
+                    }
+                }
+                else if (v.stage == 3)
+                    v.env += v.envStep;
 
                 if (v.stolen)
                     v.fade -= fadeStep;
@@ -666,7 +719,8 @@ private:
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
-    std::atomic<float> pitch { 0.0f }, attack { 0.0f }, release { 0.0f };
+    std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
+    std::atomic<double> bpm { 120.0 };
     float nextPan = 0.0f, nextCents = 0.0f;
     std::atomic<bool> reverse { false }, cut { false };
 };

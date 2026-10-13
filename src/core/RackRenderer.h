@@ -57,6 +57,10 @@ struct RackState
     std::vector<int> currentLatencies() const;
     void buildPdc (const RackState* previous);
 
+    // Cut groups: canais que cada canal corta ao tocar (cutBy == cutGroup dele).
+    std::vector<std::vector<int>> cutTargets;
+    bool hasCutGroups = false;
+
     // Mixer: ordem de processamento dos inserts e quem soa com o solo atual.
     std::vector<int> mixerOrder;
     std::vector<char> mixerAudible;

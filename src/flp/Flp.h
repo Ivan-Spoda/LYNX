@@ -4,6 +4,8 @@
 // comportamental em docs/ANALISE_FL_STUDIO.md e de testes com arquivos reais.
 // Não depende de JUCE para poder ser testado isoladamente.
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -94,6 +96,29 @@ struct Channel
     std::uint32_t colour = 0; // 0xRRGGBB (0 = sem cor gravada)
     bool hasLevels = false;
     int pan = 6400, volume = 10000, pitchCents = 0;
+
+    int swingMix = 128;          // 0x61: 0..128
+    int cutGroup = 0, cutBy = 0; // 0x84
+    int rootNote = -1;           // 0x87 (MIDI), -1 = padrão (C5 = 60)
+    int maxVoices = 0;           // 0xDD: 0 = ilimitado, 1 = mono
+
+    // 0xDA: os 5 registros, na ordem pan, volume, corte, ressonância, pitch (68 B, i32)
+    struct Envelope
+    {
+        bool present = false, enabled = false;
+        int flags = 0, delay = 100, attack = 20000, hold = 20000, decay = 30000, sustain = 128, release = 20000;
+    };
+    std::array<Envelope, 5> envelopes {};
+    int envelopeCount = 0;
+
+    // 0xD7: time-stretch
+    std::uint32_t stretchTimeRaw = 0; // em 1/192 de tempo: int ou float, conforme Project::flagsA9
+    int stretchMul = 0;               // fator = 2^(v/10000)
+    int stretchMode = 0;              // 0 resample, < 0 stretch em tempo real, >= 1 offline
+    float stretchTime = 0.0f;         // já decodificado (1/192 de tempo)
+
+    // Segundos de um tempo do envelope (docs/analise/REA_rodada3.md §1.4). Com sincronia (flags & 1), em tempos.
+    static double envelopeTime (int v) noexcept;
 };
 
 // Endereço de um parâmetro automatizável (controlID do FL), já no formato atual:
@@ -214,6 +239,8 @@ struct Project
     std::uint32_t versionNumber = 0; // major*1e6 + minor*1e3 + patch
     double tempo = 140.0;
     int beatsPerBar = 4; // evento 0x11 (o primeiro, do projeto)
+    int swing = 0;       // evento 0x0B: 0..128
+    std::uint32_t flagsA9 = 0;
     std::string title, artist, genre, url;
 
     std::vector<Channel> channels;

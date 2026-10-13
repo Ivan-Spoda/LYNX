@@ -21,6 +21,10 @@ constexpr float unityFader = 0.8f;    // posição do fader que dá 0 dB, como n
 // +5,6 dB no máximo). docs/analise/REA_rodada2.md §2.2.
 float faderGain (float position) noexcept;
 
+// Volume do canal com a mesma curva, mas 1,0 = 0 dB (o padrão do FL, 0,78, dá -5,2 dB).
+// docs/analise/REA_rodada3.md §2.
+float channelGain (float volume) noexcept;
+
 enum class InstrumentKind : std::uint8_t
 {
     kick,
@@ -48,9 +52,12 @@ struct SamplerSettings
 {
     float pitch = 0.0f;   // semitons, -24..24
     float attack = 0.0f;  // segundos, 0..2
+    float decay = 0.0f;   // segundos até o sustain (0 = sem decaimento)
+    float sustain = 1.0f; // 0..1
     float release = 0.0f; // segundos, 0..4; 0 = toca o sample inteiro (one-shot)
     bool reverse = false;
     bool cut = false;     // nota nova corta a anterior ("cut itself")
+    float stretchBeats = 0.0f; // > 0: o sample inteiro dura isto (em tempos), acompanhando o BPM (reamostrando)
 
     bool operator== (const SamplerSettings&) const = default;
 };
@@ -92,7 +99,7 @@ struct ChannelDef
 {
     std::string name;
     InstrumentKind instrument = InstrumentKind::synth;
-    float volume = 0.8f;   // 0..1
+    float volume = 0.78f;  // 0..1 (curva channelGain; 0,78 = padrão do FL)
     float pan = 0.0f;      // -1..1
     bool muted = false;
     std::string samplePath; // usado quando instrument == sampler
@@ -100,6 +107,9 @@ struct ChannelDef
     PluginRef plugin;       // usado quando instrument == plugin
     SamplerSettings sampler; // usado quando instrument == sampler
     SynthSettings synth;     // usado quando instrument == synth
+    float swingMix = 1.0f;   // quanto do swing global vale para este canal (0..1), como no FL
+    int cutGroup = 0;        // tocar este canal corta os canais com cutBy igual (0 = nenhum)
+    int cutBy = 0;
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = padrão do tema
 };
 
@@ -167,9 +177,9 @@ struct Note
     bool slide = false;       // desliza a nota que está soando até esta altura (sem reatacar), como no FL
 };
 
-// Atraso de swing para uma nota que começa em `start` (ticks na pattern): só as que caem
-// exatamente num step ímpar (o "e" de cada colcheia) andam, até meio step com swing 1.
-std::int64_t swingDelay (std::int64_t start, float swing) noexcept;
+// Atraso de swing (fórmula do FL, docs/analise/REA_rodada3.md §3): só notas cujo step mais
+// próximo é ímpar andam, com peso triangular pela distância à grade; meio step com swing 1.
+std::int64_t swingDelay (std::int64_t start, float swing, float channelMix = 1.0f) noexcept;
 
 struct Pattern
 {

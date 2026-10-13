@@ -19,7 +19,7 @@ void EventBuffer::sortByOffset() noexcept
     std::stable_sort (events.begin(), events.begin() + count, [] (const NoteEvent& a, const NoteEvent& b) {
         if (a.sampleOffset != b.sampleOffset)
             return a.sampleOffset < b.sampleOffset;
-        return a.type == NoteEvent::Type::off && b.type == NoteEvent::Type::on;
+        return a.type != NoteEvent::Type::on && b.type == NoteEvent::Type::on;
     });
 }
 
@@ -47,7 +47,8 @@ void schedulePatternLoop (const Pattern& pattern,
                           int numSamples,
                           double tps,
                           EventBuffer& out,
-                          float swing) noexcept
+                          float swing,
+                          const std::vector<ChannelDef>* channels) noexcept
 {
     if (numSamples <= 0 || patternLength <= 0 || tps <= 0.0)
         return;
@@ -66,7 +67,10 @@ void schedulePatternLoop (const Pattern& pattern,
         on.velocity = note.velocity;
         on.pan = note.pan;
         on.cents = note.finePitch;
-        const auto start = note.start + swingDelay (note.start, swing);
+        const auto mix = channels != nullptr && note.channel >= 0 && note.channel < (int) channels->size()
+                             ? (*channels)[(std::size_t) note.channel].swingMix
+                             : 1.0f;
+        const auto start = note.start + swingDelay (note.start, swing, mix);
 
         if (note.slide)
         {
@@ -152,7 +156,8 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
                 continue;
 
-            const auto on = std::min (clip.start + (note.start - clip.offset) + swingDelay (note.start, song.swing), clip.end() - 1);
+            const auto mix = note.channel >= 0 && note.channel < (int) song.channels.size() ? song.channels[(std::size_t) note.channel].swingMix : 1.0f;
+            const auto on = std::min (clip.start + (note.start - clip.offset) + swingDelay (note.start, song.swing, mix), clip.end() - 1);
             const auto off = std::min (on + std::max<std::int64_t> (note.length, 1), clip.end());
 
             NoteEvent e;

@@ -118,6 +118,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
+    song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
 
     // Canais do FL podem ter índices esparsos; mapeamos para índices densos.
     std::map<int, int> channelMap;
@@ -157,10 +158,41 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         if (c.hasLevels)
         {
-            def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f);
+            def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f); // mesma curva (channelGain)
             def.pan = std::clamp ((c.pan - 6400) / 6400.0f, -1.0f, 1.0f);
             def.sampler.pitch = std::clamp (c.pitchCents / 100.0f, -24.0f, 24.0f);
         }
+
+        // nota-raiz do sample: o nosso sampler toca na altura original em C5 (60)
+        if (c.rootNote >= 0 && c.rootNote <= 127)
+            def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
+
+        def.swingMix = std::clamp (c.swingMix / 128.0f, 0.0f, 1.0f);
+        def.cutGroup = c.cutGroup;
+        def.cutBy = c.cutBy;
+
+        // "cut itself" (grupo == cut by) e canal mono viram o "cut" do sampler
+        if ((c.cutGroup != 0 && c.cutGroup == c.cutBy) || c.maxVoices == 1)
+            def.sampler.cut = true;
+
+        // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
+        if (const auto& env = c.envelopes[1]; env.present && env.enabled)
+        {
+            const auto beats = (env.flags & 1) != 0; // sincronizado com o tempo: unidades em tempos
+            auto seconds = [&] (int v) {
+                const auto t = flp::Channel::envelopeTime (v);
+                return (float) (beats ? t * 2.0 * 60.0 / song.bpm : t); // 0,128 tempo em vez de 0,064 s
+            };
+
+            def.sampler.attack = std::clamp (seconds (env.attack), 0.0f, 2.0f);
+            def.sampler.decay = std::clamp (seconds (env.decay), 0.0f, 10.0f);
+            def.sampler.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
+            def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope ligado: a nota acaba
+        }
+
+        // time-stretch (só reamostrando, por enquanto): o sample dura TIME/192 tempos × MUL
+        if (c.stretchTime > 0.0f)
+            def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
         song.channels.push_back (std::move (def));
     }
 

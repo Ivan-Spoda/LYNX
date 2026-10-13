@@ -1683,7 +1683,8 @@ TEST (swing_delays_offbeat_sixteenths)
     CHECK (lynx::swingDelay (0, 1.0f) == 0);
     CHECK (lynx::swingDelay (lynx::ticksPerStep, 1.0f) == lynx::ticksPerStep / 2);
     CHECK (lynx::swingDelay (lynx::ticksPerStep * 2, 1.0f) == 0);
-    CHECK (lynx::swingDelay (lynx::ticksPerStep + 10, 1.0f) == 0); // fora da grade: não mexe
+    CHECK (lynx::swingDelay (lynx::ticksPerStep + 10, 1.0f) == (lynx::ticksPerStep - 20) / 2); // fora da grade: peso triangular (FL)
+    CHECK (lynx::swingDelay (lynx::ticksPerStep, 1.0f, 0.5f) == lynx::ticksPerStep / 4); // mix do canal
     CHECK (lynx::swingDelay (lynx::ticksPerStep * 3, 0.5f) == lynx::ticksPerStep / 4);
 
     lynx::Pattern p;
@@ -1710,7 +1711,7 @@ TEST (sampler_settings_pitch_reverse_envelope_cut)
         inst->prepare (48000.0);
         lynx::ChannelDef c;
         c.sampler = s;
-        inst->configure (c);
+        inst->configure (c, 120.0);
         inst->noteOn (key, 1.0f);
         std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
         inst->render (l.data(), r.data(), frames / 2, 1.0f, 1.0f);
@@ -1749,7 +1750,7 @@ TEST (sampler_settings_pitch_reverse_envelope_cut)
     inst->prepare (48000.0);
     lynx::ChannelDef cutChannel;
     cutChannel.sampler = cut;
-    inst->configure (cutChannel);
+    inst->configure (cutChannel, 120.0);
     inst->noteOn (60, 1.0f);
     std::vector<float> l (2000), r (2000);
     inst->render (l.data(), r.data(), 1000, 1.0f, 1.0f);
@@ -1995,7 +1996,7 @@ TEST (synth_three_oscillators_adsr_filter)
         inst->prepare (48000.0);
         lynx::ChannelDef c;
         c.synth = s;
-        inst->configure (c);
+        inst->configure (c, 120.0);
         inst->noteOn (69, 1.0f); // A4 = 440 Hz
         std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
         inst->render (l.data(), r.data(), releaseAt, 1.0f, 1.0f);
@@ -2051,6 +2052,65 @@ TEST (set_target_value_round_trips)
     }
 
     CHECK (! s.setTargetValue ({ lynx::AutomationTargetKind::channelParam, 0, 0, 3 }, 0.5f)); // mora no plugin
+}
+
+TEST (cut_groups_stretch_and_envelope_import)
+{
+    // hat aberto (cut by 1) é cortado quando o fechado (grupo 1) toca
+    lynx::Song s;
+    s.mixer = lynx::Song::defaultMixer (2);
+    for (int i = 0; i < 2; ++i)
+    {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::sampler;
+        c.samplePath = "dc";
+        c.volume = 1.0f;
+        c.mixerTrack = i + 1;
+        s.channels.push_back (c);
+    }
+    s.channels[0].cutBy = 1;    // aberto
+    s.channels[1].cutGroup = 1; // fechado
+    auto& p = s.patterns.emplace_back();
+    p.notes = { { 0, 100, 0, 60 }, { 960, 100, 1, 60 } };
+
+    auto provider = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (96000, 0.5f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, provider);
+    CHECK (state->hasCutGroups && state->cutTargets[1].size() == 1 && state->cutTargets[1][0] == 0);
+
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> l (512), rr (512);
+    const auto tps = lynx::ticksPerSample (s.bpm, 48000.0);
+    float afterCut = 0.0f;
+    for (double tick = 0.0; tick < 960.0 * 3; tick += 512 * tps)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+        if (tick > 960.0 * 2) // o fechado segue; o aberto já parou
+            afterCut = std::max (afterCut, std::abs (l[256]));
+    }
+    CHECK (std::abs (afterCut - 0.5f * 0.78f) < 0.01f); // só o fechado (velocity padrão 0,78)
+
+    // stretch por reamostragem: 1 s de sample esticado para 4 tempos a 120 BPM = 2 s
+    auto ramp = std::make_shared<lynx::SampleData>();
+    for (int i = 0; i < 48000; ++i)
+        ramp->left.push_back ((float) i / 48000.0f);
+    ramp->sampleRate = 48000.0;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.stretchBeats = 4.0f;
+    inst->configure (c, 120.0);
+    inst->noteOn (72, 1.0f); // a altura da nota não muda a velocidade
+    std::vector<float> a (48000), b (48000);
+    inst->render (a.data(), b.data(), 48000, 1.0f, 1.0f);
+    CHECK (std::abs (a[47999] - 0.5f) < 0.01f); // depois de 1 s leu metade
+
+    // tempo do envelope do FL: 32950 = 2 s; < 101 = 0
+    CHECK (std::abs (flp::Channel::envelopeTime (32950) - 2.0) < 0.01 && flp::Channel::envelopeTime (50) == 0.0);
 }
 
 int main (int argc, char** argv)

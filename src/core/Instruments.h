@@ -37,7 +37,7 @@ public:
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/) noexcept {}
     // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
     // forma que a thread de áudio leia sem esperar.
-    virtual void configure (const ChannelDef&) noexcept {}
+    virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos

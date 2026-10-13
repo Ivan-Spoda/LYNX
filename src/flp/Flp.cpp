@@ -10,7 +10,15 @@ namespace
 // IDs de evento (nomes descrevem o significado, não seguem nenhuma API)
 enum : std::uint32_t
 {
+    evSwing = 0x0B,
     evTimeSignatureNumerator = 0x11,
+    evChannelSwingMix = 0x61,
+    evChannelCutGroups = 0x84,
+    evSampleRootNote = 0x87,
+    evFileFlags = 0xA9,
+    evChannelParams = 0xD7,
+    evChannelEnvelope = 0xDA,
+    evChannelPolyphony = 0xDD,
     evChannelType = 0x15,
     evChannelMixerTrackOld = 0x16, // u8, arquivos antigos
     evNewChannel = 0x40,
@@ -262,6 +270,11 @@ std::uint32_t parseVersionNumber (const std::string& text)
     return version (parts[0], parts[1], parts[2]);
 }
 
+double Channel::envelopeTime (int v) noexcept
+{
+    return v < 101 ? 0.0 : 0.064 * (std::pow (1000.0, v / 65536.0) - 1.0);
+}
+
 ControlId normalizeControlId (std::uint32_t raw)
 {
     // antes do 24.2.99 a classe do mixer era 0x2... (o FL soma 0x50000000 ao carregar) e os
@@ -347,6 +360,70 @@ Project parseProject (std::span<const std::uint8_t> file)
             case evTempo:
                 project.tempo = e.value / 1000.0;
                 hasFineTempo = true;
+                break;
+
+            case evSwing:
+                project.swing = (int) e.value;
+                break;
+
+            case evFileFlags:
+                project.flagsA9 = e.value;
+                break;
+
+            case evChannelSwingMix:
+                if (section == Section::channel)
+                    channel().swingMix = (int) e.value;
+                break;
+
+            case evChannelCutGroups:
+                if (section == Section::channel)
+                {
+                    channel().cutGroup = (int) (e.value & 0xFFFF);
+                    channel().cutBy = (int) (e.value >> 16);
+                }
+                break;
+
+            case evSampleRootNote:
+                if (section == Section::channel)
+                    channel().rootNote = (int) e.value;
+                break;
+
+            case evChannelPolyphony:
+                if (section == Section::channel && e.data.size() >= 4)
+                    channel().maxVoices = readLE<std::int32_t> (e.data, 0);
+                break;
+
+            case evChannelEnvelope:
+                if (section == Section::channel && e.data.size() >= 32)
+                {
+                    auto& c = channel();
+
+                    if (c.envelopeCount < 5)
+                    {
+                        auto& env = c.envelopes[(std::size_t) c.envelopeCount];
+                        env.present = true;
+                        env.flags = readLE<std::int32_t> (e.data, 0);
+                        env.enabled = readLE<std::int32_t> (e.data, 4) != 0;
+                        env.delay = readLE<std::int32_t> (e.data, 8);
+                        env.attack = readLE<std::int32_t> (e.data, 12);
+                        env.hold = readLE<std::int32_t> (e.data, 16);
+                        env.decay = readLE<std::int32_t> (e.data, 20);
+                        env.sustain = readLE<std::int32_t> (e.data, 24);
+                        env.release = readLE<std::int32_t> (e.data, 28);
+                    }
+
+                    ++c.envelopeCount;
+                }
+                break;
+
+            case evChannelParams:
+                if (section == Section::channel && e.data.size() >= 0x70)
+                {
+                    auto& c = channel();
+                    c.stretchTimeRaw = readLE<std::uint32_t> (e.data, 0x60);
+                    c.stretchMul = readLE<std::int32_t> (e.data, 0x68);
+                    c.stretchMode = readLE<std::int32_t> (e.data, 0x6C);
+                }
                 break;
 
             case evTimeSignatureNumerator:
@@ -652,6 +729,18 @@ Project parseProject (std::span<const std::uint8_t> file)
             default:
                 break;
         }
+    }
+
+    // o tempo do stretch é int em arquivos sem o bit 0 de 0xA9, float nos novos
+    for (auto& ch : project.channels)
+    {
+        if ((project.flagsA9 & 1) == 0)
+            ch.stretchTime = (float) (std::int32_t) ch.stretchTimeRaw;
+        else
+            std::memcpy (&ch.stretchTime, &ch.stretchTimeRaw, sizeof (float));
+
+        if (! std::isfinite (ch.stretchTime) || ch.stretchTime < 0.0f)
+            ch.stretchTime = 0.0f;
     }
 
     for (auto& p : project.patterns)

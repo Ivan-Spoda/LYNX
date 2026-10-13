@@ -608,12 +608,25 @@ Clip splitClip (Clip& clip, std::int64_t tick)
     return rest;
 }
 
-std::int64_t swingDelay (std::int64_t start, float swing) noexcept
+std::int64_t swingDelay (std::int64_t start, float swing, float channelMix) noexcept
 {
-    if (swing <= 0.0f || start % (2 * ticksPerStep) != ticksPerStep)
+    if (swing <= 0.0f || channelMix <= 0.0f)
         return 0;
 
-    return (std::int64_t) std::llround (std::clamp (swing, 0.0f, 1.0f) * ticksPerStep * 0.5f);
+    constexpr std::int64_t s = ticksPerStep;
+    const auto k = (start + s / 2) / s;
+
+    if (k % 2 == 0)
+        return 0;
+
+    const auto w = s - 2 * std::abs (start - k * s);
+    return (std::int64_t) std::llround ((double) w * std::clamp (swing, 0.0f, 1.0f) * std::clamp (channelMix, 0.0f, 1.0f) * 0.5);
+}
+
+float channelGain (float volume) noexcept
+{
+    const auto v = std::clamp (volume, 0.0f, 1.0f);
+    return (std::pow (11.0f, v) - 1.0f) / 10.0f;
 }
 
 float faderGain (float position) noexcept
@@ -739,10 +752,10 @@ Song Song::makeDefault()
 
     song.channels = {
         channel ("Kick", InstrumentKind::kick, 0.9f, 0.0f),
-        channel ("Clap", InstrumentKind::clap, 0.7f, 0.0f),
-        channel ("Hat", InstrumentKind::hat, 0.5f, 0.1f),
-        channel ("Snare", InstrumentKind::snare, 0.7f, 0.0f),
-        channel ("Synth", InstrumentKind::synth, 0.5f, 0.0f),
+        channel ("Clap", InstrumentKind::clap, 0.8f, 0.0f),
+        channel ("Hat", InstrumentKind::hat, 0.7f, 0.1f),
+        channel ("Snare", InstrumentKind::snare, 0.8f, 0.0f),
+        channel ("Synth", InstrumentKind::synth, 0.78f, 0.0f),
     };
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
