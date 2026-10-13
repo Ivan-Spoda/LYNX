@@ -224,6 +224,247 @@ bool compressor (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[3] = fromLog (std::max (10.0, (double) param (4)), 10.0, 1000.0);
     return true;
 }
+// --- REA_rodada8: Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper -------
+
+double timeMs (int v) // T(x) = 2·(501^x − 1) ms
+{
+    return 2.0 * (std::pow (501.0, std::clamp (v, 0, 10000) / 10000.0) - 1.0);
+}
+
+float compressorAttackValue (double ms) { return fromLog (std::max (0.1, ms), 0.1, 100.0); }
+float compressorReleaseValue (double ms) { return fromLog (std::max (10.0, ms), 10.0, 1000.0); }
+float limiterReleaseValue (double ms) { return fromLog (std::max (10.0, ms), 10.0, 1000.0); }
+
+float utilityGainValue (double gain);
+
+bool maximus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 59 * 4)
+        return false;
+
+    const auto header = (std::uint32_t) i32At (d, 0);
+    const auto version = header > 0xFFFFu ? (int) (header >> 16) : (int) header;
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+
+    // a seção master (banda 3) representa o efeito; as bandas são multibanda (o LYNX não tem)
+    constexpr int master = 7 + 13 * 3;
+    const auto mode = param (master);
+    const auto preDb = toDb (curve (7.0, param (master + 1) / 1000.0));
+    const auto postDb = toDb (curve (7.0, param (master + 2) / 1000.0));
+
+    if (mode == 3) // master desligado: passa direto (utilitário transparente mantém a posição do slot)
+    {
+        slot = makeEffectSlot (EffectKind::utility);
+        return true;
+    }
+
+    if (mode != 0) // sem compressão: só os ganhos
+    {
+        slot = makeEffectSlot (EffectKind::utility);
+        slot.params[0] = utilityGainValue (std::pow (10.0, (preDb + postDb) / 20.0));
+        return true;
+    }
+
+    // curva de compressão do master: 7º envelope (low, 2º, mid, 2º, high, 2º, master, 2º)
+    std::vector<std::pair<double, double>> points;
+    std::size_t pos = version >= 15 ? 0x21F : version >= 14 ? 0x21B : 0x1FE;
+
+    for (int env = 0; env < 8 && pos + 12 <= d.size(); ++env)
+    {
+        const auto count = (std::size_t) std::max (0, i32At (d, pos + 8));
+
+        if (count > 512 || pos + 12 + 24 * count + 20 > d.size())
+            break;
+
+        if (env == 6)
+        {
+            double x = 0.0;
+
+            for (std::size_t k = 0; k < count; ++k)
+            {
+                double dx = 0.0, y = 0.0;
+                std::memcpy (&dx, d.data() + pos + 12 + 24 * k, 8);
+                std::memcpy (&y, d.data() + pos + 12 + 24 * k + 8, 8);
+                x += dx;
+                if (std::isfinite (x) && std::isfinite (y))
+                    points.push_back ({ std::clamp (x, 0.0, 1.0), std::clamp (y, 0.0, 1.0) });
+            }
+        }
+
+        pos += 12 + 24 * count + 20;
+    }
+
+    if (points.size() < 2)
+        points = { { 0.0, 0.0 }, { 0.5, 0.5 }, { 1.0, 0.5 } }; // a curva padrão: limitador em −0,22 dB
+
+    auto curveAt = [&] (double c) {
+        if (c <= points.front().first)
+            return points.front().second;
+        for (std::size_t k = 1; k < points.size(); ++k)
+            if (c <= points[k].first)
+            {
+                const auto span = points[k].first - points[k - 1].first;
+                const auto t = span > 0.0 ? (c - points[k - 1].first) / span : 1.0;
+                return points[k - 1].second + t * (points[k].second - points[k - 1].second);
+            }
+        return points.back().second;
+    };
+    auto levelDb = [] (double c, double scale) { return toDb ((std::pow (3.0, 2.0 * c) - 1.0) / 2.0 * scale); };
+
+    // teto, joelho e ratio da curva (nível de entrada c: 0,5 = 0 dBFS, 1 = +12 dB)
+    double ceilingDb = -120.0, kneeDb = 0.0, kneeOut = 0.0;
+    bool knee = false;
+
+    for (int k = 1; k <= 400; ++k)
+    {
+        const auto c = k / 400.0;
+        const auto in = levelDb (c, 1.0), out = levelDb (curveAt (c), 0.975);
+        ceilingDb = std::max (ceilingDb, out);
+
+        if (! knee && out < in - 0.5)
+        {
+            knee = true;
+            kneeDb = in;
+            kneeOut = out;
+        }
+    }
+
+    const auto topIn = levelDb (1.0, 1.0), topOut = levelDb (curveAt (1.0), 0.975);
+    const auto ratio = knee && topOut - kneeOut > 0.05 ? (topIn - kneeDb) / (topOut - kneeOut) : 100.0;
+
+    if (knee && kneeDb < -0.5 && ratio < 8.0) // compressão de verdade (joelho abaixo de 0 dB)
+    {
+        slot = makeEffectSlot (EffectKind::compressor);
+        slot.params[0] = clamp01 ((kneeDb + 60.0) / 60.0);
+        slot.params[1] = clamp01 ((std::clamp (ratio, 1.0, 20.0) - 1.0) / 19.0);
+        slot.params[2] = compressorAttackValue (timeMs (param (master + 6)));
+        slot.params[3] = compressorReleaseValue (2.0 * timeMs (param (master + 9)));
+        slot.params[4] = clamp01 (std::max (0.0, preDb + postDb) / 24.0);
+        return true;
+    }
+
+    slot = makeEffectSlot (EffectKind::limiter);
+    slot.params[0] = clamp01 ((std::min (ceilingDb + postDb, 0.0) + 12.0) / 12.0);
+    slot.params[1] = clamp01 (std::max (0.0, preDb) / 24.0);
+    slot.params[2] = limiterReleaseValue (2.0 * timeMs (param (master + 9)));
+    return true;
+}
+
+bool soundgoodizer (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 12)
+        return false;
+
+    // preset A–D (cópias completas do Maximus); aproximação de compressor medida com amount 0,6
+    struct Preset { double threshold, ratio, makeup; };
+    constexpr Preset presets[] = { { -6.0, 2.5, 5.3 }, { -10.5, 2.2, 6.6 }, { -10.8, 2.5, 7.9 }, { -14.0, 1.9, 8.5 } };
+    const auto& p = presets[std::clamp (i32At (d, 4), 0, 3)];
+    const auto amount = std::clamp (i32At (d, 8), 0, 1000) / 1000.0;
+    const auto scale = amount / 0.6;
+
+    slot = makeEffectSlot (EffectKind::compressor);
+    slot.params[0] = clamp01 ((p.threshold + 60.0) / 60.0);
+    slot.params[1] = clamp01 ((1.0 + (p.ratio - 1.0) * scale - 1.0) / 19.0);
+    slot.params[2] = compressorAttackValue (2.0);
+    slot.params[3] = compressorReleaseValue (85.0);
+    slot.params[4] = clamp01 (p.makeup * scale / 24.0);
+    return true;
+}
+
+bool fastDist (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 20)
+        return false;
+
+    const auto pre = curve (11.0, std::clamp (i32At (d, 0), 64, 192) / 128.0);
+    const auto t = std::clamp (i32At (d, 4), 1, 10);
+    const auto typeB = i32At (d, 8) != 0;
+    const auto mix = curve (11.0, std::clamp (i32At (d, 12), 0, 128) / 128.0);
+    const auto post = curve (11.0, std::clamp (i32At (d, 16), 0, 128) / 128.0);
+
+    // drive equivalente do tanh para a curva do FL (ajuste da REA_rodada8 §3.2)
+    constexpr double driveA[] = { 0, 0, 0, 0, 2.2, 4.5, 6.8, 9.2, 12.8, 17.8, 22.8 };
+    const auto curveDb = typeB ? std::max (0.0, 0.8 + (t - 6) * 0.85) * (t >= 6 ? 1.0 : 0.0) : driveA[t];
+    const auto wet = mix * post;
+    const auto dry = (post - wet) * pre * post; // o post entra ao quadrado no seco (assim no FL)
+    const auto level = typeB ? 1.0 : std::pow (10.0, -0.9 * (t - 1) / 20.0);
+    const auto total = wet * level + dry;
+
+    slot.params[0] = clamp01 ((toDb (pre) + curveDb) / 36.0);
+    slot.params[1] = 1.0f; // o Fast Dist não filtra
+    slot.params[2] = total > 1.0e-6 ? clamp01 (wet * level / total) : 1.0f;
+    slot.params[3] = clamp01 (0.5 + toDb (std::max (total, 1.0e-6)) / 24.0);
+    return true;
+}
+
+bool fruityFilter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 6 * 4)
+        return false;
+
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+    const auto lp = curve (11.0, std::clamp (param (2), 0, 1024) / 1024.0);
+    const auto bp = curve (11.0, std::clamp (param (3), 0, 1024) / 1024.0);
+    const auto hp = curve (11.0, std::clamp (param (4), 0, 1024) / 1024.0);
+
+    // tipo do filtro interno: 0 passa-baixas, 1 passa-altas, 2 passa-banda (floor(3v))
+    auto type = 0.0f;
+    if (hp > lp && hp >= bp && ! (lp >= 0.5 && hp >= 0.5))
+        type = 0.4f;
+    else if (bp > lp && bp > hp)
+        type = 0.7f;
+
+    // SVF de Chamberlin sem correção de taxa: "aberto" ainda corta em ~7,35 kHz (a 44,1 kHz)
+    const auto f = std::min (1.0, (std::pow (26.0, std::clamp (param (0), 0, 1024) / 1024.0) - 1.0) * 0.04);
+    const auto hz = std::max (20.0, 44100.0 / 3.141592653589793 * std::asin (f / 2.0));
+    auto q = 1.0 / (1.0 - 0.8 * std::clamp (param (1), 0, 1024) / 1024.0);
+    if (param (5) != 0)
+        q *= 1.3; // x2: segundo estágio em série
+
+    slot.params[0] = type;
+    slot.params[1] = fromLog (hz, 20.0, 20000.0);
+    slot.params[2] = fromLog (q, 0.5, 12.0);
+    slot.params[3] = 1.0f;
+    return true;
+}
+
+bool flangus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 32)
+        return false;
+
+    auto param = [&] (int i) { return i32At (d, 4 * (std::size_t) i); };
+    const auto depthMs = 24.8 * curve (11.0, std::clamp (param (1), 0, 1024) / 1024.0);
+    const auto voiceDepth = depthMs * 44.1 + 10.0; // amostras a 44,1 kHz
+    const auto period = 75000.0 * (std::pow (101.0, 1.0 - std::clamp (param (2), 0, 1024) / 1024.0) - 1.0) + 50000.0;
+    const auto hz = 250.0 * 44100.0 / (period * voiceDepth);
+    const auto dryGain = curve (11.0, std::abs (std::clamp (param (6), -128, 128)) / 128.0);
+    const auto wetGain = curve (11.0, std::abs (std::clamp (param (7), -128, 128)) / 128.0);
+    const auto r = dryGain > 1.0e-6 ? wetGain / dryGain : 1000.0;
+
+    slot.params[0] = fromLog (std::max (0.05, hz), 0.05, 5.0);
+    slot.params[1] = clamp01 (2.0 * depthMs / 8.0);
+    slot.params[2] = clamp01 (2.0 * r / (1.0 + r));
+    slot.params[3] = 0.0f; // o Flangus não realimenta
+    return true;
+}
+
+bool softClipper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 8)
+        return false;
+
+    const auto t = std::clamp (i32At (d, 0), 1, 127);
+    const auto postDb = toDb (curve (11.0, std::clamp (i32At (d, 4), 0, 160) / 128.0));
+    const auto drop = t >= 100 ? 1.5 : t >= 64 ? 2.0 - (t - 64) / 36.0 * 0.5 : 3.8 - (t - 1) / 63.0 * 1.8; // queda de nível da curva
+
+    slot.params[0] = 0.0f;
+    slot.params[1] = 1.0f;
+    slot.params[2] = 1.0f;
+    slot.params[3] = clamp01 (0.5 + (postDb - drop) / 24.0);
+    return true;
+}
+
 // --- Balance, PanOMatic, Stereo Shaper (§6) -> Utilitário ---------------------------------------
 
 float utilityGainValue (double gain) { return clamp01 (toDb (gain) / 48.0 + 0.5); }
@@ -285,7 +526,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         slot.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar
 
     if (is ("Fruity Soft Clipper"))
-        slot.params[0] = 0.15f; // drive baixo
+        softClipper (state, slot);
 
     if (is ("Fruity Parametric EQ 2"))
         parametricEq2 (state, slot);
@@ -305,6 +546,16 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         panOMatic (state, slot);
     else if (is ("Fruity Stereo Shaper"))
         stereoShaper (state, slot);
+    else if (is ("Maximus"))
+        maximus (state, slot);
+    else if (is ("Soundgoodizer"))
+        soundgoodizer (state, slot);
+    else if (is ("Fruity Fast Dist"))
+        fastDist (state, slot);
+    else if (is ("Fruity Filter"))
+        fruityFilter (state, slot);
+    else if (is ("Fruity Flangus"))
+        flangus (state, slot);
     else if (is ("Fruity Phase Inverter"))
     {
         slot.params[2] = utilityMatrixValue (-1.0); // inverte os dois lados
