@@ -733,6 +733,23 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 adopt();
             else if (name == "kepler" && synthFromKepler (c.pluginState, fromPlugin, pluginGain))
                 adopt();
+            else if (name == "boobass" && synthFromBooBass (c.pluginState, fromPlugin))
+                adopt();
+            else if (name == "drumpad")
+                if (const auto patch = drumpadPatchName (c.pluginState))
+                {
+                    // bumbo/caixa/palma/chimbal: os instrumentos de bateria; o resto, um tambor no synth
+                    if (const auto drum = guessInstrument (*patch, flp::ChannelType::sampler); drum != InstrumentKind::synth)
+                    {
+                        def.instrument = drum;
+                        adoptedFromPlugin = true;
+                    }
+                    else
+                    {
+                        fromPlugin = drumToneForName (*patch);
+                        adopt();
+                    }
+                }
         }
 
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
@@ -791,7 +808,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler") && adoptedFromPlugin)
+                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];

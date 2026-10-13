@@ -573,4 +573,76 @@ std::optional<std::pair<std::string, std::string>> flexPresetName (const std::ve
         return std::nullopt;
     return std::make_pair (pack, preset);
 }
+// ---- BooBass (REA_rodada10 §5): baixo com Bass/Mid/Treble ----
+
+bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& synth)
+{
+    if (state.size() < 16 || u32At (state.data(), 0) != 1)
+        return false;
+    auto knob = [&] (std::size_t i) { return std::clamp ((int) u32At (state.data(), 4 + 4 * i), 0, 65535) / 65535.0; };
+    const auto bass = knob (0), mid = knob (1), treble = knob (2);
+
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::saw, -1, 0.0f, (float) (0.3 + 0.7 * mid) },
+              SynthOscillator { Waveform::sine, -2, 0.0f, (float) (0.2 + 0.8 * bass) },
+              SynthOscillator {} };
+    s.cutoff = (float) std::clamp (300.0 * std::pow (2.0, 4.0 * treble), 20.0, 20000.0);
+    s.resonance = 0.2f;
+    s.attack = 0.002f;
+    s.decay = 0.6f;
+    s.sustain = 0.5f;
+    s.release = 0.08f;
+    synth = s;
+    return true;
+}
+
+// ---- Drumpad (§6): só o nome do patch; o modelo físico não é reproduzido ----
+
+std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 0x40 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, "3PMD", 4) != 0)
+        return std::nullopt;
+    const auto* p = reinterpret_cast<const char*> (state.data() + 12);
+    std::string name (p, strnlen (p, 0x30));
+    if (name.empty())
+        return std::nullopt;
+    return name;
+}
+
+SynthSettings drumToneForName (const std::string& patchName)
+{
+    const auto name = lower (patchName);
+    auto has = [&] (const char* w) { return name.find (w) != std::string::npos; };
+
+    // tambor "genérico": seno com queda de afinação + um pouco de ruído para o ataque
+    SynthSettings s;
+    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator { Waveform::noise, 0, 0.0f, 0.12f }, SynthOscillator {} };
+    s.attack = 0.0f;
+    s.decay = 0.3f;
+    s.sustain = 0.0f;
+    s.release = 0.1f;
+    s.cutoff = 6000.0f;
+    s.pitchEnv = { 5.0f, 0.0f, 0.0f, 0.06f, 0.0f, 0.05f };
+
+    if (has ("war") || has ("taiko") || has ("lo") || has ("floor"))
+    {
+        s.osc[0].octave = -1;
+        s.decay = 0.6f;
+    }
+    if (has ("bongo") || has ("hi "))
+    {
+        s.osc[0].octave = 1;
+        s.decay = 0.15f;
+    }
+    if (has ("conga"))
+        s.decay = 0.25f;
+    if (has ("wood") || has ("block") || has ("clave") || has ("rim"))
+    {
+        s.osc[0] = { Waveform::triangle, 1, 0.0f, 1.0f };
+        s.osc[1].level = 0.05f;
+        s.decay = 0.06f;
+        s.pitchEnv.amount = 2.0f;
+    }
+    return s;
+}
 } // namespace lynx

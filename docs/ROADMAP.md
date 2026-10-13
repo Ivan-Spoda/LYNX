@@ -96,4 +96,5 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Links do Peak Controller (automação ao vivo)
 - [ ] Patcher (achatar cadeias em série; paralelo -> submix), Envelope/X-Y Controller
 - [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
-- [ ] Morphine, Drumpad, BooBass, PoiZone, Toxic Biohazard, BassDrum
+- [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)
+- [ ] Morphine, PoiZone, Toxic Biohazard, BassDrum

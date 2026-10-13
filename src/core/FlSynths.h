@@ -62,5 +62,13 @@ std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vecto
 // FLEX (§1.1): nome do pacote e do preset, do estado do plugin. Os pacotes do FLEX são protegidos e o
 // LYNX não os abre: o canal ganha um patch do synth escolhido por esses nomes.
 std::optional<std::pair<std::string, std::string>> flexPresetName (const std::vector<std::uint8_t>& state);
+
+// BooBass (REA_rodada10 §5): serra + seno grave, corte pelo Treble.
+bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& synth);
+
+// Drumpad (§6): nome do patch ("War Drum Lo 01"); `drumToneForName` dá um tambor genérico pelo nome
+// (os bumbos/caixas/chimbais usam os instrumentos de bateria do LYNX).
+std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& state);
+SynthSettings drumToneForName (const std::string& patchName);
 std::vector<std::string> drumSampleCandidates (const std::string& soundName);
 } // namespace lynx

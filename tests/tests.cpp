@@ -364,6 +364,9 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (sound->size() < 256);
         if (auto wave = lynx::waveTravellerSample (blob))
             CHECK (! wave->first.empty() && wave->second >= 0 && wave->second <= 127);
+        lynx::synthFromBooBass (blob, synth);
+        if (auto patch = lynx::drumpadPatchName (blob))
+            CHECK (patch->size() <= 0x30 && std::isfinite (lynx::drumToneForName (*patch).decay));
         if (auto flex = lynx::flexPresetName (blob))
             CHECK ((! flex->first.empty() || ! flex->second.empty()) && flex->second.size() <= 1024);
         if (lynx::synthFromSytrus (blob, 120.0, synth, harmlessGain))
@@ -669,6 +672,10 @@ TEST (flp_real_files)
                     decoded = lynx::synthFromKepler (c.pluginState, gs, g);
                 else if (c.pluginName == "Wave Traveller")
                     decoded = lynx::waveTravellerSample (c.pluginState).has_value() ? 2 : 0;
+                else if (c.pluginName == "BooBass")
+                    decoded = lynx::synthFromBooBass (c.pluginState, gs);
+                else if (c.pluginName == "Drumpad" || c.pluginName == "DrumPad")
+                    decoded = lynx::drumpadPatchName (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "FLEX")
                     decoded = lynx::flexPresetName (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "Fruity DrumSynth Live")
