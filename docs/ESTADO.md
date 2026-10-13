@@ -69,6 +69,10 @@ Atualizado em 2026-10-13.
   feedback, ping-pong, corte), Compressor (threshold, ratio, ganho, attack, release).
 - **EQ embutido das trilhas do mixer** (3 bandas do FL, REA rodada 6) e **LFOs do canal**; porta e AM
   do 3x Osc; tipos de marcador conhecidos.
+- **Geradores de sample do FL (REA rodadas 8–9)**: FPC vira um canal por pad (notas pela tecla,
+  camadas de velocity, grupos de corte), DirectWave e FL Keys viram sampler multi-sample, Fruity
+  Slicer/Slicex viram sampler fatiado (WAV embutido no .flp é extraído). Maximus, Soundgoodizer,
+  Fast Dist, Fruity Filter, Flangus e Soft Clipper entram com os ajustes salvos.
 - **Presets do FL**: os 169 presets de canal do 3x Osc (botão "Presets do FL..." no synth) e 93
   presets de efeito (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 2/3, Stereo Shaper; menu
   do slot do mixer) são lidos dos `.fst` da instalação.
