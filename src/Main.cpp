@@ -672,6 +672,7 @@ private:
                 if (offline.getSong().channels[(std::size_t) c].instrument == lynx::InstrumentKind::synth)
                 {
                     saveWindow (lynx::makeChannelSettingsPanel (offline, c), "-synth.png");
+                    saveWindow (lynx::makeChannelModulationPanel (offline, c), "-modulation.png");
                     break;
                 }
 

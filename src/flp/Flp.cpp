@@ -431,6 +431,15 @@ Project parseProject (std::span<const std::uint8_t> file)
 
                         if (e.data.size() >= 36)
                             env.amount = readLE<std::int32_t> (e.data, 32);
+
+                        if (e.data.size() >= 0x38)
+                        {
+                            env.lfoDelay = readLE<std::int32_t> (e.data, 0x24);
+                            env.lfoAttack = readLE<std::int32_t> (e.data, 0x28);
+                            env.lfoAmount = readLE<std::int32_t> (e.data, 0x2C);
+                            env.lfoSpeed = readLE<std::int32_t> (e.data, 0x30);
+                            env.lfoShape = readLE<std::int32_t> (e.data, 0x34);
+                        }
                     }
 
                     ++c.envelopeCount;

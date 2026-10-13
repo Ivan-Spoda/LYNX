@@ -28,6 +28,30 @@ void readEnvelopes (const juce::var& o, ModEnvelope& filter, ModEnvelope& pitch)
         }
 }
 
+// LFOs do canal: só os ligados, [alvo, quantidade, período, sincronizado, forma, atraso, fade-in]
+void writeLfos (juce::DynamicObject& o, const std::array<ChannelLfo, lfoTargets>& lfo)
+{
+    juce::Array<juce::var> list;
+
+    for (int i = 0; i < lfoTargets; ++i)
+        if (const auto& l = lfo[(std::size_t) i]; l.amount != 0.0f)
+            list.add (juce::Array<juce::var> { i, l.amount, l.period, l.sync, l.shape, l.delay, l.attack });
+
+    if (! list.isEmpty())
+        o.setProperty ("lfo", list);
+}
+
+void readLfos (const juce::var& o, std::array<ChannelLfo, lfoTargets>& lfo)
+{
+    if (auto* list = o["lfo"].getArray())
+        for (const auto& e : *list)
+            if (e.isArray() && e.size() == 7)
+                if (const auto i = (int) e[0]; i >= 0 && i < lfoTargets)
+                    lfo[(std::size_t) i] = { juce::jlimit (-48.0f, 48.0f, (float) (double) e[1]), juce::jlimit (0.005f, 64.0f, (float) (double) e[2]),
+                                             (bool) e[3], juce::jlimit (0, 2, (int) e[4]), juce::jlimit (0.0f, 64.0f, (float) (double) e[5]),
+                                             juce::jlimit (0.0f, 64.0f, (float) (double) e[6]) };
+}
+
 const char* instrumentId (InstrumentKind k)
 {
     switch (k)
@@ -259,6 +283,7 @@ juce::String toJson (const Song& song)
                 synth->setProperty ("am", true);
 
             writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
+            writeLfos (*synth, c.synth.lfo);
             o->setProperty ("synthSettings", juce::var (synth.release()));
         }
 
@@ -285,6 +310,7 @@ juce::String toJson (const Song& song)
             sampler->setProperty ("cut", c.sampler.cut);
             sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
+            writeLfos (*sampler, c.sampler.lfo);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
         }
 
@@ -579,6 +605,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.synth.am = (bool) s.getProperty ("am", false);
 
                 readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
+                readLfos (s, def.synth.lfo);
             }
 
             if (const auto& s = c["samplerSettings"]; s.isObject())
@@ -611,6 +638,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
 
                 readEnvelopes (s, def.sampler.filterEnv, def.sampler.pitchEnv);
+                readLfos (s, def.sampler.lfo);
             }
 
             song.channels.push_back (std::move (def));

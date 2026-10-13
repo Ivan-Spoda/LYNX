@@ -117,6 +117,234 @@ private:
     std::array<juce::Label, 6> labels;
 };
 
+// LFOs do canal (pan, volume, corte, afinação), como os do FL.
+class LfoEditor final : public juce::Component
+{
+public:
+    std::function<void()> onChange;
+    static constexpr int preferredHeight = 18 + lfoTargets * 60;
+
+    LfoEditor()
+    {
+        const juce::String titles[] = { "LFO pan", "LFO volume", "LFO corte", utf8 ("LFO afinação") };
+        const double amountRange[] = { 1.0, 1.0, 8.0, 24.0 };
+        const char* amountSuffix[] = { "", "", " oit", " st" };
+
+        for (int i = 0; i < lfoTargets; ++i)
+        {
+            auto& row = rows[(std::size_t) i];
+            row.title.setText (titles[i], juce::dontSendNotification);
+            row.title.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (row.title);
+            knob (row.amount, -amountRange[i], amountRange[i], 0.01, amountSuffix[i]);
+            row.amount.setDoubleClickReturnValue (true, 0.0);
+            row.amount.setTooltip (utf8 ("0 = desligado"));
+            knob (row.period, 0.01, 16.0, 0.001, "");
+            row.period.setSkewFactorFromMidPoint (0.5);
+            knob (row.delay, 0.0, 8.0, 0.001, "");
+            row.delay.setSkewFactorFromMidPoint (0.5);
+            knob (row.attack, 0.0, 8.0, 0.001, "");
+            row.attack.setSkewFactorFromMidPoint (0.5);
+            row.shape.addItemList ({ "Senoide", utf8 ("Triângulo"), "Pulso" }, 1);
+            row.shape.onChange = [this] { changed(); };
+            addAndMakeVisible (row.shape);
+            row.sync.setButtonText ("Tempos");
+            row.sync.setTooltip (utf8 ("Período, atraso e fade-in em tempos (segue o BPM) em vez de segundos"));
+            row.sync.onClick = [this] { changed(); };
+            addAndMakeVisible (row.sync);
+        }
+
+        const juce::String headers[] = { "Quantidade", utf8 ("Período"), "Forma", "Atraso", "Fade-in", "Unidade" };
+
+        for (int i = 0; i < 6; ++i)
+        {
+            labels[(std::size_t) i].setText (headers[i], juce::dontSendNotification);
+            labels[(std::size_t) i].setJustificationType (juce::Justification::centred);
+            labels[(std::size_t) i].setFont (juce::FontOptions (11.0f));
+            addAndMakeVisible (labels[(std::size_t) i]);
+        }
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop (18);
+        header.removeFromLeft (80);
+        const auto w = header.getWidth() / 6;
+
+        for (auto& l : labels)
+            l.setBounds (header.removeFromLeft (w));
+
+        for (auto& row : rows)
+        {
+            auto line = area.removeFromTop (60);
+            row.title.setBounds (line.removeFromLeft (80).withSizeKeepingCentre (80, 24));
+            row.amount.setBounds (line.removeFromLeft (w));
+            row.period.setBounds (line.removeFromLeft (w));
+            row.shape.setBounds (line.removeFromLeft (w).withSizeKeepingCentre (w - 6, 24));
+            row.delay.setBounds (line.removeFromLeft (w));
+            row.attack.setBounds (line.removeFromLeft (w));
+            row.sync.setBounds (line.removeFromLeft (w).withSizeKeepingCentre (w - 6, 24));
+        }
+    }
+
+    void show (const std::array<ChannelLfo, lfoTargets>& lfo)
+    {
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+        {
+            auto& row = rows[i];
+            const auto& l = lfo[i];
+            row.amount.setValue (l.amount, juce::dontSendNotification);
+            row.period.setValue (l.period, juce::dontSendNotification);
+            row.delay.setValue (l.delay, juce::dontSendNotification);
+            row.attack.setValue (l.attack, juce::dontSendNotification);
+            row.shape.setSelectedId (l.shape + 1, juce::dontSendNotification);
+            row.sync.setToggleState (l.sync, juce::dontSendNotification);
+            const auto unit = l.sync ? " t" : " s";
+            for (auto* s : { &row.period, &row.delay, &row.attack })
+                s->setTextValueSuffix (unit);
+        }
+    }
+
+    std::array<ChannelLfo, lfoTargets> read() const
+    {
+        std::array<ChannelLfo, lfoTargets> lfo {};
+
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+        {
+            const auto& row = rows[i];
+            lfo[i] = { (float) row.amount.getValue(), (float) row.period.getValue(), row.sync.getToggleState(),
+                       juce::jlimit (0, 2, row.shape.getSelectedId() - 1), (float) row.delay.getValue(), (float) row.attack.getValue() };
+        }
+
+        return lfo;
+    }
+
+private:
+    struct Row
+    {
+        juce::Label title;
+        juce::Slider amount, period, delay, attack;
+        juce::ComboBox shape;
+        juce::ToggleButton sync;
+    };
+
+    void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 16);
+        s.setRange (lo, hi, step);
+        s.setTextValueSuffix (suffix);
+        s.onValueChange = [this] { changed(); };
+        addAndMakeVisible (s);
+    }
+
+    void changed()
+    {
+        if (onChange)
+            onChange();
+    }
+
+    std::array<Row, lfoTargets> rows;
+    std::array<juce::Label, 6> labels;
+};
+
+// Janela de modulação do canal: envelopes de corte/afinação e LFOs do synth ou do sampler.
+class ModulationPanel final : public juce::Component,
+                              private juce::ChangeListener
+{
+public:
+    ModulationPanel (AudioEngine& e, int c)
+        : engine (e),
+          channel (c)
+    {
+        envelopes.onChange = [this] { apply(); };
+        lfos.onChange = [this] { apply(); };
+        addAndMakeVisible (envelopes);
+        addAndMakeVisible (lfos);
+        refresh();
+        engine.addChangeListener (this);
+        setSize (660, 20 + ModEnvelopeEditor::preferredHeight + 16 + LfoEditor::preferredHeight);
+    }
+
+    ~ModulationPanel() override { engine.removeChangeListener (this); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (10);
+        envelopes.setBounds (area.removeFromTop (ModEnvelopeEditor::preferredHeight));
+        area.removeFromTop (16);
+        lfos.setBounds (area.removeFromTop (LfoEditor::preferredHeight));
+    }
+
+    int getChannel() const noexcept { return channel; }
+
+private:
+    const ChannelDef* current() const
+    {
+        const auto& channels = engine.getSong().channels;
+        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+    }
+
+    bool isSynth() const { return current() != nullptr && current()->instrument == InstrumentKind::synth; }
+
+    void refresh()
+    {
+        const auto* c = current();
+
+        if (c == nullptr)
+            return;
+
+        if (isSynth())
+        {
+            envelopes.show (c->synth.filterEnv, c->synth.pitchEnv);
+            lfos.show (c->synth.lfo);
+        }
+        else
+        {
+            envelopes.show (c->sampler.filterEnv, c->sampler.pitchEnv);
+            lfos.show (c->sampler.lfo);
+        }
+
+        if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
+            w->setName (utf8 ("Modulação - ") + juce::String::fromUTF8 (c->name.c_str()));
+    }
+
+    void apply()
+    {
+        if (current() == nullptr)
+            return;
+
+        const auto filter = envelopes.filter(), pitch = envelopes.pitch();
+        const auto lfo = lfos.read();
+        const auto synth = isSynth();
+
+        engine.editSong ([c = channel, synth, filter, pitch, lfo] (Song& song) {
+            auto& ch = song.channels[(std::size_t) c];
+
+            if (synth)
+            {
+                ch.synth.filterEnv = filter;
+                ch.synth.pitchEnv = pitch;
+                ch.synth.lfo = lfo;
+            }
+            else
+            {
+                ch.sampler.filterEnv = filter;
+                ch.sampler.pitchEnv = pitch;
+                ch.sampler.lfo = lfo;
+            }
+        });
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
+
+    AudioEngine& engine;
+    int channel;
+    ModEnvelopeEditor envelopes;
+    LfoEditor lfos;
+};
+
 class SettingsPanel final : public juce::Component,
                             private juce::ChangeListener
 {
@@ -141,8 +369,9 @@ public:
         filterType.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
         filterType.onChange = [this] { apply(); };
         addAndMakeVisible (filterType);
-        envelopes.onChange = [this] { apply(); };
-        addAndMakeVisible (envelopes);
+        modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
+        modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
+        addAndMakeVisible (modulationButton);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
@@ -169,7 +398,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (560, 536 + ModEnvelopeEditor::preferredHeight + 8);
+        setSize (420, 576);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -211,8 +440,7 @@ public:
             filterType.setBounds (filterRow.removeFromRight (filterRow.getWidth() / 3).withSizeKeepingCentre (124, 24));
             place (filterRow.withWidth (filterRow.getWidth() * 3 / 2), { { &cutoff, &cutoffLabel }, { &resonance, &resonanceLabel } });
         }
-        area.removeFromTop (4);
-        envelopes.setBounds (area.removeFromBottom (ModEnvelopeEditor::preferredHeight));
+        modulationButton.setBounds (area.removeFromBottom (26).withSizeKeepingCentre (260, 26));
         area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
         cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
@@ -257,7 +485,6 @@ private:
             cutoff.setValue (c->sampler.cutoff, juce::dontSendNotification);
             resonance.setValue (c->sampler.resonance, juce::dontSendNotification);
             filterType.setSelectedId (c->sampler.filterType + 1, juce::dontSendNotification);
-            envelopes.show (c->sampler.filterEnv, c->sampler.pitchEnv);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -288,9 +515,6 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
-        s.filterEnv = envelopes.filter();
-        s.pitchEnv = envelopes.pitch();
-
         if (s == current()->sampler)
             return;
 
@@ -320,7 +544,7 @@ private:
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch;
     juce::ComboBox filterType;
-    ModEnvelopeEditor envelopes;
+    juce::TextButton modulationButton;
 };
 
 // Página do synth interno: 3 osciladores, envelope e filtro.
@@ -354,8 +578,9 @@ public:
         knob (cutoff, 20.0, 20000.0, 1.0, " Hz");
         knob (resonance, 0.0, 1.0, 0.01, "");
 
-        envelopes.onChange = [this] { apply(); };
-        addAndMakeVisible (envelopes);
+        modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
+        modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
+        addAndMakeVisible (modulationButton);
 
         for (auto* s : { &attack, &decay, &release })
             s->setSkewFactorFromMidPoint (0.5);
@@ -407,7 +632,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (620, 590);
+        setSize (620, 410);
     }
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
@@ -449,8 +674,8 @@ public:
         for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &porta })
             s->setBounds (knobsRow.removeFromLeft (w));
 
-        area.removeFromTop (8);
-        envelopes.setBounds (area.removeFromTop (ModEnvelopeEditor::preferredHeight));
+        area.removeFromTop (12);
+        modulationButton.setBounds (area.removeFromTop (26).withSizeKeepingCentre (260, 26));
     }
 
 private:
@@ -463,7 +688,7 @@ private:
 
     static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
 
-    ModEnvelopeEditor envelopes;
+    juce::TextButton modulationButton;
     juce::ToggleButton mono, am;
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
@@ -514,7 +739,7 @@ private:
         am.setToggleState (s.am, juce::dontSendNotification);
         porta.setValue (s.portaBeats, juce::dontSendNotification);
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
-        envelopes.show (s.filterEnv, s.pitchEnv);
+
         updating = false;
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
@@ -526,7 +751,7 @@ private:
         if (updating || current() == nullptr)
             return;
 
-        SynthSettings s;
+        auto s = current()->synth; // mantém o que esta janela não mostra (envelopes e LFOs)
 
         for (std::size_t o = 0; o < 3; ++o)
             s.osc[o] = { (Waveform) juce::jlimit (0, 4, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
@@ -539,8 +764,6 @@ private:
         s.release = (float) release.getValue();
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
-        s.filterEnv = envelopes.filter();
-        s.pitchEnv = envelopes.pitch();
         s.mono = mono.getToggleState();
         s.am = am.getToggleState();
         s.portaBeats = (float) porta.getValue();
@@ -579,13 +802,16 @@ private:
 class SettingsWindow final : public juce::DocumentWindow
 {
 public:
-    SettingsWindow (AudioEngine& engine, int c)
+    SettingsWindow (AudioEngine& engine, int c, bool modulationWindow)
         : juce::DocumentWindow ("Ajustes do canal", theme::panel, DocumentWindow::closeButton),
-          channel (c)
+          channel (c),
+          modulation (modulationWindow)
     {
         setUsingNativeTitleBar (true);
 
-        if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
+        if (modulation)
+            setContentOwned (new ModulationPanel (engine, channel), true);
+        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
             setContentOwned (new SynthPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -595,10 +821,12 @@ public:
     }
 
     int getChannel() const { return channel; }
+    bool isModulation() const { return modulation; }
     void closeButtonPressed() override;
 
 private:
     int channel;
+    bool modulation;
 };
 
 std::vector<std::unique_ptr<SettingsWindow>>& windows()
@@ -617,21 +845,39 @@ void SettingsWindow::closeButtonPressed()
 }
 } // namespace
 
-void openChannelSettings (AudioEngine& engine, int channel)
+namespace
+{
+void openWindow (AudioEngine& engine, int channel, bool modulation)
 {
     for (auto& w : windows())
-        if (w->getChannel() == channel)
+        if (w->getChannel() == channel && w->isModulation() == modulation)
         {
             w->toFront (true);
             return;
         }
 
-    windows().push_back (std::make_unique<SettingsWindow> (engine, channel));
+    windows().push_back (std::make_unique<SettingsWindow> (engine, channel, modulation));
+}
+} // namespace
+
+void openChannelSettings (AudioEngine& engine, int channel)
+{
+    openWindow (engine, channel, false);
+}
+
+void openChannelModulation (AudioEngine& engine, int channel)
+{
+    openWindow (engine, channel, true);
 }
 
 void closeChannelSettings()
 {
     windows().clear();
+}
+
+std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel)
+{
+    return std::make_unique<ModulationPanel> (engine, channel);
 }
 
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel)

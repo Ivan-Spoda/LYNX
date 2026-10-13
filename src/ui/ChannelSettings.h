@@ -9,6 +9,10 @@ namespace lynx
 void openChannelSettings (AudioEngine& engine, int channel);
 void closeChannelSettings();
 
+// Janela de modulação do canal (envelopes de corte/afinação e LFOs), do synth ou do sampler.
+void openChannelModulation (AudioEngine& engine, int channel);
+
 // Só o conteúdo da janela (para o modo --snapshot).
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel);
+std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel);
 } // namespace lynx

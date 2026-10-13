@@ -367,6 +367,35 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         def.sampler.filterEnv = filterEnv;
         def.sampler.pitchEnv = pitchEnv;
 
+        // LFOs do canal (registros 0 pan, 1 volume, 2 corte, 4 afinação; REA_rodada6 §2)
+        {
+            auto lfoFrom = [&] (const flp::Channel::Envelope& env, float amount) {
+                ChannelLfo l;
+                if (! env.present || env.lfoAmount == 0 || amount == 0.0f)
+                    return l;
+
+                l.sync = (env.flags & 0x02) != 0;
+                auto time = [&] (int v) { // segundos, ou tempos com sincronia (o dobro da escala)
+                    const auto t = flp::Channel::envelopeTime (v);
+                    return (float) std::clamp (l.sync ? t * 2.0 : t, 0.0, 64.0);
+                };
+                l.amount = amount;
+                l.period = std::max (0.01f, time (env.lfoSpeed));
+                l.shape = std::clamp (env.lfoShape, 0, 2);
+                l.delay = time (env.lfoDelay);
+                l.attack = time (env.lfoAttack);
+                return l;
+            };
+
+            std::array<ChannelLfo, lfoTargets> lfo {};
+            lfo[lfoPan] = lfoFrom (c.envelopes[0], std::clamp (c.envelopes[0].lfoAmount, -64, 64) / 64.0f);
+            lfo[lfoVolume] = lfoFrom (c.envelopes[1], std::clamp (c.envelopes[1].lfoAmount, -128, 128) / 128.0f);
+            lfo[lfoCutoff] = lfoFrom (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].lfoAmount));
+            lfo[lfoPitch] = lfoFrom (c.envelopes[4], std::clamp (c.envelopes[4].lfoAmount, -2400, 2400) / 100.0f);
+            def.sampler.lfo = lfo;
+            def.synth.lfo = lfo;
+        }
+
         // plugin de terceiros (VST/CLAP) no Fruity Wrapper: o app procura o mesmo plugin instalado;
         // até lá (ou se não achar) o canal fica no synth interno
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))

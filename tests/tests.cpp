@@ -942,6 +942,52 @@ TEST (synth_porta_glides_and_am_modulates)
     CHECK (peak > 0.45f && peak < 0.65f); // 0,3 · (1 + 1) no máximo: (1 − o3) vai até 2
 }
 
+TEST (channel_lfo_vibrato_and_tremolo)
+{
+    auto render = [] (const lynx::SynthSettings& s) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c, 120.0);
+        inst->noteOn (69, 1.0f);
+        std::vector<float> l (48000), r (48000);
+        inst->render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+        return l;
+    };
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+
+    // tremolo: LFO de volume 100% a 4 Hz (período 0,25 s) -> o envelope de amplitude vai de ~0 a ~2x
+    auto tremolo = s;
+    tremolo.lfo[lynx::lfoVolume] = { 1.0f, 0.25f, false, 0, 0.0f, 0.0f };
+    const auto t = render (tremolo);
+    float lowest = 1.0f, highest = 0.0f;
+    for (std::size_t w = 4800; w + 480 <= 48000; w += 480) // janelas de 10 ms (4,4 ciclos de 440 Hz)
+    {
+        float peak = 0.0f;
+        for (auto i = w; i < w + 480; ++i)
+            peak = std::max (peak, std::abs (t[i]));
+        lowest = std::min (lowest, peak);
+        highest = std::max (highest, peak);
+    }
+    CHECK (lowest < 0.08f && highest > 0.5f);
+
+    // vibrato sincronizado: ±1 semitom, período 1 tempo (0,5 s a 120 BPM); a média fica em 440 Hz
+    auto vibrato = s;
+    vibrato.lfo[lynx::lfoPitch] = { 1.0f, 1.0f, true, 0, 0.0f, 0.0f };
+    const auto v = render (vibrato);
+    int crossings = 0;
+    for (std::size_t i = 1; i < 48000; ++i)
+        crossings += (v[i - 1] < 0.0f) != (v[i] < 0.0f);
+    CHECK (std::abs (crossings - 880) < 12);
+    int firstQuarter = 0; // primeiro quarto do ciclo: seno subindo -> mais agudo que 440
+    for (std::size_t i = 1; i < 6000; ++i)
+        firstQuarter += (v[i - 1] < 0.0f) != (v[i] < 0.0f);
+    CHECK (firstQuarter > 112);
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual

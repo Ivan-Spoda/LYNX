@@ -251,6 +251,64 @@ struct ModCoefficients
     }
 };
 
+// LFO do canal, avançado no tick de controle.
+struct LfoState
+{
+    double phase = 0.0;
+    float fade = 0.0f;
+    double delayLeft = 0.0; // samples
+};
+
+struct LfoCoefficients
+{
+    bool active = false;
+    float amount = 0.0f;
+    double increment = 0.0; // ciclos por sample
+    double delaySamples = 0.0;
+    float fadeStep = 1.0f;   // por sample
+    int shape = 0;
+
+    static LfoCoefficients make (const ChannelLfo& l, double sampleRate, double bpm) noexcept
+    {
+        LfoCoefficients c;
+        c.active = l.amount != 0.0f;
+        c.amount = l.amount;
+        const auto unit = l.sync ? 60.0 / std::max (1.0, bpm) : 1.0; // tempos -> segundos
+        c.increment = 1.0 / (std::max (0.005, (double) l.period * unit) * sampleRate);
+        c.delaySamples = std::max (0.0, (double) l.delay * unit * sampleRate);
+        c.fadeStep = l.attack > 0.0f ? (float) (1.0 / ((double) l.attack * unit * sampleRate)) : 1.0f;
+        c.shape = std::clamp (l.shape, 0, 2);
+        return c;
+    }
+
+    void start (LfoState& s) const noexcept { s = { 0.0, fadeStep >= 1.0f ? 1.0f : 0.0f, delaySamples }; }
+
+    // avança `n` samples e devolve a saída (±1, já com o fade-in)
+    float tick (LfoState& s, int n) const noexcept
+    {
+        if (s.delayLeft > 0.0)
+        {
+            s.delayLeft -= n;
+            return 0.0f;
+        }
+
+        s.phase += increment * n;
+        s.phase -= std::floor (s.phase);
+        s.fade = std::min (1.0f, s.fade + fadeStep * (float) n);
+        const auto p = s.phase;
+        float value = 0.0f;
+
+        switch (shape)
+        {
+            case 1: value = (float) (p < 0.25 ? 4.0 * p : p < 0.75 ? 2.0 - 4.0 * p : 4.0 * p - 4.0); break;
+            case 2: value = p < 0.5 ? 1.0f : -1.0f; break;
+            default: value = (float) std::sin (6.283185307179586 * p); break;
+        }
+
+        return value * s.fade;
+    }
+};
+
 // Coeficientes do passa-baixas SVF "TPT" (estável em qualquer corte), compartilhado pelo synth e o sampler.
 // O mesmo filtro dá as quatro respostas (mode: 0 passa-baixas, 1 passa-banda, 2 passa-altas,
 // 3 rejeita-faixa), como os tipos LP/BP/HP/BS do filtro do canal do FL.
@@ -305,6 +363,9 @@ struct SynthVoice
     float lowR = 0.0f, bandR = 0.0f; // filtro do lado direito (só com pan por oscilador)
 
     std::array<ModState, 2> mod {}; // filtro, afinação
+    std::array<LfoState, lfoTargets> lfo {};
+    float lfoGain = 1.0f, lfoGainStep = 0.0f; // LFO de volume, em rampa entre ticks
+    float basePan = 0.0f;                     // pan da nota (o LFO de pan soma a ele)
     SvfCoefficients filter; // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     int controlCountdown = 0;
@@ -361,8 +422,20 @@ public:
 
     void configure (const ChannelDef& channel, double songBpm) noexcept override
     {
+        bpm.store (std::max (1.0, songBpm)); // antes: o LFO sincronizado usa ao ler os ajustes
         mailbox.write (channel.synth);
-        bpm.store (std::max (1.0, songBpm));
+    }
+
+    void startModulation (SynthVoice& v, float pan) noexcept
+    {
+        v.basePan = pan;
+        v.lfoGain = 1.0f;
+        v.lfoGainStep = 0.0f;
+        v.controlCountdown = 0;
+
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+            if (lfos[i].active)
+                lfos[i].start (v.lfo[i]);
     }
 
     // portamento: a voz parte de `from` e desliza até `to` no tempo de porta
@@ -415,6 +488,7 @@ public:
                 for (auto& m : v.mod)
                     m = { m.level, 0.0f, 0, 0 };
                 voicePan (nextPan, v.panL, v.panR);
+                startModulation (v, nextPan);
                 nextPan = nextCents = 0.0f;
                 return;
             }
@@ -442,6 +516,7 @@ public:
         glide (*target, lastPhaseDelta, delta); // com porta, parte da altura da nota anterior
         lastPhaseDelta = delta;
         voicePan (nextPan, target->panL, target->panR);
+        startModulation (*target, nextPan);
         nextPan = nextCents = 0.0f;
     }
 
@@ -521,16 +596,32 @@ public:
                         if (modEnv[e].active)
                             modEnv[e].advance (v.mod[e]);
 
-                    // a cada 16 samples (o "tick" de controle): afinação e coeficientes do filtro
+                    // a cada 16 samples (o "tick" de controle): afinação, filtro, volume e pan
                     if (--v.controlCountdown <= 0)
                     {
                         v.controlCountdown = 16;
-                        v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
+                        auto semitones = modEnv[1].active ? modEnv[1].amount * v.mod[1].level : 0.0f;
+                        auto octaves = modEnv[0].active ? modEnv[0].amount * v.mod[0].level : 0.0f;
 
-                        if (modEnv[0].active)
-                            v.filter.set (settings.cutoff * std::exp2 (modEnv[0].amount * v.mod[0].level), settings.resonance, sampleRate,
-                                          settings.filterType);
+                        if (lfos[lfoPitch].active)
+                            semitones += lfos[lfoPitch].amount * lfos[lfoPitch].tick (v.lfo[lfoPitch], 16);
+                        if (lfos[lfoCutoff].active)
+                            octaves += lfos[lfoCutoff].amount * lfos[lfoCutoff].tick (v.lfo[lfoCutoff], 16);
+                        if (lfos[lfoVolume].active)
+                        {
+                            const auto target = std::max (0.0f, 1.0f + lfos[lfoVolume].amount * lfos[lfoVolume].tick (v.lfo[lfoVolume], 16));
+                            v.lfoGainStep = (target - v.lfoGain) / 16.0f;
+                        }
+                        if (lfos[lfoPan].active)
+                            voicePan (v.basePan + lfos[lfoPan].amount * lfos[lfoPan].tick (v.lfo[lfoPan], 16), v.panL, v.panR);
+
+                        v.pitchMul = semitones != 0.0f ? std::exp2 (semitones / 12.0) : 1.0;
+
+                        if (filterModulated)
+                            v.filter.set (settings.cutoff * std::exp2 (octaves), settings.resonance, sampleRate, settings.filterType);
                     }
+
+                    v.lfoGain += v.lfoGainStep;
                 }
 
                 float sum = 0.0f, sumR = 0.0f, modulator = 0.0f;
@@ -564,11 +655,11 @@ public:
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
-                const auto& f = modEnv[0].active ? v.filter : sharedFilter;
+                const auto& f = filterModulated ? v.filter : sharedFilter;
                 const auto outL = f.process (sum, v.low, v.band);
                 const auto outR = stereoOscillators ? f.process (sumR, v.lowR, v.bandR) : outL;
 
-                const auto s = 0.3f * v.level * v.velocity;
+                const auto s = 0.3f * v.level * v.velocity * v.lfoGain;
                 left[i] += outL * s * gl * v.panL;
                 right[i] += outR * s * gr * v.panR;
                 ++v.age;
@@ -647,7 +738,16 @@ private:
         sharedFilter.set (settings.cutoff, settings.resonance, sampleRate, settings.filterType);
         modEnv[0] = ModCoefficients::make (settings.filterEnv, sampleRate);
         modEnv[1] = ModCoefficients::make (settings.pitchEnv, sampleRate);
-        modulated = modEnv[0].active || modEnv[1].active;
+        auto anyLfo = false;
+
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+        {
+            lfos[i] = LfoCoefficients::make (settings.lfo[i], sampleRate, bpm.load());
+            anyLfo = anyLfo || lfos[i].active;
+        }
+
+        filterModulated = modEnv[0].active || lfos[lfoCutoff].active;
+        modulated = modEnv[0].active || modEnv[1].active || anyLfo;
     }
 
     double sampleRate = 44100.0;
@@ -658,7 +758,8 @@ private:
     float releaseCoeff = 0.999f;
     SvfCoefficients sharedFilter; // sem envelope de corte, todas as vozes usam este
     std::array<ModCoefficients, 2> modEnv {};
-    bool modulated = false;
+    std::array<LfoCoefficients, lfoTargets> lfos {};
+    bool modulated = false, filterModulated = false;
     std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
     std::atomic<double> bpm { 120.0 };
     double lastPhaseDelta = 0.0; // altura da última nota (de onde o porta parte)
@@ -693,6 +794,9 @@ struct SamplerVoice
     int glideLeft = 0;
     float lowL = 0.0f, bandL = 0.0f, lowR = 0.0f, bandR = 0.0f; // filtro do canal
     std::array<ModState, 2> mod {}; // envelopes de corte e de afinação
+    std::array<LfoState, lfoTargets> lfo {};
+    float lfoGain = 1.0f, lfoGainStep = 0.0f;
+    float basePan = 0.0f;
     SvfCoefficients filter;         // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     int controlCountdown = 0;
@@ -708,8 +812,7 @@ public:
     {
         sampleRate = sr;
         fadeStep = (float) (1.0 / (0.003 * sr)); // 3 ms
-        for (std::size_t e = 0; e < 2; ++e)
-            modEnv[e] = ModCoefficients::make (envelopes[e], sr);
+        updateModulation();
         allNotesOff();
     }
 
@@ -730,7 +833,8 @@ public:
         cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         filterType.store (std::clamp (s.filterType, 0, 3));
-        envelopeMailbox.write ({ s.filterEnv, s.pitchEnv });
+        bpm.store (std::max (1.0, songBpm)); // antes do mailbox: o LFO sincronizado lê ao atualizar
+        envelopeMailbox.write ({ { s.filterEnv, s.pitchEnv }, s.lfo });
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
         for (int i = 0; i < table.count; ++i)
@@ -833,6 +937,11 @@ public:
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
         target->stage = attackSeconds > 0.0f ? 0 : 1;
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
+        target->basePan = clipMode ? 0.0f : nextPan;
+
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+            if (lfos[i].active && ! clipMode)
+                lfos[i].start (target->lfo[i]);
         nextPan = nextCents = 0.0f;
     }
 
@@ -909,15 +1018,15 @@ public:
         const auto* r = sample->rightData();
         const auto last = (double) (sample->frames() - 1);
 
-        if (envelopeMailbox.read (envelopes))
-            for (std::size_t e = 0; e < 2; ++e)
-                modEnv[e] = ModCoefficients::make (envelopes[e], sampleRate);
+        if (envelopeMailbox.read (modulation))
+            updateModulation();
 
-        // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto, sem ressonância e sem envelope
+        // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto, sem ressonância e sem modulação
         const auto fc = cutoff.load(), res = resonance.load();
         const auto type = filterType.load();
-        const auto filtered = fc < 19500.0f || res > 0.0f || type != 0 || modEnv[0].active;
-        const auto modulated = modEnv[0].active || modEnv[1].active;
+        const auto filterModulated = modEnv[0].active || lfos[lfoCutoff].active;
+        const auto filtered = fc < 19500.0f || res > 0.0f || type != 0 || filterModulated;
+        const auto modulated = modEnv[0].active || modEnv[1].active || anyLfo;
 
         if (filtered && (fc != filterCutoff || res != filterResonance || type != sharedFilter.mode))
         {
@@ -953,21 +1062,38 @@ public:
                     if (--v.controlCountdown <= 0) // tick de controle de 16 samples, como no synth
                     {
                         v.controlCountdown = 16;
-                        v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
+                        auto semitones = modEnv[1].active ? modEnv[1].amount * v.mod[1].level : 0.0f;
+                        auto octaves = modEnv[0].active ? modEnv[0].amount * v.mod[0].level : 0.0f;
 
-                        if (modEnv[0].active)
-                            v.filter.set (fc * std::exp2 (modEnv[0].amount * v.mod[0].level), res, sampleRate, type);
+                        if (lfos[lfoPitch].active)
+                            semitones += lfos[lfoPitch].amount * lfos[lfoPitch].tick (v.lfo[lfoPitch], 16);
+                        if (lfos[lfoCutoff].active)
+                            octaves += lfos[lfoCutoff].amount * lfos[lfoCutoff].tick (v.lfo[lfoCutoff], 16);
+                        if (lfos[lfoVolume].active)
+                        {
+                            const auto target = std::max (0.0f, 1.0f + lfos[lfoVolume].amount * lfos[lfoVolume].tick (v.lfo[lfoVolume], 16));
+                            v.lfoGainStep = (target - v.lfoGain) / 16.0f;
+                        }
+                        if (lfos[lfoPan].active)
+                            voicePan (v.basePan + lfos[lfoPan].amount * lfos[lfoPan].tick (v.lfo[lfoPan], 16), v.panL, v.panR);
+
+                        v.pitchMul = semitones != 0.0f ? std::exp2 (semitones / 12.0) : 1.0;
+
+                        if (filterModulated)
+                            v.filter.set (fc * std::exp2 (octaves), res, sampleRate, type);
                     }
+
+                    v.lfoGain += v.lfoGainStep;
                 }
 
                 if (filtered)
                 {
-                    const auto& f = modEnv[0].active ? v.filter : sharedFilter;
+                    const auto& f = filterModulated ? v.filter : sharedFilter;
                     sl = f.process (sl, v.lowL, v.bandL);
                     sr = f.process (sr, v.lowR, v.bandR);
                 }
 
-                auto gain = v.velocity * v.fade * v.env;
+                auto gain = v.velocity * v.fade * v.env * v.lfoGain;
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
@@ -1049,8 +1175,29 @@ private:
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
     SvfCoefficients sharedFilter;
-    SettingsMailbox<std::array<ModEnvelope, 2>> envelopeMailbox;
-    std::array<ModEnvelope, 2> envelopes {};
+    struct Modulation
+    {
+        std::array<ModEnvelope, 2> envelopes {};
+        std::array<ChannelLfo, lfoTargets> lfo {};
+    };
+    SettingsMailbox<Modulation> envelopeMailbox;
+    Modulation modulation;
+    std::array<LfoCoefficients, lfoTargets> lfos {};
+    bool anyLfo = false;
+
+    void updateModulation() noexcept
+    {
+        anyLfo = false;
+
+        for (std::size_t e = 0; e < 2; ++e)
+            modEnv[e] = ModCoefficients::make (modulation.envelopes[e], sampleRate);
+
+        for (std::size_t i = 0; i < lfoTargets; ++i)
+        {
+            lfos[i] = LfoCoefficients::make (modulation.lfo[i], sampleRate, bpm.load());
+            anyLfo = anyLfo || lfos[i].active;
+        }
+    }
     std::array<ModCoefficients, 2> modEnv {};
     std::array<float, 4> nextClip {}; // fades do próximo noteOn (só a thread de áudio mexe)
 

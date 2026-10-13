@@ -78,6 +78,22 @@ struct ModEnvelope
     bool operator== (const ModEnvelope&) const = default;
 };
 
+// LFO do canal (como os do FL, REA_rodada6 §2): forma, período, atraso e fade-in; a quantidade
+// é na unidade do destino. Recomeça a cada nota.
+struct ChannelLfo
+{
+    float amount = 0.0f;  // pan: −1..1; volume: profundidade 0..1; corte: oitavas; afinação: semitons. 0 = desligado
+    float period = 0.5f;  // segundos, ou tempos com `sync`
+    bool sync = false;
+    int shape = 0;        // 0 senoide, 1 triângulo, 2 pulso
+    float delay = 0.0f;   // segundos (ou tempos com `sync`) antes de começar
+    float attack = 0.0f;  // fade-in, na mesma unidade
+
+    bool operator== (const ChannelLfo&) const = default;
+};
+
+enum LfoTarget { lfoPan, lfoVolume, lfoCutoff, lfoPitch, lfoTargets };
+
 struct SamplerSettings
 {
     float pitch = 0.0f;   // semitons, -24..24
@@ -97,6 +113,7 @@ struct SamplerSettings
     int filterType = 0;        // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
     ModEnvelope filterEnv;     // desloca o corte (oitavas)
     ModEnvelope pitchEnv;      // desloca a afinação (semitons)
+    std::array<ChannelLfo, lfoTargets> lfo {}; // por LfoTarget
 
     bool operator== (const SamplerSettings&) const = default;
 };
@@ -148,6 +165,7 @@ struct SynthSettings
     int filterType = 0;      // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
+    std::array<ChannelLfo, lfoTargets> lfo {}; // por LfoTarget
     bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
     float portaBeats = 0.0f; // > 0: portamento, a nota nova desliza da anterior neste tempo (em tempos)
     bool am = false;         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
