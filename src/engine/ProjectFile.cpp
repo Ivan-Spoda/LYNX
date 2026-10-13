@@ -242,6 +242,14 @@ juce::String toJson (const Song& song)
             sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
             sampler->setProperty ("keepPitch", c.sampler.keepPitch);
             sampler->setProperty ("region", juce::Array<juce::var> { c.sampler.regionStart, c.sampler.regionEnd });
+
+            if (! c.sampler.slices.empty())
+            {
+                juce::Array<juce::var> slices;
+                for (auto v : c.sampler.slices)
+                    slices.add (juce::roundToInt (v * 100000.0f) / 100000.0);
+                sampler->setProperty ("slices", slices);
+            }
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -519,6 +527,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
                 def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
                 def.sampler.keepPitch = (bool) s.getProperty ("keepPitch", false);
+
+                if (auto* slices = s["slices"].getArray())
+                    for (const auto& v : *slices)
+                        def.sampler.slices.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));
 
                 if (const auto& region = s["region"]; region.isArray() && region.size() == 2)
                 {

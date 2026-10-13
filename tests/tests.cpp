@@ -19,6 +19,7 @@
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
+#include "core/Slicer.h"
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/Song.h"
@@ -2258,6 +2259,38 @@ TEST (audio_clip_fades_and_gain)
     CHECK (std::abs (all[12000] - 0.25f) < 0.02f);       // meio do fade-in: metade de 0,5
     CHECK (std::abs (all[48000] - 0.5f) < 0.01f);        // corpo: o ganho do clip
     CHECK (std::abs (all[96000 - 12000] - 0.25f) < 0.02f); // meio do fade-out
+}
+
+TEST (slicer_detects_hits_and_plays_slices_by_key)
+{
+    // 4 batidas (ruído com decaimento) a cada 0,25 s
+    lynx::SampleData loop;
+    loop.sampleRate = 48000.0;
+    loop.left.assign (48000, 0.0f);
+    lynx::Noise noise;
+    for (int hit = 0; hit < 4; ++hit)
+        for (int i = 0; i < 6000; ++i)
+            loop.left[(std::size_t) (hit * 12000 + i)] = noise.next() * 0.8f * std::exp (-(float) i / 1500.0f);
+
+    const auto slices = lynx::detectSlices (loop, 0.5f);
+    CHECK (slices.size() == 4);
+    for (std::size_t i = 0; i < slices.size(); ++i)
+        CHECK (std::abs (slices[i] - 0.25f * (float) i) < 0.01f);
+
+    // a tecla 61 toca a segunda fatia, que começa em 0,25 e acaba antes de 0,5
+    auto ramp = std::make_shared<lynx::SampleData>();
+    for (int i = 0; i < 48000; ++i)
+        ramp->left.push_back ((float) i / 48000.0f);
+    ramp->sampleRate = 48000.0;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.slices = slices;
+    inst->configure (c, 120.0);
+    inst->noteOn (61, 1.0f);
+    std::vector<float> l (20000), r (20000);
+    inst->render (l.data(), r.data(), 20000, 1.0f, 1.0f);
+    CHECK (std::abs (l[0] - 0.25f) < 0.01f && l[11000] > 0.45f && l[13000] == 0.0f);
 }
 
 int main (int argc, char** argv)

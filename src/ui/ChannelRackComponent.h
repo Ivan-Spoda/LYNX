@@ -69,6 +69,7 @@ private:
     void assignSample (int channel, const juce::File& file);
     void rename (int channel);
     void openPluginWindow (int channel);
+    void sliceChannel (int channel);
 
     AudioEngine& engine;
     int playheadStep = -1;

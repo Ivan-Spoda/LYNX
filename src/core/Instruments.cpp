@@ -506,6 +506,11 @@ public:
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
         regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
+        SliceTable table;
+        table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
+        for (int i = 0; i < table.count; ++i)
+            table.starts[(std::size_t) i] = std::clamp (s.slices[(std::size_t) i], 0.0f, 1.0f);
+        sliceMailbox.write (table);
         bpm.store (std::max (1.0, songBpm));
     }
 
@@ -529,11 +534,26 @@ public:
         if (sample == nullptr || sample->frames() < 2)
             return;
 
+        sliceMailbox.read (slices);
         const auto backwards = ! clipMode && reverse.load();
         const auto total = (double) (sample->frames() - 1);
         // trecho do sample (o início vale como "start offset"); clips de áudio usam o arquivo todo
-        const auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
-        const auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
+        auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
+        auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
+        auto sliced = false;
+
+        // sample fatiado: cada tecla a partir do C5 toca uma fatia, na altura original
+        if (! clipMode && slices.count > 0)
+        {
+            const auto index = key - 60;
+
+            if (index < 0 || index >= slices.count)
+                return;
+
+            first = std::floor (total * slices.starts[(std::size_t) index]);
+            last = index + 1 < slices.count ? std::floor (total * slices.starts[(std::size_t) index + 1]) : total;
+            sliced = true;
+        }
         const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate();
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
@@ -568,7 +588,7 @@ public:
         }
 
         // com stretch ("resample" do FL) a altura da nota não muda a velocidade
-        const auto semitones = clipMode || stretched ? 0.0 : (key - 60) + (double) pitch.load() + nextCents / 100.0;
+        const auto semitones = clipMode || stretched ? 0.0 : (sliced ? 0 : key - 60) + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
@@ -754,6 +774,14 @@ private:
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::array<float, 4> nextClip {}; // fades do próximo noteOn (só a thread de áudio mexe)
+
+    struct SliceTable
+    {
+        std::array<float, 128> starts {};
+        int count = 0;
+    };
+    SettingsMailbox<SliceTable> sliceMailbox;
+    SliceTable slices; // cópia da thread de áudio
     float nextPan = 0.0f, nextCents = 0.0f;
     std::atomic<bool> reverse { false }, cut { false };
 };

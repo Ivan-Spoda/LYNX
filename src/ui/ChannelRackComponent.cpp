@@ -1,6 +1,7 @@
 #include "ui/ChannelRackComponent.h"
 
 #include "ui/AutomationUi.h"
+#include "core/Slicer.h"
 #include "ui/ChannelSettings.h"
 
 #include "engine/Text.h"
@@ -438,6 +439,13 @@ void ChannelRackComponent::showChannelMenu (int channel)
                       false, false, [] {});
         menu.addItem (utf8 ("Ajustes do sampler (afinação, envelope, ao contrário)..."),
                       [this, channel] { openChannelSettings (engine, channel); });
+
+        if (c.sampler.slices.empty())
+            menu.addItem (utf8 ("Fatiar sample (slicer): uma fatia por tecla e uma pattern com o loop"), [this, channel] { sliceChannel (channel); });
+        else
+            menu.addItem (utf8 ("Desfazer fatias (") + juce::String ((int) c.sampler.slices.size()) + ")", [this, channel] {
+                engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].sampler.slices.clear(); });
+            });
     }
 
     if (c.instrument == InstrumentKind::synth)
@@ -631,6 +639,44 @@ void ChannelRackComponent::rename (int channel)
                                      engine.editSong ([channel, name] (Song& s) { s.channels[(std::size_t) channel].name = name; });
                              }),
                              true);
+}
+
+void ChannelRackComponent::sliceChannel (int channel)
+{
+    const auto& song = engine.getSong();
+    const auto& c = song.channels[(std::size_t) channel];
+    const auto sample = engine.getSampleLibrary().load (juce::String::fromUTF8 (c.samplePath.c_str()));
+
+    if (sample == nullptr || sample->frames() == 0)
+        return;
+
+    const auto slices = detectSlices (*sample, 0.5f);
+    const auto seconds = (double) sample->frames() / sample->sampleRate;
+    const auto ticksPerSecond = song.bpm * ppq / 60.0;
+    const auto name = c.name + " (fatias)";
+
+    engine.editSong ([&] (Song& s) {
+        s.channels[(std::size_t) channel].sampler.slices = slices;
+
+        // pattern que toca as fatias na ordem e no tempo originais (no BPM do projeto)
+        auto& p = s.patterns.emplace_back();
+        p.name = name;
+
+        for (std::size_t i = 0; i < slices.size(); ++i)
+        {
+            const auto start = slices[i] * seconds;
+            const auto end = i + 1 < slices.size() ? slices[i + 1] * seconds : seconds;
+            Note n;
+            n.start = (std::int64_t) std::llround (start * ticksPerSecond);
+            n.length = std::max<std::int64_t> (1, (std::int64_t) std::llround ((end - start) * ticksPerSecond));
+            n.key = 60 + (int) i;
+            n.channel = channel;
+            p.notes.push_back (n);
+        }
+
+        p.sortNotes();
+        s.currentPattern = (int) s.patterns.size() - 1;
+    });
 }
 
 bool ChannelRackComponent::isInterestedInFileDrag (const juce::StringArray& files)

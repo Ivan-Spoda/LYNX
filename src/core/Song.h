@@ -61,6 +61,7 @@ struct SamplerSettings
     bool keepPitch = false;    // com stretch: estica sem mudar a altura (WSOLA); senão reamostra
     float regionStart = 0.0f;  // trecho tocado do sample (frações 0..1)
     float regionEnd = 1.0f;
+    std::vector<float> slices; // fatias (inícios em frações): a tecla 60 + i toca a fatia i, na altura original
 
     bool operator== (const SamplerSettings&) const = default;
 };
