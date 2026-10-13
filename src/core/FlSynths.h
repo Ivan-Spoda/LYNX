@@ -33,6 +33,10 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth
 // vira o filtro do synth. `gain` recebe o Master level (linear).
 bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
 
+// Harmor (REA_rodada11 §4), aproximação grosseira: cada parte (A/B) vira uma serra com a razão de
+// frequência, filtro 1 (ou 2) com o envelope, envelope de volume, uníssono, mono/porta.
+bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+
 // GMS (REA_rodada12 §1): "SSLF" + preset .gmsynth; 3 osciladores de tabela, mistura em cascata,
 // AM/sync, uníssono, ladder, 2 envelopes AD e 2 LFOs. `gain` = Mix Level × Amp Level.
 bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);

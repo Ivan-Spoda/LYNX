@@ -675,6 +675,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 adopt();
             else if (name == "sytrus" && synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
                 adopt();
+            else if (name == "harmor" && synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
+                adopt();
             else if (name == "gms" && synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
                 adopt();
             else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
@@ -739,7 +741,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura") && adoptedFromPlugin)
+                     || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura") && adoptedFromPlugin)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)

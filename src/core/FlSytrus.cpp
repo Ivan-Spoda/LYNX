@@ -122,7 +122,7 @@ bool readEnvelope (Reader& r, Envelope& e)
     return ! r.failed;
 }
 
-bool readArticulator (Reader& r, Articulator& a)
+bool readArticulator (Reader& r, Articulator& a, int maps = 6)
 {
     r.i32();
     r.i32();
@@ -145,7 +145,7 @@ bool readArticulator (Reader& r, Articulator& a)
         r.i32();
 
     Envelope map;
-    for (int k = 0; k < 6; ++k) // mapas de teclado, velocity, X, Y, aleatório, uníssono
+    for (int k = 0; k < maps; ++k) // mapas (Sytrus: teclado, velocity, X, Y, aleatório, uníssono)
         if (! readEnvelope (r, map))
             return false;
     return ! r.failed;
@@ -745,6 +745,188 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         if (! std::isfinite (o.level) || ! std::isfinite (o.detune) || ! std::isfinite (o.pan))
             return false;
 
+    synth = out;
+    return true;
+}
+// Harmor (REA_rodada11 §4): aditivo de 2 partes; cada parte vira um oscilador serra, com o filtro 1
+// (ou o 2), o envelope de volume, o envelope do filtro e o uníssono. Imagem, blur, prism,
+// harmonizador, phaser e FX ficam de fora.
+bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
+{
+    if (state.size() < 12)
+        return false;
+    Reader r { state.data(), state.size() };
+    auto version = (std::uint32_t) r.i32();
+    if (version > 0xffff)
+        version >>= 16;
+    if (version < 11 || version > 32)
+        return false;
+    const auto v = (int) version;
+    const auto mask = (std::uint32_t) r.i32();
+    if ((mask & 1) == 0)
+        return false;
+
+    struct Part
+    {
+        bool present = false;
+        std::vector<std::int32_t> p;
+        int filterType[2] { 0, 0 };
+        std::vector<Articulator> art;
+    };
+    Part parts[2];
+
+    for (int k = 0; k < 2; ++k)
+    {
+        if (((mask >> k) & 1) == 0)
+            continue;
+        const auto size = (std::size_t) (std::uint32_t) r.i32();
+        const auto start = r.pos;
+        if (r.failed || size > state.size() - start)
+            return false;
+
+        auto& part = parts[k];
+        part.p.resize (v >= 16 ? 386 : 385);
+        for (auto& x : part.p)
+            x = r.i32();
+        r.raw (0x30);
+        if (const auto* misc = r.raw (v >= 11 ? 0x4b : 0x47))
+        {
+            std::memcpy (&part.filterType[0], misc + 52, 4);
+            std::memcpy (&part.filterType[1], misc + 56, 4);
+        }
+        if (r.failed)
+            return false;
+
+        if (v >= 16)
+        {
+            part.art.resize (43);
+            for (auto& a : part.art)
+                if (! readArticulator (r, a, 9))
+                {
+                    part.art.clear();
+                    break;
+                }
+        }
+        part.present = true;
+        r.pos = start + size;
+        r.failed = false;
+    }
+
+    std::int32_t g[53] {};
+    if ((mask & 4) != 0)
+        for (auto& x : g)
+            x = r.i32();
+    if (r.failed)
+        std::fill (std::begin (g), std::end (g), 0);
+    const auto abMix = (mask & 4) != 0 && ! r.failed ? std::clamp (g[10], 0, 1000) / 1000.0 : 0.5;
+    const auto mainPitch = std::clamp (g[14], -4800, 4800) / 100.0;
+
+    SynthSettings out;
+    out.osc = { SynthOscillator { Waveform::saw, 0, 0.0f, 0.0f }, SynthOscillator { Waveform::saw, 0, 0.0f, 0.0f }, SynthOscillator {} };
+    double partSemis[2] {};
+    for (int k = 0; k < 2; ++k)
+    {
+        if (! parts[k].present)
+            continue;
+        const auto& p = parts[k].p;
+        const auto ratio = std::clamp (p[40], 1000, 640000) / 10000.0 / std::clamp (p[41], 1, 16);
+        partSemis[k] = mainPitch + 12.0 * std::log2 (ratio);
+        auto& osc = out.osc[(std::size_t) k];
+        osc.detune = 0.0f;
+        setPitch (osc, partSemis[k]);
+        const auto mix = k == 0 ? 1.0 - abMix : abMix;
+        osc.level = (float) std::clamp (std::abs (p[11]) / 1000.0 * mix, 0.0, 1.0); // A&B mix = crossfade
+    }
+    if (out.osc[0].level + out.osc[1].level < 0.01f)
+        out.osc[0].level = 1.0f;
+
+    const auto lead = out.osc[0].level >= out.osc[1].level ? 0 : 1;
+    const auto& main = parts[lead];
+
+    // envelope de volume (articulador 1); desligado = portão com release curto
+    out.attack = 0.002f;
+    out.decay = 0.0f;
+    out.sustain = 1.0f;
+    out.release = 0.1f;
+    if (! main.art.empty() && main.art[1].env.on)
+    {
+        const auto adsr = adsrOf (main.art[1].env, main.art[1].knobs, 1.0);
+        out.attack = (float) adsr.a;
+        out.decay = (float) adsr.d;
+        out.sustain = (float) adsr.s;
+        out.release = (float) adsr.r;
+    }
+
+    // filtro 1 (ou o 2 se o 1 estiver aberto): escala de corte do Harmless
+    const auto& p = main.p;
+    int which = p[52] < 8192 ? 0 : p[64] < 8192 ? 1 : -1;
+    out.cutoff = 20000.0f;
+    if (which >= 0)
+    {
+        const auto type = main.filterType[which];
+        int lynxType = -1;
+        switch (type)
+        {
+            case 0: case 4: case 13: lynxType = 0; break;
+            case 1: case 16: lynxType = 1; break;
+            case 2: lynxType = 3; break;
+            case 3: lynxType = 2; break;
+            default: lynxType = type >= 5 && type <= 12 ? 0 : -1; break;
+        }
+        if (lynxType >= 0)
+        {
+            const auto freq = std::clamp (which == 0 ? p[52] : p[64], 0, 8192);
+            const auto base = 73.4 * std::pow (2.0, 7.855 * freq / 8192.0);
+            out.filterType = lynxType;
+            out.cutoff = (float) std::clamp (base, 20.0, 20000.0);
+            out.resonance = (float) std::clamp (0.9 * std::clamp (which == 0 ? p[57] : p[69], 0, 1000) / 1000.0, 0.0, 0.95);
+
+            // envelope da frequência (articulador 4/5) × "env amount" (±1000 = ±7,9 oitavas)
+            const auto& art = main.art.empty() ? Articulator {} : main.art[(std::size_t) (4 + which)];
+            const auto amount = std::clamp (which == 0 ? p[56] : p[68], -1000, 1000) / 1000.0 * 7.9;
+            if (! main.art.empty() && art.env.on && ! art.env.points.empty() && std::abs (amount) > 0.01)
+            {
+                const auto adsr = adsrOf (art.env, art.knobs, 1.0);
+                const auto startLevel = art.env.points.front().second;
+                double peak = startLevel;
+                for (const auto& pt : art.env.points)
+                    peak = std::max (peak, pt.second);
+                const auto susLevel = adsr.s * peak;
+                const auto low = std::min (startLevel, susLevel);
+                // o corte do knob é o nível 0,5 do envelope (bipolar, como no Sytrus) [HIP]
+                out.cutoff = (float) std::clamp (base * std::exp2 ((low - 0.5) * amount), 20.0, 20000.0);
+                const auto span = (peak - low) * amount;
+                if (std::abs (span) > 0.05)
+                    out.filterEnv = { (float) std::clamp (span, -10.0, 10.0), (float) adsr.a, 0.0f, (float) adsr.d,
+                                      (float) std::clamp ((susLevel - low) / std::max (1e-6, peak - low), 0.0, 1.0), (float) adsr.r };
+            }
+        }
+    }
+
+    // uníssono: cópia desafinada da parte principal no oscilador livre
+    if (const auto order = std::clamp (p[34], 1, 9); order >= 2)
+    {
+        const auto spread = std::max (5.0, (std::pow (41.0, std::clamp (p[38], 0, 256) / 256.0) - 1.0) * 1.875);
+        const auto pan = (float) (std::clamp (p[37], 0, 256) / 256.0);
+        auto copy = out.osc[(std::size_t) lead];
+        copy.detune = (float) std::clamp (copy.detune + spread, -100.0, 100.0);
+        copy.pan = pan;
+        out.osc[(std::size_t) lead].detune = (float) std::clamp (out.osc[(std::size_t) lead].detune - spread, -100.0, 100.0);
+        out.osc[(std::size_t) lead].pan = -pan;
+        out.osc[2] = copy;
+        if (out.osc[(std::size_t) (1 - lead)].level < 0.05f) // a outra parte calada: três vozes
+        {
+            out.osc[(std::size_t) (1 - lead)] = out.osc[(std::size_t) lead];
+            out.osc[(std::size_t) (1 - lead)].detune = copy.detune - (float) spread;
+            out.osc[(std::size_t) (1 - lead)].pan = 0.0f;
+        }
+    }
+
+    out.porta = g[5] != 0;
+    out.mono = g[4] != 0;
+    gain = (float) std::clamp ((mask & 4) != 0 ? std::clamp (g[11], 0, 2000) / 1000.0 : 1.0, 0.0, 2.0);
+    if (gain <= 0.0f)
+        gain = 1.0f;
     synth = out;
     return true;
 }

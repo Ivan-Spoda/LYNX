@@ -145,7 +145,8 @@ Confirmadas empiricamente nos demos:
 
 ## Próximo passo
 Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), ~25x mais rápido
-que o tempo real. Sem equivalente ainda (tocam com preset do synth pelo nome): Harmor (100 canais nos
-demos; formato na rodada 11 §4), FLEX (57), Drumpad, Morphine. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
+que o tempo real. Harmor (100 canais) entra como aproximação grosseira (partes A/B como serras, filtro,
+envelopes, uníssono). Sem equivalente ainda (tocam com preset do synth pelo nome): FLEX (57), Drumpad,
+Morphine, BooBass, Kepler, Wave Traveller, PoiZone, Toxic Biohazard, BassDrum. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
 Patcher (contêiner), Effector, Frequency Splitter, Vocodex. Também em aberto: ASIO (licença do SDK
 da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.

@@ -357,7 +357,7 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromFruitKick (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
-        if (lynx::synthFromGms (blob, 120.0, synth, harmlessGain) || lynx::synthFromOgun (blob, synth, harmlessGain) || lynx::synthFromSakura (blob, synth))
+        if (lynx::synthFromGms (blob, 120.0, synth, harmlessGain) || lynx::synthFromHarmor (blob, synth, harmlessGain) || lynx::synthFromOgun (blob, synth, harmlessGain) || lynx::synthFromSakura (blob, synth))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack) && std::isfinite (harmlessGain));
         if (auto sound = lynx::drumSynthLiveSound (blob))
             CHECK (sound->size() < 256);
@@ -575,7 +575,9 @@ TEST (flp_real_files)
                 lynx::SynthSettings gs;
                 float g = 1.0f;
                 int decoded = -1;
-                if (c.pluginName == "GMS")
+                if (c.pluginName == "Harmor")
+                    decoded = lynx::synthFromHarmor (c.pluginState, gs, g);
+                else if (c.pluginName == "GMS")
                     decoded = lynx::synthFromGms (c.pluginState, 128.0, gs, g);
                 else if (c.pluginName == "Ogun" || c.pluginName == "Autogun")
                     decoded = lynx::synthFromOgun (c.pluginState, gs, g);

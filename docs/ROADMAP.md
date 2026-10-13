@@ -90,4 +90,5 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Harmless, MiniSynth, DX10, Fruit Kick aproximados pelo synth interno (rodada 10)
 - [x] Sytrus (matriz FM/RM, filtros, articuladores) aproximado pelo synth interno (rodada 11)
 - [x] GMS; Ogun/Autogun e Sakura (grosseiros); DrumSynth Live por sample (rodada 12)
-- [ ] Harmor (formato na rodada 11 §4), FLEX, Morphine, Drumpad
+- [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)
+- [ ] FLEX, Morphine, Drumpad, BooBass, Kepler, Wave Traveller, PoiZone, Toxic Biohazard, BassDrum
