@@ -18,6 +18,7 @@
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
 #include "core/Song.h"
+#include "core/NoteEdit.h"
 #include "flp/Flp.h"
 
 namespace
@@ -1158,6 +1159,47 @@ TEST (export_song_adds_silent_tail_and_never_restarts)
     CHECK (length == lynx::ppq * 5 && song.playlist.size() == 1);
     song = lynx::makeExportSong (s, false, 0, length);
     CHECK (length == lynx::ppq * 4 && song.playlist[0].start == 0);
+}
+
+TEST (note_edit_selection_operations)
+{
+    namespace ne = lynx::noteedit;
+    lynx::Pattern p;
+    p.notes = { { 0, 240, 0, 60 }, { 480, 240, 0, 64 }, { 960, 480, 1, 67 } };
+
+    // ordenar acompanha os índices
+    p.notes[0].start = 1200;
+    std::vector<int> tracked { 0, 2 };
+    ne::sortTracking (p, tracked);
+    CHECK (p.notes[2].start == 1200 && p.notes[(std::size_t) tracked[0]].start == 1200);
+    CHECK (p.notes[(std::size_t) tracked[1]].key == 67);
+
+    // mover em grupo respeita os limites
+    std::int64_t dt = -5000;
+    int dk = 100;
+    ne::move (p, { 0, 1 }, dt, dk);
+    CHECK (dt == -480 && dk == 127 - 67 && p.notes[0].start == 0 && p.notes[1].key == 127);
+
+    // duplicar: logo depois do trecho, arredondado à grade
+    lynx::Pattern q;
+    q.notes = { { 0, 240, 0, 60 }, { 240, 300, 0, 62 } }; // trecho de 540 ticks
+    const auto added = ne::duplicate (q, { 0, 1 }, 960);
+    CHECK (added.size() == 2 && q.notes[(std::size_t) added[0]].start == 960 && q.notes[(std::size_t) added[1]].start == 1200);
+
+    // colar em outro canal com deslocamento
+    const auto pasted = ne::paste (q, ne::copy (q, { 1 }), 100, 3);
+    CHECK (pasted.size() == 1 && q.notes.back().channel == 3 && q.notes.back().start == 340);
+
+    // quantizar arredonda para o mais próximo
+    q.notes[0].start = 130;
+    q.notes[1].start = 100;
+    ne::quantize (q, { 0, 1 }, 240);
+    CHECK (q.notes[0].start == 240 && q.notes[1].start == 0);
+
+    // remover vários (ordem e repetidos não importam)
+    const auto before = q.notes.size();
+    ne::remove (q, { 1, 0, 1 });
+    CHECK (q.notes.size() == before - 2);
 }
 
 int main (int argc, char** argv)

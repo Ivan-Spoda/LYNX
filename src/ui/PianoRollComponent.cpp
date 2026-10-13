@@ -1,5 +1,7 @@
 #include "ui/PianoRollComponent.h"
 
+#include "core/NoteEdit.h"
+#include "engine/Text.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -23,7 +25,26 @@ const Pattern& currentPattern (const Song& s)
 {
     return s.patterns[(std::size_t) s.currentPattern];
 }
+
+Pattern& currentPattern (Song& s)
+{
+    return s.patterns[(std::size_t) s.currentPattern];
+}
+
+struct SnapOption
+{
+    const char* name;
+    int ticks; // 0 = um compasso
+};
+
+const SnapOption snapOptions[] = {
+    { "Sem snap", 1 }, { "1/6 de step", ticksPerStep / 6 }, { "1/4 de step", ticksPerStep / 4 },
+    { "1/3 de step", ticksPerStep / 3 }, { "1/2 step", ticksPerStep / 2 }, { "Step", ticksPerStep },
+    { "1/3 de tempo", ppq / 3 }, { "1/2 tempo", ppq / 2 }, { "Tempo", ppq }, { "Compasso", 0 },
+};
+constexpr int defaultSnap = 5;
 } // namespace
+
 
 PianoRollComponent::PianoRollComponent (AudioEngine& e)
     : engine (e)
@@ -38,6 +59,24 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
+    for (int i = 0; i < (int) std::size (snapOptions); ++i)
+        snapBox.addItem (utf8 (snapOptions[i].name), i + 1);
+
+    snapBox.setSelectedItemIndex (defaultSnap, juce::dontSendNotification);
+    snapBox.setTooltip ("Snap (grade) do Piano Roll; Alt desliga enquanto arrasta");
+    snapBox.setWantsKeyboardFocus (false);
+    snapBox.setMouseClickGrabsKeyboardFocus (false);
+    snapBox.onChange = [this] { repaint(); };
+    addAndMakeVisible (snapBox);
+
+    hintLabel.setFont (juce::FontOptions (11.0f));
+    hintLabel.setColour (juce::Label::textColourId, theme::text.withAlpha (0.45f));
+    hintLabel.setText (utf8 ("Ctrl+arrastar seleciona · Shift+clique soma · Del apaga · Ctrl+C/X/V copiar · "
+                             "Ctrl+B duplicar · Ctrl+Q quantizar · setas movem (Shift = oitava)"),
+                       juce::dontSendNotification);
+    hintLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (hintLabel);
+
     engine.addChangeListener (this);
     startTimerHz (30);
 }
@@ -49,8 +88,14 @@ PianoRollComponent::~PianoRollComponent()
 
 juce::Rectangle<int> PianoRollComponent::gridArea() const
 {
-    return getLocalBounds().withTrimmedLeft (keyboardWidth).withTrimmedTop (timelineHeight)
-        .withTrimmedRight (scrollBarSize).withTrimmedBottom (scrollBarSize);
+    return getLocalBounds().withTrimmedLeft (keyboardWidth).withTrimmedTop (headerHeight)
+        .withTrimmedRight (scrollBarSize).withTrimmedBottom (scrollBarSize + velocityHeight);
+}
+
+juce::Rectangle<int> PianoRollComponent::velocityArea() const
+{
+    const auto grid = gridArea();
+    return { grid.getX(), grid.getBottom(), grid.getWidth(), velocityHeight };
 }
 
 double PianoRollComponent::tickToX (double tick) const
@@ -65,20 +110,25 @@ double PianoRollComponent::xToTick (int x) const
 
 int PianoRollComponent::keyToY (int key) const
 {
-    return timelineHeight + (127 - key) * rowHeight - scrollY;
+    return headerHeight + (127 - key) * rowHeight - scrollY;
 }
 
 int PianoRollComponent::yToKey (int y) const
 {
-    return juce::jlimit (0, 127, 127 - (y - timelineHeight + scrollY) / rowHeight);
+    return juce::jlimit (0, 127, 127 - (y - headerHeight + scrollY) / rowHeight);
+}
+
+std::int64_t PianoRollComponent::gridTicks() const
+{
+    const auto index = juce::jlimit (0, (int) std::size (snapOptions) - 1, snapBox.getSelectedItemIndex());
+    const auto ticks = snapOptions[index].ticks;
+    return ticks > 0 ? ticks : (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
 }
 
 std::int64_t PianoRollComponent::snap (double tick, bool enabled) const
 {
-    if (! enabled)
-        return (std::int64_t) std::floor (tick);
-
-    return (std::int64_t) std::floor (tick / ticksPerStep) * ticksPerStep;
+    const auto grid = enabled ? gridTicks() : 1;
+    return (std::int64_t) std::floor (tick / (double) grid) * grid;
 }
 
 std::int64_t PianoRollComponent::viewLengthTicks() const
@@ -103,8 +153,11 @@ void PianoRollComponent::updateScrollBars()
 
 void PianoRollComponent::resized()
 {
+    snapBox.setBounds (keyboardWidth + 4, 3, 130, toolbarHeight - 6);
+    hintLabel.setBounds (snapBox.getRight() + 10, 0, getWidth() - snapBox.getRight() - 14, toolbarHeight);
     hBar.setBounds (keyboardWidth, getHeight() - scrollBarSize, getWidth() - keyboardWidth - scrollBarSize, scrollBarSize);
-    vBar.setBounds (getWidth() - scrollBarSize, timelineHeight, scrollBarSize, getHeight() - timelineHeight - scrollBarSize);
+    vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize,
+                    getHeight() - headerHeight - scrollBarSize - velocityHeight);
     updateScrollBars();
 }
 
@@ -128,6 +181,63 @@ void PianoRollComponent::scrollToNotes()
     repaint();
 }
 
+// --- seleção -----------------------------------------------------------------
+
+bool PianoRollComponent::isSelected (int index) const
+{
+    return std::binary_search (selection.begin(), selection.end(), index);
+}
+
+std::vector<int> PianoRollComponent::channelNotes() const
+{
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto channel = engine.getSelectedChannel();
+    std::vector<int> out;
+
+    for (int i = 0; i < (int) notes.size(); ++i)
+        if (notes[(std::size_t) i].channel == channel)
+            out.push_back (i);
+
+    return out;
+}
+
+std::vector<int> PianoRollComponent::selectionOrAll() const
+{
+    return selection.empty() ? channelNotes() : selection;
+}
+
+void PianoRollComponent::setSelection (std::vector<int> indices)
+{
+    std::sort (indices.begin(), indices.end());
+    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
+    selection = std::move (indices);
+    repaint();
+}
+
+void PianoRollComponent::selectAll()
+{
+    setSelection (channelNotes());
+}
+
+void PianoRollComponent::editNotes (const std::function<void (Pattern&)>& edit)
+{
+    engine.editSong ([&edit] (Song& s) { edit (currentPattern (s)); });
+    knownNoteCount = currentPattern (engine.getSong()).notes.size();
+}
+
+void PianoRollComponent::sortNotes()
+{
+    auto tracked = selection;
+    tracked.push_back (dragNote);
+    // só reordena: não precisa de passo próprio no desfazer
+    engine.editSong ([&tracked] (Song& s) { noteedit::sortTracking (currentPattern (s), tracked); }, false);
+    dragNote = tracked.back();
+    tracked.pop_back();
+    setSelection (tracked);
+}
+
+// --- pintura -------------------------------------------------------------------
+
 void PianoRollComponent::paint (juce::Graphics& g)
 {
     const auto& song = engine.getSong();
@@ -136,8 +246,26 @@ void PianoRollComponent::paint (juce::Graphics& g)
     const auto grid = gridArea();
     const auto patternLength = pattern.effectiveLength (song.beatsPerBar);
     const auto bar = (std::int64_t) ppq * song.beatsPerBar;
+    const auto snapGrid = gridTicks();
 
     g.fillAll (theme::window);
+    g.setColour (theme::toolbar);
+    g.fillRect (0, 0, getWidth(), toolbarHeight);
+
+    auto drawVerticalGrid = [&] (juce::Rectangle<int> area) {
+        // linhas da grade: compasso > tempo > snap (se não ficar denso demais)
+        const auto step = snapGrid * pixelsPerTick >= 6.0 ? snapGrid : (std::int64_t) ppq;
+        const auto first = (std::int64_t) std::floor (scrollTicks / (double) step);
+        const auto last = (std::int64_t) std::ceil (xToTick (area.getRight()) / (double) step);
+
+        for (auto i = first; i <= last; ++i)
+        {
+            const auto tick = i * step;
+            const auto x = (float) tickToX ((double) tick);
+            g.setColour (tick % bar == 0 ? juce::Colour (0xff15181b) : tick % ppq == 0 ? juce::Colour (0xff22272c) : juce::Colour (0xff2a2f35));
+            g.drawVerticalLine ((int) x, (float) area.getY(), (float) area.getBottom());
+        }
+    };
 
     // --- grade -----------------------------------------------------------
     {
@@ -161,16 +289,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             }
         }
 
-        const auto firstStep = (std::int64_t) std::floor (scrollTicks / ticksPerStep);
-        const auto lastStep = (std::int64_t) std::ceil (xToTick (grid.getRight()) / ticksPerStep);
-
-        for (auto step = firstStep; step <= lastStep; ++step)
-        {
-            const auto tick = step * ticksPerStep;
-            const auto x = (float) tickToX ((double) tick);
-            g.setColour (tick % bar == 0 ? juce::Colour (0xff15181b) : tick % ppq == 0 ? juce::Colour (0xff22272c) : juce::Colour (0xff2a2f35));
-            g.drawVerticalLine ((int) x, (float) grid.getY(), (float) grid.getBottom());
-        }
+        drawVerticalGrid (grid);
 
         // fora da pattern fica escurecido
         const auto endX = (float) tickToX ((double) patternLength);
@@ -189,17 +308,20 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.fillRoundedRectangle (r, 2.0f);
         }
 
-        for (const auto& n : pattern.notes)
+        for (int i = 0; i < (int) pattern.notes.size(); ++i)
         {
+            const auto& n = pattern.notes[(std::size_t) i];
+
             if (n.channel != channel)
                 continue;
 
+            const auto selected = isSelected (i);
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
                                                    juce::jmax (4.0f, (float) (n.length * pixelsPerTick) - 1.0f), (float) rowHeight - 2);
-            g.setColour (theme::noteColour (n.velocity));
+            g.setColour (selected ? juce::Colour (0xffff6f6f) : theme::noteColour (n.velocity));
             g.fillRoundedRectangle (r, 2.5f);
-            g.setColour (juce::Colours::black.withAlpha (0.5f));
-            g.drawRoundedRectangle (r, 2.5f, 1.0f);
+            g.setColour (selected ? juce::Colours::white : juce::Colours::black.withAlpha (0.5f));
+            g.drawRoundedRectangle (r, 2.5f, selected ? 1.5f : 1.0f);
 
             if (r.getWidth() > 30)
             {
@@ -209,6 +331,14 @@ void PianoRollComponent::paint (juce::Graphics& g)
             }
         }
 
+        if (! rubberBand.isEmpty())
+        {
+            g.setColour (theme::accentBlue.withAlpha (0.15f));
+            g.fillRect (rubberBand);
+            g.setColour (theme::accentBlue);
+            g.drawRect (rubberBand);
+        }
+
         if (playheadTick >= 0.0)
         {
             g.setColour (theme::playhead);
@@ -216,10 +346,39 @@ void PianoRollComponent::paint (juce::Graphics& g)
         }
     }
 
+    // --- faixa de velocity -------------------------------------------------
+    {
+        const auto lane = velocityArea();
+        g.setColour (juce::Colour (0xff23272c));
+        g.fillRect (lane);
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (lane);
+        drawVerticalGrid (lane);
+        g.setColour (juce::Colour (0xff15181b));
+        g.drawHorizontalLine (lane.getY(), (float) lane.getX(), (float) lane.getRight());
+
+        const auto usable = (float) lane.getHeight() - 8.0f;
+
+        for (int i = 0; i < (int) pattern.notes.size(); ++i)
+        {
+            const auto& n = pattern.notes[(std::size_t) i];
+
+            if (n.channel != channel)
+                continue;
+
+            const auto x = (float) tickToX ((double) n.start);
+            const auto top = (float) lane.getBottom() - 2.0f - usable * n.velocity;
+            const auto colour = isSelected (i) ? juce::Colour (0xffff6f6f) : theme::noteColour (n.velocity);
+            g.setColour (colour.withAlpha (0.8f));
+            g.fillRect (juce::Rectangle<float> (x, top, 2.0f, (float) lane.getBottom() - top));
+            g.fillEllipse (x - 3.0f, top - 3.0f, 7.0f, 7.0f);
+        }
+    }
+
     // --- régua de tempo ----------------------------------------------------
     {
-        const auto ruler = juce::Rectangle<int> (keyboardWidth, 0, grid.getWidth(), timelineHeight);
-        g.setColour (theme::toolbar);
+        const auto ruler = juce::Rectangle<int> (keyboardWidth, toolbarHeight, grid.getWidth(), timelineHeight);
+        g.setColour (theme::toolbar.darker (0.15f));
         g.fillRect (ruler);
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (ruler);
@@ -232,15 +391,15 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto x = (int) tickToX ((double) (b * bar));
             g.setColour (theme::text.withAlpha (0.7f));
-            g.drawVerticalLine (x, 10.0f, (float) timelineHeight);
-            g.drawText (juce::String (b + 1), x + 3, 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
+            g.drawVerticalLine (x, (float) toolbarHeight + 10.0f, (float) headerHeight);
+            g.drawText (juce::String (b + 1), x + 3, toolbarHeight + 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
         }
 
         if (playheadTick >= 0.0)
         {
             const auto x = (float) tickToX (playheadTick);
             juce::Path tri;
-            tri.addTriangle (x - 5, 0, x + 5, 0, x, 8);
+            tri.addTriangle (x - 5, (float) toolbarHeight, x + 5, (float) toolbarHeight, x, (float) toolbarHeight + 8);
             g.setColour (theme::playhead);
             g.fillPath (tri);
         }
@@ -248,7 +407,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
     // --- teclado -------------------------------------------------------------
     {
-        const auto keys = juce::Rectangle<int> (0, timelineHeight, keyboardWidth, grid.getHeight());
+        const auto keys = juce::Rectangle<int> (0, headerHeight, keyboardWidth, grid.getHeight());
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (keys);
         g.setFont (juce::FontOptions (10.0f));
@@ -275,18 +434,30 @@ void PianoRollComponent::paint (juce::Graphics& g)
         }
     }
 
+    // rótulo da faixa de velocity
+    {
+        const auto lane = velocityArea();
+        g.setColour (theme::toolbar);
+        g.fillRect (0, lane.getY(), keyboardWidth, lane.getHeight());
+        g.setColour (theme::text.withAlpha (0.6f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText ("Velocity", 4, lane.getY() + 4, keyboardWidth - 8, 16, juce::Justification::centredLeft);
+    }
+
     // canto superior esquerdo: nome do canal
     g.setColour (theme::toolbar);
-    g.fillRect (0, 0, keyboardWidth, timelineHeight);
+    g.fillRect (0, 0, keyboardWidth, headerHeight);
 
     if (channel < (int) song.channels.size())
     {
         g.setColour (theme::accentOrange);
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()), 4, 0, keyboardWidth - 6,
-                    timelineHeight, juce::Justification::centredLeft, true);
+        g.drawFittedText (juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()), 4, 0, keyboardWidth - 6,
+                          headerHeight, juce::Justification::centredLeft, 2);
     }
 }
+
+// --- mouse -------------------------------------------------------------------
 
 int PianoRollComponent::noteAt (int x, int y, bool& onRightEdge) const
 {
@@ -320,7 +491,7 @@ void PianoRollComponent::previewOn (int key, float velocity)
     previewOff();
     previewKey = key;
     engine.sendLiveNote (engine.getSelectedChannel(), key, velocity, true);
-    repaint (0, timelineHeight, keyboardWidth, getHeight());
+    repaint (0, headerHeight, keyboardWidth, getHeight());
 }
 
 void PianoRollComponent::previewOff()
@@ -329,8 +500,31 @@ void PianoRollComponent::previewOff()
     {
         engine.sendLiveNote (engine.getSelectedChannel(), previewKey, 0.0f, false);
         previewKey = -1;
-        repaint (0, timelineHeight, keyboardWidth, getHeight());
+        repaint (0, headerHeight, keyboardWidth, getHeight());
     }
+}
+
+void PianoRollComponent::applyVelocity (int fromX, int toX, int y)
+{
+    const auto lane = velocityArea();
+    const auto velocity = juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - y) / (float) (lane.getHeight() - 8));
+    const auto lo = juce::jmin (fromX, toX) - 3, hi = juce::jmax (fromX, toX) + 3;
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    std::vector<int> hits;
+
+    for (auto i : selectionOrAll())
+    {
+        const auto x = (int) tickToX ((double) notes[(std::size_t) i].start);
+
+        if (x >= lo && x <= hi && notes[(std::size_t) i].velocity != velocity)
+            hits.push_back (i);
+    }
+
+    if (! hits.empty())
+        editNotes ([&hits, velocity] (Pattern& p) {
+            for (auto i : hits)
+                p.notes[(std::size_t) i].velocity = velocity;
+        });
 }
 
 void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
@@ -338,10 +532,18 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     if (engine.getSong().channels.empty())
         return;
 
-    if (e.x < keyboardWidth && e.y >= timelineHeight)
+    if (e.x < keyboardWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
         drag = Drag::keyboard;
         previewOn (yToKey (e.y), 0.8f);
+        return;
+    }
+
+    if (velocityArea().contains (e.getPosition()))
+    {
+        drag = Drag::velocity;
+        lastVelocityX = e.x;
+        applyVelocity (e.x, e.x, e.y);
         return;
     }
 
@@ -354,12 +556,35 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isRightButtonDown())
     {
         drag = Drag::erase;
+        setSelection ({}); // os índices mudam enquanto apaga
 
         if (hit >= 0)
-            engine.editSong ([hit] (Song& s) {
-                auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
-                notes.erase (notes.begin() + hit);
-            });
+        {
+            editNotes ([hit] (Pattern& p) { noteedit::remove (p, { hit }); });
+        }
+        return;
+    }
+
+    // Ctrl+arrastar (ou Shift no vazio): retângulo de seleção
+    if (e.mods.isCtrlDown() || (e.mods.isShiftDown() && hit < 0))
+    {
+        drag = Drag::select;
+        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
+        rubberBand = { e.x, e.y, 0, 0 };
+        setSelection (selectionBefore);
+        return;
+    }
+
+    if (hit >= 0 && e.mods.isShiftDown())
+    {
+        auto s = selection;
+
+        if (isSelected (hit))
+            s.erase (std::find (s.begin(), s.end(), hit));
+        else
+            s.push_back (hit);
+
+        setSelection (s);
         return;
     }
 
@@ -367,8 +592,18 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
     if (hit >= 0)
     {
-        const auto& n = currentPattern (engine.getSong()).notes[(std::size_t) hit];
+        if (! isSelected (hit))
+            setSelection ({});
+
+        const auto& notes = currentPattern (engine.getSong()).notes;
+        const auto& n = notes[(std::size_t) hit];
         dragNote = hit;
+        dragIndices = selection.empty() ? std::vector<int> { hit } : selection;
+        dragOriginals.clear();
+
+        for (auto i : dragIndices)
+            dragOriginals.push_back (notes[(std::size_t) i]);
+
         drag = rightEdge ? Drag::resize : Drag::move;
         grabOffset = n.start - snap (xToTick (e.x), snapOn);
         lastLength = n.length;
@@ -377,14 +612,17 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     }
 
     // nota nova
+    setSelection ({});
     Note n;
     n.start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
     n.length = lastLength;
     n.key = yToKey (e.y);
     n.channel = engine.getSelectedChannel();
 
-    engine.editSong ([n] (Song& s) { s.patterns[(std::size_t) s.currentPattern].notes.push_back (n); });
+    editNotes ([n] (Pattern& p) { p.notes.push_back (n); });
     dragNote = (int) currentPattern (engine.getSong()).notes.size() - 1;
+    dragIndices = { dragNote };
+    dragOriginals = { n };
     drag = Drag::move;
     grabOffset = 0;
     previewOn (n.key, n.velocity);
@@ -407,55 +645,82 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             return;
         }
 
+        case Drag::velocity:
+            applyVelocity (lastVelocityX, e.x, e.y);
+            lastVelocityX = e.x;
+            return;
+
+        case Drag::select:
+        {
+            rubberBand = juce::Rectangle<int> (e.getMouseDownPosition(), e.getPosition()).getIntersection (gridArea());
+            const auto t0 = xToTick (rubberBand.getX()), t1 = xToTick (rubberBand.getRight());
+            const auto kTop = yToKey (rubberBand.getY()), kBottom = yToKey (rubberBand.getBottom());
+            const auto& notes = currentPattern (engine.getSong()).notes;
+            auto s = selectionBefore;
+
+            for (auto i : channelNotes())
+            {
+                const auto& n = notes[(std::size_t) i];
+
+                if ((double) (n.start + n.length) > t0 && (double) n.start < t1 && n.key <= kTop && n.key >= kBottom)
+                    s.push_back (i);
+            }
+
+            setSelection (s);
+            return;
+        }
+
         case Drag::erase:
         {
             bool edge = false;
             const auto hit = noteAt (e.x, e.y, edge);
 
             if (hit >= 0)
-                engine.editSong ([hit] (Song& s) {
-                    auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
-                    notes.erase (notes.begin() + hit);
-                });
+                editNotes ([hit] (Pattern& p) { noteedit::remove (p, { hit }); });
             return;
         }
 
         case Drag::move:
         {
-            const auto start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset);
-            const auto key = yToKey (e.y);
-            const auto index = dragNote;
-            const auto& current = currentPattern (engine.getSong()).notes[(std::size_t) index];
+            const auto& grabbed = dragOriginals[(std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragNote) - dragIndices.begin())];
+            auto deltaTicks = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset) - grabbed.start;
+            auto deltaKeys = yToKey (e.y) - grabbed.key;
+            const auto& current = currentPattern (engine.getSong()).notes[(std::size_t) dragNote];
 
-            if (current.start == start && current.key == key)
+            if (current.start == grabbed.start + deltaTicks && current.key == grabbed.key + deltaKeys)
                 return;
 
-            if (current.key != key)
-                previewOn (key, current.velocity);
+            const auto oldKey = current.key;
 
-            // sem reordenar durante o arraste, para o índice continuar válido
-            engine.editSong ([index, start, key] (Song& s) {
-                auto& n = s.patterns[(std::size_t) s.currentPattern].notes[(std::size_t) index];
-                n.start = start;
-                n.key = key;
+            // a partir das posições originais: o grupo mantém a forma mesmo batendo nos limites
+            editNotes ([this, &deltaTicks, &deltaKeys] (Pattern& p) {
+                for (std::size_t j = 0; j < dragIndices.size(); ++j)
+                    p.notes[(std::size_t) dragIndices[j]] = dragOriginals[j];
+
+                noteedit::move (p, dragIndices, deltaTicks, deltaKeys);
             });
+
+            const auto& moved = currentPattern (engine.getSong()).notes[(std::size_t) dragNote];
+
+            if (moved.key != oldKey)
+                previewOn (moved.key, moved.velocity);
             return;
         }
 
         case Drag::resize:
         {
-            const auto index = dragNote;
-            const auto& current = currentPattern (engine.getSong()).notes[(std::size_t) index];
-            const auto minimum = snapOn ? (std::int64_t) ticksPerStep : (std::int64_t) 10;
-            auto end = snapOn ? snap (xToTick (e.x) + ticksPerStep / 2.0, true) : (std::int64_t) xToTick (e.x);
-            const auto length = juce::jmax (minimum, end - current.start);
+            const auto& grabbed = dragOriginals[(std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragNote) - dragIndices.begin())];
+            const auto minimum = snapOn ? gridTicks() : (std::int64_t) 10;
+            const auto end = snapOn ? snap (xToTick (e.x) + (double) gridTicks() / 2.0, true) : (std::int64_t) xToTick (e.x);
+            const auto delta = juce::jmax (minimum, end - grabbed.start) - grabbed.length;
 
-            if (length == current.length)
+            if (currentPattern (engine.getSong()).notes[(std::size_t) dragNote].length == grabbed.length + delta)
                 return;
 
-            lastLength = length;
-            engine.editSong ([index, length] (Song& s) {
-                s.patterns[(std::size_t) s.currentPattern].notes[(std::size_t) index].length = length;
+            lastLength = grabbed.length + delta;
+            editNotes ([this, delta, minimum] (Pattern& p) {
+                for (std::size_t j = 0; j < dragIndices.size(); ++j)
+                    p.notes[(std::size_t) dragIndices[j]].length = juce::jmax (minimum, dragOriginals[j].length + delta);
             });
             return;
         }
@@ -465,11 +730,15 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
 void PianoRollComponent::mouseUp (const juce::MouseEvent&)
 {
     if (drag == Drag::move || drag == Drag::resize)
-        engine.editSong ([] (Song& s) { s.patterns[(std::size_t) s.currentPattern].sortNotes(); });
+        sortNotes();
 
     previewOff();
     drag = Drag::none;
     dragNote = -1;
+    dragIndices.clear();
+    dragOriginals.clear();
+    rubberBand = {};
+    repaint();
 }
 
 void PianoRollComponent::mouseMove (const juce::MouseEvent& e)
@@ -477,7 +746,8 @@ void PianoRollComponent::mouseMove (const juce::MouseEvent& e)
     bool rightEdge = false;
     const auto hit = gridArea().contains (e.getPosition()) ? noteAt (e.x, e.y, rightEdge) : -1;
     setMouseCursor (hit >= 0 ? (rightEdge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::DraggingHandCursor)
-                             : juce::MouseCursor::NormalCursor);
+                             : velocityArea().contains (e.getPosition()) ? juce::MouseCursor::CrosshairCursor
+                                                                         : juce::MouseCursor::NormalCursor);
 }
 
 void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -498,6 +768,160 @@ void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::
     repaint();
 }
 
+// --- teclado -----------------------------------------------------------------
+
+void PianoRollComponent::deleteSelection()
+{
+    if (selection.empty())
+        return;
+
+    const auto doomed = selection;
+    setSelection ({});
+    editNotes ([&doomed] (Pattern& p) { noteedit::remove (p, doomed); });
+}
+
+void PianoRollComponent::copySelection()
+{
+    clipboard = noteedit::copy (currentPattern (engine.getSong()), selectionOrAll());
+}
+
+void PianoRollComponent::paste()
+{
+    if (clipboard.empty())
+        return;
+
+    // como no FL: cola na mesma posição, já selecionado para arrastar
+    std::vector<int> added;
+    const auto channel = engine.getSelectedChannel();
+    editNotes ([&added, channel] (Pattern& p) { added = noteedit::paste (p, clipboard, 0, channel); });
+    setSelection (added);
+    sortNotes();
+}
+
+void PianoRollComponent::duplicateSelection()
+{
+    const auto source = selectionOrAll();
+
+    if (source.empty())
+        return;
+
+    std::vector<int> added;
+    const auto grid = gridTicks();
+    editNotes ([&added, &source, grid] (Pattern& p) { added = noteedit::duplicate (p, source, grid); });
+    setSelection (added);
+    sortNotes();
+}
+
+void PianoRollComponent::quantizeSelection()
+{
+    const auto target = selectionOrAll();
+    const auto grid = gridTicks();
+
+    if (! target.empty())
+    {
+        editNotes ([&target, grid] (Pattern& p) { noteedit::quantize (p, target, grid); });
+        sortNotes();
+    }
+}
+
+void PianoRollComponent::nudge (std::int64_t ticks, int keys)
+{
+    if (selection.empty())
+        return;
+
+    editNotes ([this, &ticks, &keys] (Pattern& p) { noteedit::move (p, selection, ticks, keys); });
+
+    if (keys != 0 && selection.size() == 1)
+    {
+        const auto& n = currentPattern (engine.getSong()).notes[(std::size_t) selection[0]];
+        previewOn (n.key, n.velocity);
+        juce::Timer::callAfterDelay (150, [safe = juce::Component::SafePointer<PianoRollComponent> (this)] {
+            if (safe != nullptr)
+                safe->previewOff();
+        });
+    }
+
+    sortNotes();
+}
+
+bool PianoRollComponent::handleKey (const juce::KeyPress& key)
+{
+    const auto mods = key.getModifiers();
+    const auto cmd = mods.isCommandDown();
+    const auto code = key.getKeyCode();
+
+    if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey)
+    {
+        deleteSelection();
+        return true;
+    }
+
+    if (code == juce::KeyPress::escapeKey)
+    {
+        setSelection ({});
+        return true;
+    }
+
+    if (cmd && code == 'A')
+    {
+        selectAll();
+        return true;
+    }
+
+    if (cmd && code == 'C')
+    {
+        copySelection();
+        return true;
+    }
+
+    if (cmd && code == 'X')
+    {
+        copySelection();
+        deleteSelection();
+        return true;
+    }
+
+    if (cmd && code == 'V')
+    {
+        paste();
+        return true;
+    }
+
+    if (cmd && code == 'B')
+    {
+        duplicateSelection();
+        return true;
+    }
+
+    if (cmd && code == 'Q')
+    {
+        quantizeSelection();
+        return true;
+    }
+
+    if (! cmd && ! selection.empty())
+    {
+        const auto bar = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+
+        if (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey)
+        {
+            nudge (0, (code == juce::KeyPress::upKey ? 1 : -1) * (mods.isShiftDown() ? 12 : 1));
+            return true;
+        }
+
+        if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey)
+        {
+            const auto amount = mods.isShiftDown() ? bar : gridTicks();
+            nudge ((code == juce::KeyPress::rightKey ? 1 : -1) * amount, 0);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// --- outros ------------------------------------------------------------------
+
 void PianoRollComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
 {
     if (bar == &hBar)
@@ -510,6 +934,20 @@ void PianoRollComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
 
 void PianoRollComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    // trocou de pattern/canal ou a pattern mudou por fora (desfazer, outra janela): a seleção perde o sentido
+    const auto& song = engine.getSong();
+    const auto count = currentPattern (song).notes.size();
+
+    if (song.currentPattern != knownPattern || engine.getSelectedChannel() != knownChannel || count != knownNoteCount)
+    {
+        knownPattern = song.currentPattern;
+        knownChannel = engine.getSelectedChannel();
+        knownNoteCount = count;
+
+        if (drag == Drag::none)
+            selection.clear();
+    }
+
     updateScrollBars();
     repaint();
 }
