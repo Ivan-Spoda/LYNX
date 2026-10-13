@@ -698,6 +698,23 @@ public:
         knob (fmDecay, 0.0, 5.0, 0.001, " s");
         fmDecay.setSkewFactorFromMidPoint (0.5);
         fmDecay.setTooltip (utf8 ("Tempo para o índice de FM cair (0 = constante); o brilho some como num piano elétrico"));
+        knob (keyTrack, -1.0, 2.0, 0.01, "");
+        keyTrack.setTooltip (utf8 ("O corte acompanha a nota: oitavas de corte por oitava de nota, a partir do C3 (130,8 Hz)"));
+        knob (sweep, 0.0, 100.0, 0.01, "");
+        sweep.setSkewFactorFromMidPoint (2.0);
+        sweep.setTooltip (utf8 ("Varredura de bumbo: a nota começa (1 + valor) vezes mais aguda e desce"));
+        knob (sweepTime, 0.001, 2.0, 0.001, " s");
+        sweepTime.setSkewFactorFromMidPoint (0.1);
+        sweepTime.setTooltip (utf8 ("Constante de tempo da varredura"));
+        for (auto* b : { &bandLow, &bandMid, &bandHigh })
+        {
+            knob (*b, 0.0, 2.0, 0.01, "");
+            b->setTooltip (utf8 ("Tonalidade de 3 bandas depois do filtro (graves < 178 Hz < médios < 1,18 kHz < agudos); 1 = sem mudança"));
+        }
+        ring.setButtonText ("Anel");
+        ring.setTooltip (utf8 ("Com AM ligado: modulação em anel, (osc 1 + 2) × (1 − nível + osc 3), como o RM do Sytrus"));
+        ring.onClick = [this] { apply(); };
+        addAndMakeVisible (ring);
 
         modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
         modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
@@ -707,7 +724,8 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta", "FM", "Decaim. FM" };
+        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta", "FM", "Decaim. FM",
+                                "Keytrack", "Varredura", "Tempo varr.", "Graves", "Médios", "Agudos" };
 
         for (int i = 0; i < (int) labels.size(); ++i)
         {
@@ -762,7 +780,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (720, 410);
+        setSize (720, 510);
     }
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
@@ -775,7 +793,8 @@ public:
         auto topRow = area.removeFromTop (24);
         presetBox.setBounds (topRow.removeFromLeft (200));
         mono.setBounds (topRow.removeFromLeft (90).withTrimmedLeft (16));
-        am.setBounds (topRow.removeFromLeft (60));
+        am.setBounds (topRow.removeFromLeft (52));
+        ring.setBounds (topRow.removeFromLeft (60));
         flPresets.setBounds (topRow.removeFromLeft (130).reduced (4, 0));
         portaOn.setBounds (topRow.removeFromLeft (70));
         filterTypeBox.setBounds (topRow.removeFromRight (140));
@@ -799,12 +818,20 @@ public:
         auto names = area.removeFromTop (16);
         const auto w = area.getWidth() / 9;
 
-        for (int i = oscKnobs; i < (int) labels.size(); ++i)
+        for (int i = oscKnobs; i < oscKnobs + 9; ++i)
             labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
 
         auto knobsRow = area.removeFromTop (80);
         for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &porta, &fm, &fmDecay })
             s->setBounds (knobsRow.removeFromLeft (w));
+
+        area.removeFromTop (6);
+        auto names2 = area.removeFromTop (16);
+        for (int i = oscKnobs + 9; i < (int) labels.size(); ++i)
+            labels[(std::size_t) i].setBounds (names2.removeFromLeft (w));
+        auto knobsRow2 = area.removeFromTop (80);
+        for (auto* s : { &keyTrack, &sweep, &sweepTime, &bandLow, &bandMid, &bandHigh })
+            s->setBounds (knobsRow2.removeFromLeft (w));
 
         area.removeFromTop (12);
         modulationButton.setBounds (area.removeFromTop (26).withSizeKeepingCentre (260, 26));
@@ -955,6 +982,13 @@ private:
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
         fm.setValue (s.fm, juce::dontSendNotification);
         fmDecay.setValue (s.fmDecay, juce::dontSendNotification);
+        keyTrack.setValue (s.keyTrack, juce::dontSendNotification);
+        sweep.setValue (s.sweep, juce::dontSendNotification);
+        sweepTime.setValue (s.sweepTime, juce::dontSendNotification);
+        bandLow.setValue (s.bandGain[0], juce::dontSendNotification);
+        bandMid.setValue (s.bandGain[1], juce::dontSendNotification);
+        bandHigh.setValue (s.bandGain[2], juce::dontSendNotification);
+        ring.setToggleState (s.ring, juce::dontSendNotification);
 
         updating = false;
 
@@ -989,6 +1023,11 @@ private:
         s.fmDecay = (float) fmDecay.getValue();
         if (s.fmDecay <= 0.0f)
             s.fmSustain = 1.0f;
+        s.keyTrack = (float) keyTrack.getValue();
+        s.sweep = (float) sweep.getValue();
+        s.sweepTime = (float) sweepTime.getValue();
+        s.bandGain = { (float) bandLow.getValue(), (float) bandMid.getValue(), (float) bandHigh.getValue() };
+        s.ring = ring.getToggleState();
 
         if (s == current()->synth)
             return;
@@ -1015,8 +1054,9 @@ private:
     int channel;
     bool updating = false;
     std::array<Row, 3> rows;
-    juce::Slider attack, decay, sustain, release, cutoff, resonance, fm, fmDecay;
-    std::array<juce::Label, 14> labels;
+    juce::Slider attack, decay, sustain, release, cutoff, resonance, fm, fmDecay, keyTrack, sweep, sweepTime, bandLow, bandMid, bandHigh;
+    juce::ToggleButton ring;
+    std::array<juce::Label, 20> labels;
     juce::ComboBox presetBox;
 };
 
