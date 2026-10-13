@@ -143,6 +143,16 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
         s.osc[1] = osc3; // o osc 3 do GMS (se audível) toma o lugar livre
         s.osc[2] = modulator;
     }
+    else if (m > 0.0 && modKind == 1 && level[2] < 0.05) // FM/PM: o osc 2 do GMS vira o modulador (osc 3 do LYNX)
+    {
+        auto modulator = s.osc[1];
+        modulator.level = 1.0f;
+        modulator.pan = 0.0f;
+        s.fm = (float) std::min (8.0, 3.75 * m); // fase do osc 1 recebe osc2·15·m quartos de ciclo
+        s.osc[2] = modulator;
+        if (level[1] < 0.05) // o osc 2 do GMS só modulava
+            s.osc[1].level = 0.0f;
+    }
     else if (m > 0.0 && modKind == 0) // hard sync: um osc1 mais agudo e rico
     {
         s.osc[0].wave = Waveform::saw;
@@ -152,7 +162,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
     // ruído num slot vazio
     if (n > 0.05)
         for (auto& o : s.osc)
-            if (o.level < 0.05f && ! (s.am && &o == &s.osc[2]))
+            if (o.level < 0.05f && ! ((s.am || s.fm > 0.0f) && &o == &s.osc[2]))
             {
                 o = { Waveform::noise, 0, 0.0f, (float) std::min (1.0, n) };
                 break;
@@ -166,7 +176,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
         const auto compensation = 1.0 / (1.0 + 0.15 * (voices - 1));
         int sign = 1;
         for (std::size_t k = 1; k < 3; ++k)
-            if (s.osc[k].level < 0.05f && ! (s.am && k == 2))
+            if (s.osc[k].level < 0.05f && ! ((s.am || s.fm > 0.0f) && k == 2))
             {
                 s.osc[k] = s.osc[0];
                 s.osc[k].detune = (float) std::clamp (s.osc[0].detune + sign * spread, -100.0, 100.0);
@@ -174,7 +184,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
                 sign = -sign;
             }
         for (std::size_t k = 0; k < 3; ++k)
-            if (! (s.am && k == 2))
+            if (! ((s.am || s.fm > 0.0f) && k == 2))
                 s.osc[k].level = (float) std::clamp (s.osc[k].level * compensation * 1.5, 0.0, 1.0);
     }
 

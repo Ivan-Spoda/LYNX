@@ -662,8 +662,27 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         break;
     }
 
+    // FM forte numa portadora só: FM de verdade (o modulador no osc 3, índice ≈ 4·g ciclos, com o
+    // envelope de volume do modulador fazendo o índice cair)
+    if (fmIndex >= 0.15 && fmModulator >= 0 && carriers.size() == 1 && ! out.am)
+    {
+        const auto& modOp = s.units[(std::size_t) fmModulator];
+        out.osc[0].wave = waveOf (main);
+        out.osc[2] = { waveOf (modOp), 0, 0.0f, 1.0f };
+        setPitch (out.osc[2], opSemitones (modOp) + masterPitch);
+        out.fm = (float) std::min (8.0, 4.0 * fmIndex);
+        if (const auto& modVol = modOp.art[1]; modVol.env.on)
+        {
+            const auto adsr = adsrOf (modVol.env, modVol.knobs, timeScale (modVol.env));
+            if (adsr.s < 0.98)
+            {
+                out.fmDecay = (float) std::clamp (adsr.d * 2.0, 0.01, 20.0); // (o decay do LYNX é até −60 dB)
+                out.fmSustain = (float) adsr.s;
+            }
+        }
+    }
     // FM forte sem filtro do Sytrus: o índice que cai vira um passa-baixas com envelope
-    if (fmIndex >= 0.15 && fmModulator >= 0 && (! hasFilter || (out.filterType == 0 && out.filterEnv.amount == 0.0f)))
+    else if (fmIndex >= 0.15 && fmModulator >= 0 && (! hasFilter || (out.filterType == 0 && out.filterEnv.amount == 0.0f)))
     {
         const auto octaves = std::min (6.0, 4.0 * fmIndex);
         const auto& modVol = s.units[(std::size_t) fmModulator].art[1];
@@ -723,7 +742,19 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
 
     // 10. uníssono: só 1 portadora -> três cópias desafinadas e abertas
     const auto unison = std::clamp (s.main[173], 1, 9);
-    if (unison >= 2 && carriers.size() == 1 && ! out.am)
+    if (unison >= 2 && carriers.size() == 1 && ! out.am && out.fm > 0.0f) // o osc 3 é o modulador: só uma cópia
+    {
+        const auto pv = std::clamp (s.main[176], 0, 256) / 256.0;
+        const auto spread = std::max (5.0, s.altUnisonPitch ? (std::pow (41.0, pv) - 1.0) * 1.875 : (std::pow (11.0, pv) - 1.0) * 5.0);
+        const auto pan = (float) (std::clamp (s.main[174], 0, 128) / 128.0);
+        out.osc[1] = out.osc[0];
+        out.osc[0].level = out.osc[1].level = std::min (1.0f, out.osc[0].level * 0.75f);
+        out.osc[1].detune = (float) std::clamp (out.osc[0].detune + spread, -100.0, 100.0);
+        out.osc[0].detune = (float) std::clamp (out.osc[0].detune - spread, -100.0, 100.0);
+        out.osc[0].pan = std::clamp (out.osc[0].pan - pan, -1.0f, 1.0f);
+        out.osc[1].pan = std::clamp (out.osc[1].pan + pan, -1.0f, 1.0f);
+    }
+    else if (unison >= 2 && carriers.size() == 1 && ! out.am)
     {
         const auto pv = std::clamp (s.main[176], 0, 256) / 256.0;
         const auto spread = std::max (5.0, s.altUnisonPitch ? (std::pow (41.0, pv) - 1.0) * 1.875 : (std::pow (11.0, pv) - 1.0) * 5.0);

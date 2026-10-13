@@ -173,6 +173,9 @@ struct SynthSettings
     bool porta = false;       // portamento: a nota nova desliza a partir da anterior
     float portaBeats = 0.125f; // tempo do deslize, em tempos (o padrão do FL: meio step)
     bool am = false;         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
+    float fm = 0.0f;         // índice de FM: o osc 3 (calado) desloca a fase de osc 1 + 2 em fm·saída ciclos; 0 = desligado
+    float fmDecay = 0.0f;    // segundos para o índice cair até fmSustain (0 = índice constante)
+    float fmSustain = 1.0f;  // fração do índice que fica depois do decay
 
     bool operator== (const SynthSettings&) const = default;
 };

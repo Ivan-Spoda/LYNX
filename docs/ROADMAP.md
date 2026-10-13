@@ -88,6 +88,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Notas "porta" (por nota e do canal, synth e sampler)
 - [x] FPC, DirectWave, FL Keys, Fruity Slicer/Slicex como sampler (rodadas 8–9)
 - [x] Harmless, MiniSynth, DX10, Fruit Kick aproximados pelo synth interno (rodada 10)
+- [x] FM no synth interno (osc 3 modula a fase de osc 1 + 2, índice com decaimento)
 - [x] Sytrus (matriz FM/RM, filtros, articuladores) aproximado pelo synth interno (rodada 11)
 - [x] GMS; Ogun/Autogun e Sakura (grosseiros); DrumSynth Live por sample (rodada 12)
 - [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)

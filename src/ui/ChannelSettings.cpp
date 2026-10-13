@@ -594,6 +594,12 @@ public:
         knob (release, 0.0, 5.0, 0.001, " s");
         knob (cutoff, 20.0, 20000.0, 1.0, " Hz");
         knob (resonance, 0.0, 1.0, 0.01, "");
+        knob (fm, 0.0, 8.0, 0.01, "");
+        fm.setSkewFactorFromMidPoint (1.0);
+        fm.setTooltip (utf8 ("FM: o osc 3 (que deixa de soar) modula a fase dos osc 1 e 2; 0 = desligado"));
+        knob (fmDecay, 0.0, 5.0, 0.001, " s");
+        fmDecay.setSkewFactorFromMidPoint (0.5);
+        fmDecay.setTooltip (utf8 ("Tempo para o índice de FM cair (0 = constante); o brilho some como num piano elétrico"));
 
         modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
         modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
@@ -603,7 +609,7 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta" };
+        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta", "FM", "Decaim. FM" };
 
         for (int i = 0; i < (int) labels.size(); ++i)
         {
@@ -693,13 +699,13 @@ public:
 
         area.removeFromTop (10);
         auto names = area.removeFromTop (16);
-        const auto w = area.getWidth() / 7;
+        const auto w = area.getWidth() / 9;
 
         for (int i = oscKnobs; i < (int) labels.size(); ++i)
             labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
 
         auto knobsRow = area.removeFromTop (80);
-        for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &porta })
+        for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &porta, &fm, &fmDecay })
             s->setBounds (knobsRow.removeFromLeft (w));
 
         area.removeFromTop (12);
@@ -848,6 +854,8 @@ private:
         porta.setValue (s.portaBeats, juce::dontSendNotification);
         portaOn.setToggleState (s.porta, juce::dontSendNotification);
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
+        fm.setValue (s.fm, juce::dontSendNotification);
+        fmDecay.setValue (s.fmDecay, juce::dontSendNotification);
 
         updating = false;
 
@@ -878,6 +886,10 @@ private:
         s.portaBeats = (float) porta.getValue();
         s.porta = portaOn.getToggleState();
         s.filterType = juce::jlimit (0, 3, filterTypeBox.getSelectedId() - 1);
+        s.fm = (float) fm.getValue();
+        s.fmDecay = (float) fmDecay.getValue();
+        if (s.fmDecay <= 0.0f)
+            s.fmSustain = 1.0f;
 
         if (s == current()->synth)
             return;
@@ -904,8 +916,8 @@ private:
     int channel;
     bool updating = false;
     std::array<Row, 3> rows;
-    juce::Slider attack, decay, sustain, release, cutoff, resonance;
-    std::array<juce::Label, 12> labels;
+    juce::Slider attack, decay, sustain, release, cutoff, resonance, fm, fmDecay;
+    std::array<juce::Label, 14> labels;
     juce::ComboBox presetBox;
 };
 

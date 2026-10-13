@@ -293,6 +293,8 @@ juce::String toJson (const Song& song)
                 synth->setProperty ("portaTime", c.synth.portaBeats);
             if (c.synth.am)
                 synth->setProperty ("am", true);
+            if (c.synth.fm > 0.0f)
+                synth->setProperty ("fm", juce::Array<juce::var> { c.synth.fm, c.synth.fmDecay, c.synth.fmSustain });
 
             writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
             writeLfos (*synth, c.synth.lfo);
@@ -638,6 +640,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.synth.porta = (bool) s.getProperty ("porta", false);
                 def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
                 def.synth.am = (bool) s.getProperty ("am", false);
+                if (const auto* fm = s.getProperty ("fm", {}).getArray(); fm != nullptr && fm->size() >= 3)
+                {
+                    def.synth.fm = juce::jlimit (0.0f, 16.0f, (float) (double) (*fm)[0]);
+                    def.synth.fmDecay = juce::jlimit (0.0f, 30.0f, (float) (double) (*fm)[1]);
+                    def.synth.fmSustain = juce::jlimit (0.0f, 1.0f, (float) (double) (*fm)[2]);
+                }
 
                 readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
                 readLfos (s, def.synth.lfo);

@@ -320,32 +320,25 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& d, SynthSettings& synth)
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, std::clamp (octave + 1, -3, 3), 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
 
-    // o brilho do FM vira o osc 2: serra (razão 1), quadrada (2), seno no harmônico (inteira) ou desafinado
+    // FM de verdade: o osc 3 é o modulador na razão R; o índice cai de Init até Sustain
     if (index > 0.01)
     {
-        auto& o2 = s.osc[1];
-        const auto level = (float) std::min (1.0, 2.0 * index) * 0.6f;
-        const auto nearest = std::round (r);
-
-        if (std::abs (r - 1.0) < 0.05)
-            o2 = { Waveform::saw, s.osc[0].octave, 0.0f, level };
-        else if (std::abs (r - 2.0) < 0.05)
-            o2 = { Waveform::square, s.osc[0].octave, 0.0f, level };
-        else
+        s.osc[2] = { Waveform::sine, s.osc[0].octave, 0.0f, 1.0f };
+        transpose (s.osc[2], 12.0 * std::log2 (r));
+        s.osc[2].detune = (float) std::clamp ((12.0 * std::log2 (r) - std::round (12.0 * std::log2 (r))) * 100.0, -50.0, 50.0);
+        s.fm = (float) (2.0 * index * index); // índice ∝ p² [HIP na escala]
+        const auto sustain = p (7) * p (7) / std::max (1e-6, index * index);
+        if (sustain < 0.98)
         {
-            o2 = { Waveform::sine, s.osc[0].octave, 0.0f, level * 0.6f };
-            const auto semis = 12.0 * std::log2 (std::abs (r - nearest) < 0.05 ? nearest : r);
-            transpose (o2, semis);
-            if (std::abs (r - nearest) >= 0.05) // razão não inteira: um resto em centésimos
-                o2.detune = (float) std::clamp ((semis - std::round (semis)) * 100.0, -50.0, 50.0);
+            s.fmDecay = (float) std::min (20.0, 6.9 * std::exp (7.0 * p (6) - 6.0)); // τ -> −60 dB
+            s.fmSustain = (float) std::clamp (sustain, 0.0, 1.0);
         }
-        s.osc[0].level = 1.0f - 0.4f * std::min (1.0f, level);
     }
 
     if (const auto thru = 0.25 * p (12) * p (12); thru > 0.01) // o modulador direto na saída
     {
-        s.osc[2] = { Waveform::sine, s.osc[0].octave, 0.0f, (float) std::min (0.5, thru * 2.0) };
-        transpose (s.osc[2], 12.0 * std::log2 (r));
+        s.osc[1] = { Waveform::sine, s.osc[0].octave, 0.0f, (float) std::min (0.5, thru * 2.0) };
+        transpose (s.osc[1], 12.0 * std::log2 (r));
     }
 
     // amplitude
@@ -362,13 +355,7 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& d, SynthSettings& synth)
     }
     s.release = (float) std::min (10.0, 6.9 * std::exp (5.0 * p (2) - 5.0));
 
-    // o índice que decai (init -> sustain) vira um envelope de filtro
-    s.cutoff = 1500.0f;
-    if (index > 0.01)
-        s.filterEnv = { (float) (4.0 * index), 0.0f, 0.0f, (float) std::min (10.0, 4.6 * std::exp (7.0 * p (6) - 6.0)),
-                        (float) std::clamp (p (7) / std::max (0.01, index), 0.0, 1.0), (float) std::min (10.0, 4.6 * std::exp (8.0 * p (8) - 5.0)) };
-    else
-        s.cutoff = 20000.0f;
+    s.cutoff = 20000.0f;
 
     if (p (10) > 0.01) // vibrato
         s.lfo[lfoPitch] = { (float) (0.3 * p (10)), (float) (1.0 / std::max (0.1, 25.0 * p (13) * p (13))), false, 0, 0.0f, 0.0f };

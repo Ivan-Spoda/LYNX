@@ -3320,6 +3320,58 @@ TEST (slide_notes_glide_without_retrigger)
     CHECK (ons == 1 && offs == 1 && slides == 1);
 }
 
+TEST (synth_fm_phase_modulation)
+{
+    auto render = [] (const lynx::SynthSettings& s) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c, 120.0);
+        inst->noteOn (69, 1.0f); // 440 Hz
+        std::vector<float> l (48000), r (48000);
+        inst->render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+        return l;
+    };
+    // energia (Goertzel) na frequência f entre os quadros [from, to)
+    auto energy = [] (const std::vector<float>& x, double f, int from, int to) {
+        const auto w = 2.0 * 3.141592653589793 * f / 48000.0, k = 2.0 * std::cos (w);
+        double s1 = 0.0, s2 = 0.0;
+        for (int i = from; i < to; ++i)
+        {
+            const auto s0 = x[(std::size_t) i] + k * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        return s1 * s1 + s2 * s2 - k * s1 * s2;
+    };
+
+    lynx::SynthSettings plain;
+    plain.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    plain.osc[2] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    plain.cutoff = 20000.0f;
+
+    auto fm = plain;
+    fm.fm = 1.0f;
+    const auto a = render (plain), b = render (fm);
+
+    // sem FM: o osc 3 soma (mesma altura) e não há 2º harmônico; com FM aparecem as bandas laterais
+    CHECK (energy (a, 880.0, 4800, 24000) < 1e-3 * energy (a, 440.0, 4800, 24000));
+    CHECK (energy (b, 880.0, 4800, 24000) > 0.1 * energy (b, 440.0, 4800, 24000));
+    CHECK (energy (b, 1320.0, 4800, 24000) > 0.01 * energy (b, 440.0, 4800, 24000));
+    for (auto v : b)
+        CHECK (std::isfinite (v) && std::abs (v) < 1.0f);
+
+    // índice que decai até 0: o começo é brilhante, o fim volta a ser quase um seno
+    auto decaying = fm;
+    decaying.fmDecay = 0.1f;
+    decaying.fmSustain = 0.0f;
+    const auto c = render (decaying);
+    const auto early = energy (c, 880.0, 0, 2400) / energy (c, 440.0, 0, 2400);
+    const auto late = energy (c, 880.0, 36000, 48000) / energy (c, 440.0, 36000, 48000);
+    CHECK (early > 0.05 && late < 1e-3);
+}
+
 TEST (synth_three_oscillators_adsr_filter)
 {
     auto render = [] (const lynx::SynthSettings& s, int frames, int releaseAt) {

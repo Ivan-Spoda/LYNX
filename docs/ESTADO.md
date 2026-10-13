@@ -75,6 +75,9 @@ Atualizado em 2026-10-13.
   Fast Dist, Fruity Filter, Flangus e Soft Clipper entram com os ajustes salvos.
 - **Sintetizadores simples do FL (REA rodada 10)**: Harmless (160 canais nos demos), MiniSynth, DX10
   e Fruit Kick aproximados pelo synth interno (osciladores/uníssono, envelopes, filtro, LFO, porta).
+- **FM no synth interno**: o osc 3 (calado) modula a fase dos osc 1 e 2, com índice que cai até um
+  sustain (knobs "FM" e "Decaim. FM"). Usado no import do DX10, do GMS (Mod Kind FM) e do Sytrus
+  (uma portadora com FM forte).
 - **Sytrus (REA rodada 11)**: estado zlib (inflate próprio no núcleo) com a matriz FM/RM, 10 unidades e
   articuladores; as 3 portadoras mais fortes viram os osciladores, FM forte vira onda mais rica +
   envelope de filtro, RM vira AM, o primeiro filtro ativo (com o envelope de cutoff) vira o filtro.

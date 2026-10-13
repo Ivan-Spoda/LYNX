@@ -24,8 +24,8 @@ bool synthFromFruitKick (const std::vector<std::uint8_t>& state, SynthSettings& 
 // ladder, envelopes, LFO, mono.
 bool synthFromMiniSynth (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth);
 
-// Fruity DX10 (FM de 2 operadores): sem FM no LYNX, a portadora vira um seno, o modulador escolhe a
-// forma/harmônico do osc 2 e o índice que decai vira um envelope de filtro.
+// Fruity DX10 (FM de 2 operadores): portadora seno no osc 1, modulador no osc 3 (FM do synth) com o
+// índice caindo de Init até Sustain; o "Mod Thru" soa no osc 2.
 bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth);
 
 // Sytrus (6 operadores FM/RM + 3 filtros, estado zlib; REA_rodada11): as 3 portadoras mais fortes

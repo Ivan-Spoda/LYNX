@@ -383,6 +383,7 @@ struct SynthVoice
     float basePan = 0.0f;                     // pan da nota (o LFO de pan soma a ele)
     SvfCoefficients filter; // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
+    float fmLevel = 1.0f;   // envelope do índice de FM (1 -> fmSustain)
     int controlCountdown = 0;
     int age = 0;
 };
@@ -506,6 +507,7 @@ public:
                 lastPhaseDelta = target;
                 for (auto& m : v.mod)
                     m = { m.level, 0.0f, 0, 0 };
+                v.fmLevel = 1.0f;
                 voicePan (nextPan, v.panL, v.panR);
                 startModulation (v, nextPan);
                 nextPan = nextCents = 0.0f;
@@ -647,8 +649,28 @@ public:
                 }
 
                 float sum = 0.0f, sumR = 0.0f, modulator = 0.0f;
+                double fmShift = 0.0;
 
-                for (std::size_t o = 0; o < 3; ++o)
+                // AM/FM: o osc 3 não soma, modula (primeiro, para a FM deslocar a fase de osc 1 + 2)
+                if (osc3Modulates)
+                {
+                    const auto& osc = settings.osc[2];
+                    if (osc.level > 0.0f)
+                    {
+                        const auto delta = std::min (0.49, v.phaseDelta * ratios[2] * v.pitchMul);
+                        modulator = osc.level * oscillator (osc.wave, v.phase[2], delta);
+                        v.phase[2] += delta;
+                        if (v.phase[2] >= 1.0)
+                            v.phase[2] -= 1.0;
+                    }
+                    if (settings.fm > 0.0f)
+                    {
+                        v.fmLevel = settings.fmSustain + (v.fmLevel - settings.fmSustain) * fmDecayCoeff;
+                        fmShift = (double) (settings.fm * v.fmLevel * modulator);
+                    }
+                }
+
+                for (std::size_t o = 0; o < (osc3Modulates ? 2u : 3u); ++o)
                 {
                     const auto& osc = settings.osc[o];
 
@@ -656,15 +678,15 @@ public:
                         continue;
 
                     const auto delta = std::min (0.49, v.phaseDelta * ratios[o] * v.pitchMul);
-                    const auto value = osc.level * oscillator (osc.wave, v.phase[o], delta);
-
-                    if (o == 2 && settings.am)
-                        modulator = value; // AM: o osc 3 não soma, modula (abaixo)
-                    else
+                    auto phase = v.phase[o];
+                    if (fmShift != 0.0)
                     {
-                        sum += value * oscPanL[o];
-                        sumR += value * oscPanR[o];
+                        phase += fmShift;
+                        phase -= std::floor (phase);
                     }
+                    const auto value = osc.level * oscillator (osc.wave, phase, delta);
+                    sum += value * oscPanL[o];
+                    sumR += value * oscPanR[o];
                     v.phase[o] += delta;
                     if (v.phase[o] >= 1.0) // delta < 0,5: no máximo uma volta (sem floor, que é chamada de função em CPUs sem SSE4)
                         v.phase[o] -= 1.0;
@@ -756,6 +778,8 @@ private:
         }
 
         stereoOscillators = std::any_of (settings.osc.begin(), settings.osc.end(), [] (const SynthOscillator& o) { return o.pan != 0.0f; });
+        osc3Modulates = settings.am || settings.fm > 0.0f;
+        fmDecayCoeff = settings.fmDecay > 0.0f ? decayCoefficient (std::max (0.001, (double) settings.fmDecay), sampleRate) : 1.0f;
 
         sharedFilter.set (settings.cutoff, settings.resonance, sampleRate, settings.filterType);
         modEnv[0] = ModCoefficients::make (settings.filterEnv, sampleRate);
@@ -788,6 +812,8 @@ private:
     double songTicks = 0.0;      // posição da música no bloco (LFO global)
     std::array<float, 3> oscPanL { 1.0f, 1.0f, 1.0f }, oscPanR { 1.0f, 1.0f, 1.0f };
     bool stereoOscillators = false;
+    bool osc3Modulates = false; // AM ou FM: o osc 3 não soma
+    float fmDecayCoeff = 1.0f;
     float nextPan = 0.0f, nextCents = 0.0f;
     bool nextPorta = false;
     Noise noise;
