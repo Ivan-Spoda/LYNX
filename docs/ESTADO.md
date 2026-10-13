@@ -137,7 +137,9 @@ Confirmadas empiricamente nos demos:
   instâncias. A latência dos plugins entra no PDC.
 
 ## Próximo passo
-Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), 8–16 s de render
-para 2–8 min de música. Em aberto: decodificar Maximus/Soundgoodizer, Fast Dist/Filter/Flangus com
-os ajustes, mapa de parâmetros VST3 do wrapper para automação, notas "porta" individuais, ASIO
-(depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária), plugins em processo separado.
+Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), ~25x mais rápido
+que o tempo real. Sem equivalente ainda (tocam com preset do synth pelo nome): Sytrus (268 canais nos
+demos), Harmor (100), FLEX (57), Ogun (23), GMS, Drumpad, DrumSynth Live, Autogun, Morphine — Sytrus e
+GMS/Ogun estão nas rodadas 11–12 do REA. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
+Patcher (contêiner), Effector, Frequency Splitter, Vocodex. Também em aberto: ASIO (licença do SDK
+da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.
