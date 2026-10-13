@@ -29,11 +29,11 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     if (buffer.getNumChannels() >= 2)
     {
-        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1), &live, &meters, &midiLive);
+        renderer.process (state, playing, startTick, numSamples, buffer.getWritePointer (0), buffer.getWritePointer (1), &live, metering.load (std::memory_order_relaxed) ? &meters : nullptr, &midiLive);
     }
     else if (numSamples <= scratch.getNumSamples())
     {
-        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1), &live, &meters, &midiLive);
+        renderer.process (state, playing, startTick, numSamples, scratch.getWritePointer (0), scratch.getWritePointer (1), &live, metering.load (std::memory_order_relaxed) ? &meters : nullptr, &midiLive);
 
         if (buffer.getNumChannels() == 1)
         {

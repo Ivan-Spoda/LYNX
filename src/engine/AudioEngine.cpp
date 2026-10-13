@@ -127,6 +127,7 @@ void AudioEngine::buildInitialGraph()
 
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
     auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters, workers.get()));
+    rackProcessor = dynamic_cast<ChannelRackProcessor*> (rack->getProcessor());
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
@@ -160,6 +161,10 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     transport.sampleRate.store (sampleRate);
     graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
     graph.prepareToPlay (sampleRate, blockSize);
+
+    if (rackProcessor != nullptr)
+        rackProcessor->setMetering (false); // ninguém olha os medidores durante o render
+
     play();
 
     juce::AudioBuffer<float> buffer (2, blockSize);
@@ -220,6 +225,10 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     }
 
     stop();
+
+    if (rackProcessor != nullptr)
+        rackProcessor->setMetering (true);
+
     graph.releaseResources();
     return cancelled ? -1.0f : peak;
 }

@@ -39,7 +39,11 @@ public:
     void getStateInformation (juce::MemoryBlock&) override {}
     void setStateInformation (const void*, int) override {}
 
+    // Medidores (para a UI); o export desliga para não gastar CPU à toa.
+    void setMetering (bool on) noexcept { metering.store (on); }
+
 private:
+    std::atomic<bool> metering { true };
     Transport& transport;
     SnapshotExchange<RackState>& exchange;
     LiveEventQueue& live;

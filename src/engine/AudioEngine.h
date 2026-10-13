@@ -215,6 +215,7 @@ private:
     PluginHost plugins;
     juce::StringArray missingPlugins;
     RenderStats lastRenderStats;
+    class ChannelRackProcessor* rackProcessor = nullptr; // nó do grafo (dono: o grafo)
 
     Song song;
     int selectedChannel = 0;
