@@ -4643,7 +4643,7 @@ TEST (rhythm_gain_and_autopan)
     CHECK (l[12000] < 1e-3f);
     CHECK (std::abs (l[18000] - 0.5f) < 1e-3f);
     // tensão positiva: muda depressa no começo do segmento
-    CHECK (lynx::effectInfo (lynx::EffectKind::rhythmGain).params.size() == 38);
+    CHECK (lynx::effectInfo (lynx::EffectKind::rhythmGain).params.size() == 39);
 
     // auto-pan: período de 1 tempo, profundidade total; fase inicial 0,75 -> W = 0 subindo (pan no centro)
     auto pan = lynx::makeEffectSlot (lynx::EffectKind::autoPan);

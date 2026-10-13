@@ -1176,17 +1176,27 @@ public:
     {
         const auto period = std::max (1e-3, (double) p[0] * 64.0);
         const auto step = std::max (bpm, 1.0) / 60.0 / sampleRate;
+        if (p[38] > 0.5f) // só controle: o valor vira fonte de automação ao vivo, o áudio passa intacto
+        {
+            const auto t = beats + step * n;
+            current = (float) rhythm::valueAt (p, (t - std::floor (t / period) * period) / period);
+            return;
+        }
         for (int i = 0; i < n; ++i)
         {
             const auto t = beats + step * i;
             const auto g = (float) rhythm::valueAt (p, (t - std::floor (t / period) * period) / period);
             l[i] *= g;
             r[i] *= g;
+            current = g;
         }
     }
 
+    float controlOutput (int) const noexcept override { return current; }
+
 private:
     double sampleRate = 44100.0, beats = 0.0;
+    float current = 1.0f;
 };
 
 // Auto-pan (REA_rodada20 §1.5): triângulo (+1 em φ = 0, −1 em 0,5) com fase 0,75 + deslocamento + tempos/período.
@@ -1205,6 +1215,12 @@ public:
         const auto depth = 2.0 * p[1] - 1.0, fixed = 2.0 * p[3] - 1.0;
         const auto step = std::max (bpm, 1.0) / 60.0 / sampleRate / period;
         auto phase = 0.75 + p[2] + beats / period;
+        {
+            const auto f = phase + step * n - std::floor (phase + step * n);
+            current = (float) ((f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f) + 1.0) * 0.5f; // onda em 0..1
+        }
+        if (p[4] > 0.5f) // só controle (fonte de automação ao vivo)
+            return;
         for (int i = 0; i < n; ++i, phase += step)
         {
             const auto f = phase - std::floor (phase);
@@ -1215,8 +1231,11 @@ public:
         }
     }
 
+    float controlOutput (int) const noexcept override { return current; }
+
 private:
     double sampleRate = 44100.0, beats = 0.0;
+    float current = 0.5f;
 };
 
 // Vocoder (Fruity Vocoder, REA_rodada20 §4.1). Parâmetros (0..1): 0 bandas (4 << round(5v)), 1 ordem
@@ -1752,9 +1771,10 @@ const EffectInfo& effectInfo (EffectKind kind)
                                        "P10 pos", "P10 nível", "P10 tensão", "P11 pos", "P11 nível", "P11 tensão", "P12 pos", "P12 nível", "P12 tensão" };
         for (int i = 0; i < 36; ++i)
             info.params.push_back ({ names[i], i % 3 == 2 ? 0.5f : 1.0f });
+        info.params.push_back ({ "Só controle", 0.0f });
         return info;
     }();
-    static const EffectInfo autoPanInfo { "Auto-pan", { { "Período", 1.0f / 64.0f }, { "Profund.", 0.75f }, { "Fase", 0.0f }, { "Pan", 0.5f } } };
+    static const EffectInfo autoPanInfo { "Auto-pan", { { "Período", 1.0f / 64.0f }, { "Profund.", 0.75f }, { "Fase", 0.0f }, { "Pan", 0.5f }, { "Só controle", 0.0f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bandas", 0.4f }, { "Ordem", 0.5f }, { "Ouvir", 1.0f }, { "Trocar L/R", 0.0f },
                                                        { "Freq. mín.", 0.0f }, { "Freq. máx.", 1.0f }, { "Escala", 0.5f }, { "Inverter", 0.0f },
                                                        { "Formante", 0.5f }, { "Largura", 45.0f / 195.0f }, { "Ataque", 10.0f / 990.0f },

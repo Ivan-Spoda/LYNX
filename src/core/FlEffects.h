@@ -55,6 +55,14 @@ struct LovePhilterConversion
     // automação do parâmetro k do FL -> (índice dentro de `slots`, parâmetro nosso, conversão do valor)
     std::function<std::optional<std::tuple<int, int, std::function<float (float)>>> (int k)> paramMap;
     std::vector<std::string> notes; // o que ficou de fora (para o relatório)
+    // automações ao vivo: a saída de controle do slot `source` move o parâmetro `param` do slot `target`
+    // (índices dentro de `slots`), passando pela curva (33 pontos em 0..1)
+    struct LiveLink
+    {
+        int source = 0, target = 0, param = 0;
+        std::vector<float> curve;
+    };
+    std::vector<LiveLink> links;
 };
 std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 

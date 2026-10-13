@@ -144,7 +144,7 @@ O que **ainda não tem confirmação** e por isso é uma aproximação declarada
   físico não é reproduzido.
 - Toxic: o filtro do FL tem 4 polos (o do LYNX, 2); ressonância sem escala; envelope do filtro linear no LYNX.
 - Kepler: chorus (o synth do LYNX não tem chorus); "Range" ×10 só no Exo; BPM Sync do LFO.
-- Love Philter: Mango em Hz é inferido do polo; envelope/LFO de corte e ressonância não aplicados; curva de
+- Love Philter: Mango em Hz é inferido do polo; envelope/LFO de corte só com uma unidade (automação ao vivo), ressonância não aplicada; curva de
   envelope tipo 5 tratada como simples; lei do pan e tensão do LFO de pan; Mod X com várias unidades só no
   valor fixo.
 - Fruity Vocoder: implementado com o algoritmo do FL (REA_rodada20 §4.1); Vocodex fica de fora (precisa de sidechain

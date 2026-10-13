@@ -952,6 +952,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     effectSlotMap.insert ({ { insert.index, original.index }, { first, original.plugin } });
                     if (conversion->paramMap)
                         lovePhilterMaps[{ insert.index, original.index }] = conversion->paramMap;
+                    for (const auto& link : conversion->links) // envelope/LFO do corte: automação ao vivo
+                        if (first + std::max (link.source, link.target) < (int) track.effects.size())
+                        {
+                            Automation a;
+                            a.name = "Love Philter (" + track.name + ")";
+                            a.target = { AutomationTargetKind::effectParam, insert.index, first + link.target, link.param };
+                            a.source = { insert.index, first + link.source, 0 };
+                            a.curve = link.curve;
+                            song.automations.push_back (std::move (a));
+                        }
                     if (options.report != nullptr)
                     {
                         ++options.report->converted["Fruity Love Philter"];

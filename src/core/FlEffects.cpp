@@ -1329,12 +1329,11 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
             chain.push_back (utility);
         }
-        for (const int a : { 2, 3 })
-            if (unit.articulators[(std::size_t) a].pattern.on || unit.articulators[(std::size_t) a].lfo.on)
-            {
-                out.notes.push_back ("Love Philter: envelope/LFO de corte ou ressonância não aplicado");
-                break;
-            }
+        // corte: tratado como automação ao vivo só com uma unidade (abaixo); ressonância: não aplicada
+        const auto& res = unit.articulators[3];
+        const auto& cut = unit.articulators[2];
+        if (res.pattern.on || res.lfo.on || (active.size() > 1 && (cut.pattern.on || cut.lfo.on)))
+            out.notes.push_back ("Love Philter: envelope/LFO de corte ou ressonância não aplicado");
         return chain;
     };
 
@@ -1349,6 +1348,60 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         const auto u = active.front();
         out.slots = unitEffects (u);
         const auto& unit = state->units[(std::size_t) u];
+
+        // envelope/LFO do corte (aditivos, REA_rodada20 §1.4/§1.5): c = CUT/256 + (y − 0,5)·ENV/128, ou
+        // c = CUT/256 + A·d_L·W; um slot "só controle" gera o valor e uma automação ao vivo move o corte do EQ
+        if (const auto& cut = unit.articulators[2]; (cut.pattern.on || cut.lfo.on) && out.slots[0].kind == EffectKind::parametricEq)
+        {
+            const auto cut0 = std::clamp (unit.params[1], 0, 256) / 256.0, res0 = std::clamp (unit.params[2], 0, 256) / 256.0;
+            auto addLink = [&] (EffectSlot control, const std::function<double (double)>& cutoffOf) {
+                LovePhilterConversion::LiveLink link;
+                link.source = (int) out.slots.size();
+                link.target = 0;
+                link.param = peq::param (0, 1);
+                for (int i = 0; i <= 32; ++i)
+                {
+                    const auto band = philterBand (unit, std::clamp (cutoffOf (i / 32.0), 0.0, 1.0), res0);
+                    link.curve.push_back (peq::hzValue (band.hz));
+                }
+                out.slots.push_back (std::move (control));
+                out.links.push_back (std::move (link));
+            };
+            const auto& env = cut.pattern;
+            double period = 0.0;
+            for (std::size_t k = 1; k < env.points.size(); ++k)
+                period += env.points[k].dt;
+            if (env.on && env.tempo && period > 1e-6 && env.points.size() <= 12)
+            {
+                auto control = makeEffectSlot (EffectKind::rhythmGain);
+                control.params[0] = (float) std::min (1.0, period / 64.0);
+                control.params[1] = (float) env.points.size() / 12.0f;
+                double x = 0.0;
+                for (std::size_t k = 0; k < env.points.size(); ++k)
+                {
+                    if (k > 0)
+                        x += env.points[k].dt;
+                    control.params[2 + 3 * k] = (float) clamp01 (x / period);
+                    control.params[3 + 3 * k] = (float) clamp01 (env.points[k].y);
+                    control.params[4 + 3 * k] = (float) clamp01 ((env.points[k].tension + 1.0) / 2.0);
+                }
+                control.params[38] = 1.0f;
+                const auto depth = std::clamp (unit.params[0], -128, 128) / 128.0 * cut.envDepth;
+                addLink (std::move (control), [=] (double y) { return cut0 + (y - 0.5) * depth; });
+            }
+            else if (env.on)
+                out.notes.push_back ("Love Philter: envelope de corte fora do formato suportado");
+            if (const auto& lfo = cut.lfo; lfo.on && lfo.tempo && ! lfo.frozen)
+            {
+                auto control = makeEffectSlot (EffectKind::autoPan);
+                const auto period = 625.0 / (std::pow (10001.0, std::clamp (lfo.speed, 1, 65536) / 65536.0) - 1.0);
+                control.params[0] = (float) std::clamp (period / 64.0, 1e-4, 1.0);
+                control.params[2] = (float) (lfo.phase / 4294967296.0);
+                control.params[4] = 1.0f;
+                const auto amount = lfo.amplitude * cut.lfoDepth;
+                addLink (std::move (control), [=] (double v) { return cut0 + amount * (2.0 * v - 1.0); });
+            }
+        }
         const auto base = 8 + 44 * u;
         const auto masterGain = master;
         // Mod X (k = 6) / Mod Y (k = 7) movem o utilitário de volume, se houver
