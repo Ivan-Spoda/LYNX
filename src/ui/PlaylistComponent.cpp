@@ -841,7 +841,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // pinta a pattern atual
+    // pinta o que está escolhido no Picker (a pattern atual, um clip de áudio ou de automação)
     setSelection ({});
     const auto& song = engine.getSong();
     Clip c;
@@ -849,6 +849,27 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     c.track = yToTrack (e.y);
     c.start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
     c.length = song.patterns[(std::size_t) song.currentPattern].effectiveLength (song.beatsPerBar);
+
+    if (brush.kind == ClipKind::audio && brush.index >= 0 && brush.index < (int) song.channels.size()
+        && song.channels[(std::size_t) brush.index].instrument == InstrumentKind::audioClip)
+    {
+        c.kind = ClipKind::audio;
+        c.channel = brush.index;
+        c.pattern = 0;
+
+        // duração do áudio em ticks no BPM atual
+        if (auto data = engine.getSampleLibrary().load (juce::String::fromUTF8 (song.channels[(std::size_t) brush.index].samplePath.c_str())))
+            c.length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) ((double) data->frames() / data->sampleRate * song.bpm / 60.0 * ppq));
+    }
+    else if (brush.kind == ClipKind::automation && brush.index >= 0 && brush.index < (int) song.automations.size())
+    {
+        c.kind = ClipKind::automation;
+        c.automation = brush.index;
+        c.pattern = 0;
+        c.length = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar) * 4; // 4 compassos
+    }
+    else
+        brush = {};
 
     engine.editSong ([c] (Song& s) {
         s.playlist.push_back (c);
@@ -1520,6 +1541,13 @@ void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         selection.clear();
     }
 
+    // trocar de pattern (barra de cima, Channel Rack) volta o lápis para a pattern
+    if (engine.getSong().currentPattern != knownCurrentPattern)
+    {
+        knownCurrentPattern = engine.getSong().currentPattern;
+        brush = {};
+    }
+
     refreshArrangementBox();
     updateScrollBars();
     repaint();
@@ -1573,8 +1601,9 @@ void PlaylistComponent::itemDropped (const SourceDetails& details)
 }
 // ---------------------------------------------------------------------------
 
-PatternPicker::PatternPicker (AudioEngine& e)
-    : engine (e)
+PatternPicker::PatternPicker (AudioEngine& e, PlaylistComponent& p)
+    : engine (e),
+      playlist (p)
 {
     engine.addChangeListener (this);
 }
@@ -1589,36 +1618,75 @@ void PatternPicker::changeListenerCallback (juce::ChangeBroadcaster*)
     repaint();
 }
 
-int PatternPicker::patternAt (int y) const
+std::vector<PatternPicker::Row> PatternPicker::rows() const
+{
+    const auto& song = engine.getSong();
+    std::vector<Row> list;
+    list.push_back ({ ClipKind::pattern, -1, "Patterns", {} });
+
+    for (int i = 0; i < (int) song.patterns.size(); ++i)
+        list.push_back ({ ClipKind::pattern, i, juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()),
+                          PlaylistComponent::patternColour (song, i) });
+
+    bool audioHeader = false;
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+        if (song.channels[(std::size_t) c].instrument == InstrumentKind::audioClip)
+        {
+            if (! audioHeader)
+                list.push_back ({ ClipKind::audio, -1, utf8 ("Áudio"), {} });
+            audioHeader = true;
+            list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), juce::Colour (0xff4f7fa6) });
+        }
+
+    if (! song.automations.empty())
+        list.push_back ({ ClipKind::automation, -1, utf8 ("Automação"), {} });
+    for (int a = 0; a < (int) song.automations.size(); ++a)
+        list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), juce::Colour (0xff6f8f5f) });
+
+    return list;
+}
+
+int PatternPicker::rowAt (int y) const
 {
     if (y < headerHeight)
         return -1;
 
     const auto index = (y - headerHeight) / rowHeight + scroll;
-    return index < (int) engine.getSong().patterns.size() ? index : -1;
+    return index < (int) rows().size() ? index : -1;
 }
 
 void PatternPicker::paint (juce::Graphics& g)
 {
     const auto& song = engine.getSong();
+    const auto list = rows();
     g.fillAll (theme::panel);
     g.setColour (theme::toolbar);
     g.fillRect (0, 0, getWidth(), headerHeight);
     g.setColour (theme::text.withAlpha (0.8f));
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("Patterns", 8, 0, getWidth() - 16, headerHeight, juce::Justification::centredLeft);
+    g.drawText ("Picker", 8, 0, getWidth() - 16, headerHeight, juce::Justification::centredLeft);
 
-    for (int i = scroll; i < (int) song.patterns.size(); ++i)
+    for (int i = scroll; i < (int) list.size(); ++i)
     {
         const auto y = headerHeight + (i - scroll) * rowHeight;
 
         if (y > getHeight())
             break;
 
+        const auto& row = list[(std::size_t) i];
+
+        if (row.index < 0) // título de seção
+        {
+            g.setColour (theme::text.withAlpha (0.5f));
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText (row.name, 8, y, getWidth() - 16, rowHeight, juce::Justification::bottomLeft);
+            continue;
+        }
+
         const auto r = juce::Rectangle<int> (4, y + 2, getWidth() - 8, rowHeight - 4);
-        const auto colour = PlaylistComponent::patternColour (song, i);
-        const auto current = i == song.currentPattern;
-        g.setColour (current ? colour.withAlpha (0.9f) : colour.withAlpha (0.35f));
+        const auto current = row.kind == ClipKind::pattern ? (playlist.brush.kind == ClipKind::pattern && row.index == song.currentPattern)
+                                                           : (playlist.brush.kind == row.kind && playlist.brush.index == row.index);
+        g.setColour (current ? row.colour.withAlpha (0.9f) : row.colour.withAlpha (0.35f));
         g.fillRoundedRectangle (r.toFloat(), 3.0f);
 
         if (current)
@@ -1628,7 +1696,8 @@ void PatternPicker::paint (juce::Graphics& g)
         }
 
         g.setColour (current ? juce::Colours::white : theme::text.withAlpha (0.85f));
-        g.drawText (juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()), r.reduced (6, 0), juce::Justification::centredLeft, true);
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (row.name, r.reduced (6, 0), juce::Justification::centredLeft, true);
     }
 
     g.setColour (theme::window);
@@ -1637,19 +1706,33 @@ void PatternPicker::paint (juce::Graphics& g)
 
 void PatternPicker::mouseDown (const juce::MouseEvent& e)
 {
-    if (const auto p = patternAt (e.y); p >= 0 && p != engine.getSong().currentPattern)
-        engine.editSong ([p] (Song& s) { s.currentPattern = p; }, false);
+    const auto list = rows();
+    const auto i = rowAt (e.y);
+
+    if (i < 0 || list[(std::size_t) i].index < 0)
+        return;
+
+    const auto& row = list[(std::size_t) i];
+    playlist.brush = { row.kind, row.index };
+
+    if (row.kind == ClipKind::pattern && row.index != engine.getSong().currentPattern)
+        engine.editSong ([p = row.index] (Song& s) { s.currentPattern = p; }, false);
+
+    repaint();
 }
 
 void PatternPicker::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (patternAt (e.y) >= 0 && onOpenPattern)
+    const auto list = rows();
+    const auto i = rowAt (e.y);
+
+    if (i >= 0 && list[(std::size_t) i].kind == ClipKind::pattern && list[(std::size_t) i].index >= 0 && onOpenPattern)
         onOpenPattern();
 }
 
 void PatternPicker::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
 {
-    const auto rows = (int) engine.getSong().patterns.size();
+    const auto rows = (int) this->rows().size();
     const auto visible = juce::jmax (1, (getHeight() - headerHeight) / rowHeight);
     scroll = juce::jlimit (0, juce::jmax (0, rows - visible), scroll - (int) std::round (wheel.deltaY * 6.0f));
     repaint();

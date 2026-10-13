@@ -33,6 +33,15 @@ class PlaylistComponent final : public juce::Component,
                                 private juce::ScrollBar::Listener
 {
 public:
+    // O que o lápis pinta (escolhido no Picker): a pattern atual, um clip de áudio ou de automação.
+    struct Brush
+    {
+        ClipKind kind = ClipKind::pattern;
+        int index = -1; // canal do áudio ou automação; nas patterns vale a pattern atual
+    };
+    Brush brush;
+    int knownCurrentPattern = -1;
+
     explicit PlaylistComponent (AudioEngine& engine);
     ~PlaylistComponent() override;
 
@@ -136,7 +145,7 @@ class PatternPicker final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
-    explicit PatternPicker (AudioEngine& engine);
+    PatternPicker (AudioEngine& engine, PlaylistComponent& playlist);
     ~PatternPicker() override;
 
     void paint (juce::Graphics& g) override;
@@ -149,9 +158,19 @@ public:
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
-    int patternAt (int y) const;
+
+    struct Row
+    {
+        ClipKind kind;
+        int index;            // pattern, canal de áudio ou automação; -1 = título da seção
+        juce::String name;
+        juce::Colour colour;
+    };
+    std::vector<Row> rows() const;
+    int rowAt (int y) const;
 
     AudioEngine& engine;
+    PlaylistComponent& playlist;
     int scroll = 0; // em linhas
     static constexpr int rowHeight = 22, headerHeight = 24;
 };
