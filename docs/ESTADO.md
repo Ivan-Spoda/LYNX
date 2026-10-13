@@ -147,6 +147,8 @@ O que **ainda não tem confirmação** e por isso é uma aproximação declarada
 - Love Philter: Mango em Hz é inferido do polo; envelope/LFO de corte e ressonância não aplicados; curva de
   envelope tipo 5 tratada como simples; lei do pan e tensão do LFO de pan; Mod X com várias unidades só no
   valor fixo.
+- Fruity Vocoder: implementado com o algoritmo do FL (REA_rodada20 §4.1); Vocodex fica de fora (precisa de sidechain
+  ou do synth interno).
 - Pitcher: sem equivalente estático (a correção depende do detector de altura): passa reto.
 - Squeeze, Vintage Phaser: aproximações.
 - FLEX: os pacotes são protegidos; o LYNX não os abre (patch do synth pelo nome do preset).

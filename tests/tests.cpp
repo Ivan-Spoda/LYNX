@@ -4657,3 +4657,30 @@ TEST (rhythm_gain_and_autopan)
     CHECK (std::abs (a[0] - 1.0f) < 1e-3f && std::abs (b[0] - 1.0f) < 1e-3f);
     CHECK (a[6000] < 0.01f && std::abs (b[6000] - 1.0f) < 1e-3f); // ¼ de ciclo depois: todo à direita
 }
+
+TEST (vocoder_follows_modulator)
+{
+    // modulador (L) toca só na 1ª metade; portadora (R) é uma serra contínua: o molhado segue o modulador
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::vocoder);
+    auto fx = lynx::makeEffect (lynx::EffectKind::vocoder);
+    fx->prepare (48000.0);
+    std::vector<float> l (48000), r (48000);
+    std::uint32_t seed = 1;
+    for (std::size_t i = 0; i < l.size(); ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        l[i] = i < 24000 ? ((float) (seed >> 8) / 16777216.0f - 0.5f) : 0.0f;
+        r[i] = (float) (2.0 * std::fmod ((double) i * 220.0 / 48000.0, 1.0) - 1.0) * 0.5f;
+    }
+    fx->process (l.data(), r.data(), 48000, slot.params, 120.0);
+    auto rms = [&] (int from, int to) {
+        double e = 0.0;
+        for (int i = from; i < to; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        return std::sqrt (e / (to - from));
+    };
+    CHECK (rms (6000, 20000) > 0.01);
+    CHECK (rms (40000, 48000) < 0.1 * rms (6000, 20000)); // modulador calado: o vocoder some (release 100 ms)
+    for (std::size_t i = 0; i < l.size(); ++i)
+        CHECK (l[i] == r[i] && std::isfinite (l[i]));    // saída mono
+}

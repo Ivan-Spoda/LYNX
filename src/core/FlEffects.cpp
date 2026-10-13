@@ -755,12 +755,55 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double)
     return slot;
 }
 
+// Fruity Vocoder (REA_rodada20 §4.1.1): i32 versão (2), i32 bandas, i32 ordem, i32 listen, u8 troca, N f32 níveis,
+// 12 i32 parâmetros crus
+std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std::vector<std::string>* notes)
+{
+    if (d.size() < 17 || i32At (d, 0) < 2)
+        return std::nullopt;
+    const auto n = i32At (d, 4);
+    if (n < 4 || n > 128 || d.size() < 17 + (std::size_t) n * 4 + 12 * 4)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::vocoder);
+    int index = 0;
+    while ((4 << index) < n && index < 5)
+        ++index;
+    slot.params[0] = (float) index / 5.0f;
+    slot.params[1] = (float) (std::clamp (i32At (d, 8), 1, 3) - 1) / 2.0f;
+    slot.params[2] = (float) std::clamp (i32At (d, 12), 0, 2) / 2.0f;
+    slot.params[3] = d[16] != 0 ? 1.0f : 0.0f;
+    bool levelsFlat = true;
+    for (int k = 0; k < n; ++k)
+    {
+        float level = 1.0f;
+        std::memcpy (&level, d.data() + 17 + 4 * (std::size_t) k, 4);
+        levelsFlat = levelsFlat && std::abs (level - 1.0f) < 1e-4f;
+    }
+    if (! levelsFlat && notes != nullptr)
+        notes->push_back ("Fruity Vocoder: níveis por banda não aplicados");
+    auto param = [&] (int t) { return i32At (d, 17 + 4 * (std::size_t) n + 4 * (std::size_t) t); };
+    slot.params[4] = (float) clamp01 (param (0) / 65536.0);
+    slot.params[5] = (float) clamp01 (param (1) / 65536.0);
+    slot.params[6] = (float) clamp01 (param (2) / 128.0);
+    slot.params[7] = param (3) != 0 ? 1.0f : 0.0f;
+    slot.params[8] = (float) clamp01 ((std::clamp (param (4), -1200, 1200) + 1200) / 2400.0);
+    slot.params[9] = (float) clamp01 ((std::clamp (param (5), 5, 200) - 5) / 195.0);
+    slot.params[10] = (float) clamp01 ((std::clamp (param (6), 10, 1000) - 10) / 990.0);
+    slot.params[11] = (float) clamp01 ((std::clamp (param (7), 10, 1000) - 10) / 990.0);
+    slot.params[12] = param (8) != 0 ? 1.0f : 0.0f;
+    slot.params[13] = (float) clamp01 (param (9) / 160.0);
+    slot.params[14] = (float) clamp01 (param (10) / 160.0);
+    slot.params[15] = (float) clamp01 (param (11) / 160.0);
+    return slot;
+}
 } // namespace
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (pluginName == "Effector")
         return effector (state, bpm);
+    if (pluginName == "Fruity Vocoder")
+        return fruityVocoder (state, nullptr);
 
     const auto kind = effectForFlPlugin (pluginName);
 
