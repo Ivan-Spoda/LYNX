@@ -533,6 +533,13 @@ private:
             setContentOwned (content, true);
             setResizable (true, true);
             setResizeLimits (800, 400, 10000, 10000);
+            // ~88% da área útil da tela principal (mínimo o tamanho de projeto da interface)
+            if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            {
+                const auto area = display->userArea;
+                setSize (juce::jmax (getWidth(), (int) (area.getWidth() * 0.88)), juce::jmax (getHeight(), (int) (area.getHeight() * 0.88)));
+            }
+
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
             content->grabKeyboardFocus();

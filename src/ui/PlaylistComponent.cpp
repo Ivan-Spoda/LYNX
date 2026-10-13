@@ -22,6 +22,13 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
+    snapBox.addItemList ({ "Sem snap", "1/4 de step", "1/2 step", "Step", "Tempo", "Compasso" }, 1);
+    snapBox.setSelectedId (5, juce::dontSendNotification);
+    snapBox.setTooltip ("Snap (grade) da Playlist; Alt desliga enquanto arrasta");
+    snapBox.setWantsKeyboardFocus (false);
+    snapBox.setMouseClickGrabsKeyboardFocus (false);
+    addAndMakeVisible (snapBox);
+
     arrangementBox.setTooltip (utf8 ("Arrangement (como no FL, um projeto pode ter vários)"));
     arrangementBox.setWantsKeyboardFocus (false);
     arrangementBox.setMouseClickGrabsKeyboardFocus (false);
@@ -165,10 +172,17 @@ int PlaylistComponent::numTracks() const
 
 std::int64_t PlaylistComponent::snap (double tick, bool enabled) const
 {
-    if (! enabled)
+    static const std::int64_t grids[] = { 1, ticksPerStep / 4, ticksPerStep / 2, ticksPerStep, ppq, 0 };
+    const auto index = juce::jlimit (0, 5, snapBox.getSelectedId() - 1);
+    auto grid = grids[index];
+
+    if (grid == 0) // compasso
+        grid = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+
+    if (! enabled || grid <= 1)
         return (std::int64_t) std::floor (tick);
 
-    return (std::int64_t) std::floor (tick / ppq) * ppq;
+    return (std::int64_t) std::floor (tick / (double) grid) * grid;
 }
 
 void PlaylistComponent::updateScrollBars()
@@ -189,6 +203,7 @@ void PlaylistComponent::updateScrollBars()
 void PlaylistComponent::resized()
 {
     arrangementBox.setBounds (2, 1, headerWidth - 4, timelineHeight - 2);
+    snapBox.setBounds (getWidth() - scrollBarSize - 104, 1, 100, timelineHeight - 2);
     hBar.setBounds (headerWidth, getHeight() - scrollBarSize, getWidth() - headerWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, timelineHeight, scrollBarSize, getHeight() - timelineHeight - scrollBarSize);
     updateScrollBars();

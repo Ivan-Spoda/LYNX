@@ -42,6 +42,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void togglePlay();
     void showAudioSettings();
+    void showHelp();
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();

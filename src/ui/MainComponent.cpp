@@ -132,7 +132,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F8 navegador   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
+    hintLabel.setText (utf8 ("F1 ajuda   Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F8 navegador   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -284,6 +284,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (! cmd && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
     {
         toggleMode();
+        return true;
+    }
+
+    if (key.getKeyCode() == juce::KeyPress::F1Key)
+    {
+        showHelp();
         return true;
     }
 
@@ -743,6 +749,45 @@ void MainComponent::save (bool askForFile)
                                   if (chooser.getResult() != juce::File())
                                       write (chooser.getResult());
                               });
+}
+
+void MainComponent::showHelp()
+{
+    const auto text = utf8 (
+        "GERAL\n"
+        "  Espaço  play/pause        Ctrl+Z / Ctrl+Y  desfazer / refazer\n"
+        "  Ctrl+N novo   Ctrl+O abrir   Ctrl+S salvar   Ctrl+Shift+S salvar como   Ctrl+R exportar\n"
+        "  F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 navegador   F9 Mixer   L pattern/song\n"
+        "  Z..M e Q..P   teclado do PC como piano (canal selecionado)\n\n"
+        "PIANO ROLL\n"
+        "  clique cria nota (ou acorde, no seletor), arrastar move, borda direita muda a duração\n"
+        "  clique direito apaga   Ctrl+arrastar seleciona   Shift+clique soma à seleção\n"
+        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Ctrl+Q quantizar   Ctrl+M mutar   Delete apagar\n"
+        "  setas movem (Shift = oitava/compasso)   Alt desliga o snap   Ctrl+roda zoom\n"
+        "  faixa de baixo: velocity / pan / afinação   botão Slide: notas que deslizam\n\n"
+        "PLAYLIST\n"
+        "  clique pinta a pattern atual   arrastar na régua marca o loop (clique direito apaga)\n"
+        "  clique direito no nome do clip: dividir, tornar única...   LED da trilha muta\n"
+        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Delete apagar\n\n"
+        "CHANNEL RACK E MIXER\n"
+        "  clique direito no LED do canal: solo   clique direito no nome: menu do canal\n"
+        "  clique direito em qualquer knob/fader: automação ou ligar a controlador MIDI\n"
+        "  seta na base da faixa do mixer: envio da trilha selecionada para esta\n"
+        "  clique direito no BPM: automação de tempo");
+
+    auto* label = new juce::Label ({}, text);
+    label->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
+    label->setJustificationType (juce::Justification::topLeft);
+    label->setSize (760, 520);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (label);
+    options.dialogTitle = utf8 ("Atalhos do LYNX");
+    options.dialogBackgroundColour = theme::panel;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.escapeKeyTriggersCloseButton = true;
+    options.launchAsync();
 }
 
 void MainComponent::showAudioSettings()

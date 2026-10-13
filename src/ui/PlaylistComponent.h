@@ -105,6 +105,7 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox arrangementBox;
+    juce::ComboBox snapBox; // grade da Playlist (padrão: 1 tempo)
 
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px por compasso de 4 tempos
     double scrollTicks = 0.0;
