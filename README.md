@@ -1,71 +1,198 @@
-# LYNX
+<p align="center">
+  <img src="docs/img/logo.png" alt="Logo do LYNX" width="128" height="128">
+</p>
 
-DAW leve em C++20 + JUCE 8, com o fluxo de trabalho do FL Studio e foco em rodar bem em
-qualquer PC, independente do tamanho do projeto.
+<h1 align="center">LYNX</h1>
 
-> Projeto em desenvolvimento. Veja o que já existe em [`docs/ESTADO.md`](docs/ESTADO.md) e o
-> plano em [`docs/ROADMAP.md`](docs/ROADMAP.md).
+<p align="center"><strong>Uma DAW leve, com o fluxo de trabalho do FL Studio.</strong><br>
+Channel Rack, Piano Roll, Playlist e Mixer em C++20 + JUCE 8, feita para rodar bem em qualquer PC.</p>
 
-## O que já funciona
+<p align="center">
+  <a href="#recursos"><strong>Recursos</strong></a> ·
+  <a href="#abre-projetos-do-fl-studio">Projetos do FL</a> ·
+  <a href="#compilar">Compilar</a> ·
+  <a href="docs/ESTADO.md">Estado</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a>
+</p>
 
-- **Channel Rack** com step sequencer, pan/volume/mute/solo por canal, swing, várias patterns
-  (renomear, cor, comprimento, clonar), ajustes do sampler (afinação, envelope, ao contrário, cut,
-  filtro do canal com envelopes de corte e afinação), synth interno de 3 osciladores (pan e
-  semitom por oscilador, filtro LP/BP/HP/BS, envelopes de corte e afinação, 4 LFOs, AM, FM com
-  índice que decai, mono/portamento)
-- **Piano Roll**: notas com snap configurável, seleção múltipla, mover/redimensionar em grupo,
-  copiar/colar/duplicar, quantizar, faixa de velocity, importar/exportar `.mid`
-- **Playlist**: clips de pattern, áudio e automação; vários arrangements; região de loop;
-  seleção múltipla, copiar/colar/duplicar, dividir, "tornar única"; trilhas com nome e mute;
-  marcadores e mudanças de compasso na régua; normalizar clips de áudio
-- **Automação**: qualquer knob/fader (canal, mixer, efeitos, parâmetros de plugins) vira um clip
-  com editor de pontos e curvas
-- **Mixer**: até 127 inserts, envios entre inserts com nível, solo pelo caminho do sinal, curva do
-  fader do FL, 10 slots de efeito com dry/wet (EQ, EQ paramétrico de 7 bandas, compressor,
-  limiter, delay, reverb, chorus, filtro, distorção, utilitário, gate de volume por passos, pitch
-  shift, frequency shifter, plugins) e sidechain pelo Peak Controller importado do FL
-- **Plugins VST3 e CLAP**: instrumentos e efeitos com a interface própria; busca em processo
-  separado (um plugin que trave não derruba o LYNX); PDC; "smart disable"
-- **Gravação**: notas (teclado do PC e MIDI) e áudio da entrada da placa
-- **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
-- **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
-  patterns, arrangements, marcadores, mixer com roteamento, EQ das trilhas e efeitos nativos com os
-  ajustes salvos, Gross Beat/Effector/Frequency Splitter/Patcher em série, automação e links de
-  controlador, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller, e aproximados
-  pelo synth interno: Sytrus, Harmor, GMS, Harmless, Kepler, DX10, Ogun e outros; filtro/envelopes/LFOs
-  do canal, VST3/CLAP de terceiros com estado quando estiverem instalados; um relatório mostra o que não
-  tem equivalente) e `.mid`; ~2800 presets `.fst` de synths do FL (3x Osc, Sytrus, Harmor, GMS...) e
-  presets de efeitos do FL
-- **Desempenho**: motor sem locks, canais e mixer em várias threads, áudios longos lidos do disco
-  sob demanda
-- **Desfazer/refazer** em todas as edições; **teclado do PC como piano** (layout do FL)
+<p align="center">
+  <img src="https://img.shields.io/badge/C%2B%2B-20-ef7b22" alt="C++20">
+  <img src="https://img.shields.io/badge/JUCE-8-8a8a8a" alt="JUCE 8">
+  <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-24292f" alt="Windows 10 e 11">
+  <img src="https://img.shields.io/badge/VST3%20%C2%B7%20CLAP-suportados-d9534f" alt="VST3 e CLAP">
+  <img src="https://img.shields.io/badge/status-alfa-f0ad4e" alt="Alfa">
+</p>
+
+<p align="center">
+  <img src="docs/img/playlist.png" alt="A Playlist do LYNX com patterns, automação e marcadores" width="100%">
+  <br><sub>O projeto de demonstração do próprio LYNX (<code>LYNX.exe --showcase</code>): intro, drop e final na Playlist.</sub>
+</p>
+
+---
+
+## Destaques
+
+<table>
+<tr>
+<td width="25%" valign="top">
+
+### ⚡ Leve
+Motor sem locks, canais e mixer em várias threads, canais ociosos pulados e áudios longos lidos do disco sob demanda. Um projeto de 125 trilhas exporta a mais de 10× o tempo real.
+
+</td>
+<td width="25%" valign="top">
+
+### 🍒 Fluxo do FL
+Channel Rack com step sequencer, patterns, Piano Roll, Playlist com arrangements, Mixer com inserts, envios e sidechain. Os mesmos atalhos.
+
+</td>
+<td width="25%" valign="top">
+
+### 📂 Abre `.flp`
+Importa projetos do FL Studio: canais, samples, patterns, arranjo, automação, mixer e mais de 40 plugins nativos convertidos.
+
+</td>
+<td width="25%" valign="top">
+
+### 🔬 Clean-room
+O comportamento do FL foi estudado por engenharia reversa comportamental e documentado; nenhuma linha de código da Image-Line foi copiada.
+
+</td>
+</tr>
+</table>
+
+## Recursos
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/img/channel-rack.png" alt="Channel Rack">
+
+### Channel Rack
+Step sequencer com volume, pan, mute e solo por canal, swing, várias patterns (nome, cor, comprimento, clonar), cut groups, arpejador e o teclado do PC como piano.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/img/piano-roll.png" alt="Piano Roll">
+
+### Piano Roll
+Snap configurável, acordes e escalas, seleção múltipla, quantizar, notas com slide e porta, faixa de velocity/pan/afinação, importar e exportar `.mid`.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/img/mixer.png" alt="Mixer">
+
+### Mixer
+Até 127 inserts, envios com nível, 10 slots de efeito com dry/wet por trilha, EQ embutido, PDC, "smart disable" e **sidechain** (aqui o compressor do baixo ouvindo o bumbo).
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/img/synth.png" alt="Synth interno">
+
+### Synth interno
+3 osciladores (incluindo um oscilador de **harmônicas** com tabelas de banda limitada), filtro LP/BP/HP/BS com keytrack, FM e anel, envelopes, 4 LFOs, varredura de bumbo, mono e portamento.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/img/eq.png" alt="EQ paramétrico">
+
+### EQ paramétrico de 7 bandas
+Alças arrastáveis, prateleiras, cortes de 12 a 48 dB/oit, passa-banda e rejeita-faixa, com a resposta desenhada em tempo real.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/img/automacao.png" alt="Automação">
+
+### Automação
+Qualquer knob ou fader (canal, mixer, efeito, parâmetro de plugin) vira um clip com pontos e curvas; controladores MIDI ligáveis a qualquer parâmetro.
+
+</td>
+</tr>
+</table>
+
+### Tudo o que vem dentro
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+#### Instrumentos
+- Synth de 3 osciladores com oscilador de harmônicas
+- Sampler com zonas, fatias, stretch (WSOLA) e streaming do disco
+- Bateria interna (kick, snare, hat, clap)
+- Plugins VST3 e CLAP, opcionalmente em processo separado
+
+</td>
+<td width="33%" valign="top">
+
+#### Efeitos
+- EQ, EQ paramétrico de 7 bandas, compressor com sidechain, limiter
+- Delay, reverb, chorus, filtro, distorção, Lo-fi
+- Effector (12 algoritmos), Vocoder, correção de afinação
+- Gate de volume, envelope rítmico, auto-pan, crossover Linkwitz-Riley
+- Pitch shift, frequency shifter, utilitário, contêiner paralelo (Patcher)
+
+</td>
+<td width="33%" valign="top">
+
+#### Projeto e arquivo
+- Formato próprio `.lynx` (JSON) com autosave
+- Importa `.flp` e `.mid`; presets `.fst` do FL
+- Exporta WAV 16/24/32f, FLAC e OGG, música ou pattern, com dither
+- Gravação de notas (PC e MIDI) e de áudio da entrada
+- Desfazer/refazer em todas as edições
+
+</td>
+</tr>
+</table>
+
+## Abre projetos do FL Studio
+
+O LYNX lê o formato `.flp` diretamente e converte o que tem equivalente:
+
+- **Estrutura:** canais, samples reais (inclusive os WAV com Ogg Vorbis e WavPack da instalação do FL), patterns, notas com slide/porta, todos os arrangements, marcadores, mudanças de compasso, automação e links de controlador.
+- **Mixer:** roteamento, níveis, sidechains, EQ das trilhas, efeitos nativos com os ajustes salvos (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 3, Maximus, Gross Beat, Effector, Love Philter, Frequency Splitter, Patcher, Pitcher, Vocoder e outros).
+- **Geradores:** 3x Osc, FPC, DirectWave, FL Keys, Slicex, Fruity Slicer e Wave Traveller como sampler; Sytrus, Harmor, Harmless, GMS, Kepler, Ogun, MiniSynth, DX10, Toxic Biohazard, Sakura, Morphine, BassDrum e outros pelo synth interno, com os timbres reconstruídos a partir das curvas e tabelas de harmônicas do projeto.
+- **Plugins de terceiros:** VST3/CLAP do Fruity Wrapper são trocados pelo mesmo plugin instalado, com o preset.
+
+Ao abrir, um relatório mostra o que foi convertido, o que é aproximado e o que ficou de fora. Os pacotes FLEX são protegidos e não são abertos (o canal recebe um patch pelo nome do preset).
+
+> [!NOTE]
+> Cada lei de conversão vem de engenharia reversa **comportamental** (decompilação estudada, manual oficial e dados dos projetos), registrada em [`docs/analise/`](docs/analise). O que não foi confirmado fica marcado como aproximação em [`docs/ESTADO.md`](docs/ESTADO.md#confirmado-x-aproximado-import-do-fl).
+
+## Para testes e automação
+
+O `LYNX.exe` também funciona sem interface, o que permite verificar tudo sem abrir janelas:
+
+```
+LYNX.exe projeto.lynx                          abre um projeto (.lynx, .flp ou .mid)
+LYNX.exe --export projeto.flp saida.flac       exporta a música (wav/flac/ogg)
+LYNX.exe --render projeto.flp saida.wav 20     exporta 20 s da pattern atual (WAV 24 bits)
+LYNX.exe --selftest relatorio.txt [demo.lynx]  autoteste sem placa de som
+LYNX.exe --snapshot prefixo projeto.flp        desenha a interface (e as janelas) em PNG
+LYNX.exe --showcase saida.lynx [pattern]       gera o projeto de demonstração usado nestas imagens
+LYNX.exe --plugintest plugin.vst3 rel.txt      testa um plugin VST3 ou CLAP
+LYNX.exe --sandboxtest plugin.vst3 rel.txt     testa um plugin em processo separado (inclusive travado)
+LYNX.exe --scantest pasta rel.txt              busca plugins numa pasta (processos separados)
+LYNX.exe --dispositivos rel.txt                lista drivers e saídas de áudio
+```
 
 ## Atalhos
 
 | Tecla | Ação |
 |---|---|
 | Espaço | Play / Pause |
-| F5 / F6 / F7 / F9 | Playlist / Channel Rack / Piano Roll / Mixer |
+| F5 / F6 / F7 / F8 / F9 | Playlist / Channel Rack / Piano Roll / Navegador / Mixer |
 | L | Alterna Pattern / Song |
 | Ctrl+Z / Ctrl+Y | Desfazer / refazer |
 | Ctrl+N / Ctrl+O / Ctrl+S | Novo / Abrir / Salvar (Ctrl+Shift+S: salvar como) |
 | Ctrl+R | Exportar áudio |
 | `Z`..`M`, `Q`..`P` | Tocar o canal selecionado |
-| Piano Roll / Playlist | Ctrl+A/C/X/V, Ctrl+B duplicar, Delete, Esc; no Piano Roll também Ctrl+Q e setas |
-
-## Linha de comando
-
-```
-LYNX.exe projeto.lynx                          abre um projeto (.lynx, .flp ou .mid)
-LYNX.exe --export projeto.flp saida.flac       exporta a música (wav/flac/ogg) como o botão Exportar
-LYNX.exe --render projeto.flp saida.wav 20     exporta 20 s da pattern atual para WAV 24 bits
-LYNX.exe --selftest relatorio.txt [demo.lynx]  autoteste sem placa de som
-LYNX.exe --snapshot prefixo projeto.flp        desenha a interface (e as janelas) em PNG
-LYNX.exe --plugintest plugin.vst3 rel.txt      testa um plugin VST3 ou CLAP
-LYNX.exe --scantest pasta rel.txt              busca plugins numa pasta (processos separados)
-LYNX.exe --wrappertest plugin.vst3 rel.txt     confere o import de um VST3 salvo pelo Fruity Wrapper do FL
-LYNX.exe --dispositivos rel.txt                lista drivers e saídas de áudio (WASAPI, exclusivo, DirectSound)
-```
+| Piano Roll / Playlist | Ctrl+A/C/X/V, Ctrl+B duplicar, Delete; no Piano Roll também Ctrl+Q e as setas |
 
 ## Compilar
 
@@ -79,9 +206,9 @@ Precisa do Zig 0.14.1 em `~/opt/zig-x86_64-linux-0.14.1` e do JUCE 8.0.4 em `~/o
 (ou defina `ZIG` e `JUCE_DIR`). O JUCE 8 não suporta MinGW oficialmente; o script contorna as
 diferenças (veja `cmake/mingw/` e `src/platform/MingwFixes.cpp`).
 
-### Windows com Visual Studio (build oficial)
+### Windows com Visual Studio
 
-Pré-requisitos: Visual Studio 2022 Build Tools (workload "Desktop development with C++"), CMake ≥ 3.22 e Git.
+Pré-requisitos: Visual Studio 2022 Build Tools ("Desktop development with C++"), CMake ≥ 3.22 e Git.
 
 ```
 cmake -B build -G "Visual Studio 17 2022" -A x64
@@ -94,28 +221,48 @@ cmake --build build --config Release
 ./scripts/build-local.sh ["pasta com arquivos .flp"]
 ```
 
-Também gera `build-local/flpdump` (mostra o conteúdo de um `.flp`) e `build-local/renderwav`.
+São mais de um milhão de verificações, incluindo a leitura dos 165 projetos `.flp` que vêm com o FL Studio 2026 quando a pasta é informada. Também gera `build-local/flpdump` (mostra o conteúdo de um `.flp`) e `build-local/renderwav`.
 
-## Organização
+## Por dentro
 
 ```
-src/core/     modelo, sequenciador, instrumentos, leitor de .flp (C++ puro, testável sem JUCE)
+src/core/     modelo, sequenciador, instrumentos, efeitos e import do .flp (C++ puro, testável sem JUCE)
 src/flp/      leitor do formato .flp
-src/engine/   motor de áudio (JUCE): dispositivo, grafo, samples, arquivo de projeto
+src/engine/   motor de áudio (JUCE): dispositivo, grafo, samples, plugins, arquivo de projeto
 src/ui/       interface: Channel Rack, Piano Roll, Playlist, Mixer, janelas
-third_party/  headers do CLAP (MIT)
+third_party/  CLAP (MIT) e decodificador WavPack (BSD)
 tests/        testes do núcleo
-tools/        flpdump, renderwav
+tools/        flpdump, renderwav, comparewav, make_logo
 docs/         arquitetura, estado, roadmap e a análise comportamental do FL Studio
 ```
 
+- **Áudio sem bloqueio:** a interface edita uma cópia da música e publica um snapshot imutável para a thread de áudio.
+- **Renderização em trechos:** cada nota cai na amostra exata; trilhas do mixer são processadas em camadas paralelas.
+- **Plugins isolados:** a busca de plugins sempre roda em processos separados; opcionalmente, os próprios plugins também (um plugin que trava fica mudo e o LYNX continua).
+
+> [!IMPORTANT]
+> O LYNX está em **alfa**. Já abre, toca e exporta projetos inteiros, mas ainda não substitui uma DAW no dia a dia. O que funciona e o que falta está em [`docs/ESTADO.md`](docs/ESTADO.md); o plano, em [`docs/ROADMAP.md`](docs/ROADMAP.md); e um roteiro para testar à mão, em [`docs/TESTE_MANUAL.md`](docs/TESTE_MANUAL.md).
+
 ## Documentação
-- `docs/ESTADO.md`: o que já funciona e o que falta; `docs/ROADMAP.md`: fases
-- `docs/TESTE_MANUAL.md`: roteiro para ouvir/mexer no que os testes automáticos não cobrem
-- `docs/analise/REA_rodada*.md`: o comportamento do FL Studio levantado com o REA (clean-room)
 
-## Sobre o FL Studio
+| Documento | Conteúdo |
+|---|---|
+| [`docs/ESTADO.md`](docs/ESTADO.md) | o que já funciona, o que é aproximado e o que falta |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | as fases do projeto |
+| [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) | como o motor e a interface se organizam |
+| [`docs/TESTE_MANUAL.md`](docs/TESTE_MANUAL.md) | roteiro para ouvir e mexer no que os testes automáticos não cobrem |
+| [`docs/analise/`](docs/analise) | o comportamento do FL Studio levantado rodada a rodada (clean-room) |
 
-O LYNX é uma implementação independente. O FL Studio foi estudado para entender o
-comportamento e o formato de arquivo (veja `docs/ANALISE_FL_STUDIO.md`); nenhum código da
-Image-Line foi copiado.
+## Créditos e aviso
+
+O LYNX é uma implementação independente. O FL Studio foi estudado apenas para entender o comportamento e o formato de arquivo; nenhum código da Image-Line foi copiado, e nenhum conteúdo protegido (como os pacotes FLEX) é aberto.
+
+FL Studio é marca registrada da Image-Line Software. O LYNX não tem nenhuma relação com a Image-Line. VST é marca registrada da Steinberg Media Technologies GmbH.
+
+Feito com [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap) e o decodificador [WavPack](https://www.wavpack.com).
+
+<p align="center">
+  <a href="https://star-history.com/#Ka1-S/LYNX&Date">
+    <img src="https://api.star-history.com/svg?repos=Ka1-S/LYNX&type=Date" alt="Histórico de estrelas" width="600">
+  </a>
+</p>
