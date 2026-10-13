@@ -129,6 +129,10 @@ public:
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
 
+    // Últimos samples da saída (mono), para o osciloscópio. Thread da UI.
+    void copyScope (float* destination, int count) const noexcept;
+    static constexpr int scopeSize = 2048;
+
     // Latência total compensada pelo PDC (na saída do Master), em samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
 
@@ -177,6 +181,8 @@ private:
     double lastPlayingTick = 0.0;
     std::atomic<int> liveChannel { 0 };              // canal selecionado, lido pela thread MIDI
     std::atomic<double> blockTimeMs { 0.0 };         // quando positionTicks foi atualizado por último
+    std::array<std::atomic<float>, scopeSize> scope {}; // anel com a saída (escrito pelo áudio)
+    std::atomic<int> scopeWrite { 0 };
     juce::MidiDeviceListConnection midiDevicesChanged;
 
     // gravação de áudio

@@ -222,6 +222,18 @@ void AudioEngine::stop() noexcept { transport.playing.store (false); }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
 void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
 
+void AudioEngine::copyScope (float* destination, int count) const noexcept
+{
+    count = juce::jmin (count, scopeSize);
+    auto r = (scopeWrite.load (std::memory_order_acquire) - count + scopeSize) % scopeSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        destination[i] = scope[(std::size_t) r].load (std::memory_order_relaxed);
+        r = (r + 1) % scopeSize;
+    }
+}
+
 void AudioEngine::previewFile (const juce::File& file)
 {
     if (preview != nullptr)
@@ -856,6 +868,21 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         for (int ch = 0; ch < numOutputChannels; ++ch)
             if (outputs[(std::size_t) ch] != nullptr)
                 softClip (outputs[(std::size_t) ch], n);
+
+        // osciloscópio: média dos dois lados no anel
+        if (numOutputChannels > 0 && outputs[0] != nullptr)
+        {
+            auto w = scopeWrite.load (std::memory_order_relaxed);
+            const auto* right = numOutputChannels > 1 && outputs[1] != nullptr ? outputs[1] : outputs[0];
+
+            for (int i = 0; i < n; ++i)
+            {
+                scope[(std::size_t) w].store (0.5f * (outputs[0][i] + right[i]), std::memory_order_relaxed);
+                w = (w + 1) % scopeSize;
+            }
+
+            scopeWrite.store (w, std::memory_order_release);
+        }
 
         if (playing)
         {

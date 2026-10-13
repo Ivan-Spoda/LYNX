@@ -154,7 +154,7 @@ MainComponent::MainComponent (AudioEngine& e)
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
                                                              &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton, &swingLabel, &swingSlider,
-                                                             &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
+                                                             &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs, &scope })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // o teclado do PC fica com a janela principal
@@ -217,6 +217,13 @@ void MainComponent::resized()
     place (swingSlider, 30);
 
     settingsButton.setBounds (toolbar.removeFromRight (74));
+    toolbar.removeFromRight (6);
+
+    if (toolbar.getWidth() > 220)
+        scope.setBounds (toolbar.removeFromRight (juce::jmin (160, toolbar.getWidth() - 110)));
+    else
+        scope.setBounds ({});
+
     positionLabel.setBounds (toolbar);
 
     auto status = area.removeFromBottom (20).reduced (8, 0);
@@ -542,8 +549,44 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         refreshToolbar();
 }
 
+void MainComponent::Scope::update()
+{
+    if (! isShowing() || getWidth() <= 0)
+        return;
+
+    engine.copyScope (samples.data(), (int) samples.size());
+    repaint();
+}
+
+void MainComponent::Scope::paint (juce::Graphics& g)
+{
+    const auto area = getLocalBounds().toFloat();
+    g.setColour (theme::knobBackground);
+    g.fillRoundedRectangle (area, 3.0f);
+
+    juce::Path wave;
+    const auto mid = area.getCentreY();
+    const auto half = area.getHeight() * 0.45f;
+
+    for (int x = 0; x < (int) area.getWidth(); ++x)
+    {
+        const auto index = (std::size_t) (x * (int) samples.size() / juce::jmax (1, (int) area.getWidth()));
+        const auto y = mid - juce::jlimit (-1.0f, 1.0f, samples[index]) * half;
+
+        if (x == 0)
+            wave.startNewSubPath (area.getX(), y);
+        else
+            wave.lineTo (area.getX() + (float) x, y);
+    }
+
+    g.setColour (theme::accentGreen.withAlpha (0.85f));
+    g.strokePath (wave, juce::PathStrokeType (1.2f));
+}
+
 void MainComponent::timerCallback()
 {
+    scope.update();
+
     if (engine.isModified() != lastModified)
     {
         lastModified = engine.isModified();

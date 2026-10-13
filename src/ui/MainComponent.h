@@ -86,6 +86,20 @@ private:
     juce::Label swingLabel;
     juce::TextButton settingsButton { "Audio..." };
     juce::Label positionLabel;
+
+    // osciloscópio da saída, na barra (como o do FL)
+    class Scope final : public juce::Component
+    {
+    public:
+        explicit Scope (AudioEngine& e) : engine (e) { setInterceptsMouseClicks (false, false); }
+        void update();
+        void paint (juce::Graphics& g) override;
+
+    private:
+        AudioEngine& engine;
+        std::array<float, 1024> samples {};
+    };
+    Scope scope { engine };
     juce::Label cpuLabel;
     juce::Label hintLabel;
 
