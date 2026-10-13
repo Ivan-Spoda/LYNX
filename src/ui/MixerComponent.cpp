@@ -560,7 +560,8 @@ namespace
 {
 constexpr int panelHeader = 30;
 constexpr int slotHeight = 24;
-constexpr EffectKind allEffects[] = { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb };
+constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::compressor, EffectKind::limiter,    EffectKind::delay,
+                                      EffectKind::reverb, EffectKind::chorus,     EffectKind::filter, EffectKind::distortion };
 } // namespace
 
 EffectsPanel::EffectsPanel (AudioEngine& e)

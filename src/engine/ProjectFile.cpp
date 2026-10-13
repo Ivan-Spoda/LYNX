@@ -44,6 +44,10 @@ const char* effectId (EffectKind k)
         case EffectKind::delay: return "delay";
         case EffectKind::reverb: return "reverb";
         case EffectKind::plugin: return "plugin";
+        case EffectKind::limiter: return "limiter";
+        case EffectKind::filter: return "filter";
+        case EffectKind::distortion: return "distortion";
+        case EffectKind::chorus: return "chorus";
     }
     return "eq";
 }
@@ -68,7 +72,8 @@ PluginRef pluginFromVar (const juce::var& v)
 
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
-    for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin })
+    for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus })
         if (id == effectId (k))
             return k;
 

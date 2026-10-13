@@ -74,7 +74,11 @@ enum class EffectKind : std::uint8_t
     compressor,
     delay,
     reverb,
-    plugin // efeito externo (VST3), criado pelo app
+    plugin, // efeito externo (VST3/CLAP), criado pelo app
+    limiter,
+    filter,
+    distortion,
+    chorus
 };
 
 constexpr int maxEffectParams = 6;

@@ -1881,6 +1881,60 @@ TEST (mixer_stereo_separation_phase_swap)
     CHECK (l[0] == -0.25f && r[0] == -1.0f);
 }
 
+TEST (effects_limiter_filter_distortion_chorus)
+{
+    const double sr = 48000.0;
+    auto sine = [] (float hz, float amp, int n) {
+        std::vector<float> v ((std::size_t) n);
+        for (int i = 0; i < n; ++i)
+            v[(std::size_t) i] = amp * std::sin (2.0f * 3.14159265f * hz * (float) i / 48000.0f);
+        return v;
+    };
+    auto peak = [] (const std::vector<float>& v, int from) {
+        float p = 0.0f;
+        for (std::size_t i = (std::size_t) from; i < v.size(); ++i)
+            p = std::max (p, std::abs (v[i]));
+        return p;
+    };
+
+    // limiter: +12 dB num seno de 0,9 nunca passa do teto (-1 dB) e informa a latência
+    auto lim = lynx::makeEffect (lynx::EffectKind::limiter);
+    lim->prepare (sr);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::limiter);
+    slot.params[0] = 11.0f / 12.0f; // -1 dB
+    slot.params[1] = 0.5f;          // +12 dB
+    auto l = sine (100.0f, 0.9f, 48000), r = l;
+    lim->process (l.data(), r.data(), 48000, slot.params, 120.0);
+    CHECK (peak (l, 0) <= std::pow (10.0f, -1.0f / 20.0f) + 1e-4f);
+    CHECK (peak (l, 4800) > 0.8f);
+    CHECK (lim->latencySamples() == 72);
+
+    // filtro passa-baixas em 500 Hz derruba um seno de 8 kHz
+    auto lp = lynx::makeEffect (lynx::EffectKind::filter);
+    lp->prepare (sr);
+    auto fs = lynx::makeEffectSlot (lynx::EffectKind::filter);
+    fs.params[1] = std::log (500.0f / 20.0f) / std::log (1000.0f);
+    l = sine (8000.0f, 1.0f, 9600);
+    r = l;
+    lp->process (l.data(), r.data(), 9600, fs.params, 120.0);
+    CHECK (peak (l, 4800) < 0.05f);
+
+    // distorção e chorus: saída finita e com som
+    for (auto kind : { lynx::EffectKind::distortion, lynx::EffectKind::chorus })
+    {
+        auto fx = lynx::makeEffect (kind);
+        fx->prepare (sr);
+        auto ps = lynx::makeEffectSlot (kind);
+        l = sine (220.0f, 0.5f, 9600);
+        r = l;
+        fx->process (l.data(), r.data(), 9600, ps.params, 120.0);
+        bool finite = true;
+        for (auto v : l)
+            finite = finite && std::isfinite (v);
+        CHECK (finite && peak (l, 2400) > 0.1f && peak (l, 0) < 2.0f);
+    }
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

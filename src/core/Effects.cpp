@@ -34,6 +34,18 @@ constexpr std::array<const char*, 8> delayNames { "1/16", "1/8", "1/8 pont.", "1
 
 int delayIndex (float v) { return std::clamp ((int) (v * (float) delayDivisions.size()), 0, (int) delayDivisions.size() - 1); }
 
+float limiterCeilingDb (float v) { return -12.0f + v * 12.0f; }
+float limiterGainDb (float v) { return v * 24.0f; }
+float limiterReleaseMs (float v) { return logRange (v, 10.0f, 1000.0f); }
+int filterType (float v) { return std::clamp ((int) (v * 3.0f), 0, 2); } // passa-baixas, passa-altas, passa-banda
+constexpr std::array<const char*, 3> filterNames { "Passa-baixas", "Passa-altas", "Passa-banda" };
+float filterHz (float v) { return logRange (v, 20.0f, 20000.0f); }
+float filterQ (float v) { return logRange (v, 0.5f, 12.0f); }
+float distortionDriveDb (float v) { return v * 36.0f; }
+float distortionToneHz (float v) { return logRange (v, 800.0f, 20000.0f); }
+float chorusRateHz (float v) { return logRange (v, 0.05f, 5.0f); }
+float chorusDepthMs (float v) { return v * 8.0f; }
+
 // ---------------------------------------------------------------------------
 // Biquad (fórmulas clássicas do "Audio EQ Cookbook" de R. Bristow-Johnson)
 
@@ -55,6 +67,21 @@ struct Biquad
     void set (double nb0, double nb1, double nb2, double a0, double na1, double na2) noexcept
     {
         b0 = nb0 / a0; b1 = nb1 / a0; b2 = nb2 / a0; a1 = na1 / a0; a2 = na2 / a0;
+    }
+
+    // passa-baixas/altas/banda (cookbook); o passa-banda tem ganho 0 dB no pico
+    void filter (double sr, int type, double hz, double q) noexcept
+    {
+        const auto w = 2.0 * pi * std::min (hz, sr * 0.45) / sr;
+        const auto cw = std::cos (w);
+        const auto alpha = std::sin (w) / (2.0 * q);
+
+        if (type == 0)
+            set ((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+        else if (type == 1)
+            set ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+        else
+            set (alpha, 0, -alpha, 1 + alpha, -2 * cw, 1 - alpha);
     }
 
     void peaking (double sr, double hz, double q, double db) noexcept
@@ -369,6 +396,232 @@ private:
     std::array<std::array<Comb, 8>, 2> combs;
     std::array<std::array<Allpass, 4>, 2> allpasses;
 };
+// ---------------------------------------------------------------------------
+// Limiter com lookahead: o ganho já começa a cair antes do pico chegar (atraso de 1,5 ms,
+// informado como latência para o PDC alinhar com as outras trilhas).
+
+class Limiter final : public Effect
+{
+public:
+    static constexpr double lookaheadSeconds = 0.0015;
+
+    Limiter()
+    {
+        const auto size = (std::size_t) (lookaheadSeconds * maxSampleRate) + 4;
+        delay[0].assign (size, 0.0f);
+        delay[1].assign (size, 0.0f);
+        peaks.assign (size, 0.0f);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        lookahead = std::max (1, (int) std::lround (lookaheadSeconds * sr));
+        attack = (float) (1.0 - std::exp (-1.0 / (lookahead * 0.3)));
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        std::fill (delay[0].begin(), delay[0].end(), 0.0f);
+        std::fill (delay[1].begin(), delay[1].end(), 0.0f);
+        std::fill (peaks.begin(), peaks.end(), 0.0f);
+        position = 0;
+        gain = 1.0f;
+    }
+
+    int latencySamples() const noexcept override { return lookahead; }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto ceiling = dbToGain (limiterCeilingDb (params[0]));
+        const auto input = dbToGain (limiterGainDb (params[1]));
+        const auto release = (float) (1.0 - std::exp (-1.0 / (limiterReleaseMs (params[2]) * 0.001 * sampleRate)));
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto a = l[i] * input, b = r[i] * input;
+            peaks[(std::size_t) position] = std::max (std::abs (a), std::abs (b));
+
+            // maior pico na janela que ainda vai sair (janela curta: busca direta é barata)
+            float ahead = 0.0f;
+            for (int k = 0; k < lookahead; ++k)
+                ahead = std::max (ahead, peaks[(std::size_t) k]);
+
+            const auto target = ahead > ceiling ? ceiling / ahead : 1.0f;
+            gain += (target - gain) * (target < gain ? attack : release);
+
+            const auto outL = delay[0][(std::size_t) position] * gain;
+            const auto outR = delay[1][(std::size_t) position] * gain;
+            delay[0][(std::size_t) position] = a;
+            delay[1][(std::size_t) position] = b;
+            position = (position + 1) % lookahead;
+
+            // segurança: nunca passa do teto
+            l[i] = std::clamp (outL, -ceiling, ceiling);
+            r[i] = std::clamp (outR, -ceiling, ceiling);
+        }
+    }
+
+private:
+    double sampleRate = 44100.0;
+    int lookahead = 64, position = 0;
+    float attack = 0.1f, gain = 1.0f;
+    std::array<std::vector<float>, 2> delay;
+    std::vector<float> peaks;
+};
+
+// ---------------------------------------------------------------------------
+
+class Filter final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        last.fill (-1.0f);
+        reset();
+    }
+
+    void reset() noexcept override { biquad.reset(); }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        if (params[0] != last[0] || params[1] != last[1] || params[2] != last[2])
+        {
+            last = params;
+            biquad.filter (sampleRate, filterType (params[0]), filterHz (params[1]), filterQ (params[2]));
+        }
+
+        const auto mix = params[3];
+
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] += (biquad.process (l[i], 0) - l[i]) * mix;
+            r[i] += (biquad.process (r[i], 1) - r[i]) * mix;
+        }
+    }
+
+private:
+    double sampleRate = 44100.0;
+    Biquad biquad;
+    EffectParams last {};
+};
+
+// ---------------------------------------------------------------------------
+
+class Distortion final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        lastTone = -1.0f;
+        reset();
+    }
+
+    void reset() noexcept override { tone.reset(); }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        if (params[1] != lastTone)
+        {
+            lastTone = params[1];
+            tone.filter (sampleRate, 0, distortionToneHz (params[1]), 0.707);
+        }
+
+        const auto drive = dbToGain (distortionDriveDb (params[0]));
+        const auto mix = params[2];
+        const auto output = dbToGain ((params[3] - 0.5f) * 24.0f);
+        // compensa o ganho do drive para o volume não explodir
+        const auto compensate = 1.0f / std::tanh (std::max (drive, 1.0f));
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto wl = tone.process (std::tanh (l[i] * drive) * compensate, 0);
+            const auto wr = tone.process (std::tanh (r[i] * drive) * compensate, 1);
+            l[i] = (l[i] + (wl - l[i]) * mix) * output;
+            r[i] = (r[i] + (wr - r[i]) * mix) * output;
+        }
+    }
+
+private:
+    double sampleRate = 44100.0;
+    Biquad tone;
+    float lastTone = -1.0f;
+};
+
+// ---------------------------------------------------------------------------
+// Chorus: uma linha de atraso modulada por LFO, com fases opostas em L e R.
+
+class Chorus final : public Effect
+{
+public:
+    static constexpr double maxSeconds = 0.05;
+
+    Chorus()
+    {
+        const auto size = (std::size_t) (maxSeconds * maxSampleRate) + 4;
+        buffer[0].assign (size, 0.0f);
+        buffer[1].assign (size, 0.0f);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        length = (int) std::min<std::size_t> (buffer[0].size(), (std::size_t) (maxSeconds * sr) + 4);
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        std::fill (buffer[0].begin(), buffer[0].end(), 0.0f);
+        std::fill (buffer[1].begin(), buffer[1].end(), 0.0f);
+        write = 0;
+        phase = 0.0;
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto rate = chorusRateHz (params[0]);
+        const auto depth = chorusDepthMs (params[1]) * 0.001 * sampleRate;
+        const auto mix = params[2];
+        const auto feedback = params[3] * 0.7f;
+        const auto base = 0.012 * sampleRate; // 12 ms
+        const auto step = rate / sampleRate;
+
+        for (int i = 0; i < n; ++i)
+        {
+            float* io[2] = { l + i, r + i };
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const auto lfo = std::sin (2.0 * pi * (phase + (ch == 0 ? 0.0 : 0.5)));
+                const auto delaySamples = base + depth * 0.5 * (1.0 + lfo);
+                auto readPos = (double) write - delaySamples;
+                while (readPos < 0.0)
+                    readPos += length;
+
+                const auto i0 = (int) readPos;
+                const auto frac = (float) (readPos - i0);
+                const auto& buf = buffer[(std::size_t) ch];
+                const auto delayed = buf[(std::size_t) i0] + frac * (buf[(std::size_t) ((i0 + 1) % length)] - buf[(std::size_t) i0]);
+                buffer[(std::size_t) ch][(std::size_t) write] = *io[ch] + delayed * feedback;
+                *io[ch] += (delayed - *io[ch]) * mix * 0.5f;
+            }
+
+            write = (write + 1) % length;
+            phase += step;
+            phase -= std::floor (phase);
+        }
+    }
+
+private:
+    double sampleRate = 44100.0;
+    std::array<std::vector<float>, 2> buffer;
+    int length = 1, write = 0;
+    double phase = 0.0;
+};
 } // namespace
 
 const EffectInfo& effectInfo (EffectKind kind)
@@ -378,6 +631,10 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo delay { "Delay", { { "Tempo", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Abafar", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f } } };
     static const EffectInfo plugin { "Plugin", {} };
+    static const EffectInfo limiter { "Limiter", { { "Teto", 0.975f }, { "Ganho", 0.0f }, { "Release", 0.5f } } };
+    static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
+    static const EffectInfo distortion { "Distorção", { { "Drive", 0.4f }, { "Tom", 0.7f }, { "Mix", 1.0f }, { "Saída", 0.5f } } };
+    static const EffectInfo chorus { "Chorus", { { "Velocidade", 0.45f }, { "Profund.", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
 
     switch (kind)
     {
@@ -386,6 +643,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::delay: return delay;
         case EffectKind::reverb: return reverb;
         case EffectKind::plugin: return plugin;
+        case EffectKind::limiter: return limiter;
+        case EffectKind::filter: return filter;
+        case EffectKind::distortion: return distortion;
+        case EffectKind::chorus: return chorus;
     }
     return eq;
 }
@@ -431,6 +692,44 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
+        case EffectKind::limiter:
+            switch (param)
+            {
+                case 0: std::snprintf (text, sizeof (text), "%.1f dB", limiterCeilingDb (v)); break;
+                case 1: std::snprintf (text, sizeof (text), "+%.1f dB", limiterGainDb (v)); break;
+                default: std::snprintf (text, sizeof (text), "%.0f ms", limiterReleaseMs (v)); break;
+            }
+            return text;
+
+        case EffectKind::filter:
+            switch (param)
+            {
+                case 0: return filterNames[(std::size_t) filterType (v)];
+                case 1: std::snprintf (text, sizeof (text), "%.0f Hz", filterHz (v)); break;
+                case 2: std::snprintf (text, sizeof (text), "Q %.2f", filterQ (v)); break;
+                default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+            }
+            return text;
+
+        case EffectKind::distortion:
+            switch (param)
+            {
+                case 0: std::snprintf (text, sizeof (text), "+%.1f dB", distortionDriveDb (v)); break;
+                case 1: std::snprintf (text, sizeof (text), "%.0f Hz", distortionToneHz (v)); break;
+                case 2: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+                default: std::snprintf (text, sizeof (text), "%+.1f dB", (v - 0.5f) * 24.0f); break;
+            }
+            return text;
+
+        case EffectKind::chorus:
+            switch (param)
+            {
+                case 0: std::snprintf (text, sizeof (text), "%.2f Hz", chorusRateHz (v)); break;
+                case 1: std::snprintf (text, sizeof (text), "%.1f ms", chorusDepthMs (v)); break;
+                default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+            }
+            return text;
+
         case EffectKind::plugin:
             break;
     }
@@ -458,6 +757,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::compressor: return std::make_unique<Compressor>();
         case EffectKind::delay: return std::make_unique<Delay>();
         case EffectKind::reverb: return std::make_unique<Reverb>();
+        case EffectKind::limiter: return std::make_unique<Limiter>();
+        case EffectKind::filter: return std::make_unique<Filter>();
+        case EffectKind::distortion: return std::make_unique<Distortion>();
+        case EffectKind::chorus: return std::make_unique<Chorus>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();
