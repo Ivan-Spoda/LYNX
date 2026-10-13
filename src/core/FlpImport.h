@@ -49,9 +49,11 @@ struct DrumPad
 {
     std::string name;
     int key = 60;                   // tecla que dispara o pad no canal original
-    std::vector<SampleZone> layers; // camadas por velocity (a nota-raiz de cada uma é a nota tocada)
-    float volume = 0.78f, pan = 0.0f, tune = 0.0f; // volume na curva do canal; afinação em semitons
-    int cutGroup = 0;               // pads com o mesmo grupo cortam uns aos outros (0 = nenhum)
+    std::vector<SampleZone> layers; // camadas por velocity (tocam na altura do sample)
+    float gain = 1.0f;              // ganho linear do pad (multiplica o do canal)
+    float pan = 0.0f, tune = 0.0f;  // pan −1..1; afinação em semitons
+    int cutGroup = 0, cutBy = 0;    // tocar este pad corta os pads com cutBy == cutGroup (0 = nenhum)
+    int mixerOffset = 0;            // trilha do mixer relativa à do canal
 };
 
 // Troca o canal `channel` por um canal sampler por pad (logo depois dele, no mesmo insert do mixer)

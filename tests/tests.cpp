@@ -370,6 +370,16 @@ TEST (flp_real_files)
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
+    int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
+    // import com os samples da instalação (o realFlpDir é ...\Data): para DirectWave/FPC
+    lynx::FlpImportOptions withFiles;
+    const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
+    withFiles.roots = { flRoot, realFlpDir, "" };
+    withFiles.fileExists = [] (const std::string& path) {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        return std::filesystem::exists (local);
+    };
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -388,6 +398,29 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            {
+                const auto full = lynx::importFlp (p, withFiles);
+                bool hasFpc = false;
+                for (const auto& c : p.channels)
+                    hasFpc = hasFpc || c.pluginName == "FPC";
+                for (const auto& c : full.channels)
+                {
+                    if (! c.zones.empty() && c.name.find (" - ") == std::string::npos)
+                    {
+                        ++dwChannels;
+                        dwZones += (int) c.zones.size();
+                    }
+                    padChannels += c.name.find (" - ") != std::string::npos && c.instrument == lynx::InstrumentKind::sampler ? 1 : 0;
+                }
+                fpcKits += hasFpc;
+                for (const auto& pat : full.patterns)
+                    for (const auto& n : pat.notes)
+                    {
+                        CHECK (n.channel >= 0 && n.channel < (int) full.channels.size());
+                        padNotes += full.channels[(std::size_t) n.channel].name.find (" - ") != std::string::npos ? 1 : 0;
+                    }
+            }
 
             const auto peqDefaults = lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params;
             for (const auto& t : song.mixer)
@@ -550,6 +583,9 @@ TEST (flp_real_files)
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);
     std::printf ("  %d EQs paramétricos (%d com ajustes do FL), %d reverbs (%d sem seco)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
+    std::printf ("  DirectWave: %d canais, %d zonas; FPC: %d projetos, %d canais de pad, %d notas nos pads\n", dwChannels, dwZones, fpcKits,
+                 padChannels, padNotes);
+    CHECK (dwZones > 1000 && padChannels > 250 && padNotes > 500);
     CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20 && reverbsLowCut > 250);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
@@ -1535,6 +1571,7 @@ TEST (split_drum_channel_moves_notes_to_pads)
     pads[1].key = 38;
     pads[1].layers = { { "snare soft.wav", 60, 0, 127, 0, 90 }, { "snare hard.wav", 60, 0, 127, 91, 127 } };
     pads[1].cutGroup = 2;
+    pads[1].cutBy = 2;
     lynx::splitDrumChannel (song, 1, pads);
 
     CHECK ((int) song.channels.size() == channels + 1);

@@ -2,6 +2,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/FlSamplers.h"
 #include "core/FlWrapper.h"
 #include "core/SynthPresets.h"
 
@@ -267,15 +268,21 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
         def.name = original.name + " - " + pad.name;
         def.instrument = InstrumentKind::sampler;
         def.plugin = {};
-        def.samplePath = pad.layers.size() == 1 ? pad.layers.front().path : std::string();
-        def.zones = pad.layers.size() > 1 ? pad.layers : std::vector<SampleZone> {};
+        const auto single = pad.layers.size() == 1;
+        def.samplePath = single ? pad.layers.front().path : std::string();
+        def.zones = single ? std::vector<SampleZone> {} : pad.layers;
         for (auto& z : def.zones)
-            z.rootKey = 60, z.lowKey = 0, z.highKey = 127;
-        def.volume = std::clamp (original.volume * pad.volume / 0.78f, 0.0f, 1.0f);
+            z.rootKey = 60, z.lowKey = 0, z.highKey = 127; // o pad toca na altura do sample
+        // volume: ganho do canal × ganho do pad (× o da única camada), de volta para a curva do canal
+        const auto gain = channelGain (original.volume) * pad.gain * (single ? pad.layers.front().gain : 1.0f);
+        def.volume = std::clamp ((float) (std::log (10.0 * gain + 1.0) / std::log (11.0)), 0.0f, 1.0f);
         def.pan = std::clamp (original.pan + pad.pan, -1.0f, 1.0f);
         def.sampler = {};
-        def.sampler.pitch = std::clamp (original.sampler.pitch + pad.tune, -24.0f, 24.0f);
-        def.cutGroup = def.cutBy = pad.cutGroup > 0 ? 1000 + pad.cutGroup : 0; // grupos próprios do kit
+        def.sampler.pitch = std::clamp (original.sampler.pitch + pad.tune + (single ? pad.layers.front().tune : 0.0f), -24.0f, 24.0f);
+        // grupos de corte próprios do kit (não se misturam com os dos outros canais)
+        def.cutGroup = pad.cutGroup > 0 ? 1000 * (channel + 1) + pad.cutGroup : 0;
+        def.cutBy = pad.cutBy > 0 ? 1000 * (channel + 1) + pad.cutBy : 0;
+        def.mixerTrack = std::clamp (original.mixerTrack + pad.mixerOffset, 0, maxMixerTracks - 1);
         padChannels.push_back (std::move (def));
     }
 
@@ -356,6 +363,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
     // Canais do FL podem ter índices esparsos; mapeamos para índices densos.
     std::map<int, int> channelMap;
+    std::vector<std::pair<int, std::vector<DrumPad>>> drumKits; // canais FPC para dividir no fim
 
     for (const auto& c : project.channels)
     {
@@ -501,6 +509,51 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         // plugin de terceiros (VST/CLAP) no Fruity Wrapper: o app procura o mesmo plugin instalado;
         // até lá (ou se não achar) o canal fica no synth interno
+        // geradores do FL com samples (REA_rodada9): DirectWave vira sampler multi-sample; o FPC é
+        // dividido em um canal por pad no fim do import (as notas vão para o pad pela tecla)
+        auto existing = [&] (std::string path) {
+            const auto resolved = resolveFlPath (path, options.roots);
+            return ! resolved.empty() && options.fileExists && options.fileExists (resolved) ? resolved : std::string();
+        };
+
+        if (c.pluginName == "DirectWave")
+            if (auto program = directWaveProgram (c.pluginState))
+            {
+                std::vector<SampleZone> zones;
+                for (auto z : program->zones)
+                    if (z.path = existing (z.path); ! z.path.empty())
+                        zones.push_back (std::move (z));
+
+                if (! zones.empty())
+                {
+                    def.instrument = InstrumentKind::sampler;
+                    def.zones = std::move (zones);
+                    def.sampler.attack = std::clamp (program->attack, 0.0f, 2.0f);
+                    def.sampler.decay = std::clamp (program->decay, 0.0f, 10.0f);
+                    def.sampler.sustain = program->sustain;
+                    def.sampler.release = std::clamp (std::max (program->release, 0.01f), 0.0f, 4.0f);
+                }
+            }
+
+        if (c.pluginName == "FPC")
+            if (auto pads = fpcPads (c.pluginState))
+            {
+                std::vector<DrumPad> found;
+                for (auto pad : *pads)
+                {
+                    std::vector<SampleZone> layers;
+                    for (auto layer : pad.layers)
+                        if (layer.path = existing (layer.path); ! layer.path.empty())
+                            layers.push_back (std::move (layer));
+                    pad.layers = std::move (layers);
+                    if (! pad.layers.empty())
+                        found.push_back (std::move (pad));
+                }
+
+                if (! found.empty())
+                    drumKits.push_back ({ (int) song.channels.size(), std::move (found) });
+            }
+
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
             def.plugin.name = def.plugin.foreign.name;
 
@@ -945,6 +998,10 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
     for (int i = 0; i < (int) song.patterns.size(); ++i)
         if (song.patterns[(std::size_t) i].notes.size() > song.patterns[(std::size_t) song.currentPattern].notes.size())
             song.currentPattern = i;
+
+    // kits do FPC: um canal por pad (do último para o primeiro, para os índices não andarem)
+    for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)
+        splitDrumChannel (song, it->first, it->second);
 
     return song;
 }

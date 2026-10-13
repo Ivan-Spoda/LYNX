@@ -26,7 +26,8 @@ add_library(lynx_core STATIC
     src/core/Slicer.cpp
     src/core/Templates.cpp
     src/core/FlWrapper.cpp
-    src/core/FlEffects.cpp)
+    src/core/FlEffects.cpp
+    src/core/FlSamplers.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)
