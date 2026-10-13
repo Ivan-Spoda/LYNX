@@ -9,6 +9,10 @@
 #include "engine/Metronome.h"
 #include "flp/Flp.h"
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+#endif
+
 namespace lynx
 {
 using IONode = juce::AudioProcessorGraph::AudioGraphIOProcessor;
@@ -41,8 +45,36 @@ FlPathRoots findFlStudioRoots()
 }
 } // namespace
 
+namespace
+{
+// Workers do áudio com prioridade de tempo real (MMCSS "Pro Audio" no Windows, como o driver).
+void raiseAudioThreadPriority()
+{
+   #if JUCE_WINDOWS
+    using AvSet = void* (__stdcall*) (const wchar_t*, unsigned long*);
+    static const auto avSet = [] () -> AvSet {
+        if (auto* avrt = LoadLibraryW (L"avrt.dll"))
+            return reinterpret_cast<AvSet> (reinterpret_cast<void*> (GetProcAddress (avrt, "AvSetMmThreadCharacteristicsW")));
+        return nullptr;
+    }();
+    unsigned long task = 0;
+
+    if (avSet == nullptr || avSet (L"Pro Audio", &task) == nullptr)
+        SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+   #endif
+}
+
+int workerCount()
+{
+    // a thread de áudio também trabalha; deixa um núcleo livre para a interface
+    const auto cores = (int) std::thread::hardware_concurrency();
+    return juce::jlimit (0, 7, cores - 2);
+}
+} // namespace
+
 AudioEngine::AudioEngine (bool openAudioDevice)
-    : song (Song::makeDefault())
+    : workers (std::make_unique<WorkerPool> (workerCount(), raiseAudioThreadPriority)),
+      song (Song::makeDefault())
 {
     publishSong();
     buildInitialGraph();
@@ -80,7 +112,7 @@ void AudioEngine::buildInitialGraph()
     graph.setPlayConfigDetails (0, 2, transport.sampleRate.load(), 512);
 
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
-    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters));
+    auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters, workers.get()));
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
 
     for (int channel = 0; channel < 2; ++channel)

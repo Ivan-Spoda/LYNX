@@ -60,6 +60,18 @@ struct RackState
     std::vector<int> mixerOrder;
     std::vector<char> mixerAudible;
 
+    // Modelo "puxar": cada trilha soma as saídas (pós-fader) das que enviam para ela.
+    struct MixerInput
+    {
+        int source = 0;
+        int delay = 0; // índice em sendDelays[source]
+        float level = 1.0f;
+    };
+    std::vector<std::vector<MixerInput>> mixerInputs; // [trilha]; [0] = Master
+    std::vector<std::vector<int>> mixerLayers;        // inserts sem dependência entre si, em ordem
+    bool parallel = false;                            // vale a pena dividir entre threads
+    void buildMixerGraph();
+
     void buildAutomationTables();
 
     // Carrega (ou pega do cache) o áudio de um arquivo; nullptr se não conseguir.
@@ -90,9 +102,14 @@ struct RackState
                                                    const Factories& factories);
 };
 
+class WorkerPool;
+
 class RackRenderer
 {
 public:
+    // Threads extras para canais e camadas do mixer (nullptr = tudo na thread de áudio).
+    void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
+
     // Aloca os buffers do mixer: chamar fora da thread de áudio.
     // Blocos maiores que maxBlockSize são processados em pedaços.
     void prepare (double sampleRate, int maxBlockSize = 2048);
@@ -115,7 +132,11 @@ public:
 private:
     void processChunk (const RackState& state, bool playing, double startTick, int numSamples,
                        float* left, float* right, MeterBank* meters) noexcept;
-    void renderSegment (const RackState& state, int offset, int n) noexcept;
+    void renderChannel (const RackState& state, int channel, int n) noexcept;
+    void processTrack (const RackState& state, int track, int n, MeterBank* meters) noexcept;
+    void pullInputs (const RackState& state, int track, int n) noexcept;
+    float* channelBuffer (int channel, int side) noexcept;
+    float* trackScratch (int track, int side) noexcept;
     void runEffects (const RackState& state, int track, int n) noexcept;
     void updateAutomation (const RackState& state, double startTick) noexcept;
     float automated (int automation, float base) const noexcept;
@@ -131,6 +152,12 @@ private:
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = ainda não avaliada
     std::vector<float> scratch; // 2 * blockCapacity, para atrasar um canal ou um envio
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // ganho L/R do bloco anterior, para a rampa
+    std::array<char, maxMixerTracks> trackActive {};        // a saída da trilha tem som neste bloco
+    static constexpr int maxChannels = 1024;
+    static constexpr int chunkCapacity = 512;               // trechos processados de uma vez
+    std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
+    std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
+    WorkerPool* workers = nullptr;
     int blockCapacity = 0;
 };
 } // namespace lynx

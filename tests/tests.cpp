@@ -1,5 +1,6 @@
 // Testes do núcleo (sem JUCE). Uso: lynx_tests [pasta-com-arquivos-flp]
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +19,7 @@
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
+#include "core/WorkerPool.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
@@ -1510,6 +1512,65 @@ TEST (dither_quantizes_to_lsb_grid_with_small_error)
     }
     CHECK (onGrid);
     CHECK (errorSum / (double) x.size() < 4.0 / 32768.0); // poucos LSB de ruído em média
+}
+
+TEST (parallel_rendering_matches_sequential)
+{
+    // 32 canais (vale a pena paralelizar), inserts com envios em cadeia
+    auto song = lynx::Song::makeDefault();
+    song.mixer = lynx::Song::defaultMixer (16);
+
+    for (int i = 5; i < 32; ++i)
+    {
+        lynx::ChannelDef c;
+        c.instrument = i % 2 ? lynx::InstrumentKind::synth : lynx::InstrumentKind::hat;
+        c.mixerTrack = 1 + i % 12;
+        c.volume = 0.3f;
+        song.channels.push_back (c);
+
+        for (int step = i % 4; step < 16; step += 3)
+            song.patterns[0].notes.push_back ({ (std::int64_t) step * lynx::ticksPerStep, 200, i, 48 + i, 0.7f });
+    }
+
+    song.patterns[0].sortNotes();
+    song.setRoute (3, 7, true, 0.6f);
+    song.setRoute (7, 9, true, 0.5f);
+    song.setRoute (2, 9, true);
+    song.mixer[9].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::reverb));
+
+    auto seqState = lynx::RackState::build (song, nullptr, 48000.0);
+    auto parState = lynx::RackState::build (song, nullptr, 48000.0);
+    CHECK (parState->parallel && parState->mixerLayers.size() == 3);
+
+    lynx::WorkerPool pool (3);
+    lynx::RackRenderer seq, par;
+    seq.prepare (48000.0, 512);
+    par.prepare (48000.0, 512);
+    par.setWorkerPool (&pool);
+
+    std::vector<float> l1 (512), r1 (512), l2 (512), r2 (512);
+    const auto tps = lynx::ticksPerSample (song.bpm, 48000.0);
+    bool same = true;
+    float peak = 0.0f;
+
+    for (int block = 0; block < 200; ++block)
+    {
+        seq.process (seqState.get(), true, block * 512 * tps, 512, l1.data(), r1.data());
+        par.process (parState.get(), true, block * 512 * tps, 512, l2.data(), r2.data());
+        same = same && l1 == l2 && r1 == r2;
+        for (auto v : l1)
+            peak = std::max (peak, std::abs (v));
+    }
+
+    CHECK (same);
+    CHECK (peak > 0.05f);
+
+    // o pool aguenta muitas rodadas pequenas seguidas
+    std::atomic<int> sum { 0 };
+    auto add = [&sum] (int i) { sum.fetch_add (i + 1); };
+    for (int round = 0; round < 2000; ++round)
+        pool.parallelFor (5, add);
+    CHECK (sum.load() == 2000 * 15);
 }
 
 int main (int argc, char** argv)

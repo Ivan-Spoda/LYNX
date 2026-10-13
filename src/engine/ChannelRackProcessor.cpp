@@ -3,7 +3,7 @@
 namespace lynx
 {
 ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange<RackState>& x, LiveEventQueue& l,
-                                            LiveEventQueue& midi, MeterBank& m)
+                                            LiveEventQueue& midi, MeterBank& m, WorkerPool* workers)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       transport (t),
       exchange (x),
@@ -11,6 +11,7 @@ ChannelRackProcessor::ChannelRackProcessor (const Transport& t, SnapshotExchange
       midiLive (midi),
       meters (m)
 {
+    renderer.setWorkerPool (workers);
 }
 
 void ChannelRackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock)

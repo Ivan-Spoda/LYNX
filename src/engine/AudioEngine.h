@@ -7,6 +7,7 @@
 
 #include "core/LiveEventQueue.h"
 #include "core/Recorder.h"
+#include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
@@ -130,6 +131,7 @@ private:
     void buildInitialGraph();
     void publishSong();
 
+    std::unique_ptr<WorkerPool> workers; // threads extras do renderer (antes do grafo, que as usa)
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorPlayer player;

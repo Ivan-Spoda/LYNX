@@ -1,5 +1,7 @@
 #include "core/RackRenderer.h"
 
+#include "core/WorkerPool.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -131,10 +133,61 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     state->sampleRate = sampleRate;
     state->buildAutomationTables();
     state->buildPdc (previous);
-    state->mixerOrder = state->song.mixerOrder();
+    state->buildMixerGraph();
     const auto audible = state->song.soloAudible();
     state->mixerAudible.assign (audible.begin(), audible.end());
     return state;
+}
+
+void RackState::buildMixerGraph()
+{
+    mixerOrder = song.mixerOrder();
+    const auto audible = song.soloAudible();
+    mixerAudible.assign (audible.begin(), audible.end());
+
+    const auto tracks = std::max<int> (1, (int) song.mixer.size());
+    mixerInputs.assign ((std::size_t) tracks, {});
+    std::vector<int> depth ((std::size_t) tracks, 0);
+
+    for (auto t : mixerOrder) // fontes antes dos destinos: a profundidade já está pronta
+    {
+        const auto& track = song.mixer[(std::size_t) t];
+
+        if (track.toMaster)
+            mixerInputs[0].push_back ({ t, 0, 1.0f });
+
+        for (std::size_t k = 0; k < track.sends.size(); ++k)
+        {
+            const auto& send = track.sends[k];
+
+            if (send.target > 0 && send.target < tracks && send.target != t && send.level > 0.0f)
+            {
+                mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level });
+                depth[(std::size_t) send.target] = std::max (depth[(std::size_t) send.target], depth[(std::size_t) t] + 1);
+            }
+        }
+    }
+
+    mixerLayers.clear();
+
+    for (auto t : mixerOrder)
+    {
+        const auto d = (std::size_t) depth[(std::size_t) t];
+
+        if (mixerLayers.size() <= d)
+            mixerLayers.resize (d + 1);
+
+        mixerLayers[d].push_back (t);
+    }
+
+    // dividir entre threads custa uns microssegundos por bloco; só compensa com plugins ou muitos canais
+    const auto plugins = std::count_if (song.channels.begin(), song.channels.end(),
+                                        [] (const ChannelDef& c) { return c.instrument == InstrumentKind::plugin; });
+    auto pluginEffects = 0;
+    for (const auto& t : song.mixer)
+        pluginEffects += (int) std::count_if (t.effects.begin(), t.effects.end(), [] (const EffectSlot& e) { return e.kind == EffectKind::plugin; });
+
+    parallel = plugins + pluginEffects >= 2 || song.channels.size() >= 24;
 }
 
 std::vector<int> RackState::currentLatencies() const
@@ -306,6 +359,8 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
     scratch.assign ((std::size_t) std::max (64, maxBlockSize) * 2, 0.0f);
     lastTrackGain.fill (std::numeric_limits<float>::quiet_NaN());
+    channelBuffers.assign ((std::size_t) maxChannels * 2 * chunkCapacity, 0.0f);
+    trackScratchBuffers.assign ((std::size_t) maxMixerTracks * 2 * chunkCapacity, 0.0f);
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
@@ -397,43 +452,61 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     }
 }
 
-void RackRenderer::renderSegment (const RackState& state, int offset, int n) noexcept
+float* RackRenderer::channelBuffer (int channel, int side) noexcept
 {
-    const auto& channels = state.song.channels;
-    const auto tracks = std::max<int> (1, (int) state.song.mixer.size());
+    return channelBuffers.data() + ((std::size_t) channel * 2 + (std::size_t) side) * chunkCapacity;
+}
+
+float* RackRenderer::trackScratch (int track, int side) noexcept
+{
+    return trackScratchBuffers.data() + ((std::size_t) track * 2 + (std::size_t) side) * chunkCapacity;
+}
+
+// Um canal inteiro no trecho: notas no sample exato (só os eventos dele), volume/pan e o
+// atraso de PDC. Cada canal só mexe no próprio instrumento e buffer: pode rodar em paralelo.
+void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
+{
+    const auto& c = state.song.channels[(std::size_t) i];
     const auto automation = state.hasAutomation;
+    const auto volume = automation ? automated (state.channelVolumeAuto[(std::size_t) i], c.volume) : c.volume;
+    const auto pan = automation ? automated (state.channelPanAuto[(std::size_t) i], (c.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : c.pan;
+    float gl = 0.0f, gr = 0.0f;
+    panGains (pan, volume, gl, gr);
 
-    for (std::size_t i = 0; i < state.instruments.size() && i < channels.size(); ++i)
+    auto* l = channelBuffer (i, 0);
+    auto* r = channelBuffer (i, 1);
+    std::memset (l, 0, sizeof (float) * (std::size_t) n);
+    std::memset (r, 0, sizeof (float) * (std::size_t) n);
+
+    auto& instrument = *state.instruments[(std::size_t) i];
+    int position = 0;
+
+    for (const auto& e : events)
     {
-        const auto& c = channels[i];
-        const auto track = std::clamp (c.mixerTrack, 0, tracks - 1);
-        const auto volume = automation ? automated (state.channelVolumeAuto[i], c.volume) : c.volume;
-        const auto pan = automation ? automated (state.channelPanAuto[i], (c.pan + 1.0f) * 0.5f) * 2.0f - 1.0f : c.pan;
-        float gl = 0.0f, gr = 0.0f;
-        panGains (pan, volume, gl, gr);
+        if (e.channel != i)
+            continue;
 
-        if (i < state.channelDelays.size() && state.channelDelays[i] != nullptr)
+        if (e.sampleOffset > position)
         {
-            // PDC: este canal chega antes dos outros da trilha; atrasa até alinhar
-            auto* sl = scratch.data();
-            auto* sr = scratch.data() + blockCapacity;
-            std::memset (sl, 0, sizeof (float) * (std::size_t) n);
-            std::memset (sr, 0, sizeof (float) * (std::size_t) n);
-            state.instruments[i]->render (sl, sr, n, gl, gr);
-            state.channelDelays[i]->process (sl, sr, n);
+            instrument.render (l + position, r + position, e.sampleOffset - position, gl, gr);
+            position = e.sampleOffset;
+        }
 
-            auto* dl = trackBuffer (track, 0) + offset;
-            auto* dr = trackBuffer (track, 1) + offset;
-
-            for (int k = 0; k < n; ++k)
-            {
-                dl[k] += sl[k];
-                dr[k] += sr[k];
-            }
+        if (e.type == NoteEvent::Type::on)
+        {
+            if (! c.muted)
+                instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
         }
         else
-            state.instruments[i]->render (trackBuffer (track, 0) + offset, trackBuffer (track, 1) + offset, n, gl, gr);
+            instrument.noteOff (e.key);
     }
+
+    if (position < n)
+        instrument.render (l + position, r + position, n - position, gl, gr);
+
+    // PDC: este canal chega antes dos outros da trilha; atrasa até alinhar
+    if ((std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr)
+        state.channelDelays[(std::size_t) i]->process (l, r, n);
 }
 
 void RackRenderer::runEffects (const RackState& state, int track, int n) noexcept
@@ -532,7 +605,7 @@ void RackRenderer::process (const RackState* state,
 
     // Blocos maiores que os buffers do mixer são feitos em pedaços. Com automação, pedaços
     // pequenos para os valores andarem suavemente.
-    const auto chunk = state->hasAutomation ? std::min (blockCapacity, 128) : blockCapacity;
+    const auto chunk = std::min (blockCapacity, state->hasAutomation ? 128 : chunkCapacity);
 
     for (int done = 0; done < numSamples; done += chunk)
     {
@@ -571,126 +644,48 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
                              ticksPerSample (song.bpm, sampleRate), events);
     }
 
-    // 1) instrumentos -> trilhas do mixer, em segmentos entre eventos para cada nota
-    //    começar no sample exato
-    int position = 0;
+    // 1) canais, cada um com as próprias notas no sample exato (em paralelo quando vale a pena)
+    const auto channels = std::min<int> ({ (int) state.instruments.size(), (int) song.channels.size(), maxChannels });
+    auto channel = [this, &state, numSamples] (int c) { renderChannel (state, c, numSamples); };
 
-    for (const auto& e : events)
+    if (workers != nullptr && state.parallel)
+        workers->parallelFor (channels, channel);
+    else
+        for (int c = 0; c < channels; ++c)
+            channel (c);
+
+    for (int c = 0; c < channels; ++c)
     {
-        if (e.sampleOffset > position)
+        const auto t = std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1);
+        auto* dl = trackBuffer (t, 0);
+        auto* dr = trackBuffer (t, 1);
+        const auto* sl = channelBuffer (c, 0);
+        const auto* sr = channelBuffer (c, 1);
+
+        for (int k = 0; k < numSamples; ++k)
         {
-            renderSegment (state, position, e.sampleOffset - position);
-            position = e.sampleOffset;
+            dl[k] += sl[k];
+            dr[k] += sr[k];
         }
+    }
 
-        if (e.channel < 0 || e.channel >= (int) state.instruments.size())
-            continue;
+    // 2) inserts por camadas: numa camada ninguém depende de ninguém; cada trilha puxa as
+    //    saídas das que enviam para ela (sem escrever no buffer dos outros)
+    trackActive.fill (0);
 
-        auto& instrument = *state.instruments[(std::size_t) e.channel];
+    for (const auto& layer : state.mixerLayers)
+    {
+        auto track = [this, &state, &layer, numSamples, meters] (int i) { processTrack (state, layer[(std::size_t) i], numSamples, meters); };
 
-        if (e.type == NoteEvent::Type::on)
-        {
-            if (! song.channels[(std::size_t) e.channel].muted)
-                instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
-        }
+        if (workers != nullptr && state.parallel && layer.size() > 1)
+            workers->parallelFor ((int) layer.size(), track);
         else
-        {
-            instrument.noteOff (e.key);
-        }
+            for (int i = 0; i < (int) layer.size(); ++i)
+                track (i);
     }
 
-    if (position < numSamples)
-        renderSegment (state, position, numSamples - position);
-
-    // 2) inserts em ordem de roteamento (quem envia antes de quem recebe) -> destinos
-    float* masterL = trackBuffer (0, 0);
-    float* masterR = trackBuffer (0, 1);
-
-    for (const auto t : state.mixerOrder)
-    {
-        if (t <= 0 || t >= tracks)
-            continue;
-
-        const auto& track = song.mixer[(std::size_t) t];
-        const auto silent = track.muted || ! state.mixerAudible[(std::size_t) t];
-
-        // ganho alvo; a rampa a partir do bloco anterior evita estalo em mute e fader
-        float gl = 0.0f, gr = 0.0f;
-
-        if (! silent)
-        {
-            const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[(std::size_t) t], track.volume) : track.volume;
-            const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[(std::size_t) t], (track.pan + 1.0f) * 0.5f) * 2.0f - 1.0f
-                                                 : track.pan;
-            panGains (pan, faderGain (volume), gl, gr);
-        }
-
-        auto& lastL = lastTrackGain[(std::size_t) t * 2];
-        auto& lastR = lastTrackGain[(std::size_t) t * 2 + 1];
-        const auto fromL = std::isnan (lastL) ? gl : lastL;
-        const auto fromR = std::isnan (lastR) ? gr : lastR;
-        lastL = gl;
-        lastR = gr;
-
-        if (silent && fromL == 0.0f && fromR == 0.0f)
-            continue;
-
-        runEffects (state, t, numSamples);
-
-        const auto* l = trackBuffer (t, 0);
-        const auto* r = trackBuffer (t, 1);
-
-        const auto* delays = (std::size_t) t < state.sendDelays.size() ? &state.sendDelays[(std::size_t) t] : nullptr;
-        const auto stepL = (gl - fromL) / (float) numSamples, stepR = (gr - fromR) / (float) numSamples;
-
-        auto sendTo = [&] (float* dl, float* dr, float level, std::size_t k) {
-            DelayLine* delay = delays != nullptr && k < delays->size() ? (*delays)[k].get() : nullptr;
-
-            if (delay == nullptr)
-            {
-                for (int i = 0; i < numSamples; ++i)
-                {
-                    dl[i] += l[i] * (fromL + stepL * (float) (i + 1)) * level;
-                    dr[i] += r[i] * (fromR + stepR * (float) (i + 1)) * level;
-                }
-                return;
-            }
-
-            // PDC: esta aresta é mais curta que a mais lenta que chega no destino
-            auto* xl = scratch.data();
-            auto* xr = scratch.data() + blockCapacity;
-
-            for (int i = 0; i < numSamples; ++i)
-            {
-                xl[i] = l[i] * (fromL + stepL * (float) (i + 1)) * level;
-                xr[i] = r[i] * (fromR + stepR * (float) (i + 1)) * level;
-            }
-
-            delay->process (xl, xr, numSamples);
-
-            for (int i = 0; i < numSamples; ++i)
-            {
-                dl[i] += xl[i];
-                dr[i] += xr[i];
-            }
-        };
-
-        if (track.toMaster)
-            sendTo (masterL, masterR, 1.0f, 0);
-
-        for (std::size_t k = 0; k < track.sends.size(); ++k)
-        {
-            const auto& send = track.sends[k];
-
-            if (send.target > 0 && send.target < tracks && send.target != t && send.level > 0.0f)
-                sendTo (trackBuffer (send.target, 0), trackBuffer (send.target, 1), send.level, k + 1);
-        }
-
-        if (meters != nullptr)
-            meters->accumulate (t, peakOf (l, numSamples) * gl, peakOf (r, numSamples) * gr);
-    }
-
-    // 3) efeitos do Master, depois Master -> saída. Sem mixer configurado, o Master fica em 0 dB.
+    // 3) Master: entradas, efeitos, fader. Sem mixer configurado, fica em 0 dB.
+    pullInputs (state, 0, numSamples);
     runEffects (state, 0, numSamples);
 
     float gl = 1.0f, gr = 1.0f;
@@ -710,6 +705,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     lastL = gl;
     lastR = gr;
     const auto stepL = (gl - fromL) / (float) numSamples, stepR = (gr - fromR) / (float) numSamples;
+    const auto* masterL = trackBuffer (0, 0);
+    const auto* masterR = trackBuffer (0, 1);
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -719,5 +716,99 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (meters != nullptr)
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
+}
+
+void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
+{
+    if ((std::size_t) t >= state.mixerInputs.size())
+        return;
+
+    auto* dl = trackBuffer (t, 0);
+    auto* dr = trackBuffer (t, 1);
+
+    for (const auto& in : state.mixerInputs[(std::size_t) t])
+    {
+        if (! trackActive[(std::size_t) in.source])
+            continue;
+
+        const auto* sl = trackBuffer (in.source, 0);
+        const auto* sr = trackBuffer (in.source, 1);
+        const auto& delays = state.sendDelays[(std::size_t) in.source];
+        auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
+
+        if (delay == nullptr)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                dl[i] += sl[i] * in.level;
+                dr[i] += sr[i] * in.level;
+            }
+            continue;
+        }
+
+        // PDC: esta aresta é mais curta que a mais lenta que chega aqui
+        auto* xl = trackScratch (t, 0);
+        auto* xr = trackScratch (t, 1);
+
+        for (int i = 0; i < n; ++i)
+        {
+            xl[i] = sl[i] * in.level;
+            xr[i] = sr[i] * in.level;
+        }
+
+        delay->process (xl, xr, n);
+
+        for (int i = 0; i < n; ++i)
+        {
+            dl[i] += xl[i];
+            dr[i] += xr[i];
+        }
+    }
+}
+
+void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank* meters) noexcept
+{
+    const auto& track = state.song.mixer[(std::size_t) t];
+    pullInputs (state, t, n);
+
+    const auto silent = track.muted || ! state.mixerAudible[(std::size_t) t];
+
+    // ganho alvo; a rampa a partir do bloco anterior evita estalo em mute e fader
+    float gl = 0.0f, gr = 0.0f;
+
+    if (! silent)
+    {
+        const auto volume = state.hasAutomation ? automated (state.mixerVolumeAuto[(std::size_t) t], track.volume) : track.volume;
+        const auto pan = state.hasAutomation ? automated (state.mixerPanAuto[(std::size_t) t], (track.pan + 1.0f) * 0.5f) * 2.0f - 1.0f
+                                             : track.pan;
+        panGains (pan, faderGain (volume), gl, gr);
+    }
+
+    auto& lastL = lastTrackGain[(std::size_t) t * 2];
+    auto& lastR = lastTrackGain[(std::size_t) t * 2 + 1];
+    const auto fromL = std::isnan (lastL) ? gl : lastL;
+    const auto fromR = std::isnan (lastR) ? gr : lastR;
+    lastL = gl;
+    lastR = gr;
+
+    if (silent && fromL == 0.0f && fromR == 0.0f)
+        return; // fica inativa: ninguém puxa nada dela
+
+    runEffects (state, t, n);
+
+    auto* l = trackBuffer (t, 0);
+    auto* r = trackBuffer (t, 1);
+    const auto stepL = (gl - fromL) / (float) n, stepR = (gr - fromR) / (float) n;
+
+    for (int i = 0; i < n; ++i)
+    {
+        l[i] *= fromL + stepL * (float) (i + 1);
+        r[i] *= fromR + stepR * (float) (i + 1);
+    }
+
+    trackActive[(std::size_t) t] = 1;
+
+    if (meters != nullptr)
+        meters->accumulate (t, peakOf (l, n), peakOf (r, n));
 }
 } // namespace lynx

@@ -15,7 +15,7 @@ class ChannelRackProcessor final : public juce::AudioProcessor
 {
 public:
     ChannelRackProcessor (const Transport& transport, SnapshotExchange<RackState>& exchange, LiveEventQueue& live,
-                          LiveEventQueue& midiLive, MeterBank& meters);
+                          LiveEventQueue& midiLive, MeterBank& meters, WorkerPool* workers = nullptr);
 
     const juce::String getName() const override { return "Channel Rack"; }
 
