@@ -398,7 +398,17 @@ Project parseProject (std::span<const std::uint8_t> file)
 
             case evChannelPolyphony:
                 if (section == Section::channel && e.data.size() >= 4)
-                    channel().maxVoices = readLE<std::int32_t> (e.data, 0);
+                {
+                    auto& c = channel();
+                    c.maxVoices = readLE<std::int32_t> (e.data, 0);
+
+                    if (e.data.size() >= 9)
+                    {
+                        c.slideTime = readLE<std::int32_t> (e.data, 4);
+                        c.monoFlag = (e.data[8] & 1) != 0;
+                        c.portaFlag = (e.data[8] & 2) != 0;
+                    }
+                }
                 break;
 
             case evChannelEnvelope:

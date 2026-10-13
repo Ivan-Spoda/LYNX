@@ -253,6 +253,10 @@ juce::String toJson (const Song& song)
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
+            if (c.synth.portaBeats > 0.0f)
+                synth->setProperty ("porta", c.synth.portaBeats);
+            if (c.synth.am)
+                synth->setProperty ("am", true);
 
             writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
             o->setProperty ("synthSettings", juce::var (synth.release()));
@@ -568,6 +572,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);
+                def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("porta", 0.0));
+                def.synth.am = (bool) s.getProperty ("am", false);
 
                 readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
             }

@@ -103,7 +103,9 @@ struct Channel
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84
     int rootNote = -1;           // 0x87 (MIDI), -1 = padrão (C5 = 60)
-    int maxVoices = 0;           // 0xDD: 0 = ilimitado, 1 = mono
+    int maxVoices = 0;           // 0xDD: 0 = ilimitado (com Mono desligado, o excesso solta as vozes mais velhas)
+    int slideTime = 820;         // 0xDD +4: tempo de porta/slide (0..1660; REA_rodada6 §4)
+    bool monoFlag = false, portaFlag = false; // 0xDD +8: bit 0 Mono, bit 1 Porta
 
     // 0xDA: os 5 registros, na ordem pan, volume, corte, ressonância, pitch (68 B, i32)
     struct Envelope

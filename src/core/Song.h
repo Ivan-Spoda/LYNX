@@ -149,6 +149,8 @@ struct SynthSettings
     ModEnvelope filterEnv;   // desloca o corte (oitavas)
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
     bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
+    float portaBeats = 0.0f; // > 0: portamento, a nota nova desliza da anterior neste tempo (em tempos)
+    bool am = false;         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
 
     bool operator== (const SynthSettings&) const = default;
 };

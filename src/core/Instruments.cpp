@@ -354,11 +354,33 @@ public:
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
+        lastPhaseDelta = 0.0;
         updateCoefficients();
         allNotesOff();
     }
 
-    void configure (const ChannelDef& channel, double) noexcept override { mailbox.write (channel.synth); }
+    void configure (const ChannelDef& channel, double songBpm) noexcept override
+    {
+        mailbox.write (channel.synth);
+        bpm.store (std::max (1.0, songBpm));
+    }
+
+    // portamento: a voz parte de `from` e desliza até `to` no tempo de porta
+    void glide (SynthVoice& v, double from, double to) noexcept
+    {
+        const auto steps = (int) (settings.portaBeats * 60.0 / bpm.load() * sampleRate);
+
+        if (settings.portaBeats <= 0.0f || from <= 0.0 || steps < 1)
+        {
+            v.phaseDelta = to;
+            v.glideLeft = 0;
+            return;
+        }
+
+        v.phaseDelta = from;
+        v.glideRatio = std::pow (to / from, 1.0 / steps); // reta em semitons, como o FL
+        v.glideLeft = steps;
+    }
 
     void noteOn (int key, float velocity) noexcept override
     {
@@ -387,8 +409,9 @@ public:
                 v.releasing = false;
                 v.stage = 0;
                 v.age = 0;
-                v.glideLeft = 0;
-                v.phaseDelta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+                const auto target = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+                glide (v, v.phaseDelta, target);
+                lastPhaseDelta = target;
                 for (auto& m : v.mod)
                     m = { m.level, 0.0f, 0, 0 };
                 voicePan (nextPan, v.panL, v.panR);
@@ -415,7 +438,9 @@ public:
         target->active = true;
         target->key = key;
         target->velocity = velocity;
-        target->phaseDelta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+        const auto delta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+        glide (*target, lastPhaseDelta, delta); // com porta, parte da altura da nota anterior
+        lastPhaseDelta = delta;
         voicePan (nextPan, target->panL, target->panR);
         nextPan = nextCents = 0.0f;
     }
@@ -508,7 +533,7 @@ public:
                     }
                 }
 
-                float sum = 0.0f, sumR = 0.0f;
+                float sum = 0.0f, sumR = 0.0f, modulator = 0.0f;
 
                 for (std::size_t o = 0; o < 3; ++o)
                 {
@@ -519,11 +544,23 @@ public:
 
                     const auto delta = std::min (0.49, v.phaseDelta * ratios[o] * v.pitchMul);
                     const auto value = osc.level * oscillator (osc.wave, v.phase[o], delta);
-                    sum += value * oscPanL[o];
-                    sumR += value * oscPanR[o];
+
+                    if (o == 2 && settings.am)
+                        modulator = value; // AM: o osc 3 não soma, modula (abaixo)
+                    else
+                    {
+                        sum += value * oscPanL[o];
+                        sumR += value * oscPanR[o];
+                    }
                     v.phase[o] += delta;
                     if (v.phase[o] >= 1.0) // delta < 0,5: no máximo uma volta (sem floor, que é chamada de função em CPUs sem SSE4)
                         v.phase[o] -= 1.0;
+                }
+
+                if (settings.am) // (o1·g1 + o2·g2)·(1 − g3·o3), REA_rodada6 §3
+                {
+                    sum *= 1.0f - modulator;
+                    sumR *= 1.0f - modulator;
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
@@ -623,6 +660,8 @@ private:
     std::array<ModCoefficients, 2> modEnv {};
     bool modulated = false;
     std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
+    std::atomic<double> bpm { 120.0 };
+    double lastPhaseDelta = 0.0; // altura da última nota (de onde o porta parte)
     std::array<float, 3> oscPanL { 1.0f, 1.0f, 1.0f }, oscPanR { 1.0f, 1.0f, 1.0f };
     bool stereoOscillators = false;
     float nextPan = 0.0f, nextCents = 0.0f;

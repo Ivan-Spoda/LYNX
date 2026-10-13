@@ -166,7 +166,9 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synt
     const auto g3 = std::clamp (param (2, 0), 0, 128) / 128.0f;
     const auto rest = am ? 1.0f : 1.0f - g3;
     const auto g2 = rest * std::clamp (param (1, 0), 0, 128) / 128.0f;
-    const std::array<float, 3> levels { std::max (0.0f, rest - g2), g2, am ? 0.0f : g3 }; // AM ainda não: osc 3 mudo
+    // com AM o osc 3 não entra na soma: o nível dele vira a profundidade da modulação (REA_rodada6 §3)
+    const std::array<float, 3> levels { std::max (0.0f, rest - g2), g2, g3 };
+    synth.am = am;
 
     for (int o = 0; o < 3; ++o)
     {
@@ -309,7 +311,14 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         if ((c.cutGroup != 0 && c.cutGroup == c.cutBy) || c.maxVoices == 1)
             def.sampler.cut = true;
 
-        def.synth.mono = c.maxVoices == 1;
+        def.synth.mono = c.monoFlag || c.maxVoices == 1;
+
+        // porta do canal: n = round((27^(v/1024) - 1) * 48/26) ticks de 1/192 tempo (REA_rodada6 §4)
+        if (c.portaFlag)
+        {
+            const auto ticks = std::round ((std::pow (27.0, std::clamp (c.slideTime, 0, 1660) / 1024.0) - 1.0) * 48.0 / 26.0);
+            def.synth.portaBeats = (float) std::max (1.0, ticks) / 192.0f;
+        }
 
         // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
         const auto& volumeEnvelope = c.envelopes[1];

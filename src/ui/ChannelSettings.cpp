@@ -361,7 +361,7 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância" };
+        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Porta" };
 
         for (int i = 0; i < (int) labels.size(); ++i)
         {
@@ -391,6 +391,15 @@ public:
         filterTypeBox.onChange = [this] { apply(); };
         addAndMakeVisible (filterTypeBox);
 
+        am.setButtonText ("AM");
+        am.setTooltip (utf8 ("O osc 3 modula a amplitude dos osc 1 e 2 (como o AM do 3x Osc); o nível dele é a profundidade"));
+        am.onClick = [this] { apply(); };
+        addAndMakeVisible (am);
+
+        knob (porta, 0.0, 2.0, 0.005, " t");
+        porta.setSkewFactorFromMidPoint (0.25);
+        porta.setTooltip (utf8 ("Portamento em tempos: a nota nova desliza a partir da anterior (0 = desligado)"));
+
         mono.setButtonText ("Mono");
         mono.setTooltip (utf8 ("Uma voz só: a nota nova assume a que está soando (baixos e leads)"));
         mono.onClick = [this] { apply(); };
@@ -410,7 +419,8 @@ public:
         auto area = getLocalBounds().reduced (10);
         auto topRow = area.removeFromTop (24);
         presetBox.setBounds (topRow.removeFromLeft (200));
-        mono.setBounds (topRow.removeFromLeft (100).withTrimmedLeft (16));
+        mono.setBounds (topRow.removeFromLeft (90).withTrimmedLeft (16));
+        am.setBounds (topRow.removeFromLeft (60));
         filterTypeBox.setBounds (topRow.removeFromRight (140));
         area.removeFromTop (6);
         auto header = area.removeFromTop (16);
@@ -430,13 +440,13 @@ public:
 
         area.removeFromTop (10);
         auto names = area.removeFromTop (16);
-        const auto w = area.getWidth() / 6;
+        const auto w = area.getWidth() / 7;
 
         for (int i = oscKnobs; i < (int) labels.size(); ++i)
             labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
 
         auto knobsRow = area.removeFromTop (80);
-        for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance })
+        for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &porta })
             s->setBounds (knobsRow.removeFromLeft (w));
 
         area.removeFromTop (8);
@@ -454,7 +464,8 @@ private:
     static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
 
     ModEnvelopeEditor envelopes;
-    juce::ToggleButton mono;
+    juce::ToggleButton mono, am;
+    juce::Slider porta;
     juce::ComboBox filterTypeBox;
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
@@ -500,6 +511,8 @@ private:
         cutoff.setValue (s.cutoff, juce::dontSendNotification);
         resonance.setValue (s.resonance, juce::dontSendNotification);
         mono.setToggleState (s.mono, juce::dontSendNotification);
+        am.setToggleState (s.am, juce::dontSendNotification);
+        porta.setValue (s.portaBeats, juce::dontSendNotification);
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
         envelopes.show (s.filterEnv, s.pitchEnv);
         updating = false;
@@ -529,6 +542,8 @@ private:
         s.filterEnv = envelopes.filter();
         s.pitchEnv = envelopes.pitch();
         s.mono = mono.getToggleState();
+        s.am = am.getToggleState();
+        s.portaBeats = (float) porta.getValue();
         s.filterType = juce::jlimit (0, 3, filterTypeBox.getSelectedId() - 1);
 
         if (s == current()->synth)
@@ -557,7 +572,7 @@ private:
     bool updating = false;
     std::array<Row, 3> rows;
     juce::Slider attack, decay, sustain, release, cutoff, resonance;
-    std::array<juce::Label, 11> labels;
+    std::array<juce::Label, 12> labels;
     juce::ComboBox presetBox;
 };
 

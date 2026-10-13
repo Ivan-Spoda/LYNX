@@ -316,8 +316,9 @@ TEST (flp_real_files)
                     if (lynx::synthFrom3xOsc (c.pluginState, s))
                     {
                         ++threeOscDecoded;
-                        const auto sum = s.osc[0].level + s.osc[1].level + s.osc[2].level;
-                        CHECK (sum <= 1.001f);
+                        // com AM o osc 3 é a profundidade da modulação e fica fora da soma
+                        const auto sum = s.osc[0].level + s.osc[1].level + (s.am ? 0.0f : s.osc[2].level);
+                        CHECK (sum <= 1.001f && s.osc[2].level <= 1.0f);
                         for (const auto& o : s.osc)
                             CHECK (o.octave >= -2 && o.octave <= 2 && std::abs (o.semitones) <= 11 && std::abs (o.pan) <= 1.0f);
                     }
@@ -882,6 +883,55 @@ TEST (synth_mono_reuses_the_sounding_voice)
     for (std::size_t i = 4790; i < 4810; ++i)
         jump = std::max (jump, std::abs (l[i] - l[i - 1]));
     CHECK (jump < 0.05f);
+}
+
+TEST (synth_porta_glides_and_am_modulates)
+{
+    auto make = [] (const lynx::SynthSettings& s) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c, 120.0);
+        return inst;
+    };
+    auto crossings = [] (const std::vector<float>& b, std::size_t from, std::size_t to) {
+        int n = 0;
+        for (auto i = from + 1; i < to; ++i)
+            n += (b[i - 1] < 0.0f) != (b[i] < 0.0f);
+        return n;
+    };
+
+    // mono + porta de 1 tempo (0,5 s a 120 BPM): de A3 para A4, no meio do caminho ~E4 (329,6 Hz)
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+    s.mono = true;
+    s.portaBeats = 1.0f;
+    auto inst = make (s);
+    std::vector<float> l (96000), r (96000);
+    inst->noteOn (57, 1.0f);
+    inst->render (l.data(), r.data(), 4800, 1.0f, 1.0f);
+    inst->noteOn (69, 1.0f);
+    inst->render (l.data() + 4800, r.data() + 4800, 91200, 1.0f, 1.0f);
+    const auto middle = crossings (l, 4800 + 12000 - 2400, 4800 + 12000 + 2400); // 0,1 s em volta de 0,25 s
+    CHECK (std::abs (middle - 66) < 6);                                            // ~330 Hz * 0,1 s * 2
+    CHECK (std::abs (crossings (l, 48000, 96000) - 880) < 4);                    // chegou no A4 (1 s = 880 cruzamentos)
+
+    // AM: osc 3 em 1,0 de nível, seno lento, modula o osc 1 (o nível médio cai, a soma não ganha o osc 3)
+    lynx::SynthSettings am;
+    am.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    am.osc[2] = { lynx::Waveform::sine, -3, 0.0f, 1.0f };
+    am.cutoff = 20000.0f;
+    am.am = true;
+    auto modulated = make (am);
+    modulated->noteOn (69, 1.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    modulated->render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+    float peak = 0.0f;
+    for (std::size_t i = 4800; i < 48000; ++i)
+        peak = std::max (peak, std::abs (l[i]));
+    CHECK (peak > 0.45f && peak < 0.65f); // 0,3 · (1 + 1) no máximo: (1 − o3) vai até 2
 }
 
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
