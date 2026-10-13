@@ -1,5 +1,6 @@
 #include "ui/BrowserComponent.h"
 
+#include "core/FlpImport.h"
 #include "engine/Text.h"
 #include "ui/Theme.h"
 
@@ -36,6 +37,7 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     add ("Samples do FL (Packs)", data.getChildFile ("Patches").getChildFile ("Packs"));
     add ("Projetos de exemplo do FL", data.getChildFile ("Demo projects"));
     add ("MIDI do FL", data.getChildFile ("Patches").getChildFile ("Scores"));
+    add ("Presets do 3x Osc (FL)", data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
     add ("Documentos", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
     add (utf8 ("Música"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
     add (utf8 ("Área de trabalho"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
@@ -109,6 +111,35 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
             s.channels.push_back (c);
         });
         engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
+        return;
+    }
+
+    // preset de canal do 3x Osc: canal novo com o synth interno ajustado pelo preset
+    if (file.hasFileExtension ("fst"))
+    {
+        juce::MemoryBlock data;
+
+        if (! file.loadFileAsData (data))
+            return;
+
+        const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+
+        if (auto synth = synthFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize())))
+        {
+            const auto name = file.getFileNameWithoutExtension().toStdString();
+            engine.editSong ([&] (Song& s) {
+                ChannelDef c;
+                c.name = name;
+                c.instrument = InstrumentKind::synth;
+                c.synth = *synth;
+                c.mixerTrack = s.nextFreeInsert();
+                s.channels.push_back (c);
+            });
+            engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
+        }
+        else
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Preset",
+                                                    utf8 ("Por enquanto o LYNX lê presets de canal do 3x Osc."));
         return;
     }
 

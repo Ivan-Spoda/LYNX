@@ -35,7 +35,7 @@ private:
     juce::ComboBox rootBox;
     juce::Array<juce::File> roots;
     juce::TimeSliceThread thread { "LYNX navegador" };
-    juce::WildcardFileFilter filter { "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff;*.mid;*.midi;*.lynx;*.flp", "*", "arquivos" };
+    juce::WildcardFileFilter filter { "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff;*.mid;*.midi;*.lynx;*.flp;*.fst", "*", "arquivos" };
     juce::DirectoryContentsList list { &filter, thread };
     juce::FileTreeComponent tree { list };
 
