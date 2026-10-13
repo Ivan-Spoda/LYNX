@@ -21,6 +21,7 @@ Channel Rack, Piano Roll, Playlist e Mixer em C++20 + JUCE 8, feita para rodar b
   <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-24292f" alt="Windows 10 e 11">
   <img src="https://img.shields.io/badge/VST3%20%C2%B7%20CLAP-suportados-d9534f" alt="VST3 e CLAP">
   <img src="https://img.shields.io/badge/status-alfa-f0ad4e" alt="Alfa">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-AGPL--3.0-5cb85c" alt="Licença AGPL-3.0"></a>
 </p>
 
 <p align="center">
@@ -259,7 +260,13 @@ O LYNX é uma implementação independente. O FL Studio foi estudado apenas para
 
 FL Studio é marca registrada da Image-Line Software. O LYNX não tem nenhuma relação com a Image-Line. VST é marca registrada da Steinberg Media Technologies GmbH.
 
-Feito com [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap) e o decodificador [WavPack](https://www.wavpack.com).
+Feito com [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap) e o decodificador [WavPack](https://www.wavpack.com) — as licenças de cada um estão em [`THIRD_PARTY.md`](THIRD_PARTY.md).
+
+## Licença
+
+O LYNX é software livre sob a [GNU Affero General Public License v3.0](LICENSE): você pode usar, estudar,
+modificar e redistribuir; quem distribuir uma versão modificada (inclusive como serviço) precisa publicar o
+código-fonte dela sob a mesma licença.
 
 <p align="center">
   <a href="https://star-history.com/#Ka1-S/LYNX&Date">
