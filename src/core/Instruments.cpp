@@ -197,17 +197,55 @@ inline void voicePan (float pan, float& left, float& right) noexcept
 struct SynthVoice
 {
     float panL = 1.0f, panR = 1.0f;
-    double glideRatio = 1.0;  // multiplica phaseDelta a cada sample durante um slide
+    double glideRatio = 1.0;  // multiplica a frequência a cada sample durante um slide
     int glideLeft = 0;
     bool active = false;
     bool releasing = false;
     int key = 0;
     float velocity = 0.0f;
-    float level = 0.0f;
-    double phase = 0.0;
-    double phaseDelta = 0.0;
-    float filter = 0.0f;
+    float level = 0.0f;       // envelope
+    int stage = 0;            // 0 ataque, 1 decaimento, 2 sustentação, 3 release
+    double phaseDelta = 0.0;  // da fundamental (cada oscilador multiplica)
+    std::array<double, 3> phase {};
+    float low = 0.0f, band = 0.0f; // estados do filtro
     int age = 0;
+};
+
+// Troca de ajustes sem bloquear a thread de áudio: a UI escreve sob um flag curto e o áudio
+// só copia quando consegue pegar o flag (se não conseguir, usa os ajustes antigos neste bloco).
+template <typename T>
+class SettingsMailbox
+{
+public:
+    void write (const T& value) noexcept
+    {
+        while (busy.test_and_set (std::memory_order_acquire)) {}
+        pending = value;
+        dirty = true;
+        busy.clear (std::memory_order_release);
+    }
+
+    bool read (T& out) noexcept
+    {
+        if (busy.test_and_set (std::memory_order_acquire))
+            return false;
+
+        const auto changed = dirty;
+
+        if (changed)
+        {
+            out = pending;
+            dirty = false;
+        }
+
+        busy.clear (std::memory_order_release);
+        return changed;
+    }
+
+private:
+    std::atomic_flag busy = ATOMIC_FLAG_INIT;
+    T pending {};
+    bool dirty = false;
 };
 
 class SynthInstrument final : public Instrument
@@ -216,11 +254,11 @@ public:
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
-        attackStep = (float) (1.0 / (0.005 * sr));
-        release = decayCoefficient (0.25, sr);
-        filterCoeff = (float) (1.0 - std::exp (-twoPi * 2500.0 / sr));
+        updateCoefficients();
         allNotesOff();
     }
+
+    void configure (const ChannelDef& channel) noexcept override { mailbox.write (channel.synth); }
 
     void noteOn (int key, float velocity) noexcept override
     {
@@ -270,7 +308,10 @@ public:
     {
         for (auto& v : voices)
             if (v.active && ! v.releasing && v.key == key)
+            {
                 v.releasing = true;
+                v.stage = 3;
+            }
     }
 
     void allNotesOff() noexcept override
@@ -281,6 +322,9 @@ public:
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
+        if (mailbox.read (settings))
+            updateCoefficients();
+
         for (auto& v : voices)
         {
             if (! v.active)
@@ -288,10 +332,20 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
-                if (v.releasing)
-                    v.level *= release;
-                else if (v.level < 1.0f)
-                    v.level = std::fmin (1.0f, v.level + attackStep);
+                // envelope ADSR
+                switch (v.stage)
+                {
+                    case 0:
+                        v.level += attackStep;
+                        if (v.level >= 1.0f) { v.level = 1.0f; v.stage = 1; }
+                        break;
+                    case 1:
+                        v.level = settings.sustain + (v.level - settings.sustain) * decayCoeff;
+                        if (v.level - settings.sustain < 0.001f) { v.level = settings.sustain; v.stage = 2; }
+                        break;
+                    case 2: break;
+                    default: v.level *= releaseCoeff; break;
+                }
 
                 if (v.glideLeft > 0)
                 {
@@ -299,30 +353,108 @@ public:
                     --v.glideLeft;
                 }
 
-                v.phase += v.phaseDelta;
-                v.phase -= std::floor (v.phase);
-                const auto saw = (float) (2.0 * v.phase - 1.0);
-                v.filter += filterCoeff * (saw - v.filter);
+                float sum = 0.0f;
 
-                const auto s = 0.3f * v.filter * v.level * v.velocity;
+                for (std::size_t o = 0; o < 3; ++o)
+                {
+                    const auto& osc = settings.osc[o];
+
+                    if (osc.level <= 0.0f)
+                        continue;
+
+                    const auto delta = std::min (0.49, v.phaseDelta * ratios[o]);
+                    sum += osc.level * oscillator (osc.wave, v.phase[o], delta);
+                    v.phase[o] += delta;
+                    v.phase[o] -= std::floor (v.phase[o]);
+                }
+
+                // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
+                const auto v3 = sum - v.low;
+                const auto v1 = a1 * v.band + a2 * v3;
+                const auto v2 = v.low + a2 * v.band + a3 * v3;
+                v.band = 2.0f * v1 - v.band;
+                v.low = 2.0f * v2 - v.low;
+
+                const auto s = 0.3f * v2 * v.level * v.velocity;
                 left[i] += s * gl * v.panL;
                 right[i] += s * gr * v.panR;
                 ++v.age;
             }
 
-            if (v.releasing && v.level < 0.0005f)
+            if (v.stage == 3 && v.level < 0.0005f)
                 v.active = false;
         }
     }
 
 private:
+    // correção de aliasing nas descontinuidades (polyBLEP)
+    static float polyBlep (double t, double dt) noexcept
+    {
+        if (t < dt)
+        {
+            t /= dt;
+            return (float) (t + t - t * t - 1.0);
+        }
+
+        if (t > 1.0 - dt)
+        {
+            t = (t - 1.0) / dt;
+            return (float) (t * t + t + t + 1.0);
+        }
+
+        return 0.0f;
+    }
+
+    float oscillator (Waveform w, double phase, double dt) noexcept
+    {
+        switch (w)
+        {
+            case Waveform::sine: return (float) std::sin (twoPi * phase);
+            case Waveform::triangle: return (float) (phase < 0.5 ? 4.0 * phase - 1.0 : 3.0 - 4.0 * phase);
+            case Waveform::saw: return (float) (2.0 * phase - 1.0) - polyBlep (phase, dt);
+            case Waveform::square:
+            {
+                auto s = phase < 0.5 ? 1.0f : -1.0f;
+                s += polyBlep (phase, dt);
+                s -= polyBlep (std::fmod (phase + 0.5, 1.0), dt);
+                return s;
+            }
+            case Waveform::noise: return noise.next();
+        }
+
+        return 0.0f;
+    }
+
+    void updateCoefficients() noexcept
+    {
+        attackStep = (float) (1.0 / (std::max (0.0005, (double) settings.attack) * sampleRate));
+        decayCoeff = decayCoefficient (std::max (0.001, (double) settings.decay), sampleRate);
+        releaseCoeff = decayCoefficient (std::max (0.005, (double) settings.release), sampleRate);
+
+        for (std::size_t o = 0; o < 3; ++o)
+            ratios[o] = std::pow (2.0, settings.osc[o].octave + settings.osc[o].detune / 1200.0);
+
+        const auto fc = std::clamp ((double) settings.cutoff, 20.0, sampleRate * 0.45);
+        const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
+        const auto k = 2.0f - 1.9f * std::clamp (settings.resonance, 0.0f, 1.0f); // 2 = sem ressonância
+        a1 = 1.0f / (1.0f + g * (g + k));
+        a2 = g * a1;
+        a3 = g * a2;
+    }
+
     double sampleRate = 44100.0;
+    SettingsMailbox<SynthSettings> mailbox;
+    SynthSettings settings;
     float attackStep = 0.01f;
-    float release = 0.999f;
-    float filterCoeff = 0.3f;
+    float decayCoeff = 0.999f;
+    float releaseCoeff = 0.999f;
+    float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f; // coeficientes do filtro
+    std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
     float nextPan = 0.0f, nextCents = 0.0f;
+    Noise noise;
     std::array<SynthVoice, 16> voices {};
 };
+
 // ---------------------------------------------------------------------------
 // Sampler: toca o sample inteiro a cada nota (one-shot, como um step do FL),
 // transposto pela tecla (60 = altura original), com interpolação linear.
@@ -357,8 +489,9 @@ public:
         allNotesOff();
     }
 
-    void configure (const SamplerSettings& s) noexcept override
+    void configure (const ChannelDef& channel) noexcept override
     {
+        const auto& s = channel.sampler;
         pitch.store (std::clamp (s.pitch, -24.0f, 24.0f));
         attack.store (std::clamp (s.attack, 0.0f, 2.0f));
         release.store (std::clamp (s.release, 0.0f, 4.0f));

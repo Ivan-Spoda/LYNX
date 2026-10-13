@@ -58,7 +58,7 @@ Defaults vêm de `FUN_009cec20` (inicialização) e batem com o valor mais comum
 | 0x0C | Env **attack** | tempo | 20000 |
 | 0x10 | Env **hold** | tempo | 20000 |
 | 0x14 | Env **decay** | tempo | 30000 |
-| 0x18 | Env **sustain** | 0…128 (nível = v/127) | 50 |
+| 0x18 | Env **sustain** | 0…128 (nível = v/128) | 50 |
 | 0x1C | Env **release** | tempo | 20000 |
 | 0x20 | Env **amount** | ±faixa do alvo | 0 |
 | 0x24 | LFO **delay** | tempo | 100 (= 0) |
@@ -91,14 +91,14 @@ Envelope ligado: 150 canais no Volume, 51 no cutoff, 30 no pitch **[DADOS]**.
 | `+0x44` | Incremento do attack por tick = `1/(ticks_attack + 1)` |
 | `+0x5C` | Hold em ticks |
 | `+0x48` | Incremento do decay = `−1/(ticks_decay + 1)` |
-| `+0x4C` | Sustain = `v · (1/127)` |
+| `+0x4C` | Sustain = `v/128` |
 | `+0x50` | Incremento do release = `−1/(ticks_release + 1)` |
-| `+0x70` | Env amount = `v/127` (float) |
+| `+0x70` | Env amount = `v/128` (float) |
 | `+0x7C/+0x88/+0x94` | Curvas de tensão (3 × 12 B: valor, `1/|a|`, `ln(|a|+1)`) |
 | `+0x60` | Delay do LFO em ticks |
 | `+0x54` | Incremento do fade-in do LFO = `1/(ticks + 1)` |
 | `+0x64` | Incremento de fase do LFO = `2³² / max(ticks_período, 3)` (fase de 32 bits) |
-| `+0x74` | LFO amount = `v/127` |
+| `+0x74` | LFO amount = `v/128` |
 | `+0x68` | Ponteiro da tabela de onda (16384 amostras) |
 
 ### 1.4 Conversão de tempo (knob → segundos) **[DECOMP]**
@@ -148,7 +148,7 @@ Consequências práticas:
 **Curva de tensão** (`FUN_009ce890` + `FUN_006774b0`), com `t` = tensão (−128…128):
 
 ```
-a = sinal(t) · (6347^(|t|/127) − 1) · 0,125     (t = 0 → reta, y = x)
+a = sinal(t) · (6347^(|t|/128) − 1) · 0,1     (t = 0 → reta, y = x)
 K = ln(|a| + 1),  C = 1/|a|
 t < 0:  y = C · (e^(K·x) − 1)                    (começa devagar, termina rápido)
 t > 0:  y = 1 − C · (e^(K·(1−x)) − 1)            (começa rápido, termina devagar)
@@ -163,11 +163,11 @@ Por tick, para cada voz (y = saída do envelope, l = saída do LFO, já multipli
 
 | Alvo | Modulação |
 |---|---|
-| Volume | `ganho = y · (1 + l · lfoAmt/127)`, com piso 0. **O amount do envelope de volume é ignorado**; o envelope multiplica direto o ganho |
-| Cutoff | `y · envAmt/127 + l · lfoAmt/127` (somado ao Mod X da voz) |
+| Volume | `ganho = y · (1 + l · lfoAmt/128)`, com piso 0. **O amount do envelope de volume é ignorado**; o envelope multiplica direto o ganho |
+| Cutoff | `y · envAmt/128 + l · lfoAmt/128` (somado ao Mod X da voz) |
 | Resonance | idem com os amounts do registro 3 (somado ao Mod Y) |
 | Pitch | `y · envAmt + l · lfoAmt` em **centésimos** (amount cru, ±2400) |
-| Panning | `2 · l · lfoAmt/127` (a parte do envelope é aplicada em outro ponto **[HIP]**) |
+| Panning | `2 · l · lfoAmt/128` (a parte do envelope é aplicada em outro ponto **[HIP]**) |
 
 **LFO:** fase de 32 bits, índice da tabela = `fase >> 18` (tabelas de 16384 pontos geradas em
 `FUN_009cdfc0`: senoide, triângulo, quadrada ±1, rampa −1…1, e outras). O shape 0/1/2 escolhe uma de três
@@ -179,9 +179,110 @@ depois do delay e entra com fade-in linear de `1/(n+1)` por tick.
 1. Importador: leia os 5 registros `0xDA` na ordem Pan, Vol, Cutoff, Res, Pitch. Para um ADSR de sampler,
    use o registro 1 (Volume) se `+0x04 ≠ 0`:
    `delay/attack/hold/decay/release = 0,064·(1000^(v/65536) − 1)` s (ou em beats ×0,128 se `flags&1`),
-   `sustain = v/127`, tensões `v/128`.
+   `sustain = v/128`, tensões `v/128`.
 2. Implemente o mesmo ADSR "DAHDSR" com tensão exponencial (fórmula acima). Um tick de controle de
    ~1–5 ms com interpolação linear de ganho por amostra é fiel ao FL; dá para avaliar por amostra se
    preferir.
 3. Release a partir do nível atual (não do sustain) e decay medido de 1,0 até 0.
 4. O envelope de volume multiplica o ganho da voz; os demais somam `amount·y` ao destino.
+
+---
+
+## 2. Volume e pan do canal: curva de ganho
+
+### 2.1 Onde ficam **[DECOMP+DADOS]**
+
+| Fonte | Campo | Conteúdo |
+|---|---|---|
+| `0xDB` (24 B) → `C+0x16C` | `i32 pan, i32 vol, i32 pitch, i32 modX, i32 modY, i32 tipo_filtro` | pan 0…12800 (centro 6400), vol 0…12800, pitch em centésimos, Mod X (cutoff, default 256), Mod Y (res., default 0), tipo de filtro (0…7) |
+| `0xE5` (20 B) → `C+0x184` | `i32 panAdj, i32 volAdj, i32 ?, i32 modXAdj, i32 modYAdj` | "ajustes de nível" do canal: panAdj ±6400 (0 = neutro), **volAdj 12800 = neutro** |
+| Arquivos < 5.3.7 | | pan/vol (de `0xDB` e `0xE5`) gravados em escala /100 (o load multiplica por 100) |
+| Eventos legados `0x02`/`0x03` | | vol/pan em byte, convertidos por `FUN_00f3ad20`/`FUN_00f3ad40` |
+
+Como parâmetro (`controlID` de canal, §2.7 da rodada 2): `p=0` volume, `p=1` pan, `p=2/3` Mod X/Y,
+`p=4` pitch (faixa −4800…+4800), `p=0x10…0x14` os ajustes de `0xE5` **[DECOMP, `FUN_01046a70`]**.
+
+### 2.2 Fórmula (`FUN_00fe9d20`, conferida pela API de script `getChannelVolume` em `FUN_00d59d70`) **[DECOMP]**
+
+**É a mesma curva do fader do mixer**, só que com unity no topo do curso do canal:
+
+```
+x = vol / 12800                       (0…1)
+f(x) = 1                              se x == 1
+f(x) = (11^x − 1) / 10                caso contrário
+ganho_canal = f(vol/12800) · f(volAdj/12800)          (gravado em C+0x19C)
+dB = 20·log10(ganho)                  (a API de script devolve exatamente isso no modo 1)
+```
+
+**Resposta direta:** volume **12800 (100 %) = 0 dB**. O default **10000 (78 %) NÃO é 0 dB: é −5,18 dB**
+(ganho 0,551). Tabela:
+
+| vol | % | ganho | dB |
+|---|---|---|---|
+| 12800 | 100 | 1,000 | 0,0 |
+| 11200 | 87,5 | 0,715 | −2,9 |
+| 10000 | 78,1 | 0,551 | **−5,2** |
+| 8000 | 62,5 | 0,348 | −9,2 |
+| 6400 | 50 | 0,232 | −12,7 |
+| 3200 | 25 | 0,082 | −21,7 |
+| 0 | 0 | 0 | −∞ |
+
+Constantes: `1/12800` (`0x013e7584`), `ln 11` (calculado em `FUN_006a6890`, `DAT_015f49ec`) e `0,1`
+(`0x013e7558`). O canal não passa de 0 dB pelo knob (o mixer vai até +5,6 dB).
+
+**Pan efetivo** (`FUN_00fe9bf0`): `p = (pan − 6400 + panAdj) / 6400` em −1…+1, gravado em `C+0x198`.
+Para MIDI/plugins, também envia `p·64` arredondado em −64…+64.
+
+**Volume para plugins (MIDI CC7):** `FUN_00fe9d20` manda `vol·volAdj/0x138800` (≈ /1.280.000), clampado a 127.
+
+### Recomendações para o LYNX (volume)
+
+1. Importador: `ganhoCanal = f(vol/12800)·f(volAdj/12800)` com `f(x) = (11^x − 1)/10`. Não trate 10000 como
+   0 dB; projetos do FL soam 5,2 dB mais baixos no canal por padrão, e isso precisa ser preservado.
+2. Pan efetivo = pan de `0xDB` + panAdj de `0xE5`.
+
+---
+
+## 3. Swing (global e por canal)
+
+### 3.1 Armazenamento **[DECOMP+DADOS]**
+
+| Item | Onde | Faixa | Default |
+|---|---|---|---|
+| **Swing global** ("Main swing") | evento **`0x0B`** (u8) no cabeçalho do projeto; `controlID 0x40000001`; global `DAT_0196ec34` | **0…128** (128 = 100 %) | 0 (145 de 165 demos); valores vistos 16…66 |
+| **Swing mix do canal** | evento **`0x61`** (u32) → `C+0x220`; parâmetro de canal `p = 12` | 0…128 | **128** (3.235 de 3.239 canais) |
+| **"Truncate swing notes"** do canal | evento **`0x30`** (u8 bool) → `C+0x224` | 0/1 | 0 |
+
+`FUN_01311070(v)` guarda o swing e pré-calcula `DAT_0196ec30 = (ticksPorStep · v) >> 8`, com
+`ticksPorStep = PPQ/4` (16 avos). A API de script `getSwing` (`FUN_00d5dbf0`) devolve `valor/128`.
+
+### 3.2 Aplicação na reprodução de notas (`FUN_00d0c220`) **[DECOMP]**
+
+Para cada nota de pattern que vai disparar, com `p` = posição da nota em ticks dentro da pattern e
+`S = PPQ/4`:
+
+```
+k  = floor((p + S/2) / S)               (step mais próximo)
+se k é ímpar (contratempo de 16 avos):
+    d = |p − k·S|                        (distância até a grade)
+    w = S − 2·d                          (peso triangular: S na grade, 0 a ±S/2)
+    atraso = (w · swingGlobal · swingMixCanal) >> 15        [ticks]
+    se "truncate" do canal: duração −= w
+```
+
+- **A 100 % (128 × 128)**, uma nota exatamente no 16 avo ímpar atrasa `S·16384/32768 = S/2`, ou seja
+  **meio 16 avo = uma fusa (1/32)**. Os pares de 16 avos ficam na proporção 3:1 (pontuado), e não 2:1
+  (tercina).
+- Notas fora da grade recebem atraso proporcional à proximidade do step ímpar; nos steps pares o atraso é
+  zero. Assim o swing também vale para notas do piano roll (o FL avisa ao abrir projetos antigos, em que
+  ele só valia para os steps: string `0xf519a8`).
+- O atraso é em ticks inteiros (resolução de 1 tick).
+- Na conversão steps→notas (`FUN_010012e0`) o step ímpar recebe `DAT_0196ec30` inteiro (só o global,
+  sem o mix do canal) mais o *shift* individual do step.
+
+### Recomendações para o LYNX (swing)
+
+1. Importador: swing global de `0x0B`/128, mix por canal de `0x61`/128.
+2. Implemente no agendador de notas, e não por step: `atraso = (S − 2·|p − k·S|) · sg · sc / 2`
+   (sg, sc ∈ 0…1), aplicado só quando o step mais próximo é ímpar. Isso reproduz o FL para steps e notas
+   livres.

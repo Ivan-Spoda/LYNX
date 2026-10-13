@@ -138,20 +138,212 @@ private:
     juce::ToggleButton reverse, cut;
 };
 
+// Página do synth interno: 3 osciladores, envelope e filtro.
+class SynthPanel final : public juce::Component,
+                         private juce::ChangeListener
+{
+public:
+    SynthPanel (AudioEngine& e, int c)
+        : engine (e),
+          channel (c)
+    {
+        for (int o = 0; o < 3; ++o)
+        {
+            auto& row = rows[(std::size_t) o];
+            row.title.setText ("Osc " + juce::String (o + 1), juce::dontSendNotification);
+            row.wave.addItemList ({ "Seno", utf8 ("Triângulo"), "Serra", "Quadrada", utf8 ("Ruído") }, 1);
+            row.wave.onChange = [this] { apply(); };
+            knob (row.octave, -3.0, 3.0, 1.0, " oit");
+            knob (row.detune, -100.0, 100.0, 1.0, " ct");
+            knob (row.level, 0.0, 1.0, 0.01, "");
+            addAndMakeVisible (row.title);
+            addAndMakeVisible (row.wave);
+        }
+
+        knob (attack, 0.0, 5.0, 0.001, " s");
+        knob (decay, 0.0, 5.0, 0.001, " s");
+        knob (sustain, 0.0, 1.0, 0.01, "");
+        knob (release, 0.0, 5.0, 0.001, " s");
+        knob (cutoff, 20.0, 20000.0, 1.0, " Hz");
+        knob (resonance, 0.0, 1.0, 0.01, "");
+
+        for (auto* s : { &attack, &decay, &release })
+            s->setSkewFactorFromMidPoint (0.5);
+        cutoff.setSkewFactorFromMidPoint (1000.0);
+
+        const char* names[] = { "Oitava", "Afinação", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância" };
+
+        for (int i = 0; i < 9; ++i)
+        {
+            labels[(std::size_t) i].setText (utf8 (names[i]), juce::dontSendNotification);
+            labels[(std::size_t) i].setJustificationType (juce::Justification::centred);
+            labels[(std::size_t) i].setFont (juce::FontOptions (11.0f));
+            addAndMakeVisible (labels[(std::size_t) i]);
+        }
+
+        refresh();
+        engine.addChangeListener (this);
+        setSize (520, 400);
+    }
+
+    ~SynthPanel() override { engine.removeChangeListener (this); }
+
+    int getChannel() const noexcept { return channel; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (10);
+        auto header = area.removeFromTop (16);
+        header.removeFromLeft (150);
+
+        for (int i = 0; i < 3; ++i)
+            labels[(std::size_t) i].setBounds (header.removeFromLeft (110));
+
+        for (auto& row : rows)
+        {
+            auto line = area.removeFromTop (64);
+            row.title.setBounds (line.removeFromLeft (50).withSizeKeepingCentre (50, 24));
+            row.wave.setBounds (line.removeFromLeft (100).withSizeKeepingCentre (96, 24));
+            row.octave.setBounds (line.removeFromLeft (110));
+            row.detune.setBounds (line.removeFromLeft (110));
+            row.level.setBounds (line.removeFromLeft (110));
+        }
+
+        area.removeFromTop (10);
+        auto names = area.removeFromTop (16);
+        const auto w = area.getWidth() / 6;
+
+        for (int i = 3; i < 9; ++i)
+            labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
+
+        for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance })
+            s->setBounds (area.removeFromLeft (w).removeFromTop (80));
+    }
+
+private:
+    struct Row
+    {
+        juce::Label title;
+        juce::ComboBox wave;
+        juce::Slider octave, detune, level;
+    };
+
+    void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 16);
+        s.setRange (lo, hi, step);
+        s.setTextValueSuffix (suffix);
+        s.onValueChange = [this] { apply(); };
+        addAndMakeVisible (s);
+    }
+
+    const ChannelDef* current() const
+    {
+        const auto& channels = engine.getSong().channels;
+        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+    }
+
+    void refresh()
+    {
+        const auto* c = current();
+
+        if (c == nullptr)
+            return;
+
+        updating = true;
+        const auto& s = c->synth;
+
+        for (std::size_t o = 0; o < 3; ++o)
+        {
+            rows[o].wave.setSelectedId ((int) s.osc[o].wave + 1, juce::dontSendNotification);
+            rows[o].octave.setValue (s.osc[o].octave, juce::dontSendNotification);
+            rows[o].detune.setValue (s.osc[o].detune, juce::dontSendNotification);
+            rows[o].level.setValue (s.osc[o].level, juce::dontSendNotification);
+        }
+
+        attack.setValue (s.attack, juce::dontSendNotification);
+        decay.setValue (s.decay, juce::dontSendNotification);
+        sustain.setValue (s.sustain, juce::dontSendNotification);
+        release.setValue (s.release, juce::dontSendNotification);
+        cutoff.setValue (s.cutoff, juce::dontSendNotification);
+        resonance.setValue (s.resonance, juce::dontSendNotification);
+        updating = false;
+
+        if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
+            w->setName ("Ajustes do synth - " + juce::String::fromUTF8 (c->name.c_str()));
+    }
+
+    void apply()
+    {
+        if (updating || current() == nullptr)
+            return;
+
+        SynthSettings s;
+
+        for (std::size_t o = 0; o < 3; ++o)
+            s.osc[o] = { (Waveform) juce::jlimit (0, 4, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
+                         (float) rows[o].detune.getValue(), (float) rows[o].level.getValue() };
+
+        s.attack = (float) attack.getValue();
+        s.decay = (float) decay.getValue();
+        s.sustain = (float) sustain.getValue();
+        s.release = (float) release.getValue();
+        s.cutoff = (float) cutoff.getValue();
+        s.resonance = (float) resonance.getValue();
+
+        if (s == current()->synth)
+            return;
+
+        engine.editSong ([c = channel, s] (Song& song) { song.channels[(std::size_t) c].synth = s; });
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        if (current() == nullptr)
+        {
+            if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::DocumentWindow> (w)] {
+                    if (safe != nullptr)
+                        safe->closeButtonPressed();
+                });
+            return;
+        }
+
+        refresh();
+    }
+
+    AudioEngine& engine;
+    int channel;
+    bool updating = false;
+    std::array<Row, 3> rows;
+    juce::Slider attack, decay, sustain, release, cutoff, resonance;
+    std::array<juce::Label, 9> labels;
+};
+
 class SettingsWindow final : public juce::DocumentWindow
 {
 public:
-    SettingsWindow (AudioEngine& engine, int channel)
-        : juce::DocumentWindow ("Ajustes do sampler", theme::panel, DocumentWindow::closeButton)
+    SettingsWindow (AudioEngine& engine, int c)
+        : juce::DocumentWindow ("Ajustes do canal", theme::panel, DocumentWindow::closeButton),
+          channel (c)
     {
         setUsingNativeTitleBar (true);
-        setContentOwned (new SettingsPanel (engine, channel), true);
+
+        if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
+            setContentOwned (new SynthPanel (engine, channel), true);
+        else
+            setContentOwned (new SettingsPanel (engine, channel), true);
+
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
     }
 
-    int getChannel() const { return static_cast<SettingsPanel*> (getContentComponent())->getChannel(); }
+    int getChannel() const { return channel; }
     void closeButtonPressed() override;
+
+private:
+    int channel;
 };
 
 std::vector<std::unique_ptr<SettingsWindow>>& windows()
@@ -189,6 +381,9 @@ void closeChannelSettings()
 
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel)
 {
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
+        return std::make_unique<SynthPanel> (engine, channel);
+
     return std::make_unique<SettingsPanel> (engine, channel);
 }
 } // namespace lynx

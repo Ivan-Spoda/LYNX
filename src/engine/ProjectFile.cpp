@@ -192,6 +192,20 @@ juce::String toJson (const Song& song)
         if (c.colour != 0)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
 
+        if (! (c.synth == SynthSettings {}))
+        {
+            auto synth = std::make_unique<juce::DynamicObject>();
+            juce::Array<juce::var> oscs;
+
+            for (const auto& osc : c.synth.osc)
+                oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level });
+
+            synth->setProperty ("osc", oscs);
+            synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
+            synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance });
+            o->setProperty ("synthSettings", juce::var (synth.release()));
+        }
+
         if (! (c.sampler == SamplerSettings {}))
         {
             auto sampler = std::make_unique<juce::DynamicObject>();
@@ -418,6 +432,30 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             if (c.hasProperty ("colour"))
                 def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
+
+            if (const auto& s = c["synthSettings"]; s.isObject())
+            {
+                if (auto* oscs = s["osc"].getArray())
+                    for (int i = 0; i < oscs->size() && i < 3; ++i)
+                        if (const auto& o = (*oscs)[i]; o.isArray() && o.size() == 4)
+                            def.synth.osc[(std::size_t) i] = { (Waveform) juce::jlimit (0, 4, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
+                                                               juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]),
+                                                               juce::jlimit (0.0f, 1.0f, (float) (double) o[3]) };
+
+                if (const auto& a = s["adsr"]; a.isArray() && a.size() == 4)
+                {
+                    def.synth.attack = juce::jlimit (0.0f, 10.0f, (float) (double) a[0]);
+                    def.synth.decay = juce::jlimit (0.0f, 10.0f, (float) (double) a[1]);
+                    def.synth.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) a[2]);
+                    def.synth.release = juce::jlimit (0.0f, 10.0f, (float) (double) a[3]);
+                }
+
+                if (const auto& f = s["filter"]; f.isArray() && f.size() == 2)
+                {
+                    def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
+                    def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
+                }
+            }
 
             if (const auto& s = c["samplerSettings"]; s.isObject())
             {

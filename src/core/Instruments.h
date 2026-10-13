@@ -35,8 +35,9 @@ public:
     virtual void slideTo (int /*key*/, float /*cents*/, float /*samples*/) noexcept {}
     // Pan e afinação fina da próxima nota (chamado logo antes do noteOn). Quem não suporta ignora.
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/) noexcept {}
-    // Ajustes do canal (ex.: sampler). Thread da UI, a cada snapshot; o instrumento guarda em atomics.
-    virtual void configure (const SamplerSettings&) noexcept {}
+    // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
+    // forma que a thread de áudio leia sem esperar.
+    virtual void configure (const ChannelDef&) noexcept {}
 };
 
 // Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos

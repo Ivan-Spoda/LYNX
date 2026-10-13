@@ -440,6 +440,9 @@ void ChannelRackComponent::showChannelMenu (int channel)
                       [this, channel] { openChannelSettings (engine, channel); });
     }
 
+    if (c.instrument == InstrumentKind::synth)
+        menu.addItem (utf8 ("Ajustes do synth (osciladores, envelope, filtro)..."), [this, channel] { openChannelSettings (engine, channel); });
+
     if (c.instrument == InstrumentKind::plugin)
     {
         menu.addItem (utf8 ("Abrir interface do plugin"), [this, channel] { openPluginWindow (channel); });

@@ -1708,7 +1708,9 @@ TEST (sampler_settings_pitch_reverse_envelope_cut)
     auto play = [&] (const lynx::SamplerSettings& s, int key, int frames, bool releaseAfterHalf) {
         auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
         inst->prepare (48000.0);
-        inst->configure (s);
+        lynx::ChannelDef c;
+        c.sampler = s;
+        inst->configure (c);
         inst->noteOn (key, 1.0f);
         std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
         inst->render (l.data(), r.data(), frames / 2, 1.0f, 1.0f);
@@ -1745,7 +1747,9 @@ TEST (sampler_settings_pitch_reverse_envelope_cut)
     cut.cut = true;
     auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, ramp);
     inst->prepare (48000.0);
-    inst->configure (cut);
+    lynx::ChannelDef cutChannel;
+    cutChannel.sampler = cut;
+    inst->configure (cutChannel);
     inst->noteOn (60, 1.0f);
     std::vector<float> l (2000), r (2000);
     inst->render (l.data(), r.data(), 1000, 1.0f, 1.0f);
@@ -1982,6 +1986,52 @@ TEST (slide_notes_glide_without_retrigger)
         }
     }
     CHECK (ons == 1 && offs == 1 && slides == 1);
+}
+
+TEST (synth_three_oscillators_adsr_filter)
+{
+    auto render = [] (const lynx::SynthSettings& s, int frames, int releaseAt) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        inst->configure (c);
+        inst->noteOn (69, 1.0f); // A4 = 440 Hz
+        std::vector<float> l ((std::size_t) frames), r ((std::size_t) frames);
+        inst->render (l.data(), r.data(), releaseAt, 1.0f, 1.0f);
+        inst->noteOff (69);
+        inst->render (l.data() + releaseAt, r.data() + releaseAt, frames - releaseAt, 1.0f, 1.0f);
+        return l;
+    };
+    auto peakIn = [] (const std::vector<float>& v, int from, int to) {
+        float p = 0.0f;
+        for (int i = from; i < to; ++i)
+            p = std::max (p, std::abs (v[(std::size_t) i]));
+        return p;
+    };
+
+    // padrão: soa e some depois do release
+    const lynx::SynthSettings standard;
+    const auto a = render (standard, 48000, 24000);
+    CHECK (peakIn (a, 1000, 20000) > 0.05f && peakIn (a, 40000, 48000) < 1e-3f);
+
+    // seno puro com filtro aberto: a contagem de cruzamentos por zero dá ~440 Hz
+    lynx::SynthSettings sine;
+    sine.osc[0].wave = lynx::Waveform::sine;
+    sine.cutoff = 20000.0f;
+    const auto b = render (sine, 48000, 47000);
+    int crossings = 0;
+    for (int i = 4800; i < 4800 + 48000 / 2; ++i)
+        crossings += (b[(std::size_t) i - 1] < 0.0f) != (b[(std::size_t) i] < 0.0f);
+    CHECK (std::abs (crossings - 440) < 6); // meio segundo = 220 ciclos = 440 cruzamentos
+
+    // segundo oscilador uma oitava acima soma energia; sustain 0 faz a nota decair sozinha
+    lynx::SynthSettings two = sine;
+    two.osc[1] = { lynx::Waveform::sine, 1, 0.0f, 1.0f };
+    two.sustain = 0.0f;
+    two.decay = 0.1f;
+    const auto c = render (two, 48000, 47000);
+    CHECK (peakIn (c, 100, 2000) > peakIn (b, 100, 2000) && peakIn (c, 30000, 40000) < 1e-3f);
 }
 
 int main (int argc, char** argv)

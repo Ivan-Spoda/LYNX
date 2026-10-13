@@ -65,7 +65,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate)))
         {
             state->instruments.push_back (previous->instruments[i]);
-            state->instruments.back()->configure (channel.sampler);
+            state->instruments.back()->configure (channel);
             continue;
         }
 
@@ -87,7 +87,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
         instrument->prepare (sampleRate);
-        instrument->configure (channel.sampler);
+        instrument->configure (channel);
         state->instruments.push_back (std::move (instrument));
     }
 

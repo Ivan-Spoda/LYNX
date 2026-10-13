@@ -500,6 +500,13 @@ private:
             }
 
             saveWindow (lynx::makeChannelSettingsPanel (offline, 0), "-sampler.png");
+
+            for (int c = 0; c < (int) offline.getSong().channels.size(); ++c)
+                if (offline.getSong().channels[(std::size_t) c].instrument == lynx::InstrumentKind::synth)
+                {
+                    saveWindow (lynx::makeChannelSettingsPanel (offline, c), "-synth.png");
+                    break;
+                }
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

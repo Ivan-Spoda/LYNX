@@ -55,6 +55,39 @@ struct SamplerSettings
     bool operator== (const SamplerSettings&) const = default;
 };
 
+// Synth interno de 3 osciladores (no espírito do 3xOsc do FL).
+enum class Waveform : std::uint8_t
+{
+    sine,
+    triangle,
+    saw,
+    square,
+    noise
+};
+
+struct SynthOscillator
+{
+    Waveform wave = Waveform::saw;
+    int octave = 0;      // -3..3
+    float detune = 0.0f; // centésimos, -100..100
+    float level = 0.0f;  // 0..1
+
+    bool operator== (const SynthOscillator&) const = default;
+};
+
+struct SynthSettings
+{
+    std::array<SynthOscillator, 3> osc { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    float attack = 0.005f; // segundos
+    float decay = 0.3f;
+    float sustain = 1.0f;  // 0..1
+    float release = 0.25f;
+    float cutoff = 2500.0f;  // Hz
+    float resonance = 0.0f;  // 0..1
+
+    bool operator== (const SynthSettings&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -66,6 +99,7 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = direto no Master
     PluginRef plugin;       // usado quando instrument == plugin
     SamplerSettings sampler; // usado quando instrument == sampler
+    SynthSettings synth;     // usado quando instrument == synth
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = padrão do tema
 };
 
