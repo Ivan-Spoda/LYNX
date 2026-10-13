@@ -595,4 +595,72 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         default: return {};
     }
 }
+std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int k)
+{
+    auto is = [&] (const char* n) { return pluginName == n; };
+
+    if (is ("Fruity Parametric EQ 2"))
+    {
+        if (k >= 0 && k < 7) // ganho da banda: ±18 dB
+            return FlParamMap { peq::param (k, 2), [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
+        if (k >= 7 && k < 14) // frequência: 20 Hz · 1000^v
+            return FlParamMap { peq::param (k - 7, 1), [] (float v) { return peq::hzValue (20.0 * std::pow (1000.0, (double) v)); } };
+        if (k == 35)
+            return FlParamMap { peq::outputParam, [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
+        return std::nullopt;
+    }
+
+    if (is ("Fruity Filter"))
+    {
+        if (k == 0) // corte (SVF de Chamberlin, como no import do estado)
+            return FlParamMap { 1, [] (float v) {
+                const auto f = std::min (1.0, (std::pow (26.0, (double) v) - 1.0) * 0.04);
+                return fromLog (std::max (20.0, 44100.0 / 3.141592653589793 * std::asin (f / 2.0)), 20.0, 20000.0);
+            } };
+        if (k == 1)
+            return FlParamMap { 2, [] (float v) { return fromLog (1.0 / (1.0 - 0.8 * (double) v), 0.5, 12.0); } };
+        return std::nullopt;
+    }
+
+    if (is ("Fruity Balance") || is ("Fruity PanOMatic"))
+    {
+        if (k == 0) // pan: a faixa inteira dos dois casa com a nossa
+            return FlParamMap { 1, [] (float v) { return v; } };
+        if (k == 1) // volume: 0..320 (256 = 0 dB) [HIP no máximo]
+            return FlParamMap { 0, [] (float v) { return utilityGainValue (curve (11.0, 1.25 * (double) v)); } };
+        return std::nullopt;
+    }
+
+    if (is ("Fruity Fast LP") && (k == 0 || k == 1)) // corte / ressonância: o filtro interno tem os padrões, segue o knob
+        return FlParamMap { k + 1, [] (float v) { return v; } };
+
+    if (is ("Fruity Reeverb 2"))
+    {
+        if (k == 5) // decay 0,1..20 s -> realimentação dos combs
+            return FlParamMap { 0, [] (float v) {
+                const auto decay = 0.1 + 19.9 * (double) v;
+                return clamp01 ((std::pow (10.0, -3.0 * 0.03 / decay) - 0.7) / 0.28);
+            } };
+        if (k == 10)
+            return FlParamMap { 4, [] (float v) { return clamp01 (curve (11.0, (double) v)); } };
+        if (k == 12)
+            return FlParamMap { 3, [] (float v) { return clamp01 (curve (11.0, (double) v) / 0.25); } };
+        return std::nullopt;
+    }
+
+    if (is ("Fruity Delay 2") && k == 1) // wet
+        return FlParamMap { 2, [] (float v) { return clamp01 (curve (11.0, (double) v) * 0.5); } };
+
+    if (is ("Fruity Delay 3"))
+    {
+        if (k == 14)
+            return FlParamMap { 1, [] (float v) { return clamp01 (v * 0.9); } };
+        if (k == 23)
+            return FlParamMap { 2, [] (float v) { return clamp01 (v * 0.5); } };
+        if (k == 16)
+            return FlParamMap { 4, [] (float v) { return clamp01 (1.0 - v); } };
+    }
+
+    return std::nullopt;
+}
 } // namespace lynx

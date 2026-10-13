@@ -138,7 +138,12 @@ AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int
         t.index = id.track();
         const auto p = id.param();
 
-        if (p == flp::ControlId::mixerVolume)
+        if (p == 0x1F01) // dry/wet do slot
+        {
+            t.kind = AutomationTargetKind::effectMix;
+            t.slot = id.slot();
+        }
+        else if (p == flp::ControlId::mixerVolume)
             t.kind = AutomationTargetKind::mixerVolume;
         else if (p == flp::ControlId::mixerPan)
             t.kind = AutomationTargetKind::mixerPan;
@@ -822,6 +827,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
     // efeitos nativos do FL viram os efeitos internos parecidos (parâmetros no padrão: o estado
     // interno dos plugins do FL não é conhecido); os outros ficam de fora
+    std::map<std::pair<int, int>, std::pair<int, std::string>> effectSlotMap; // (trilha, slot do FL) -> (efeito nosso, plugin do FL)
+
     for (const auto& insert : project.mixer)
     {
         if (insert.index < 0 || insert.index >= tracks)
@@ -877,6 +884,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                         fx.mix = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
                 }
 
+            effectSlotMap[{ insert.index, slot.index }] = { (int) track.effects.size(), slot.plugin };
             track.effects.push_back (fx);
         }
     }
@@ -990,11 +998,37 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         Automation a;
         a.name = c.name.empty() ? "Automação " + std::to_string (c.index + 1) : c.name;
+        std::function<float (float)> valueMap; // valor normalizado do FL -> o nosso (parâmetros de efeito)
 
         for (const auto& link : project.automationLinks)
             if (link.channel == c.index)
             {
                 a.target = automationTargetFor (link.target, channelMap, (int) song.mixer.size());
+
+                // o slot do FL (0..9, com buracos) vira o índice do nosso efeito; efeito que não veio = sem alvo
+                if (a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix)
+                {
+                    const auto found = effectSlotMap.find ({ a.target.index, a.target.slot });
+                    if (found == effectSlotMap.end())
+                        a.target.kind = AutomationTargetKind::none;
+                    else
+                    {
+                        a.target.slot = found->second.first;
+                        const auto& fx = song.mixer[(std::size_t) a.target.index].effects[(std::size_t) a.target.slot];
+
+                        // parâmetro de efeito interno: só com o mapa do parâmetro do FL para o nosso
+                        if (a.target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
+                        {
+                            if (const auto mapped = effectParamFromFl (found->second.second, a.target.param))
+                            {
+                                a.target.param = mapped->param;
+                                valueMap = mapped->convert;
+                            }
+                            else
+                                a.target.kind = AutomationTargetKind::none;
+                        }
+                    }
+                }
                 break;
             }
 
@@ -1007,6 +1041,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             // o FL automatiza o tempo de 60 a 180 BPM; o nosso alvo cobre a faixa inteira do andamento
             if (a.target.kind == AutomationTargetKind::tempo)
                 value = valueFromTempo (60.0 + 120.0 * value);
+            else if (valueMap)
+                value = std::clamp (valueMap (value), 0.0f, 1.0f);
 
             // a curva do FL é do trecho que termina no ponto; a nossa fica no ponto da esquerda
             if (i > 0)

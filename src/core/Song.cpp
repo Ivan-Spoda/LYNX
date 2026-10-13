@@ -339,7 +339,7 @@ void Song::swapEffectSlots (int track, int a, int b)
     std::swap (fx[(std::size_t) a], fx[(std::size_t) b]);
 
     forEachTarget ([track, a, b] (AutomationTarget& t) {
-        if (t.kind == AutomationTargetKind::effectParam && t.index == track)
+        if ((t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix) && t.index == track)
             t.slot = t.slot == a ? b : t.slot == b ? a : t.slot;
     });
 }
@@ -353,7 +353,7 @@ void Song::removeEffectSlot (int track, int slot)
     fx.erase (fx.begin() + slot);
 
     forEachTarget ([track, slot] (AutomationTarget& t) {
-        if (t.kind == AutomationTargetKind::effectParam && t.index == track)
+        if ((t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix) && t.index == track)
         {
             if (t.slot == slot)
                 t.kind = AutomationTargetKind::none;
@@ -525,6 +525,10 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
                 return mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param];
             return validTrack ? 0.5f : -1.0f; // parâmetro de plugin: o valor mora no plugin
         case AutomationTargetKind::channelParam: return validChannel ? 0.5f : -1.0f;
+        case AutomationTargetKind::effectMix:
+            return validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
+                       ? mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].mix
+                       : -1.0f;
         case AutomationTargetKind::tempo: return valueFromTempo (bpm);
         case AutomationTargetKind::none: break;
     }
@@ -545,6 +549,11 @@ bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
         case AutomationTargetKind::mixerVolume: if (! validTrack) return false; mixer[(std::size_t) t.index].volume = v; return true;
         case AutomationTargetKind::mixerPan: if (! validTrack) return false; mixer[(std::size_t) t.index].pan = v * 2.0f - 1.0f; return true;
         case AutomationTargetKind::tempo: bpm = tempoFromValue (v); return true;
+        case AutomationTargetKind::effectMix:
+            if (! validTrack || t.slot < 0 || t.slot >= (int) mixer[(std::size_t) t.index].effects.size())
+                return false;
+            mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].mix = v;
+            return true;
         case AutomationTargetKind::effectParam:
             if (validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
                 && mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind != EffectKind::plugin && t.param >= 0

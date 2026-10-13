@@ -78,7 +78,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Efeitos nativos do FL nos slots do mixer viram efeitos internos parecidos
 - [x] ... com os ajustes salvos: Parametric EQ 2, Limiter, Reeverb 2, Delay 2/3, Compressor (rodada 7)
 - [x] EQ embutido das trilhas do mixer, LFOs do canal, porta, AM do 3x Osc (rodada 6)
-- [ ] Corte de graves/agudos e predelay no reverb; efeito de matriz estéreo (Stereo Shaper); Maximus
+- [x] Corte de graves/agudos e predelay no reverb; efeito de matriz estéreo (Stereo Shaper); Maximus
 - [x] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado VST3 (rodada 5)
 - [ ] Estado CLAP do wrapper e mapa de parâmetros VST3 para automação (formatos ainda em aberto)
 - [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)

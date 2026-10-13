@@ -4,6 +4,7 @@
 // internos do LYNX. Formatos e fórmulas em docs/analise/REA_rodada7.md (clean-room).
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,4 +23,12 @@ std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& f
 
 // Plugins do FL cujos presets dão este efeito interno (para listar as pastas de presets).
 std::vector<std::string> flPluginsForEffect (EffectKind kind);
+// Automação de um parâmetro de efeito nativo do FL: o nosso parâmetro equivalente e a conversão do
+// valor normalizado do FL (0..1 na faixa do parâmetro dele) para o nosso. nullopt = sem equivalente.
+struct FlParamMap
+{
+    int param = 0;
+    std::function<float (float)> convert;
+};
+std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int flParam);
 } // namespace lynx

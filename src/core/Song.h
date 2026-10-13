@@ -335,7 +335,8 @@ enum class AutomationTargetKind : std::uint8_t
     mixerVolume,   // index = trilha do mixer (0 = Master)
     mixerPan,      // index = trilha
     effectParam,   // index = trilha, slot, param (efeito interno ou plugin)
-    tempo          // andamento da música: 0..1 = minTempo..maxTempo BPM
+    tempo,         // andamento da música: 0..1 = minTempo..maxTempo BPM
+    effectMix      // index = trilha, slot: dry/wet do slot (0..1)
 };
 
 constexpr double minTempo = 10.0, maxTempo = 522.0; // a faixa do FL

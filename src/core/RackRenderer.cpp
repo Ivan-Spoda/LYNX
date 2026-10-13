@@ -332,12 +332,14 @@ void RackState::buildAutomationTables()
     mixerVolumeAuto.assign (song.mixer.size(), -1);
     mixerPanAuto.assign (song.mixer.size(), -1);
     effectParamAuto.assign (song.mixer.size(), {});
+    effectMixAuto.assign (song.mixer.size(), {});
 
     for (std::size_t t = 0; t < song.mixer.size(); ++t)
     {
         std::array<int, maxEffectParams> none;
         none.fill (-1);
         effectParamAuto[t].assign (song.mixer[t].effects.size(), none);
+        effectMixAuto[t].assign (song.mixer[t].effects.size(), -1);
     }
 
     pluginParams.clear();
@@ -383,6 +385,13 @@ void RackState::buildAutomationTables()
                     used = false;
                 break;
             }
+
+            case AutomationTargetKind::effectMix:
+                if (trackOk && t.slot >= 0 && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
+                    effectMixAuto[(std::size_t) t.index][(std::size_t) t.slot] = a;
+                else
+                    used = false;
+                break;
 
             case AutomationTargetKind::tempo: tempoAutomation = a; break;
             case AutomationTargetKind::none: used = false; break;
@@ -692,7 +701,12 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
     {
-        if (! slots[i].enabled || slots[i].mix <= 0.0f)
+        // dry/wet do slot (automatizável)
+        const auto wet = state.hasAutomation && i < state.effectMixAuto[(std::size_t) track].size()
+                             ? std::clamp (automated (state.effectMixAuto[(std::size_t) track][i], slots[i].mix), 0.0f, 1.0f)
+                             : slots[i].mix;
+
+        if (! slots[i].enabled || wet <= 0.0f)
             continue;
 
         // smart disable (como no FL): efeito com entrada e saída em silêncio é pulado (plugins
@@ -720,7 +734,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         }
 
         // dry/wet: guarda o seco para misturar depois
-        const auto partial = slots[i].mix < 0.999f;
+        const auto partial = wet < 0.999f;
 
         if (partial)
         {
@@ -745,7 +759,6 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         if (partial)
         {
-            const auto wet = slots[i].mix;
             const auto* dl = trackScratch (track, 0);
             const auto* dr = trackScratch (track, 1);
 

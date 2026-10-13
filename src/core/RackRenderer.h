@@ -37,6 +37,7 @@ struct RackState
     std::vector<int> channelVolumeAuto, channelPanAuto;
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
     std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [trilha][slot][param] (internos)
+    std::vector<std::vector<int>> effectMixAuto;                                 // [trilha][slot]: dry/wet
 
     struct PluginParamBinding
     {

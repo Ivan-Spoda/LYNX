@@ -417,6 +417,13 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
         }
 
         case AutomationTargetKind::tempo: return "Tempo";
+        case AutomationTargetKind::effectMix:
+        {
+            juce::String effect = "FX " + juce::String (t.slot + 1);
+            if (t.index < (int) song.mixer.size() && t.slot >= 0 && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
+                effect = utf8 (effectInfo (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind).name);
+            return trackName + " - " + effect + " - Mix";
+        }
         case AutomationTargetKind::none: break;
     }
 

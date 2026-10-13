@@ -405,6 +405,51 @@ TEST (inflate_zlib)
     CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
 }
 
+TEST (flp_effect_automation_follows_slots_and_params)
+{
+    // trilha 1: slot 0 com um efeito sem equivalente (sai), slot 2 com o Parametric EQ 2
+    flp::Project p;
+    flp::MixerInsert insert;
+    insert.index = 1;
+    insert.slots.push_back ({ 0, "Some Unknown FX", {} });
+    insert.slots.push_back ({ 2, "Fruity Parametric EQ 2", {} });
+    p.mixer.push_back (insert);
+
+    auto clip = [&] (int index, std::uint32_t target) {
+        flp::Channel c;
+        c.index = index;
+        c.type = flp::ChannelType::automationClip;
+        c.automation = { { 0.0, 0.0 }, { 96.0, 1.0 } };
+        p.channels.push_back (c);
+        p.automationLinks.push_back ({ index, { target } });
+    };
+    const auto mixer = [] (int track, int slot, int param) { return 0x70000000u + ((std::uint32_t) track << 22) + ((std::uint32_t) slot << 16) + (std::uint32_t) param; };
+    clip (0, mixer (1, 2, 0x8000 + 7)); // frequência da banda 1 do EQ
+    clip (1, mixer (1, 2, 0x1F01));     // mix do slot do EQ
+    clip (2, mixer (1, 0, 0x8000));     // parâmetro do efeito que saiu
+    clip (3, mixer (1, 2, 0x8000 + 21)); // tipo da banda: sem equivalente
+
+    const auto song = lynx::importFlp (p);
+    CHECK (song.automations.size() == 4);
+    CHECK (song.mixer[1].effects.size() == 1 && song.mixer[1].effects[0].kind == lynx::EffectKind::parametricEq);
+
+    const auto& freq = song.automations[0];
+    CHECK (freq.target.kind == lynx::AutomationTargetKind::effectParam && freq.target.index == 1 && freq.target.slot == 0);
+    CHECK (freq.target.param == lynx::peq::param (0, 1));
+    // 0..1 do FL (20 Hz..20 kHz) vira a nossa escala de frequência
+    CHECK (std::abs (freq.points.front().value - lynx::peq::hzValue (20.0)) < 1e-4f);
+    CHECK (std::abs (freq.points.back().value - lynx::peq::hzValue (20000.0)) < 1e-4f);
+
+    CHECK (song.automations[1].target.kind == lynx::AutomationTargetKind::effectMix && song.automations[1].target.slot == 0);
+    CHECK (song.automations[2].target.kind == lynx::AutomationTargetKind::none);
+    CHECK (song.automations[3].target.kind == lynx::AutomationTargetKind::none);
+
+    // o mix automatizado é lido/escrito pelo alvo
+    auto copy = song;
+    CHECK (copy.setTargetValue (song.automations[1].target, 0.25f) && std::abs (copy.mixer[1].effects[0].mix - 0.25f) < 1e-6f);
+    CHECK (std::abs (copy.targetValue (song.automations[1].target) - 0.25f) < 1e-6f);
+}
+
 TEST (flp_real_files)
 {
     if (realFlpDir.empty())
