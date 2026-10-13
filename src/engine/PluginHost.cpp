@@ -137,12 +137,14 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 
 // ---------------------------------------------------------------------------
 
-PluginHost::PluginHost()
+PluginHost::PluginHost (bool keep)
+    : persistent (keep)
 {
     formats.addDefaultFormats();
 
-    if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
-        known.recreateFromXml (*xml);
+    if (persistent)
+        if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
+            known.recreateFromXml (*xml);
 }
 
 juce::File PluginHost::settingsFolder()
@@ -164,6 +166,9 @@ juce::FileSearchPath PluginHost::defaultSearchPath()
 
 void PluginHost::save()
 {
+    if (! persistent)
+        return;
+
     if (auto xml = known.createXml())
         xml->writeTo (settingsFolder().getChildFile ("plugins.xml"));
 }
@@ -171,28 +176,76 @@ void PluginHost::save()
 int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress)
 {
     const auto before = known.getNumTypes();
-    const auto pedal = settingsFolder().getChildFile ("scan-em-andamento.txt");
+    const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+    const auto result = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-scan.xml");
 
     for (auto* format : formats.getFormats())
     {
         if (! format->canScanForPlugins())
             continue;
 
-        juce::PluginDirectoryScanner scanner (known, *format, paths, true, pedal, false);
-        juce::String name;
+        const auto files = format->searchPathsForPlugins (paths, true, false);
 
-        while (true)
+        for (int i = 0; i < files.size(); ++i)
         {
-            if (progress && ! progress (scanner.getProgress(), scanner.getNextPluginFileThatWillBeScanned()))
+            const auto& file = files[i];
+
+            if (progress && ! progress ((float) i / (float) juce::jmax (1, files.size()), file))
                 break;
 
-            if (! scanner.scanNextFile (true, name))
-                break;
+            if (known.isListingUpToDate (file, *format) || known.getBlacklistedFiles().contains (file))
+                continue;
+
+            result.deleteFile();
+            juce::ChildProcess child;
+            auto ok = child.start (juce::StringArray { exe.getFullPathName(), "--scan-one", format->getName(), file, result.getFullPathName() },
+                                   0);
+
+            if (ok && ! child.waitForProcessToFinish (scanTimeoutMs))
+            {
+                child.kill(); // travou: lista negra
+                ok = false;
+            }
+
+            ok = ok && child.getExitCode() == 0;
+
+            if (auto xml = ok ? juce::XmlDocument::parse (result) : nullptr)
+            {
+                for (auto* e : xml->getChildIterator())
+                {
+                    juce::PluginDescription d;
+
+                    if (d.loadFromXml (*e))
+                        known.addType (d);
+                }
+            }
+            else if (! ok)
+                known.addToBlacklist (file);
         }
     }
 
+    result.deleteFile();
     save();
     return known.getNumTypes() - before;
+}
+
+int PluginHost::scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output)
+{
+    juce::AudioPluginFormatManager manager;
+    manager.addDefaultFormats();
+    juce::OwnedArray<juce::PluginDescription> found;
+
+    for (auto* format : manager.getFormats())
+        if (format->getName() == formatName)
+            format->findAllTypesForFile (found, file);
+
+    juce::XmlElement xml ("PLUGINS");
+
+    for (auto* d : found)
+        xml.addChildElement (d->createXml().release());
+
+    xml.writeTo (output);
+    return found.size();
 }
 
 int PluginHost::addPluginFile (const juce::File& file)

@@ -13,7 +13,8 @@ class LynxApplication final : public juce::JUCEApplication
 public:
     const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override { return false; }
+    // a busca de plugins roda cópias do LYNX como processos filhos
+    bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise (const juce::String& commandLine) override
     {
@@ -23,6 +24,37 @@ public:
         {
             const auto i = args.indexOf ("--selftest");
             runSelfTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
+        if (args.contains ("--scan-one"))
+        {
+            // processo filho da busca de plugins (ver PluginHost::scan)
+            const auto i = args.indexOf ("--scan-one");
+            lynx::PluginHost::scanOneFile (args[i + 1].unquoted(), args[i + 2].unquoted(), juce::File (args[i + 3].unquoted()));
+            setApplicationReturnValue (0);
+            quit();
+            return;
+        }
+
+        if (args.contains ("--scantest"))
+        {
+            // LYNX.exe --scantest pasta relatorio.txt: busca (em processos filhos) sem tocar na lista do usuário
+            const auto i = args.indexOf ("--scantest");
+            lynx::PluginHost host (false);
+            const auto found = host.scan (juce::FileSearchPath (args[i + 1].unquoted()), {});
+            juce::String report;
+            report << "encontrados=" << found << "\n";
+
+            for (const auto& t : host.getKnownPlugins().getTypes())
+                report << "  " << (t.isInstrument ? "instrumento: " : "efeito: ") << t.name << "\n";
+
+            for (const auto& f : host.getKnownPlugins().getBlacklistedFiles())
+                report << "  lista negra: " << f << "\n";
+
+            juce::File (args[i + 2].unquoted()).replaceWithText (report);
+            setApplicationReturnValue (found > 0 ? 0 : 1);
+            quit();
             return;
         }
 

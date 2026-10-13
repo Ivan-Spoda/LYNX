@@ -62,7 +62,8 @@ private:
 class PluginHost
 {
 public:
-    PluginHost();
+    // persistent = lê e grava a lista em %APPDATA%\LYNX (false nos testes).
+    explicit PluginHost (bool persistent = true);
 
     juce::KnownPluginList& getKnownPlugins() noexcept { return known; }
     juce::AudioPluginFormatManager& getFormats() noexcept { return formats; }
@@ -71,8 +72,15 @@ public:
     static juce::FileSearchPath defaultSearchPath(); // pastas padrão de VST3
 
     // Varre as pastas atrás de plugins. `progress(0..1, arquivo)` retorna false para cancelar.
-    // Plugins que travaram uma varredura anterior são pulados (arquivo "dead man's pedal").
+    // Cada arquivo é examinado num processo separado (LYNX.exe --scan-one): um plugin que
+    // trave ou feche o processo não derruba o LYNX; ele vai para a lista negra e é pulado
+    // nas próximas buscas.
     int scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress);
+
+    // Modo filho da busca: descreve os plugins de um arquivo em `output` (XML). Retorna o nº achado.
+    static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
+
+    static constexpr int scanTimeoutMs = 30000;
 
     // Adiciona um arquivo específico (ex.: um .vst3 fora das pastas padrão).
     int addPluginFile (const juce::File& file);
@@ -90,6 +98,7 @@ private:
 
     juce::AudioPluginFormatManager formats;
     juce::KnownPluginList known;
+    bool persistent = true;
 };
 
 // Estado atual do plugin em base64 (para salvar no projeto).
