@@ -84,6 +84,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Balance", EffectKind::utility },    { "Fruity PanOMatic", EffectKind::utility },  { "Fruity Stereo Shaper", EffectKind::utility },
         { "Fruity Center", EffectKind::utility },     { "Fruity Phase Inverter", EffectKind::utility },
         { "Fruity Stereo Enhancer", EffectKind::utility }, { "Fruity Convolver", EffectKind::reverb }, { "EQUO", EffectKind::parametricEq },
+        { "Spreader", EffectKind::utility },          { "Transient Processor", EffectKind::utility },
         { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
     };
@@ -803,7 +804,13 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
             if (! made)
             {
-                if (options.report != nullptr && slot.plugin != "Fruity Wrapper")
+                // os que não mexem no áudio (controladores, visualizadores, anotações) não fazem falta
+                static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface", "Wave Candy",
+                                                "ZGameEditor Visualizer", "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
+                                                "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
+                const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
+
+                if (options.report != nullptr && slot.plugin != "Fruity Wrapper" && ! harmless)
                     ++options.report->droppedEffects[slot.plugin];
                 continue;
             }
