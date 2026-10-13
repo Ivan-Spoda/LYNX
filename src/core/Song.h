@@ -279,6 +279,7 @@ struct EffectSlot
     EffectParams params {}; // 0..1; o significado depende do efeito
     float mix = 1.0f;       // dry/wet do slot (como no FL): 0 = só o sinal seco
     PluginRef plugin;                             // usado quando kind == plugin
+    int sidechain = -1;   // trilha do mixer cuja saída (pós-fader) entra no detector do efeito (compressor); −1 = nenhuma
     std::vector<EffectBranch> branches;           // usado quando kind == parallel
 };
 

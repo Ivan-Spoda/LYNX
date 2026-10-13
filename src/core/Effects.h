@@ -77,6 +77,9 @@ public:
     virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
     // Posição da música no começo do bloco, em ticks (efeitos sincronizados ao compasso).
     virtual void setSongPosition (double /*ticks*/) noexcept {}
+    // Entrada lateral (sidechain) para o próximo process(): a saída de outra trilha, ou nullptr se ela estiver
+    // calada. Só é chamada quando o slot tem sidechain.
+    virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}
     // Latência que o efeito introduz (plugins), em samples. Para o PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };

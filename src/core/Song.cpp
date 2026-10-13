@@ -240,10 +240,20 @@ std::vector<int> Song::mixerOrder() const
     const auto n = (int) mixer.size();
     std::vector<int> incoming ((std::size_t) std::max (0, n), 0);
 
+    // arestas: envios e sidechains (a fonte do sidechain precisa ser processada antes de quem a ouve)
+    std::vector<std::vector<int>> next ((std::size_t) std::max (0, n));
     for (int t = 1; t < n; ++t)
+    {
         for (const auto& s : mixer[(std::size_t) t].sends)
             if (s.target > 0 && s.target < n)
-                ++incoming[(std::size_t) s.target];
+                next[(std::size_t) t].push_back (s.target);
+        for (const auto& fx : mixer[(std::size_t) t].effects)
+            if (fx.sidechain > 0 && fx.sidechain < n && fx.sidechain != t)
+                next[(std::size_t) fx.sidechain].push_back (t);
+    }
+    for (int t = 1; t < n; ++t)
+        for (const auto target : next[(std::size_t) t])
+            ++incoming[(std::size_t) target];
 
     // Kahn: começa pelas trilhas que ninguém alimenta (em ordem de número)
     std::vector<int> order, ready;
@@ -258,12 +268,12 @@ std::vector<int> Song::mixerOrder() const
         ready.pop_back();
         order.push_back (t);
 
-        for (const auto& s : mixer[(std::size_t) t].sends)
-            if (s.target > 0 && s.target < n && --incoming[(std::size_t) s.target] == 0)
+        for (const auto target : next[(std::size_t) t])
+            if (--incoming[(std::size_t) target] == 0)
             {
                 // mantém a ordem numérica entre as que ficam prontas juntas
-                auto pos = std::upper_bound (ready.begin(), ready.end(), s.target, std::greater<int>());
-                ready.insert (pos, s.target);
+                auto pos = std::upper_bound (ready.begin(), ready.end(), target, std::greater<int>());
+                ready.insert (pos, target);
             }
     }
 

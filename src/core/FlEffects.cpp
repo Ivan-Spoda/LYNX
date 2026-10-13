@@ -100,7 +100,7 @@ bool parametricEq2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 
 // --- Fruity Limiter (§2): limiter, ou o compressor dele quando só o compressor trabalha -------
 
-bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot, bool forceCompressor = false)
 {
     if (d.size() < 4 + 18 * 4)
         return false;
@@ -114,7 +114,7 @@ bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto ratio = ratioRaw > 0 ? 1.0 + 0.38 * (std::pow (51.0, ratioRaw / 1000.0) - 1.0) : 1.0;
 
     // teto acima de 0 dB praticamente desliga o limitador; aí o que soa é o compressor
-    if (ceilingDb > -0.1 && ratio > 1.05 && compThresholdDb < -0.5)
+    if (forceCompressor || (ceilingDb > -0.1 && ratio > 1.05 && compThresholdDb < -0.5))
     {
         slot = makeEffectSlot (EffectKind::compressor);
         slot.params[0] = clamp01 ((compThresholdDb + 60.0) / 60.0);
@@ -797,6 +797,14 @@ std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std
     return slot;
 }
 } // namespace
+
+std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_t>& state)
+{
+    EffectSlot slot;
+    if (! limiter (state, slot, true))
+        return std::nullopt;
+    return slot;
+}
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {

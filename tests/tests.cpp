@@ -4711,3 +4711,34 @@ TEST (synth_spectral_oscillator)
     const auto d = renderSynthNote (spectral, 105, 24000); // 3520 Hz
     CHECK (goertzel (d, 1000.0, 4800, 24000) < 1e-3 * goertzel (d, 3520.0, 4800, 24000));
 }
+
+TEST (compressor_sidechain_ducks_and_orders_mixer)
+{
+    // o detector ouve a entrada lateral: sinal baixo na trilha, bumbo forte no sidechain -> redução
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::compressor);
+    slot.params[0] = 0.5f; // threshold
+    slot.params[1] = 1.0f; // ratio alto
+    slot.params[4] = 0.0f;
+    auto run = [&] (bool withSidechain) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::compressor);
+        fx->prepare (48000.0);
+        std::vector<float> l (4800, 0.1f), r (4800, 0.1f), kick (4800, 1.0f);
+        if (withSidechain)
+            fx->setSidechain (kick.data(), kick.data());
+        fx->process (l.data(), r.data(), 4800, slot.params, 120.0);
+        return l.back();
+    };
+    const auto alone = run (false), ducked = run (true);
+    CHECK (ducked < 0.5f * alone);
+
+    // ordem: a trilha 5 ouve a 7 por sidechain -> a 7 vem antes da 5
+    auto song = lynx::Song::makeDefault();
+    while (song.mixer.size() < 8)
+        song.mixer.push_back ({});
+    auto comp = lynx::makeEffectSlot (lynx::EffectKind::compressor);
+    comp.sidechain = 7;
+    song.mixer[5].effects.push_back (comp);
+    const auto order = song.mixerOrder();
+    const auto at = [&] (int t) { return std::find (order.begin(), order.end(), t) - order.begin(); };
+    CHECK (at (7) < at (5));
+}

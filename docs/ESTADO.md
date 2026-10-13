@@ -138,6 +138,9 @@ e 19 verificaram as hipóteses (decompilação + manual oficial) e o código foi
   7 (passa-tudo) e 11 (Mango); envelopes de pattern no volume (efeito "Envelope rítmico", em tempos, em loop,
   travado na música, curva de tensão) e LFO de pan (efeito "Auto-pan", triângulo travado na música).
 - Patcher: qualquer grafo dos demos reduzido a série/paralelo (contêineres aninhados), cabos com a classe certa.
+- Sidechain (rodada 22): rotas de nível 0 viram ligações de sidechain; o Fruity Limiter (seção de compressão) e o
+  Fruity Compressor com entrada lateral viram o compressor do LYNX ouvindo a trilha-fonte (o ducking do bumbo).
+  No mixer: clique direito no slot do compressor > "Sidechain de".
 
 O que **ainda não tem confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
 - Harmor: ressonância (curva por harmônica sem equivalente); com o envelope de volume desligado o FL mantém a

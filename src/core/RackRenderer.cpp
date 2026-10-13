@@ -206,9 +206,19 @@ void RackState::buildMixerGraph()
     mixerInputs.assign ((std::size_t) tracks, {});
     std::vector<int> depth ((std::size_t) tracks, 0);
 
+    // quem ouve cada trilha por sidechain (a fonte vai numa camada anterior)
+    std::vector<std::vector<int>> sidechainListeners ((std::size_t) tracks);
+    for (int t = 1; t < tracks; ++t)
+        for (const auto& fx : song.mixer[(std::size_t) t].effects)
+            if (fx.sidechain > 0 && fx.sidechain < tracks && fx.sidechain != t)
+                sidechainListeners[(std::size_t) fx.sidechain].push_back (t);
+
     for (auto t : mixerOrder) // fontes antes dos destinos: a profundidade já está pronta
     {
         const auto& track = song.mixer[(std::size_t) t];
+
+        for (const auto listener : sidechainListeners[(std::size_t) t])
+            depth[(std::size_t) listener] = std::max (depth[(std::size_t) listener], depth[(std::size_t) t] + 1);
 
         if (track.toMaster)
             mixerInputs[0].push_back ({ t, 0, 1.0f });
@@ -707,6 +717,16 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
     }
 }
 
+void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept
+{
+    const auto source = slot.sidechain;
+    if (source < 0 || source == track || source >= (int) state.song.mixer.size())
+        return;
+    // a fonte já foi processada nesta passada (camada anterior); calada = sem sinal no detector
+    const auto active = (std::size_t) source < trackActive.size() && trackActive[(std::size_t) source] != 0;
+    effect.setSidechain (active ? trackBuffer (source, 0) : nullptr, active ? trackBuffer (source, 1) : nullptr);
+}
+
 void RackRenderer::runEffects (const RackState& state, int track, int n) noexcept
 {
     if (track >= (int) state.effects.size())
@@ -772,11 +792,13 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 params[p] = automated (autos[p], params[p]);
 
             effects[i]->setSongPosition (chunkTick);
+            setSidechain (state, slots[i], *effects[i], track);
             effects[i]->process (l, r, n, params, bpm);
         }
         else
         {
             effects[i]->setSongPosition (chunkTick);
+            setSidechain (state, slots[i], *effects[i], track);
             effects[i]->process (l, r, n, slots[i].params, bpm);
         }
 

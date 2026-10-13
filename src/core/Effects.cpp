@@ -141,11 +141,15 @@ public:
         const auto release = (float) std::exp (-1.0 / (compReleaseMs (params[3]) * 0.001 * sampleRate));
         const auto makeup = dbToGain (compMakeupDb (params[4]));
         const auto thresholdGain = dbToGain (threshold);
+        const auto sidechain = useSidechain;
+        useSidechain = false;
 
         for (int i = 0; i < n; ++i)
         {
-            // detector de pico estéreo ligado, curva "hard knee"; abaixo do threshold não precisa do log
-            const auto peak = std::max (std::abs (l[i]), std::abs (r[i]));
+            // detector de pico estéreo ligado, curva "hard knee"; abaixo do threshold não precisa do log.
+            // Com sidechain, o detector ouve a outra trilha (o ducking do bumbo)
+            const auto peak = sidechain ? (sideL != nullptr ? std::max (std::abs (sideL[i]), std::abs (sideR[i])) : 0.0f)
+                                        : std::max (std::abs (l[i]), std::abs (r[i]));
             const auto reductionDb = peak > thresholdGain ? (gainToDb (peak) - threshold) * (1.0f - 1.0f / ratio) : 0.0f;
 
             // o envelope sobe com o attack e desce com o release
@@ -161,9 +165,19 @@ public:
         }
     }
 
+    void setSidechain (const float* left, const float* right) noexcept override
+    {
+        sideL = left;
+        sideR = right;
+        useSidechain = true;
+    }
+
 private:
     double sampleRate = 44100.0;
     float envelopeDb = 0.0f;
+    const float* sideL = nullptr;
+    const float* sideR = nullptr;
+    bool useSidechain = false;
 };
 
 // ---------------------------------------------------------------------------

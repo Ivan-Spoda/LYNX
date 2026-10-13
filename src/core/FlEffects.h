@@ -64,6 +64,10 @@ struct LovePhilterConversion
     };
     std::vector<LiveLink> links;
 };
+// A seção de compressão do Fruity Limiter como compressor do LYNX (para o sidechain, que só alimenta o detector
+// do compressor; REA_rodada22 §1)
+std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_t>& state);
+
 std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 
 // Valor atual (0..1) da saída `output` de um controlador parado (Fruity X-Y Controller, Control

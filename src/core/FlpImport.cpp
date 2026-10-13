@@ -928,6 +928,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     // efeitos nativos do FL viram os efeitos internos parecidos (parâmetros no padrão: o estado
     // interno dos plugins do FL não é conhecido); os outros ficam de fora
     std::map<std::pair<int, int>, std::pair<int, std::string>> effectSlotMap; // (trilha, slot do FL) -> (efeito nosso, plugin do FL)
+
+    // entradas de cada trilha (REA_rodada22 §1): [a própria, as que roteiam para ela em ordem crescente (com
+    // qualquer nível; nível 0 = só sidechain)]; o índice k gravado nos plugins aponta para esta lista
+    std::map<int, std::vector<int>> trackInputs;
+    for (const auto& insert : project.mixer)
+        if (insert.hasRoutes)
+            for (const auto target : insert.routes)
+                if (target > 0 && target != insert.index)
+                    trackInputs[target].push_back (insert.index);
+    auto sidechainSource = [&] (int track, int k) {
+        if (k <= 0)
+            return -1;
+        auto inputs = trackInputs[track];
+        std::sort (inputs.begin(), inputs.end());
+        inputs.erase (std::unique (inputs.begin(), inputs.end()), inputs.end());
+        inputs.insert (inputs.begin(), track);
+        return k < (int) inputs.size() && inputs[(std::size_t) k] < tracks ? inputs[(std::size_t) k] : -1;
+    };
     std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // automação dos Love Philter
 
     for (const auto& insert : project.mixer)
@@ -1097,6 +1115,34 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
 
                 auto fx = std::move (*made);
+
+                // sidechain (REA_rodada22 §1): Fruity Limiter (i32 em 0xA4, v ≥ 6; só o detector do compressor e só
+                // com Comp threshold < 0 dB) e Fruity Compressor (i32 em 0x20, v3)
+                if (slot.plugin == "Fruity Limiter" && slot.state.size() >= 0xA8)
+                {
+                    std::int32_t version = 0, k = 0, compThreshold = 1000;
+                    std::memcpy (&version, slot.state.data(), 4);
+                    std::memcpy (&k, slot.state.data() + 0xA4, 4);
+                    std::memcpy (&compThreshold, slot.state.data() + 4 + 8 * 4, 4);
+                    if (const auto source = sidechainSource (insert.index, k); version >= 6 && source >= 0 && compThreshold < 1000)
+                        if (auto comp = fruityLimiterCompressor (slot.state))
+                        {
+                            const auto enabled = fx.enabled;
+                            fx = std::move (*comp);
+                            fx.enabled = enabled;
+                            fx.sidechain = source;
+                            if (options.report != nullptr)
+                                ++options.report->converted["Fruity Limiter (sidechain)"];
+                        }
+                }
+                else if (slot.plugin == "Fruity Compressor" && slot.state.size() >= 0x24 && fx.kind == EffectKind::compressor)
+                {
+                    std::int32_t version = 0, k = 0;
+                    std::memcpy (&version, slot.state.data(), 4);
+                    std::memcpy (&k, slot.state.data() + 0x20, 4);
+                    if (version == 3)
+                        fx.sidechain = sidechainSource (insert.index, k);
+                }
 
                 // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
                 for (const auto& control : project.controls)

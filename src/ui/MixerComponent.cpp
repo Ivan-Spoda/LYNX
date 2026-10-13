@@ -858,8 +858,10 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.setColour (theme::muteLed (! slot.enabled));
             g.fillEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 5, 10, 10);
             g.setColour (slot.enabled ? theme::text : juce::Colours::grey);
-            const auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
-                                                              : utf8 (effectInfo (slot.kind).name);
+            auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
+                                                        : utf8 (effectInfo (slot.kind).name);
+            if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
+                name << utf8 (" ← ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
 
             // knob de dry/wet do slot
@@ -1230,6 +1232,24 @@ void EffectsPanel::showSlotMenu (int slot)
 
         if (presets.getNumItems() > 0)
             menu.addSubMenu ("Presets do FL", presets);
+    }
+
+    // sidechain: a saída de outra trilha entra no detector (por ora, o compressor usa)
+    if ((*slots())[(std::size_t) slot].kind == EffectKind::compressor)
+    {
+        juce::PopupMenu side;
+        const auto current = (*slots())[(std::size_t) slot].sidechain;
+        side.addItem ("Nenhum", true, current < 0, [this, slot] {
+            engine.editSong ([t = track, slot] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].sidechain = -1; });
+        });
+        const auto& song = engine.getSong();
+        for (int t = 1; t < (int) song.mixer.size(); ++t)
+            if (t != track)
+                side.addItem (juce::String (t) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), true, current == t,
+                              [this, slot, t] {
+                                  engine.editSong ([tr = track, slot, t] (Song& s) { s.mixer[(std::size_t) tr].effects[(std::size_t) slot].sidechain = t; });
+                              });
+        menu.addSubMenu ("Sidechain de", side);
     }
     menu.addItem ("Mover para cima", slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });

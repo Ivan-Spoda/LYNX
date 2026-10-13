@@ -161,6 +161,7 @@ private:
     float* channelBuffer (int channel, int side) noexcept;
     float* trackScratch (int track, int side) noexcept;
     void runEffects (const RackState& state, int track, int n) noexcept;
+    void setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept;
     void updateAutomation (const RackState& state, double startTick) noexcept;
     float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;
