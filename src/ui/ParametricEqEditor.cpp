@@ -295,9 +295,9 @@ private:
         if (currentType == peq::BandType::lowCut || currentType == peq::BandType::highCut)
         {
             menu.addSeparator();
-            for (auto [label, value] : { std::pair { "12 dB/oit", 0.0f }, { "24 dB/oit", 0.5f }, { "48 dB/oit", 1.0f } })
-                menu.addItem (label, true, peq::slopeStages (s->params[(std::size_t) (peq::slopeParam + band)]) == peq::slopeStages (value),
-                              [this, band, value = value] { setParams ({ { peq::slopeParam + band, value } }); });
+            for (int stages = 1; stages <= 4; ++stages)
+                menu.addItem (juce::String (12 * stages) + " dB/oit", true, peq::slopeStages (s->params[(std::size_t) (peq::slopeParam + band)]) == stages,
+                              [this, band, stages] { setParams ({ { peq::slopeParam + band, peq::slopeValue (stages) } }); });
         }
 
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());

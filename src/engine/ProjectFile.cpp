@@ -806,7 +806,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     if (! kind || (int) track.effects.size() >= maxEffectSlots)
                         continue;
 
-                    EffectSlot slot;
+                    // parte dos padrões do efeito: parâmetros que não estão no arquivo (efeito ganhou
+                    // parâmetro depois) ficam no padrão em vez de 0
+                    auto slot = *kind == EffectKind::plugin ? EffectSlot {} : makeEffectSlot (*kind);
                     slot.kind = *kind;
                     slot.enabled = (bool) e.getProperty ("on", true);
                     slot.mix = juce::jlimit (0.0f, 1.0f, (float) (double) e.getProperty ("mix", 1.0));

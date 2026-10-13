@@ -76,10 +76,13 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Filtro do canal (Mod X/Y, 8 tipos) no synth e no sampler
 - [x] Envelopes de corte e de afinação do canal no synth
 - [x] Efeitos nativos do FL nos slots do mixer viram efeitos internos parecidos
+- [x] ... com os ajustes salvos: Parametric EQ 2, Limiter, Reeverb 2, Delay 2/3, Compressor (rodada 7)
+- [x] EQ embutido das trilhas do mixer, LFOs do canal, porta, AM do 3x Osc (rodada 6)
+- [ ] Corte de graves/agudos e predelay no reverb; efeito de matriz estéreo (Stereo Shaper); Maximus
 - [x] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado VST3 (rodada 5)
 - [ ] Estado CLAP do wrapper e mapa de parâmetros VST3 para automação (formatos ainda em aberto)
 - [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)
-- [ ] LFOs do canal, AM do 3x Osc
+- [x] LFOs do canal, AM do 3x Osc
 - [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)
 - [x] Metrônomo seguindo as mudanças de compasso (modo song)
 - [ ] Notas "porta"

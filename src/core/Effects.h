@@ -33,7 +33,8 @@ std::string formatEffectParam (EffectKind kind, int param, float value01, double
 EffectSlot makeEffectSlot (EffectKind kind);
 
 // EQ paramétrico de 7 bandas. Parâmetros: banda b usa [4b .. 4b+3] = tipo, frequência, ganho, Q;
-// [28] = saída; [29 + b] = inclinação dos cortes (12/24/48 dB por oitava).
+// [28] = saída; [29 + b] = inclinação dos cortes (1 a 4 biquads: 12/24/36/48 dB por oitava).
+// Nas prateleiras o "Q" é a inclinação S do cookbook (1 = padrão).
 namespace peq
 {
 constexpr int bands = 7;
@@ -52,7 +53,8 @@ double gainDb (float v) noexcept;  // ±18 dB
 float gainValue (double db) noexcept;
 double q (float v) noexcept;       // 0,1 .. 18 (log)
 float qValue (double q) noexcept;
-int slopeStages (float v) noexcept; // 1, 2 ou 4 biquads (12/24/48 dB/oit)
+int slopeStages (float v) noexcept; // 1 a 4 biquads (12/24/36/48 dB/oit)
+float slopeValue (int stages) noexcept;
 const char* typeName (BandType t) noexcept;
 
 // Resposta do EQ inteiro (todas as bandas e a saída) em dB, para o gráfico do editor.

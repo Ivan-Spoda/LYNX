@@ -676,23 +676,30 @@ private:
                     break;
                 }
 
-            // EQ paramétrico: no primeiro slot que tiver um (com uma curva de exemplo para ver o desenho)
-            for (int t = 0; t < (int) offline.getSong().mixer.size(); ++t)
-                for (int s = 0; s < (int) offline.getSong().mixer[(std::size_t) t].effects.size(); ++s)
-                    if (offline.getSong().mixer[(std::size_t) t].effects[(std::size_t) s].kind == lynx::EffectKind::parametricEq)
-                    {
-                        offline.editSong ([t, s] (lynx::Song& song) {
-                            auto& p = song.mixer[(std::size_t) t].effects[(std::size_t) s].params;
-                            p[(std::size_t) lynx::peq::param (0, 0)] = lynx::peq::typeValue (lynx::peq::BandType::lowCut);
-                            p[(std::size_t) lynx::peq::param (0, 1)] = lynx::peq::hzValue (40.0);
-                            p[(std::size_t) lynx::peq::param (2, 2)] = lynx::peq::gainValue (-6.0);
-                            p[(std::size_t) lynx::peq::param (4, 2)] = lynx::peq::gainValue (4.5);
-                            p[(std::size_t) lynx::peq::param (6, 2)] = lynx::peq::gainValue (3.0);
-                        });
-                        saveWindow (lynx::makeParametricEqEditor (offline, t, s), "-peq.png");
-                        t = (int) offline.getSong().mixer.size();
-                        break;
-                    }
+            // EQ paramétrico: o de curva mais marcada (no .flp importado, com os ajustes do FL)
+            {
+                int bestTrack = -1, bestSlot = -1;
+                double bestShape = -1.0;
+                const auto& mixer = offline.getSong().mixer;
+
+                for (int t = 0; t < (int) mixer.size(); ++t)
+                    for (int s = 0; s < (int) mixer[(std::size_t) t].effects.size(); ++s)
+                        if (const auto& fx = mixer[(std::size_t) t].effects[(std::size_t) s]; fx.kind == lynx::EffectKind::parametricEq)
+                        {
+                            double shape = 0.0;
+                            for (double hz = 30.0; hz < 18000.0; hz *= 1.5)
+                                shape += std::abs (lynx::peq::responseDb (fx.params, 48000.0, hz));
+                            if (shape > bestShape)
+                            {
+                                bestShape = shape;
+                                bestTrack = t;
+                                bestSlot = s;
+                            }
+                        }
+
+                if (bestTrack >= 0)
+                    saveWindow (lynx::makeParametricEqEditor (offline, bestTrack, bestSlot), "-peq.png");
+            }
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();

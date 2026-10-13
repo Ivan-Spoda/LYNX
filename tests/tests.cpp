@@ -14,6 +14,7 @@
 #include "core/Dither.h"
 #include "core/Effects.h"
 #include "core/FlpImport.h"
+#include "core/FlEffects.h"
 #include "core/FlWrapper.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -265,6 +266,7 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
+    int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -283,6 +285,24 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            const auto peqDefaults = lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params;
+            for (const auto& t : song.mixer)
+                for (const auto& fx : t.effects)
+                {
+                    if (fx.kind == lynx::EffectKind::parametricEq)
+                    {
+                        ++peqSlots;
+                        peqShaped += fx.params != peqDefaults;
+                        for (double hz : { 50.0, 1000.0, 10000.0 })
+                            CHECK (std::isfinite (lynx::peq::responseDb (fx.params, 48000.0, hz)));
+                    }
+                    if (fx.kind == lynx::EffectKind::reverb)
+                    {
+                        ++reverbs;
+                        reverbsDryless += fx.params[4] < 0.01f;
+                    }
+                }
 
             for (const auto& t : song.mixer)
                 if (t.eq.active())
@@ -385,6 +405,8 @@ TEST (flp_real_files)
     CHECK (wrappedParsed == wrapped);
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);
+    std::printf ("  %d EQs paramétricos (%d com ajustes do FL), %d reverbs (%d sem seco)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
+    CHECK (peqSlots > 1000 && peqShaped > 900 && reverbsDryless > 20);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
@@ -1491,6 +1513,7 @@ TEST (parametric_eq_bands_and_response)
     auto cut = lynx::makeEffectSlot (lynx::EffectKind::parametricEq);
     cut.params[(std::size_t) lynx::peq::param (0, 0)] = lynx::peq::typeValue (lynx::peq::BandType::lowCut);
     cut.params[(std::size_t) lynx::peq::param (0, 1)] = lynx::peq::hzValue (200.0);
+    cut.params[(std::size_t) lynx::peq::param (0, 3)] = lynx::peq::qValue (0.70710678); // Butterworth
     cut.params[(std::size_t) (lynx::peq::slopeParam + 0)] = 1.0f;
     CHECK (lynx::peq::responseDb (cut.params, 48000.0, 50.0) < -80.0);
     CHECK (std::abs (lynx::peq::responseDb (cut.params, 48000.0, 200.0) + 3.0) < 0.5); // -3 dB no corte (Butterworth)
@@ -1500,6 +1523,44 @@ TEST (parametric_eq_bands_and_response)
     CHECK (std::abs (lynx::peq::hz (lynx::peq::hzValue (440.0)) - 440.0) < 0.5);
     CHECK (std::abs (lynx::peq::q (lynx::peq::qValue (2.5)) - 2.5) < 0.01);
     CHECK (lynx::peq::type (lynx::peq::typeValue (lynx::peq::BandType::notch)) == lynx::peq::BandType::notch);
+}
+
+TEST (fl_parametric_eq2_state_maps_to_bands)
+{
+    // blob v8: banda 1 corta graves a 100 Hz "Steep 8", banda 4 pico +6 dB em 1 kHz, saída −3 dB
+    std::vector<std::uint8_t> blob (354, 0);
+    auto put = [&] (std::size_t off, std::int32_t v) { std::memcpy (blob.data() + off, &v, 4); };
+    put (0, 8);
+    auto param = [&] (int i, std::int32_t v) { put (4 + 4 * (std::size_t) i, v); };
+    auto hzRaw = [] (double hz) { return (std::int32_t) std::lround (std::log (hz / 20.0) / std::log (1000.0) * 65536.0); };
+    for (int b = 0; b < 7; ++b)
+        param (21 + b, 0); // tudo desligado
+    param (21 + 0, 3);          // high pass (= corta graves)
+    param (7 + 0, hzRaw (100.0));
+    param (14 + 0, 40124);      // largura padrão -> Q ~0,68
+    param (28 + 0, -3);         // Steep 8 -> 4 biquads
+    param (21 + 3, 6);          // peaking
+    param (7 + 3, hzRaw (1000.0));
+    param (3, 600);             // +6 dB
+    param (14 + 3, 25412);
+    param (35, -300);           // main level −3 dB
+    put (0x13E, 0x7F);
+
+    const auto slot = lynx::effectFromFl ("Fruity Parametric EQ 2", blob);
+    CHECK (slot.has_value() && slot->kind == lynx::EffectKind::parametricEq);
+    const auto& p = slot->params;
+    CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (0, 0)]) == lynx::peq::BandType::lowCut);
+    CHECK (lynx::peq::slopeStages (p[(std::size_t) lynx::peq::slopeParam]) == 4);
+    CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (3, 0)]) == lynx::peq::BandType::peak);
+    CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (1, 0)]) == lynx::peq::BandType::off);
+    CHECK (std::abs (lynx::peq::responseDb (p, 48000.0, 1000.0) - 3.0) < 0.3);   // +6 do pico −3 da saída
+    CHECK (lynx::peq::responseDb (p, 48000.0, 30.0) < -40.0);                     // 48 dB/oit abaixo de 100 Hz
+    CHECK (std::abs (lynx::peq::responseDb (p, 48000.0, 8000.0) + 3.0) < 0.3);
+
+    // banda mutada pela máscara não soa
+    put (0x13E, 0x7F & ~(1 << 3));
+    const auto muted = lynx::effectFromFl ("Fruity Parametric EQ 2", blob);
+    CHECK (lynx::peq::type (muted->params[(std::size_t) lynx::peq::param (3, 0)]) == lynx::peq::BandType::off);
 }
 
 TEST (effects_eq_compressor_behave)

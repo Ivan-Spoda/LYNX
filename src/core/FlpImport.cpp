@@ -1,6 +1,7 @@
 #include "core/FlpImport.h"
 
 #include "core/Effects.h"
+#include "core/FlEffects.h"
 #include "core/FlWrapper.h"
 #include "core/SynthPresets.h"
 
@@ -503,26 +504,26 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         for (const auto& slot : insert.slots)
         {
-            ForeignPlugin foreign;
-            const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
-            const auto kind = wrapped ? std::optional<EffectKind> (EffectKind::plugin) : effectForFlPlugin (slot.plugin);
-
-            if (! kind || (int) track.effects.size() >= maxEffectSlots)
+            if ((int) track.effects.size() >= maxEffectSlots)
                 continue;
 
-            auto fx = makeEffectSlot (*kind);
+            ForeignPlugin foreign;
+            std::optional<EffectSlot> made;
 
-            if (wrapped) // o app troca pelo plugin instalado; sem ele, o slot sai
+            if (slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign))
             {
-                fx.plugin.name = foreign.name;
-                fx.plugin.foreign = std::move (foreign);
+                // o app troca pelo plugin instalado; sem ele, o slot sai
+                made = makeEffectSlot (EffectKind::plugin);
+                made->plugin.name = foreign.name;
+                made->plugin.foreign = std::move (foreign);
             }
+            else
+                made = effectFromFl (slot.plugin, slot.state); // efeito nativo com os ajustes salvos (REA_rodada7)
 
-            if (*kind == EffectKind::filter)
-                fx.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar
+            if (! made)
+                continue;
 
-            if (slot.plugin == "Fruity Soft Clipper")
-                fx.params[0] = 0.15f; // drive baixo
+            auto fx = std::move (*made);
 
             // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
             for (const auto& control : project.controls)

@@ -297,6 +297,7 @@ public:
         const auto damping = params[1] * 0.4f;
         const auto width = params[2];
         const auto mix = params[3];
+        const auto dry = params[4]; // 0 = só o reverb (reverb num send)
         const auto wet1 = width / 2.0f + 0.5f;
         const auto wet2 = (1.0f - width) / 2.0f;
         constexpr float inputGain = 0.015f;
@@ -330,8 +331,8 @@ public:
 
             for (int i = 0; i < m; ++i)
             {
-                bl[i] += mix * (out[0][i] * wet1 + out[1][i] * wet2);
-                br[i] += mix * (out[1][i] * wet1 + out[0][i] * wet2);
+                bl[i] = bl[i] * dry + mix * (out[0][i] * wet1 + out[1][i] * wet2);
+                br[i] = br[i] * dry + mix * (out[1][i] * wet1 + out[0][i] * wet2);
             }
         }
     }
@@ -673,8 +674,9 @@ private:
 // EQ paramétrico de 7 bandas: cada banda é um biquad do cookbook (ou até 4 em série nos cortes,
 // com os Q de um Butterworth da ordem pedida).
 
-constexpr std::array<std::array<double, 4>, 3> butterworthQ { { { 0.70710678, 0, 0, 0 },
+constexpr std::array<std::array<double, 4>, 4> butterworthQ { { { 0.70710678, 0, 0, 0 },
                                                                 { 0.54119610, 1.30656296, 0, 0 },
+                                                                { 0.51763809, 0.70710678, 1.93185165, 0 },
                                                                 { 0.50979558, 0.60134489, 0.89997622, 2.56291545 } } };
 
 // Coeficientes das etapas de uma banda; retorna quantas etapas (0 = banda desligada/transparente).
@@ -697,15 +699,16 @@ int bandStages (const EffectParams& p, int band, double sr, std::array<Biquad, 4
         case peq::BandType::highShelf:
             if (std::abs (db) < 0.01)
                 return 0;
-            out[0].shelf (sr, hz, db, t == peq::BandType::highShelf);
+            out[0].shelf (sr, hz, db, t == peq::BandType::highShelf, std::clamp (q, 0.1, 4.0)); // Q = inclinação S
             return 1;
         case peq::BandType::lowCut:
         case peq::BandType::highCut:
         {
+            // em cascata: os Q de um Butterworth da ordem, escalados pelo Q da banda (0,707 = Butterworth)
             const auto stages = peq::slopeStages (p[(std::size_t) (peq::slopeParam + band)]);
-            const auto& qs = butterworthQ[(std::size_t) (stages == 1 ? 0 : stages == 2 ? 1 : 2)];
+            const auto& qs = butterworthQ[(std::size_t) (stages - 1)];
             for (int s = 0; s < stages; ++s)
-                out[(std::size_t) s].filter (sr, t == peq::BandType::lowCut ? 1 : 0, hz, stages == 1 ? q : qs[(std::size_t) s]);
+                out[(std::size_t) s].filter (sr, t == peq::BandType::lowCut ? 1 : 0, hz, stages == 1 ? q : qs[(std::size_t) s] * q / 0.70710678);
             return stages;
         }
         case peq::BandType::bandPass:
@@ -809,7 +812,8 @@ double gainDb (float v) noexcept { return (std::clamp ((double) v, 0.0, 1.0) - 0
 float gainValue (double db) noexcept { return (float) std::clamp (db / 36.0 + 0.5, 0.0, 1.0); }
 double q (float v) noexcept { return 0.1 * std::pow (180.0, std::clamp ((double) v, 0.0, 1.0)); }
 float qValue (double value) noexcept { return (float) std::clamp (std::log (std::max (value, 0.01) / 0.1) / std::log (180.0), 0.0, 1.0); }
-int slopeStages (float v) noexcept { return v < 0.25f ? 1 : v < 0.75f ? 2 : 4; }
+int slopeStages (float v) noexcept { return 1 + (int) std::lround (std::clamp (v, 0.0f, 1.0f) * 3.0f); }
+float slopeValue (int stages) noexcept { return (float) (std::clamp (stages, 1, 4) - 1) / 3.0f; }
 
 const char* typeName (BandType t) noexcept
 {
@@ -847,7 +851,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo eq { "EQ", { { "Graves", 0.5f }, { "Médios", 0.5f }, { "Freq. médios", 0.5f }, { "Agudos", 0.5f }, { "Saída", 0.5f } } };
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Tempo", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Abafar", 0.3f } } };
-    static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f } } };
+    static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f }, { "Seco", 1.0f } } };
     static const EffectInfo plugin { "Plugin", {} };
     static const EffectInfo limiter { "Limiter", { { "Teto", 0.975f }, { "Ganho", 0.0f }, { "Release", 0.5f } } };
     static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
@@ -871,7 +875,8 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params.push_back ({ names[b][0], peq::typeValue (types[b]) });
             info.params.push_back ({ names[b][1], peq::hzValue (freqs[b]) });
             info.params.push_back ({ names[b][2], 0.5f });
-            info.params.push_back ({ names[b][3], peq::qValue (1.0) });
+            // Q 1,0 nas prateleiras = inclinação S 1; nos cortes, 0,707 = Butterworth
+            info.params.push_back ({ names[b][3], peq::qValue (types[b] == peq::BandType::lowCut || types[b] == peq::BandType::highCut ? 0.70710678 : 1.0) });
         }
 
         info.params.push_back ({ "Saída", 0.5f });

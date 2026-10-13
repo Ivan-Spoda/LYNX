@@ -62,6 +62,13 @@ Atualizado em 2026-10-13.
   (VST3 pelo class ID, CLAP pelo id, ou pelo nome, que também cobre VST2 → VST3/CLAP do mesmo produto)
   e restaura o estado VST3. Os não achados aparecem num aviso; os canais ficam no synth interno.
   Conferido com `LYNX.exe --wrappertest "Surge XT.vst3" relatorio.txt`. VST2 o LYNX não hospeda.
+- **Efeitos nativos do FL com os ajustes reais (REA rodada 7, `docs/analise/REA_rodada7.md`)**:
+  Parametric EQ 2 → EQ paramétrico de 7 bandas (tipos, frequências, ganhos, larguras, inclinações
+  "Steep" e bandas mutadas; 1124 slots nos demos), Limiter (limitador ou o compressor dele),
+  Reeverb 2 (decaimento, abafamento, separação, seco/molhado), Delay 2/3 (tempo sincronizado,
+  feedback, ping-pong, corte), Compressor (threshold, ratio, ganho, attack, release).
+- **EQ embutido das trilhas do mixer** (3 bandas do FL, REA rodada 6) e **LFOs do canal**; porta e AM
+  do 3x Osc; tipos de marcador conhecidos.
 - **Render mais leve**: PDC em uma passada, reverb por blocos, limiter O(1), FTZ/DAZ; o export do
   SHINE (110 s, 60 efeitos importados) caiu de 4,4 s para 2,4 s.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
