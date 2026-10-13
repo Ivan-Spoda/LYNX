@@ -917,6 +917,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     // efeitos nativos do FL viram os efeitos internos parecidos (parâmetros no padrão: o estado
     // interno dos plugins do FL não é conhecido); os outros ficam de fora
     std::map<std::pair<int, int>, std::pair<int, std::string>> effectSlotMap; // (trilha, slot do FL) -> (efeito nosso, plugin do FL)
+    std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // automação dos Love Philter
 
     for (const auto& insert : project.mixer)
     {
@@ -929,6 +930,26 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             // Patcher com uma cadeia simples em série: os plugins de dentro viram slots seguidos
             std::vector<flp::MixerInsert::Slot> expanded { original };
+            // Fruity Love Philter: as unidades viram EQ paramétrico + ganho/pan (ou um contêiner paralelo)
+            if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots)
+                if (auto conversion = lovePhilterEffects (original.state))
+                {
+                    const auto first = (int) track.effects.size();
+                    for (auto& fx : conversion->slots)
+                        if ((int) track.effects.size() < maxEffectSlots)
+                            track.effects.push_back (std::move (fx));
+                    effectSlotMap.insert ({ { insert.index, original.index }, { first, original.plugin } });
+                    if (conversion->paramMap)
+                        lovePhilterMaps[{ insert.index, original.index }] = conversion->paramMap;
+                    if (options.report != nullptr)
+                    {
+                        ++options.report->converted["Fruity Love Philter"];
+                        for (const auto& note : conversion->notes)
+                            ++options.report->droppedEffects[note];
+                    }
+                    continue;
+                }
+
             // Patcher em ramos paralelos simples: um contêiner com as cadeias de cada ramo
             if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
                 if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && ! graph->branches.empty())
@@ -1134,7 +1155,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 target.slot = found->second.first;
                 const auto& fx = song.mixer[(std::size_t) target.index].effects[(std::size_t) target.slot];
 
-                if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
+                if (target.kind == AutomationTargetKind::effectParam && found->second.second == "Fruity Love Philter")
+                {
+                    const auto map = lovePhilterMaps.find ({ id.track(), id.slot() });
+                    const auto mapped = map != lovePhilterMaps.end() && map->second ? map->second (target.param) : std::nullopt;
+                    if (mapped)
+                    {
+                        target.slot = found->second.first + std::get<0> (*mapped);
+                        target.param = std::get<1> (*mapped);
+                        valueMap = std::get<2> (*mapped);
+                    }
+                    else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
                 {
                     if (const auto mapped = effectParamFromFl (found->second.second, target.param))
                     {

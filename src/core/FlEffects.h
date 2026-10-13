@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <tuple>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,18 @@ struct FlParamMap
     std::function<float (float)> convert;
 };
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int flParam);
+
+// Fruity Love Philter -> efeitos do LYNX (REA_rodadas 16 §2 e 17 §15): cada unidade ligada vira um EQ
+// paramétrico (tipo, corte e Q pelas fórmulas do FL a 44,1 kHz) + ganho/pan. Uma unidade: `slots` em
+// série (e `paramMap` traduz a automação do FL para eles); várias em paralelo (NEXT = 0): um contêiner.
+struct LovePhilterConversion
+{
+    std::vector<EffectSlot> slots;
+    // automação do parâmetro k do FL -> (índice dentro de `slots`, parâmetro nosso, conversão do valor)
+    std::function<std::optional<std::tuple<int, int, std::function<float (float)>>> (int k)> paramMap;
+    std::vector<std::string> notes; // o que ficou de fora (para o relatório)
+};
+std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 
 // Valor atual (0..1) da saída `output` de um controlador parado (Fruity X-Y Controller, Control
 // Surface; REA_rodada15 §11): um link dele vira um valor fixo no alvo. nullopt se não der para ler.

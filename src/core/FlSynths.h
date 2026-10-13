@@ -83,6 +83,7 @@ struct LovePhilterState
     int version = 0;
     std::array<std::int32_t, 6> globals {};
     std::int32_t modX = 512, modY = 512;
+    int soloUnit = -1; // −1 = nenhuma
     std::array<LovePhilterUnit, 8> units {};
 };
 std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t>& state);

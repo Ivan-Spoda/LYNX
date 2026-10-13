@@ -1,4 +1,5 @@
 #include "core/FlEffects.h"
+#include "core/FlSynths.h"
 
 #include <algorithm>
 #include <functional>
@@ -1048,5 +1049,214 @@ std::optional<float> controllerConstantOutput (const std::string& pluginName, co
     }
 
     return std::nullopt;
+}
+namespace
+{
+// curva de ganho dos knobs do FL: (11^x − 1)/10, com sinal
+double scurve11 (double x) { return (x < 0.0 ? -1.0 : 1.0) * (std::pow (11.0, std::abs (x)) - 1.0) / 10.0; }
+
+struct PhilterBand
+{
+    peq::BandType type = peq::BandType::off;
+    double hz = 1000.0, q = 0.707, gainDb = 0.0;
+    int stages = 1;
+    bool ok = false;
+};
+
+// tipo, corte e Q de uma unidade com corte c e ressonância r (0..1), a 44,1 kHz (k = 1)
+PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
+{
+    PhilterBand b;
+    c = std::clamp (c, 0.0, 1.0);
+    r = std::clamp (r, 0.0, 1.0);
+    const auto mode = std::clamp (u.mode, 0, 5);
+    if (mode == 0)
+        return b; // a unidade não filtra
+    b.stages = mode == 4 ? 2 : mode == 5 ? 3 : mode;
+    auto lpQ = [] (double rr) { return 0.1 + 0.02495 * (std::pow (2001.0, rr) - 1.0); };
+    const auto lowGain = scurve11 (std::clamp (u.params[3], 0, 128) / 128.0);
+    const auto bandGain = scurve11 (std::clamp (u.params[4], 0, 128) / 128.0);
+    const auto highGain = scurve11 (std::clamp (u.params[5], 0, 128) / 128.0);
+
+    switch (u.type)
+    {
+        case 0: // SVF de Chamberlin: fc = (x + 0,005)·44100/π; saída = L·LP + B·BP + H·HP
+        {
+            const auto x = (std::pow (51.0, c) - 1.0) * 0.0159;
+            b.hz = (x + 0.005) * 44100.0 / 3.141592653589793;
+            auto d = r <= 0.0 ? 1.0 : r >= 1.0 ? 0.2 : 1.0 - 0.9 * r;
+            if (u.alt)
+                d *= d;
+            b.q = 1.0 / std::max (0.05, d);
+            const auto l = std::abs (lowGain) > 1e-6, bp = std::abs (bandGain) > 1e-6, h = std::abs (highGain) > 1e-6;
+            // só as saídas puras têm equivalente: LP, BP, HP ou L+H (rejeita-faixa) com o mesmo ganho
+            if (l && ! bp && ! h)
+                b.type = peq::BandType::highCut, b.gainDb = 20.0 * std::log10 (std::abs (lowGain));
+            else if (h && ! l && ! bp)
+                b.type = peq::BandType::lowCut, b.gainDb = 20.0 * std::log10 (std::abs (highGain));
+            else if (bp && ! l && ! h)
+                b.type = peq::BandType::bandPass, b.gainDb = 20.0 * std::log10 (std::abs (bandGain));
+            else if (l && h && ! bp && std::abs (lowGain - highGain) < 1e-6)
+                b.type = peq::BandType::notch, b.gainDb = 20.0 * std::log10 (std::abs (lowGain));
+            else
+                return b;
+            b.ok = true;
+            break;
+        }
+        case 1: case 2: // Lime: ω = (x + 0,007)·π/2 -> fc = (x + 0,007)·44100/4
+        {
+            const auto x = std::min (1.6, (std::pow (76.0, c) - 1.0) * 0.01324);
+            b.hz = (x + 0.007) * 44100.0 / 4.0;
+            b.q = std::min (50.0, std::pow (1001.0, r));
+            b.type = u.type == 1 ? peq::BandType::highCut : peq::BandType::lowCut; // o slot L é "drive" aqui: fica de fora
+            b.ok = true;
+            break;
+        }
+        case 3: // Vanilla LP: fc = (x + 0,003)·44100
+        {
+            const auto x = (std::pow (1501.0, c) - 1.0) * 0.000664667;
+            b.hz = (x + 0.003) * 44100.0;
+            b.q = lpQ (r);
+            b.type = peq::BandType::highCut;
+            b.ok = true;
+            break;
+        }
+        case 6: case 8: case 9: case 10: // família Vanilla 4…10: fc = (x + 0,0001)·44100
+        {
+            auto x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
+            if (u.type == 6)
+                x = std::min (x, 0.6001);
+            b.hz = (x + 0.0001) * 44100.0;
+            if (u.type == 6)
+            {
+                b.type = peq::BandType::lowCut;
+                b.q = lpQ (r);
+            }
+            else if (u.type == 9)
+            {
+                b.type = peq::BandType::peak;
+                b.q = 0.1 + 0.04995 * (std::pow (2001.0, 1.0 - r) - 1.0);
+                b.gainDb = 20.0 * std::log10 (std::max (1e-6, std::abs (lowGain))); // o ganho do pico é o slot low/gain
+            }
+            else
+            {
+                b.type = u.type == 8 ? peq::BandType::lowShelf : peq::BandType::highShelf;
+                b.q = 0.1 + 0.45 * (std::pow (3.0, 1.0 - r) - 1.0); // inclinação S
+                b.gainDb = 20.0 * std::log10 (std::max (1e-6, std::abs (lowGain)));
+            }
+            b.ok = true;
+            break;
+        }
+        default: // 4/5 (largura em unidade não confirmada), 7 (passa-tudo), 11 (Mango, fórmula não detalhada)
+            return b;
+    }
+    if (b.stages > 1)
+        b.q = std::pow (b.q, 1.0 / b.stages);
+    b.hz = std::clamp (b.hz, 20.0, 20000.0);
+    return b;
+}
+
+EffectSlot philterSlot (const PhilterBand& band, double unitGain)
+{
+    auto slot = makeEffectSlot (EffectKind::parametricEq);
+    for (int i = 0; i < peq::bands; ++i)
+        slot.params[(std::size_t) peq::param (i, 0)] = peq::typeValue (peq::BandType::off);
+    double outputDb = 20.0 * std::log10 (std::max (1e-6, unitGain));
+    if (band.ok)
+    {
+        const auto cut = band.type == peq::BandType::highCut || band.type == peq::BandType::lowCut;
+        // cortes: estágios = inclinação do EQ; os outros tipos repetem a banda (cascata)
+        const auto copies = cut ? 1 : std::min (band.stages, peq::bands);
+        for (int i = 0; i < copies; ++i)
+        {
+            slot.params[(std::size_t) peq::param (i, 0)] = peq::typeValue (band.type);
+            slot.params[(std::size_t) peq::param (i, 1)] = peq::hzValue (band.hz);
+            slot.params[(std::size_t) peq::param (i, 2)] = peq::gainValue (std::clamp (band.gainDb, -18.0, 18.0));
+            slot.params[(std::size_t) peq::param (i, 3)] = peq::qValue (band.q);
+            slot.params[(std::size_t) (peq::slopeParam + i)] = peq::slopeValue (cut ? std::clamp (band.stages, 1, 4) : 1);
+        }
+        if (cut) // nos cortes o ganho do slot L/H multiplica a saída
+            outputDb += band.gainDb;
+    }
+    slot.params[peq::outputParam] = peq::gainValue (std::clamp (outputDb, -18.0, 18.0));
+    return slot;
+}
+} // namespace
+
+std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& stateBytes)
+{
+    const auto state = parseLovePhilter (stateBytes);
+    if (! state)
+        return std::nullopt;
+
+    const auto master = scurve11 (std::clamp (state->globals[0], 0, 160) / 128.0);
+    std::vector<int> active;
+    for (int u = 0; u < 8; ++u)
+        if (state->units[(std::size_t) u].enabled && (state->soloUnit < 0 || state->soloUnit == u))
+            active.push_back (u);
+
+    LovePhilterConversion out;
+    for (const auto u : active)
+        if (u + 1 < 8 && state->units[(std::size_t) u + 1].enabled && state->units[(std::size_t) u].params[11] != 0)
+        {
+            out.notes.push_back ("Love Philter: unidades encadeadas (NEXT) tocam em paralelo");
+            break;
+        }
+
+    auto unitEffects = [&] (int u) {
+        const auto& unit = state->units[(std::size_t) u];
+        const auto band = philterBand (unit, std::clamp (unit.params[1], 0, 256) / 256.0, std::clamp (unit.params[2], 0, 256) / 256.0);
+        if (unit.mode != 0 && ! band.ok)
+            out.notes.push_back ("Love Philter: filtro tipo " + std::to_string (unit.type) + " sem equivalente");
+        const auto gain = scurve11 (std::clamp (unit.params[9], 0, 160) / 128.0) * master * std::abs (scurve11 (std::clamp (unit.params[10], -160, 160) / 128.0));
+        std::vector<EffectSlot> chain { philterSlot (band, gain) };
+        if (const auto pan = std::clamp (unit.params[8], -128, 128) / 128.0; std::abs (pan) > 1e-3)
+        {
+            auto utility = makeEffectSlot (EffectKind::utility);
+            utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
+            chain.push_back (utility);
+        }
+        return chain;
+    };
+
+    if (active.empty())
+    {
+        out.slots.push_back (philterSlot ({}, 0.0)); // nenhuma unidade ligada: o Love Philter fica mudo
+        return out;
+    }
+
+    if (active.size() == 1)
+    {
+        const auto u = active.front();
+        out.slots = unitEffects (u);
+        const auto& unit = state->units[(std::size_t) u];
+        const auto base = 8 + 44 * u;
+        const auto masterGain = master;
+        out.paramMap = [unit, base, masterGain] (int k) -> std::optional<std::tuple<int, int, std::function<float (float)>>> {
+            if (k == base + 1) // CUT: c = valor
+                return std::make_tuple (0, peq::param (0, 1), std::function<float (float)> ([unit] (float v) {
+                                            const auto b = philterBand (unit, v, std::clamp (unit.params[2], 0, 256) / 256.0);
+                                            return peq::hzValue (b.hz);
+                                        }));
+            if (k == base + 2) // RES
+                return std::make_tuple (0, peq::param (0, 3), std::function<float (float)> ([unit] (float v) {
+                                            const auto b = philterBand (unit, std::clamp (unit.params[1], 0, 256) / 256.0, v);
+                                            return peq::qValue (b.q);
+                                        }));
+            if (k == base + 9) // VOL: 0..160
+                return std::make_tuple (0, peq::outputParam, std::function<float (float)> ([masterGain] (float v) {
+                                            const auto g = scurve11 (160.0 * v / 128.0) * masterGain;
+                                            return peq::gainValue (std::clamp (20.0 * std::log10 (std::max (1e-6, g)), -18.0, 18.0));
+                                        }));
+            return std::nullopt;
+        };
+        return out;
+    }
+
+    auto container = makeEffectSlot (EffectKind::parallel);
+    for (const auto u : active)
+        container.branches.push_back ({ unitEffects (u), 1.0f });
+    out.slots.push_back (std::move (container));
+    return out;
 }
 } // namespace lynx

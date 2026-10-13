@@ -1098,6 +1098,9 @@ std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t
     {
         std::memcpy (&out.modX, g2, 4);
         std::memcpy (&out.modY, g2 + 4, 4);
+        std::int32_t solo = -1;
+        std::memcpy (&solo, g2 + 16, 4);
+        out.soloUnit = solo >= 0 && solo < 8 ? solo : -1;
     }
     if (v >= 2)
     {

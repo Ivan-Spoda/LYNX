@@ -976,7 +976,7 @@ TEST (flp_real_files)
 
     // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
     {
-        int embeddedZones = 0, lovePhilters = 0, lovePhiltersRead = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
+        int embeddedZones = 0, lovePhilters = 0, lovePhiltersRead = 0, lovePhiltersConverted = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
             {
@@ -999,6 +999,14 @@ TEST (flp_real_files)
                             {
                                 ++lovePhilters;
                                 lovePhiltersRead += lynx::parseLovePhilter (slot.state).has_value();
+                                if (const auto conv = lynx::lovePhilterEffects (slot.state))
+                                {
+                                    ++lovePhiltersConverted;
+                                    CHECK (! conv->slots.empty());
+                                    for (const auto& fx : conv->slots)
+                                        for (auto v : fx.params)
+                                            CHECK (std::isfinite (v) && v >= 0.0f && v <= 1.0f);
+                                }
                             }
                             else if (slot.plugin == "Effector")
                                 effectors += lynx::effectFromFl (slot.plugin, slot.state).has_value();
@@ -1033,7 +1041,7 @@ TEST (flp_real_files)
             }
         std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos; Love Philter: %d, %d lidos\n", gates, shaped, effectors,
                      lovePhilters, lovePhiltersRead);
-        CHECK (lovePhiltersRead == lovePhilters);
+        CHECK (lovePhiltersRead == lovePhilters && lovePhiltersConverted == lovePhilters);
         std::printf ("  DirectWave: %d zonas com áudio embutido\n", embeddedZones);
         CHECK (embeddedZones == 12);
         std::printf ("  Patcher: %d no mixer (%d em série, %d em ramos paralelos simples), %d como instrumento com gerador\n", patchers, serial,
