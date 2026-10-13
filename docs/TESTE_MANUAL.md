@@ -16,11 +16,13 @@ de teste fica em `C:\Users\kauan\lynx-test\LYNX.exe` (copiado a cada build).
 3. Exportar (`Ctrl+R`) e comparar o arquivo com o render do FL do mesmo projeto.
 
 ## 2. Synth e sampler (5 min)
-- Num canal synth: `Presets do FL...` lista os 169 presets do 3x Osc; trocar alguns e tocar com o
-  teclado do PC (`Z`..`M`, `Q`..`P`).
+- Num canal synth: `Presets do FL...` lista os presets do 3x Osc e, por gerador, os de Sytrus, Harmor,
+  GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun e Sakura (~2800, aproximados pelo synth interno);
+  trocar alguns e tocar com o teclado do PC (`Z`..`M`, `Q`..`P`).
 - `Modulação (envelopes e LFOs)...`: ligar um LFO de afinação (vibrato) e um de volume (tremolo).
 - Botões Mono / Porta / AM e o knob Tempo porta.
-- No Navegador (F8), em "Presets do 3x Osc (FL)", dar duplo clique num preset: cria um canal novo.
+- No Navegador (F8), em "Presets do 3x Osc (FL)" ou "Presets de sintetizadores (FL)", dar duplo clique
+  num preset (.fst ou .gmsynth): cria um canal novo.
 - Num sampler: filtro (tipo, corte, ressonância), Porta + Cut itself (glide de 808).
 - Piano Roll: `Ctrl+P` marca notas com porta (traço no começo da nota).
 

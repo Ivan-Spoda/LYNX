@@ -701,6 +701,25 @@ TEST (flp_real_files)
                 }
             }
     std::printf ("  presets GMS: %d, %d decodificados\n", gmsPresets, gmsDecoded);
+
+    // o botão "Presets do FL" do synth: .fst de Sytrus/Harmor e .gmsynth viram ajustes do synth
+    int presetFiles = 0, presetsRead = 0;
+    for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "Ogun", "Sakura", "Fruit Kick", "Fruity DX10", "MiniSynth" })
+    {
+        const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / name;
+        if (! std::filesystem::exists (folder))
+            continue;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator (folder))
+            if (entry.path().extension() == ".fst" || entry.path().extension() == ".gmsynth")
+            {
+                std::ifstream in (entry.path(), std::ios::binary);
+                const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+                ++presetFiles;
+                presetsRead += lynx::synthFromFlPreset (file).has_value();
+            }
+    }
+    std::printf ("  presets de synth do FL: %d arquivos, %d lidos\n", presetFiles, presetsRead);
+    CHECK (presetsRead >= presetFiles * 95 / 100);
     CHECK (gmsDecoded == gmsPresets);
     CHECK (sytrusDecoded == sytrus);
     CHECK (harmlessDecoded == harmless && harmless > 100);

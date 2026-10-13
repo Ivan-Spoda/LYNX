@@ -38,6 +38,7 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     add ("Projetos de exemplo do FL", data.getChildFile ("Demo projects"));
     add ("MIDI do FL", data.getChildFile ("Patches").getChildFile ("Scores"));
     add ("Presets do 3x Osc (FL)", data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
+    add ("Presets de sintetizadores (FL)", data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
     add ("Documentos", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
     add (utf8 ("Música"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
     add (utf8 ("Área de trabalho"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
@@ -114,8 +115,8 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
         return;
     }
 
-    // preset de canal do 3x Osc: canal novo com o synth interno ajustado pelo preset
-    if (file.hasFileExtension ("fst"))
+    // preset de um synth do FL que o LYNX converte (3x Osc, Sytrus, GMS...): canal novo com o synth interno
+    if (file.hasFileExtension ("fst;gmsynth"))
     {
         juce::MemoryBlock data;
 
@@ -139,7 +140,7 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
         }
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Preset",
-                                                    utf8 ("Por enquanto o LYNX lê presets de canal do 3x Osc."));
+                                                    utf8 ("O LYNX lê presets do 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun e Sakura."));
         return;
     }
 

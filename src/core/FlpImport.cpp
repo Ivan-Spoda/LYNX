@@ -8,6 +8,7 @@
 #include "core/SynthPresets.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cctype>
 #include <cmath>
 #include <map>
@@ -334,13 +335,36 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
     });
 }
 
+bool isFlSynthPresetPlugin (const std::string& pluginName)
+{
+    static const char* const supported[] = { "3x osc", "sytrus", "harmor", "gms", "harmless", "minisynth", "fruity dx10", "dx10",
+                                             "fruit kick", "ogun", "autogun", "sakura" };
+    const auto name = lowercase (pluginName);
+    return std::any_of (std::begin (supported), std::end (supported), [&] (const char* n) { return name == n; });
+}
+
 std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>& bytes)
 {
+    // preset nativo do GMS (.gmsynth): é o estado do plugin sem o "SSLF"
+    if (bytes.size() >= 4 && (std::memcmp (bytes.data(), "4nyS", 4) == 0 || std::memcmp (bytes.data(), "3nyS", 4) == 0))
+    {
+        std::vector<std::uint8_t> state { 'S', 'S', 'L', 'F' };
+        const auto n = (std::uint32_t) bytes.size();
+        for (int i = 0; i < 4; ++i)
+            state.push_back ((std::uint8_t) (n >> (8 * i)));
+        state.insert (state.end(), bytes.begin(), bytes.end());
+        SynthSettings synth;
+        float gain = 1.0f;
+        if (synthFromGms (state, 120.0, synth, gain))
+            return synth;
+        return std::nullopt;
+    }
+
     try
     {
         auto project = flp::parseProject (bytes, true);
 
-        if (project.channels.empty() || project.channels.front().pluginName != "3x Osc")
+        if (project.channels.empty() || ! isFlSynthPresetPlugin (project.channels.front().pluginName))
             return std::nullopt;
 
         project.channels.front().type = flp::ChannelType::native; // gerador nativo (o .fst não diz)

@@ -80,9 +80,11 @@ struct DrumPad
 // pad somem. Os índices de canal das patterns, automações e clips são ajustados.
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads);
 
-// Preset de canal do FL (.fst) do 3x Osc como ajustes do synth interno (osciladores, envelope,
-// filtro, LFOs, porta). nullopt se o arquivo não é de 3x Osc.
+// Preset de canal/plugin do FL (.fst) de um sintetizador que o import converte (3x Osc, Sytrus,
+// Harmor, GMS, Harmless...) ou preset nativo do GMS (.gmsynth), como ajustes do synth interno.
+// nullopt se o gerador não é um desses ou o arquivo não pôde ser lido.
 std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>& fileBytes);
+bool isFlSynthPresetPlugin (const std::string& pluginName);
 
 // Efeito interno parecido com um efeito nativo do FL (pelo nome interno do plugin).
 std::optional<EffectKind> effectForFlPlugin (const std::string& name);

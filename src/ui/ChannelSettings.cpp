@@ -1,5 +1,7 @@
 #include "ui/ChannelSettings.h"
 
+#include <functional>
+
 #include "core/FlpImport.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
@@ -718,44 +720,65 @@ private:
     juce::ToggleButton mono, am, portaOn;
     juce::TextButton flPresets;
 
-    // menu com os .fst do 3x Osc da instalação do FL, em ordem alfabética
+    // menu com os presets da instalação do FL dos sintetizadores que o LYNX converte: os .fst de canal
+    // do 3x Osc (por letra) e, por gerador, as pastas de "Plugin presets" (Sytrus, Harmor, GMS...)
     void showFlPresets()
     {
         const auto roots = findFlStudioRoots();
-        const auto folder = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Channel presets/3x Osc");
-        auto files = folder.findChildFiles (juce::File::findFiles, false, "*.fst");
-        std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) {
-            return a.getFileName().compareNatural (b.getFileName()) < 0;
-        });
-
-        if (files.isEmpty())
-        {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Presets do FL",
-                                                    utf8 ("Não achei os presets do 3x Osc (instale o FL Studio ou confira a pasta Patches\\Channel presets\\3x Osc)."));
-            return;
-        }
+        const auto patches = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches");
+        auto sorted = [] (juce::Array<juce::File> files) {
+            std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) {
+                return a.getFileName().compareNatural (b.getFileName()) < 0;
+            });
+            return files;
+        };
 
         juce::PopupMenu menu;
-        juce::PopupMenu sub;
-        juce::juce_wchar letter = 0;
 
-        // agrupa por letra inicial (são ~170)
-        for (const auto& f : files)
+        // 3x Osc: ~170 presets agrupados pela letra inicial
         {
-            const auto first = juce::CharacterFunctions::toUpperCase (f.getFileName()[0]);
-
-            if (first != letter && sub.getNumItems() > 0)
+            juce::PopupMenu threeOsc, sub;
+            juce::juce_wchar letter = 0;
+            for (const auto& f : sorted (patches.getChildFile ("Channel presets/3x Osc").findChildFiles (juce::File::findFiles, false, "*.fst")))
             {
-                menu.addSubMenu (juce::String::charToString (letter), sub);
-                sub = {};
+                const auto first = juce::CharacterFunctions::toUpperCase (f.getFileName()[0]);
+                if (first != letter && sub.getNumItems() > 0)
+                {
+                    threeOsc.addSubMenu (juce::String::charToString (letter), sub);
+                    sub = {};
+                }
+                letter = first;
+                sub.addItem (f.getFileNameWithoutExtension(), [this, f] { loadFlPreset (f); });
             }
-
-            letter = first;
-            sub.addItem (f.getFileNameWithoutExtension(), [this, f] { loadFlPreset (f); });
+            if (sub.getNumItems() > 0)
+                threeOsc.addSubMenu (juce::String::charToString (letter), sub);
+            if (threeOsc.getNumItems() > 0)
+                menu.addSubMenu ("3x Osc", threeOsc);
         }
 
-        if (sub.getNumItems() > 0)
-            menu.addSubMenu (juce::String::charToString (letter), sub);
+        // uma pasta de presets como menu: subpastas viram submenus
+        std::function<juce::PopupMenu (const juce::File&, int)> folderMenu = [&] (const juce::File& folder, int depth) {
+            juce::PopupMenu m;
+            if (depth < 3)
+                for (const auto& dir : sorted (folder.findChildFiles (juce::File::findDirectories, false)))
+                    if (auto sub = folderMenu (dir, depth + 1); sub.getNumItems() > 0)
+                        m.addSubMenu (dir.getFileName(), sub);
+            for (const auto& f : sorted (folder.findChildFiles (juce::File::findFiles, false, "*.fst;*.gmsynth")))
+                m.addItem (f.getFileNameWithoutExtension(), [this, f] { loadFlPreset (f); });
+            return m;
+        };
+
+        const auto generators = patches.getChildFile ("Plugin presets/Generators");
+        for (const auto* name : { "Sytrus", "Harmor", "GMS", "Harmless", "MiniSynth", "Fruity DX10", "Fruit Kick", "Ogun", "Sakura" })
+            if (auto sub = folderMenu (generators.getChildFile (name), 0); sub.getNumItems() > 0)
+                menu.addSubMenu (name, sub);
+
+        if (menu.getNumItems() == 0)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Presets do FL",
+                                                    utf8 ("Não achei os presets do FL (instale o FL Studio ou confira a pasta Data\\Patches)."));
+            return;
+        }
 
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&flPresets));
     }
@@ -773,7 +796,7 @@ private:
             engine.editSong ([c = channel, s = *synth] (Song& song) { song.channels[(std::size_t) c].synth = s; });
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Presets do FL",
-                                                    utf8 ("Este preset não é de 3x Osc ou não pôde ser lido."));
+                                                    utf8 ("Este preset não é de um sintetizador que o LYNX converte ou não pôde ser lido."));
     }
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
