@@ -80,7 +80,8 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] EQ embutido das trilhas do mixer, LFOs do canal, porta, AM do 3x Osc (rodada 6)
 - [x] Corte de graves/agudos e predelay no reverb; efeito de matriz estéreo (Stereo Shaper); Maximus
 - [x] VSTs de terceiros do "Fruity Wrapper": achar o mesmo plugin instalado e restaurar o estado VST3 (rodada 5)
-- [ ] Estado CLAP do wrapper e mapa de parâmetros VST3 para automação (formatos ainda em aberto)
+- [x] Estado CLAP do wrapper (rodada 22)
+- [ ] Mapa de parâmetros VST3 (registro 4: slot k → ParamID) nas automações de plugins de terceiros (nenhum demo usa)
 - [x] Filtros BP/HP/BS do canal (tipos 2-4 do FL)
 - [x] LFOs do canal, AM do 3x Osc
 - [x] Marcadores da Playlist e mudanças de compasso (régua, grade, snap, contador; import do .flp)

@@ -351,8 +351,12 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
 
     // devolve o estado no formato do JUCE, ou vazio quando não dá para levar o estado
     auto convertState = [] (const ForeignPlugin& f, const juce::PluginDescription& d) -> std::string {
+        // CLAP: u32 0 + os bytes de clap_plugin_state.save (REA_rodada22 §2); o host CLAP do LYNX guarda o mesmo
+        if (f.format == ForeignPlugin::Format::clap && d.pluginFormatName == "CLAP")
+            return f.state.size() > 4 ? juce::MemoryBlock (f.state.data() + 4, f.state.size() - 4).toBase64Encoding().toStdString() : std::string {};
+
         if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3")
-            return {}; // VST2 -> VST3 e CLAP: formato do estado diferente ou desconhecido; plugin no padrão
+            return {}; // VST2 -> VST3: formato do estado diferente; plugin no padrão
 
         std::vector<std::uint8_t> component, controller;
 
