@@ -511,6 +511,21 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void MainComponent::timerCallback()
 {
+    if (engine.isModified() != lastModified)
+    {
+        lastModified = engine.isModified();
+        updateTitle();
+    }
+
+    // autosave a cada 2 minutos com alterações
+    if (++autosaveTicks >= 30 * 120)
+    {
+        autosaveTicks = 0;
+
+        if (engine.isModified())
+            autosave();
+    }
+
     auto& transport = engine.getTransport();
     const auto& song = engine.getSong();
     const auto loop = song.mode == PlayMode::song ? song.songLength()
@@ -535,20 +550,66 @@ void MainComponent::timerCallback()
 void MainComponent::updateTitle()
 {
     if (auto* window = getTopLevelComponent())
-        window->setName (currentFile.exists() ? "LYNX - " + currentFile.getFileNameWithoutExtension() : juce::String ("LYNX"));
+        window->setName ((engine.isModified() ? "* " : "")
+                         + (projectName.isNotEmpty() ? "LYNX - " + projectName : juce::String ("LYNX")));
+}
+
+void MainComponent::confirmDiscard (std::function<void()> then)
+{
+    if (! engine.isModified())
+    {
+        then();
+        return;
+    }
+
+    auto* window = new juce::AlertWindow (utf8 ("Salvar alterações?"),
+                                          utf8 ("O projeto tem alterações que não foram salvas."),
+                                          juce::MessageBoxIconType::QuestionIcon);
+    window->addButton ("Salvar", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Descartar", 2);
+    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, then] (int result) {
+                                 if (result == 1)
+                                 {
+                                     save (false);
+                                     if (! engine.isModified()) // salvou (não cancelou o "salvar como")
+                                         then();
+                                 }
+                                 else if (result == 2)
+                                     then();
+                             }),
+                             true);
+}
+
+void MainComponent::autosave()
+{
+    // cópia de segurança do projeto aberto, para não perder trabalho se algo travar
+    const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    folder.createDirectory();
+    const auto name = projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("sem nome");
+    juce::String error;
+    engine.capturePluginStates();
+    ProjectFile::save (engine.getSong(), folder.getChildFile (name + ProjectFile::extension), error);
 }
 
 void MainComponent::newProject()
 {
-    engine.stop();
-    engine.rewind();
-    engine.setSong (Song::makeDefault());
-    currentFile = juce::File();
-    projectName = {};
-    updateTitle();
+    confirmDiscard ([this] {
+        engine.stop();
+        engine.rewind();
+        engine.setSong (Song::makeDefault());
+        currentFile = juce::File();
+        projectName = {};
+        updateTitle();
+    });
 }
 
 void MainComponent::chooseFileToOpen()
+{
+    confirmDiscard ([this] { chooseFileToOpenNow(); });
+}
+
+void MainComponent::chooseFileToOpenNow()
 {
     fileChooser = std::make_unique<juce::FileChooser> ("Abrir projeto", currentFile.getParentDirectory(),
                                                        juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.mid;*.midi");
@@ -632,6 +693,7 @@ void MainComponent::save (bool askForFile)
 
         if (ProjectFile::save (engine.getSong(), file, error))
         {
+            engine.markSaved();
             currentFile = file;
             projectName = file.getFileNameWithoutExtension();
             updateTitle();

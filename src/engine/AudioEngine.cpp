@@ -501,6 +501,7 @@ void AudioEngine::setSong (Song newSong)
     redoStack.clear();
     song = std::move (newSong);
     selectedChannel = 0;
+    modified = false;
     publishSong();
 }
 
@@ -532,6 +533,9 @@ void AudioEngine::editSong (const std::function<void (Song&)>& edit, bool undoab
         }
     }
 
+    if (undoable)
+        modified = true;
+
     edit (song);
     publishSong();
 }
@@ -544,6 +548,7 @@ void AudioEngine::undo()
     redoStack.push_back (std::move (song));
     song = std::move (undoStack.back());
     undoStack.pop_back();
+    modified = true;
     lastUndoPress = {};
     publishSong();
 }
@@ -556,6 +561,7 @@ void AudioEngine::redo()
     undoStack.push_back (std::move (song));
     song = std::move (redoStack.back());
     redoStack.pop_back();
+    modified = true;
     lastUndoPress = {};
     publishSong();
 }

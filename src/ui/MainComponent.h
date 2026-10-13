@@ -29,6 +29,9 @@ public:
     // Abre .lynx ou .flp (também usado pela linha de comando).
     void openFile (const juce::File& file);
 
+    // Pergunta "salvar alterações?" se houver; `then` roda se o usuário não cancelar.
+    void confirmDiscard (std::function<void()> then);
+
     // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist, 3 = Mixer.
     void selectTabForSnapshot (int tab);
 
@@ -39,10 +42,14 @@ private:
     void showAudioSettings();
     void newProject();
     void chooseFileToOpen();
+    void chooseFileToOpenNow();
     void save (bool askForFile);
     void exportAudio();
     void refreshToolbar();
     void updateTitle();
+    void autosave();
+    int autosaveTicks = 0;
+    bool lastModified = false;
     void openPianoRoll();
     void toggleMode();
     void refreshModeButton();

@@ -107,7 +107,13 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
 
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (mainWindow != nullptr)
+            mainWindow->confirmDiscard ([] { juce::JUCEApplication::quit(); });
+        else
+            quit();
+    }
 
 private:
     // LYNX.exe --selftest relatorio.txt: renderiza 2 s sem placa de som e grava o resultado.
@@ -164,7 +170,8 @@ private:
         offline.undo();
         const auto afterUndo = offline.getSong().bpm;
         offline.redo();
-        const auto undoOk = afterUndo == 99.0 && offline.getSong().bpm == 101.0 && offline.canUndo() && ! offline.canRedo();
+        const auto undoOk = afterUndo == 99.0 && offline.getSong().bpm == 101.0 && offline.canUndo() && ! offline.canRedo()
+                            && offline.isModified();
 
         // gravação pelo teclado do PC: uma nota de um tempo entra na pattern, num passo de desfazer
         const auto notesBefore = offline.getSong().patterns[0].notes.size();
@@ -489,6 +496,7 @@ private:
         }
 
         void openFile (const juce::File& file) { content->openFile (file); }
+        void confirmDiscard (std::function<void()> then) { content->confirmDiscard (std::move (then)); }
 
         void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }
 

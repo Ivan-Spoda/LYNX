@@ -78,6 +78,10 @@ public:
     // (arrastar uma nota, girar um knob) viram um passo só.
     void editSong (const std::function<void (Song&)>& edit, bool undoable = true);
 
+    // Alterações desde o último salvar/abrir (para o "*" no título e o "salvar alterações?").
+    bool isModified() const noexcept { return modified; }
+    void markSaved() noexcept { modified = false; sendChangeMessage(); }
+
     bool canUndo() const noexcept { return ! undoStack.empty(); }
     bool canRedo() const noexcept { return ! redoStack.empty(); }
     void undo();
@@ -176,6 +180,7 @@ private:
 
     Song song;
     int selectedChannel = 0;
+    bool modified = false;
     std::unique_ptr<StreamPrefetcher> prefetcher; // só com dispositivo de áudio (tocando ao vivo)
 
     static constexpr std::size_t maxUndoSteps = 100;
