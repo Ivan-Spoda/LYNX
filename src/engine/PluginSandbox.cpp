@@ -8,6 +8,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "engine/PluginHost.h"
+#include "ui/WindowOwner.h"
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -469,6 +470,7 @@ public:
     {
         setUsingNativeTitleBar (true);
         setAlwaysOnTop (true);
+        setIcon (logoImage());
     }
 
     void closeButtonPressed() override { setVisible (false); }
