@@ -79,6 +79,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Blood Overdrive", EffectKind::distortion }, { "Distructor", EffectKind::distortion },
         { "Fruity Flangus", EffectKind::chorus },      { "Fruity Chorus", EffectKind::chorus },      { "Hyper Chorus", EffectKind::chorus },
         { "Vintage Chorus", EffectKind::chorus },      { "Fruity Flanger", EffectKind::chorus },
+        { "Fruity Balance", EffectKind::utility },    { "Fruity PanOMatic", EffectKind::utility },  { "Fruity Stereo Shaper", EffectKind::utility },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
     };
 

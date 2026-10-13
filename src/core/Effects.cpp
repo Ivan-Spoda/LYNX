@@ -855,6 +855,35 @@ private:
     float output = 1.0f;
     EffectParams lastParams {};
 };
+
+// ---------------------------------------------------------------------------
+// Utilitário: matriz estéreo (L->L, R->L, L->R, R->R), balanço e ganho.
+
+float utilityGainDb (float v) { return (v - 0.5f) * 48.0f; }   // ±24 dB
+float utilityMatrix (float v) { return v * 4.0f - 2.0f; }      // −2..2 (0,75 = 1,0)
+
+class Utility final : public Effect
+{
+public:
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        const auto gain = std::pow (10.0f, utilityGainDb (p[0]) / 20.0f);
+        const auto pan = std::clamp (p[1] * 2.0f - 1.0f, -1.0f, 1.0f);
+        const auto gl = gain * (pan > 0.0f ? 1.0f - pan : 1.0f); // balanço: abaixa o lado oposto
+        const auto gr = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
+        const auto ll = utilityMatrix (p[2]), rl = utilityMatrix (p[3]), lr = utilityMatrix (p[4]), rr = utilityMatrix (p[5]);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto a = l[i], b = r[i];
+            l[i] = (ll * a + rl * b) * gl;
+            r[i] = (lr * a + rr * b) * gr;
+        }
+    }
+};
 } // namespace
 
 namespace peq
@@ -913,6 +942,8 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
     static const EffectInfo distortion { "Distorção", { { "Drive", 0.4f }, { "Tom", 0.7f }, { "Mix", 1.0f }, { "Saída", 0.5f } } };
     static const EffectInfo chorus { "Chorus", { { "Velocidade", 0.45f }, { "Profund.", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
+    static const EffectInfo utility { "Utilitário", { { "Ganho", 0.5f }, { "Balanço", 0.5f }, { "E -> E", 0.75f }, { "D -> E", 0.5f },
+                                                      { "E -> D", 0.5f }, { "D -> D", 0.75f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
         constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
@@ -955,6 +986,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::distortion: return distortion;
         case EffectKind::chorus: return chorus;
         case EffectKind::parametricEq: return parametric;
+        case EffectKind::utility: return utility;
     }
     return eq;
 }
@@ -1070,6 +1102,20 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
         }
 
+        case EffectKind::utility:
+            if (param == 0)
+                std::snprintf (text, sizeof (text), "%+.1f dB", utilityGainDb (v));
+            else if (param == 1)
+            {
+                const auto pan = v * 2.0f - 1.0f;
+                if (std::abs (pan) < 0.005f)
+                    return "centro";
+                std::snprintf (text, sizeof (text), "%.0f%% %s", std::abs (pan) * 100.0f, pan < 0.0f ? "E" : "D");
+            }
+            else
+                std::snprintf (text, sizeof (text), "%.2f", utilityMatrix (v));
+            return text;
+
         case EffectKind::plugin:
             break;
     }
@@ -1102,6 +1148,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::distortion: return std::make_unique<Distortion>();
         case EffectKind::chorus: return std::make_unique<Chorus>();
         case EffectKind::parametricEq: return std::make_unique<ParametricEq>();
+        case EffectKind::utility: return std::make_unique<Utility>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

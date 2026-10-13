@@ -222,6 +222,43 @@ bool compressor (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[3] = fromLog (std::max (10.0, (double) param (4)), 10.0, 1000.0);
     return true;
 }
+// --- Balance, PanOMatic, Stereo Shaper (§6) -> Utilitário ---------------------------------------
+
+float utilityGainValue (double gain) { return clamp01 (toDb (gain) / 48.0 + 0.5); }
+float utilityMatrixValue (double m) { return clamp01 ((m + 2.0) / 4.0); }
+
+bool balance (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 8)
+        return false;
+
+    slot.params[1] = clamp01 (std::clamp (i32At (d, 0), -128, 128) / 256.0 + 0.5);
+    slot.params[0] = utilityGainValue (curve (11.0, i32At (d, 4) / 256.0)); // 256 = 0 dB
+    return true;
+}
+
+bool panOMatic (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 8)
+        return false;
+
+    slot.params[1] = clamp01 (std::clamp (i32At (d, 0), 0, 256) / 256.0); // 128 = centro
+    slot.params[0] = utilityGainValue (curve (11.0, i32At (d, 4) / 256.0));
+    return true; // o LFO do PanOMatic (ligado em poucos demos) fica de fora
+}
+
+bool stereoShaper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 4 + 4 * 4)
+        return false;
+
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i) / 12800.0; }; // 12800 = 1,0
+    slot.params[3] = utilityMatrixValue (param (0)); // R -> L
+    slot.params[2] = utilityMatrixValue (param (1)); // L
+    slot.params[5] = utilityMatrixValue (param (2)); // R
+    slot.params[4] = utilityMatrixValue (param (3)); // L -> R
+    return true;
+}
 } // namespace
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
@@ -251,6 +288,12 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         delay3 (state, slot);
     else if (pluginName == "Fruity Compressor")
         compressor (state, slot);
+    else if (pluginName == "Fruity Balance")
+        balance (state, slot);
+    else if (pluginName == "Fruity PanOMatic")
+        panOMatic (state, slot);
+    else if (pluginName == "Fruity Stereo Shaper")
+        stereoShaper (state, slot);
 
     return slot;
 }

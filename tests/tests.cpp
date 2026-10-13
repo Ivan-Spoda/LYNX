@@ -1596,6 +1596,34 @@ TEST (reverb_low_cut_and_predelay)
     CHECK (cut < open * 0.01);
 }
 
+TEST (utility_effect_and_fl_stereo_tools)
+{
+    // padrão transparente; balanço todo à direita cala a esquerda
+    CHECK (std::abs (runEffectOnSine (lynx::EffectKind::utility, [] (auto&) {}, 440.0, 0.5f) - 0.5f) < 0.001f);
+    CHECK (runEffectOnSine (lynx::EffectKind::utility, [] (auto& s) { s.params[1] = 1.0f; }, 440.0, 0.5f) < 0.001f);
+
+    // Stereo Shaper em "mono": cada saída = 0,5 L + 0,5 R
+    std::vector<std::uint8_t> blob (36, 0);
+    auto put = [&] (std::size_t off, std::int32_t v) { std::memcpy (blob.data() + off, &v, 4); };
+    put (4, 6400); put (8, 6400); put (12, 6400); put (16, 6400);
+    const auto slot = lynx::effectFromFl ("Fruity Stereo Shaper", blob);
+    CHECK (slot && slot->kind == lynx::EffectKind::utility);
+    auto fx = lynx::makeEffect (lynx::EffectKind::utility);
+    float l = 1.0f, r = 0.0f;
+    fx->process (&l, &r, 1, slot->params, 120.0);
+    CHECK (std::abs (l - 0.5f) < 1e-4f && std::abs (r - 0.5f) < 1e-4f);
+
+    // Balance: volume 256 = 0 dB, pan −128 = toda à esquerda
+    std::vector<std::uint8_t> bal (8, 0);
+    std::int32_t pan = -128, vol = 256;
+    std::memcpy (bal.data(), &pan, 4);
+    std::memcpy (bal.data() + 4, &vol, 4);
+    const auto b = lynx::effectFromFl ("Fruity Balance", bal);
+    l = 0.5f; r = 0.5f;
+    fx->process (&l, &r, 1, b->params, 120.0);
+    CHECK (std::abs (l - 0.5f) < 1e-3f && std::abs (r) < 1e-4f);
+}
+
 TEST (effects_eq_compressor_behave)
 {
     // EQ no padrão é transparente
