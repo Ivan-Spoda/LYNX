@@ -132,6 +132,9 @@ e 19 verificaram as hipóteses (decompilação + manual oficial) e o código foi
   a máscara aplicada harmônica a harmônica e o "detune" p39 de ±1200/±2400; Sub 1 com o nível certo.
   Ogun: corte 44100·(c + c₀) Hz, Q/largura do FL, release 20 s, uníssono ±5(11^(P15/256) − 1) ct. MiniSynth:
   períodos do LFO, quantidade ao quadrado, release, 2ª voz em semitons inteiros + 7,5 ct.
+- Harmor e Sytrus (rodada 23): timbre exato no oscilador Harmônicas — Harmor pelas curvas Timbre 1/2, mistura,
+  EQ local (1/n) e fase por harmônica; Sytrus pela onda do operador calculada como no FL (forma base por Shape,
+  Half/Even, Skew, Sine shaper, normalização, Tension, Absolute, Pre-filter) e FFT.
 - Kepler: LFO1 (taxa, vibrato e corte em picos ±, atraso). BassDrum: Peak `1 + 100x³·s⁴`. Sakura: ADSR, Tune,
   Mix, Hi-Cut. BooBass: EQ de 3 bandas. Drumpad: Pitch e Mallet Amplitude.
 - Love Philter: base do articulador, Mod X/Y → volume (com automação/links), tipos 4/5 (largura em oitavas),

@@ -892,7 +892,22 @@ TEST (flp_real_files)
                 float g = 1.0f;
                 int decoded = -1;
                 if (c.pluginName == "Harmor")
+                {
                     decoded = lynx::synthFromHarmor (c.pluginState, gs, g);
+                    static int saw = 0, square = 0, other = 0, total = 0;
+                    if (decoded && std::any_of (gs.osc.begin(), gs.osc.end(), [] (const lynx::SynthOscillator& o) { return o.wave == lynx::Waveform::spectral; }))
+                    {
+                        auto isSaw = true, isSquare = true;
+                        for (int n = 1; n <= 16; ++n)
+                        {
+                            isSaw = isSaw && std::abs (gs.spectrum[(std::size_t) n - 1] - 1.0f / n) < 1e-3f;
+                            isSquare = isSquare && std::abs (gs.spectrum[(std::size_t) n - 1] - (n % 2 == 1 ? 1.1535f / n : 0.0f)) < 2e-3f;
+                        }
+                        ++(isSaw ? saw : isSquare ? square : other);
+                        if (++total % 20 == 0 || total == 100)
+                            std::printf ("  Harmor espectro: %d serra, %d quadrada, %d outros (de %d)\n", saw, square, other, total);
+                    }
+                }
                 else if (c.pluginName == "GMS")
                     decoded = lynx::synthFromGms (c.pluginState, 128.0, gs, g);
                 else if (c.pluginName == "Ogun" || c.pluginName == "Autogun")

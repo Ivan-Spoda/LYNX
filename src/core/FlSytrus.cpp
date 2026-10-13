@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstring>
 
 namespace lynx
@@ -70,6 +71,7 @@ struct Unit
     std::vector<float> harmonics, phases;
     int shape = 0;
     std::array<std::int32_t, 5> form { 0, 0, 0, 0, 128 }; // Shape, Tension, Skew, Sine shaper, Pre-filter
+    bool half = false, even = false, absolute = false, gibbs = false;
     // filtros
     int filterKind = 3;
     std::vector<Articulator> art;
@@ -266,6 +268,9 @@ bool parse (const std::vector<std::uint8_t>& blob, State& s)
             {
                 std::memcpy (&unit.shape, op + 0x80c, 4);
                 std::memcpy (unit.form.data(), op + 0x80c, 5 * 4);
+                unit.half = op[0x820] != 0;
+                unit.even = op[0x821] != 0;
+                unit.absolute = op[0x822] != 0;
                 unit.phases.resize (count);
                 std::memcpy (unit.phases.data(), op + 0x40c, count * 4);
             }
@@ -297,6 +302,152 @@ double curve (int v, double full = 256.0)
 {
     const auto g = (std::pow (11.0, std::min (std::abs (v) / full, 2.0)) - 1.0) / 10.0;
     return v < 0 ? -g : g;
+}
+
+// Onda do operador (REA_rodada23 §2): tabela de 16 384 amostras com a forma base B(Shape) em cada parcial,
+// Half/Even, Skew e Sine shaper, normalização de pico, Tension, Absolute e Pre-filter; o espectro (harmônicas
+// 1…256, amplitude do seno e fase em ciclos) sai por FFT. Falso se a tabela de harmônicas estiver vazia.
+bool operatorSpectrum (const Unit& op, std::array<float, SynthSettings::spectrumSize>& amplitude, std::array<float, SynthSettings::spectrumSize>& phase)
+{
+    constexpr int size = 16384;
+    constexpr double pi = 3.141592653589793;
+    if (op.harmonics.empty())
+        return false;
+    const auto x = std::clamp (op.form[0], 0, 512) / 128.0;
+    double m = 1.0, d = 0.0, t = 0.0, pulse = 0.0;
+    if (x <= 1.0)
+        m = x, d = 0.5;
+    else if (x <= 2.0)
+        d = (2.0 - x) / 2.0;
+    else if (x <= 3.0)
+        t = x - 2.0;
+    else
+        t = 1.0, pulse = x - 3.0;
+    auto base = [&] (double theta) {
+        if (pulse > 0.0)
+            return theta < (1.0 - 0.75 * pulse) / 2.0 ? 1.0 : -1.0;
+        const auto u = std::fmod (theta + d / 2.0, 1.0);
+        double w = 0.0;
+        if (u < d)
+            w = 2.0 * u / d - 1.0;
+        else
+        {
+            w = 1.0 - 2.0 * (u - d) / std::max (1e-12, 1.0 - d);
+            if (t > 0.0)
+                w = (u < 0.5 ? t : -t) + (1.0 - t) * w;
+        }
+        return (1.0 - m) * std::sin (2.0 * pi * theta) + m * w;
+    };
+    const auto skewA = (std::pow (21.0, std::clamp (op.form[2], 0, 128) / 128.0) - 1.0) / 20.0;
+    const auto skewK = std::pow (1e9, skewA) - 1.0;
+    const auto sine = std::clamp (op.form[3], 0, 128) * 1.5 * pi / 128.0;
+    auto evalPartial = [&] (double c) {
+        // Skew: dobra a fase local φ = 2c em torno do centro 1
+        if (skewK > 1e-9)
+        {
+            const auto phi = 2.0 * c, delta = std::abs (phi - 1.0);
+            const auto bent = 1.0 - (std::pow (skewK + 1.0, 1.0 - delta) - 1.0) / skewK;
+            c = (phi <= 1.0 ? 1.0 - bent : 1.0 + bent) / 2.0;
+        }
+        const auto v = base (std::clamp (c, 0.0, 0.999999));
+        return sine > 0.0 ? std::sin (v * sine) : v;
+    };
+
+    std::vector<double> wave ((std::size_t) size, 0.0);
+    for (std::size_t k = 0; k < op.harmonics.size(); ++k)
+    {
+        const auto a = (double) op.harmonics[k];
+        if (! std::isfinite (a) || a == 0.0)
+            continue;
+        const auto p = k < op.phases.size() && std::isfinite (op.phases[k]) ? (double) op.phases[k] : 0.0;
+        const auto harmonic = (double) (k + 1);
+        for (int i = 0; i < size; ++i)
+        {
+            const auto theta = (double) i / size;
+            double value = 0.0;
+            if (op.half && op.even)
+            {
+                const auto c = std::fmod (harmonic * theta + p, 1.0);
+                value = c <= 0.5 ? evalPartial (c) : 0.0;
+            }
+            else if (op.half)
+                value = evalPartial (std::fmod (harmonic * theta + 2.0 * p, 1.0) / 2.0);
+            else if (op.even)
+            {
+                const auto c = std::fmod (harmonic * theta + p / 2.0, 1.0);
+                value = c <= 0.5 ? evalPartial (2.0 * c) : 0.0;
+            }
+            else
+                value = evalPartial (std::fmod (harmonic * theta + p, 1.0));
+            wave[(std::size_t) i] += a * value;
+        }
+    }
+
+    double peak = 0.0;
+    for (const auto v : wave)
+        peak = std::max (peak, std::abs (v));
+    if (peak <= 5.96e-8)
+        return false;
+    const auto tA = (std::pow (21.0, std::abs (std::clamp (op.form[1], -128, 128)) / 128.0) - 1.0) / 20.0;
+    const auto tK = (op.form[1] < 0 ? -1.0 : 1.0) * (std::pow (9.99999984e17, tA) - 1.0);
+    for (auto& v : wave)
+    {
+        v /= peak;
+        if (std::abs (tK) > 1e-9)
+        {
+            const auto u = std::abs (v);
+            const auto curved = tK > 0.0 ? 1.0 - (std::pow (tK + 1.0, 1.0 - u) - 1.0) / tK : (std::pow (-tK + 1.0, u) - 1.0) / -tK;
+            v = v < 0.0 ? -curved : curved;
+        }
+        if (op.absolute)
+            v = std::abs (v);
+    }
+
+    // DFT pelas harmônicas 1…256 (FFT radix-2 da tabela)
+    std::vector<std::complex<double>> bins (wave.begin(), wave.end());
+    for (std::size_t i = 1, j = 0; i < bins.size(); ++i)
+    {
+        auto bit = bins.size() >> 1;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
+        j ^= bit;
+        if (i < j)
+            std::swap (bins[i], bins[j]);
+    }
+    for (std::size_t len = 2; len <= bins.size(); len <<= 1)
+    {
+        const auto w = std::polar (1.0, -2.0 * pi / (double) len);
+        for (std::size_t i = 0; i < bins.size(); i += len)
+        {
+            std::complex<double> wn (1.0, 0.0);
+            for (std::size_t k = 0; k < len / 2; ++k)
+            {
+                const auto u = bins[i + k], v = bins[i + k + len / 2] * wn;
+                bins[i + k] = u + v;
+                bins[i + k + len / 2] = u - v;
+                wn *= w;
+            }
+        }
+    }
+    // Pre-filter: harmônicas ≥ M somem; com o byte "Gibbs", fatores sinc de Lanczos
+    const auto pre = std::clamp (op.form[4], 0, 128);
+    const auto cut = (int) std::lround ((std::pow (10.0, 10.0 * (0.65 + 0.35 * pre / 128.0)) - 1.0) * 1.6384e-6);
+    for (int h = 1; h <= SynthSettings::spectrumSize; ++h)
+    {
+        auto c = bins[(std::size_t) h];
+        if (cut <= size / 2 && h >= cut)
+            c = 0.0;
+        else if (cut <= size / 2 && op.gibbs && cut > 1)
+        {
+            const auto z = pi * h / (cut - 1);
+            c *= std::sin (z) / z;
+        }
+        // W = Σ A·sen(2π(hθ + φ)): A = 2|X|/N; φ = arg(X)/2π + ¼; o "spectral" do LYNX mede como a serra (×π/2)
+        amplitude[(std::size_t) h - 1] = (float) (2.0 * std::abs (c) / size * pi / 2.0);
+        const auto ph = std::arg (c) / (2.0 * pi) + 0.25;
+        phase[(std::size_t) h - 1] = (float) (ph - std::floor (ph));
+    }
+    return true;
 }
 
 // forma da onda do operador: pela tabela de harmônicas (§1.4) ou, se só tem a fundamental, pela Shape
@@ -522,25 +673,17 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         const auto& op = s.units[(std::size_t) i];
         auto& osc = out.osc[k];
         osc.wave = waveOf (op);
-        // tabela rica com parciais senoidais (Shape 0, sem tensão/skew/sine shaper, pré-filtro aberto): o espectro
-        // exato no oscilador "Harmônicas" (um só por canal: a primeira portadora assim). REA_rodada11 §1.4
-        if (const auto exact = op.form == std::array<std::int32_t, 5> { 0, 0, 0, 0, 128 } && op.phases.size() == op.harmonics.size();
-            exact && ! usedSpectrum)
+        // forma exata do operador no oscilador "Harmônicas" (um espectro por canal: a primeira portadora que não
+        // for um seno puro). REA_rodada23 §2
+        if (! usedSpectrum)
         {
             int rich = 0;
             for (const auto h : op.harmonics)
                 rich += std::isfinite (h) && std::abs (h) > 1e-4f ? 1 : 0;
-            if (rich > 1)
+            const auto plainSine = rich <= 1 && op.form == std::array<std::int32_t, 5> { 0, 0, 0, 0, 128 } && ! op.half && ! op.even && ! op.absolute;
+            if (! plainSine && operatorSpectrum (op, out.spectrum, out.spectrumPhase))
             {
                 usedSpectrum = true;
-                for (std::size_t h = 0; h < op.harmonics.size() && h < (std::size_t) SynthSettings::spectrumSize; ++h)
-                {
-                    const auto a = std::isfinite (op.harmonics[h]) ? op.harmonics[h] : 0.0f;
-                    const auto ph = std::isfinite (op.phases[h]) ? op.phases[h] : 0.0f;
-                    // a amplitude 1 é um seno cheio (o "spectral" do LYNX mede como a serra: ×π/2); fase em meio ciclo
-                    out.spectrum[h] = (float) (std::abs (a) * 3.141592653589793 / 2.0);
-                    out.spectrumPhase[h] = ph * 0.5f + (a < 0.0f ? 0.5f : 0.0f);
-                }
                 osc.wave = Waveform::spectral;
             }
         }
@@ -825,6 +968,63 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
 // harmonizador, phaser e FX ficam de fora.
 namespace
 {
+// valor de uma curva de shaping em x ∈ [0, 1] (REA_rodada23 §1.2): segmento até o ponto j com a forma do ponto j
+double shapingAt (const Envelope& e, double x)
+{
+    if (e.points.empty())
+        return 0.25;
+    double total = 0.0;
+    for (const auto& pt : e.points)
+        total += pt.first;
+    if (total <= 0.0)
+        return e.points.front().second;
+    x *= total;
+    double start = 0.0;
+    for (std::size_t j = 1; j < e.points.size(); ++j)
+    {
+        const auto end = start + e.points[j].first;
+        if (x <= end || j + 1 == e.points.size())
+        {
+            const auto t = e.points[j].first > 0.0 ? std::clamp ((x - start) / e.points[j].first, 0.0, 1.0) : 1.0;
+            const auto tension = j < e.tensions.size() ? (double) e.tensions[j] : 0.0;
+            const auto mode = j < e.curves.size() ? e.curves[j] : 0;
+            const auto a = e.points[j - 1].second, b = e.points[j].second;
+            const auto n = std::round ((std::pow (1000001.0, 1.0 - 0.6 * std::abs (tension)) - 1.0) * 0.001);
+            double f = t;
+            switch (mode)
+            {
+                case 2: f = 0.0; break;
+                case 5: f = std::fmod (std::round (t * 2.0 * (n + 1.0) - (tension < 0.0 ? -0.5 : 0.5)), 2.0); break;
+                case 6:
+                    if (tension < 0.0)
+                        f = (std::sin (2.0 * 3.141592653589793 * (t * (n + 0.5) + 0.75)) + 1.0) / 2.0;
+                    else if (n > 0.0)
+                    {
+                        const auto u = t * (n + 0.5);
+                        f = std::abs (2.0 * (u - std::floor (u)) - 1.0);
+                    }
+                    break;
+                case 7:
+                {
+                    const auto u = tension <= 0.0 ? t : 1.0 - t;
+                    f = t - (std::pow (u, 6.0) - u) * tension;
+                    break;
+                }
+                default:
+                    if (std::abs (tension) > 1e-9)
+                    {
+                        const auto k = std::pow (1000001.0, std::abs (tension)) - 1.0;
+                        f = tension > 0.0 ? 1.0 - (std::pow (k + 1.0, 1.0 - t) - 1.0) / k : (std::pow (k + 1.0, t) - 1.0) / k;
+                    }
+                    break;
+            }
+            return a + f * (b - a);
+        }
+        start = end;
+    }
+    return e.points.back().second;
+}
+
 // curva de volume do Harmor (REA_rodada18 §1.3): exatamente 1 em x = 1; senão (3^x − 1)/2
 double harmorGain (double x)
 {
@@ -852,7 +1052,9 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         bool present = false;
         std::vector<std::int32_t> p;
         int filterType[2] { 0, 0 };
+        int blendMode = 0, partialMode = 1;
         std::vector<Articulator> art;
+        std::vector<Envelope> shaping; // 26 curvas: 0 Local EQ, 1 fase, 2/3 Timbre 1/2… (REA_rodada23 §1.1)
     };
     Part parts[2];
 
@@ -874,6 +1076,8 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         {
             std::memcpy (&part.filterType[0], misc + 52, 4);
             std::memcpy (&part.filterType[1], misc + 56, 4);
+            std::memcpy (&part.blendMode, misc, 4);
+            std::memcpy (&part.partialMode, misc + 0x1C, 4);
         }
         if (r.failed)
             return false;
@@ -887,6 +1091,16 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
                     part.art.clear();
                     break;
                 }
+            if (! part.art.empty())
+            {
+                part.shaping.resize (26);
+                for (auto& e : part.shaping)
+                    if (! readEnvelope (r, e))
+                    {
+                        part.shaping.clear();
+                        break;
+                    }
+            }
         }
         part.present = true;
         r.pos = start + size;
@@ -926,6 +1140,33 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
 
     const auto lead = out.osc[0].level >= out.osc[1].level ? 0 : 1;
     const auto& main = parts[lead];
+
+    // timbre da parte principal (REA_rodada23 §1.7): A(n) = [(1 − m)(4y₁)² + m(4y₂)²]·(4y_L(log2 n/9))²/n e
+    // φ(n) = y_φ − 0,5, x = (n − 1)/515; caso estático (sem modulação, sem filtro de curva) e parciais harmônicas
+    if (main.shaping.size() == 26 && main.partialMode >= 1 && main.blendMode >= 0 && main.blendMode <= 4
+        && main.p.size() > 43 && main.p[42] == 10000 * std::max (1, main.p[43]))
+    {
+        const auto m = std::clamp (main.p[4] / 1000.0, 0.0, 1.0);
+        for (int n = 1; n <= SynthSettings::spectrumSize; ++n)
+        {
+            const auto x = (n - 1) / 515.0;
+            const auto g1 = std::pow (4.0 * shapingAt (main.shaping[2], x), 2.0);
+            auto g2 = std::pow (4.0 * shapingAt (main.shaping[3], x), 2.0);
+            switch (main.blendMode)
+            {
+                case 1: g2 = std::max (g1 - g2, 0.0); break;
+                case 2: g2 = g1 * g2; break;
+                case 3: g2 = std::max (g1, g2); break;
+                case 4: g2 = std::min (g1, g2); break;
+                default: break;
+            }
+            const auto localEq = std::pow (4.0 * shapingAt (main.shaping[0], std::log2 ((double) n) / 9.0), 2.0);
+            out.spectrum[(std::size_t) n - 1] = (float) std::clamp (((1.0 - m) * g1 + m * g2) * localEq / n, 0.0, 64.0);
+            const auto ph = shapingAt (main.shaping[1], x) - 0.5;
+            out.spectrumPhase[(std::size_t) n - 1] = (float) (ph - std::floor (ph));
+        }
+        out.osc[(std::size_t) lead].wave = Waveform::spectral;
+    }
 
     // envelope de volume (articulador 1). Desligado, o FL não aplica envelope nenhum (nível constante,
     // REA_rodada18 §1.1); o A 2 ms / R 0,1 s abaixo é só o declick do LYNX. Ligado, o nível usado é o
