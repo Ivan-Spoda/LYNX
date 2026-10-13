@@ -11,7 +11,8 @@ qualquer PC, independente do tamanho do projeto.
 - **Channel Rack** com step sequencer, pan/volume/mute/solo por canal, swing, várias patterns
   (renomear, cor, comprimento, clonar), ajustes do sampler (afinação, envelope, ao contrário, cut,
   filtro do canal com envelopes de corte e afinação), synth interno de 3 osciladores (pan e
-  semitom por oscilador, filtro LP/BP/HP/BS, envelopes de corte e afinação, modo mono)
+  semitom por oscilador, filtro LP/BP/HP/BS, envelopes de corte e afinação, 4 LFOs, AM, FM com
+  índice que decai, mono/portamento)
 - **Piano Roll**: notas com snap configurável, seleção múltipla, mover/redimensionar em grupo,
   copiar/colar/duplicar, quantizar, faixa de velocity, importar/exportar `.mid`
 - **Playlist**: clips de pattern, áudio e automação; vários arrangements; região de loop;
@@ -20,17 +21,21 @@ qualquer PC, independente do tamanho do projeto.
 - **Automação**: qualquer knob/fader (canal, mixer, efeitos, parâmetros de plugins) vira um clip
   com editor de pontos e curvas
 - **Mixer**: até 127 inserts, envios entre inserts com nível, solo pelo caminho do sinal, curva do
-  fader do FL, 10 slots de efeito com dry/wet (EQ, compressor, delay, reverb, plugins)
+  fader do FL, 10 slots de efeito com dry/wet (EQ, EQ paramétrico de 7 bandas, compressor,
+  limiter, delay, reverb, chorus, filtro, distorção, utilitário, gate de volume por passos, pitch
+  shift, frequency shifter, plugins) e sidechain pelo Peak Controller importado do FL
 - **Plugins VST3 e CLAP**: instrumentos e efeitos com a interface própria; busca em processo
   separado (um plugin que trave não derruba o LYNX); PDC; "smart disable"
 - **Gravação**: notas (teclado do PC e MIDI) e áudio da entrada da placa
 - **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
 - **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
   patterns, arrangements, marcadores, mixer com roteamento, EQ das trilhas e efeitos nativos com os
-  ajustes salvos, automação, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Sytrus, GMS, Harmless e outros
-  synths aproximados, filtro/envelopes/LFOs do canal, VST3/CLAP de terceiros com estado quando estiverem
-  instalados; um relatório mostra o que não tem equivalente) e `.mid`; presets `.fst` do 3x Osc e de
-  efeitos do FL
+  ajustes salvos, Gross Beat/Effector/Frequency Splitter/Patcher em série, automação e links de
+  controlador, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller, e aproximados
+  pelo synth interno: Sytrus, Harmor, GMS, Harmless, Kepler, DX10, Ogun e outros; filtro/envelopes/LFOs
+  do canal, VST3/CLAP de terceiros com estado quando estiverem instalados; um relatório mostra o que não
+  tem equivalente) e `.mid`; ~2800 presets `.fst` de synths do FL (3x Osc, Sytrus, Harmor, GMS...) e
+  presets de efeitos do FL
 - **Desempenho**: motor sem locks, canais e mixer em várias threads, áudios longos lidos do disco
   sob demanda
 - **Desfazer/refazer** em todas as edições; **teclado do PC como piano** (layout do FL)
