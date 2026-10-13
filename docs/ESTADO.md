@@ -73,6 +73,8 @@ Atualizado em 2026-10-13.
   camadas de velocity, grupos de corte), DirectWave e FL Keys viram sampler multi-sample, Fruity
   Slicer/Slicex viram sampler fatiado (WAV embutido no .flp é extraído). Maximus, Soundgoodizer,
   Fast Dist, Fruity Filter, Flangus e Soft Clipper entram com os ajustes salvos.
+- **Sintetizadores simples do FL (REA rodada 10)**: Harmless (160 canais nos demos), MiniSynth, DX10
+  e Fruit Kick aproximados pelo synth interno (osciladores/uníssono, envelopes, filtro, LFO, porta).
 - **Presets do FL**: os 169 presets de canal do 3x Osc (botão "Presets do FL..." no synth) e 93
   presets de efeito (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 2/3, Stereo Shaper; menu
   do slot do mixer) são lidos dos `.fst` da instalação.
