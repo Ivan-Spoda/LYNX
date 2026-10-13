@@ -23,7 +23,8 @@ add_library(lynx_core STATIC
     src/core/TimeStretch.cpp
     src/core/Arpeggiator.cpp
     src/core/SynthPresets.cpp
-    src/core/Slicer.cpp)
+    src/core/Slicer.cpp
+    src/core/Templates.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
 add_executable(lynx_tests tests/tests.cpp)

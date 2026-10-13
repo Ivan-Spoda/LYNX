@@ -20,6 +20,7 @@
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
 #include "core/Slicer.h"
+#include "core/Templates.h"
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/Song.h"
@@ -2291,6 +2292,34 @@ TEST (slicer_detects_hits_and_plays_slices_by_key)
     std::vector<float> l (20000), r (20000);
     inst->render (l.data(), r.data(), 20000, 1.0f, 1.0f);
     CHECK (std::abs (l[0] - 0.25f) < 0.01f && l[11000] > 0.45f && l[13000] == 0.0f);
+}
+
+TEST (project_templates_render_sound)
+{
+    const auto names = lynx::templateNames();
+    CHECK (names.size() == 4);
+
+    for (int t = 1; t < (int) names.size(); ++t)
+    {
+        auto song = lynx::makeTemplate (t);
+        auto state = lynx::RackState::build (song, nullptr, 48000.0);
+        lynx::RackRenderer r;
+        r.prepare (48000.0, 512);
+        std::vector<float> l (512), rr (512);
+        const auto tps = lynx::ticksPerSample (song.bpm, 48000.0);
+        float peak = 0.0f;
+
+        for (double tick = 0.0; tick < lynx::ppq * 4.0; tick += 512 * tps)
+        {
+            r.process (state.get(), true, tick, 512, l.data(), rr.data());
+            for (auto v : l)
+                peak = std::max (peak, std::abs (v));
+        }
+
+        CHECK (peak > 0.05f && peak < 4.0f);
+    }
+
+    CHECK (lynx::makeTemplate (0).patterns[0].notes.empty());
 }
 
 int main (int argc, char** argv)

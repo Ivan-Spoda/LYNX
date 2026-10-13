@@ -2,6 +2,7 @@
 
 #include "engine/Text.h"
 
+#include "core/Templates.h"
 #include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
 #include "ui/AutomationUi.h"
@@ -816,6 +817,21 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     if (index == 0)
     {
         menu.addItem ("Novo\tCtrl+N", [this] { newProject(); });
+
+        juce::PopupMenu templates;
+        const auto names = templateNames();
+        for (int i = 0; i < (int) names.size(); ++i)
+            templates.addItem (juce::String::fromUTF8 (names[(std::size_t) i].c_str()), [this, i] {
+                confirmDiscard ([this, i] {
+                    engine.stop();
+                    engine.rewind();
+                    engine.setSong (makeTemplate (i));
+                    currentFile = juce::File();
+                    projectName = {};
+                    updateTitle();
+                });
+            });
+        menu.addSubMenu ("Novo a partir de modelo", templates);
         menu.addItem ("Abrir...\tCtrl+O", [this] { chooseFileToOpen(); });
 
         juce::PopupMenu recentMenu;
