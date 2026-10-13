@@ -678,7 +678,8 @@ constexpr int panelHeader = 30;
 constexpr int slotHeight = 24;
 constexpr EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
-                                      EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate };
+                                      EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
+                                      EffectKind::pitchShift };
 } // namespace
 
 EffectsPanel::EffectsPanel (AudioEngine& e)

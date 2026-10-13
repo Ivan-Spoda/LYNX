@@ -413,6 +413,31 @@ TEST (inflate_zlib)
     CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
 }
 
+TEST (pitch_shift_moves_frequency_keeps_length)
+{
+    auto fx = lynx::makeEffect (lynx::EffectKind::pitchShift);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchShift);
+    auto crossingsAfter = [&] (float semitoneParam) {
+        fx->reset();
+        slot.params[0] = semitoneParam;
+        std::vector<float> l (48000), r (48000);
+        for (int i = 0; i < 48000; ++i)
+            l[(std::size_t) i] = r[(std::size_t) i] = (float) std::sin (2.0 * 3.141592653589793 * 220.0 * i / 48000.0);
+        for (int done = 0; done < 48000; done += 512)
+            fx->process (l.data() + done, r.data() + done, std::min (512, 48000 - done), slot.params, 120.0);
+        int crossings = 0;
+        for (int i = 9600; i < 48000; ++i)
+            crossings += (l[(std::size_t) i - 1] < 0.0f) != (l[(std::size_t) i] < 0.0f);
+        for (auto v : l)
+            CHECK (std::isfinite (v) && std::abs (v) < 1.6f);
+        return crossings / 0.8 / 2.0; // ciclos por segundo
+    };
+    CHECK (std::abs (crossingsAfter (0.5f) - 220.0) < 8.0);           // 0 st
+    CHECK (std::abs (crossingsAfter (0.5f + 12.0f / 48.0f) - 440.0) < 25.0); // +12 st
+    CHECK (std::abs (crossingsAfter (0.5f - 12.0f / 48.0f) - 110.0) < 12.0); // −12 st
+}
+
 TEST (volume_gate_follows_bar_position)
 {
     auto fx = lynx::makeEffect (lynx::EffectKind::volumeGate);

@@ -899,6 +899,91 @@ private:
     float gain = 1.0f;
 };
 
+// Pitch shift em tempo real: duas cabeças de leitura numa linha de atraso cujo atraso varia em dente
+// de serra (a "fita giratória"); quando uma cabeça dá a volta, a outra está no meio da janela e o
+// crossfade em seno/cosseno esconde o salto. Parâmetros: semitons (±24), cents (±100), mix, janela.
+namespace pitch
+{
+inline double semitones (float v) { return std::round ((std::clamp ((double) v, 0.0, 1.0) - 0.5) * 48.0); }
+inline double cents (float v) { return (std::clamp ((double) v, 0.0, 1.0) - 0.5) * 200.0; }
+inline double windowMs (float v) { return 20.0 + 100.0 * std::clamp ((double) v, 0.0, 1.0); }
+} // namespace pitch
+
+class PitchShift final : public Effect
+{
+public:
+    static constexpr double maxSeconds = 0.13;
+
+    PitchShift()
+    {
+        const auto size = (std::size_t) (maxSeconds * maxSampleRate) + 8;
+        buffer[0].assign (size, 0.0f);
+        buffer[1].assign (size, 0.0f);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        length = (int) std::min<std::size_t> (buffer[0].size(), (std::size_t) (maxSeconds * sr) + 8);
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        std::fill (buffer[0].begin(), buffer[0].end(), 0.0f);
+        std::fill (buffer[1].begin(), buffer[1].end(), 0.0f);
+        write = 0;
+        phase = 0.0;
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        const auto ratio = std::pow (2.0, (pitch::semitones (p[0]) + pitch::cents (p[1]) / 100.0) / 12.0);
+        const auto mix = std::clamp (p[2], 0.0f, 1.0f);
+        const auto window = std::min (pitch::windowMs (p[3]) * 0.001 * sampleRate, (double) length - 4.0);
+        const auto step = (1.0 - ratio) / window; // o atraso cresce (desce o tom) ou encolhe (sobe)
+
+        for (int i = 0; i < n; ++i)
+        {
+            float* io[2] = { l + i, r + i };
+            buffer[0][(std::size_t) write] = *io[0];
+            buffer[1][(std::size_t) write] = *io[1];
+
+            const auto phaseB = phase + 0.5 >= 1.0 ? phase - 0.5 : phase + 0.5;
+            const auto gainA = (float) std::sin (3.141592653589793 * phase);
+            const auto gainB = (float) std::sin (3.141592653589793 * phaseB);
+
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto shifted = gainA * read (c, 1.0 + phase * window) + gainB * read (c, 1.0 + phaseB * window);
+                *io[c] += (shifted - *io[c]) * mix;
+            }
+
+            phase += step;
+            phase -= std::floor (phase);
+            if (++write >= length)
+                write = 0;
+        }
+    }
+
+private:
+    float read (int c, double delay) const noexcept
+    {
+        auto position = (double) write - delay;
+        while (position < 0.0)
+            position += length;
+        const auto i0 = (int) position;
+        const auto frac = (float) (position - i0);
+        const auto i1 = i0 + 1 >= length ? 0 : i0 + 1;
+        const auto& b = buffer[(std::size_t) c];
+        return b[(std::size_t) i0] + (b[(std::size_t) i1] - b[(std::size_t) i0]) * frac;
+    }
+
+    std::array<std::vector<float>, 2> buffer;
+    double sampleRate = 44100.0, phase = 0.0;
+    int length = 1, write = 0;
+};
+
 // Peak Controller: o som passa direto; um seguidor de pico (ataque imediato, queda pelo "decay")
 // vira as saídas de controle: 0 = base + quantidade·pico (com tensão), 1 = base, 2 = igual à 0.
 class PeakController final : public Effect
@@ -1025,6 +1110,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         info.params.push_back ({ "Release", 0.5f });    // ~43 ms
         return info;
     }();
+    static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.85f }, { "Tensão", 0.5f }, { "Decaimento", 0.48f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
@@ -1071,6 +1157,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::utility: return utility;
         case EffectKind::volumeGate: return volumeGate;
         case EffectKind::peakController: return peakController;
+        case EffectKind::pitchShift: return pitchShift;
     }
     return eq;
 }
@@ -1207,6 +1294,16 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.1f ms", param == gate::attackParam ? gate::attackMs (v) : gate::releaseMs (v));
             return text;
 
+        case EffectKind::pitchShift:
+            switch (param)
+            {
+                case 0: std::snprintf (text, sizeof (text), "%+.0f st", pitch::semitones (v)); break;
+                case 1: std::snprintf (text, sizeof (text), "%+.0f ct", pitch::cents (v)); break;
+                case 3: std::snprintf (text, sizeof (text), "%.0f ms", pitch::windowMs (v)); break;
+                default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+            }
+            return text;
+
         case EffectKind::peakController:
             if (param == 1)
                 std::snprintf (text, sizeof (text), "%+.0f%%", (v * 2.0f - 1.0f) * 100.0f);
@@ -1251,6 +1348,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::utility: return std::make_unique<Utility>();
         case EffectKind::volumeGate: return std::make_unique<VolumeGate>();
         case EffectKind::peakController: return std::make_unique<PeakController>();
+        case EffectKind::pitchShift: return std::make_unique<PitchShift>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();
