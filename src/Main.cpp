@@ -5,6 +5,7 @@
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
@@ -363,7 +364,25 @@ private:
             }
         }
 
-        const auto ok = audioOk && projectOk && richOk && undoOk && recordOk && recordUndoOk && midiOk;
+        // WavPack: um .wv dos pacotes do FL (se instalado) abre pelo leitor de samples
+        juce::String wavpack = "SEM_FL";
+        {
+            const auto roots = lynx::findFlStudioRoots();
+            const auto packs = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Packs");
+            const auto found = packs.isDirectory() ? packs.findChildFiles (juce::File::findFiles, true, "*.wv") : juce::Array<juce::File> {};
+            if (! found.isEmpty())
+            {
+                lynx::SampleLibrary library;
+                const auto sample = library.load (found.getFirst().getFullPathName());
+                float peakWv = 0.0f;
+                if (sample != nullptr)
+                    for (std::size_t i = 0; i < sample->frames(); ++i)
+                        peakWv = std::max (peakWv, std::abs (sample->leftData()[i]));
+                wavpack = sample != nullptr && sample->frames() > 0 && peakWv > 1e-4f ? "OK" : "ERRO";
+            }
+        }
+
+        const auto ok = audioOk && projectOk && richOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERRO";
 
         juce::String report;
         report << "conexoes=" << offline.getNumGraphConnections() << "\n"
@@ -373,6 +392,7 @@ private:
                << "desfazer=" << (undoOk ? "OK" : "ERRO") << "\n"
                << "gravacao=" << (recordOk && recordUndoOk ? "OK" : "ERRO") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERRO") << "\n"
+               << "wavpack=" << wavpack << "\n"
                << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
 
         if (reportPath.isNotEmpty())

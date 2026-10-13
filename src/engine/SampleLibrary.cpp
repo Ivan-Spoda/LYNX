@@ -1,6 +1,7 @@
 #include "engine/SampleLibrary.h"
 
 #include "core/TimeStretch.h"
+#include "engine/WavPackFormat.h"
 
 namespace lynx
 {
@@ -48,6 +49,7 @@ std::unique_ptr<juce::MemoryBlock> extractOggFromWav (const juce::File& file)
 SampleLibrary::SampleLibrary()
 {
     formats.registerBasicFormats();
+    formats.registerFormat (new WavPackAudioFormat(), false); // .wv dos pacotes do FL
 }
 
 juce::String SampleLibrary::wildcard() const

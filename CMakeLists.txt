@@ -32,8 +32,16 @@ add_library(lynx_core STATIC
     src/core/FlSytrus.cpp
     src/core/FlGenerators.cpp
     src/core/FlPatcher.cpp
-    src/core/Inflate.cpp)
+    src/core/Inflate.cpp
+    src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
+
+# decodificador WavPack (BSD; só leitura) para os samples .wv dos pacotes do FL
+file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
+add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
+target_include_directories(wavpack_decoder PUBLIC third_party/wavpack/include PRIVATE third_party/wavpack/src)
+target_compile_definitions(wavpack_decoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:HAVE___BUILTIN_CLZ=1>)
+target_link_libraries(lynx_core PUBLIC wavpack_decoder)
 
 add_executable(lynx_tests tests/tests.cpp)
 target_link_libraries(lynx_tests PRIVATE lynx_core)
@@ -71,6 +79,7 @@ if(LYNX_BUILD_APP)
         src/engine/ChannelRackProcessor.cpp
         src/engine/Metronome.cpp
         src/engine/SampleLibrary.cpp
+    src/engine/WavPackFormat.cpp
         src/engine/ProjectFile.cpp
         src/engine/PluginHost.cpp
         src/engine/Exporter.cpp

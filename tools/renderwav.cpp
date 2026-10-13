@@ -118,7 +118,7 @@ int main (int argc, char** argv)
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
-        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "clip de audio" };
+        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "clip de audio", "plugin", "controlador" };
         std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
     }
 

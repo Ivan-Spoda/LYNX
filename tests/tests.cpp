@@ -19,6 +19,7 @@
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
+#include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -1130,6 +1131,36 @@ TEST (flp_real_files)
                 CHECK (std::isfinite (gain) && std::isfinite (synth.cutoff));
             }
         std::printf ("  fuzz por mutação: %d blobs de %d plugins\n", mutations, (int) samples.size());
+    }
+
+    // samples WavPack (.wv) dos pacotes do FL: todos decodificam, com áudio finito e não mudo
+    {
+        int files = 0, decoded = 0, audible = 0;
+        double seconds = 0.0;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Patches" / "Packs"))
+            if (entry.path().extension() == ".wv")
+            {
+                std::ifstream in (entry.path(), std::ios::binary);
+                const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+                ++files;
+                lynx::DecodedAudio audio;
+                if (! lynx::decodeWavPack (file.data(), file.size(), audio))
+                    continue;
+                ++decoded;
+                float peak = 0.0f;
+                bool finite = true;
+                for (const auto& ch : audio.channels)
+                    for (auto v : ch)
+                    {
+                        finite = finite && std::isfinite (v);
+                        peak = std::max (peak, std::abs (v));
+                    }
+                CHECK (finite && peak <= 4.0f);
+                audible += peak > 1e-4f;
+                seconds += (double) audio.channels[0].size() / audio.sampleRate;
+            }
+        std::printf ("  WavPack: %d arquivos .wv, %d decodificados, %d com som, %.0f s de áudio\n", files, decoded, audible, seconds);
+        CHECK (decoded == files);
     }
 
     // presets nativos do GMS (.gmsynth = o conteúdo do 0xD5 sem o "SSLF")

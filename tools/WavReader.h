@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/Instruments.h"
+#include "core/WavPack.h"
 
 namespace lynx::tools
 {
@@ -23,6 +24,20 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
         return nullptr;
 
     std::vector<std::uint8_t> d ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+
+    // WavPack (.wv dos pacotes do FL)
+    if (d.size() >= 4 && std::memcmp (d.data(), "wvpk", 4) == 0)
+    {
+        DecodedAudio audio;
+        if (! decodeWavPack (d.data(), d.size(), audio))
+            return nullptr;
+        auto out = std::make_shared<SampleData>();
+        out->sampleRate = audio.sampleRate;
+        out->left = std::move (audio.channels[0]);
+        if (audio.channels.size() > 1)
+            out->right = std::move (audio.channels[1]);
+        return out;
+    }
 
     if (d.size() < 12 || std::memcmp (d.data(), "RIFF", 4) != 0 || std::memcmp (d.data() + 8, "WAVE", 4) != 0)
         return nullptr;
