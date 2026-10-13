@@ -32,6 +32,10 @@ de teste fica em `C:\Users\kauan\lynx-test\LYNX.exe` (copiado a cada build).
   direito = tipo e inclinação.
 - Menu do slot > `Presets do FL` (EQ, Limiter, Reeverb 2, Delays, Compressor, Stereo Shaper).
 - Efeito "Utilitário" (ganho, balanço, matriz estéreo).
+- Efeito "Gate de volume": desenhar os 32 passos com o mouse, clique direito nas barras = padrões
+  (gate de 1/2 tempo, sidechain...); tocar e conferir que o corte segue o compasso. Projetos do FL com
+  Gross Beat (ex.: *Bien Duro*) abrem com o gate do slot de volume escolhido.
+- Sidechain: no *With You* (Mehran Abbasi) o Peak Controller do bumbo abaixa o volume de outras trilhas.
 
 ## 4. Plugins de terceiros
 - `Plugins > Procurar plugins` e depois abrir um `.flp` que use VST3/CLAP pelo Fruity Wrapper: o

@@ -720,9 +720,71 @@ juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
-    const auto top = panelHeader + maxEffectSlots * slotHeight + 40;
+    auto top = panelHeader + maxEffectSlots * slotHeight + 40;
     const auto w = (getWidth() - 16) / 3;
+
+    // gate de volume: os 32 passos são barras (gateStepsBounds); os knobs são mix/ataque/release
+    if (gateSelected())
+    {
+        if (param < 32)
+            return {};
+        param -= 32;
+        top = gateStepsBounds().getBottom() + 22;
+    }
+
     return { 8 + (param % 3) * w, top + (param / 3) * 86, w, 82 };
+}
+
+bool EffectsPanel::gateSelected() const
+{
+    const auto* s = slots();
+    return s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::volumeGate;
+}
+
+juce::Rectangle<int> EffectsPanel::gateStepsBounds() const
+{
+    return { 10, panelHeader + maxEffectSlots * slotHeight + 40, getWidth() - 20, 90 };
+}
+
+void EffectsPanel::setGateStep (juce::Point<int> p)
+{
+    const auto area = gateStepsBounds();
+    const auto step = juce::jlimit (0, 31, (int) ((p.x - area.getX()) * 32 / juce::jmax (1, area.getWidth())));
+    const auto value = juce::jlimit (0.0f, 1.0f, (float) (area.getBottom() - p.y) / (float) area.getHeight());
+    engine.editSong ([t = track, slot = selectedSlot, step, value] (Song& song) {
+        song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) step] = value;
+    });
+}
+
+void EffectsPanel::showGatePatterns()
+{
+    // padrões prontos (como os slots do Gross Beat): valor do passo i de 32 (1/8 de tempo cada)
+    struct Pattern
+    {
+        const char* name;
+        float (*level) (int);
+    };
+    static const Pattern patterns[] = {
+        { "Tudo aberto", [] (int) { return 1.0f; } },
+        { "Gate de 1/2 tempo", [] (int i) { return (i % 4) < 2 ? 1.0f : 0.0f; } },
+        { "Gate de 1 tempo", [] (int i) { return (i % 8) < 4 ? 1.0f : 0.0f; } },
+        { "Contratempo", [] (int i) { return (i % 8) >= 4 ? 1.0f : 0.0f; } },
+        { "Sidechain (rampa por tempo)", [] (int i) { return std::min (1.0f, 0.15f + (float) (i % 8) / 5.0f); } },
+        { "Trance gate", [] (int i) { return (i % 4) == 3 ? 0.0f : (i % 16) >= 12 ? 0.4f : 1.0f; } },
+        { "Fade-in no compasso", [] (int i) { return (float) (i + 1) / 32.0f; } },
+        { "Fade-out no compasso", [] (int i) { return 1.0f - (float) i / 32.0f; } },
+    };
+
+    juce::PopupMenu menu;
+    for (const auto& p : patterns)
+        menu.addItem (utf8 (p.name), [this, level = p.level] {
+            engine.editSong ([t = track, slot = selectedSlot, level] (Song& song) {
+                auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) slot].params;
+                for (int i = 0; i < 32; ++i)
+                    params[(std::size_t) i] = level (i);
+            });
+        });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
 int EffectsPanel::knobAt (juce::Point<int> p) const
@@ -737,7 +799,7 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
 
     const auto count = (int) effectInfo ((*s)[(std::size_t) selectedSlot].kind).params.size();
 
-    for (int i = 0; i < count; ++i)
+    for (int i = gateSelected() ? 32 : 0; i < count; ++i)
         if (knobBounds (i).contains (p))
             return i;
 
@@ -832,11 +894,34 @@ void EffectsPanel::paint (juce::Graphics& g)
     }
 
     const auto& info = effectInfo (slot.kind);
+    const auto gate = slot.kind == EffectKind::volumeGate;
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (14.0f));
-    g.drawText (utf8 (info.name), 10, knobBounds (0).getY() - 28, getWidth() - 20, 20, juce::Justification::centredLeft);
+    g.drawText (utf8 (info.name), 10, (gate ? gateStepsBounds().getY() : knobBounds (0).getY()) - 28, getWidth() - 20, 20,
+                juce::Justification::centredLeft);
 
-    for (int p = 0; p < (int) info.params.size(); ++p)
+    if (gate) // 32 passos = 1 compasso de 4 tempos
+    {
+        const auto area = gateStepsBounds().toFloat();
+        g.setColour (theme::knobBackground);
+        g.fillRoundedRectangle (area, 3.0f);
+        const auto w = area.getWidth() / 32.0f;
+        for (int i = 0; i < 32; ++i)
+        {
+            const auto h = area.getHeight() * juce::jlimit (0.0f, 1.0f, slot.params[(std::size_t) i]);
+            g.setColour ((slot.enabled ? theme::accentOrange : juce::Colours::grey).withAlpha ((i / 8) % 2 == 0 ? 1.0f : 0.75f));
+            g.fillRect (area.getX() + i * w + 1.0f, area.getBottom() - h, w - 2.0f, h);
+        }
+        g.setColour (theme::text.withAlpha (0.3f));
+        for (int beat = 1; beat < 4; ++beat)
+            g.drawVerticalLine ((int) (area.getX() + beat * 8 * w), area.getY(), area.getBottom());
+        g.setColour (theme::text.withAlpha (0.5f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (utf8 ("1 compasso: desenhe os passos; clique direito = padrões"), area.withY (area.getBottom() + 2).withHeight (14),
+                    juce::Justification::centredLeft);
+    }
+
+    for (int p = gate ? 32 : 0; p < (int) info.params.size(); ++p)
     {
         const auto r = knobBounds (p);
         const auto value = slot.params[(std::size_t) p];
@@ -918,6 +1003,18 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (gateSelected() && gateStepsBounds().contains (e.getPosition()))
+    {
+        if (e.mods.isPopupMenu())
+            showGatePatterns();
+        else
+        {
+            dragParam = gateStepParam;
+            setGateStep (e.getPosition());
+        }
+        return;
+    }
+
     dragParam = knobAt (e.getPosition());
 
     if (dragParam >= 0 && e.mods.isPopupMenu())
@@ -935,6 +1032,12 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
 void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (dragParam == gateStepParam)
+    {
+        setGateStep (e.getPosition());
+        return;
+    }
+
     if (dragParam == mixParam)
     {
         const auto v = juce::jlimit (0.0f, 1.0f, dragStart - (float) e.getDistanceFromDragStartY() / 150.0f);

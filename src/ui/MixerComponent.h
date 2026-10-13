@@ -97,7 +97,12 @@ private:
     juce::Rectangle<int> slotBounds (int slot) const;
     juce::Rectangle<int> mixBounds (int slot) const; // knob de dry/wet na linha do slot
     static constexpr int mixParam = -2;
+    static constexpr int gateStepParam = -3; // desenhando os passos do gate de volume
     juce::Rectangle<int> knobBounds (int param) const;
+    bool gateSelected() const;
+    juce::Rectangle<int> gateStepsBounds() const;
+    void setGateStep (juce::Point<int> p);
+    void showGatePatterns();
     int knobAt (juce::Point<int> p) const;
     const std::vector<EffectSlot>* slots() const;
     void showAddMenu (int slot);
