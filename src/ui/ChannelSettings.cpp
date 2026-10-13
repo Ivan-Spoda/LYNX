@@ -8,6 +8,115 @@ namespace lynx
 {
 namespace
 {
+// Envelopes de corte e de afinação (os envelopes do canal do FL), usados pelo synth e pelo sampler.
+class ModEnvelopeEditor final : public juce::Component
+{
+public:
+    std::function<void()> onChange;
+    static constexpr int preferredHeight = 16 + 2 * 62;
+
+    ModEnvelopeEditor()
+    {
+        const juce::String titles[] = { "Env. corte", utf8 ("Env. afinação") };
+
+        for (int e = 0; e < 2; ++e)
+        {
+            auto& row = rows[(std::size_t) e];
+            row.title.setText (titles[e], juce::dontSendNotification);
+            row.title.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (row.title);
+            knob (row.amount, e == 0 ? -10.0 : -48.0, e == 0 ? 10.0 : 48.0, 0.01, e == 0 ? " oit" : " st");
+            row.amount.setDoubleClickReturnValue (true, 0.0);
+            row.amount.setTooltip (utf8 ("0 = desligado"));
+
+            for (auto* s : { &row.attack, &row.hold, &row.decay, &row.release })
+            {
+                knob (*s, 0.0, 10.0, 0.001, " s");
+                s->setSkewFactorFromMidPoint (0.5);
+            }
+
+            knob (row.sustain, 0.0, 1.0, 0.01, "");
+        }
+
+        const char* names[] = { "Quantidade", "Ataque", "Hold", "Decaimento", "Sustentação", "Release" };
+
+        for (int i = 0; i < 6; ++i)
+        {
+            labels[(std::size_t) i].setText (utf8 (names[i]), juce::dontSendNotification);
+            labels[(std::size_t) i].setJustificationType (juce::Justification::centred);
+            labels[(std::size_t) i].setFont (juce::FontOptions (11.0f));
+            addAndMakeVisible (labels[(std::size_t) i]);
+        }
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop (16);
+        header.removeFromLeft (80);
+        const auto w = header.getWidth() / 6;
+
+        for (auto& l : labels)
+            l.setBounds (header.removeFromLeft (w));
+
+        for (auto& row : rows)
+        {
+            auto line = area.removeFromTop (62);
+            row.title.setBounds (line.removeFromLeft (80).withSizeKeepingCentre (80, 24));
+            for (auto* s : { &row.amount, &row.attack, &row.hold, &row.decay, &row.sustain, &row.release })
+                s->setBounds (line.removeFromLeft (w));
+        }
+    }
+
+    void show (const ModEnvelope& filter, const ModEnvelope& pitch)
+    {
+        rows[0].show (filter);
+        rows[1].show (pitch);
+    }
+
+    ModEnvelope filter() const { return rows[0].read(); }
+    ModEnvelope pitch() const { return rows[1].read(); }
+
+private:
+    struct Row
+    {
+        juce::Label title;
+        juce::Slider amount, attack, hold, decay, sustain, release;
+
+        void show (const ModEnvelope& e)
+        {
+            amount.setValue (e.amount, juce::dontSendNotification);
+            attack.setValue (e.attack, juce::dontSendNotification);
+            hold.setValue (e.hold, juce::dontSendNotification);
+            decay.setValue (e.decay, juce::dontSendNotification);
+            sustain.setValue (e.sustain, juce::dontSendNotification);
+            release.setValue (e.release, juce::dontSendNotification);
+        }
+
+        ModEnvelope read() const
+        {
+            return { (float) amount.getValue(), (float) attack.getValue(), (float) hold.getValue(),
+                     (float) decay.getValue(), (float) sustain.getValue(), (float) release.getValue() };
+        }
+    };
+
+    void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 16);
+        s.setRange (lo, hi, step);
+        s.setTextValueSuffix (suffix);
+        s.onValueChange = [this] {
+            if (onChange)
+                onChange();
+        };
+        addAndMakeVisible (s);
+    }
+
+    std::array<Row, 2> rows;
+    std::array<juce::Label, 6> labels;
+};
+
 class SettingsPanel final : public juce::Component,
                             private juce::ChangeListener
 {
@@ -32,6 +141,8 @@ public:
         filterType.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
         filterType.onChange = [this] { apply(); };
         addAndMakeVisible (filterType);
+        envelopes.onChange = [this] { apply(); };
+        addAndMakeVisible (envelopes);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
@@ -58,7 +169,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (420, 536);
+        setSize (560, 536 + ModEnvelopeEditor::preferredHeight + 8);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -100,6 +211,8 @@ public:
             filterType.setBounds (filterRow.removeFromRight (filterRow.getWidth() / 3).withSizeKeepingCentre (124, 24));
             place (filterRow.withWidth (filterRow.getWidth() * 3 / 2), { { &cutoff, &cutoffLabel }, { &resonance, &resonanceLabel } });
         }
+        area.removeFromTop (4);
+        envelopes.setBounds (area.removeFromBottom (ModEnvelopeEditor::preferredHeight));
         area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
         cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
@@ -144,6 +257,7 @@ private:
             cutoff.setValue (c->sampler.cutoff, juce::dontSendNotification);
             resonance.setValue (c->sampler.resonance, juce::dontSendNotification);
             filterType.setSelectedId (c->sampler.filterType + 1, juce::dontSendNotification);
+            envelopes.show (c->sampler.filterEnv, c->sampler.pitchEnv);
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
@@ -174,6 +288,8 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
+        s.filterEnv = envelopes.filter();
+        s.pitchEnv = envelopes.pitch();
 
         if (s == current()->sampler)
             return;
@@ -204,6 +320,7 @@ private:
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch;
     juce::ComboBox filterType;
+    ModEnvelopeEditor envelopes;
 };
 
 // Página do synth interno: 3 osciladores, envelope e filtro.
@@ -237,32 +354,8 @@ public:
         knob (cutoff, 20.0, 20000.0, 1.0, " Hz");
         knob (resonance, 0.0, 1.0, 0.01, "");
 
-        const juce::String envTitles[] = { "Env. corte", utf8 ("Env. afinação") };
-        for (int e = 0; e < 2; ++e)
-        {
-            auto& row = envRows[(std::size_t) e];
-            row.title.setText (envTitles[e], juce::dontSendNotification);
-            row.title.setFont (juce::FontOptions (12.0f));
-            addAndMakeVisible (row.title);
-            knob (row.amount, e == 0 ? -10.0 : -48.0, e == 0 ? 10.0 : 48.0, 0.01, e == 0 ? " oit" : " st");
-            row.amount.setDoubleClickReturnValue (true, 0.0);
-            row.amount.setTooltip (utf8 ("0 = desligado"));
-            for (auto* s : { &row.attack, &row.hold, &row.decay, &row.release })
-            {
-                knob (*s, 0.0, 10.0, 0.001, " s");
-                s->setSkewFactorFromMidPoint (0.5);
-            }
-            knob (row.sustain, 0.0, 1.0, 0.01, "");
-        }
-
-        const char* envNames[] = { "Quantidade", "Ataque", "Hold", "Decaimento", "Sustentação", "Release" };
-        for (int i = 0; i < 6; ++i)
-        {
-            envLabels[(std::size_t) i].setText (utf8 (envNames[i]), juce::dontSendNotification);
-            envLabels[(std::size_t) i].setJustificationType (juce::Justification::centred);
-            envLabels[(std::size_t) i].setFont (juce::FontOptions (11.0f));
-            addAndMakeVisible (envLabels[(std::size_t) i]);
-        }
+        envelopes.onChange = [this] { apply(); };
+        addAndMakeVisible (envelopes);
 
         for (auto* s : { &attack, &decay, &release })
             s->setSkewFactorFromMidPoint (0.5);
@@ -347,19 +440,7 @@ public:
             s->setBounds (knobsRow.removeFromLeft (w));
 
         area.removeFromTop (8);
-        auto envHeader = area.removeFromTop (16);
-        envHeader.removeFromLeft (80);
-        const auto ew = envHeader.getWidth() / 6;
-        for (auto& l : envLabels)
-            l.setBounds (envHeader.removeFromLeft (ew));
-
-        for (auto& row : envRows)
-        {
-            auto line = area.removeFromTop (62);
-            row.title.setBounds (line.removeFromLeft (80).withSizeKeepingCentre (80, 24));
-            for (auto* s : { &row.amount, &row.attack, &row.hold, &row.decay, &row.sustain, &row.release })
-                s->setBounds (line.removeFromLeft (ew));
-        }
+        envelopes.setBounds (area.removeFromTop (ModEnvelopeEditor::preferredHeight));
     }
 
 private:
@@ -372,32 +453,9 @@ private:
 
     static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
 
-    struct EnvRow
-    {
-        juce::Label title;
-        juce::Slider amount, attack, hold, decay, sustain, release;
-
-        void show (const ModEnvelope& e)
-        {
-            amount.setValue (e.amount, juce::dontSendNotification);
-            attack.setValue (e.attack, juce::dontSendNotification);
-            hold.setValue (e.hold, juce::dontSendNotification);
-            decay.setValue (e.decay, juce::dontSendNotification);
-            sustain.setValue (e.sustain, juce::dontSendNotification);
-            release.setValue (e.release, juce::dontSendNotification);
-        }
-
-        ModEnvelope read() const
-        {
-            return { (float) amount.getValue(), (float) attack.getValue(), (float) hold.getValue(),
-                     (float) decay.getValue(), (float) sustain.getValue(), (float) release.getValue() };
-        }
-    };
-
-    std::array<EnvRow, 2> envRows; // corte, afinação
+    ModEnvelopeEditor envelopes;
     juce::ToggleButton mono;
     juce::ComboBox filterTypeBox;
-    std::array<juce::Label, 6> envLabels;
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
     {
@@ -443,8 +501,7 @@ private:
         resonance.setValue (s.resonance, juce::dontSendNotification);
         mono.setToggleState (s.mono, juce::dontSendNotification);
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
-        envRows[0].show (s.filterEnv);
-        envRows[1].show (s.pitchEnv);
+        envelopes.show (s.filterEnv, s.pitchEnv);
         updating = false;
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
@@ -469,8 +526,8 @@ private:
         s.release = (float) release.getValue();
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
-        s.filterEnv = envRows[0].read();
-        s.pitchEnv = envRows[1].read();
+        s.filterEnv = envelopes.filter();
+        s.pitchEnv = envelopes.pitch();
         s.mono = mono.getToggleState();
         s.filterType = juce::jlimit (0, 3, filterTypeBox.getSelectedId() - 1);
 
