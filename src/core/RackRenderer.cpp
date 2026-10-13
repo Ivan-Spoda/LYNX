@@ -61,7 +61,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
             && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip)
-                || (previous->song.channels[i].samplePath == channel.samplePath
+                || (previous->song.channels[i].samplePath == channel.samplePath && previous->song.channels[i].zones == channel.zones
                     && previous->song.channels[i].sampler.keepPitch == channel.sampler.keepPitch
                     && (! channel.sampler.keepPitch
                         || (previous->song.channels[i].sampler.stretchBeats == channel.sampler.stretchBeats
@@ -82,6 +82,21 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 instrument = factories.pluginInstruments (channel.plugin, sampleRate);
 
             state->instruments.push_back (instrument != nullptr ? instrument : std::make_shared<SilentInstrument>());
+            continue;
+        }
+
+        // sampler multi-sample: uma zona por sample (DirectWave, camadas do FPC...)
+        if (kind == InstrumentKind::sampler && ! channel.zones.empty())
+        {
+            std::vector<LoadedZone> zones;
+
+            for (const auto& z : channel.zones)
+                zones.push_back ({ z, samples ? samples (z.path) : nullptr });
+
+            std::shared_ptr<Instrument> instrument = makeZonedSampler (std::move (zones));
+            instrument->prepare (sampleRate);
+            instrument->configure (channel, song.bpm);
+            state->instruments.push_back (std::move (instrument));
             continue;
         }
 

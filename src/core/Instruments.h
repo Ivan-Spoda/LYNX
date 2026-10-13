@@ -71,6 +71,14 @@ struct SampleData
 // `sample` só é usado pelo sampler; sem sample o sampler fica mudo.
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);
 
+// Sampler multi-sample: cada zona com o sample já carregado (nullptr = arquivo que faltou).
+struct LoadedZone
+{
+    SampleZone zone;
+    std::shared_ptr<const SampleData> sample;
+};
+std::unique_ptr<Instrument> makeZonedSampler (std::vector<LoadedZone> zones);
+
 // Ruído branco barato e determinístico (xorshift), igual em toda plataforma.
 struct Noise
 {

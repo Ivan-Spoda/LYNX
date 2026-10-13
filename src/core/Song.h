@@ -176,6 +176,20 @@ struct SynthSettings
     bool operator== (const SynthSettings&) const = default;
 };
 
+// Zona de um sampler multi-sample (como as do DirectWave/FPC do FL): o sample toca nas teclas e
+// velocities da faixa, afinado a partir da nota-raiz.
+struct SampleZone
+{
+    std::string path;
+    int rootKey = 60;
+    int lowKey = 0, highKey = 127;
+    int lowVelocity = 0, highVelocity = 127; // 0..127
+    float tune = 0.0f;  // semitons
+    float gain = 1.0f;
+
+    bool operator== (const SampleZone&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -184,6 +198,7 @@ struct ChannelDef
     float pan = 0.0f;      // -1..1
     bool muted = false;
     std::string samplePath; // usado quando instrument == sampler
+    std::vector<SampleZone> zones; // sampler multi-sample (vazio: só samplePath)
     int mixerTrack = 0;     // 0 = direto no Master
     PluginRef plugin;       // usado quando instrument == plugin
     SamplerSettings sampler; // usado quando instrument == sampler

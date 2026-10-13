@@ -803,6 +803,8 @@ struct SamplerVoice
     std::array<LfoState, lfoTargets> lfo {};
     float lfoGain = 1.0f, lfoGainStep = 0.0f;
     float basePan = 0.0f;
+    const SampleData* data = nullptr; // o sample desta voz (a zona escolhida, no multi-sample)
+    float zoneGain = 1.0f;
     SvfCoefficients filter;         // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     int controlCountdown = 0;
@@ -813,6 +815,38 @@ class SamplerInstrument final : public Instrument
 public:
     // clipMode: clip de áudio da Playlist (sem transposição, para no noteOff)
     SamplerInstrument (std::shared_ptr<const SampleData> s, bool clip) : sample (std::move (s)), clipMode (clip) {}
+
+    // multi-sample: chamado antes de o instrumento ir para a thread de áudio
+    void setZones (std::vector<LoadedZone> z)
+    {
+        zones = std::move (z);
+        zones.erase (std::remove_if (zones.begin(), zones.end(), [] (const LoadedZone& lz) { return lz.sample == nullptr || lz.sample->frames() < 2; }),
+                     zones.end());
+
+        if (sample == nullptr && ! zones.empty())
+            sample = zones.front().sample;
+    }
+
+    // a zona da tecla/velocity; sem nenhuma que cubra, a de nota-raiz mais próxima
+    const LoadedZone* zoneFor (int key, float velocity) const noexcept
+    {
+        if (zones.empty())
+            return nullptr;
+
+        const auto vel = (int) std::lround (std::clamp (velocity, 0.0f, 1.0f) * 127.0f);
+        const LoadedZone* nearest = nullptr;
+
+        for (const auto& z : zones)
+        {
+            if (key >= z.zone.lowKey && key <= z.zone.highKey && vel >= z.zone.lowVelocity && vel <= z.zone.highVelocity)
+                return &z;
+
+            if (nearest == nullptr || std::abs (z.zone.rootKey - key) < std::abs (nearest->zone.rootKey - key))
+                nearest = &z;
+        }
+
+        return nearest;
+    }
 
     void prepare (double sr) noexcept override
     {
@@ -854,26 +888,29 @@ public:
     // Leitura em frames do sample por sample de saída (antes da afinação das notas). Com
     // stretch, o sample inteiro dura `stretchBeats` no andamento atual (reamostrando, como o
     // modo "resample" do FL: a altura acompanha).
-    double baseRate() const noexcept
+    double baseRate (const SampleData& data) const noexcept
     {
         const auto beats = stretchBeats.load();
 
-        if (beats > 0.0f && sample != nullptr)
-            return (double) sample->frames() / ((double) beats * 60.0 / bpm.load() * sampleRate);
+        if (beats > 0.0f)
+            return (double) data.frames() / ((double) beats * 60.0 / bpm.load() * sampleRate);
 
-        return sample->sampleRate / sampleRate;
+        return data.sampleRate / sampleRate;
     }
 
     void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
 
     void noteOnAt (int key, float velocity, double startSeconds) noexcept override
     {
-        if (sample == nullptr || sample->frames() < 2)
+        const auto* zone = clipMode ? nullptr : zoneFor (key, velocity);
+        const auto* data = zone != nullptr ? zone->sample.get() : sample.get();
+
+        if (data == nullptr || data->frames() < 2)
             return;
 
         sliceMailbox.read (slices);
         const auto backwards = ! clipMode && reverse.load();
-        const auto total = (double) (sample->frames() - 1);
+        const auto total = (double) (data->frames() - 1);
         // trecho do sample (o início vale como "start offset"); clips de áudio usam o arquivo todo
         auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
         auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
@@ -892,7 +929,7 @@ public:
             sliced = true;
         }
         const auto stretched = stretchBeats.load() > 0.0f;
-        const auto base = baseRate();
+        const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
 
         if (startFrame >= last)
@@ -925,13 +962,17 @@ public:
         }
 
         // com stretch ("resample" do FL) a altura da nota não muda a velocidade
-        const auto semitones = clipMode || stretched ? 0.0 : (sliced ? 0 : key - 60) + (double) pitch.load() + nextCents / 100.0;
+        const auto root = zone != nullptr ? zone->zone.rootKey : 60;
+        const auto tune = zone != nullptr ? (double) zone->zone.tune : 0.0;
+        const auto semitones = clipMode || stretched ? 0.0 : (sliced ? 0 : key - root) + tune + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
         target->active = true;
         target->key = key;
         target->velocity = velocity;
+        target->data = data;
+        target->zoneGain = zone != nullptr ? zone->zone.gain : 1.0f;
         target->position = startFrame;
         target->first = first;
         target->last = last;
@@ -985,16 +1026,16 @@ public:
 
     void slideTo (int key, float cents, float samples) noexcept override
     {
-        if (clipMode || sample == nullptr)
+        if (clipMode)
             return;
 
         const auto semitones = (key - 60) + (double) pitch.load() + cents / 100.0;
         const auto steps = std::max (1, (int) samples);
 
         for (auto& v : voices)
-            if (v.active && ! v.stolen && v.rate != 0.0)
+            if (v.active && ! v.stolen && v.rate != 0.0 && v.data != nullptr)
             {
-                const auto target = sample->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (v.rate < 0.0 ? -1.0 : 1.0);
+                const auto target = v.data->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (v.rate < 0.0 ? -1.0 : 1.0);
                 v.glideRatio = std::pow (target / v.rate, 1.0 / steps);
                 v.glideLeft = steps;
             }
@@ -1038,12 +1079,8 @@ public:
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
-        if (sample == nullptr)
+        if (sample == nullptr && zones.empty())
             return;
-
-        const auto* l = sample->leftData();
-        const auto* r = sample->rightData();
-        const auto last = (double) (sample->frames() - 1);
 
         if (envelopeMailbox.read (modulation))
             updateModulation();
@@ -1064,8 +1101,12 @@ public:
 
         for (auto& v : voices)
         {
-            if (! v.active)
+            if (! v.active || v.data == nullptr)
                 continue;
+
+            const auto* l = v.data->leftData();
+            const auto* r = v.data->rightData();
+            const auto last = (double) (v.data->frames() - 1);
 
             for (int i = 0; i < n; ++i)
             {
@@ -1120,7 +1161,7 @@ public:
                     sr = f.process (sr, v.lowR, v.bandR);
                 }
 
-                auto gain = v.velocity * v.fade * v.env * v.lfoGain;
+                auto gain = v.velocity * v.fade * v.env * v.lfoGain * v.zoneGain;
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
@@ -1201,6 +1242,7 @@ private:
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
     std::atomic<bool> porta { false };
     std::atomic<float> portaBeats { 0.125f };
+    std::vector<LoadedZone> zones; // multi-sample (fixo depois de criado)
     double lastRate = 0.0; // velocidade de leitura da última nota (de onde o porta parte)
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
@@ -1243,6 +1285,13 @@ private:
     std::atomic<bool> reverse { false }, cut { false };
 };
 } // namespace
+
+std::unique_ptr<Instrument> makeZonedSampler (std::vector<LoadedZone> zones)
+{
+    auto sampler = std::make_unique<SamplerInstrument> (nullptr, false);
+    sampler->setZones (std::move (zones));
+    return sampler;
+}
 
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {

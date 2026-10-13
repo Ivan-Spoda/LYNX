@@ -1044,6 +1044,50 @@ TEST (sampler_porta_glides_from_previous_note)
     CHECK (end > 36);
 }
 
+TEST (zoned_sampler_picks_zone_by_key_and_velocity)
+{
+    auto sine = [] (double hz, float amp) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->sampleRate = 48000.0;
+        d->left.resize (48000);
+        for (std::size_t i = 0; i < d->left.size(); ++i)
+            d->left[i] = amp * (float) std::sin (6.283185307 * hz * (double) i / 48000.0);
+        return d;
+    };
+    // graves: seno de 220 Hz gravado como A3 (57), até a tecla 69; agudos: 880 Hz como A5 (81)
+    // camada forte nos agudos: mesma afinação, mais alta
+    std::vector<lynx::LoadedZone> zones {
+        { { "graves.wav", 57, 0, 69, 0, 127, 0.0f, 1.0f }, sine (220.0, 0.5f) },
+        { { "agudos.wav", 81, 70, 127, 0, 99, 0.0f, 1.0f }, sine (880.0, 0.25f) },
+        { { "agudos forte.wav", 81, 70, 127, 100, 127, 0.0f, 1.0f }, sine (880.0, 0.9f) },
+    };
+    auto inst = lynx::makeZonedSampler (zones);
+    inst->prepare (48000.0);
+    inst->configure (lynx::ChannelDef {}, 120.0);
+    auto play = [&] (int key, float velocity) {
+        inst->allNotesOff();
+        std::vector<float> l (24000), r (24000);
+        inst->render (l.data(), r.data(), 2000, 1.0f, 1.0f); // deixa as vozes antigas sumirem
+        std::fill (l.begin(), l.end(), 0.0f);
+        inst->noteOn (key, velocity);
+        inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+        int crossings = 0;
+        float peak = 0.0f;
+        for (std::size_t i = 1; i < 24000; ++i)
+        {
+            crossings += (l[i - 1] < 0.0f) != (l[i] < 0.0f);
+            peak = std::max (peak, std::abs (l[i]));
+        }
+        return std::pair { crossings, peak };
+    };
+    const auto low = play (69, 0.5f);    // A4 a partir da raiz A3: 440 Hz -> 440 cruzamentos em 0,5 s
+    CHECK (std::abs (low.first - 440) < 4);
+    const auto soft = play (81, 0.5f);   // zona de agudos na raiz: 880 Hz
+    CHECK (std::abs (soft.first - 880) < 6);
+    const auto hard = play (81, 0.95f);  // velocity alta: camada forte
+    CHECK (hard.second > soft.second * 2.0f);
+}
+
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
 {
     // ruído branco no sampler: com corte em 300 Hz a energia cai muito; aberto passa igual

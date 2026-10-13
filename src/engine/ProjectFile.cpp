@@ -254,6 +254,14 @@ juce::String toJson (const Song& song)
         if (! c.samplePath.empty())
             o->setProperty ("sample", str (c.samplePath));
 
+        if (! c.zones.empty()) // [arquivo, raiz, tecla mín., máx., velocity mín., máx., afinação, ganho]
+        {
+            juce::Array<juce::var> zones;
+            for (const auto& z : c.zones)
+                zones.add (juce::Array<juce::var> { str (z.path), z.rootKey, z.lowKey, z.highKey, z.lowVelocity, z.highVelocity, z.tune, z.gain });
+            o->setProperty ("zones", zones);
+        }
+
         o->setProperty ("mixer", c.mixerTrack);
 
         if (c.colour != 0)
@@ -558,6 +566,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.pan = juce::jlimit (-1.0f, 1.0f, (float) c.getProperty ("pan", 0.0));
             def.muted = (bool) c.getProperty ("muted", false);
             def.samplePath = c["sample"].toString().toStdString();
+
+            if (auto* zones = c["zones"].getArray())
+                for (const auto& z : *zones)
+                    if (z.isArray() && z.size() == 8)
+                        def.zones.push_back ({ z[0].toString().toStdString(), juce::jlimit (0, 127, (int) z[1]), juce::jlimit (0, 127, (int) z[2]),
+                                               juce::jlimit (0, 127, (int) z[3]), juce::jlimit (0, 127, (int) z[4]), juce::jlimit (0, 127, (int) z[5]),
+                                               juce::jlimit (-48.0f, 48.0f, (float) (double) z[6]), juce::jlimit (0.0f, 4.0f, (float) (double) z[7]) });
             def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
             def.plugin = pluginFromVar (c["plugin"]);
 
