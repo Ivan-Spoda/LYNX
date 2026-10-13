@@ -33,6 +33,14 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options = {
 
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type);
 
+// Osciladores do synth interno a partir do estado (0xD5) do 3x Osc, versões 10 a 14
+// (docs/analise/REA_rodada4.md §1-2). Mantém ADSR e filtro de `base`. Falso se o blob não serve.
+bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& base);
+
+// Filtro do canal do FL (Mod X/Y 0..256, tipo 0..7 do 0xDB) como corte em Hz e ressonância 0..1
+// do passa-baixas do synth interno (REA_rodada4 §3). Tipos sem passa-baixas ficam abertos.
+void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance);
+
 // Efeito interno parecido com um efeito nativo do FL (pelo nome interno do plugin).
 std::optional<EffectKind> effectForFlPlugin (const std::string& name);
 

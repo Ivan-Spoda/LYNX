@@ -263,6 +263,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
+    int threeOsc = 0, threeOscDecoded = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -281,6 +282,23 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            // 3x Osc: todo estado dos demos decodifica, com níveis que somam no máximo 1
+            for (const auto& c : p.channels)
+                if (c.pluginName == "3x Osc")
+                {
+                    ++threeOsc;
+                    lynx::SynthSettings s;
+
+                    if (lynx::synthFrom3xOsc (c.pluginState, s))
+                    {
+                        ++threeOscDecoded;
+                        const auto sum = s.osc[0].level + s.osc[1].level + s.osc[2].level;
+                        CHECK (sum <= 1.001f);
+                        for (const auto& o : s.osc)
+                            CHECK (o.octave >= -2 && o.octave <= 2 && std::abs (o.semitones) <= 11 && std::abs (o.pan) <= 1.0f);
+                    }
+                }
 
             for (auto& pat : p.patterns)
                 if (! pat.notes.empty())
@@ -331,6 +349,8 @@ TEST (flp_real_files)
         }
     }
 
+    CHECK (threeOscDecoded == threeOsc);
+    std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
                  files, withNotes, withPlaylist, automations, automationsWithTarget, sends);
     CHECK (files > 0);
@@ -717,6 +737,76 @@ TEST (remove_pattern_fixes_clips)
     CHECK (s.patterns.size() == 2);
     CHECK (s.playlist.size() == 2 && s.playlist[1].pattern == 1);
     CHECK (s.currentPattern == 1);
+}
+
+TEST (flp_import_3x_osc_state_and_channel_filter)
+{
+    // patch novo do 3x Osc (versão 14): osc 2 mix 64 coarse -12, osc 3 mix 32 coarse -24
+    std::vector<std::uint8_t> blob (460, 0);
+    auto put = [&] (std::size_t off, std::int32_t v) {
+        for (int b = 0; b < 4; ++b)
+            blob[off + (std::size_t) b] = (std::uint8_t) ((std::uint32_t) v >> (8 * b));
+    };
+    put (0x00, 14);
+    put (0x08, 3);    // osc 1 serra
+    put (0x10, 7);    // osc 1 fine +7
+    put (0x04, -32);  // osc 1 pan -0,5
+    put (0x1C, 64);   // osc 2 mix
+    put (0x28, -12);  // osc 2 coarse
+    put (0x38, 32);   // osc 3 mix
+    put (0x40, 2);    // osc 3 quadrada
+    put (0x44, -19);  // osc 3 coarse: -1 oitava e -7 semitons
+    lynx::SynthSettings s;
+    CHECK (lynx::synthFrom3xOsc (blob, s));
+    CHECK (std::abs (s.osc[0].level - 0.375f) < 1e-4f && std::abs (s.osc[1].level - 0.375f) < 1e-4f && std::abs (s.osc[2].level - 0.25f) < 1e-4f);
+    CHECK (s.osc[0].wave == lynx::Waveform::saw && s.osc[0].detune == 7.0f && s.osc[0].pan == -0.5f);
+    CHECK (s.osc[1].wave == lynx::Waveform::sine && s.osc[1].octave == -1 && s.osc[1].semitones == 0);
+    CHECK (s.osc[2].wave == lynx::Waveform::square && s.osc[2].octave == -1 && s.osc[2].semitones == -7);
+    CHECK (! lynx::synthFrom3xOsc (std::vector<std::uint8_t> (40, 0), s));
+
+    // filtro do canal: padrão aberto; LP com Mod X 128 ~ 2,71 kHz; Fast LP com Mod X 128 ~ 280 Hz
+    float hz = 0.0f, res = 1.0f;
+    lynx::synthFilterFromChannel (256, 0, 0, hz, res);
+    CHECK (hz >= 19999.0f && res == 0.0f);
+    lynx::synthFilterFromChannel (128, 0, 1, hz, res);
+    CHECK (std::abs (hz - 2710.0f) < 30.0f && res == 0.0f);
+    lynx::synthFilterFromChannel (128, 0, 0, hz, res);
+    CHECK (hz > 240.0f && hz < 320.0f);
+    lynx::synthFilterFromChannel (128, 256, 1, hz, res);
+    CHECK (res > 0.8f);
+    lynx::synthFilterFromChannel (64, 0, 3, hz, res); // passa-altas: o synth não tem, fica aberto
+    CHECK (hz >= 19999.0f);
+}
+
+TEST (synth_oscillator_pan_and_semitones)
+{
+    auto render = [] (lynx::SynthSettings s, std::vector<float>& l, std::vector<float>& r) {
+        auto synth = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        synth->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = s;
+        synth->configure (c, 120.0);
+        synth->noteOn (69, 1.0f);
+        l.assign (24000, 0.0f);
+        r.assign (24000, 0.0f);
+        synth->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+    };
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f, 7, 1.0f }; // quinta acima, todo à direita
+    s.cutoff = 20000.0f;
+    std::vector<float> l, r;
+    render (s, l, r);
+    float peakL = 0.0f, peakR = 0.0f;
+    int crossings = 0;
+    for (std::size_t i = 4800; i < 24000; ++i)
+    {
+        peakL = std::max (peakL, std::abs (l[i]));
+        peakR = std::max (peakR, std::abs (r[i]));
+        crossings += (r[i - 1] < 0.0f) != (r[i] < 0.0f);
+    }
+    CHECK (peakL < 1e-4f && peakR > 0.1f);
+    // 440 * 2^(7/12) = 659,3 Hz; 0,4 s = 263,7 ciclos = ~527 cruzamentos
+    CHECK (std::abs (crossings - 527) < 6);
 }
 
 TEST (flp_import_brings_playlist)

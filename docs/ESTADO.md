@@ -46,7 +46,15 @@ Atualizado em 2026-10-13.
   swing com a fórmula do FL (+ mix por canal), ADSR do sampler importado do envelope de volume (`0xDA`),
   time-stretch (reamostrando ou mantendo a altura com WSOLA), nota-raiz, cut groups, canal mono,
   trecho/start offset do sample. Os 30 primeiros demos exportam sem erro.
-- **Synth interno de 3 osciladores** com ADSR, filtro ressonante e presets (808, Reese, pad...).
+- **Synth interno de 3 osciladores** com ADSR, filtro ressonante e presets (808, Reese, pad...);
+  cada oscilador tem oitava, semitom, afinação fina, pan e nível.
+- **3x Osc do FL importado (REA rodada 4, `docs/analise/REA_rodada4.md`)**: o estado do plugin (`0xD5`,
+  versões 10-14) vira os 3 osciladores (forma, coarse/fine, pan, níveis com a regra de mix do FL);
+  envelope de volume do canal vira o ADSR e o filtro do canal (Mod X/Y + tipo, `0xDB`) vira corte/
+  ressonância. Os 152 canais 3x Osc dos demos decodificam. Ainda não: AM do osc 3, inverter fase,
+  SPO/phase rand, filtros BP/HP/BS.
+- **Render mais leve**: PDC em uma passada, reverb por blocos, limiter O(1), FTZ/DAZ; o export do
+  SHINE (110 s, 60 efeitos importados) caiu de 4,4 s para 2,4 s.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
 - **Compasso** da música (menu da pattern), importado do `.flp`.
 

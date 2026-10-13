@@ -95,6 +95,8 @@ struct SynthOscillator
     int octave = 0;      // -3..3
     float detune = 0.0f; // centésimos, -100..100
     float level = 0.0f;  // 0..1
+    int semitones = 0;   // -11..11, somados à oitava (o "coarse" do 3x Osc vai até ±24)
+    float pan = 0.0f;    // -1..1, balanço linear como no FL
 
     bool operator== (const SynthOscillator&) const = default;
 };

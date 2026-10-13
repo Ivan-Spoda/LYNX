@@ -96,6 +96,9 @@ struct Channel
     std::uint32_t colour = 0; // 0xRRGGBB (0 = sem cor gravada)
     bool hasLevels = false;
     int pan = 6400, volume = 10000, pitchCents = 0;
+    int modX = 256, modY = 0, filterType = 0; // filtro do canal (0xDB com 24 B; docs/analise/REA_rodada4.md §3)
+
+    std::vector<std::uint8_t> pluginState; // 0xD5 do gerador (ex.: estado do 3x Osc)
 
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84

@@ -223,7 +223,7 @@ juce::String toJson (const Song& song)
             juce::Array<juce::var> oscs;
 
             for (const auto& osc : c.synth.osc)
-                oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level });
+                oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level, osc.semitones, osc.pan });
 
             synth->setProperty ("osc", oscs);
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
@@ -498,10 +498,18 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             {
                 if (auto* oscs = s["osc"].getArray())
                     for (int i = 0; i < oscs->size() && i < 3; ++i)
-                        if (const auto& o = (*oscs)[i]; o.isArray() && o.size() == 4)
-                            def.synth.osc[(std::size_t) i] = { (Waveform) juce::jlimit (0, 4, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
-                                                               juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]),
-                                                               juce::jlimit (0.0f, 1.0f, (float) (double) o[3]) };
+                        if (const auto& o = (*oscs)[i]; o.isArray() && o.size() >= 4)
+                        {
+                            auto& osc = def.synth.osc[(std::size_t) i];
+                            osc = { (Waveform) juce::jlimit (0, 4, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
+                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 1.0f, (float) (double) o[3]) };
+
+                            if (o.size() >= 6) // semitons e pan (desde o import do 3x Osc)
+                            {
+                                osc.semitones = juce::jlimit (-11, 11, (int) o[4]);
+                                osc.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) o[5]);
+                            }
+                        }
 
                 if (const auto& a = s["adsr"]; a.isArray() && a.size() == 4)
                 {

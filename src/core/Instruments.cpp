@@ -208,6 +208,7 @@ struct SynthVoice
     double phaseDelta = 0.0;  // da fundamental (cada oscilador multiplica)
     std::array<double, 3> phase {};
     float low = 0.0f, band = 0.0f; // estados do filtro
+    float lowR = 0.0f, bandR = 0.0f; // filtro do lado direito (só com pan por oscilador)
     int age = 0;
 };
 
@@ -353,7 +354,7 @@ public:
                     --v.glideLeft;
                 }
 
-                float sum = 0.0f;
+                float sum = 0.0f, sumR = 0.0f;
 
                 for (std::size_t o = 0; o < 3; ++o)
                 {
@@ -363,21 +364,20 @@ public:
                         continue;
 
                     const auto delta = std::min (0.49, v.phaseDelta * ratios[o]);
-                    sum += osc.level * oscillator (osc.wave, v.phase[o], delta);
+                    const auto value = osc.level * oscillator (osc.wave, v.phase[o], delta);
+                    sum += value * oscPanL[o];
+                    sumR += value * oscPanR[o];
                     v.phase[o] += delta;
                     v.phase[o] -= std::floor (v.phase[o]);
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
-                const auto v3 = sum - v.low;
-                const auto v1 = a1 * v.band + a2 * v3;
-                const auto v2 = v.low + a2 * v.band + a3 * v3;
-                v.band = 2.0f * v1 - v.band;
-                v.low = 2.0f * v2 - v.low;
+                const auto outL = filter (sum, v.low, v.band);
+                const auto outR = stereoOscillators ? filter (sumR, v.lowR, v.bandR) : outL;
 
-                const auto s = 0.3f * v2 * v.level * v.velocity;
-                left[i] += s * gl * v.panL;
-                right[i] += s * gr * v.panR;
+                const auto s = 0.3f * v.level * v.velocity;
+                left[i] += outL * s * gl * v.panL;
+                right[i] += outR * s * gr * v.panR;
                 ++v.age;
             }
 
@@ -433,6 +433,16 @@ private:
         return 0.0f;
     }
 
+    float filter (float in, float& low, float& band) const noexcept
+    {
+        const auto v3 = in - low;
+        const auto v1 = a1 * band + a2 * v3;
+        const auto v2 = low + a2 * band + a3 * v3;
+        band = 2.0f * v1 - band;
+        low = 2.0f * v2 - low;
+        return v2;
+    }
+
     void updateCoefficients() noexcept
     {
         attackStep = (float) (1.0 / (std::max (0.0005, (double) settings.attack) * sampleRate));
@@ -440,7 +450,15 @@ private:
         releaseCoeff = decayCoefficient (std::max (0.005, (double) settings.release), sampleRate);
 
         for (std::size_t o = 0; o < 3; ++o)
-            ratios[o] = std::pow (2.0, settings.osc[o].octave + settings.osc[o].detune / 1200.0);
+        {
+            const auto& osc = settings.osc[o];
+            ratios[o] = std::pow (2.0, osc.octave + (osc.semitones * 100.0 + osc.detune) / 1200.0);
+            const auto p = std::clamp (osc.pan, -1.0f, 1.0f);
+            oscPanL[o] = p > 0.0f ? 1.0f - p : 1.0f;
+            oscPanR[o] = p < 0.0f ? 1.0f + p : 1.0f;
+        }
+
+        stereoOscillators = std::any_of (settings.osc.begin(), settings.osc.end(), [] (const SynthOscillator& o) { return o.pan != 0.0f; });
 
         const auto fc = std::clamp ((double) settings.cutoff, 20.0, sampleRate * 0.45);
         const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
@@ -458,6 +476,8 @@ private:
     float releaseCoeff = 0.999f;
     float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f; // coeficientes do filtro
     std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
+    std::array<float, 3> oscPanL { 1.0f, 1.0f, 1.0f }, oscPanR { 1.0f, 1.0f, 1.0f };
+    bool stereoOscillators = false;
     float nextPan = 0.0f, nextCents = 0.0f;
     Noise noise;
     std::array<SynthVoice, 16> voices {};

@@ -18,6 +18,7 @@ enum : std::uint32_t
     evFileFlags = 0xA9,
     evChannelParams = 0xD7,
     evChannelEnvelope = 0xDA,
+    evPluginState = 0xD5,       // blob do plugin (gerador do canal ou efeito de um slot)
     evChannelPolyphony = 0xDD,
     evChannelType = 0x15,
     evChannelMixerTrackOld = 0x16, // u8, arquivos antigos
@@ -548,6 +549,11 @@ Project parseProject (std::span<const std::uint8_t> file)
                 pendingSlotPlugin.clear();
                 break;
 
+            case evPluginState:
+                if (section == Section::channel && channel().pluginState.empty())
+                    channel().pluginState.assign (e.data.begin(), e.data.end());
+                break;
+
             case evSamplePath:
                 if (section == Section::channel)
                     channel().samplePath = text (e);
@@ -630,6 +636,13 @@ Project parseProject (std::span<const std::uint8_t> file)
                     c.pan = readLE<std::int32_t> (e.data, 0);
                     c.volume = readLE<std::int32_t> (e.data, 4);
                     c.pitchCents = readLE<std::int32_t> (e.data, 8);
+
+                    if (e.data.size() >= 24)
+                    {
+                        c.modX = readLE<std::int32_t> (e.data, 12);
+                        c.modY = readLE<std::int32_t> (e.data, 16);
+                        c.filterType = readLE<std::int32_t> (e.data, 20);
+                    }
                 }
                 break;
 

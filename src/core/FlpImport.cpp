@@ -139,6 +139,99 @@ AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int
     return t;
 }
 
+bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synth)
+{
+    // versão 10/11: 20 parâmetros + 4 bools (80 B); 12+: 21 parâmetros + 4 bools (+ HQ)
+    if (state.size() < 84)
+        return false;
+
+    auto i32 = [&] (std::size_t offset) {
+        return (std::int32_t) ((std::uint32_t) state[offset] | ((std::uint32_t) state[offset + 1] << 8)
+                               | ((std::uint32_t) state[offset + 2] << 16) | ((std::uint32_t) state[offset + 3] << 24));
+    };
+
+    const auto version = i32 (0);
+
+    if (version < 10 || version > 64)
+        return false;
+
+    // parâmetro i fica em 0x04 + 4i; (i + 1) = 7·osc + campo, campos [mix, pan, shape, coarse, fine, spo, detune]
+    auto param = [&] (int osc, int field) { return i32 ((std::size_t) (4 + 4 * (7 * osc + field - 1))); };
+    const auto boolsAt = version >= 12 ? (std::size_t) 0x58 : (std::size_t) 0x54;
+    const bool am = version >= 11 && state.size() > boolsAt + 3 && state[boolsAt + 3] != 0;
+
+    // níveis (§2.2): o osc 3 leva mix3/128, o osc 2 uma parte do resto, o osc 1 o que sobra
+    const auto g3 = std::clamp (param (2, 0), 0, 128) / 128.0f;
+    const auto rest = am ? 1.0f : 1.0f - g3;
+    const auto g2 = rest * std::clamp (param (1, 0), 0, 128) / 128.0f;
+    const std::array<float, 3> levels { std::max (0.0f, rest - g2), g2, am ? 0.0f : g3 }; // AM ainda não: osc 3 mudo
+
+    for (int o = 0; o < 3; ++o)
+    {
+        auto& osc = synth.osc[(std::size_t) o];
+
+        switch (param (o, 2))
+        {
+            case 0: osc.wave = Waveform::sine; break;
+            case 1: osc.wave = Waveform::triangle; break;
+            case 2: osc.wave = Waveform::square; break;
+            case 5: osc.wave = Waveform::noise; break;
+            default: osc.wave = Waveform::saw; break; // 3 serra, 4 serra arredondada, 6 custom sem sample
+        }
+
+        const auto coarse = std::clamp (param (o, 3), -24, 24);
+        osc.octave = coarse / 12; // trunca em direção a zero; o resto vira semitons
+        osc.semitones = coarse - osc.octave * 12;
+        // o stereo detune só soa no canal direito: metade dele vale como desafinação média
+        osc.detune = std::clamp ((float) std::clamp (param (o, 4), -100, 100) + std::clamp (param (o, 6), -50, 50) * 0.5f, -100.0f, 100.0f);
+        osc.pan = std::clamp (param (o, 1), -64, 64) / 64.0f;
+        osc.level = levels[(std::size_t) o];
+    }
+
+    return true;
+}
+
+void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance)
+{
+    constexpr double twoPi = 6.283185307179586;
+    const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
+    const auto r = std::clamp (modY / 256.0, 0.0, 1.0);
+    auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // o SVF do synth: k = 1/Q
+    double hz = 20000.0;
+    resonance = 0.0f;
+
+    switch (type)
+    {
+        case 0: // Fast LP: 1 polo + realimentação; aberto com Mod X no máximo e sem ressonância
+        {
+            if (x >= 1.0 && r <= 0.0)
+                break;
+
+            const auto c = std::min ((std::pow (601.0, x) - 1.0) / 600.0, 0.999);
+            hz = x >= 1.0 ? 20000.0 : -44100.0 / twoPi * std::log (1.0 - c);
+            resonance = (float) (r * 0.9); // aproximação: a realimentação cresce com Mod Y
+            break;
+        }
+        case 1:
+        case 5: // biquad LP (LPx2 = o mesmo duas vezes)
+            hz = ((std::pow (51.0, x) - 1.0) * 0.0596 + 0.02) * 44100.0 / twoPi;
+            resonance = fromQ (r <= 0.0 ? 0.1 : (std::pow (51.0, 0.625 * r) - 1.0) * 0.4 + 0.1);
+            break;
+        case 6:
+        case 7: // SVF de Chamberlin
+        {
+            const auto f = std::min (1.0, (std::pow (26.0, x) - 1.0) * 0.04);
+            hz = 44100.0 / (twoPi / 2.0) * std::asin (f / 2.0);
+            const auto d = r <= 0.0 ? 1.0 : (r < 1.0 ? 1.0 - 0.8 * r : 0.2);
+            resonance = fromQ (1.0 / d);
+            break;
+        }
+        default: break; // BP/HP/BS: o synth só tem passa-baixas, melhor deixar aberto
+    }
+
+    cutoffHz = (float) std::clamp (hz, 20.0, 20000.0);
+}
+
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
@@ -206,8 +299,12 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.sampler.cut = true;
 
         // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
-        if (const auto& env = c.envelopes[1]; env.present && env.enabled)
+        const auto& volumeEnvelope = c.envelopes[1];
+        const auto hasVolumeEnvelope = volumeEnvelope.present && volumeEnvelope.enabled;
+
+        if (hasVolumeEnvelope)
         {
+            const auto& env = volumeEnvelope;
             const auto beats = (env.flags & 1) != 0; // sincronizado com o tempo: unidades em tempos
             auto seconds = [&] (int v) {
                 const auto t = flp::Channel::envelopeTime (v);
@@ -218,6 +315,28 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.sampler.decay = std::clamp (seconds (env.decay), 0.0f, 10.0f);
             def.sampler.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope ligado: a nota acaba
+        }
+
+        // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
+        if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
+        {
+            if (hasVolumeEnvelope)
+            {
+                def.synth.attack = def.sampler.attack;
+                def.synth.decay = def.sampler.decay;
+                def.synth.sustain = def.sampler.sustain;
+                def.synth.release = def.sampler.release;
+            }
+            else
+            {
+                // sem envelope o FL toca a nota como um portão, só com um declique curto
+                def.synth.attack = 0.002f;
+                def.synth.decay = 0.0f;
+                def.synth.sustain = 1.0f;
+                def.synth.release = 0.02f;
+            }
+
+            synthFilterFromChannel (c.modX, c.modY, c.filterType, def.synth.cutoff, def.synth.resonance);
         }
 
         // trecho do sample e start offset

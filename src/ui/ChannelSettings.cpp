@@ -200,7 +200,9 @@ public:
             row.wave.addItemList ({ "Seno", utf8 ("Triângulo"), "Serra", "Quadrada", utf8 ("Ruído") }, 1);
             row.wave.onChange = [this] { apply(); };
             knob (row.octave, -3.0, 3.0, 1.0, " oit");
+            knob (row.semitones, -11.0, 11.0, 1.0, " st");
             knob (row.detune, -100.0, 100.0, 1.0, " ct");
+            knob (row.pan, -1.0, 1.0, 0.01, "");
             knob (row.level, 0.0, 1.0, 0.01, "");
             addAndMakeVisible (row.title);
             addAndMakeVisible (row.wave);
@@ -217,9 +219,9 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Afinação", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância" };
+        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância" };
 
-        for (int i = 0; i < 9; ++i)
+        for (int i = 0; i < (int) labels.size(); ++i)
         {
             labels[(std::size_t) i].setText (utf8 (names[i]), juce::dontSendNotification);
             labels[(std::size_t) i].setJustificationType (juce::Justification::centred);
@@ -244,7 +246,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (520, 430);
+        setSize (620, 430);
     }
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
@@ -259,24 +261,23 @@ public:
         auto header = area.removeFromTop (16);
         header.removeFromLeft (150);
 
-        for (int i = 0; i < 3; ++i)
-            labels[(std::size_t) i].setBounds (header.removeFromLeft (110));
+        for (int i = 0; i < oscKnobs; ++i)
+            labels[(std::size_t) i].setBounds (header.removeFromLeft (88));
 
         for (auto& row : rows)
         {
             auto line = area.removeFromTop (64);
             row.title.setBounds (line.removeFromLeft (50).withSizeKeepingCentre (50, 24));
             row.wave.setBounds (line.removeFromLeft (100).withSizeKeepingCentre (96, 24));
-            row.octave.setBounds (line.removeFromLeft (110));
-            row.detune.setBounds (line.removeFromLeft (110));
-            row.level.setBounds (line.removeFromLeft (110));
+            for (auto* s : { &row.octave, &row.semitones, &row.detune, &row.pan, &row.level })
+                s->setBounds (line.removeFromLeft (88));
         }
 
         area.removeFromTop (10);
         auto names = area.removeFromTop (16);
         const auto w = area.getWidth() / 6;
 
-        for (int i = 3; i < 9; ++i)
+        for (int i = oscKnobs; i < (int) labels.size(); ++i)
             labels[(std::size_t) i].setBounds (names.removeFromLeft (w));
 
         for (auto* s : { &attack, &decay, &sustain, &release, &cutoff, &resonance })
@@ -288,8 +289,10 @@ private:
     {
         juce::Label title;
         juce::ComboBox wave;
-        juce::Slider octave, detune, level;
+        juce::Slider octave, semitones, detune, pan, level;
     };
+
+    static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
 
     void knob (juce::Slider& s, double lo, double hi, double step, const char* suffix)
     {
@@ -322,6 +325,8 @@ private:
             rows[o].wave.setSelectedId ((int) s.osc[o].wave + 1, juce::dontSendNotification);
             rows[o].octave.setValue (s.osc[o].octave, juce::dontSendNotification);
             rows[o].detune.setValue (s.osc[o].detune, juce::dontSendNotification);
+            rows[o].semitones.setValue (s.osc[o].semitones, juce::dontSendNotification);
+            rows[o].pan.setValue (s.osc[o].pan, juce::dontSendNotification);
             rows[o].level.setValue (s.osc[o].level, juce::dontSendNotification);
         }
 
@@ -346,7 +351,8 @@ private:
 
         for (std::size_t o = 0; o < 3; ++o)
             s.osc[o] = { (Waveform) juce::jlimit (0, 4, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
-                         (float) rows[o].detune.getValue(), (float) rows[o].level.getValue() };
+                         (float) rows[o].detune.getValue(), (float) rows[o].level.getValue(), (int) rows[o].semitones.getValue(),
+                         (float) rows[o].pan.getValue() };
 
         s.attack = (float) attack.getValue();
         s.decay = (float) decay.getValue();
@@ -381,7 +387,7 @@ private:
     bool updating = false;
     std::array<Row, 3> rows;
     juce::Slider attack, decay, sustain, release, cutoff, resonance;
-    std::array<juce::Label, 9> labels;
+    std::array<juce::Label, 11> labels;
     juce::ComboBox presetBox;
 };
 
