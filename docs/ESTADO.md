@@ -126,5 +126,7 @@ Confirmadas empiricamente nos demos:
   instâncias. A latência dos plugins entra no PDC.
 
 ## Próximo passo
-Arpejador do canal (layout em hipótese no `0xD7`), envelopes de pitch/corte do sampler, porta, ASIO
-(depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária).
+Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), 8–16 s de render
+para 2–8 min de música. Em aberto: decodificar Maximus/Soundgoodizer, Fast Dist/Filter/Flangus com
+os ajustes, mapa de parâmetros VST3 do wrapper para automação, notas "porta" individuais, ASIO
+(depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária), plugins em processo separado.
