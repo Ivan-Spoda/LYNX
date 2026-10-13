@@ -539,19 +539,24 @@ void MixerStrips::changeListenerCallback (juce::ChangeBroadcaster*)
 void MixerStrips::timerCallback()
 {
     auto& meters = engine.getMeters();
-    bool changed = false;
+    const auto showing = isShowing();
 
     for (std::size_t i = 0; i < levels.size(); ++i)
     {
         const auto peak = meters.takePeak ((int) (i / 2), (int) (i % 2));
         const auto next = juce::jmax (peak, levels[i] * 0.86f); // queda de ~20 dB/s a 30 Hz
         const auto shown = next < 0.001f ? 0.0f : next;
-        changed = changed || std::abs (shown - levels[i]) > 1e-4f;
+
+        // só o medidor que mudou é redesenhado
+        if (showing && std::abs (shown - levels[i]) > 1e-4f)
+        {
+            const auto t = (int) (i / 2);
+            const auto area = faderArea (t);
+            repaint (area.getX(), area.getY(), 16, area.getHeight());
+        }
+
         levels[i] = shown;
     }
-
-    if (changed && isShowing())
-        repaint();
 }
 
 // ---------------------------------------------------------------------------

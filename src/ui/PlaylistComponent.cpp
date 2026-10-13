@@ -270,6 +270,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
             const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
 
+            if (! g.getClipBounds().toFloat().intersects (r.expanded (1.0f)))
+                continue; // fora da área sendo redesenhada
+
             if (c.kind == ClipKind::automation)
             {
                 paintAutomationClip (g, c, r);
@@ -1271,6 +1274,13 @@ void PlaylistComponent::timerCallback()
 
     if (tick != playheadTick && isShowing())
     {
+        // só a coluna do cursor (antiga e nova) é redesenhada: projeto grande não pesa
+        auto dirty = [this] (double t) {
+            if (t >= 0.0)
+                repaint ((int) tickToX (t) - 8, 0, 16, getHeight());
+        };
+
+        dirty (playheadTick);
         playheadTick = tick;
 
         // acompanha a reprodução: se o cursor sair da tela, rola uma página
@@ -1281,9 +1291,10 @@ void PlaylistComponent::timerCallback()
         {
             scrollTicks = juce::jmax (0.0, tick - 20.0 / pixelsPerTick);
             updateScrollBars();
+            repaint();
         }
-
-        repaint();
+        else
+            dirty (tick);
     }
 }
 

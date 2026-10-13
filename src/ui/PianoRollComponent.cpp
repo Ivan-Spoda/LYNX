@@ -1088,8 +1088,14 @@ void PianoRollComponent::timerCallback()
 
     if (tick != playheadTick)
     {
+        auto dirty = [this] (double t) {
+            if (t >= 0.0)
+                repaint ((int) tickToX (t) - 7, 0, 14, getHeight());
+        };
+
+        dirty (playheadTick);
         playheadTick = tick;
-        repaint();
+        dirty (tick);
     }
 }
 } // namespace lynx
