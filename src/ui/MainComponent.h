@@ -78,6 +78,7 @@ private:
 
     AudioEngine& engine;
 
+    juce::ImageComponent logo; // o ícone do LYNX no canto da barra (como a fruta do FL)
     juce::TextButton newButton { "Novo" }, openButton { "Abrir" }, saveButton { "Salvar" }, exportButton { "Exportar" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };

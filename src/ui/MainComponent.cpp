@@ -55,6 +55,9 @@ MainComponent::MainComponent (AudioEngine& e)
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     addAndMakeVisible (browser);
     newButton.onClick = [this] { newProject(); };
+    logo.setImage (logoImage(), juce::RectanglePlacement::centred);
+    logo.setTooltip ("LYNX " JUCE_APPLICATION_VERSION_STRING);
+    addAndMakeVisible (logo);
     openButton.onClick = [this] { chooseFileToOpen(); };
     saveButton.onClick = [this] { save (false); };
     exportButton.setTooltip (utf8 ("Exportar áudio: WAV, FLAC ou OGG (Ctrl+R)"));
@@ -206,6 +209,7 @@ void MainComponent::resized()
         toolbar.removeFromLeft (gapAfter);
     };
 
+    place (logo, 30, 8);
     place (newButton, 50);
     place (openButton, 52);
     place (saveButton, 56);
