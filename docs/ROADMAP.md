@@ -31,7 +31,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Clips de áudio na playlist (forma de onda, arrastar arquivo, recorte, retomada no meio após seek)
 - [x] Importar clips de áudio do `.flp` (offsets em tempos ou em ms, detectado por clip)
 - [x] Streaming do disco para áudios longos (cache mapeado em memória + prefetch)
-- [ ] Time-stretch/resample de clips de áudio
+- [x] Time-stretch/resample de clips de áudio (WSOLA mantendo a altura ou reamostrando)
 - [x] Loop region, seleção múltipla, copiar/colar/duplicar clips, clips "únicos"
 - [x] Vários arrangements (seletor na Playlist; importados do `.flp`)
 - [x] Automação: clips na Playlist, editor de pontos com curva; volume/pan, efeitos e parâmetros de plugins
@@ -59,7 +59,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 ## Ainda por fazer (além da fase 5)
 - [x] Automação de tempo (mudança de compasso ainda não)
 - [x] Propriedades de nota (pan, afinação fina, mute, slide) importadas do `.flp` (porta ainda não)
-- [ ] Time-stretch/resample de clips de áudio
+- [x] Time-stretch/resample de clips de áudio (WSOLA mantendo a altura ou reamostrando)
 - [x] Renderizar insert para áudio (congelar)
 
 ## Fase 5: escalar

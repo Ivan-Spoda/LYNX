@@ -42,6 +42,13 @@ Atualizado em 2026-10-13.
 - **Segurança**: "*" no título, "salvar alterações?", autosave a cada 2 min e salvamento de emergência
   se travar (`%APPDATA%\LYNX\autosave`).
 - **Interface mais leve**: só o cursor e os medidores que mudaram são redesenhados.
+- **Fiel ao FL (REA rodada 3, `docs/analise/REA_rodada3.md`)**: curva de volume do canal (78% = -5,2 dB),
+  swing com a fórmula do FL (+ mix por canal), ADSR do sampler importado do envelope de volume (`0xDA`),
+  time-stretch (reamostrando ou mantendo a altura com WSOLA), nota-raiz, cut groups, canal mono,
+  trecho/start offset do sample. Os 30 primeiros demos exportam sem erro.
+- **Synth interno de 3 osciladores** com ADSR, filtro ressonante e presets (808, Reese, pad...).
+- **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
+- **Compasso** da música (menu da pattern), importado do `.flp`.
 
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
@@ -95,5 +102,5 @@ Confirmadas empiricamente nos demos:
   instâncias. Latência de plugin (PDC) ainda não é compensada.
 
 ## Próximo passo
-Importar envelopes/ajustes do sampler do `.flp` (análise REA rodada 3 em andamento), time-stretch de
-clips de áudio, ASIO (depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária).
+Arpejador do canal (layout em hipótese no `0xD7`), envelopes de pitch/corte do sampler, porta, ASIO
+(depende de decidir a licença do SDK da Steinberg: GPLv3 ou proprietária).
