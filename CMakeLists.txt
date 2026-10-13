@@ -63,6 +63,7 @@ if(LYNX_BUILD_APP)
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
         src/engine/ClapFormat.cpp
+        src/engine/MidiFileIo.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
         src/ui/PianoRollComponent.cpp

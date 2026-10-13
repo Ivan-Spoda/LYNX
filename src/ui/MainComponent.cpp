@@ -2,6 +2,7 @@
 
 #include "engine/Text.h"
 
+#include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
@@ -538,7 +539,7 @@ void MainComponent::newProject()
 void MainComponent::chooseFileToOpen()
 {
     fileChooser = std::make_unique<juce::FileChooser> ("Abrir projeto", currentFile.getParentDirectory(),
-                                                       juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp");
+                                                       juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.mid;*.midi");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this] (const juce::FileChooser& chooser) {
@@ -550,6 +551,27 @@ void MainComponent::chooseFileToOpen()
 void MainComponent::openFile (const juce::File& file)
 {
     juce::String error;
+
+    if (file.hasFileExtension ("mid;midi"))
+    {
+        auto song = MidiFileIo::loadSong (file, error);
+
+        if (! song)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível abrir"), error);
+            return;
+        }
+
+        engine.stop();
+        engine.rewind();
+        engine.setSong (std::move (*song));
+        currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
+        projectName = file.getFileNameWithoutExtension();
+
+        if (auto* window = getTopLevelComponent())
+            window->setName ("LYNX - " + projectName + " (importado de MIDI)");
+        return;
+    }
 
     if (file.hasFileExtension ("flp"))
     {

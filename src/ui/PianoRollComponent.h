@@ -89,6 +89,9 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox snapBox;
+    juce::TextButton midiButton { "MIDI" };
+    std::unique_ptr<juce::FileChooser> chooser;
+    void showMidiMenu();
     juce::Label hintLabel;
 
     double pixelsPerTick = 24.0 / ticksPerStep; // 24 px por step

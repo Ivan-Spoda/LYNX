@@ -1,6 +1,7 @@
 #include "ui/PianoRollComponent.h"
 
 #include "core/NoteEdit.h"
+#include "engine/MidiFileIo.h"
 #include "engine/Text.h"
 #include "ui/Theme.h"
 
@@ -68,6 +69,12 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     snapBox.setMouseClickGrabsKeyboardFocus (false);
     snapBox.onChange = [this] { repaint(); };
     addAndMakeVisible (snapBox);
+
+    midiButton.setTooltip (utf8 ("Importar um .mid para este canal ou exportar a pattern"));
+    midiButton.setWantsKeyboardFocus (false);
+    midiButton.setMouseClickGrabsKeyboardFocus (false);
+    midiButton.onClick = [this] { showMidiMenu(); };
+    addAndMakeVisible (midiButton);
 
     hintLabel.setFont (juce::FontOptions (11.0f));
     hintLabel.setColour (juce::Label::textColourId, theme::text.withAlpha (0.45f));
@@ -154,7 +161,8 @@ void PianoRollComponent::updateScrollBars()
 void PianoRollComponent::resized()
 {
     snapBox.setBounds (keyboardWidth + 4, 3, 130, toolbarHeight - 6);
-    hintLabel.setBounds (snapBox.getRight() + 10, 0, getWidth() - snapBox.getRight() - 14, toolbarHeight);
+    midiButton.setBounds (snapBox.getRight() + 6, 3, 50, toolbarHeight - 6);
+    hintLabel.setBounds (midiButton.getRight() + 10, 0, getWidth() - midiButton.getRight() - 14, toolbarHeight);
     hBar.setBounds (keyboardWidth, getHeight() - scrollBarSize, getWidth() - keyboardWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize,
                     getHeight() - headerHeight - scrollBarSize - velocityHeight);
@@ -918,6 +926,54 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
     }
 
     return false;
+}
+
+void PianoRollComponent::showMidiMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (utf8 ("Importar .mid para este canal..."), [this] {
+        chooser = std::make_unique<juce::FileChooser> ("Importar MIDI", juce::File(), "*.mid;*.midi");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc) {
+            if (! fc.getResult().existsAsFile())
+                return;
+
+            juce::String error;
+            auto notes = MidiFileIo::loadNotes (fc.getResult(), engine.getSelectedChannel(), error);
+
+            if (! notes)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", error);
+                return;
+            }
+
+            std::vector<int> added;
+            editNotes ([&] (Pattern& p) { added = noteedit::paste (p, *notes, 0); });
+            setSelection (added);
+            sortNotes();
+            scrollToNotes();
+        });
+    });
+    menu.addItem (utf8 ("Exportar a pattern como .mid..."), [this] {
+        const auto& song = engine.getSong();
+        const auto name = juce::String::fromUTF8 (song.patterns[(std::size_t) song.currentPattern].name.c_str());
+        chooser = std::make_unique<juce::FileChooser> ("Exportar MIDI", juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (name + ".mid"),
+                                                       "*.mid");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this] (const juce::FileChooser& fc) {
+            auto file = fc.getResult();
+
+            if (file == juce::File())
+                return;
+
+            if (! file.hasFileExtension ("mid;midi"))
+                file = file.withFileExtension (".mid");
+
+            juce::String error;
+
+            if (! MidiFileIo::savePattern (engine.getSong(), engine.getSong().currentPattern, file, error))
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", error);
+        });
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&midiButton));
 }
 
 // --- outros ------------------------------------------------------------------

@@ -3,6 +3,7 @@
 #include "core/Effects.h"
 #include "engine/AudioEngine.h"
 #include "engine/Exporter.h"
+#include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
 #include "engine/Text.h"
 #include "ui/AutomationUi.h"
@@ -182,7 +183,30 @@ private:
         offline.undo();
         const auto recordUndoOk = offline.getSong().patterns[0].notes.size() == notesBefore;
 
-        const auto ok = audioOk && projectOk && undoOk && recordOk && recordUndoOk;
+        // MIDI: exportar a pattern e importar de volta dá as mesmas notas
+        bool midiOk = false;
+        {
+            auto source = lynx::Song::makeDefault();
+            source.patterns[0].notes.push_back ({ 1000, 480, 4, 67, 0.5f });
+            source.patterns[0].sortNotes();
+            const auto midiFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-selftest.mid");
+            juce::String midiError;
+            const auto saved = lynx::MidiFileIo::savePattern (source, 0, midiFile, midiError);
+            const auto song = saved ? lynx::MidiFileIo::loadSong (midiFile, midiError) : std::nullopt;
+            midiFile.deleteFile();
+
+            if (song && song->patterns.size() == 1 && song->patterns[0].notes.size() == source.patterns[0].notes.size()
+                && std::abs (song->bpm - source.bpm) < 0.01)
+            {
+                midiOk = true;
+                const auto& a = source.patterns[0].notes;
+                const auto& b = song->patterns[0].notes;
+                for (std::size_t i = 0; i < a.size(); ++i)
+                    midiOk = midiOk && a[i].start == b[i].start && a[i].key == b[i].key && a[i].length == b[i].length;
+            }
+        }
+
+        const auto ok = audioOk && projectOk && undoOk && recordOk && recordUndoOk && midiOk;
 
         juce::String report;
         report << "conexoes=" << offline.getNumGraphConnections() << "\n"
@@ -190,6 +214,7 @@ private:
                << "projeto=" << (projectOk ? "OK" : "ERRO " + error) << "\n"
                << "desfazer=" << (undoOk ? "OK" : "ERRO") << "\n"
                << "gravacao=" << (recordOk && recordUndoOk ? "OK" : "ERRO") << "\n"
+               << "midi=" << (midiOk ? "OK" : "ERRO") << "\n"
                << "resultado=" << (ok ? "OK" : "FALHOU") << "\n";
 
         if (reportPath.isNotEmpty())
