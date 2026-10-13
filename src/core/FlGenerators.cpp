@@ -970,7 +970,7 @@ bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size
 
 // forma de onda pelo espectro: fundamental dominante -> seno; só ímpares -> quadrada (queda lenta) ou
 // triângulo (queda rápida, ~1/n²); o resto -> serra
-Waveform waveFromSpectrum (const std::array<double, 128>& e)
+[[maybe_unused]] Waveform waveFromSpectrum (const std::array<double, 128>& e)
 {
     double total = 0.0, odd = 0.0, peak = 0.0;
     for (std::size_t n = 0; n < e.size(); ++n)
@@ -1044,14 +1044,21 @@ bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
     const auto transpose = (double) (int) ((a[5] - 0.5f) * 48.0f) + (double) (int) ((a[6] - 0.5f) * 200.0f) / 100.0;
-    for (std::size_t k = 0; k < active.size() && k < 3; ++k)
+    // espectro médio dos geradores ativos (energia por harmônica × Mix²) no oscilador "Harmônicas"; as fases
+    // não são lidas (0). Escala: a harmônica mais forte vale 1 (o nível absoluto do Morphine não foi medido)
+    std::array<double, 128> energy {};
+    for (const auto g : active)
+        for (std::size_t n = 0; n < energy.size(); ++n)
+            energy[n] += gens[(std::size_t) g].energy[n] / std::max (1e-12, gens[(std::size_t) g].weight)
+                         * (double) gens[(std::size_t) g].mix * gens[(std::size_t) g].mix;
+    const auto strongest = *std::max_element (energy.begin(), energy.end());
+    if (strongest > 0.0)
     {
-        const auto& g = gens[(std::size_t) active[k]];
-        s.osc[k] = { waveFromSpectrum (g.energy), 0, 0.0f, std::max (0.05f, g.mix) };
-        setPitch (s.osc[k], transpose);
+        for (std::size_t n = 0; n < energy.size(); ++n)
+            s.spectrum[n] = (float) std::sqrt (energy[n] / strongest);
+        s.osc[0] = { Waveform::spectral, 0, 0.0f, 1.0f };
     }
-    if (active.empty())
-        setPitch (s.osc[0], transpose);
+    setPitch (s.osc[0], transpose);
 
     // envelope mestre (s): A 15·v^3,5, D 30·v³, S v², R 10·v³ (mín. 3 ms)
     s.attack = (float) (15.0 * std::pow ((double) a[9], 3.5));
