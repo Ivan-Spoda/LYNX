@@ -941,7 +941,7 @@ void MainComponent::showHelp()
         "PIANO ROLL\n"
         "  clique cria nota (ou acorde, no seletor), arrastar move, borda direita muda a duração\n"
         "  clique direito apaga   Ctrl+arrastar seleciona   Ctrl+clique soma à seleção   Shift+arrastar copia\n"
-        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Ctrl+Q quantizar   Ctrl+M mutar   Delete apagar\n"
+        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Ctrl+Q quantizar   Ctrl+M mutar   Ctrl+P porta   Delete apagar\n"
         "  setas movem (Shift = oitava/compasso)   Alt desliga o snap   Ctrl+roda zoom\n"
         "  faixa de baixo: velocity / pan / afinação   botão Slide: notas que deslizam\n\n"
         "PLAYLIST\n"

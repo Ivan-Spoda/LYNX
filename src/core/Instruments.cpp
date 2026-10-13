@@ -438,12 +438,14 @@ public:
                 lfos[i].start (v.lfo[i]);
     }
 
-    // portamento: a voz parte de `from` e desliza até `to` no tempo de porta
+    // portamento: a voz parte de `from` e desliza até `to` no tempo de porta (porta do canal,
+    // invertido pela nota)
     void glide (SynthVoice& v, double from, double to) noexcept
     {
         const auto steps = (int) (settings.portaBeats * 60.0 / bpm.load() * sampleRate);
+        const auto on = settings.porta != nextPorta;
 
-        if (settings.portaBeats <= 0.0f || from <= 0.0 || steps < 1)
+        if (! on || settings.portaBeats <= 0.0f || from <= 0.0 || steps < 1)
         {
             v.phaseDelta = to;
             v.glideLeft = 0;
@@ -490,6 +492,7 @@ public:
                 voicePan (nextPan, v.panL, v.panR);
                 startModulation (v, nextPan);
                 nextPan = nextCents = 0.0f;
+        nextPorta = false;
                 return;
             }
         }
@@ -518,12 +521,14 @@ public:
         voicePan (nextPan, target->panL, target->panR);
         startModulation (*target, nextPan);
         nextPan = nextCents = 0.0f;
+        nextPorta = false;
     }
 
-    void setNextNoteExpression (float pan, float cents) noexcept override
+    void setNextNoteExpression (float pan, float cents, bool porta) noexcept override
     {
         nextPan = pan;
         nextCents = cents;
+        nextPorta = porta;
     }
 
     void slideTo (int key, float cents, float samples) noexcept override
@@ -766,6 +771,7 @@ private:
     std::array<float, 3> oscPanL { 1.0f, 1.0f, 1.0f }, oscPanR { 1.0f, 1.0f, 1.0f };
     bool stereoOscillators = false;
     float nextPan = 0.0f, nextCents = 0.0f;
+    bool nextPorta = false;
     Noise noise;
     std::array<SynthVoice, 16> voices {};
 };
@@ -830,6 +836,8 @@ public:
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
         regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
+        porta.store (s.porta);
+        portaBeats.store (std::max (0.0f, s.portaBeats));
         cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         filterType.store (std::clamp (s.filterType, 0, 3));
@@ -933,6 +941,23 @@ public:
         target->fadeOut = nextClip[3];
         nextClip = {};
         target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
+
+        // portamento (porta do canal, invertido pela nota): parte da altura da nota anterior
+        if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0 && ! stretched)
+        {
+            const auto steps = (int) (portaBeats.load() * 60.0 / bpm.load() * sampleRate);
+            const auto from = std::abs (lastRate) * (target->rate < 0.0 ? -1.0 : 1.0);
+
+            if (steps >= 1 && from != 0.0)
+            {
+                target->glideRatio = std::pow (target->rate / from, 1.0 / steps);
+                target->glideLeft = steps;
+                target->rate = from;
+            }
+        }
+
+        if (! clipMode)
+            lastRate = target->glideLeft > 0 ? target->rate * std::pow (target->glideRatio, target->glideLeft) : target->rate;
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
         target->stage = attackSeconds > 0.0f ? 0 : 1;
@@ -943,12 +968,14 @@ public:
             if (lfos[i].active && ! clipMode)
                 lfos[i].start (target->lfo[i]);
         nextPan = nextCents = 0.0f;
+        nextPorta = false;
     }
 
-    void setNextNoteExpression (float pan, float cents) noexcept override
+    void setNextNoteExpression (float pan, float cents, bool porta) noexcept override
     {
         nextPan = pan;
         nextCents = cents;
+        nextPorta = porta;
     }
 
     void setNextClipFades (float elapsed, float remaining, float in, float out) noexcept override
@@ -1172,6 +1199,9 @@ private:
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
+    std::atomic<bool> porta { false };
+    std::atomic<float> portaBeats { 0.125f };
+    double lastRate = 0.0; // velocidade de leitura da última nota (de onde o porta parte)
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
     SvfCoefficients sharedFilter;
@@ -1209,6 +1239,7 @@ private:
     SettingsMailbox<SliceTable> sliceMailbox;
     SliceTable slices; // cópia da thread de áudio
     float nextPan = 0.0f, nextCents = 0.0f;
+    bool nextPorta = false;
     std::atomic<bool> reverse { false }, cut { false };
 };
 } // namespace

@@ -938,6 +938,7 @@ TEST (synth_porta_glides_and_am_modulates)
     s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
     s.cutoff = 20000.0f;
     s.mono = true;
+    s.porta = true;
     s.portaBeats = 1.0f;
     auto inst = make (s);
     std::vector<float> l (96000), r (96000);
@@ -1009,6 +1010,38 @@ TEST (channel_lfo_vibrato_and_tremolo)
     for (std::size_t i = 1; i < 6000; ++i)
         firstQuarter += (v[i - 1] < 0.0f) != (v[i] < 0.0f);
     CHECK (firstQuarter > 112);
+}
+
+TEST (sampler_porta_glides_from_previous_note)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    data->left.resize (96000);
+    for (std::size_t i = 0; i < data->left.size(); ++i)
+        data->left[i] = 0.5f * (float) std::sin (6.283185307 * 220.0 * (double) i / 48000.0);
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.cut = true;
+    c.sampler.porta = true;
+    c.sampler.portaBeats = 1.0f; // 0,5 s a 120 BPM
+    inst->configure (c, 120.0);
+    std::vector<float> l (24000), r (24000);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 2400, 1.0f, 1.0f);
+    inst->noteOn (72, 1.0f); // uma oitava acima: começa em 220 Hz e sobe
+    std::fill (l.begin(), l.end(), 0.0f);
+    inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+    auto crossings = [&] (std::size_t from, std::size_t to) {
+        int n = 0;
+        for (auto i = from + 1; i < to; ++i)
+            n += (l[i - 1] < 0.0f) != (l[i] < 0.0f);
+        return n;
+    };
+    const auto start = crossings (600, 2400);     // 37,5 ms ainda perto de 220 Hz: ~17 cruzamentos (440 Hz daria 33)
+    const auto end = crossings (21600, 24000);    // 50 ms no fim do deslize: perto de 440 Hz (~44; 220 Hz daria 22)
+    CHECK (start < 22);
+    CHECK (end > 36);
 }
 
 TEST (sampler_channel_filter_darkens_and_bypasses_when_open)

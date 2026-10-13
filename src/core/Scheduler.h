@@ -24,6 +24,7 @@ struct NoteEvent
     float pan = 0.0f;          // -1..1, da nota
     float cents = 0.0f;        // afinação fina da nota
     float slideSamples = 0.0f; // slide: duração do deslize
+    bool porta = false;        // a nota inverte o porta do canal
     // clips de áudio: fades (em samples) e a posição dentro do clip quando a nota começa
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f;
 };

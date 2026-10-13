@@ -35,8 +35,9 @@ public:
     virtual void slideTo (int /*key*/, float /*cents*/, float /*samples*/) noexcept {}
     // Clip de áudio: fades e posição no clip da próxima nota (antes do noteOn), em samples.
     virtual void setNextClipFades (float /*elapsed*/, float /*remaining*/, float /*fadeIn*/, float /*fadeOut*/) noexcept {}
-    // Pan e afinação fina da próxima nota (chamado logo antes do noteOn). Quem não suporta ignora.
-    virtual void setNextNoteExpression (float /*pan*/, float /*cents*/) noexcept {}
+    // Pan, afinação fina e "porta" (inverte o porta do canal) da próxima nota (chamado logo antes
+    // do noteOn). Quem não suporta ignora.
+    virtual void setNextNoteExpression (float /*pan*/, float /*cents*/, bool /*porta*/ = false) noexcept {}
     // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
     // forma que a thread de áudio leia sem esperar.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}

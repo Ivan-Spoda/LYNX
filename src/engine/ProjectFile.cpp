@@ -278,8 +278,10 @@ juce::String toJson (const Song& song)
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
-            if (c.synth.portaBeats > 0.0f)
-                synth->setProperty ("porta", c.synth.portaBeats);
+            if (c.synth.porta)
+                synth->setProperty ("porta", true);
+            if (c.synth.portaBeats != SynthSettings {}.portaBeats)
+                synth->setProperty ("portaTime", c.synth.portaBeats);
             if (c.synth.am)
                 synth->setProperty ("am", true);
 
@@ -309,6 +311,10 @@ juce::String toJson (const Song& song)
             }
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
+            if (c.sampler.porta)
+                sampler->setProperty ("porta", true);
+            if (c.sampler.portaBeats != SamplerSettings {}.portaBeats)
+                sampler->setProperty ("portaTime", c.sampler.portaBeats);
             sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             writeLfos (*sampler, c.sampler.lfo);
@@ -344,12 +350,14 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, afinação fina, mutada] só quando não são o padrão
-            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide)
+            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
                 note.add (juce::roundToInt (n.finePitch * 10.0f) / 10.0);
                 note.add (n.muted);
                 note.add (n.slide);
+                if (n.porta)
+                    note.add (true);
             }
 
             notes.add (note);
@@ -602,7 +610,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);
-                def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("porta", 0.0));
+                def.synth.porta = (bool) s.getProperty ("porta", false);
+                def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
                 def.synth.am = (bool) s.getProperty ("am", false);
 
                 readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
@@ -630,6 +639,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
                 def.sampler.reverse = (bool) s.getProperty ("reverse", false);
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
+                def.sampler.porta = (bool) s.getProperty ("porta", false);
+                def.sampler.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SamplerSettings {}.portaBeats));
 
                 if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {
@@ -674,6 +685,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         note.finePitch = juce::jlimit (-120.0f, 120.0f, (float) (double) n[6]);
                         note.muted = (bool) n[7];
                         note.slide = n.size() >= 9 && (bool) n[8];
+                        note.porta = n.size() >= 10 && (bool) n[9];
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

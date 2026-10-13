@@ -156,7 +156,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     hintLabel.setFont (juce::FontOptions (11.0f));
     hintLabel.setColour (juce::Label::textColourId, theme::text.withAlpha (0.45f));
     hintLabel.setText (utf8 ("Ctrl+arrastar seleciona · Ctrl+clique soma · Shift+arrastar copia · Del apaga · Ctrl+C/X/V copiar · "
-                             "Ctrl+B duplicar · Ctrl+Q quantizar · Ctrl+M mutar · setas movem (Shift = oitava)"),
+                             "Ctrl+B duplicar · Ctrl+Q quantizar · Ctrl+M mutar · Ctrl+P porta · setas movem (Shift = oitava)"),
                        juce::dontSendNotification);
     hintLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (hintLabel);
@@ -433,6 +433,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.setColour (selected ? juce::Colours::white : juce::Colours::black.withAlpha (0.5f));
             g.drawRoundedRectangle (r, 2.5f, selected ? 1.5f : 1.0f);
 
+            if (n.porta) // porta: traço inclinado no começo, como o glide
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.6f));
+                g.drawLine (r.getX() + 2.0f, r.getBottom() - 2.0f, r.getX() + 9.0f, r.getY() + 2.0f, 2.0f);
+            }
+
             if (n.slide) // seta de slide no começo da nota
             {
                 juce::Path arrow;
@@ -678,6 +684,22 @@ void PianoRollComponent::applyVelocity (int fromX, int toX, int y)
             for (auto i : hits)
                 setLaneValue (p.notes[(std::size_t) i], value);
         });
+}
+
+void PianoRollComponent::togglePorta()
+{
+    const auto target = selectionOrAll();
+
+    if (target.empty())
+        return;
+
+    // como o mutar: se alguma não tem porta, liga em todas; senão desliga
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto porta = std::any_of (target.begin(), target.end(), [&notes] (int i) { return ! notes[(std::size_t) i].porta; });
+    editNotes ([&target, porta] (Pattern& p) {
+        for (auto i : target)
+            p.notes[(std::size_t) i].porta = porta;
+    });
 }
 
 void PianoRollComponent::toggleMute()
@@ -1108,6 +1130,12 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
     if (cmd && code == 'M')
     {
         toggleMute();
+        return true;
+    }
+
+    if (cmd && code == 'P')
+    {
+        togglePorta();
         return true;
     }
 

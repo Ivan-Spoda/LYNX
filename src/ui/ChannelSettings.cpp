@@ -388,9 +388,11 @@ public:
 
         reverse.setButtonText (utf8 ("Ao contrário"));
         cut.setButtonText ("Cut itself");
+        porta.setButtonText ("Porta");
+        porta.setTooltip (utf8 ("Portamento: a nota parte da altura da anterior (com Cut itself, o glide do 808)"));
         cut.setTooltip (utf8 ("Uma nota nova corta a anterior (bom para hi-hats e 808)"));
 
-        for (auto* b : { &reverse, &cut })
+        for (auto* b : { &reverse, &cut, &porta })
         {
             addAndMakeVisible (b);
             b->onClick = [this] { apply(); };
@@ -443,7 +445,8 @@ public:
         modulationButton.setBounds (area.removeFromBottom (26).withSizeKeepingCentre (260, 26));
         area.removeFromTop (6);
         reverse.setBounds (area.removeFromLeft (150).removeFromTop (24));
-        cut.setBounds (area.removeFromLeft (150).removeFromTop (24));
+        cut.setBounds (area.removeFromLeft (130).removeFromTop (24));
+        porta.setBounds (area.removeFromLeft (100).removeFromTop (24));
     }
 
     int getChannel() const noexcept { return channel; }
@@ -488,6 +491,7 @@ private:
             release.setValue (c->sampler.release, juce::dontSendNotification);
             reverse.setToggleState (c->sampler.reverse, juce::dontSendNotification);
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
+            porta.setToggleState (c->sampler.porta, juce::dontSendNotification);
             updating = false;
 
             if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
@@ -512,6 +516,7 @@ private:
         s.release = (float) release.getValue();
         s.reverse = reverse.getToggleState();
         s.cut = cut.getToggleState();
+        s.porta = porta.getToggleState();
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
@@ -542,7 +547,7 @@ private:
     juce::Slider pitch, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
     juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
-    juce::ToggleButton reverse, cut, keepPitch;
+    juce::ToggleButton reverse, cut, keepPitch, porta;
     juce::ComboBox filterType;
     juce::TextButton modulationButton;
 };
@@ -586,7 +591,7 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Porta" };
+        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta" };
 
         for (int i = 0; i < (int) labels.size(); ++i)
         {
@@ -623,7 +628,11 @@ public:
 
         knob (porta, 0.0, 2.0, 0.005, " t");
         porta.setSkewFactorFromMidPoint (0.25);
-        porta.setTooltip (utf8 ("Portamento em tempos: a nota nova desliza a partir da anterior (0 = desligado)"));
+        porta.setTooltip (utf8 ("Tempo do portamento, em tempos (vale para o botão Porta e para as notas com porta)"));
+        portaOn.setButtonText ("Porta");
+        portaOn.setTooltip (utf8 ("Portamento: a nota nova desliza a partir da anterior (notas marcadas com porta invertem)"));
+        portaOn.onClick = [this] { apply(); };
+        addAndMakeVisible (portaOn);
 
         mono.setButtonText ("Mono");
         mono.setTooltip (utf8 ("Uma voz só: a nota nova assume a que está soando (baixos e leads)"));
@@ -646,6 +655,7 @@ public:
         presetBox.setBounds (topRow.removeFromLeft (200));
         mono.setBounds (topRow.removeFromLeft (90).withTrimmedLeft (16));
         am.setBounds (topRow.removeFromLeft (60));
+        portaOn.setBounds (topRow.removeFromLeft (70));
         filterTypeBox.setBounds (topRow.removeFromRight (140));
         area.removeFromTop (6);
         auto header = area.removeFromTop (16);
@@ -689,7 +699,7 @@ private:
     static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
 
     juce::TextButton modulationButton;
-    juce::ToggleButton mono, am;
+    juce::ToggleButton mono, am, portaOn;
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
 
@@ -738,6 +748,7 @@ private:
         mono.setToggleState (s.mono, juce::dontSendNotification);
         am.setToggleState (s.am, juce::dontSendNotification);
         porta.setValue (s.portaBeats, juce::dontSendNotification);
+        portaOn.setToggleState (s.porta, juce::dontSendNotification);
         filterTypeBox.setSelectedId (s.filterType + 1, juce::dontSendNotification);
 
         updating = false;
@@ -767,6 +778,7 @@ private:
         s.mono = mono.getToggleState();
         s.am = am.getToggleState();
         s.portaBeats = (float) porta.getValue();
+        s.porta = portaOn.getToggleState();
         s.filterType = juce::jlimit (0, 3, filterTypeBox.getSelectedId() - 1);
 
         if (s == current()->synth)

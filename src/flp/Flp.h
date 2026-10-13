@@ -186,6 +186,7 @@ struct Note
     std::uint8_t repeats = 0;
 
     bool muted() const noexcept { return (extra & 0x20) != 0; }
+    bool porta() const noexcept { return (extra & 0x10) != 0; }
     bool slide() const noexcept { return (flags & 0xF) == 8; }
 };
 

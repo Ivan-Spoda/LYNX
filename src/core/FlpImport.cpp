@@ -315,11 +315,12 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         def.synth.mono = c.monoFlag || c.maxVoices == 1;
 
-        // porta do canal: n = round((27^(v/1024) - 1) * 48/26) ticks de 1/192 tempo (REA_rodada6 §4)
-        if (c.portaFlag)
+        // porta do canal e tempo de slide: n = round((27^(v/1024) - 1) * 48/26) ticks de 1/192 tempo
+        // (REA_rodada6 §4); o tempo vale também para as notas com porta próprio
         {
             const auto ticks = std::round ((std::pow (27.0, std::clamp (c.slideTime, 0, 1660) / 1024.0) - 1.0) * 48.0 / 26.0);
-            def.synth.portaBeats = (float) std::max (1.0, ticks) / 192.0f;
+            def.synth.portaBeats = def.sampler.portaBeats = (float) std::max (1.0, ticks) / 192.0f;
+            def.synth.porta = def.sampler.porta = c.portaFlag;
         }
 
         // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
@@ -626,6 +627,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             note.finePitch = (float) std::clamp ((int) n.finePitch - 120, -120, 120);
             note.muted = n.muted();
             note.slide = n.slide();
+            note.porta = n.porta();
             p.notes.push_back (note);
         }
 

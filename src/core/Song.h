@@ -108,6 +108,8 @@ struct SamplerSettings
     float regionStart = 0.0f;  // trecho tocado do sample (frações 0..1)
     float regionEnd = 1.0f;
     std::vector<float> slices; // fatias (inícios em frações): a tecla 60 + i toca a fatia i, na altura original
+    bool porta = false;        // portamento (com "cut", o glide do 808): a nota parte da altura da anterior
+    float portaBeats = 0.125f; // tempo do deslize, em tempos
     float cutoff = 20000.0f;   // filtro do canal (Hz); passa-baixas em 20 kHz sem ressonância = desligado
     float resonance = 0.0f;    // 0..1
     int filterType = 0;        // 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa
@@ -167,7 +169,8 @@ struct SynthSettings
     ModEnvelope pitchEnv;    // desloca a afinação (semitons)
     std::array<ChannelLfo, lfoTargets> lfo {}; // por LfoTarget
     bool mono = false;       // uma voz só: a nota nova assume a voz que está soando (sem estalo)
-    float portaBeats = 0.0f; // > 0: portamento, a nota nova desliza da anterior neste tempo (em tempos)
+    bool porta = false;       // portamento: a nota nova desliza a partir da anterior
+    float portaBeats = 0.125f; // tempo do deslize, em tempos (o padrão do FL: meio step)
     bool am = false;         // osc 3 modula a amplitude de osc 1 + osc 2 (o "AM" do 3x Osc)
 
     bool operator== (const SynthSettings&) const = default;
@@ -273,6 +276,7 @@ struct Note
     float finePitch = 0.0f;   // centésimos de semitom, -120..120
     bool muted = false;       // nota desligada (não toca, continua na pattern)
     bool slide = false;       // desliza a nota que está soando até esta altura (sem reatacar), como no FL
+    bool porta = false;       // inverte o porta do canal nesta nota (a nota desliza da anterior; como no FL)
 };
 
 // Atraso de swing (fórmula do FL, docs/analise/REA_rodada3.md §3): só notas cujo step mais

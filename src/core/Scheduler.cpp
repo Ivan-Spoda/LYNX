@@ -67,6 +67,7 @@ void schedulePatternLoop (const Pattern& pattern,
         on.velocity = note.velocity;
         on.pan = note.pan;
         on.cents = note.finePitch;
+        on.porta = note.porta;
         const auto mix = channels != nullptr && note.channel >= 0 && note.channel < (int) channels->size()
                              ? (*channels)[(std::size_t) note.channel].swingMix
                              : 1.0f;
@@ -207,6 +208,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.velocity = note.velocity;
             e.pan = note.pan;
             e.cents = note.finePitch;
+            e.porta = note.porta;
 
             if (note.slide)
             {

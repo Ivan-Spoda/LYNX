@@ -16,7 +16,7 @@ namespace lynx
 //  - Alt desliga o snap; roda do mouse rola, Shift+roda rola na horizontal, Ctrl+roda dá zoom
 //  - teclado à esquerda toca a nota
 //  - a faixa de baixo edita velocity, pan ou afinação fina (combo no canto dela)
-//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Ctrl+M (mutar), Esc, setas (Shift = oitava/compasso)
+//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Ctrl+M (mutar), Ctrl+P (porta), Esc, setas (Shift = oitava/compasso)
 // Notas de outros canais aparecem apagadas ao fundo, como "ghost notes" no FL.
 class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener,
@@ -84,6 +84,7 @@ private:
     void setLaneValue (Note& n, float value) const; // inverso
     bool laneIsBipolar() const;
     void toggleMute();
+    void togglePorta(); // notas com porta deslizam da nota anterior (inverte o porta do canal)
 
     void deleteSelection();
     void copySelection();

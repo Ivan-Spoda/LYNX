@@ -593,7 +593,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         {
             if (! c.muted)
             {
-                instrument.setNextNoteExpression (e.pan, e.cents);
+                instrument.setNextNoteExpression (e.pan, e.cents, e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
