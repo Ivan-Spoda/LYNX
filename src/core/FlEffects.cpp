@@ -1,11 +1,13 @@
 #include "core/FlEffects.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 
 #include "core/Effects.h"
 #include "core/FlpImport.h"
+#include "flp/Flp.h"
 
 namespace lynx
 {
@@ -270,36 +272,76 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
 
     auto slot = makeEffectSlot (*kind);
 
+    // compara sem caixa (presets do FL 3: "Fruity delay 2")
+    std::string lower = pluginName;
+    std::transform (lower.begin(), lower.end(), lower.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+    auto is = [&] (const char* canonical) {
+        std::string other = canonical;
+        std::transform (other.begin(), other.end(), other.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+        return lower == other;
+    };
+
     if (*kind == EffectKind::filter)
         slot.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar
 
-    if (pluginName == "Fruity Soft Clipper")
+    if (is ("Fruity Soft Clipper"))
         slot.params[0] = 0.15f; // drive baixo
 
-    if (pluginName == "Fruity Parametric EQ 2")
+    if (is ("Fruity Parametric EQ 2"))
         parametricEq2 (state, slot);
-    else if (pluginName == "Fruity Limiter")
+    else if (is ("Fruity Limiter"))
         limiter (state, slot);
-    else if (pluginName == "Fruity Reeverb 2")
+    else if (is ("Fruity Reeverb 2"))
         reeverb2 (state, slot, bpm);
-    else if (pluginName == "Fruity Delay 2")
+    else if (is ("Fruity Delay 2"))
         delay2 (state, slot);
-    else if (pluginName == "Fruity Delay 3")
+    else if (is ("Fruity Delay 3"))
         delay3 (state, slot);
-    else if (pluginName == "Fruity Compressor")
+    else if (is ("Fruity Compressor"))
         compressor (state, slot);
-    else if (pluginName == "Fruity Balance")
+    else if (is ("Fruity Balance"))
         balance (state, slot);
-    else if (pluginName == "Fruity PanOMatic")
+    else if (is ("Fruity PanOMatic"))
         panOMatic (state, slot);
-    else if (pluginName == "Fruity Stereo Shaper")
+    else if (is ("Fruity Stereo Shaper"))
         stereoShaper (state, slot);
-    else if (pluginName == "Fruity Phase Inverter")
+    else if (is ("Fruity Phase Inverter"))
     {
         slot.params[2] = utilityMatrixValue (-1.0); // inverte os dois lados
         slot.params[5] = utilityMatrixValue (-1.0);
     }
 
     return slot;
+}
+std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& bytes, double bpm)
+{
+    try
+    {
+        // o preset de efeito tem o mesmo formato do de canal: nome do plugin (0xC9) e estado (0xD5)
+        const auto project = flp::parseProject (bytes, true);
+
+        if (project.channels.empty() || project.channels.front().pluginState.empty())
+            return std::nullopt;
+
+        return effectFromFl (project.channels.front().pluginName, project.channels.front().pluginState, bpm);
+    }
+    catch (const flp::Error&)
+    {
+        return std::nullopt;
+    }
+}
+
+std::vector<std::string> flPluginsForEffect (EffectKind kind)
+{
+    switch (kind)
+    {
+        case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
+        case EffectKind::limiter:
+        case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
+        case EffectKind::reverb: return { "Fruity Reeverb 2" };
+        case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
+        case EffectKind::utility: return { "Fruity Stereo Shaper" };
+        default: return {};
+    }
 }
 } // namespace lynx

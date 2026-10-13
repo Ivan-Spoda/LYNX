@@ -422,6 +422,27 @@ TEST (flp_real_files)
             }
     std::printf ("  %d presets de 3x Osc, %d lidos\n", presets, presetsDecoded);
     CHECK (presetsDecoded == presets);
+
+    // presets de efeito do FL que viram efeitos internos
+    int fxPresets = 0, fxDecoded = 0;
+    for (auto kind : { lynx::EffectKind::parametricEq, lynx::EffectKind::limiter, lynx::EffectKind::reverb, lynx::EffectKind::delay,
+                       lynx::EffectKind::utility })
+        for (const auto& plugin : lynx::flPluginsForEffect (kind))
+        {
+            const auto dir = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Effects" / plugin;
+            if (! std::filesystem::is_directory (dir))
+                continue;
+            for (auto& entry : std::filesystem::recursive_directory_iterator (dir))
+                if (entry.path().extension() == ".fst")
+                {
+                    ++fxPresets;
+                    std::ifstream in (entry.path(), std::ios::binary);
+                    std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+                    fxDecoded += lynx::effectFromFlPreset (bytes).has_value();
+                }
+        }
+    std::printf ("  %d presets de efeito do FL, %d lidos\n", fxPresets, fxDecoded);
+    CHECK (fxDecoded == fxPresets);
     CHECK (wrappedParsed == wrapped);
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);

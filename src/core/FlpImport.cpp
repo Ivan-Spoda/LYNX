@@ -85,8 +85,11 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
     };
 
+    // presets antigos (FL 3) gravam o nome com outra caixa ("Fruity delay 2")
+    const auto wanted = lowercase (name);
+
     for (const auto& [plugin, kind] : table)
-        if (name == plugin)
+        if (wanted == lowercase (plugin))
             return kind;
 
     return std::nullopt;

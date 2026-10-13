@@ -16,4 +16,10 @@ namespace lynx
 // interno parecido com os parâmetros padrão; nullopt quando não há efeito parecido.
 // `bpm` converte tempos sincronizados (ex.: predelay do Reeverb 2) para milissegundos.
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm = 120.0);
+
+// Preset de efeito do FL (.fst de Plugin presets\Effects): o efeito interno com os ajustes do preset.
+std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& fileBytes, double bpm = 120.0);
+
+// Plugins do FL cujos presets dão este efeito interno (para listar as pastas de presets).
+std::vector<std::string> flPluginsForEffect (EffectKind kind);
 } // namespace lynx

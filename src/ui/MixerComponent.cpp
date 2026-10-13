@@ -1,5 +1,6 @@
 #include "ui/MixerComponent.h"
 
+#include "core/FlEffects.h"
 #include "ui/AutomationUi.h"
 #include "ui/ExportDialog.h"
 
@@ -1045,6 +1046,43 @@ void EffectsPanel::showSlotMenu (int slot)
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;
     menu.addSubMenu ("Trocar por", replace);
+
+    // presets do FL (Plugin presets\Effects\<plugin>) que viram este efeito
+    {
+        juce::PopupMenu presets;
+        const auto roots = findFlStudioRoots();
+        const auto base = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Effects");
+
+        for (const auto& plugin : flPluginsForEffect ((*slots())[(std::size_t) slot].kind))
+        {
+            juce::PopupMenu sub;
+            auto files = base.getChildFile (juce::String::fromUTF8 (plugin.c_str())).findChildFiles (juce::File::findFiles, true, "*.fst");
+            std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getFileName().compareNatural (b.getFileName()) < 0; });
+
+            for (const auto& f : files)
+                sub.addItem (f.getFileNameWithoutExtension(), [this, slot, f] {
+                    juce::MemoryBlock data;
+                    if (! f.loadFileAsData (data))
+                        return;
+                    const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                    if (auto fx = effectFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), engine.getSong().bpm))
+                        engine.editSong ([t = track, slot, fx = *fx] (Song& song) {
+                            auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) slot];
+                            const auto enabled = target.enabled;
+                            const auto mix = target.mix;
+                            target = fx;
+                            target.enabled = enabled;
+                            target.mix = mix;
+                        });
+                });
+
+            if (sub.getNumItems() > 0)
+                presets.addSubMenu (juce::String::fromUTF8 (plugin.c_str()), sub);
+        }
+
+        if (presets.getNumItems() > 0)
+            menu.addSubMenu ("Presets do FL", presets);
+    }
     menu.addItem ("Mover para cima", slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;
