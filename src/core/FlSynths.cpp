@@ -318,15 +318,23 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& d, SynthSettings& synth)
     const auto index = p (5);
 
     SynthSettings s;
-    s.osc = { SynthOscillator { Waveform::sine, std::clamp (octave + 1, -3, 3), 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    // portadora = nota MIDI × 2^oct; modulador = R·portadora/2 (REA_rodada17 §11)
+    s.osc = { SynthOscillator { Waveform::sine, std::clamp (octave, -3, 3), 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
+    const auto modulatorSemis = 12.0 * octave + 12.0 * std::log2 (r / 2.0);
+    auto setModulatorPitch = [&] (SynthOscillator& o) {
+        o.octave = 0;
+        o.semitones = 0;
+        transpose (o, modulatorSemis);
+        o.detune = (float) std::clamp ((modulatorSemis - std::round (modulatorSemis)) * 100.0, -50.0, 50.0);
+    };
 
-    // FM de verdade: o osc 3 é o modulador na razão R; o índice cai de Init até Sustain
+    // FM de verdade: o osc 3 é o modulador; profundidade de pico ≈ 11·p²/(R·2^oct) ciclos (notas até ~67;
+    // acima o FL limita o nível), caindo de Init até Sustain
     if (index > 0.01)
     {
-        s.osc[2] = { Waveform::sine, s.osc[0].octave, 0.0f, 1.0f };
-        transpose (s.osc[2], 12.0 * std::log2 (r));
-        s.osc[2].detune = (float) std::clamp ((12.0 * std::log2 (r) - std::round (12.0 * std::log2 (r))) * 100.0, -50.0, 50.0);
-        s.fm = (float) (2.0 * index * index); // índice ∝ p² [HIP na escala]
+        s.osc[2] = { Waveform::sine, 0, 0.0f, 1.0f };
+        setModulatorPitch (s.osc[2]);
+        s.fm = (float) std::min (16.0, 11.0 * index * index / (r * std::pow (2.0, octave)));
         const auto sustain = p (7) * p (7) / std::max (1e-6, index * index);
         if (sustain < 0.98)
         {
@@ -337,8 +345,8 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& d, SynthSettings& synth)
 
     if (const auto thru = 0.25 * p (12) * p (12); thru > 0.01) // o modulador direto na saída
     {
-        s.osc[1] = { Waveform::sine, s.osc[0].octave, 0.0f, (float) std::min (0.5, thru * 2.0) };
-        transpose (s.osc[1], 12.0 * std::log2 (r));
+        s.osc[1] = { Waveform::sine, 0, 0.0f, (float) std::min (0.5, thru * 2.0) };
+        setModulatorPitch (s.osc[1]);
     }
 
     // amplitude

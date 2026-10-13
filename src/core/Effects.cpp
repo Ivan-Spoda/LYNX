@@ -1191,35 +1191,49 @@ private:
     std::array<std::vector<float>, 8> scratch;
 };
 
-// Peak Controller: o som passa direto; um seguidor de pico (ataque imediato, queda pelo "decay")
-// vira as saídas de controle: 0 = base + quantidade·pico (com tensão), 1 = base, 2 = igual à 0.
+// Peak Controller (REA_rodada17 §5): o som passa direto. Detector com ataque instantâneo (pico do bloco)
+// e queda LINEAR em tempo musical: (10001^(D/128) − 1)·0,0192 por semínima. Saída Peak =
+// base + a·forma(p) com a = ±0,4·(6^(|A|/256) − 1) e a tensão do FL; saída 0 = Peak + LFO, 1 = Peak,
+// 2 = LFO (o LFO dele ainda não é gerado: vale a base do LFO). Parâmetros = valores crus do FL normalizados.
 class PeakController final : public Effect
 {
 public:
     void prepare (double sr) noexcept override { sampleRate = sr; }
-    void reset() noexcept override { peak = 0.0f; }
+    void reset() noexcept override { detector = 0.0; }
 
-    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
-        // decay: velocidade 5..128 do FL; ~0,3 s até −60 dB no padrão [HIP]
-        const auto speed = 5.0 + 123.0 * std::clamp ((double) p[3], 0.0, 1.0);
-        const auto fall = (float) std::exp (std::log (0.001) / (std::max (0.01, 20.0 / speed) * sampleRate));
+        const auto amountRaw = (std::clamp ((double) p[1], 0.0, 1.0) * 2.0 - 1.0) * 256.0;
+        const auto tensionRaw = (std::clamp ((double) p[2], 0.0, 1.0) * 2.0 - 1.0) * 128.0;
+        const auto decayRaw = 5.0 + 123.0 * std::clamp ((double) p[3], 0.0, 1.0);
+        const auto perBeat = (std::pow (10001.0, decayRaw / 128.0) - 1.0) * 0.0192;
+
+        float blockPeak = 0.0f;
         for (int i = 0; i < n; ++i)
+            blockPeak = std::max ({ blockPeak, std::abs (l[i]), std::abs (r[i]) });
+        detector = std::max (0.0, detector - perBeat * std::max (1.0, bpm) / 60.0 * n / sampleRate);
+        detector = std::max (detector, (double) blockPeak);
+
+        const auto amount = (amountRaw < 0.0 ? -1.0 : 1.0) * (std::pow (6.0, std::abs (amountRaw) / 256.0) - 1.0) * 0.4;
+        double shaped = detector;
+        if (std::abs (tensionRaw) > 1e-9)
         {
-            const auto x = std::max (std::abs (l[i]), std::abs (r[i]));
-            peak = x > peak ? x : peak * fall;
+            const auto k = (std::pow (1001.0, std::abs (tensionRaw) / 128.0) - 1.0) * 0.1;
+            const auto y = tensionRaw > 0.0 ? k - (std::pow (k + 1.0, 1.0 - detector) - 1.0) : std::pow (k + 1.0, detector) - 1.0;
+            shaped = y / k;
         }
-        const auto tension = (double) (p[2] * 2.0f - 1.0f);
-        const auto shaped = std::pow ((double) std::clamp (peak, 0.0f, 1.0f), std::exp2 (-2.0 * tension));
-        base = p[0];
-        value = std::clamp (base + (p[1] * 2.0f - 1.0f) * (float) shaped, 0.0f, 1.0f);
+        peakOut = (float) std::clamp (p[0] + amount * shaped, 0.0, 1.0);
+        lfoOut = std::clamp (p[4], 0.0f, 1.0f);
     }
 
-    float controlOutput (int output) const noexcept override { return output == 1 ? base : value; }
+    float controlOutput (int output) const noexcept override
+    {
+        return output == 1 ? peakOut : output == 2 ? lfoOut : std::clamp (peakOut + lfoOut, 0.0f, 1.0f);
+    }
 
 private:
-    double sampleRate = 44100.0;
-    float peak = 0.0f, value = 0.0f, base = 0.0f;
+    double sampleRate = 44100.0, detector = 0.0;
+    float peakOut = 0.0f, lfoOut = 0.0f;
 };
 
 class Utility final : public Effect
@@ -1320,7 +1334,8 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
     static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
     static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
-    static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.85f }, { "Tensão", 0.5f }, { "Decaimento", 0.48f } } };
+    static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.8496f }, { "Tensão", 0.5f },
+                                                                  { "Queda", 0.4959f }, { "Base do LFO", 0.0f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
         constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
@@ -1524,9 +1539,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::peakController:
             if (param == 1)
-                std::snprintf (text, sizeof (text), "%+.0f%%", (v * 2.0f - 1.0f) * 100.0f);
+            {
+                const auto raw = (v * 2.0 - 1.0) * 256.0;
+                std::snprintf (text, sizeof (text), "%+.0f%%", (raw < 0.0 ? -1.0 : 1.0) * (std::pow (6.0, std::abs (raw) / 256.0) - 1.0) * 40.0);
+            }
             else if (param == 3)
-                std::snprintf (text, sizeof (text), "%.2f s", 20.0 / (5.0 + 123.0 * v));
+                std::snprintf (text, sizeof (text), "%.2f / tempo", (std::pow (10001.0, (5.0 + 123.0 * v) / 128.0) - 1.0) * 0.0192);
+            else if (param == 2)
+                std::snprintf (text, sizeof (text), "%+.0f", (v * 2.0f - 1.0f) * 128.0f);
             else
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;

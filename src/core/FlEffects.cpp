@@ -625,6 +625,7 @@ bool peakController (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[1] = clamp01 ((std::clamp (i32At (d, 4), -256, 256) / 256.0 + 1.0) / 2.0);
     slot.params[2] = clamp01 ((std::clamp (i32At (d, 8), -128, 128) / 128.0 + 1.0) / 2.0);
     slot.params[3] = clamp01 ((std::clamp (i32At (d, 12), 5, 128) - 5) / 123.0);
+    slot.params[4] = clamp01 (i32At (d, 16) / 65536.0); // base do LFO
     return true;
 }
 
@@ -683,7 +684,9 @@ bool lowLifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto mix = x (1);
     const auto lowDb = std::clamp ((x (2) - 0.5) * 24.0, -18.0, 12.0);
     const auto highDb = std::clamp (100.0 * std::log10 (std::max (1e-3, x (9))), -18.0, 0.0);
-    const auto boost = 0.25 * 18.0 * x (6) * mix; // os harmônicos soam como alguns dB a mais de grave [HIP]
+    // o gerador de harmônicos (Chebyshev até a 3ª ordem, REA_rodada17 §13) não tem equivalente aqui; o EQ
+    // reproduz só o corte de graves e os ganhos das bandas
+    const auto boost = 0.0;
 
     for (int b = 0; b < peq::bands; ++b)
         slot.params[(std::size_t) peq::param (b, 0)] = peq::typeValue (peq::BandType::off);
@@ -1001,8 +1004,14 @@ std::optional<float> controllerConstantOutput (const std::string& pluginName, co
         auto param = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), -65536, 65536) / 65536.0; };
         const auto axis = output * 4;
         const auto level = std::clamp (param (axis), 0.0, 1.0);
-        const auto tension = std::clamp (i32At (d, 4 + 4 * (std::size_t) (axis + 3)), -128, 128) / 128.0;
-        const auto shaped = std::pow (level, std::exp2 (-2.0 * tension)); // tensão: curva (0 = reta) [HIP]
+        // tensão (REA_rodada17 §4): k = 0,1·(1001^(|t|/128) − 1); t > 0 côncava, t < 0 convexa
+        const auto t = std::clamp (i32At (d, 4 + 4 * (std::size_t) (axis + 3)), -128, 128);
+        auto shaped = level;
+        if (t != 0)
+        {
+            const auto k = 0.1 * (std::pow (1001.0, std::abs (t) / 128.0) - 1.0);
+            shaped = t > 0 ? 1.0 - (std::pow (k + 1.0, 1.0 - level) - 1.0) / k : (std::pow (k + 1.0, level) - 1.0) / k;
+        }
         return (float) std::clamp (param (axis + 1) + (param (axis + 2) - param (axis + 1)) * shaped, 0.0, 1.0);
     }
 

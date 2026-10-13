@@ -364,7 +364,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
         s.resonance = std::min (0.95f, std::clamp (p[18], 0, 256) / 256.0f);
     }
 
-    gain = (float) std::clamp (p[0] / 128.0, 0.0, 4.0);
+    gain = (float) std::clamp ((std::pow (3.0, std::clamp (p[0], 0, 256) / 128.0) - 1.0) / 2.0, 0.0, 4.0); // (3^(P0/128) − 1)/2
     synth = s;
     return true;
 }
@@ -485,11 +485,23 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     for (auto& v : k)
         v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
 
+    // tabelas de 11 pontos do motor, interpoladas em x·10 (REA_rodada17 §6)
+    auto table = [] (const double (&t)[11], float x) {
+        const auto pos = std::clamp ((double) x, 0.0, 1.0) * 10.0;
+        const auto i = std::min (9, (int) pos);
+        return t[i] + (t[i + 1] - t[i]) * (pos - i);
+    };
+    static constexpr double attackTable[11] = { 0.003, 0.004, 0.013, 0.05, 0.128, 0.243, 0.401, 0.7, 1.3, 2.403, 3.049 };
+    static constexpr double decayTable[11] = { 0.0015, 0.0027, 0.043, 0.141, 0.328, 0.651, 1.144, 2.053, 3.956, 8.466, 10.124 };
+    static constexpr double releaseTable[11] = { 0.001, 0.002, 0.02, 0.112, 0.321, 0.572, 1.063, 1.964, 3.38, 6.91, 10.967 };
+    static constexpr double cutoffTable[11] = { 2.0, 2.4594, 3.3219, 4.3219, 5.6837, 6.9542, 8.543, 10.4717, 12.388, 15.1635, 15.6096 };
+    static constexpr double envAmountTable[11] = { 0.0, 0.389, 1.681, 2.888, 4.017, 5.039, 6.069, 7.288, 8.475, 8.957, 8.972 };
+
     SynthSettings s;
-    const auto octave = std::clamp ((int) std::lround ((k[32] - 0.5f) * 4.0f), -2, 2); // Octave Transpose (0,5 = 0) [HIP: ±2]
+    const auto octave = std::clamp ((int) std::lround (2.0 * k[32]) - 1, -1, 1); // −1, 0, +1
     const auto saw = k[14] >= 0.5f, pulse = k[13] >= 0.5f, sub = k[15] >= 0.5f;
     s.osc = { SynthOscillator { Waveform::saw, octave, 0.0f, saw ? 1.0f : 0.0f },
-              SynthOscillator { Waveform::square, octave, 0.0f, pulse ? 0.8f : 0.0f },
+              SynthOscillator { Waveform::square, octave, 0.0f, pulse ? 1.0f : 0.0f },
               SynthOscillator {} };
     if (! saw && ! pulse)
         s.osc[0].level = 1.0f;
@@ -498,12 +510,12 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     else if (sub)
         s.osc[2] = { Waveform::square, std::max (-3, octave - 1), 0.0f, std::max (0.05f, k[16]) };
 
-    // um ADSR (Env1) para volume e corte; tempos ~10·x³ s [HIP]
-    auto seconds = [] (float x) { return 10.0f * x * x * x; };
-    s.attack = seconds (k[26]);
-    s.decay = seconds (k[27]);
+    // Env1: ataque chega a 1 em T_A (linear no LYNX); decay/release do Kepler são até −20 dB, os do LYNX
+    // até −60 dB (exponenciais): × 3
+    s.attack = (float) table (attackTable, k[26]);
+    s.decay = (float) (3.0 * table (decayTable, k[27]));
     s.sustain = k[28];
-    s.release = std::max (0.01f, seconds (k[29]));
+    s.release = (float) std::max (0.003, 3.0 * table (releaseTable, k[29]));
     if (k[25] >= 0.5f) // VCA por gate
     {
         s.attack = 0.002f;
@@ -512,31 +524,19 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
         s.release = 0.01f;
     }
 
-    s.cutoff = (float) std::clamp (20.0 * std::pow (2.0, 10.0 * k[19]), 20.0, 20000.0);
+    s.cutoff = (float) std::clamp (std::pow (2.0, table (cutoffTable, k[19])), 20.0, 20000.0);
     s.resonance = std::min (0.95f, k[20]);
-    if (k[22] > 0.01f)
+    if (const auto octaves = table (envAmountTable, k[22]); octaves > 0.01)
     {
-        const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polaridade invertida
-        s.filterEnv = { sign * 8.0f * k[22], seconds (k[26]), 0.0f, seconds (k[27]), k[28], std::max (0.01f, seconds (k[29])) };
+        const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polaridade
+        s.filterEnv = { sign * (float) octaves, s.attack, 0.0f, s.decay, s.sustain, s.release };
     }
+    // LFO1: a taxa é confirmada (21,739·2^(−T(x)) Hz), mas as profundidades LFO→DCO/corte não: ficam de fora
+    // chorus I/II do Juno: as taxas não foram confirmadas; sem chorus
 
-    // LFO1: vibrato (DCO) e corte; período 1/(0,1..20 Hz) [HIP]
-    const auto lfoPeriod = (float) (1.0 / (0.1 * std::pow (200.0, (double) k[5])));
-    if (k[10] > 0.01f)
-        s.lfo[lfoPitch] = { k[10] * 1.0f, lfoPeriod, false, 1, seconds (k[7]), 0.0f };
-    if (k[23] > 0.01f)
-        s.lfo[lfoCutoff] = { k[23] * 4.0f, lfoPeriod, false, 1, seconds (k[7]), 0.0f };
-
-    // chorus do Juno: aproximado por desafinação + abertura do osc 2 (o chorus de verdade fica no mixer)
-    if (k[30] > 0.1f && s.osc[1].level > 0.0f)
-    {
-        s.osc[0].detune = -6.0f;
-        s.osc[1].detune = 6.0f;
-        s.osc[0].pan = -0.3f;
-        s.osc[1].pan = 0.3f;
-    }
-
-    gain = std::clamp (k[33] / 0.7f, 0.0f, 2.0f); // Main Volume [HIP: 0,7 = 0 dB]
+    // Main Volume: m(v) = 0,34968v − 0,32754v² + 1,39229v³ (v = 1 -> 0 dB)
+    const auto v = (double) k[33];
+    gain = (float) std::clamp (0.34968 * v - 0.32754 * v * v + 1.39229 * v * v * v, 0.0, 2.0);
     synth = s;
     return true;
 }
@@ -683,11 +683,13 @@ bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& sy
     s.decay = (float) ms4 (1.0, 19999.0, p[23]);
     s.sustain = p[24];
     s.release = (float) ms4 (15.0, 9985.0, p[25]);
-    s.cutoff = (float) std::clamp (20.0 * std::pow (1000.0, (double) p[18]), 20.0, 20000.0);
+    // corte (REA_rodada17 §8): 2^(10·v + 6) Hz com v = 1,1·x recortado em 0,91 (64 Hz … 35 kHz)
+    s.cutoff = (float) std::clamp (std::pow (2.0, 10.0 * std::min (0.91, 1.1 * (double) p[18]) + 6.0), 20.0, 20000.0);
     s.resonance = std::min (0.95f, p[19]);
     s.filterType = std::clamp ((int) (2.0f * p[66]), 0, 2) == 0 ? 0 : (int) (2.0f * p[66]) == 1 ? 1 : 2;
-    if ((int) (4.0f * p[65]) == 0 && std::abs (p[10] - 0.5f) > 0.01f) // envelope do filtro no corte
-        s.filterEnv = { (2.0f * p[10] - 1.0f) * 4.0f, (float) ms4 (5.0, 49995.0, p[11]), 0.0f, (float) ms4 (5.0, 49995.0, p[12]), p[13],
+    // envelope do filtro no corte: ±10·a² oitavas, a = 2x − 1 (REA_rodada17 §8)
+    if (const auto a = 2.0f * p[10] - 1.0f; (int) (4.0f * p[65]) == 0 && std::abs (a) > 0.01f)
+        s.filterEnv = { (a < 0.0f ? -10.0f : 10.0f) * a * a, (float) ms4 (5.0, 49995.0, p[11]), 0.0f, (float) ms4 (5.0, 49995.0, p[12]), p[13],
                         (float) ms4 (5.0, 49995.0, p[14]) };
     if (std::abs (p[26] - 0.5f) > 0.01f && p[28] > 0.0f)
     {
@@ -698,10 +700,9 @@ bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& sy
         const auto amount = 2.0f * p[26] - 1.0f;
         switch (std::clamp ((int) (5.0f * p[67]), 0, 5))
         {
-            case 0: lfo.amount = amount * 3.0f; s.lfo[lfoCutoff] = lfo; break;
-            case 1: case 2: lfo.amount = amount * 1.0f; s.lfo[lfoPitch] = lfo; break;
-            case 5: lfo.amount = amount; s.lfo[lfoPan] = lfo; break;
-            default: break;
+            case 0: lfo.amount = (amount < 0.0f ? -10.0f : 10.0f) * amount * amount; s.lfo[lfoCutoff] = lfo; break; // ±10·l² oit
+            case 1: case 2: lfo.amount = std::floor (24.0f * amount); s.lfo[lfoPitch] = lfo; break;               // até ±24 st
+            default: break; // PW e pan: escalas não confirmadas
         }
     }
     s.mono = p[44] >= 0.5f;
@@ -717,21 +718,19 @@ bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& s
     if (! sslfFloats (state, "1kiK", 0x50C, p, 23) && ! sslfFloats (state, "2kiK", 0x50C, p, 23))
         return false;
 
-    // seno que desce do "peak" ao "base" no slide, com clique/ruído no ataque
+    // seno na frequência "Base" (2^(4x + 4) Hz). Confirmados (REA_rodada17 §7): duração = rampa linear de
+    // (x³ + 0,001) s, sem release. A escala do "Peak" (o tamanho da queda de afinação), o clique e a camada
+    // de amostra não foram confirmados e ficam de fora.
     const auto baseHz = std::pow (2.0, 4.0 * p[6] + 4.0);
-    const auto sweep = 12.0 * 6.0 * p[7]; // até 6 oitavas acima [HIP]
     SynthSettings s;
-    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f },
-              SynthOscillator { Waveform::noise, 0, 0.0f, std::min (0.5f, 0.15f * p[21] + 0.1f * p[15]) },
-              SynthOscillator {} };
+    s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
     setPitch (s.osc[0], 12.0 * std::log2 (baseHz / 261.63));
+    const auto duration = (float) (std::pow ((double) p[2], 3.0) + 0.001);
     s.attack = 0.0005f;
-    s.decay = 0.05f + 1.5f * p[2];
+    s.decay = duration;   // o decay do LYNX chega a −60 dB no tempo dado (a rampa do BassDrum chega a zero)
     s.sustain = 0.0f;
-    s.release = 0.02f;
+    s.release = duration; // sem release: soltar a nota não corta
     s.cutoff = 20000.0f;
-    if (sweep > 0.1)
-        s.pitchEnv = { (float) sweep, 0.0f, 0.0f, 0.01f + 0.3f * p[8], 0.0f, 0.02f };
     gain = (float) std::pow (10.0, 40.0 * (p[0] - 0.5) / 20.0);
     synth = s;
     return true;
@@ -743,43 +742,28 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     if (! sslfFloats (state, "2iBT", 0x204C, p, 294))
         return false;
 
-    // portadora = operador ligado com mais "Mix"; modulador = quem mais modula a portadora
+    // portadora = operador ligado com mais "Mix" (REA_rodada17 §9). O índice de FM e a escala do corte
+    // em Hz não foram confirmados: o LYNX toca só a portadora, com o filtro aberto.
     int carrier = -1;
     for (int i = 0; i < 6; ++i)
         if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
             carrier = i;
     if (carrier < 0)
         carrier = 0;
-    int modulator = -1;
-    float strongest = 0.0f;
-    for (int j = 0; j < 6; ++j)
-        if (j != carrier && p[25 + j] >= 0.5f && p[109 + 6 * j + carrier] > strongest)
-            strongest = p[109 + 6 * j + carrier], modulator = j;
 
-    auto ratioSemis = [&] (int op) { return std::round ((p[31 + op] - 0.5) * 48.0) + (p[37 + op] - 0.5) * 2.0; };
-    auto seconds = [] (float x) { return 10.0f * x * x * x; };
+    auto steps = [] (float x) { return (double) std::clamp ((int) (198.0f * x - 99.0f), -99, 99); }; // trunc(198x − 99)
+    const auto semis = steps (p[31 + carrier]) + steps (p[37 + carrier]) * 0.01 + (double) (int) (48.0f * p[2] - 24.0f);
+    auto seconds = [] (float x) { return (float) std::max (50.0 * std::pow ((double) x, 4.0), 0.00101); };
 
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
-    setPitch (s.osc[0], ratioSemis (carrier) + std::round ((p[2] - 0.5) * 48.0));
-    if (modulator >= 0 && strongest > 0.01f)
-    {
-        s.osc[2] = { Waveform::sine, 0, 0.0f, 1.0f };
-        setPitch (s.osc[2], ratioSemis (modulator) + std::round ((p[2] - 0.5) * 48.0));
-        s.fm = std::min (8.0f, strongest * 4.0f);
-        if (p[85 + modulator] < 0.9f)
-        {
-            s.fmDecay = std::max (0.01f, seconds (p[79 + modulator]));
-            s.fmSustain = p[85 + modulator];
-        }
-    }
+    setPitch (s.osc[0], semis);
     s.attack = seconds (p[3]);
     s.decay = seconds (p[4]);
-    s.sustain = p[5];
-    s.release = std::max (0.01f, seconds (p[6]));
-    s.cutoff = (float) std::clamp (20.0 * std::pow (1000.0, (double) p[15]), 20.0, 20000.0);
-    s.resonance = std::min (0.95f, p[16]);
-    gain = std::clamp (p[0] * 2.0f, 0.0f, 2.0f);
+    s.sustain = p[5] * p[5];
+    s.release = 0.35f * seconds (p[6]) + 0.02f;
+    s.cutoff = 20000.0f;
+    gain = 1.0f;
     synth = s;
     return true;
 }
