@@ -94,23 +94,82 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
 
 DelayLine::DelayLine (int delaySamples)
     : delay (std::max (1, delaySamples)),
-      buffer ((std::size_t) delay * 2, 0.0f)
+      left ((std::size_t) delay, 0.0f),
+      right ((std::size_t) delay, 0.0f),
+      quiet (delay)
 {
 }
 
-void DelayLine::process (float* left, float* right, int n) noexcept
+void DelayLine::process (float* l, float* r, int n) noexcept
 {
-    for (int i = 0; i < n; ++i)
+    // em trechos contíguos do anel: troca o que entra pelo que sai
+    for (int done = 0; done < n;)
     {
-        auto* slot = buffer.data() + (std::size_t) position * 2;
-        const auto l = slot[0], r = slot[1];
-        slot[0] = left[i];
-        slot[1] = right[i];
-        left[i] = l;
-        right[i] = r;
+        const auto run = std::min (n - done, delay - position);
+        auto* bl = left.data() + position;
+        auto* br = right.data() + position;
 
-        if (++position == delay)
-            position = 0;
+        for (int i = 0; i < run; ++i)
+        {
+            std::swap (bl[i], l[done + i]);
+            std::swap (br[i], r[done + i]);
+        }
+
+        done += run;
+        position = (position + run) % delay;
+    }
+
+    quiet = 0;
+}
+
+void DelayLine::mixInto (const float* sl, const float* sr, float level, float* dl, float* dr, int n) noexcept
+{
+    if (sl == nullptr)
+    {
+        if (quiet >= delay)
+            return; // tudo zero lá dentro: a saída seria silêncio e a posição não importa
+
+        quiet += n;
+    }
+    else
+    {
+        quiet = 0;
+    }
+
+    for (int done = 0; done < n;)
+    {
+        const auto run = std::min (n - done, delay - position);
+        auto* bl = left.data() + position;
+        auto* br = right.data() + position;
+        auto* ol = dl + done;
+        auto* orr = dr + done;
+
+        if (sl != nullptr)
+        {
+            const auto* il = sl + done;
+            const auto* ir = sr + done;
+
+            for (int i = 0; i < run; ++i)
+            {
+                ol[i] += bl[i];
+                orr[i] += br[i];
+                bl[i] = il[i] * level;
+                br[i] = ir[i] * level;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < run; ++i)
+            {
+                ol[i] += bl[i];
+                orr[i] += br[i];
+                bl[i] = 0.0f;
+                br[i] = 0.0f;
+            }
+        }
+
+        done += run;
+        position = (position + run) % delay;
     }
 }
 } // namespace lynx

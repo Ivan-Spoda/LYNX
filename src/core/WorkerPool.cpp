@@ -1,5 +1,7 @@
 #include "core/WorkerPool.h"
 
+#include "core/Denormals.h"
+
 namespace lynx
 {
 WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart)
@@ -21,6 +23,8 @@ WorkerPool::~WorkerPool()
 
 void WorkerPool::workerLoop (std::function<void()> onStart)
 {
+    const ScopedFlushDenormals noDenormals;
+
     if (onStart)
         onStart();
 

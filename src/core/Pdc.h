@@ -37,9 +37,14 @@ public:
     int length() const noexcept { return delay; }
     void process (float* left, float* right, int n) noexcept; // no lugar
 
+    // Atrasa `source * level` e soma em `dest`, numa passada só. Com source nulo (fonte
+    // calada) empurra silêncio; quando a linha já está toda em silêncio, não faz nada.
+    void mixInto (const float* sourceLeft, const float* sourceRight, float level, float* destLeft, float* destRight, int n) noexcept;
+
 private:
     int delay;
-    std::vector<float> buffer; // intercalado L R
+    std::vector<float> left, right; // anel planar
     int position = 0;
+    int quiet = 0; // samples de silêncio seguidos já escritos (até delay)
 };
 } // namespace lynx

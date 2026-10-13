@@ -387,6 +387,14 @@ public:
     }
 
 private:
+    // seno de uma fase 0..1 por parábola refinada (erro < 0,1%), bem mais barato que std::sin
+    static float fastSine (double phase) noexcept
+    {
+        auto x = (float) (phase < 0.5 ? phase : phase - 1.0) * 2.0f; // -1..1 (meia volta = 1)
+        const auto y = 4.0f * x * (1.0f - std::abs (x));            // parábola
+        return 0.225f * (y * std::abs (y) - y) + y;                  // refinamento
+    }
+
     // correção de aliasing nas descontinuidades (polyBLEP)
     static float polyBlep (double t, double dt) noexcept
     {
@@ -409,7 +417,7 @@ private:
     {
         switch (w)
         {
-            case Waveform::sine: return (float) std::sin (twoPi * phase);
+            case Waveform::sine: return fastSine (phase);
             case Waveform::triangle: return (float) (phase < 0.5 ? 4.0 * phase - 1.0 : 3.0 - 4.0 * phase);
             case Waveform::saw: return (float) (2.0 * phase - 1.0) - polyBlep (phase, dt);
             case Waveform::square:

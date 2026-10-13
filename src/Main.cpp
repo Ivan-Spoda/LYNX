@@ -449,6 +449,7 @@ private:
     {
         juce::String error, report;
         bool ok = false;
+        const auto started = juce::Time::getMillisecondCounterHiRes();
         {
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
@@ -470,13 +471,27 @@ private:
                                   : output.hasFileExtension ("ogg") ? lynx::ExportSettings::Format::ogg
                                                                     : lynx::ExportSettings::Format::wav24;
                 // --insert N: só a saída daquele insert (o que o "Renderizar para áudio" grava)
+                if (juce::JUCEApplication::getCommandLineParameters().contains ("--sem-efeitos")) // diagnóstico de desempenho
+                    loader.editSong ([] (lynx::Song& s) {
+                        for (auto& t : s.mixer)
+                            t.effects.clear();
+                    }, false);
+
+                if (juce::JUCEApplication::getCommandLineParameters().contains ("--sem-automacao"))
+                    loader.editSong ([] (lynx::Song& s) { s.automations.clear(); }, false);
+
+                const auto loaded = juce::Time::getMillisecondCounterHiRes();
                 lynx::ExportJob job (insert > 0 ? lynx::makeBounceSong (loader.getSong(), insert) : loader.getSong(), settings, output);
+                const auto prepared = juce::Time::getMillisecondCounterHiRes();
                 int lastPercent = -1;
                 ok = job.run ([&lastPercent] (double p) {
                     lastPercent = (int) (p * 100.0);
                     return true;
                 }, error);
-                report << "musica_segundos=" << job.getMusicSeconds() << "\n"
+                report << "abrir_ms=" << juce::roundToInt (loaded - started) << "\n"
+                       << "preparar_ms=" << juce::roundToInt (prepared - loaded) << "\n"
+                       << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
+                       << "musica_segundos=" << job.getMusicSeconds() << "\n"
                        << "pico=" << job.getPeak() << "\n"
                        << "progresso_final=" << lastPercent << "\n"
                        << "bytes=" << output.getSize() << "\n";

@@ -1386,6 +1386,69 @@ private:
 };
 } // namespace
 
+TEST (delay_line_mix_into_matches_process_and_drains_tail)
+{
+    // mixInto = process sobre source*level, somado no destino; em trechos que cruzam o anel
+    lynx::DelayLine a (37), b (37);
+    std::vector<float> sl (300), sr (300), dl (300, 0.5f), dr (300, -0.5f), xl (300), xr (300);
+    for (int i = 0; i < 300; ++i)
+    {
+        sl[(std::size_t) i] = (float) std::sin (i * 0.1);
+        sr[(std::size_t) i] = (float) std::cos (i * 0.07);
+    }
+    for (int start = 0; start < 300; start += 100)
+    {
+        b.mixInto (sl.data() + start, sr.data() + start, 0.25f, dl.data() + start, dr.data() + start, 100);
+        for (int i = start; i < start + 100; ++i)
+        {
+            xl[(std::size_t) i] = sl[(std::size_t) i] * 0.25f;
+            xr[(std::size_t) i] = sr[(std::size_t) i] * 0.25f;
+        }
+        a.process (xl.data() + start, xr.data() + start, 100);
+    }
+    float worst = 0.0f;
+    for (int i = 0; i < 300; ++i)
+        worst = std::max ({ worst, std::abs (dl[(std::size_t) i] - 0.5f - xl[(std::size_t) i]),
+                            std::abs (dr[(std::size_t) i] + 0.5f - xr[(std::size_t) i]) });
+    CHECK (worst < 1e-6f);
+
+    // fonte calada: a cauda que estava na linha ainda sai, depois não sobra nada
+    std::vector<float> tl (64, 0.0f), tr (64, 0.0f);
+    b.mixInto (nullptr, nullptr, 1.0f, tl.data(), tr.data(), 64);
+    CHECK (std::abs (tl[0] - sl[263] * 0.25f) < 1e-6f);
+    std::vector<float> zl (64, 0.0f), zr (64, 0.0f);
+    b.mixInto (nullptr, nullptr, 1.0f, zl.data(), zr.data(), 64);
+    CHECK (*std::max_element (zl.begin(), zl.end()) == 0.0f && *std::min_element (zl.begin(), zl.end()) == 0.0f);
+}
+
+TEST (limiter_lookahead_holds_ceiling_on_bursts)
+{
+    // rajadas curtas sobre um fundo baixo: o máximo deslizante precisa ver cada pico antes de sair
+    auto fx = lynx::makeEffect (lynx::EffectKind::limiter);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::limiter);
+    slot.params[2] = 0.0f; // release de 10 ms
+    std::vector<float> l (48000), r (48000);
+    std::uint32_t seed = 1;
+    for (int i = 0; i < 48000; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const auto noise = ((float) (seed >> 8) / 16777216.0f - 0.5f) * 0.1f;
+        l[(std::size_t) i] = noise + ((i % 9973) < 3 ? 3.0f : 0.0f);
+        r[(std::size_t) i] = -noise;
+    }
+    for (int i = 0; i < 48000; i += 333)
+        fx->process (l.data() + i, r.data() + i, std::min (333, 48000 - i), slot.params, 120.0);
+    float peak = 0.0f, quiet = 0.0f;
+    for (int i = 0; i < 48000; ++i)
+        peak = std::max (peak, std::abs (l[(std::size_t) i]));
+    for (int i = 9973 * 2 + 2000; i < 9973 * 2 + 2400; ++i) // 40 ms depois da rajada o ganho já voltou
+        quiet = std::max (quiet, std::abs (r[(std::size_t) i]));
+    const auto ceiling = 1.0f; // o teto padrão fica em 0 dBFS ou abaixo
+    CHECK (peak <= ceiling + 1e-5f);
+    CHECK (quiet > 0.03f);
+}
+
 TEST (pdc_aligns_paths_through_latent_effects)
 {
     // plano: canal 0 -> insert 1 (efeito de 100) -> insert 3; canal 1 -> insert 2 -> Master
@@ -2028,6 +2091,10 @@ TEST (synth_three_oscillators_adsr_filter)
     for (int i = 4800; i < 4800 + 48000 / 2; ++i)
         crossings += (b[(std::size_t) i - 1] < 0.0f) != (b[(std::size_t) i] < 0.0f);
     CHECK (std::abs (crossings - 440) < 6); // meio segundo = 220 ciclos = 440 cruzamentos
+    float sinePeak = 0.0f;
+    for (int i = 4800; i < 9600; ++i)
+        sinePeak = std::max (sinePeak, std::abs (b[(std::size_t) i]));
+    CHECK (sinePeak > 0.2f && sinePeak < 0.35f); // 0,3 de nível, seno aproximado sem estouro
 
     // segundo oscilador uma oitava acima soma energia; sustain 0 faz a nota decair sozinha
     lynx::SynthSettings two = sine;

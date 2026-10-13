@@ -1,6 +1,7 @@
 #include "core/RackRenderer.h"
 
 #include "core/WorkerPool.h"
+#include "core/Denormals.h"
 
 #include <algorithm>
 #include <cmath>
@@ -599,11 +600,13 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         if (! slots[i].enabled || slots[i].mix <= 0.0f)
             continue;
 
-        // smart disable (como no FL): plugin com entrada e saída em silêncio por 4 s é pulado
+        // smart disable (como no FL): efeito com entrada e saída em silêncio é pulado (plugins
+        // depois de 4 s; os internos depois de 1 s, que é bem mais que a cauda deles)
         const auto key = (std::size_t) track * maxEffectSlots + i;
         const auto isPlugin = slots[i].kind == EffectKind::plugin;
+        const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
 
-        if (isPlugin && key < smartDisable.size())
+        if (key < smartDisable.size())
         {
             auto& sd = smartDisable[key];
 
@@ -612,7 +615,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
             if (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel)
                 sd.silentSamples = 0;
-            else if (sd.silentSamples >= (int) (sampleRate * 4.0))
+            else if (sd.silentSamples >= hold)
                 continue;
             else
                 sd.silentSamples += n;
@@ -640,7 +643,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         else
             effects[i]->process (l, r, n, slots[i].params, bpm);
 
-        if (isPlugin && key < smartDisable.size() && (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel))
+        if (key < smartDisable.size() && (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel))
             smartDisable[key].silentSamples = 0; // cauda (reverb, delay): continua processando
 
         if (partial)
@@ -668,6 +671,7 @@ void RackRenderer::process (const RackState* state,
                             MeterBank* meters,
                             LiveEventQueue* moreLive) noexcept
 {
+    const ScopedFlushDenormals noDenormals;
     std::memset (left, 0, sizeof (float) * (std::size_t) numSamples);
     std::memset (right, 0, sizeof (float) * (std::size_t) numSamples);
     events.clear();
@@ -930,40 +934,29 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
 
     for (const auto& in : state.mixerInputs[(std::size_t) t])
     {
-        if (! trackActive[(std::size_t) in.source])
+        const auto active = trackActive[(std::size_t) in.source];
+        const auto& delays = state.sendDelays[(std::size_t) in.source];
+        auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
+
+        if (delay != nullptr)
+        {
+            // PDC: esta aresta é mais curta que a mais lenta que chega aqui. Fonte calada
+            // ainda esvazia a cauda que estava na linha.
+            delay->mixInto (active ? trackBuffer (in.source, 0) : nullptr, active ? trackBuffer (in.source, 1) : nullptr,
+                            in.level, dl, dr, n);
+            continue;
+        }
+
+        if (! active)
             continue;
 
         const auto* sl = trackBuffer (in.source, 0);
         const auto* sr = trackBuffer (in.source, 1);
-        const auto& delays = state.sendDelays[(std::size_t) in.source];
-        auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
-
-        if (delay == nullptr)
-        {
-            for (int i = 0; i < n; ++i)
-            {
-                dl[i] += sl[i] * in.level;
-                dr[i] += sr[i] * in.level;
-            }
-            continue;
-        }
-
-        // PDC: esta aresta é mais curta que a mais lenta que chega aqui
-        auto* xl = trackScratch (t, 0);
-        auto* xr = trackScratch (t, 1);
 
         for (int i = 0; i < n; ++i)
         {
-            xl[i] = sl[i] * in.level;
-            xr[i] = sr[i] * in.level;
-        }
-
-        delay->process (xl, xr, n);
-
-        for (int i = 0; i < n; ++i)
-        {
-            dl[i] += xl[i];
-            dr[i] += xr[i];
+            dl[i] += sl[i] * in.level;
+            dr[i] += sr[i] * in.level;
         }
     }
 }

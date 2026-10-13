@@ -12,6 +12,26 @@ constexpr double pi = 3.141592653589793;
 constexpr double maxSampleRate = 192000.0;
 
 float dbToGain (float db) noexcept { return std::pow (10.0f, db / 20.0f); }
+
+// tanh aproximada (Padé), com saturação em ±1: bem mais barata que std::tanh por sample
+inline float fastTanh (float x) noexcept
+{
+    if (x > 3.0f)
+        return 1.0f;
+    if (x < -3.0f)
+        return -1.0f;
+
+    const auto x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+// seno de uma fase em voltas (0..1) por parábola refinada (erro < 0,1%), para LFOs
+inline float sinTurns (double phase) noexcept
+{
+    const auto x = (float) (phase < 0.5 ? phase : phase - 1.0) * 2.0f;
+    const auto y = 4.0f * x * (1.0f - std::abs (x));
+    return 0.225f * (y * std::abs (y) - y) + y;
+}
+
 float gainToDb (float g) noexcept { return 20.0f * std::log10 (std::max (g, 1e-9f)); }
 
 // 0..1 -> faixa logarítmica [lo, hi]
@@ -338,22 +358,36 @@ public:
         const auto wet2 = (1.0f - width) / 2.0f;
         constexpr float inputGain = 0.015f;
 
-        for (int i = 0; i < n; ++i)
+        // filtro a filtro sobre um trecho (cada comb/allpass inteiro no cache), na mesma ordem
+        // de soma do processamento amostra a amostra
+        constexpr int span = 256;
+        float input[span], out[2][span];
+
+        for (int start = 0; start < n; start += span)
         {
-            const auto input = (l[i] + r[i]) * inputGain;
-            float out[2] = { 0.0f, 0.0f };
+            const auto m = std::min (span, n - start);
+            auto* bl = l + start;
+            auto* br = r + start;
+
+            for (int i = 0; i < m; ++i)
+                input[i] = (bl[i] + br[i]) * inputGain;
 
             for (int ch = 0; ch < 2; ++ch)
             {
+                std::fill (out[ch], out[ch] + m, 0.0f);
+
                 for (auto& c : combs[ch])
-                    out[ch] += c.process (input, feedback, damping);
+                    c.process (input, out[ch], m, feedback, damping);
 
                 for (auto& a : allpasses[ch])
-                    out[ch] = a.process (out[ch]);
+                    a.process (out[ch], m);
             }
 
-            l[i] += mix * (out[0] * wet1 + out[1] * wet2);
-            r[i] += mix * (out[1] * wet1 + out[0] * wet2);
+            for (int i = 0; i < m; ++i)
+            {
+                bl[i] += mix * (out[0][i] * wet1 + out[1][i] * wet2);
+                br[i] += mix * (out[1][i] * wet1 + out[0][i] * wet2);
+            }
         }
     }
 
@@ -364,13 +398,30 @@ private:
         std::size_t length = 1, index = 0;
         float store = 0.0f;
 
-        float process (float input, float feedback, float damping) noexcept
+        // soma a saída em `out`
+        void process (const float* input, float* out, int n, float feedback, float damping) noexcept
         {
-            const auto output = buffer[index];
-            store = output * (1.0f - damping) + store * damping;
-            buffer[index] = input + store * feedback;
-            index = (index + 1) % length;
-            return output;
+            // estado em locais: sem isso o compilador relê/grava os membros a cada sample
+            auto* buf = buffer.data();
+            auto idx = index;
+            auto st = store;
+            const auto len = length;
+            const auto keep = 1.0f - damping;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto output = buf[idx];
+                st = output * keep + st * damping;
+                buf[idx] = input[i] + st * feedback;
+
+                if (++idx == len)
+                    idx = 0;
+
+                out[i] += output;
+            }
+
+            index = idx;
+            store = st;
         }
     };
 
@@ -379,13 +430,24 @@ private:
         std::vector<float> buffer;
         std::size_t length = 1, index = 0;
 
-        float process (float input) noexcept
+        void process (float* io, int n) noexcept
         {
-            const auto delayed = buffer[index];
-            const auto output = delayed - input;
-            buffer[index] = input + delayed * 0.5f;
-            index = (index + 1) % length;
-            return output;
+            auto* buf = buffer.data();
+            auto idx = index;
+            const auto len = length;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto input = io[i];
+                const auto delayed = buf[idx];
+                io[i] = delayed - input;
+                buf[idx] = input + delayed * 0.5f;
+
+                if (++idx == len)
+                    idx = 0;
+            }
+
+            index = idx;
         }
     };
 
@@ -410,7 +472,8 @@ public:
         const auto size = (std::size_t) (lookaheadSeconds * maxSampleRate) + 4;
         delay[0].assign (size, 0.0f);
         delay[1].assign (size, 0.0f);
-        peaks.assign (size, 0.0f);
+        maxValues.assign (size, 0.0f);
+        maxTimes.assign (size, 0);
     }
 
     void prepare (double sr) noexcept override
@@ -425,9 +488,14 @@ public:
     {
         std::fill (delay[0].begin(), delay[0].end(), 0.0f);
         std::fill (delay[1].begin(), delay[1].end(), 0.0f);
-        std::fill (peaks.begin(), peaks.end(), 0.0f);
         position = 0;
         gain = 1.0f;
+        clock = 0;
+        // a janela começa cheia de zeros: um candidato 0 cobre todos eles
+        head = 0;
+        count = 1;
+        maxValues[0] = 0.0f;
+        maxTimes[0] = -1;
     }
 
     int latencySamples() const noexcept override { return lookahead; }
@@ -441,12 +509,27 @@ public:
         for (int i = 0; i < n; ++i)
         {
             const auto a = l[i] * input, b = r[i] * input;
-            peaks[(std::size_t) position] = std::max (std::abs (a), std::abs (b));
+            const auto peak = std::max (std::abs (a), std::abs (b));
 
-            // maior pico na janela que ainda vai sair (janela curta: busca direta é barata)
-            float ahead = 0.0f;
-            for (int k = 0; k < lookahead; ++k)
-                ahead = std::max (ahead, peaks[(std::size_t) k]);
+            // maior pico entre os `lookahead` últimos (máximo deslizante com fila monotônica)
+            const auto capacity = (int) maxValues.size();
+
+            while (count > 0 && maxValues[(std::size_t) ((head + count - 1) % capacity)] <= peak)
+                --count;
+
+            const auto slot = (std::size_t) ((head + count) % capacity);
+            maxValues[slot] = peak;
+            maxTimes[slot] = clock;
+            ++count;
+
+            if (maxTimes[(std::size_t) head] <= clock - lookahead)
+            {
+                head = (head + 1) % capacity;
+                --count;
+            }
+
+            ++clock;
+            const auto ahead = maxValues[(std::size_t) head];
 
             const auto target = ahead > ceiling ? ceiling / ahead : 1.0f;
             gain += (target - gain) * (target < gain ? attack : release);
@@ -455,7 +538,9 @@ public:
             const auto outR = delay[1][(std::size_t) position] * gain;
             delay[0][(std::size_t) position] = a;
             delay[1][(std::size_t) position] = b;
-            position = (position + 1) % lookahead;
+
+            if (++position == lookahead)
+                position = 0;
 
             // segurança: nunca passa do teto
             l[i] = std::clamp (outL, -ceiling, ceiling);
@@ -468,7 +553,10 @@ private:
     int lookahead = 64, position = 0;
     float attack = 0.1f, gain = 1.0f;
     std::array<std::vector<float>, 2> delay;
-    std::vector<float> peaks;
+    std::vector<float> maxValues;      // fila monotônica (decrescente) do máximo deslizante
+    std::vector<std::int64_t> maxTimes;
+    int head = 0, count = 0;
+    std::int64_t clock = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -534,12 +622,12 @@ public:
         const auto mix = params[2];
         const auto output = dbToGain ((params[3] - 0.5f) * 24.0f);
         // compensa o ganho do drive para o volume não explodir
-        const auto compensate = 1.0f / std::tanh (std::max (drive, 1.0f));
+        const auto compensate = 1.0f / fastTanh (std::max (drive, 1.0f));
 
         for (int i = 0; i < n; ++i)
         {
-            const auto wl = tone.process (std::tanh (l[i] * drive) * compensate, 0);
-            const auto wr = tone.process (std::tanh (r[i] * drive) * compensate, 1);
+            const auto wl = tone.process (fastTanh (l[i] * drive) * compensate, 0);
+            const auto wr = tone.process (fastTanh (r[i] * drive) * compensate, 1);
             l[i] = (l[i] + (wl - l[i]) * mix) * output;
             r[i] = (r[i] + (wr - r[i]) * mix) * output;
         }
@@ -593,10 +681,11 @@ public:
         for (int i = 0; i < n; ++i)
         {
             float* io[2] = { l + i, r + i };
+            const auto s = sinTurns (phase); // L e R em fases opostas: o mesmo seno com sinal trocado
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                const auto lfo = std::sin (2.0 * pi * (phase + (ch == 0 ? 0.0 : 0.5)));
+                const auto lfo = ch == 0 ? s : -s;
                 const auto delaySamples = base + depth * 0.5 * (1.0 + lfo);
                 auto readPos = (double) write - delaySamples;
                 while (readPos < 0.0)
@@ -605,14 +694,18 @@ public:
                 const auto i0 = (int) readPos;
                 const auto frac = (float) (readPos - i0);
                 const auto& buf = buffer[(std::size_t) ch];
-                const auto delayed = buf[(std::size_t) i0] + frac * (buf[(std::size_t) ((i0 + 1) % length)] - buf[(std::size_t) i0]);
+                const auto next = i0 + 1 == length ? 0 : i0 + 1;
+                const auto delayed = buf[(std::size_t) i0] + frac * (buf[(std::size_t) next] - buf[(std::size_t) i0]);
                 buffer[(std::size_t) ch][(std::size_t) write] = *io[ch] + delayed * feedback;
                 *io[ch] += (delayed - *io[ch]) * mix * 0.5f;
             }
 
-            write = (write + 1) % length;
+            if (++write == length)
+                write = 0;
+
             phase += step;
-            phase -= std::floor (phase);
+            if (phase >= 1.0)
+                phase -= 1.0;
         }
     }
 

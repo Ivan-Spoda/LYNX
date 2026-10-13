@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <map>
+#include <string>
+#include <chrono>
 
 #include "WavReader.h"
 #include "core/FlpImport.h"
@@ -83,7 +85,14 @@ int main (int argc, char** argv)
         return 1;
     }
 
-    int chosen = argc > 3 ? std::atoi (argv[3]) : -1;
+    // "song" no lugar do índice: a música inteira (playlist), como o export do app
+    const bool wholeSong = argc > 3 && std::string (argv[3]) == "song";
+    std::int64_t songTicks = 0;
+
+    if (wholeSong)
+        song = lynx::makeExportSong (song, true, 0, songTicks);
+
+    int chosen = argc > 3 && ! wholeSong ? std::atoi (argv[3]) : -1;
 
     if (chosen < 0 || chosen >= (int) song.patterns.size())
     {
@@ -96,7 +105,7 @@ int main (int argc, char** argv)
     song.currentPattern = chosen;
     const int loops = argc > 4 ? std::max (1, std::atoi (argv[4])) : 2;
     const auto& pattern = song.patterns[(std::size_t) chosen];
-    const auto lengthTicks = pattern.effectiveLength (song.beatsPerBar) * loops;
+    const auto lengthTicks = wholeSong ? songTicks : pattern.effectiveLength (song.beatsPerBar) * loops;
 
     constexpr int sampleRate = 44100;
     constexpr int blockSize = 256;
@@ -122,10 +131,24 @@ int main (int argc, char** argv)
             std::printf ("  (não consegui ler %s)\n", p.c_str());
         return entry;
     });
+    {
+        std::size_t edges = 0, delayed = 0, tracksWithFx = 0;
+        for (const auto& ins : state->mixerInputs)
+            for (const auto& in : ins)
+            {
+                ++edges;
+                const auto& d = state->sendDelays[(std::size_t) in.source];
+                delayed += (std::size_t) in.delay < d.size() && d[(std::size_t) in.delay] != nullptr;
+            }
+        for (const auto& t : song.mixer)
+            tracksWithFx += ! t.effects.empty();
+        std::printf ("mixer: %zu arestas (%zu com atraso de PDC), %zu tracks com efeitos\n", edges, delayed, tracksWithFx);
+    }
     lynx::RackRenderer renderer;
     renderer.prepare (sampleRate);
 
     std::vector<float> left (totalSamples), right (totalSamples);
+    const auto started = std::chrono::steady_clock::now();
     double tick = 0.0;
 
     for (std::size_t pos = 0; pos < totalSamples; pos += blockSize)
@@ -135,6 +158,8 @@ int main (int argc, char** argv)
         renderer.process (state.get(), playing, tick, n, left.data() + pos, right.data() + pos);
         tick += n * tps;
     }
+
+    std::printf ("render: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count());
 
     // normaliza o pico para -1 dBFS
     float peak = 0.0f;
