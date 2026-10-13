@@ -38,6 +38,38 @@ struct SnapOption
     int ticks; // 0 = um compasso
 };
 
+struct NamedIntervals
+{
+    const char* name;
+    std::vector<int> intervals;
+};
+
+const std::vector<NamedIntervals>& chords()
+{
+    static const std::vector<NamedIntervals> list {
+        { "Nota", { 0 } },         { "Maior", { 0, 4, 7 } },     { "Menor", { 0, 3, 7 } },     { "Dim", { 0, 3, 6 } },
+        { "Aum", { 0, 4, 8 } },    { "Sus2", { 0, 2, 7 } },      { "Sus4", { 0, 5, 7 } },      { "7", { 0, 4, 7, 10 } },
+        { "Maj7", { 0, 4, 7, 11 } }, { "m7", { 0, 3, 7, 10 } }, { "m9", { 0, 3, 7, 10, 14 } }, { "Oitava", { 0, 12 } },
+    };
+    return list;
+}
+
+const std::vector<NamedIntervals>& scales()
+{
+    static const std::vector<NamedIntervals> list {
+        { "Sem escala", {} },
+        { "Maior", { 0, 2, 4, 5, 7, 9, 11 } },
+        { "Menor natural", { 0, 2, 3, 5, 7, 8, 10 } },
+        { "Menor harmônica", { 0, 2, 3, 5, 7, 8, 11 } },
+        { "Pentatônica maior", { 0, 2, 4, 7, 9 } },
+        { "Pentatônica menor", { 0, 3, 5, 7, 10 } },
+        { "Blues", { 0, 3, 5, 6, 7, 10 } },
+        { "Dórico", { 0, 2, 3, 5, 7, 9, 10 } },
+        { "Frígio", { 0, 1, 3, 5, 7, 8, 10 } },
+    };
+    return list;
+}
+
 const SnapOption snapOptions[] = {
     { "Sem snap", 1 }, { "1/6 de step", ticksPerStep / 6 }, { "1/4 de step", ticksPerStep / 4 },
     { "1/3 de step", ticksPerStep / 3 }, { "1/2 step", ticksPerStep / 2 }, { "Step", ticksPerStep },
@@ -69,6 +101,35 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     snapBox.setMouseClickGrabsKeyboardFocus (false);
     snapBox.onChange = [this] { repaint(); };
     addAndMakeVisible (snapBox);
+
+    for (int i = 0; i < (int) chords().size(); ++i)
+        chordBox.addItem (utf8 (chords()[(std::size_t) i].name), i + 1);
+    chordBox.setSelectedId (1, juce::dontSendNotification);
+    chordBox.setTooltip (utf8 ("Clique cria este acorde (a nota clicada é a fundamental)"));
+
+    // escala: tônica x tipo
+    static const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    for (int s = 0; s < (int) scales().size(); ++s)
+    {
+        if (s == 0)
+        {
+            scaleBox.addItem (utf8 (scales()[0].name), 1);
+            continue;
+        }
+
+        for (int root = 0; root < 12; ++root)
+            scaleBox.addItem (juce::String (noteNames[root]) + " " + utf8 (scales()[(std::size_t) s].name), s * 100 + root + 1);
+    }
+    scaleBox.setSelectedId (1, juce::dontSendNotification);
+    scaleBox.setTooltip (utf8 ("Destaca as notas de uma escala"));
+
+    for (auto* box : { &chordBox, &scaleBox })
+    {
+        box->setWantsKeyboardFocus (false);
+        box->setMouseClickGrabsKeyboardFocus (false);
+        box->onChange = [this] { repaint(); };
+        addAndMakeVisible (box);
+    }
 
     laneBox.addItem ("Velocity", 1);
     laneBox.addItem ("Pan", 2);
@@ -171,7 +232,9 @@ void PianoRollComponent::resized()
 {
     snapBox.setBounds (keyboardWidth + 4, 3, 130, toolbarHeight - 6);
     midiButton.setBounds (snapBox.getRight() + 6, 3, 50, toolbarHeight - 6);
-    hintLabel.setBounds (midiButton.getRight() + 10, 0, getWidth() - midiButton.getRight() - 14, toolbarHeight);
+    chordBox.setBounds (midiButton.getRight() + 6, 3, 90, toolbarHeight - 6);
+    scaleBox.setBounds (chordBox.getRight() + 6, 3, 170, toolbarHeight - 6);
+    hintLabel.setBounds (scaleBox.getRight() + 10, 0, getWidth() - scaleBox.getRight() - 14, toolbarHeight);
     laneBox.setBounds (2, velocityArea().getY() + 4, keyboardWidth - 4, 20);
     hBar.setBounds (keyboardWidth, getHeight() - scrollBarSize, getWidth() - keyboardWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize,
@@ -200,6 +263,24 @@ void PianoRollComponent::scrollToNotes()
 }
 
 // --- seleção -----------------------------------------------------------------
+
+std::vector<int> PianoRollComponent::chordIntervals() const
+{
+    const auto index = juce::jlimit (0, (int) chords().size() - 1, chordBox.getSelectedId() - 1);
+    return chords()[(std::size_t) index].intervals;
+}
+
+bool PianoRollComponent::inScale (int key) const
+{
+    const auto id = scaleBox.getSelectedId();
+
+    if (id <= 1)
+        return false;
+
+    const auto& intervals = scales()[(std::size_t) (id / 100)].intervals;
+    const auto root = (id % 100) - 1;
+    return std::find (intervals.begin(), intervals.end(), ((key - root) % 12 + 12) % 12) != intervals.end();
+}
 
 bool PianoRollComponent::isSelected (int index) const
 {
@@ -297,7 +378,10 @@ void PianoRollComponent::paint (juce::Graphics& g)
             if (y > grid.getBottom() || y + rowHeight < grid.getY())
                 continue;
 
-            g.setColour (isBlackKey (key) ? juce::Colour (0xff262b30) : juce::Colour (0xff30363d));
+            auto row = isBlackKey (key) ? juce::Colour (0xff262b30) : juce::Colour (0xff30363d);
+            if (inScale (key))
+                row = row.interpolatedWith (theme::accentBlue, 0.12f);
+            g.setColour (row);
             g.fillRect (grid.getX(), y, grid.getWidth(), rowHeight);
 
             if (key % 12 == 0)
@@ -680,7 +764,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // nota nova
+    // nota nova (ou o acorde escolhido, com a nota clicada como fundamental)
     setSelection ({});
     Note n;
     n.start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
@@ -688,10 +772,23 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     n.key = yToKey (e.y);
     n.channel = engine.getSelectedChannel();
 
-    editNotes ([n] (Pattern& p) { p.notes.push_back (n); });
-    dragNote = (int) currentPattern (engine.getSong()).notes.size() - 1;
-    dragIndices = { dragNote };
-    dragOriginals = { n };
+    std::vector<Note> stamp;
+    for (auto interval : chordIntervals())
+        if (n.key + interval <= 127)
+        {
+            auto chordNote = n;
+            chordNote.key = n.key + interval;
+            stamp.push_back (chordNote);
+        }
+
+    std::vector<int> added;
+    editNotes ([&] (Pattern& p) { added = noteedit::paste (p, stamp, 0); });
+    dragNote = added.front(); // a fundamental guia o arraste
+    dragIndices = added;
+    dragOriginals = stamp;
+
+    if (added.size() > 1)
+        setSelection (added);
     drag = Drag::move;
     grabOffset = 0;
     previewOn (n.key, n.velocity);
