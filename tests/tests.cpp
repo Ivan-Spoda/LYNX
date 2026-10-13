@@ -4767,3 +4767,19 @@ TEST (pitch_correction_pulls_to_allowed_note)
     slot.params[2] = 1.0f; // desligar tudo: passa sem mudar
     CHECK (std::abs (run (slot.params, 452.0) - 452.0) < 4.0);
 }
+
+TEST (pitch_correction_passes_dry_when_in_tune)
+{
+    // nota já afinada (440 Hz): sai igual à entrada, sem a coloração das duas cabeças
+    auto fx = lynx::makeEffect (lynx::EffectKind::pitchCorrect);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchCorrect);
+    std::vector<float> l (48000), r;
+    for (std::size_t i = 0; i < l.size(); ++i)
+        l[i] = 0.5f * (float) std::sin (2.0 * 3.141592653589793 * 440.0 * (double) i / 48000.0);
+    r = l;
+    const auto in = l;
+    fx->process (l.data(), r.data(), (int) l.size(), slot.params, 120.0);
+    for (std::size_t i = 24000; i < l.size(); ++i)
+        CHECK (std::abs (l[i] - in[i]) < 0.01f);
+}

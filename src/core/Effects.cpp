@@ -1445,6 +1445,7 @@ public:
         hopCount = 0;
         detectedHz = 0.0;
         correction = 0.0;
+        wet = 0.0f;
         write = 0;
         phase = 0.0;
     }
@@ -1455,6 +1456,7 @@ public:
         const auto coeff = u < 0.01 ? 1.0 : std::min (1.0, 8.82 / (sampleRate * (3.0 * u * u * u + 0.001)));
         const auto fine = 2.0 * p[1] - 1.0;
         const auto window = std::min (windowSeconds * sampleRate, (double) length - 4.0);
+        const auto wetCoeff = (float) (1.0 / (0.01 * sampleRate));
 
         for (int i = 0; i < n; ++i)
         {
@@ -1485,8 +1487,16 @@ public:
             const auto phaseB = phase + 0.5 >= 1.0 ? phase - 0.5 : phase + 0.5;
             const auto gainA = (float) std::sin (3.141592653589793 * phase);
             const auto gainB = (float) std::sin (3.141592653589793 * phaseB);
-            for (int c = 0; c < 2; ++c)
-                *io[c] = gainA * read (c, 1.0 + phase * window) + gainB * read (c, 1.0 + phaseB * window);
+            // sem correção, o som passa seco (as duas cabeças paradas somariam atrasos diferentes = filtro pente);
+            // a passagem seco <-> deslocado é suave (~10 ms)
+            const auto shifting = std::abs (correction + fine) > 0.05; // 5 centésimos: abaixo disso não se ouve
+            wet += ((shifting ? 1.0f : 0.0f) - wet) * wetCoeff;
+            if (wet > 1e-4f)
+                for (int c = 0; c < 2; ++c)
+                {
+                    const auto shifted = gainA * read (c, 1.0 + phase * window) + gainB * read (c, 1.0 + phaseB * window);
+                    *io[c] += (shifted - *io[c]) * wet;
+                }
             phase += step;
             phase -= std::floor (phase);
             if (++write >= length)
@@ -1572,6 +1582,7 @@ private:
     int ringWrite = 0, decimCount = 0, hopCount = 0;
     float decimSum = 0.0f;
     double detectedHz = 0.0, target = 0.0, correction = 0.0;
+    float wet = 0.0f;
     std::array<std::vector<float>, 2> buffer;
     int length = 1, write = 0;
     double phase = 0.0;
