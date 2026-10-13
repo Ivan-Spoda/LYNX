@@ -1,5 +1,8 @@
 #include "ui/PlaylistComponent.h"
 
+#include "core/NoteEdit.h"
+#include "engine/Text.h"
+
 #include "ui/Theme.h"
 
 namespace lynx
@@ -130,6 +133,17 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.drawVerticalLine ((int) tickToX ((double) tick), (float) grid.getY(), (float) grid.getBottom());
         }
 
+        // região de loop
+        if (song.hasLoop())
+        {
+            const auto lx0 = (float) tickToX ((double) song.loopStart), lx1 = (float) tickToX ((double) song.loopEnd);
+            g.setColour (theme::accentGreen.withAlpha (0.05f));
+            g.fillRect (juce::Rectangle<float> (lx0, (float) grid.getY(), lx1 - lx0, (float) grid.getHeight()));
+            g.setColour (theme::accentGreen.withAlpha (0.35f));
+            g.drawVerticalLine ((int) lx0, (float) grid.getY(), (float) grid.getBottom());
+            g.drawVerticalLine ((int) lx1, (float) grid.getY(), (float) grid.getBottom());
+        }
+
         // fim da música
         if (! song.playlist.empty())
         {
@@ -155,16 +169,23 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (c.kind == ClipKind::audio)
             {
                 paintAudioClip (g, c, r);
+
+                if (isSelected (i))
+                {
+                    g.setColour (juce::Colour (0xffff6f6f));
+                    g.drawRoundedRectangle (r, 3.0f, 2.0f);
+                }
                 continue;
             }
 
             const auto colour = patternColour (song, c.pattern);
-            const auto selected = c.pattern == song.currentPattern;
+            const auto current = c.pattern == song.currentPattern;
+            const auto selected = isSelected (i);
 
             g.setColour (colour.withAlpha (0.85f));
             g.fillRoundedRectangle (r, 3.0f);
-            g.setColour (selected ? juce::Colours::white : colour.darker (0.6f));
-            g.drawRoundedRectangle (r, 3.0f, selected ? 1.5f : 1.0f);
+            g.setColour (selected ? juce::Colour (0xffff6f6f) : current ? juce::Colours::white : colour.darker (0.6f));
+            g.drawRoundedRectangle (r, 3.0f, selected ? 2.0f : current ? 1.5f : 1.0f);
 
             // faixa do nome
             const auto title = r.withHeight (13.0f);
@@ -207,6 +228,14 @@ void PlaylistComponent::paint (juce::Graphics& g)
             }
         }
 
+        if (! rubberBand.isEmpty())
+        {
+            g.setColour (theme::accentBlue.withAlpha (0.15f));
+            g.fillRect (rubberBand);
+            g.setColour (theme::accentBlue);
+            g.drawRect (rubberBand);
+        }
+
         if (playheadTick >= 0.0)
         {
             g.setColour (theme::playhead);
@@ -222,6 +251,13 @@ void PlaylistComponent::paint (juce::Graphics& g)
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (ruler);
         g.setFont (juce::FontOptions (12.0f));
+
+        if (song.hasLoop())
+        {
+            const auto lx0 = (float) tickToX ((double) song.loopStart), lx1 = (float) tickToX ((double) song.loopEnd);
+            g.setColour (theme::accentGreen.withAlpha (0.55f));
+            g.fillRect (juce::Rectangle<float> (lx0, 0.0f, lx1 - lx0, 6.0f));
+        }
 
         const auto barPixels = bar * pixelsPerTick;
         const auto every = barPixels < 30.0 ? (barPixels < 10.0 ? 16 : 4) : 1; // números mais espaçados quando afastado
@@ -408,11 +444,39 @@ void PlaylistComponent::seekTo (int x)
     repaint();
 }
 
+bool PlaylistComponent::isSelected (int index) const
+{
+    return std::binary_search (selection.begin(), selection.end(), index);
+}
+
+void PlaylistComponent::setSelection (std::vector<int> indices)
+{
+    std::sort (indices.begin(), indices.end());
+    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
+    selection = std::move (indices);
+    knownClipCount = engine.getSong().playlist.size();
+    repaint();
+}
+
+void PlaylistComponent::sortClips()
+{
+    auto tracked = selection;
+    engine.editSong ([&tracked] (Song& s) { noteedit::sortByStartTracking (s.playlist, tracked); }, false);
+    setSelection (tracked);
+}
+
 void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 {
     if (e.y < timelineHeight && e.x >= headerWidth)
     {
+        if (e.mods.isPopupMenu())
+        {
+            engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false);
+            return;
+        }
+
         drag = Drag::seek;
+        loopAnchor = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), ! e.mods.isAltDown()));
         seekTo (e.x);
         return;
     }
@@ -425,10 +489,40 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
     if (e.mods.isRightButtonDown())
     {
+        // na faixa do nome: menu do clip; no corpo: apaga
+        if (hit >= 0 && e.y < trackToY (engine.getSong().playlist[(std::size_t) hit].track) + 15)
+        {
+            showClipMenu (hit);
+            return;
+        }
+
         drag = Drag::erase;
+        setSelection ({}); // os índices mudam enquanto apaga
 
         if (hit >= 0)
             engine.editSong ([hit] (Song& s) { s.playlist.erase (s.playlist.begin() + hit); });
+        return;
+    }
+
+    if (e.mods.isCtrlDown() || (e.mods.isShiftDown() && hit < 0))
+    {
+        drag = Drag::select;
+        selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
+        rubberBand = { e.x, e.y, 0, 0 };
+        setSelection (selectionBefore);
+        return;
+    }
+
+    if (hit >= 0 && e.mods.isShiftDown())
+    {
+        auto s = selection;
+
+        if (isSelected (hit))
+            s.erase (std::find (s.begin(), s.end(), hit));
+        else
+            s.push_back (hit);
+
+        setSelection (s);
         return;
     }
 
@@ -436,8 +530,18 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
     if (hit >= 0)
     {
-        const auto& c = engine.getSong().playlist[(std::size_t) hit];
+        if (! isSelected (hit))
+            setSelection ({});
+
+        const auto& playlist = engine.getSong().playlist;
+        const auto& c = playlist[(std::size_t) hit];
         dragClip = hit;
+        dragIndices = selection.empty() ? std::vector<int> { hit } : selection;
+        dragOriginals.clear();
+
+        for (auto i : dragIndices)
+            dragOriginals.push_back (playlist[(std::size_t) i]);
+
         drag = rightEdge ? Drag::resize : Drag::move;
         grabOffset = c.start - snap (xToTick (e.x), snapOn);
 
@@ -447,6 +551,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     }
 
     // pinta a pattern atual
+    setSelection ({});
     const auto& song = engine.getSong();
     Clip c;
     c.pattern = song.currentPattern;
@@ -459,6 +564,8 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         s.mode = PlayMode::song; // quem está arranjando quer ouvir a música
     });
     dragClip = (int) engine.getSong().playlist.size() - 1;
+    dragIndices = { dragClip };
+    dragOriginals = { c };
     drag = Drag::move;
     grabOffset = 0;
 }
@@ -473,8 +580,47 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
             return;
 
         case Drag::seek:
-            seekTo (e.x);
+            if (std::abs (e.getDistanceFromDragStartX()) < 5)
+            {
+                seekTo (e.x);
+                return;
+            }
+
+            drag = Drag::loop;
+            [[fallthrough]];
+
+        case Drag::loop:
+        {
+            const auto here = juce::jmax<std::int64_t> (0, snap (xToTick (e.x) + (snapOn ? ppq / 2.0 : 0.0), snapOn));
+            const auto from = juce::jmin (loopAnchor, here), to = juce::jmax (loopAnchor, here);
+
+            engine.editSong ([from, to] (Song& s) {
+                s.loopStart = from;
+                s.loopEnd = to;
+                s.mode = PlayMode::song;
+            }, false);
             return;
+        }
+
+        case Drag::select:
+        {
+            rubberBand = juce::Rectangle<int> (e.getMouseDownPosition(), e.getPosition()).getIntersection (gridArea());
+            const auto t0 = xToTick (rubberBand.getX()), t1 = xToTick (rubberBand.getRight());
+            const auto tr0 = yToTrack (rubberBand.getY()), tr1 = yToTrack (rubberBand.getBottom());
+            const auto& playlist = engine.getSong().playlist;
+            auto s = selectionBefore;
+
+            for (int i = 0; i < (int) playlist.size(); ++i)
+            {
+                const auto& c = playlist[(std::size_t) i];
+
+                if ((double) c.end() > t0 && (double) c.start < t1 && c.track >= tr0 && c.track <= tr1)
+                    s.push_back (i);
+            }
+
+            setSelection (s);
+            return;
+        }
 
         case Drag::erase:
         {
@@ -488,26 +634,49 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 
         case Drag::move:
         {
-            const auto start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset);
-            const auto track = yToTrack (e.y);
-            const auto& c = engine.getSong().playlist[(std::size_t) dragClip];
+            const auto grabbedAt = (std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragClip) - dragIndices.begin());
+            const auto& grabbed = dragOriginals[grabbedAt];
+            auto deltaTicks = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset) - grabbed.start;
+            auto deltaTracks = yToTrack (e.y) - grabbed.track;
 
-            if (c.start != start || c.track != track)
-                engine.editSong ([i = dragClip, start, track] (Song& s) {
-                    s.playlist[(std::size_t) i].start = start;
-                    s.playlist[(std::size_t) i].track = track;
-                });
+            // o grupo mantém a forma: limita pelo clip mais à esquerda / mais acima
+            for (const auto& c : dragOriginals)
+            {
+                deltaTicks = juce::jmax (deltaTicks, -c.start);
+                deltaTracks = juce::jlimit (-c.track, 499 - c.track, deltaTracks);
+            }
+
+            const auto& current = engine.getSong().playlist[(std::size_t) dragClip];
+
+            if (current.start == grabbed.start + deltaTicks && current.track == grabbed.track + deltaTracks)
+                return;
+
+            engine.editSong ([this, deltaTicks, deltaTracks] (Song& s) {
+                for (std::size_t j = 0; j < dragIndices.size(); ++j)
+                {
+                    auto& c = s.playlist[(std::size_t) dragIndices[j]];
+                    c.start = dragOriginals[j].start + deltaTicks;
+                    c.track = dragOriginals[j].track + deltaTracks;
+                }
+            });
             return;
         }
 
         case Drag::resize:
         {
-            const auto& c = engine.getSong().playlist[(std::size_t) dragClip];
+            const auto grabbedAt = (std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragClip) - dragIndices.begin());
+            const auto& grabbed = dragOriginals[grabbedAt];
+            const auto minimum = snapOn ? (std::int64_t) ppq : (std::int64_t) 10;
             const auto end = snapOn ? snap (xToTick (e.x) + ppq / 2.0, true) : (std::int64_t) xToTick (e.x);
-            const auto length = juce::jmax<std::int64_t> (snapOn ? ppq : 10, end - c.start);
+            const auto delta = juce::jmax (minimum, end - grabbed.start) - grabbed.length;
 
-            if (length != c.length)
-                engine.editSong ([i = dragClip, length] (Song& s) { s.playlist[(std::size_t) i].length = length; });
+            if (engine.getSong().playlist[(std::size_t) dragClip].length == grabbed.length + delta)
+                return;
+
+            engine.editSong ([this, delta, minimum] (Song& s) {
+                for (std::size_t j = 0; j < dragIndices.size(); ++j)
+                    s.playlist[(std::size_t) dragIndices[j]].length = juce::jmax (minimum, dragOriginals[j].length + delta);
+            });
             return;
         }
     }
@@ -516,12 +685,220 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 void PlaylistComponent::mouseUp (const juce::MouseEvent&)
 {
     if (drag == Drag::move || drag == Drag::resize)
-        engine.editSong ([] (Song& s) {
-            std::stable_sort (s.playlist.begin(), s.playlist.end(), [] (const Clip& a, const Clip& b) { return a.start < b.start; });
-        });
+        sortClips();
 
     drag = Drag::none;
     dragClip = -1;
+    dragIndices.clear();
+    dragOriginals.clear();
+    rubberBand = {};
+    knownClipCount = engine.getSong().playlist.size();
+    repaint();
+}
+
+void PlaylistComponent::showClipMenu (int index)
+{
+    const auto& clip = engine.getSong().playlist[(std::size_t) index];
+    const auto targets = isSelected (index) ? selection : std::vector<int> { index };
+    juce::PopupMenu menu;
+
+    if (clip.kind == ClipKind::pattern)
+    {
+        menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
+        // como o "Make unique" do FL: os clips escolhidos passam a usar uma cópia da pattern
+        menu.addItem (utf8 ("Tornar única"), [this, targets] {
+            engine.editSong ([targets] (Song& s) {
+                std::map<int, int> copies; // pattern original -> cópia
+
+                for (auto i : targets)
+                {
+                    auto& c = s.playlist[(std::size_t) i];
+
+                    if (c.kind != ClipKind::pattern)
+                        continue;
+
+                    if (! copies.count (c.pattern))
+                    {
+                        auto copy = s.patterns[(std::size_t) c.pattern];
+                        copy.name += " #2";
+                        s.patterns.push_back (std::move (copy));
+                        copies[c.pattern] = (int) s.patterns.size() - 1;
+                    }
+
+                    c.pattern = copies[c.pattern];
+                }
+
+                s.currentPattern = copies.empty() ? s.currentPattern : copies.begin()->second;
+            });
+        });
+        menu.addItem ("Selecionar todos desta pattern", [this, p = clip.pattern] {
+            std::vector<int> same;
+            const auto& playlist = engine.getSong().playlist;
+
+            for (int i = 0; i < (int) playlist.size(); ++i)
+                if (playlist[(std::size_t) i].kind == ClipKind::pattern && playlist[(std::size_t) i].pattern == p)
+                    same.push_back (i);
+
+            setSelection (same);
+        });
+        menu.addItem ("Abrir no Channel Rack", [this] {
+            if (onOpenPattern)
+                onOpenPattern();
+        });
+    }
+
+    menu.addItem (targets.size() > 1 ? "Apagar selecionados" : "Apagar", [this, targets] {
+        setSelection ({});
+        engine.editSong ([targets] (Song& s) {
+            auto sorted = targets;
+            std::sort (sorted.rbegin(), sorted.rend());
+
+            for (auto i : sorted)
+                s.playlist.erase (s.playlist.begin() + i);
+        });
+    });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void PlaylistComponent::deleteSelection()
+{
+    if (selection.empty())
+        return;
+
+    auto doomed = selection;
+    setSelection ({});
+    engine.editSong ([&doomed] (Song& s) {
+        std::sort (doomed.rbegin(), doomed.rend());
+
+        for (auto i : doomed)
+            if (i >= 0 && i < (int) s.playlist.size())
+                s.playlist.erase (s.playlist.begin() + i);
+    });
+}
+
+void PlaylistComponent::copySelection()
+{
+    clipboard.clear();
+
+    for (auto i : selection)
+        clipboard.push_back (engine.getSong().playlist[(std::size_t) i]);
+}
+
+void PlaylistComponent::pasteClips()
+{
+    if (clipboard.empty())
+        return;
+
+    // cola no cursor de reprodução (ou onde o primeiro clip estava), mantendo trilhas e distâncias
+    std::int64_t first = clipboard.front().start;
+    for (const auto& c : clipboard)
+        first = juce::jmin (first, c.start);
+
+    const auto target = playheadTick >= 0.0 ? snap (playheadTick, true) : first;
+    std::vector<int> added;
+
+    engine.editSong ([&added, target, first] (Song& s) {
+        for (auto c : clipboard)
+        {
+            if (c.kind == ClipKind::pattern && c.pattern >= (int) s.patterns.size())
+                continue;
+            if (c.kind == ClipKind::audio && c.channel >= (int) s.channels.size())
+                continue;
+
+            c.start = c.start - first + target;
+            added.push_back ((int) s.playlist.size());
+            s.playlist.push_back (c);
+        }
+    });
+    setSelection (added);
+    sortClips();
+}
+
+void PlaylistComponent::duplicateSelection()
+{
+    if (selection.empty())
+        return;
+
+    const auto& song = engine.getSong();
+    const auto bar = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar);
+    std::int64_t from = INT64_MAX, to = 0;
+
+    for (auto i : selection)
+    {
+        from = juce::jmin (from, song.playlist[(std::size_t) i].start);
+        to = juce::jmax (to, song.playlist[(std::size_t) i].end());
+    }
+
+    const auto offset = juce::jmax (bar, (to - from + bar - 1) / bar * bar); // como o Ctrl+B do FL
+    const auto source = selection;
+    std::vector<int> added;
+
+    engine.editSong ([&added, &source, offset] (Song& s) {
+        for (auto i : source)
+        {
+            auto c = s.playlist[(std::size_t) i];
+            c.start += offset;
+            added.push_back ((int) s.playlist.size());
+            s.playlist.push_back (c);
+        }
+    });
+    setSelection (added);
+    sortClips();
+}
+
+bool PlaylistComponent::handleKey (const juce::KeyPress& key)
+{
+    const auto cmd = key.getModifiers().isCommandDown();
+    const auto code = key.getKeyCode();
+
+    if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey)
+    {
+        deleteSelection();
+        return true;
+    }
+
+    if (code == juce::KeyPress::escapeKey)
+    {
+        setSelection ({});
+        return true;
+    }
+
+    if (cmd && code == 'A')
+    {
+        std::vector<int> all ((std::size_t) engine.getSong().playlist.size());
+        for (std::size_t i = 0; i < all.size(); ++i)
+            all[i] = (int) i;
+        setSelection (all);
+        return true;
+    }
+
+    if (cmd && code == 'C')
+    {
+        copySelection();
+        return true;
+    }
+
+    if (cmd && code == 'X')
+    {
+        copySelection();
+        deleteSelection();
+        return true;
+    }
+
+    if (cmd && code == 'V')
+    {
+        pasteClips();
+        return true;
+    }
+
+    if (cmd && code == 'B')
+    {
+        duplicateSelection();
+        return true;
+    }
+
+    return false;
 }
 
 void PlaylistComponent::mouseMove (const juce::MouseEvent& e)
@@ -624,6 +1001,15 @@ void PlaylistComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
 
 void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    // a lista de clips mudou por fora (desfazer, remover pattern...): a seleção perde o sentido
+    const auto count = engine.getSong().playlist.size();
+
+    if (count != knownClipCount && drag == Drag::none)
+    {
+        knownClipCount = count;
+        selection.clear();
+    }
+
     updateScrollBars();
     repaint();
 }

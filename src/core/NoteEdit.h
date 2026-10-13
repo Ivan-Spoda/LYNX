@@ -3,6 +3,7 @@
 // Operações de edição de notas usadas pelo Piano Roll (seleção, copiar/colar,
 // quantizar...). Trabalham com índices em Pattern::notes. Sem JUCE, testáveis.
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -10,6 +11,34 @@
 
 namespace lynx::noteedit
 {
+// Ordena itens com campo `start` (notas, clips) e atualiza `tracked` (índices) para as novas posições.
+template <typename T>
+void sortByStartTracking (std::vector<T>& items, std::vector<int>& tracked)
+{
+    std::vector<int> order (items.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = (int) i;
+
+    std::stable_sort (order.begin(), order.end(),
+                      [&] (int a, int b) { return items[(std::size_t) a].start < items[(std::size_t) b].start; });
+
+    std::vector<int> newIndex (order.size());
+    std::vector<T> sorted;
+    sorted.reserve (order.size());
+
+    for (std::size_t j = 0; j < order.size(); ++j)
+    {
+        newIndex[(std::size_t) order[j]] = (int) j;
+        sorted.push_back (items[(std::size_t) order[j]]);
+    }
+
+    items = std::move (sorted);
+
+    for (auto& i : tracked)
+        if (i >= 0 && i < (int) newIndex.size())
+            i = newIndex[(std::size_t) i];
+}
+
 // Ordena as notas por início e atualiza `tracked` (índices) para as novas posições.
 void sortTracking (Pattern& pattern, std::vector<int>& tracked);
 

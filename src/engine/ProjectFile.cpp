@@ -178,6 +178,9 @@ juce::String toJson (const Song& song)
 
     root->setProperty ("mixer", mixer);
     root->setProperty ("mode", song.mode == PlayMode::song ? "song" : "pattern");
+
+    if (song.hasLoop())
+        root->setProperty ("loop", juce::Array<juce::var> { (juce::int64) song.loopStart, (juce::int64) song.loopEnd });
     return juce::JSON::toString (juce::var (root.release()), false);
 }
 
@@ -285,6 +288,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         }
 
     song.mode = root["mode"].toString() == "song" ? PlayMode::song : PlayMode::pattern;
+
+    if (const auto& loop = root["loop"]; loop.isArray() && loop.size() == 2)
+    {
+        song.loopStart = juce::jmax<juce::int64> (0, (juce::int64) loop[0]);
+        song.loopEnd = juce::jmax<juce::int64> (song.loopStart, (juce::int64) loop[1]);
+    }
 
     if (auto* mixer = root["mixer"].getArray())
         for (const auto& t : *mixer)

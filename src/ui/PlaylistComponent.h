@@ -19,6 +19,10 @@ namespace lynx
 //  - clicar na régua posiciona a reprodução e liga o modo Song
 //  - arrastar um arquivo de áudio para a Playlist cria um clip de áudio
 //  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
+//  - Ctrl+arrastar seleciona com retângulo; Shift+clique soma; clips selecionados andam juntos
+//  - arrastar na régua marca a região de loop; clique direito na régua desliga o loop
+//  - clique direito na faixa do nome de um clip abre o menu dele (tornar única etc.)
+//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
 class PlaylistComponent final : public juce::Component,
                                 public juce::FileDragAndDropTarget,
                                 private juce::ChangeListener,
@@ -40,6 +44,9 @@ public:
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
+    // Atalhos de edição; a janela principal repassa as teclas quando a Playlist está visível.
+    bool handleKey (const juce::KeyPress& key);
+
     // arrastar arquivos de áudio cria clips de áudio (e um canal para cada um)
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
@@ -52,7 +59,7 @@ public:
     static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
-    enum class Drag { none, move, resize, erase, seek };
+    enum class Drag { none, move, resize, erase, seek, loop, select };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -67,6 +74,14 @@ private:
     std::int64_t snap (double tick, bool enabled) const;
     int clipAt (int x, int y, bool& onRightEdge) const;
     void updateScrollBars();
+    bool isSelected (int index) const;
+    void setSelection (std::vector<int> indices);
+    void sortClips(); // ordena mantendo a seleção (sem passo de desfazer)
+    void showClipMenu (int clip);
+    void deleteSelection();
+    void copySelection();
+    void pasteClips();
+    void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
     const std::vector<float>* waveformFor (const std::string& path);
@@ -84,6 +99,13 @@ private:
 
     Drag drag = Drag::none;
     int dragClip = -1;
+    std::vector<int> dragIndices;
+    std::vector<Clip> dragOriginals;
+    std::vector<int> selection, selectionBefore;
+    juce::Rectangle<int> rubberBand;
+    std::int64_t loopAnchor = 0;
+    std::size_t knownClipCount = 0;
+    static inline std::vector<Clip> clipboard;
     std::int64_t grabOffset = 0;
     double playheadTick = -1.0;
 

@@ -140,6 +140,9 @@ struct Song
 
     std::vector<Clip> playlist;
     PlayMode mode = PlayMode::pattern;
+    std::int64_t loopStart = 0, loopEnd = 0; // trecho em loop na Playlist (ticks); loopEnd <= loopStart = desligado
+
+    bool hasLoop() const noexcept { return loopEnd > loopStart; }
 
     std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
 

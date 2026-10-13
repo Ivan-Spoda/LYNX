@@ -393,6 +393,9 @@ void AudioEngine::publishSong()
     liveChannel.store (selectedChannel);
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
+    transport.songMode.store (song.mode == PlayMode::song);
+    transport.loopStart.store ((double) song.loopStart);
+    transport.loopEnd.store ((double) song.loopEnd);
 
     RackState::Factories factories;
     factories.samples = [this] (const std::string& path) { return samples.load (juce::String::fromUTF8 (path.c_str())); };
@@ -469,18 +472,60 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
         transport.positionTicks.store (target);
 
-    player.audioDeviceIOCallbackWithContext (inputChannelData, numInputChannels,
-                                             outputChannelData, numOutputChannels,
-                                             numSamples, context);
+    // Com a região de loop ligada, o bloco é dividido no fim do loop e a posição volta ao
+    // início dele (os nós veem um salto e soltam as notas, como no FL).
+    std::array<const float*, 64> inputs {};
+    std::array<float*, 64> outputs {};
+    numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());
+    numOutputChannels = juce::jmin (numOutputChannels, (int) outputs.size());
 
-    for (int ch = 0; ch < numOutputChannels; ++ch)
-        if (outputChannelData[ch] != nullptr)
-            softClip (outputChannelData[ch], numSamples);
+    for (int done = 0; done < numSamples;)
+    {
+        auto n = numSamples - done;
+        const auto playing = transport.playing.load (std::memory_order_relaxed);
+        const auto tps = transport.ticksPerSample();
+        const auto loopStart = transport.loopStart.load (std::memory_order_relaxed);
+        const auto loopEnd = transport.loopEnd.load (std::memory_order_relaxed);
+        const auto looping = playing && transport.songMode.load (std::memory_order_relaxed) && loopEnd > loopStart && tps > 0.0;
 
-    if (transport.playing.load (std::memory_order_relaxed))
-        transport.positionTicks.store (transport.positionTicks.load (std::memory_order_relaxed)
-                                           + numSamples * transport.ticksPerSample(),
-                                       std::memory_order_relaxed);
+        if (looping)
+        {
+            // antes do loop toca normalmente até chegar nele; depois do fim volta ao início
+            auto position = transport.positionTicks.load (std::memory_order_relaxed);
+
+            if (position >= loopEnd)
+            {
+                position = loopStart;
+                transport.positionTicks.store (position, std::memory_order_relaxed);
+            }
+
+            n = juce::jlimit (1, n, (int) std::ceil ((loopEnd - position) / tps));
+        }
+
+        for (int ch = 0; ch < numInputChannels; ++ch)
+            inputs[(std::size_t) ch] = inputChannelData[ch] != nullptr ? inputChannelData[ch] + done : nullptr;
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            outputs[(std::size_t) ch] = outputChannelData[ch] != nullptr ? outputChannelData[ch] + done : nullptr;
+
+        player.audioDeviceIOCallbackWithContext (inputs.data(), numInputChannels, outputs.data(), numOutputChannels, n, context);
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputs[(std::size_t) ch] != nullptr)
+                softClip (outputs[(std::size_t) ch], n);
+
+        if (playing)
+        {
+            auto position = transport.positionTicks.load (std::memory_order_relaxed) + n * tps;
+
+            if (looping && position >= loopEnd - 1e-6)
+                position = loopStart;
+
+            transport.positionTicks.store (position, std::memory_order_relaxed);
+        }
+
+        done += n;
+    }
 
     blockTimeMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
 }

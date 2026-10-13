@@ -164,6 +164,7 @@ Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, s
     }
 
     out.mode = PlayMode::song;
+    out.loopStart = out.loopEnd = 0; // exportar ignora a região de loop
     return out;
 }
 

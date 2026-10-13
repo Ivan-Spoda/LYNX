@@ -186,6 +186,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (tabs.getCurrentTabIndex() == pianoRollTab && pianoRoll.handleKey (key))
         return true;
 
+    if (tabs.getCurrentTabIndex() == playlistTab && playlist.handleKey (key))
+        return true;
+
     if (cmd && key.getKeyCode() == 'Z')
     {
         key.getModifiers().isShiftDown() ? engine.redo() : engine.undo();

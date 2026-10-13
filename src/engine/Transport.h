@@ -21,6 +21,10 @@ struct Transport
     std::atomic<bool> rewindRequested { false };
     std::atomic<double> seekRequest { -1.0 }; // < 0 = nenhum; a thread de áudio aplica no próximo bloco
 
+    // Região de loop da Playlist (só no modo song). end <= start = desligada.
+    std::atomic<bool> songMode { false };
+    std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
+
     double ticksPerSample() const noexcept
     {
         return bpm.load (std::memory_order_relaxed) * ppq / (60.0 * sampleRate.load (std::memory_order_relaxed));

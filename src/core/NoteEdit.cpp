@@ -1,7 +1,6 @@
 #include "core/NoteEdit.h"
 
 #include <algorithm>
-#include <numeric>
 
 namespace lynx::noteedit
 {
@@ -15,26 +14,7 @@ bool valid (const Pattern& p, int i)
 
 void sortTracking (Pattern& pattern, std::vector<int>& tracked)
 {
-    std::vector<int> order (pattern.notes.size());
-    std::iota (order.begin(), order.end(), 0);
-    std::stable_sort (order.begin(), order.end(),
-                      [&] (int a, int b) { return pattern.notes[(std::size_t) a].start < pattern.notes[(std::size_t) b].start; });
-
-    std::vector<int> newIndex (order.size());
-    std::vector<Note> sorted;
-    sorted.reserve (order.size());
-
-    for (std::size_t j = 0; j < order.size(); ++j)
-    {
-        newIndex[(std::size_t) order[j]] = (int) j;
-        sorted.push_back (pattern.notes[(std::size_t) order[j]]);
-    }
-
-    pattern.notes = std::move (sorted);
-
-    for (auto& i : tracked)
-        if (i >= 0 && i < (int) newIndex.size())
-            i = newIndex[(std::size_t) i];
+    sortByStartTracking (pattern.notes, tracked);
 }
 
 void remove (Pattern& pattern, std::vector<int> indices)
