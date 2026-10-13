@@ -1,5 +1,5 @@
-# Gera o ícone do LYNX (disco escuro + pimenta) a partir do PNG transparente da pimenta.
-# Uso: python3 tools/make_logo.py resources/lynx_logo.png pasta_de_saida
+# Generates the LYNX icon (dark disc + pepper) from the pepper's transparent PNG.
+# Usage: python3 tools/make_logo.py resources/lynx_logo.png output_folder
 import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
 S = 1024
@@ -8,7 +8,7 @@ pepper = Image.open(sys.argv[1]).convert("RGBA")
 pepper = pepper.crop(pepper.getbbox())
 
 def radial(size, inner, outer, center=(0.5, 0.42)):
-    # gradiente radial (centro levemente acima: luz de cima)
+    # radial gradient (centre slightly above: light from the top)
     import math
     img = Image.new("RGBA", (size, size))
     px = img.load()
@@ -21,14 +21,14 @@ def radial(size, inner, outer, center=(0.5, 0.42)):
             px[x, y] = tuple(int(inner[i] + (outer[i] - inner[i]) * t) for i in range(4))
     return img
 
-big = S * 2  # supersample para bordas suaves
+big = S * 2  # supersample for smooth edges
 mask = Image.new("L", (big, big), 0)
 ImageDraw.Draw(mask).ellipse((40, 40, big - 40, big - 40), fill=255)
 disc = radial(big, (52, 52, 56, 255), (8, 8, 10, 255))
 badge = Image.new("RGBA", (big, big), (0, 0, 0, 0))
 badge.paste(disc, (0, 0), mask)
 
-# aro: anel fino com degradê laranja->vermelho (as cores da pimenta), mais forte em cima
+# rim: thin ring with an orange->red gradient (the pepper's colours), stronger at the top
 rim = Image.new("RGBA", (big, big), (0, 0, 0, 0))
 d = ImageDraw.Draw(rim)
 for i, w in enumerate(range(0, 22)):
@@ -38,14 +38,14 @@ rimGrad = Image.linear_gradient("L").resize((big, big)).point(lambda v: 255 - in
 rim.putalpha(ImageChops.multiply(rim.getchannel("A"), rimGrad))
 badge = Image.alpha_composite(badge, rim)
 
-# brilho de vidro na metade de cima
+# glass gloss on the top half
 gloss = Image.new("L", (big, big), 0)
 ImageDraw.Draw(gloss).ellipse((170, 70, big - 170, big * 0.52), fill=34)
 gloss = gloss.filter(ImageFilter.GaussianBlur(60))
 gl = Image.new("RGBA", (big, big), (255, 255, 255, 0)); gl.putalpha(ImageChops.multiply(gloss, mask))
 badge = Image.alpha_composite(badge, gl)
 
-# pimenta: ~74% da altura, levemente inclinada, com sombra
+# pepper: ~74% of the height, slightly tilted, with a shadow
 h = int(big * 0.74)
 w = int(pepper.width * h / pepper.height)
 p = pepper.resize((w, h), Image.LANCZOS).rotate(-14, resample=Image.BICUBIC, expand=True)

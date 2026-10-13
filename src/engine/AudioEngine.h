@@ -19,13 +19,13 @@
 
 namespace lynx
 {
-// Dono do dispositivo de áudio, do grafo de processamento e do documento (Song).
-// Fica entre o driver e o AudioProcessorPlayer para avançar o transporte
-// depois de cada bloco, assim todos os nós veem a mesma posição de início.
+// Owns the audio device, the processing graph and the document (Song).
+// Sits between the driver and the AudioProcessorPlayer to advance the transport
+// after each block, so every node sees the same start position.
 //
-// O Song só é tocado pela thread da UI; cada edição publica um snapshot
-// imutável (RackState) para a thread de áudio.
-// Pastas da instalação mais recente do FL Studio (vazias se não houver).
+// The Song is touched only by the UI thread; each edit publishes an immutable
+// snapshot (RackState) to the audio thread.
+// Folders of the most recent FL Studio installation (empty if none).
 FlPathRoots findFlStudioRoots();
 
 class AudioEngine final : private juce::AudioIODeviceCallback,
@@ -43,16 +43,16 @@ public:
     MeterBank& getMeters() noexcept { return meters; }
     PluginHost& getPluginHost() noexcept { return plugins; }
 
-    // Plugins de terceiros do último .flp importado que não foram achados entre os escaneados.
+    // Third-party plugins from the last imported .flp that were not found among the scanned ones.
     const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
-    // O que o último .flp importado converteu, aproximou ou deixou de fora.
+    // What the last imported .flp converted, approximated or left out.
     const FlpImportReport& getImportReport() const noexcept { return importReport; }
 
-    // Instâncias vivas (para abrir a janela do plugin). nullptr se não for plugin.
+    // Live instances (to open the plugin window). nullptr if not a plugin.
     std::shared_ptr<Instrument> getChannelInstrument (int channel) const;
     std::shared_ptr<Effect> getEffect (int track, int slot) const;
 
-    // Copia o estado atual dos plugins para o Song (antes de salvar).
+    // Copies the plugins' current state into the Song (before saving).
     void capturePluginStates();
 
     void play() noexcept;
@@ -60,41 +60,41 @@ public:
     void rewind() noexcept;
     void seek (double ticks) noexcept;
 
-    // Prévia de um arquivo de áudio (navegador). Arquivo inválido/vazio para a prévia.
+    // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
 
-    // Nota tocada ao vivo (teclado do PC, preview). Thread da UI.
-    // `record` = entra na gravação se ela estiver ligada (o preview do Piano Roll não entra).
+    // Note played live (PC keyboard, preview). UI thread.
+    // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
     void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
 
-    // Gravação de notas (MIDI e teclado do PC) na pattern atual enquanto toca. Thread da UI.
+    // Note recording (MIDI and PC keyboard) into the current pattern while playing. UI thread.
     void setRecording (bool shouldRecord);
     bool isRecording() const noexcept { return transport.recording.load(); }
 
-    // Gravação de áudio da entrada da placa: com isto ligado, gravar (Rec + Play) escreve a
-    // entrada num WAV e, ao parar, o take vira um clip na Playlist (compensado pela latência).
-    // Ligar abre a entrada do dispositivo (só então o Windows mostra o microfone em uso).
+    // Audio recording from the interface input: with this on, recording (Rec + Play) writes the
+    // input to a WAV and, on stop, the take becomes a Playlist clip (latency-compensated).
+    // Enabling it opens the device input (only then does Windows show the mic as in use).
     void setAudioRecordingArmed (bool armed);
     bool isAudioRecordingArmed() const noexcept { return audioArmed; }
     juce::String getLastRecordingError() const { return recordingError; }
 
-    // MIDI learn: o próximo CC recebido vira um controlador ligado a `target`.
+    // MIDI learn: the next CC received becomes a controller linked to `target`.
     void learnMidiController (const AutomationTarget& target);
     bool isLearningMidi() const noexcept { return learning.kind != AutomationTargetKind::none; }
 
-    // Entradas MIDI: todas as disponíveis ficam ligadas e tocam o canal selecionado.
+    // MIDI inputs: all available ones are enabled and play the selected channel.
     juce::StringArray getActiveMidiInputs() const;
 
-    // Documento (thread da UI)
+    // Document (UI thread)
     const Song& getSong() const noexcept { return song; }
-    void setSong (Song newSong); // projeto novo/aberto: zera o histórico
+    void setSong (Song newSong); // new/opened project: clears the history
 
-    // Edita a música e publica para o áudio. Edições `undoable` entram no histórico;
-    // todas as edições feitas enquanto o mesmo clique do mouse está pressionado
-    // (arrastar uma nota, girar um knob) viram um passo só.
+    // Edits the song and publishes it to audio. `undoable` edits go into the history;
+    // all edits made while the same mouse click is held down
+    // (dragging a note, turning a knob) become a single step.
     void editSong (const std::function<void (Song&)>& edit, bool undoable = true);
 
-    // Alterações desde o último salvar/abrir (para o "*" no título e o "salvar alterações?").
+    // Changes since the last save/open (for the "*" in the title and the "save changes?" prompt).
     bool isModified() const noexcept { return modified; }
     void markSaved() noexcept { modified = false; sendChangeMessage(); }
 
@@ -103,32 +103,32 @@ public:
     void undo();
     void redo();
 
-    // Canal selecionado no Channel Rack (alvo do Piano Roll e do teclado). Thread da UI.
+    // Channel selected in the Channel Rack (target of the Piano Roll and keyboard). UI thread.
     int getSelectedChannel() const noexcept { return selectedChannel; }
     void setSelectedChannel (int channel);
 
-    // Importa um .flp localizando a instalação do FL para achar os samples.
-    // Retorna false e preenche `error` se não conseguir.
+    // Imports a .flp, locating the FL installation to find the samples.
+    // Returns false and fills `error` on failure.
     bool importFlpFile (const juce::File& file, juce::String& error);
 
-    // Renderiza sem dispositivo de áudio. Grava em `output` se não for nullptr.
-    // Depois de `seconds`, continua por até `tailSeconds` enquanto ainda houver som.
-    // `progress(0..1)` retorna false para cancelar. Retorna o pico (usado pelo autoteste),
-    // ou -1 se cancelado.
+    // Renders without an audio device. Writes to `output` if not nullptr.
+    // After `seconds`, continues for up to `tailSeconds` while there is still sound.
+    // `progress(0..1)` returns false to cancel. Returns the peak (used by the self-test),
+    // or -1 if cancelled.
     struct RenderOptions
     {
         double seconds = 10.0;
         double sampleRate = 44100.0;
         juce::AudioFormatWriter* output = nullptr;
-        std::function<bool (double)> progress; // 0..1; false cancela
+        std::function<bool (double)> progress; // 0..1; false cancels
         double tailSeconds = 0.0;
-        int trimSamples = 0;  // PDC: descarta esse tanto do começo e renderiza o mesmo tanto a mais no fim
-        int ditherBits = 0;   // > 0: dither TPDF com noise shaping para essa resolução
+        int trimSamples = 0;  // PDC: discards this much from the start and renders the same amount extra at the end
+        int ditherBits = 0;   // > 0: TPDF dither with noise shaping for this bit depth
     };
 
     float renderOffline (const RenderOptions& options);
 
-    // tempos do último renderOffline (diagnóstico): o grafo de áudio e a gravação do arquivo
+    // timings of the last renderOffline (diagnostics): the audio graph and the file writing
     struct RenderStats
     {
         double graphMs = 0.0, writeMs = 0.0;
@@ -145,11 +145,11 @@ public:
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
 
-    // Últimos samples da saída (mono), para o osciloscópio. Thread da UI.
+    // Latest output samples (mono), for the oscilloscope. UI thread.
     void copyScope (float* destination, int count) const noexcept;
     static constexpr int scopeSize = 2048;
 
-    // Latência total compensada pelo PDC (na saída do Master), em samples.
+    // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
 
 private:
@@ -171,65 +171,65 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
-    class PreviewPlayer* preview = nullptr; // nó do grafo (o grafo é o dono)
+    class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     void publishSong();
 
-    std::unique_ptr<WorkerPool> workers; // threads extras do renderer (antes do grafo, que as usa)
+    std::unique_ptr<WorkerPool> workers; // extra renderer threads (before the graph, which uses them)
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorPlayer player;
     Transport transport;
     SampleLibrary samples;
-    LiveEventQueue liveEvents;   // UI -> áudio
-    LiveEventQueue midiEvents;   // thread MIDI -> áudio
-    SpscQueue<RecordedEvent, 1024> midiRecordQueue; // thread MIDI -> UI (gravação)
+    LiveEventQueue liveEvents;   // UI -> audio
+    LiveEventQueue midiEvents;   // MIDI thread -> audio
+    SpscQueue<RecordedEvent, 1024> midiRecordQueue; // MIDI thread -> UI (recording)
 
     struct ControllerEvent
     {
         int cc = 0, channel = 0, value = 0;
     };
-    SpscQueue<ControllerEvent, 1024> controllerQueue; // thread MIDI -> UI (controladores)
+    SpscQueue<ControllerEvent, 1024> controllerQueue; // MIDI thread -> UI (controllers)
     AutomationTarget learning;
     void applyControllers();
-    std::vector<RecordedEvent> uiRecorded;           // teclado do PC -> gravação
+    std::vector<RecordedEvent> uiRecorded;           // PC keyboard -> recording
     NoteRecorder recorder;
     bool takeHasUndoStep = false;
     double lastPlayingTick = 0.0;
-    std::atomic<int> liveChannel { 0 };              // canal selecionado, lido pela thread MIDI
-    std::atomic<double> blockTimeMs { 0.0 };         // quando positionTicks foi atualizado por último
-    std::array<std::atomic<float>, scopeSize> scope {}; // anel com a saída (escrito pelo áudio)
+    std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
+    std::atomic<double> blockTimeMs { 0.0 };         // when positionTicks was last updated
+    std::array<std::atomic<float>, scopeSize> scope {}; // ring buffer of the output (written by audio)
     std::atomic<int> scopeWrite { 0 };
     juce::MidiDeviceListConnection midiDevicesChanged;
 
-    // gravação de áudio
+    // audio recording
     bool audioArmed = false;
     juce::String recordingError;
-    juce::TimeSliceThread recordThread { "LYNX gravação" };
+    juce::TimeSliceThread recordThread { "LYNX recording" };
     std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> takeWriter;
-    juce::SpinLock takeLock;                       // a thread de áudio só tenta (nunca espera)
+    juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
     juce::File takeFile;
     int takeChannels = 0;
-    std::atomic<double> takeStartTick { -1.0 };    // posição do primeiro sample gravado
+    std::atomic<double> takeStartTick { -1.0 };    // position of the first recorded sample
     std::atomic<juce::int64> takeFrames { 0 };
     double takeSampleRate = 44100.0;
-    int takeLatency = 0;                           // entrada + saída, em samples
+    int takeLatency = 0;                           // input + output, in samples
     MeterBank meters;
     PluginHost plugins;
     juce::StringArray missingPlugins;
     FlpImportReport importReport;
     RenderStats lastRenderStats;
-    class ChannelRackProcessor* rackProcessor = nullptr; // nó do grafo (dono: o grafo)
+    class ChannelRackProcessor* rackProcessor = nullptr; // graph node (owner: the graph)
 
     Song song;
     int selectedChannel = 0;
     bool modified = false;
-    std::unique_ptr<StreamPrefetcher> prefetcher; // só com dispositivo de áudio (tocando ao vivo)
+    std::unique_ptr<StreamPrefetcher> prefetcher; // only with an audio device (playing live)
 
     static constexpr std::size_t maxUndoSteps = 100;
     std::deque<Song> undoStack, redoStack;
-    juce::Time lastUndoPress; // clique do mouse que já gerou um passo de desfazer
+    juce::Time lastUndoPress; // mouse click that already produced an undo step
     SnapshotExchange<RackState> rackExchange;
-    RackState lastPublishedShape; // canais + instrumentos do último snapshot, para reaproveitar vozes
+    RackState lastPublishedShape; // channels + instruments of the last snapshot, to reuse voices
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

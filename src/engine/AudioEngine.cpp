@@ -20,7 +20,7 @@ namespace lynx
 {
 using IONode = juce::AudioProcessorGraph::AudioGraphIOProcessor;
 
-// Procura a instalação mais recente do FL Studio para resolver %FLStudio...%.
+// Finds the most recent FL Studio installation to resolve %FLStudio...%.
 FlPathRoots findFlStudioRoots()
 {
     FlPathRoots roots;
@@ -47,7 +47,7 @@ FlPathRoots findFlStudioRoots()
 
 namespace
 {
-// Workers do áudio com prioridade de tempo real (MMCSS "Pro Audio" no Windows, como o driver).
+// Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver).
 void raiseAudioThreadPriority()
 {
    #if JUCE_WINDOWS
@@ -66,11 +66,11 @@ void raiseAudioThreadPriority()
 
 int workerCount()
 {
-    // diagnóstico: LYNX_WORKERS=n fixa o número de threads extras
+    // diagnostics: LYNX_WORKERS=n fixes the number of extra threads
     if (const auto forced = juce::SystemStats::getEnvironmentVariable ("LYNX_WORKERS", {}); forced.isNotEmpty())
         return juce::jlimit (0, 31, forced.getIntValue());
 
-    // a thread de áudio também trabalha; deixa um núcleo livre para a interface
+    // the audio thread works too; leave one core free for the UI
     const auto cores = (int) std::thread::hardware_concurrency();
     return juce::jlimit (0, 7, cores - 2);
 }
@@ -87,18 +87,18 @@ AudioEngine::AudioEngine (bool openAudioDevice)
     {
         player.setProcessor (&graph);
 
-        // 0 entradas, 2 saídas, sem estado salvo ainda, usa o dispositivo padrão.
+        // 0 inputs, 2 outputs, no saved state yet, use the default device.
         deviceManager.initialise (0, 2, nullptr, true);
         deviceManager.addAudioCallback (this);
 
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
         enableAllMidiInputs();
-        deviceManager.addMidiInputDeviceCallback ({}, this); // {} = todas as entradas ligadas
+        deviceManager.addMidiInputDeviceCallback ({}, this); // {} = all inputs enabled
         midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
     }
 
-    startTimerHz (30); // gravação e coleta de snapshots aposentados
+    startTimerHz (30); // recording and collection of retired snapshots
 }
 
 AudioEngine::~AudioEngine()
@@ -107,7 +107,7 @@ AudioEngine::~AudioEngine()
 
     {
         const juce::SpinLock::ScopedLockType lock (takeLock);
-        takeWriter = nullptr; // fecha o WAV do take em andamento (fica na pasta de gravações)
+        takeWriter = nullptr; // closes the WAV of the take in progress (it stays in the recordings folder)
     }
 
     recordThread.stopThread (2000);
@@ -116,13 +116,13 @@ AudioEngine::~AudioEngine()
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     player.setProcessor (nullptr);
-    graph.clear(); // os nós referenciam rackExchange e transport
+    graph.clear(); // the nodes reference rackExchange and transport
 }
 
 void AudioEngine::buildInitialGraph()
 {
-    // O nó de saída herda o número de canais do grafo no momento em que é criado.
-    // Sem isto o grafo ainda tem 0 saídas e o JUCE recusa as conexões em silêncio.
+    // The output node inherits the graph's channel count at the moment it is created.
+    // Without this the graph still has 0 outputs and JUCE silently rejects the connections.
     graph.setPlayConfigDetails (0, 2, transport.sampleRate.load(), 512);
 
     auto output = graph.addNode (std::make_unique<IONode> (IONode::audioOutputNode));
@@ -163,7 +163,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     graph.prepareToPlay (sampleRate, blockSize);
 
     if (rackProcessor != nullptr)
-        rackProcessor->setMetering (false); // ninguém olha os medidores durante o render
+        rackProcessor->setMetering (false); // nobody looks at the meters during the render
 
     play();
 
@@ -197,7 +197,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
             for (int ch = 0; ch < view.getNumChannels(); ++ch)
                 dither->process (view.getWritePointer (ch), n, ch);
 
-        // PDC: o começo é o silêncio da latência; o fim da música chega `trim` samples depois
+        // PDC: the start is the latency's silence; the song's end arrives `trim` samples later
         if (output != nullptr && done + n > trim)
         {
             const auto skip = (int) juce::jmax<std::int64_t> (0, trim - done);
@@ -208,7 +208,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
 
         transport.positionTicks.store (transport.positionTicks.load() + n * transport.ticksPerSample());
 
-        // na cauda: meio segundo de silêncio encerra
+        // in the tail: half a second of silence ends it
         if (done + n > musicSamples)
         {
             quietSamples = blockPeak < silence ? quietSamples + n : 0;
@@ -271,7 +271,7 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
 
 double AudioEngine::estimatedPositionNow() const noexcept
 {
-    // a posição só anda de bloco em bloco; interpola pelo tempo desde o último bloco
+    // the position only moves block by block; interpolate by the time since the last block
     auto tick = transport.positionTicks.load (std::memory_order_relaxed);
 
     if (transport.playing.load (std::memory_order_relaxed))
@@ -287,11 +287,11 @@ void AudioEngine::updateAudioRecording()
 {
     const auto wantTake = audioArmed && transport.recording.load();
 
-    // o arquivo fica pronto antes do Play: o primeiro bloco já é gravado
+    // the file is ready before Play: the very first block gets recorded
     if (wantTake && takeWriter == nullptr && recordingError.isEmpty())
         startAudioTake();
 
-    // parou de tocar (ou desligou a gravação) com algo gravado: fecha o take
+    // playback stopped (or recording turned off) with something recorded: close the take
     if (takeWriter != nullptr && (! wantTake || ! transport.playing.load()) && takeFrames.load() > 0)
         finishAudioTake();
     else if (takeWriter != nullptr && ! wantTake)
@@ -309,11 +309,11 @@ void AudioEngine::startAudioTake()
 
     if (takeChannels == 0)
     {
-        recordingError = utf8 ("nenhuma entrada de áudio ativa");
+        recordingError = utf8 ("no active audio input");
         return;
     }
 
-    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações"));
+    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings");
     folder.createDirectory();
     takeFile = folder.getNonexistentChildFile ("Take " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), ".wav");
     takeSampleRate = device->getCurrentSampleRate();
@@ -324,7 +324,7 @@ void AudioEngine::startAudioTake()
 
     if (stream == nullptr)
     {
-        recordingError = utf8 ("não foi possível criar ") + takeFile.getFullPathName();
+        recordingError = utf8 ("could not create ") + takeFile.getFullPathName();
         return;
     }
 
@@ -334,11 +334,11 @@ void AudioEngine::startAudioTake()
     {
         stream.reset();
         takeFile.deleteFile();
-        recordingError = utf8 ("o WAV não aceita esta taxa/canais");
+        recordingError = utf8 ("WAV does not accept this sample rate/channel count");
         return;
     }
 
-    stream.release(); // agora é do writer
+    stream.release(); // now owned by the writer
     takeStartTick.store (-1.0);
     takeFrames.store (0);
     auto threaded = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer, recordThread, 1 << 18);
@@ -353,7 +353,7 @@ void AudioEngine::finishAudioTake()
         const juce::SpinLock::ScopedLockType lock (takeLock);
         done = std::move (takeWriter);
     }
-    done.reset(); // esvazia a fila e fecha o WAV
+    done.reset(); // drains the queue and closes the WAV
 
     const auto frames = takeFrames.exchange (0);
     const auto startTick = takeStartTick.exchange (-1.0);
@@ -364,7 +364,7 @@ void AudioEngine::finishAudioTake()
         return;
     }
 
-    // o que entrou na placa corresponde ao que se ouvia latência atrás
+    // what came into the interface corresponds to what was heard one latency earlier
     const auto ticksPerSample = song.bpm * ppq / (60.0 * takeSampleRate);
     auto start = (std::int64_t) std::llround (startTick - takeLatency * ticksPerSample);
     std::int64_t offset = 0;
@@ -408,7 +408,7 @@ void AudioEngine::finishAudioTake()
 
 void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
-    // thread MIDI: só filas e atomics
+    // MIDI thread: queues and atomics only
     if (m.isController())
     {
         controllerQueue.push ({ m.getControllerNumber(), m.getChannel() - 1, m.getControllerValue() });
@@ -454,7 +454,7 @@ void AudioEngine::setAudioRecordingArmed (bool armed)
 
     if (armed)
     {
-        // abre a entrada padrão (estéreo se der) no mesmo dispositivo/tipo de driver
+        // opens the default input (stereo if possible) on the same device/driver type
         auto setup = deviceManager.getAudioDeviceSetup();
 
         if (auto* type = deviceManager.getCurrentDeviceTypeObject(); type != nullptr && setup.inputDeviceName.isEmpty())
@@ -493,8 +493,8 @@ void AudioEngine::updateRecording()
     if (playing)
         lastPlayingTick = estimatedPositionNow();
 
-    // a tomada começa ao tocar com a gravação ligada, ou no primeiro evento gravado
-    // (que só é enfileirado nessa situação, mesmo que este timer ainda não tenha visto)
+    // the take starts when playing with recording on, or at the first recorded event
+    // (which is only queued in that situation, even if this timer hasn't seen it yet)
     auto beginTake = [this] {
         if (recorder.isActive())
             return;
@@ -533,7 +533,7 @@ void AudioEngine::updateRecording()
     if (notes.empty())
         return;
 
-    // a tomada inteira é um passo só no desfazer
+    // the whole take is a single undo step
     editSong ([&notes] (Song& s) {
         auto& p = s.patterns[(std::size_t) s.currentPattern];
         p.notes.insert (p.notes.end(), notes.begin(), notes.end());
@@ -556,7 +556,7 @@ void AudioEngine::editSong (const std::function<void (Song&)>& edit, bool undoab
 {
     if (undoable)
     {
-        // Durante um arraste chegam dezenas de edições; só a primeira do clique guarda o estado.
+        // Dozens of edits arrive during a drag; only the first one of the click saves the state.
         bool samePress = false;
 
         if (juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
@@ -632,7 +632,7 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
 
     if (! file.loadFileAsData (data))
     {
-        error = utf8 ("não foi possível ler o arquivo");
+        error = utf8 ("could not read the file");
         return false;
     }
 
@@ -653,7 +653,7 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
             const auto sample = samples.load (juce::String::fromUTF8 (path.c_str()));
             return sample != nullptr ? (std::int64_t) sample->frames() : 0;
         };
-        // WAV que só existe dentro do .flp (Slicex): vai para %APPDATA%\LYNX\flp-embedded, pelo conteúdo
+        // WAV that only exists inside the .flp (Slicex): goes to %APPDATA%\LYNX\flp-embedded, keyed by content
         options.saveEmbedded = [] (const std::vector<std::uint8_t>& wav, const std::string& name) -> std::string {
             const auto folder = PluginHost::settingsFolder().getChildFile ("flp-embedded");
             folder.createDirectory();
@@ -696,8 +696,8 @@ void AudioEngine::publishSong()
     transport.beatsPerBar.store (song.beatsPerBar);
 
     {
-        // tabela de compassos para o metrônomo: o começo (beatsPerBar/4) e cada mudança de compasso
-        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // ímpar: escrevendo
+        // time-signature table for the metronome: the start (beatsPerBar/4) and each signature change
+        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // odd: writing
         int count = 0;
         transport.signatureTick[0].store (0, std::memory_order_relaxed);
         transport.signatureLength[0].store ((std::int64_t) ppq * juce::jmax (1, song.beatsPerBar), std::memory_order_relaxed);
@@ -707,13 +707,13 @@ void AudioEngine::publishSong()
             if (m.isSignature() && count < Transport::maxSignatures)
             {
                 const auto length = juce::jmax<std::int64_t> (1, (std::int64_t) ppq * 4 * m.numerator / juce::jmax (1, m.denominator));
-                const auto slot = m.tick <= 0 ? 0 : count++; // na posição 0 substitui o padrão
+                const auto slot = m.tick <= 0 ? 0 : count++; // at position 0 it replaces the default
                 transport.signatureTick[(std::size_t) slot].store (juce::jmax<std::int64_t> (0, m.tick), std::memory_order_relaxed);
                 transport.signatureLength[(std::size_t) slot].store (length, std::memory_order_relaxed);
             }
 
         transport.signatureCount.store (count, std::memory_order_relaxed);
-        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // par: pronto
+        transport.signatureVersion.fetch_add (1, std::memory_order_acq_rel); // even: ready
     }
     transport.songMode.store (song.mode == PlayMode::song);
     transport.loopStart.store ((double) song.loopStart);
@@ -729,7 +729,7 @@ void AudioEngine::publishSong()
 
     auto state = RackState::build (song, &lastPublishedShape, transport.sampleRate.load(), factories);
 
-    // o que o próximo build precisa para reaproveitar instrumentos e efeitos
+    // what the next build needs to reuse instruments and effects
     lastPublishedShape.song.channels = song.channels;
     lastPublishedShape.song.mixer = song.mixer;
     lastPublishedShape.instruments = state->instruments;
@@ -757,13 +757,13 @@ void AudioEngine::learnMidiController (const AutomationTarget& target)
 void AudioEngine::applyControllers()
 {
     ControllerEvent e;
-    std::map<std::pair<int, int>, int> latest; // (cc, canal) -> último valor deste quadro
+    std::map<std::pair<int, int>, int> latest; // (cc, channel) -> latest value this frame
 
     while (controllerQueue.pop (e))
     {
         if (learning.kind != AutomationTargetKind::none)
         {
-            // MIDI learn: troca o vínculo antigo do mesmo alvo pelo novo
+            // MIDI learn: replace the old link for the same target with the new one
             editSong ([t = learning, e] (Song& s) {
                 s.midiLinks.erase (std::remove_if (s.midiLinks.begin(), s.midiLinks.end(), [&] (const MidiLink& l) { return l.target == t; }),
                                    s.midiLinks.end());
@@ -778,7 +778,7 @@ void AudioEngine::applyControllers()
     if (latest.empty() || song.midiLinks.empty())
         return;
 
-    // um snapshot por quadro, fora do histórico de desfazer (é como girar o knob)
+    // one snapshot per frame, outside the undo history (like turning the knob)
     std::vector<std::pair<AutomationTarget, float>> changes;
 
     for (const auto& [key, value] : latest)
@@ -794,7 +794,7 @@ void AudioEngine::applyControllers()
                 pluginChanges.push_back ({ target, v });
     }, false);
 
-    // parâmetros de plugin moram no plugin
+    // plugin parameters live in the plugin
     for (const auto& [target, v] : pluginChanges)
     {
         juce::AudioPluginInstance* plugin = nullptr;
@@ -818,8 +818,8 @@ void AudioEngine::timerCallback()
     updateRecording();
     rackExchange.collectGarbage();
 
-    // Plugins são preparados numa taxa fixa; se o dispositivo mudou de taxa, recria.
-    // Um plugin que mudou de latência (troca de preset, lookahead) pede um novo plano de PDC.
+    // Plugins are prepared at a fixed rate; if the device changed rate, recreate them.
+    // A plugin whose latency changed (preset change, lookahead) requests a new PDC plan.
     if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5
         || lastPublishedShape.currentLatencies() != lastPublishedShape.latencies)
         publishSong();
@@ -845,7 +845,7 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::capturePluginStates()
 {
-    // Muda só o estado salvo (não recria nada nem entra no histórico de desfazer).
+    // Changes only the saved state (recreates nothing and doesn't enter the undo history).
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
             song.channels[i].plugin.state = capturePluginState (p->getInstance());
@@ -872,8 +872,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
         transport.positionTicks.store (target);
 
-    // Com a região de loop ligada, o bloco é dividido no fim do loop e a posição volta ao
-    // início dele (os nós veem um salto e soltam as notas, como no FL).
+    // With the loop region on, the block is split at the loop end and the position jumps back to
+    // its start (the nodes see a jump and release their notes, as in FL).
     std::array<const float*, 64> inputs {};
     std::array<float*, 64> outputs {};
     numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());
@@ -890,7 +890,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
         if (looping)
         {
-            // antes do loop toca normalmente até chegar nele; depois do fim volta ao início
+            // before the loop, play normally until reaching it; past the end, jump back to the start
             auto position = transport.positionTicks.load (std::memory_order_relaxed);
 
             if (position >= loopEnd)
@@ -905,7 +905,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         for (int ch = 0; ch < numInputChannels; ++ch)
             inputs[(std::size_t) ch] = inputChannelData[ch] != nullptr ? inputChannelData[ch] + done : nullptr;
 
-        // gravação de áudio: a entrada deste trecho vai para o disco (sem esperar lock)
+        // audio recording: this block's input goes to disk (without waiting on a lock)
         if (playing && transport.recording.load (std::memory_order_relaxed))
         {
             const juce::SpinLock::ScopedTryLockType lock (takeLock);
@@ -937,7 +937,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
             if (outputs[(std::size_t) ch] != nullptr)
                 softClip (outputs[(std::size_t) ch], n);
 
-        // osciloscópio: média dos dois lados no anel
+        // oscilloscope: average of both sides into the ring buffer
         if (numOutputChannels > 0 && outputs[0] != nullptr)
         {
             auto w = scopeWrite.load (std::memory_order_relaxed);

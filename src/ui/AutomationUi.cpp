@@ -29,10 +29,10 @@ juce::AudioPluginInstance* pluginFor (AudioEngine& engine, const AutomationTarge
     return nullptr;
 }
 
-// Editor dos pontos: tempo na horizontal (compassos), valor na vertical.
-//  - clique no vazio cria um ponto; arrastar move; clique direito apaga
-//  - arrastar com Alt sobre um trecho muda a curva (tensão)
-//  - Ctrl+roda dá zoom; roda rola
+// Point editor: time horizontal (bars), value vertical.
+//  - click on empty space creates a point; drag moves; right-click deletes
+//  - Alt+drag over a segment changes the curve (tension)
+//  - Ctrl+wheel zooms; wheel scrolls
 class AutomationEditor final : public juce::Component,
                                private juce::ChangeListener,
                                private juce::Timer
@@ -66,7 +66,7 @@ public:
         g.setColour (juce::Colour (0xff262b30));
         g.fillRect (area);
 
-        // grade: tempos e compassos
+        // grid: beats and bars
         const auto beatPixels = ppq * pixelsPerTick;
         const auto lastTick = (std::int64_t) xToTick (area.getRight());
 
@@ -95,7 +95,7 @@ public:
             g.drawHorizontalLine ((int) valueToY (v), (float) area.getX(), (float) area.getRight());
         }
 
-        // curva
+        // curve
         juce::Path curve;
         const auto& points = a->points;
 
@@ -121,7 +121,7 @@ public:
             g.drawEllipse (p.x - 5.0f, p.y - 5.0f, 10.0f, 10.0f, 1.0f);
         }
 
-        // cursor de reprodução (na posição do clip que estiver tocando)
+        // playback cursor (at the position of the clip currently playing)
         if (playhead >= 0.0)
         {
             g.setColour (theme::playhead);
@@ -130,7 +130,7 @@ public:
 
         g.setColour (theme::text.withAlpha (0.45f));
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 ("Clique: novo ponto · arrastar: mover · clique direito: apagar · Alt+arrastar: curva · Ctrl+roda: zoom"),
+        g.drawText (utf8 ("Click: new point · drag: move · right-click: delete · Alt+drag: curve · Ctrl+wheel: zoom"),
                     area.getX(), getHeight() - 18, area.getWidth(), 16, juce::Justification::centredLeft);
 
         if (hoverPoint >= 0 && hoverPoint < (int) points.size())
@@ -173,7 +173,7 @@ public:
 
         if (e.mods.isAltDown())
         {
-            // segmento sob o mouse: o ponto à esquerda guarda a tensão
+            // segment under the mouse: the point on the left holds the tension
             tensionPoint = -1;
             const auto tick = xToTick (e.x);
 
@@ -222,7 +222,7 @@ public:
         if (dragPoint < 0 || dragPoint >= (int) a->points.size())
             return;
 
-        // o ponto não passa dos vizinhos (a ordem não muda durante o arraste)
+        // the point can't pass its neighbours (order doesn't change while dragging)
         const auto& points = a->points;
         auto tick = snap (xToTick (e.x), ! e.mods.isShiftDown());
         const auto lo = dragPoint > 0 ? points[(std::size_t) dragPoint - 1].tick : 0;
@@ -301,7 +301,7 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
-        if (current() == nullptr) // automação removida: fecha
+        if (current() == nullptr) // automation removed: close
         {
             juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Component> (getParentComponent())] {
                 if (auto* w = dynamic_cast<juce::DocumentWindow*> (safe.getComponent()))
@@ -311,14 +311,14 @@ private:
         }
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-            w->setName (utf8 ("Automação - ") + juce::String::fromUTF8 (current()->name.c_str()));
+            w->setName (utf8 ("Automation - ") + juce::String::fromUTF8 (current()->name.c_str()));
 
         repaint();
     }
 
     void timerCallback() override
     {
-        // posição dentro da automação, se algum clip dela estiver sob o cursor
+        // position within the automation, if one of its clips is under the cursor
         auto tick = -1.0;
         const auto& song = engine.getSong();
 
@@ -429,7 +429,7 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
         case AutomationTargetKind::none: break;
     }
 
-    return utf8 ("(sem alvo)");
+    return utf8 ("(no target)");
 }
 
 void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)
@@ -482,7 +482,7 @@ void openAutomationEditor (AudioEngine& engine, int index)
         }
 
     windows().push_back (std::make_unique<AutomationWindow> (
-        engine, index, utf8 ("Automação - ") + nameOf (engine.getSong().automations[(std::size_t) index].name)));
+        engine, index, utf8 ("Automation - ") + nameOf (engine.getSong().automations[(std::size_t) index].name)));
 }
 
 void closeAutomationEditors()
@@ -497,8 +497,8 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
 
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
-    menu.addItem (utf8 ("Criar clip de automação"), [&engine, target] { createAutomationClip (engine, target); });
-    menu.addItem (utf8 ("Ligar a controlador MIDI (mexa um knob do controlador)"), [&engine, target] {
+    menu.addItem (utf8 ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
+    menu.addItem (utf8 ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
     });
 
@@ -506,7 +506,7 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
     const auto linked = std::find_if (links.begin(), links.end(), [&] (const MidiLink& l) { return l.target == target; });
 
     if (linked != links.end())
-        menu.addItem (utf8 ("Desligar controlador (CC ") + juce::String (linked->cc) + ")", [&engine, target] {
+        menu.addItem (utf8 ("Unlink controller (CC ") + juce::String (linked->cc) + ")", [&engine, target] {
             engine.editSong ([target] (Song& s) {
                 s.midiLinks.erase (std::remove_if (s.midiLinks.begin(), s.midiLinks.end(), [&] (const MidiLink& l) { return l.target == target; }),
                                    s.midiLinks.end());
@@ -530,8 +530,8 @@ void addPluginParameterItems (juce::PopupMenu& menu, AudioEngine& engine, juce::
     }
 
     if (list.isEmpty())
-        params.addItem (utf8 ("(o plugin não expõe parâmetros)"), false, false, [] {});
+        params.addItem (utf8 ("(the plugin exposes no parameters)"), false, false, [] {});
 
-    menu.addSubMenu (utf8 ("Automatizar parâmetro do plugin"), params);
+    menu.addSubMenu (utf8 ("Automate plugin parameter"), params);
 }
 } // namespace lynx

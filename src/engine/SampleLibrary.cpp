@@ -7,8 +7,8 @@ namespace lynx
 {
 namespace
 {
-// O FL guarda muitos samples de fábrica como WAV cujo "data" é um stream Ogg Vorbis
-// (format tag 0x674F/0x6750/0x6751, "Og"). O leitor de WAV do JUCE não entende isso.
+// FL stores many factory samples as WAV whose "data" is an Ogg Vorbis stream
+// (format tag 0x674F/0x6750/0x6751, "Og"). JUCE's WAV reader doesn't understand this.
 std::unique_ptr<juce::MemoryBlock> extractOggFromWav (const juce::File& file)
 {
     juce::MemoryBlock bytes;
@@ -49,7 +49,7 @@ std::unique_ptr<juce::MemoryBlock> extractOggFromWav (const juce::File& file)
 SampleLibrary::SampleLibrary()
 {
     formats.registerBasicFormats();
-    formats.registerFormat (new WavPackAudioFormat(), false); // .wv dos pacotes do FL
+    formats.registerFormat (new WavPackAudioFormat(), false); // .wv files from FL packs
 }
 
 juce::String SampleLibrary::wildcard() const
@@ -62,7 +62,7 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     if (auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)))
         return reader;
 
-    // Extensão mentirosa (ex.: um Ogg salvo como .wav): testa todos os formatos pelo conteúdo.
+    // Misleading extension (e.g. an Ogg saved as .wav): try every format by content.
     if (auto* reader = formats.createReaderFor (file.createInputStream()))
         return std::unique_ptr<juce::AudioFormatReader> (reader);
 
@@ -70,7 +70,7 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     {
         juce::OggVorbisAudioFormat vorbis;
 
-        // O reader fica dono do stream; se falhar, o próprio JUCE apaga o stream.
+        // The reader takes ownership of the stream; on failure, JUCE itself deletes the stream.
         if (auto* reader = vorbis.createReaderFor (new juce::MemoryInputStream (std::move (*ogg)), true))
             return std::unique_ptr<juce::AudioFormatReader> (reader);
     }
@@ -92,7 +92,7 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
 
     std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio);
 
-    // só um tamanho por arquivo fica guardado (mudar o BPM troca o esticado)
+    // only one length per file is kept (changing the BPM replaces the stretched one)
     for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
         it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
 
@@ -109,7 +109,7 @@ juce::File SampleLibrary::cacheFolder()
 
 namespace
 {
-// Arquivo de cache por canal: cabeçalho de 32 bytes + float32 contínuos.
+// One cache file per channel: 32-byte header + contiguous float32.
 constexpr char cacheMagic[8] = { 'L', 'Y', 'N', 'X', 'P', 'C', 'M', '1' };
 constexpr int cacheHeader = 32;
 
@@ -145,7 +145,7 @@ std::unique_ptr<juce::MemoryMappedFile> mapChannel (const juce::File& file, doub
     return rate == sampleRate && count == frames ? std::move (mapped) : nullptr;
 }
 
-// Lê uma amostra a cada página para o sistema trazer o trecho do disco agora (fora da thread de áudio).
+// Reads one sample per page so the OS brings the range in from disk now (off the audio thread).
 float touch (const float* data, std::size_t from, std::size_t to)
 {
     float sum = 0.0f;
@@ -171,7 +171,7 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStreamed (const juce::File&
 
     if (mapped->left == nullptr || (channels > 1 && mapped->right == nullptr))
     {
-        // decodifica uma vez, em pedaços, direto para os arquivos de cache
+        // decode once, in chunks, straight into the cache files
         leftFile.deleteFile();
         rightFile.deleteFile();
         {
@@ -219,7 +219,7 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStreamed (const juce::File&
                             : nullptr;
     data->mapping = mapped;
 
-    // os primeiros segundos já na memória: o começo do clip não espera o disco
+    // the first seconds already in memory: the clip start doesn't wait for the disk
     const auto head = juce::jmin ((std::size_t) frames, (std::size_t) (reader.sampleRate * 3.0));
     volatile float sink = touch (data->leftData(), 0, head) + touch (data->rightData(), 0, head);
     juce::ignoreUnused (sink);
@@ -259,7 +259,7 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
             return streamed;
         }
 
-    // Na memória: limite de segurança de 10 minutos (os longos vão pelo cache em disco).
+    // In memory: 10-minute safety limit (long ones go through the disk cache).
     const auto frames = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 600.0));
     const auto channels = juce::jmin (2, (int) reader->numChannels);
 

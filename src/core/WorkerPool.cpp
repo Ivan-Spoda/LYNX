@@ -6,7 +6,7 @@ namespace lynx
 {
 WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart)
 {
-    next.store (1 << 30); // nada para pegar até o primeiro parallelFor
+    next.store (1 << 30); // nothing to take until the first parallelFor
 
     for (int i = 0; i < n; ++i)
         threads.emplace_back ([this, onThreadStart] { workerLoop (onThreadStart); });
@@ -69,7 +69,7 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     call = fn;
     done.store (0, std::memory_order_relaxed);
     count.store (n, std::memory_order_release);
-    next.store (0, std::memory_order_release); // a partir daqui os workers podem pegar índices
+    next.store (0, std::memory_order_release); // from here on the workers may take indices
 
     wake.release ((std::ptrdiff_t) std::min<int> ((int) threads.size(), n - 1));
     work();
@@ -77,6 +77,6 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     while (done.load (std::memory_order_acquire) < n)
         std::this_thread::yield();
 
-    next.store (1 << 30, std::memory_order_release); // workers atrasados não pegam nada
+    next.store (1 << 30, std::memory_order_release); // late workers take nothing
 }
 } // namespace lynx

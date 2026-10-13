@@ -8,16 +8,16 @@
 
 namespace lynx
 {
-// Arquivos MIDI (.mid): importar como projeto, importar notas num canal e exportar patterns.
+// MIDI files (.mid): import as a project, import notes into a channel, and export patterns.
 namespace MidiFileIo
 {
-// Projeto novo: um canal (synth interno) por trilha MIDI com notas, tudo numa pattern.
+// New project: one channel (built-in synth) per MIDI track with notes, all in one pattern.
 std::optional<Song> loadSong (const juce::File& file, juce::String& error);
 
-// Todas as notas do arquivo (trilhas juntas) para `channel`, a partir do tick 0.
+// All notes in the file (tracks merged) into `channel`, starting at tick 0.
 std::optional<std::vector<Note>> loadNotes (const juce::File& file, int channel, juce::String& error);
 
-// Uma trilha por canal com notas na pattern. Tempo da música no início.
+// One track per channel with notes in the pattern. Song tempo at the start.
 bool savePattern (const Song& song, int pattern, const juce::File& file, juce::String& error);
 } // namespace MidiFileIo
 } // namespace lynx

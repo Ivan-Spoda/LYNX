@@ -7,7 +7,7 @@ namespace flp
 {
 namespace
 {
-// IDs de evento (nomes descrevem o significado, não seguem nenhuma API)
+// Event IDs (names describe the meaning, they do not follow any API)
 enum : std::uint32_t
 {
     evSwing = 0x0B,
@@ -18,16 +18,16 @@ enum : std::uint32_t
     evFileFlags = 0xA9,
     evChannelParams = 0xD7,
     evChannelEnvelope = 0xDA,
-    evPluginState = 0xD5,       // blob do plugin (gerador do canal ou efeito de um slot)
+    evPluginState = 0xD5,       // plugin blob (channel generator or slot effect)
     evChannelPolyphony = 0xDD,
     evChannelType = 0x15,
-    evChannelMixerTrackOld = 0x16, // u8, arquivos antigos
+    evChannelMixerTrackOld = 0x16, // u8, old files
     evNewChannel = 0x40,
     evNewPattern = 0x41,
-    evTempoCoarse = 0x42,       // legado: BPM inteiro
+    evTempoCoarse = 0x42,       // legacy: integer BPM
     evArrangement = 0x63,
     evChannelMixerTrack = 0x68,    // u16
-    evPatternColour = 0x96,     // u32 0x00BBGGRR; 0x565148 = cinza padrão
+    evPatternColour = 0x96,     // u32 0x00BBGGRR; 0x565148 = default gray
     evTempo = 0x9C,             // BPM * 1000
     evChannelNameOld = 0xC0,    // FL <= 11
     evPatternName = 0xC1,
@@ -41,20 +41,20 @@ enum : std::uint32_t
     evGenre = 0xCE,
     evArtist = 0xCF,
     evPatternNotes = 0xE0,
-    evControlValues = 0xE1,     // registros de 12 B {u32 ?, u32 controlID, i32 valor}
-    evAutomationLink = 0xE3,    // registros de 20 B {u32 canal<<16, u32 0, u32 controlID, u32 flags, u32 ?}
-    evAutomationPoints = 0xEA,  // header 21 B + 24 B por ponto + 112 B
-    evMixerRoutes = 0xEB,       // um byte por trilha de destino
+    evControlValues = 0xE1,     // 12 B records {u32 ?, u32 controlID, i32 value}
+    evAutomationLink = 0xE3,    // 20 B records {u32 channel<<16, u32 0, u32 controlID, u32 flags, u32 ?}
+    evAutomationPoints = 0xEA,  // header 21 B + 24 B per point + 112 B
+    evMixerRoutes = 0xEB,       // one byte per destination track
     evChannelLevels = 0xDB,
     evChannelColour = 0x80,
-    evMixerInsertColour = 0x95, // u32 0x00BBGGRR; vem antes do 0xEC que abre o insert
-    evMixerSlotIndex = 0x62,    // u16: fecha o slot de efeito descrito pelos eventos anteriores     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
-    evPlaylistTrack = 0xEE,     // u32 índice (1..500), u32 cor, u32 ícone, u8 habilitada, ...
+    evMixerInsertColour = 0x95, // u32 0x00BBGGRR; comes before the 0xEC that opens the insert
+    evMixerSlotIndex = 0x62,    // u16: closes the effect slot described by the preceding events     // u32 0x00BBGGRR (also appears in mixer slots)     // i32 pan, i32 volume, i32 pitch (cents), ...
+    evPlaylistTrack = 0xEE,     // u32 index (1..500), u32 colour, u32 icon, u8 enabled, ...
     evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
-    evMixerInsertParams = 0xEC, // abre um novo insert do mixer
+    evMixerInsertParams = 0xEC, // opens a new mixer insert
     evArrangementName = 0xF1,
-    evTimeMarker = 0x94,          // u32 tipo << 24 | posição
+    evTimeMarker = 0x94,          // u32 type << 24 | position
     evTimeMarkerNumerator = 0x21, // u8
     evTimeMarkerDenominator = 0x22,
     evTimeMarkerName = 0xCD,
@@ -74,7 +74,7 @@ template <typename T>
 T readLE (std::span<const std::uint8_t> s, std::size_t offset)
 {
     T v {};
-    std::memcpy (&v, s.data() + offset, sizeof (T)); // x86/ARM são little-endian
+    std::memcpy (&v, s.data() + offset, sizeof (T)); // x86/ARM are little-endian
     return v;
 }
 
@@ -140,7 +140,7 @@ std::string decodeAnsi (std::span<const std::uint8_t> s)
         if (b == 0)
             break;
 
-        appendUtf8 (out, b); // trata como Latin-1
+        appendUtf8 (out, b); // treat as Latin-1
     }
 
     return out;
@@ -165,12 +165,12 @@ EventReader::EventReader (std::span<const std::uint8_t> file)
     : bytes (file)
 {
     if (bytes.size() < 22 || std::memcmp (bytes.data(), "FLhd", 4) != 0)
-        throw Error ("não é um arquivo .flp (cabeçalho FLhd ausente)");
+        throw Error ("not a .flp file (missing FLhd header)");
 
     const auto headerSize = readLE<std::uint32_t> (bytes, 4);
 
     if (headerSize < 6 || 8 + (std::size_t) headerSize + 8 > bytes.size())
-        throw Error ("cabeçalho FLhd inválido");
+        throw Error ("invalid FLhd header");
 
     hdr.format = readLE<std::uint16_t> (bytes, 8);
     hdr.channelCount = readLE<std::uint16_t> (bytes, 10);
@@ -179,9 +179,9 @@ EventReader::EventReader (std::span<const std::uint8_t> file)
     pos = 8 + headerSize;
 
     if (std::memcmp (bytes.data() + pos, "FLdt", 4) != 0)
-        throw Error ("bloco FLdt ausente");
+        throw Error ("missing FLdt chunk");
 
-    pos += 8; // o tamanho declarado do FLdt não é confiável; lemos até o fim do arquivo
+    pos += 8; // the declared FLdt size is not reliable; we read to the end of the file
 }
 
 bool EventReader::next (Event& out)
@@ -192,13 +192,13 @@ bool EventReader::next (Event& out)
     auto need = [this] (std::size_t n)
     {
         if (pos + n > bytes.size())
-            throw Error ("arquivo truncado no offset " + std::to_string (pos));
+            throw Error ("file truncated at offset " + std::to_string (pos));
     };
 
     out = {};
     out.id = bytes[pos++];
 
-    if (out.id == 0xAC) // escape: ID estendido de 32 bits
+    if (out.id == 0xAC) // escape: 32-bit extended ID
     {
         need (4);
         out.id = readLE<std::uint32_t> (bytes, pos);
@@ -234,7 +234,7 @@ bool EventReader::next (Event& out)
                 need (1);
 
                 if (shift > 28)
-                    throw Error ("varint de tamanho inválido no offset " + std::to_string (pos));
+                    throw Error ("invalid size varint at offset " + std::to_string (pos));
 
                 const auto b = bytes[pos++];
                 size |= (std::uint64_t) (b & 0x7F) << shift;
@@ -283,8 +283,8 @@ double Channel::envelopeTime (int v) noexcept
 
 ControlId normalizeControlId (std::uint32_t raw)
 {
-    // antes do 24.2.99 a classe do mixer era 0x2... (o FL soma 0x50000000 ao carregar) e os
-    // envios ficavam em 0x1F40 + destino. Trilhas >= 64 transbordam para 0x3... (mesma conta).
+    // before 24.2.99 the mixer class was 0x2... (FL adds 0x50000000 on load) and the
+    // sends were at 0x1F40 + destination. Tracks >= 64 overflow into 0x3... (same arithmetic).
     if ((raw >> 28) == 2 || (raw >> 28) == 3)
     {
         raw += 0x50000000u;
@@ -299,7 +299,7 @@ ControlId normalizeControlId (std::uint32_t raw)
 
 std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize)
 {
-    // Tamanhos observados nos demos do FL 2026; a troca 60 → 80 cai entre 24.1.0 e 24.2.99.
+    // Sizes observed in the FL 2026 demos; the 60 → 80 change falls between 24.1.0 and 24.2.99.
     const std::size_t preferred = versionNumber < version (20, 99, 1)   ? 32
                                   : versionNumber < version (24, 2, 99) ? 60
                                                                          : 80;
@@ -333,10 +333,10 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
     project.header = reader.header();
 
     if (project.header.format != 0 && ! channelPreset)
-        project.warnings.push_back ("formato " + std::to_string (project.header.format) + " não é projeto");
+        project.warnings.push_back ("format " + std::to_string (project.header.format) + " is not a project");
 
-    // Os eventos são contextuais: um NewChannel/NewPattern/Arrangement define
-    // a quem pertencem os eventos seguintes, até o próximo seletor.
+    // Events are contextual: a NewChannel/NewPattern/Arrangement determines
+    // who the following events belong to, until the next selector.
     enum class Section { global, channel, arrangement, mixer } section = Section::global;
     int currentChannel = -1, currentPattern = -1, currentArrangement = -1;
 
@@ -367,7 +367,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
         switch (e.id)
         {
             case evVersion:
-                project.version = decodeAnsi (e.data); // sempre ASCII: vem antes de sabermos a versão
+                project.version = decodeAnsi (e.data); // always ASCII: comes before we know the version
                 project.versionNumber = parseVersionNumber (project.version);
                 break;
 
@@ -473,7 +473,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 if (! hasTimeSignature && e.value >= 1 && e.value <= 32)
                 {
                     project.beatsPerBar = (int) e.value;
-                    hasTimeSignature = true; // os seguintes são de patterns
+                    hasTimeSignature = true; // the following ones belong to patterns
                 }
                 break;
 
@@ -509,8 +509,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
                 if (e.data.size() % noteRecordSize != 0)
                 {
-                    project.warnings.push_back ("notas da pattern " + std::to_string (currentPattern)
-                                                + " com tamanho inesperado; ignoradas");
+                    project.warnings.push_back ("notes of pattern " + std::to_string (currentPattern)
+                                                + " have an unexpected size; ignored");
                     break;
                 }
 
@@ -569,7 +569,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
 
             case evPluginInternalName:
-                // aparece nos canais (gerador) e nos slots do mixer (efeito, fechado pelo 0x62)
+                // appears in channels (generator) and in mixer slots (effect, closed by 0x62)
                 if (section == Section::channel && channel().pluginName.empty())
                     channel().pluginName = text (e);
                 else if (section == Section::mixer)
@@ -632,19 +632,19 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 if (currentArrangement < 0)
                 {
                     currentArrangement = 0;
-                    arrangement(); // arquivos antigos não têm o evento de arrangement
+                    arrangement(); // old files do not have the arrangement event
                 }
 
                 const auto recordSize = playlistRecordSize (project.versionNumber, e.data.size());
 
                 if (recordSize == 0)
                 {
-                    project.warnings.push_back ("itens da playlist com tamanho inesperado; ignorados");
+                    project.warnings.push_back ("playlist items with unexpected size; ignored");
                     break;
                 }
 
                 auto& items = arrangement().items;
-                // A playlist passou de 199 para 500 trilhas no FL 12.9.
+                // The playlist went from 199 to 500 tracks in FL 12.9.
                 const int trackCount = project.versionNumber < version (12, 9, 0) ? 199 : 500;
 
                 for (std::size_t o = 0; o + recordSize <= e.data.size(); o += recordSize)
@@ -726,12 +726,12 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
             case evAutomationLink:
                 for (std::size_t o = 0; o + 20 <= e.data.size(); o += 20)
-                    if ((readLE<std::uint32_t> (e.data, o + 12) & 8) != 0) // 8 = clip de automação (4 = controle remoto)
+                    if ((readLE<std::uint32_t> (e.data, o + 12) & 8) != 0) // 8 = automation clip (4 = remote control)
                     {
                         const auto source = readLE<std::uint32_t> (e.data, o);
                         const auto target = normalizeControlId (readLE<std::uint32_t> (e.data, o + 8));
 
-                        if ((source & 0xFFFFu) >= 0x8000u) // saída de um controlador, não um clip
+                        if ((source & 0xFFFFu) >= 0x8000u) // output of a controller, not a clip
                             project.controllerLinks.push_back ({ normalizeControlId (source), target });
                         else
                             project.automationLinks.push_back ({ (int) (source >> 16), target });
@@ -747,7 +747,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
                 if (automationHeaderSize + (std::size_t) count * automationPointSize > e.data.size())
                 {
-                    project.warnings.push_back ("automação do canal " + std::to_string (currentChannel) + " truncada; ignorada");
+                    project.warnings.push_back ("automation of channel " + std::to_string (currentChannel) + " truncated; ignored");
                     break;
                 }
 
@@ -759,7 +759,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 {
                     const auto o = automationHeaderSize + (std::size_t) i * automationPointSize;
                     AutomationPoint p;
-                    position += readLE<double> (e.data, o); // distância até o ponto anterior
+                    position += readLE<double> (e.data, o); // distance to the previous point
                     p.position = position;
                     p.value = readLE<double> (e.data, o + 8);
                     p.tension = readLE<float> (e.data, o + 16);
@@ -781,7 +781,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         if (e.data[i] == 0)
                             continue;
 
-                        // arquivos antigos tinham menos trilhas; as extras ("Current") viram 500/501
+                        // old files had fewer tracks; the extra ones ("Current") become 500/501
                         auto target = (int) i;
                         if (project.versionNumber < version (8, 5, 0) && target > 64)
                             target += 35;
@@ -800,8 +800,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
 
             case evMixerInsertName:
-                // O nome vem antes do evento que abre o insert ao qual pertence
-                // (confirmado cruzando com a rota dos canais nos demos).
+                // The name comes before the event that opens the insert it belongs to
+                // (confirmed by cross-checking with the channel routing in the demos).
                 pendingInsertName = text (e);
                 break;
 
@@ -825,7 +825,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
         }
     }
 
-    // o tempo do stretch é int em arquivos sem o bit 0 de 0xA9, float nos novos
+    // the stretch time is int in files without bit 0 of 0xA9, float in newer ones
     for (auto& ch : project.channels)
     {
         if ((project.flagsA9 & 1) == 0)

@@ -9,8 +9,8 @@
 
 namespace lynx
 {
-// Decodifica arquivos de áudio para SampleData, com cache por caminho.
-// Thread da UI (decodificar aloca e faz I/O).
+// Decodes audio files into SampleData, cached by path.
+// UI thread (decoding allocates and does I/O).
 class SampleLibrary
 {
 public:
@@ -18,15 +18,15 @@ public:
 
     std::shared_ptr<const SampleData> load (const juce::String& path);
 
-    // O sample esticado sem mudar a altura (WSOLA), com cache por (caminho, razão).
+    // The sample time-stretched without changing pitch (WSOLA), cached by (path, ratio).
     std::shared_ptr<const SampleData> loadStretched (const juce::String& path, double ratio);
 
-    // Acima disto o áudio vai para um cache em disco mapeado na memória, em vez de ficar todo
-    // na RAM (o "streaming do disco"). O cache é reaproveitado entre sessões.
+    // Above this, audio goes to a memory-mapped disk cache instead of staying entirely
+    // in RAM ("disk streaming"). The cache is reused across sessions.
     static constexpr double streamAboveSeconds = 30.0;
     static juce::File cacheFolder();
 
-    // Filtro para FileChooser ("*.wav;*.flac;...")
+    // Filter for FileChooser ("*.wav;*.flac;...")
     juce::String wildcard() const;
 
 private:
@@ -35,8 +35,8 @@ private:
 
     juce::AudioFormatManager formats;
     std::map<juce::String, std::weak_ptr<const SampleData>> cache;
-    std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // segura o último de cada caminho
+    std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // keeps the latest one per path
 };
-// Traz do disco o trecho [from, to) (segundos) de um sample mapeado. Thread qualquer, menos a de áudio.
+// Brings in from disk the range [from, to) (seconds) of a mapped sample. Any thread except the audio thread.
 void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds);
 } // namespace lynx

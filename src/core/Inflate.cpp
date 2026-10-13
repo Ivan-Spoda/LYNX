@@ -32,7 +32,7 @@ struct BitReader
         return b;
     }
 
-    int bits (int n) // n <= 16, LSB primeiro
+    int bits (int n) // n <= 16, LSB first
     {
         int v = 0;
         for (int i = 0; i < n; ++i)
@@ -41,7 +41,7 @@ struct BitReader
     }
 };
 
-// Huffman canônico: contagem por comprimento + símbolos em ordem
+// canonical Huffman: count per length + symbols in order
 struct Huffman
 {
     std::array<std::uint16_t, 16> count {};
@@ -59,7 +59,7 @@ struct Huffman
         {
             left = (left << 1) - count[(std::size_t) len];
             if (left < 0)
-                return false; // excesso de códigos
+                return false; // too many codes
         }
 
         std::array<std::uint16_t, 16> offs {};
@@ -147,7 +147,7 @@ std::optional<std::vector<std::uint8_t>> inflateZlib (const std::uint8_t* data, 
         last = in.bit() != 0;
         const auto type = in.bits (2);
 
-        if (type == 0) // sem compressão
+        if (type == 0) // uncompressed
         {
             in.bitCount = 0;
             if (in.pos + 4 > size)
@@ -160,7 +160,7 @@ std::optional<std::vector<std::uint8_t>> inflateZlib (const std::uint8_t* data, 
             out.insert (out.end(), data + in.pos, data + in.pos + len);
             in.pos += len;
         }
-        else if (type == 1) // Huffman fixo
+        else if (type == 1) // fixed Huffman
         {
             std::array<std::uint8_t, 288> l {};
             for (int i = 0; i < 288; ++i)
@@ -173,7 +173,7 @@ std::optional<std::vector<std::uint8_t>> inflateZlib (const std::uint8_t* data, 
             if (! inflateBlock (in, out, lit, dist, maxSize))
                 return std::nullopt;
         }
-        else if (type == 2) // Huffman dinâmico
+        else if (type == 2) // dynamic Huffman
         {
             const auto hlit = in.bits (5) + 257, hdist = in.bits (5) + 1, hclen = in.bits (4) + 4;
             if (hlit > 286 || hdist > 30)

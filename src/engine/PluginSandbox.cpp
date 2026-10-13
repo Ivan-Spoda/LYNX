@@ -36,7 +36,7 @@ int processTag()
     return tag;
 }
 
-// diagnóstico: LYNX_SANDBOX_LOG=arquivo registra os passos (um arquivo por processo)
+// diagnostics: LYNX_SANDBOX_LOG=file logs the steps (one file per process)
 void trace (const juce::String& what)
 {
     if (const auto path = juce::SystemStats::getEnvironmentVariable ("LYNX_SANDBOX_LOG", {}); path.isNotEmpty())
@@ -52,8 +52,8 @@ void setPluginSandboxAlerts (bool show)
 #if JUCE_WINDOWS
 namespace
 {
-// Bloco compartilhado entre o LYNX e o filho. O pai escreve a entrada e sinaliza `request`; o filho
-// processa no mesmo lugar e sinaliza `response`.
+// Block shared between LYNX and the child. The parent writes the input and signals `request`; the child
+// processes in place and signals `response`.
 struct SharedBlock
 {
     static constexpr std::uint32_t magicValue = 0x4C594E58; // "LYNX"
@@ -94,7 +94,7 @@ juce::MemoryBlock encode (const juce::ValueTree& message)
     return out.getMemoryBlock();
 }
 
-// Fila de mudanças de parâmetro com vários produtores (UI e thread de áudio) e um consumidor.
+// Parameter-change queue with multiple producers (UI and audio thread) and one consumer.
 class ParamQueue
 {
 public:
@@ -122,7 +122,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Lado do LYNX: conexão com o filho, memória compartilhada e eventos.
+// LYNX side: connection to the child, shared memory and events.
 
 class SandboxSession final : private juce::ChildProcessCoordinator
 {
@@ -160,7 +160,7 @@ public:
         if (shared == nullptr || request == nullptr || response == nullptr)
             return false;
         const auto launched = launchWorkerProcess (juce::File::getSpecialLocation (juce::File::currentExecutableFile), pluginSandboxId, 10000);
-        trace ("pai: filho lançado " + juce::String ((int) launched));
+        trace ("parent: child launched " + juce::String ((int) launched));
         return launched;
     }
 
@@ -177,14 +177,14 @@ public:
             return;
         juce::MessageManager::callAsync ([title = pluginName] {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
-                                                    title + juce::String::fromUTF8 (" parou de responder (processo separado). "
-                                                                                    "Ele ficou mudo; salve o projeto e reabra para recarregar."));
+                                                    title + juce::String::fromUTF8 (" stopped responding (separate process). "
+                                                                                    "It has been muted; save the project and reopen it to reload."));
         });
     }
 
     void setPluginName (const juce::String& n) { pluginName = n; }
 
-    // pedido com resposta (thread da UI)
+    // request with reply (UI thread)
     juce::ValueTree ask (const juce::ValueTree& message, int timeoutMs)
     {
         const std::scoped_lock lock (askMutex);
@@ -212,7 +212,7 @@ public:
             sendMessageToWorker (encode (message));
     }
 
-    // um bloco de áudio (thread de áudio): false = o filho não respondeu
+    // one audio block (audio thread): false = the child didn't respond
     bool runBlock (int timeoutMs) noexcept
     {
         if (dead)
@@ -233,13 +233,13 @@ private:
             const std::scoped_lock l (replyMutex);
             reply = juce::ValueTree::readFromData (data.getData(), data.getSize());
         }
-        trace ("pai: resposta recebida " + reply.getType().toString());
+        trace ("parent: reply received " + reply.getType().toString());
         replyReady.signal();
     }
 
     void handleConnectionLost() override
     {
-        trace ("pai: conexão perdida");
+        trace ("parent: connection lost");
         markDead();
     }
 
@@ -298,10 +298,10 @@ public:
     RemoteEditor (juce::AudioProcessor& p, std::function<void()> show)
         : AudioProcessorEditor (p), showWindow (std::move (show))
     {
-        text.setText (juce::String::fromUTF8 ("Este plugin roda em processo separado: a interface dele abre numa janela própria."),
+        text.setText (juce::String::fromUTF8 ("This plugin runs in a separate process: its interface opens in its own window."),
                       juce::dontSendNotification);
         text.setJustificationType (juce::Justification::centred);
-        button.setButtonText (juce::String::fromUTF8 ("Mostrar a janela do plugin"));
+        button.setButtonText (juce::String::fromUTF8 ("Show the plugin window"));
         button.onClick = [this] { showWindow(); };
         addAndMakeVisible (text);
         addAndMakeVisible (button);
@@ -412,7 +412,7 @@ public:
         shared->paramCount = pending.drain (shared->params, SharedBlock::maxParams);
         shared->paramOutCount = 0;
 
-        // tempo de espera: 0,5 s (um plugin saudável responde em bem menos que um bloco)
+        // timeout: 0.5 s (a healthy plugin responds in well under one block)
         if (! session->runBlock (500))
         {
             buffer.clear();
@@ -438,9 +438,9 @@ private:
         auto set = [] (int n) { return n <= 8 ? juce::AudioChannelSet::canonicalChannelSet (n) : juce::AudioChannelSet::discreteChannels (n); };
         BusesProperties buses;
         if (ins > 0)
-            buses = buses.withInput ("Entrada", set (ins), true);
+            buses = buses.withInput ("Input", set (ins), true);
         if (outs > 0)
-            buses = buses.withOutput ("Saida", set (outs), true);
+            buses = buses.withOutput ("Output", set (outs), true);
         return buses;
     }
 
@@ -460,7 +460,7 @@ void RemoteParameter::setValue (float v)
 }
 
 // ---------------------------------------------------------------------------
-// Lado do filho.
+// Child side.
 
 class SandboxWindow final : public juce::DocumentWindow
 {
@@ -501,13 +501,13 @@ public:
     void handleMessageFromCoordinator (const juce::MemoryBlock& data) override
     {
         auto message = juce::ValueTree::readFromData (data.getData(), data.getSize());
-        trace ("filho: mensagem " + message.getType().toString());
+        trace ("child: message " + message.getType().toString());
         juce::MessageManager::callAsync ([this, message] { handle (message); });
     }
 
     void handleConnectionLost() override
     {
-        trace ("filho: conexão perdida");
+        trace ("child: connection lost");
         juce::MessageManager::callAsync ([] { juce::JUCEApplicationBase::quit(); });
     }
 
@@ -566,12 +566,12 @@ private:
         request = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName (base, "-req")).c_str());
         response = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName (base, "-resp")).c_str());
         if (shared == nullptr || request == nullptr || response == nullptr || shared->magic != SharedBlock::magicValue)
-            return fail ("memória compartilhada indisponível");
+            return fail ("shared memory unavailable");
 
         juce::PluginDescription description;
         const auto xml = juce::parseXML (message["description"].toString());
         if (xml == nullptr || ! description.loadFromXml (*xml))
-            return fail ("descrição do plugin inválida");
+            return fail ("invalid plugin description");
 
         const auto sampleRate = (double) message["sampleRate"];
         blockSize = juce::jlimit (16, SharedBlock::maxFrames, (int) message["blockSize"]);
@@ -579,7 +579,7 @@ private:
         juce::String error;
         plugin = host.getFormats().createPluginInstance (description, sampleRate, blockSize, error);
         if (plugin == nullptr)
-            return fail (error.isEmpty() ? juce::String ("o plugin não abriu") : error);
+            return fail (error.isEmpty() ? juce::String ("the plugin failed to open") : error);
 
         preparePlugin (*plugin, sampleRate, blockSize);
         if (const auto state = message["state"].toString(); state.isNotEmpty())
@@ -639,7 +639,7 @@ private:
 
     void process() noexcept
     {
-        if (hang) // só no teste do tempo-limite
+        if (hang) // only in the timeout test
             Thread::sleep (3000);
         const auto frames = juce::jlimit (0, blockSize, (int) shared->frames);
         const auto& list = plugin->getParameters();
@@ -695,12 +695,12 @@ std::unique_ptr<SandboxWorker>& worker()
 std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::PluginDescription& description, double sampleRate,
                                                                   int blockSize, const std::string& stateBase64, juce::String& error)
 {
-    trace ("pai: sessão");
+    trace ("parent: session");
     auto session = std::make_unique<SandboxSession>();
-    trace ("pai: iniciando filho");
+    trace ("parent: starting child");
     if (! session->start())
     {
-        error = juce::String::fromUTF8 ("não consegui abrir o processo do plugin");
+        error = juce::String::fromUTF8 ("could not start the plugin process");
         return nullptr;
     }
 
@@ -711,16 +711,16 @@ std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::Pl
     open.setProperty ("blockSize", blockSize, nullptr);
     open.setProperty ("state", juce::String::fromUTF8 (stateBase64.c_str()), nullptr);
 
-    trace ("pai: open");
+    trace ("parent: open");
     const auto info = session->ask (open, 30000);
-    trace ("pai: resposta " + juce::String ((int) info.isValid()));
+    trace ("parent: reply " + juce::String ((int) info.isValid()));
     if (! info.isValid() || ! (bool) info["ok"])
     {
-        error = info.isValid() ? info["error"].toString() : juce::String::fromUTF8 ("o processo do plugin não respondeu");
+        error = info.isValid() ? info["error"].toString() : juce::String::fromUTF8 ("the plugin process did not respond");
         return nullptr;
     }
     auto remote = std::make_unique<RemotePlugin> (std::move (session), description, info);
-    trace ("pai: proxy pronto");
+    trace ("parent: proxy ready");
     return remote;
 }
 
@@ -740,7 +740,7 @@ bool runPluginSandboxWorker (const juce::String& commandLine)
 {
     if (! commandLine.contains (pluginSandboxId))
         return false;
-    trace ("filho: " + commandLine);
+    trace ("child: " + commandLine);
     worker() = std::make_unique<SandboxWorker>();
     if (! worker()->initialiseFromCommandLine (commandLine, pluginSandboxId, 10000))
     {
@@ -759,7 +759,7 @@ void shutdownPluginSandboxWorker()
 
 std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::PluginDescription&, double, int, const std::string&, juce::String& error)
 {
-    error = juce::String::fromUTF8 ("plugins em processo separado: só no Windows");
+    error = juce::String::fromUTF8 ("out-of-process plugins: Windows only");
     return nullptr;
 }
 

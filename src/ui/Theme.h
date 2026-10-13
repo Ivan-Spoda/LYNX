@@ -2,8 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// Paleta e LookAndFeel: tons de cinza-azulado escuros, destaques em laranja,
-// verde e azul, no espírito do FL Studio.
+// Palette and LookAndFeel: dark bluish-grey tones, accents in orange,
+// green and blue, in the spirit of FL Studio.
 namespace lynx::theme
 {
 inline const juce::Colour window { 0xff1e2226 };
@@ -22,7 +22,7 @@ inline const juce::Colour text { 0xffe6e6e6 };
 
 inline juce::Colour stepOff (int step)
 {
-    return (step / 4) % 2 == 0 ? juce::Colour (0xff4a525b) : juce::Colour (0xff5b4f4f); // grupos de 4 alternados
+    return (step / 4) % 2 == 0 ? juce::Colour (0xff4a525b) : juce::Colour (0xff5b4f4f); // alternating groups of 4
 }
 
 inline juce::Colour muteLed (bool muted)
@@ -30,7 +30,7 @@ inline juce::Colour muteLed (bool muted)
     return muted ? juce::Colour (0xff505050) : accentGreen;
 }
 
-// Cor de nota no Piano Roll pela velocity (fraca = esverdeada, forte = laranja).
+// Piano Roll note colour by velocity (soft = greenish, hard = orange).
 inline juce::Colour noteColour (float velocity)
 {
     return juce::Colour (0xff7ed957).interpolatedWith (accentOrange, juce::jlimit (0.0f, 1.0f, velocity));

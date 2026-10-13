@@ -47,7 +47,7 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         buffer.clear();
     }
 
-    // automação de tempo: o transporte avança no andamento que o renderer usou
+    // tempo automation: the transport advances at the tempo the renderer used
     if (state != nullptr && state->tempoAutomation >= 0)
         transport.bpm.store (renderer.currentBpm(), std::memory_order_relaxed);
 }

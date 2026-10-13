@@ -1,7 +1,7 @@
 #pragma once
 
-// Biquad (fórmulas clássicas do "Audio EQ Cookbook" de R. Bristow-Johnson), em double,
-// estéreo (estado por canal). Usado pelos efeitos internos e pelo EQ das trilhas do mixer.
+// Biquad (classic formulas from R. Bristow-Johnson's "Audio EQ Cookbook"), in double,
+// stereo (per-channel state). Used by the built-in effects and the mixer tracks' EQ.
 
 #include <algorithm>
 #include <cmath>
@@ -28,11 +28,11 @@ struct Biquad
         return (float) y;
     }
 
-    // os dois canais de um bloco, com o estado em locais (o mesmo resultado de process() por amostra)
+    // both channels of a block, with state in locals (same result as per-sample process())
     void processBlock (float* l, float* r, int n) noexcept
     {
        #if LYNX_BIQUAD_SSE2
-        // os dois canais lado a lado num registrador de 2 doubles (mesmas contas, mesma ordem)
+        // both channels side by side in a 2-double register (same math, same order)
         auto s1 = _mm_set_pd (z1[1], z1[0]), s2 = _mm_set_pd (z2[1], z2[0]);
         const auto c0 = _mm_set1_pd (b0), c1 = _mm_set1_pd (b1), c2 = _mm_set1_pd (b2), d1 = _mm_set1_pd (a1), d2 = _mm_set1_pd (a2);
 
@@ -78,7 +78,7 @@ struct Biquad
         b0 = nb0 / a0; b1 = nb1 / a0; b2 = nb2 / a0; a1 = na1 / a0; a2 = na2 / a0;
     }
 
-    // passa-baixas/altas/banda (cookbook); o passa-banda tem ganho 0 dB no pico
+    // low/high/band-pass (cookbook); the band-pass has 0 dB gain at the peak
     void filter (double sr, int type, double hz, double q) noexcept
     {
         constexpr double pi = 3.141592653589793;
@@ -103,7 +103,7 @@ struct Biquad
         set (1 + alpha * a, -2 * std::cos (w), 1 - alpha * a, 1 + alpha / a, -2 * std::cos (w), 1 - alpha / a);
     }
 
-    // prateleira; `slope` é o S do cookbook (1 = a mais íngreme sem ressalto)
+    // shelf; `slope` is the cookbook's S (1 = steepest without overshoot)
     void shelf (double sr, double hz, double db, bool high, double slope = 1.0) noexcept
     {
         constexpr double pi = 3.141592653589793;

@@ -22,14 +22,14 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
-    snapBox.addItemList ({ "Sem snap", "1/4 de step", "1/2 step", "Step", "Tempo", "Compasso" }, 1);
+    snapBox.addItemList ({ "No snap", "1/4 step", "1/2 step", "Step", "Beat", "Bar" }, 1);
     snapBox.setSelectedId (5, juce::dontSendNotification);
-    snapBox.setTooltip ("Snap (grade) da Playlist; Alt desliga enquanto arrasta");
+    snapBox.setTooltip ("Playlist snap (grid); hold Alt while dragging to disable");
     snapBox.setWantsKeyboardFocus (false);
     snapBox.setMouseClickGrabsKeyboardFocus (false);
     addAndMakeVisible (snapBox);
 
-    arrangementBox.setTooltip (utf8 ("Arrangement (como no FL, um projeto pode ter vários)"));
+    arrangementBox.setTooltip (utf8 ("Arrangement (as in FL, a project can have several)"));
     arrangementBox.setWantsKeyboardFocus (false);
     arrangementBox.setMouseClickGrabsKeyboardFocus (false);
     arrangementBox.onChange = [this] { arrangementChosen(); };
@@ -59,7 +59,7 @@ void PlaylistComponent::refreshArrangementBox()
     for (const auto& a : song.arrangements)
         names.add (juce::String::fromUTF8 (a.name.c_str()));
 
-    // só reconstrói quando algo mudou (reconstruir fecha o menu aberto)
+    // only rebuilds when something changed (rebuilding closes the open menu)
     bool same = arrangementBox.getNumItems() == names.size() + 4;
     for (int i = 0; same && i < names.size(); ++i)
         same = arrangementBox.getItemText (i) == names[i];
@@ -72,10 +72,10 @@ void PlaylistComponent::refreshArrangementBox()
             arrangementBox.addItem (names[i], i + 1);
 
         arrangementBox.addSeparator();
-        arrangementBox.addItem (utf8 ("Novo arrangement"), newArrangement);
-        arrangementBox.addItem (utf8 ("Clonar este"), cloneArrangement);
-        arrangementBox.addItem (utf8 ("Renomear..."), renameArrangementAction);
-        arrangementBox.addItem (utf8 ("Remover este"), removeArrangementAction);
+        arrangementBox.addItem (utf8 ("New arrangement"), newArrangement);
+        arrangementBox.addItem (utf8 ("Clone this one"), cloneArrangement);
+        arrangementBox.addItem (utf8 ("Rename..."), renameArrangementAction);
+        arrangementBox.addItem (utf8 ("Remove this one"), removeArrangementAction);
         arrangementBox.setItemEnabled (removeArrangementAction, names.size() > 1);
     }
 
@@ -102,7 +102,7 @@ void PlaylistComponent::arrangementChosen()
             break;
         case cloneArrangement:
             engine.editSong ([] (Song& s) {
-                s.addArrangement (s.arrangements[(std::size_t) s.currentArrangement].name + " (cópia)", true);
+                s.addArrangement (s.arrangements[(std::size_t) s.currentArrangement].name + " (copy)", true);
             });
             break;
         case renameArrangementAction:
@@ -121,10 +121,10 @@ void PlaylistComponent::arrangementChosen()
 void PlaylistComponent::renameArrangement()
 {
     const auto index = engine.getSong().currentArrangement;
-    auto* window = new juce::AlertWindow ("Renomear arrangement", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow ("Rename arrangement", {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().arrangements[(std::size_t) index].name.c_str()));
     window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
                                  const auto name = window->getTextEditorContents ("name").trim().toStdString();
 
@@ -144,7 +144,7 @@ juce::Colour PlaylistComponent::patternColour (const Song& song, int pattern)
     if (pattern >= 0 && pattern < (int) song.patterns.size() && song.patterns[(std::size_t) pattern].colour != 0)
         return juce::Colour (song.patterns[(std::size_t) pattern].colour);
 
-    // matizes espalhados pela razão áurea: patterns vizinhas ficam com cores bem diferentes
+    // hues spread by the golden ratio: neighboring patterns get clearly different colors
     const auto hue = std::fmod (0.08f + (float) pattern * 0.618034f, 1.0f);
     return juce::Colour::fromHSV (hue, 0.45f, 0.75f, 1.0f);
 }
@@ -167,7 +167,7 @@ int PlaylistComponent::numTracks() const
     for (const auto& c : engine.getSong().playlist)
         highest = juce::jmax (highest, c.track);
 
-    return juce::jlimit (16, 500, highest + 8); // sempre algumas trilhas livres embaixo
+    return juce::jlimit (16, 500, highest + 8); // always a few free tracks at the bottom
 }
 
 std::int64_t PlaylistComponent::snap (double tick, bool enabled) const
@@ -179,7 +179,7 @@ std::int64_t PlaylistComponent::snap (double tick, bool enabled) const
     if (! enabled)
         return (std::int64_t) std::floor (tick);
 
-    if (grid == 0) // compasso (respeita as mudanças de compasso)
+    if (grid == 0) // bar (respects time signature changes)
         return engine.getSong().barAt ((std::int64_t) std::max (0.0, std::floor (tick))).tick;
 
     if (grid <= 1)
@@ -221,7 +221,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
     g.fillAll (theme::window);
 
-    // --- trilhas e grade ---------------------------------------------------
+    // --- tracks and grid ---------------------------------------------------
     {
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (grid);
@@ -247,14 +247,14 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.drawVerticalLine ((int) tickToX ((double) b.tick), (float) grid.getY(), (float) grid.getBottom());
 
             if (beatPixels < 8.0)
-                continue; // muito afastado: só linhas de compasso
+                continue; // zoomed far out: bar lines only
 
             g.setColour (juce::Colour (0xff24292e));
             for (auto tick = b.tick + ppq; tick < b.tick + b.length; tick += ppq)
                 g.drawVerticalLine ((int) tickToX ((double) tick), (float) grid.getY(), (float) grid.getBottom());
         }
 
-        // região de loop
+        // loop region
         if (song.hasLoop())
         {
             const auto lx0 = (float) tickToX ((double) song.loopStart), lx1 = (float) tickToX ((double) song.loopEnd);
@@ -265,7 +265,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.drawVerticalLine ((int) lx1, (float) grid.getY(), (float) grid.getBottom());
         }
 
-        // fim da música
+        // end of song
         if (! song.playlist.empty())
         {
             const auto endX = (float) tickToX ((double) song.songLength());
@@ -288,7 +288,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
 
             if (! g.getClipBounds().toFloat().intersects (r.expanded (1.0f)))
-                continue; // fora da área sendo redesenhada
+                continue; // outside the area being repainted
 
             if (c.kind == ClipKind::automation)
             {
@@ -323,7 +323,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.setColour (selected ? juce::Colour (0xffff6f6f) : current ? juce::Colours::white : colour.darker (0.6f));
             g.drawRoundedRectangle (r, 3.0f, selected ? 2.0f : current ? 1.5f : 1.0f);
 
-            // faixa do nome
+            // name strip
             const auto title = r.withHeight (13.0f);
             g.setColour (colour.darker (0.4f));
             g.fillRoundedRectangle (title, 3.0f);
@@ -335,7 +335,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
                             title.reduced (3, 0).toNearestInt(), juce::Justification::centredLeft, true);
             }
 
-            // miniatura das notas
+            // note thumbnail
             const auto& notes = song.patterns[(std::size_t) c.pattern].notes;
 
             if (! notes.empty() && r.getWidth() > 6)
@@ -379,7 +379,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
         }
     }
 
-    // --- régua ---------------------------------------------------------------
+    // --- ruler ---------------------------------------------------------------
     {
         const auto ruler = juce::Rectangle<int> (headerWidth, 0, grid.getWidth(), timelineHeight);
         g.setColour (theme::toolbar);
@@ -396,7 +396,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
         }
 
         const auto barPixels = bar * pixelsPerTick;
-        const auto every = barPixels < 30.0 ? (barPixels < 10.0 ? 16 : 4) : 1; // números mais espaçados quando afastado
+        const auto every = barPixels < 30.0 ? (barPixels < 10.0 ? 16 : 4) : 1; // numbers spaced further apart when zoomed out
 
         for (const auto& b : song.barsBetween ((std::int64_t) std::max (0.0, scrollTicks), (std::int64_t) xToTick (grid.getRight()) + 1))
         {
@@ -409,7 +409,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.drawText (juce::String (b.number), x + 3, 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
         }
 
-        // marcadores: bandeirinha com o nome; mudanças de compasso mostram a fração
+        // markers: small flag with the name; time signature changes show the fraction
         g.setFont (juce::FontOptions (11.0f));
 
         for (const auto& m : song.markers())
@@ -444,7 +444,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
         }
     }
 
-    // --- cabeçalhos das trilhas --------------------------------------------
+    // --- track headers -----------------------------------------------------
     {
         const auto headers = juce::Rectangle<int> (0, timelineHeight, headerWidth, grid.getHeight());
         juce::Graphics::ScopedSaveState state (g);
@@ -480,7 +480,7 @@ const std::vector<float>* PlaylistComponent::waveformFor (const std::string& pat
     if (auto it = waveforms.find (path); it != waveforms.end())
         return it->second.empty() ? nullptr : &it->second;
 
-    auto& peaks = waveforms[path]; // vazio = não deu para ler (não tenta de novo)
+    auto& peaks = waveforms[path]; // empty = could not be read (don't retry)
 
     if (auto data = engine.getSampleLibrary().load (juce::String::fromUTF8 (path.c_str())))
     {
@@ -498,7 +498,7 @@ const std::vector<float>* PlaylistComponent::waveformFor (const std::string& pat
 
         waveformRates[path] = data->sampleRate;
 
-        // normaliza pelo pico do arquivo: áudio baixo também fica legível na tela
+        // normalize by the file's peak: quiet audio is still readable on screen
         const auto loudest = *std::max_element (peaks.begin(), peaks.end());
         if (loudest > 0.0f)
             for (auto& p : peaks)
@@ -516,7 +516,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         return;
 
     const auto& channel = song.channels[(std::size_t) c.channel];
-    const auto colour = juce::Colour (0xff4f7f9f); // clips de áudio em azul, como destaque
+    const auto colour = juce::Colour (0xff4f7f9f); // audio clips in blue, as a highlight
 
     g.setColour (colour.withAlpha (0.85f));
     g.fillRoundedRectangle (r, 3.0f);
@@ -534,7 +534,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
                     juce::Justification::centredLeft, true);
     }
 
-    // fades: rampas e alças nos cantos de cima
+    // fades: ramps and handles at the top corners
     {
         const auto inX = r.getX() + (float) (c.fadeIn * pixelsPerTick);
         const auto outX = r.getRight() - (float) (c.fadeOut * pixelsPerTick);
@@ -557,7 +557,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
     if (peaks == nullptr)
         return;
 
-    // forma de onda: cada coluna de pixel mostra o pico do trecho de áudio que ela cobre
+    // waveform: each pixel column shows the peak of the audio segment it covers
     const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 1.0f);
     const auto rate = waveformRates[channel.samplePath];
     const auto secondsPerTick = 60.0 / (song.bpm * ppq);
@@ -611,7 +611,7 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
         g.drawText (juce::String::fromUTF8 (automation.name.c_str()), title.reduced (3, 0).toNearestInt(), juce::Justification::centredLeft, true);
     }
 
-    // curva da automação no trecho do clip
+    // automation curve over the clip's range
     const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 2.0f);
     const auto clip = g.getClipBounds().toFloat();
     juce::Path curve;
@@ -714,7 +714,7 @@ void PlaylistComponent::sortClips()
 
 void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 {
-    // cabeçalho da trilha: LED muta; clique direito renomeia
+    // track header: LED mutes; right click renames
     if (e.x < headerWidth && e.y >= timelineHeight && e.y < gridArea().getBottom())
     {
         const auto track = yToTrack (e.y);
@@ -752,7 +752,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
     if (e.mods.isRightButtonDown())
     {
-        // na faixa do nome: menu do clip; no corpo: apaga
+        // on the name strip: clip menu; on the body: delete
         if (hit >= 0 && e.y < trackToY (engine.getSong().playlist[(std::size_t) hit].track) + 15)
         {
             showClipMenu (hit);
@@ -760,15 +760,15 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         }
 
         drag = Drag::erase;
-        setSelection ({}); // os índices mudam enquanto apaga
+        setSelection ({}); // indices change while deleting
 
         if (hit >= 0)
             engine.editSong ([hit] (Song& s) { s.playlist.erase (s.playlist.begin() + hit); });
         return;
     }
 
-    // como no FL: Ctrl+clique num clip soma/tira da seleção; Ctrl+arrastar no vazio seleciona
-    // (com Shift, somando); Shift+arrastar um clip arrasta uma cópia
+    // as in FL: Ctrl+click on a clip adds/removes it from the selection; Ctrl+drag on empty space selects
+    // (with Shift, adding); Shift+drag on a clip drags a copy
     if (hit >= 0 && e.mods.isCtrlDown())
     {
         auto s = selection;
@@ -841,7 +841,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // pinta o que está escolhido no Picker (a pattern atual, um clip de áudio ou de automação)
+    // paints what is chosen in the Picker (the current pattern, an audio clip or an automation clip)
     setSelection ({});
     const auto& song = engine.getSong();
     Clip c;
@@ -857,7 +857,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         c.channel = brush.index;
         c.pattern = 0;
 
-        // duração do áudio em ticks no BPM atual
+        // audio length in ticks at the current BPM
         if (auto data = engine.getSampleLibrary().load (juce::String::fromUTF8 (song.channels[(std::size_t) brush.index].samplePath.c_str())))
             c.length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) ((double) data->frames() / data->sampleRate * song.bpm / 60.0 * ppq));
     }
@@ -866,14 +866,14 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         c.kind = ClipKind::automation;
         c.automation = brush.index;
         c.pattern = 0;
-        c.length = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar) * 4; // 4 compassos
+        c.length = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar) * 4; // 4 bars
     }
     else
         brush = {};
 
     engine.editSong ([c] (Song& s) {
         s.playlist.push_back (c);
-        s.mode = PlayMode::song; // quem está arranjando quer ouvir a música
+        s.mode = PlayMode::song; // someone arranging wants to hear the song
     });
     dragClip = (int) engine.getSong().playlist.size() - 1;
     dragIndices = { dragClip };
@@ -967,7 +967,7 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
             auto deltaTicks = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset) - grabbed.start;
             auto deltaTracks = yToTrack (e.y) - grabbed.track;
 
-            // o grupo mantém a forma: limita pelo clip mais à esquerda / mais acima
+            // the group keeps its shape: clamp by the leftmost / topmost clip
             for (const auto& c : dragOriginals)
             {
                 deltaTicks = juce::jmax (deltaTicks, -c.start);
@@ -1028,10 +1028,10 @@ void PlaylistComponent::renameTrack (int track)
 {
     const auto& tracks = engine.getSong().playlistTracks;
     const auto current = track < (int) tracks.size() ? juce::String::fromUTF8 (tracks[(std::size_t) track].name.c_str()) : juce::String();
-    auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow ("Rename track", {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", current.isNotEmpty() ? current : "Track " + juce::String (track + 1));
     window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, track, window] (int result) {
                                  if (result != 1)
                                      return;
@@ -1051,27 +1051,27 @@ void PlaylistComponent::showRulerMenu (int x)
     const auto& song = engine.getSong();
     const auto tick = juce::jmax<std::int64_t> (0, snap (xToTick (x), true));
 
-    // marcador perto do clique (até 6 px)
+    // marker near the click (up to 6 px)
     int near = -1;
     for (int i = 0; i < (int) song.markers().size(); ++i)
         if (std::abs (tickToX ((double) song.markers()[(std::size_t) i].tick) - x) <= 6.0)
             near = i;
 
     juce::PopupMenu menu;
-    menu.addItem ("Adicionar marcador aqui...", [this, tick] { editMarkerName (tick, -1); });
+    menu.addItem ("Add marker here...", [this, tick] { editMarkerName (tick, -1); });
 
     juce::PopupMenu signatures;
     for (auto [n, d] : { std::pair { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 4 }, { 7, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } })
         signatures.addItem (juce::String (n) + "/" + juce::String (d), [this, tick, n = n, d = d] {
             engine.editSong ([tick, n, d] (Song& s) { s.addMarker ({ tick, {}, n, d }); });
         });
-    menu.addSubMenu (utf8 ("Mudança de compasso aqui"), signatures);
+    menu.addSubMenu (utf8 ("Time signature change here"), signatures);
 
     if (near >= 0)
     {
         menu.addSeparator();
-        menu.addItem ("Renomear marcador...", [this, near] { editMarkerName (0, near); });
-        menu.addItem ("Remover marcador", [this, near] {
+        menu.addItem ("Rename marker...", [this, near] { editMarkerName (0, near); });
+        menu.addItem ("Remove marker", [this, near] {
             engine.editSong ([near] (Song& s) {
                 if (near < (int) s.markers().size())
                     s.markers().erase (s.markers().begin() + near);
@@ -1082,7 +1082,7 @@ void PlaylistComponent::showRulerMenu (int x)
     if (song.hasLoop())
     {
         menu.addSeparator();
-        menu.addItem ("Remover loop", [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
+        menu.addItem ("Remove loop", [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -1092,11 +1092,11 @@ void PlaylistComponent::editMarkerName (std::int64_t tick, int existing)
 {
     const auto& markers = engine.getSong().markers();
     const auto current = existing >= 0 && existing < (int) markers.size() ? juce::String::fromUTF8 (markers[(std::size_t) existing].name.c_str())
-                                                                          : juce::String ("Marcador");
-    auto* window = new juce::AlertWindow (existing >= 0 ? "Renomear marcador" : "Novo marcador", {}, juce::MessageBoxIconType::NoIcon);
+                                                                          : juce::String ("Marker");
+    auto* window = new juce::AlertWindow (existing >= 0 ? "Rename marker" : "New marker", {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", current);
     window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, tick, existing, window] (int result) {
                                  if (result != 1)
                                      return;
@@ -1118,11 +1118,11 @@ void PlaylistComponent::showClipMenu (int index)
     const auto targets = isSelected (index) ? selection : std::vector<int> { index };
     juce::PopupMenu menu;
 
-    // dividir no ponto clicado (na grade de 1 tempo)
+    // split at the clicked point (on a 1-beat grid)
     const auto splitAt = snap (xToTick (getMouseXYRelative().x) + ppq / 2.0, true);
 
     if (splitAt > clip.start && splitAt < clip.end())
-        menu.addItem (utf8 ("Dividir aqui"), [this, index, splitAt] {
+        menu.addItem (utf8 ("Split here"), [this, index, splitAt] {
             setSelection ({});
             engine.editSong ([index, splitAt] (Song& s) {
                 auto rest = splitClip (s.playlist[(std::size_t) index], splitAt);
@@ -1134,10 +1134,10 @@ void PlaylistComponent::showClipMenu (int index)
     if (clip.kind == ClipKind::pattern)
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
-        // como o "Make unique" do FL: os clips escolhidos passam a usar uma cópia da pattern
-        menu.addItem (utf8 ("Tornar única"), [this, targets] {
+        // like FL's "Make unique": the chosen clips switch to using a copy of the pattern
+        menu.addItem (utf8 ("Make unique"), [this, targets] {
             engine.editSong ([targets] (Song& s) {
-                std::map<int, int> copies; // pattern original -> cópia
+                std::map<int, int> copies; // original pattern -> copy
 
                 for (auto i : targets)
                 {
@@ -1160,7 +1160,7 @@ void PlaylistComponent::showClipMenu (int index)
                 s.currentPattern = copies.empty() ? s.currentPattern : copies.begin()->second;
             });
         });
-        menu.addItem ("Selecionar todos desta pattern", [this, p = clip.pattern] {
+        menu.addItem ("Select all of this pattern", [this, p = clip.pattern] {
             std::vector<int> same;
             const auto& playlist = engine.getSong().playlist;
 
@@ -1170,7 +1170,7 @@ void PlaylistComponent::showClipMenu (int index)
 
             setSelection (same);
         });
-        menu.addItem ("Abrir no Channel Rack", [this] {
+        menu.addItem ("Open in Channel Rack", [this] {
             if (onOpenPattern)
                 onOpenPattern();
         });
@@ -1192,10 +1192,10 @@ void PlaylistComponent::showClipMenu (int index)
             });
         }
 
-        menu.addSubMenu ("Volume do clip", gains);
+        menu.addSubMenu ("Clip volume", gains);
 
-        menu.addItem ("Normalizar", [this, targets] {
-            // ganho do clip para o pico do trecho tocado chegar a 0 dB (no máximo +24 dB)
+        menu.addItem ("Normalize", [this, targets] {
+            // clip gain so that the peak of the played segment reaches 0 dB (at most +24 dB)
             const auto& song = engine.getSong();
             const auto secondsPerTick = 60.0 / (juce::jmax (1.0, song.bpm) * ppq);
             std::vector<std::pair<int, float>> gainsFor;
@@ -1235,7 +1235,7 @@ void PlaylistComponent::showClipMenu (int index)
         });
 
         if (clip.fadeIn > 0 || clip.fadeOut > 0)
-            menu.addItem ("Tirar os fades", [this, targets] {
+            menu.addItem ("Remove fades", [this, targets] {
                 engine.editSong ([targets] (Song& s) {
                     for (auto i : targets)
                         s.playlist[(std::size_t) i].fadeIn = s.playlist[(std::size_t) i].fadeOut = 0;
@@ -1246,8 +1246,8 @@ void PlaylistComponent::showClipMenu (int index)
     if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) engine.getSong().automations.size())
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().automations[(std::size_t) clip.automation].name.c_str()));
-        menu.addItem (utf8 ("Editar pontos..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
-        menu.addItem (utf8 ("Tornar única"), [this, index] {
+        menu.addItem (utf8 ("Edit points..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
+        menu.addItem (utf8 ("Make unique"), [this, index] {
             engine.editSong ([index] (Song& s) {
                 auto& c = s.playlist[(std::size_t) index];
                 auto copy = s.automations[(std::size_t) c.automation];
@@ -1256,13 +1256,13 @@ void PlaylistComponent::showClipMenu (int index)
                 c.automation = (int) s.automations.size() - 1;
             });
         });
-        menu.addItem (utf8 ("Apagar a automação (todos os clips dela)"), [this, a = clip.automation] {
+        menu.addItem (utf8 ("Delete automation (all of its clips)"), [this, a = clip.automation] {
             setSelection ({});
             engine.editSong ([a] (Song& s) { s.removeAutomation (a); });
         });
     }
 
-    menu.addItem (targets.size() > 1 ? "Apagar selecionados" : "Apagar", [this, targets] {
+    menu.addItem (targets.size() > 1 ? "Delete selected" : "Delete", [this, targets] {
         setSelection ({});
         engine.editSong ([targets] (Song& s) {
             auto sorted = targets;
@@ -1305,7 +1305,7 @@ void PlaylistComponent::pasteClips()
     if (clipboard.empty())
         return;
 
-    // cola no cursor de reprodução (ou onde o primeiro clip estava), mantendo trilhas e distâncias
+    // pastes at the playback cursor (or where the first clip was), keeping tracks and spacing
     std::int64_t first = clipboard.front().start;
     for (const auto& c : clipboard)
         first = juce::jmin (first, c.start);
@@ -1347,7 +1347,7 @@ void PlaylistComponent::duplicateSelection()
         to = juce::jmax (to, song.playlist[(std::size_t) i].end());
     }
 
-    const auto offset = juce::jmax (bar, (to - from + bar - 1) / bar * bar); // como o Ctrl+B do FL
+    const auto offset = juce::jmax (bar, (to - from + bar - 1) / bar * bar); // like FL's Ctrl+B
     const auto source = selection;
     std::vector<int> added;
 
@@ -1475,7 +1475,7 @@ void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int
         if (data == nullptr)
             continue;
 
-        // duração do áudio convertida em ticks no BPM atual
+        // audio length converted to ticks at the current BPM
         const auto seconds = (double) data->frames() / data->sampleRate;
         const auto length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) (seconds * engine.getSong().bpm / 60.0 * ppq));
         const auto path = file.getFullPathName().toStdString();
@@ -1499,7 +1499,7 @@ void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int
             s.mode = PlayMode::song;
         });
 
-        ++track; // vários arquivos: um embaixo do outro
+        ++track; // multiple files: one below the other
     }
 }
 
@@ -1532,7 +1532,7 @@ void PlaylistComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
 
 void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // a lista de clips mudou por fora (desfazer, remover pattern...): a seleção perde o sentido
+    // the clip list changed externally (undo, pattern removal...): the selection no longer applies
     const auto count = engine.getSong().playlist.size();
 
     if (count != knownClipCount && drag == Drag::none)
@@ -1541,7 +1541,7 @@ void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         selection.clear();
     }
 
-    // trocar de pattern (barra de cima, Channel Rack) volta o lápis para a pattern
+    // switching pattern (top bar, Channel Rack) sets the pencil back to the pattern
     if (engine.getSong().currentPattern != knownCurrentPattern)
     {
         knownCurrentPattern = engine.getSong().currentPattern;
@@ -1564,7 +1564,7 @@ void PlaylistComponent::timerCallback()
 
     if (tick != playheadTick && isShowing())
     {
-        // só a coluna do cursor (antiga e nova) é redesenhada: projeto grande não pesa
+        // only the cursor column (old and new) is repainted: large projects stay cheap
         auto dirty = [this] (double t) {
             if (t >= 0.0)
                 repaint ((int) tickToX (t) - 8, 0, 16, getHeight());
@@ -1573,7 +1573,7 @@ void PlaylistComponent::timerCallback()
         dirty (playheadTick);
         playheadTick = tick;
 
-        // acompanha a reprodução: se o cursor sair da tela, rola uma página
+        // follows playback: if the cursor leaves the screen, scrolls one page
         const auto grid = gridArea();
         const auto x = tickToX (tick);
 
@@ -1633,13 +1633,13 @@ std::vector<PatternPicker::Row> PatternPicker::rows() const
         if (song.channels[(std::size_t) c].instrument == InstrumentKind::audioClip)
         {
             if (! audioHeader)
-                list.push_back ({ ClipKind::audio, -1, utf8 ("Áudio"), {} });
+                list.push_back ({ ClipKind::audio, -1, utf8 ("Audio"), {} });
             audioHeader = true;
             list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), juce::Colour (0xff4f7fa6) });
         }
 
     if (! song.automations.empty())
-        list.push_back ({ ClipKind::automation, -1, utf8 ("Automação"), {} });
+        list.push_back ({ ClipKind::automation, -1, utf8 ("Automation"), {} });
     for (int a = 0; a < (int) song.automations.size(); ++a)
         list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), juce::Colour (0xff6f8f5f) });
 
@@ -1675,7 +1675,7 @@ void PatternPicker::paint (juce::Graphics& g)
 
         const auto& row = list[(std::size_t) i];
 
-        if (row.index < 0) // título de seção
+        if (row.index < 0) // section title
         {
             g.setColour (theme::text.withAlpha (0.5f));
             g.setFont (juce::FontOptions (11.0f));

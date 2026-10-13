@@ -4,8 +4,8 @@
 
 namespace lynx
 {
-// Proteção do master até existir um limiter de verdade no mixer: linear até 0,9 e
-// depois uma curva suave que nunca passa de 1,0 (evita a distorção dura do clipping).
+// Master protection until there's a real limiter in the mixer: linear up to 0.9 and
+// then a smooth curve that never exceeds 1.0 (avoids the harsh distortion of clipping).
 inline void softClip (float* samples, int n) noexcept
 {
     constexpr float knee = 0.9f;

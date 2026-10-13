@@ -1,6 +1,6 @@
 #pragma once
 
-// Logo do LYNX (disco escuro com a pimenta, PNG 256 px com transparência), de resources/lynx_icon_256.png
+// LYNX logo (dark disc with the pepper, 256 px PNG with transparency), from resources/lynx_icon_256.png
 
 namespace lynx::logo
 {

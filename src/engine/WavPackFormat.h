@@ -1,7 +1,7 @@
 #pragma once
 
-// Formato de áudio WavPack (.wv) para o JUCE: só leitura, decodifica o arquivo inteiro na abertura
-// (os .wv dos pacotes do FL são samples curtos). Usa core/WavPack (biblioteca oficial, BSD).
+// WavPack (.wv) audio format for JUCE: read-only, decodes the whole file on open
+// (the .wv files in FL packs are short samples). Uses core/WavPack (official library, BSD).
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -20,7 +20,7 @@ public:
     juce::AudioFormatReader* createReaderFor (juce::InputStream* source, bool deleteStreamIfOpeningFails) override;
     juce::AudioFormatWriter* createWriterFor (juce::OutputStream*, double, unsigned int, int, const juce::StringPairArray&, int) override
     {
-        return nullptr; // só leitura
+        return nullptr; // read-only
     }
     using juce::AudioFormat::createWriterFor;
 };

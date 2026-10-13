@@ -6,18 +6,18 @@
 
 namespace lynx
 {
-// Piano Roll do canal selecionado na pattern atual.
-//  - clique esquerdo no vazio cria uma nota (com a última duração usada) e já permite arrastar
-//  - arrastar o corpo move; arrastar a borda direita muda a duração (as notas selecionadas juntas)
-//  - Ctrl+arrastar seleciona com um retângulo; Ctrl+clique põe/tira uma nota da seleção;
-//    Shift+arrastar uma nota arrasta uma cópia (como no FL)
-//  - clique direito apaga (arrastar apaga várias)
-//  - faixa de velocity embaixo: clicar/arrastar desenha a velocity (só nas selecionadas, se houver)
-//  - Alt desliga o snap; roda do mouse rola, Shift+roda rola na horizontal, Ctrl+roda dá zoom
-//  - teclado à esquerda toca a nota
-//  - a faixa de baixo edita velocity, pan ou afinação fina (combo no canto dela)
-//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Ctrl+M (mutar), Ctrl+P (porta), Esc, setas (Shift = oitava/compasso)
-// Notas de outros canais aparecem apagadas ao fundo, como "ghost notes" no FL.
+// Piano Roll for the selected channel in the current pattern.
+//  - left click on empty space creates a note (with the last used length) and starts dragging it
+//  - dragging the body moves; dragging the right edge changes the length (selected notes together)
+//  - Ctrl+drag selects with a rectangle; Ctrl+click adds/removes a note from the selection;
+//    Shift+drag on a note drags a copy (as in FL)
+//  - right click deletes (dragging deletes several)
+//  - velocity lane at the bottom: click/drag draws velocity (only on selected notes, if any)
+//  - Alt disables snap; mouse wheel scrolls, Shift+wheel scrolls horizontally, Ctrl+wheel zooms
+//  - keyboard on the left plays the note
+//  - the bottom lane edits velocity, pan or fine pitch (combo in its corner)
+//  - keys (via handleKey): Delete, Ctrl+A/C/X/V/B/Q, Ctrl+M (mute), Ctrl+P (porta), Esc, arrows (Shift = octave/bar)
+// Notes from other channels appear dimmed in the background, like "ghost notes" in FL.
 class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener,
                                  private juce::Timer,
@@ -35,13 +35,13 @@ public:
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
-    // Atalhos de edição; a janela principal repassa as teclas quando o Piano Roll está visível.
+    // Editing shortcuts; the main window forwards keys when the Piano Roll is visible.
     bool handleKey (const juce::KeyPress& key);
 
-    // Centraliza a vista nas notas do canal (chamado ao abrir).
+    // Centers the view on the channel's notes (called on open).
     void scrollToNotes();
 
-    // Para testes/snapshot: seleciona todas as notas do canal.
+    // For tests/snapshots: selects all of the channel's notes.
     void selectAll();
 
     static constexpr int keyboardWidth = 64;
@@ -74,17 +74,17 @@ private:
     void previewOff();
 
     bool isSelected (int index) const;
-    std::vector<int> channelNotes() const;           // índices das notas do canal
-    std::vector<int> selectionOrAll() const;         // seleção, ou todas do canal se vazia
+    std::vector<int> channelNotes() const;           // indices of the channel's notes
+    std::vector<int> selectionOrAll() const;         // selection, or all of the channel's notes if empty
     void setSelection (std::vector<int> indices);
-    void sortNotes();                                // ordena mantendo a seleção (sem passo de desfazer)
+    void sortNotes();                                // sorts while keeping the selection (no undo step)
     void editNotes (const std::function<void (Pattern&)>& edit);
     void applyVelocity (int fromX, int toX, int y);
-    float laneValue (const Note& n) const;          // 0..1 da propriedade escolhida
-    void setLaneValue (Note& n, float value) const; // inverso
+    float laneValue (const Note& n) const;          // 0..1 of the chosen property
+    void setLaneValue (Note& n, float value) const; // inverse
     bool laneIsBipolar() const;
     void toggleMute();
-    void togglePorta(); // notas com porta deslizam da nota anterior (inverte o porta do canal)
+    void togglePorta(); // porta notes glide from the previous note (toggles the channel's porta)
 
     void deleteSelection();
     void copySelection();
@@ -97,31 +97,31 @@ private:
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox snapBox;
     juce::TextButton midiButton { "MIDI" };
-    juce::ComboBox laneBox; // o que a faixa de baixo edita: velocity, pan ou afinação fina
-    juce::ComboBox chordBox; // acorde criado a cada clique (como o "stamp" do FL)
-    juce::TextButton slideButton { "Slide" }; // notas novas deslizam (como a ferramenta slide do FL)
-    juce::ComboBox scaleBox; // escala destacada nas linhas do teclado
+    juce::ComboBox laneBox; // what the bottom lane edits: velocity, pan or fine pitch
+    juce::ComboBox chordBox; // chord created on each click (like FL's "stamp")
+    juce::TextButton slideButton { "Slide" }; // new notes slide (like FL's slide tool)
+    juce::ComboBox scaleBox; // scale highlighted on the keyboard rows
     std::vector<int> chordIntervals() const;
     bool inScale (int key) const;
     std::unique_ptr<juce::FileChooser> chooser;
     void showMidiMenu();
     juce::Label hintLabel;
 
-    double pixelsPerTick = 24.0 / ticksPerStep; // 24 px por step
+    double pixelsPerTick = 24.0 / ticksPerStep; // 24 px per step
     double scrollTicks = 0.0;
-    int scrollY = (127 - 84) * rowHeight;       // começa mostrando por volta do C6..C3
+    int scrollY = (127 - 84) * rowHeight;       // starts showing roughly C6..C3
 
     Drag drag = Drag::none;
-    int dragNote = -1;              // nota agarrada (referência para snap e preview)
-    std::vector<int> dragIndices;   // notas que acompanham o arraste
+    int dragNote = -1;              // grabbed note (reference for snap and preview)
+    std::vector<int> dragIndices;   // notes that follow the drag
     std::vector<Note> dragOriginals;
-    std::int64_t grabOffset = 0;    // tick da nota - tick do mouse no início do arraste
+    std::int64_t grabOffset = 0;    // note tick - mouse tick at drag start
     std::int64_t lastLength = ticksPerStep * 2;
     int previewKey = -1;
     double playheadTick = -1.0;
 
-    std::vector<int> selection;     // índices em Pattern::notes, ordenados
-    std::vector<int> selectionBefore; // seleção no início de um Shift+retângulo
+    std::vector<int> selection;     // indices into Pattern::notes, sorted
+    std::vector<int> selectionBefore; // selection at the start of a Shift+rectangle
     juce::Rectangle<int> rubberBand;
     int lastVelocityX = 0;
     int knownPattern = -1, knownChannel = -1;

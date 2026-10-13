@@ -1,7 +1,7 @@
 #pragma once
 
-// Operações de edição de notas usadas pelo Piano Roll (seleção, copiar/colar,
-// quantizar...). Trabalham com índices em Pattern::notes. Sem JUCE, testáveis.
+// Note editing operations used by the Piano Roll (selection, copy/paste,
+// quantize...). They work with indices into Pattern::notes. No JUCE, testable.
 
 #include <algorithm>
 #include <cstdint>
@@ -11,7 +11,7 @@
 
 namespace lynx::noteedit
 {
-// Ordena itens com campo `start` (notas, clips) e atualiza `tracked` (índices) para as novas posições.
+// Sorts items with a `start` field (notes, clips) and updates `tracked` (indices) to the new positions.
 template <typename T>
 void sortByStartTracking (std::vector<T>& items, std::vector<int>& tracked)
 {
@@ -39,30 +39,30 @@ void sortByStartTracking (std::vector<T>& items, std::vector<int>& tracked)
             i = newIndex[(std::size_t) i];
 }
 
-// Ordena as notas por início e atualiza `tracked` (índices) para as novas posições.
+// Sorts the notes by start and updates `tracked` (indices) to the new positions.
 void sortTracking (Pattern& pattern, std::vector<int>& tracked);
 
-// Remove as notas dos índices dados (em qualquer ordem, repetidos ignorados).
+// Removes the notes at the given indices (in any order, duplicates ignored).
 void remove (Pattern& pattern, std::vector<int> indices);
 
-// Cópias das notas dos índices dados, em ordem de início.
+// Copies of the notes at the given indices, in start order.
 std::vector<Note> copy (const Pattern& pattern, const std::vector<int>& indices);
 
-// Acrescenta `notes` deslocadas de `offset` ticks; channel >= 0 força o canal.
-// Retorna os índices das notas novas (o vetor não é reordenado).
+// Appends `notes` shifted by `offset` ticks; channel >= 0 forces the channel.
+// Returns the indices of the new notes (the vector is not re-sorted).
 std::vector<int> paste (Pattern& pattern, const std::vector<Note>& notes, std::int64_t offset, int channel = -1);
 
-// Início da primeira nota e fim da última (0, 0 se vazio).
+// Start of the first note and end of the last (0, 0 if empty).
 void span (const std::vector<Note>& notes, std::int64_t& start, std::int64_t& end);
 
-// Duplica as notas logo depois delas mesmas (como o Ctrl+B do FL): o deslocamento é o
-// tamanho do trecho arredondado para cima em múltiplos de `grid`. Retorna os índices novos.
+// Duplicates the notes right after themselves (like FL's Ctrl+B): the offset is the
+// span length rounded up to a multiple of `grid`. Returns the new indices.
 std::vector<int> duplicate (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
 
-// Arredonda o início das notas para o múltiplo de `grid` mais próximo (duração mantida).
+// Rounds the notes' start to the nearest multiple of `grid` (length kept).
 void quantize (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
 
-// Move as notas por (deltaTicks, deltaKeys), limitando para nenhuma sair de [0, ...) e [0, 127].
-// Retorna o deslocamento aplicado de fato.
+// Moves the notes by (deltaTicks, deltaKeys), clamping so none leaves [0, ...) and [0, 127].
+// Returns the offset actually applied.
 void move (Pattern& pattern, const std::vector<int>& indices, std::int64_t& deltaTicks, int& deltaKeys);
 } // namespace lynx::noteedit

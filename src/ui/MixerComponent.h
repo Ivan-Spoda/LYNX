@@ -9,15 +9,15 @@
 
 namespace lynx
 {
-// Mixer no estilo do FL: uma faixa vertical por trilha (Master primeiro).
-//  - fader: arrastar na vertical; duplo clique volta a 0 dB
-//  - pan: arrastar o knob; duplo clique centraliza
-//  - LED verde = mute (clique), "S" = solo
-//  - clique numa faixa seleciona; clique direito abre o menu (renomear, rotear o canal
-//    selecionado para esta trilha); "+" no fim adiciona um insert
-//  - embaixo de cada faixa aparecem os canais que chegam nela
-//  - botão de envio (seta) na base: liga/desliga o envio da trilha selecionada para esta;
-//    arrastar na vertical muda o nível do envio
+// FL-style mixer: one vertical strip per track (Master first).
+//  - fader: drag vertically; double-click resets to 0 dB
+//  - pan: drag the knob; double-click centers
+//  - green LED = mute (click), "S" = solo
+//  - clicking a strip selects it; right-click opens the menu (rename, route the selected
+//    channel to this track); "+" at the end adds an insert
+//  - below each strip are the channels routed into it
+//  - send button (arrow) at the bottom: toggles the send from the selected track to this one;
+//    dragging vertically changes the send level
 class MixerStrips final : public juce::Component,
                           private juce::ChangeListener,
                           private juce::Timer
@@ -68,15 +68,15 @@ private:
     int dragTrack = -1;
     float dragStartValue = 0.0f;
 
-    std::vector<float> levels; // nível exibido por trilha*2, com queda suave
+    std::vector<float> levels; // displayed level per track*2, with smooth falloff
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerStrips)
 };
 
-// Painel de efeitos da trilha selecionada: 10 slots e os knobs do slot escolhido.
-//  - clique num slot vazio: escolher efeito; clique num ocupado: editar os knobs
-//  - LED do slot: liga/desliga (bypass); clique direito: trocar, mover, remover
-//  - knob à direita do slot: dry/wet (arrastar; duplo clique volta a 100%)
+// Effects panel for the selected track: 10 slots and the knobs of the chosen slot.
+//  - click an empty slot: choose an effect; click an occupied one: edit its knobs
+//  - slot LED: on/off (bypass); right-click: replace, move, delete
+//  - knob to the right of the slot: dry/wet (drag; double-click resets to 100%)
 class EffectsPanel final : public juce::Component,
                            private juce::ChangeListener
 {
@@ -100,9 +100,9 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     juce::Rectangle<int> slotBounds (int slot) const;
-    juce::Rectangle<int> mixBounds (int slot) const; // knob de dry/wet na linha do slot
+    juce::Rectangle<int> mixBounds (int slot) const; // dry/wet knob on the slot's row
     static constexpr int mixParam = -2;
-    static constexpr int gateStepParam = -3; // desenhando os passos do gate de volume
+    static constexpr int gateStepParam = -3; // drawing the volume gate steps
     juce::Rectangle<int> knobBounds (int param) const;
     bool gateSelected() const;
     juce::Rectangle<int> gateStepsBounds() const;
@@ -130,7 +130,7 @@ public:
     explicit MixerComponent (AudioEngine& engine);
     void resized() override;
 
-    // Seleciona a primeira trilha que tem efeitos (usado pelo modo --snapshot).
+    // Selects the first track that has effects (used by --snapshot mode).
     void selectFirstTrackWithEffects();
     void selectTrack (int track) { strips.selectTrack (track); }
     void selectSlot (int slot) { effects.selectSlot (slot); }

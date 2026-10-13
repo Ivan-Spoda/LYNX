@@ -18,7 +18,7 @@ constexpr double maxSampleRate = 192000.0;
 
 float dbToGain (float db) noexcept { return std::pow (10.0f, db / 20.0f); }
 
-// tanh aproximada (Padé), com saturação em ±1: bem mais barata que std::tanh por sample
+// approximate tanh (Padé), saturating at ±1: much cheaper than std::tanh per sample
 inline float fastTanh (float x) noexcept
 {
     if (x > 3.0f)
@@ -29,7 +29,7 @@ inline float fastTanh (float x) noexcept
     const auto x2 = x * x;
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
-// seno de uma fase em voltas (0..1) por parábola refinada (erro < 0,1%), para LFOs
+// sine of a phase in turns (0..1) via refined parabola (error < 0.1%), for LFOs
 inline float sinTurns (double phase) noexcept
 {
     const auto x = (float) (phase < 0.5 ? phase : phase - 1.0) * 2.0f;
@@ -39,11 +39,11 @@ inline float sinTurns (double phase) noexcept
 
 float gainToDb (float g) noexcept { return 20.0f * std::log10 (std::max (g, 1e-9f)); }
 
-// 0..1 -> faixa logarítmica [lo, hi]
+// 0..1 -> logarithmic range [lo, hi]
 float logRange (float v, float lo, float hi) noexcept { return lo * std::pow (hi / lo, std::clamp (v, 0.0f, 1.0f)); }
 
 // ---------------------------------------------------------------------------
-// Mapeamento dos parâmetros (o mesmo usado pelo DSP e pelo texto da interface)
+// Parameter mapping (shared by the DSP and the UI text)
 
 float eqGainDb (float v) { return (v - 0.5f) * 36.0f; } // -18..+18 dB
 float eqMidHz (float v) { return logRange (v, 200.0f, 5000.0f); }
@@ -53,20 +53,20 @@ float compAttackMs (float v) { return logRange (v, 0.1f, 100.0f); }
 float compReleaseMs (float v) { return logRange (v, 10.0f, 1000.0f); }
 float compMakeupDb (float v) { return v * 24.0f; }
 
-// Divisões do Delay sincronizado com o BPM, em tempos (semínimas).
+// BPM-synced Delay divisions, in beats (quarter notes).
 constexpr std::array<double, 8> delayDivisions { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
-constexpr std::array<const char*, 8> delayNames { "1/16", "1/8", "1/8 pont.", "1/4", "1/4 pont.", "1/2", "1/2 pont.", "1 compasso" };
+constexpr std::array<const char*, 8> delayNames { "1/16", "1/8", "1/8 dot.", "1/4", "1/4 dot.", "1/2", "1/2 dot.", "1 bar" };
 
 int delayIndex (float v) { return std::clamp ((int) (v * (float) delayDivisions.size()), 0, (int) delayDivisions.size() - 1); }
 
-float reverbLowCutHz (float v) { return logRange (v, 20.0f, 3000.0f); }    // 0 = desligado
-float reverbHighCutHz (float v) { return logRange (v, 500.0f, 22000.0f); } // 1 = desligado
+float reverbLowCutHz (float v) { return logRange (v, 20.0f, 3000.0f); }    // 0 = off
+float reverbHighCutHz (float v) { return logRange (v, 500.0f, 22000.0f); } // 1 = off
 
 float limiterCeilingDb (float v) { return -12.0f + v * 12.0f; }
 float limiterGainDb (float v) { return v * 24.0f; }
 float limiterReleaseMs (float v) { return logRange (v, 10.0f, 1000.0f); }
-int filterType (float v) { return std::clamp ((int) (v * 3.0f), 0, 2); } // passa-baixas, passa-altas, passa-banda
-constexpr std::array<const char*, 3> filterNames { "Passa-baixas", "Passa-altas", "Passa-banda" };
+int filterType (float v) { return std::clamp ((int) (v * 3.0f), 0, 2); } // low-pass, high-pass, band-pass
+constexpr std::array<const char*, 3> filterNames { "Low-pass", "High-pass", "Band-pass" };
 float filterHz (float v) { return logRange (v, 20.0f, 20000.0f); }
 float filterQ (float v) { return logRange (v, 0.5f, 12.0f); }
 float distortionDriveDb (float v) { return v * 36.0f; }
@@ -82,7 +82,7 @@ public:
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
-        lastParams.fill (-1.0f); // força recalcular
+        lastParams.fill (-1.0f); // force recalculation
         reset();
     }
 
@@ -146,18 +146,18 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            // detector de pico estéreo ligado, curva "hard knee"; abaixo do threshold não precisa do log.
-            // Com sidechain, o detector ouve a outra trilha (o ducking do bumbo)
+            // linked stereo peak detector, "hard knee" curve; below the threshold the log is not needed.
+            // With sidechain, the detector listens to the other track (kick ducking)
             const auto peak = sidechain ? (sideL != nullptr ? std::max (std::abs (sideL[i]), std::abs (sideR[i])) : 0.0f)
                                         : std::max (std::abs (l[i]), std::abs (r[i]));
             const auto reductionDb = peak > thresholdGain ? (gainToDb (peak) - threshold) * (1.0f - 1.0f / ratio) : 0.0f;
 
-            // o envelope sobe com o attack e desce com o release
+            // the envelope rises with the attack and falls with the release
             const auto coeff = reductionDb > envelopeDb ? attack : release;
             envelopeDb = reductionDb + coeff * (envelopeDb - reductionDb);
 
             if (envelopeDb < 1.0e-4f)
-                envelopeDb = 0.0f; // sem redução audível: dispensa o pow
+                envelopeDb = 0.0f; // no audible reduction: skip the pow
 
             const auto gain = envelopeDb > 0.0f ? dbToGain (-envelopeDb) * makeup : makeup;
             l[i] *= gain;
@@ -212,7 +212,7 @@ public:
         const auto feedback = params[1] * 0.95f;
         const auto mix = params[2];
         const auto pingPong = params[3] > 0.5f;
-        const auto dampCoeff = 1.0f - params[4] * 0.9f; // 1 = sem filtro no retorno
+        const auto dampCoeff = 1.0f - params[4] * 0.9f; // 1 = no filter in the feedback path
         const auto size = buffer[0].size();
 
         for (int i = 0; i < n; ++i)
@@ -221,7 +221,7 @@ public:
             auto echoL = buffer[0][readPos];
             auto echoR = buffer[1][readPos];
 
-            // passa-baixas de 1 polo no retorno: repetições ficam mais escuras
+            // 1-pole low-pass in the feedback path: repeats get darker
             damp[0] += dampCoeff * (echoL - damp[0]);
             damp[1] += dampCoeff * (echoR - damp[1]);
             echoL = damp[0];
@@ -229,7 +229,7 @@ public:
 
             const auto inL = l[i], inR = r[i];
 
-            if (pingPong) // entrada mono no lado esquerdo, retornos se alternam
+            if (pingPong) // mono input on the left side, repeats alternate
             {
                 buffer[0][write] = 0.5f * (inL + inR) + echoR * feedback;
                 buffer[1][write] = echoL * feedback;
@@ -254,8 +254,8 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Reverb no estilo Schroeder/Moorer (a estrutura do "Freeverb", domínio público):
-// 8 filtros pente com passa-baixas no retorno + 4 passa-tudo por lado.
+// Schroeder/Moorer-style reverb (the "Freeverb" structure, public domain):
+// 8 comb filters with low-pass in the feedback + 4 all-passes per side.
 
 class Reverb final : public Effect
 {
@@ -323,16 +323,16 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
-        const auto feedback = 0.7f + params[0] * 0.28f; // tamanho da sala
+        const auto feedback = 0.7f + params[0] * 0.28f; // room size
         const auto damping = params[1] * 0.4f;
         const auto width = params[2];
         const auto mix = params[3];
-        const auto dry = params[4]; // 0 = só o reverb (reverb num send)
+        const auto dry = params[4]; // 0 = reverb only (reverb on a send)
         const auto wet1 = width / 2.0f + 0.5f;
         const auto wet2 = (1.0f - width) / 2.0f;
         constexpr float inputGain = 0.015f;
 
-        // na entrada do molhado: corte de graves/agudos (nas pontas = desligado) e predelay
+        // at the wet input: low/high cut (at the extremes = off) and predelay
         const auto lowCutHz = params[5], highCutHz = params[6];
         const auto useLowCut = lowCutHz > 0.001f, useHighCut = highCutHz < 0.999f;
 
@@ -347,8 +347,8 @@ public:
         const auto predelay = std::min ((int) (params[7] * maxPredelaySeconds * sampleRate), (int) predelayBuffer.size() - 1);
         const auto predelayLength = (int) predelayBuffer.size();
 
-        // filtro a filtro sobre um trecho (cada comb/allpass inteiro no cache), na mesma ordem
-        // de soma do processamento amostra a amostra
+        // filter by filter over a chunk (each comb/allpass fully in cache), with the same summing
+        // order as sample-by-sample processing
         constexpr int span = 256;
         float input[span], out[2][span];
 
@@ -386,8 +386,8 @@ public:
             {
                 std::fill (out[ch], out[ch] + m, 0.0f);
 
-                // 4 combs por laço: as cadeias de realimentação são independentes e a CPU as
-                // intercala (um comb sozinho fica preso na latência do filtro de amortecimento)
+                // 4 combs per loop: the feedback chains are independent and the CPU interleaves
+                // them (a single comb is bound by the damping filter's latency)
                 for (std::size_t c = 0; c + 4 <= combs[ch].size(); c += 4)
                     Comb::process4 (&combs[ch][c], input, out[ch], m, feedback, damping);
 
@@ -410,7 +410,7 @@ private:
         std::size_t length = 1, index = 0;
         float store = 0.0f;
 
-        // quatro combs de uma vez; soma em `out` na mesma ordem que um por um
+        // four combs at once; sums into `out` in the same order as one by one
         static void process4 (Comb* c, const float* input, float* out, int n, float feedback, float damping) noexcept
         {
             float* buf[4] = { c[0].buffer.data(), c[1].buffer.data(), c[2].buffer.data(), c[3].buffer.data() };
@@ -484,8 +484,8 @@ private:
     int predelayWrite = 0;
 };
 // ---------------------------------------------------------------------------
-// Limiter com lookahead: o ganho já começa a cair antes do pico chegar (atraso de 1,5 ms,
-// informado como latência para o PDC alinhar com as outras trilhas).
+// Lookahead limiter: gain starts dropping before the peak arrives (1.5 ms delay,
+// reported as latency so PDC aligns it with the other tracks).
 
 class Limiter final : public Effect
 {
@@ -516,7 +516,7 @@ public:
         position = 0;
         gain = 1.0f;
         clock = 0;
-        // a janela começa cheia de zeros: um candidato 0 cobre todos eles
+        // the window starts full of zeros: a single 0 candidate covers all of them
         head = 0;
         count = 1;
         maxValues[0] = 0.0f;
@@ -536,7 +536,7 @@ public:
             const auto a = l[i] * input, b = r[i] * input;
             const auto peak = std::max (std::abs (a), std::abs (b));
 
-            // maior pico entre os `lookahead` últimos (máximo deslizante com fila monotônica)
+            // largest peak among the last `lookahead` samples (sliding maximum with a monotonic queue)
             const auto capacity = (int) maxValues.size();
 
             while (count > 0 && maxValues[(std::size_t) ((head + count - 1) % capacity)] <= peak)
@@ -567,7 +567,7 @@ public:
             if (++position == lookahead)
                 position = 0;
 
-            // segurança: nunca passa do teto
+            // safety: never exceed the ceiling
             l[i] = std::clamp (outL, -ceiling, ceiling);
             r[i] = std::clamp (outR, -ceiling, ceiling);
         }
@@ -578,7 +578,7 @@ private:
     int lookahead = 64, position = 0;
     float attack = 0.1f, gain = 1.0f;
     std::array<std::vector<float>, 2> delay;
-    std::vector<float> maxValues;      // fila monotônica (decrescente) do máximo deslizante
+    std::vector<float> maxValues;      // monotonic (decreasing) queue for the sliding maximum
     std::vector<std::int64_t> maxTimes;
     int head = 0, count = 0;
     std::int64_t clock = 0;
@@ -646,7 +646,7 @@ public:
         const auto drive = dbToGain (distortionDriveDb (params[0]));
         const auto mix = params[2];
         const auto output = dbToGain ((params[3] - 0.5f) * 24.0f);
-        // compensa o ganho do drive para o volume não explodir
+        // compensate the drive gain so the volume doesn't blow up
         const auto compensate = 1.0f / fastTanh (std::max (drive, 1.0f));
 
         for (int i = 0; i < n; ++i)
@@ -665,7 +665,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Chorus: uma linha de atraso modulada por LFO, com fases opostas em L e R.
+// Chorus: an LFO-modulated delay line, with opposite phases on L and R.
 
 class Chorus final : public Effect
 {
@@ -706,7 +706,7 @@ public:
         for (int i = 0; i < n; ++i)
         {
             float* io[2] = { l + i, r + i };
-            const auto s = sinTurns (phase); // L e R em fases opostas: o mesmo seno com sinal trocado
+            const auto s = sinTurns (phase); // L and R in opposite phases: the same sine with flipped sign
 
             for (int ch = 0; ch < 2; ++ch)
             {
@@ -742,15 +742,15 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// EQ paramétrico de 7 bandas: cada banda é um biquad do cookbook (ou até 4 em série nos cortes,
-// com os Q de um Butterworth da ordem pedida).
+// 7-band parametric EQ: each band is a cookbook biquad (or up to 4 in series for the cuts,
+// with the Qs of a Butterworth of the requested order).
 
 constexpr std::array<std::array<double, 4>, 4> butterworthQ { { { 0.70710678, 0, 0, 0 },
                                                                 { 0.54119610, 1.30656296, 0, 0 },
                                                                 { 0.51763809, 0.70710678, 1.93185165, 0 },
                                                                 { 0.50979558, 0.60134489, 0.89997622, 2.56291545 } } };
 
-// Coeficientes das etapas de uma banda; retorna quantas etapas (0 = banda desligada/transparente).
+// Stage coefficients of a band; returns the number of stages (0 = band off/transparent).
 int bandStages (const EffectParams& p, int band, double sr, std::array<Biquad, 4>& out) noexcept
 {
     const auto t = peq::type (p[(std::size_t) peq::param (band, 0)]);
@@ -770,12 +770,12 @@ int bandStages (const EffectParams& p, int band, double sr, std::array<Biquad, 4
         case peq::BandType::highShelf:
             if (std::abs (db) < 0.01)
                 return 0;
-            out[0].shelf (sr, hz, db, t == peq::BandType::highShelf, std::clamp (q, 0.1, 4.0)); // Q = inclinação S
+            out[0].shelf (sr, hz, db, t == peq::BandType::highShelf, std::clamp (q, 0.1, 4.0)); // Q = shelf slope S
             return 1;
         case peq::BandType::lowCut:
         case peq::BandType::highCut:
         {
-            // em cascata: os Q de um Butterworth da ordem, escalados pelo Q da banda (0,707 = Butterworth)
+            // cascaded: the Qs of a Butterworth of that order, scaled by the band Q (0.707 = Butterworth)
             const auto stages = peq::slopeStages (p[(std::size_t) (peq::slopeParam + band)]);
             const auto& qs = butterworthQ[(std::size_t) (stages - 1)];
             for (int s = 0; s < stages; ++s)
@@ -826,7 +826,7 @@ public:
                 std::array<Biquad, 4> fresh;
                 const auto count = bandStages (params, b, sampleRate, fresh);
 
-                // mantém o estado dos filtros que continuam (sem estalo ao mexer num knob)
+                // keep the state of filters that remain (no click when turning a knob)
                 for (int s = 0; s < count; ++s)
                 {
                     auto& stage = stages[(std::size_t) b][(std::size_t) s];
@@ -865,13 +865,13 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Utilitário: matriz estéreo (L->L, R->L, L->R, R->R), balanço e ganho.
+// Utility: stereo matrix (L->L, R->L, L->R, R->R), balance and gain.
 
 float utilityGainDb (float v) { return (v - 0.5f) * 48.0f; }   // ±24 dB
-float utilityMatrix (float v) { return v * 4.0f - 2.0f; }      // −2..2 (0,75 = 1,0)
+float utilityMatrix (float v) { return v * 4.0f - 2.0f; }      // −2..2 (0.75 = 1.0)
 
-// Gate de volume: 32 passos por compasso de 4 tempos (o "volume" do Gross Beat). Ganho por passo,
-// mistura com o sinal original e suavização de ataque/release.
+// Volume gate: 32 steps per 4-beat bar (Gross Beat's "volume"). Per-step gain,
+// mix with the original signal and attack/release smoothing.
 namespace gate
 {
 constexpr int steps = 32;
@@ -915,9 +915,9 @@ private:
     float gain = 1.0f;
 };
 
-// Pitch shift em tempo real: duas cabeças de leitura numa linha de atraso cujo atraso varia em dente
-// de serra (a "fita giratória"); quando uma cabeça dá a volta, a outra está no meio da janela e o
-// crossfade em seno/cosseno esconde o salto. Parâmetros: semitons (±24), cents (±100), mix, janela.
+// Real-time pitch shift: two read heads on a delay line whose delay varies as a sawtooth
+// (the "rotating tape"); when one head wraps around, the other is mid-window and the
+// sine/cosine crossfade hides the jump. Parameters: semitones (±24), cents (±100), mix, window.
 namespace pitch
 {
 inline double semitones (float v) { return std::round ((std::clamp ((double) v, 0.0, 1.0) - 0.5) * 48.0); }
@@ -957,7 +957,7 @@ public:
         const auto ratio = std::pow (2.0, (pitch::semitones (p[0]) + pitch::cents (p[1]) / 100.0) / 12.0);
         const auto mix = std::clamp (p[2], 0.0f, 1.0f);
         const auto window = std::min (pitch::windowMs (p[3]) * 0.001 * sampleRate, (double) length - 4.0);
-        const auto step = (1.0 - ratio) / window; // o atraso cresce (desce o tom) ou encolhe (sobe)
+        const auto step = (1.0 - ratio) / window; // the delay grows (pitch down) or shrinks (pitch up)
 
         for (int i = 0; i < n; ++i)
         {
@@ -1000,10 +1000,10 @@ private:
     int length = 1, write = 0;
 };
 
-// Frequency shifter: o sinal analítico (par em quadratura de duas cadeias de allpass de 2ª ordem
-// em z², um "transformador de Hilbert" de ~90° na faixa útil) multiplicado por um oscilador complexo.
-// Parâmetros: deslocamento (±2 kHz, curva quadrática em volta do centro), mix, abertura estéreo
-// (o lado direito desloca ao contrário).
+// Frequency shifter: the analytic signal (quadrature pair from two chains of 2nd-order allpasses
+// in z², a ~90° "Hilbert transformer" over the useful range) multiplied by a complex oscillator.
+// Parameters: shift (±2 kHz, quadratic curve around the center), mix, stereo spread
+// (the right side shifts the opposite way).
 namespace fshift
 {
 inline double hz (float v)
@@ -1013,19 +1013,19 @@ inline double hz (float v)
 }
 } // namespace fshift
 
-// Lo-fi: segura cada amostra por 128·t³ + 1 amostras e quantiza em 65536/(2048·b² + 1) níveis
-// (as leis do Lo-fi do Effector do FL, REA_rodada18 §3.2); mistura dry/wet linear.
+// Lo-fi: holds each sample for 128·t³ + 1 samples and quantizes to 65536/(2048·b² + 1) levels
+// (the laws of FL Effector's Lo-fi, REA_rodada18 §3.2); linear dry/wet mix.
 namespace lofi
 {
 int holdSamples (float v) { return (int) (128.0f * v * v * v) + 1; }
 double levels (float v) { return 65536.0 / (2048.0 * v * v + 1.0); }
 } // namespace lofi
 
-// Crossover (banda do Frequency Splitter do FL, REA_rodada17 §1.2): passa-altas e/ou passa-baixas com a
-// estrutura de cada inclinação — 6 dB: 1ª ordem; 12: 1 biquad Q 0,5 (HP invertido); 18: Butterworth 3
-// (no FL é uma estrutura com passa-tudo não detalhada: aproximação); 24: 2× Q 0,707; 36: Q 0,5412/1,3066/
-// 0,7070 (HP invertido); 48: Butterworth 4 ao quadrado; 72: Butterworth 6 ao quadrado; 96: Butterworth 8 ao
-// quadrado. Parâmetros: 0 liga o HP, 1 corte do HP, 2 inclinação do HP, 3 liga o LP, 4 corte do LP, 5 inclinação.
+// Crossover (a band of FL's Frequency Splitter, REA_rodada17 §1.2): high-pass and/or low-pass with the
+// structure of each slope — 6 dB: 1st order; 12: 1 biquad Q 0.5 (inverted HP); 18: Butterworth 3
+// (in FL it is an undocumented all-pass structure: approximation); 24: 2× Q 0.707; 36: Q 0.5412/1.3066/
+// 0.7070 (inverted HP); 48: Butterworth 4 squared; 72: Butterworth 6 squared; 96: Butterworth 8
+// squared. Parameters: 0 HP on, 1 HP cutoff, 2 HP slope, 3 LP on, 4 LP cutoff, 5 LP slope.
 namespace xover
 {
 double hz (float v) { return 30.0 * std::pow (2.0, 9.0589 * std::clamp (v, 0.0f, 1.0f)); }
@@ -1034,7 +1034,7 @@ constexpr int dbPerOctave[8] { 6, 12, 18, 24, 36, 48, 72, 96 };
 
 struct Design
 {
-    std::vector<double> qs; // biquads de 2ª ordem
+    std::vector<double> qs; // 2nd-order biquads
     bool firstOrder = false;
     bool invertHighPass = false;
 };
@@ -1102,14 +1102,14 @@ private:
         double sign = 1.0;
         std::array<Biquad, 8> biquads;
         int count = 0;
-        double a = 0.0; // 1ª ordem (transformação bilinear)
+        double a = 0.0; // 1st order (bilinear transform)
         double firstState[2] {}, firstIn[2] {};
 
         double process (double x, int ch) noexcept
         {
             if (firstOrder)
             {
-                // passa-baixas de 1ª ordem: y = a·(x + x[n−1]) + (1 − 2a)·y[n−1]; o passa-altas é o complemento
+                // 1st-order low-pass: y = a·(x + x[n−1]) + (1 − 2a)·y[n−1]; the high-pass is the complement
                 const auto lp = a * (x + firstIn[ch]) + (1.0 - 2.0 * a) * firstState[ch];
                 firstIn[ch] = x;
                 firstState[ch] = lp;
@@ -1143,9 +1143,9 @@ private:
     std::array<float, 6> last {};
 };
 
-// Envelope rítmico (REA_rodada20 §1.2/§1.3): período em tempos, até 12 pontos (posição 0..1 no período, nível,
-// tensão); o valor entre dois pontos segue a curva do ponto de chegada. Parâmetros: 0 período/64 tempos,
-// 1 nº de pontos/12, depois 3 por ponto (posição, nível, (tensão + 1)/2).
+// Rhythmic envelope (REA_rodada20 §1.2/§1.3): period in beats, up to 12 points (position 0..1 in the period, level,
+// tension); the value between two points follows the curve of the destination point. Parameters: 0 period/64 beats,
+// 1 point count/12, then 3 per point (position, level, (tension + 1)/2).
 namespace rhythm
 {
 constexpr int maxPoints = 12;
@@ -1189,7 +1189,7 @@ public:
     {
         const auto period = std::max (1e-3, (double) p[0] * 64.0);
         const auto step = std::max (bpm, 1.0) / 60.0 / sampleRate;
-        if (p[38] > 0.5f) // só controle: o valor vira fonte de automação ao vivo, o áudio passa intacto
+        if (p[38] > 0.5f) // control only: the value becomes a live automation source, audio passes through untouched
         {
             const auto t = beats + step * n;
             current = (float) rhythm::valueAt (p, (t - std::floor (t / period) * period) / period);
@@ -1212,9 +1212,9 @@ private:
     float current = 1.0f;
 };
 
-// Auto-pan (REA_rodada20 §1.5): triângulo (+1 em φ = 0, −1 em 0,5) com fase 0,75 + deslocamento + tempos/período.
-// Parâmetros: 0 período/64 tempos, 1 profundidade ((a + 1)/2, a = deslocamento máximo do pan), 2 deslocamento de
-// fase (ciclos), 3 pan fixo ((p + 1)/2). Lei do pan: o balanço do utilitário (a do FL não foi decodificada).
+// Auto-pan (REA_rodada20 §1.5): triangle (+1 at φ = 0, −1 at 0.5) with phase 0.75 + offset + beats/period.
+// Parameters: 0 period/64 beats, 1 depth ((a + 1)/2, a = maximum pan excursion), 2 phase
+// offset (cycles), 3 fixed pan ((p + 1)/2). Pan law: the utility's balance (FL's has not been decoded).
 class AutoPan final : public Effect
 {
 public:
@@ -1230,9 +1230,9 @@ public:
         auto phase = 0.75 + p[2] + beats / period;
         {
             const auto f = phase + step * n - std::floor (phase + step * n);
-            current = (float) ((f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f) + 1.0) * 0.5f; // onda em 0..1
+            current = (float) ((f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f) + 1.0) * 0.5f; // wave in 0..1
         }
-        if (p[4] > 0.5f) // só controle (fonte de automação ao vivo)
+        if (p[4] > 0.5f) // control only (live automation source)
             return;
         for (int i = 0; i < n; ++i, phase += step)
         {
@@ -1251,10 +1251,10 @@ private:
     float current = 0.5f;
 };
 
-// Vocoder (Fruity Vocoder, REA_rodada20 §4.1). Parâmetros (0..1): 0 bandas (4 << round(5v)), 1 ordem
-// (1 + round(2v)), 2 listen (0 modulador, 1 portadora, 2 mistura), 3 troca L/R, 4/5 FreqMin/Max (v·65536),
-// 6 FreqScale (v·128), 7 inverter, 8 Formant ((v·2400 − 1200) centésimos), 9 largura (5 + 195v %),
-// 10/11 ataque/release (10 + 990v ms), 12 hold, 13/14/15 níveis do modulador/portadora/wet (v·160).
+// Vocoder (Fruity Vocoder, REA_rodada20 §4.1). Parameters (0..1): 0 bands (4 << round(5v)), 1 order
+// (1 + round(2v)), 2 listen (0 modulator, 1 carrier, 2 mix), 3 swap L/R, 4/5 FreqMin/Max (v·65536),
+// 6 FreqScale (v·128), 7 invert, 8 Formant ((v·2400 − 1200) cents), 9 width (5 + 195v %),
+// 10/11 attack/release (10 + 990v ms), 12 hold, 13/14/15 modulator/carrier/wet levels (v·160).
 namespace vocoder
 {
 int bands (float v) { return 4 << std::clamp ((int) std::lround (v * 5.0f), 0, 5); }
@@ -1331,7 +1331,7 @@ public:
                     sum += c * b.env;
                 }
             const auto out = (float) (sum + mod * gMod + car * gCar);
-            l[i] = r[i] = out; // saída mono nos dois lados
+            l[i] = r[i] = out; // mono output on both sides
         }
     }
 
@@ -1377,7 +1377,7 @@ private:
         {
             auto& b = bands[(std::size_t) k];
             const auto lo = edges[(std::size_t) k], hi = edges[(std::size_t) k + 1];
-            const auto s = invert ? activeBands - 1 - k : k; // banco da portadora (espelhado com Invert)
+            const auto s = invert ? activeBands - 1 - k : k; // carrier bank (mirrored with Invert)
             const auto slo = edges[(std::size_t) s] + formant, shi = edges[(std::size_t) s + 1] + formant;
             const auto fa = hzOf ((lo + hi) / 2.0), fs = hzOf ((slo + shi) / 2.0);
             b.active = fa >= 10.0 && fa < top && fs >= 10.0 && fs < top && fa < 0.49 * sampleRate && fs < 0.49 * sampleRate;
@@ -1400,15 +1400,15 @@ private:
     double bandwidthPercent = 50.0, attackCoeff = 0.99, releaseCoeff = 0.999;
 };
 
-// Correção de afinação (Pitcher do FL; leis em REA_rodada15 §1 e rodada19 §6). Parâmetros: 0 Correction Speed,
-// 1 Fine Tune, 2 Bypass All, 3 Note A Freq, 4 faixa (índice/5: f mín. 220/170/110/80/55/25 Hz), 5…16 máscara de
-// notas C…B (1 = permitida), 17…28 Key Bypass C…B. O detector (YIN) e o deslocador (duas cabeças) são do LYNX:
-// os do FL não foram decodificados.
+// Pitch correction (FL's Pitcher; laws in REA_rodada15 §1 and rodada19 §6). Parameters: 0 Correction Speed,
+// 1 Fine Tune, 2 Bypass All, 3 Note A Freq, 4 range (index/5: min f 220/170/110/80/55/25 Hz), 5…16 note
+// mask C…B (1 = allowed), 17…28 Key Bypass C…B. The detector (YIN) and the shifter (two heads) are LYNX's own:
+// FL's have not been decoded.
 namespace pcorr
 {
 constexpr double minHz[6] { 220.0, 170.0, 110.0, 80.0, 55.0, 25.0 };
 int range (float v) { return std::clamp ((int) std::lround (v * 5.0f), 0, 5); }
-double noteA (float v) { return 55.0 * std::pow (2.0, (2.0 * v - 1.0) / 12.0); } // ×8 = Lá 440 em v = 0,5
+double noteA (float v) { return 55.0 * std::pow (2.0, (2.0 * v - 1.0) / 12.0); } // ×8 = A 440 at v = 0.5
 } // namespace pcorr
 
 class PitchCorrect final : public Effect
@@ -1459,7 +1459,7 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            // detector: mono decimado por 4, YIN a cada `hop` amostras
+            // detector: mono decimated by 4, YIN every `hop` samples
             decimSum += 0.5f * (l[i] + r[i]);
             if (++decimCount == decimation)
             {
@@ -1475,7 +1475,7 @@ public:
                 target = targetFor (p);
             }
 
-            // correção suavizada pelo polo da Correction Speed; sem altura detectada volta a zero
+            // correction smoothed by the Correction Speed pole; with no detected pitch it returns to zero
             correction += coeff * ((detectedHz > 0.0 ? target : 0.0) - correction);
             const auto ratio = std::pow (2.0, (correction + fine) / 12.0);
             const auto step = (1.0 - ratio) / window;
@@ -1486,9 +1486,9 @@ public:
             const auto phaseB = phase + 0.5 >= 1.0 ? phase - 0.5 : phase + 0.5;
             const auto gainA = (float) std::sin (3.141592653589793 * phase);
             const auto gainB = (float) std::sin (3.141592653589793 * phaseB);
-            // sem correção, o som passa seco (as duas cabeças paradas somariam atrasos diferentes = filtro pente);
-            // a passagem seco <-> deslocado é suave (~10 ms)
-            const auto shifting = std::abs (correction + fine) > 0.05; // 5 centésimos: abaixo disso não se ouve
+            // with no correction the sound passes dry (two stopped heads would sum different delays = comb filter);
+            // the dry <-> shifted transition is smooth (~10 ms)
+            const auto shifting = std::abs (correction + fine) > 0.05; // 5 cents: below that it is inaudible
             wet += ((shifting ? 1.0f : 0.0f) - wet) * wetCoeff;
             if (wet > 1e-4f)
                 for (int c = 0; c < 2; ++c)
@@ -1504,7 +1504,7 @@ public:
     }
 
 private:
-    // YIN (de Cheveigné & Kawahara) no sinal decimado: período com a diferença normalizada abaixo de 0,15
+    // YIN (de Cheveigné & Kawahara) on the decimated signal: period with normalized difference below 0.15
     double detect (double fmin) noexcept
     {
         const auto fs = sampleRate / decimation;
@@ -1518,7 +1518,7 @@ private:
         for (int j = 0; j < w; ++j)
             energy += (double) at (j) * at (j);
         if (energy / w < 1e-6)
-            return 0.0; // silêncio
+            return 0.0; // silence
         double running = 0.0;
         diff[0] = 1.0f;
         for (int tau = 1; tau <= maxLag; ++tau)
@@ -1537,7 +1537,7 @@ private:
             {
                 while (tau + 1 < maxLag && diff[(std::size_t) tau + 1] < diff[(std::size_t) tau])
                     ++tau;
-                // interpolação parabólica do mínimo
+                // parabolic interpolation of the minimum
                 const double a = diff[(std::size_t) tau - 1], b = diff[(std::size_t) tau], c = diff[(std::size_t) tau + 1];
                 const auto den = a + c - 2.0 * b;
                 const auto t = tau + (std::abs (den) > 1e-12 ? 0.5 * (a - c) / den : 0.0);
@@ -1546,7 +1546,7 @@ private:
         return 0.0;
     }
 
-    // nota permitida mais próxima: n = 9 + 12·log2(f/A); Key Bypass na nota escolhida = sem correção
+    // nearest allowed note: n = 9 + 12·log2(f/A); Key Bypass on the chosen note = no correction
     double targetFor (const EffectParams& p) const noexcept
     {
         if (detectedHz <= 0.0 || p[2] > 0.5f)
@@ -1655,7 +1655,7 @@ public:
             {
                 float re = 0.0f, im = 0.0f;
                 chains[(std::size_t) c].analytic (*io[c], re, im);
-                // lado direito: entre o mesmo sentido (0) e o oposto (1)
+                // right side: between the same direction (0) and the opposite (1)
                 const auto sign = c == 0 ? 1.0f : 1.0f - 2.0f * spread;
                 const auto shifted = re * cosA + sign * im * sinA;
                 *io[c] += (shifted - *io[c]) * mix;
@@ -1667,7 +1667,7 @@ public:
     }
 
 private:
-    // 4 allpass de 2ª ordem em z² por ramo; o ramo real tem 1 amostra de atraso a mais
+    // 4 2nd-order allpasses in z² per branch; the real branch has 1 extra sample of delay
     struct Chain
     {
         static constexpr float a[4] = { 0.6923878f, 0.9360654322959f, 0.9882295226860f, 0.9987488452737f };
@@ -1703,12 +1703,12 @@ private:
     double sampleRate = 44100.0, phase = 0.0;
 };
 
-// Contêiner de ramos paralelos (Patcher do FL): cada ramo processa uma cópia da entrada pela sua
-// cadeia de efeitos internos e a saída é a soma dos ramos com os ganhos.
+// Parallel-branch container (FL's Patcher): each branch processes a copy of the input through its
+// chain of built-in effects and the output is the gain-weighted sum of the branches.
 class ParallelEffect final : public Effect
 {
 public:
-    static constexpr int capacity = 4096; // amostras por pedaço (blocos maiores são divididos)
+    static constexpr int capacity = 4096; // samples per chunk (larger blocks are split)
 
     explicit ParallelEffect (const EffectSlot& slot)
     {
@@ -1717,7 +1717,7 @@ public:
             Branch branch;
             branch.gain = b.gain;
             for (const auto& child : b.chain)
-                if (child.kind == EffectKind::parallel) // contêineres aninhados (grafos série-paralelo do Patcher)
+                if (child.kind == EffectKind::parallel) // nested containers (Patcher series-parallel graphs)
                     branch.chain.push_back ({ makeParallelEffect (child), child });
                 else if (child.kind != EffectKind::plugin)
                     branch.chain.push_back ({ makeEffect (child.kind), child });
@@ -1818,10 +1818,10 @@ private:
     std::array<std::vector<float>, 8> scratch;
 };
 
-// Peak Controller (REA_rodada17 §5): o som passa direto. Detector com ataque instantâneo (pico do bloco)
-// e queda LINEAR em tempo musical: (10001^(D/128) − 1)·0,0192 por semínima. Saída Peak =
-// base + a·forma(p) com a = ±0,4·(6^(|A|/256) − 1) e a tensão do FL; saída 0 = Peak + LFO, 1 = Peak,
-// 2 = LFO (o LFO dele ainda não é gerado: vale a base do LFO). Parâmetros = valores crus do FL normalizados.
+// Peak Controller (REA_rodada17 §5): audio passes straight through. Detector with instant attack (block peak)
+// and LINEAR decay in musical time: (10001^(D/128) − 1)·0.0192 per quarter note. Peak output =
+// base + a·shape(p) with a = ±0.4·(6^(|A|/256) − 1) and FL's tension; output 0 = Peak + LFO, 1 = Peak,
+// 2 = LFO (its LFO is not generated yet: the LFO base is used). Parameters = FL raw values, normalized.
 class PeakController final : public Effect
 {
 public:
@@ -1871,18 +1871,18 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
-        if (p[0] != lastGainParam) // pow só quando o parâmetro muda (os Patchers têm dezenas de utilitários)
+        if (p[0] != lastGainParam) // pow only when the parameter changes (Patchers have dozens of utilities)
         {
             lastGainParam = p[0];
-            cachedGain = p[0] <= 0.0f ? 0.0f : std::pow (10.0f, utilityGainDb (p[0]) / 20.0f); // no fundo = mudo
+            cachedGain = p[0] <= 0.0f ? 0.0f : std::pow (10.0f, utilityGainDb (p[0]) / 20.0f); // at the bottom = mute
         }
         const auto gain = cachedGain;
         const auto pan = std::clamp (p[1] * 2.0f - 1.0f, -1.0f, 1.0f);
-        const auto gl = gain * (pan > 0.0f ? 1.0f - pan : 1.0f); // balanço: abaixa o lado oposto
+        const auto gl = gain * (pan > 0.0f ? 1.0f - pan : 1.0f); // balance: lowers the opposite side
         const auto gr = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
         const auto ll = utilityMatrix (p[2]), rl = utilityMatrix (p[3]), lr = utilityMatrix (p[4]), rr = utilityMatrix (p[5]);
 
-        // atalhos: identidade (comum nos PanOMatic/Stereo Shaper dos Patchers) e mudo
+        // shortcuts: identity (common in Patchers' PanOMatic/Stereo Shaper) and mute
         if (gl == 0.0f && gr == 0.0f)
         {
             std::fill (l, l + n, 0.0f);
@@ -1930,14 +1930,14 @@ float slopeValue (int stages) noexcept { return (float) (std::clamp (stages, 1, 
 
 const char* typeName (BandType t) noexcept
 {
-    static constexpr const char* names[] = { "Desligada", "Pico", "Prateleira grave", "Prateleira aguda", "Corta graves",
-                                             "Corta agudos", "Passa-banda", "Rejeita-faixa" };
+    static constexpr const char* names[] = { "Off", "Peak", "Low shelf", "High shelf", "Low cut",
+                                             "High cut", "Band-pass", "Notch" };
     return names[(int) t];
 }
 
 double responseDb (const EffectParams& params, double sr, double f)
 {
-    // |H(e^jw)| de cada etapa, somado em dB
+    // |H(e^jw)| of each stage, summed in dB
     const auto w = 2.0 * pi * std::clamp (f, 1.0, sr * 0.499) / sr;
     const std::complex<double> z1 = std::polar (1.0, -w), z2 = std::polar (1.0, -2.0 * w);
     auto total = gainDb (params[outputParam]);
@@ -1961,56 +1961,56 @@ double responseDb (const EffectParams& params, double sr, double f)
 
 const EffectInfo& effectInfo (EffectKind kind)
 {
-    static const EffectInfo eq { "EQ", { { "Graves", 0.5f }, { "Médios", 0.5f }, { "Freq. médios", 0.5f }, { "Agudos", 0.5f }, { "Saída", 0.5f } } };
+    static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f } } };
-    static const EffectInfo delay { "Delay", { { "Tempo", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Abafar", 0.3f } } };
-    static const EffectInfo reverb { "Reverb", { { "Sala", 0.6f }, { "Abafar", 0.5f }, { "Largura", 1.0f }, { "Mix", 0.25f }, { "Seco", 1.0f },
-                                                 { "Corta graves", 0.0f }, { "Corta agudos", 1.0f }, { "Predelay", 0.0f } } };
+    static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
+    static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
+                                                 { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
     static const EffectInfo plugin { "Plugin", {} };
-    static const EffectInfo limiter { "Limiter", { { "Teto", 0.975f }, { "Ganho", 0.0f }, { "Release", 0.5f } } };
-    static const EffectInfo filter { "Filtro", { { "Tipo", 0.0f }, { "Corte", 0.75f }, { "Resson.", 0.2f }, { "Mix", 1.0f } } };
-    static const EffectInfo distortion { "Distorção", { { "Drive", 0.4f }, { "Tom", 0.7f }, { "Mix", 1.0f }, { "Saída", 0.5f } } };
-    static const EffectInfo chorus { "Chorus", { { "Velocidade", 0.45f }, { "Profund.", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
-    static const EffectInfo utility { "Utilitário", { { "Ganho", 0.5f }, { "Balanço", 0.5f }, { "E -> E", 0.75f }, { "D -> E", 0.5f },
-                                                      { "E -> D", 0.5f }, { "D -> D", 0.75f } } };
+    static const EffectInfo limiter { "Limiter", { { "Ceiling", 0.975f }, { "Gain", 0.0f }, { "Release", 0.5f } } };
+    static const EffectInfo filter { "Filter", { { "Type", 0.0f }, { "Cutoff", 0.75f }, { "Reso.", 0.2f }, { "Mix", 1.0f } } };
+    static const EffectInfo distortion { "Distortion", { { "Drive", 0.4f }, { "Tone", 0.7f }, { "Mix", 1.0f }, { "Output", 0.5f } } };
+    static const EffectInfo chorus { "Chorus", { { "Rate", 0.45f }, { "Depth", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
+    static const EffectInfo utility { "Utility", { { "Gain", 0.5f }, { "Balance", 0.5f }, { "L -> L", 0.75f }, { "R -> L", 0.5f },
+                                                      { "L -> R", 0.5f }, { "R -> R", 0.75f } } };
     static const EffectInfo volumeGate = [] {
-        static const char* names[] = { "Passo 1", "Passo 2", "Passo 3", "Passo 4", "Passo 5", "Passo 6", "Passo 7", "Passo 8",
-                                       "Passo 9", "Passo 10", "Passo 11", "Passo 12", "Passo 13", "Passo 14", "Passo 15", "Passo 16",
-                                       "Passo 17", "Passo 18", "Passo 19", "Passo 20", "Passo 21", "Passo 22", "Passo 23", "Passo 24",
-                                       "Passo 25", "Passo 26", "Passo 27", "Passo 28", "Passo 29", "Passo 30", "Passo 31", "Passo 32" };
-        EffectInfo info { "Gate de volume", {} };
+        static const char* names[] = { "Step 1", "Step 2", "Step 3", "Step 4", "Step 5", "Step 6", "Step 7", "Step 8",
+                                       "Step 9", "Step 10", "Step 11", "Step 12", "Step 13", "Step 14", "Step 15", "Step 16",
+                                       "Step 17", "Step 18", "Step 19", "Step 20", "Step 21", "Step 22", "Step 23", "Step 24",
+                                       "Step 25", "Step 26", "Step 27", "Step 28", "Step 29", "Step 30", "Step 31", "Step 32" };
+        EffectInfo info { "Volume gate", {} };
         for (int i = 0; i < gate::steps; ++i)
-            info.params.push_back ({ names[i], (i % 8) < 4 ? 1.0f : 0.0f }); // padrão: meio tempo ligado, meio desligado
+            info.params.push_back ({ names[i], (i % 8) < 4 ? 1.0f : 0.0f }); // default: half a beat on, half off
         info.params.push_back ({ "Mix", 1.0f });
-        info.params.push_back ({ "Ataque", 0.1765f });  // ~2 ms
+        info.params.push_back ({ "Attack", 0.1765f });  // ~2 ms
         info.params.push_back ({ "Release", 0.5f });    // ~43 ms
         return info;
     }();
-    static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
-    static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
-    static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
-    static const EffectInfo crossoverInfo { "Crossover", { { "Passa-altas", 0.0f }, { "Corte PA", 0.3f }, { "Incl. PA", 3.0f / 7.0f },
-                                                           { "Passa-baixas", 0.0f }, { "Corte PB", 0.7f }, { "Incl. PB", 3.0f / 7.0f } } };
+    static const EffectInfo pitchShift { "Pitch shift", { { "Semitones", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Window", 0.4f } } };
+    static const EffectInfo freqShift { "Frequency shifter", { { "Shift", 0.5f }, { "Mix", 1.0f }, { "Stereo", 0.0f } } };
+    static const EffectInfo parallelInfo { "Patcher (parallel)", {} };
+    static const EffectInfo crossoverInfo { "Crossover", { { "High-pass", 0.0f }, { "HP cutoff", 0.3f }, { "HP slope", 3.0f / 7.0f },
+                                                           { "Low-pass", 0.0f }, { "LP cutoff", 0.7f }, { "LP slope", 3.0f / 7.0f } } };
     static const EffectInfo rhythmInfo = [] {
-        EffectInfo info { "Envelope rítmico", { { "Período", 1.0f / 64.0f }, { "Pontos", 0.0f } } };
-        static const char* names[] = { "P1 pos", "P1 nível", "P1 tensão", "P2 pos", "P2 nível", "P2 tensão", "P3 pos", "P3 nível", "P3 tensão",
-                                       "P4 pos", "P4 nível", "P4 tensão", "P5 pos", "P5 nível", "P5 tensão", "P6 pos", "P6 nível", "P6 tensão",
-                                       "P7 pos", "P7 nível", "P7 tensão", "P8 pos", "P8 nível", "P8 tensão", "P9 pos", "P9 nível", "P9 tensão",
-                                       "P10 pos", "P10 nível", "P10 tensão", "P11 pos", "P11 nível", "P11 tensão", "P12 pos", "P12 nível", "P12 tensão" };
+        EffectInfo info { "Rhythmic envelope", { { "Period", 1.0f / 64.0f }, { "Points", 0.0f } } };
+        static const char* names[] = { "P1 pos", "P1 level", "P1 tension", "P2 pos", "P2 level", "P2 tension", "P3 pos", "P3 level", "P3 tension",
+                                       "P4 pos", "P4 level", "P4 tension", "P5 pos", "P5 level", "P5 tension", "P6 pos", "P6 level", "P6 tension",
+                                       "P7 pos", "P7 level", "P7 tension", "P8 pos", "P8 level", "P8 tension", "P9 pos", "P9 level", "P9 tension",
+                                       "P10 pos", "P10 level", "P10 tension", "P11 pos", "P11 level", "P11 tension", "P12 pos", "P12 level", "P12 tension" };
         for (int i = 0; i < 36; ++i)
             info.params.push_back ({ names[i], i % 3 == 2 ? 0.5f : 1.0f });
-        info.params.push_back ({ "Só controle", 0.0f });
+        info.params.push_back ({ "Control only", 0.0f });
         return info;
     }();
-    static const EffectInfo autoPanInfo { "Auto-pan", { { "Período", 1.0f / 64.0f }, { "Profund.", 0.75f }, { "Fase", 0.0f }, { "Pan", 0.5f }, { "Só controle", 0.0f } } };
-    static const EffectInfo vocoderInfo { "Vocoder", { { "Bandas", 0.4f }, { "Ordem", 0.5f }, { "Ouvir", 1.0f }, { "Trocar L/R", 0.0f },
-                                                       { "Freq. mín.", 0.0f }, { "Freq. máx.", 1.0f }, { "Escala", 0.5f }, { "Inverter", 0.0f },
-                                                       { "Formante", 0.5f }, { "Largura", 45.0f / 195.0f }, { "Ataque", 10.0f / 990.0f },
-                                                       { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulador", 0.0f },
-                                                       { "Portadora", 0.0f }, { "Wet", 0.8f } } };
+    static const EffectInfo autoPanInfo { "Auto-pan", { { "Period", 1.0f / 64.0f }, { "Depth", 0.75f }, { "Phase", 0.0f }, { "Pan", 0.5f }, { "Control only", 0.0f } } };
+    static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
+                                                       { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
+                                                       { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
+                                                       { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulator", 0.0f },
+                                                       { "Carrier", 0.0f }, { "Wet", 0.8f } } };
     static const EffectInfo pitchCorrectInfo = [] {
-        EffectInfo info { "Correção de afinação", { { "Velocidade", 1.0f }, { "Fino", 0.5f }, { "Desligar tudo", 0.0f }, { "Lá", 0.5f },
-                                                     { "Faixa", 0.4f } } };
+        EffectInfo info { "Pitch correction", { { "Speed", 1.0f }, { "Fine", 0.5f }, { "Bypass all", 0.0f }, { "A freq.", 0.5f },
+                                                     { "Range", 0.4f } } };
         static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
         for (const auto* name : names)
             info.params.push_back ({ name, 1.0f });
@@ -2019,35 +2019,35 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params.push_back ({ name, 0.0f });
         return info;
     }();
-    static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
-    static const EffectInfo effectorInfo { "Effector", { { "Tipo", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
+    static const EffectInfo lofiInfo { "Lo-fi", { { "Rate", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
+    static const EffectInfo effectorInfo { "Effector", { { "Type", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
-                                                         { "Forma LFO", 0.0f }, { "Entrada", 1.0f }, { "Saída", 0.5f } } };
-    static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.8496f }, { "Tensão", 0.5f },
-                                                                  { "Queda", 0.4959f }, { "Base do LFO", 0.0f } } };
+                                                         { "LFO shape", 0.0f }, { "Input", 1.0f }, { "Output", 0.5f } } };
+    static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Amount", 0.8496f }, { "Tension", 0.5f },
+                                                                  { "Decay", 0.4959f }, { "LFO base", 0.0f } } };
     static const EffectInfo parametric = [] {
-        // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
+        // bands as in a mixing EQ: low shelf, 5 peaks and high shelf, all at 0 dB
         constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
                                             peq::BandType::peak, peq::BandType::peak, peq::BandType::highShelf };
         constexpr double freqs[] = { 80.0, 200.0, 500.0, 1200.0, 3000.0, 6000.0, 12000.0 };
         static const char* names[peq::bands][4] = {
-            { "B1 tipo", "B1 freq.", "B1 ganho", "B1 Q" }, { "B2 tipo", "B2 freq.", "B2 ganho", "B2 Q" },
-            { "B3 tipo", "B3 freq.", "B3 ganho", "B3 Q" }, { "B4 tipo", "B4 freq.", "B4 ganho", "B4 Q" },
-            { "B5 tipo", "B5 freq.", "B5 ganho", "B5 Q" }, { "B6 tipo", "B6 freq.", "B6 ganho", "B6 Q" },
-            { "B7 tipo", "B7 freq.", "B7 ganho", "B7 Q" } };
-        static const char* slopes[peq::bands] = { "B1 inclin.", "B2 inclin.", "B3 inclin.", "B4 inclin.", "B5 inclin.", "B6 inclin.", "B7 inclin." };
-        EffectInfo info { "EQ paramétrico", {} };
+            { "B1 type", "B1 freq.", "B1 gain", "B1 Q" }, { "B2 type", "B2 freq.", "B2 gain", "B2 Q" },
+            { "B3 type", "B3 freq.", "B3 gain", "B3 Q" }, { "B4 type", "B4 freq.", "B4 gain", "B4 Q" },
+            { "B5 type", "B5 freq.", "B5 gain", "B5 Q" }, { "B6 type", "B6 freq.", "B6 gain", "B6 Q" },
+            { "B7 type", "B7 freq.", "B7 gain", "B7 Q" } };
+        static const char* slopes[peq::bands] = { "B1 slope", "B2 slope", "B3 slope", "B4 slope", "B5 slope", "B6 slope", "B7 slope" };
+        EffectInfo info { "Parametric EQ", {} };
 
         for (int b = 0; b < peq::bands; ++b)
         {
             info.params.push_back ({ names[b][0], peq::typeValue (types[b]) });
             info.params.push_back ({ names[b][1], peq::hzValue (freqs[b]) });
             info.params.push_back ({ names[b][2], 0.5f });
-            // Q 1,0 nas prateleiras = inclinação S 1; nos cortes, 0,707 = Butterworth
+            // Q 1.0 on shelves = shelf slope S 1; on cuts, 0.707 = Butterworth
             info.params.push_back ({ names[b][3], peq::qValue (types[b] == peq::BandType::lowCut || types[b] == peq::BandType::highCut ? 0.70710678 : 1.0) });
         }
 
-        info.params.push_back ({ "Saída", 0.5f });
+        info.params.push_back ({ "Output", 0.5f });
 
         for (int b = 0; b < peq::bands; ++b)
             info.params.push_back ({ slopes[b], 0.0f });
@@ -2117,15 +2117,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 return text;
             }
             if (param == 3)
-                return v > 0.5f ? "ligado" : "desligado";
+                return v > 0.5f ? "on" : "off";
             std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
         case EffectKind::reverb:
             if (param == 5)
-                return v <= 0.001f ? std::string ("desligado") : (std::snprintf (text, sizeof (text), "%.0f Hz", reverbLowCutHz (v)), std::string (text));
+                return v <= 0.001f ? std::string ("off") : (std::snprintf (text, sizeof (text), "%.0f Hz", reverbLowCutHz (v)), std::string (text));
             if (param == 6)
-                return v >= 0.999f ? std::string ("desligado") : (std::snprintf (text, sizeof (text), "%.1f kHz", reverbHighCutHz (v) / 1000.0f), std::string (text));
+                return v >= 0.999f ? std::string ("off") : (std::snprintf (text, sizeof (text), "%.1f kHz", reverbHighCutHz (v) / 1000.0f), std::string (text));
             if (param == 7)
                 std::snprintf (text, sizeof (text), "%.0f ms", v * 1000.0f);
             else
@@ -2175,7 +2175,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             if (param == peq::outputParam)
                 std::snprintf (text, sizeof (text), "%+.1f dB", peq::gainDb (v));
             else if (param > peq::outputParam)
-                std::snprintf (text, sizeof (text), "%d dB/oit", 12 * peq::slopeStages (v));
+                std::snprintf (text, sizeof (text), "%d dB/oct", 12 * peq::slopeStages (v));
             else
                 switch (param % 4)
                 {
@@ -2199,15 +2199,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             if (param == 0)
             {
                 if (v <= 0.0f)
-                    return "mudo";
+                    return "mute";
                 std::snprintf (text, sizeof (text), "%+.1f dB", utilityGainDb (v));
             }
             else if (param == 1)
             {
                 const auto pan = v * 2.0f - 1.0f;
                 if (std::abs (pan) < 0.005f)
-                    return "centro";
-                std::snprintf (text, sizeof (text), "%.0f%% %s", std::abs (pan) * 100.0f, pan < 0.0f ? "E" : "D");
+                    return "center";
+                std::snprintf (text, sizeof (text), "%.0f%% %s", std::abs (pan) * 100.0f, pan < 0.0f ? "L" : "R");
             }
             else
                 std::snprintf (text, sizeof (text), "%.2f", utilityMatrix (v));
@@ -2244,7 +2244,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%+.0f%%", (raw < 0.0 ? -1.0 : 1.0) * (std::pow (6.0, std::abs (raw) / 256.0) - 1.0) * 40.0);
             }
             else if (param == 3)
-                std::snprintf (text, sizeof (text), "%.2f / tempo", (std::pow (10001.0, (5.0 + 123.0 * v) / 128.0) - 1.0) * 0.0192);
+                std::snprintf (text, sizeof (text), "%.2f / beat", (std::pow (10001.0, (5.0 + 123.0 * v) / 128.0) - 1.0) * 0.0192);
             else if (param == 2)
                 std::snprintf (text, sizeof (text), "%+.0f", (v * 2.0f - 1.0f) * 128.0f);
             else
@@ -2270,14 +2270,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 {
                     const auto u = 1.0 - v;
                     if (u < 0.01)
-                        return "instantânea";
+                        return "instant";
                     std::snprintf (text, sizeof (text), "%.1f ms", (3.0 * u * u * u + 0.001) / 8.82 * 1000.0);
                     break;
                 }
                 case 1: std::snprintf (text, sizeof (text), "%+.0f ct", (2.0f * v - 1.0f) * 100.0f); break;
                 case 3: std::snprintf (text, sizeof (text), "%.1f Hz", pcorr::noteA (v) * 8.0); break;
-                case 4: std::snprintf (text, sizeof (text), "%.0f Hz mín.", pcorr::minHz[pcorr::range (v)]); break;
-                default: return v > 0.5f ? (param >= 17 ? "fora" : "sim") : (param >= 17 ? "-" : (param == 2 ? "não" : "não"));
+                case 4: std::snprintf (text, sizeof (text), "%.0f Hz min.", pcorr::minHz[pcorr::range (v)]); break;
+                default: return v > 0.5f ? (param >= 17 ? "bypassed" : "yes") : (param >= 17 ? "-" : (param == 2 ? "no" : "no"));
             }
             return text;
 
@@ -2286,8 +2286,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             {
                 case 0: std::snprintf (text, sizeof (text), "%d", vocoder::bands (v)); break;
                 case 1: std::snprintf (text, sizeof (text), "%d", vocoder::order (v)); break;
-                case 2: return std::array<const char*, 3> { "modulador", "portadora", "mistura" }[(std::size_t) std::clamp ((int) std::lround (v * 2.0f), 0, 2)];
-                case 3: case 7: case 12: return v > 0.5f ? "ligado" : "desligado";
+                case 2: return std::array<const char*, 3> { "modulator", "carrier", "mix" }[(std::size_t) std::clamp ((int) std::lround (v * 2.0f), 0, 2)];
+                case 3: case 7: case 12: return v > 0.5f ? "on" : "off";
                 case 4: case 5: std::snprintf (text, sizeof (text), "%.0f Hz", vocoder::freq (v)); break;
                 case 8: std::snprintf (text, sizeof (text), "%+.0f ct", v * 2400.0f - 1200.0f); break;
                 case 9: std::snprintf (text, sizeof (text), "%.0f%%", 5.0f + 195.0f * v); break;
@@ -2300,7 +2300,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::rhythmGain:
         case EffectKind::autoPan:
             if (param == 0)
-                std::snprintf (text, sizeof (text), "%.3g tempos", v * 64.0f);
+                std::snprintf (text, sizeof (text), "%.3g beats", v * 64.0f);
             else if (kind == EffectKind::rhythmGain && param == 1)
                 std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * rhythm::maxPoints));
             else if (kind == EffectKind::autoPan && (param == 1 || param == 3))
@@ -2311,11 +2311,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::crossover:
             if (param == 0 || param == 3)
-                return v > 0.5f ? "ligado" : "desligado";
+                return v > 0.5f ? "on" : "off";
             if (param == 1 || param == 4)
                 std::snprintf (text, sizeof (text), "%.0f Hz", xover::hz (v));
             else
-                std::snprintf (text, sizeof (text), "%d dB/oit", xover::dbPerOctave[xover::combo (v)]);
+                std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
         case EffectKind::plugin:
@@ -2361,7 +2361,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::peakController: return std::make_unique<PeakController>();
         case EffectKind::pitchShift: return std::make_unique<PitchShift>();
         case EffectKind::freqShift: return std::make_unique<FreqShift>();
-        case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // vazio: use makeParallelEffect
+        case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // empty: use makeParallelEffect
         case EffectKind::lofi: return std::make_unique<LoFi>();
         case EffectKind::effector: return effector::make();
         case EffectKind::crossover: return std::make_unique<Crossover>();
@@ -2369,7 +2369,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::autoPan: return std::make_unique<AutoPan>();
         case EffectKind::vocoder: return std::make_unique<Vocoder>();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
-        case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
+        case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
 }

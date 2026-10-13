@@ -1,5 +1,5 @@
-// GMS, Ogun/Autogun, Sakura e Fruity DrumSynth Live aproximados pelo synth interno (ou por um
-// sample de bateria). Formatos e fórmulas em docs/analise/REA_rodada12.md (clean-room).
+// GMS, Ogun/Autogun, Sakura and Fruity DrumSynth Live approximated by the built-in synth (or by a
+// drum sample). Formats and formulas in docs/analise/REA_rodada12.md (clean-room).
 
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
@@ -46,7 +46,7 @@ std::string lower (std::string s)
 
 // ---- GMS ----
 
-// forma do LYNX pelo nome do .wav do GMS (§1.4); `octaveUp` nas ondas com o 2º harmônico dominante
+// LYNX waveform from the GMS .wav name (§1.4); `octaveUp` for waves with a dominant 2nd harmonic
 Waveform gmsWave (const std::string& path, bool& octaveUp)
 {
     auto name = path.substr (path.find_last_of ("\\/") == std::string::npos ? 0 : path.find_last_of ("\\/") + 1);
@@ -64,7 +64,7 @@ Waveform gmsWave (const std::string& path, bool& octaveUp)
     return Waveform::saw;
 }
 
-// corte do ladder do GMS em Hz para u = 0..1 (tabela 2^(9,77u), polo a 4× 44,1 kHz)
+// GMS ladder cutoff in Hz for u = 0..1 (table 2^(9.77u), pole at 4× 44.1 kHz)
 double gmsCutoffHz (double u)
 {
     const auto g = 0.0005 * std::pow (2.0, 9.7734 * std::clamp (u, 0.0, 0.999));
@@ -76,7 +76,7 @@ int truncf32 (float x) { return (int) x; }
 
 bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain)
 {
-    // "SSLF" + tamanho + o preset .gmsynth
+    // "SSLF" + size + the .gmsynth preset
     if (state.size() < 8 || std::memcmp (state.data(), "SSLF", 4) != 0)
         return false;
     const auto size = (std::size_t) u32At (state.data(), 4);
@@ -94,7 +94,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
 
     float x[212];
     std::memcpy (x, d + paramsAt, sizeof (x));
-    const auto velocityToCutoff = x[199] == 1.0f; // destino gravado como número inteiro (1 = corte)
+    const auto velocityToCutoff = x[199] == 1.0f; // destination stored as an integer (1 = cutoff)
     for (int i = 0; i < 212; ++i)
         if (! std::isfinite (x[i]) || x[i] < 0.0f || x[i] > 1.0f)
             x[i] = i < 197 ? std::clamp (std::isfinite (x[i]) ? x[i] : 0.0f, 0.0f, 1.0f) : 0.0f;
@@ -108,7 +108,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
 
     SynthSettings s;
 
-    // afinação: oitava global, Δ do canal e semitons/cents de cada oscilador (em float32, truncando)
+    // tuning: global octave, channel Δ and semitones/cents of each oscillator (in float32, truncating)
     const auto octave = std::clamp (truncf32 (4.0f * x[44]) - 2, -2, 2);
     const auto channel = -truncf32 (24.0f - 48.0f * x[2]);
     double semis[3] {};
@@ -119,7 +119,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
         semis[k] = 12.0 * octave + channel + truncf32 (72.0f * x[55 + 2 * k] - 36.0f) + truncf32 (100.0f * x[56 + 2 * k] - 50.0f) / 100.0 + (up ? 12.0 : 0.0);
     }
 
-    // mistura em cascata (§1.3)
+    // cascaded mix (§1.3)
     const double a = (double) x[48] * x[48], b = (double) x[49] * x[49], n = (double) x[45] * x[45];
     double level[3] = { (1 - a) * (1 - b) * (1 - n), a * (1 - b) * (1 - n), b * (1 - n) };
     for (int k = 0; k < 3; ++k)
@@ -131,35 +131,35 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
         o.pan = 0.0f;
     }
 
-    // modulação osc2 -> osc1
+    // modulation osc2 -> osc1
     const auto modKind = std::clamp (truncf32 (2.0f * x[51]), 0, 2);
     const auto m = (double) x[50] * x[50];
-    if (m > 0.0 && modKind == 2) // AM: o osc 2 do GMS vira o modulador (osc 3 do LYNX)
+    if (m > 0.0 && modKind == 2) // AM: GMS osc 2 becomes the modulator (LYNX osc 3)
     {
         auto osc3 = s.osc[2];
         auto modulator = s.osc[1];
         modulator.level = (float) std::min (1.0, 3.0 * m);
         s.am = true;
-        s.osc[1] = osc3; // o osc 3 do GMS (se audível) toma o lugar livre
+        s.osc[1] = osc3; // GMS osc 3 (if audible) takes the free slot
         s.osc[2] = modulator;
     }
-    else if (m > 0.0 && modKind == 1 && level[2] < 0.05) // FM/PM: o osc 2 do GMS vira o modulador (osc 3 do LYNX)
+    else if (m > 0.0 && modKind == 1 && level[2] < 0.05) // FM/PM: GMS osc 2 becomes the modulator (LYNX osc 3)
     {
         auto modulator = s.osc[1];
         modulator.level = 1.0f;
         modulator.pan = 0.0f;
-        s.fm = (float) std::min (8.0, 3.75 * m); // fase do osc 1 recebe osc2·15·m quartos de ciclo
+        s.fm = (float) std::min (8.0, 3.75 * m); // osc 1 phase receives osc2·15·m quarter cycles
         s.osc[2] = modulator;
-        if (level[1] < 0.05) // o osc 2 do GMS só modulava
+        if (level[1] < 0.05) // GMS osc 2 was only modulating
             s.osc[1].level = 0.0f;
     }
-    else if (m > 0.0 && modKind == 0) // hard sync: um osc1 mais agudo e rico
+    else if (m > 0.0 && modKind == 0) // hard sync: a higher, richer osc1
     {
         s.osc[0].wave = Waveform::saw;
         setPitch (s.osc[0], semis[0] + 12.0 * std::log2 (1.0 + 3.0 * m));
     }
 
-    // ruído num slot vazio
+    // noise in an empty slot
     if (n > 0.05)
         for (auto& o : s.osc)
             if (o.level < 0.05f && ! ((s.am || s.fm > 0.0f) && &o == &s.osc[2]))
@@ -168,7 +168,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
                 break;
             }
 
-    // uníssono: cópias do osc 1 nos slots vazios
+    // unison: copies of osc 1 in the empty slots
     const auto voices = 1 + truncf32 (15.0f * x[41]);
     if (voices >= 2)
     {
@@ -188,7 +188,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
                 s.osc[k].level = (float) std::clamp (s.osc[k].level * compensation * 1.5, 0.0, 1.0);
     }
 
-    // amplitude: a saída é e², os tempos são de −40 dB
+    // amplitude: the output is e², times are to −40 dB
     s.attack = (float) std::min (5.0, 1.265 * std::pow ((double) x[4], 3.0));
     const auto td = 50.0 * std::pow ((double) x[5], 4.0) + 0.001;
     const auto tr = 25.0 * std::pow (0.55 * x[7] + 0.1, 3.0) + 0.001;
@@ -196,9 +196,9 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
     s.decay = s.sustain >= 0.999f ? 0.0f : (float) std::min (20.0, 2.3 * td / 8.82);
     s.release = (float) std::clamp (2.3 * tr / 8.82, 0.003, 10.0);
 
-    // filtro ladder -> SVF do LYNX
+    // ladder filter -> LYNX SVF
     auto u = (double) x[12];
-    if (velocityToCutoff) // velocidade -> corte (com uma velocidade típica de 0,8)
+    if (velocityToCutoff) // velocity -> cutoff (with a typical velocity of 0.8)
         u += (2.0 * x[198] - 1.0) * 0.8;
     u = std::clamp (u, 0.0, 0.999);
     const auto filterType = std::clamp (truncf32 (2.0f * x[15]), 0, 2);
@@ -207,7 +207,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
     s.resonance = std::min (0.95f, x[13]);
     auto octavesFrom = [&] (double du) { return std::log2 (gmsCutoffHz (u + du) / gmsCutoffHz (u)); };
 
-    // envelopes AD de modulação
+    // AD modulation envelopes
     for (int k = 0; k < 2; ++k)
     {
         auto amount = (double) x[16 + k] * x[16 + k];
@@ -220,7 +220,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
         const auto dest = std::clamp (truncf32 (3.0f * x[24 + k]), 0, 3);
         if (dest == 0 && s.filterEnv.amount == 0.0f)
         {
-            if (amount < 0.0) // fecha: o corte parte de baixo e "abre" de volta
+            if (amount < 0.0) // closing: the cutoff starts low and "opens" back up
                 s.filterEnv = { (float) std::clamp (octavesFrom (amount), -10.0, 0.0), (float) attack, 0.0f, (float) decay, 0.0f, s.release };
             else
                 s.filterEnv = { (float) std::clamp (octavesFrom (amount), 0.0, 10.0), (float) attack, 0.0f, (float) decay, 0.0f, s.release };
@@ -250,9 +250,9 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
             lfo.period = (float) (beats[std::clamp (truncf32 (9.0f * x[34 + k]), 0, 8)] * (sync == 2 ? 4.0 : 1.0));
             lfo.sync = true;
         }
-        lfo.global = x[26 + k] < 0.5f; // sem retrig a fase corre livre
+        lfo.global = x[26 + k] < 0.5f; // without retrig the phase runs free
 
-        // um envelope com destino "LFO" vira o fade-in deste LFO
+        // an envelope targeting "LFO" becomes this LFO's fade-in
         if (std::clamp (truncf32 (3.0f * x[24 + k]), 0, 3) == 3 && x[16 + k] > 0.0f)
             lfo.attack = (float) std::min (10.0, 7.59 * std::pow ((double) x[20 + k], 5.0));
         if (lfo.sync && lfo.attack > 0.0f)
@@ -263,7 +263,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
             case 0: lfo.amount = (float) std::clamp (octavesFrom (std::abs (amount)) * (amount < 0 ? -1 : 1), -10.0, 10.0); s.lfo[lfoCutoff] = lfo; break;
             case 2: lfo.amount = (float) (12.0 * amount); s.lfo[lfoPitch] = lfo; break;
             case 3: lfo.amount = (float) std::abs (amount); s.lfo[lfoVolume] = lfo; break;
-            default: break; // "modulation": sem equivalente
+            default: break; // "modulation": no equivalent
         }
     }
 
@@ -283,7 +283,7 @@ bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSett
 
 // ---- Ogun / Autogun ----
 
-// ressonância 0..1 do synth do LYNX para um Q (o SVF usa k = 1/Q = 2 − 1,9·res; Q < 0,5 vira 0)
+// LYNX synth resonance 0..1 for a Q (the SVF uses k = 1/Q = 2 − 1.9·res; Q < 0.5 becomes 0)
 float synthResonanceForQ (double q)
 {
     return (float) std::clamp ((2.0 - 1.0 / std::max (q, 1e-3)) / 1.9, 0.0, 1.0);
@@ -297,7 +297,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     if (version > 0xffff)
         version >>= 16;
     if (version < 14 || version > 19)
-        return false; // as versões antigas gravam um bloco reduzido (não usado nos demos atuais)
+        return false; // old versions store a reduced block (not used in the current demos)
 
     const auto body = inflateZlib (state.data() + 4, state.size() - 4, false, 8u << 20);
     if (! body || body->size() < 64 * 4)
@@ -305,7 +305,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     std::int32_t p[64];
     std::memcpy (p, body->data(), sizeof (p));
 
-    // tempo dos knobs de timbre: 10000 = infinito
+    // timbre knob time: 10000 = infinite
     auto seconds = [] (int v) { return v >= 10000 ? -1.0 : ((std::pow (21.0, std::clamp (v, 0, 10000) / 10000.0) - 1.0) * 997.5 + 50.0) / 1000.0; };
 
     SynthSettings s;
@@ -316,7 +316,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
 
     s.osc = { SynthOscillator { wave, 0, 0.0f, 0.8f }, SynthOscillator {}, SynthOscillator {} };
     setPitch (s.osc[0], transpose);
-    if (fullness > 300) // timbre "metálico": um parcial uma oitava acima
+    if (fullness > 300) // "metallic" timbre: a partial one octave up
     {
         s.osc[1] = { Waveform::sine, 0, 0.0f, 0.3f };
         setPitch (s.osc[1], transpose + 12.0);
@@ -343,7 +343,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
             if (s.osc[k].level == 0.0f)
             {
                 s.osc[k] = s.osc[0];
-                // desvio ±5·(11^(P15/256) − 1) centésimos (REA_rodada21 §2.4)
+                // detune ±5·(11^(P15/256) − 1) cents (REA_rodada21 §2.4)
                 const auto spread = (float) (5.0 * (std::pow (11.0, std::clamp (p[15], 0, 256) / 256.0) - 1.0));
                 s.osc[k].detune = std::clamp (s.osc[0].detune + (k == 1 ? spread : -spread), -100.0f, 100.0f);
                 s.osc[k].pan = k == 1 ? pan : -pan;
@@ -352,14 +352,14 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
             o.level *= 0.6f;
     }
 
-    // filtro: só existe com ordem > 0
+    // filter: only exists with order > 0
     s.cutoff = 20000.0f;
     if (const auto order = std::clamp (p[50], 0, 3); order > 0)
     {
         const auto type = std::clamp (p[49], 0, 3);
         const auto u = std::clamp (p[17], 0, 256) / 256.0;
-        // REA_rodada21 §2.5: fc = 44100·(c + c₀) Hz (ω limitado a 2,8495 rad); ordem = biquads iguais em cascata
-        // (o LYNX tem um só: inclinação aproximada); LP/HP com Q^(1/ordem) por estágio, BP/BS com largura em oitavas
+        // REA_rodada21 §2.5: fc = 44100·(c + c₀) Hz (ω limited to 2.8495 rad); order = identical cascaded biquads
+        // (LYNX has only one: approximate slope); LP/HP with Q^(1/order) per stage, BP/BS with width in octaves
         double c = 0.0, c0 = 0.0;
         if (type == 0)
             c = 0.0006646667 * (std::pow (1501.0, u) - 1.0), c0 = 0.003;
@@ -397,15 +397,15 @@ bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& syn
     for (auto& v : t)
         v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
 
-    // As cordas do Sakura são físicas (excitador + guia de onda): aqui viram serra (corda 1) + triângulo
-    // (corda 2) — a troca de modelo é aproximação. Confirmados (REA_rodada18 §10): Amp A = 35x⁵ + 0,001 s,
-    // D = 50x⁵ + 0,001 s e R = 10x⁵ + 0,1 s com polos de constante T/8,82 (o LYNX mede o tempo até −60 dB:
-    // ×6,908/8,82), sustain x², Tune trunc(198x − 99)·0,01 semitom, String Mix linear (corda 1 ∝ 1 − mix).
-    // O decaimento da corda (realimentação d^0,05 por período → T60 ≈ 60/(f·(−log10 d)) s) depende da
-    // nota: usa-se o T60 da tecla 60 (aproximação). Hi-Cut (REA_rodada19 §5): 4 polos de 1ª ordem com
-    // c = Cutoff² (sem envelope); cada polo corta em −fs·ln(1 − c)/2π e a cascata em ≈ 0,435 disso, com
-    // fs = 48 kHz (a taxa dos coeficientes do motor; não confirmada como a de render). No FL ele filtra o
-    // excitador; aqui, a saída do synth (2 polos).
+    // Sakura's strings are physical (exciter + waveguide): here they become a saw (string 1) + triangle
+    // (string 2) — the model swap is an approximation. Confirmed (REA_rodada18 §10): Amp A = 35x⁵ + 0.001 s,
+    // D = 50x⁵ + 0.001 s and R = 10x⁵ + 0.1 s with poles of time constant T/8.82 (LYNX measures time down to −60 dB:
+    // ×6.908/8.82), sustain x², Tune trunc(198x − 99)·0.01 semitone, linear String Mix (string 1 ∝ 1 − mix).
+    // The string decay (feedback d^0.05 per period → T60 ≈ 60/(f·(−log10 d)) s) depends on the
+    // note: the T60 of key 60 is used (approximation). Hi-Cut (REA_rodada19 §5): 4 first-order poles with
+    // c = Cutoff² (no envelope); each pole cuts at −fs·ln(1 − c)/2π and the cascade at ≈ 0.435 of that, with
+    // fs = 48 kHz (the engine's coefficient rate; not confirmed as the render rate). In FL it filters the
+    // exciter; here, the synth output (2 poles).
     SynthSettings s;
     const auto mix = t[17];
     s.osc = { SynthOscillator { Waveform::saw, 0, 0.0f, 1.0f - mix }, SynthOscillator { Waveform::triangle, 0, 0.0f, mix }, SynthOscillator {} };
@@ -506,7 +506,7 @@ std::vector<std::string> drumSampleCandidates (const std::string& soundName)
 
 bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
-    // u32 0, u32 tamanho, u32 0, u32 9 + "Kepler-1\0", u32 versão, u32 n, n floats
+    // u32 0, u32 size, u32 0, u32 9 + "Kepler-1\0", u32 version, u32 n, n floats
     if (state.size() < 0x21 + 34 * 4 || u32At (state.data(), 12) != 9 || std::memcmp (state.data() + 16, "Kepler-1", 8) != 0)
         return false;
     const auto count = (int) u32At (state.data(), 0x1D);
@@ -517,7 +517,7 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     for (auto& v : k)
         v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
 
-    // tabelas de 11 pontos do motor, interpoladas em x·10 (REA_rodada17 §6)
+    // engine 11-point tables, interpolated at x·10 (REA_rodada17 §6)
     auto table = [] (const double (&t)[11], float x) {
         const auto pos = std::clamp ((double) x, 0.0, 1.0) * 10.0;
         const auto i = std::min (9, (int) pos);
@@ -537,18 +537,18 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
               SynthOscillator {} };
     if (! saw && ! pulse)
         s.osc[0].level = 1.0f;
-    if (k[17] > k[16] * (sub ? 1.0f : 0.0f) && k[17] > 0.05f) // ruído mais alto que o sub
+    if (k[17] > k[16] * (sub ? 1.0f : 0.0f) && k[17] > 0.05f) // noise louder than the sub
         s.osc[2] = { Waveform::noise, 0, 0.0f, k[17] };
     else if (sub)
         s.osc[2] = { Waveform::square, std::max (-3, octave - 1), 0.0f, std::max (0.05f, k[16]) };
 
-    // Env1: ataque chega a 1 em T_A (linear no LYNX); decay/release do Kepler são até −20 dB, os do LYNX
-    // até −60 dB (exponenciais): × 3
+    // Env1: attack reaches 1 at T_A (linear in LYNX); Kepler's decay/release are to −20 dB, LYNX's
+    // to −60 dB (exponential): × 3
     s.attack = (float) table (attackTable, k[26]);
     s.decay = (float) (3.0 * table (decayTable, k[27]));
     s.sustain = k[28];
     s.release = (float) std::max (0.003, 3.0 * table (releaseTable, k[29]));
-    if (k[25] >= 0.5f) // VCA por gate
+    if (k[25] >= 0.5f) // gate-driven VCA
     {
         s.attack = 0.002f;
         s.decay = 0.0f;
@@ -560,13 +560,13 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     s.resonance = std::min (0.95f, k[20]);
     if (const auto octaves = table (envAmountTable, k[22]); octaves > 0.01)
     {
-        const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polaridade
+        const auto sign = k[21] >= 0.5f ? -1.0f : 1.0f; // polarity
         s.filterEnv = { sign * (float) octaves, s.attack, 0.0f, s.decay, s.sustain, s.release };
     }
-    // LFO1 (REA_rodada17 §6, rodada18 §7, rodada19 §3): um só LFO global quase senoidal, valor ±1;
-    // taxa 21,739·2^(−T(x)) Hz; vibrato ±A(k10) oitavas e corte ±A_c(k23) oitavas (picos); atraso = rampa
-    // linear de D(k7) s. O "Range" ×10 só existe no painel do Kepler Exo (aqui fica desligado); o BPM Sync
-    // (k6) não foi lido. Chorus I/II: o synth do LYNX não tem chorus.
+    // LFO1 (REA_rodada17 §6, rodada18 §7, rodada19 §3): a single, nearly sinusoidal global LFO, value ±1;
+    // rate 21.739·2^(−T(x)) Hz; vibrato ±A(k10) octaves and cutoff ±A_c(k23) octaves (peaks); delay = linear
+    // ramp of D(k7) s. The ×10 "Range" only exists on the Kepler Exo panel (left off here); BPM Sync
+    // (k6) was not read. Chorus I/II: the LYNX synth has no chorus.
     static constexpr double lfoRateTable[11] = { 7.4422, 5.8074, 4.3499, 3.6563, 3.1131, 2.6712, 2.0463, 1.3093, 0.8515, 0.2838, 0.0 };
     static constexpr double vibratoTable[11] = { 0, 0.00116, 0.00813, 0.01506, 0.02196, 0.02882, 0.05259, 0.07819, 0.12057, 0.17728, 0.21388 };
     static constexpr double lfoCutoffTable[11] = { 0, 0.0914, 0.38038, 0.662, 0.96846, 1.23732, 1.48249, 1.85735, 2.27554, 2.66441, 2.82 };
@@ -586,14 +586,14 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
         s.lfo[lfoCutoff].amount = (float) oct;
     }
 
-    // Main Volume: m(v) = 0,34968v − 0,32754v² + 1,39229v³ (v = 1 -> 0 dB)
+    // Main Volume: m(v) = 0.34968v − 0.32754v² + 1.39229v³ (v = 1 -> 0 dB)
     const auto v = (double) k[33];
     gain = (float) std::clamp (0.34968 * v - 0.32754 * v * v + 1.39229 * v * v * v, 0.0, 2.0);
     synth = s;
     return true;
 }
 
-// ---- Wave Traveller (§4): o sample e a nota-raiz ----
+// ---- Wave Traveller (§4): the sample and root note ----
 
 std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vector<std::uint8_t>& state)
 {
@@ -610,7 +610,7 @@ std::optional<std::pair<std::string, int>> waveTravellerSample (const std::vecto
     return std::make_pair (path, std::clamp (root, 0, 127));
 }
 
-// ---- FLEX (§1.1): só o estado do plugin (os pacotes são protegidos e não são abertos) ----
+// ---- FLEX (§1.1): only the plugin state (the packs are protected and are not opened) ----
 
 std::optional<std::pair<std::string, std::string>> flexPresetName (const std::vector<std::uint8_t>& state)
 {
@@ -625,7 +625,7 @@ std::optional<std::pair<std::string, std::string>> flexPresetName (const std::ve
         return std::nullopt;
     return std::make_pair (pack, preset);
 }
-// ---- BooBass (REA_rodada10 §5): baixo com Bass/Mid/Treble ----
+// ---- BooBass (REA_rodada10 §5): bass with Bass/Mid/Treble ----
 
 bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& synth)
 {
@@ -634,10 +634,10 @@ bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& sy
     auto knob = [&] (std::size_t i) { return std::clamp ((int) u32At (state.data(), 4 + 4 * i), 0, 65535) / 65535.0; };
     const auto bass = knob (0), mid = knob (1), treble = knob (2);
 
-    // REA_rodada18 §11: o som do BooBass é uma amostra (ataque + laço) que não está nos dados do projeto;
-    // aqui a fonte é uma serra uma oitava abaixo com decaimento (aproximação). Os três knobs são o EQ de 3
-    // bandas confirmado: abaixo de 0,1 a banda cala; Bass 10^((12x − 12)/20), Mid 10^((10x − 10)/20),
-    // Treble 10^((12x − 9)/20). A 2ª etapa (saturação no grave, ×3, limitador) fica de fora.
+    // REA_rodada18 §11: BooBass's sound is a sample (attack + loop) that is not in the project data;
+    // here the source is a saw one octave down with a decay (approximation). The three knobs are the confirmed
+    // 3-band EQ: below 0.1 the band is muted; Bass 10^((12x − 12)/20), Mid 10^((10x − 10)/20),
+    // Treble 10^((12x − 9)/20). The 2nd stage (low-end saturation, ×3, limiter) is left out.
     auto band = [] (double x, double range, double top) { return x < 0.1 ? 0.0f : (float) std::pow (10.0, (range * x - range + top) / 20.0); };
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::saw, -1, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
@@ -651,7 +651,7 @@ bool synthFromBooBass (const std::vector<std::uint8_t>& state, SynthSettings& sy
     return true;
 }
 
-// ---- Drumpad (§6): só o nome do patch; o modelo físico não é reproduzido ----
+// ---- Drumpad (§6): only the patch name; the physical model is not reproduced ----
 
 std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& state)
 {
@@ -666,7 +666,7 @@ std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& st
 
 std::optional<std::array<float, 38>> drumpadParams (const std::vector<std::uint8_t>& state)
 {
-    // "SSLF" + tamanho + "3PMD" + 128 B de nome + 38 floats (parâmetros 0…37 na ordem), REA_rodada18 §12
+    // "SSLF" + size + "3PMD" + 128 B name + 38 floats (parameters 0…37 in order), REA_rodada18 §12
     if (state.size() < 140 + 38 * 4 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, "3PMD", 4) != 0)
         return std::nullopt;
     std::array<float, 38> p {};
@@ -682,7 +682,7 @@ SynthSettings drumToneForName (const std::string& patchName)
     const auto name = lower (patchName);
     auto has = [&] (const char* w) { return name.find (w) != std::string::npos; };
 
-    // tambor "genérico": seno com queda de afinação + um pouco de ruído para o ataque
+    // "generic" drum: sine with a pitch drop + a little noise for the attack
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator { Waveform::noise, 0, 0.0f, 0.12f }, SynthOscillator {} };
     s.attack = 0.0f;
@@ -751,11 +751,11 @@ bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& sy
     s.decay = (float) ms4 (1.0, 19999.0, p[23]);
     s.sustain = p[24];
     s.release = (float) ms4 (15.0, 9985.0, p[25]);
-    // corte (REA_rodada17 §8): 2^(10·v + 6) Hz com v = 1,1·x recortado em 0,91 (64 Hz … 35 kHz)
+    // cutoff (REA_rodada17 §8): 2^(10·v + 6) Hz with v = 1.1·x clipped at 0.91 (64 Hz … 35 kHz)
     s.cutoff = (float) std::clamp (std::pow (2.0, 10.0 * std::min (0.91, 1.1 * (double) p[18]) + 6.0), 20.0, 20000.0);
     s.resonance = std::min (0.95f, p[19]);
     s.filterType = std::clamp ((int) (2.0f * p[66]), 0, 2) == 0 ? 0 : (int) (2.0f * p[66]) == 1 ? 1 : 2;
-    // envelope do filtro no corte: ±10·a² oitavas, a = 2x − 1 (REA_rodada17 §8)
+    // filter envelope on the cutoff: ±10·a² octaves, a = 2x − 1 (REA_rodada17 §8)
     if (const auto a = 2.0f * p[10] - 1.0f; (int) (4.0f * p[65]) == 0 && std::abs (a) > 0.01f)
         s.filterEnv = { (a < 0.0f ? -10.0f : 10.0f) * a * a, (float) ms4 (5.0, 49995.0, p[11]), 0.0f, (float) ms4 (5.0, 49995.0, p[12]), p[13],
                         (float) ms4 (5.0, 49995.0, p[14]) };
@@ -768,9 +768,9 @@ bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& sy
         const auto amount = 2.0f * p[26] - 1.0f;
         switch (std::clamp ((int) (5.0f * p[67]), 0, 5))
         {
-            case 0: lfo.amount = (amount < 0.0f ? -10.0f : 10.0f) * amount * amount; s.lfo[lfoCutoff] = lfo; break; // ±10·l² oit
-            case 1: case 2: lfo.amount = std::floor (24.0f * amount); s.lfo[lfoPitch] = lfo; break;               // até ±24 st
-            default: break; // PW e pan: escalas não confirmadas
+            case 0: lfo.amount = (amount < 0.0f ? -10.0f : 10.0f) * amount * amount; s.lfo[lfoCutoff] = lfo; break; // ±10·l² oct
+            case 1: case 2: lfo.amount = std::floor (24.0f * amount); s.lfo[lfoPitch] = lfo; break;               // up to ±24 st
+            default: break; // PW and pan: scales not confirmed
         }
     }
     s.mono = p[44] >= 0.5f;
@@ -786,23 +786,23 @@ bool synthFromBassDrum (const std::vector<std::uint8_t>& state, SynthSettings& s
     if (! sslfFloats (state, "1kiK", 0x50C, p, 23) && ! sslfFloats (state, "2kiK", 0x50C, p, 23))
         return false;
 
-    // seno na frequência "Base" (2^(4x + 4) Hz). Confirmados (REA_rodada17 §7 + rodada18 §9): duração = rampa
-    // linear de (x³ + 0,001) s, sem release; Peak f = base·(1 + 100·peak³·s⁴), com s caindo por
-    // (1 − 0,0002/T_s) a cada amostra (a 44,1 kHz), T_s = 20·slide³ + 0,001. O clique e a camada de amostra
-    // ficam de fora (a tabela do oscilador é quase senoidal).
+    // sine at the "Base" frequency (2^(4x + 4) Hz). Confirmed (REA_rodada17 §7 + rodada18 §9): duration = linear
+    // ramp of (x³ + 0.001) s, no release; Peak f = base·(1 + 100·peak³·s⁴), with s falling by
+    // (1 − 0.0002/T_s) every sample (at 44.1 kHz), T_s = 20·slide³ + 0.001. The click and the sample layer
+    // are left out (the oscillator table is nearly sinusoidal).
     const auto baseHz = std::pow (2.0, 4.0 * p[6] + 4.0);
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
     setPitch (s.osc[0], 12.0 * std::log2 (baseHz / 261.63));
     const auto duration = (float) (std::pow ((double) p[2], 3.0) + 0.001);
     s.attack = 0.0005f;
-    s.decay = duration;   // o decay do LYNX chega a −60 dB no tempo dado (a rampa do BassDrum chega a zero)
+    s.decay = duration;   // LYNX's decay reaches −60 dB in the given time (the BassDrum ramp reaches zero)
     s.sustain = 0.0f;
-    s.release = duration; // sem release: soltar a nota não corta
+    s.release = duration; // no release: releasing the note does not cut it
     s.cutoff = 20000.0f;
     s.sweep = (float) (100.0 * std::pow ((double) p[7], 3.0));
     const auto slide = 20.0 * std::pow ((double) p[8], 3.0) + 0.001;
-    s.sweepTime = (float) (-1.0 / (44100.0 * std::log (1.0 - 0.0002 / slide))); // constante de tempo de s
+    s.sweepTime = (float) (-1.0 / (44100.0 * std::log (1.0 - 0.0002 / slide))); // time constant of s
     gain = (float) std::pow (10.0, 40.0 * (p[0] - 0.5) / 20.0);
     synth = s;
     return true;
@@ -813,18 +813,18 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     float p[301];
     if (! sslfFloats (state, "2iBT", 0x204C, p, 294))
         return false;
-    // p300 (modo do filtro) é cru, fora da faixa 0..1: lido à parte (REA_rodada19 §4.1)
+    // p300 (filter mode) is raw, outside the 0..1 range: read separately (REA_rodada19 §4.1)
     std::fill (&p[294], &p[301], 0.0f);
     if (state.size() >= 0x204C + 301 * 4)
         std::memcpy (&p[294], state.data() + 0x204C + 294 * 4, sizeof (float) * 7);
     const auto filterMode = std::isfinite (p[300]) ? std::clamp ((int) p[300], 0, 3) : 0;
 
-    // portadora = operador ligado com mais "Mix" (REA_rodada17 §9) + o modulador ligado com a maior célula
-    // da matriz para ela (REA_rodada18 §8: o operador alvo t recebe da fonte j a célula 109 + 6j + t,
-    // desvio de fase = 2·célula·saída ciclos). Filtro (REA_rodada19 §4): modo p300 (0 desligado, 1 LP, 2 BP,
-    // 3 HP), corte 2^(9u + 5) Hz na nota 60, key-track 0,09·KT oitava por semitom, envelope ±9·EGAmt oitavas
-    // com EGAmt = sinal(2x − 1)(2x − 1)². O filtro do FL tem 4 polos e o do LYNX 2 (inclinação aproximada);
-    // a ressonância não tem escala confirmada.
+    // carrier = enabled operator with the highest "Mix" (REA_rodada17 §9) + the enabled modulator with the largest
+    // matrix cell into it (REA_rodada18 §8: target operator t receives from source j the cell 109 + 6j + t,
+    // phase deviation = 2·cell·output cycles). Filter (REA_rodada19 §4): mode p300 (0 off, 1 LP, 2 BP,
+    // 3 HP), cutoff 2^(9u + 5) Hz at note 60, key-track 0.09·KT octave per semitone, envelope ±9·EGAmt octaves
+    // with EGAmt = sign(2x − 1)(2x − 1)². FL's filter has 4 poles and LYNX's 2 (approximate slope);
+    // the resonance has no confirmed scale.
     int carrier = -1;
     for (int i = 0; i < 6; ++i)
         if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
@@ -851,7 +851,7 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
         s.osc[2] = SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f };
         setPitch (s.osc[2], steps (p[31 + modulator]) + steps (p[37 + modulator]) * 0.01 + (double) (int) (48.0f * p[2] - 24.0f));
         s.fm = 2.0f * cell * cell;
-        // o envelope do modulador escala a saída dele: decay até o sustain (o ataque fica de fora)
+        // the modulator's envelope scales its output: decay down to sustain (the attack is left out)
         s.fmDecay = seconds (p[79 + modulator]);
         s.fmSustain = p[85 + modulator] * p[85 + modulator];
     }
@@ -863,23 +863,23 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     s.cutoff = 20000.0f;
     if (filterMode != 0)
     {
-        const auto u = (double) p[15], kt = 0.09 * 12.0 * p[17]; // oitavas por oitava
+        const auto u = (double) p[15], kt = 0.09 * 12.0 * p[17]; // octaves per octave
         s.filterType = filterMode == 1 ? 0 : filterMode == 2 ? 1 : 2;
         s.keyTrack = (float) kt;
-        s.cutoff = (float) std::clamp (std::exp2 (9.0 * u + 5.0 - kt), 20.0, 20000.0); // o LYNX mede na tecla 48
+        s.cutoff = (float) std::clamp (std::exp2 (9.0 * u + 5.0 - kt), 20.0, 20000.0); // LYNX measures at key 48
         s.resonance = std::clamp (0.9f * p[16], 0.0f, 0.95f);
         const auto eg = 2.0 * p[23] - 1.0;
         const auto egAmount = 9.0 * (eg < 0.0 ? -eg * eg : eg * eg);
         if (std::abs (egAmount) > 0.01)
-            // o polo exponencial do FL chega perto do alvo em ~metade do tempo T; o envelope do LYNX é linear
+            // FL's exponential pole gets close to the target in ~half the time T; LYNX's envelope is linear
             s.filterEnv = { (float) egAmount, seconds (p[19]), 0.0f, 0.5f * seconds (p[20]), p[21] * p[21], 0.5f * seconds (p[22]) };
     }
     gain = 1.0f;
     synth = s;
     return true;
 }
-// ---- Morphine (REA_rodada16 §3): aditivo de até 4 geradores; cada um vira um oscilador pela forma do
-// espectro médio (quadros ponderados por duração × ganho). Envelope, nível e afinação: o bloco mestre ----
+// ---- Morphine (REA_rodada16 §3): additive with up to 4 generators; each becomes an oscillator from the shape of
+// the average spectrum (frames weighted by duration × gain). Envelope, level and tuning: the master block ----
 
 namespace
 {
@@ -888,12 +888,12 @@ constexpr std::uint32_t morTag (const char (&t)[5]) { return (std::uint32_t) t[3
 
 struct MorphineGenerator
 {
-    std::array<double, 128> energy {}; // energia média de cada harmônico
+    std::array<double, 128> energy {}; // average energy of each harmonic
     double weight = 0.0;
     float mix = 0.0f;
 };
 
-// MBP0: 3 vetores de 128 valores em 16 grupos de 8 (máscara + um f32 por bit ligado); o 1º é a amplitude
+// MBP0: 3 vectors of 128 values in 16 groups of 8 (mask + one f32 per set bit); the 1st is the amplitude
 bool readPartials (const std::vector<std::uint8_t>& d, std::size_t& o, std::size_t end, std::array<float, 128>& amplitude)
 {
     if (o + 4 > end || tagAt (d.data(), o) != morTag ("0PBM"))
@@ -922,7 +922,7 @@ bool readPartials (const std::vector<std::uint8_t>& d, std::size_t& o, std::size
 
 bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size_t end, MorphineGenerator& gen)
 {
-    // MVC0 · i32 · MZH0 · i32 zonas · { i32, f32 nível, i32 n, MSP0 } · i32 n · 6 × i32 (o 1º é o Mix, f32)
+    // MVC0 · i32 · MZH0 · i32 zones · { i32, f32 level, i32 n, MSP0 } · i32 n · 6 × i32 (the 1st is Mix, f32)
     if (o + 8 > end || tagAt (d.data(), o) != morTag ("0CVM"))
         return false;
     o += 8;
@@ -934,7 +934,7 @@ bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size
     {
         if (o + 12 > end)
             return false;
-        const auto zoneEnd = o + 12 + (std::size_t) u32At (d.data(), o + 8); // inclui o próprio campo de tamanho [DADOS]
+        const auto zoneEnd = o + 12 + (std::size_t) u32At (d.data(), o + 8); // includes the size field itself [DATA]
         o += 12;
         if (o + 8 > end || tagAt (d.data(), o) != morTag ("0PSM"))
             return false;
@@ -968,8 +968,8 @@ bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size
     return true;
 }
 
-// forma de onda pelo espectro: fundamental dominante -> seno; só ímpares -> quadrada (queda lenta) ou
-// triângulo (queda rápida, ~1/n²); o resto -> serra
+// waveform from the spectrum: dominant fundamental -> sine; odd harmonics only -> square (slow falloff) or
+// triangle (fast falloff, ~1/n²); everything else -> saw
 [[maybe_unused]] Waveform waveFromSpectrum (const std::array<double, 128>& e)
 {
     double total = 0.0, odd = 0.0, peak = 0.0;
@@ -989,7 +989,7 @@ bool readGenerator (const std::vector<std::uint8_t>& d, std::size_t o, std::size
         return Waveform::sine;
     if (odd / total >= 0.8)
     {
-        // inclinação log-log das amplitudes dos harmônicos ímpares presentes
+        // log-log slope of the amplitudes of the odd harmonics present
         double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
         int count = 0;
         for (std::size_t n = 0; n < e.size(); n += 2)
@@ -1021,7 +1021,7 @@ bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth
             return false;
         o += 4 + n;
     }
-    for (int block = 0; block < 2; ++block) // MML0 (linha de morph) e MMD0 (envelopes de modulação)
+    for (int block = 0; block < 2; ++block) // MML0 (morph line) and MMD0 (modulation envelopes)
     {
         if (o + 8 > d.size())
             return false;
@@ -1034,7 +1034,7 @@ bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth
     for (auto& v : a)
         v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
 
-    // os geradores com som, pelo Mix
+    // the generators that make sound, by Mix
     std::vector<int> active;
     for (int g = 0; g < 4; ++g)
         if (gens[(std::size_t) g].weight > 0.0 && std::any_of (gens[(std::size_t) g].energy.begin(), gens[(std::size_t) g].energy.end(), [] (double v) { return v > 0.0; }))
@@ -1044,8 +1044,8 @@ bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth
     SynthSettings s;
     s.osc = { SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
     const auto transpose = (double) (int) ((a[5] - 0.5f) * 48.0f) + (double) (int) ((a[6] - 0.5f) * 200.0f) / 100.0;
-    // espectro médio dos geradores ativos (energia por harmônica × Mix²) no oscilador "Harmônicas"; as fases
-    // não são lidas (0). Escala: a harmônica mais forte vale 1 (o nível absoluto do Morphine não foi medido)
+    // average spectrum of the active generators (energy per harmonic × Mix²) in the "Harmonics" oscillator; phases
+    // are not read (0). Scale: the strongest harmonic is 1 (Morphine's absolute level was not measured)
     std::array<double, 128> energy {};
     for (const auto g : active)
         for (std::size_t n = 0; n < energy.size(); ++n)
@@ -1060,7 +1060,7 @@ bool synthFromMorphine (const std::vector<std::uint8_t>& d, SynthSettings& synth
     }
     setPitch (s.osc[0], transpose);
 
-    // envelope mestre (s): A 15·v^3,5, D 30·v³, S v², R 10·v³ (mín. 3 ms)
+    // master envelope (s): A 15·v^3.5, D 30·v³, S v², R 10·v³ (min. 3 ms)
     s.attack = (float) (15.0 * std::pow ((double) a[9], 3.5));
     s.decay = (float) (30.0 * std::pow ((double) a[10], 3.0));
     s.sustain = a[11] * a[11];

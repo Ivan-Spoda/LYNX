@@ -15,7 +15,7 @@ void EventBuffer::add (const NoteEvent& e) noexcept
 
 void EventBuffer::sortByOffset() noexcept
 {
-    // "off" antes de "on" no mesmo sample, para uma nota repetida não ser cortada
+    // "off" before "on" on the same sample, so a repeated note isn't cut
     std::stable_sort (events.begin(), events.begin() + count, [] (const NoteEvent& a, const NoteEvent& b) {
         if (a.sampleOffset != b.sampleOffset)
             return a.sampleOffset < b.sampleOffset;
@@ -25,12 +25,12 @@ void EventBuffer::sortByOffset() noexcept
 
 namespace
 {
-// Emite um evento para cada repetição do tick `t` (dentro da pattern) que cai em [start, end).
+// Emits an event for each repetition of tick `t` (within the pattern) that falls in [start, end).
 void emitOccurrences (double t, std::int64_t loopLength, double start, double end, double tps, int numSamples,
                       NoteEvent event, EventBuffer& out) noexcept
 {
     const auto len = (double) loopLength;
-    // primeira repetição k com t + k*len >= start
+    // first repetition k with t + k*len >= start
     auto k = std::ceil ((start - t) / len);
 
     for (auto tick = t + k * len; tick < end; tick += len)
@@ -58,7 +58,7 @@ void schedulePatternLoop (const Pattern& pattern,
     for (const auto& note : pattern.notes)
     {
         if (note.start >= patternLength || note.muted)
-            continue; // fora do loop / nota desligada
+            continue; // outside the loop / muted note
 
         NoteEvent on;
         on.type = NoteEvent::Type::on;
@@ -78,7 +78,7 @@ void schedulePatternLoop (const Pattern& pattern,
             on.type = NoteEvent::Type::slide;
             on.slideSamples = (float) ((double) std::max<std::int64_t> (note.length, 1) / tps);
             emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
-            continue; // slide não tem "off": a nota original continua até o fim dela
+            continue; // slide has no "off": the original note continues until its own end
         }
 
         emitOccurrences ((double) start, patternLength, startTick, endTick, tps, numSamples, on, out);
@@ -118,7 +118,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
     const auto loop = index != nullptr ? index->songLength : song.songLength();
     const auto endTick = startTick + numSamples * tps;
 
-    // Janela do bloco dentro do loop; se atravessar o fim, vira duas janelas.
+    // Block window within the loop; if it crosses the end, it becomes two windows.
     const auto loopStart = std::fmod (startTick, (double) loop);
     const auto loopEnd = loopStart + (endTick - startTick);
 
@@ -172,15 +172,15 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
         if (clip.kind != ClipKind::pattern || clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
             continue;
 
-        // folga de um tick para pegar o "off" que cai exatamente no fim do clip
+        // one tick of slack to catch the "off" that falls exactly at the end of the clip
         if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
             continue;
 
         const auto& notes = song.patterns[(std::size_t) clip.pattern].notes;
         auto first = notes.begin(), last = notes.end();
 
-        // com o índice e sem o bloco dar a volta no fim da música: só as notas cujo "on" ou "off"
-        // pode cair no bloco (o swing atrasa no máximo meio step)
+        // with the index and without the block wrapping around the end of the song: only the notes whose "on" or "off"
+        // can fall in the block (swing delays by at most half a step)
         if (index != nullptr && loopEnd <= (double) loop && (std::size_t) clip.pattern < index->maxNoteLength.size())
         {
             const auto local = (double) (clip.offset - clip.start);

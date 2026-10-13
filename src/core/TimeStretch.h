@@ -1,8 +1,8 @@
 #pragma once
 
-// Time-stretch que preserva a altura (WSOLA: overlap-add com busca de similaridade).
-// Feito fora da thread de áudio, uma vez por (sample, razão), como os modos "offline" do
-// FL (docs/analise/REA_rodada3.md §5).
+// Pitch-preserving time-stretch (WSOLA: overlap-add with similarity search).
+// Done off the audio thread, once per (sample, ratio), like FL's "offline" modes
+// (docs/analise/REA_rodada3.md §5).
 
 #include <memory>
 
@@ -10,6 +10,6 @@
 
 namespace lynx
 {
-// `ratio` = duração de saída / duração de entrada (2 = o dobro do tempo, mesma altura).
+// `ratio` = output duration / input duration (2 = twice as long, same pitch).
 std::shared_ptr<SampleData> timeStretch (const SampleData& input, double ratio);
 } // namespace lynx

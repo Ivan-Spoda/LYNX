@@ -12,7 +12,7 @@ namespace lynx
 namespace
 {
 constexpr double minHz = 20.0, maxHz = 20000.0;
-constexpr double rangeDb = 24.0; // o gráfico vai de -24 a +24 dB
+constexpr double rangeDb = 24.0; // the graph spans -24 to +24 dB
 
 juce::Colour bandColour (int band)
 {
@@ -47,7 +47,7 @@ bool hasGain (peq::BandType t)
     return t == peq::BandType::peak || t == peq::BandType::lowShelf || t == peq::BandType::highShelf;
 }
 
-// --- o editor -------------------------------------------------------------------------------
+// --- the editor -----------------------------------------------------------------------------
 
 class ParametricEqEditor final : public juce::Component,
                                  private juce::ChangeListener
@@ -64,7 +64,7 @@ public:
 
     ~ParametricEqEditor() override { engine.removeChangeListener (this); }
 
-    // o slot ainda é um EQ paramétrico? (pode ter sido removido ou trocado)
+    // is the slot still a parametric EQ? (it may have been removed or replaced)
     const EffectSlot* current() const
     {
         const auto& mixer = engine.getSong().mixer;
@@ -84,14 +84,14 @@ public:
         if (s == nullptr)
         {
             g.setColour (theme::text);
-            g.drawText (utf8 ("O EQ foi removido deste slot."), getLocalBounds(), juce::Justification::centred);
+            g.drawText (utf8 ("The EQ was removed from this slot."), getLocalBounds(), juce::Justification::centred);
             return;
         }
 
         const auto area = graphArea();
         drawParametricEqCurve (g, area, s->params, sampleRate(), s->enabled, selected);
 
-        // alças
+        // handles
         for (int b = 0; b < peq::bands; ++b)
         {
             const auto t = peq::type (s->params[(std::size_t) peq::param (b, 0)]);
@@ -108,7 +108,7 @@ public:
             g.drawText (juce::String (b + 1), r, juce::Justification::centred);
         }
 
-        // rodapé: a banda selecionada e a saída
+        // footer: the selected band and the output
         auto footer = getLocalBounds().removeFromBottom (54).reduced (12, 6);
         g.setFont (juce::FontOptions (13.0f));
 
@@ -117,7 +117,7 @@ public:
             const auto& p = s->params;
             const auto t = peq::type (p[(std::size_t) peq::param (selected, 0)]);
             juce::String text;
-            text << "Banda " << (selected + 1) << ": " << utf8 (peq::typeName (t)) << "   "
+            text << "Band " << (selected + 1) << ": " << utf8 (peq::typeName (t)) << "   "
                  << juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::param (selected, 1), p[(std::size_t) peq::param (selected, 1)], 120.0).c_str());
 
             if (hasGain (t))
@@ -134,13 +134,13 @@ public:
         else
         {
             g.setColour (theme::text.withAlpha (0.6f));
-            g.drawText (utf8 ("Arraste uma alça (frequência e ganho); roda do mouse = Q; clique direito = tipo; duplo clique = 0 dB"),
+            g.drawText (utf8 ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"),
                         footer.removeFromTop (20), juce::Justification::centredLeft);
         }
 
         g.setColour (theme::text.withAlpha (0.8f));
-        g.drawText (utf8 ("Saída: ") + juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::outputParam, s->params[peq::outputParam], 120.0).c_str())
-                        + utf8 ("   (arraste aqui na vertical)"),
+        g.drawText (utf8 ("Output: ") + juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::outputParam, s->params[peq::outputParam], 120.0).c_str())
+                        + utf8 ("   (drag vertically here)"),
                     outputArea(), juce::Justification::centredLeft);
     }
 
@@ -284,7 +284,7 @@ private:
     void showBandMenu (int band)
     {
         juce::PopupMenu menu;
-        menu.addSectionHeader ("Banda " + juce::String (band + 1));
+        menu.addSectionHeader ("Band " + juce::String (band + 1));
         const auto* s = current();
         const auto currentType = peq::type (s->params[(std::size_t) peq::param (band, 0)]);
 
@@ -297,7 +297,7 @@ private:
         {
             menu.addSeparator();
             for (int stages = 1; stages <= 4; ++stages)
-                menu.addItem (juce::String (12 * stages) + " dB/oit", true, peq::slopeStages (s->params[(std::size_t) (peq::slopeParam + band)]) == stages,
+                menu.addItem (juce::String (12 * stages) + " dB/oct", true, peq::slopeStages (s->params[(std::size_t) (peq::slopeParam + band)]) == stages,
                               [this, band, stages] { setParams ({ { peq::slopeParam + band, peq::slopeValue (stages) } }); });
         }
 
@@ -352,7 +352,7 @@ void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, cons
     g.setColour (theme::knobBackground);
     g.fillRoundedRectangle (area, 4.0f);
 
-    // grade: décadas de frequência e ±6/12/18 dB
+    // grid: frequency decades and ±6/12/18 dB
     g.setColour (juce::Colours::white.withAlpha (0.07f));
     for (double hz : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
         g.drawVerticalLine ((int) xForHz (area, hz), area.getY(), area.getBottom());
@@ -369,7 +369,7 @@ void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, cons
             g.drawText (label, (int) xForHz (area, hz) + 3, (int) area.getBottom() - 14, 30, 12, juce::Justification::centredLeft);
     }
 
-    // curva
+    // curve
     juce::Path curve;
     const auto steps = juce::jmax (32, (int) area.getWidth() / 2);
 
@@ -415,7 +415,7 @@ void open (AudioEngine& engine, int track, int slot)
 
     const auto& mixer = engine.getSong().mixer;
     const auto name = track < (int) mixer.size() ? juce::String::fromUTF8 (mixer[(std::size_t) track].name.c_str()) : juce::String();
-    const auto title = utf8 ("EQ paramétrico - ") + (track == 0 ? juce::String ("Master") : name.isNotEmpty() ? name : "Insert " + juce::String (track))
+    const auto title = utf8 ("Parametric EQ - ") + (track == 0 ? juce::String ("Master") : name.isNotEmpty() ? name : "Insert " + juce::String (track))
                        + " (slot " + juce::String (slot + 1) + ")";
     open[key] = std::make_unique<ParametricEqWindow> (engine, track, slot, title);
 }

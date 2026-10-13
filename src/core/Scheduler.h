@@ -1,7 +1,7 @@
 #pragma once
 
-// Converte notas de uma pattern em eventos com offset exato em samples dentro
-// de um bloco de áudio. Roda na thread de áudio: sem alocação, sem locks.
+// Converts a pattern's notes into events with an exact sample offset within
+// an audio block. Runs on the audio thread: no allocation, no locks.
 
 #include <array>
 #include <cstdint>
@@ -13,24 +13,24 @@ namespace lynx
 {
 struct NoteEvent
 {
-    enum class Type : std::uint8_t { on, off, slide, choke }; // slide: desliza as notas soando até `key`; choke: cut group
+    enum class Type : std::uint8_t { on, off, slide, choke }; // slide: glides the sounding notes to `key`; choke: cut group
 
-    int sampleOffset = 0;   // 0 .. numSamples-1 dentro do bloco
+    int sampleOffset = 0;   // 0 .. numSamples-1 within the block
     Type type = Type::on;
     int channel = 0;
     int key = 60;
     float velocity = 0.0f;
-    double startSeconds = 0.0; // clips de áudio: de onde o sample começa a tocar
-    float pan = 0.0f;          // -1..1, da nota
-    float cents = 0.0f;        // afinação fina da nota
-    float slideSamples = 0.0f; // slide: duração do deslize
-    bool porta = false;        // a nota inverte o porta do canal
-    // clips de áudio: fades (em samples) e a posição dentro do clip quando a nota começa
+    double startSeconds = 0.0; // audio clips: where the sample starts playing from
+    float pan = 0.0f;          // -1..1, from the note
+    float cents = 0.0f;        // note's fine pitch
+    float slideSamples = 0.0f; // slide: glide duration
+    bool porta = false;        // the note inverts the channel's porta
+    // audio clips: fades (in samples) and the position within the clip when the note starts
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f;
 };
 
-// Buffer de capacidade fixa. Eventos além da capacidade são descartados
-// (e contados), nunca alocam.
+// Fixed-capacity buffer. Events beyond capacity are dropped
+// (and counted), never allocate.
 class EventBuffer
 {
 public:
@@ -57,8 +57,8 @@ inline double ticksPerSample (double bpm, double sampleRate) noexcept
     return bpm * ppq / (60.0 * sampleRate);
 }
 
-// Gera os eventos da pattern (tocando em loop) no intervalo [startTick, startTick + numSamples * tps).
-// Uma nota que começa em t gera "on" em t e "off" em t + length.
+// Generates the pattern's events (playing in a loop) in the interval [startTick, startTick + numSamples * tps).
+// A note starting at t generates "on" at t and "off" at t + length.
 void schedulePatternLoop (const Pattern& pattern,
                           std::int64_t patternLength,
                           double startTick,
@@ -67,21 +67,21 @@ void schedulePatternLoop (const Pattern& pattern,
                           EventBuffer& out,
                           float swing = 0.0f,
                           const std::vector<ChannelDef>* channels = nullptr) noexcept;
-// Índice feito uma vez por snapshot para o scheduleSong não varrer todas as notas a cada bloco:
-// duração da música e a nota mais longa de cada pattern. Exige notas ordenadas por início.
+// Index built once per snapshot so scheduleSong doesn't scan every note on every block:
+// song length and the longest note of each pattern. Requires notes sorted by start.
 struct ScheduleIndex
 {
     std::int64_t songLength = 0;
-    std::vector<std::int64_t> maxNoteLength; // por pattern
+    std::vector<std::int64_t> maxNoteLength; // per pattern
 };
 
 ScheduleIndex makeScheduleIndex (const Song& song);
 
-// Gera os eventos da Playlist (tocando a música inteira em loop). Cada clip de pattern
-// toca as notas da pattern que caem em [offset, offset + length); notas são cortadas no
-// fim do clip. Clips de áudio disparam o sample do canal no início e param no fim.
-// `resume` = a reprodução começou ou pulou para startTick: clips de áudio que já estavam
-// em andamento nesse ponto começam no meio, no primeiro sample do bloco.
+// Generates the Playlist's events (playing the whole song in a loop). Each pattern clip
+// plays the pattern's notes that fall in [offset, offset + length); notes are cut at the
+// end of the clip. Audio clips trigger the channel's sample at the start and stop at the end.
+// `resume` = playback started or jumped to startTick: audio clips that were already
+// in progress at that point start in the middle, on the first sample of the block.
 void scheduleSong (const Song& song,
                    double startTick,
                    int numSamples,

@@ -1,7 +1,7 @@
 #pragma once
 
-// Decodifica áudio WavPack (.wv), o formato de muitos samples dos pacotes do FL Studio, com a
-// biblioteca oficial (thirdparty/wavpack, licença BSD).
+// Decodes WavPack (.wv) audio, the format of many samples in FL Studio's packs, using the
+// official library (thirdparty/wavpack, BSD license).
 
 #include <cstdint>
 #include <vector>
@@ -14,6 +14,6 @@ struct DecodedAudio
     double sampleRate = 44100.0;
 };
 
-// nullopt-equivalente: devolve false se o arquivo não for WavPack válido.
+// nullopt-equivalent: returns false if the file is not valid WavPack.
 bool decodeWavPack (const std::uint8_t* data, std::size_t size, DecodedAudio& out);
 } // namespace lynx

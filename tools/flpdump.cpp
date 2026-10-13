@@ -1,5 +1,5 @@
-// flpdump: mostra o conteúdo de um projeto .flp.
-// Uso: flpdump [--events] arquivo.flp
+// flpdump: shows the contents of an .flp project.
+// Usage: flpdump [--events] file.flp
 
 #include <cstdio>
 #include <fstream>
@@ -17,11 +17,11 @@ const char* typeName (flp::ChannelType t)
     switch (t)
     {
         case flp::ChannelType::sampler: return "sampler";
-        case flp::ChannelType::native: return "nativo";
-        case flp::ChannelType::instrument: return "instrumento";
+        case flp::ChannelType::native: return "native";
+        case flp::ChannelType::instrument: return "instrument";
         case flp::ChannelType::layer: return "layer";
         case flp::ChannelType::audioClip: return "audio clip";
-        case flp::ChannelType::automationClip: return "automacao";
+        case flp::ChannelType::automationClip: return "automation";
         case flp::ChannelType::unknown: break;
     }
     return "?";
@@ -30,7 +30,7 @@ const char* typeName (flp::ChannelType t)
 void dumpEvents (const std::vector<std::uint8_t>& bytes)
 {
     flp::EventReader reader (bytes);
-    std::map<std::uint32_t, std::pair<int, std::size_t>> stats; // id -> (contagem, bytes)
+    std::map<std::uint32_t, std::pair<int, std::size_t>> stats; // id -> (count, bytes)
     flp::Event e;
 
     while (reader.next (e))
@@ -40,7 +40,7 @@ void dumpEvents (const std::vector<std::uint8_t>& bytes)
         s.second += e.data.size();
     }
 
-    std::printf ("%-12s %8s %10s\n", "evento", "qtd", "bytes");
+    std::printf ("%-12s %8s %10s\n", "event", "count", "bytes");
 
     for (auto& [id, s] : stats)
         std::printf ("0x%-10X %8d %10zu\n", id, s.first, s.second);
@@ -50,15 +50,15 @@ void dumpProject (const std::vector<std::uint8_t>& bytes)
 {
     const auto p = flp::parseProject (bytes);
 
-    std::printf ("Versao     : %s\n", p.version.c_str());
+    std::printf ("Version    : %s\n", p.version.c_str());
     std::printf ("PPQ        : %u\n", p.header.ppq);
     std::printf ("Tempo      : %.3f BPM\n", p.tempo);
 
-    if (! p.title.empty()) std::printf ("Titulo     : %s\n", p.title.c_str());
-    if (! p.artist.empty()) std::printf ("Artista    : %s\n", p.artist.c_str());
-    if (! p.genre.empty()) std::printf ("Genero     : %s\n", p.genre.c_str());
+    if (! p.title.empty()) std::printf ("Title      : %s\n", p.title.c_str());
+    if (! p.artist.empty()) std::printf ("Artist     : %s\n", p.artist.c_str());
+    if (! p.genre.empty()) std::printf ("Genre      : %s\n", p.genre.c_str());
 
-    std::printf ("\nCanais (%zu)\n", p.channels.size());
+    std::printf ("\nChannels (%zu)\n", p.channels.size());
     for (auto& c : p.channels)
         std::printf ("  %3d  %-11s  %-24s  plugin=%-16s  mixer=%d%s%s\n", c.index, typeName (c.type),
                      c.name.c_str(), c.pluginName.c_str(), c.mixerTrack,
@@ -71,12 +71,12 @@ void dumpProject (const std::vector<std::uint8_t>& bytes)
         for (auto& n : pat.notes)
             end = std::max (end, n.position + n.length);
 
-        std::printf ("  %3d  %-24s  %5zu notas  ate o tick %u\n", pat.index, pat.name.c_str(), pat.notes.size(), end);
+        std::printf ("  %3d  %-24s  %5zu notes  up to tick %u\n", pat.index, pat.name.c_str(), pat.notes.size(), end);
     }
 
     for (auto& a : p.arrangements)
     {
-        std::printf ("\nArrangement %d \"%s\": %zu itens na playlist\n", a.index, a.name.c_str(), a.items.size());
+        std::printf ("\nArrangement %d \"%s\": %zu playlist items\n", a.index, a.name.c_str(), a.items.size());
 
         int shown = 0;
         for (auto& item : a.items)
@@ -98,10 +98,10 @@ void dumpProject (const std::vector<std::uint8_t>& bytes)
             else
             {
                 const auto* ch = p.findChannel (item.index);
-                what = "clip do canal " + std::to_string (item.index) + (ch ? " (" + ch->name + ")" : "");
+                what = "clip of channel " + std::to_string (item.index) + (ch ? " (" + ch->name + ")" : "");
             }
 
-            std::printf ("  trilha %3d  tick %7u  dur %6u  %s\n", item.track, item.position, item.length, what.c_str());
+            std::printf ("  track %3d  tick %7u  dur %6u  %s\n", item.track, item.position, item.length, what.c_str());
         }
     }
 
@@ -111,7 +111,7 @@ void dumpProject (const std::vector<std::uint8_t>& bytes)
             std::printf ("  %3d  %s\n", m.index, m.name.c_str());
 
     for (auto& w : p.warnings)
-        std::printf ("AVISO: %s\n", w.c_str());
+        std::printf ("WARNING: %s\n", w.c_str());
 }
 } // namespace
 
@@ -130,7 +130,7 @@ int main (int argc, char** argv)
 
     if (path == nullptr)
     {
-        std::fprintf (stderr, "uso: flpdump [--events] arquivo.flp\n");
+        std::fprintf (stderr, "usage: flpdump [--events] file.flp\n");
         return 2;
     }
 
@@ -138,7 +138,7 @@ int main (int argc, char** argv)
 
     if (! in)
     {
-        std::fprintf (stderr, "nao foi possivel abrir %s\n", path);
+        std::fprintf (stderr, "could not open %s\n", path);
         return 1;
     }
 
@@ -150,7 +150,7 @@ int main (int argc, char** argv)
     }
     catch (const flp::Error& e)
     {
-        std::fprintf (stderr, "erro: %s\n", e.what());
+        std::fprintf (stderr, "error: %s\n", e.what());
         return 1;
     }
 

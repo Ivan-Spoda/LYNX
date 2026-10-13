@@ -17,12 +17,12 @@ bool isAudio (const juce::File& f)
 BrowserComponent::BrowserComponent (AudioEngine& e)
     : engine (e)
 {
-    // pastas do FL (se instalado) e do usuário
+    // FL folders (if installed) and user folders
     const auto programs = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
     juce::File fl;
 
     for (const auto& dir : programs.getChildFile ("Image-Line").findChildFiles (juce::File::findDirectories, false, "FL Studio*"))
-        if (dir.getChildFile ("Data").isDirectory() && dir.getFileName() > fl.getFileName()) // "FL Studio ASIO" é o driver
+        if (dir.getChildFile ("Data").isDirectory() && dir.getFileName() > fl.getFileName()) // "FL Studio ASIO" is the driver
             fl = dir;
 
     auto add = [this] (const juce::String& name, const juce::File& folder) {
@@ -34,14 +34,14 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     };
 
     const auto data = fl.getChildFile ("Data");
-    add ("Samples do FL (Packs)", data.getChildFile ("Patches").getChildFile ("Packs"));
-    add ("Projetos de exemplo do FL", data.getChildFile ("Demo projects"));
-    add ("MIDI do FL", data.getChildFile ("Patches").getChildFile ("Scores"));
-    add ("Presets do 3x Osc (FL)", data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
-    add ("Presets de sintetizadores (FL)", data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
-    add ("Documentos", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
-    add (utf8 ("Música"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
-    add (utf8 ("Área de trabalho"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
+    add ("FL samples (Packs)", data.getChildFile ("Patches").getChildFile ("Packs"));
+    add ("FL demo projects", data.getChildFile ("Demo projects"));
+    add ("FL MIDI", data.getChildFile ("Patches").getChildFile ("Scores"));
+    add ("3x Osc presets (FL)", data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
+    add ("Synth presets (FL)", data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
+    add ("Documents", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
+    add (utf8 ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
+    add (utf8 ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
     add ("Downloads", juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads"));
 
     rootBox.onChange = [this] { setRoot (rootBox.getSelectedId() - 1); };
@@ -115,7 +115,7 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
         return;
     }
 
-    // preset de um synth do FL que o LYNX converte (3x Osc, Sytrus, GMS...): canal novo com o synth interno
+    // preset of an FL synth that LYNX converts (3x Osc, Sytrus, GMS...): new channel with the built-in synth
     if (file.hasFileExtension ("fst;gmsynth"))
     {
         juce::MemoryBlock data;
@@ -140,7 +140,7 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
         }
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Preset",
-                                                    utf8 ("O LYNX lê presets do 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun e Sakura."));
+                                                    utf8 ("LYNX reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
         return;
     }
 

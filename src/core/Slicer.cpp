@@ -13,7 +13,7 @@ std::vector<float> detectSlices (const SampleData& sample, float sensitivity, in
     if (frames < 2048)
         return slices;
 
-    // energia em janelas de ~5 ms; ataque = subida forte em relação à média recente
+    // energy in ~5 ms windows; attack = strong rise relative to the recent average
     const auto hop = std::max (64L, (long) (sample.sampleRate * 0.005));
     const auto* l = sample.leftData();
     const auto* r = sample.rightData();
@@ -35,9 +35,9 @@ std::vector<float> detectSlices (const SampleData& sample, float sensitivity, in
     if (peak <= 1e-6f)
         return slices;
 
-    const auto ratio = 1.6f + (1.0f - std::clamp (sensitivity, 0.0f, 1.0f)) * 3.0f; // quão maior que a média
-    const auto floor = peak * (0.04f + (1.0f - sensitivity) * 0.1f);                  // ignora ruído baixo
-    const auto minGap = (long) std::ceil (0.06 * sample.sampleRate / (double) hop);   // 60 ms entre fatias
+    const auto ratio = 1.6f + (1.0f - std::clamp (sensitivity, 0.0f, 1.0f)) * 3.0f; // how much larger than the average
+    const auto floor = peak * (0.04f + (1.0f - sensitivity) * 0.1f);                  // ignores low-level noise
+    const auto minGap = (long) std::ceil (0.06 * sample.sampleRate / (double) hop);   // 60 ms between slices
     long last = 0;
 
     for (long i = 4; i < (long) energy.size(); ++i)

@@ -8,9 +8,9 @@
 
 namespace lynx
 {
-// Estado do transporte compartilhado entre a UI e a thread de áudio.
-// Só atomics: a thread de áudio nunca trava esperando a UI.
-// A posição (em ticks, PPQ do core) é escrita apenas pela thread de áudio.
+// Transport state shared between the UI and the audio thread.
+// Atomics only: the audio thread never blocks waiting for the UI.
+// The position (in ticks, core PPQ) is written only by the audio thread.
 struct Transport
 {
     std::atomic<bool> playing { false };
@@ -19,9 +19,9 @@ struct Transport
     std::atomic<double> bpm { 130.0 };
     std::atomic<int> beatsPerBar { 4 };
 
-    // Mudanças de compasso da Playlist para o metrônomo (modo song): o compasso recomeça em cada
-    // `signatureTick[i]` com `signatureLength[i]` ticks. A UI escreve num "seqlock": versão ímpar
-    // durante a escrita; quem lê confere a versão antes e depois.
+    // Playlist time-signature changes for the metronome (song mode): the bar restarts at each
+    // `signatureTick[i]` with `signatureLength[i]` ticks. The UI writes under a "seqlock": odd version
+    // while writing; readers check the version before and after.
     static constexpr int maxSignatures = 64;
     std::array<std::atomic<std::int64_t>, maxSignatures> signatureTick {}, signatureLength {};
     std::atomic<int> signatureCount { 0 };
@@ -29,9 +29,9 @@ struct Transport
     std::atomic<double> sampleRate { 44100.0 };
     std::atomic<double> positionTicks { 0.0 };
     std::atomic<bool> rewindRequested { false };
-    std::atomic<double> seekRequest { -1.0 }; // < 0 = nenhum; a thread de áudio aplica no próximo bloco
+    std::atomic<double> seekRequest { -1.0 }; // < 0 = none; the audio thread applies it on the next block
 
-    // Região de loop da Playlist (só no modo song). end <= start = desligada.
+    // Playlist loop region (song mode only). end <= start = disabled.
     std::atomic<bool> songMode { false };
     std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
 

@@ -13,7 +13,7 @@ namespace lynx
 {
 namespace
 {
-// Envelopes de corte e de afinação (os envelopes do canal do FL), usados pelo synth e pelo sampler.
+// Cutoff and pitch envelopes (FL's channel envelopes), used by the synth and the sampler.
 class ModEnvelopeEditor final : public juce::Component
 {
 public:
@@ -22,7 +22,7 @@ public:
 
     ModEnvelopeEditor()
     {
-        const juce::String titles[] = { "Env. corte", utf8 ("Env. afinação") };
+        const juce::String titles[] = { "Cutoff env.", utf8 ("Pitch env.") };
 
         for (int e = 0; e < 2; ++e)
         {
@@ -30,9 +30,9 @@ public:
             row.title.setText (titles[e], juce::dontSendNotification);
             row.title.setFont (juce::FontOptions (12.0f));
             addAndMakeVisible (row.title);
-            knob (row.amount, e == 0 ? -10.0 : -48.0, e == 0 ? 10.0 : 48.0, 0.01, e == 0 ? " oit" : " st");
+            knob (row.amount, e == 0 ? -10.0 : -48.0, e == 0 ? 10.0 : 48.0, 0.01, e == 0 ? " oct" : " st");
             row.amount.setDoubleClickReturnValue (true, 0.0);
-            row.amount.setTooltip (utf8 ("0 = desligado"));
+            row.amount.setTooltip (utf8 ("0 = off"));
 
             for (auto* s : { &row.attack, &row.hold, &row.decay, &row.release })
             {
@@ -43,7 +43,7 @@ public:
             knob (row.sustain, 0.0, 1.0, 0.01, "");
         }
 
-        const char* names[] = { "Quantidade", "Ataque", "Hold", "Decaimento", "Sustentação", "Release" };
+        const char* names[] = { "Amount", "Attack", "Hold", "Decay", "Sustain", "Release" };
 
         for (int i = 0; i < 6; ++i)
         {
@@ -122,7 +122,7 @@ private:
     std::array<juce::Label, 6> labels;
 };
 
-// LFOs do canal (pan, volume, corte, afinação), como os do FL.
+// Channel LFOs (pan, volume, cutoff, pitch), like FL's.
 class LfoEditor final : public juce::Component
 {
 public:
@@ -131,9 +131,9 @@ public:
 
     LfoEditor()
     {
-        const juce::String titles[] = { "LFO pan", "LFO volume", "LFO corte", utf8 ("LFO afinação") };
+        const juce::String titles[] = { "Pan LFO", "Volume LFO", "Cutoff LFO", utf8 ("Pitch LFO") };
         const double amountRange[] = { 1.0, 1.0, 8.0, 24.0 };
-        const char* amountSuffix[] = { "", "", " oit", " st" };
+        const char* amountSuffix[] = { "", "", " oct", " st" };
 
         for (int i = 0; i < lfoTargets; ++i)
         {
@@ -143,27 +143,27 @@ public:
             addAndMakeVisible (row.title);
             knob (row.amount, -amountRange[i], amountRange[i], 0.01, amountSuffix[i]);
             row.amount.setDoubleClickReturnValue (true, 0.0);
-            row.amount.setTooltip (utf8 ("0 = desligado"));
+            row.amount.setTooltip (utf8 ("0 = off"));
             knob (row.period, 0.01, 16.0, 0.001, "");
             row.period.setSkewFactorFromMidPoint (0.5);
             knob (row.delay, 0.0, 8.0, 0.001, "");
             row.delay.setSkewFactorFromMidPoint (0.5);
             knob (row.attack, 0.0, 8.0, 0.001, "");
             row.attack.setSkewFactorFromMidPoint (0.5);
-            row.shape.addItemList ({ "Senoide", utf8 ("Triângulo"), "Pulso" }, 1);
+            row.shape.addItemList ({ "Sine", utf8 ("Triangle"), "Pulse" }, 1);
             row.shape.onChange = [this] { changed(); };
             addAndMakeVisible (row.shape);
-            row.sync.setButtonText ("Tempos");
-            row.sync.setTooltip (utf8 ("Período, atraso e fade-in em tempos (segue o BPM) em vez de segundos"));
+            row.sync.setButtonText ("Beats");
+            row.sync.setTooltip (utf8 ("Period, delay and fade-in in beats (follows the BPM) instead of seconds"));
             row.sync.onClick = [this] { changed(); };
             addAndMakeVisible (row.sync);
             row.global.setButtonText ("Global");
-            row.global.setTooltip (utf8 ("A fase acompanha a posição da música em vez de recomeçar a cada nota"));
+            row.global.setTooltip (utf8 ("Phase follows the song position instead of restarting on each note"));
             row.global.onClick = [this] { changed(); };
             addAndMakeVisible (row.global);
         }
 
-        const juce::String headers[] = { "Quantidade", utf8 ("Período"), "Forma", "Atraso", "Fade-in", "Unidade" };
+        const juce::String headers[] = { "Amount", utf8 ("Period"), "Shape", "Delay", "Fade-in", "Unit" };
 
         for (int i = 0; i < 6; ++i)
         {
@@ -262,7 +262,7 @@ private:
     std::array<juce::Label, 6> labels;
 };
 
-// Janela de modulação do canal: envelopes de corte/afinação e LFOs do synth ou do sampler.
+// Channel modulation window: cutoff/pitch envelopes and LFOs of the synth or the sampler.
 class ModulationPanel final : public juce::Component,
                               private juce::ChangeListener
 {
@@ -320,7 +320,7 @@ private:
         }
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-            w->setName (utf8 ("Modulação - ") + juce::String::fromUTF8 (c->name.c_str()));
+            w->setName (utf8 ("Modulation - ") + juce::String::fromUTF8 (c->name.c_str()));
     }
 
     void apply()
@@ -358,8 +358,8 @@ private:
     LfoEditor lfos;
 };
 
-// Canal "controlador" (Envelope Controller do FL): mostra os 8 articuladores (envelope, base, modo e
-// faixa de teclas) e quais automações cada saída comanda. Só leitura.
+// "Controller" channel (FL's Envelope Controller): shows the 8 articulators (envelope, base, mode and
+// key range) and which automations each output drives. Read-only.
 class ControllerPanel final : public juce::Component
 {
 public:
@@ -379,7 +379,7 @@ public:
         const auto parsed = parseEnvelopeController (song.channels[(std::size_t) channel].controllerState);
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (14.0f));
-        g.drawText (utf8 ("Controlador de envelope: cada nota deste canal dispara os envelopes; a saída k comanda os alvos ligados"),
+        g.drawText (utf8 ("Envelope controller: each note on this channel triggers the envelopes; output k drives the linked targets"),
                     10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
         if (! parsed)
             return;
@@ -391,7 +391,7 @@ public:
             g.setColour (theme::knobBackground);
             g.fillRoundedRectangle (area, 4.0f);
 
-            // alvos desta saída
+            // targets of this output
             juce::StringArray targets;
             for (const auto& automation : song.automations)
                 if (automation.source.channel == channel && automation.source.output == k)
@@ -399,7 +399,7 @@ public:
 
             g.setColour (targets.isEmpty() ? theme::text.withAlpha (0.4f) : theme::accentOrange);
             g.setFont (juce::FontOptions (13.0f));
-            g.drawText (utf8 ("Saída ") + juce::String (k) + (targets.isEmpty() ? juce::String() : utf8 (" (em uso)")), area.withHeight (20.0f).reduced (6.0f, 0.0f),
+            g.drawText (utf8 ("Output ") + juce::String (k) + (targets.isEmpty() ? juce::String() : utf8 (" (in use)")), area.withHeight (20.0f).reduced (6.0f, 0.0f),
                         juce::Justification::centredLeft);
 
             const auto graph = area.withTrimmedTop (22.0f).withHeight (110.0f).reduced (6.0f, 2.0f);
@@ -429,7 +429,7 @@ public:
             else
             {
                 g.setColour (theme::text.withAlpha (0.4f));
-                g.drawText ("envelope desligado", graph, juce::Justification::centred);
+                g.drawText ("envelope off", graph, juce::Justification::centred);
             }
 
             g.setColour (theme::text.withAlpha (0.8f));
@@ -441,10 +441,10 @@ public:
             };
             text (juce::String::formatted ("base %.2f, env %+.2f", a.base, a.envLevel) + (a.bipolar ? ", bipolar" : ", unipolar"));
             if (a.envOn && a.count > 0)
-                text (juce::String::formatted ("dura %.2f ", a.time[(std::size_t) a.count - 1]) + (a.tempo ? "tempos" : "s")
-                      + (a.sustain >= 0 ? utf8 (", com sustain") : utf8 (", sem sustain")));
+                text (juce::String::formatted ("length %.2f ", a.time[(std::size_t) a.count - 1]) + (a.tempo ? "beats" : "s")
+                      + (a.sustain >= 0 ? utf8 (", with sustain") : utf8 (", no sustain")));
             if (a.lowKey > 0 || a.highKey < 127)
-                text (juce::String::formatted ("teclas %d a %d", a.lowKey, std::min (a.highKey, 127)));
+                text (juce::String::formatted ("keys %d to %d", a.lowKey, std::min (a.highKey, 127)));
             for (const auto& t : targets)
                 text (utf8 ("-> ") + t);
         }
@@ -463,44 +463,44 @@ public:
         : engine (e),
           channel (c)
     {
-        setup (pitch, pitchLabel, "Afinação", -24.0, 24.0, 0.01, " st");
-        setup (attack, attackLabel, "Ataque", 0.0, 2.0, 0.001, " s");
+        setup (pitch, pitchLabel, "Pitch", -24.0, 24.0, 0.01, " st");
+        setup (attack, attackLabel, "Attack", 0.0, 2.0, 0.001, " s");
         setup (release, releaseLabel, "Release", 0.0, 4.0, 0.001, " s");
-        setup (decay, decayLabel, "Decaimento", 0.0, 10.0, 0.001, " s");
-        setup (sustain, sustainLabel, "Sustentação", 0.0, 1.0, 0.01, "");
-        setup (stretch, stretchLabel, "Esticar", 0.0, 64.0, 0.25, " tempos");
-        setup (regionStart, regionStartLabel, "Início", 0.0, 1.0, 0.001, "");
-        setup (regionEnd, regionEndLabel, "Fim", 0.0, 1.0, 0.001, "");
-        setup (cutoff, cutoffLabel, "Corte", 20.0, 20000.0, 1.0, " Hz");
-        setup (resonance, resonanceLabel, "Ressonância", 0.0, 1.0, 0.01, "");
+        setup (decay, decayLabel, "Decay", 0.0, 10.0, 0.001, " s");
+        setup (sustain, sustainLabel, "Sustain", 0.0, 1.0, 0.01, "");
+        setup (stretch, stretchLabel, "Stretch", 0.0, 64.0, 0.25, " beats");
+        setup (regionStart, regionStartLabel, "Start", 0.0, 1.0, 0.001, "");
+        setup (regionEnd, regionEndLabel, "End", 0.0, 1.0, 0.001, "");
+        setup (cutoff, cutoffLabel, "Cutoff", 20.0, 20000.0, 1.0, " Hz");
+        setup (resonance, resonanceLabel, "Resonance", 0.0, 1.0, 0.01, "");
         cutoff.setSkewFactorFromMidPoint (1000.0);
         cutoff.setDoubleClickReturnValue (true, 20000.0);
-        cutoff.setTooltip (utf8 ("Corte do filtro do canal (passa-baixas no máximo e sem ressonância = desligado)"));
-        filterType.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
+        cutoff.setTooltip (utf8 ("Channel filter cutoff (low-pass at maximum with no resonance = off)"));
+        filterType.addItemList ({ "Low-pass", "Band-pass", "High-pass", "Notch" }, 1);
         filterType.onChange = [this] { apply(); };
         addAndMakeVisible (filterType);
-        modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
+        modulationButton.setButtonText (utf8 ("Modulation (envelopes and LFOs)..."));
         modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
         addAndMakeVisible (modulationButton);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
-        regionStart.setTooltip (utf8 ("De onde o sample começa a tocar (fração do arquivo)"));
+        regionStart.setTooltip (utf8 ("Where the sample starts playing (fraction of the file)"));
         sustain.setDoubleClickReturnValue (true, 1.0);
         decay.setSkewFactorFromMidPoint (0.5);
-        stretch.setTooltip (utf8 ("0 = desligado. Senão o sample inteiro dura este tanto de tempos e acompanha o BPM (reamostrando, como o modo Resample do FL)"));
+        stretch.setTooltip (utf8 ("0 = off. Otherwise the whole sample lasts this many beats and follows the BPM (by resampling, like FL's Resample mode)"));
         attack.setSkewFactorFromMidPoint (0.2);
         release.setSkewFactorFromMidPoint (0.4);
-        release.setTooltip (utf8 ("0 = o sample toca inteiro (one-shot), como os steps do FL"));
+        release.setTooltip (utf8 ("0 = the whole sample plays (one-shot), like FL's steps"));
 
-        keepPitch.setButtonText (utf8 ("Esticar mantendo a altura"));
-        keepPitch.setTooltip (utf8 ("Com \"Esticar\": muda a duração sem mudar a altura (como os modos Stretch do FL)"));
+        keepPitch.setButtonText (utf8 ("Stretch keeping pitch"));
+        keepPitch.setTooltip (utf8 ("With \"Stretch\": changes the length without changing the pitch (like FL's Stretch modes)"));
         keepPitch.onClick = [this] { apply(); };
         addAndMakeVisible (keepPitch);
 
-        reverse.setButtonText (utf8 ("Ao contrário"));
+        reverse.setButtonText (utf8 ("Reverse"));
         cut.setButtonText ("Cut itself");
         porta.setButtonText ("Porta");
-        porta.setTooltip (utf8 ("Portamento: a nota parte da altura da anterior (com Cut itself, o glide do 808)"));
-        cut.setTooltip (utf8 ("Uma nota nova corta a anterior (bom para hi-hats e 808)"));
+        porta.setTooltip (utf8 ("Portamento: the note starts from the previous note's pitch (with Cut itself, the 808 glide)"));
+        cut.setTooltip (utf8 ("A new note cuts the previous one (good for hi-hats and 808s)"));
 
         for (auto* b : { &reverse, &cut, &porta })
         {
@@ -605,8 +605,8 @@ private:
             updating = false;
 
             if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-                w->setName (utf8 ("Ajustes do sampler - ") + juce::String::fromUTF8 (c->name.c_str())
-                            + (c->zones.empty() ? juce::String() : " (multi-sample: " + juce::String ((int) c->zones.size()) + " zonas)"));
+                w->setName (utf8 ("Sampler settings - ") + juce::String::fromUTF8 (c->name.c_str())
+                            + (c->zones.empty() ? juce::String() : " (multi-sample: " + juce::String ((int) c->zones.size()) + " zones)"));
         }
     }
 
@@ -615,7 +615,7 @@ private:
         if (updating || current() == nullptr)
             return;
 
-        auto s = current()->sampler; // mantém o que o painel não mostra (fatias)
+        auto s = current()->sampler; // keeps what the panel does not show (slices)
         s.pitch = (float) pitch.getValue();
         s.attack = (float) attack.getValue();
         s.decay = (float) decay.getValue();
@@ -639,7 +639,7 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
-        if (current() == nullptr) // canal removido
+        if (current() == nullptr) // channel removed
         {
             if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
                 juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::DocumentWindow> (w)] {
@@ -663,7 +663,7 @@ private:
     juce::TextButton modulationButton;
 };
 
-// Página do synth interno: 3 osciladores, envelope e filtro.
+// Built-in synth page: 3 oscillators, envelope and filter.
 class SynthPanel final : public juce::Component,
                          private juce::ChangeListener
 {
@@ -676,14 +676,14 @@ public:
         {
             auto& row = rows[(std::size_t) o];
             row.title.setText ("Osc " + juce::String (o + 1), juce::dontSendNotification);
-            row.wave.addItemList ({ "Seno", utf8 ("Triângulo"), "Serra", "Quadrada", utf8 ("Ruído"), utf8 ("Harmônicas") }, 1);
+            row.wave.addItemList ({ "Sine", utf8 ("Triangle"), "Saw", "Square", utf8 ("Noise"), utf8 ("Harmonics") }, 1);
             row.wave.onChange = [this] { apply(); };
-            knob (row.octave, -3.0, 3.0, 1.0, " oit");
+            knob (row.octave, -3.0, 3.0, 1.0, " oct");
             knob (row.semitones, -11.0, 11.0, 1.0, " st");
             knob (row.detune, -100.0, 100.0, 1.0, " ct");
             knob (row.pan, -1.0, 1.0, 0.01, "");
             knob (row.level, 0.0, 4.0, 0.01, "");
-            row.level.setSkewFactorFromMidPoint (1.0); // acima de 1: ganho (o Harmor chega a +12 dB)
+            row.level.setSkewFactorFromMidPoint (1.0); // above 1: gain (Harmor goes up to +12 dB)
             addAndMakeVisible (row.title);
             addAndMakeVisible (row.wave);
         }
@@ -696,29 +696,29 @@ public:
         knob (resonance, 0.0, 1.0, 0.01, "");
         knob (fm, 0.0, 8.0, 0.01, "");
         fm.setSkewFactorFromMidPoint (1.0);
-        fm.setTooltip (utf8 ("FM: o osc 3 (que deixa de soar) modula a fase dos osc 1 e 2; 0 = desligado"));
+        fm.setTooltip (utf8 ("FM: osc 3 (which stops sounding) modulates the phase of osc 1 and 2; 0 = off"));
         knob (fmDecay, 0.0, 5.0, 0.001, " s");
         fmDecay.setSkewFactorFromMidPoint (0.5);
-        fmDecay.setTooltip (utf8 ("Tempo para o índice de FM cair (0 = constante); o brilho some como num piano elétrico"));
+        fmDecay.setTooltip (utf8 ("Time for the FM index to decay (0 = constant); the brightness fades like an electric piano"));
         knob (keyTrack, -1.0, 2.0, 0.01, "");
-        keyTrack.setTooltip (utf8 ("O corte acompanha a nota: oitavas de corte por oitava de nota, a partir do C3 (130,8 Hz)"));
+        keyTrack.setTooltip (utf8 ("Cutoff follows the note: cutoff octaves per note octave, relative to C3 (130.8 Hz)"));
         knob (sweep, 0.0, 100.0, 0.01, "");
         sweep.setSkewFactorFromMidPoint (2.0);
-        sweep.setTooltip (utf8 ("Varredura de bumbo: a nota começa (1 + valor) vezes mais aguda e desce"));
+        sweep.setTooltip (utf8 ("Kick pitch sweep: the note starts (1 + value) times higher and falls"));
         knob (sweepTime, 0.001, 2.0, 0.001, " s");
         sweepTime.setSkewFactorFromMidPoint (0.1);
-        sweepTime.setTooltip (utf8 ("Constante de tempo da varredura"));
+        sweepTime.setTooltip (utf8 ("Sweep time constant"));
         for (auto* b : { &bandLow, &bandMid, &bandHigh })
         {
             knob (*b, 0.0, 2.0, 0.01, "");
-            b->setTooltip (utf8 ("Tonalidade de 3 bandas depois do filtro (graves < 178 Hz < médios < 1,18 kHz < agudos); 1 = sem mudança"));
+            b->setTooltip (utf8 ("3-band tone after the filter (low < 178 Hz < mid < 1.18 kHz < high); 1 = unchanged"));
         }
-        ring.setButtonText ("Anel");
-        ring.setTooltip (utf8 ("Com AM ligado: modulação em anel, (osc 1 + 2) × (1 − nível + osc 3), como o RM do Sytrus"));
+        ring.setButtonText ("Ring");
+        ring.setTooltip (utf8 ("With AM on: ring modulation, (osc 1 + 2) × (1 − level + osc 3), like Sytrus's RM"));
         ring.onClick = [this] { apply(); };
         addAndMakeVisible (ring);
 
-        modulationButton.setButtonText (utf8 ("Modulação (envelopes e LFOs)..."));
+        modulationButton.setButtonText (utf8 ("Modulation (envelopes and LFOs)..."));
         modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
         addAndMakeVisible (modulationButton);
 
@@ -726,8 +726,8 @@ public:
             s->setSkewFactorFromMidPoint (0.5);
         cutoff.setSkewFactorFromMidPoint (1000.0);
 
-        const char* names[] = { "Oitava", "Semitom", "Afinação", "Pan", "Nível", "Ataque", "Decaimento", "Sustentação", "Release", "Corte", "Ressonância", "Tempo porta", "FM", "Decaim. FM",
-                                "Keytrack", "Varredura", "Tempo varr.", "Graves", "Médios", "Agudos" };
+        const char* names[] = { "Octave", "Semitone", "Fine", "Pan", "Level", "Attack", "Decay", "Sustain", "Release", "Cutoff", "Resonance", "Porta time", "FM", "FM decay",
+                                "Keytrack", "Sweep", "Sweep time", "Low", "Mid", "High" };
 
         for (int i = 0; i < (int) labels.size(); ++i)
         {
@@ -752,31 +752,31 @@ public:
         };
         addAndMakeVisible (presetBox);
 
-        flPresets.setButtonText ("Presets do FL...");
-        flPresets.setTooltip (utf8 ("Os presets de canal do 3x Osc que vêm com o FL Studio (Patches\\Channel presets\\3x Osc)"));
+        flPresets.setButtonText ("FL presets...");
+        flPresets.setTooltip (utf8 ("The 3x Osc channel presets that ship with FL Studio (Patches\\Channel presets\\3x Osc)"));
         flPresets.onClick = [this] { showFlPresets(); };
         addAndMakeVisible (flPresets);
 
-        filterTypeBox.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
-        filterTypeBox.setTooltip ("Tipo do filtro");
+        filterTypeBox.addItemList ({ "Low-pass", "Band-pass", "High-pass", "Notch" }, 1);
+        filterTypeBox.setTooltip ("Filter type");
         filterTypeBox.onChange = [this] { apply(); };
         addAndMakeVisible (filterTypeBox);
 
         am.setButtonText ("AM");
-        am.setTooltip (utf8 ("O osc 3 modula a amplitude dos osc 1 e 2 (como o AM do 3x Osc); o nível dele é a profundidade"));
+        am.setTooltip (utf8 ("Osc 3 modulates the amplitude of osc 1 and 2 (like 3x Osc's AM); its level is the depth"));
         am.onClick = [this] { apply(); };
         addAndMakeVisible (am);
 
         knob (porta, 0.0, 2.0, 0.005, " t");
         porta.setSkewFactorFromMidPoint (0.25);
-        porta.setTooltip (utf8 ("Tempo do portamento, em tempos (vale para o botão Porta e para as notas com porta)"));
+        porta.setTooltip (utf8 ("Portamento time, in beats (applies to the Porta button and to notes marked porta)"));
         portaOn.setButtonText ("Porta");
-        portaOn.setTooltip (utf8 ("Portamento: a nota nova desliza a partir da anterior (notas marcadas com porta invertem)"));
+        portaOn.setTooltip (utf8 ("Portamento: the new note glides from the previous one (notes marked porta invert this)"));
         portaOn.onClick = [this] { apply(); };
         addAndMakeVisible (portaOn);
 
         mono.setButtonText ("Mono");
-        mono.setTooltip (utf8 ("Uma voz só: a nota nova assume a que está soando (baixos e leads)"));
+        mono.setTooltip (utf8 ("Single voice: the new note takes over the one currently sounding (basses and leads)"));
         mono.onClick = [this] { apply(); };
         addAndMakeVisible (mono);
 
@@ -847,14 +847,14 @@ private:
         juce::Slider octave, semitones, detune, pan, level;
     };
 
-    static constexpr int oscKnobs = 5; // rótulos dos knobs de oscilador vêm primeiro
+    static constexpr int oscKnobs = 5; // oscillator knob labels come first
 
     juce::TextButton modulationButton;
     juce::ToggleButton mono, am, portaOn;
     juce::TextButton flPresets;
 
-    // menu com os presets da instalação do FL dos sintetizadores que o LYNX converte: os .fst de canal
-    // do 3x Osc (por letra) e, por gerador, as pastas de "Plugin presets" (Sytrus, Harmor, GMS...)
+    // menu with the presets from the FL install for the synths LYNX converts: the 3x Osc channel .fst
+    // files (by letter) and, per generator, the "Plugin presets" folders (Sytrus, Harmor, GMS...)
     void showFlPresets()
     {
         const auto roots = findFlStudioRoots();
@@ -868,7 +868,7 @@ private:
 
         juce::PopupMenu menu;
 
-        // 3x Osc: ~170 presets agrupados pela letra inicial
+        // 3x Osc: ~170 presets grouped by first letter
         {
             juce::PopupMenu threeOsc, sub;
             juce::juce_wchar letter = 0;
@@ -889,7 +889,7 @@ private:
                 menu.addSubMenu ("3x Osc", threeOsc);
         }
 
-        // uma pasta de presets como menu: subpastas viram submenus
+        // a preset folder as a menu: subfolders become submenus
         std::function<juce::PopupMenu (const juce::File&, int)> folderMenu = [&] (const juce::File& folder, int depth) {
             juce::PopupMenu m;
             if (depth < 3)
@@ -909,8 +909,8 @@ private:
 
         if (menu.getNumItems() == 0)
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Presets do FL",
-                                                    utf8 ("Não achei os presets do FL (instale o FL Studio ou confira a pasta Data\\Patches)."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "FL presets",
+                                                    utf8 ("FL presets not found (install FL Studio or check the Data\\Patches folder)."));
             return;
         }
 
@@ -929,8 +929,8 @@ private:
         if (auto synth = synthFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize())))
             engine.editSong ([c = channel, s = *synth] (Song& song) { song.channels[(std::size_t) c].synth = s; });
         else
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Presets do FL",
-                                                    utf8 ("Este preset não é de um sintetizador que o LYNX converte ou não pôde ser lido."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "FL presets",
+                                                    utf8 ("This preset is not for a synth LYNX converts, or it could not be read."));
     }
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
@@ -995,7 +995,7 @@ private:
         updating = false;
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-            w->setName ("Ajustes do synth - " + juce::String::fromUTF8 (c->name.c_str()));
+            w->setName ("Synth settings - " + juce::String::fromUTF8 (c->name.c_str()));
     }
 
     void apply()
@@ -1003,7 +1003,7 @@ private:
         if (updating || current() == nullptr)
             return;
 
-        auto s = current()->synth; // mantém o que esta janela não mostra (envelopes e LFOs)
+        auto s = current()->synth; // keeps what this window does not show (envelopes and LFOs)
 
         for (std::size_t o = 0; o < 3; ++o)
             s.osc[o] = { (Waveform) juce::jlimit (0, 5, rows[o].wave.getSelectedId() - 1), (int) rows[o].octave.getValue(),
@@ -1066,7 +1066,7 @@ class SettingsWindow final : public juce::DocumentWindow
 {
 public:
     SettingsWindow (AudioEngine& engine, int c, bool modulationWindow)
-        : juce::DocumentWindow ("Ajustes do canal", theme::panel, DocumentWindow::closeButton),
+        : juce::DocumentWindow ("Channel settings", theme::panel, DocumentWindow::closeButton),
           channel (c),
           modulation (modulationWindow)
     {

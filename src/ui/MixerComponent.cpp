@@ -19,7 +19,7 @@ constexpr int panHeight = 34;
 constexpr int buttonsHeight = 22;
 constexpr int feedsHeight = 46;
 
-// Fader 0..1 -> dB, com 0,8 = 0 dB (como no FL).
+// Fader 0..1 -> dB, with 0.8 = 0 dB (as in FL).
 juce::String faderToDb (float volume)
 {
     if (volume <= 0.0001f)
@@ -29,7 +29,7 @@ juce::String faderToDb (float volume)
     return (db > 0 ? "+" : "") + juce::String (db, 1);
 }
 
-// Nível 0..1 do medidor em escala de dB (-60..+6).
+// Meter level 0..1 on a dB scale (-60..+6).
 float meterPosition (float gain)
 {
     const auto db = juce::Decibels::gainToDecibels (gain, -60.0f);
@@ -74,7 +74,7 @@ int MixerStrips::trackAt (int x) const noexcept
 {
     const auto tracks = (int) engine.getSong().mixer.size();
 
-    for (int t = 0; t <= tracks; ++t) // t == tracks = botão "+"
+    for (int t = 0; t <= tracks; ++t) // t == tracks = "+" button
         if (x >= stripX (t) && x < stripX (t) + stripWidthOf (t))
             return t;
 
@@ -147,7 +147,7 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setColour (t == selected ? juce::Colour (0xff3c444d) : (t == 0 ? juce::Colour (0xff343a41) : theme::panel));
         g.fillRoundedRectangle (strip.toFloat(), 4.0f);
 
-        if (track.colour != 0) // faixa colorida no topo, como no mixer do FL
+        if (track.colour != 0) // colored band at the top, as in FL's mixer
         {
             g.setColour (juce::Colour (track.colour));
             g.fillRoundedRectangle (strip.toFloat().withHeight (4.0f), 2.0f);
@@ -159,7 +159,7 @@ void MixerStrips::paint (juce::Graphics& g)
             g.drawRoundedRectangle (strip.toFloat(), 4.0f, 1.5f);
         }
 
-        // cabeçalho: número e nome
+        // header: number and name
         g.setColour (theme::text.withAlpha (0.55f));
         g.setFont (juce::FontOptions (11.0f));
         g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 4, w - 4, 12, juce::Justification::centred);
@@ -167,14 +167,14 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (12.0f));
         g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 2, 16, w - 8, 16, juce::Justification::centred, 1, 0.7f);
 
-        // latência compensada (PDC) no Master
+        // compensated latency (PDC) on the Master
         if (t == 0 && engine.getLatencySamples() > 0)
         {
             const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
             g.setColour (theme::accentOrange);
             g.setFont (juce::FontOptions (10.0f));
             g.drawText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 36).withWidth (w - 40),
-                        juce::Justification::centredLeft); // o Master não tem solo: usa o lugar dele
+                        juce::Justification::centredLeft); // the Master has no solo: use its spot
         }
 
         if (! track.effects.empty())
@@ -203,7 +203,7 @@ void MixerStrips::paint (juce::Graphics& g)
             g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * 9.0f, centre.y - std::cos (to) * 9.0f, 1.5f);
         }
 
-        // mute e solo
+        // mute and solo
         {
             const auto m = muteArea (t).toFloat();
             g.setColour (theme::muteLed (track.muted));
@@ -220,7 +220,7 @@ void MixerStrips::paint (juce::Graphics& g)
             }
         }
 
-        // medidores + fader
+        // meters + fader
         {
             const auto area = faderArea (t);
             const auto meterW = 6;
@@ -241,7 +241,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.fillRect (lit);
             }
 
-            // trilho do fader e marca de 0 dB
+            // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
             g.setColour (theme::knobBackground);
             g.fillRoundedRectangle (railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight(), 2.0f);
@@ -261,7 +261,7 @@ void MixerStrips::paint (juce::Graphics& g)
             g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, 14, juce::Justification::centred);
         }
 
-        // envio da trilha selecionada para esta
+        // send from the selected track to this one
         if (selected > 0 && t != selected && selected < tracks)
         {
             const auto r = routeArea (t).toFloat();
@@ -274,7 +274,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (r, 4.0f);
                 g.setColour (on ? juce::Colours::black : theme::text.withAlpha (0.45f));
                 g.setFont (juce::FontOptions (10.0f));
-                juce::String label = juce::String::fromUTF8 ("\xe2\x86\x92"); // seta
+                juce::String label = juce::String::fromUTF8 ("\xe2\x86\x92"); // arrow
 
                 if (on && t > 0)
                     for (const auto& send : song.mixer[(std::size_t) selected].sends)
@@ -285,7 +285,7 @@ void MixerStrips::paint (juce::Graphics& g)
             }
         }
 
-        // canais que chegam nesta trilha
+        // channels routed into this track
         {
             juce::StringArray feeds;
             for (const auto& c : song.channels)
@@ -299,7 +299,7 @@ void MixerStrips::paint (juce::Graphics& g)
         }
     }
 
-    // botão "+"
+    // "+" button
     if (tracks < maxMixerTracks)
     {
         const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60);
@@ -334,12 +334,12 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
     if (part == Part::route)
     {
-        // a seleção é a origem do envio: não muda
+        // the selection is the send source: don't change it
         const auto from = selected;
         const auto on = engine.getSong().routes (from, t);
         engine.editSong ([from, t, on] (Song& s) { s.setRoute (from, t, ! on); });
 
-        if (! on && t > 0) // acabou de ligar: arrastar ajusta o nível
+        if (! on && t > 0) // just enabled: dragging adjusts the level
         {
             dragPart = Part::route;
             dragTrack = t;
@@ -389,7 +389,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             dragTrack = t;
             dragStartValue = part == Part::pan ? track.pan : track.volume;
 
-            if (part == Part::fader) // clicar no trilho pula o fader para lá
+            if (part == Part::fader) // clicking the track jumps the fader there
             {
                 const auto area = faderArea (t);
                 const auto capY = area.getBottom() - track.volume * (float) area.getHeight();
@@ -471,7 +471,7 @@ void MixerStrips::selectTrack (int track)
 
 namespace
 {
-// Os 3 knobs de cada banda do EQ embutido da trilha (ganho, frequência, largura).
+// The 3 knobs of each band of the track's built-in EQ (gain, frequency, width).
 class TrackEqEditor final : public juce::Component
 {
 public:
@@ -479,7 +479,7 @@ public:
         : engine (e),
           track (t)
     {
-        const juce::String bands[] = { "Graves", utf8 ("Médios"), "Agudos" };
+        const juce::String bands[] = { "Low", utf8 ("Mid"), "High" };
         const auto& eq = engine.getSong().mixer[(std::size_t) track].eq;
 
         for (int b = 0; b < 3; ++b)
@@ -498,7 +498,7 @@ public:
 
             auto& width = knobs[(std::size_t) b][2];
             setup (width, 0.0, 1.0, 0.01, "", eq.width[(std::size_t) b]);
-            width.setTooltip (b == 1 ? utf8 ("Largura do pico (Q)") : utf8 ("Inclinação da prateleira"));
+            width.setTooltip (b == 1 ? utf8 ("Peak width (Q)") : utf8 ("Shelf slope"));
         }
 
         setSize (3 * 90, 3 * 74 + 24);
@@ -551,7 +551,7 @@ private:
     AudioEngine& engine;
     int track;
     std::array<juce::Label, 3> titles;
-    std::array<std::array<juce::Slider, 3>, 3> knobs; // [banda][ganho, frequência, largura]
+    std::array<std::array<juce::Slider, 3>, 3> knobs; // [band][gain, frequency, width]
 };
 } // namespace
 
@@ -569,13 +569,13 @@ void MixerStrips::showMenu (int t)
     menu.addSectionHeader (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
 
     if (channel < (int) song.channels.size())
-        menu.addItem (utf8 ("Rotear o canal \"") + juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str())
-                          + utf8 ("\" para cá"),
+        menu.addItem (utf8 ("Route channel \"") + juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str())
+                          + utf8 ("\" here"),
                       [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
 
     if (selected > 0 && selected != t && (t == 0 || song.canRoute (selected, t) || song.routes (selected, t)))
-        menu.addItem (utf8 ("Enviar \"") + juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str())
-                          + utf8 ("\" só para esta trilha"),
+        menu.addItem (utf8 ("Send \"") + juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str())
+                          + utf8 ("\" only to this track"),
                       [this, from = selected, t] {
                           engine.editSong ([from, t] (Song& s) {
                               s.mixer[(std::size_t) from].sends.clear();
@@ -585,7 +585,7 @@ void MixerStrips::showMenu (int t)
                       });
 
     if (t > 0 && (! song.mixer[(std::size_t) t].sends.empty() || ! song.mixer[(std::size_t) t].toMaster))
-        menu.addItem (utf8 ("Voltar a enviar só para o Master"), [this, t] {
+        menu.addItem (utf8 ("Send only to the Master again"), [this, t] {
             engine.editSong ([t] (Song& s) {
                 s.mixer[(std::size_t) t].sends.clear();
                 s.mixer[(std::size_t) t].toMaster = true;
@@ -595,32 +595,32 @@ void MixerStrips::showMenu (int t)
     {
         const auto& track = song.mixer[(std::size_t) t];
         juce::PopupMenu stereo;
-        const std::pair<const char*, float> widths[] = { { "Mono", 1.0f }, { "Mais estreito", 0.5f }, { "Normal", 0.0f },
-                                                          { "Mais largo", -0.5f }, { "Bem largo", -1.0f } };
+        const std::pair<const char*, float> widths[] = { { "Mono", 1.0f }, { "Narrower", 0.5f }, { "Normal", 0.0f },
+                                                          { "Wider", -0.5f }, { "Very wide", -1.0f } };
 
         for (const auto& [label, value] : widths)
             stereo.addItem (juce::String::fromUTF8 (label), true, std::abs (track.stereo - value) < 0.01f,
                             [this, t, v = value] { engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].stereo = v; }); });
 
-        menu.addSubMenu (utf8 ("Separação estéreo"), stereo);
-        menu.addItem (utf8 ("EQ da trilha..."), [this, t] { showTrackEq (t); });
-        menu.addItem (utf8 ("Inverter fase"), true, track.invertPhase, [this, t] {
+        menu.addSubMenu (utf8 ("Stereo separation"), stereo);
+        menu.addItem (utf8 ("Track EQ..."), [this, t] { showTrackEq (t); });
+        menu.addItem (utf8 ("Invert phase"), true, track.invertPhase, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].invertPhase = ! s.mixer[(std::size_t) t].invertPhase; });
         });
-        menu.addItem (utf8 ("Trocar esquerda/direita"), true, track.swapChannels, [this, t] {
+        menu.addItem (utf8 ("Swap left/right"), true, track.swapChannels, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].swapChannels = ! s.mixer[(std::size_t) t].swapChannels; });
         });
         menu.addSeparator();
     }
 
     if (t > 0)
-        menu.addItem (utf8 ("Renderizar para áudio (congelar)..."), [this, t] { bounceInsertToAudio (engine, t); });
+        menu.addItem (utf8 ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
 
-    menu.addItem ("Renomear...", [this, t] {
-        auto* window = new juce::AlertWindow ("Renomear trilha", {}, juce::MessageBoxIconType::NoIcon);
+    menu.addItem ("Rename...", [this, t] {
+        auto* window = new juce::AlertWindow ("Rename track", {}, juce::MessageBoxIconType::NoIcon);
         window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str()));
         window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-        window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
         window->enterModalState (true, juce::ModalCallbackFunction::create ([this, t, window] (int result) {
                                      const auto name = window->getTextEditorContents ("name").trim().toStdString();
                                      if (result == 1 && ! name.empty() && t < (int) engine.getSong().mixer.size())
@@ -628,7 +628,7 @@ void MixerStrips::showMenu (int t)
                                  }),
                                  true);
     });
-    menu.addItem ("Resetar (0 dB, centro, sem mute/solo)", [this, t] {
+    menu.addItem ("Reset (0 dB, center, no mute/solo)", [this, t] {
         engine.editSong ([t] (Song& s) {
             auto& track = s.mixer[(std::size_t) t];
             track.volume = unityFader;
@@ -655,10 +655,10 @@ void MixerStrips::timerCallback()
     for (std::size_t i = 0; i < levels.size(); ++i)
     {
         const auto peak = meters.takePeak ((int) (i / 2), (int) (i % 2));
-        const auto next = juce::jmax (peak, levels[i] * 0.86f); // queda de ~20 dB/s a 30 Hz
+        const auto next = juce::jmax (peak, levels[i] * 0.86f); // ~20 dB/s falloff at 30 Hz
         const auto shown = next < 0.001f ? 0.0f : next;
 
-        // só o medidor que mudou é redesenhado
+        // only the meter that changed is repainted
         if (showing && std::abs (shown - levels[i]) > 1e-4f)
         {
             const auto t = (int) (i / 2);
@@ -721,7 +721,7 @@ juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 
 namespace
 {
-// parâmetros mostrados como knob: no envelope rítmico, só os dos pontos usados
+// parameters shown as knobs: in the rhythmic envelope, only those of the points in use
 int shownParams (const EffectSlot& slot)
 {
     const auto all = (int) effectInfo (slot.kind).params.size();
@@ -734,7 +734,7 @@ int shownParams (const EffectSlot& slot)
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
     auto top = panelHeader + maxEffectSlots * slotHeight + 40;
-    // muitos parâmetros (Effector: 12): 4 colunas e linhas mais baixas para caber na altura
+    // many parameters (Effector: 12): 4 columns and shorter rows to fit the height
     int count = 0;
     if (const auto* s = slots(); ! gateSelected() && s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size())
         count = shownParams ((*s)[(std::size_t) selectedSlot]);
@@ -743,7 +743,7 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
     const auto rows = juce::jmax (1, (count + columns - 1) / columns);
     const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (getHeight() - top - 4) / rows) : 86;
 
-    // gate de volume: os 32 passos são barras (gateStepsBounds); os knobs são mix/ataque/release
+    // volume gate: the 32 steps are bars (gateStepsBounds); the knobs are mix/attack/release
     if (gateSelected())
     {
         if (param < 32)
@@ -778,21 +778,21 @@ void EffectsPanel::setGateStep (juce::Point<int> p)
 
 void EffectsPanel::showGatePatterns()
 {
-    // padrões prontos (como os slots do Gross Beat): valor do passo i de 32 (1/8 de tempo cada)
+    // ready-made patterns (like Gross Beat's slots): value of step i of 32 (1/8 beat each)
     struct Pattern
     {
         const char* name;
         float (*level) (int);
     };
     static const Pattern patterns[] = {
-        { "Tudo aberto", [] (int) { return 1.0f; } },
-        { "Gate de 1/2 tempo", [] (int i) { return (i % 4) < 2 ? 1.0f : 0.0f; } },
-        { "Gate de 1 tempo", [] (int i) { return (i % 8) < 4 ? 1.0f : 0.0f; } },
-        { "Contratempo", [] (int i) { return (i % 8) >= 4 ? 1.0f : 0.0f; } },
-        { "Sidechain (rampa por tempo)", [] (int i) { return std::min (1.0f, 0.15f + (float) (i % 8) / 5.0f); } },
+        { "All open", [] (int) { return 1.0f; } },
+        { "1/2 beat gate", [] (int i) { return (i % 4) < 2 ? 1.0f : 0.0f; } },
+        { "1 beat gate", [] (int i) { return (i % 8) < 4 ? 1.0f : 0.0f; } },
+        { "Offbeat", [] (int i) { return (i % 8) >= 4 ? 1.0f : 0.0f; } },
+        { "Sidechain (ramp per beat)", [] (int i) { return std::min (1.0f, 0.15f + (float) (i % 8) / 5.0f); } },
         { "Trance gate", [] (int i) { return (i % 4) == 3 ? 0.0f : (i % 16) >= 12 ? 0.4f : 1.0f; } },
-        { "Fade-in no compasso", [] (int i) { return (float) (i + 1) / 32.0f; } },
-        { "Fade-out no compasso", [] (int i) { return 1.0f - (float) i / 32.0f; } },
+        { "Fade-in over the bar", [] (int i) { return (float) (i + 1) / 32.0f; } },
+        { "Fade-out over the bar", [] (int i) { return 1.0f - (float) i / 32.0f; } },
     };
 
     juce::PopupMenu menu;
@@ -815,7 +815,7 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
         return -1;
 
     if ((*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq)
-        return -1; // editado na janela própria
+        return -1; // edited in its own window
 
     const auto count = shownParams ((*s)[(std::size_t) selectedSlot]);
 
@@ -840,7 +840,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto& song = engine.getSong();
     g.setColour (theme::accentOrange);
     g.setFont (juce::FontOptions (14.0f));
-    g.drawText (utf8 ("Efeitos — ") + juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()), 10, 4,
+    g.drawText (utf8 ("Effects — ") + juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()), 10, 4,
                 getWidth() - 20, panelHeader - 8, juce::Justification::centredLeft, true);
 
     g.setFont (juce::FontOptions (13.0f));
@@ -864,7 +864,7 @@ void EffectsPanel::paint (juce::Graphics& g)
                 name << utf8 (" ← ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
 
-            // knob de dry/wet do slot
+            // slot's dry/wet knob
             const auto knob = mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f);
             constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
             constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
@@ -878,7 +878,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         else if (i == (int) s->size())
         {
             g.setColour (theme::text.withAlpha (0.45f));
-            g.drawText (juce::String (i + 1) + utf8 (". (vazio — clique para adicionar)"), r.withTrimmedLeft (24),
+            g.drawText (juce::String (i + 1) + utf8 (". (empty — click to add)"), r.withTrimmedLeft (24),
                         juce::Justification::centredLeft);
         }
     }
@@ -895,7 +895,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.fillRoundedRectangle (button.toFloat(), 4.0f);
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (13.0f));
-        g.drawText (utf8 ("Abrir interface do plugin"), button, juce::Justification::centred);
+        g.drawText (utf8 ("Open plugin interface"), button, juce::Justification::centred);
         g.setColour (theme::text.withAlpha (0.5f));
         g.setFont (juce::FontOptions (11.0f));
         g.drawText (juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
@@ -909,13 +909,13 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.fillRoundedRectangle (button.toFloat(), 4.0f);
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (13.0f));
-        g.drawText (utf8 ("Abrir EQ paramétrico"), button, juce::Justification::centred);
+        g.drawText (utf8 ("Open parametric EQ"), button, juce::Justification::centred);
         const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
         drawParametricEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
         return;
     }
 
-    if (slot.kind == EffectKind::parallel) // contêiner: lista os ramos
+    if (slot.kind == EffectKind::parallel) // container: list the branches
     {
         auto y = knobBounds (0).getY() - 28;
         g.setColour (theme::text);
@@ -925,9 +925,9 @@ void EffectsPanel::paint (juce::Graphics& g)
         for (std::size_t b = 0; b < slot.branches.size(); ++b)
         {
             y += 22;
-            juce::String line = "Ramo " + juce::String ((int) b + 1) + juce::String::formatted (" (x%.2f): ", slot.branches[b].gain);
+            juce::String line = "Branch " + juce::String ((int) b + 1) + juce::String::formatted (" (x%.2f): ", slot.branches[b].gain);
             if (slot.branches[b].chain.empty())
-                line += "seco";
+                line += "dry";
             for (std::size_t c = 0; c < slot.branches[b].chain.size(); ++c)
                 line += (c > 0 ? " -> " : "") + utf8 (effectInfo (slot.branches[b].chain[c].kind).name);
             g.setColour (theme::text.withAlpha (0.8f));
@@ -943,7 +943,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     g.drawText (utf8 (info.name), 10, (gate ? gateStepsBounds().getY() : knobBounds (0).getY()) - 28, getWidth() - 20, 20,
                 juce::Justification::centredLeft);
 
-    if (gate) // 32 passos = 1 compasso de 4 tempos
+    if (gate) // 32 steps = 1 bar of 4 beats
     {
         const auto area = gateStepsBounds().toFloat();
         g.setColour (theme::knobBackground);
@@ -960,7 +960,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.drawVerticalLine ((int) (area.getX() + beat * 8 * w), area.getY(), area.getBottom());
         g.setColour (theme::text.withAlpha (0.5f));
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 ("1 compasso: desenhe os passos; clique direito = padrões"), area.withY (area.getBottom() + 2).withHeight (14),
+        g.drawText (utf8 ("1 bar: draw the steps; right-click = patterns"), area.withY (area.getBottom() + 2).withHeight (14),
                     juce::Justification::centredLeft);
     }
 
@@ -968,7 +968,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     {
         const auto r = knobBounds (p);
         const auto value = slot.params[(std::size_t) p];
-        // knob de 38 px; em grades apertadas (Effector) diminui para caber nome e valor embaixo
+        // 38 px knob; in tight grids (Effector) it shrinks to fit name and value below
         const auto knobHeight = juce::jlimit (30, 44, r.getHeight() - 30);
         const auto diameter = (float) knobHeight - 6.0f;
         const auto area = r.withHeight (knobHeight).toFloat().withSizeKeepingCentre (diameter, diameter);
@@ -1145,7 +1145,7 @@ void EffectsPanel::openPluginWindow (int slot)
     }
 
     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
-                                            utf8 ("Este plugin não pôde ser carregado (não está instalado ou não foi escaneado)."));
+                                            utf8 ("This plugin could not be loaded (it is not installed or has not been scanned)."));
 }
 
 void EffectsPanel::showAddMenu (int)
@@ -1195,9 +1195,9 @@ void EffectsPanel::showSlotMenu (int slot)
 
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;
-    menu.addSubMenu ("Trocar por", replace);
+    menu.addSubMenu ("Replace with", replace);
 
-    // presets do FL (Plugin presets\Effects\<plugin>) que viram este efeito
+    // FL presets (Plugin presets\Effects\<plugin>) that map to this effect
     {
         juce::PopupMenu presets;
         const auto roots = findFlStudioRoots();
@@ -1231,15 +1231,15 @@ void EffectsPanel::showSlotMenu (int slot)
         }
 
         if (presets.getNumItems() > 0)
-            menu.addSubMenu ("Presets do FL", presets);
+            menu.addSubMenu ("FL presets", presets);
     }
 
-    // sidechain: a saída de outra trilha entra no detector (por ora, o compressor usa)
+    // sidechain: another track's output feeds the detector (currently used by the compressor)
     if ((*slots())[(std::size_t) slot].kind == EffectKind::compressor)
     {
         juce::PopupMenu side;
         const auto current = (*slots())[(std::size_t) slot].sidechain;
-        side.addItem ("Nenhum", true, current < 0, [this, slot] {
+        side.addItem ("None", true, current < 0, [this, slot] {
             engine.editSong ([t = track, slot] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].sidechain = -1; });
         });
         const auto& song = engine.getSong();
@@ -1249,13 +1249,13 @@ void EffectsPanel::showSlotMenu (int slot)
                               [this, slot, t] {
                                   engine.editSong ([tr = track, slot, t] (Song& s) { s.mixer[(std::size_t) tr].effects[(std::size_t) slot].sidechain = t; });
                               });
-        menu.addSubMenu ("Sidechain de", side);
+        menu.addSubMenu ("Sidechain from", side);
     }
-    menu.addItem ("Mover para cima", slot > 0, false, [this, slot] {
+    menu.addItem ("Move up", slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;
     });
-    menu.addItem ("Mover para baixo", slot < count - 1, false, [this, slot] {
+    menu.addItem ("Move down", slot < count - 1, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot + 1); });
         selectedSlot = slot + 1;
     });
@@ -1266,7 +1266,7 @@ void EffectsPanel::showSlotMenu (int slot)
     }
 
     menu.addSeparator();
-    menu.addItem ("Remover", [this, slot] {
+    menu.addItem ("Delete", [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
         selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
         repaint();

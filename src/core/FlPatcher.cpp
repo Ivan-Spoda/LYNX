@@ -20,7 +20,7 @@ T at (const std::uint8_t* p, std::size_t offset)
     return v;
 }
 
-// chunks "u32 id + u64 tamanho + dados"; id 0 = grupo (o conteúdo são mais chunks)
+// chunks "u32 id + u64 size + data"; id 0 = group (the content is more chunks)
 bool forEachChunk (const std::uint8_t* p, std::size_t size, const std::function<void (std::uint32_t, const std::uint8_t*, std::size_t)>& fn)
 {
     std::size_t pos = 0;
@@ -41,7 +41,7 @@ std::string text (const std::uint8_t* p, std::size_t size, bool wide)
     std::string out;
     if (wide)
         for (std::size_t i = 0; i + 1 < size; i += 2)
-            out += (char) (p[i] | (p[i + 1] != 0 ? 0x80 : 0)); // nomes de plugin são ASCII
+            out += (char) (p[i] | (p[i + 1] != 0 ? 0x80 : 0)); // plugin names are ASCII
     else
         out.assign (reinterpret_cast<const char*> (p), size);
     while (! out.empty() && out.back() == '\0')
@@ -51,30 +51,30 @@ std::string text (const std::uint8_t* p, std::size_t size, bool wide)
 
 struct Port
 {
-    int node = -1;      // -1 = pino do Patcher
-    bool input = false; // entrada do nó, ou pino que leva o som para fora
+    int node = -1;      // -1 = Patcher pin
+    bool input = false; // node input, or pin that takes the sound out
     int bus = 0;
-    int kind = 0;       // 0 áudio, 1 MIDI, 2 controle
+    int kind = 0;       // 0 audio, 1 MIDI, 2 control
 };
 
 struct Connection
 {
     std::uint64_t destination = 0, source = 0;
     float gain = 1.0f;
-    int kind = -1;         // −1 = classe da porta (bit 1 das flags desligado)
-    bool disabled = false; // bit 0 das flags
+    int kind = -1;         // −1 = port class (flags bit 1 cleared)
+    bool disabled = false; // flags bit 0
 };
 
 bool isSplitterName (std::string name)
 {
     for (auto& ch : name)
         ch = (char) std::tolower ((unsigned char) ch);
-    return name == "frequency splitter" || name == "fruity stereo shaper"; // nós que dividem por barramento
+    return name == "frequency splitter" || name == "fruity stereo shaper"; // nodes that split by bus
 }
 
-// Redução série-paralelo (REA_rodada20 §3.3). Vértices: IN, OUT e, para cada nó (ou nó divisor por
-// barramento), a entrada e a saída; arestas carregam a expressão. Repete: arestas com as mesmas pontas
-// viram paralelo; vértice com uma entrada e uma saída vira série.
+// Series-parallel reduction (REA_rodada20 §3.3). Vertices: IN, OUT and, for each node (or splitter node per
+// bus), its input and output; edges carry the expression. Repeat: edges with the same endpoints
+// become parallel; a vertex with one input and one output becomes series.
 struct SpEdge
 {
     int from, to;
@@ -118,7 +118,7 @@ std::optional<PatcherExpr> reduce (std::vector<SpEdge> edges, int source, int si
             return edges[0].expr;
         bool changed = false;
 
-        // paralelo
+        // parallel
         for (std::size_t i = 0; i < edges.size() && ! changed; ++i)
             for (std::size_t j = i + 1; j < edges.size(); ++j)
                 if (edges[i].from == edges[j].from && edges[i].to == edges[j].to)
@@ -139,7 +139,7 @@ std::optional<PatcherExpr> reduce (std::vector<SpEdge> edges, int source, int si
         if (changed)
             continue;
 
-        // série
+        // series
         std::map<int, int> inCount, outCount;
         for (const auto& e : edges)
         {
@@ -191,7 +191,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             return;
 
         const auto first = sub.front().first;
-        if (first == 5000 && sub.front().second.second >= 4) // nó
+        if (first == 5000 && sub.front().second.second >= 4) // node
         {
             PatcherNode node;
             node.generator = at<std::uint32_t> (sub.front().second.first, 0) == 3;
@@ -206,7 +206,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
                                                              (int) at<std::uint32_t> (x.first, 0) };
             graph.nodes.push_back (std::move (node));
         }
-        else if (first == 1400 && sub.front().second.second >= 21) // pino de E/S
+        else if (first == 1400 && sub.front().second.second >= 21) // I/O pin
         {
             const auto* x = sub.front().second.first;
             const auto portId = at<std::uint64_t> (x, 0);
@@ -219,10 +219,10 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             if (kind == 0 && bus == 0 && ! fromOutside)
                 outputPin = portId, hasOutput = true;
         }
-        else if (first == 1300 && sub.front().second.second >= 25) // conexão
+        else if (first == 1300 && sub.front().second.second >= 25) // connection
         {
             const auto* x = sub.front().second.first;
-            // flags (offset 20): bit 0 = cabo desligado; bit 1 = o byte de classe (24) vale (REA_rodada20 §3.1)
+            // flags (offset 20): bit 0 = cable disabled; bit 1 = the class byte (24) is valid (REA_rodada20 §3.1)
             const auto flags = at<std::uint32_t> (x, 20);
             connections.push_back ({ at<std::uint64_t> (x, 0), at<std::uint64_t> (x, 8), at<float> (x, 16), (flags & 2) != 0 ? (int) x[24] : -1,
                                      (flags & 1) != 0 });
@@ -231,7 +231,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
     if (! ok)
         return std::nullopt;
 
-    // classe do cabo: a do byte 24 se valer; senão, a da porta de destino. Cabos desligados saem.
+    // cable class: byte 24's if valid; otherwise, the destination port's. Disabled cables are dropped.
     std::erase_if (connections, [] (const Connection& c) { return c.disabled; });
     for (auto& c : connections)
         if (c.kind < 0)
@@ -240,7 +240,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             c.kind = dst != ports.end() ? dst->second.kind : 2;
         }
 
-    // gerador principal: o que chega na saída com mais ganho
+    // main generator: the one reaching the output with the most gain
     float best = -1.0f;
     for (const auto& c : connections)
         if (c.kind == 0 && hasOutput && c.destination == outputPin)
@@ -251,7 +251,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
                 graph.mainGenerator = src->second.node;
             }
 
-    // cadeia em série: só arestas de áudio no barramento 0, cada nó com uma entrada e uma saída
+    // serial chain: only audio edges on bus 0, each node with one input and one output
     if (hasInput && hasOutput)
     {
         std::map<int, std::vector<int>> next; // -1 = IN, -2 = OUT
@@ -292,9 +292,9 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             graph.serialChain = std::move (chain);
     }
 
-    // ramos em paralelo: trecho comum em série desde IN, depois ramos (do IN, de um nó com várias
-    // saídas, ou das bandas de um Frequency Splitter), cada um uma cadeia simples até OUT. Entradas de
-    // sidechain (barramento > 0 no destino) ficam de fora.
+    // parallel branches: common serial section from IN, then branches (from IN, from a node with several
+    // outputs, or from the bands of a Frequency Splitter), each a simple chain to OUT. Sidechain
+    // inputs (bus > 0 at the destination) are left out.
     if (hasInput && hasOutput)
     {
         struct Edge
@@ -327,7 +327,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             auto name = graph.nodes[(std::size_t) n].plugin;
             for (auto& ch : name)
                 ch = (char) std::tolower ((unsigned char) ch);
-            return name == "frequency splitter" || name == "fruity stereo shaper"; // nós que dividem por barramento
+            return name == "frequency splitter" || name == "fruity stereo shaper"; // nodes that split by bus
         };
         auto outs = [&] (int n) {
             std::vector<std::size_t> r;
@@ -338,7 +338,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
         };
         auto countTo = [&] (int n) { return (int) std::count_if (edges.begin(), edges.end(), [n] (const Edge& e) { return e.to == n; }); };
 
-        // só barramento 0 fora do splitter (outras saídas, como as do Stereo Shaper, não são reproduzíveis)
+        // only bus 0 outside the splitter (other outputs, like the Stereo Shaper's, are not reproducible)
         for (const auto& e : edges)
             if (e.fromBus != 0 && (e.from < 0 || ! isSplitter (e.from)))
                 ok = false;
@@ -405,7 +405,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
         }
     }
 
-    // grafo de áudio reduzido a série/paralelo (REA_rodada20 §3.3)
+    // audio graph reduced to series/parallel (REA_rodada20 §3.3)
     if (hasInput && hasOutput)
     {
         struct Edge
@@ -421,7 +421,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
                 continue;
             const auto src = ports.find (c.source), dst = ports.find (c.destination);
             if (src == ports.end() || dst == ports.end() || dst->second.bus != 0)
-                continue; // sidechain fica de fora
+                continue; // sidechain is left out
             const auto from = src->second.node >= 0 ? src->second.node : (c.source == inputPin ? -1 : -3);
             const auto to = dst->second.node >= 0 ? dst->second.node : (c.destination == outputPin ? -2 : -3);
             if (from == -3 || to == -3)
@@ -429,7 +429,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             edges.push_back ({ from, to, src->second.bus, std::isfinite (c.gain) ? c.gain : 1.0f });
         }
 
-        // poda: só nós alcançáveis a partir de IN e que chegam a OUT
+        // prune: only nodes reachable from IN that also reach OUT
         auto reach = [&] (int start, bool forward) {
             std::set<int> seen { start };
             std::vector<int> stack { start };
@@ -446,20 +446,20 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
         const auto fromIn = reach (-1, true), toOut = reach (-2, false);
         std::erase_if (edges, [&] (const Edge& e) { return ! fromIn.count (e.from) || ! toOut.count (e.from) || ! fromIn.count (e.to) || ! toOut.count (e.to); });
 
-        // divisores com saídas por barramento ≠ 0 viram um vértice por barramento usado
+        // splitters with outputs on bus ≠ 0 become one vertex per used bus
         std::map<int, std::set<int>> splitBuses;
         for (const auto& e : edges)
             if (e.from >= 0 && e.fromBus != 0)
             {
                 if (! isSplitterName (graph.nodes[(std::size_t) e.from].plugin))
-                    valid = false; // saída lateral de um nó comum: não reproduzível
+                    valid = false; // side output of an ordinary node: not reproducible
                 splitBuses[e.from].insert (e.fromBus);
             }
         for (const auto& e : edges)
             if (e.from >= 0 && splitBuses.count (e.from))
                 splitBuses[e.from].insert (e.fromBus);
 
-        // vértices: IN = 0, OUT = 1; nó n (ou n por barramento): entrada/saída
+        // vertices: IN = 0, OUT = 1; node n (or n per bus): input/output
         std::map<std::pair<int, int>, int> vin, vout;
         int next = 2;
         std::vector<SpEdge> sp;
@@ -488,7 +488,7 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
                 vertexPair (e.from, fromBus);
                 from = vout[{ e.from, fromBus }];
             }
-            // o cabo que entra num divisor alimenta todos os barramentos dele
+            // the cable entering a splitter feeds all of its buses
             for (const auto bus : e.to >= 0 ? busesOf (e.to) : std::vector<int> { -1 })
             {
                 int to = 1;

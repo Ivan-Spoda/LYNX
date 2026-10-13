@@ -1,8 +1,8 @@
 #pragma once
 
-// Leitor de projetos .flp (FL Studio), escrito do zero a partir da análise
-// comportamental em docs/ANALISE_FL_STUDIO.md e de testes com arquivos reais.
-// Não depende de JUCE para poder ser testado isoladamente.
+// Reader for .flp (FL Studio) projects, written from scratch based on the behavioral
+// analysis in docs/ANALISE_FL_STUDIO.md and tests with real files.
+// Does not depend on JUCE so it can be tested in isolation.
 
 #include <array>
 #include <cmath>
@@ -21,27 +21,27 @@ struct Error : std::runtime_error
 };
 
 // ---------------------------------------------------------------------------
-// Nível 1: eventos crus
+// Level 1: raw events
 
 struct Event
 {
-    std::uint32_t id = 0;        // ID de 1 byte, ou ID estendido de 32 bits (escape 0xAC)
-    std::uint32_t value = 0;     // payload de u8/u16/u32 (vazio para eventos de dados)
-    std::span<const std::uint8_t> data; // payload de tamanho variável (vista sobre o buffer)
+    std::uint32_t id = 0;        // 1-byte ID, or 32-bit extended ID (escape 0xAC)
+    std::uint32_t value = 0;     // u8/u16/u32 payload (empty for data events)
+    std::span<const std::uint8_t> data; // variable-size payload (view over the buffer)
 
-    // Classe de tamanho: 0 = u8, 1 = u16, 2 = u32, 3 = dados
+    // Size class: 0 = u8, 1 = u16, 2 = u32, 3 = data
     int sizeClass() const noexcept { return (int) ((id > 0xFF ? id >> 24 : id) >> 6); }
     bool isData() const noexcept { return sizeClass() == 3; }
 };
 
 struct Header
 {
-    std::uint16_t format = 0;    // 0 = projeto
+    std::uint16_t format = 0;    // 0 = project
     std::uint16_t channelCount = 0;
     std::uint16_t ppq = 96;
 };
 
-// Percorre os eventos de um buffer .flp. O buffer precisa viver mais que o leitor.
+// Iterates over the events of a .flp buffer. The buffer must outlive the reader.
 class EventReader
 {
 public:
@@ -49,7 +49,7 @@ public:
 
     const Header& header() const noexcept { return hdr; }
 
-    // Retorna false no fim dos dados. Lança flp::Error se o arquivo estiver truncado.
+    // Returns false at the end of the data. Throws flp::Error if the file is truncated.
     bool next (Event& out);
 
 private:
@@ -59,7 +59,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Nível 2: modelo de projeto
+// Level 2: project model
 
 enum class ChannelType : std::uint8_t
 {
@@ -72,10 +72,10 @@ enum class ChannelType : std::uint8_t
     unknown = 255
 };
 
-// Ponto de um clip de automação (evento 0xEA). Posições em tempos (semínimas).
+// Point of an automation clip (event 0xEA). Positions in beats (quarter notes).
 struct AutomationPoint
 {
-    double position = 0.0;  // absoluta, já somando os deltas do arquivo
+    double position = 0.0;  // absolute, with the file's deltas already summed
     double value = 0.0;     // 0..1
     float tension = 0.0f;   // -1..1
     std::uint8_t curve = 0; // 0 = single curve, 1 = double, 2 = hold, 10 = smooth...
@@ -85,54 +85,54 @@ struct Channel
 {
     int index = 0;
     ChannelType type = ChannelType::unknown;
-    std::string name;            // nome mostrado no Channel Rack
-    std::string pluginName;      // nome interno do gerador (ex.: "FLEX")
+    std::string name;            // name shown in the Channel Rack
+    std::string pluginName;      // internal name of the generator (e.g. "FLEX")
     std::string samplePath;
     int mixerTrack = -1;
-    std::vector<AutomationPoint> automation; // canais do tipo automationClip
+    std::vector<AutomationPoint> automation; // channels of type automationClip
 
-    // evento 0xDB ("níveis" do canal): pan 0..12800 (6400 = centro), volume 0..12800
-    // (10000 = 78%, o padrão), afinação em centésimos
-    std::uint32_t colour = 0; // 0xRRGGBB (0 = sem cor gravada)
+    // event 0xDB (channel "levels"): pan 0..12800 (6400 = center), volume 0..12800
+    // (10000 = 78%, the default), pitch in cents
+    std::uint32_t colour = 0; // 0xRRGGBB (0 = no stored colour)
     bool hasLevels = false;
     int pan = 6400, volume = 10000, pitchCents = 0;
-    int modX = 256, modY = 0, filterType = 0; // filtro do canal (0xDB com 24 B; docs/analise/REA_rodada4.md §3)
+    int modX = 256, modY = 0, filterType = 0; // channel filter (0xDB with 24 B; docs/analise/REA_rodada4.md §3)
 
-    std::vector<std::uint8_t> pluginState; // 0xD5 do gerador (ex.: estado do 3x Osc)
+    std::vector<std::uint8_t> pluginState; // the generator's 0xD5 (e.g. 3x Osc state)
 
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84
-    int rootNote = -1;           // 0x87 (MIDI), -1 = padrão (C5 = 60)
-    int maxVoices = 0;           // 0xDD: 0 = ilimitado (com Mono desligado, o excesso solta as vozes mais velhas)
-    int slideTime = 820;         // 0xDD +4: tempo de porta/slide (0..1660; REA_rodada6 §4)
+    int rootNote = -1;           // 0x87 (MIDI), -1 = default (C5 = 60)
+    int maxVoices = 0;           // 0xDD: 0 = unlimited (with Mono off, the excess releases the oldest voices)
+    int slideTime = 820;         // 0xDD +4: porta/slide time (0..1660; REA_rodada6 §4)
     bool monoFlag = false, portaFlag = false; // 0xDD +8: bit 0 Mono, bit 1 Porta
 
-    // 0xDA: os 5 registros, na ordem pan, volume, corte, ressonância, pitch (68 B, i32)
+    // 0xDA: the 5 records, in order pan, volume, cutoff, resonance, pitch (68 B, i32)
     struct Envelope
     {
         bool present = false, enabled = false;
         int flags = 0, delay = 100, attack = 20000, hold = 20000, decay = 30000, sustain = 128, release = 20000;
-        int amount = 0; // alvo: ±128 (corte/ressonância/volume), ±64 (pan), ±2400 centésimos (afinação)
-        // LFO (REA_rodada6 §2): flags 0x02 = sincronizado ao tempo, 0x20 = global
+        int amount = 0; // target: ±128 (cutoff/resonance/volume), ±64 (pan), ±2400 cents (pitch)
+        // LFO (REA_rodada6 §2): flags 0x02 = tempo-synced, 0x20 = global
         int lfoDelay = 100, lfoAttack = 20000, lfoAmount = 0, lfoSpeed = 32950, lfoShape = 0;
     };
     std::array<Envelope, 5> envelopes {};
     int envelopeCount = 0;
 
     // 0xD7: time-stretch
-    std::uint32_t stretchTimeRaw = 0; // em 1/192 de tempo: int ou float, conforme Project::flagsA9
-    int stretchMul = 0;               // fator = 2^(v/10000)
-    int stretchMode = 0;              // 0 resample, < 0 stretch em tempo real, >= 1 offline
-    float stretchTime = 0.0f;         // já decodificado (1/192 de tempo)
-    double sampleStart = 0.0, sampleEnd = 1.0, startOffset = 0.0; // frações do sample
+    std::uint32_t stretchTimeRaw = 0; // in 1/192 of a beat: int or float, depending on Project::flagsA9
+    int stretchMul = 0;               // factor = 2^(v/10000)
+    int stretchMode = 0;              // 0 resample, < 0 real-time stretch, >= 1 offline
+    float stretchTime = 0.0f;         // already decoded (1/192 of a beat)
+    double sampleStart = 0.0, sampleEnd = 1.0, startOffset = 0.0; // fractions of the sample
 
-    // Segundos de um tempo do envelope (docs/analise/REA_rodada3.md §1.4). Com sincronia (flags & 1), em tempos.
+    // Seconds for an envelope time value (docs/analise/REA_rodada3.md §1.4). With sync (flags & 1), in beats.
     static double envelopeTime (int v) noexcept;
 };
 
-// Endereço de um parâmetro automatizável (controlID do FL), já no formato atual:
-//  < 0x10000000: canal (id >> 16), parâmetro (id & 0xFFFF)
-//  0x70000000 + (trilha << 22) + (slot << 16) + p: mixer
+// Address of an automatable parameter (FL's controlID), already in the current format:
+//  < 0x10000000: channel (id >> 16), parameter (id & 0xFFFF)
+//  0x70000000 + (track << 22) + (slot << 16) + p: mixer
 struct ControlId
 {
     std::uint32_t raw = 0;
@@ -146,32 +146,32 @@ struct ControlId
 
     static constexpr int mixerVolume = 0x1FC0;
     static constexpr int mixerPan = 0x1FC1;
-    static constexpr int mixerStereo = 0x1FC2; // separação ±64
-    static constexpr int mixerEqBase = 0x1FD0;  // EQ da trilha: + grupo·8 + banda (REA_rodada6 §1)
-    static constexpr int mixerSendBase = 0x2000; // + trilha de destino
+    static constexpr int mixerStereo = 0x1FC2; // separation ±64
+    static constexpr int mixerEqBase = 0x1FD0;  // track EQ: + group·8 + band (REA_rodada6 §1)
+    static constexpr int mixerSendBase = 0x2000; // + destination track
     static constexpr int pluginParamBase = 0x8000;
-    static constexpr std::uint32_t tempo = 0x40000005; // automação de tempo: 0..1 = 60..180 BPM (conferido nos demos)
+    static constexpr std::uint32_t tempo = 0x40000005; // tempo automation: 0..1 = 60..180 BPM (checked against the demos)
 
     bool isTempo() const noexcept { return raw == tempo; }
 };
 
-// Valor gravado de um parâmetro (evento 0xE1).
+// Stored value of a parameter (event 0xE1).
 struct ControlValue
 {
     ControlId id;
     std::int32_t value = 0;
 };
 
-// Liga um clip de automação (canal) a um parâmetro (evento 0xE3).
+// Links an automation clip (channel) to a parameter (event 0xE3).
 struct AutomationLink
 {
     int channel = 0;
     ControlId target;
 };
 
-// Liga a saída de um controlador (Peak Controller num slot do mixer, Envelope Controller num canal...)
-// a um parâmetro (mesmo evento 0xE3, com a origem apontando para "parâmetro" >= 0x8000 do plugin;
-// REA_rodada14 §7). `source.param() - 0x8000` = número da saída.
+// Links a controller's output (Peak Controller in a mixer slot, Envelope Controller in a channel...)
+// to a parameter (same event 0xE3, with the source pointing to plugin "parameter" >= 0x8000;
+// REA_rodada14 §7). `source.param() - 0x8000` = output number.
 struct ControllerLink
 {
     ControlId source;
@@ -180,18 +180,18 @@ struct ControllerLink
 
 struct Note
 {
-    std::uint32_t position = 0;  // em ticks do PPQ do arquivo
-    std::uint32_t length = 0;    // 0 = nota de step sequencer (sem duração própria)
-    std::uint16_t channel = 0;   // índice no Channel Rack
-    std::uint16_t key = 60;      // 60 = C5 no FL
+    std::uint32_t position = 0;  // in ticks of the file's PPQ
+    std::uint32_t length = 0;    // 0 = step sequencer note (no length of its own)
+    std::uint16_t channel = 0;   // index in the Channel Rack
+    std::uint16_t key = 60;      // 60 = C5 in FL
     std::uint16_t flags = 0;
-    std::uint8_t finePitch = 120; // 120 = centro
+    std::uint8_t finePitch = 120; // 120 = center
     std::uint8_t release = 64;
-    std::uint8_t pan = 64;       // 0..128, 64 = centro
+    std::uint8_t pan = 64;       // 0..128, 64 = center
     std::uint8_t velocity = 100; // 0..128
     std::uint8_t modX = 128;
     std::uint8_t modY = 128;
-    std::uint8_t extra = 0;      // bits 0-3 cor/canal MIDI; 0x10 porta; 0x20 mutada; 0x80 selecionada
+    std::uint8_t extra = 0;      // bits 0-3 colour/MIDI channel; 0x10 porta; 0x20 muted; 0x80 selected
     std::uint8_t repeats = 0;
 
     bool muted() const noexcept { return (extra & 0x20) != 0; }
@@ -203,7 +203,7 @@ struct Pattern
 {
     int index = 0;
     std::string name;
-    std::optional<std::uint32_t> colour; // 0xRRGGBB (no arquivo vem como 0x00BBGGRR)
+    std::optional<std::uint32_t> colour; // 0xRRGGBB (stored in the file as 0x00BBGGRR)
     std::vector<Note> notes;
 };
 
@@ -213,14 +213,14 @@ struct PlaylistItem
 
     std::uint32_t position = 0;  // ticks
     std::uint32_t length = 0;    // ticks
-    int track = 0;               // 0 = primeira trilha da playlist
+    int track = 0;               // 0 = first playlist track
     Kind kind = Kind::pattern;
-    int index = 0;               // índice da pattern, ou do canal (clip de áudio/automação)
+    int index = 0;               // pattern index, or channel index (audio/automation clip)
     std::uint16_t flags = 0;
 
-    // Os mesmos 8 bytes têm significados diferentes por tipo de clip:
-    //  - pattern: dois int32 em ticks (início/fim do trecho da pattern); -1 = sem recorte
-    //  - clip de canal (áudio/automação): dois float
+    // The same 8 bytes mean different things per clip type:
+    //  - pattern: two int32 in ticks (start/end of the pattern section); -1 = no trimming
+    //  - channel clip (audio/automation): two floats
     std::int32_t patternStartTick = -1;
     std::int32_t patternEndTick = -1;
     float startOffset = 0.0f;
@@ -229,14 +229,14 @@ struct PlaylistItem
 
 struct PlaylistTrackInfo
 {
-    int index = 0;        // 0 = primeira trilha
+    int index = 0;        // 0 = first track
     std::string name;
-    bool enabled = true;  // false = trilha mutada
+    bool enabled = true;  // false = track muted
 };
 
-// Marcador de tempo da Playlist: 0x94 (u32: tipo << 24 | posição em ticks), seguido de
-// 0x21/0x22 (numerador/denominador) e 0xCD (nome). Tipo 8 = mudança de compasso (visto nos demos:
-// 7/4, 6/4, 3/4); 0 = marcador comum; os outros são ações (loop, pausa...).
+// Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by
+// 0x21/0x22 (numerator/denominator) and 0xCD (name). Type 8 = time signature change (seen in the demos:
+// 7/4, 6/4, 3/4); 0 = ordinary marker; the others are actions (loop, pause...).
 struct TimeMarker
 {
     std::uint32_t position = 0;
@@ -250,7 +250,7 @@ struct Arrangement
     int index = 0;
     std::string name;
     std::vector<PlaylistItem> items;
-    std::vector<PlaylistTrackInfo> tracks; // só as que o arquivo descreve
+    std::vector<PlaylistTrackInfo> tracks; // only the ones the file describes
     std::vector<TimeMarker> markers;
 };
 
@@ -258,16 +258,16 @@ struct MixerInsert
 {
     int index = 0;
     std::string name;
-    std::uint32_t flags = 0x4C;  // 0x08 = habilitada (apagado = mutada), 0x1000 = solo
-    std::uint32_t colour = 0;    // 0xRRGGBB (0 = sem cor gravada)
-    std::vector<int> routes;      // trilhas de destino (0 = Master)
+    std::uint32_t flags = 0x4C;  // 0x08 = enabled (cleared = muted), 0x1000 = solo
+    std::uint32_t colour = 0;    // 0xRRGGBB (0 = no stored colour)
+    std::vector<int> routes;      // destination tracks (0 = Master)
     bool hasRoutes = false;
 
     struct Slot
     {
         int index = 0;      // 0..9
-        std::string plugin; // nome interno (0xC9), ex.: "Fruity Limiter"
-        std::vector<std::uint8_t> state; // 0xD5 do plugin (ex.: blob do Fruity Wrapper)
+        std::string plugin; // internal name (0xC9), e.g. "Fruity Limiter"
+        std::vector<std::uint8_t> state; // the plugin's 0xD5 (e.g. Fruity Wrapper blob)
     };
     std::vector<Slot> slots;
 };
@@ -278,8 +278,8 @@ struct Project
     std::string version;
     std::uint32_t versionNumber = 0; // major*1e6 + minor*1e3 + patch
     double tempo = 140.0;
-    int beatsPerBar = 4; // evento 0x11 (o primeiro, do projeto)
-    int swing = 0;       // evento 0x0B: 0..128
+    int beatsPerBar = 4; // event 0x11 (the first one, the project's)
+    int swing = 0;       // event 0x0B: 0..128
     std::uint32_t flagsA9 = 0;
     std::string title, artist, genre, url;
 
@@ -287,23 +287,23 @@ struct Project
     std::vector<Pattern> patterns;
     std::vector<Arrangement> arrangements;
     std::vector<MixerInsert> mixer;
-    std::vector<ControlValue> controls;       // volumes, pans, níveis de envio...
+    std::vector<ControlValue> controls;       // volumes, pans, send levels...
     std::vector<AutomationLink> automationLinks;
     std::vector<ControllerLink> controllerLinks;
 
-    std::vector<std::string> warnings; // coisas ignoradas ou suspeitas, para diagnóstico
+    std::vector<std::string> warnings; // ignored or suspicious things, for diagnostics
 
     const Pattern* findPattern (int index) const noexcept;
     const Channel* findChannel (int index) const noexcept;
 };
 
-// `channelPreset`: arquivo de preset de canal do FL (.fst): os eventos são de um canal só (índice 0),
-// sem o evento de novo canal.
+// `channelPreset`: FL channel preset file (.fst): the events belong to a single channel (index 0),
+// without the new-channel event.
 Project parseProject (std::span<const std::uint8_t> file, bool channelPreset = false);
 
-// Utilitários expostos para testes
+// Utilities exposed for tests
 std::uint32_t parseVersionNumber (const std::string& version);
 std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize);
-// Converte um controlID de arquivos antigos (classe 0x2..., envios em 0x1F40+d) para o formato atual.
+// Converts a controlID from old files (class 0x2..., sends at 0x1F40+d) to the current format.
 ControlId normalizeControlId (std::uint32_t raw);
 } // namespace flp

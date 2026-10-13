@@ -12,7 +12,7 @@ void PreviewPlayer::play (std::shared_ptr<const SampleData> sample)
     std::shared_ptr<const SampleData> old;
     {
         const juce::SpinLock::ScopedLockType sl (lock);
-        old = std::move (retired); // o que o áudio largou é desalocado aqui, na UI
+        old = std::move (retired); // whatever the audio thread released is freed here, on the UI thread
         pending = std::move (sample);
         hasPending = true;
     }
@@ -27,7 +27,7 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
         if (sl.isLocked() && hasPending)
         {
-            std::swap (current, pending); // o anterior vai para `pending` e depois para `retired`
+            std::swap (current, pending); // the previous one goes to `pending` and then to `retired`
             retired = std::move (pending);
             hasPending = false;
             position = 0.0;

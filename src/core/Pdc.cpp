@@ -28,7 +28,7 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
     auto channelLat = [&] (std::size_t c) { return c < channelLatency.size() ? std::max (0, channelLatency[c]) : 0; };
     auto trackOf = [&] (const ChannelDef& c) { return std::clamp (c.mixerTrack, 0, tracks - 1); };
 
-    // latência própria de entrada: o instrumento mais lento que chega na trilha
+    // own input latency: the slowest instrument feeding the track
     for (std::size_t c = 0; c < song.channels.size(); ++c)
     {
         auto& in = plan.inAlign[(std::size_t) trackOf (song.channels[c])];
@@ -50,7 +50,7 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
         return sum;
     };
 
-    // inserts em ordem: quando T é processada, todas as fontes dela já foram
+    // inserts in order: when T is processed, all its sources already have been
     const auto order = song.mixerOrder();
 
     for (auto t : order)
@@ -69,7 +69,7 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
     plan.outLat[0] = plan.inAlign[0] + effectsLatency (0);
     plan.total = plan.outLat[0];
 
-    // atrasos por aresta (o que falta para chegar no alinhamento do destino)
+    // per-edge delays (what's missing to reach the destination's alignment)
     for (std::size_t c = 0; c < song.channels.size(); ++c)
         plan.channelDelay[c] = plan.inAlign[(std::size_t) trackOf (song.channels[c])] - channelLat (c);
 
@@ -102,7 +102,7 @@ DelayLine::DelayLine (int delaySamples)
 
 void DelayLine::process (float* l, float* r, int n) noexcept
 {
-    // em trechos contíguos do anel: troca o que entra pelo que sai
+    // in contiguous ring segments: swap what comes in for what goes out
     for (int done = 0; done < n;)
     {
         const auto run = std::min (n - done, delay - position);
@@ -127,7 +127,7 @@ void DelayLine::mixInto (const float* sl, const float* sr, float level, float* d
     if (sl == nullptr)
     {
         if (quiet >= delay)
-            return; // tudo zero lá dentro: a saída seria silêncio e a posição não importa
+            return; // all zeros inside: the output would be silence and the position doesn't matter
 
         quiet += n;
     }

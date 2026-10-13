@@ -4,10 +4,10 @@
 
 namespace lynx
 {
-// Hosting de plugins CLAP (o JUCE 8 só traz VST3/AU/LV2). Implementado como mais um
-// juce::AudioPluginFormat: a busca, a lista de plugins, a janela do plugin, o estado salvo,
-// a latência (PDC) e a automação de parâmetros funcionam pelo mesmo caminho do VST3.
-// Escrito a partir dos headers públicos do CLAP 1.2 (licença MIT, em third_party/clap).
+// CLAP plugin hosting (JUCE 8 only ships VST3/AU/LV2). Implemented as one more
+// juce::AudioPluginFormat: scanning, the plugin list, the plugin window, saved state,
+// latency (PDC) and parameter automation all work through the same path as VST3.
+// Written from the public CLAP 1.2 headers (MIT license, in third_party/clap).
 class ClapPluginFormat final : public juce::AudioPluginFormat
 {
 public:
@@ -31,6 +31,6 @@ private:
                                PluginCreationCallback) override;
 };
 
-// Adiciona os formatos do LYNX (os do JUCE + CLAP) a um gerenciador.
+// Adds the LYNX formats (JUCE's + CLAP) to a manager.
 void addPluginFormats (juce::AudioPluginFormatManager& manager);
 } // namespace lynx

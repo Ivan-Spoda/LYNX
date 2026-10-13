@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build cruzado do LYNX.exe (Windows x64) a partir do Linux/WSL usando Zig (clang + MinGW-w64).
-# Não precisa de Visual Studio nem de CMake. O build oficial continua sendo o CMakeLists.txt.
+# Cross build of LYNX.exe (Windows x64) from Linux/WSL using Zig (clang + MinGW-w64).
+# Needs neither Visual Studio nor CMake. The official build is still CMakeLists.txt.
 #
-# Variáveis: ZIG (caminho do zig), JUCE_DIR (checkout do JUCE 8), OUT (pasta de saída), JOBS
+# Variables: ZIG (path to zig), JUCE_DIR (JUCE 8 checkout), OUT (output folder), JOBS
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -14,7 +14,7 @@ TARGET=x86_64-windows-gnu
 
 mkdir -p "$OUT/juce" "$OUT/app" "$OUT/shim"
 
-# Os headers do MinGW são minúsculos; o JUCE inclui alguns com maiúsculas (no Windows tanto faz).
+# MinGW headers are lowercase; JUCE includes some with capitals (on Windows it does not matter).
 echo '#include <dbghelp.h>' > "$OUT/shim/Dbghelp.h"
 
 MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basics juce_gui_extra
@@ -34,7 +34,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.0"'
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
 } > "$OUT/JuceConfig.h.new"
-# só troca o arquivo se mudou, para não invalidar o cache dos módulos
+# only replace the file if it changed, so the module cache is not invalidated
 cmp -s "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h" 2>/dev/null && rm "$OUT/JuceConfig.h.new" || mv "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h"
 
 COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
@@ -44,7 +44,7 @@ COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
 export ZIG OUT JUCE_DIR TARGET
 export COMMON_STR="${COMMON[*]}"
 
-echo "Compilando módulos do JUCE (com cache)..."
+echo "Compiling JUCE modules (cached)..."
 for m in "${MODULES[@]}"; do echo "$m"; done | xargs -P "$JOBS" -I{} bash -c '
     m={}; obj="$OUT/juce/$m.o"
     if [[ ! -f "$obj" || "$OUT/JuceConfig.h" -nt "$obj" ]]; then
@@ -52,7 +52,7 @@ for m in "${MODULES[@]}"; do echo "$m"; done | xargs -P "$JOBS" -I{} bash -c '
         $ZIG c++ $COMMON_STR -w -c "$JUCE_DIR/modules/$m/$m.cpp" -o "$obj"
     fi'
 
-# Unidades extras que o CMake do JUCE compila junto com os módulos
+# Extra units that JUCE's CMake compiles along with the modules
 for f in juce_core/juce_core_CompilationTime.cpp juce_graphics/juce_graphics_Harfbuzz.cpp; do
     obj="$OUT/juce/$(basename "$f" .cpp).o"
     if [[ ! -f "$obj" || "$OUT/JuceConfig.h" -nt "$obj" ]]; then
@@ -74,7 +74,7 @@ APP_SOURCES=(src/Main.cpp
              src/core/FlpImport.cpp src/core/Effects.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/core/Arpeggiator.cpp src/core/SynthPresets.cpp src/core/Slicer.cpp src/core/Templates.cpp src/core/FlWrapper.cpp src/core/FlEffects.cpp src/core/Effector.cpp src/core/FlSamplers.cpp src/core/FlSynths.cpp src/core/FlSytrus.cpp src/core/FlGenerators.cpp src/core/FlPatcher.cpp src/core/Inflate.cpp src/core/WavPack.cpp src/flp/Flp.cpp
              src/platform/MingwFixes.cpp)
 
-echo "WavPack (decodificador, C)..."
+echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
 for f in third_party/wavpack/src/*.c; do
     obj="$OUT/wavpack/$(basename "$f" .c).o"
@@ -83,15 +83,15 @@ for f in third_party/wavpack/src/*.c; do
     fi
 done
 
-echo "Compilando o app..."
+echo "Compiling the app..."
 printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     src={}; obj="$OUT/app/$(echo "$src" | tr / _).o"
     $ZIG c++ $COMMON_STR -Wall -Wextra -c "$src" -o "$obj"'
 
-echo "Recursos (manifest)..."
+echo "Resources (manifest)..."
 ( cd resources && "$ZIG" rc /fo "../$OUT/LYNX.res" LYNX.rc )
 
-echo "Linkando..."
+echo "Linking..."
 "$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT/LYNX.res" \
     -Wl,--subsystem,windows \
     -lole32 -loleaut32 -luuid -lwinmm -lws2_32 -lshlwapi -lversion -lwininet -limm32 -lcomdlg32 \

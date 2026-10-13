@@ -6,19 +6,19 @@
 
 namespace lynx
 {
-// Editor do EQ paramétrico de 7 bandas (como o Parametric EQ 2 do FL): curva de resposta com uma
-// alça por banda. Arrastar a alça muda frequência e ganho; a roda do mouse muda o Q; clique direito
-// escolhe o tipo e a inclinação; duplo clique zera o ganho.
+// 7-band parametric EQ editor (like FL's Parametric EQ 2): response curve with one
+// handle per band. Dragging a handle changes frequency and gain; the mouse wheel changes Q; right-click
+// picks the type and slope; double-click resets the gain.
 namespace ParametricEqWindows
 {
 void open (AudioEngine& engine, int track, int slot);
 void closeAll();
 } // namespace ParametricEqWindows
 
-// O editor sozinho (para o --snapshot).
+// The editor alone (for --snapshot).
 std::unique_ptr<juce::Component> makeParametricEqEditor (AudioEngine& engine, int track, int slot);
 
-// Desenha a curva do EQ (usado também na miniatura do painel do mixer).
+// Draws the EQ curve (also used in the mixer panel thumbnail).
 void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, const EffectParams& params, double sampleRate,
                             bool enabled, int highlightBand = -1);
 } // namespace lynx

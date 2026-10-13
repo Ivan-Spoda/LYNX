@@ -1,8 +1,8 @@
 #pragma once
 
-// Liga flush-to-zero/denormals-are-zero na thread enquanto o objeto existe. Caudas de reverb,
-// filtros e delays decaem para números denormais, que no x86 custam dezenas de vezes mais
-// por operação; zerá-los não muda nada audível.
+// Enables flush-to-zero/denormals-are-zero on the thread while the object exists. Reverb tails,
+// filters and delays decay into denormal numbers, which on x86 cost tens of times more
+// per operation; zeroing them changes nothing audible.
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
  #include <xmmintrin.h>
 #endif

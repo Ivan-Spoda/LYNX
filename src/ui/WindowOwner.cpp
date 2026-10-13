@@ -36,7 +36,7 @@ void keepAboveMainWindow (juce::Component& window)
     auto* owner = mainWindow().getComponent();
     if (owner == nullptr || owner == &window || window.getWindowHandle() == nullptr || owner->getWindowHandle() == nullptr)
         return;
-    // janela "possuída": o Windows a mantém acima da dona e a minimiza junto
+    // "owned" window: Windows keeps it above its owner and minimizes it along with it
     SetWindowLongPtrW ((HWND) window.getWindowHandle(), GWLP_HWNDPARENT, (LONG_PTR) owner->getWindowHandle());
    #else
     juce::ignoreUnused (window);

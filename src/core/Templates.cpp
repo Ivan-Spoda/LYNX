@@ -39,7 +39,7 @@ void steps (Pattern& p, int channel, std::initializer_list<int> list, float velo
 
 void notes (Pattern& p, int channel, std::initializer_list<std::array<int, 3>> list)
 {
-    // {step, duração em steps, tecla}
+    // {step, length in steps, key}
     for (const auto& [step, length, key] : list)
     {
         Note n;
@@ -54,7 +54,7 @@ void notes (Pattern& p, int channel, std::initializer_list<std::array<int, 3>> l
 
 std::vector<std::string> templateNames()
 {
-    return { "Vazio", "Batida básica", "Trap com 808", "House" };
+    return { "Empty", "Basic beat", "Trap with 808", "House" };
 }
 
 Song makeTemplate (int index)
@@ -73,7 +73,7 @@ Song makeTemplate (int index)
     s.patterns[0].notes.clear();
     auto& p = s.patterns[0];
 
-    if (index == 2) // trap: 140 BPM, hats rápidos, 808 com slide
+    if (index == 2) // trap: 140 BPM, fast hats, 808 with slide
     {
         s.bpm = 140.0;
         p.name = "Trap";
@@ -83,7 +83,7 @@ Song makeTemplate (int index)
         for (int i = 0; i < 32; i += 2)
             steps (p, 2, { i }, i % 4 == 0 ? 0.7f : 0.45f);
         steps (p, 2, { 13, 29 }, 0.5f);
-        s.channels[4] = synth ("808", "Baixo 808", 5, 0.85f);
+        s.channels[4] = synth ("808", "808 Bass", 5, 0.85f);
         notes (p, 4, { { { 0, 6, 36 } }, { { 10, 4, 36 } }, { { 16, 6, 39 } }, { { 26, 6, 34 } } });
         Note glide;
         glide.start = 28 * ticksPerStep;
@@ -94,16 +94,16 @@ Song makeTemplate (int index)
         p.notes.push_back (glide);
         s.swing = 0.0f;
     }
-    else // house: 124 BPM, 4 no chão, clap, hats no contratempo, baixo e acorde
+    else // house: 124 BPM, four on the floor, clap, off-beat hats, bass and chord
     {
         s.bpm = 124.0;
         p.name = "House";
         steps (p, 0, { 0, 4, 8, 12 }, 0.9f);
         steps (p, 1, { 4, 12 });
         steps (p, 2, { 2, 6, 10, 14 }, 0.6f);
-        s.channels[4] = synth ("Baixo", "Baixo Reese", 5);
+        s.channels[4] = synth ("Bass", "Reese Bass", 5);
         notes (p, 4, { { { 2, 2, 33 } }, { { 6, 2, 33 } }, { { 10, 2, 36 } }, { { 14, 2, 31 } } });
-        s.channels.push_back (synth ("Acorde", "Pluck", 6, 0.6f));
+        s.channels.push_back (synth ("Chord", "Pluck", 6, 0.6f));
         for (int key : { 57, 60, 64 })
             notes (p, 5, { { { 3, 1, key } }, { { 7, 1, key } }, { { 11, 1, key } } });
         s.swing = 0.15f;

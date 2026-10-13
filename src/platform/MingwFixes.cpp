@@ -1,6 +1,6 @@
-// Só entra no build cruzado com Zig/MinGW (scripts/build-windows-zig.sh).
-// O JUCE 8 usa __uuidof num ComSmartPtr; o MSVC resolve isso pelo tipo apontado,
-// mas o MinGW procura uma especialização de __mingw_uuidof para o próprio smart pointer.
+// Only part of the Zig/MinGW cross build (scripts/build-windows-zig.sh).
+// JUCE 8 uses __uuidof on a ComSmartPtr; MSVC resolves it via the pointee type,
+// but MinGW looks for a __mingw_uuidof specialization for the smart pointer itself.
 
 #if defined(__MINGW32__)
  #include <windows.h>

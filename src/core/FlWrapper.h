@@ -1,7 +1,7 @@
 #pragma once
 
-// Estado do "Fruity Wrapper" do FL (plugins VST2/VST3/CLAP de terceiros) dentro do .flp.
-// Formato descrito em docs/analise/REA_rodada5.md (comportamental, clean-room).
+// State of FL's "Fruity Wrapper" (third-party VST2/VST3/CLAP plugins) inside the .flp.
+// Format described in docs/analise/REA_rodada5.md (behavioral, clean-room).
 
 #include <cstdint>
 #include <vector>
@@ -10,11 +10,11 @@
 
 namespace lynx
 {
-// Lê o blob 0xD5 do wrapper (versões 5 a 12: u32 versão + registros {u32 id, u64 tamanho, dados}).
-// Falso se não é um formato conhecido.
+// Reads the wrapper's 0xD5 blob (versions 5 to 12: u32 version + records {u32 id, u64 size, data}).
+// False if the format is not a known one.
 bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out);
 
-// Estado VST3 que o FL guarda no registro 0x35 (u32 versão + registros: 3 componente, 2 controlador).
+// VST3 state FL stores in record 0x35 (u32 version + records: 3 component, 2 controller).
 bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::uint8_t>& component,
                        std::vector<std::uint8_t>& controller);
 } // namespace lynx

@@ -6,8 +6,8 @@
 
 namespace lynx
 {
-// Metrônomo: um clique por tempo, mais agudo no primeiro tempo
-// do compasso. Liga/desliga por Transport::metronome.
+// Metronome: one click per beat, higher-pitched on the first beat
+// of the bar. Toggled by Transport::metronome.
 class Metronome final : public juce::AudioProcessor
 {
 public:
@@ -43,7 +43,7 @@ private:
     double clickPhaseDelta = 0.0;
     int clickSamplesLeft = 0;
 
-    // cópia local da tabela de compassos do Transport (início, duração do compasso em ticks)
+    // local copy of the Transport's time-signature table (start, bar length in ticks)
     std::array<std::pair<std::int64_t, std::int64_t>, Transport::maxSignatures> signatures {};
     int signatureCount = 0;
     std::uint32_t signatureVersion = 0;

@@ -1,13 +1,13 @@
 #pragma once
 
-// Entrega objetos imutáveis da UI para a thread de áudio sem locks nem
-// alocação/liberação na thread de áudio.
+// Hands immutable objects from the UI to the audio thread without locks or
+// allocation/deallocation on the audio thread.
 //
-//  - UI:    publish(novo)   → coloca na caixa de entrada (substitui um ainda não lido)
-//           collectGarbage() → libera os objetos que o áudio devolveu
-//  - Áudio: acquire()       → pega o mais recente, devolve o anterior para a UI liberar
+//  - UI:    publish(new)    → puts it in the inbox (replaces one not yet read)
+//           collectGarbage() → frees the objects the audio thread returned
+//  - Audio: acquire()       → takes the most recent, returns the previous one for the UI to free
 //
-// Só uma thread de UI e uma thread de áudio podem usar a mesma instância.
+// Only one UI thread and one audio thread may use the same instance.
 
 #include <array>
 #include <atomic>
@@ -34,7 +34,7 @@ public:
     void publish (std::unique_ptr<const T> next)
     {
         collectGarbage();
-        delete incoming.exchange (next.release(), std::memory_order_acq_rel); // um não lido é simplesmente trocado
+        delete incoming.exchange (next.release(), std::memory_order_acq_rel); // an unread one is simply swapped
     }
 
     // UI
@@ -44,14 +44,14 @@ public:
             delete slot.exchange (nullptr, std::memory_order_acq_rel);
     }
 
-    // Áudio: retorna o snapshot atual (pode ser nullptr antes do primeiro publish).
+    // Audio: returns the current snapshot (may be nullptr before the first publish).
     const T* acquire() noexcept
     {
         if (incoming.load (std::memory_order_relaxed) == nullptr)
             return active;
 
-        // Precisa de uma vaga para devolver o anterior; sem vaga, continua com o atual
-        // e tenta de novo no próximo bloco.
+        // Needs a free slot to return the previous one; with no slot, keeps the current one
+        // and tries again on the next block.
         std::atomic<const T*>* freeSlot = nullptr;
 
         if (active != nullptr)
@@ -82,6 +82,6 @@ public:
 private:
     std::atomic<const T*> incoming { nullptr };
     std::array<std::atomic<const T*>, 8> retired {};
-    const T* active = nullptr; // só a thread de áudio toca
+    const T* active = nullptr; // only the audio thread touches it
 };
 } // namespace lynx

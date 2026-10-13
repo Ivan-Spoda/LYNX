@@ -11,9 +11,9 @@ namespace
 class ExportThread final : public juce::ThreadWithProgressWindow
 {
 public:
-    // onDone (na thread da UI): se vazio, mostra o resultado numa mensagem
+    // onDone (on the UI thread): if empty, shows the result in a message box
     ExportThread (std::unique_ptr<ExportJob> j, juce::File f, std::function<void (bool)> done = {},
-                  const juce::String& title = utf8 ("Exportando áudio..."))
+                  const juce::String& title = utf8 ("Exporting audio..."))
         : juce::ThreadWithProgressWindow (title, true, true),
           job (std::move (j)),
           file (std::move (f)),
@@ -34,18 +34,18 @@ public:
         if (onDone)
         {
             if (! ok && ! userPressedCancel)
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível renderizar"), error);
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not render"), error);
 
             onDone (ok);
         }
         else if (ok)
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Exportação concluída"),
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Export complete"),
                                                     file.getFullPathName() + "\n\n"
-                                                        + utf8 ("Pico: ") + juce::String (juce::Decibels::gainToDecibels (job->getPeak()), 1) + " dBFS");
+                                                        + utf8 ("Peak: ") + juce::String (juce::Decibels::gainToDecibels (job->getPeak()), 1) + " dBFS");
         else if (! userPressedCancel)
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível exportar"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not export"), error);
 
-        // o engine da exportação é desmontado na thread da UI (plugins pedem isso)
+        // the export engine is torn down on the UI thread (plugins require this)
         juce::MessageManager::callAsync ([this] { delete this; });
     }
 
@@ -57,18 +57,18 @@ private:
     bool ok = false;
 };
 
-// Stems: um arquivo por insert com som (como o "split mixer tracks" do FL). Cada render cria
-// o seu engine; os plugins nascem e morrem na thread da UI, então a thread de fundo pede isso a ela.
+// Stems: one file per insert that produces sound (like FL's "split mixer tracks"). Each render creates
+// its own engine; plugins are created and destroyed on the UI thread, so the background thread asks it to do that.
 class StemsThread final : public juce::ThreadWithProgressWindow
 {
 public:
     StemsThread (const AudioEngine& e, ExportSettings s, juce::File base)
-        : juce::ThreadWithProgressWindow (utf8 ("Exportando stems..."), true, true),
+        : juce::ThreadWithProgressWindow (utf8 ("Exporting stems..."), true, true),
           settings (s),
           baseFile (std::move (base)),
           song (e.getSong())
     {
-        // inserts que recebem canal ou envio
+        // inserts that receive a channel or a send
         for (int t = 1; t < (int) song.mixer.size(); ++t)
         {
             auto used = std::any_of (song.channels.begin(), song.channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; });
@@ -121,8 +121,8 @@ public:
     void threadComplete (bool cancelled) override
     {
         if (! cancelled)
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Stems exportados"),
-                                                    juce::String (written) + utf8 (" arquivo(s) em ") + baseFile.getParentDirectory().getFullPathName());
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Stems exported"),
+                                                    juce::String (written) + utf8 (" file(s) in ") + baseFile.getParentDirectory().getFullPathName());
 
         juce::MessageManager::callAsync ([this] { delete this; });
     }
@@ -147,25 +147,25 @@ public:
         formatBox.setSelectedItemIndex (lastFormat, juce::dontSendNotification);
         rateBox.addItemList ({ "44100 Hz", "48000 Hz", "88200 Hz", "96000 Hz" }, 1);
         rateBox.setSelectedItemIndex (lastRate, juce::dontSendNotification);
-        whatBox.addItem (utf8 ("Música inteira (Playlist)"), 1);
-        whatBox.addItem (utf8 ("Pattern atual"), 2);
+        whatBox.addItem (utf8 ("Full song (Playlist)"), 1);
+        whatBox.addItem (utf8 ("Current pattern"), 2);
         whatBox.setSelectedItemIndex (engine.getSong().mode == PlayMode::song && ! engine.getSong().playlist.empty() ? 0 : 1,
                                       juce::dontSendNotification);
-        tailBox.addItemList ({ utf8 ("Sem cauda"), utf8 ("Cauda de até 3 s"), utf8 ("Cauda de até 6 s"), utf8 ("Cauda de até 12 s") }, 1);
+        tailBox.addItemList ({ utf8 ("No tail"), utf8 ("Tail up to 3 s"), utf8 ("Tail up to 6 s"), utf8 ("Tail up to 12 s") }, 1);
         tailBox.setSelectedItemIndex (lastTail, juce::dontSendNotification);
 
         for (auto* l : { &formatLabel, &rateLabel, &whatLabel, &tailLabel })
             addAndMakeVisible (l);
 
-        formatLabel.setText ("Formato", juce::dontSendNotification);
-        rateLabel.setText ("Taxa", juce::dontSendNotification);
-        whatLabel.setText ("Exportar", juce::dontSendNotification);
-        tailLabel.setText (utf8 ("Final"), juce::dontSendNotification);
+        formatLabel.setText ("Format", juce::dontSendNotification);
+        rateLabel.setText ("Rate", juce::dontSendNotification);
+        whatLabel.setText ("Export", juce::dontSendNotification);
+        tailLabel.setText (utf8 ("Tail"), juce::dontSendNotification);
 
         for (auto* c : { &formatBox, &rateBox, &whatBox, &tailBox })
             addAndMakeVisible (c);
 
-        stemsToggle.setButtonText (utf8 ("Um arquivo por insert do mixer (stems)"));
+        stemsToggle.setButtonText (utf8 ("One file per mixer insert (stems)"));
         addAndMakeVisible (stemsToggle);
         addAndMakeVisible (exportButton);
         addAndMakeVisible (cancelButton);
@@ -227,7 +227,7 @@ private:
                       : suggestedFolder.isDirectory() ? suggestedFolder
                                                       : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
 
-        chooser = std::make_unique<juce::FileChooser> (utf8 ("Exportar áudio"), folder.getChildFile (suggestedName + extension),
+        chooser = std::make_unique<juce::FileChooser> (utf8 ("Export audio"), folder.getChildFile (suggestedName + extension),
                                                        "*" + extension);
         auto& engineRef = engine;
 
@@ -242,7 +242,7 @@ private:
                                       file = file.withFileExtension (extension);
 
                                   lastFolder = file.getParentDirectory();
-                                  engineRef.capturePluginStates(); // a cópia leva o estado atual dos plugins
+                                  engineRef.capturePluginStates(); // the copy carries the current plugin state
 
                                   if (stemsToggle.getToggleState())
                                   {
@@ -254,7 +254,7 @@ private:
                                   }
 
                                   auto job = std::make_unique<ExportJob> (engineRef.getSong(), s, file);
-                                  close(); // apaga este painel: nada de `this` depois daqui
+                                  close(); // deletes this panel: no `this` after this point
                                   (new ExportThread (std::move (job), file))->launchThread();
                               });
     }
@@ -264,11 +264,11 @@ private:
     juce::String suggestedName;
     juce::Label formatLabel, rateLabel, whatLabel, tailLabel;
     juce::ComboBox formatBox, rateBox, whatBox, tailBox;
-    juce::TextButton exportButton { "Exportar..." }, cancelButton { "Cancelar" };
+    juce::TextButton exportButton { "Export..." }, cancelButton { "Cancel" };
     juce::ToggleButton stemsToggle;
     std::unique_ptr<juce::FileChooser> chooser;
 
-    // lembra a última escolha enquanto o app está aberto
+    // remembers the last choice while the app is open
     static inline int lastFormat = 1, lastRate = 0, lastTail = 2;
     static inline juce::File lastFolder;
 };
@@ -292,7 +292,7 @@ void bounceInsertToAudio (AudioEngine& engine, int track)
     settings.sampleRate = engine.getTransport().sampleRate.load();
     settings.tailSeconds = 4.0;
 
-    // comprimento do clip: a música + a cauda, no andamento do fim
+    // clip length: the song + the tail, at the ending tempo
     std::int64_t musicTicks = 0;
     makeExportSong (song, true, 0, musicTicks);
     const auto length = musicTicks + (std::int64_t) (settings.tailSeconds * song.tempoAt ((double) musicTicks) * ppq / 60.0);
@@ -304,7 +304,7 @@ void bounceInsertToAudio (AudioEngine& engine, int track)
             return;
 
         engineRef->editSong ([&] (Song& s) { applyBounce (s, track, file.getFullPathName().toStdString(), length); });
-    }, utf8 ("Renderizando o insert para áudio...")))->launchThread();
+    }, utf8 ("Rendering insert to audio...")))->launchThread();
 }
 
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine)
@@ -316,7 +316,7 @@ void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, c
 {
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX"));
-    options.dialogTitle = utf8 ("Exportar áudio");
+    options.dialogTitle = utf8 ("Export audio");
     options.dialogBackgroundColour = juce::Colour (0xff2b3036);
     options.useNativeTitleBar = true;
     options.resizable = false;

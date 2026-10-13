@@ -20,14 +20,14 @@ ExportJob::ExportJob (const Song& song, const ExportSettings& s, const juce::Fil
       settings (s),
       output (file)
 {
-    // duração integrando a automação de tempo; a cauda no andamento do fim da música
+    // duration integrating tempo automation; the tail at the tempo of the song's end
     std::int64_t musicTicks = 0;
     makeExportSong (song, settings.wholeSong, 0, musicTicks);
     const auto ticksPerSecond = song.tempoAt ((double) musicTicks) * ppq / 60.0;
     auto copy = makeExportSong (song, settings.wholeSong, (std::int64_t) (settings.tailSeconds * ticksPerSecond), musicTicks);
     musicSeconds = copy.secondsForTicks (musicTicks);
 
-    // a taxa antes do setSong: instrumentos e plugins já nascem preparados nela
+    // rate before setSong: instruments and plugins are created already prepared for it
     engine->getTransport().sampleRate.store (settings.sampleRate);
     engine->setSong (std::move (copy));
 }
@@ -57,7 +57,7 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     if (stream == nullptr)
     {
-        error = utf8 ("não foi possível criar ") + output.getFullPathName();
+        error = utf8 ("could not create ") + output.getFullPathName();
         return false;
     }
 
@@ -66,11 +66,11 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     if (writer == nullptr)
     {
-        error = utf8 ("o formato não aceita estas configurações");
+        error = utf8 ("the format does not accept these settings");
         return false;
     }
 
-    stream.release(); // agora pertence ao writer
+    stream.release(); // now owned by the writer
 
     AudioEngine::RenderOptions render;
     render.seconds = musicSeconds;
@@ -79,14 +79,14 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
     render.progress = progress;
     render.tailSeconds = settings.tailSeconds;
     render.trimSamples = engine->getLatencySamples();
-    render.ditherBits = settings.format == ExportSettings::Format::wav16 ? 16 : 0; // OGG codifica em float
+    render.ditherBits = settings.format == ExportSettings::Format::wav16 ? 16 : 0; // OGG encodes in float
     peak = engine->renderOffline (render);
-    writer.reset(); // fecha o arquivo (o cabeçalho do WAV é finalizado aqui)
+    writer.reset(); // closes the file (the WAV header is finalized here)
 
     if (peak < 0.0f)
     {
         output.deleteFile();
-        error = "cancelado";
+        error = "cancelled";
         return false;
     }
 

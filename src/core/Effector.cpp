@@ -15,20 +15,20 @@ constexpr double maxRate = 192000.0;
 
 float clamp01 (float v) noexcept { return std::clamp (v, 0.0f, 1.0f); }
 
-// valores do Mod Rate (rótulos "1/8" … "8/1"), em tempos
+// Mod Rate values (labels "1/8" … "8/1"), in beats
 constexpr std::array<double, 9> rates { 0.125, 0.25, 0.375, 0.5, 0.75, 1.0, 2.0, 4.0, 8.0 };
 constexpr std::array<const char*, 9> rateNames { "1/8", "1/4", "3/8", "1/2", "3/4", "1/1", "2/1", "4/1", "8/1" };
 
 int rateIndex (float v) noexcept { return std::clamp ((int) (8.0f * v + 0.5f), 0, 8); }
 
-// quantidade de modulação: sinal·(2v − 1)²
+// modulation amount: sign·(2v − 1)²
 float modAmount (float v) noexcept
 {
     const auto m = 2.0f * v - 1.0f;
     return m < 0.0f ? -m * m : m * m;
 }
 
-// cascata de saturação do Distort (REA_rodada19 §1.5)
+// Distort saturation cascade (REA_rodada19 §1.5)
 double distortCurve (double s, double k) noexcept
 {
     s = s / (1.0 + k * std::abs (s));
@@ -43,7 +43,7 @@ struct Biquad
     double b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
     double z1[2] {}, z2[2] {};
 
-    // passa-faixa do cookbook com ganho de pico = Q (b0 = sen ω / 2)
+    // cookbook band-pass with peak gain = Q (b0 = sin ω / 2)
     void bandPass (double hz, double q, double fs) noexcept
     {
         const auto w = 2.0 * pi * std::clamp (hz, 10.0, 0.49 * fs) / fs;
@@ -129,7 +129,7 @@ public:
         const auto beats = rateBeats (p[modRate], p[tempoReduce]);
         const auto periodSeconds = beats * 60.0 / std::max (bpm, 20.0);
 
-        // LFO avaliado uma vez por bloco, com a fase presa à posição da música
+        // LFO evaluated once per block, with phase locked to the song position
         const auto phase = songBeats / beats - std::floor (songBeats / beats);
         float lfo = 0.0f;
         switch (std::clamp ((int) (2.0f * p[modShape] + 0.5f), 0, 2))
@@ -180,7 +180,7 @@ private:
         return wetSmooth;
     }
 
-    // 0 Distort: só a parte grave (polo (0,9Y + 0,1)⁴) passa pela cascata; o resto segue limpo
+    // 0 Distort: only the low part (pole (0.9Y + 0.1)⁴) goes through the cascade; the rest stays clean
     void distort (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         const auto d = std::clamp (0.95 * x + 0.05, 0.0, 1.0), k = 2048.0 * d * d;
@@ -199,7 +199,7 @@ private:
         }
     }
 
-    // 1 Lo-fi: segura 128X³ + 1 amostras; 65536/(2048Y² + 1) níveis
+    // 1 Lo-fi: holds 128X³ + 1 samples; 65536/(2048Y² + 1) levels
     void lofi (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         const auto holdSamples = (int) (128.0f * x * x * x) + 1;
@@ -229,7 +229,7 @@ private:
         return shortLine[(std::size_t) ch][i0] + f * (shortLine[(std::size_t) ch][i1] - shortLine[(std::size_t) ch][i0]);
     }
 
-    // 2 Flanger: atraso X² (+ LFO·ModX) de uma linha de 5 ms, realimentação −0,96·Y', seco + w·molhado
+    // 2 Flanger: delay X² (+ LFO·ModX) of a 5 ms line, feedback −0.96·Y', dry + w·wet
     void flanger (float* l, float* r, int n, float x, float lfoX, float y, float wet) noexcept
     {
         const auto position = clamp01 (x * x + lfoX);
@@ -243,14 +243,14 @@ private:
             {
                 auto& s = ch == 0 ? l[i] : r[i];
                 const auto delayed = readShort (ch, delay);
-                shortLine[(std::size_t) ch][shortWrite] = -(s + feedback * delayed); // entrada do atraso invertida
+                shortLine[(std::size_t) ch][shortWrite] = -(s + feedback * delayed); // inverted delay input
                 s += w * delayed;
             }
             shortWrite = (shortWrite + 1) % size;
         }
     }
 
-    // 3 Phaser: 6 passa-tudo de 1ª ordem por canal com realimentação 0,98·(0,6Y')^(1/3); seco + w·molhado
+    // 3 Phaser: 6 first-order all-passes per channel with feedback 0.98·(0.6Y')^(1/3); dry + w·wet
     void phaser (float* l, float* r, int n, float x, float lfoX, float y, float wet) noexcept
     {
         const auto target = (double) x * x;
@@ -279,8 +279,8 @@ private:
         }
     }
 
-    // 4 Filter: s = 2(0,8X + 0,1); s ≤ 1 passa-baixas (coef. s³), s > 1 passa-altas (coef. 0,5(s − 1)³).
-    // A cascata do FL (4 seções com realimentação) não foi tabelada: aqui 4 polos com realimentação.
+    // 4 Filter: s = 2(0.8X + 0.1); s ≤ 1 low-pass (coef. s³), s > 1 high-pass (coef. 0.5(s − 1)³).
+    // FL's cascade (4 sections with feedback) was not tabulated: here 4 poles with feedback.
     void filter (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         const auto s = 2.0 * (0.8 * x + 0.1);
@@ -295,7 +295,7 @@ private:
                 auto& smp = ch == 0 ? l[i] : r[i];
                 auto& st = ladder[(std::size_t) ch];
                 auto v = smp - 3.6 * res * st[3];
-                v = v / (1.0 + std::abs (v)); // saturação leve na realimentação
+                v = v / (1.0 + std::abs (v)); // light saturation in the feedback
                 for (auto& stage : st)
                 {
                     stage += c * (v - stage);
@@ -307,8 +307,8 @@ private:
         }
     }
 
-    // 5 Delay: tempo = período do Mod Rate (dividido por 2 até caber em 1,5 s), realimentação e nível X²,
-    // filtro do eco por Y (Y < 0,5 escurece, Y > 0,5 corta graves); seco + w·eco
+    // 5 Delay: time = Mod Rate period (halved until it fits in 1.5 s), feedback and level X²,
+    // echo filter by Y (Y < 0.5 darkens, Y > 0.5 cuts lows); dry + w·echo
     void echo (float* l, float* r, int n, float x, float y, float wet, double periodSeconds) noexcept
     {
         auto seconds = periodSeconds;
@@ -337,18 +337,18 @@ private:
         }
     }
 
-    // 6 Reverb: o seco fica com ganho 1 e o reverb de w·entrada é somado (REA_rodada19 §1.6).
-    // Decaimento 0,75X'³ e abafamento Y'² aproximados pelo reverb do LYNX.
+    // 6 Reverb: dry stays at gain 1 and the reverb of w·input is added (REA_rodada19 §1.6).
+    // Decay 0.75X'³ and damping Y'² approximated with the LYNX reverb.
     void reverbUnit (float* l, float* r, int n, float x, float y, float wet, double bpm) noexcept
     {
         EffectParams rp {};
         const auto& info = effectInfo (EffectKind::reverb);
         for (std::size_t i = 0; i < info.params.size(); ++i)
             rp[i] = info.params[i].defaultValue;
-        rp[0] = x * x * x;                 // sala
-        rp[1] = y * y;                     // abafamento
-        rp[3] = 0.225f * x * x * x + 0.5f; // nível do reverb
-        rp[4] = 0.0f;                      // só o molhado
+        rp[0] = x * x * x;                 // room
+        rp[1] = y * y;                     // damping
+        rp[3] = 0.225f * x * x * x + 0.5f; // reverb level
+        rp[4] = 0.0f;                      // wet only
         for (int start = 0; start < n; start += 256)
         {
             const auto count = std::min (256, n - start);
@@ -368,7 +368,7 @@ private:
         }
     }
 
-    // 7 Stereo: p = 2X − 1; atraso (Haas) de até 2 ms no lado oposto; Y·p vira diferença de nível
+    // 7 Stereo: p = 2X − 1; (Haas) delay of up to 2 ms on the opposite side; Y·p becomes a level difference
     void stereo (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         const auto pan = 2.0f * x - 1.0f;
@@ -382,7 +382,7 @@ private:
             shortLine[0][shortWrite] = l[i];
             shortLine[1][shortWrite] = r[i];
             auto outL = l[i], outR = r[i];
-            if (pan > 0.0f) // som para a direita: a esquerda atrasa
+            if (pan > 0.0f) // sound to the right: the left is delayed
                 outL = readShort (0, delay);
             else if (pan < 0.0f)
                 outR = readShort (1, delay);
@@ -392,8 +392,8 @@ private:
         }
     }
 
-    // 8 Trancer: por período, o ganho cai a Y² em 1 % do período e volta seguindo u⁴·(50(1 − X)² + 1);
-    // o Wet Mix não entra (REA_rodada19 §1.1)
+    // 8 Trancer: each period, gain drops to Y² within 1 % of the period and recovers following u⁴·(50(1 − X)² + 1);
+    // Wet Mix is not used (REA_rodada19 §1.1)
     void trance (float* l, float* r, int n, float x, float y, double phase, double beats, double bpm) noexcept
     {
         const auto k = 50.0 * (1.0 - x) * (1.0 - x) + 1.0;
@@ -420,7 +420,7 @@ private:
         }
     }
 
-    // 9 Stutter: grava 1,5 s desde o reset e repete o começo a cada período (crossfade de 192 amostras)
+    // 9 Stutter: records 1.5 s from reset and repeats the start every period (192-sample crossfade)
     void stutterUnit (float* l, float* r, int n, float wet, double periodSeconds) noexcept
     {
         const auto capacity = std::min (stutter[0].size() - 2, (std::size_t) (1.5 * fs));
@@ -447,7 +447,7 @@ private:
             {
                 auto& s = ch == 0 ? l[i] : r[i];
                 if (playPos >= recorded)
-                    continue; // ainda não gravado: passa a entrada
+                    continue; // not recorded yet: pass the input through
                 auto v = stutter[(std::size_t) ch][playPos];
                 if (fadeLeft > 0 && fadeFrom < recorded)
                 {
@@ -465,7 +465,7 @@ private:
         }
     }
 
-    // 10 Vowel: 8 passa-faixas Q = 12 em paralelo; X' percorre os conjuntos A→B→C→A; Y' escala 2^(1,86Y' − 1)
+    // 10 Vowel: 8 parallel band-passes with Q = 12; X' sweeps the sets A→B→C→A; Y' scales by 2^(1.86Y' − 1)
     void vowelUnit (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         static constexpr double sets[3][4] { { 250, 700, 2500, 3500 }, { 700, 1250, 2500, 3500 }, { 250, 2500, 2700, 3500 } };
@@ -495,7 +495,7 @@ private:
         }
     }
 
-    // 11 Ring: portador senoidal de 2^(8,7X' + 5) Hz; (1 − w)·x + w·x·sen
+    // 11 Ring: sine carrier at 2^(8.7X' + 5) Hz; (1 − w)·x + w·x·sin
     void ring (float* l, float* r, int n, float x, float wet) noexcept
     {
         const auto inc = std::pow (2.0, 8.7 * x + 5.0) / fs;
@@ -552,7 +552,7 @@ std::string formatParam (int param, float v, double bpm)
     switch (param)
     {
         case type: return typeName (typeOf (v));
-        case bypass: return v != 0.0f ? "ligado" : "desligado";
+        case bypass: return v != 0.0f ? "on" : "off";
         case modRate:
             std::snprintf (text, sizeof (text), "%s (%.0f ms)", rateNames[(std::size_t) rateIndex (v)],
                            rates[(std::size_t) rateIndex (v)] * 60000.0 / std::max (bpm, 20.0));
@@ -560,7 +560,7 @@ std::string formatParam (int param, float v, double bpm)
         case modX: case modY: std::snprintf (text, sizeof (text), "%+.0f%%", modAmount (v) * 100.0f); return text;
         case modShape:
         {
-            static constexpr const char* shapes[3] { "Seno", "Serra", "Quadrada" };
+            static constexpr const char* shapes[3] { "Sine", "Saw", "Square" };
             return shapes[std::clamp ((int) (2.0f * v + 0.5f), 0, 2)];
         }
         case inputLevel: std::snprintf (text, sizeof (text), "%.1f dB", 40.0 * std::log10 (std::max (1e-4f, v))); return text;

@@ -4,14 +4,14 @@
 
 namespace lynx
 {
-// Janela "Exportar áudio": formato, taxa e o que exportar; depois pergunta o arquivo e
-// renderiza numa thread de fundo com barra de progresso. `suggestedName` = nome sem extensão.
+// "Export audio" window: format, sample rate and what to export; then asks for the file and
+// renders on a background thread with a progress bar. `suggestedName` = name without extension.
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName);
 
-// "Renderizar para áudio" (congelar): o insert vira um clip de áudio num insert novo com o mesmo
-// roteamento, e o original é mutado. Roda numa thread de fundo com progresso.
+// "Render to audio" (freeze): the insert becomes an audio clip on a new insert with the same
+// routing, and the original is muted. Runs on a background thread with progress.
 void bounceInsertToAudio (AudioEngine& engine, int track);
 
-// Só o painel (para o modo --snapshot).
+// Panel only (for --snapshot mode).
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine);
 } // namespace lynx

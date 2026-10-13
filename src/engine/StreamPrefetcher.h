@@ -8,16 +8,16 @@
 
 namespace lynx
 {
-// Thread que lê do disco, antes da hora, o trecho dos samples mapeados (os longos, ver
-// SampleLibrary) que vai tocar nos próximos segundos. Assim a thread de áudio quase nunca
-// espera o disco. Os clips vêm da UI (update) e a posição do transporte.
+// Thread that reads ahead from disk the part of mapped samples (the long ones, see
+// SampleLibrary) that will play in the next few seconds, so the audio thread almost never
+// waits for the disk. Clips come from the UI (update), plus the transport position.
 class StreamPrefetcher final : private juce::Thread
 {
 public:
     explicit StreamPrefetcher (const Transport& transport);
     ~StreamPrefetcher() override;
 
-    // Thread da UI: clips de áudio da música atual que usam samples mapeados.
+    // UI thread: audio clips of the current song that use mapped samples.
     void update (const Song& song, SampleLibrary& samples);
 
     static constexpr double lookaheadSeconds = 4.0;
@@ -26,8 +26,8 @@ private:
     struct Entry
     {
         std::shared_ptr<const SampleData> sample;
-        double start = 0.0, end = 0.0; // ticks na música
-        double offsetSeconds = 0.0;    // de onde o sample começa a tocar
+        double start = 0.0, end = 0.0; // ticks in the song
+        double offsetSeconds = 0.0;    // where in the sample playback starts
     };
 
     void run() override;

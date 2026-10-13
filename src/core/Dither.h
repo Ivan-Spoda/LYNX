@@ -1,8 +1,8 @@
 #pragma once
 
-// Dither para exportar em menos bits: ruído TPDF de ±1 LSB com noise shaping de 2ª ordem
-// (empurra o ruído de quantização para os agudos), como o export em 16 bits do FL
-// (docs/analise/REA_rodada2.md §5). Quantiza no lugar; o writer só repete a mesma conta.
+// Dither for exporting at lower bit depths: ±1 LSB TPDF noise with 2nd-order noise shaping
+// (pushes quantization noise into the highs), like FL's 16-bit export
+// (docs/analise/REA_rodada2.md §5). Quantizes in place; the writer just repeats the same math.
 
 #include <cmath>
 #include <cstdint>
@@ -32,7 +32,7 @@ public:
     }
 
 private:
-    float random() noexcept // 0..1, xorshift (determinístico)
+    float random() noexcept // 0..1, xorshift (deterministic)
     {
         state ^= state << 13;
         state ^= state >> 17;

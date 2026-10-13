@@ -1,7 +1,7 @@
 #pragma once
 
-// Descompressor DEFLATE/zlib (RFC 1950/1951) pequeno, para estados de plugins do FL gravados com
-// zlib (Sytrus, Harmor). Só leitura; sem dependências.
+// Small DEFLATE/zlib (RFC 1950/1951) decompressor, for FL plugin states saved with
+// zlib (Sytrus, Harmor). Read-only; no dependencies.
 
 #include <cstdint>
 #include <optional>
@@ -9,8 +9,8 @@
 
 namespace lynx
 {
-// `data` começa no cabeçalho zlib (78 xx) ou, com `raw`, direto no fluxo DEFLATE. `maxSize` limita a
-// saída (proteção contra blobs corrompidos). Nada se o fluxo for inválido.
+// `data` starts at the zlib header (78 xx) or, with `raw`, directly at the DEFLATE stream. `maxSize` caps the
+// output (protection against corrupted blobs). Nothing if the stream is invalid.
 std::optional<std::vector<std::uint8_t>> inflateZlib (const std::uint8_t* data, std::size_t size, bool raw = false,
                                                       std::size_t maxSize = 64u << 20);
 } // namespace lynx

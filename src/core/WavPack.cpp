@@ -106,7 +106,7 @@ bool decodeWavPack (const std::uint8_t* data, std::size_t size, DecodedAudio& ou
     }
 
     out.channels.assign ((std::size_t) channels, std::vector<float> ((std::size_t) total));
-    const auto scale = isFloat ? 1.0f : 1.0f / (float) (1u << (bits - 1)); // inteiros alinhados à direita
+    const auto scale = isFloat ? 1.0f : 1.0f / (float) (1u << (bits - 1)); // right-aligned integers
     std::vector<std::int32_t> buffer (4096 * (std::size_t) channels);
     std::int64_t done = 0;
     while (done < total)

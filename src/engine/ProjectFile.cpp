@@ -9,7 +9,7 @@ namespace lynx::ProjectFile
 {
 namespace
 {
-// envelopes de corte/afinação: [quantidade, ataque, hold, decaimento, sustentação, release]; só os ligados
+// cutoff/pitch envelopes: [amount, attack, hold, decay, sustain, release]; only the active ones
 void writeEnvelopes (juce::DynamicObject& o, const ModEnvelope& filter, const ModEnvelope& pitch)
 {
     for (auto [name, env] : { std::pair { "filterEnv", &filter }, { "pitchEnv", &pitch } })
@@ -28,7 +28,7 @@ void readEnvelopes (const juce::var& o, ModEnvelope& filter, ModEnvelope& pitch)
         }
 }
 
-// LFOs do canal: só os ligados, [alvo, quantidade, período, sincronizado, forma, atraso, fade-in]
+// channel LFOs: only the active ones, [target, amount, period, synced, shape, delay, fade-in]
 void writeLfos (juce::DynamicObject& o, const std::array<ChannelLfo, lfoTargets>& lfo)
 {
     juce::Array<juce::var> list;
@@ -152,7 +152,7 @@ juce::var effectToVar (const EffectSlot& slot)
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
 
-    if (slot.kind == EffectKind::parallel) // ramos do contêiner, cada um com a sua cadeia
+    if (slot.kind == EffectKind::parallel) // container branches, each with its own chain
     {
         juce::Array<juce::var> branches;
         for (const auto& b : slot.branches)
@@ -176,8 +176,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     if (! kind)
         return std::nullopt;
 
-    // parte dos padrões do efeito: parâmetros que não estão no arquivo (efeito ganhou parâmetro
-    // depois) ficam no padrão em vez de 0
+    // start from the effect's defaults: parameters missing from the file (parameter added to the
+    // effect later) stay at their default instead of 0
     auto slot = *kind == EffectKind::plugin ? EffectSlot {} : makeEffectSlot (*kind);
     slot.kind = *kind;
     slot.enabled = (bool) e.getProperty ("on", true);
@@ -198,7 +198,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
             if (auto* chain = b["chain"].getArray())
                 for (const auto& child : *chain)
                     if (auto c = effectFromVar (child))
-                        branch.chain.push_back (std::move (*c)); // contêineres podem ser aninhados
+                        branch.chain.push_back (std::move (*c)); // containers can be nested
             slot.branches.push_back (std::move (branch));
         }
     return slot;
@@ -211,7 +211,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
         if (id == effectId (k))
             return k;
 
-    return std::nullopt; // efeito de uma versão futura: ignorado
+    return std::nullopt; // effect from a future version: ignored
 }
 
 const char* targetKindName (AutomationTargetKind k)
@@ -245,14 +245,14 @@ juce::var clipsToVar (const std::vector<Clip>& list)
 {
     juce::Array<juce::var> clips;
 
-    // [pattern, trilha, início, duração, offset, tipo (0 pattern, 1 áudio, 2 automação), canal ou automação]
+    // [pattern, track, start, length, offset, kind (0 pattern, 1 audio, 2 automation), channel or automation]
     for (const auto& c : list)
     {
         juce::Array<juce::var> clip { c.pattern, c.track, (juce::int64) c.start, (juce::int64) c.length,
                                       (juce::int64) c.offset, (int) c.kind,
                                       c.kind == ClipKind::automation ? c.automation : c.channel };
 
-        // [.., fade-in, fade-out, ganho] só quando não são o padrão
+        // [.., fade-in, fade-out, gain] only when not default
         if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f)
         {
             clip.add ((juce::int64) c.fadeIn);
@@ -266,7 +266,7 @@ juce::var clipsToVar (const std::vector<Clip>& list)
     return clips;
 }
 
-// Precisa de canais, patterns e automações já lidos para validar os índices.
+// Needs channels, patterns and automations already loaded to validate the indices.
 std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
 {
     std::vector<Clip> out;
@@ -299,7 +299,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
                 if (clip.automation >= 0 && clip.automation < (int) song.automations.size() && clip.length > 0)
                     out.push_back (clip);
             }
-            else if (c.size() >= 7 && (int) c[5] == 1) // [.., tipo, canal]; arquivos antigos têm só 5 campos
+            else if (c.size() >= 7 && (int) c[5] == 1) // [.., kind, channel]; old files have only 5 fields
             {
                 clip.kind = ClipKind::audio;
                 clip.channel = (int) c[6];
@@ -344,7 +344,7 @@ juce::String toJson (const Song& song)
         if (! c.controllerState.empty())
             o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
 
-        if (! c.zones.empty()) // [arquivo, raiz, tecla mín., máx., velocity mín., máx., afinação, ganho]
+        if (! c.zones.empty()) // [file, root, min key, max key, min velocity, max velocity, tune, gain]
         {
             juce::Array<juce::var> zones;
             for (const auto& z : c.zones)
@@ -472,7 +472,7 @@ juce::String toJson (const Song& song)
             juce::Array<juce::var> note { (juce::int64) n.start, (juce::int64) n.length, n.channel, n.key,
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
-            // [.., pan, afinação fina, mutada] só quando não são o padrão
+            // [.., pan, fine pitch, muted] only when not default
             if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
@@ -555,7 +555,7 @@ juce::String toJson (const Song& song)
             auto o = std::make_unique<juce::DynamicObject>();
             o->setProperty ("name", str (a.name));
 
-            if ((int) i != song.currentArrangement) // o atual está em "playlist"
+            if ((int) i != song.currentArrangement) // the current one is in "playlist"
             {
                 o->setProperty ("clips", clipsToVar (a.clips));
 
@@ -563,7 +563,7 @@ juce::String toJson (const Song& song)
                     o->setProperty ("loop", juce::Array<juce::var> { (juce::int64) a.loopStart, (juce::int64) a.loopEnd });
             }
 
-            // marcadores: [tick, nome, numerador, denominador] (numerador 0 = marcador comum)
+            // markers: [tick, name, numerator, denominator] (numerator 0 = plain marker)
             if (! a.markers.empty())
             {
                 juce::Array<juce::var> markers;
@@ -600,7 +600,7 @@ juce::String toJson (const Song& song)
             o->setProperty ("invertPhase", true);
         if (t.swapChannels)
             o->setProperty ("swap", true);
-        if (! (t.eq == TrackEq {})) // [ganhos dB, frequências Hz, larguras 0..1] das 3 bandas
+        if (! (t.eq == TrackEq {})) // [gains dB, frequencies Hz, widths 0..1] of the 3 bands
             o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
                                                            t.eq.width[0], t.eq.width[1], t.eq.width[2] });
 
@@ -640,20 +640,20 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if (parsed.failed())
     {
-        error = utf8 ("JSON inválido: ") + parsed.getErrorMessage();
+        error = utf8 ("invalid JSON: ") + parsed.getErrorMessage();
         return std::nullopt;
     }
 
-    // "daw-project" = projetos salvos antes do projeto se chamar LYNX
+    // "daw-project" = projects saved before the project was named LYNX
     if (root["format"].toString() != "lynx-project" && root["format"].toString() != "daw-project")
     {
-        error = utf8 ("não é um projeto desta DAW");
+        error = utf8 ("not a project from this DAW");
         return std::nullopt;
     }
 
     if ((int) root["version"] > currentVersion)
     {
-        error = utf8 ("projeto salvo por uma versão mais nova do LYNX");
+        error = utf8 ("project saved by a newer version of LYNX");
         return std::nullopt;
     }
 
@@ -726,9 +726,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         {
                             auto& osc = def.synth.osc[(std::size_t) i];
                             osc = { (Waveform) juce::jlimit (0, 5, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
-                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor com volume acima de 0 dB
+                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor with volume above 0 dB
 
-                            if (o.size() >= 6) // semitons e pan (desde o import do 3x Osc)
+                            if (o.size() >= 6) // semitones and pan (since the 3x Osc import)
                             {
                                 osc.semitones = juce::jlimit (-11, 11, (int) o[4]);
                                 osc.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) o[5]);
@@ -989,10 +989,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             song.mixer.push_back (std::move (track));
         }
 
-    if (song.mixer.empty()) // projetos de antes do mixer
+    if (song.mixer.empty()) // projects from before the mixer existed
         song.mixer = Song::defaultMixer();
 
-    // envios para trilhas que não existem são descartados
+    // sends to tracks that don't exist are discarded
     for (auto& t : song.mixer)
         t.sends.erase (std::remove_if (t.sends.begin(), t.sends.end(),
                                        [n = (int) song.mixer.size()] (const MixerSend& s) { return s.target <= 0 || s.target >= n; }),
@@ -1004,12 +1004,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
 bool save (const Song& song, const juce::File& file, juce::String& error)
 {
-    // Grava num temporário e troca, para um erro no meio não destruir o projeto anterior.
+    // Write to a temp file and swap, so a mid-write error doesn't destroy the previous project.
     juce::TemporaryFile temp (file);
 
     if (! temp.getFile().replaceWithText (toJson (song)) || ! temp.overwriteTargetFileWithTemporary())
     {
-        error = utf8 ("não foi possível gravar ") + file.getFullPathName();
+        error = utf8 ("could not write ") + file.getFullPathName();
         return false;
     }
 
@@ -1020,7 +1020,7 @@ std::optional<Song> load (const juce::File& file, juce::String& error)
 {
     if (! file.existsAsFile())
     {
-        error = utf8 ("arquivo não encontrado");
+        error = utf8 ("file not found");
         return std::nullopt;
     }
 

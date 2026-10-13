@@ -9,8 +9,8 @@
 
 namespace lynx
 {
-// Nó do grafo que toca o Channel Rack: pega o snapshot mais recente da música
-// e renderiza os instrumentos internos com o sequenciador.
+// Graph node that plays the Channel Rack: takes the latest song snapshot
+// and renders the built-in instruments with the sequencer.
 class ChannelRackProcessor final : public juce::AudioProcessor
 {
 public:
@@ -39,7 +39,7 @@ public:
     void getStateInformation (juce::MemoryBlock&) override {}
     void setStateInformation (const void*, int) override {}
 
-    // Medidores (para a UI); o export desliga para não gastar CPU à toa.
+    // Meters (for the UI); export turns them off to avoid wasting CPU.
     void setMetering (bool on) noexcept { metering.store (on); }
 
 private:
@@ -50,7 +50,7 @@ private:
     LiveEventQueue& midiLive;
     MeterBank& meters;
     RackRenderer renderer;
-    juce::AudioBuffer<float> scratch; // para saída mono
+    juce::AudioBuffer<float> scratch; // for mono output
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackProcessor)
 };

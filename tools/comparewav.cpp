@@ -1,7 +1,7 @@
-// comparewav: compara dois WAVs (ex.: render do FL x render do LYNX do mesmo projeto).
-// Uso: comparewav referencia.wav teste.wav
-// Mostra o nível (RMS e pico), o espectro médio em bandas de oitava (diferença em dB), o brilho
-// (centroide espectral) e a correlação dos envelopes de volume (10 ms) depois de alinhar o começo.
+// comparewav: compares two WAVs (e.g. FL render vs LYNX render of the same project).
+// Usage: comparewav reference.wav test.wav
+// Shows the level (RMS and peak), the average spectrum in octave bands (difference in dB), the brightness
+// (spectral centroid) and the correlation of the volume envelopes (10 ms) after aligning the start.
 
 #include <algorithm>
 #include <cmath>
@@ -70,7 +70,7 @@ void fft (std::vector<std::complex<double>>& a)
     }
 }
 
-// espectro médio de potência (janelas de 4096 com Hann)
+// average power spectrum (4096-sample Hann windows)
 std::vector<double> spectrum (const Signal& x)
 {
     constexpr std::size_t n = 4096;
@@ -120,7 +120,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "uso: comparewav referencia.wav teste.wav\n");
+        std::fprintf (stderr, "usage: comparewav reference.wav test.wav\n");
         return 2;
     }
 
@@ -129,19 +129,19 @@ int main (int argc, char** argv)
 
     if (a == nullptr || b == nullptr)
     {
-        std::fprintf (stderr, "não consegui ler os dois WAVs (PCM 16/24/32 ou float)\n");
+        std::fprintf (stderr, "could not read both WAVs (PCM 16/24/32 or float)\n");
         return 1;
     }
 
     const auto x = mono (*a), y = mono (*b);
-    std::printf ("nível RMS: %.1f dB x %.1f dB (diferença %+.1f)\n", rmsDb (x), rmsDb (y), rmsDb (y) - rmsDb (x));
-    std::printf ("pico: %.1f dB x %.1f dB\n", peakDb (x), peakDb (y));
+    std::printf ("RMS level: %.1f dB vs %.1f dB (difference %+.1f)\n", rmsDb (x), rmsDb (y), rmsDb (y) - rmsDb (x));
+    std::printf ("peak: %.1f dB vs %.1f dB\n", peakDb (x), peakDb (y));
 
-    // bandas de oitava a partir de 31 Hz
+    // octave bands starting at 31 Hz
     const auto sx = spectrum (x), sy = spectrum (y);
     const auto binHz = a->sampleRate / 4096.0;
     double centroidX = 0.0, centroidY = 0.0, sumX = 0.0, sumY = 0.0;
-    std::printf ("oitavas (dB teste − referência):");
+    std::printf ("octaves (dB test − reference):");
 
     for (double lo = 31.25; lo < 16000.0; lo *= 2.0)
     {
@@ -162,9 +162,9 @@ int main (int argc, char** argv)
         sumY += sy[k];
     }
 
-    std::printf ("\nbrilho (centroide): %.0f Hz x %.0f Hz\n", centroidX / std::max (1e-20, sumX), centroidY / std::max (1e-20, sumY));
+    std::printf ("\nbrightness (centroid): %.0f Hz vs %.0f Hz\n", centroidX / std::max (1e-20, sumX), centroidY / std::max (1e-20, sumY));
 
-    // envelopes alinhados pelo primeiro som
+    // envelopes aligned by the first sound
     const auto ex = envelope (x, a->sampleRate, onset (x)), ey = envelope (y, b->sampleRate, onset (y));
     const auto n = std::min (ex.size(), ey.size());
     double mx = 0.0, my = 0.0;
@@ -182,7 +182,7 @@ int main (int argc, char** argv)
         vx += (ex[i] - mx) * (ex[i] - mx);
         vy += (ey[i] - my) * (ey[i] - my);
     }
-    std::printf ("envelope: correlação %.2f em %.1f s; início %.1f ms x %.1f ms\n", cov / std::sqrt (std::max (1e-20, vx * vy)),
+    std::printf ("envelope: correlation %.2f over %.1f s; onset %.1f ms vs %.1f ms\n", cov / std::sqrt (std::max (1e-20, vx * vy)),
                  (double) n * 0.01, onset (x) * 1000.0 / a->sampleRate, onset (y) * 1000.0 / b->sampleRate);
     return 0;
 }

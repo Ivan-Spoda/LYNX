@@ -1,6 +1,6 @@
 #pragma once
 
-// Detecção de ataques para fatiar loops (como o Slicex/Fruity Slicer do FL).
+// Transient detection for slicing loops (like FL's Slicex/Fruity Slicer).
 
 #include <vector>
 
@@ -8,7 +8,7 @@
 
 namespace lynx
 {
-// Inícios das fatias, em frações do sample (o primeiro é sempre 0). `sensitivity` 0..1:
-// mais alto = mais fatias. No máximo `maxSlices`.
+// Slice starts, as fractions of the sample (the first is always 0). `sensitivity` 0..1:
+// higher = more slices. At most `maxSlices`.
 std::vector<float> detectSlices (const SampleData& sample, float sensitivity = 0.5f, int maxSlices = 64);
 } // namespace lynx

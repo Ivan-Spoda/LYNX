@@ -19,7 +19,7 @@ struct Reader
     T read() noexcept
     {
         T v {};
-        std::memcpy (&v, data.data() + pos, sizeof (T)); // little-endian, como o x86 que gravou
+        std::memcpy (&v, data.data() + pos, sizeof (T)); // little-endian, like the x86 that wrote it
         pos += sizeof (T);
         return v;
     }
@@ -33,7 +33,7 @@ std::uint32_t u32At (const std::vector<std::uint8_t>& d, std::size_t offset)
     return v;
 }
 
-// texto sem terminador: UTF-8 a partir da versão 9; antes, ANSI (Windows-1252 ~ Latin-1 nos ASCII)
+// unterminated text: UTF-8 from version 9 on; before that, ANSI (Windows-1252 ~ Latin-1 in ASCII)
 std::string text (const std::uint8_t* p, std::size_t n, bool utf8)
 {
     std::string s;
@@ -44,7 +44,7 @@ std::string text (const std::uint8_t* p, std::size_t n, bool utf8)
 
         if (utf8 || c < 0x80)
             s += (char) c;
-        else // Latin-1 -> UTF-8 (aproxima o 1252 fora de 0x80..0x9F)
+        else // Latin-1 -> UTF-8 (approximates 1252 outside 0x80..0x9F)
         {
             s += (char) (0xC0 | (c >> 6));
             s += (char) (0x80 | (c & 0x3F));
@@ -54,7 +54,7 @@ std::string text (const std::uint8_t* p, std::size_t n, bool utf8)
     return s;
 }
 
-// percorre {u32 id, u64 tamanho, dados}; para em registro truncado
+// walks {u32 id, u64 size, data}; stops at a truncated record
 template <typename Fn>
 void forEachRecord (Reader& r, Fn&& fn)
 {
@@ -103,14 +103,14 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
             case 0x36: out.name = text (p, n, utf8); break;
             case 0x37: out.path = text (p, n, utf8); break;
             case 0x35: out.state.assign (p, p + n); break;
-            case 0x01: // portas MIDI de entrada e saída (REA_rodada16 §1.2)
+            case 0x01: // MIDI input and output ports (REA_rodada16 §1.2)
                 if (n >= 8)
                 {
                     std::memcpy (&out.midiInPort, p, 4);
                     std::memcpy (&out.midiOutPort, p + 4, 4);
                 }
                 break;
-            default: break; // opções do wrapper, pinos: o LYNX não precisa
+            default: break; // wrapper options, pins: LYNX does not need them
         }
     });
 
@@ -122,8 +122,8 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
         case 8: out.format = ForeignPlugin::Format::vst3; break;
         case 11:
         case 12: out.format = ForeignPlugin::Format::clap; break;
-        case 0xFFFFFFFFu: return false; // sem o registro de tipo não dá para achar o plugin
-        default: out.format = ForeignPlugin::Format::other; break; // DirectX, AU, FL nativo
+        case 0xFFFFFFFFu: return false; // without the type record the plugin cannot be found
+        default: out.format = ForeignPlugin::Format::other; break; // DirectX, AU, native FL
     }
 
     return true;

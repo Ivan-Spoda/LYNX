@@ -22,7 +22,7 @@ std::shared_ptr<SampleData> timeStretch (const SampleData& in, double ratio)
 
     ratio = std::clamp (ratio, 0.05, 20.0);
 
-    // janela de ~46 ms, 50% de sobreposição; busca de ±12 ms
+    // ~46 ms window, 50% overlap; ±12 ms search
     const auto window = (long) std::max (256.0, std::pow (2.0, std::round (std::log2 (in.sampleRate * 0.046))));
     const auto synthesisHop = window / 2;
     const auto analysisHop = (double) synthesisHop / ratio;
@@ -41,7 +41,7 @@ std::shared_ptr<SampleData> timeStretch (const SampleData& in, double ratio)
     const auto* r = in.rightData();
     auto mono = [&] (long i) { return i < 0 || i >= frames ? 0.0f : (stereo ? 0.5f * (l[i] + r[i]) : l[i]); };
 
-    long previous = 0; // onde a janela anterior começou na entrada
+    long previous = 0; // where the previous window started in the input
 
     for (long k = 0; k * synthesisHop < outFrames; ++k)
     {
@@ -50,8 +50,8 @@ std::shared_ptr<SampleData> timeStretch (const SampleData& in, double ratio)
 
         if (k > 0)
         {
-            // procura, perto da posição nominal, o trecho mais parecido com a continuação
-            // natural da janela anterior (previous + synthesisHop): evita cancelamento de fase
+            // searches, near the nominal position, for the segment most similar to the natural
+            // continuation of the previous window (previous + synthesisHop): avoids phase cancellation
             const auto natural = previous + synthesisHop;
             double bestScore = -1e300;
 

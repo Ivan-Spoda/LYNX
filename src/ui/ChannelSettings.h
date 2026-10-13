@@ -4,15 +4,15 @@
 
 namespace lynx
 {
-// Janela de ajustes do sampler de um canal (afinação, ataque, release, ao contrário,
-// "cut itself"), como o Channel settings do FL. Uma janela por canal.
+// Sampler settings window for a channel (pitch, attack, release, reverse,
+// "cut itself"), like FL's Channel settings. One window per channel.
 void openChannelSettings (AudioEngine& engine, int channel);
 void closeChannelSettings();
 
-// Janela de modulação do canal (envelopes de corte/afinação e LFOs), do synth ou do sampler.
+// Channel modulation window (cutoff/pitch envelopes and LFOs), for the synth or the sampler.
 void openChannelModulation (AudioEngine& engine, int channel);
 
-// Só o conteúdo da janela (para o modo --snapshot).
+// Window content only (for --snapshot mode).
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel);
 std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel);
 } // namespace lynx

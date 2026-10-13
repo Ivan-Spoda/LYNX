@@ -12,7 +12,7 @@ std::int64_t patternPositionForTick (const Song& song, double tick, std::int64_t
     if (song.mode == PlayMode::song)
     {
         const auto songLength = std::max<std::int64_t> (1, song.songLength());
-        const auto inSong = position % songLength; // a música toca em loop
+        const auto inSong = position % songLength; // the song plays in a loop
 
         for (const auto& c : song.playlist)
             if (c.kind == ClipKind::pattern && c.pattern == song.currentPattern && inSong >= c.start && inSong < c.end())
@@ -38,7 +38,7 @@ void NoteRecorder::add (const Song& song, const RecordedEvent& e)
 
     if (e.on)
     {
-        // nota repetida sem "off" no meio: fecha a anterior
+        // repeated note without an "off" in between: close the previous one
         if (auto it = held.find (id); it != held.end())
             finish (song, e.channel, e.key, it->second, e.tick);
 

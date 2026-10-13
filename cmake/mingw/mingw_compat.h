@@ -1,6 +1,6 @@
 #pragma once
-// Declarações que o JUCE 8 usa e os headers MinGW-w64 (Zig) não trazem.
-// Usado só no build cruzado com Zig; o MSVC tem tudo no Windows SDK.
+// Declarations JUCE 8 uses that the MinGW-w64 (Zig) headers lack.
+// Only used in the Zig cross build; MSVC has all of this in the Windows SDK.
 
 #ifdef __cplusplus
 // UIAutomationCore.h (Windows SDK)

@@ -111,7 +111,7 @@ Draggable handles, shelves, 12–48 dB/oct cuts, band-pass and notch, with the r
 
 </td>
 <td width="50%" valign="top">
-<img src="docs/img/automacao.png" alt="Automation">
+<img src="docs/img/automation.png" alt="Automation">
 
 ### Automation
 Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with points and curves; MIDI controllers can be linked to any parameter.
@@ -190,7 +190,7 @@ LYNX.exe --showcase out.lynx [pattern]         generate the demo project used in
 LYNX.exe --plugintest plugin.vst3 rep.txt      test a VST3 or CLAP plugin
 LYNX.exe --sandboxtest plugin.vst3 rep.txt     test a plugin in a separate process (including a hung one)
 LYNX.exe --scantest folder rep.txt             scan a folder for plugins (separate processes)
-LYNX.exe --dispositivos rep.txt                list audio drivers and outputs
+LYNX.exe --devices rep.txt                     list audio drivers and outputs
 ```
 
 ## Shortcuts

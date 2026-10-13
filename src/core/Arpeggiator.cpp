@@ -23,7 +23,7 @@ void Arpeggiator::hold (int key, float velocity) noexcept
     if (heldCount == maxHeld)
         return;
 
-    // mantém ordenado por altura
+    // keep sorted by pitch
     auto i = heldCount++;
     while (i > 0 && heldKeys[(std::size_t) i - 1] > key)
     {
@@ -54,7 +54,7 @@ void Arpeggiator::release (int key) noexcept
 
 int Arpeggiator::nextIndex (const ArpSettings& s) noexcept
 {
-    // sequência: as notas seguradas, repetidas uma oitava acima por `range` oitavas
+    // sequence: the held notes, repeated an octave higher over `range` octaves
     const auto octaves = std::clamp (s.range, 1, 4);
     const auto length = heldCount * octaves;
 
@@ -65,23 +65,23 @@ int Arpeggiator::nextIndex (const ArpSettings& s) noexcept
 
     switch (s.direction)
     {
-        case 2: // desce
+        case 2: // down
             index = length - 1 - step % length;
             break;
-        case 3: // sobe e desce (sem repetir as pontas)
+        case 3: // up and down (without repeating the ends)
         {
             const auto cycle = std::max (1, 2 * length - 2);
             const auto p = step % cycle;
             index = p < length ? p : cycle - p;
             break;
         }
-        case 4: // aleatório
+        case 4: // random
             random ^= random << 13;
             random ^= random >> 17;
             random ^= random << 5;
             index = (int) (random % (std::uint32_t) length);
             break;
-        default: // sobe
+        default: // up
             index = step % length;
             break;
     }
@@ -108,7 +108,7 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
     const auto endTick = startTick + n * tps;
     auto nextInput = 0;
 
-    // pontos de decisão: soltar a nota do gate e as fronteiras de step, intercalados com a entrada
+    // decision points: releasing the gated note and step boundaries, interleaved with the input
     auto boundary = std::ceil (startTick / stepTicks - 1e-9) * stepTicks;
 
     while (true)
@@ -145,7 +145,7 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
             else
                 emit (e); // slide, choke...
 
-            // soltou tudo: corta a nota do arpejo e recomeça a sequência
+            // everything released: cut the arp note and restart the sequence
             if (heldCount == 0)
             {
                 step = 0;
@@ -165,7 +165,7 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
             continue;
         }
 
-        // fronteira de step: próxima nota do arpejo
+        // step boundary: next arp note
         if (heldCount > 0)
         {
             NoteEvent e;

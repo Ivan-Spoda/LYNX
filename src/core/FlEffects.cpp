@@ -23,7 +23,7 @@ std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t offset)
     return v;
 }
 
-// Lk(x) = (k^x − 1)/(k − 1): as curvas de ganho dos plugins Fruity
+// Lk(x) = (k^x − 1)/(k − 1): the gain curves of the Fruity plugins
 double curve (double k, double x)
 {
     return (std::pow (k, std::max (0.0, x)) - 1.0) / (k - 1.0);
@@ -34,7 +34,7 @@ double toDb (double gain)
     return 20.0 * std::log10 (std::max (gain, 1.0e-6));
 }
 
-// inverso de logRange (lo·(hi/lo)^v)
+// inverse of logRange (lo·(hi/lo)^v)
 float fromLog (double value, double lo, double hi)
 {
     return (float) std::clamp (std::log (std::max (value, lo) / lo) / std::log (hi / lo), 0.0, 1.0);
@@ -45,7 +45,7 @@ float clamp01 (double v)
     return (float) std::clamp (v, 0.0, 1.0);
 }
 
-// Q de um pico/passa-banda pela largura em oitavas (cookbook)
+// Q of a peak/band-pass from the width in octaves (cookbook)
 double qFromOctaves (double octaves)
 {
     return 1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * std::max (0.01, octaves)));
@@ -80,7 +80,7 @@ bool parametricEq2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
             case 2: t = peq::BandType::bandPass; q = qFromOctaves ((0.1 + 4.9 * w) * 0.708 * std::sqrt (std::abs (order) + 1.0)); break;
             case 3: t = peq::BandType::lowCut; q = 0.1 + 9.9 * std::pow (1.0 - w, 3.0); break;
             case 4: t = peq::BandType::notch; q = qFromOctaves ((0.1 + 4.9 * w) / (0.708 * std::sqrt (std::abs (order) + 1.0))); break;
-            case 5: t = peq::BandType::lowShelf; q = 1.0 / 3.0 + 1.7193 * (1.0 - w); break; // Q = inclinação S
+            case 5: t = peq::BandType::lowShelf; q = 1.0 / 3.0 + 1.7193 * (1.0 - w); break; // Q = shelf slope S
             case 6: t = peq::BandType::peak; q = qFromOctaves (0.1 + 4.9 * w); break;
             case 7: t = peq::BandType::highShelf; q = 1.0 / 3.0 + 1.7193 * (1.0 - w); break;
             default: break;
@@ -90,7 +90,7 @@ bool parametricEq2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
         slot.params[(std::size_t) peq::param (b, 1)] = peq::hzValue (hz);
         slot.params[(std::size_t) peq::param (b, 2)] = peq::gainValue (gainDb);
         slot.params[(std::size_t) peq::param (b, 3)] = peq::qValue (q);
-        // ordem: |ordem| + 1 biquads (os cortes "Steep 8" = 4)
+        // order: |order| + 1 biquads (the "Steep 8" cuts = 4)
         slot.params[(std::size_t) (peq::slopeParam + b)] = peq::slopeValue (std::abs (order) + 1);
     }
 
@@ -98,7 +98,7 @@ bool parametricEq2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// --- Fruity Limiter (§2): limiter, ou o compressor dele quando só o compressor trabalha -------
+// --- Fruity Limiter (§2): limiter, or its compressor when only the compressor is active -------
 
 bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot, bool forceCompressor = false)
 {
@@ -113,7 +113,7 @@ bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot, bool forceCo
     const auto ratioRaw = param (9);
     const auto ratio = ratioRaw > 0 ? 1.0 + 0.38 * (std::pow (51.0, ratioRaw / 1000.0) - 1.0) : 1.0;
 
-    // teto acima de 0 dB praticamente desliga o limitador; aí o que soa é o compressor
+    // a ceiling above 0 dB practically disables the limiter; then what you hear is the compressor
     if (forceCompressor || (ceilingDb > -0.1 && ratio > 1.05 && compThresholdDb < -0.5))
     {
         slot = makeEffectSlot (EffectKind::compressor);
@@ -149,15 +149,15 @@ bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot, double bpm)
     const auto dry = curve (11.0, param (10) / 128.0);
     const auto wet = curve (11.0, param (12) / 256.0);
 
-    // o Freeverb do LYNX: realimentação dos combs para o decaimento pedido (combs de ~30 ms)
+    // LYNX's Freeverb: comb feedback for the requested decay (~30 ms combs)
     const auto feedback = std::pow (10.0, -3.0 * 0.03 / decay);
     slot.params[0] = clamp01 ((feedback - 0.7) / 0.28);
-    slot.params[1] = clamp01 (1.0 - std::log (dampingKhz / 0.5) / std::log (22.0 / 0.5)); // abafa mais com o corte mais baixo
-    slot.params[2] = clamp01 (1.0 + std::min (0.0, separation));                           // separação negativa estreita
+    slot.params[1] = clamp01 (1.0 - std::log (dampingKhz / 0.5) / std::log (22.0 / 0.5)); // more damping with a lower cutoff
+    slot.params[2] = clamp01 (1.0 + std::min (0.0, separation));                           // negative separation narrows
     slot.params[3] = clamp01 (wet / 0.25);
     slot.params[4] = clamp01 (dry);
 
-    // corte de graves (< 20 Hz = desligado), de agudos (>= 22,1 kHz = desligado) e predelay
+    // low cut (< 20 Hz = off), high cut (>= 22.1 kHz = off) and predelay
     const auto lowCutHz = param (0);
     slot.params[5] = lowCutHz < 20 ? 0.0f : std::max (0.002f, fromLog (lowCutHz, 20.0, 3000.0));
     slot.params[6] = param (1) >= 221 ? 1.0f : std::min (0.998f, fromLog (param (1) * 100.0, 500.0, 22000.0));
@@ -167,11 +167,11 @@ bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot, double bpm)
     return true;
 }
 
-// --- Fruity Delay 2 e Delay 3 (§4) ---------------------------------------------------------------
+// --- Fruity Delay 2 and Delay 3 (§4) ---------------------------------------------------------------
 
 float delayTimeValue (double beats)
 {
-    // a divisão do delay interno mais próxima (0,25 … 4 tempos, 8 divisões)
+    // the closest built-in delay division (0.25 … 4 beats, 8 divisions)
     constexpr double divisions[] = { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
     int best = 0;
 
@@ -202,7 +202,7 @@ bool delay3 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 
     auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
     const auto synced = param (2) != 0;
-    // sincronizado: ticks de 1/96 de tempo; sem sincronia a unidade não é conhecida: fica 1/4
+    // synced: ticks of 1/96 beat; unsynced the unit is unknown: use 1/4
     slot.params[0] = delayTimeValue (synced ? std::clamp (param (4), 1, 768) / 96.0 : 1.0);
     slot.params[1] = clamp01 (param (14) / 6000.0 * 0.9);
     slot.params[2] = clamp01 (param (23) / 6000.0 * 0.5);
@@ -248,26 +248,26 @@ bool maximus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto version = header > 0xFFFFu ? (int) (header >> 16) : (int) header;
     auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
 
-    // a seção master (banda 3) representa o efeito; as bandas são multibanda (o LYNX não tem)
+    // the master section (band 3) represents the effect; the bands are multiband (LYNX has none)
     constexpr int master = 7 + 13 * 3;
     const auto mode = param (master);
     const auto preDb = toDb (curve (7.0, param (master + 1) / 1000.0));
     const auto postDb = toDb (curve (7.0, param (master + 2) / 1000.0));
 
-    if (mode == 3) // master desligado: passa direto (utilitário transparente mantém a posição do slot)
+    if (mode == 3) // master off: pass-through (a transparent utility keeps the slot position)
     {
         slot = makeEffectSlot (EffectKind::utility);
         return true;
     }
 
-    if (mode != 0) // sem compressão: só os ganhos
+    if (mode != 0) // no compression: gains only
     {
         slot = makeEffectSlot (EffectKind::utility);
         slot.params[0] = utilityGainValue (std::pow (10.0, (preDb + postDb) / 20.0));
         return true;
     }
 
-    // curva de compressão do master: 7º envelope (low, 2º, mid, 2º, high, 2º, master, 2º)
+    // master compression curve: 7th envelope (low, 2nd, mid, 2nd, high, 2nd, master, 2nd)
     std::vector<std::pair<double, double>> points;
     std::size_t pos = version >= 15 ? 0x21F : version >= 14 ? 0x21B : 0x1FE;
 
@@ -297,7 +297,7 @@ bool maximus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     }
 
     if (points.size() < 2)
-        points = { { 0.0, 0.0 }, { 0.5, 0.5 }, { 1.0, 0.5 } }; // a curva padrão: limitador em −0,22 dB
+        points = { { 0.0, 0.0 }, { 0.5, 0.5 }, { 1.0, 0.5 } }; // the default curve: limiter at −0.22 dB
 
     auto curveAt = [&] (double c) {
         if (c <= points.front().first)
@@ -313,7 +313,7 @@ bool maximus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     };
     auto levelDb = [] (double c, double scale) { return toDb ((std::pow (3.0, 2.0 * c) - 1.0) / 2.0 * scale); };
 
-    // teto, joelho e ratio da curva (nível de entrada c: 0,5 = 0 dBFS, 1 = +12 dB)
+    // ceiling, knee and ratio of the curve (input level c: 0.5 = 0 dBFS, 1 = +12 dB)
     double ceilingDb = -120.0, kneeDb = 0.0, kneeOut = 0.0;
     bool knee = false;
 
@@ -334,7 +334,7 @@ bool maximus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto topIn = levelDb (1.0, 1.0), topOut = levelDb (curveAt (1.0), 0.975);
     const auto ratio = knee && topOut - kneeOut > 0.05 ? (topIn - kneeDb) / (topOut - kneeOut) : 100.0;
 
-    if (knee && kneeDb < -0.5 && ratio < 8.0) // compressão de verdade (joelho abaixo de 0 dB)
+    if (knee && kneeDb < -0.5 && ratio < 8.0) // real compression (knee below 0 dB)
     {
         slot = makeEffectSlot (EffectKind::compressor);
         slot.params[0] = clamp01 ((kneeDb + 60.0) / 60.0);
@@ -357,7 +357,7 @@ bool soundgoodizer (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     if (d.size() < 12)
         return false;
 
-    // preset A–D (cópias completas do Maximus); aproximação de compressor medida com amount 0,6
+    // preset A–D (full Maximus copies); compressor approximation measured at amount 0.6
     struct Preset { double threshold, ratio, makeup; };
     constexpr Preset presets[] = { { -6.0, 2.5, 5.3 }, { -10.5, 2.2, 6.6 }, { -10.8, 2.5, 7.9 }, { -14.0, 1.9, 8.5 } };
     const auto& p = presets[std::clamp (i32At (d, 4), 0, 3)];
@@ -384,16 +384,16 @@ bool fastDist (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto mix = curve (11.0, std::clamp (i32At (d, 12), 0, 128) / 128.0);
     const auto post = curve (11.0, std::clamp (i32At (d, 16), 0, 128) / 128.0);
 
-    // drive equivalente do tanh para a curva do FL (ajuste da REA_rodada8 §3.2)
+    // equivalent tanh drive for FL's curve (fit from REA_rodada8 §3.2)
     constexpr double driveA[] = { 0, 0, 0, 0, 2.2, 4.5, 6.8, 9.2, 12.8, 17.8, 22.8 };
     const auto curveDb = typeB ? std::max (0.0, 0.8 + (t - 6) * 0.85) * (t >= 6 ? 1.0 : 0.0) : driveA[t];
     const auto wet = mix * post;
-    const auto dry = (post - wet) * pre * post; // o post entra ao quadrado no seco (assim no FL)
+    const auto dry = (post - wet) * pre * post; // post is applied squared to the dry signal (as in FL)
     const auto level = typeB ? 1.0 : std::pow (10.0, -0.9 * (t - 1) / 20.0);
     const auto total = wet * level + dry;
 
     slot.params[0] = clamp01 ((toDb (pre) + curveDb) / 36.0);
-    slot.params[1] = 1.0f; // o Fast Dist não filtra
+    slot.params[1] = 1.0f; // Fast Dist does not filter
     slot.params[2] = total > 1.0e-6 ? clamp01 (wet * level / total) : 1.0f;
     slot.params[3] = clamp01 (0.5 + toDb (std::max (total, 1.0e-6)) / 24.0);
     return true;
@@ -409,19 +409,19 @@ bool fruityFilter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto bp = curve (11.0, std::clamp (param (3), 0, 1024) / 1024.0);
     const auto hp = curve (11.0, std::clamp (param (4), 0, 1024) / 1024.0);
 
-    // tipo do filtro interno: 0 passa-baixas, 1 passa-altas, 2 passa-banda (floor(3v))
+    // built-in filter type: 0 low-pass, 1 high-pass, 2 band-pass (floor(3v))
     auto type = 0.0f;
     if (hp > lp && hp >= bp && ! (lp >= 0.5 && hp >= 0.5))
         type = 0.4f;
     else if (bp > lp && bp > hp)
         type = 0.7f;
 
-    // SVF de Chamberlin sem correção de taxa: "aberto" ainda corta em ~7,35 kHz (a 44,1 kHz)
+    // Chamberlin SVF without rate correction: "open" still cuts at ~7.35 kHz (at 44.1 kHz)
     const auto f = std::min (1.0, (std::pow (26.0, std::clamp (param (0), 0, 1024) / 1024.0) - 1.0) * 0.04);
     const auto hz = std::max (20.0, 44100.0 / 3.141592653589793 * std::asin (f / 2.0));
     auto q = 1.0 / (1.0 - 0.8 * std::clamp (param (1), 0, 1024) / 1024.0);
     if (param (5) != 0)
-        q *= 1.3; // x2: segundo estágio em série
+        q *= 1.3; // x2: second stage in series
 
     slot.params[0] = type;
     slot.params[1] = fromLog (hz, 20.0, 20000.0);
@@ -437,7 +437,7 @@ bool flangus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 
     auto param = [&] (int i) { return i32At (d, 4 * (std::size_t) i); };
     const auto depthMs = 24.8 * curve (11.0, std::clamp (param (1), 0, 1024) / 1024.0);
-    const auto voiceDepth = depthMs * 44.1 + 10.0; // amostras a 44,1 kHz
+    const auto voiceDepth = depthMs * 44.1 + 10.0; // samples at 44.1 kHz
     const auto period = 75000.0 * (std::pow (101.0, 1.0 - std::clamp (param (2), 0, 1024) / 1024.0) - 1.0) + 50000.0;
     const auto hz = 250.0 * 44100.0 / (period * voiceDepth);
     const auto dryGain = curve (11.0, std::abs (std::clamp (param (6), -128, 128)) / 128.0);
@@ -447,7 +447,7 @@ bool flangus (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[0] = fromLog (std::max (0.05, hz), 0.05, 5.0);
     slot.params[1] = clamp01 (2.0 * depthMs / 8.0);
     slot.params[2] = clamp01 (2.0 * r / (1.0 + r));
-    slot.params[3] = 0.0f; // o Flangus não realimenta
+    slot.params[3] = 0.0f; // Flangus has no feedback
     return true;
 }
 
@@ -458,7 +458,7 @@ bool softClipper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 
     const auto t = std::clamp (i32At (d, 0), 1, 127);
     const auto postDb = toDb (curve (11.0, std::clamp (i32At (d, 4), 0, 160) / 128.0));
-    const auto drop = t >= 100 ? 1.5 : t >= 64 ? 2.0 - (t - 64) / 36.0 * 0.5 : 3.8 - (t - 1) / 63.0 * 1.8; // queda de nível da curva
+    const auto drop = t >= 100 ? 1.5 : t >= 64 ? 2.0 - (t - 64) / 36.0 * 0.5 : 3.8 - (t - 1) / 63.0 * 1.8; // level drop of the curve
 
     slot.params[0] = 0.0f;
     slot.params[1] = 1.0f;
@@ -467,7 +467,7 @@ bool softClipper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// --- Balance, PanOMatic, Stereo Shaper (§6) -> Utilitário ---------------------------------------
+// --- Balance, PanOMatic, Stereo Shaper (§6) -> Utility ------------------------------------------
 
 float utilityGainValue (double gain) { return clamp01 (toDb (gain) / 48.0 + 0.5); }
 float utilityMatrixValue (double m) { return clamp01 ((m + 2.0) / 4.0); }
@@ -487,9 +487,9 @@ bool panOMatic (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     if (d.size() < 8)
         return false;
 
-    slot.params[1] = clamp01 (std::clamp (i32At (d, 0), 0, 256) / 256.0); // 128 = centro
+    slot.params[1] = clamp01 (std::clamp (i32At (d, 0), 0, 256) / 256.0); // 128 = center
     slot.params[0] = utilityGainValue (curve (11.0, i32At (d, 4) / 256.0));
-    return true; // o LFO do PanOMatic (ligado em poucos demos) fica de fora
+    return true; // PanOMatic's LFO (enabled in few demos) is left out
 }
 
 bool stereoShaper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
@@ -497,7 +497,7 @@ bool stereoShaper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     if (d.size() < 4 + 4 * 4)
         return false;
 
-    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i) / 12800.0; }; // 12800 = 1,0
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i) / 12800.0; }; // 12800 = 1.0
     slot.params[3] = utilityMatrixValue (param (0)); // R -> L
     slot.params[2] = utilityMatrixValue (param (1)); // L
     slot.params[5] = utilityMatrixValue (param (2)); // R
@@ -506,8 +506,8 @@ bool stereoShaper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 }
 // --- REA_rodada14: Gross Beat (volume), Frequency Splitter, Effector ----------------------------
 
-// Gross Beat: o slot de volume escolhido (envelope de 4 tempos) vira os 32 passos do gate; o
-// "time travel" não tem equivalente. Sem estado legível, o gate fica transparente.
+// Gross Beat: the selected volume slot (4-beat envelope) becomes the gate's 32 steps; the
+// "time travel" has no equivalent. Without a readable state, the gate stays transparent.
 bool grossBeat (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     for (int i = 0; i < 32; ++i)
@@ -526,8 +526,8 @@ bool grossBeat (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     std::size_t pos = 4 + 4 * paramCount + (version >= 5 ? 9 : 8);
     const auto volumeSlot = 36 + std::clamp (param (1), 0, 35);
 
-    // os 72 slots (36 de tempo + 36 de volume): nome, 15 B de sincronismo, envelope
-    std::vector<std::pair<double, double>> chosen; // (x acumulado em tempos, y)
+    // the 72 slots (36 time + 36 volume): name, 15 B of sync, envelope
+    std::vector<std::pair<double, double>> chosen; // (accumulated x in beats, y)
     std::vector<int> curves;
     for (int s = 0; s < 72; ++s)
     {
@@ -557,7 +557,7 @@ bool grossBeat (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     if (chosen.empty())
         return true;
 
-    // valor no meio de cada passo; "hold" (2) segura o ponto anterior, o resto vira reta
+    // value at the middle of each step; "hold" (2) holds the previous point, the rest is linear
     for (int i = 0; i < 32; ++i)
     {
         const auto t = (i + 0.5) / 32.0 * 4.0;
@@ -582,7 +582,7 @@ bool grossBeat (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Frequency Splitter: a saída principal com nível por banda vira prateleiras no EQ paramétrico
+// Frequency Splitter: the main output with per-band level becomes shelves in the parametric EQ
 bool frequencySplitter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     if (d.size() < 15 * 4)
@@ -617,7 +617,7 @@ bool frequencySplitter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Peak Controller (§7.3): base, quantidade, tensão e velocidade de queda
+// Peak Controller (§7.3): base, amount, tension and decay speed
 bool peakController (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     if (d.size() < 40)
@@ -626,7 +626,7 @@ bool peakController (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[1] = clamp01 ((std::clamp (i32At (d, 4), -256, 256) / 256.0 + 1.0) / 2.0);
     slot.params[2] = clamp01 ((std::clamp (i32At (d, 8), -128, 128) / 128.0 + 1.0) / 2.0);
     slot.params[3] = clamp01 ((std::clamp (i32At (d, 12), 5, 128) - 5) / 123.0);
-    slot.params[4] = clamp01 (i32At (d, 16) / 65536.0); // base do LFO
+    slot.params[4] = clamp01 (i32At (d, 16) / 65536.0); // LFO base
     return true;
 }
 
@@ -654,9 +654,9 @@ bool frequencyShifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
         return false;
     auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
     const auto s = std::clamp (param (2), -70000, 70000) / 70000.0;
-    const auto k = param (8) == 0 ? 17.6096 : 10.9658; // faixa 20 kHz / 200 Hz (a "Tempo" fica como 200 Hz)
+    const auto k = param (8) == 0 ? 17.6096 : 10.9658; // range 20 kHz / 200 Hz ("Tempo" is treated as 200 Hz)
     const auto hz = s == 0.0 ? 0.0 : (s < 0.0 ? -1.0 : 1.0) * 0.1 * std::pow (2.0, k * std::abs (s));
-    // a nossa escala: 2000·x·|x| Hz
+    // our scale: 2000·x·|x| Hz
     const auto x = std::clamp ((hz < 0.0 ? -1.0 : 1.0) * std::sqrt (std::min (1.0, std::abs (hz) / 2000.0)), -1.0, 1.0);
     slot.params[0] = clamp01 (0.5 + x / 2.0);
     slot.params[1] = clamp01 (std::clamp (param (0), 0, 10000) / 10000.0);
@@ -671,7 +671,7 @@ bool emphasis (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     auto x = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), 0, 10000) / 10000.0; };
     const auto ceilingDb = toDb (curve (11.0, x (9)));
     slot.params[0] = clamp01 ((std::min (ceilingDb, 0.0) + 12.0) / 12.0);
-    slot.params[1] = clamp01 (x (6)); // ganho de entrada 24x dB = a nossa escala de 0..24 dB
+    slot.params[1] = clamp01 (x (6)); // input gain 24x dB = our 0..24 dB scale
     slot.enabled = i32At (d, 4) == 0;
     return true;
 }
@@ -685,8 +685,8 @@ bool lowLifter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     const auto mix = x (1);
     const auto lowDb = std::clamp ((x (2) - 0.5) * 24.0, -18.0, 12.0);
     const auto highDb = std::clamp (100.0 * std::log10 (std::max (1e-3, x (9))), -18.0, 0.0);
-    // o gerador de harmônicos (Chebyshev até a 3ª ordem, REA_rodada17 §13) não tem equivalente aqui; o EQ
-    // reproduz só o corte de graves e os ganhos das bandas
+    // the harmonics generator (Chebyshev up to 3rd order, REA_rodada17 §13) has no equivalent here; the EQ
+    // reproduces only the low cut and the band gains
     const auto boost = 0.0;
 
     for (int b = 0; b < peq::bands; ++b)
@@ -710,19 +710,19 @@ bool fruitySend (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     if (d.size() < 12)
         return false;
-    slot.params[0] = utilityGainValue (std::clamp (i32At (d, 8), 0, 256) / 256.0); // o que segue na trilha
+    slot.params[0] = utilityGainValue (std::clamp (i32At (d, 8), 0, 256) / 256.0); // what continues on the track
     slot.params[1] = 0.5f;
     return true;
 }
 
-// Squeeze: quantização (poucos bits) + filtro; aproximado por distorção leve, com o mix dele
+// Squeeze: quantization (few bits) + filter; approximated by light distortion, with its mix
 bool squeeze (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     if (d.size() < 4 + 12 * 4)
         return false;
     auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
     const auto levels = std::pow (32768.0, 1.0 - std::clamp (param (2), 1, 32768) / 32768.0);
-    slot.params[0] = clamp01 (0.6 * (1.0 - std::log2 (std::max (2.0, levels)) / 15.0)); // menos níveis, mais "sujeira"
+    slot.params[0] = clamp01 (0.6 * (1.0 - std::log2 (std::max (2.0, levels)) / 15.0)); // fewer levels, more "dirt"
     slot.params[1] = param (3) != 0 ? clamp01 (std::clamp (param (6), 0, 65536) / 65536.0) : 0.8f;
     slot.params[2] = 1.0f;
     slot.params[3] = 0.5f;
@@ -738,10 +738,10 @@ bool transporter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Effector: o efeito Effector do LYNX (core/Effector.h) recebe os 12 parâmetros crus do FL
+// Effector: LYNX's Effector effect (core/Effector.h) receives FL's 12 raw parameters
 std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double)
 {
-    // "SSLF" + tamanho + "10XF" + 64 floats reservados + os 12 parâmetros
+    // "SSLF" + size + "10XF" + 64 reserved floats + the 12 parameters
     if (d.size() < 12 + 76 * 4 || std::memcmp (d.data(), "SSLF", 4) != 0)
         return std::nullopt;
     float p[12];
@@ -749,14 +749,14 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double)
     auto slot = makeEffectSlot (EffectKind::effector);
     for (int i = 0; i < 12; ++i)
         slot.params[(std::size_t) i] = std::isfinite (p[i]) ? std::clamp (p[i], 0.0f, 1.0f) : 0.0f;
-    slot.enabled = slot.params[1] == 0.0f; // bypass = qualquer valor ≠ 0
+    slot.enabled = slot.params[1] == 0.0f; // bypass = any value ≠ 0
     slot.params[1] = 0.0f;
-    slot.mix = 1.0f; // a mistura de cada algoritmo é feita dentro do efeito (Wet Mix = parâmetro 2)
+    slot.mix = 1.0f; // each algorithm's mix is done inside the effect (Wet Mix = parameter 2)
     return slot;
 }
 
-// Fruity Vocoder (REA_rodada20 §4.1.1): i32 versão (2), i32 bandas, i32 ordem, i32 listen, u8 troca, N f32 níveis,
-// 12 i32 parâmetros crus
+// Fruity Vocoder (REA_rodada20 §4.1.1): i32 version (2), i32 bands, i32 order, i32 listen, u8 swap, N f32 levels,
+// 12 i32 raw parameters
 std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std::vector<std::string>* notes)
 {
     if (d.size() < 17 || i32At (d, 0) < 2)
@@ -780,7 +780,7 @@ std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std
         levelsFlat = levelsFlat && std::abs (level - 1.0f) < 1e-4f;
     }
     if (! levelsFlat && notes != nullptr)
-        notes->push_back ("Fruity Vocoder: níveis por banda não aplicados");
+        notes->push_back ("Fruity Vocoder: per-band levels not applied");
     auto param = [&] (int t) { return i32At (d, 17 + 4 * (std::size_t) n + 4 * (std::size_t) t); };
     slot.params[4] = (float) clamp01 (param (0) / 65536.0);
     slot.params[5] = (float) clamp01 (param (1) / 65536.0);
@@ -814,7 +814,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return fruityVocoder (state, nullptr);
     if (pluginName == "Pitcher")
     {
-        // "SSLF" + u32 + "1RTP" + 33 f32 (parâmetros 0…32 crus) + 12 B de máscara de notas + f32 (REA_rodada19 §6)
+        // "SSLF" + u32 + "1RTP" + 33 f32 (raw parameters 0…32) + 12 B note mask + f32 (REA_rodada19 §6)
         if (state.size() < 12 + 33 * 4 + 12 || std::memcmp (state.data(), "SSLF", 4) != 0 || std::memcmp (state.data() + 8, "1RTP", 4) != 0)
             return std::nullopt;
         float p[33];
@@ -843,7 +843,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
 
     auto slot = makeEffectSlot (*kind);
 
-    // compara sem caixa (presets do FL 3: "Fruity delay 2")
+    // case-insensitive compare (FL 3 presets: "Fruity delay 2")
     std::string lower = pluginName;
     std::transform (lower.begin(), lower.end(), lower.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
     auto is = [&] (const char* canonical) {
@@ -853,7 +853,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     };
 
     if (*kind == EffectKind::filter)
-        slot.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar
+        slot.params[1] = 1.0f; // open: without FL's settings, better not to muffle
 
     if (is ("Fruity Soft Clipper"))
         softClipper (state, slot);
@@ -908,7 +908,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         frequencySplitter (state, slot);
     else if (is ("Fruity Phase Inverter"))
     {
-        slot.params[2] = utilityMatrixValue (-1.0); // inverte os dois lados
+        slot.params[2] = utilityMatrixValue (-1.0); // inverts both sides
         slot.params[5] = utilityMatrixValue (-1.0);
     }
 
@@ -918,7 +918,7 @@ std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& b
 {
     try
     {
-        // o preset de efeito tem o mesmo formato do de canal: nome do plugin (0xC9) e estado (0xD5)
+        // the effect preset has the same format as the channel one: plugin name (0xC9) and state (0xD5)
         const auto project = flp::parseProject (bytes, true);
 
         if (project.channels.empty() || project.channels.front().pluginState.empty())
@@ -951,9 +951,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 
     if (is ("Fruity Parametric EQ 2"))
     {
-        if (k >= 0 && k < 7) // ganho da banda: ±18 dB
+        if (k >= 0 && k < 7) // band gain: ±18 dB
             return FlParamMap { peq::param (k, 2), [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
-        if (k >= 7 && k < 14) // frequência: 20 Hz · 1000^v
+        if (k >= 7 && k < 14) // frequency: 20 Hz · 1000^v
             return FlParamMap { peq::param (k - 7, 1), [] (float v) { return peq::hzValue (20.0 * std::pow (1000.0, (double) v)); } };
         if (k == 35)
             return FlParamMap { peq::outputParam, [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
@@ -962,7 +962,7 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 
     if (is ("Fruity Filter"))
     {
-        if (k == 0) // corte (SVF de Chamberlin, como no import do estado)
+        if (k == 0) // cutoff (Chamberlin SVF, as in the state import)
             return FlParamMap { 1, [] (float v) {
                 const auto f = std::min (1.0, (std::pow (26.0, (double) v) - 1.0) * 0.04);
                 return fromLog (std::max (20.0, 44100.0 / 3.141592653589793 * std::asin (f / 2.0)), 20.0, 20000.0);
@@ -974,19 +974,19 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 
     if (is ("Fruity Balance") || is ("Fruity PanOMatic"))
     {
-        if (k == 0) // pan: a faixa inteira dos dois casa com a nossa
+        if (k == 0) // pan: the full range of both matches ours
             return FlParamMap { 1, [] (float v) { return v; } };
-        if (k == 1) // volume: 0..320 (256 = 0 dB) [HIP no máximo]
+        if (k == 1) // volume: 0..320 (256 = 0 dB) [HIP for the maximum]
             return FlParamMap { 0, [] (float v) { return utilityGainValue (curve (11.0, 1.25 * (double) v)); } };
         return std::nullopt;
     }
 
-    if (is ("Fruity Fast LP") && (k == 0 || k == 1)) // corte / ressonância: o filtro interno tem os padrões, segue o knob
+    if (is ("Fruity Fast LP") && (k == 0 || k == 1)) // cutoff / resonance: the built-in filter has the defaults, follow the knob
         return FlParamMap { k + 1, [] (float v) { return v; } };
 
     if (is ("Fruity Reeverb 2"))
     {
-        if (k == 5) // decay 0,1..20 s -> realimentação dos combs
+        if (k == 5) // decay 0.1..20 s -> comb feedback
             return FlParamMap { 0, [] (float v) {
                 const auto decay = 0.1 + 19.9 * (double) v;
                 return clamp01 ((std::pow (10.0, -3.0 * 0.03 / decay) - 0.7) / 0.28);
@@ -1000,7 +1000,7 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 
     if (is ("Pitch Shifter"))
     {
-        if (k == 0) // afinação: −12..+12 st (em centésimos) -> os nossos ±24 st
+        if (k == 0) // pitch: −12..+12 st (in cents) -> our ±24 st
             return FlParamMap { 0, [] (float v) { return (float) clamp01 (0.5 + std::round (24.0 * v - 12.0) / 48.0); } };
         if (k == 3)
             return FlParamMap { 2, [] (float v) { return v; } };
@@ -1031,7 +1031,7 @@ std::optional<float> controllerConstantOutput (const std::string& pluginName, co
         auto param = [&] (int i) { return std::clamp (i32At (d, 4 + 4 * (std::size_t) i), -65536, 65536) / 65536.0; };
         const auto axis = output * 4;
         const auto level = std::clamp (param (axis), 0.0, 1.0);
-        // tensão (REA_rodada17 §4): k = 0,1·(1001^(|t|/128) − 1); t > 0 côncava, t < 0 convexa
+        // tension (REA_rodada17 §4): k = 0.1·(1001^(|t|/128) − 1); t > 0 concave, t < 0 convex
         const auto t = std::clamp (i32At (d, 4 + 4 * (std::size_t) (axis + 3)), -128, 128);
         auto shaped = level;
         if (t != 0)
@@ -1047,7 +1047,7 @@ std::optional<float> controllerConstantOutput (const std::string& pluginName, co
         if (d.size() < 16)
             return std::nullopt;
         std::optional<float> found;
-        // chunks u32 id + u64 tamanho (id 0 = grupo); 0x836 = valor de um controle e a saída publicada
+        // chunks u32 id + u64 size (id 0 = group); 0x836 = a control's value and the published output
         std::function<void (std::size_t, std::size_t)> walk = [&] (std::size_t pos, std::size_t end) {
             while (pos + 12 <= end && ! found)
             {
@@ -1078,7 +1078,7 @@ std::optional<float> controllerConstantOutput (const std::string& pluginName, co
 }
 namespace
 {
-// curva de ganho dos knobs do FL: (11^x − 1)/10, com sinal
+// FL knob gain curve: (11^x − 1)/10, signed
 double scurve11 (double x) { return (x < 0.0 ? -1.0 : 1.0) * (std::pow (11.0, std::abs (x)) - 1.0) / 10.0; }
 
 struct PhilterBand
@@ -1087,10 +1087,10 @@ struct PhilterBand
     double hz = 1000.0, q = 0.707, gainDb = 0.0;
     int stages = 1;
     bool ok = false;
-    std::vector<double> stageHz; // modos alternate: corte de cada estágio
+    std::vector<double> stageHz; // alternate modes: cutoff of each stage
 };
 
-// tipo, corte e Q de uma unidade com corte c e ressonância r (0..1), a 44,1 kHz (k = 1)
+// type, cutoff and Q of a unit with cutoff c and resonance r (0..1), at 44.1 kHz (k = 1)
 PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
 {
     PhilterBand b;
@@ -1098,7 +1098,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
     r = std::clamp (r, 0.0, 1.0);
     const auto mode = std::clamp (u.mode, 0, 5);
     if (mode == 0)
-        return b; // a unidade não filtra
+        return b; // the unit does not filter
     b.stages = mode == 4 ? 2 : mode == 5 ? 3 : mode;
     auto lpQ = [] (double rr) { return 0.1 + 0.02495 * (std::pow (2001.0, rr) - 1.0); };
     const auto lowGain = scurve11 (std::clamp (u.params[3], 0, 128) / 128.0);
@@ -1109,7 +1109,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
 
     switch (u.type)
     {
-        case 0: // SVF de Chamberlin: fc = (x + 0,005)·44100/π; saída = L·LP + B·BP + H·HP
+        case 0: // Chamberlin SVF: fc = (x + 0.005)·44100/π; output = L·LP + B·BP + H·HP
         {
             x = (std::pow (51.0, c) - 1.0) * 0.0159;
             hzOf = [] (double v) { return (v + 0.005) * 44100.0 / 3.141592653589793; };
@@ -1119,7 +1119,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
                 d *= d;
             b.q = 1.0 / std::max (0.05, d);
             const auto l = std::abs (lowGain) > 1e-6, bp = std::abs (bandGain) > 1e-6, h = std::abs (highGain) > 1e-6;
-            // só as saídas puras têm equivalente: LP, BP, HP ou L+H (rejeita-faixa) com o mesmo ganho
+            // only the pure outputs have an equivalent: LP, BP, HP or L+H (band-reject) with the same gain
             if (l && ! bp && ! h)
                 b.type = peq::BandType::highCut, b.gainDb = 20.0 * std::log10 (std::abs (lowGain));
             else if (h && ! l && ! bp)
@@ -1133,17 +1133,17 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
             b.ok = true;
             break;
         }
-        case 1: case 2: // Lime: ω = (x + 0,007)·π/2 -> fc = (x + 0,007)·44100/4
+        case 1: case 2: // Lime: ω = (x + 0.007)·π/2 -> fc = (x + 0.007)·44100/4
         {
             x = std::min (1.6, (std::pow (76.0, c) - 1.0) * 0.01324);
             hzOf = [] (double v) { return (v + 0.007) * 44100.0 / 4.0; };
             b.hz = hzOf (x);
             b.q = std::min (50.0, std::pow (1001.0, r));
-            b.type = u.type == 1 ? peq::BandType::highCut : peq::BandType::lowCut; // o slot L é "drive" aqui: fica de fora
+            b.type = u.type == 1 ? peq::BandType::highCut : peq::BandType::lowCut; // the L slot is "drive" here: left out
             b.ok = true;
             break;
         }
-        case 3: // Vanilla LP: fc = (x + 0,003)·44100
+        case 3: // Vanilla LP: fc = (x + 0.003)·44100
         {
             x = (std::pow (1501.0, c) - 1.0) * 0.000664667;
             hzOf = [] (double v) { return (v + 0.003) * 44100.0; };
@@ -1153,7 +1153,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
             b.ok = true;
             break;
         }
-        case 6: case 8: case 9: case 10: // família Vanilla 4…10: fc = (x + 0,0001)·44100
+        case 6: case 8: case 9: case 10: // Vanilla 4…10 family: fc = (x + 0.0001)·44100
         {
             x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
             if (u.type == 6)
@@ -1169,41 +1169,41 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
             {
                 b.type = peq::BandType::peak;
                 b.q = 0.1 + 0.04995 * (std::pow (2001.0, 1.0 - r) - 1.0);
-                b.gainDb = 20.0 * std::log10 (std::max (1e-6, std::abs (lowGain))); // o ganho do pico é o slot low/gain
+                b.gainDb = 20.0 * std::log10 (std::max (1e-6, std::abs (lowGain))); // the peak gain is the low/gain slot
             }
             else
             {
                 b.type = u.type == 8 ? peq::BandType::lowShelf : peq::BandType::highShelf;
-                b.q = 0.1 + 0.45 * (std::pow (3.0, 1.0 - r) - 1.0); // inclinação S
+                b.q = 0.1 + 0.45 * (std::pow (3.0, 1.0 - r) - 1.0); // shelf slope S
                 b.gainDb = 20.0 * std::log10 (std::max (1e-6, std::abs (lowGain)));
             }
             b.ok = true;
             break;
         }
-        case 4: case 5: // Vanilla passa-faixa / rejeita-faixa: largura em oitavas (REA_rodada19 §7.1)
+        case 4: case 5: // Vanilla band-pass / band-reject: width in octaves (REA_rodada19 §7.1)
         {
             x = std::min (1.0001, (std::pow (1501.0, c) - 1.0) * 0.00039993);
             hzOf = [] (double v) { return (v + 0.0001) * 44100.0; };
             b.hz = hzOf (x);
             const auto n = std::max (1, mode);
             auto bw = 0.01 + 0.1199 * (std::pow (101.0, u.alt ? r * (c + 1.0) * 0.5 : r) - 1.0);
-            bw = u.type == 4 ? bw * n : bw / n; // por estágio
+            bw = u.type == 4 ? bw * n : bw / n; // per stage
             const auto w = std::clamp (2.0 * 3.141592653589793 * b.hz / 44100.0, 1e-4, 2.8495);
             b.q = std::clamp (1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * bw * w / std::sin (w))), 0.1, 18.0);
             b.type = u.type == 4 ? peq::BandType::bandPass : peq::BandType::notch;
             b.ok = true;
-            if (b.stages > 1) // a largura já foi dividida por estágio: não refazer a raiz do Q abaixo
+            if (b.stages > 1) // the width was already divided per stage: don't redo the Q root below
             {
                 b.hz = std::clamp (b.hz, 20.0, 20000.0);
                 return b;
             }
             break;
         }
-        case 7: // passa-tudo: só muda a fase; sozinho na unidade, o módulo é 1 (REA_rodada19 §7.2)
+        case 7: // all-pass: only changes phase; alone in the unit, the magnitude is 1 (REA_rodada19 §7.2)
             b.type = peq::BandType::off;
             b.ok = true;
             return b;
-        case 11: // Mango: 4 polos com realimentação; o corte em Hz é inferido do polo (REA_rodada19 §7.3)
+        case 11: // Mango: 4 poles with feedback; the cutoff in Hz is inferred from the pole (REA_rodada19 §7.3)
         {
             x = std::min (3.0, (std::pow (201.0, c) - 1.0) * 0.01495);
             hzOf = [] (double v) {
@@ -1213,7 +1213,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
             b.hz = hzOf (x);
             b.q = lpQ (r);
             b.type = peq::BandType::highCut;
-            b.stages = std::min (4, 2 * b.stages); // 4 polos (24 dB/oit) por estágio
+            b.stages = std::min (4, 2 * b.stages); // 4 poles (24 dB/oct) per stage
             b.ok = true;
             break;
         }
@@ -1222,7 +1222,7 @@ PhilterBand philterBand (const LovePhilterUnit& u, double c, double r)
     }
     if (b.stages > 1)
         b.q = std::pow (b.q, 1.0 / b.stages);
-    // alternate (modos 4/5): a variável de frequência de cada estágio é x, x^E, x^(E²), E = 0,5 / 0,75
+    // alternate (modes 4/5): each stage's frequency variable is x, x^E, x^(E²), E = 0.5 / 0.75
     if ((mode == 4 || mode == 5) && hzOf)
     {
         const auto e = mode == 4 ? 0.5 : 0.75;
@@ -1247,7 +1247,7 @@ EffectSlot philterSlot (const PhilterBand& band, double unitGain)
     {
         const auto cut = band.type == peq::BandType::highCut || band.type == peq::BandType::lowCut;
         const auto alternate = ! band.stageHz.empty();
-        // cortes: estágios = inclinação do EQ; os outros tipos (e os alternate) repetem a banda (cascata)
+        // cuts: stages = EQ slope; the other types (and the alternate ones) repeat the band (cascade)
         const auto copies = cut && ! alternate ? 1 : std::min (band.stages, peq::bands);
         for (int i = 0; i < copies; ++i)
         {
@@ -1257,7 +1257,7 @@ EffectSlot philterSlot (const PhilterBand& band, double unitGain)
             slot.params[(std::size_t) peq::param (i, 3)] = peq::qValue (band.q);
             slot.params[(std::size_t) (peq::slopeParam + i)] = peq::slopeValue (cut && ! alternate ? std::clamp (band.stages, 1, 4) : 1);
         }
-        if (cut) // nos cortes o ganho do slot L/H multiplica a saída
+        if (cut) // for cuts the L/H slot gain multiplies the output
             outputDb += band.gainDb;
     }
     slot.params[peq::outputParam] = peq::gainValue (std::clamp (outputDb, -18.0, 18.0));
@@ -1278,8 +1278,8 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             active.push_back (u);
 
     LovePhilterConversion out;
-    // articulador de volume (multiplicativo, REA_rodada17 §15.3 + rodada18 §4): base × mapaX(x) × mapaY(y);
-    // envelope/LFO desligados são neutros (os ligados ficam de fora)
+    // volume articulator (multiplicative, REA_rodada17 §15.3 + rodada18 §4): base × mapX(x) × mapY(y);
+    // disabled envelope/LFO are neutral (enabled ones are left out)
     const auto modX = std::clamp (state->modX, 0, 1024) / 1024.0, modY = std::clamp (state->modY, 0, 1024) / 1024.0;
     auto volumeFactor = [] (const LovePhilterUnit& unit, double x, double y) {
         const auto& a = unit.articulators[1];
@@ -1292,7 +1292,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
     for (const auto u : active)
         if (u + 1 < 8 && state->units[(std::size_t) u + 1].enabled && state->units[(std::size_t) u].params[11] != 0)
         {
-            out.notes.push_back ("Love Philter: unidades encadeadas (NEXT) tocam em paralelo");
+            out.notes.push_back ("Love Philter: chained units (NEXT) play in parallel");
             break;
         }
 
@@ -1300,17 +1300,17 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         const auto& unit = state->units[(std::size_t) u];
         const auto band = philterBand (unit, std::clamp (unit.params[1], 0, 256) / 256.0, std::clamp (unit.params[2], 0, 256) / 256.0);
         if (unit.mode != 0 && ! band.ok)
-            out.notes.push_back ("Love Philter: filtro tipo " + std::to_string (unit.type) + " sem equivalente");
+            out.notes.push_back ("Love Philter: filter type " + std::to_string (unit.type) + " has no equivalent");
         const auto gain = scurve11 (std::clamp (unit.params[9], 0, 160) / 128.0) * master * std::abs (scurve11 (std::clamp (unit.params[10], -160, 160) / 128.0));
         std::vector<EffectSlot> chain { philterSlot (band, gain) };
         const auto& vol = unit.articulators[1];
         if (! mapsNeutral (vol.mapX) || ! mapsNeutral (vol.mapY) || std::abs (vol.base - 1.0f) > 1e-6f)
         {
-            auto utility = makeEffectSlot (EffectKind::utility); // volume controlado por Mod X/Y
+            auto utility = makeEffectSlot (EffectKind::utility); // volume controlled by Mod X/Y
             utility.params[0] = utilityGainValue (volumeFactor (unit, modX, modY));
             chain.push_back (utility);
         }
-        // envelope do pattern no volume (modo 0: ganho × y·d_E), em tempos e em loop (REA_rodada20 §1.2–1.4)
+        // pattern envelope on volume (mode 0: gain × y·d_E), in beats and looped (REA_rodada20 §1.2–1.4)
         if (const auto& env = vol.pattern; env.on)
         {
             double period = 0.0;
@@ -1318,7 +1318,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
                 period += env.points[k].dt;
             const auto points = env.points.size();
             if (! env.tempo || period <= 1e-6 || points > 12 || points == 0)
-                out.notes.push_back ("Love Philter: envelope de volume fora do formato suportado");
+                out.notes.push_back ("Love Philter: volume envelope outside the supported format");
             else
             {
                 auto gate = makeEffectSlot (EffectKind::rhythmGain);
@@ -1333,7 +1333,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
                     gate.params[3 + 3 * k] = (float) clamp01 (env.points[k].y * std::clamp ((double) vol.envDepth, 0.0, 1.0));
                     gate.params[4 + 3 * k] = (float) clamp01 ((env.points[k].tension + 1.0) / 2.0);
                     if (env.points[k].curve != 0 && k > 0)
-                        out.notes.push_back ("Love Philter: curva de envelope de tipo " + std::to_string (env.points[k].curve) + " tratada como simples");
+                        out.notes.push_back ("Love Philter: envelope curve of type " + std::to_string (env.points[k].curve) + " treated as simple");
                 }
                 chain.push_back (gate);
             }
@@ -1342,7 +1342,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         const auto pan = std::clamp (unit.params[8], -128, 128) / 128.0;
         if (const auto& lfo = unit.articulators[0].lfo; lfo.on && ! lfo.frozen && lfo.tempo)
         {
-            // pan = PAN/128 + 2·A·d_L·W(φ), período 625/(10001^(S/65536) − 1) tempos (REA_rodada20 §1.5)
+            // pan = PAN/128 + 2·A·d_L·W(φ), period 625/(10001^(S/65536) − 1) beats (REA_rodada20 §1.5)
             auto autoPan = makeEffectSlot (EffectKind::autoPan);
             const auto period = 625.0 / (std::pow (10001.0, std::clamp (lfo.speed, 1, 65536) / 65536.0) - 1.0);
             const auto depth = std::clamp (2.0 * lfo.amplitude * unit.articulators[0].lfoDepth, -1.0, 1.0);
@@ -1352,7 +1352,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             autoPan.params[3] = (float) clamp01 (pan * 0.5 + 0.5);
             chain.push_back (autoPan);
             if (lfo.skew != 0 || lfo.width != 0)
-                out.notes.push_back ("Love Philter: forma do LFO de pan aproximada por triângulo");
+                out.notes.push_back ("Love Philter: pan LFO shape approximated by a triangle");
         }
         else if (std::abs (pan) > 1e-3)
         {
@@ -1360,17 +1360,17 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
             chain.push_back (utility);
         }
-        // corte: tratado como automação ao vivo só com uma unidade (abaixo); ressonância: não aplicada
+        // cutoff: handled as live automation only with a single unit (below); resonance: not applied
         const auto& res = unit.articulators[3];
         const auto& cut = unit.articulators[2];
         if (res.pattern.on || res.lfo.on || (active.size() > 1 && (cut.pattern.on || cut.lfo.on)))
-            out.notes.push_back ("Love Philter: envelope/LFO de corte ou ressonância não aplicado");
+            out.notes.push_back ("Love Philter: cutoff or resonance envelope/LFO not applied");
         return chain;
     };
 
     if (active.empty())
     {
-        out.slots.push_back (philterSlot ({}, 0.0)); // nenhuma unidade ligada: o Love Philter fica mudo
+        out.slots.push_back (philterSlot ({}, 0.0)); // no unit enabled: the Love Philter is silent
         return out;
     }
 
@@ -1380,8 +1380,8 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         out.slots = unitEffects (u);
         const auto& unit = state->units[(std::size_t) u];
 
-        // envelope/LFO do corte (aditivos, REA_rodada20 §1.4/§1.5): c = CUT/256 + (y − 0,5)·ENV/128, ou
-        // c = CUT/256 + A·d_L·W; um slot "só controle" gera o valor e uma automação ao vivo move o corte do EQ
+        // cutoff envelope/LFO (additive, REA_rodada20 §1.4/§1.5): c = CUT/256 + (y − 0.5)·ENV/128, or
+        // c = CUT/256 + A·d_L·W; a "control-only" slot generates the value and a live automation drives the EQ cutoff
         if (const auto& cut = unit.articulators[2]; (cut.pattern.on || cut.lfo.on) && out.slots[0].kind == EffectKind::parametricEq)
         {
             const auto cut0 = std::clamp (unit.params[1], 0, 256) / 256.0, res0 = std::clamp (unit.params[2], 0, 256) / 256.0;
@@ -1421,7 +1421,7 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
                 addLink (std::move (control), [=] (double y) { return cut0 + (y - 0.5) * depth; });
             }
             else if (env.on)
-                out.notes.push_back ("Love Philter: envelope de corte fora do formato suportado");
+                out.notes.push_back ("Love Philter: cutoff envelope outside the supported format");
             if (const auto& lfo = cut.lfo; lfo.on && lfo.tempo && ! lfo.frozen)
             {
                 auto control = makeEffectSlot (EffectKind::autoPan);
@@ -1435,14 +1435,14 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
         }
         const auto base = 8 + 44 * u;
         const auto masterGain = master;
-        // Mod X (k = 6) / Mod Y (k = 7) movem o utilitário de volume, se houver
+        // Mod X (k = 6) / Mod Y (k = 7) drive the volume utility, if any
         const auto modSlot = out.slots.size() >= 2 && out.slots[1].kind == EffectKind::utility && out.slots[1].params[1] == 0.5f ? 1 : -1;
         out.paramMap = [unit, base, masterGain, modSlot, modX, modY, volumeFactor] (int k) -> std::optional<std::tuple<int, int, std::function<float (float)>>> {
             if ((k == 6 || k == 7) && modSlot >= 0)
                 return std::make_tuple (modSlot, 0, std::function<float (float)> ([unit, k, modX, modY, volumeFactor] (float v) {
                                             return utilityGainValue (k == 6 ? volumeFactor (unit, v, modY) : volumeFactor (unit, modX, v));
                                         }));
-            if (k == base + 1) // CUT: c = valor
+            if (k == base + 1) // CUT: c = value
                 return std::make_tuple (0, peq::param (0, 1), std::function<float (float)> ([unit] (float v) {
                                             const auto b = philterBand (unit, v, std::clamp (unit.params[2], 0, 256) / 256.0);
                                             return peq::hzValue (b.hz);
@@ -1499,11 +1499,11 @@ PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vecto
         const auto threeBands = word (6) != 0;
         if (! threeBands && band == 1)
         {
-            head.gain = 0.0f; // em 2 bandas o barramento da média é mudo
+            head.gain = 0.0f; // with 2 bands the mid bus is muted
             return head;
         }
-        // a banda vira um Crossover com a estrutura exata de cada inclinação (REA_rodada17 §1.2); só a de
-        // 18 dB/oit (estrutura com passa-tudo do FL) é aproximada por Butterworth 3
+        // the band becomes a Crossover with the exact structure of each slope (REA_rodada17 §1.2); only the
+        // 18 dB/oct one (FL's all-pass structure) is approximated by a 3rd-order Butterworth
         auto slot = makeEffectSlot (EffectKind::crossover);
         auto value = [] (int v) { return (float) (std::clamp (v, 0, 65536) / 65536.0); };
         auto combo = [] (int c) { return (float) std::clamp (c, 0, 7) / 7.0f; };
@@ -1532,9 +1532,9 @@ PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vecto
         else
             highPass (1, 3);
         head.slot = slot;
-        head.gain = (float) std::pow (10.0, std::clamp (word (9 + band), -6000, 1800) / 100.0 / 20.0); // nível de envio (centésimos de dB)
+        head.gain = (float) std::pow (10.0, std::clamp (word (9 + band), -6000, 1800) / 100.0 / 20.0); // send level (hundredths of a dB)
         if (approximate)
-            head.note = "Frequency Splitter: inclinação de 18 dB/oit aproximada";
+            head.note = "Frequency Splitter: 18 dB/oct slope approximated";
         return head;
     }
 
@@ -1552,8 +1552,8 @@ PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vecto
             return head;
         }
         if (bus != param (6) || param (4) != 0 || param (5) != 0)
-            return head; // com delay/fase a diferença não é uma matriz: fora
-        // entrada − saída da matriz M = (I − M)
+            return head; // with delay/phase the difference is not a matrix: skip
+        // input − matrix output M = (I − M)
         const auto rl = param (0) / 12800.0, l = param (1) / 12800.0, r = param (2) / 12800.0, lr = param (3) / 12800.0;
         slot.params[2] = utilityMatrixValue (1.0 - l);
         slot.params[3] = utilityMatrixValue (-rl);

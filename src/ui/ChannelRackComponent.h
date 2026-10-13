@@ -8,13 +8,13 @@
 
 namespace lynx
 {
-// Channel Rack no estilo do FL: uma linha por canal com mute, pan, volume, nome
-// e a grade de steps da pattern atual.
-//  - steps: clique esquerdo liga (arrastar pinta), clique direito apaga
-//  - nome: clique seleciona e toca um preview, duplo clique abre o Piano Roll,
-//    clique direito abre o menu do canal
-//  - knobs: arrastar na vertical, duplo clique volta ao padrão
-//  - arrastar um arquivo de áudio para uma linha transforma o canal em sampler
+// FL-style Channel Rack: one row per channel with mute, pan, volume, name
+// and the step grid of the current pattern.
+//  - steps: left click turns on (drag paints), right click erases
+//  - name: click selects and plays a preview, double click opens the Piano Roll,
+//    right click opens the channel menu
+//  - knobs: drag vertically, double click resets to default
+//  - dropping an audio file onto a row turns the channel into a sampler
 class ChannelRackComponent final : public juce::Component,
                                    public juce::FileDragAndDropTarget,
                                    public juce::DragAndDropTarget,
@@ -36,7 +36,7 @@ public:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
-    // arquivos arrastados do navegador do LYNX
+    // files dragged from the LYNX browser
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;
 
@@ -65,7 +65,7 @@ private:
     void applyPaint (const juce::MouseEvent& e);
     void showChannelMenu (int channel);
     void showAddChannelMenu();
-    void chooseSample (int channel); // channel < 0 = novo canal
+    void chooseSample (int channel); // channel < 0 = new channel
     void assignSample (int channel, const juce::File& file);
     void rename (int channel);
     void openPluginWindow (int channel);

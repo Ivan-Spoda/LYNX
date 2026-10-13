@@ -10,85 +10,85 @@
 
 namespace lynx
 {
-// Pastas para onde apontam as variáveis que o FL grava nos caminhos de sample.
+// Folders that the variables FL writes into sample paths point to.
 struct FlPathRoots
 {
-    std::string factoryData; // %FLStudioFactoryData%  ex.: C:\Program Files\Image-Line\FL Studio 2026
-    std::string data;        // %FLStudioData%         ex.: ...\FL Studio 2026\Data
-    std::string userData;    // %FLStudioUserData%     ex.: Documentos\Image-Line\FL Studio
+    std::string factoryData; // %FLStudioFactoryData%  e.g. C:\Program Files\Image-Line\FL Studio 2026
+    std::string data;        // %FLStudioData%         e.g. ...\FL Studio 2026\Data
+    std::string userData;    // %FLStudioUserData%     e.g. Documents\Image-Line\FL Studio
 };
 
 std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots);
 
-// O que o import fez com cada coisa do FL que não é "nota e sample": para o usuário saber por que
-// algo soa diferente.
+// What the import did with each FL thing that isn't "notes and samples": so the user knows why
+// something sounds different.
 struct FlpImportReport
 {
-    std::map<std::string, int> converted;    // geradores convertidos de verdade (3x Osc, FPC, DirectWave...)
-    std::map<std::string, int> approximated; // aproximados pelo synth interno (Harmless, DX10...)
-    std::map<std::string, int> unsupported;  // sem equivalente: tocam com um preset do synth pelo nome
-    std::map<std::string, int> droppedEffects; // efeitos sem equivalente (saem do mixer)
+    std::map<std::string, int> converted;    // generators truly converted (3x Osc, FPC, DirectWave...)
+    std::map<std::string, int> approximated; // approximated by the internal synth (Harmless, DX10...)
+    std::map<std::string, int> unsupported;  // no equivalent: play with a synth preset chosen by name
+    std::map<std::string, int> droppedEffects; // effects with no equivalent (removed from the mixer)
     int missingSamples = 0;
 };
 
 struct FlpImportOptions
 {
     FlPathRoots roots;
-    std::function<bool (const std::string& path)> fileExists; // sem isto, nenhum sample é usado
+    std::function<bool (const std::string& path)> fileExists; // without this, no sample is used
 
-    // Opcionais (fatias do Fruity Slicer/Slicex): bytes de um arquivo, duração de um sample em
-    // quadros (0 = desconhecida) e gravação de um WAV embutido no projeto (devolve o caminho).
+    // Optional (Fruity Slicer/Slicex slices): bytes of a file, a sample's length in
+    // frames (0 = unknown) and saving of a WAV embedded in the project (returns the path).
     std::function<std::vector<std::uint8_t> (const std::string& path)> readFile;
     std::function<std::int64_t (const std::string& path)> sampleFrames;
     std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
 
-    FlpImportReport* report = nullptr; // opcional
+    FlpImportReport* report = nullptr; // optional
 };
 
-// Converte um projeto do FL Studio para o nosso modelo. Canais sampler cujo
-// arquivo existe viram samplers; os demais usam um instrumento interno escolhido
-// pelo nome. Patterns são reescaladas para o nosso PPQ. Plugins ainda não.
+// Converts an FL Studio project to our model. Sampler channels whose
+// file exists become samplers; the rest use an internal instrument chosen
+// by name. Patterns are rescaled to our PPQ. Plugins not yet.
 Song importFlp (const flp::Project& project, const FlpImportOptions& options = {});
 
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type);
 
-// Osciladores do synth interno a partir do estado (0xD5) do 3x Osc, versões 10 a 14
-// (docs/analise/REA_rodada4.md §1-2). Mantém ADSR e filtro de `base`. Falso se o blob não serve.
+// Internal synth oscillators from the 3x Osc state (0xD5), versions 10 to 14
+// (docs/analise/REA_rodada4.md §1-2). Keeps ADSR and filter from `base`. False if the blob is unusable.
 bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& base);
 
-// Filtro do canal do FL (Mod X/Y 0..256, tipo 0..7 do 0xDB) como corte em Hz e ressonância 0..1
-// do filtro do synth/sampler (REA_rodada4 §3); `mode` 0 passa-baixas, 1 passa-banda, 2 passa-altas, 3 rejeita-faixa.
+// FL channel filter (Mod X/Y 0..256, type 0..7 from 0xDB) as cutoff in Hz and resonance 0..1
+// of the synth/sampler filter (REA_rodada4 §3); `mode` 0 low-pass, 1 band-pass, 2 high-pass, 3 band-reject.
 void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance, int& mode);
 
-// Oitavas que o envelope de corte do FL (amount ±128 em unidades de Mod X) desloca a partir do Mod X do canal.
+// Octaves the FL cutoff envelope (amount ±128 in Mod X units) shifts from the channel's Mod X.
 float filterEnvelopeOctaves (int modX, int type, int amount);
 
-// Um pad de um sampler de bateria do FL (FPC e afins) que vira um canal próprio.
+// A pad of an FL drum sampler (FPC and similar) that becomes its own channel.
 struct DrumPad
 {
     std::string name;
-    int key = 60;                   // tecla que dispara o pad no canal original
-    std::vector<SampleZone> layers; // camadas por velocity (tocam na altura do sample)
-    float gain = 1.0f;              // ganho linear do pad (multiplica o do canal)
-    float pan = 0.0f, tune = 0.0f;  // pan −1..1; afinação em semitons
-    int cutGroup = 0, cutBy = 0;    // tocar este pad corta os pads com cutBy == cutGroup (0 = nenhum)
-    int mixerOffset = 0;            // trilha do mixer relativa à do canal
+    int key = 60;                   // key that triggers the pad in the original channel
+    std::vector<SampleZone> layers; // velocity layers (play at the sample's pitch)
+    float gain = 1.0f;              // pad linear gain (multiplies the channel's)
+    float pan = 0.0f, tune = 0.0f;  // pan −1..1; tuning in semitones
+    int cutGroup = 0, cutBy = 0;    // playing this pad cuts pads with cutBy == cutGroup (0 = none)
+    int mixerOffset = 0;            // mixer track relative to the channel's
 };
 
-// Troca o canal `channel` por um canal sampler por pad (logo depois dele, no mesmo insert do mixer)
-// e move as notas pela tecla: a nota do pad vai para o canal dele, na tecla 60. Notas de teclas sem
-// pad somem. Os índices de canal das patterns, automações e clips são ajustados.
+// Replaces channel `channel` with one sampler channel per pad (right after it, on the same mixer insert)
+// and moves notes by key: a pad's note goes to its channel, at key 60. Notes on keys without a
+// pad are dropped. Channel indices of patterns, automations and clips are adjusted.
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads);
 
-// Preset de canal/plugin do FL (.fst) de um sintetizador que o import converte (3x Osc, Sytrus,
-// Harmor, GMS, Harmless...) ou preset nativo do GMS (.gmsynth), como ajustes do synth interno.
-// nullopt se o gerador não é um desses ou o arquivo não pôde ser lido.
+// FL channel/plugin preset (.fst) of a synthesizer the import converts (3x Osc, Sytrus,
+// Harmor, GMS, Harmless...) or native GMS preset (.gmsynth), as internal synth settings.
+// nullopt if the generator isn't one of these or the file couldn't be read.
 std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>& fileBytes);
 bool isFlSynthPresetPlugin (const std::string& pluginName);
 
-// Efeito interno parecido com um efeito nativo do FL (pelo nome interno do plugin).
+// Internal effect similar to a native FL effect (by the plugin's internal name).
 std::optional<EffectKind> effectForFlPlugin (const std::string& name);
 
-// Alvo nosso para um controlID do FL (canal/mixer). `channelMap` = canal do FL -> nosso.
+// Our target for an FL controlID (channel/mixer). `channelMap` = FL channel -> ours.
 AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int>& channelMap, int mixerTracks);
 } // namespace lynx

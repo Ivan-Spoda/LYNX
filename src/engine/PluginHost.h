@@ -10,9 +10,9 @@
 
 namespace lynx
 {
-// Adaptadores: um plugin JUCE visto pelo núcleo como Instrument/Effect.
-// As notas viram MIDI no início do próximo trecho renderizado; como o núcleo
-// renderiza em trechos que começam exatamente em cada evento, o tempo é preciso.
+// Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
+// Notes become MIDI at the start of the next rendered chunk; since the core
+// renders in chunks that start exactly at each event, timing is sample-accurate.
 class PluginInstrument final : public Instrument
 {
 public:
@@ -21,7 +21,7 @@ public:
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
 
-    void prepare (double) noexcept override {} // preparado na criação (fora da thread de áudio)
+    void prepare (double) noexcept override {} // prepared at creation (off the audio thread)
     void noteOn (int key, float velocity) noexcept override;
     void noteOff (int key) noexcept override;
     void allNotesOff() noexcept override;
@@ -57,40 +57,40 @@ private:
     int blockSize;
 };
 
-// Formatos de plugin, lista de plugins conhecidos (salva em AppData) e criação de instâncias.
-// Thread da UI.
+// Plugin formats, known-plugin list (saved in AppData) and instance creation.
+// UI thread.
 class PluginHost
 {
 public:
-    // persistent = lê e grava a lista em %APPDATA%\LYNX (false nos testes).
+    // persistent = read and write the list in %APPDATA%\LYNX (false in tests).
     explicit PluginHost (bool persistent = true);
 
     juce::KnownPluginList& getKnownPlugins() noexcept { return known; }
     juce::AudioPluginFormatManager& getFormats() noexcept { return formats; }
 
     static juce::File settingsFolder();          // %APPDATA%\LYNX
-    static juce::FileSearchPath defaultSearchPath(); // pastas padrão de VST3
+    static juce::FileSearchPath defaultSearchPath(); // default VST3 folders
 
-    // Varre as pastas atrás de plugins. `progress(0..1, arquivo)` retorna false para cancelar.
-    // Cada arquivo é examinado num processo separado (LYNX.exe --scan-one): um plugin que
-    // trave ou feche o processo não derruba o LYNX; ele vai para a lista negra e é pulado
-    // nas próximas buscas.
+    // Scans the folders for plugins. `progress(0..1, file)` returns false to cancel.
+    // Each file is examined in a separate process (LYNX.exe --scan-one): a plugin that
+    // hangs or crashes the process doesn't take LYNX down; it is blacklisted and skipped
+    // in later scans.
     int scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress);
 
-    // Modo filho da busca: descreve os plugins de um arquivo em `output` (XML). Retorna o nº achado.
+    // Scan child mode: describes a file's plugins into `output` (XML). Returns the number found.
     static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
 
     static constexpr int scanTimeoutMs = 30000;
 
-    // Adiciona um arquivo específico (ex.: um .vst3 fora das pastas padrão).
+    // Adds a specific file (e.g. a .vst3 outside the default folders).
     int addPluginFile (const juce::File& file);
 
     std::unique_ptr<juce::PluginDescription> find (const juce::String& id) const;
 
-    // Plugins de terceiros de um .flp importado (ForeignPlugin): acha o mesmo plugin entre os
-    // escaneados (VST3 pelo class ID, CLAP pelo id, e pelo nome como plano B, também para os VST2
-    // que o LYNX não hospeda) e converte o estado VST3 para o formato do JUCE. Canais achados viram
-    // canais de plugin; slots de efeito não achados saem. Retorna quantos foram achados.
+    // Third-party plugins from an imported .flp (ForeignPlugin): finds the same plugin among the
+    // scanned ones (VST3 by class ID, CLAP by id, and by name as a fallback, also for the VST2s
+    // LYNX doesn't host) and converts the VST3 state to JUCE's format. Matched channels become
+    // plugin channels; unmatched effect slots are dropped. Returns how many were matched.
     int adoptFlPlugins (Song& song, juce::StringArray* missing = nullptr) const;
     const juce::PluginDescription* findForeign (const ForeignPlugin& plugin, bool instrument) const;
 
@@ -108,9 +108,9 @@ private:
     bool persistent = true;
 };
 
-// Layout estéreo (se o plugin aceitar), taxa e bloco; chama prepareToPlay.
+// Stereo layout (if the plugin accepts it), rate and block size; calls prepareToPlay.
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize);
 
-// Estado atual do plugin em base64 (para salvar no projeto).
+// Current plugin state as base64 (for saving in the project).
 std::string capturePluginState (juce::AudioPluginInstance& plugin);
 } // namespace lynx

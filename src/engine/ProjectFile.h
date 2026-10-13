@@ -8,8 +8,8 @@
 
 namespace lynx
 {
-// Formato próprio de projeto: JSON versionado (.lynx).
-// Notas vão como arrays compactos [start, length, channel, key, velocity].
+// Native project format: versioned JSON (.lynx).
+// Notes are stored as compact arrays [start, length, channel, key, velocity].
 namespace ProjectFile
 {
 constexpr const char* extension = ".lynx";

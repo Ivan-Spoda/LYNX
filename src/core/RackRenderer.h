@@ -1,7 +1,7 @@
 #pragma once
 
-// Junta Song + instrumentos + scheduler: dado o estado do transporte, gera o
-// áudio estéreo de um bloco com as notas disparadas no sample exato.
+// Ties Song + instruments + scheduler together: given the transport state, renders
+// a block of stereo audio with notes triggered at the exact sample.
 
 #include <array>
 #include <functional>
@@ -21,81 +21,81 @@
 
 namespace lynx
 {
-// Snapshot imutável publicado pela UI. Os instrumentos são compartilhados entre
-// snapshots consecutivos para as vozes não serem cortadas quando a música é editada.
+// Immutable snapshot published by the UI. Instruments are shared between
+// consecutive snapshots so voices are not cut off when the song is edited.
 struct RackState
 {
     Song song;
-    std::vector<std::shared_ptr<Instrument>> instruments; // um por canal
-    std::vector<std::vector<std::shared_ptr<Effect>>> effects; // [trilha do mixer][slot]
-    double sampleRate = 44100.0; // taxa com que os instrumentos novos foram preparados
+    std::vector<std::shared_ptr<Instrument>> instruments; // one per channel
+    std::vector<std::vector<std::shared_ptr<Effect>>> effects; // [mixer track][slot]
+    double sampleRate = 44100.0; // rate the new instruments were prepared with
 
-    // Automação, pré-processada para a thread de áudio só consultar tabelas.
-    // Índices em song.automations, ou -1 = sem automação.
+    // Automation, preprocessed so the audio thread only does table lookups.
+    // Indices into song.automations, or -1 = no automation.
     static constexpr int maxAutomations = 1024;
-    std::vector<std::vector<int>> automationClips; // por automação: clips na Playlist
+    std::vector<std::vector<int>> automationClips; // per automation: clips in the Playlist
     std::vector<int> channelVolumeAuto, channelPanAuto;
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
-    std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [trilha][slot][param] (internos)
-    std::vector<std::vector<int>> effectMixAuto;                                 // [trilha][slot]: dry/wet
-    std::vector<int> liveAutomations;                                            // automações com fonte ao vivo (controladores)
+    std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [track][slot][param] (built-in)
+    std::vector<std::vector<int>> effectMixAuto;                                 // [track][slot]: dry/wet
+    std::vector<int> liveAutomations;                                            // automations with a live source (controllers)
 
     struct PluginParamBinding
     {
         int automation = 0;
-        int channel = -1;       // instrumento do canal, ou
-        int track = 0, slot = 0; // efeito no slot
+        int channel = -1;       // channel instrument, or
+        int track = 0, slot = 0; // effect in the slot
         int param = 0;
     };
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
-    ScheduleIndex schedule; // índice para agendar a Playlist sem varrer todas as notas
-    int tempoAutomation = -1; // automação do andamento, se houver
+    ScheduleIndex schedule; // index to schedule the Playlist without scanning every note
+    int tempoAutomation = -1; // tempo automation, if any
 
-    // PDC: atrasos por aresta (nullptr = sem atraso) e as latências usadas para montar o plano.
+    // PDC: per-edge delays (nullptr = no delay) and the latencies used to build the plan.
     PdcPlan pdc;
     std::vector<std::shared_ptr<DelayLine>> channelDelays;
-    std::vector<std::vector<std::shared_ptr<DelayLine>>> sendDelays; // [trilha][k] como PdcPlan::sendDelay
-    std::vector<int> latencies; // canais, depois slots de todas as trilhas
+    std::vector<std::vector<std::shared_ptr<DelayLine>>> sendDelays; // [track][k] like PdcPlan::sendDelay
+    std::vector<int> latencies; // channels, then slots of all tracks
 
-    // Latências atuais dos instrumentos e efeitos, no mesmo formato de `latencies`.
+    // Current latencies of instruments and effects, in the same layout as `latencies`.
     std::vector<int> currentLatencies() const;
     void buildPdc (const RackState* previous);
 
-    // Arpejadores dos canais com arpejo ligado (nullptr nos outros); reaproveitados entre snapshots.
+    // Arpeggiators of channels with arpeggio on (nullptr for the others); reused across snapshots.
     std::vector<std::shared_ptr<Arpeggiator>> arpeggiators;
 
-    // Cut groups: canais que cada canal corta ao tocar (cutBy == cutGroup dele).
+    // Cut groups: channels each channel cuts when it plays (cutBy == its cutGroup).
     std::vector<std::vector<int>> cutTargets;
     bool hasCutGroups = false;
 
-    // Mixer: ordem de processamento dos inserts e quem soa com o solo atual.
+    // Mixer: insert processing order and which ones sound with the current solo.
     std::vector<int> mixerOrder;
     std::vector<char> mixerAudible;
 
-    // Modelo "puxar": cada trilha soma as saídas (pós-fader) das que enviam para ela.
+    // "Pull" model: each track sums the (post-fader) outputs of the tracks that send to it.
     struct MixerInput
     {
         int source = 0;
-        int delay = 0; // índice em sendDelays[source]
+        int delay = 0; // index into sendDelays[source]
         float level = 1.0f;
     };
-    std::vector<std::vector<MixerInput>> mixerInputs; // [trilha]; [0] = Master
-    std::vector<std::vector<int>> mixerLayers;        // inserts sem dependência entre si, em ordem
-    bool parallel = false;                            // vale a pena dividir entre threads
+    std::vector<std::vector<MixerInput>> mixerInputs; // [track]; [0] = Master
+    std::vector<std::vector<int>> mixerLayers;        // inserts with no dependencies among them, in order
+    bool parallel = false;                            // worth splitting across threads
     void buildMixerGraph();
 
     void buildAutomationTables();
 
-    // Carrega (ou pega do cache) o áudio de um arquivo; nullptr se não conseguir.
+    // Loads (or fetches from cache) a file's audio; nullptr on failure.
     using SampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path)>;
 
-    // O app cria instrumentos/efeitos de plugin (o núcleo não conhece JUCE). nullptr = não deu
-    // (plugin ausente): o canal fica mudo / o slot vira bypass.
+    // The app creates plugin instruments/effects (the core does not know JUCE). nullptr = failed
+    // (missing plugin): the channel goes silent / the slot becomes bypass.
     using PluginInstrumentFactory = std::function<std::shared_ptr<Instrument> (const PluginRef&, double sampleRate)>;
     using PluginEffectFactory = std::function<std::shared_ptr<Effect> (const PluginRef&, double sampleRate)>;
 
-    // Sample esticado sem mudar a altura (razão = duração nova / original); com cache no app.
+    // Sample stretched without changing pitch (ratio = new / original duration); cached in the app.
     using StretchedSampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path, double ratio)>;
 
     struct Factories
@@ -106,9 +106,9 @@ struct RackState
         PluginEffectFactory pluginEffects;
     };
 
-    // Monta o próximo estado reaproveitando os instrumentos de `previous` quando o
-    // canal não mudou de instrumento nem de sample, e os efeitos quando o slot tem o
-    // mesmo tipo. Roda na thread da UI (aloca).
+    // Builds the next state reusing the instruments from `previous` when the
+    // channel changed neither instrument nor sample, and the effects when the slot has the
+    // same type. Runs on the UI thread (allocates).
     static std::unique_ptr<const RackState> build (Song song,
                                                    const RackState* previous,
                                                    double sampleRate,
@@ -124,15 +124,15 @@ class WorkerPool;
 class RackRenderer
 {
 public:
-    // Threads extras para canais e camadas do mixer (nullptr = tudo na thread de áudio).
+    // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
-    // Aloca os buffers do mixer: chamar fora da thread de áudio.
-    // Blocos maiores que maxBlockSize são processados em pedaços.
+    // Allocates the mixer buffers: call off the audio thread.
+    // Blocks larger than maxBlockSize are processed in pieces.
     void prepare (double sampleRate, int maxBlockSize = 2048);
 
-    // Thread de áudio. left/right são sobrescritos. `live` (opcional) traz notas
-    // tocadas ao vivo, aplicadas no início do bloco.
+    // Audio thread. left/right are overwritten. `live` (optional) carries notes
+    // played live, applied at the start of the block.
     void process (const RackState* state,
                   bool playing,
                   double startTick,
@@ -145,10 +145,10 @@ public:
 
     static void applyStereoForTest (const MixerTrack& t, float* l, float* r, int n) noexcept { applyStereo (t, l, r, n); }
 
-    // Andamento usado no último bloco (muda com automação de tempo). O transporte avança com ele.
+    // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
 
-    // Eventos do último bloco (para testes e diagnóstico).
+    // Events of the last block (for tests and diagnostics).
     const EventBuffer& lastEvents() const noexcept { return events; }
 
 private:
@@ -169,20 +169,20 @@ private:
     double sampleRate = 44100.0;
     double bpm = 120.0;
     bool wasPlaying = false;
-    double expectedTick = -1.0; // onde o próximo bloco deveria começar, para detectar saltos
+    double expectedTick = -1.0; // where the next block should start, to detect jumps
     bool resumeAudio = false;
     const RackState* lastState = nullptr;
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
-    std::array<float, RackState::maxAutomations> automationValues {}; // NaN = ainda não avaliada
-    std::array<float, maxMixerTracks * 2> lastTrackGain {}; // ganho L/R do bloco anterior, para a rampa
-    std::array<char, maxMixerTracks> trackActive {};        // a saída da trilha tem som neste bloco
+    std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
+    std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
+    std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
     static constexpr int maxChannels = 1024;
-    std::array<char, maxChannels> channelSilent {};          // canal pulado neste trecho (ocioso, sem notas)
-    static constexpr int chunkCapacity = 512;               // trechos processados de uma vez
+    std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
+    static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
-    double chunkStartTick = 0.0, chunkTps = 1.0;            // do trecho sendo renderizado (para o arpejador)
+    double chunkStartTick = 0.0, chunkTps = 1.0;            // of the chunk being rendered (for the arpeggiator)
     WorkerPool* workers = nullptr;
 
     struct SmartDisableState
@@ -190,7 +190,7 @@ private:
         const Effect* effect = nullptr;
         int silentSamples = 0;
     };
-    std::vector<SmartDisableState> smartDisable; // [trilha * maxEffectSlots + slot]
+    std::vector<SmartDisableState> smartDisable; // [track * maxEffectSlots + slot]
 
     struct TrackEqState
     {
@@ -198,8 +198,8 @@ private:
         std::array<Biquad, 3> bands;
         bool running = false;
     };
-    std::vector<TrackEqState> trackEqs; // EQ embutido de cada trilha
-    double chunkTick = 0.0;             // começo do bloco (para os LFOs globais)
+    std::vector<TrackEqState> trackEqs; // built-in EQ of each track
+    double chunkTick = 0.0;             // start of the block (for the global LFOs)
     void applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;

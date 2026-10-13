@@ -23,7 +23,7 @@ public:
         if (auto* editor = plugin.createEditorIfNeeded())
             setContentOwned (editor, true);
         else
-            setContentOwned (new juce::GenericAudioProcessorEditor (plugin), true); // plugin sem interface
+            setContentOwned (new juce::GenericAudioProcessorEditor (plugin), true); // plugin without a UI
 
         if (auto* editor = dynamic_cast<juce::AudioProcessorEditor*> (getContentComponent()))
             setResizable (editor->isResizable(), false);
@@ -34,7 +34,7 @@ public:
 
     ~PluginWindow() override
     {
-        // a interface precisa morrer antes do plugin (que pode morrer junto com `owner`)
+        // the UI must be destroyed before the plugin (which may die together with `owner`)
         clearContentComponent();
     }
 
@@ -56,7 +56,7 @@ std::map<juce::AudioPluginInstance*, std::unique_ptr<PluginWindow>>& windows()
 void PluginWindow::closeButtonPressed()
 {
     const auto* k = key();
-    // fecha depois de sair deste callback (a janela se apaga)
+    // close after leaving this callback (the window deletes itself)
     juce::MessageManager::callAsync ([k] { windows().erase (const_cast<juce::AudioPluginInstance*> (k)); });
 }
 
@@ -64,13 +64,13 @@ class ScanThread final : public juce::ThreadWithProgressWindow
 {
 public:
     ScanThread (AudioEngine& e, std::function<void (int)> done)
-        : juce::ThreadWithProgressWindow (utf8 ("Procurando plugins (VST3 e CLAP)..."), true, true),
+        : juce::ThreadWithProgressWindow (utf8 ("Scanning for plugins (VST3 and CLAP)..."), true, true),
           engine (e),
           onDone (std::move (done))
     {
     }
 
-    // chamado na thread da UI quando a varredura termina (ou é cancelada)
+    // called on the UI thread when the scan finishes (or is cancelled)
     void threadComplete (bool) override
     {
         if (onDone)
@@ -119,7 +119,7 @@ void closeAll()
 
 void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onDone)
 {
-    (new ScanThread (engine, std::move (onDone)))->launchThread(); // se apaga sozinho no fim
+    (new ScanThread (engine, std::move (onDone)))->launchThread(); // deletes itself when done
 }
 
 void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen)
@@ -141,13 +141,13 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
     }
 
     if (added == 0)
-        menu.addItem (utf8 ("(nenhum plugin encontrado; use \"Procurar plugins\")"), false, false, [] {});
+        menu.addItem (utf8 ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
 
     menu.addSeparator();
-    menu.addItem (utf8 ("Procurar plugins (VST3 e CLAP)..."), [&engine] {
+    menu.addItem (utf8 ("Scan for plugins (VST3 and CLAP)..."), [&engine] {
         scanPluginsWithProgress (engine, [] (int found) {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
-                                                    juce::String (found) + utf8 (" plugin(s) novo(s) encontrado(s)."));
+                                                    juce::String (found) + utf8 (" new plugin(s) found."));
         });
     });
 }

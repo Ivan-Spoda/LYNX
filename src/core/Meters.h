@@ -7,9 +7,9 @@
 
 namespace lynx
 {
-// Picos por trilha do mixer, escritos pela thread de áudio e lidos pela UI.
-// O áudio acumula o máximo; a UI lê e zera (takePeak), então nenhum pico se perde
-// entre dois quadros da tela.
+// Peaks per mixer track, written by the audio thread and read by the UI.
+// Audio accumulates the maximum; the UI reads and resets (takePeak), so no peak is lost
+// between two screen frames.
 class MeterBank
 {
 public:
@@ -22,7 +22,7 @@ public:
         raise (peaks[(std::size_t) track * 2 + 1], right);
     }
 
-    // UI: pico desde a última leitura. channel 0 = esquerda, 1 = direita.
+    // UI: peak since the last read. channel 0 = left, 1 = right.
     float takePeak (int track, int channel) noexcept
     {
         if (track < 0 || track >= maxMixerTracks)

@@ -1,7 +1,7 @@
 #pragma once
 
-// Estado salvo (0xD5) dos efeitos nativos do FL nos slots do mixer -> parâmetros dos efeitos
-// internos do LYNX. Formatos e fórmulas em docs/analise/REA_rodada7.md (clean-room).
+// Saved state (0xD5) of FL's native effects in mixer slots -> parameters of LYNX's built-in
+// effects. Formats and formulas in docs/analise/REA_rodada7.md (clean-room).
 
 #include <cstdint>
 #include <functional>
@@ -14,18 +14,18 @@
 
 namespace lynx
 {
-// Monta o slot a partir do nome do plugin do FL e do blob. Sem blob utilizável, devolve o efeito
-// interno parecido com os parâmetros padrão; nullopt quando não há efeito parecido.
-// `bpm` converte tempos sincronizados (ex.: predelay do Reeverb 2) para milissegundos.
+// Builds the slot from the FL plugin name and the blob. Without a usable blob, returns the similar
+// built-in effect with default parameters; nullopt when there is no similar effect.
+// `bpm` converts tempo-synced times (e.g. Reeverb 2 predelay) to milliseconds.
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm = 120.0);
 
-// Preset de efeito do FL (.fst de Plugin presets\Effects): o efeito interno com os ajustes do preset.
+// FL effect preset (.fst from Plugin presets\Effects): the built-in effect with the preset's settings.
 std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& fileBytes, double bpm = 120.0);
 
-// Plugins do FL cujos presets dão este efeito interno (para listar as pastas de presets).
+// FL plugins whose presets map to this built-in effect (for listing the preset folders).
 std::vector<std::string> flPluginsForEffect (EffectKind kind);
-// Automação de um parâmetro de efeito nativo do FL: o nosso parâmetro equivalente e a conversão do
-// valor normalizado do FL (0..1 na faixa do parâmetro dele) para o nosso. nullopt = sem equivalente.
+// Automation of an FL native effect parameter: our equivalent parameter and the conversion from FL's
+// normalized value (0..1 over its parameter range) to ours. nullopt = no equivalent.
 struct FlParamMap
 {
     int param = 0;
@@ -33,30 +33,30 @@ struct FlParamMap
 };
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int flParam);
 
-// Começo de um ramo de Patcher que sai do barramento `bus` de um Frequency Splitter ou Stereo Shaper
-// (REA_rodada17 §1-2). Splitter: barramento 0 = soma das bandas; barramento k = banda cujo destino (palavra
-// 15 + i) vale k, filtrada pelos crossovers com a inclinação do combo; em 2 bandas a média é muda.
-// Stereo Shaper: 0 = saída da matriz; o destino da "diferença" (parâmetro 6) = entrada − saída.
+// Head of a Patcher branch leaving bus `bus` of a Frequency Splitter or Stereo Shaper
+// (REA_rodada17 §1-2). Splitter: bus 0 = sum of the bands; bus k = the band whose destination (word
+// 15 + i) equals k, filtered by the crossovers with the combo's slope; with 2 bands the mid is muted.
+// Stereo Shaper: 0 = matrix output; the "difference" destination (parameter 6) = input − output.
 struct PatcherBranchHead
 {
     bool valid = false;
-    std::optional<EffectSlot> slot; // efeito no começo do ramo (nada = sinal direto)
+    std::optional<EffectSlot> slot; // effect at the head of the branch (none = direct signal)
     float gain = 1.0f;
-    std::string note;               // aproximação usada (para o relatório)
+    std::string note;               // approximation used (for the report)
 };
 PatcherBranchHead patcherBranchHead (const std::string& pluginName, const std::vector<std::uint8_t>& state, int bus);
 
-// Fruity Love Philter -> efeitos do LYNX (REA_rodadas 16 §2 e 17 §15): cada unidade ligada vira um EQ
-// paramétrico (tipo, corte e Q pelas fórmulas do FL a 44,1 kHz) + ganho/pan. Uma unidade: `slots` em
-// série (e `paramMap` traduz a automação do FL para eles); várias em paralelo (NEXT = 0): um contêiner.
+// Fruity Love Philter -> LYNX effects (REA_rodadas 16 §2 and 17 §15): each enabled unit becomes a parametric
+// EQ (type, cutoff and Q from FL's formulas at 44.1 kHz) + gain/pan. One unit: `slots` in series
+// (and `paramMap` translates FL automation to them); several in parallel (NEXT = 0): a container.
 struct LovePhilterConversion
 {
     std::vector<EffectSlot> slots;
-    // automação do parâmetro k do FL -> (índice dentro de `slots`, parâmetro nosso, conversão do valor)
+    // automation of FL parameter k -> (index within `slots`, our parameter, value conversion)
     std::function<std::optional<std::tuple<int, int, std::function<float (float)>>> (int k)> paramMap;
-    std::vector<std::string> notes; // o que ficou de fora (para o relatório)
-    // automações ao vivo: a saída de controle do slot `source` move o parâmetro `param` do slot `target`
-    // (índices dentro de `slots`), passando pela curva (33 pontos em 0..1)
+    std::vector<std::string> notes; // what was left out (for the report)
+    // live automations: the control output of slot `source` drives parameter `param` of slot `target`
+    // (indices within `slots`), through the curve (33 points over 0..1)
     struct LiveLink
     {
         int source = 0, target = 0, param = 0;
@@ -64,13 +64,13 @@ struct LovePhilterConversion
     };
     std::vector<LiveLink> links;
 };
-// A seção de compressão do Fruity Limiter como compressor do LYNX (para o sidechain, que só alimenta o detector
-// do compressor; REA_rodada22 §1)
+// The Fruity Limiter's compression section as a LYNX compressor (for the sidechain, which only feeds the
+// compressor's detector; REA_rodada22 §1)
 std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_t>& state);
 
 std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 
-// Valor atual (0..1) da saída `output` de um controlador parado (Fruity X-Y Controller, Control
-// Surface; REA_rodada15 §11): um link dele vira um valor fixo no alvo. nullopt se não der para ler.
+// Current value (0..1) of output `output` of a static controller (Fruity X-Y Controller, Control
+// Surface; REA_rodada15 §11): a link from it becomes a fixed value on the target. nullopt if unreadable.
 std::optional<float> controllerConstantOutput (const std::string& pluginName, const std::vector<std::uint8_t>& state, int output);
 } // namespace lynx

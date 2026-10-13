@@ -8,10 +8,10 @@
 
 namespace lynx
 {
-// Presets do synth interno (nome, ajustes). O primeiro é o padrão.
+// Built-in synth presets (name, settings). The first one is the default.
 std::vector<std::pair<std::string, SynthSettings>> synthPresets();
 
-// Preset que combina com o nome de um canal ("Bass", "Pad", "808"...), para dar um som
-// razoável aos sintetizadores do FL que viram o synth interno na importação.
+// Preset matching a channel name ("Bass", "Pad", "808"...), to give a reasonable sound
+// to FL synths that become the built-in synth on import.
 SynthSettings presetForChannelName (const std::string& channelName);
 } // namespace lynx

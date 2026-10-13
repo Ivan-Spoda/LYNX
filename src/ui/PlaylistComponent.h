@@ -11,20 +11,20 @@
 
 namespace lynx
 {
-// Playlist (arranjo) no estilo do FL: trilhas na vertical, tempo na horizontal.
-//  - clique esquerdo no vazio "pinta" a pattern atual (e já permite arrastar)
-//  - arrastar um clip move (tempo e trilha); a borda direita muda a duração
-//  - clicar num clip torna a pattern dele a atual; duplo clique abre no Channel Rack
-//  - clique direito apaga (arrastar apaga vários)
-//  - clicar na régua posiciona a reprodução e liga o modo Song
-//  - arrastar um arquivo de áudio para a Playlist cria um clip de áudio
-//  - Alt desliga o snap (1 tempo); roda rola, Shift+roda horizontal, Ctrl+roda zoom
-//  - Ctrl+arrastar seleciona com retângulo; Ctrl+clique soma; clips selecionados andam juntos;
-//    Shift+arrastar um clip arrasta uma cópia
-//  - arrastar na régua marca a região de loop; clique direito na régua desliga o loop
-//  - clique direito na faixa do nome de um clip abre o menu dele (dividir, tornar única etc.)
-//  - cabeçalho da trilha: LED muta a trilha; clique direito renomeia
-//  - teclas (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
+// FL-style Playlist (arrangement): tracks vertically, time horizontally.
+//  - left click on empty space "paints" the current pattern (and starts dragging it)
+//  - dragging a clip moves it (time and track); the right edge changes the length
+//  - clicking a clip makes its pattern the current one; double click opens it in the Channel Rack
+//  - right click deletes (dragging deletes several)
+//  - clicking the ruler sets the playback position and enables Song mode
+//  - dragging an audio file into the Playlist creates an audio clip
+//  - Alt disables snap (1 beat); wheel scrolls, Shift+wheel horizontal, Ctrl+wheel zoom
+//  - Ctrl+drag selects with a rectangle; Ctrl+click adds; selected clips move together;
+//    Shift+drag on a clip drags a copy
+//  - dragging on the ruler marks the loop region; right click on the ruler disables the loop
+//  - right click on a clip's name strip opens its menu (split, make unique, etc.)
+//  - track header: LED mutes the track; right click renames
+//  - keys (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
 class PlaylistComponent final : public juce::Component,
                                 public juce::FileDragAndDropTarget,
                                 public juce::DragAndDropTarget,
@@ -33,11 +33,11 @@ class PlaylistComponent final : public juce::Component,
                                 private juce::ScrollBar::Listener
 {
 public:
-    // O que o lápis pinta (escolhido no Picker): a pattern atual, um clip de áudio ou de automação.
+    // What the pencil paints (chosen in the Picker): the current pattern, an audio clip or an automation clip.
     struct Brush
     {
         ClipKind kind = ClipKind::pattern;
-        int index = -1; // canal do áudio ou automação; nas patterns vale a pattern atual
+        int index = -1; // audio or automation channel; for patterns the current pattern is used
     };
     Brush brush;
     int knownCurrentPattern = -1;
@@ -56,14 +56,14 @@ public:
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
-    // Atalhos de edição; a janela principal repassa as teclas quando a Playlist está visível.
+    // Editing shortcuts; the main window forwards keys when the Playlist is visible.
     bool handleKey (const juce::KeyPress& key);
 
-    // arrastar arquivos de áudio cria clips de áudio (e um canal para cada um)
+    // dragging audio files creates audio clips (and a channel for each)
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
-    // arquivos arrastados do navegador do LYNX
+    // files dragged from the LYNX browser
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;
 
@@ -89,15 +89,15 @@ private:
     int numTracks() const;
     std::int64_t snap (double tick, bool enabled) const;
     int clipAt (int x, int y, bool& onRightEdge) const;
-    // alça de fade de um clip de áudio sob o mouse: 1 = fade-in, 2 = fade-out, 0 = nenhuma
+    // fade handle of an audio clip under the mouse: 1 = fade-in, 2 = fade-out, 0 = none
     int fadeHandleAt (int clip, juce::Point<int> p) const;
     void updateScrollBars();
     bool isSelected (int index) const;
     void setSelection (std::vector<int> indices);
-    void sortClips(); // ordena mantendo a seleção (sem passo de desfazer)
+    void sortClips(); // sorts while keeping the selection (no undo step)
     void showClipMenu (int clip);
-    void showRulerMenu (int x);                           // marcadores, compasso e loop
-    void editMarkerName (std::int64_t tick, int existing); // existing = índice, ou -1 para criar
+    void showRulerMenu (int x);                           // markers, time signature and loop
+    void editMarkerName (std::int64_t tick, int existing); // existing = index, or -1 to create
     void deleteSelection();
     void copySelection();
     void pasteClips();
@@ -107,7 +107,7 @@ private:
     void paintAutomationClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
     const std::vector<float>* waveformFor (const std::string& path);
 
-    static constexpr std::size_t waveformBucket = 256; // frames por ponto da forma de onda
+    static constexpr std::size_t waveformBucket = 256; // frames per waveform point
     std::map<std::string, std::vector<float>> waveforms;
     std::map<std::string, double> waveformRates;
 
@@ -119,9 +119,9 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox arrangementBox;
-    juce::ComboBox snapBox; // grade da Playlist (padrão: 1 tempo)
+    juce::ComboBox snapBox; // Playlist grid (default: 1 beat)
 
-    double pixelsPerTick = 96.0 / (4 * ppq); // 96 px por compasso de 4 tempos
+    double pixelsPerTick = 96.0 / (4 * ppq); // 96 px per 4-beat bar
     double scrollTicks = 0.0;
     int scrollY = 0;
 
@@ -139,8 +139,8 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaylistComponent)
 };
-// "Picker" da Playlist (como no FL): lista das patterns com a cor delas; clicar escolhe a
-// pattern que o lápis da Playlist pinta; duplo clique abre no Channel Rack.
+// Playlist "Picker" (as in FL): list of patterns with their colors; clicking chooses the
+// pattern the Playlist pencil paints; double click opens it in the Channel Rack.
 class PatternPicker final : public juce::Component,
                             private juce::ChangeListener
 {
@@ -162,7 +162,7 @@ private:
     struct Row
     {
         ClipKind kind;
-        int index;            // pattern, canal de áudio ou automação; -1 = título da seção
+        int index;            // pattern, audio or automation channel; -1 = section title
         juce::String name;
         juce::Colour colour;
     };
@@ -171,11 +171,11 @@ private:
 
     AudioEngine& engine;
     PlaylistComponent& playlist;
-    int scroll = 0; // em linhas
+    int scroll = 0; // in rows
     static constexpr int rowHeight = 22, headerHeight = 24;
 };
 
-// A aba da Playlist: o Picker à esquerda e a Playlist (não é dono deles).
+// The Playlist tab: the Picker on the left and the Playlist (does not own them).
 class PlaylistArea final : public juce::Component
 {
 public:

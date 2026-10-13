@@ -12,7 +12,7 @@ namespace lynx
 {
 namespace
 {
-// chunk = id:u32 tamanho:u64 corpo (FPC e DirectWave); o corpo pode ter sub-chunks
+// chunk = id:u32 size:u64 body (FPC and DirectWave); the body may have sub-chunks
 struct Chunk
 {
     std::uint32_t id = 0;
@@ -33,7 +33,7 @@ void forEachChunk (const std::uint8_t* p, std::size_t n, const std::function<voi
         pos += 12;
 
         if (size > n - pos)
-            return; // truncado: para aqui
+            return; // truncated: stop here
 
         c.data = p + pos;
         c.size = (std::size_t) size;
@@ -92,7 +92,7 @@ std::string utf16 (const Chunk& c)
     return out;
 }
 
-double l11 (double x) // (11^x − 1)/10: as curvas de volume do FL
+double l11 (double x) // (11^x − 1)/10: FL's volume curves
 {
     return (std::pow (11.0, std::clamp (x, 0.0, 2.0)) - 1.0) / 10.0;
 }
@@ -106,7 +106,7 @@ std::optional<std::vector<DrumPad>> fpcPads (const std::vector<std::uint8_t>& d)
     std::uint32_t version = 0;
     std::memcpy (&version, d.data(), 4);
 
-    if (version < 0xF424B || version > 0x1E84E403) // formatos antigos sem chunks: não tratados
+    if (version < 0xF424B || version > 0x1E84E403) // old formats without chunks: not handled
         return std::nullopt;
 
     std::vector<DrumPad> pads;
@@ -119,20 +119,20 @@ std::optional<std::vector<DrumPad>> fpcPads (const std::vector<std::uint8_t>& d)
         bool muted = false;
 
         forEachChunk (top.data, top.size, [&] (const Chunk& c) {
-            if (c.id == 0x64) // 16 × i32 de parâmetros
+            if (c.id == 0x64) // 16 × i32 parameters
             {
                 pad.gain = (float) l11 (std::clamp (i32 (c, 0), 0, 128) / 127.0);
                 pad.pan = std::clamp (i32 (c, 1), -128, 128) / 128.0f;
                 muted = (i32 (c, 2) & 1) != 0;
                 pad.key = std::clamp (i32 (c, 3), 0, 127);
                 pad.mixerOffset = std::clamp (i32 (c, 4), -99, 103);
-                pad.cutGroup = i32 (c, 5) >= 0 ? i32 (c, 5) + 1 : 0; // −1 = nenhum; 0 vira o grupo 1
+                pad.cutGroup = i32 (c, 5) >= 0 ? i32 (c, 5) + 1 : 0; // −1 = none; 0 becomes group 1
                 pad.cutBy = i32 (c, 6) >= 0 ? i32 (c, 6) + 1 : 0;
                 pad.tune = std::clamp (i32 (c, 7), -128, 128) * 9.375f / 100.0f;
             }
             else if (c.id == 0x65)
                 pad.name = utf16 (c);
-            else if (c.id == 0x69) // camada
+            else if (c.id == 0x69) // layer
             {
                 SampleZone layer;
                 bool hasPath = false;
@@ -147,7 +147,7 @@ std::optional<std::vector<DrumPad>> fpcPads (const std::vector<std::uint8_t>& d)
                     {
                         layer.gain = (float) l11 (std::clamp (i32 (l, 0), 0, 127) / 127.0);
                         layer.lowVelocity = std::clamp (i32 (l, 2), 0, 127);
-                        const auto high = std::clamp (i32 (l, 3), 0, 127); // exclusiva, exceto 127
+                        const auto high = std::clamp (i32 (l, 3), 0, 127); // exclusive, except 127
                         layer.highVelocity = high >= 127 ? 127 : std::max (layer.lowVelocity, high - 1);
                         layer.tune = std::clamp (i32 (l, 5), -128, 128) * 9.375f / 100.0f;
                     }
@@ -186,14 +186,14 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
     std::optional<DirectWaveProgram> result;
 
     forEachChunk (d.data() + 4, d.size() - 4, [&] (const Chunk& top) {
-        if (top.id != 1 || result) // o primeiro programa com zonas
+        if (top.id != 1 || result) // the first program with zones
             return;
 
         DirectWaveProgram program;
         bool envelopeSet = false;
 
         forEachChunk (top.data, top.size, [&] (const Chunk& z) {
-            if (z.id != 3) // zona
+            if (z.id != 3) // zone
                 return;
 
             SampleZone zone;
@@ -205,7 +205,7 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
             std::vector<std::uint8_t> embedded;
 
             forEachChunk (z.data, z.size, [&] (const Chunk& c) {
-                if (c.id == 0x1F4 && c.size >= 13) // cabeçalho: raiz, teclas, velocities, ganho
+                if (c.id == 0x1F4 && c.size >= 13) // header: root, keys, velocities, gain
                 {
                     zone.rootKey = std::clamp ((int) c.data[0], 0, 127);
                     zone.lowKey = std::clamp ((int) c.data[1], 0, 127);
@@ -213,11 +213,11 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                     zone.lowVelocity = std::clamp ((int) c.data[3], 0, 127);
                     zone.highVelocity = std::clamp ((int) c.data[4], zone.lowVelocity, 127);
                     const auto g = std::clamp (f32 (c.data + 9), 0.0f, 2.0f);
-                    zone.gain = g * g; // ganho = v²
+                    zone.gain = g * g; // gain = v²
                 }
                 else if (c.id == 0x1F6)
                     zone.path = ascii (c);
-                else if (c.id == 0x1F7 && c.size >= 32) // quadros, canais, ?, taxa, modo de loop, loop A, loop B
+                else if (c.id == 0x1F7 && c.size >= 32) // frames, channels, ?, rate, loop mode, loop A, loop B
                 {
                     std::memcpy (&frames, c.data, 8);
                     channels = i32 (c, 2);
@@ -227,7 +227,7 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                     const auto mode = i32 (c, 5);
                     const auto a = (std::int64_t) i32 (c, 6), b = (std::int64_t) i32 (c, 7);
 
-                    // 2 contínuo, 3 enquanto pressionada, 4 vai-e-volta (aqui: contínuo); 0/1 sem loop
+                    // 2 continuous, 3 while held, 4 ping-pong (here: continuous); 0/1 no loop
                     if ((mode == 2 || mode == 3 || mode == 4) && b > a && a >= 0 && (frames <= 0 || b <= frames))
                     {
                         zone.loopStart = a;
@@ -237,8 +237,8 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                 }
                 else if (c.id == 0x205 && frames > 0 && channels >= 1 && channels <= 2 && (bits == 16 || bits == 32))
                 {
-                    // áudio embutido (REA_rodada9 §2.5): canais em blocos de (quadros + 512) amostras, com 256
-                    // de folga antes e depois do áudio [DADOS: 257 zeros exatos em cada ponta]
+                    // embedded audio (REA_rodada9 §2.5): channels in blocks of (frames + 512) samples, with 256
+                    // of padding before and after the audio [DATA: exactly 257 zeros at each end]
                     const auto bytes = (std::size_t) bits / 8;
                     const auto block = ((std::size_t) frames + 512) * bytes;
                     if (block * (std::size_t) channels == c.size && std::isfinite (rate) && rate >= 1000.0f && rate <= 384000.0f)
@@ -263,7 +263,7 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
                     }
                 }
                 else if (c.id == 0x1F8 && c.size >= 4)
-                    zone.tune = (std::clamp (f32 (c.data), 0.0f, 1.0f) - 0.5f) * 24.0f; // (v − 0,5)·2400 cents
+                    zone.tune = (std::clamp (f32 (c.data), 0.0f, 1.0f) - 0.5f) * 24.0f; // (v − 0.5)·2400 cents
                 else if (c.id == 0x1FD && c.size >= 16)
                 {
                     auto time = [] (float v) { return 10.0f * std::pow (std::clamp (v, 0.0f, 1.0f), 4.0f); }; // 10·v⁴ s
@@ -299,7 +299,7 @@ std::optional<DirectWaveProgram> directWaveProgram (const std::vector<std::uint8
 }
 namespace
 {
-// leitor sequencial com limite (o blob pode estar truncado)
+// bounded sequential reader (the blob may be truncated)
 struct Stream
 {
     const std::vector<std::uint8_t>& d;
@@ -320,7 +320,7 @@ struct Stream
         return v;
     }
 
-    std::string str8() // u8 comprimento + bytes ANSI
+    std::string str8() // u8 length + ANSI bytes
     {
         const auto n = read<std::uint8_t>();
         if (! ok || pos + n > d.size())
@@ -352,9 +352,9 @@ std::optional<SlicedSample> fruitySlicer (const std::vector<std::uint8_t>& d)
         return std::nullopt;
 
     SlicedSample result;
-    in.skip (8); // comprimento em tempos, BPM originais
+    in.skip (8); // length in beats, original BPM
     result.pitchCents = (float) std::clamp (in.read<std::int32_t>(), -1200, 1200);
-    in.skip (16); // estiramento, método, fades
+    in.skip (16); // stretching, method, fades
     result.path = in.str8();
     const auto count = in.read<std::uint32_t>();
 
@@ -363,7 +363,7 @@ std::optional<SlicedSample> fruitySlicer (const std::vector<std::uint8_t>& d)
 
     for (std::uint32_t i = 0; i < count && in.ok; ++i)
     {
-        in.str8(); // nome
+        in.str8(); // name
         const auto position = in.read<std::int32_t>();
         in.skip (4 + 4 + 1);
         if (in.ok && position >= 0)
@@ -390,9 +390,9 @@ std::optional<SlicedSample> slicex (const std::vector<std::uint8_t>& d)
     for (auto& m : master)
         m = in.read<std::int32_t>();
     result.pitchCents = (float) std::clamp (master[5], -1200, 1200);
-    in.skip (47 + 12); // opções e estado de UI: o deck A começa em 0x5F
+    in.skip (47 + 12); // options and UI state: deck A starts at 0x5F
 
-    const auto referenceOnly = in.read<std::uint8_t>(); // 0 = WAV embutido a seguir
+    const auto referenceOnly = in.read<std::uint8_t>(); // 0 = embedded WAV follows
     result.path = in.str8();
 
     if (in.ok && referenceOnly == 0)
@@ -446,7 +446,7 @@ std::vector<std::int64_t> wavCuePoints (const std::vector<std::uint8_t>& w, std:
             }
         }
 
-        pos += 8 + size + (size & 1); // chunks alinhados em 2
+        pos += 8 + size + (size & 1); // chunks aligned to 2
     }
 
     std::sort (cues.begin(), cues.end());
@@ -512,7 +512,7 @@ std::vector<std::uint8_t> makeWavFloat (const std::vector<std::vector<float>>& c
 std::vector<SampleZone> flKeysZones (const std::string& wti, const std::string& folder, const std::vector<std::uint8_t>& rawData,
                                      const std::function<std::string (const std::vector<std::uint8_t>&, const std::string&)>& saveWav)
 {
-    // INI simples: [seção] e chave=valor
+    // simple INI: [section] and key=value
     std::map<std::string, std::map<std::string, std::string>> ini;
     std::string section;
     std::size_t start = 0;
@@ -568,7 +568,7 @@ std::vector<SampleZone> flKeysZones (const std::string& wti, const std::string& 
     {
         const auto sec = "sample" + std::to_string (i);
         SampleZone zone;
-        zone.rootKey = zone.lowKey = std::clamp (value (sec, "root", 60), 0, 127); // a raiz é também o começo da faixa
+        zone.rootKey = zone.lowKey = std::clamp (value (sec, "root", 60), 0, 127); // the root is also the start of the range
         zone.highKey = std::clamp (value (sec, "high", 127), zone.lowKey, 127);
         const auto layer = i % layers;
         zone.lowVelocity = thresholds[(std::size_t) layer];

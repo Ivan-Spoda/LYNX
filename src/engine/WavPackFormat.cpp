@@ -60,11 +60,11 @@ juce::AudioFormatReader* WavPackAudioFormat::createReaderFor (juce::InputStream*
     {
         if (! deleteStreamIfOpeningFails && source != nullptr)
         {
-            source->setPosition (0); // o chamador vai tentar outro formato com o mesmo stream
+            source->setPosition (0); // the caller will try another format with the same stream
             owned.release();
         }
         return nullptr;
     }
-    return new WavPackReader (std::move (audio)); // o stream já foi lido inteiro: pode ir embora
+    return new WavPackReader (std::move (audio)); // the stream has been fully read: it can go
 }
 } // namespace lynx

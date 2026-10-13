@@ -6,10 +6,10 @@
 
 namespace lynx
 {
-// Navegador de arquivos (como o Browser do FL): pastas de samples do FL e do usuário.
-//  - clique num áudio: prévia; duplo clique: novo canal sampler com ele
-//  - arrastar para o Channel Rack ou a Playlist (como arrastar do Explorer)
-//  - duplo clique num .lynx/.flp/.mid: abre (onOpenProject)
+// File browser (like FL's Browser): FL and user sample folders.
+//  - click an audio file: preview; double-click: new sampler channel with it
+//  - drag onto the Channel Rack or the Playlist (like dragging from Explorer)
+//  - double-click a .lynx/.flp/.mid: opens it (onOpenProject)
 class BrowserComponent final : public juce::Component,
                                private juce::FileBrowserListener
 {
@@ -34,8 +34,8 @@ private:
     AudioEngine& engine;
     juce::ComboBox rootBox;
     juce::Array<juce::File> roots;
-    juce::TimeSliceThread thread { "LYNX navegador" };
-    juce::WildcardFileFilter filter { "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff;*.mid;*.midi;*.lynx;*.flp;*.fst", "*", "arquivos" };
+    juce::TimeSliceThread thread { "LYNX browser" };
+    juce::WildcardFileFilter filter { "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff;*.mid;*.midi;*.lynx;*.flp;*.fst", "*", "files" };
     juce::DirectoryContentsList list { &filter, thread };
     juce::FileTreeComponent tree { list };
 

@@ -37,8 +37,8 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load (std::memory_order_relaxed));
     const auto songMode = transport.songMode.load (std::memory_order_relaxed);
 
-    // no modo song, os compassos seguem as mudanças de compasso da Playlist (cópia consistente
-    // da tabela; se a UI estiver escrevendo, fica a cópia do bloco anterior)
+    // in song mode, bars follow the Playlist time-signature changes (consistent copy
+    // of the table; if the UI is writing, the previous block's copy is kept)
     if (songMode)
     {
         const auto before = transport.signatureVersion.load (std::memory_order_acquire);

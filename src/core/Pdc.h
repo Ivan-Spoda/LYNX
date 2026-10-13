@@ -1,11 +1,11 @@
 #pragma once
 
-// Compensação de latência de plugins (PDC), no modelo "por aresta" que o FL usa
-// (docs/analise/REA_rodada2.md §1): em ordem de roteamento,
-//   inAlign[T] = max(latência dos instrumentos que chegam em T, outLat[S] de cada S -> T)
-//   outLat[T]  = inAlign[T] + soma das latências dos efeitos ligados de T
-// e cada aresta (instrumento -> trilha, trilha -> trilha) atrasa o que falta para chegar
-// em inAlign do destino. O caminho mais longo nunca é atrasado.
+// Plugin delay compensation (PDC), in the "per-edge" model FL uses
+// (docs/analise/REA_rodada2.md §1): in routing order,
+//   inAlign[T] = max(latency of the instruments feeding T, outLat[S] of each S -> T)
+//   outLat[T]  = inAlign[T] + sum of the latencies of T's enabled effects
+// and each edge (instrument -> track, track -> track) delays by what's missing to reach
+// the destination's inAlign. The longest path is never delayed.
 
 #include <memory>
 #include <vector>
@@ -16,35 +16,35 @@ namespace lynx
 {
 struct PdcPlan
 {
-    std::vector<int> channelDelay;             // por canal, em samples
-    std::vector<std::vector<int>> sendDelay;   // [trilha][k]: k = 0 Master, k = 1 + i para sends[i]
-    std::vector<int> inAlign, outLat;          // por trilha
-    int total = 0;                              // latência na saída do Master
+    std::vector<int> channelDelay;             // per channel, in samples
+    std::vector<std::vector<int>> sendDelay;   // [track][k]: k = 0 Master, k = 1 + i for sends[i]
+    std::vector<int> inAlign, outLat;          // per track
+    int total = 0;                              // latency at the Master output
 
     bool any() const noexcept;
 };
 
-// `channelLatency[c]` = latência do instrumento do canal; `slotLatency[t][s]` = do efeito do
-// slot (0 se desligado). Vetores menores que o Song valem 0.
+// `channelLatency[c]` = latency of the channel's instrument; `slotLatency[t][s]` = of the slot's
+// effect (0 if disabled). Vectors smaller than the Song count as 0.
 PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, const std::vector<std::vector<int>>& slotLatency);
 
-// Linha de atraso estéreo com atraso inteiro, alocada na criação. process() não aloca.
+// Stereo delay line with an integer delay, allocated on creation. process() does not allocate.
 class DelayLine
 {
 public:
     explicit DelayLine (int delaySamples);
 
     int length() const noexcept { return delay; }
-    void process (float* left, float* right, int n) noexcept; // no lugar
+    void process (float* left, float* right, int n) noexcept; // in place
 
-    // Atrasa `source * level` e soma em `dest`, numa passada só. Com source nulo (fonte
-    // calada) empurra silêncio; quando a linha já está toda em silêncio, não faz nada.
+    // Delays `source * level` and adds it into `dest`, in a single pass. With a null source (silent
+    // source) pushes silence; when the line is already all silence, does nothing.
     void mixInto (const float* sourceLeft, const float* sourceRight, float level, float* destLeft, float* destRight, int n) noexcept;
 
 private:
     int delay;
-    std::vector<float> left, right; // anel planar
+    std::vector<float> left, right; // planar ring
     int position = 0;
-    int quiet = 0; // samples de silêncio seguidos já escritos (até delay)
+    int quiet = 0; // consecutive silent samples already written (up to delay)
 };
 } // namespace lynx

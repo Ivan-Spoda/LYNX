@@ -4,11 +4,11 @@
 
 namespace lynx
 {
-// Janelas secundárias (plugin, ajustes do canal, EQ, automação) ficam sempre acima da janela principal
-// do LYNX, sem ficar acima dos outros programas: no Windows, a principal vira a "dona" delas.
+// Secondary windows (plugin, channel settings, EQ, automation) always stay above the LYNX main window,
+// without staying above other programs: on Windows, the main window becomes their "owner".
 void setMainWindowForOwnership (juce::Component* mainWindow);
-void keepAboveMainWindow (juce::Component& window); // chamar depois de a janela estar visível; põe o ícone do LYNX
+void keepAboveMainWindow (juce::Component& window); // call after the window is visible; sets the LYNX icon
 
-// O logo do LYNX (256 px, com transparência).
+// The LYNX logo (256 px, with transparency).
 juce::Image logoImage();
 } // namespace lynx

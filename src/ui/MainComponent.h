@@ -27,15 +27,15 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
-    void mouseDown (const juce::MouseEvent& e) override; // clique direito no BPM: automação de tempo
+    void mouseDown (const juce::MouseEvent& e) override; // right-click on BPM: tempo automation
 
-    // Abre .lynx ou .flp (também usado pela linha de comando).
+    // Opens .lynx or .flp (also used by the command line).
     void openFile (const juce::File& file);
 
-    // Pergunta "salvar alterações?" se houver; `then` roda se o usuário não cancelar.
+    // Asks "save changes?" if there are any; `then` runs unless the user cancels.
     void confirmDiscard (std::function<void()> then);
 
-    // Para o modo --snapshot: 0 = Channel Rack, 1 = Piano Roll (no canal com mais notas), 2 = Playlist, 3 = Mixer.
+    // For --snapshot mode: 0 = Channel Rack, 1 = Piano Roll (on the channel with the most notes), 2 = Playlist, 3 = Mixer.
     void selectTabForSnapshot (int tab);
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
@@ -52,7 +52,7 @@ private:
     void showImportReport();
     void showHelp();
 
-    // barra de menus
+    // menu bar
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex (int index, const juce::String& name) override;
     void menuItemSelected (int, int) override {}
@@ -78,8 +78,8 @@ private:
 
     AudioEngine& engine;
 
-    juce::ImageComponent logo; // o ícone do LYNX no canto da barra (como a fruta do FL)
-    juce::TextButton newButton { "Novo" }, openButton { "Abrir" }, saveButton { "Salvar" }, exportButton { "Exportar" };
+    juce::ImageComponent logo; // the LYNX icon in the corner of the bar (like FL's fruit)
+    juce::TextButton newButton { "New" }, openButton { "Open" }, saveButton { "Save" }, exportButton { "Export" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::TextButton modeButton { "PAT" };
@@ -95,7 +95,7 @@ private:
     juce::TextButton settingsButton { "Audio..." };
     juce::Label positionLabel;
 
-    // osciloscópio da saída, na barra (como o do FL)
+    // output oscilloscope in the bar (like FL's)
     class Scope final : public juce::Component
     {
     public:
@@ -124,8 +124,8 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
-    juce::String projectName; // nome sugerido para exportar (também de .flp importado)
-    std::set<int> heldKeys; // teclas do teclado do PC tocando notas agora (keyCode)
+    juce::String projectName; // suggested name for export (also from an imported .flp)
+    std::set<int> heldKeys; // PC keyboard keys currently playing notes (keyCode)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

@@ -24,23 +24,23 @@ struct ExportSettings
 
     Format format = Format::wav24;
     double sampleRate = 44100.0;
-    bool wholeSong = true;     // false = só a pattern atual
-    double tailSeconds = 6.0;  // máximo de cauda; para antes quando o som acaba
+    bool wholeSong = true;     // false = current pattern only
+    double tailSeconds = 6.0;  // maximum tail; stops earlier when the sound ends
 };
 
-// Extensão (com ponto) do formato.
+// File extension (with dot) for the format.
 juce::String exportExtension (ExportSettings::Format format);
 
-// Exporta uma cópia da música com um engine próprio, sem mexer no que está tocando.
-// O construtor cria os instrumentos e plugins (chamar na thread da UI); run() pode ir
-// numa thread de fundo.
+// Exports a copy of the song with its own engine, without touching what is playing.
+// The constructor creates the instruments and plugins (call on the UI thread); run() may
+// run on a background thread.
 class ExportJob
 {
 public:
     ExportJob (const Song& song, const ExportSettings& settings, const juce::File& output);
     ~ExportJob();
 
-    // progress(0..1) retorna false para cancelar. Em erro ou cancelamento apaga o arquivo.
+    // progress(0..1) returns false to cancel. On error or cancellation the file is deleted.
     bool run (const std::function<bool (double)>& progress, juce::String& error);
 
     double getMusicSeconds() const noexcept { return musicSeconds; }

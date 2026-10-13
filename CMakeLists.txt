@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
-# Núcleo sem JUCE: modelo, sequenciador, instrumentos internos e leitor de .flp
+# JUCE-free core: model, sequencer, built-in instruments and .flp reader
 
 add_library(lynx_core STATIC
     src/flp/Flp.cpp
@@ -37,7 +37,7 @@ add_library(lynx_core STATIC
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
-# decodificador WavPack (BSD; só leitura) para os samples .wv dos pacotes do FL
+# WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
 target_include_directories(wavpack_decoder PUBLIC third_party/wavpack/include PRIVATE third_party/wavpack/src)
@@ -59,7 +59,7 @@ add_test(NAME lynx_tests COMMAND lynx_tests)
 # ---------------------------------------------------------------------------
 # App (JUCE)
 
-option(LYNX_BUILD_APP "Compila o app com JUCE" ON)
+option(LYNX_BUILD_APP "Build the app with JUCE" ON)
 
 if(LYNX_BUILD_APP)
     include(FetchContent)
@@ -106,7 +106,7 @@ if(LYNX_BUILD_APP)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
-        JUCE_ASIO=0                      # ligar quando o ASIO SDK estiver disponível
+        JUCE_ASIO=0                      # enable once the ASIO SDK is available
         JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LYNX,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:LYNX,JUCE_VERSION>")

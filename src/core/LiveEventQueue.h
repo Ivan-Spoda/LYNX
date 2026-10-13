@@ -1,7 +1,7 @@
 #pragma once
 
-// Filas lock-free de uma thread produtora para uma consumidora. Usadas para notas
-// tocadas ao vivo (UI -> áudio, MIDI -> áudio) e para a gravação (MIDI -> UI).
+// Lock-free single-producer/single-consumer queues. Used for notes
+// played live (UI -> audio, MIDI -> audio) and for recording (MIDI -> UI).
 
 #include <array>
 #include <atomic>
@@ -15,10 +15,10 @@ template <typename T, std::size_t Capacity>
 class SpscQueue
 {
 public:
-    static_assert ((Capacity & (Capacity - 1)) == 0, "capacidade precisa ser potência de 2");
+    static_assert ((Capacity & (Capacity - 1)) == 0, "capacity must be a power of 2");
     static constexpr std::size_t capacity = Capacity;
 
-    // Produtora. Retorna false se a fila estiver cheia (o item é descartado).
+    // Producer. Returns false if the queue is full (the item is dropped).
     bool push (const T& item) noexcept
     {
         const auto w = writeIndex.load (std::memory_order_relaxed);
@@ -32,7 +32,7 @@ public:
         return true;
     }
 
-    // Consumidora.
+    // Consumer.
     bool pop (T& out) noexcept
     {
         const auto r = readIndex.load (std::memory_order_relaxed);

@@ -10,7 +10,7 @@ namespace
 {
 struct Parsed
 {
-    std::vector<std::vector<Note>> tracks; // notas por trilha (canal = índice da trilha)
+    std::vector<std::vector<Note>> tracks; // notes per track (channel = track index)
     std::vector<std::string> names;
     double bpm = 120.0;
 };
@@ -22,7 +22,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
 
     if (! in.openedOk() || ! midi.readFrom (in))
     {
-        error = utf8 ("não é um arquivo MIDI válido");
+        error = utf8 ("not a valid MIDI file");
         return std::nullopt;
     }
 
@@ -30,7 +30,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
 
     if (format <= 0)
     {
-        // SMPTE: converte para segundos e depois para ticks no tempo padrão
+        // SMPTE: convert to seconds, then to ticks at the default tempo
         midi.convertTimestampTicksToSeconds();
     }
 
@@ -77,7 +77,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
 
     if (out.tracks.empty())
     {
-        error = utf8 ("o arquivo não tem notas");
+        error = utf8 ("the file has no notes");
         return std::nullopt;
     }
 
@@ -142,7 +142,7 @@ bool savePattern (const Song& song, int patternIndex, const juce::File& file, ju
 {
     if (patternIndex < 0 || patternIndex >= (int) song.patterns.size())
     {
-        error = "pattern inexistente";
+        error = "pattern does not exist";
         return false;
     }
 
@@ -167,7 +167,7 @@ bool savePattern (const Song& song, int patternIndex, const juce::File& file, ju
 
     for (auto& [channel, seq] : byChannel)
     {
-        const auto name = channel >= 0 && channel < (int) song.channels.size() ? song.channels[(std::size_t) channel].name : std::string ("Canal");
+        const auto name = channel >= 0 && channel < (int) song.channels.size() ? song.channels[(std::size_t) channel].name : std::string ("Channel");
         seq.addEvent (juce::MidiMessage::textMetaEvent (3, juce::String::fromUTF8 (name.c_str())), 0.0);
         seq.sort();
         seq.updateMatchedPairs();
@@ -179,7 +179,7 @@ bool savePattern (const Song& song, int patternIndex, const juce::File& file, ju
 
     if (out.failedToOpen() || ! midi.writeTo (out))
     {
-        error = utf8 ("não foi possível gravar ") + file.getFullPathName();
+        error = utf8 ("could not write ") + file.getFullPathName();
         return false;
     }
 

@@ -1,7 +1,7 @@
 #pragma once
 
-// Leitor mínimo de WAV (PCM 8/16/24/32 e float 32) para as ferramentas e testes.
-// O app usa os leitores do JUCE, que cobrem bem mais formatos.
+// Minimal WAV reader (PCM 8/16/24/32 and float 32) for the tools and tests.
+// The app uses JUCE's readers, which cover many more formats.
 
 #include <cstdint>
 #include <cstring>
@@ -25,7 +25,7 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
 
     std::vector<std::uint8_t> d ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
 
-    // WavPack (.wv dos pacotes do FL)
+    // WavPack (.wv from FL's packs)
     if (d.size() >= 4 && std::memcmp (d.data(), "wvpk", 4) == 0)
     {
         DecodedAudio audio;
@@ -62,7 +62,7 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
             rate = u32 (body + 4);
             bits = u16 (body + 14);
 
-            if (format == 0xFFFE && size >= 26) // WAVE_FORMAT_EXTENSIBLE: subformato nos 2 primeiros bytes do GUID
+            if (format == 0xFFFE && size >= 26) // WAVE_FORMAT_EXTENSIBLE: subformat in the first 2 bytes of the GUID
                 format = u16 (body + 24);
         }
         else if (std::memcmp (&d[pos], "data", 4) == 0)

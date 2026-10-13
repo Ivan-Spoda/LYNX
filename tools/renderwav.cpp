@@ -1,6 +1,6 @@
-// renderwav: importa um .flp e renderiza uma pattern com os instrumentos internos.
-// Uso: renderwav projeto.flp saida.wav [indice-da-pattern] [loops]
-// Sem índice, escolhe a pattern com mais notas.
+// renderwav: imports an .flp and renders a pattern with the built-in instruments.
+// Usage: renderwav project.flp output.wav [pattern-index] [loops]
+// Without an index, picks the pattern with the most notes.
 
 #include <cstdio>
 #include <cstdlib>
@@ -33,7 +33,7 @@ void writeWav (const char* path, const std::vector<float>& left, const std::vect
     out.write ("WAVEfmt ", 8);
     u32 (16);
     u16 (1);  // PCM
-    u16 (2);  // estéreo
+    u16 (2);  // stereo
     u32 ((std::uint32_t) sampleRate);
     u32 ((std::uint32_t) sampleRate * 4);
     u16 (4);
@@ -54,7 +54,7 @@ int main (int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf (stderr, "uso: renderwav projeto.flp saida.wav [pattern] [loops]\n");
+        std::fprintf (stderr, "usage: renderwav project.flp output.wav [pattern] [loops]\n");
         return 2;
     }
 
@@ -63,7 +63,7 @@ int main (int argc, char** argv)
 
     lynx::Song song;
 
-    // No Linux/WSL o FL fica em /mnt/c; os caminhos do .flp usam barras invertidas.
+    // On Linux/WSL FL lives under /mnt/c; the .flp paths use backslashes.
     const std::string flRoot = std::getenv ("FL_ROOT") ? std::getenv ("FL_ROOT")
                                                        : "/mnt/c/Program Files/Image-Line/FL Studio 2026";
     auto toLocal = [] (std::string p) {
@@ -81,11 +81,11 @@ int main (int argc, char** argv)
     }
     catch (const flp::Error& e)
     {
-        std::fprintf (stderr, "erro: %s\n", e.what());
+        std::fprintf (stderr, "error: %s\n", e.what());
         return 1;
     }
 
-    // "song" no lugar do índice: a música inteira (playlist), como o export do app
+    // "song" instead of the index: the whole song (playlist), like the app's export
     const bool wholeSong = argc > 3 && std::string (argv[3]) == "song";
     std::int64_t songTicks = 0;
 
@@ -110,15 +110,15 @@ int main (int argc, char** argv)
     constexpr int sampleRate = 44100;
     constexpr int blockSize = 256;
     const auto tps = lynx::ticksPerSample (song.bpm, sampleRate);
-    const auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s de cauda
+    const auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
 
-    std::printf ("%.1f BPM, %zu canais, pattern \"%s\" (%zu notas), %d loops, %.1f s\n", song.bpm,
+    std::printf ("%.1f BPM, %zu channels, pattern \"%s\" (%zu notes), %d loops, %.1f s\n", song.bpm,
                  song.channels.size(), pattern.name.c_str(), pattern.notes.size(), loops,
                  (double) totalSamples / sampleRate);
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
-        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "clip de audio", "plugin", "controlador" };
+        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "audio clip", "plugin", "controller" };
         std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
     }
 
@@ -128,7 +128,7 @@ int main (int argc, char** argv)
         if (entry == nullptr)
             entry = lynx::tools::readWav (toLocal (p));
         if (entry == nullptr)
-            std::printf ("  (não consegui ler %s)\n", p.c_str());
+            std::printf ("  (could not read %s)\n", p.c_str());
         return entry;
     });
     {
@@ -142,7 +142,7 @@ int main (int argc, char** argv)
             }
         for (const auto& t : song.mixer)
             tracksWithFx += ! t.effects.empty();
-        std::printf ("mixer: %zu arestas (%zu com atraso de PDC), %zu tracks com efeitos\n", edges, delayed, tracksWithFx);
+        std::printf ("mixer: %zu edges (%zu with PDC delay), %zu tracks with effects\n", edges, delayed, tracksWithFx);
     }
     lynx::RackRenderer renderer;
     renderer.prepare (sampleRate);
@@ -161,11 +161,11 @@ int main (int argc, char** argv)
 
     std::printf ("render: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count());
 
-    // normaliza o pico para -1 dBFS
+    // normalize the peak to -1 dBFS
     float peak = 0.0f;
     for (std::size_t i = 0; i < totalSamples; ++i)
         peak = std::max ({ peak, std::abs (left[i]), std::abs (right[i]) });
-    std::printf ("pico antes de normalizar: %.4f\n", peak);
+    std::printf ("peak before normalizing: %.4f\n", peak);
 
     if (peak > 0.0f)
     {
@@ -178,6 +178,6 @@ int main (int argc, char** argv)
     }
 
     writeWav (argv[2], left, right, sampleRate);
-    std::printf ("gravado em %s\n", argv[2]);
+    std::printf ("written to %s\n", argv[2]);
     return 0;
 }

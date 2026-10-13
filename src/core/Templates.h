@@ -7,7 +7,7 @@
 
 namespace lynx
 {
-// Modelos de projeto novo (Arquivo > Novo a partir de modelo).
+// New project templates (File > New from template).
 std::vector<std::string> templateNames();
 Song makeTemplate (int index);
 } // namespace lynx

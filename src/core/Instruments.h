@@ -1,8 +1,8 @@
 #pragma once
 
-// Instrumentos internos: bateria e synth sintetizados, e um sampler. Servem para a
-// DAW fazer som antes de existir hosting de plugins e para tocar projetos importados.
-// Tudo com capacidade fixa: noteOn/render nunca alocam.
+// Built-in instruments: synthesized drums and synth, and a sampler. They let the
+// DAW make sound before plugin hosting exists and play imported projects.
+// Everything has fixed capacity: noteOn/render never allocate.
 
 #include <array>
 #include <cstdint>
@@ -20,47 +20,47 @@ public:
 
     virtual void prepare (double sampleRate) noexcept = 0;
     virtual void noteOn (int key, float velocity) noexcept = 0;
-    // Começa a nota já `startSeconds` adiante (só faz sentido para samples; os outros ignoram).
+    // Starts the note already `startSeconds` in (only meaningful for samples; others ignore it).
     virtual void noteOnAt (int key, float velocity, double /*startSeconds*/) noexcept { noteOn (key, velocity); }
     virtual void noteOff (int key) noexcept = 0;
     virtual void allNotesOff() noexcept = 0;
 
-    // Soma (não sobrescreve) n samples em left/right, já aplicando os ganhos.
+    // Adds (does not overwrite) n samples into left/right, with the gains already applied.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
-    // Parâmetro automatizado (plugins). 0..1. Thread de áudio.
+    // Automated parameter (plugins). 0..1. Audio thread.
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
-    // Latência que o instrumento introduz (plugins), em samples. Para o PDC.
+    // Latency the instrument introduces (plugins), in samples. For PDC.
     virtual int latencySamples() const noexcept { return 0; }
-    // Nota "slide": as notas soando deslizam até `key` em `samples`, sem reatacar. Quem não suporta ignora.
+    // "Slide" note: sounding notes glide to `key` over `samples`, without retriggering. Ignored if unsupported.
     virtual void slideTo (int /*key*/, float /*cents*/, float /*samples*/) noexcept {}
-    // Clip de áudio: fades e posição no clip da próxima nota (antes do noteOn), em samples.
+    // Audio clip: fades and in-clip position of the next note (before noteOn), in samples.
     virtual void setNextClipFades (float /*elapsed*/, float /*remaining*/, float /*fadeIn*/, float /*fadeOut*/) noexcept {}
-    // Pan, afinação fina e "porta" (inverte o porta do canal) da próxima nota (chamado logo antes
-    // do noteOn). Quem não suporta ignora.
+    // Pan, fine tuning and "porta" (inverts the channel's porta) of the next note (called right before
+    // noteOn). Ignored if unsupported.
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/, bool /*porta*/ = false) noexcept {}
-    // Ajustes do canal (sampler, synth). Thread da UI, a cada snapshot; o instrumento guarda de
-    // forma que a thread de áudio leia sem esperar.
+    // Channel settings (sampler, synth). UI thread, on every snapshot; the instrument stores them
+    // so the audio thread can read without waiting.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}
-    // Saída de controle (instrumentos "controladores"), 0..1. Thread de áudio.
+    // Control output ("controller" instruments), 0..1. Audio thread.
     virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
-    // Posição da música (ticks) no começo do bloco, para os LFOs globais. Thread de áudio.
+    // Song position (ticks) at the start of the block, for the global LFOs. Audio thread.
     virtual void setSongPosition (double /*ticks*/) noexcept {}
-    // Sem nenhuma voz soando: o render daria só silêncio (o mixer pula o canal até chegar uma nota).
+    // No voice sounding: render would only produce silence (the mixer skips the channel until a note arrives).
     virtual bool idle() const noexcept { return false; }
 };
 
-// Áudio de um sample já decodificado (carregado fora da thread de áudio). Samples curtos
-// ficam nos vetores; os longos ficam num arquivo de cache mapeado na memória (o sistema lê
-// do disco sob demanda) e usam os ponteiros `mapped*`.
+// Audio of an already-decoded sample (loaded off the audio thread). Short samples
+// live in the vectors; long ones live in a memory-mapped cache file (the OS reads
+// from disk on demand) and use the `mapped*` pointers.
 struct SampleData
 {
-    std::vector<float> left, right; // right vazio = mono
+    std::vector<float> left, right; // empty right = mono
     double sampleRate = 44100.0;
 
     const float* mappedLeft = nullptr;
     const float* mappedRight = nullptr; // nullptr = mono
     std::size_t mappedFrames = 0;
-    std::shared_ptr<const void> mapping; // dono do mapeamento
+    std::shared_ptr<const void> mapping; // owner of the mapping
 
     bool isMapped() const noexcept { return mappedLeft != nullptr; }
     std::size_t frames() const noexcept { return isMapped() ? mappedFrames : left.size(); }
@@ -74,10 +74,10 @@ struct SampleData
     bool isStereo() const noexcept { return isMapped() ? mappedRight != nullptr : ! right.empty(); }
 };
 
-// `sample` só é usado pelo sampler; sem sample o sampler fica mudo.
+// `sample` is only used by the sampler; without a sample the sampler is silent.
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);
 
-// Sampler multi-sample: cada zona com o sample já carregado (nullptr = arquivo que faltou).
+// Multi-sample sampler: each zone with its sample already loaded (nullptr = missing file).
 struct LoadedZone
 {
     SampleZone zone;
@@ -85,7 +85,7 @@ struct LoadedZone
 };
 std::unique_ptr<Instrument> makeZonedSampler (std::vector<LoadedZone> zones);
 
-// Ruído branco barato e determinístico (xorshift), igual em toda plataforma.
+// Cheap, deterministic white noise (xorshift), identical on every platform.
 struct Noise
 {
     std::uint32_t state = 0x12345678u;

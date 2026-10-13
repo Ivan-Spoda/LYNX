@@ -9,7 +9,7 @@ namespace lynx
 {
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize)
 {
-    // Tenta saída estéreo; plugins que não aceitam ficam com o layout que tiverem.
+    // Try stereo output; plugins that don't accept it keep whatever layout they have.
     plugin.enableAllBuses();
     auto layout = plugin.getBusesLayout();
 
@@ -51,7 +51,7 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
       blockSize (maxBlockSize)
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
-    midi.ensureSize (8192); // a thread de áudio só adiciona eventos dentro dessa capacidade
+    midi.ensureSize (8192); // the audio thread only adds events within this capacity
 }
 
 PluginInstrument::~PluginInstrument()
@@ -163,7 +163,7 @@ juce::FileSearchPath PluginHost::defaultSearchPath()
 {
     juce::FileSearchPath paths;
 
-    // Mesmo lugar que o JUCE/Steinberg usam por padrão no Windows.
+    // Same locations JUCE/Steinberg use by default on Windows.
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/VST3"));
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
     paths.add (juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("Programs/Common/CLAP"));
@@ -210,7 +210,7 @@ int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<boo
 
             if (ok && ! child.waitForProcessToFinish (scanTimeoutMs))
             {
-                child.kill(); // travou: lista negra
+                child.kill(); // hung: blacklist
                 ok = false;
             }
 
@@ -274,8 +274,8 @@ std::unique_ptr<juce::PluginDescription> PluginHost::find (const juce::String& i
 
 namespace
 {
-// O deprecatedUid que o JUCE dá a uma classe VST3: hash 31 sobre os 16 bytes do TUID como `char`
-// (com sinal, como o TUID do SDK). O FL guarda o TUID na mesma ordem de memória.
+// The deprecatedUid JUCE assigns to a VST3 class: hash-31 over the TUID's 16 bytes as `char`
+// (signed, like the SDK's TUID). FL stores the TUID in the same memory order.
 int vst3Hash (const std::array<std::uint8_t, 16>& tuid)
 {
     juce::uint32 value = 0;
@@ -286,7 +286,7 @@ int vst3Hash (const std::array<std::uint8_t, 16>& tuid)
     return (int) value;
 }
 
-// O uniqueId "normalizado" do JUCE: o mesmo hash sobre os 4 inteiros do FUID (layout COM no Windows).
+// JUCE's "normalised" uniqueId: the same hash over the FUID's 4 integers (COM layout on Windows).
 int vst3NormalisedHash (const std::array<std::uint8_t, 16>& d)
 {
     auto make = [] (juce::uint32 a, juce::uint32 b, juce::uint32 c, juce::uint32 e) { return (a << 24) | (b << 16) | (c << 8) | e; };
@@ -313,7 +313,7 @@ const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plu
         juce::String::fromUTF8 (plugin.path.c_str()).replaceCharacter ('\\', '/')).getFileNameWithoutExtension());
     const auto name = plainName (juce::String::fromUTF8 (plugin.name.c_str()));
 
-    // 1) o mesmo plugin, pelo identificador do formato
+    // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
         if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
@@ -325,7 +325,7 @@ const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plu
             return &d;
     }
 
-    // 2) plano B, como o FL troca VST2 <-> VST3: mesmo nome (do plugin ou do arquivo), mesmo papel
+    // 2) fallback, since FL swaps VST2 <-> VST3: same name (plugin or file), same role
     if (name.isEmpty() && fileName.isEmpty())
         return nullptr;
 
@@ -349,14 +349,14 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
 {
     int found = 0;
 
-    // devolve o estado no formato do JUCE, ou vazio quando não dá para levar o estado
+    // returns the state in JUCE's format, or empty when the state can't be carried over
     auto convertState = [] (const ForeignPlugin& f, const juce::PluginDescription& d) -> std::string {
-        // CLAP: u32 0 + os bytes de clap_plugin_state.save (REA_rodada22 §2); o host CLAP do LYNX guarda o mesmo
+        // CLAP: u32 0 + the clap_plugin_state.save bytes (REA_rodada22 §2); LYNX's CLAP host stores the same
         if (f.format == ForeignPlugin::Format::clap && d.pluginFormatName == "CLAP")
             return f.state.size() > 4 ? juce::MemoryBlock (f.state.data() + 4, f.state.size() - 4).toBase64Encoding().toStdString() : std::string {};
 
         if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3")
-            return {}; // VST2 -> VST3: formato do estado diferente; plugin no padrão
+            return {}; // VST2 -> VST3: different state format; plugin at defaults
 
         std::vector<std::uint8_t> component, controller;
 
@@ -414,14 +414,14 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
     if (description == nullptr)
     {
         if (error != nullptr)
-            *error = juce::String::fromUTF8 (ref.name.c_str()) + juce::String::fromUTF8 (": plugin não instalado ou não escaneado");
+            *error = juce::String::fromUTF8 (ref.name.c_str()) + juce::String::fromUTF8 (": plugin not installed or not scanned");
         return nullptr;
     }
 
     juce::String message;
     if (pluginSandboxEnabled())
     {
-        // processo separado: o filho prepara o plugin e aplica o estado
+        // separate process: the child prepares the plugin and applies the state
         if (auto remote = createSandboxedPlugin (*description, sampleRate, maxBlockSize, ref.state, message))
             return remote;
         if (error != nullptr)

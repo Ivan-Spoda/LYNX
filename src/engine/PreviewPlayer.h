@@ -6,13 +6,13 @@
 
 namespace lynx
 {
-// Nó do grafo que toca a prévia de um arquivo (navegador de samples), fora da música.
+// Graph node that plays a file preview (sample browser), outside the song.
 class PreviewPlayer final : public juce::AudioProcessor
 {
 public:
     PreviewPlayer();
 
-    // Thread da UI. nullptr para parar.
+    // UI thread. nullptr to stop.
     void play (std::shared_ptr<const SampleData> sample);
 
     const juce::String getName() const override { return "Preview"; }
@@ -34,11 +34,11 @@ public:
     void setStateInformation (const void*, int) override {}
 
 private:
-    juce::SpinLock lock;                       // a thread de áudio só tenta (nunca espera)
-    std::shared_ptr<const SampleData> pending; // trocado pela UI
+    juce::SpinLock lock;                       // the audio thread only tries (never waits)
+    std::shared_ptr<const SampleData> pending; // swapped by the UI
     bool hasPending = false;
-    std::shared_ptr<const SampleData> current;  // só a thread de áudio mexe
-    std::shared_ptr<const SampleData> retired;  // a UI solta (o áudio nunca desaloca)
+    std::shared_ptr<const SampleData> current;  // touched only by the audio thread
+    std::shared_ptr<const SampleData> retired;  // released by the UI (audio never deallocates)
     double position = 0.0;
     double deviceRate = 44100.0;
 

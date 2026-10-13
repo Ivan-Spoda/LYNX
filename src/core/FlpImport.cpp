@@ -97,7 +97,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Vintage Phaser", EffectKind::chorus },     { "Fruity Squeeze", EffectKind::distortion },
     };
 
-    // presets antigos (FL 3) gravam o nome com outra caixa ("Fruity delay 2")
+    // old presets (FL 3) store the name with different casing ("Fruity delay 2")
     const auto wanted = lowercase (name);
 
     for (const auto& [plugin, kind] : table)
@@ -145,7 +145,7 @@ AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int
         t.index = id.track();
         const auto p = id.param();
 
-        if (p == 0x1F01) // dry/wet do slot
+        if (p == 0x1F01) // slot dry/wet
         {
             t.kind = AutomationTargetKind::effectMix;
             t.slot = id.slot();
@@ -167,7 +167,7 @@ AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int
 
 bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synth)
 {
-    // versão 10/11: 20 parâmetros + 4 bools (80 B); 12+: 21 parâmetros + 4 bools (+ HQ)
+    // version 10/11: 20 parameters + 4 bools (80 B); 12+: 21 parameters + 4 bools (+ HQ)
     if (state.size() < 84)
         return false;
 
@@ -181,16 +181,16 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synt
     if (version < 10 || version > 64)
         return false;
 
-    // parâmetro i fica em 0x04 + 4i; (i + 1) = 7·osc + campo, campos [mix, pan, shape, coarse, fine, spo, detune]
+    // parameter i is at 0x04 + 4i; (i + 1) = 7·osc + field, fields [mix, pan, shape, coarse, fine, spo, detune]
     auto param = [&] (int osc, int field) { return i32 ((std::size_t) (4 + 4 * (7 * osc + field - 1))); };
     const auto boolsAt = version >= 12 ? (std::size_t) 0x58 : (std::size_t) 0x54;
     const bool am = version >= 11 && state.size() > boolsAt + 3 && state[boolsAt + 3] != 0;
 
-    // níveis (§2.2): o osc 3 leva mix3/128, o osc 2 uma parte do resto, o osc 1 o que sobra
+    // levels (§2.2): osc 3 takes mix3/128, osc 2 a share of the rest, osc 1 what remains
     const auto g3 = std::clamp (param (2, 0), 0, 128) / 128.0f;
     const auto rest = am ? 1.0f : 1.0f - g3;
     const auto g2 = rest * std::clamp (param (1, 0), 0, 128) / 128.0f;
-    // com AM o osc 3 não entra na soma: o nível dele vira a profundidade da modulação (REA_rodada6 §3)
+    // with AM, osc 3 is not summed: its level becomes the modulation depth (REA_rodada6 §3)
     const std::array<float, 3> levels { std::max (0.0f, rest - g2), g2, g3 };
     synth.am = am;
 
@@ -204,13 +204,13 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synt
             case 1: osc.wave = Waveform::triangle; break;
             case 2: osc.wave = Waveform::square; break;
             case 5: osc.wave = Waveform::noise; break;
-            default: osc.wave = Waveform::saw; break; // 3 serra, 4 serra arredondada, 6 custom sem sample
+            default: osc.wave = Waveform::saw; break; // 3 saw, 4 rounded saw, 6 custom without sample
         }
 
         const auto coarse = std::clamp (param (o, 3), -24, 24);
-        osc.octave = coarse / 12; // trunca em direção a zero; o resto vira semitons
+        osc.octave = coarse / 12; // truncates toward zero; the remainder becomes semitones
         osc.semitones = coarse - osc.octave * 12;
-        // o stereo detune só soa no canal direito: metade dele vale como desafinação média
+        // stereo detune only sounds on the right channel: half of it counts as average detune
         osc.detune = std::clamp ((float) std::clamp (param (o, 4), -100, 100) + std::clamp (param (o, 6), -50, 50) * 0.5f, -100.0f, 100.0f);
         osc.pan = std::clamp (param (o, 1), -64, 64) / 64.0f;
         osc.level = levels[(std::size_t) o];
@@ -221,7 +221,7 @@ bool synthFrom3xOsc (const std::vector<std::uint8_t>& state, SynthSettings& synt
 
 namespace
 {
-// Corte (Hz) do filtro do canal do FL para Mod X normalizado `x` (REA_rodada4 §3); 20 kHz = aberto.
+// FL channel filter cutoff (Hz) for normalized Mod X `x` (REA_rodada4 §3); 20 kHz = open.
 double channelFilterHz (int type, double x)
 {
     constexpr double twoPi = 6.283185307179586;
@@ -253,17 +253,17 @@ float filterEnvelopeOctaves (int modX, int type, int amount)
 
 void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, float& resonance, int& mode)
 {
-    mode = type == 2 ? 1 : type == 3 ? 2 : type == 4 ? 3 : 0; // BP, HP, BS; o resto é passa-baixas
+    mode = type == 2 ? 1 : type == 3 ? 2 : type == 4 ? 3 : 0; // BP, HP, BS; the rest is low-pass
     const auto x = std::clamp (modX / 256.0, 0.0, 1.0);
     const auto r = std::clamp (modY / 256.0, 0.0, 1.0);
-    auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // o SVF do synth: k = 1/Q
+    auto fromQ = [] (double q) { return (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0); }; // the synth SVF: k = 1/Q
     resonance = 0.0f;
 
-    if (type == 0) // Fast LP: 1 polo + realimentação; a realimentação cresce com Mod Y (aproximação)
+    if (type == 0) // Fast LP: 1 pole + feedback; feedback grows with Mod Y (approximation)
         resonance = (float) (r * 0.9);
-    else if (type >= 1 && type <= 5) // biquads LP/BP/HP/BS (LPx2 = o LP duas vezes)
+    else if (type >= 1 && type <= 5) // LP/BP/HP/BS biquads (LPx2 = the LP twice)
         resonance = fromQ (r <= 0.0 ? 0.1 : (std::pow (51.0, 0.625 * r) - 1.0) * 0.4 + 0.1);
-    else if (type == 6 || type == 7) // SVF de Chamberlin
+    else if (type == 6 || type == 7) // Chamberlin SVF
         resonance = fromQ (1.0 / (r <= 0.0 ? 1.0 : (r < 1.0 ? 1.0 - 0.8 * r : 0.2)));
 
     cutoffHz = (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0);
@@ -275,7 +275,7 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
         return;
 
     const auto original = song.channels[(std::size_t) channel];
-    const auto inserted = (int) pads.size() - 1; // o primeiro pad ocupa o lugar do canal original
+    const auto inserted = (int) pads.size() - 1; // the first pad takes the original channel's place
     std::vector<ChannelDef> padChannels;
 
     for (const auto& pad : pads)
@@ -288,14 +288,14 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
         def.samplePath = single ? pad.layers.front().path : std::string();
         def.zones = single ? std::vector<SampleZone> {} : pad.layers;
         for (auto& z : def.zones)
-            z.rootKey = 60, z.lowKey = 0, z.highKey = 127; // o pad toca na altura do sample
-        // volume: ganho do canal × ganho do pad (× o da única camada), de volta para a curva do canal
+            z.rootKey = 60, z.lowKey = 0, z.highKey = 127; // the pad plays at the sample's pitch
+        // volume: channel gain × pad gain (× the single layer's), mapped back to the channel curve
         const auto gain = channelGain (original.volume) * pad.gain * (single ? pad.layers.front().gain : 1.0f);
         def.volume = std::clamp ((float) (std::log (10.0 * gain + 1.0) / std::log (11.0)), 0.0f, 1.0f);
         def.pan = std::clamp (original.pan + pad.pan, -1.0f, 1.0f);
         def.sampler = {};
         def.sampler.pitch = std::clamp (original.sampler.pitch + pad.tune + (single ? pad.layers.front().tune : 0.0f), -24.0f, 24.0f);
-        // grupos de corte próprios do kit (não se misturam com os dos outros canais)
+        // kit-specific cut groups (don't mix with other channels' groups)
         def.cutGroup = pad.cutGroup > 0 ? 1000 * (channel + 1) + pad.cutGroup : 0;
         def.cutBy = pad.cutBy > 0 ? 1000 * (channel + 1) + pad.cutBy : 0;
         def.mixerTrack = std::clamp (original.mixerTrack + pad.mixerOffset, 0, maxMixerTracks - 1);
@@ -305,7 +305,7 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
     song.channels[(std::size_t) channel] = padChannels.front();
     song.channels.insert (song.channels.begin() + channel + 1, padChannels.begin() + 1, padChannels.end());
 
-    // canais depois do original andam `inserted` posições
+    // channels after the original shift by `inserted` positions
     auto shift = [&] (int c) { return c > channel ? c + inserted : c; };
 
     for (auto& p : song.patterns)
@@ -358,7 +358,7 @@ bool isFlSynthPresetPlugin (const std::string& pluginName)
 
 std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>& bytes)
 {
-    // preset nativo do GMS (.gmsynth): é o estado do plugin sem o "SSLF"
+    // native GMS preset (.gmsynth): it is the plugin state without the "SSLF"
     if (bytes.size() >= 4 && (std::memcmp (bytes.data(), "4nyS", 4) == 0 || std::memcmp (bytes.data(), "3nyS", 4) == 0))
     {
         std::vector<std::uint8_t> state { 'S', 'S', 'L', 'F' };
@@ -380,7 +380,7 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
         if (project.channels.empty() || ! isFlSynthPresetPlugin (project.channels.front().pluginName))
             return std::nullopt;
 
-        project.channels.front().type = flp::ChannelType::native; // gerador nativo (o .fst não diz)
+        project.channels.front().type = flp::ChannelType::native; // native generator (the .fst doesn't say)
         const auto song = importFlp (project);
 
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
@@ -396,7 +396,7 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
 
 Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 {
-    // Patcher usado como instrumento: o canal vira o gerador principal de dentro dele (REA_rodada14 §1)
+    // Patcher used as an instrument: the channel becomes the main generator inside it (REA_rodada14 §1)
     std::optional<flp::Project> unpacked;
     for (std::size_t i = 0; i < input.channels.size(); ++i)
         if (lowercase (input.channels[i].pluginName) == "patcher")
@@ -415,24 +415,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
 
-    // Canais do FL podem ter índices esparsos; mapeamos para índices densos.
+    // FL channels may have sparse indices; we map them to dense indices.
     std::map<int, int> channelMap;
-    std::vector<std::pair<int, std::vector<DrumPad>>> drumKits; // canais FPC para dividir no fim
+    std::vector<std::pair<int, std::vector<DrumPad>>> drumKits; // FPC channels to split at the end
 
     for (const auto& c : project.channels)
     {
-        // clips de automação viram Song::automations (mais abaixo), não canais
+        // automation clips become Song::automations (further below), not channels
         if (c.type == flp::ChannelType::automationClip)
             continue;
 
         channelMap[c.index] = (int) song.channels.size();
 
         ChannelDef def;
-        def.name = c.name.empty() ? "Canal " + std::to_string (c.index + 1) : c.name;
+        def.name = c.name.empty() ? "Channel " + std::to_string (c.index + 1) : c.name;
         def.instrument = guessInstrument (def.name, c.type);
 
-        // sintetizador do FL que vira o synth interno: um preset que combine com o nome (no FLEX, o nome
-        // do preset escolhido no plugin diz mais que o do canal)
+        // FL synthesizer that becomes the internal synth: a preset matching the name (in FLEX, the name
+        // of the preset chosen in the plugin says more than the channel's)
         if (def.instrument == InstrumentKind::synth)
         {
             def.synth = presetForChannelName (def.name);
@@ -456,7 +456,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
 
         if (isAudioClip && def.instrument != InstrumentKind::audioClip)
-            def.instrument = InstrumentKind::audioClip; // sem arquivo: fica mudo, mas o clip continua na playlist
+            def.instrument = InstrumentKind::audioClip; // no file: stays silent, but the clip remains in the playlist
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
 
@@ -465,12 +465,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if (c.hasLevels)
         {
-            def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f); // mesma curva (channelGain)
+            def.volume = std::clamp (c.volume / 12800.0f, 0.0f, 1.0f); // same curve (channelGain)
             def.pan = std::clamp ((c.pan - 6400) / 6400.0f, -1.0f, 1.0f);
             def.sampler.pitch = std::clamp (c.pitchCents / 100.0f, -24.0f, 24.0f);
         }
 
-        // nota-raiz do sample: o nosso sampler toca na altura original em C5 (60)
+        // sample root note: our sampler plays at the original pitch at C5 (60)
         if (c.rootNote >= 0 && c.rootNote <= 127)
             def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
 
@@ -478,43 +478,43 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         def.cutGroup = c.cutGroup;
         def.cutBy = c.cutBy;
 
-        // "cut itself" (grupo == cut by) e canal mono viram o "cut" do sampler
+        // "cut itself" (group == cut by) and mono channel become the sampler's "cut"
         if ((c.cutGroup != 0 && c.cutGroup == c.cutBy) || c.maxVoices == 1)
             def.sampler.cut = true;
 
         def.synth.mono = c.monoFlag || c.maxVoices == 1;
 
-        // porta do canal e tempo de slide: n = round((27^(v/1024) - 1) * 48/26) ticks de 1/192 tempo
-        // (REA_rodada6 §4); o tempo vale também para as notas com porta próprio
+        // channel porta and slide time: n = round((27^(v/1024) - 1) * 48/26) ticks of 1/192 beat
+        // (REA_rodada6 §4); the time also applies to notes with their own porta
         {
             const auto ticks = std::round ((std::pow (27.0, std::clamp (c.slideTime, 0, 1660) / 1024.0) - 1.0) * 48.0 / 26.0);
             def.synth.portaBeats = def.sampler.portaBeats = (float) std::max (1.0, ticks) / 192.0f;
             def.synth.porta = def.sampler.porta = c.portaFlag;
         }
 
-        // envelope de volume (registro 1 do 0xDA) -> ADSR do sampler
+        // volume envelope (record 1 of 0xDA) -> sampler ADSR
         const auto& volumeEnvelope = c.envelopes[1];
         const auto hasVolumeEnvelope = volumeEnvelope.present && volumeEnvelope.enabled;
 
         if (hasVolumeEnvelope)
         {
             const auto& env = volumeEnvelope;
-            const auto beats = (env.flags & 1) != 0; // sincronizado com o tempo: unidades em tempos
+            const auto beats = (env.flags & 1) != 0; // tempo-synced: units in beats
             auto seconds = [&] (int v) {
                 const auto t = flp::Channel::envelopeTime (v);
-                return (float) (beats ? t * 2.0 * 60.0 / song.bpm : t); // 0,128 tempo em vez de 0,064 s
+                return (float) (beats ? t * 2.0 * 60.0 / song.bpm : t); // 0.128 beat instead of 0.064 s
             };
 
             def.sampler.attack = std::clamp (seconds (env.attack), 0.0f, 2.0f);
             def.sampler.decay = std::clamp (seconds (env.decay), 0.0f, 10.0f);
             def.sampler.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
-            def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope ligado: a nota acaba
+            def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope on: the note ends
         }
 
-        // filtro do canal (Mod X/Y + tipo do 0xDB) vale para o sampler também
+        // channel filter (Mod X/Y + type from 0xDB) applies to the sampler too
         synthFilterFromChannel (c.modX, c.modY, c.filterType, def.sampler.cutoff, def.sampler.resonance, def.sampler.filterType);
 
-        // envelopes de corte (registro 2) e de afinação (registro 4) do canal
+        // channel cutoff (record 2) and pitch (record 4) envelopes
         auto modEnvelope = [&] (const flp::Channel::Envelope& env, float amount) {
             ModEnvelope m;
             if (! env.present || ! env.enabled || amount == 0.0f)
@@ -539,7 +539,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         def.sampler.filterEnv = filterEnv;
         def.sampler.pitchEnv = pitchEnv;
 
-        // LFOs do canal (registros 0 pan, 1 volume, 2 corte, 4 afinação; REA_rodada6 §2)
+        // channel LFOs (records 0 pan, 1 volume, 2 cutoff, 4 pitch; REA_rodada6 §2)
         {
             auto lfoFrom = [&] (const flp::Channel::Envelope& env, float amount) {
                 ChannelLfo l;
@@ -547,7 +547,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     return l;
 
                 l.sync = (env.flags & 0x02) != 0;
-                auto time = [&] (int v) { // segundos, ou tempos com sincronia (o dobro da escala)
+                auto time = [&] (int v) { // seconds, or beats when synced (double the scale)
                     const auto t = flp::Channel::envelopeTime (v);
                     return (float) std::clamp (l.sync ? t * 2.0 : t, 0.0, 64.0);
                 };
@@ -569,10 +569,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.synth.lfo = lfo;
         }
 
-        // plugin de terceiros (VST/CLAP) no Fruity Wrapper: o app procura o mesmo plugin instalado;
-        // até lá (ou se não achar) o canal fica no synth interno
-        // geradores do FL com samples (REA_rodada9): DirectWave vira sampler multi-sample; o FPC é
-        // dividido em um canal por pad no fim do import (as notas vão para o pad pela tecla)
+        // third-party plugin (VST/CLAP) in Fruity Wrapper: the app looks for the same installed plugin;
+        // until then (or if not found) the channel stays on the internal synth
+        // FL generators with samples (REA_rodada9): DirectWave becomes a multi-sample sampler; FPC is
+        // split into one channel per pad at the end of the import (notes go to the pad by key)
         auto existing = [&] (std::string path) {
             const auto resolved = resolveFlPath (path, options.roots);
             return ! resolved.empty() && options.fileExists && options.fileExists (resolved) ? resolved : std::string();
@@ -586,7 +586,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     auto z = program->zones[i];
                     auto path = existing (z.path);
-                    // arquivo que não existe nesta máquina: o áudio que o projeto guardou junto
+                    // file missing on this machine: use the audio the project stored with it
                     if (path.empty() && i < program->embeddedWav.size() && ! program->embeddedWav[i].empty() && options.saveEmbedded)
                         path = options.saveEmbedded (program->embeddedWav[i], def.name + " " + std::to_string (i + 1));
                     if (! path.empty())
@@ -607,7 +607,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
             }
 
-        // Fruity Slicer / Slicex: sampler com as fatias (a fatia i toca na tecla 60 + i, na altura do sample)
+        // Fruity Slicer / Slicex: sampler with the slices (slice i plays on key 60 + i, at the sample's pitch)
         {
             const auto name = lowercase (c.pluginName);
             std::optional<SlicedSample> sliced;
@@ -621,7 +621,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             {
                 std::string path;
 
-                if (! sliced->embeddedWav.empty() && options.saveEmbedded) // o áudio que só existe dentro do projeto
+                if (! sliced->embeddedWav.empty() && options.saveEmbedded) // audio that only exists inside the project
                     path = options.saveEmbedded (sliced->embeddedWav, def.name);
                 if (path.empty())
                     path = existing (sliced->path);
@@ -631,7 +631,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     auto positions = sliced->positions;
                     std::int64_t frames = 0;
 
-                    if (positions.empty()) // Slicex: as fatias são os pontos "cue" do WAV
+                    if (positions.empty()) // Slicex: the slices are the WAV "cue" points
                     {
                         const auto bytes = ! sliced->embeddedWav.empty() ? sliced->embeddedWav
                                                                          : options.readFile ? options.readFile (path) : std::vector<std::uint8_t> {};
@@ -654,7 +654,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
         }
 
-        // FL Keys: os samples do conjunto (.wti) que vem com o FL
+        // FL Keys: the samples of the set (.wti) that ships with FL
         if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())
             if (const auto set = flKeysSet (c.pluginState))
             {
@@ -679,11 +679,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     def.instrument = InstrumentKind::sampler;
                     def.zones = std::move (zones);
-                    def.sampler.release = 0.4f; // o piano solta a nota com um release curto
+                    def.sampler.release = 0.4f; // the piano releases the note with a short release
                 }
             }
 
-        // Wave Traveller: toca o sample dele (a curva de scratch fica de fora)
+        // Wave Traveller: plays its sample (the scratch curve is left out)
         if (c.pluginName == "Wave Traveller")
             if (const auto wave = waveTravellerSample (c.pluginState))
                 if (auto path = existing (wave->first); ! path.empty())
@@ -693,7 +693,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - wave->second), -24.0f, 24.0f);
                 }
 
-        // Fruity Envelope Controller: canal "controlador" (sem som) que dispara os envelopes pelas notas
+        // Fruity Envelope Controller: "controller" channel (silent) that triggers the envelopes from notes
         if ((c.pluginName == "Fruity Envelope Controller" && parseEnvelopeController (c.pluginState))
             || (c.pluginName == "Fruity Keyboard Controller" && parseKeyboardController (c.pluginState)))
         {
@@ -701,7 +701,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.controllerState = c.pluginState;
         }
 
-        // Fruity DrumSynth Live: o sample de bateria do FL com o mesmo nome do som escolhido
+        // Fruity DrumSynth Live: the FL drum sample with the same name as the chosen sound
         if (c.pluginName == "Fruity DrumSynth Live")
             if (const auto sound = drumSynthLiveSound (c.pluginState))
                 for (const auto& candidate : drumSampleCandidates (*sound))
@@ -734,7 +734,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
             def.plugin.name = def.plugin.foreign.name;
 
-        // Harmless / Fruit Kick (REA_rodada10): aproximados pelo synth interno; os LFOs do canal ficam
+        // Harmless / Fruit Kick (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
         if (def.instrument == InstrumentKind::synth)
         {
@@ -784,7 +784,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (name == "drumpad")
                 if (const auto patch = drumpadPatchName (c.pluginState))
                 {
-                    // bumbo/caixa/palma/chimbal: os instrumentos de bateria; o resto, um tambor no synth
+                    // kick/snare/clap/hi-hat: the drum instruments; the rest, a drum on the synth
                     if (const auto drum = guessInstrument (*patch, flp::ChannelType::sampler); drum != InstrumentKind::synth)
                     {
                         def.instrument = drum;
@@ -793,7 +793,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     else
                     {
                         fromPlugin = drumToneForName (*patch);
-                        // confirmados: Pitch ×2^(2x − 1) e Mallet Amplitude 10^(−4(1 − x)) (o modelo físico não)
+                        // confirmed: Pitch ×2^(2x − 1) and Mallet Amplitude 10^(−4(1 − x)) (the physical model isn't)
                         if (const auto dp = drumpadParams (c.pluginState))
                         {
                             const auto semis = 12.0f * (2.0f * std::clamp ((*dp)[29], 0.0f, 1.0f) - 1.0f);
@@ -809,7 +809,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
         }
 
-        // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
+        // 3x Osc: oscillators from the plugin state; envelope and filter come from the channel (REA_rodada4)
         if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
         {
             if (hasVolumeEnvelope)
@@ -821,7 +821,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
             else
             {
-                // sem envelope o FL toca a nota como um portão, só com um declique curto
+                // without an envelope FL plays the note as a gate, with only a short declick
                 def.synth.attack = 0.002f;
                 def.synth.decay = 0.0f;
                 def.synth.sustain = 1.0f;
@@ -834,7 +834,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.synth.pitchEnv = pitchEnv;
         }
 
-        // trecho do sample e start offset
+        // sample region and start offset
         if (std::isfinite (c.sampleStart) && std::isfinite (c.sampleEnd) && std::isfinite (c.startOffset))
         {
             const auto start = std::clamp (c.sampleStart, 0.0, 1.0), end = std::clamp (c.sampleEnd, 0.0, 1.0);
@@ -846,13 +846,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
         }
 
-        // time-stretch: o sample dura TIME/192 tempos × MUL
+        // time-stretch: the sample lasts TIME/192 beats × MUL
         if (c.stretchTime > 0.0f)
         {
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
-            def.sampler.keepPitch = c.stretchMode != 0; // só o "Resample" do FL muda a altura
+            def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
         }
-        // relatório: o que aconteceu com o gerador/sample deste canal
+        // report: what happened to this channel's generator/sample
         if (options.report != nullptr)
         {
             auto& r = *options.report;
@@ -874,14 +874,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
-                ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)
+                ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
         }
 
         song.channels.push_back (std::move (def));
     }
 
-    // Mixer: nomes, mute/solo, roteamento e níveis do .flp; inserts suficientes para todas as
-    // rotas (mínimo 16, como um projeto novo). As trilhas extras do FL (500/501) ficam de fora.
+    // Mixer: names, mute/solo, routing and levels from the .flp; enough inserts for all
+    // routes (minimum 16, like a new project). FL's extra tracks (500/501) are left out.
     int highestTrack = 16;
     for (const auto& c : song.channels)
         highestTrack = std::max (highestTrack, c.mixerTrack);
@@ -905,7 +905,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (insert.index > 0 && ! insert.name.empty())
             track.name = insert.name;
 
-        if (insert.colour != 0 && insert.colour != 0x485156) // o cinza padrão do FL
+        if (insert.colour != 0 && insert.colour != 0x485156) // FL's default gray
             track.colour = 0xFF000000u | insert.colour;
 
         track.muted = (insert.flags & 0x08) == 0;
@@ -917,20 +917,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             track.toMaster = std::find (insert.routes.begin(), insert.routes.end(), 0) != insert.routes.end();
 
-            // O nível vem do 0xE1 (abaixo). Sem registro, os templates do FL ligam todo insert às
-            // trilhas de send do fim do mixer (100+) com nível 0; rotas para inserts comuns valem 100%.
+            // The level comes from 0xE1 (below). Without a record, FL templates route every insert to the
+            // send tracks at the end of the mixer (100+) at level 0; routes to regular inserts are 100%.
             for (auto target : insert.routes)
                 if (target > 0 && target < tracks && target != insert.index)
                     track.sends.push_back ({ target, target >= 100 ? 0.0f : 1.0f });
         }
     }
 
-    // efeitos nativos do FL viram os efeitos internos parecidos (parâmetros no padrão: o estado
-    // interno dos plugins do FL não é conhecido); os outros ficam de fora
-    std::map<std::pair<int, int>, std::pair<int, std::string>> effectSlotMap; // (trilha, slot do FL) -> (efeito nosso, plugin do FL)
+    // native FL effects become the similar internal effects (default parameters: the internal
+    // state of FL plugins is not known); the others are left out
+    std::map<std::pair<int, int>, std::pair<int, std::string>> effectSlotMap; // (track, FL slot) -> (our effect, FL plugin)
 
-    // entradas de cada trilha (REA_rodada22 §1): [a própria, as que roteiam para ela em ordem crescente (com
-    // qualquer nível; nível 0 = só sidechain)]; o índice k gravado nos plugins aponta para esta lista
+    // inputs of each track (REA_rodada22 §1): [itself, the ones routing to it in ascending order (at
+    // any level; level 0 = sidechain only)]; the index k stored in the plugins points into this list
     std::map<int, std::vector<int>> trackInputs;
     for (const auto& insert : project.mixer)
         if (insert.hasRoutes)
@@ -946,7 +946,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         inputs.insert (inputs.begin(), track);
         return k < (int) inputs.size() && inputs[(std::size_t) k] < tracks ? inputs[(std::size_t) k] : -1;
     };
-    std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // automação dos Love Philter
+    std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // Love Philter automation
 
     for (const auto& insert : project.mixer)
     {
@@ -957,9 +957,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         for (const auto& original : insert.slots)
         {
-            // Patcher com uma cadeia simples em série: os plugins de dentro viram slots seguidos
+            // Patcher with a simple serial chain: the plugins inside become consecutive slots
             std::vector<flp::MixerInsert::Slot> expanded { original };
-            // Fruity Love Philter: as unidades viram EQ paramétrico + ganho/pan (ou um contêiner paralelo)
+            // Fruity Love Philter: the units become parametric EQ + gain/pan (or a parallel container)
             if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots)
                 if (auto conversion = lovePhilterEffects (original.state))
                 {
@@ -970,7 +970,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     effectSlotMap.insert ({ { insert.index, original.index }, { first, original.plugin } });
                     if (conversion->paramMap)
                         lovePhilterMaps[{ insert.index, original.index }] = conversion->paramMap;
-                    for (const auto& link : conversion->links) // envelope/LFO do corte: automação ao vivo
+                    for (const auto& link : conversion->links) // cutoff envelope/LFO: live automation
                         if (first + std::max (link.source, link.target) < (int) track.effects.size())
                         {
                             Automation a;
@@ -989,8 +989,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     continue;
                 }
 
-            // Patcher com ramos (REA_rodada20 §3.3): o grafo de áudio reduzido a série/paralelo vira slots e
-            // contêineres paralelos aninhados; nós divisores entram pela banda/barramento usado
+            // Patcher with branches (REA_rodada20 §3.3): the audio graph reduced to series/parallel becomes slots and
+            // nested parallel containers; splitter nodes enter via the band/bus used
             if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
                 if (const auto graph = parsePatcher (original.state); graph && graph->serialChain.empty() && graph->audio)
                 {
@@ -1009,7 +1009,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                     if (! head.valid)
                                     {
                                         if (options.report != nullptr)
-                                            ++options.report->droppedEffects["Patcher: barramento " + std::to_string (e.bus) + " de " + node.plugin];
+                                            ++options.report->droppedEffects["Patcher: bus " + std::to_string (e.bus) + " of " + node.plugin];
                                         break;
                                     }
                                     gain *= head.gain;
@@ -1021,7 +1021,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
                                     chain.push_back (std::move (*fx));
                                 else if (options.report != nullptr)
-                                    ++options.report->droppedEffects[node.plugin + " (no Patcher)"];
+                                    ++options.report->droppedEffects[node.plugin + " (in Patcher)"];
                                 break;
                             }
                             case PatcherExpr::Kind::series:
@@ -1054,7 +1054,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         utility.params[0] = gain <= 0.0f ? 0.0f : std::clamp ((float) (20.0 * std::log10 (gain) / 48.0 + 0.5), 0.0f, 1.0f);
                         chain.push_back (std::move (utility));
                     }
-                    if ((int) (track.effects.size() + chain.size()) > maxEffectSlots) // não cabe: um contêiner de um ramo
+                    if ((int) (track.effects.size() + chain.size()) > maxEffectSlots) // doesn't fit: a single-branch container
                     {
                         auto container = makeEffectSlot (EffectKind::parallel);
                         container.branches.push_back ({ std::move (chain), 1.0f });
@@ -1064,7 +1064,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     for (auto& slot : chain)
                         track.effects.push_back (std::move (slot));
                     if (options.report != nullptr)
-                        ++options.report->converted["Patcher (série/paralelo)"];
+                        ++options.report->converted["Patcher (series/parallel)"];
                     continue;
                 }
 
@@ -1075,7 +1075,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     for (const auto n : graph->serialChain)
                         expanded.push_back ({ original.index, graph->nodes[(std::size_t) n].plugin, graph->nodes[(std::size_t) n].state });
                     if (options.report != nullptr)
-                        ++options.report->converted["Patcher (em série)"];
+                        ++options.report->converted["Patcher (in series)"];
                 }
 
             for (const auto& slot : expanded)
@@ -1088,22 +1088,22 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 const auto wrapped = slot.plugin == "Fruity Wrapper" && parseFlWrapper (slot.state, foreign);
 
-                // FL antigo salvava os próprios efeitos Fruity como VST2 dentro do wrapper: vira o efeito interno
+                // old FL saved its own Fruity effects as VST2 inside the wrapper: becomes the internal effect
                 if (wrapped && foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
                     made = effectFromFl (foreign.name, {}, song.bpm);
                 else if (wrapped)
                 {
-                    // o app troca pelo plugin instalado; sem ele, o slot sai
+                    // the app swaps in the installed plugin; without it, the slot is removed
                     made = makeEffectSlot (EffectKind::plugin);
                     made->plugin.name = foreign.name;
                     made->plugin.foreign = std::move (foreign);
                 }
                 else
-                    made = effectFromFl (slot.plugin, slot.state, song.bpm); // efeito nativo com os ajustes salvos (REA_rodada7)
+                    made = effectFromFl (slot.plugin, slot.state, song.bpm); // native effect with the saved settings (REA_rodada7)
 
                 if (! made)
                 {
-                    // os que não mexem no áudio (controladores, visualizadores, anotações) não fazem falta
+                    // the ones that don't touch audio (controllers, visualizers, notes) aren't missed
                     static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface", "Wave Candy",
                                                     "ZGameEditor Visualizer", "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
@@ -1116,8 +1116,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 auto fx = std::move (*made);
 
-                // sidechain (REA_rodada22 §1): Fruity Limiter (i32 em 0xA4, v ≥ 6; só o detector do compressor e só
-                // com Comp threshold < 0 dB) e Fruity Compressor (i32 em 0x20, v3)
+                // sidechain (REA_rodada22 §1): Fruity Limiter (i32 at 0xA4, v ≥ 6; only the compressor detector and only
+                // with Comp threshold < 0 dB) and Fruity Compressor (i32 at 0x20, v3)
                 if (slot.plugin == "Fruity Limiter" && slot.state.size() >= 0xA8)
                 {
                     std::int32_t version = 0, k = 0, compThreshold = 1000;
@@ -1144,7 +1144,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         fx.sidechain = sidechainSource (insert.index, k);
                 }
 
-                // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
+                // slot bypass and dry/wet (0xE1, p = 0x1F00 / 0x1F01)
                 for (const auto& control : project.controls)
                     if (control.id.isMixer() && control.id.track() == insert.index && control.id.slot() == slot.index)
                     {
@@ -1160,7 +1160,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
     }
 
-    // ciclos não deveriam existir no arquivo; se existirem, o envio que fecha o ciclo cai
+    // cycles shouldn't exist in the file; if they do, the send that closes the cycle is dropped
     for (int t = 1; t < tracks; ++t)
     {
         auto sends = std::move (song.mixer[(std::size_t) t].sends);
@@ -1183,7 +1183,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         auto& track = song.mixer[(std::size_t) t];
 
-        // faixas do FL: volume 0..16000 (12800 = 0 dB), pan ±6400, envio 0..16000 (12800 = 100%)
+        // FL ranges: volume 0..16000 (12800 = 0 dB), pan ±6400, send 0..16000 (12800 = 100%)
         if (p == flp::ControlId::mixerVolume)
             track.volume = std::clamp (control.value / 16000.0f, 0.0f, 1.0f);
         else if (p == flp::ControlId::mixerPan)
@@ -1192,7 +1192,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             track.stereo = std::clamp (control.value / 64.0f, -1.0f, 1.0f);
         else if (p >= flp::ControlId::mixerEqBase && p < flp::ControlId::mixerEqBase + 24 && (p - flp::ControlId::mixerEqBase) % 8 < 3)
         {
-            // EQ da trilha: p = 0x1FD0 + grupo·8 + banda (grupo 0 ganho, 1 frequência, 2 largura; REA_rodada6 §1)
+            // track EQ: p = 0x1FD0 + group·8 + band (group 0 gain, 1 frequency, 2 width; REA_rodada6 §1)
             const auto group = (p - flp::ControlId::mixerEqBase) / 8;
             const auto band = (std::size_t) ((p - flp::ControlId::mixerEqBase) % 8);
             const auto v = (double) control.value;
@@ -1210,7 +1210,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     send.level = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
     }
 
-    // o template do FL liga todo insert às trilhas de send com nível 0; isso não soa, só gasta CPU
+    // the FL template routes every insert to the send tracks at level 0; that makes no sound, only wastes CPU
     for (auto& t : song.mixer)
         t.sends.erase (std::remove_if (t.sends.begin(), t.sends.end(), [] (const MixerSend& s) { return s.level <= 0.0f; }),
                        t.sends.end());
@@ -1218,14 +1218,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     const auto filePpq = project.header.ppq > 0 ? (std::int64_t) project.header.ppq : 96;
     auto rescale = [filePpq] (std::int64_t ticks) { return ticks * ppq / filePpq; };
 
-    std::map<int, int> patternMap; // índice no FL -> índice denso nosso
+    std::map<int, int> patternMap; // FL index -> our dense index
 
     for (const auto& src : project.patterns)
     {
         Pattern p;
         p.name = src.name.empty() ? "Pattern " + std::to_string (src.index) : src.name;
 
-        if (src.colour && *src.colour != 0x485156) // o cinza padrão do FL vira cor automática
+        if (src.colour && *src.colour != 0x485156) // FL's default gray becomes an automatic colour
             p.colour = 0xFF000000u | *src.colour;
 
         for (const auto& n : src.notes)
@@ -1237,10 +1237,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
             Note note;
             note.start = rescale (n.position);
-            // Notas de step (duração 0) tocam por um step.
+            // Step notes (length 0) play for one step.
             note.length = n.length > 0 ? rescale (n.length) : ticksPerStep;
             note.channel = it->second;
-            note.key = n.key; // FL e MIDI usam a mesma numeração; só o nome da oitava difere
+            note.key = n.key; // FL and MIDI use the same numbering; only the octave name differs
             note.velocity = std::clamp (n.velocity / 128.0f, 0.0f, 1.0f);
             note.pan = std::clamp ((n.pan - 64) / 64.0f, -1.0f, 1.0f);
             note.finePitch = (float) std::clamp ((int) n.finePitch - 120, -120, 120);
@@ -1259,9 +1259,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
     }
 
-    // Alvo nosso para um controlID do FL: o slot do FL (0..9, com buracos) vira o índice do nosso
-    // efeito (efeito que não veio = sem alvo); parâmetro de efeito interno só com o mapa do FL para o
-    // nosso (`valueMap` recebe a conversão do valor).
+    // Our target for an FL controlID: the FL slot (0..9, with gaps) becomes our effect's
+    // index (effect not imported = no target); internal effect parameter only with the FL-to-ours
+    // map (`valueMap` receives the value conversion).
     auto resolveTarget = [&] (flp::ControlId id, std::function<float (float)>& valueMap) {
         auto target = automationTargetFor (id, channelMap, (int) song.mixer.size());
 
@@ -1303,8 +1303,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         return target;
     };
 
-    // Clips de automação: um Automation por canal de automação do FL, com o alvo do link 0xE3.
-    std::map<int, int> automationMap; // canal do FL -> índice em song.automations
+    // Automation clips: one Automation per FL automation channel, with the target from the 0xE3 link.
+    std::map<int, int> automationMap; // FL channel -> index into song.automations
 
     for (const auto& c : project.channels)
     {
@@ -1312,8 +1312,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             continue;
 
         Automation a;
-        a.name = c.name.empty() ? "Automação " + std::to_string (c.index + 1) : c.name;
-        std::function<float (float)> valueMap; // valor normalizado do FL -> o nosso (parâmetros de efeito)
+        a.name = c.name.empty() ? "Automation " + std::to_string (c.index + 1) : c.name;
+        std::function<float (float)> valueMap; // FL normalized value -> ours (effect parameters)
 
         for (const auto& link : project.automationLinks)
             if (link.channel == c.index)
@@ -1328,20 +1328,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             const auto tick = (std::int64_t) std::llround (p.position * ppq);
             auto value = (float) std::clamp (p.value, 0.0, 1.0);
 
-            // o FL automatiza o tempo de 60 a 180 BPM; o nosso alvo cobre a faixa inteira do andamento
+            // FL automates tempo from 60 to 180 BPM; our target covers the full tempo range
             if (a.target.kind == AutomationTargetKind::tempo)
                 value = valueFromTempo (60.0 + 120.0 * value);
             else if (valueMap)
                 value = std::clamp (valueMap (value), 0.0f, 1.0f);
 
-            // a curva do FL é do trecho que termina no ponto; a nossa fica no ponto da esquerda
+            // FL's curve belongs to the segment ending at the point; ours sits on the left point
             if (i > 0)
             {
                 auto& previous = a.points.back();
 
-                if (p.curve == 0 || p.curve == 1) // single/double curve: exponencial pela tensão
+                if (p.curve == 0 || p.curve == 1) // single/double curve: exponential by tension
                     previous.tension = std::clamp (-p.tension, -1.0f, 1.0f);
-                else if (p.curve == 2 && tick - previous.tick > 1) // hold: degrau logo antes do ponto
+                else if (p.curve == 2 && tick - previous.tick > 1) // hold: step right before the point
                     a.points.push_back ({ tick - 1, previous.value, 0.0f });
             }
 
@@ -1352,11 +1352,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         song.automations.push_back (std::move (a));
     }
 
-    // Links de controlador (REA_rodada14 §7): Peak Controller num slot do mixer -> automação ao vivo do
-    // alvo (a saída do efeito é lida a cada bloco). Os outros controladores ainda ficam de fora.
+    // Controller links (REA_rodada14 §7): Peak Controller in a mixer slot -> live automation of the
+    // target (the effect output is read every block). Other controllers are still left out.
     for (const auto& link : project.controllerLinks)
     {
-        // Envelope Controller num canal: a saída k segue o articulador k
+        // Envelope Controller on a channel: output k follows articulator k
         if (link.source.isChannel())
         {
             const auto channel = channelMap.find (link.source.channel());
@@ -1367,7 +1367,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             a.target = resolveTarget (link.target, valueMap);
             if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
                 continue;
-            a.name = "Controlador (" + song.channels[(std::size_t) channel->second].name + ")";
+            a.name = "Controller (" + song.channels[(std::size_t) channel->second].name + ")";
             a.source.channel = channel->second;
             a.source.output = link.source.param() - flp::ControlId::pluginParamBase;
             if (valueMap)
@@ -1375,14 +1375,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
             song.automations.push_back (std::move (a));
             if (options.report != nullptr)
-                ++options.report->converted["Controlador de canal (link)"];
+                ++options.report->converted["Channel controller (link)"];
             continue;
         }
 
         if (! link.source.isMixer() || link.source.track() < 0 || link.source.track() >= (int) song.mixer.size())
             continue;
 
-        // X-Y Controller / Control Surface parados: o valor atual vai para o alvo uma vez
+        // static X-Y Controller / Control Surface: the current value is applied to the target once
         {
             const flp::MixerInsert::Slot* source = nullptr;
             for (const auto& insert : project.mixer)
@@ -1423,7 +1423,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->converted["Peak Controller (link)"];
     }
 
-    // Playlist: todos os arrangements (o primeiro fica aberto); clips de pattern, de áudio e de automação.
+    // Playlist: all arrangements (the first stays open); pattern, audio and automation clips.
     std::vector<const std::vector<flp::PlaylistTrackInfo>*> importedTracks;
 
     if (! project.arrangements.empty())
@@ -1447,7 +1447,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 clip.start = rescale (item.position);
                 clip.length = rescale (item.length);
 
-                // recorte em tempos (-1 = sem recorte)
+                // trim in beats (-1 = no trim)
                 if (std::isfinite (item.startOffset) && item.startOffset > 0.0f)
                     clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
 
@@ -1469,8 +1469,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 clip.start = rescale (item.position);
                 clip.length = rescale (item.length);
 
-                // O início do trecho vem em tempos ou em milissegundos, conforme o clip;
-                // descobrimos pela unidade em que (fim - início) bate com a duração.
+                // The region start comes in beats or in milliseconds, depending on the clip;
+                // we find out by the unit in which (end - start) matches the length.
                 const auto beats = (double) item.length / (double) filePpq;
                 const auto span = (double) item.endOffset - (double) item.startOffset;
 
@@ -1505,7 +1505,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         Arrangement a;
         a.name = arrangement.name.empty() ? "Arrangement " + std::to_string (song.arrangements.size() + 1) : arrangement.name;
 
-        // marcadores; os de tipo 8 mudam o compasso (as ações de loop/pausa viram marcadores comuns)
+        // markers; type 8 changes the time signature (loop/pause actions become plain markers)
         for (const auto& m : arrangement.markers)
         {
             Marker marker;
@@ -1520,9 +1520,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 marker.denominator = m.denominator;
             }
 
-            // sem nome: o tipo do marcador no FL (REA_rodada6 §5)
-            static const char* typeNames[] = { "", "Loop (marcador)", "Pular", "Pausa", "Loop", "Início", "Tamanho da pattern", "",
-                                               "", "Começar gravação", "Parar gravação", "Tamanho do loop", "Tom/escala" };
+            // unnamed: the FL marker type (REA_rodada6 §5)
+            static const char* typeNames[] = { "", "Loop (marker)", "Skip", "Pause", "Loop", "Start", "Pattern length", "",
+                                               "", "Start recording", "Stop recording", "Loop length", "Key/scale" };
             if (marker.name.empty() && m.type > 0 && m.type < 13 && m.type != 8)
                 marker.name = typeNames[m.type];
 
@@ -1533,14 +1533,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         importedTracks.push_back (&arrangement.tracks);
 
         if (song.arrangements.empty())
-            song.playlist = std::move (clips); // o primeiro é o atual
+            song.playlist = std::move (clips); // the first is the current one
         else
             a.clips = std::move (clips);
 
         song.arrangements.push_back (std::move (a));
     }
 
-    // o .flp não diz qual arrangement estava aberto; o mais cheio costuma ser a música
+    // the .flp doesn't say which arrangement was open; the fullest is usually the song
     {
         int fullest = 0;
         std::size_t most = song.playlist.size();
@@ -1554,7 +1554,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         song.selectArrangement (fullest);
 
-        // nomes e mute das trilhas da Playlist (do arrangement aberto)
+        // Playlist track names and mute (from the open arrangement)
         if (fullest < (int) importedTracks.size())
             for (const auto& t : *importedTracks[(std::size_t) fullest])
                 if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled))
@@ -1573,13 +1573,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     if (song.patterns.empty())
         song.patterns.emplace_back().name = "Pattern 1";
 
-    // O .flp não diz qual pattern estava aberta; a mais cheia é o melhor ponto de partida.
+    // The .flp doesn't say which pattern was open; the fullest is the best starting point.
     for (int i = 0; i < (int) song.patterns.size(); ++i)
         if (song.patterns[(std::size_t) i].notes.size() > song.patterns[(std::size_t) song.currentPattern].notes.size())
             song.currentPattern = i;
 
-    // MIDI Out (REA_rodada16 §1): o canal não toca som; as notas dele vão para os plugins (Fruity
-    // Wrapper) que escutam a mesma porta MIDI
+    // MIDI Out (REA_rodada16 §1): the channel makes no sound; its notes go to the plugins (Fruity
+    // Wrapper) listening on the same MIDI port
     for (const auto& c : project.channels)
     {
         if (lowercase (c.pluginName) != "midi out" || c.pluginState.size() < 28)
@@ -1610,7 +1610,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
     }
 
-    // kits do FPC: um canal por pad (do último para o primeiro, para os índices não andarem)
+    // FPC kits: one channel per pad (last to first, so indices don't shift)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)
         splitDrumChannel (song, it->first, it->second);
 

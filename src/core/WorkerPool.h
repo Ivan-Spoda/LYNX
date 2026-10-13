@@ -1,9 +1,9 @@
 #pragma once
 
-// Pool de threads para a thread de áudio dividir o trabalho de um bloco (canais e
-// trilhas do mixer), como o FL faz com as camadas do mixer (docs/ANALISE_FL_STUDIO.md §2.2).
-// parallelFor não aloca nem trava em mutex: os workers acordam por semáforo e pegam
-// índices num contador atômico; a thread chamadora também trabalha e espera girando.
+// Thread pool for the audio thread to split a block's work (channels and
+// mixer tracks), like FL does with the mixer layers (docs/ANALISE_FL_STUDIO.md §2.2).
+// parallelFor neither allocates nor blocks on a mutex: workers wake via semaphore and take
+// indices from an atomic counter; the calling thread also works and spin-waits.
 
 #include <atomic>
 #include <functional>
@@ -16,8 +16,8 @@ namespace lynx
 class WorkerPool
 {
 public:
-    // `threads` workers além da thread chamadora. `onThreadStart` roda em cada worker
-    // (ex.: subir a prioridade); pode ser vazio.
+    // `threads` workers besides the calling thread. `onThreadStart` runs on each worker
+    // (e.g. raising the priority); may be empty.
     explicit WorkerPool (int threads, std::function<void()> onThreadStart = {});
     ~WorkerPool();
 
@@ -26,7 +26,7 @@ public:
 
     int workers() const noexcept { return (int) threads.size(); }
 
-    // Chama fn(i) para i em [0, count), em paralelo. Volta quando todos terminarem.
+    // Calls fn(i) for i in [0, count), in parallel. Returns when all have finished.
     template <typename Fn>
     void parallelFor (int count, Fn& fn) noexcept
     {
@@ -44,7 +44,7 @@ private:
     std::counting_semaphore<> wake { 0 };
     std::atomic<bool> quit { false };
 
-    // trabalho atual (publicado antes de `next` voltar a 0)
+    // current work (published before `next` goes back to 0)
     void* context = nullptr;
     Call call = nullptr;
     std::atomic<int> count { 0 };

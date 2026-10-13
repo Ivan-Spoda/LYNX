@@ -143,7 +143,7 @@ void Song::removeChannel (int index)
             --t.index;
     });
 
-    for (auto& automation : automations) // fonte ao vivo num canal controlador
+    for (auto& automation : automations) // live source on a controller channel
         if (automation.source.channel == index)
             automation.source.channel = -1, automation.target.kind = AutomationTargetKind::none;
         else if (automation.source.channel > index)
@@ -182,7 +182,7 @@ bool Song::canRoute (int from, int to) const
     if (to == 0)
         return true;
 
-    // ciclo se `from` já for alcançável a partir de `to`
+    // cycle if `from` is already reachable from `to`
     std::vector<int> stack { to };
     std::vector<bool> seen ((std::size_t) n, false);
 
@@ -240,7 +240,7 @@ std::vector<int> Song::mixerOrder() const
     const auto n = (int) mixer.size();
     std::vector<int> incoming ((std::size_t) std::max (0, n), 0);
 
-    // arestas: envios e sidechains (a fonte do sidechain precisa ser processada antes de quem a ouve)
+    // edges: sends and sidechains (the sidechain source must be processed before whoever listens to it)
     std::vector<std::vector<int>> next ((std::size_t) std::max (0, n));
     for (int t = 1; t < n; ++t)
     {
@@ -255,7 +255,7 @@ std::vector<int> Song::mixerOrder() const
         for (const auto target : next[(std::size_t) t])
             ++incoming[(std::size_t) target];
 
-    // Kahn: começa pelas trilhas que ninguém alimenta (em ordem de número)
+    // Kahn: start with the tracks nothing feeds (in numeric order)
     std::vector<int> order, ready;
 
     for (int t = n - 1; t >= 1; --t)
@@ -271,13 +271,13 @@ std::vector<int> Song::mixerOrder() const
         for (const auto target : next[(std::size_t) t])
             if (--incoming[(std::size_t) target] == 0)
             {
-                // mantém a ordem numérica entre as que ficam prontas juntas
+                // keep numeric order among those that become ready together
                 auto pos = std::upper_bound (ready.begin(), ready.end(), target, std::greater<int>());
                 ready.insert (pos, target);
             }
     }
 
-    // ciclo (arquivo estragado): as que sobraram vão no fim, sem os envios que fecham o ciclo
+    // cycle (corrupt file): the leftovers go at the end, without the sends that close the cycle
     for (int t = 1; t < n; ++t)
         if (std::find (order.begin(), order.end(), t) == order.end())
             order.push_back (t);
@@ -303,7 +303,7 @@ std::vector<bool> Song::soloAudible() const
     if (n > 0)
         audible[0] = true;
 
-    // para baixo: o caminho do sinal das trilhas solo até o Master
+    // downstream: the signal path from the soloed tracks to Master
     std::vector<int> stack = soloed;
 
     while (! stack.empty())
@@ -321,7 +321,7 @@ std::vector<bool> Song::soloAudible() const
                 stack.push_back (s.target);
     }
 
-    // para cima: quem alimenta as trilhas solo
+    // upstream: whoever feeds the soloed tracks
     std::vector<bool> feeds (n, false);
     stack = soloed;
 
@@ -376,7 +376,7 @@ void Song::removeEffectSlot (int track, int slot)
         if (automation.source.track == track)
         {
             if (automation.source.slot == slot)
-                automation.source.track = -1, automation.target.kind = AutomationTargetKind::none; // a fonte sumiu
+                automation.source.track = -1, automation.target.kind = AutomationTargetKind::none; // the source is gone
             else if (automation.source.slot > slot)
                 --automation.source.slot;
         }
@@ -446,7 +446,7 @@ std::vector<Bar> Song::barsBetween (std::int64_t from, std::int64_t to) const
 
     while (bar.tick < to)
     {
-        // mudanças de compasso que caem no começo deste compasso valem para ele
+        // time signature changes falling at the start of this bar apply to it
         while (next < list.size() && (! list[next].isSignature() || list[next].tick <= bar.tick))
         {
             if (list[next].isSignature())
@@ -454,7 +454,7 @@ std::vector<Bar> Song::barsBetween (std::int64_t from, std::int64_t to) const
             ++next;
         }
 
-        // a próxima mudança corta este compasso e começa um novo ali
+        // the next change cuts this bar short and starts a new one there
         const auto end = next < list.size() ? std::min (bar.tick + bar.length, list[next].tick) : bar.tick + bar.length;
 
         if (end > from)
@@ -462,7 +462,7 @@ std::vector<Bar> Song::barsBetween (std::int64_t from, std::int64_t to) const
 
         bar = { end, bar.length, bar.number + 1 };
 
-        // sem mudanças pela frente: o resto é aritmética (evita andar compasso a compasso até `from`)
+        // no changes ahead: the rest is arithmetic (avoids walking bar by bar up to `from`)
         if (bar.tick < from && next >= list.size())
         {
             const auto skip = (from - bar.tick) / bar.length;
@@ -552,7 +552,7 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
                 && mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind != EffectKind::plugin && t.param >= 0
                 && t.param < maxEffectParams)
                 return mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param];
-            return validTrack ? 0.5f : -1.0f; // parâmetro de plugin: o valor mora no plugin
+            return validTrack ? 0.5f : -1.0f; // plugin parameter: the value lives in the plugin
         case AutomationTargetKind::channelParam: return validChannel ? 0.5f : -1.0f;
         case AutomationTargetKind::effectMix:
             return validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
@@ -617,7 +617,7 @@ float Song::automationValueAt (int index, double tick) const
     const auto& automation = automations[(std::size_t) index];
     const Clip* before = nullptr;
 
-    // mesma regra da reprodução: dentro do clip a curva; entre clips o último valor; antes o primeiro
+    // same rule as playback: inside a clip the curve; between clips the last value; before, the first
     for (const auto* c : clips)
     {
         if (tick < (double) c->start)
@@ -640,7 +640,7 @@ double Song::tempoAt (double tick) const
     if (mode != PlayMode::song)
         return bpm;
 
-    for (int i = (int) automations.size() - 1; i >= 0; --i) // a última automação de tempo ganha
+    for (int i = (int) automations.size() - 1; i >= 0; --i) // the last tempo automation wins
         if (automations[(std::size_t) i].target.kind == AutomationTargetKind::tempo)
             if (const auto v = automationValueAt (i, tick); ! std::isnan (v))
                 return tempoFromValue (v);
@@ -657,7 +657,7 @@ double Song::secondsForTicks (std::int64_t ticks) const
     if (! hasTempo)
         return (double) ticks * 60.0 / (std::max (1.0, bpm) * ppq);
 
-    // integra em passos de 1/16 (a reprodução troca o andamento bloco a bloco; a diferença é mínima)
+    // integrate in 1/16 steps (playback changes tempo block by block; the difference is minimal)
     double seconds = 0.0;
     constexpr std::int64_t step = ticksPerStep;
 
@@ -699,7 +699,7 @@ float Automation::valueAt (double tick) const noexcept
             const auto span = (double) std::max<std::int64_t> (1, b.tick - a.tick);
             auto t = (float) ((tick - (double) a.tick) / span);
 
-            // tensão: expoente da curva (positiva = sobe devagar e acelera)
+            // tension: curve exponent (positive = rises slowly then accelerates)
             if (a.tension != 0.0f)
                 t = std::pow (t, std::pow (2.0f, a.tension * 3.0f));
 
@@ -787,12 +787,12 @@ Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, s
             musicLength = std::max (musicLength, c.end());
     }
 
-    // pattern vazia na cauda: estende a música sem tocar nada. Um compasso a mais de folga
-    // porque o último bloco renderizado passa um pouco do fim e não pode voltar ao início.
+    // empty pattern in the tail: extends the song without playing anything. One extra bar of slack
+    // because the last rendered block goes slightly past the end and must not wrap to the start.
     if (tailTicks > 0)
     {
         tailTicks += (std::int64_t) ppq * std::max (1, out.beatsPerBar);
-        out.patterns.emplace_back().name = "(cauda)";
+        out.patterns.emplace_back().name = "(tail)";
         Clip tail;
         tail.pattern = (int) out.patterns.size() - 1;
         tail.start = musicLength;
@@ -801,7 +801,7 @@ Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, s
     }
 
     out.mode = PlayMode::song;
-    out.loopStart = out.loopEnd = 0; // exportar ignora a região de loop
+    out.loopStart = out.loopEnd = 0; // export ignores the loop region
     return out;
 }
 
@@ -819,7 +819,7 @@ Song makeBounceSong (const Song& song, int track)
     insert.sends.clear();
     insert.toMaster = true;
     insert.muted = false;
-    insert.solo = true; // soam ele e quem chega nele
+    insert.solo = true; // it and whatever feeds it are audible
 
     auto& master = out.mixer[0];
     master.effects.clear();
@@ -837,7 +837,7 @@ int applyBounce (Song& song, int track, const std::string& samplePath, std::int6
 
     auto& original = song.mixer[(std::size_t) track];
     MixerTrack copy;
-    copy.name = original.name + " (áudio)";
+    copy.name = original.name + " (audio)";
     copy.toMaster = original.toMaster;
     copy.sends = original.sends;
     original.muted = true;
@@ -889,7 +889,7 @@ Song Song::makeDefault()
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         song.channels[i].mixerTrack = (int) i + 1;
 
-    // como o template do FL: um limiter no Master (transparente até -0,3 dB)
+    // like FL's template: a limiter on Master (transparent up to -0.3 dB)
     EffectSlot limiter;
     limiter.kind = EffectKind::limiter;
     limiter.params = { 11.7f / 12.0f, 0.0f, 0.5f };

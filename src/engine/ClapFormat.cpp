@@ -18,9 +18,9 @@ namespace lynx
 {
 namespace
 {
-// --- módulo (a DLL .clap) ----------------------------------------------------
-// clap_entry.init/deinit valem uma vez por DLL: um módulo carregado é compartilhado por
-// todas as instâncias e descarregado quando a última some.
+// --- module (the .clap DLL) --------------------------------------------------
+// clap_entry.init/deinit apply once per DLL: a loaded module is shared by
+// all instances and unloaded when the last one goes away.
 class ClapModule
 {
 public:
@@ -108,7 +108,7 @@ juce::PluginDescription describe (const clap_plugin_descriptor_t& d, const juce:
     return p;
 }
 
-// --- lista de eventos de entrada (sem alocar na thread de áudio) -------------------
+// --- input event list (no allocation on the audio thread) -------------------------
 class EventList
 {
 public:
@@ -137,7 +137,7 @@ public:
         const auto size = (sizeof (Event) + 7) & ~(std::size_t) 7;
 
         if (used + size > pool.size() || offsets.size() == offsets.capacity())
-            return; // cheio: descarta (nunca aloca)
+            return; // full: drop it (never allocates)
 
         std::memcpy (pool.data() + used, &e, sizeof (Event));
         offsets.push_back ((uint32_t) used);
@@ -167,7 +167,7 @@ Event makeEvent (uint16_t type, uint32_t time)
 
 class ClapInstance;
 
-// --- parâmetro ---------------------------------------------------------------------
+// --- parameter ---------------------------------------------------------------------
 class ClapParameter final : public juce::HostedAudioProcessorParameter
 {
 public:
@@ -218,10 +218,10 @@ private:
     std::atomic<float> normalised { 0.0f };
 };
 
-// --- janela da interface do plugin -------------------------------------------------
+// --- plugin UI window ----------------------------------------------------------------
 class ClapEditor;
 
-// --- instância -----------------------------------------------------------------------
+// --- instance ------------------------------------------------------------------------
 class ClapInstance final : public juce::AudioPluginInstance
 {
 public:
@@ -233,7 +233,7 @@ public:
     {
     }
 
-    // Segunda fase (precisa de `this` pronto como host_data): init + extensões + parâmetros.
+    // Second phase (needs `this` ready as host_data): init + extensions + parameters.
     bool initialise()
     {
         if (! plugin->init (plugin))
@@ -348,7 +348,7 @@ public:
 
         events.clear();
 
-        // parâmetros mudados pelo host (automação, interface)
+        // parameters changed by the host (automation, UI)
         PendingParam change;
         while (pendingParams.pop (change))
         {
@@ -465,7 +465,7 @@ public:
             }
     }
 
-    // --- usados pelos parâmetros e pelo editor ---------------------------------------------
+    // --- used by the parameters and the editor ---------------------------------------------
     void queueParam (clap_id id, void* cookie, double value) { pendingParams.push ({ id, cookie, value }); }
 
     juce::String paramText (clap_id id, double value) const
@@ -490,7 +490,7 @@ private:
         double value = 0.0;
     };
 
-    // fila de uma produtora (thread da UI) para a de áudio
+    // single-producer queue (UI thread) to the audio thread
     class ParamQueue
     {
     public:
@@ -566,7 +566,7 @@ private:
 
         if (! midiDialect && (m.isAllNotesOff() || m.isAllSoundOff()))
         {
-            // CLAP não tem "all notes off": solta cada nota presa
+            // CLAP has no "all notes off": release each held note
             for (std::size_t i = 0; i < heldNotes.size(); ++i)
                 if (heldNotes[i])
                 {
@@ -590,7 +590,7 @@ private:
         }
     }
 
-    // --- o host visto pelo plugin -----------------------------------------------------------
+    // --- the host as seen by the plugin -----------------------------------------------------
     static ClapInstance* from (const clap_host_t* h) { return static_cast<ClapInstance*> (h->host_data); }
 
     void onMainThread (std::function<void()> fn)
@@ -622,7 +622,7 @@ private:
             return nullptr;
         };
         h.request_restart = [] (const clap_host_t* hh) {
-            // reinicia na thread da UI com as mesmas configurações (latência nova, portas...)
+            // restart on the UI thread with the same settings (new latency, ports...)
             auto* self = from (hh);
             self->onMainThread ([self] {
                 if (self->active)
@@ -717,7 +717,7 @@ juce::String ClapParameter::getText (float v, int) const
     return owner.paramText (id, toPlain (v));
 }
 
-// A interface nativa do plugin dentro de uma janela filha (HWND) embutida no componente.
+// The plugin's native UI inside a child window (HWND) embedded in the component.
 class ClapEditor final : public juce::AudioProcessorEditor,
                          private juce::Timer
 {
@@ -770,7 +770,7 @@ public:
         {
             g.fillAll (juce::Colours::black);
             g.setColour (juce::Colours::white);
-            g.drawText (juce::String::fromUTF8 ("Este plugin não tem interface própria"), getLocalBounds(), juce::Justification::centred);
+            g.drawText (juce::String::fromUTF8 ("This plugin has no UI of its own"), getLocalBounds(), juce::Justification::centred);
         }
     }
 
@@ -778,7 +778,7 @@ private:
     void timerCallback() override
     {
        #if JUCE_WINDOWS
-        // a janela filha precisa de uma janela de verdade como mãe: espera estar na tela
+        // the child window needs a real window as parent: wait until on screen
         auto* peer = getPeer();
 
         if (! created || peer == nullptr || container != nullptr)
@@ -814,7 +814,7 @@ juce::AudioProcessorEditor* ClapInstance::createEditor()
 }
 } // namespace
 
-// --- formato ---------------------------------------------------------------------------
+// --- format ----------------------------------------------------------------------------
 
 void ClapPluginFormat::findAllTypesForFile (juce::OwnedArray<juce::PluginDescription>& results, const juce::String& path)
 {
@@ -882,7 +882,7 @@ void ClapPluginFormat::createPluginInstance (const juce::PluginDescription& d, d
 
     if (module == nullptr)
     {
-        callback (nullptr, juce::String::fromUTF8 ("não foi possível carregar ") + d.fileOrIdentifier);
+        callback (nullptr, juce::String::fromUTF8 ("could not load ") + d.fileOrIdentifier);
         return;
     }
 
@@ -895,7 +895,7 @@ void ClapPluginFormat::createPluginInstance (const juce::PluginDescription& d, d
         if (desc == nullptr || idHash (desc->id) != d.uniqueId)
             continue;
 
-        // o host precisa existir antes de create_plugin; a instância nasce com o plugin depois
+        // the host must exist before create_plugin; the instance is created with the plugin afterwards
         auto instance = std::unique_ptr<ClapInstance> (new ClapInstance (module, nullptr, d));
         const auto* plugin = module->factory->create_plugin (module->factory, ClapInstance::hostFor (instance.get()), desc->id);
 
@@ -906,7 +906,7 @@ void ClapPluginFormat::createPluginInstance (const juce::PluginDescription& d, d
 
         if (! instance->initialise())
         {
-            callback (nullptr, juce::String::fromUTF8 ("o plugin recusou iniciar"));
+            callback (nullptr, juce::String::fromUTF8 ("the plugin refused to start"));
             return;
         }
 
@@ -915,7 +915,7 @@ void ClapPluginFormat::createPluginInstance (const juce::PluginDescription& d, d
         return;
     }
 
-    callback (nullptr, juce::String::fromUTF8 ("plugin não encontrado no arquivo ") + d.fileOrIdentifier);
+    callback (nullptr, juce::String::fromUTF8 ("plugin not found in file ") + d.fileOrIdentifier);
 }
 
 void addPluginFormats (juce::AudioPluginFormatManager& manager)

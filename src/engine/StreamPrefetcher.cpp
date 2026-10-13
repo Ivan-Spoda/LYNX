@@ -52,7 +52,7 @@ void StreamPrefetcher::run()
 
                 for (const auto& e : entries)
                 {
-                    // trecho do clip entre agora e daqui a alguns segundos (a música pode dar a volta)
+                    // part of the clip between now and a few seconds from now (the song may wrap around)
                     for (const auto base : { 0.0, songLength })
                     {
                         const auto from = juce::jmax (e.start + base, now);

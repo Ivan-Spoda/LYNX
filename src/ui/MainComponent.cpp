@@ -19,7 +19,7 @@ namespace lynx
 {
 namespace
 {
-// Teclado do PC como piano, no layout do FL: Z S X D C V G B H N J M = C5..B5,
+// PC keyboard as a piano, in FL's layout: Z S X D C V G B H N J M = C5..B5,
 // Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P = C6..E7.
 int keyCodeToNote (int keyCode)
 {
@@ -60,7 +60,7 @@ MainComponent::MainComponent (AudioEngine& e)
     addAndMakeVisible (logo);
     openButton.onClick = [this] { chooseFileToOpen(); };
     saveButton.onClick = [this] { save (false); };
-    exportButton.setTooltip (utf8 ("Exportar áudio: WAV, FLAC ou OGG (Ctrl+R)"));
+    exportButton.setTooltip (utf8 ("Export audio: WAV, FLAC or OGG (Ctrl+R)"));
     exportButton.onClick = [this] { exportAudio(); };
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this]
@@ -70,33 +70,33 @@ MainComponent::MainComponent (AudioEngine& e)
     };
     recordButton.setClickingTogglesState (false);
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
-    recordMenuButton.setTooltip (utf8 ("O que gravar"));
+    recordMenuButton.setTooltip (utf8 ("What to record"));
     recordMenuButton.onClick = [this] {
         juce::PopupMenu menu;
-        menu.addItem (utf8 ("Notas (MIDI e teclado do PC) na pattern atual"), false, true, [] {});
-        menu.addItem (utf8 ("Áudio da entrada da placa (vira clip na Playlist)"), true, engine.isAudioRecordingArmed(), [this] {
+        menu.addItem (utf8 ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
+        menu.addItem (utf8 ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
 
             if (engine.getLastRecordingError().isNotEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Entrada de áudio"),
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Audio input"),
                                                         engine.getLastRecordingError());
         });
         menu.addSeparator();
-        menu.addItem (utf8 ("Abrir a pasta das gravações"), [] {
-            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações")).createDirectory();
-            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (utf8 ("LYNX/Gravações")).startAsProcess();
+        menu.addItem (utf8 ("Open recordings folder"), [] {
+            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
+            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
     };
 
-    modeButton.setTooltip ("Pattern ou Song (tecla L)");
+    modeButton.setTooltip ("Pattern or Song (L key)");
     modeButton.onClick = [this] { toggleMode(); };
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
     settingsButton.onClick = [this] { showAudioSettings(); };
 
     bpmSlider.setRange (minTempo, maxTempo, 0.1);
     bpmSlider.addMouseListener (this, true);
-    bpmSlider.setTooltip (utf8 ("Andamento (clique direito: criar automação de tempo)"));
+    bpmSlider.setTooltip (utf8 ("Tempo (right-click: create tempo automation)"));
     bpmSlider.setValue (engine.getSong().bpm, juce::dontSendNotification);
     bpmSlider.onValueChange = [this] { engine.editSong ([v = bpmSlider.getValue()] (Song& s) { s.bpm = v; }); };
 
@@ -108,7 +108,7 @@ MainComponent::MainComponent (AudioEngine& e)
             engine.editSong ([index] (Song& s) { s.currentPattern = index; }, false);
     };
 
-    newPatternButton.setTooltip ("Nova pattern");
+    newPatternButton.setTooltip ("New pattern");
     newPatternButton.onClick = [this]
     {
         engine.editSong ([] (Song& s) {
@@ -130,7 +130,7 @@ MainComponent::MainComponent (AudioEngine& e)
     swingLabel.setFont (juce::FontOptions (11.0f));
     swingLabel.setJustificationType (juce::Justification::centredRight);
 
-    patternMenuButton.setTooltip ("Pattern: renomear, cor, clonar, comprimento, remover");
+    patternMenuButton.setTooltip ("Pattern: rename, color, clone, length, delete");
     patternMenuButton.onClick = [this] { showPatternMenu(); };
 
     positionLabel.setFont (juce::FontOptions (18.0f));
@@ -140,7 +140,7 @@ MainComponent::MainComponent (AudioEngine& e)
     cpuLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
     hintLabel.setFont (juce::FontOptions (12.0f));
     hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("F1 ajuda   Espaço: play/pause   Z..M / Q..P: tocar o canal   F5 playlist   F6 rack   F7 piano roll   F8 navegador   F9 mixer   L pattern/song   Ctrl+Z/Y desfazer/refazer   Ctrl+S salvar   Ctrl+O abrir   Ctrl+R exportar"),
+    hintLabel.setText (utf8 ("F1 help   Space: play/pause   Z..M / Q..P: play the channel   F5 playlist   F6 rack   F7 piano roll   F8 browser   F9 mixer   L pattern/song   Ctrl+Z/Y undo/redo   Ctrl+S save   Ctrl+O open   Ctrl+R export"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -156,7 +156,7 @@ MainComponent::MainComponent (AudioEngine& e)
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
     picker.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
-    // arquivos recentes (guardados em %APPDATA%\LYNX)
+    // recent files (stored in %APPDATA%\LYNX)
     recent.setMaxNumberOfItems (12);
     recent.restoreFromString (PluginHost::settingsFolder().getChildFile ("recentes.txt").loadFileAsString());
     addAndMakeVisible (menuBar);
@@ -166,7 +166,7 @@ MainComponent::MainComponent (AudioEngine& e)
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs, &scope })
     {
         addAndMakeVisible (c);
-        c->setMouseClickGrabsKeyboardFocus (false); // o teclado do PC fica com a janela principal
+        c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
     }
 
     for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
@@ -183,7 +183,7 @@ MainComponent::MainComponent (AudioEngine& e)
 
 MainComponent::~MainComponent()
 {
-    PluginWindows::closeAll(); // interfaces de plugin antes do engine
+    PluginWindows::closeAll(); // plugin UIs before the engine
     ParametricEqWindows::closeAll();
     closeAutomationEditors();
     closeChannelSettings();
@@ -369,7 +369,7 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
 
 bool MainComponent::keyStateChanged (bool)
 {
-    // O JUCE não tem "keyReleased" por tecla; conferimos quais teclas presas foram soltas.
+    // JUCE has no per-key "keyReleased"; check which held keys were released.
     for (auto it = heldKeys.begin(); it != heldKeys.end();)
     {
         if (! juce::KeyPress::isKeyCurrentlyDown (*it))
@@ -420,7 +420,7 @@ void MainComponent::selectTabForSnapshot (int tab)
         tabs.setCurrentTabIndex (tab);
 
     if (tab == playlistTab)
-        playlist.resized(); // atualiza as barras de rolagem para a música carregada
+        playlist.resized(); // update the scrollbars for the loaded song
 
     if (tab == mixerTab)
         mixer.selectFirstTrackWithEffects();
@@ -447,11 +447,11 @@ void MainComponent::showPatternMenu()
     const auto& pattern = song.patterns[(std::size_t) index];
 
     juce::PopupMenu colours;
-    colours.addItem (utf8 ("Automática"), true, pattern.colour == 0,
+    colours.addItem (utf8 ("Automatic"), true, pattern.colour == 0,
                      [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].colour = 0; }); });
     colours.addSeparator();
 
-    // paleta no espírito da do FL
+    // palette in the spirit of FL's
     static const std::uint32_t palette[] = { 0xff485156, 0xffa14547, 0xffa16f45, 0xffa19d45, 0xff6ca145, 0xff45a175,
                                              0xff45a1a0, 0xff457ca1, 0xff4f45a1, 0xff8a5096, 0xffa1458a, 0xff6b3866 };
 
@@ -468,28 +468,28 @@ void MainComponent::showPatternMenu()
     }
 
     juce::PopupMenu lengths;
-    lengths.addItem (utf8 ("Automático (pelas notas)"), true, pattern.lengthTicks == 0,
+    lengths.addItem (utf8 ("Automatic (from notes)"), true, pattern.lengthTicks == 0,
                      [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = 0; }); });
 
     for (int bars : { 1, 2, 4, 8, 16, 32 })
     {
         const auto ticks = (std::int64_t) bars * ppq * juce::jmax (1, song.beatsPerBar);
-        lengths.addItem (juce::String (bars) + (bars == 1 ? " compasso" : " compassos"), true, pattern.lengthTicks == ticks,
+        lengths.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), true, pattern.lengthTicks == ticks,
                          [this, index, ticks] { engine.editSong ([index, ticks] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = ticks; }); });
     }
 
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (pattern.name.c_str()));
-    menu.addItem ("Renomear...", [this, index] { renamePattern (index); });
-    menu.addSubMenu ("Cor", colours);
-    menu.addSubMenu ("Comprimento", lengths);
-    menu.addItem ("Clonar", [this, index] {
+    menu.addItem ("Rename...", [this, index] { renamePattern (index); });
+    menu.addSubMenu ("Color", colours);
+    menu.addSubMenu ("Length", lengths);
+    menu.addItem ("Clone", [this, index] {
         engine.editSong ([index] (Song& s) {
             auto copy = s.patterns[(std::size_t) index];
-            copy.name += " (cópia)";
+            copy.name += " (copy)";
             s.patterns.insert (s.patterns.begin() + index + 1, std::move (copy));
 
-            // os clips que apontam para patterns depois da nova andam uma posição
+            // clips pointing to patterns after the new one shift by one position
             s.forEachClipList ([index] (std::vector<Clip>& clips) {
                 for (auto& c : clips)
                     if (c.kind == ClipKind::pattern && c.pattern > index)
@@ -505,9 +505,9 @@ void MainComponent::showPatternMenu()
         signatures.addItem (juce::String (beats) + "/4", true, song.beatsPerBar == beats,
                             [this, beats] { engine.editSong ([beats] (Song& s) { s.beatsPerBar = beats; }); });
 
-    menu.addSubMenu (utf8 ("Compasso da música"), signatures);
+    menu.addSubMenu (utf8 ("Song time signature"), signatures);
     menu.addSeparator();
-    menu.addItem ("Remover pattern", song.patterns.size() > 1, false,
+    menu.addItem ("Delete pattern", song.patterns.size() > 1, false,
                   [this, index] { engine.editSong ([index] (Song& s) { s.removePattern (index); }); });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patternMenuButton));
@@ -515,10 +515,10 @@ void MainComponent::showPatternMenu()
 
 void MainComponent::renamePattern (int index)
 {
-    auto* window = new juce::AlertWindow ("Renomear pattern", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow ("Rename pattern", {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) index].name.c_str()));
     window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
                                  const auto name = window->getTextEditorContents ("name").trim().toStdString();
@@ -534,9 +534,9 @@ void MainComponent::refreshModeButton()
     const auto recording = engine.isRecording();
     recordButton.setColour (juce::TextButton::buttonColourId, recording ? juce::Colour (0xffd03030) : theme::toolbar.brighter (0.1f));
     const auto inputs = engine.getActiveMidiInputs();
-    recordButton.setTooltip (utf8 ("Gravar enquanto toca: notas (teclado do PC e MIDI)")
-                             + (engine.isAudioRecordingArmed() ? utf8 (" e áudio da entrada") : juce::String())
-                             + utf8 ("\nEntradas MIDI: ") + (inputs.isEmpty() ? utf8 ("nenhuma") : inputs.joinIntoString (", ")));
+    recordButton.setTooltip (utf8 ("Record while playing: notes (PC keyboard and MIDI)")
+                             + (engine.isAudioRecordingArmed() ? utf8 (" and input audio") : juce::String())
+                             + utf8 ("\nMIDI inputs: ") + (inputs.isEmpty() ? utf8 ("none") : inputs.joinIntoString (", ")));
     recordMenuButton.setColour (juce::TextButton::buttonColourId,
                                 engine.isAudioRecordingArmed() ? juce::Colour (0xffa03030) : theme::toolbar.brighter (0.1f));
 
@@ -604,7 +604,7 @@ void MainComponent::timerCallback()
         updateTitle();
     }
 
-    // autosave a cada 2 minutos com alterações
+    // autosave every 2 minutes when there are changes
     if (++autosaveTicks >= 30 * 120)
     {
         autosaveTicks = 0;
@@ -621,7 +621,7 @@ void MainComponent::timerCallback()
     const auto beats = ticks / ppq;
     int bar = 0, beat = 0;
 
-    if (song.mode == PlayMode::song) // na música vale a régua da Playlist (com as mudanças de compasso)
+    if (song.mode == PlayMode::song) // in song mode the Playlist ruler applies (with time signature changes)
     {
         const auto current = song.barAt ((std::int64_t) ticks);
         bar = current.number;
@@ -638,16 +638,16 @@ void MainComponent::timerCallback()
 
     positionLabel.setText (juce::String::formatted ("%d : %d : %d", bar, beat, step), juce::dontSendNotification);
 
-    // MIDI learn esperando um controlador
+    // MIDI learn waiting for a controller
     static const auto normalHint = hintLabel.getText();
-    const auto hint = engine.isLearningMidi() ? utf8 ("Mexa um knob/fader do controlador MIDI para ligar ao parâmetro...") : normalHint;
+    const auto hint = engine.isLearningMidi() ? utf8 ("Move a knob/fader on the MIDI controller to link it to the parameter...") : normalHint;
     if (hintLabel.getText() != hint)
         hintLabel.setText (hint, juce::dontSendNotification);
     playButton.setButtonText (transport.playing.load() ? "Pause" : "Play");
     cpuLabel.setText ("CPU " + juce::String (engine.getDeviceManager().getCpuUsage() * 100.0, 1) + "%",
                       juce::dontSendNotification);
 
-    // Se um diálogo roubou o foco, devolve para o teclado do PC continuar tocando.
+    // If a dialog stole focus, give it back so the PC keyboard keeps playing.
     if (! hasKeyboardFocus (true) && isShowing() && juce::Process::isForegroundProcess()
         && juce::Component::getCurrentlyModalComponent() == nullptr)
         grabKeyboardFocus();
@@ -668,17 +668,17 @@ void MainComponent::confirmDiscard (std::function<void()> then)
         return;
     }
 
-    auto* window = new juce::AlertWindow (utf8 ("Salvar alterações?"),
-                                          utf8 ("O projeto tem alterações que não foram salvas."),
+    auto* window = new juce::AlertWindow (utf8 ("Save changes?"),
+                                          utf8 ("The project has unsaved changes."),
                                           juce::MessageBoxIconType::QuestionIcon);
-    window->addButton ("Salvar", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Descartar", 2);
-    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Discard", 2);
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, then] (int result) {
                                  if (result == 1)
                                  {
                                      save (false);
-                                     if (! engine.isModified()) // salvou (não cancelou o "salvar como")
+                                     if (! engine.isModified()) // saved (did not cancel "save as")
                                          then();
                                  }
                                  else if (result == 2)
@@ -689,10 +689,10 @@ void MainComponent::confirmDiscard (std::function<void()> then)
 
 void MainComponent::autosave()
 {
-    // cópia de segurança do projeto aberto, para não perder trabalho se algo travar
+    // backup copy of the open project, so work isn't lost if something crashes
     const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
     folder.createDirectory();
-    const auto name = projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("sem nome");
+    const auto name = projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled");
     juce::String error;
     engine.capturePluginStates();
     ProjectFile::save (engine.getSong(), folder.getChildFile (name + ProjectFile::extension), error);
@@ -717,7 +717,7 @@ void MainComponent::chooseFileToOpen()
 
 void MainComponent::chooseFileToOpenNow()
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Abrir projeto", currentFile.getParentDirectory(),
+    fileChooser = std::make_unique<juce::FileChooser> ("Open project", currentFile.getParentDirectory(),
                                                        juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.mid;*.midi");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -737,19 +737,19 @@ void MainComponent::openFile (const juce::File& file)
 
         if (! song)
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível abrir"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
             return;
         }
 
         engine.stop();
         engine.rewind();
         engine.setSong (std::move (*song));
-        currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
+        currentFile = juce::File(); // imported: "Save" asks where to write the .lynx
         projectName = file.getFileNameWithoutExtension();
         rememberRecent (file);
 
         if (auto* window = getTopLevelComponent())
-            window->setName ("LYNX - " + projectName + " (importado de MIDI)");
+            window->setName ("LYNX - " + projectName + " (imported from MIDI)");
         return;
     }
 
@@ -757,15 +757,15 @@ void MainComponent::openFile (const juce::File& file)
     {
         if (! engine.importFlpFile (file, error))
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível abrir"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
             return;
         }
 
-        currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
+        currentFile = juce::File(); // imported: "Save" asks where to write the .lynx
         projectName = file.getFileNameWithoutExtension();
         rememberRecent (file);
         if (auto* window = getTopLevelComponent())
-            window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
+            window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (imported from FL)");
 
         showImportReport();
         return;
@@ -775,7 +775,7 @@ void MainComponent::openFile (const juce::File& file)
 
     if (! song)
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível abrir"), error);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
         return;
     }
 
@@ -800,7 +800,7 @@ void MainComponent::save (bool askForFile)
             file = file.withFileExtension (ProjectFile::extension);
 
         juce::String error;
-        engine.capturePluginStates(); // o estado dos plugins mora neles; copia antes de gravar
+        engine.capturePluginStates(); // plugin state lives in the plugins; copy it before saving
 
         if (ProjectFile::save (engine.getSong(), file, error))
         {
@@ -811,7 +811,7 @@ void MainComponent::save (bool askForFile)
             updateTitle();
         }
         else
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Não foi possível salvar"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not save"), error);
     };
 
     if (! askForFile && currentFile != juce::File())
@@ -820,7 +820,7 @@ void MainComponent::save (bool askForFile)
         return;
     }
 
-    fileChooser = std::make_unique<juce::FileChooser> ("Salvar projeto", currentFile.getParentDirectory(),
+    fileChooser = std::make_unique<juce::FileChooser> ("Save project", currentFile.getParentDirectory(),
                                                        juce::String ("*") + ProjectFile::extension);
 
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
@@ -832,7 +832,7 @@ void MainComponent::save (bool askForFile)
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "Arquivo", "Editar", "Exibir", utf8 ("Opções"), "Ajuda" };
+    return { "File", "Edit", "View", utf8 ("Options"), "Help" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -841,7 +841,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
     if (index == 0)
     {
-        menu.addItem ("Novo\tCtrl+N", [this] { newProject(); });
+        menu.addItem ("New\tCtrl+N", [this] { newProject(); });
 
         juce::PopupMenu templates;
         const auto names = templateNames();
@@ -856,8 +856,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                     updateTitle();
                 });
             });
-        menu.addSubMenu ("Novo a partir de modelo", templates);
-        menu.addItem ("Abrir...\tCtrl+O", [this] { chooseFileToOpen(); });
+        menu.addSubMenu ("New from template", templates);
+        menu.addItem ("Open...\tCtrl+O", [this] { chooseFileToOpen(); });
 
         juce::PopupMenu recentMenu;
         for (int i = 0; i < recent.getNumFiles(); ++i)
@@ -867,23 +867,23 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                                 false, [this, file] { confirmDiscard ([this, file] { openFile (file); }); });
         }
         if (recent.getNumFiles() == 0)
-            recentMenu.addItem ("(nenhum)", false, false, [] {});
-        menu.addSubMenu ("Abrir recentes", recentMenu);
+            recentMenu.addItem ("(none)", false, false, [] {});
+        menu.addSubMenu ("Open recent", recentMenu);
 
-        menu.addItem ("Salvar\tCtrl+S", [this] { save (false); });
-        menu.addItem ("Salvar como...\tCtrl+Shift+S", [this] { save (true); });
+        menu.addItem ("Save\tCtrl+S", [this] { save (false); });
+        menu.addItem ("Save as...\tCtrl+Shift+S", [this] { save (true); });
         menu.addSeparator();
-        menu.addItem (utf8 ("Exportar áudio...\tCtrl+R"), [this] { exportAudio(); });
-        menu.addItem ("Abrir a pasta de autosave", [] {
+        menu.addItem (utf8 ("Export audio...\tCtrl+R"), [this] { exportAudio(); });
+        menu.addItem ("Open autosave folder", [] {
             juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave").startAsProcess();
         });
         menu.addSeparator();
-        menu.addItem ("Sair", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
+        menu.addItem ("Exit", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
     }
     else if (index == 1)
     {
-        menu.addItem ("Desfazer\tCtrl+Z", engine.canUndo(), false, [this] { engine.undo(); });
-        menu.addItem ("Refazer\tCtrl+Y", engine.canRedo(), false, [this] { engine.redo(); });
+        menu.addItem ("Undo\tCtrl+Z", engine.canUndo(), false, [this] { engine.undo(); });
+        menu.addItem ("Redo\tCtrl+Y", engine.canRedo(), false, [this] { engine.redo(); });
     }
     else if (index == 2)
     {
@@ -891,48 +891,48 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem ("Channel Rack\tF6", [this] { tabs.setCurrentTabIndex (rackTab); });
         menu.addItem ("Piano Roll\tF7", [this] { openPianoRoll(); });
         menu.addItem ("Mixer\tF9", [this] { tabs.setCurrentTabIndex (mixerTab); });
-        menu.addItem ("Navegador\tF8", true, browserVisible, [this] {
+        menu.addItem ("Browser\tF8", true, browserVisible, [this] {
             browserVisible = ! browserVisible;
             resized();
         });
     }
     else if (index == 3)
     {
-        menu.addItem (utf8 ("Configurações de áudio..."), [this] { showAudioSettings(); });
-        menu.addItem (utf8 ("Procurar plugins (VST3 e CLAP)..."), [this] {
+        menu.addItem (utf8 ("Audio settings..."), [this] { showAudioSettings(); });
+        menu.addItem (utf8 ("Scan for plugins (VST3 and CLAP)..."), [this] {
             scanPluginsWithProgress (engine, [] (int found) {
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
-                                                        juce::String (found) + utf8 (" plugin(s) novo(s) encontrado(s)."));
+                                                        juce::String (found) + utf8 (" new plugin(s) found."));
             });
         });
-        menu.addItem (utf8 ("Plugins em processo separado (protege o LYNX de travamentos)"), true, pluginSandboxEnabled(), [] {
+        menu.addItem (utf8 ("Run plugins in a separate process (protects LYNX from crashes)"), true, pluginSandboxEnabled(), [] {
             setPluginSandboxEnabled (! pluginSandboxEnabled());
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
                                                     utf8 (pluginSandboxEnabled()
-                                                              ? "Ligado: os plugins abertos daqui em diante rodam num processo separado. "
-                                                                "Se um travar, ele fica mudo e o LYNX continua. Reabra o projeto para aplicar aos já abertos."
-                                                              : "Desligado: os plugins abertos daqui em diante rodam dentro do LYNX."));
+                                                              ? "On: plugins opened from now on run in a separate process. "
+                                                                "If one crashes, it goes silent and LYNX keeps running. Reopen the project to apply this to plugins already open."
+                                                              : "Off: plugins opened from now on run inside LYNX."));
         });
-        menu.addItem (utf8 ("Gravar áudio da entrada"), true, engine.isAudioRecordingArmed(), [this] {
+        menu.addItem (utf8 ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
         });
-        menu.addItem (utf8 ("Metrônomo"), true, engine.getTransport().metronome.load(), [this] {
+        menu.addItem (utf8 ("Metronome"), true, engine.getTransport().metronome.load(), [this] {
             metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
         });
     }
     else
     {
-        menu.addItem ("Atalhos\tF1", [this] { showHelp(); });
-        menu.addItem (utf8 ("Relatório da última importação do FL"), [this] {
+        menu.addItem ("Shortcuts\tF1", [this] { showHelp(); });
+        menu.addItem (utf8 ("Last FL import report"), [this] {
             const auto& r = engine.getImportReport();
             if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
                 && engine.getMissingPlugins().isEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Importação do FL Studio"),
-                                                        utf8 ("Nada a relatar (nenhum .flp importado nesta sessão, ou tudo foi convertido)."));
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("FL Studio import"),
+                                                        utf8 ("Nothing to report (no .flp imported in this session, or everything was converted)."));
             else
                 showImportReport();
         });
-        menu.addItem ("Sobre o LYNX", [] {
+        menu.addItem ("About LYNX", [] {
             struct Logo final : juce::Component
             {
                 Logo() { setSize (300, 150); }
@@ -943,8 +943,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             };
             auto* logo = new Logo();
             auto* window = new juce::AlertWindow ("LYNX " JUCE_APPLICATION_VERSION_STRING,
-                                                  utf8 ("DAW leve em C++/JUCE, com o fluxo de trabalho do FL Studio.\n"
-                                                        "Implementação independente: nenhum código da Image-Line foi copiado."),
+                                                  utf8 ("Lightweight C++/JUCE DAW with the FL Studio workflow.\n"
+                                                        "Independent implementation: no Image-Line code was copied."),
                                                   juce::MessageBoxIconType::NoIcon);
             window->addCustomComponent (logo);
             window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -966,26 +966,26 @@ void MainComponent::rememberRecent (const juce::File& file)
 void MainComponent::showHelp()
 {
     const auto text = utf8 (
-        "GERAL\n"
-        "  Espaço  play/pause        Ctrl+Z / Ctrl+Y  desfazer / refazer\n"
-        "  Ctrl+N novo   Ctrl+O abrir   Ctrl+S salvar   Ctrl+Shift+S salvar como   Ctrl+R exportar\n"
-        "  F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 navegador   F9 Mixer   L pattern/song\n"
-        "  Z..M e Q..P   teclado do PC como piano (canal selecionado)\n\n"
+        "GENERAL\n"
+        "  Space   play/pause        Ctrl+Z / Ctrl+Y  undo / redo\n"
+        "  Ctrl+N new   Ctrl+O open   Ctrl+S save   Ctrl+Shift+S save as   Ctrl+R export\n"
+        "  F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 browser   F9 Mixer   L pattern/song\n"
+        "  Z..M and Q..P   PC keyboard as a piano (selected channel)\n\n"
         "PIANO ROLL\n"
-        "  clique cria nota (ou acorde, no seletor), arrastar move, borda direita muda a duração\n"
-        "  clique direito apaga   Ctrl+arrastar seleciona   Ctrl+clique soma à seleção   Shift+arrastar copia\n"
-        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Ctrl+Q quantizar   Ctrl+M mutar   Ctrl+P porta   Delete apagar\n"
-        "  setas movem (Shift = oitava/compasso)   Alt desliga o snap   Ctrl+roda zoom\n"
-        "  faixa de baixo: velocity / pan / afinação   botão Slide: notas que deslizam\n\n"
+        "  click creates a note (or chord, via the selector), drag moves, right edge changes the length\n"
+        "  right-click deletes   Ctrl+drag selects   Ctrl+click adds to selection   Shift+drag copies\n"
+        "  Ctrl+A/C/X/V   Ctrl+B duplicate   Ctrl+Q quantize   Ctrl+M mute   Ctrl+P porta   Delete remove\n"
+        "  arrows move (Shift = octave/bar)   Alt disables snap   Ctrl+wheel zoom\n"
+        "  bottom lane: velocity / pan / pitch   Slide button: sliding notes\n\n"
         "PLAYLIST\n"
-        "  clique pinta a pattern atual   arrastar na régua marca o loop (clique direito apaga)\n"
-        "  clique direito no nome do clip: dividir, tornar única...   LED da trilha muta\n"
-        "  Ctrl+A/C/X/V   Ctrl+B duplicar   Delete apagar\n\n"
-        "CHANNEL RACK E MIXER\n"
-        "  clique direito no LED do canal: solo   clique direito no nome: menu do canal\n"
-        "  clique direito em qualquer knob/fader: automação ou ligar a controlador MIDI\n"
-        "  seta na base da faixa do mixer: envio da trilha selecionada para esta\n"
-        "  clique direito no BPM: automação de tempo");
+        "  click paints the current pattern   drag on the ruler sets the loop (right-click clears)\n"
+        "  right-click the clip name: split, make unique...   track LED mutes\n"
+        "  Ctrl+A/C/X/V   Ctrl+B duplicate   Delete remove\n\n"
+        "CHANNEL RACK AND MIXER\n"
+        "  right-click the channel LED: solo   right-click the name: channel menu\n"
+        "  right-click any knob/fader: automation or link to a MIDI controller\n"
+        "  arrow at the bottom of a mixer strip: send from the selected track to this one\n"
+        "  right-click the BPM: tempo automation");
 
     auto* label = new juce::Label ({}, text);
     label->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
@@ -994,7 +994,7 @@ void MainComponent::showHelp()
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (label);
-    options.dialogTitle = utf8 ("Atalhos do LYNX");
+    options.dialogTitle = utf8 ("LYNX shortcuts");
     options.dialogBackgroundColour = theme::panel;
     options.useNativeTitleBar = true;
     options.resizable = true;
@@ -1005,7 +1005,7 @@ void MainComponent::showHelp()
 
 void MainComponent::showImportReport()
 {
-    // resumo do que o .flp tinha e o LYNX não reproduz igual (só quando há algo a dizer)
+    // summary of what the .flp had that LYNX doesn't reproduce exactly (only when there is something to say)
     const auto& r = engine.getImportReport();
     const auto& missing = engine.getMissingPlugins();
     auto list = [] (const std::map<std::string, int>& items) {
@@ -1022,18 +1022,18 @@ void MainComponent::showImportReport()
     juce::String text;
 
     if (! r.approximated.empty())
-        text << utf8 ("Aproximados pelo synth interno:\n") << list (r.approximated) << "\n\n";
+        text << utf8 ("Approximated by the built-in synth:\n") << list (r.approximated) << "\n\n";
     if (! r.unsupported.empty())
-        text << utf8 ("Sem equivalente (tocam com um preset do synth):\n") << list (r.unsupported) << "\n\n";
+        text << utf8 ("No equivalent (played with a synth preset):\n") << list (r.unsupported) << "\n\n";
     if (! missing.isEmpty())
-        text << utf8 ("Plugins não encontrados (Plugins > Procurar plugins):\n  ") << missing.joinIntoString ("\n  ") << "\n\n";
+        text << utf8 ("Plugins not found (Options > Scan for plugins):\n  ") << missing.joinIntoString ("\n  ") << "\n\n";
     if (! r.droppedEffects.empty())
-        text << utf8 ("Efeitos sem equivalente (ficaram de fora):\n") << list (r.droppedEffects) << "\n\n";
+        text << utf8 ("Effects with no equivalent (left out):\n") << list (r.droppedEffects) << "\n\n";
     if (r.missingSamples > 0)
-        text << utf8 ("Samples que não estão nesta máquina: ") << r.missingSamples << "\n";
+        text << utf8 ("Samples missing on this machine: ") << r.missingSamples << "\n";
 
     if (text.isNotEmpty())
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("Importação do FL Studio"), text.trimEnd());
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("FL Studio import"), text.trimEnd());
 }
 
 void MainComponent::showAudioSettings()
@@ -1044,7 +1044,7 @@ void MainComponent::showAudioSettings()
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (selector.release());
-    options.dialogTitle = utf8 ("Configurações de áudio");
+    options.dialogTitle = utf8 ("Audio settings");
     options.useNativeTitleBar = true;
     options.resizable = false;
     if (auto* dialog = options.launchAsync())

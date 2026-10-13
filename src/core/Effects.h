@@ -1,8 +1,8 @@
 #pragma once
 
-// Efeitos internos para os slots do mixer. Escritos do zero, sem dependências.
-// Os buffers são alocados no construtor já para 192 kHz, então prepare() e
-// process() nunca alocam e podem rodar na thread de áudio.
+// Built-in effects for the mixer slots. Written from scratch, no dependencies.
+// Buffers are allocated in the constructor already sized for 192 kHz, so prepare() and
+// process() never allocate and can run on the audio thread.
 
 #include <array>
 #include <memory>
@@ -12,7 +12,7 @@
 
 namespace lynx
 {
-// Descrição de um parâmetro para a interface (todos os valores são 0..1 no modelo).
+// Parameter description for the UI (all values are 0..1 in the model).
 struct EffectParamInfo
 {
     const char* name;
@@ -27,14 +27,14 @@ struct EffectInfo
 
 const EffectInfo& effectInfo (EffectKind kind);
 
-// Texto do valor de um parâmetro já convertido para a unidade real (dB, ms, %...).
+// Text for a parameter value, converted to its real unit (dB, ms, %...).
 std::string formatEffectParam (EffectKind kind, int param, float value01, double bpm);
 
 EffectSlot makeEffectSlot (EffectKind kind);
 
-// EQ paramétrico de 7 bandas. Parâmetros: banda b usa [4b .. 4b+3] = tipo, frequência, ganho, Q;
-// [28] = saída; [29 + b] = inclinação dos cortes (1 a 4 biquads: 12/24/36/48 dB por oitava).
-// Nas prateleiras o "Q" é a inclinação S do cookbook (1 = padrão).
+// 7-band parametric EQ. Parameters: band b uses [4b .. 4b+3] = type, frequency, gain, Q;
+// [28] = output; [29 + b] = cut slope (1 to 4 biquads: 12/24/36/48 dB per octave).
+// For shelves the "Q" is the cookbook shelf slope S (1 = default).
 namespace peq
 {
 constexpr int bands = 7;
@@ -44,20 +44,20 @@ constexpr int slopeParam = 29;
 enum class BandType { off, peak, lowShelf, highShelf, lowCut, highCut, bandPass, notch };
 constexpr int bandTypes = 8;
 
-inline int param (int band, int field) noexcept { return band * 4 + field; } // field: 0 tipo, 1 freq, 2 ganho, 3 Q
+inline int param (int band, int field) noexcept { return band * 4 + field; } // field: 0 type, 1 freq, 2 gain, 3 Q
 BandType type (float v) noexcept;
 float typeValue (BandType t) noexcept;
 double hz (float v) noexcept;      // 20 Hz .. 20 kHz (log)
 float hzValue (double hz) noexcept;
 double gainDb (float v) noexcept;  // ±18 dB
 float gainValue (double db) noexcept;
-double q (float v) noexcept;       // 0,1 .. 18 (log)
+double q (float v) noexcept;       // 0.1 .. 18 (log)
 float qValue (double q) noexcept;
-int slopeStages (float v) noexcept; // 1 a 4 biquads (12/24/36/48 dB/oit)
+int slopeStages (float v) noexcept; // 1 to 4 biquads (12/24/36/48 dB/oct)
 float slopeValue (int stages) noexcept;
 const char* typeName (BandType t) noexcept;
 
-// Resposta do EQ inteiro (todas as bandas e a saída) em dB, para o gráfico do editor.
+// Response of the whole EQ (all bands and the output) in dB, for the editor graph.
 double responseDb (const EffectParams& params, double sampleRate, double hz);
 } // namespace peq
 
@@ -69,22 +69,22 @@ public:
     virtual void prepare (double sampleRate) noexcept = 0;
     virtual void reset() noexcept = 0;
 
-    // Processa no lugar. Os parâmetros chegam a cada bloco (podem mudar a qualquer momento).
+    // Processes in place. Parameters arrive every block (they may change at any time).
     virtual void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept = 0;
-    // Parâmetro automatizado de plugin (os internos recebem os parâmetros em process()). 0..1.
+    // Automated plugin parameter (built-in effects receive their parameters in process()). 0..1.
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
-    // Saída de controle (efeitos "controladores", como o Peak Controller), 0..1. Lida a cada bloco.
+    // Control output ("controller" effects such as the Peak Controller), 0..1. Read every block.
     virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
-    // Posição da música no começo do bloco, em ticks (efeitos sincronizados ao compasso).
+    // Song position at the start of the block, in ticks (for tempo-synced effects).
     virtual void setSongPosition (double /*ticks*/) noexcept {}
-    // Entrada lateral (sidechain) para o próximo process(): a saída de outra trilha, ou nullptr se ela estiver
-    // calada. Só é chamada quando o slot tem sidechain.
+    // Sidechain input for the next process(): another track's output, or nullptr if that track is
+    // silent. Only called when the slot has a sidechain.
     virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}
-    // Latência que o efeito introduz (plugins), em samples. Para o PDC.
+    // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind);
-// Contêiner `parallel` com os efeitos dos ramos do slot.
+// `parallel` container holding the effects of the slot's branches.
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot);
 } // namespace lynx
