@@ -15,6 +15,7 @@ namespace lynx
 {
 class MainComponent final : public juce::Component,
                             public juce::DragAndDropContainer,
+                            private juce::MenuBarModel,
                             private juce::Timer,
                             private juce::ChangeListener
 {
@@ -43,6 +44,15 @@ private:
     void togglePlay();
     void showAudioSettings();
     void showHelp();
+
+    // barra de menus
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex (int index, const juce::String& name) override;
+    void menuItemSelected (int, int) override {}
+    void rememberRecent (const juce::File& file);
+    juce::MenuBarComponent menuBar { this };
+    juce::RecentlyOpenedFilesList recent;
+    static constexpr int menuHeight = 22;
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();

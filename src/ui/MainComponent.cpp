@@ -147,6 +147,11 @@ MainComponent::MainComponent (AudioEngine& e)
     tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
+    // arquivos recentes (guardados em %APPDATA%\LYNX)
+    recent.setMaxNumberOfItems (12);
+    recent.restoreFromString (PluginHost::settingsFolder().getChildFile ("recentes.txt").loadFileAsString());
+    addAndMakeVisible (menuBar);
+
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
                                                              &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton, &swingLabel, &swingSlider,
                                                              &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs })
@@ -163,7 +168,7 @@ MainComponent::MainComponent (AudioEngine& e)
     refreshToolbar();
 
     setWantsKeyboardFocus (true);
-    setSize (1180, 620);
+    setSize (1180, 642);
     startTimerHz (30);
 }
 
@@ -180,12 +185,13 @@ void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::window);
     g.setColour (theme::toolbar);
-    g.fillRect (0, 0, getWidth(), 46);
+    g.fillRect (0, menuHeight, getWidth(), 46);
 }
 
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
+    menuBar.setBounds (area.removeFromTop (menuHeight));
     auto toolbar = area.removeFromTop (46).reduced (8);
 
     auto place = [&toolbar] (juce::Component& c, int width, int gapAfter = 4) {
@@ -673,6 +679,7 @@ void MainComponent::openFile (const juce::File& file)
         engine.setSong (std::move (*song));
         currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
         projectName = file.getFileNameWithoutExtension();
+        rememberRecent (file);
 
         if (auto* window = getTopLevelComponent())
             window->setName ("LYNX - " + projectName + " (importado de MIDI)");
@@ -689,6 +696,7 @@ void MainComponent::openFile (const juce::File& file)
 
         currentFile = juce::File(); // importado: "Salvar" pergunta onde gravar o .lynx
         projectName = file.getFileNameWithoutExtension();
+        rememberRecent (file);
         if (auto* window = getTopLevelComponent())
             window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (importado do FL)");
         return;
@@ -707,6 +715,7 @@ void MainComponent::openFile (const juce::File& file)
     engine.setSong (std::move (*song));
     currentFile = file;
     projectName = file.getFileNameWithoutExtension();
+    rememberRecent (file);
     updateTitle();
 }
 
@@ -727,6 +736,7 @@ void MainComponent::save (bool askForFile)
         if (ProjectFile::save (engine.getSong(), file, error))
         {
             engine.markSaved();
+            rememberRecent (file);
             currentFile = file;
             projectName = file.getFileNameWithoutExtension();
             updateTitle();
@@ -749,6 +759,93 @@ void MainComponent::save (bool askForFile)
                                   if (chooser.getResult() != juce::File())
                                       write (chooser.getResult());
                               });
+}
+
+juce::StringArray MainComponent::getMenuBarNames()
+{
+    return { "Arquivo", "Editar", "Exibir", utf8 ("Opções"), "Ajuda" };
+}
+
+juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
+{
+    juce::PopupMenu menu;
+
+    if (index == 0)
+    {
+        menu.addItem ("Novo\tCtrl+N", [this] { newProject(); });
+        menu.addItem ("Abrir...\tCtrl+O", [this] { chooseFileToOpen(); });
+
+        juce::PopupMenu recentMenu;
+        for (int i = 0; i < recent.getNumFiles(); ++i)
+        {
+            const auto file = recent.getFile (i);
+            recentMenu.addItem (file.getFileName() + "  (" + file.getParentDirectory().getFullPathName() + ")", file.existsAsFile(),
+                                false, [this, file] { confirmDiscard ([this, file] { openFile (file); }); });
+        }
+        if (recent.getNumFiles() == 0)
+            recentMenu.addItem ("(nenhum)", false, false, [] {});
+        menu.addSubMenu ("Abrir recentes", recentMenu);
+
+        menu.addItem ("Salvar\tCtrl+S", [this] { save (false); });
+        menu.addItem ("Salvar como...\tCtrl+Shift+S", [this] { save (true); });
+        menu.addSeparator();
+        menu.addItem (utf8 ("Exportar áudio...\tCtrl+R"), [this] { exportAudio(); });
+        menu.addItem ("Abrir a pasta de autosave", [] {
+            juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave").startAsProcess();
+        });
+        menu.addSeparator();
+        menu.addItem ("Sair", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
+    }
+    else if (index == 1)
+    {
+        menu.addItem ("Desfazer\tCtrl+Z", engine.canUndo(), false, [this] { engine.undo(); });
+        menu.addItem ("Refazer\tCtrl+Y", engine.canRedo(), false, [this] { engine.redo(); });
+    }
+    else if (index == 2)
+    {
+        menu.addItem ("Playlist\tF5", [this] { tabs.setCurrentTabIndex (playlistTab); });
+        menu.addItem ("Channel Rack\tF6", [this] { tabs.setCurrentTabIndex (rackTab); });
+        menu.addItem ("Piano Roll\tF7", [this] { openPianoRoll(); });
+        menu.addItem ("Mixer\tF9", [this] { tabs.setCurrentTabIndex (mixerTab); });
+        menu.addItem ("Navegador\tF8", true, browserVisible, [this] {
+            browserVisible = ! browserVisible;
+            resized();
+        });
+    }
+    else if (index == 3)
+    {
+        menu.addItem (utf8 ("Configurações de áudio..."), [this] { showAudioSettings(); });
+        menu.addItem (utf8 ("Procurar plugins (VST3 e CLAP)..."), [this] {
+            scanPluginsWithProgress (engine, [] (int found) {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
+                                                        juce::String (found) + utf8 (" plugin(s) novo(s) encontrado(s)."));
+            });
+        });
+        menu.addItem (utf8 ("Gravar áudio da entrada"), true, engine.isAudioRecordingArmed(), [this] {
+            engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
+        });
+        menu.addItem (utf8 ("Metrônomo"), true, engine.getTransport().metronome.load(), [this] {
+            metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
+        });
+    }
+    else
+    {
+        menu.addItem ("Atalhos\tF1", [this] { showHelp(); });
+        menu.addItem ("Sobre o LYNX", [] {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "LYNX",
+                                                    utf8 ("LYNX " JUCE_APPLICATION_VERSION_STRING "\nDAW leve em C++/JUCE, com o fluxo de trabalho do FL Studio.\n"
+                                                          "Implementação independente: nenhum código da Image-Line foi copiado."));
+        });
+    }
+
+    return menu;
+}
+
+void MainComponent::rememberRecent (const juce::File& file)
+{
+    recent.addFile (file);
+    PluginHost::settingsFolder().getChildFile ("recentes.txt").replaceWithText (recent.toString());
+    menuItemsChanged();
 }
 
 void MainComponent::showHelp()
