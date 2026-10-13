@@ -67,8 +67,9 @@ struct Unit
     std::array<std::int32_t, 10> p {};
     // operadores
     double ratio = 1.0, offsetHz = 0.0;
-    std::vector<float> harmonics;
+    std::vector<float> harmonics, phases;
     int shape = 0;
+    std::array<std::int32_t, 5> form { 0, 0, 0, 0, 128 }; // Shape, Tension, Skew, Sine shaper, Pre-filter
     // filtros
     int filterKind = 3;
     std::vector<Articulator> art;
@@ -262,7 +263,12 @@ bool parse (const std::vector<std::uint8_t>& blob, State& s)
             unit.harmonics.resize (count);
             std::memcpy (unit.harmonics.data(), op + harmonicsAt, count * 4);
             if (v >= 0x11)
+            {
                 std::memcpy (&unit.shape, op + 0x80c, 4);
+                std::memcpy (unit.form.data(), op + 0x80c, 5 * 4);
+                unit.phases.resize (count);
+                std::memcpy (unit.phases.data(), op + 0x40c, count * 4);
+            }
         }
         else if (u < 9)
         {
@@ -508,6 +514,7 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
 
     // 2-4. osciladores: afinação, onda, FM -> brilho, nível e pan
     double fmIndex = 0.0; // soma das FMs fortes (para o envelope de filtro)
+    bool usedSpectrum = false;
     int fmModulator = -1;
     for (std::size_t k = 0; k < carriers.size(); ++k)
     {
@@ -515,6 +522,28 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         const auto& op = s.units[(std::size_t) i];
         auto& osc = out.osc[k];
         osc.wave = waveOf (op);
+        // tabela rica com parciais senoidais (Shape 0, sem tensão/skew/sine shaper, pré-filtro aberto): o espectro
+        // exato no oscilador "Harmônicas" (um só por canal: a primeira portadora assim). REA_rodada11 §1.4
+        if (const auto exact = op.form == std::array<std::int32_t, 5> { 0, 0, 0, 0, 128 } && op.phases.size() == op.harmonics.size();
+            exact && ! usedSpectrum)
+        {
+            int rich = 0;
+            for (const auto h : op.harmonics)
+                rich += std::isfinite (h) && std::abs (h) > 1e-4f ? 1 : 0;
+            if (rich > 1)
+            {
+                usedSpectrum = true;
+                for (std::size_t h = 0; h < op.harmonics.size() && h < (std::size_t) SynthSettings::spectrumSize; ++h)
+                {
+                    const auto a = std::isfinite (op.harmonics[h]) ? op.harmonics[h] : 0.0f;
+                    const auto ph = std::isfinite (op.phases[h]) ? op.phases[h] : 0.0f;
+                    // a amplitude 1 é um seno cheio (o "spectral" do LYNX mede como a serra: ×π/2); fase em meio ciclo
+                    out.spectrum[h] = (float) (std::abs (a) * 3.141592653589793 / 2.0);
+                    out.spectrumPhase[h] = ph * 0.5f + (a < 0.0f ? 0.5f : 0.0f);
+                }
+                osc.wave = Waveform::spectral;
+            }
+        }
         setPitch (osc, opSemitones (op) + masterPitch);
         osc.level = (float) std::min (1.0, amp (i));
         osc.pan = (float) std::clamp (2.0 * s.cell (0, i, 6) / 512.0, -1.0, 1.0);
