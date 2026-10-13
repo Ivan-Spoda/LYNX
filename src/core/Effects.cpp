@@ -984,6 +984,100 @@ private:
     int length = 1, write = 0;
 };
 
+// Frequency shifter: o sinal analítico (par em quadratura de duas cadeias de allpass de 2ª ordem
+// em z², um "transformador de Hilbert" de ~90° na faixa útil) multiplicado por um oscilador complexo.
+// Parâmetros: deslocamento (±2 kHz, curva quadrática em volta do centro), mix, abertura estéreo
+// (o lado direito desloca ao contrário).
+namespace fshift
+{
+inline double hz (float v)
+{
+    const auto x = (std::clamp ((double) v, 0.0, 1.0) - 0.5) * 2.0;
+    return 2000.0 * x * std::abs (x);
+}
+} // namespace fshift
+
+class FreqShift final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        for (auto& c : chains)
+            c = {};
+        phase = 0.0;
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        const auto shift = fshift::hz (p[0]);
+        const auto mix = std::clamp (p[1], 0.0f, 1.0f);
+        const auto spread = std::clamp (p[2], 0.0f, 1.0f);
+        const auto step = shift / sampleRate;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto angle = 2.0 * 3.141592653589793 * phase;
+            const auto cosA = (float) std::cos (angle), sinA = (float) std::sin (angle);
+            float* io[2] = { l + i, r + i };
+
+            for (int c = 0; c < 2; ++c)
+            {
+                float re = 0.0f, im = 0.0f;
+                chains[(std::size_t) c].analytic (*io[c], re, im);
+                // lado direito: entre o mesmo sentido (0) e o oposto (1)
+                const auto sign = c == 0 ? 1.0f : 1.0f - 2.0f * spread;
+                const auto shifted = re * cosA + sign * im * sinA;
+                *io[c] += (shifted - *io[c]) * mix;
+            }
+
+            phase += step;
+            phase -= std::floor (phase);
+        }
+    }
+
+private:
+    // 4 allpass de 2ª ordem em z² por ramo; o ramo real tem 1 amostra de atraso a mais
+    struct Chain
+    {
+        static constexpr float a[4] = { 0.6923878f, 0.9360654322959f, 0.9882295226860f, 0.9987488452737f };
+        static constexpr float b[4] = { 0.4021921162426f, 0.8561710882420f, 0.9722909545651f, 0.9952884791278f };
+        std::array<float, 4> ax1 {}, ax2 {}, ay1 {}, ay2 {}, bx1 {}, bx2 {}, by1 {}, by2 {};
+        float delayed = 0.0f;
+
+        static float stage (float k, float x, float& x1, float& x2, float& y1, float& y2) noexcept
+        {
+            const auto y = k * k * (x + y2) - x2;
+            x2 = x1;
+            x1 = x;
+            y2 = y1;
+            y1 = y;
+            return y;
+        }
+
+        void analytic (float x, float& re, float& im) noexcept
+        {
+            auto u = x, v = x;
+            for (std::size_t k = 0; k < 4; ++k)
+            {
+                u = stage (a[k], u, ax1[k], ax2[k], ay1[k], ay2[k]);
+                v = stage (b[k], v, bx1[k], bx2[k], by1[k], by2[k]);
+            }
+            re = delayed;
+            im = v;
+            delayed = u;
+        }
+    };
+
+    std::array<Chain, 2> chains {};
+    double sampleRate = 44100.0, phase = 0.0;
+};
+
 // Peak Controller: o som passa direto; um seguidor de pico (ataque imediato, queda pelo "decay")
 // vira as saídas de controle: 0 = base + quantidade·pico (com tensão), 1 = base, 2 = igual à 0.
 class PeakController final : public Effect
@@ -1111,6 +1205,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         return info;
     }();
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
+    static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.85f }, { "Tensão", 0.5f }, { "Decaimento", 0.48f } } };
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
@@ -1158,6 +1253,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::volumeGate: return volumeGate;
         case EffectKind::peakController: return peakController;
         case EffectKind::pitchShift: return pitchShift;
+        case EffectKind::freqShift: return freqShift;
     }
     return eq;
 }
@@ -1304,6 +1400,13 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             }
             return text;
 
+        case EffectKind::freqShift:
+            if (param == 0)
+                std::snprintf (text, sizeof (text), "%+.1f Hz", fshift::hz (v));
+            else
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            return text;
+
         case EffectKind::peakController:
             if (param == 1)
                 std::snprintf (text, sizeof (text), "%+.0f%%", (v * 2.0f - 1.0f) * 100.0f);
@@ -1349,6 +1452,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::volumeGate: return std::make_unique<VolumeGate>();
         case EffectKind::peakController: return std::make_unique<PeakController>();
         case EffectKind::pitchShift: return std::make_unique<PitchShift>();
+        case EffectKind::freqShift: return std::make_unique<FreqShift>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

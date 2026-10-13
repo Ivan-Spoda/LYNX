@@ -413,6 +413,34 @@ TEST (inflate_zlib)
     CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
 }
 
+TEST (frequency_shifter_moves_spectrum_by_hz)
+{
+    auto fx = lynx::makeEffect (lynx::EffectKind::freqShift);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::freqShift);
+    // +200 Hz: x·|x|·2000 = 200 -> x = sqrt(0,1)
+    slot.params[0] = (float) (0.5 + std::sqrt (0.1) / 2.0);
+    std::vector<float> l (48000), r (48000);
+    for (int i = 0; i < 48000; ++i)
+        l[(std::size_t) i] = r[(std::size_t) i] = (float) std::sin (2.0 * 3.141592653589793 * 1000.0 * i / 48000.0);
+    for (int done = 0; done < 48000; done += 480)
+        fx->process (l.data() + done, r.data() + done, 480, slot.params, 120.0);
+    auto energy = [&] (double f) {
+        const auto w = 2.0 * 3.141592653589793 * f / 48000.0, k = 2.0 * std::cos (w);
+        double s1 = 0.0, s2 = 0.0;
+        for (int i = 9600; i < 48000; ++i)
+        {
+            const auto s0 = l[(std::size_t) i] + k * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        return s1 * s1 + s2 * s2 - k * s1 * s2;
+    };
+    // a energia vai para 1200 Hz; sobra pouco em 1000 e quase nada na imagem (800)
+    CHECK (energy (1200.0) > 50.0 * energy (1000.0));
+    CHECK (energy (1200.0) > 50.0 * energy (800.0));
+}
+
 TEST (pitch_shift_moves_frequency_keeps_length)
 {
     auto fx = lynx::makeEffect (lynx::EffectKind::pitchShift);

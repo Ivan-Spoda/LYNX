@@ -231,7 +231,8 @@ enum class EffectKind : std::uint8_t
     utility,      // ganho, pan e matriz estéreo (Balance, PanOMatic, Stereo Shaper do FL)
     volumeGate,   // ganho por passo sincronizado ao compasso (o volume do Gross Beat)
     peakController, // não muda o som: mede o pico e serve de fonte para automações ao vivo (Peak Controller do FL)
-    pitchShift    // muda a afinação sem mudar a duração (duas cabeças de leitura em crossfade)
+    pitchShift,   // muda a afinação sem mudar a duração (duas cabeças de leitura em crossfade)
+    freqShift     // desloca todas as frequências em Hz (banda lateral única, sem preservar harmonia)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte
