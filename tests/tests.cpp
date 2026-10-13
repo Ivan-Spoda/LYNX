@@ -883,6 +883,24 @@ TEST (sampler_channel_filter_darkens_and_bypasses_when_open)
     const auto open = energy (20000.0f), dark = energy (300.0f);
     CHECK (open > 100.0);
     CHECK (dark < open * 0.05);
+
+    // envelope de afinação +12 st com sustentação 1: o sample corre no dobro da velocidade
+    // e acaba na metade do tempo (1 s de sample -> 0,5 s)
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.sampler.pitchEnv = { 12.0f, 0.0f, 0.0f, 0.1f, 1.0f, 0.1f };
+    inst->configure (c, 120.0);
+    inst->noteOn (60, 1.0f);
+    std::vector<float> l (48000), r (48000);
+    inst->render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+    float tail = 0.0f, body = 0.0f;
+    for (std::size_t i = 20000; i < 23000; ++i)
+        body = std::max (body, std::abs (l[i]));
+    for (std::size_t i = 25000; i < 48000; ++i)
+        tail = std::max (tail, std::abs (l[i]));
+    CHECK (body > 0.1f);
+    CHECK (tail == 0.0f);
 }
 
 TEST (synth_oscillator_pan_and_semitones)

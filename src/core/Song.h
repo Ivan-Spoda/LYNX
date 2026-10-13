@@ -48,6 +48,19 @@ struct PluginRef
 };
 
 // Ajustes do sampler do canal (a janela "Channel settings" do FL).
+// Envelope de modulação (corte ou afinação), como os envelopes do canal no FL.
+struct ModEnvelope
+{
+    float amount = 0.0f;  // filtro: oitavas (±); afinação: semitons (±). 0 = desligado
+    float attack = 0.0f;  // segundos
+    float hold = 0.0f;
+    float decay = 0.3f;
+    float sustain = 0.0f; // 0..1
+    float release = 0.2f;
+
+    bool operator== (const ModEnvelope&) const = default;
+};
+
 struct SamplerSettings
 {
     float pitch = 0.0f;   // semitons, -24..24
@@ -64,6 +77,8 @@ struct SamplerSettings
     std::vector<float> slices; // fatias (inícios em frações): a tecla 60 + i toca a fatia i, na altura original
     float cutoff = 20000.0f;   // passa-baixas do canal (Hz); 20 kHz e sem ressonância = desligado
     float resonance = 0.0f;    // 0..1
+    ModEnvelope filterEnv;     // desloca o corte (oitavas)
+    ModEnvelope pitchEnv;      // desloca a afinação (semitons)
 
     bool operator== (const SamplerSettings&) const = default;
 };
@@ -101,19 +116,6 @@ struct SynthOscillator
     float pan = 0.0f;    // -1..1, balanço linear como no FL
 
     bool operator== (const SynthOscillator&) const = default;
-};
-
-// Envelope de modulação (corte ou afinação), como os envelopes do canal no FL.
-struct ModEnvelope
-{
-    float amount = 0.0f;  // filtro: oitavas (±); afinação: semitons (±). 0 = desligado
-    float attack = 0.0f;  // segundos
-    float hold = 0.0f;
-    float decay = 0.3f;
-    float sustain = 0.0f; // 0..1
-    float release = 0.2f;
-
-    bool operator== (const ModEnvelope&) const = default;
 };
 
 struct SynthSettings

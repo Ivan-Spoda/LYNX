@@ -194,6 +194,89 @@ inline void voicePan (float pan, float& left, float& right) noexcept
 // ---------------------------------------------------------------------------
 // Synth polifônico simples: dente-de-serra com passa-baixas e envelope AR.
 
+// ---------------------------------------------------------------------------
+// Envelopes de modulação (corte e afinação), por voz: 0 ataque, 1 hold, 2 decaimento,
+// 3 sustentação, 4 release. Segmentos retos (tensão 0, o padrão do FL; REA_rodada3 §1.5).
+
+struct ModState
+{
+    float level = 0.0f;
+    float releaseStep = 0.0f; // fixado ao soltar a nota: do nível atual até 0
+    int stage = 0, held = 0;
+};
+
+struct ModCoefficients
+{
+    bool active = false;
+    float amount = 0.0f, attackStep = 1.0f, decayStep = 1.0f, releasePerLevel = 1.0f, sustain = 0.0f;
+    int holdSamples = 0;
+
+    static ModCoefficients make (const ModEnvelope& e, double sampleRate) noexcept
+    {
+        ModCoefficients c;
+        c.active = e.amount != 0.0f;
+        c.amount = e.amount;
+        c.attackStep = (float) (1.0 / (std::max (0.0005, (double) e.attack) * sampleRate));
+        c.holdSamples = (int) (std::max (0.0f, e.hold) * sampleRate);
+        c.sustain = std::clamp (e.sustain, 0.0f, 1.0f);
+        c.decayStep = (float) ((1.0 - c.sustain) / (std::max (0.0005, (double) e.decay) * sampleRate)); // de 1 ao sustain
+        c.releasePerLevel = (float) (1.0 / (std::max (0.002, (double) e.release) * sampleRate));
+        return c;
+    }
+
+    void advance (ModState& m) const noexcept
+    {
+        switch (m.stage)
+        {
+            case 0:
+                m.level += attackStep;
+                if (m.level >= 1.0f) { m.level = 1.0f; m.stage = 1; }
+                break;
+            case 1:
+                if (++m.held >= holdSamples) m.stage = 2;
+                break;
+            case 2:
+                m.level -= decayStep;
+                if (m.level <= sustain) { m.level = sustain; m.stage = 3; }
+                break;
+            case 3: break;
+            default: m.level = std::max (0.0f, m.level - m.releaseStep); break;
+        }
+    }
+
+    void release (ModState& m) const noexcept
+    {
+        m.stage = 4;
+        m.releaseStep = m.level * releasePerLevel;
+    }
+};
+
+// Coeficientes do passa-baixas SVF "TPT" (estável em qualquer corte), compartilhado pelo synth e o sampler.
+struct SvfCoefficients
+{
+    float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f;
+
+    void set (double cutoffHz, float resonance, double sampleRate) noexcept
+    {
+        const auto fc = std::clamp (cutoffHz, 20.0, sampleRate * 0.45);
+        const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
+        const auto k = 2.0f - 1.9f * std::clamp (resonance, 0.0f, 1.0f); // 2 = sem ressonância
+        a1 = 1.0f / (1.0f + g * (g + k));
+        a2 = g * a1;
+        a3 = g * a2;
+    }
+
+    float process (float in, float& low, float& band) const noexcept
+    {
+        const auto v3 = in - low;
+        const auto v1 = a1 * band + a2 * v3;
+        const auto v2 = low + a2 * band + a3 * v3;
+        band = 2.0f * v1 - band;
+        low = 2.0f * v2 - low;
+        return v2;
+    }
+};
+
 struct SynthVoice
 {
     float panL = 1.0f, panR = 1.0f;
@@ -210,15 +293,8 @@ struct SynthVoice
     float low = 0.0f, band = 0.0f; // estados do filtro
     float lowR = 0.0f, bandR = 0.0f; // filtro do lado direito (só com pan por oscilador)
 
-    // envelopes de modulação: 0 ataque, 1 hold, 2 decaimento, 3 sustentação, 4 release
-    struct ModState
-    {
-        float level = 0.0f;
-        float releaseStep = 0.0f; // fixado ao soltar a nota: do nível atual até 0
-        int stage = 0, held = 0;
-    };
     std::array<ModState, 2> mod {}; // filtro, afinação
-    float va1 = 1.0f, va2 = 0.0f, va3 = 0.0f; // coeficientes do filtro desta voz (com envelope de corte)
+    SvfCoefficients filter; // desta voz (só com envelope de corte)
     double pitchMul = 1.0;
     int controlCountdown = 0;
     int age = 0;
@@ -360,11 +436,7 @@ public:
                 v.releasing = true;
                 v.stage = 3;
                 for (std::size_t e = 0; e < 2; ++e)
-                {
-                    auto& m = v.mod[e];
-                    m.stage = 4;
-                    m.releaseStep = m.level * modEnv[e].releasePerLevel;
-                }
+                    modEnv[e].release (v.mod[e]);
             }
     }
 
@@ -411,7 +483,7 @@ public:
                 {
                     for (std::size_t e = 0; e < 2; ++e)
                         if (modEnv[e].active)
-                            advance (modEnv[e], v.mod[e]);
+                            modEnv[e].advance (v.mod[e]);
 
                     // a cada 16 samples (o "tick" de controle): afinação e coeficientes do filtro
                     if (--v.controlCountdown <= 0)
@@ -420,7 +492,7 @@ public:
                         v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
 
                         if (modEnv[0].active)
-                            filterCoefficients (settings.cutoff * std::exp2 (modEnv[0].amount * v.mod[0].level), v.va1, v.va2, v.va3);
+                            v.filter.set (settings.cutoff * std::exp2 (modEnv[0].amount * v.mod[0].level), settings.resonance, sampleRate);
                     }
                 }
 
@@ -442,9 +514,9 @@ public:
                 }
 
                 // filtro passa-baixas ressonante (state variable "TPT": estável em qualquer corte)
-                const auto& fv = modEnv[0].active ? v : shared;
-                const auto outL = filter (sum, v.low, v.band, fv.va1, fv.va2, fv.va3);
-                const auto outR = stereoOscillators ? filter (sumR, v.lowR, v.bandR, fv.va1, fv.va2, fv.va3) : outL;
+                const auto& f = modEnv[0].active ? v.filter : sharedFilter;
+                const auto outL = f.process (sum, v.low, v.band);
+                const auto outR = stereoOscillators ? f.process (sumR, v.lowR, v.bandR) : outL;
 
                 const auto s = 0.3f * v.level * v.velocity;
                 left[i] += outL * s * gl * v.panL;
@@ -504,67 +576,6 @@ private:
         return 0.0f;
     }
 
-    static float filter (float in, float& low, float& band, float a1, float a2, float a3) noexcept
-    {
-        const auto v3 = in - low;
-        const auto v1 = a1 * band + a2 * v3;
-        const auto v2 = low + a2 * band + a3 * v3;
-        band = 2.0f * v1 - band;
-        low = 2.0f * v2 - low;
-        return v2;
-    }
-
-    void filterCoefficients (double cutoffHz, float& c1, float& c2, float& c3) const noexcept
-    {
-        const auto fc = std::clamp (cutoffHz, 20.0, sampleRate * 0.45);
-        const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
-        const auto k = 2.0f - 1.9f * std::clamp (settings.resonance, 0.0f, 1.0f); // 2 = sem ressonância
-        c1 = 1.0f / (1.0f + g * (g + k));
-        c2 = g * c1;
-        c3 = g * c2;
-    }
-
-    struct ModCoefficients
-    {
-        bool active = false;
-        float amount = 0.0f, attackStep = 1.0f, decayStep = 1.0f, releasePerLevel = 1.0f, sustain = 0.0f;
-        int holdSamples = 0;
-    };
-
-    // Segmentos retos (tensão 0, o padrão do FL para estes envelopes; REA_rodada3 §1.5).
-
-    static void advance (const ModCoefficients& c, SynthVoice::ModState& m) noexcept
-    {
-        switch (m.stage)
-        {
-            case 0:
-                m.level += c.attackStep;
-                if (m.level >= 1.0f) { m.level = 1.0f; m.stage = 1; }
-                break;
-            case 1:
-                if (++m.held >= c.holdSamples) m.stage = 2;
-                break;
-            case 2:
-                m.level -= c.decayStep;
-                if (m.level <= c.sustain) { m.level = c.sustain; m.stage = 3; }
-                break;
-            case 3: break;
-            default: m.level = std::max (0.0f, m.level - m.releaseStep); break;
-        }
-    }
-
-    ModCoefficients modCoefficients (const ModEnvelope& e) const noexcept
-    {
-        ModCoefficients c;
-        c.active = e.amount != 0.0f;
-        c.amount = e.amount;
-        c.attackStep = (float) (1.0 / (std::max (0.0005, (double) e.attack) * sampleRate));
-        c.holdSamples = (int) (std::max (0.0f, e.hold) * sampleRate);
-        c.sustain = std::clamp (e.sustain, 0.0f, 1.0f);
-        c.decayStep = (float) ((1.0 - c.sustain) / (std::max (0.0005, (double) e.decay) * sampleRate)); // de 1 ao sustain
-        c.releasePerLevel = (float) (1.0 / (std::max (0.002, (double) e.release) * sampleRate));
-        return c;
-    }
 
     void updateCoefficients() noexcept
     {
@@ -583,9 +594,9 @@ private:
 
         stereoOscillators = std::any_of (settings.osc.begin(), settings.osc.end(), [] (const SynthOscillator& o) { return o.pan != 0.0f; });
 
-        filterCoefficients (settings.cutoff, shared.va1, shared.va2, shared.va3);
-        modEnv[0] = modCoefficients (settings.filterEnv);
-        modEnv[1] = modCoefficients (settings.pitchEnv);
+        sharedFilter.set (settings.cutoff, settings.resonance, sampleRate);
+        modEnv[0] = ModCoefficients::make (settings.filterEnv, sampleRate);
+        modEnv[1] = ModCoefficients::make (settings.pitchEnv, sampleRate);
         modulated = modEnv[0].active || modEnv[1].active;
     }
 
@@ -595,7 +606,7 @@ private:
     float attackStep = 0.01f;
     float decayCoeff = 0.999f;
     float releaseCoeff = 0.999f;
-    SynthVoice shared; // só os coeficientes do filtro (sem envelope de corte)
+    SvfCoefficients sharedFilter; // sem envelope de corte, todas as vozes usam este
     std::array<ModCoefficients, 2> modEnv {};
     bool modulated = false;
     std::array<double, 3> ratios { 1.0, 1.0, 1.0 };
@@ -629,6 +640,10 @@ struct SamplerVoice
     double glideRatio = 1.0;
     int glideLeft = 0;
     float lowL = 0.0f, bandL = 0.0f, lowR = 0.0f, bandR = 0.0f; // filtro do canal
+    std::array<ModState, 2> mod {}; // envelopes de corte e de afinação
+    SvfCoefficients filter;         // desta voz (só com envelope de corte)
+    double pitchMul = 1.0;
+    int controlCountdown = 0;
 };
 
 class SamplerInstrument final : public Instrument
@@ -641,6 +656,8 @@ public:
     {
         sampleRate = sr;
         fadeStep = (float) (1.0 / (0.003 * sr)); // 3 ms
+        for (std::size_t e = 0; e < 2; ++e)
+            modEnv[e] = ModCoefficients::make (envelopes[e], sr);
         allNotesOff();
     }
 
@@ -660,6 +677,7 @@ public:
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
         cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
+        envelopeMailbox.write ({ s.filterEnv, s.pitchEnv });
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
         for (int i = 0; i < table.count; ++i)
@@ -801,6 +819,12 @@ public:
             return;
         }
 
+        // os envelopes de corte/afinação soltam sempre
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.stage < 3)
+                for (std::size_t e = 0; e < 2; ++e)
+                    modEnv[e].release (v.mod[e]);
+
         // com release, a nota solta decai; sem release o sample toca inteiro (one-shot)
         const auto seconds = release.load();
 
@@ -832,19 +856,20 @@ public:
         const auto* r = sample->rightData();
         const auto last = (double) (sample->frames() - 1);
 
-        // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto e sem ressonância
+        if (envelopeMailbox.read (envelopes))
+            for (std::size_t e = 0; e < 2; ++e)
+                modEnv[e] = ModCoefficients::make (envelopes[e], sampleRate);
+
+        // filtro do canal (SVF TPT, o mesmo do synth); desligado quando aberto, sem ressonância e sem envelope
         const auto fc = cutoff.load(), res = resonance.load();
-        const auto filtered = fc < 19500.0f || res > 0.0f;
+        const auto filtered = fc < 19500.0f || res > 0.0f || modEnv[0].active;
+        const auto modulated = modEnv[0].active || modEnv[1].active;
 
         if (filtered && (fc != filterCutoff || res != filterResonance))
         {
             filterCutoff = fc;
             filterResonance = res;
-            const auto g = (float) std::tan (3.14159265358979 * std::min ((double) fc, sampleRate * 0.45) / sampleRate);
-            const auto k = 2.0f - 1.9f * res;
-            fa1 = 1.0f / (1.0f + g * (g + k));
-            fa2 = g * fa1;
-            fa3 = g * fa2;
+            sharedFilter.set (fc, res, sampleRate);
         }
 
         for (auto& v : voices)
@@ -865,10 +890,27 @@ public:
                 auto sl = l[index] + frac * (l[index + 1] - l[index]);
                 auto sr = r[index] + frac * (r[index + 1] - r[index]);
 
+                if (modulated)
+                {
+                    for (std::size_t e = 0; e < 2; ++e)
+                        if (modEnv[e].active)
+                            modEnv[e].advance (v.mod[e]);
+
+                    if (--v.controlCountdown <= 0) // tick de controle de 16 samples, como no synth
+                    {
+                        v.controlCountdown = 16;
+                        v.pitchMul = modEnv[1].active ? std::exp2 (modEnv[1].amount * v.mod[1].level / 12.0) : 1.0;
+
+                        if (modEnv[0].active)
+                            v.filter.set (fc * std::exp2 (modEnv[0].amount * v.mod[0].level), res, sampleRate);
+                    }
+                }
+
                 if (filtered)
                 {
-                    sl = svf (sl, v.lowL, v.bandL);
-                    sr = svf (sr, v.lowR, v.bandR);
+                    const auto& f = modEnv[0].active ? v.filter : sharedFilter;
+                    sl = f.process (sl, v.lowL, v.bandL);
+                    sr = f.process (sr, v.lowR, v.bandR);
                 }
 
                 auto gain = v.velocity * v.fade * v.env;
@@ -887,7 +929,7 @@ public:
                 left[i] += sl * gain * gl * v.panL;
                 right[i] += sr * gain * gr * v.panR;
 
-                v.position += v.rate;
+                v.position += v.rate * v.pitchMul;
                 ++v.age;
 
                 if (v.glideLeft > 0)
@@ -951,17 +993,10 @@ private:
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // valores com que os coeficientes foram feitos
-    float fa1 = 1.0f, fa2 = 0.0f, fa3 = 0.0f;
-
-    float svf (float in, float& low, float& band) const noexcept
-    {
-        const auto v3 = in - low;
-        const auto v1 = fa1 * band + fa2 * v3;
-        const auto v2 = low + fa2 * band + fa3 * v3;
-        band = 2.0f * v1 - band;
-        low = 2.0f * v2 - low;
-        return v2;
-    }
+    SvfCoefficients sharedFilter;
+    SettingsMailbox<std::array<ModEnvelope, 2>> envelopeMailbox;
+    std::array<ModEnvelope, 2> envelopes {};
+    std::array<ModCoefficients, 2> modEnv {};
     std::array<float, 4> nextClip {}; // fades do próximo noteOn (só a thread de áudio mexe)
 
     struct SliceTable

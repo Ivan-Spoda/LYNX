@@ -6,6 +6,25 @@ namespace lynx::ProjectFile
 {
 namespace
 {
+// envelopes de corte/afinação: [quantidade, ataque, hold, decaimento, sustentação, release]; só os ligados
+void writeEnvelopes (juce::DynamicObject& o, const ModEnvelope& filter, const ModEnvelope& pitch)
+{
+    for (auto [name, env] : { std::pair { "filterEnv", &filter }, { "pitchEnv", &pitch } })
+        if (env->amount != 0.0f)
+            o.setProperty (name, juce::Array<juce::var> { env->amount, env->attack, env->hold, env->decay, env->sustain, env->release });
+}
+
+void readEnvelopes (const juce::var& o, ModEnvelope& filter, ModEnvelope& pitch)
+{
+    for (auto [name, env, limit] : { std::tuple { "filterEnv", &filter, 10.0f }, { "pitchEnv", &pitch, 48.0f } })
+        if (const auto& e = o[name]; e.isArray() && e.size() == 6)
+        {
+            auto time = [&] (int i) { return juce::jlimit (0.0f, 20.0f, (float) (double) e[i]); };
+            *env = { juce::jlimit (-limit, limit, (float) (double) e[0]), time (1), time (2), time (3),
+                     juce::jlimit (0.0f, 1.0f, (float) (double) e[4]), time (5) };
+        }
+}
+
 const char* instrumentId (InstrumentKind k)
 {
     switch (k)
@@ -231,9 +250,7 @@ juce::String toJson (const Song& song)
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
 
-            for (auto [name, env] : { std::pair { "filterEnv", &c.synth.filterEnv }, { "pitchEnv", &c.synth.pitchEnv } })
-                if (env->amount != 0.0f)
-                    synth->setProperty (name, juce::Array<juce::var> { env->amount, env->attack, env->hold, env->decay, env->sustain, env->release });
+            writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
             o->setProperty ("synthSettings", juce::var (synth.release()));
         }
 
@@ -259,6 +276,7 @@ juce::String toJson (const Song& song)
             sampler->setProperty ("reverse", c.sampler.reverse);
             sampler->setProperty ("cut", c.sampler.cut);
             sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance });
+            writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
         }
 
@@ -534,13 +552,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);
 
-                for (auto [name, env, limit] : { std::tuple { "filterEnv", &def.synth.filterEnv, 10.0f }, { "pitchEnv", &def.synth.pitchEnv, 48.0f } })
-                    if (const auto& e = s[name]; e.isArray() && e.size() == 6)
-                    {
-                        auto time = [&] (int i) { return juce::jlimit (0.0f, 20.0f, (float) (double) e[i]); };
-                        *env = { juce::jlimit (-limit, limit, (float) (double) e[0]), time (1), time (2), time (3),
-                                 juce::jlimit (0.0f, 1.0f, (float) (double) e[4]), time (5) };
-                    }
+                readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
             }
 
             if (const auto& s = c["samplerSettings"]; s.isObject())
@@ -570,6 +582,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
                     def.sampler.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) filter[1]);
                 }
+
+                readEnvelopes (s, def.sampler.filterEnv, def.sampler.pitchEnv);
             }
 
             song.channels.push_back (std::move (def));

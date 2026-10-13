@@ -329,6 +329,33 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
         // filtro do canal (Mod X/Y + tipo do 0xDB) vale para o sampler também
         synthFilterFromChannel (c.modX, c.modY, c.filterType, def.sampler.cutoff, def.sampler.resonance);
 
+        // envelopes de corte (registro 2) e de afinação (registro 4) do canal
+        auto modEnvelope = [&] (const flp::Channel::Envelope& env, float amount) {
+            ModEnvelope m;
+            if (! env.present || ! env.enabled || amount == 0.0f)
+                return m;
+
+            const auto beats = (env.flags & 1) != 0;
+            auto seconds = [&] (int v) {
+                const auto t = flp::Channel::envelopeTime (v);
+                return (float) std::clamp (beats ? t * 2.0 * 60.0 / song.bpm : t, 0.0, 20.0);
+            };
+            m.amount = amount;
+            m.attack = seconds (env.attack);
+            m.hold = seconds (env.hold);
+            m.decay = seconds (env.decay);
+            m.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
+            m.release = seconds (env.release);
+            return m;
+        };
+
+        const auto lowPassFilter = c.filterType <= 1 || c.filterType >= 5;
+        const auto filterEnv = lowPassFilter ? modEnvelope (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].amount))
+                                             : ModEnvelope {};
+        const auto pitchEnv = modEnvelope (c.envelopes[4], std::clamp (c.envelopes[4].amount, -2400, 2400) / 100.0f);
+        def.sampler.filterEnv = filterEnv;
+        def.sampler.pitchEnv = pitchEnv;
+
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
         if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
         {
@@ -350,29 +377,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
             synthFilterFromChannel (c.modX, c.modY, c.filterType, def.synth.cutoff, def.synth.resonance);
 
-            // envelopes de corte (registro 2) e de afinação (registro 4) do canal
-            auto modEnvelope = [&] (const flp::Channel::Envelope& env, float amount) {
-                ModEnvelope m;
-                if (! env.present || ! env.enabled || amount == 0.0f)
-                    return m;
-
-                const auto beats = (env.flags & 1) != 0;
-                auto seconds = [&] (int v) {
-                    const auto t = flp::Channel::envelopeTime (v);
-                    return (float) std::clamp (beats ? t * 2.0 * 60.0 / song.bpm : t, 0.0, 20.0);
-                };
-                m.amount = amount;
-                m.attack = seconds (env.attack);
-                m.hold = seconds (env.hold);
-                m.decay = seconds (env.decay);
-                m.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
-                m.release = seconds (env.release);
-                return m;
-            };
-
-            if (c.filterType <= 1 || c.filterType >= 5) // tipos com passa-baixas
-                def.synth.filterEnv = modEnvelope (c.envelopes[2], filterEnvelopeOctaves (c.modX, c.filterType, c.envelopes[2].amount));
-            def.synth.pitchEnv = modEnvelope (c.envelopes[4], std::clamp (c.envelopes[4].amount, -2400, 2400) / 100.0f);
+            def.synth.filterEnv = filterEnv;
+            def.synth.pitchEnv = pitchEnv;
         }
 
         // trecho do sample e start offset
