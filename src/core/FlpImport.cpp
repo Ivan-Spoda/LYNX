@@ -615,6 +615,17 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                 }
             }
 
+        // Fruity DrumSynth Live: o sample de bateria do FL com o mesmo nome do som escolhido
+        if (c.pluginName == "Fruity DrumSynth Live")
+            if (const auto sound = drumSynthLiveSound (c.pluginState))
+                for (const auto& candidate : drumSampleCandidates (*sound))
+                    if (auto path = existing (candidate); ! path.empty())
+                    {
+                        def.instrument = InstrumentKind::sampler;
+                        def.samplePath = std::move (path);
+                        break;
+                    }
+
         if (c.pluginName == "FPC")
             if (auto pads = fpcPads (c.pluginState))
             {
@@ -638,6 +649,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             def.plugin.name = def.plugin.foreign.name;
 
         // Harmless / Fruit Kick (REA_rodada10): aproximados pelo synth interno; os LFOs do canal ficam
+        bool adoptedFromPlugin = false;
         if (def.instrument == InstrumentKind::synth)
         {
             const auto name = lowercase (c.pluginName);
@@ -648,6 +660,7 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                     if (def.synth.lfo[(std::size_t) i].amount != 0.0f)
                         fromPlugin.lfo[(std::size_t) i] = def.synth.lfo[(std::size_t) i];
                 def.synth = fromPlugin;
+                adoptedFromPlugin = true;
                 const auto g = channelGain (def.volume) * pluginGain;
                 def.volume = std::clamp ((float) (std::log (10.0 * g + 1.0) / std::log (11.0)), 0.0f, 1.0f);
             };
@@ -661,6 +674,12 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
                 adopt();
             else if (name == "sytrus" && synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                adopt();
+            else if (name == "gms" && synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                adopt();
+            else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
+                adopt();
+            else if (name == "sakura" && synthFromSakura (c.pluginState, fromPlugin))
                 adopt();
         }
 
@@ -720,7 +739,8 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
             else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || (plugin == "sytrus" && def.instrument == InstrumentKind::synth))
+                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura") && adoptedFromPlugin)
+                     || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (o Keyboard Controller só manda notas para outros canais)

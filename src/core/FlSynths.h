@@ -4,6 +4,8 @@
 // Formatos e fórmulas em docs/analise/REA_rodada10.md (clean-room).
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "core/Song.h"
@@ -30,4 +32,20 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth
 // viram os osciladores, FM forte vira onda mais rica + envelope de filtro, o primeiro filtro ativo
 // vira o filtro do synth. `gain` recebe o Master level (linear).
 bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
+
+// GMS (REA_rodada12 §1): "SSLF" + preset .gmsynth; 3 osciladores de tabela, mistura em cascata,
+// AM/sync, uníssono, ladder, 2 envelopes AD e 2 LFOs. `gain` = Mix Level × Amp Level.
+bool synthFromGms (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
+
+// Ogun / Autogun (§2), aproximação grosseira: forma pela "fullness", decay/release do timbre,
+// uníssono e o filtro. O timbre aditivo e os articuladores ficam de fora.
+bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain);
+
+// Sakura (§4): corda aproximada (serra + triângulo, Hi-Cut, ADSR). Escalas [HIP].
+bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& synth);
+
+// Fruity DrumSynth Live (§3): nome do som escolhido (ex. "909 Hat O") e caminhos (com
+// %FLStudioData%) de samples de bateria do FL que o substituem, em ordem de preferência.
+std::optional<std::string> drumSynthLiveSound (const std::vector<std::uint8_t>& state);
+std::vector<std::string> drumSampleCandidates (const std::string& soundName);
 } // namespace lynx

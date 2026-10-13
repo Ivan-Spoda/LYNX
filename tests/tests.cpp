@@ -357,6 +357,10 @@ TEST (plugin_state_decoders_survive_garbage)
             CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromFruitKick (blob, synth))
             CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
+        if (lynx::synthFromGms (blob, 120.0, synth, harmlessGain) || lynx::synthFromOgun (blob, synth, harmlessGain) || lynx::synthFromSakura (blob, synth))
+            CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack) && std::isfinite (harmlessGain));
+        if (auto sound = lynx::drumSynthLiveSound (blob))
+            CHECK (sound->size() < 256);
         if (lynx::synthFromSytrus (blob, 120.0, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
         if (lynx::synthFromDX10 (blob, synth))
@@ -412,6 +416,7 @@ TEST (flp_real_files)
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, sytrus = 0, sytrusDecoded = 0;
+    std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: canais, decodificados
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     // import com os samples da instalação (o realFlpDir é ...\Data): para DirectWave/FPC
@@ -564,6 +569,37 @@ TEST (flp_real_files)
                     }
                 }
 
+            // geradores da rodada 12
+            for (const auto& c : p.channels)
+            {
+                lynx::SynthSettings gs;
+                float g = 1.0f;
+                int decoded = -1;
+                if (c.pluginName == "GMS")
+                    decoded = lynx::synthFromGms (c.pluginState, 128.0, gs, g);
+                else if (c.pluginName == "Ogun" || c.pluginName == "Autogun")
+                    decoded = lynx::synthFromOgun (c.pluginState, gs, g);
+                else if (c.pluginName == "Sakura")
+                    decoded = lynx::synthFromSakura (c.pluginState, gs);
+                else if (c.pluginName == "Fruity DrumSynth Live")
+                {
+                    const auto sound = lynx::drumSynthLiveSound (c.pluginState);
+                    decoded = sound && ! lynx::drumSampleCandidates (*sound).empty();
+                }
+                if (decoded < 0)
+                    continue;
+                auto& counter = generators[c.pluginName];
+                ++counter.first;
+                counter.second += decoded;
+                if (decoded && c.pluginName != "Fruity DrumSynth Live")
+                {
+                    CHECK (std::isfinite (g) && g >= 0.0f && gs.cutoff >= 20.0f && gs.cutoff <= 20000.0f && gs.sustain >= 0.0f && gs.sustain <= 1.0f);
+                    CHECK (std::isfinite (gs.attack) && std::isfinite (gs.decay) && std::isfinite (gs.release) && std::isfinite (gs.filterEnv.amount) && std::isfinite (gs.lfo[lynx::lfoCutoff].amount));
+                    for (const auto& o : gs.osc)
+                        CHECK (o.level >= 0.0f && o.level <= 1.0f && std::isfinite (o.detune) && std::isfinite (o.pan));
+                }
+            }
+
             // 3x Osc: todo estado dos demos decodifica, com níveis que somam no máximo 1
             for (const auto& c : p.channels)
                 if (c.pluginName == "3x Osc")
@@ -634,6 +670,36 @@ TEST (flp_real_files)
     CHECK (threeOscDecoded == threeOsc);
     std::printf ("  Harmless: %d canais, %d decodificados\n", harmless, harmlessDecoded);
     std::printf ("  Sytrus: %d canais, %d decodificados\n", sytrus, sytrusDecoded);
+    for (const auto& [name, counter] : generators)
+    {
+        std::printf ("  %s: %d canais, %d decodificados\n", name.c_str(), counter.first, counter.second);
+        CHECK (counter.second == counter.first);
+    }
+
+    // presets nativos do GMS (.gmsynth = o conteúdo do 0xD5 sem o "SSLF")
+    int gmsPresets = 0, gmsDecoded = 0;
+    const auto gmsFolder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "GMS";
+    if (std::filesystem::exists (gmsFolder))
+        for (const auto& entry : std::filesystem::recursive_directory_iterator (gmsFolder))
+            if (entry.path().extension() == ".gmsynth")
+            {
+                std::ifstream in (entry.path(), std::ios::binary);
+                std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+                std::vector<std::uint8_t> blob { 'S', 'S', 'L', 'F' };
+                const auto n = (std::uint32_t) file.size();
+                blob.insert (blob.end(), reinterpret_cast<const std::uint8_t*> (&n), reinterpret_cast<const std::uint8_t*> (&n) + 4);
+                blob.insert (blob.end(), file.begin(), file.end());
+                lynx::SynthSettings gs;
+                float g = 1.0f;
+                ++gmsPresets;
+                if (lynx::synthFromGms (blob, 120.0, gs, g))
+                {
+                    ++gmsDecoded;
+                    CHECK (std::isfinite (g) && gs.cutoff >= 20.0f && std::isfinite (gs.pitchEnv.amount) && std::isfinite (gs.lfo[lynx::lfoPitch].period));
+                }
+            }
+    std::printf ("  presets GMS: %d, %d decodificados\n", gmsPresets, gmsDecoded);
+    CHECK (gmsDecoded == gmsPresets);
     CHECK (sytrusDecoded == sytrus);
     CHECK (harmlessDecoded == harmless && harmless > 100);
 

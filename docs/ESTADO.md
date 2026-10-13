@@ -75,6 +75,13 @@ Atualizado em 2026-10-13.
   Fast Dist, Fruity Filter, Flangus e Soft Clipper entram com os ajustes salvos.
 - **Sintetizadores simples do FL (REA rodada 10)**: Harmless (160 canais nos demos), MiniSynth, DX10
   e Fruit Kick aproximados pelo synth interno (osciladores/uníssono, envelopes, filtro, LFO, porta).
+- **Sytrus (REA rodada 11)**: estado zlib (inflate próprio no núcleo) com a matriz FM/RM, 10 unidades e
+  articuladores; as 3 portadoras mais fortes viram os osciladores, FM forte vira onda mais rica +
+  envelope de filtro, RM vira AM, o primeiro filtro ativo (com o envelope de cutoff) vira o filtro.
+  268/268 canais dos demos e 984/984 presets decodificam.
+- **GMS, Ogun/Autogun, Sakura, DrumSynth Live (REA rodada 12)**: GMS completo (ondas pelo nome,
+  mistura em cascata, AM/sync, uníssono, ladder, 2 envelopes, 2 LFOs, mono/porta; 306/306 presets);
+  Ogun/Autogun e Sakura aproximações grosseiras; DrumSynth Live toca o sample 808/909 do FL de mesmo nome.
 - **Presets do FL**: os 169 presets de canal do 3x Osc (botão "Presets do FL..." no synth) e 93
   presets de efeito (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 2/3, Stereo Shaper; menu
   do slot do mixer) são lidos dos `.fst` da instalação.
@@ -138,8 +145,7 @@ Confirmadas empiricamente nos demos:
 
 ## Próximo passo
 Regressão: os 20 "Demo songs" do FL 2026 exportam sem erro (`LYNX.exe --export`), ~25x mais rápido
-que o tempo real. Sem equivalente ainda (tocam com preset do synth pelo nome): Sytrus (268 canais nos
-demos), Harmor (100), FLEX (57), Ogun (23), GMS, Drumpad, DrumSynth Live, Autogun, Morphine — Sytrus e
-GMS/Ogun estão nas rodadas 11–12 do REA. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
+que o tempo real. Sem equivalente ainda (tocam com preset do synth pelo nome): Harmor (100 canais nos
+demos; formato na rodada 11 §4), FLEX (57), Drumpad, Morphine. Efeitos sem equivalente mais comuns: Pitcher, Gross Beat,
 Patcher (contêiner), Effector, Frequency Splitter, Vocodex. Também em aberto: ASIO (licença do SDK
 da Steinberg: GPLv3 ou proprietária) e plugins em processo separado.

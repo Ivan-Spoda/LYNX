@@ -27,7 +27,7 @@ qualquer PC, independente do tamanho do projeto.
 - **Exportar**: WAV 16/24/32f, FLAC, OGG, música ou pattern, com cauda e dither
 - **Projetos**: formato próprio `.lynx` (JSON); importa `.flp` do FL Studio (canais, samples reais,
   patterns, arrangements, marcadores, mixer com roteamento, EQ das trilhas e efeitos nativos com os
-  ajustes salvos, automação, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Harmless e outros
+  ajustes salvos, automação, 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Sytrus, GMS, Harmless e outros
   synths aproximados, filtro/envelopes/LFOs do canal, VST3/CLAP de terceiros com estado quando estiverem
   instalados; um relatório mostra o que não tem equivalente) e `.mid`; presets `.fst` do 3x Osc e de
   efeitos do FL

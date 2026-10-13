@@ -30,6 +30,7 @@ add_library(lynx_core STATIC
     src/core/FlSamplers.cpp
     src/core/FlSynths.cpp
     src/core/FlSytrus.cpp
+    src/core/FlGenerators.cpp
     src/core/Inflate.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
