@@ -566,6 +566,11 @@ const std::vector<EffectSlot>* EffectsPanel::slots() const
     return track >= 0 && track < (int) mixer.size() ? &mixer[(std::size_t) track].effects : nullptr;
 }
 
+juce::Rectangle<int> EffectsPanel::mixBounds (int slot) const
+{
+    return slotBounds (slot).removeFromRight (26);
+}
+
 juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 {
     return { 8, panelHeader + slot * slotHeight, getWidth() - 16, slotHeight - 3 };
@@ -628,7 +633,18 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.setColour (slot.enabled ? theme::text : juce::Colours::grey);
             const auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
                                                               : utf8 (effectInfo (slot.kind).name);
-            g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24), juce::Justification::centredLeft);
+            g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
+
+            // knob de dry/wet do slot
+            const auto knob = mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f);
+            constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
+            constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
+            g.setColour (theme::knobBackground);
+            g.fillEllipse (knob);
+            juce::Path arc;
+            arc.addCentredArc (knob.getCentreX(), knob.getCentreY(), 7.5f, 7.5f, 0.0f, start, start + range * slot.mix, true);
+            g.setColour (slot.enabled ? theme::accentBlue : juce::Colours::grey);
+            g.strokePath (arc, juce::PathStrokeType (2.0f));
         }
         else if (i == (int) s->size())
         {
@@ -713,6 +729,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         selectedSlot = i;
         repaint();
 
+        if (! e.mods.isPopupMenu() && mixBounds (i).contains (e.getPosition()))
+        {
+            dragParam = mixParam;
+            dragStart = (*s)[(std::size_t) i].mix;
+            return;
+        }
+
         if (e.mods.isPopupMenu())
             showSlotMenu (i);
         else if (e.x < r.getX() + 22) // LED: bypass
@@ -747,6 +770,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
 void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (dragParam == mixParam)
+    {
+        const auto v = juce::jlimit (0.0f, 1.0f, dragStart - (float) e.getDistanceFromDragStartY() / 150.0f);
+        engine.editSong ([t = track, slot = selectedSlot, v] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].mix = v; });
+        return;
+    }
+
     if (dragParam < 0)
         return;
 
@@ -764,6 +794,13 @@ void EffectsPanel::mouseUp (const juce::MouseEvent&)
 
 void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    for (int i = 0; slots() != nullptr && i < (int) slots()->size(); ++i)
+        if (mixBounds (i).contains (e.getPosition()))
+        {
+            engine.editSong ([t = track, i] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) i].mix = 1.0f; });
+            return;
+        }
+
     const auto p = knobAt (e.getPosition());
 
     if (p < 0)

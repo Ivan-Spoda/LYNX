@@ -1598,6 +1598,79 @@ TEST (arrangements_switch_and_keep_clip_indices)
     CHECK (s.arrangements.size() == 1 && s.currentArrangement == 0 && s.playlist.size() == 1 && s.loopEnd == 0);
 }
 
+namespace
+{
+// Efeito de teste que inverte o sinal e conta quantas vezes processou.
+class CountingInverter final : public lynx::Effect
+{
+public:
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+    void process (float* l, float* r, int n, const lynx::EffectParams&, double) noexcept override
+    {
+        ++calls;
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] = -l[i];
+            r[i] = -r[i];
+        }
+    }
+    int calls = 0;
+};
+} // namespace
+
+TEST (effect_slot_dry_wet_and_smart_disable)
+{
+    lynx::Song s;
+    s.mixer = lynx::Song::defaultMixer (1);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sampler;
+    c.samplePath = "dc";
+    c.volume = 1.0f;
+    c.mixerTrack = 1;
+    s.channels.push_back (c);
+    s.patterns.emplace_back();
+    lynx::EffectSlot fx;
+    fx.kind = lynx::EffectKind::plugin;
+    fx.plugin.id = "inversor";
+    fx.mix = 0.25f; // 75% seco (+0,5) e 25% molhado (-0,5) = +0,25
+    s.mixer[1].effects.push_back (fx);
+
+    auto inverter = std::make_shared<CountingInverter>();
+    lynx::RackState::Factories f;
+    f.samples = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (4800, 0.5f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    f.pluginEffects = [inverter] (const lynx::PluginRef&, double) -> std::shared_ptr<lynx::Effect> { return inverter; };
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, f);
+
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    lynx::LiveEventQueue live;
+    lynx::NoteEvent on;
+    on.velocity = 1.0f;
+    live.push (on);
+    std::vector<float> l (480), rr (480);
+    r.process (state.get(), false, 0.0, 480, l.data(), rr.data(), &live);
+    CHECK (std::abs (l[100] - 0.25f) < 1e-4f);
+
+    // depois que o sample acaba: 4 s de silêncio e o plugin deixa de ser chamado
+    for (int i = 0; i < 100 * 6; ++i) // 6 s
+        r.process (state.get(), false, 0.0, 480, l.data(), rr.data());
+    const auto callsAfterSilence = inverter->calls;
+    for (int i = 0; i < 100; ++i)
+        r.process (state.get(), false, 0.0, 480, l.data(), rr.data());
+    CHECK (inverter->calls == callsAfterSilence);
+    CHECK (callsAfterSilence < 100 * 6);
+
+    // som de novo: volta a processar no mesmo bloco
+    live.push (on);
+    r.process (state.get(), false, 0.0, 480, l.data(), rr.data(), &live);
+    CHECK (inverter->calls == callsAfterSilence + 1 && std::abs (l[100] - 0.25f) < 1e-4f);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

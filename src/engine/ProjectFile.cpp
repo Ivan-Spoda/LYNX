@@ -295,6 +295,9 @@ juce::String toJson (const Song& song)
                 params.add (juce::roundToInt (v * 10000.0f) / 10000.0);
             e->setProperty ("params", params);
 
+            if (slot.mix < 1.0f)
+                e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
+
             if (slot.kind == EffectKind::plugin)
                 e->setProperty ("plugin", pluginToVar (slot.plugin));
             effects.add (juce::var (e.release()));
@@ -476,6 +479,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     EffectSlot slot;
                     slot.kind = *kind;
                     slot.enabled = (bool) e.getProperty ("on", true);
+                    slot.mix = juce::jlimit (0.0f, 1.0f, (float) (double) e.getProperty ("mix", 1.0));
 
                     if (auto* params = e["params"].getArray())
                         for (int i = 0; i < params->size() && i < maxEffectParams; ++i)

@@ -75,6 +75,7 @@ private:
 // Painel de efeitos da trilha selecionada: 10 slots e os knobs do slot escolhido.
 //  - clique num slot vazio: escolher efeito; clique num ocupado: editar os knobs
 //  - LED do slot: liga/desliga (bypass); clique direito: trocar, mover, remover
+//  - knob à direita do slot: dry/wet (arrastar; duplo clique volta a 100%)
 class EffectsPanel final : public juce::Component,
                            private juce::ChangeListener
 {
@@ -93,6 +94,8 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     juce::Rectangle<int> slotBounds (int slot) const;
+    juce::Rectangle<int> mixBounds (int slot) const; // knob de dry/wet na linha do slot
+    static constexpr int mixParam = -2;
     juce::Rectangle<int> knobBounds (int param) const;
     int knobAt (juce::Point<int> p) const;
     const std::vector<EffectSlot>* slots() const;

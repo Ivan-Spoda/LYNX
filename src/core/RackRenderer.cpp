@@ -359,6 +359,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
     lastTrackGain.fill (std::numeric_limits<float>::quiet_NaN());
     channelBuffers.assign ((std::size_t) maxChannels * 2 * chunkCapacity, 0.0f);
+    smartDisable.assign ((std::size_t) maxMixerTracks * maxEffectSlots, {});
     trackScratchBuffers.assign ((std::size_t) maxMixerTracks * 2 * chunkCapacity, 0.0f);
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
@@ -516,12 +517,43 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
     const auto& slots = state.song.mixer[(std::size_t) track].effects;
     const auto& effects = state.effects[(std::size_t) track];
 
+    auto* l = trackBuffer (track, 0);
+    auto* r = trackBuffer (track, 1);
+
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
     {
-        if (! slots[i].enabled)
+        if (! slots[i].enabled || slots[i].mix <= 0.0f)
             continue;
 
-        if (state.hasAutomation && slots[i].kind != EffectKind::plugin)
+        // smart disable (como no FL): plugin com entrada e saída em silêncio por 4 s é pulado
+        const auto key = (std::size_t) track * maxEffectSlots + i;
+        const auto isPlugin = slots[i].kind == EffectKind::plugin;
+
+        if (isPlugin && key < smartDisable.size())
+        {
+            auto& sd = smartDisable[key];
+
+            if (sd.effect != effects[i].get())
+                sd = { effects[i].get(), 0 };
+
+            if (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel)
+                sd.silentSamples = 0;
+            else if (sd.silentSamples >= (int) (sampleRate * 4.0))
+                continue;
+            else
+                sd.silentSamples += n;
+        }
+
+        // dry/wet: guarda o seco para misturar depois
+        const auto partial = slots[i].mix < 0.999f;
+
+        if (partial)
+        {
+            std::memcpy (trackScratch (track, 0), l, sizeof (float) * (std::size_t) n);
+            std::memcpy (trackScratch (track, 1), r, sizeof (float) * (std::size_t) n);
+        }
+
+        if (state.hasAutomation && ! isPlugin)
         {
             auto params = slots[i].params; // cópia de 6 floats, sem alocação
             const auto& autos = state.effectParamAuto[(std::size_t) track][i];
@@ -529,10 +561,26 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             for (std::size_t p = 0; p < params.size(); ++p)
                 params[p] = automated (autos[p], params[p]);
 
-            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, params, state.song.bpm);
+            effects[i]->process (l, r, n, params, state.song.bpm);
         }
         else
-            effects[i]->process (trackBuffer (track, 0), trackBuffer (track, 1), n, slots[i].params, state.song.bpm);
+            effects[i]->process (l, r, n, slots[i].params, state.song.bpm);
+
+        if (isPlugin && key < smartDisable.size() && (peakOf (l, n) > silenceLevel || peakOf (r, n) > silenceLevel))
+            smartDisable[key].silentSamples = 0; // cauda (reverb, delay): continua processando
+
+        if (partial)
+        {
+            const auto wet = slots[i].mix;
+            const auto* dl = trackScratch (track, 0);
+            const auto* dr = trackScratch (track, 1);
+
+            for (int k = 0; k < n; ++k)
+            {
+                l[k] = dl[k] + (l[k] - dl[k]) * wet;
+                r[k] = dr[k] + (r[k] - dr[k]) * wet;
+            }
+        }
     }
 }
 

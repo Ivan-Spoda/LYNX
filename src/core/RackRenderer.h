@@ -157,6 +157,14 @@ private:
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
     WorkerPool* workers = nullptr;
+
+    struct SmartDisableState
+    {
+        const Effect* effect = nullptr;
+        int silentSamples = 0;
+    };
+    std::vector<SmartDisableState> smartDisable; // [trilha * maxEffectSlots + slot]
+    static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;
 };
 } // namespace lynx
