@@ -92,4 +92,6 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Sytrus (matriz FM/RM, filtros, articuladores) aproximado pelo synth interno (rodada 11)
 - [x] GMS; Ogun/Autogun e Sakura (grosseiros); DrumSynth Live por sample (rodada 12)
 - [x] Harmor (aproximação grosseira: partes A/B, filtro, envelopes, uníssono)
+- [x] Gross Beat (gate de volume), Frequency Splitter, Effector (rodada 14)
+- [ ] Patcher (achatar cadeias em série; paralelo -> submix), links de controlador (Peak/Envelope Controller)
 - [ ] FLEX, Morphine, Drumpad, BooBass, Kepler, Wave Traveller, PoiZone, Toxic Biohazard, BassDrum

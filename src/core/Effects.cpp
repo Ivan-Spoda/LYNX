@@ -854,6 +854,51 @@ private:
 float utilityGainDb (float v) { return (v - 0.5f) * 48.0f; }   // ±24 dB
 float utilityMatrix (float v) { return v * 4.0f - 2.0f; }      // −2..2 (0,75 = 1,0)
 
+// Gate de volume: 32 passos por compasso de 4 tempos (o "volume" do Gross Beat). Ganho por passo,
+// mistura com o sinal original e suavização de ataque/release.
+namespace gate
+{
+constexpr int steps = 32;
+constexpr int mixParam = 32, attackParam = 33, releaseParam = 34;
+inline double attackMs (float v) { return std::pow (501.0, (double) v) - 1.0; }
+inline double releaseMs (float v) { return 2.0 * (std::pow (501.0, (double) v) - 1.0); }
+} // namespace gate
+
+class VolumeGate final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override { sampleRate = sr; }
+    void reset() noexcept override { gain = 1.0f; }
+    void setSongPosition (double ticks) noexcept override { tick = ticks; }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        const auto mix = std::clamp (p[gate::mixParam], 0.0f, 1.0f);
+        const auto up = (float) (1.0 - std::exp (-1.0 / (std::max (0.05, gate::attackMs (p[gate::attackParam])) * 0.001 * sampleRate)));
+        const auto down = (float) (1.0 - std::exp (-1.0 / (std::max (0.05, gate::releaseMs (p[gate::releaseParam])) * 0.001 * sampleRate)));
+        const auto ticksPerSample = std::max (1.0, bpm) / 60.0 * ppq / sampleRate;
+        const auto bar = 4.0 * ppq;
+        auto position = std::fmod (std::max (0.0, tick), bar);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto step = std::clamp ((int) (position / bar * gate::steps), 0, gate::steps - 1);
+            const auto target = 1.0f - mix + mix * std::clamp (p[(std::size_t) step], 0.0f, 1.0f);
+            gain += (target - gain) * (target > gain ? up : down);
+            l[i] *= gain;
+            r[i] *= gain;
+            position += ticksPerSample;
+            if (position >= bar)
+                position -= bar;
+        }
+        tick += ticksPerSample * n;
+    }
+
+private:
+    double sampleRate = 44100.0, tick = 0.0;
+    float gain = 1.0f;
+};
+
 class Utility final : public Effect
 {
 public:
@@ -936,6 +981,19 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo chorus { "Chorus", { { "Velocidade", 0.45f }, { "Profund.", 0.4f }, { "Mix", 0.5f }, { "Feedback", 0.0f } } };
     static const EffectInfo utility { "Utilitário", { { "Ganho", 0.5f }, { "Balanço", 0.5f }, { "E -> E", 0.75f }, { "D -> E", 0.5f },
                                                       { "E -> D", 0.5f }, { "D -> D", 0.75f } } };
+    static const EffectInfo volumeGate = [] {
+        static const char* names[] = { "Passo 1", "Passo 2", "Passo 3", "Passo 4", "Passo 5", "Passo 6", "Passo 7", "Passo 8",
+                                       "Passo 9", "Passo 10", "Passo 11", "Passo 12", "Passo 13", "Passo 14", "Passo 15", "Passo 16",
+                                       "Passo 17", "Passo 18", "Passo 19", "Passo 20", "Passo 21", "Passo 22", "Passo 23", "Passo 24",
+                                       "Passo 25", "Passo 26", "Passo 27", "Passo 28", "Passo 29", "Passo 30", "Passo 31", "Passo 32" };
+        EffectInfo info { "Gate de volume", {} };
+        for (int i = 0; i < gate::steps; ++i)
+            info.params.push_back ({ names[i], (i % 8) < 4 ? 1.0f : 0.0f }); // padrão: meio tempo ligado, meio desligado
+        info.params.push_back ({ "Mix", 1.0f });
+        info.params.push_back ({ "Ataque", 0.1765f });  // ~2 ms
+        info.params.push_back ({ "Release", 0.5f });    // ~43 ms
+        return info;
+    }();
     static const EffectInfo parametric = [] {
         // bandas como num EQ de mixagem: prateleira grave, 5 picos e prateleira aguda, tudo em 0 dB
         constexpr peq::BandType types[] = { peq::BandType::lowShelf, peq::BandType::peak, peq::BandType::peak, peq::BandType::peak,
@@ -979,6 +1037,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::chorus: return chorus;
         case EffectKind::parametricEq: return parametric;
         case EffectKind::utility: return utility;
+        case EffectKind::volumeGate: return volumeGate;
     }
     return eq;
 }
@@ -1108,6 +1167,13 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.2f", utilityMatrix (v));
             return text;
 
+        case EffectKind::volumeGate:
+            if (param < gate::steps || param == gate::mixParam)
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            else
+                std::snprintf (text, sizeof (text), "%.1f ms", param == gate::attackParam ? gate::attackMs (v) : gate::releaseMs (v));
+            return text;
+
         case EffectKind::plugin:
             break;
     }
@@ -1141,6 +1207,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::chorus: return std::make_unique<Chorus>();
         case EffectKind::parametricEq: return std::make_unique<ParametricEq>();
         case EffectKind::utility: return std::make_unique<Utility>();
+        case EffectKind::volumeGate: return std::make_unique<VolumeGate>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

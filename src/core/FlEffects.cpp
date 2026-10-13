@@ -502,10 +502,191 @@ bool stereoShaper (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     slot.params[4] = utilityMatrixValue (param (3)); // L -> R
     return true;
 }
+// --- REA_rodada14: Gross Beat (volume), Frequency Splitter, Effector ----------------------------
+
+// Gross Beat: o slot de volume escolhido (envelope de 4 tempos) vira os 32 passos do gate; o
+// "time travel" não tem equivalente. Sem estado legível, o gate fica transparente.
+bool grossBeat (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    for (int i = 0; i < 32; ++i)
+        slot.params[(std::size_t) i] = 1.0f;
+
+    if (d.size() < 64)
+        return false;
+    auto version = (std::uint32_t) i32At (d, 0);
+    if (version > 0xffff)
+        version >>= 16;
+    if (version < 3 || version > 9)
+        return false;
+
+    const auto paramCount = 9;
+    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
+    std::size_t pos = 4 + 4 * paramCount + (version >= 5 ? 9 : 8);
+    const auto volumeSlot = 36 + std::clamp (param (1), 0, 35);
+
+    // os 72 slots (36 de tempo + 36 de volume): nome, 15 B de sincronismo, envelope
+    std::vector<std::pair<double, double>> chosen; // (x acumulado em tempos, y)
+    std::vector<int> curves;
+    for (int s = 0; s < 72; ++s)
+    {
+        if (pos >= d.size())
+            return false;
+        pos += 1 + d[pos] + 15;
+        if (pos + 12 > d.size())
+            return false;
+        const auto n = i32At (d, pos + 8);
+        if (n < 0 || n > 5000 || pos + 12 + (std::size_t) n * 24 + 20 > d.size())
+            return false;
+        pos += 12;
+        double x = 0.0;
+        for (int k = 0; k < n; ++k, pos += 24)
+            if (s == volumeSlot)
+            {
+                double dx = 0.0, y = 0.0;
+                std::memcpy (&dx, d.data() + pos, 8);
+                std::memcpy (&y, d.data() + pos + 8, 8);
+                x += std::isfinite (dx) ? std::max (0.0, dx) : 0.0;
+                chosen.emplace_back (x, std::isfinite (y) ? std::clamp (y, 0.0, 1.0) : 1.0);
+                curves.push_back (d[pos + 20]);
+            }
+        pos += 20;
+    }
+
+    if (chosen.empty())
+        return true;
+
+    // valor no meio de cada passo; "hold" (2) segura o ponto anterior, o resto vira reta
+    for (int i = 0; i < 32; ++i)
+    {
+        const auto t = (i + 0.5) / 32.0 * 4.0;
+        auto value = chosen.back().second;
+        if (t <= chosen.front().first)
+            value = chosen.front().second;
+        else
+            for (std::size_t k = 1; k < chosen.size(); ++k)
+                if (t < chosen[k].first)
+                {
+                    const auto [x0, y0] = chosen[k - 1];
+                    const auto [x1, y1] = chosen[k];
+                    value = curves[k] == 2 || x1 <= x0 ? y0 : y0 + (y1 - y0) * (t - x0) / (x1 - x0);
+                    break;
+                }
+        slot.params[(std::size_t) i] = (float) value;
+    }
+
+    slot.params[32] = clamp01 (param (3) / 256.0);
+    slot.params[33] = clamp01 (param (4) / 10000.0);
+    slot.params[34] = clamp01 (param (5) / 10000.0);
+    return true;
+}
+
+// Frequency Splitter: a saída principal com nível por banda vira prateleiras no EQ paramétrico
+bool frequencySplitter (const std::vector<std::uint8_t>& d, EffectSlot& slot)
+{
+    if (d.size() < 15 * 4)
+        return false;
+    auto word = [&] (int i) { return i32At (d, 4 * (std::size_t) i); };
+    auto hz = [] (int v) { return 30.0 * std::pow (16000.0 / 30.0, std::clamp (v, 0, 65536) / 65536.0); };
+    auto db = [] (int v) { return std::clamp (v / 100.0, -18.0, 18.0); };
+    const auto threeBands = word (6) != 0;
+    const auto low = db (word (12)), mid = db (word (13)), high = db (word (14));
+
+    for (int b = 0; b < peq::bands; ++b)
+        slot.params[(std::size_t) peq::param (b, 0)] = peq::typeValue (peq::BandType::off);
+
+    auto shelf = [&] (int band, peq::BandType type, double f, double gain) {
+        slot.params[(std::size_t) peq::param (band, 0)] = peq::typeValue (type);
+        slot.params[(std::size_t) peq::param (band, 1)] = peq::hzValue (f);
+        slot.params[(std::size_t) peq::param (band, 2)] = peq::gainValue (gain);
+        slot.params[(std::size_t) peq::param (band, 3)] = peq::qValue (1.0);
+    };
+
+    if (threeBands)
+    {
+        shelf (0, peq::BandType::lowShelf, hz (word (1)), low - mid);
+        shelf (6, peq::BandType::highShelf, hz (word (2)), high - mid);
+        slot.params[peq::outputParam] = peq::gainValue (mid);
+    }
+    else
+    {
+        shelf (0, peq::BandType::lowShelf, hz (word (1)), low - mid);
+        slot.params[peq::outputParam] = peq::gainValue (mid);
+    }
+    return true;
+}
+
+// Effector: o algoritmo escolhido vira o efeito interno parecido (escalas de X/Y aproximadas)
+std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d)
+{
+    // "SSLF" + tamanho + "10XF" + 64 floats reservados + os 12 parâmetros
+    if (d.size() < 12 + 76 * 4 || std::memcmp (d.data(), "SSLF", 4) != 0)
+        return std::nullopt;
+    float p[12];
+    std::memcpy (p, d.data() + 12 + 64 * 4, sizeof (p));
+    for (auto& v : p)
+        v = std::isfinite (v) ? std::clamp (v, 0.0f, 1.0f) : 0.0f;
+
+    const auto x = p[3], y = p[4];
+    std::optional<EffectSlot> slot;
+    switch ((int) std::lround (p[0] * 11.0f))
+    {
+        case 0: // Distort
+            slot = makeEffectSlot (EffectKind::distortion);
+            slot->params[0] = x;
+            slot->params[1] = 1.0f - 0.5f * y;
+            break;
+        case 1: // Lo-fi: distorção leve e escura
+            slot = makeEffectSlot (EffectKind::distortion);
+            slot->params[0] = 0.3f * x;
+            slot->params[1] = 0.6f * (1.0f - y);
+            break;
+        case 2: case 3: // Flanger / Phaser
+            slot = makeEffectSlot (EffectKind::chorus);
+            slot->params[1] = x;
+            slot->params[3] = y;
+            slot->params[2] = 1.0f;
+            break;
+        case 4: // Filter
+            slot = makeEffectSlot (EffectKind::filter);
+            slot->params[1] = x;
+            slot->params[2] = y;
+            break;
+        case 5: // Delay
+            slot = makeEffectSlot (EffectKind::delay);
+            slot->params[0] = x;
+            slot->params[1] = y * 0.9f;
+            slot->params[2] = 0.5f;
+            break;
+        case 6: // Reverb
+            slot = makeEffectSlot (EffectKind::reverb);
+            slot->params[0] = x;
+            slot->params[1] = y;
+            slot->params[3] = 1.0f;
+            slot->params[4] = 0.0f; // só o molhado: o dry/wet do slot faz a mistura
+            break;
+        case 7: // Stereo: largura
+        {
+            slot = makeEffectSlot (EffectKind::utility);
+            const auto w = 2.0 * x;
+            slot->params[2] = slot->params[5] = utilityMatrixValue ((1.0 + w) / 2.0);
+            slot->params[3] = slot->params[4] = utilityMatrixValue ((1.0 - w) / 2.0);
+            break;
+        }
+        default: return std::nullopt; // Trans, Grain, Vox, Ring
+    }
+
+    slot->mix = p[2];
+    slot->enabled = p[1] < 0.5f;
+    return slot;
+}
+
 } // namespace
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    if (pluginName == "Effector")
+        return effector (state);
+
     const auto kind = effectForFlPlugin (pluginName);
 
     if (! kind)
@@ -556,6 +737,10 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         fruityFilter (state, slot);
     else if (is ("Fruity Flangus"))
         flangus (state, slot);
+    else if (is ("Gross Beat"))
+        grossBeat (state, slot);
+    else if (is ("Frequency Splitter"))
+        frequencySplitter (state, slot);
     else if (is ("Fruity Phase Inverter"))
     {
         slot.params[2] = utilityMatrixValue (-1.0); // inverte os dois lados

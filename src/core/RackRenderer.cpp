@@ -751,10 +751,14 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             for (std::size_t p = 0; p < used; ++p)
                 params[p] = automated (autos[p], params[p]);
 
+            effects[i]->setSongPosition (chunkTick);
             effects[i]->process (l, r, n, params, bpm);
         }
         else
+        {
+            effects[i]->setSongPosition (chunkTick);
             effects[i]->process (l, r, n, slots[i].params, bpm);
+        }
 
 
         if (partial)

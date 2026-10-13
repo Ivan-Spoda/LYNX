@@ -228,7 +228,8 @@ enum class EffectKind : std::uint8_t
     distortion,
     chorus,
     parametricEq, // 7 bandas (como o Parametric EQ 2 do FL)
-    utility       // ganho, pan e matriz estéreo (Balance, PanOMatic, Stereo Shaper do FL)
+    utility,      // ganho, pan e matriz estéreo (Balance, PanOMatic, Stereo Shaper do FL)
+    volumeGate    // ganho por passo sincronizado ao compasso (o volume do Gross Beat)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

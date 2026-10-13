@@ -88,6 +88,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Spreader", EffectKind::utility },          { "Transient Processor", EffectKind::utility },
         { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
+        { "Gross Beat", EffectKind::volumeGate },     { "Frequency Splitter", EffectKind::parametricEq },
     };
 
     // presets antigos (FL 3) gravam o nome com outra caixa ("Fruity delay 2")

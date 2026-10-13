@@ -405,6 +405,38 @@ TEST (inflate_zlib)
     CHECK (! lynx::inflateZlib (fixed, sizeof (fixed), false, 10));
 }
 
+TEST (volume_gate_follows_bar_position)
+{
+    auto fx = lynx::makeEffect (lynx::EffectKind::volumeGate);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::volumeGate);
+    for (int i = 0; i < 32; ++i)
+        slot.params[(std::size_t) i] = i < 16 ? 1.0f : 0.0f; // dois primeiros tempos abertos, dois fechados
+    slot.params[33] = slot.params[34] = 0.0f;                // sem suavização
+
+    // 120 BPM: um tempo = 0,5 s = 24000 amostras; o compasso de 4 tempos começa no tick 0
+    std::vector<float> l (96000, 1.0f), r (96000, 1.0f);
+    fx->setSongPosition (0.0);
+    for (int done = 0; done < 96000; done += 512)
+        fx->process (l.data() + done, r.data() + done, std::min (512, 96000 - done), slot.params, 120.0);
+    CHECK (l[10000] > 0.99f && l[40000] > 0.99f);  // tempos 1 e 2
+    CHECK (l[60000] < 0.01f && l[90000] < 0.01f);  // tempos 3 e 4
+
+    // começando no meio do compasso (tempo 3): já fechado
+    std::vector<float> l2 (4800, 1.0f), r2 (4800, 1.0f);
+    fx->reset();
+    fx->setSongPosition (2.0 * lynx::ppq);
+    fx->process (l2.data(), r2.data(), 4800, slot.params, 120.0);
+    CHECK (l2[4000] < 0.01f);
+
+    // mix 0: transparente
+    slot.params[32] = 0.0f;
+    std::vector<float> l3 (4800, 1.0f), r3 (4800, 1.0f);
+    fx->setSongPosition (2.0 * lynx::ppq);
+    fx->process (l3.data(), r3.data(), 4800, slot.params, 120.0);
+    CHECK (l3[4000] > 0.99f);
+}
+
 TEST (flp_effect_automation_follows_slots_and_params)
 {
     // trilha 1: slot 0 com um efeito sem equivalente (sai), slot 2 com o Parametric EQ 2
@@ -721,6 +753,36 @@ TEST (flp_real_files)
     {
         std::printf ("  %s: %d canais, %d decodificados\n", name.c_str(), counter.first, counter.second);
         CHECK (counter.second == counter.first);
+    }
+
+    // Gross Beat dos demos: o slot de volume vira o gate (os que usam um slot com envelope ficam com passos < 1)
+    {
+        int gates = 0, shaped = 0, effectors = 0;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
+            if (entry.path().extension() == ".flp")
+            {
+                std::ifstream in (entry.path(), std::ios::binary);
+                const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+                try
+                {
+                    const auto project = flp::parseProject (file);
+                    for (const auto& insert : project.mixer)
+                        for (const auto& slot : insert.slots)
+                            if (slot.plugin == "Gross Beat")
+                            {
+                                const auto fx = lynx::effectFromFl (slot.plugin, slot.state);
+                                CHECK (fx && fx->kind == lynx::EffectKind::volumeGate);
+                                ++gates;
+                                if (fx && std::any_of (fx->params.begin(), fx->params.begin() + 32, [] (float v) { return v < 0.99f; }))
+                                    ++shaped;
+                            }
+                            else if (slot.plugin == "Effector")
+                                effectors += lynx::effectFromFl (slot.plugin, slot.state).has_value();
+                }
+                catch (const flp::Error&) {}
+            }
+        std::printf ("  Gross Beat: %d slots, %d com gate; Effector: %d convertidos\n", gates, shaped, effectors);
+        CHECK (gates == 0 || shaped > 0);
     }
 
     // presets nativos do GMS (.gmsynth = o conteúdo do 0xD5 sem o "SSLF")
