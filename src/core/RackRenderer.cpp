@@ -435,6 +435,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     lastTrackGain.fill (std::numeric_limits<float>::quiet_NaN());
     channelBuffers.assign ((std::size_t) maxChannels * 2 * chunkCapacity, 0.0f);
     smartDisable.assign ((std::size_t) maxMixerTracks * maxEffectSlots, {});
+    trackEqs.assign ((std::size_t) maxMixerTracks, {});
     trackScratchBuffers.assign ((std::size_t) maxMixerTracks * 2 * chunkCapacity, 0.0f);
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
@@ -618,6 +619,51 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
     // PDC: este canal chega antes dos outros da trilha; atrasa até alinhar
     if ((std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr)
         state.channelDelays[(std::size_t) i]->process (l, r, n);
+}
+
+void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept
+{
+    if ((std::size_t) t >= trackEqs.size())
+        return;
+
+    auto& eq = trackEqs[(std::size_t) t];
+
+    if (! track.eq.active())
+    {
+        if (eq.running)
+            eq = {}; // desligado: zera os filtros para não voltar com cauda velha
+        return;
+    }
+
+    if (! eq.running || ! (eq.settings == track.eq))
+    {
+        // novos coeficientes, mantendo o estado dos filtros (sem estalo ao mexer)
+        const auto& s = track.eq;
+        eq.bands[0].shelf (sampleRate, std::min ((double) s.hz[0], sampleRate * 0.45), s.gainDb[0], false, TrackEq::shelfSlope (s.width[0]));
+        eq.bands[1].peaking (sampleRate, std::min ((double) s.hz[1], sampleRate * 0.45), TrackEq::peakQ (s.width[1]), s.gainDb[1]);
+        eq.bands[2].shelf (sampleRate, std::min ((double) s.hz[2], sampleRate * 0.45), s.gainDb[2], true, TrackEq::shelfSlope (s.width[2]));
+
+        for (std::size_t b = 0; b < 3; ++b)
+            if (s.gainDb[b] == 0.0f)
+                eq.bands[b].reset();
+
+        eq.settings = s;
+        eq.running = true;
+    }
+
+    for (std::size_t b = 0; b < 3; ++b)
+    {
+        if (eq.settings.gainDb[b] == 0.0f)
+            continue; // banda em 0 dB: não processa (como o FL)
+
+        auto& band = eq.bands[b];
+
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] = band.process (l[i], 0);
+            r[i] = band.process (r[i], 1);
+        }
+    }
 }
 
 void RackRenderer::runEffects (const RackState& state, int track, int n) noexcept
@@ -906,7 +952,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     runEffects (state, 0, numSamples);
 
     if (! song.mixer.empty())
+    {
+        applyTrackEq (song.mixer[0], 0, trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
         applyStereo (song.mixer[0], trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
+    }
 
     float gl = 1.0f, gr = 1.0f;
 
@@ -1038,6 +1087,7 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
 
     auto* l = trackBuffer (t, 0);
     auto* r = trackBuffer (t, 1);
+    applyTrackEq (track, t, l, r, n);
     applyStereo (track, l, r, n);
     const auto stepL = (gl - fromL) / (float) n, stepR = (gr - fromR) / (float) n;
 

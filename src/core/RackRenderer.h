@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/Arpeggiator.h"
+#include "core/Biquad.h"
 #include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
@@ -186,6 +187,15 @@ private:
         int silentSamples = 0;
     };
     std::vector<SmartDisableState> smartDisable; // [trilha * maxEffectSlots + slot]
+
+    struct TrackEqState
+    {
+        TrackEq settings;
+        std::array<Biquad, 3> bands;
+        bool running = false;
+    };
+    std::vector<TrackEqState> trackEqs; // EQ embutido de cada trilha
+    void applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;
 };

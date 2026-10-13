@@ -264,7 +264,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -283,6 +283,14 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            for (const auto& t : song.mixer)
+                if (t.eq.active())
+                {
+                    ++trackEqs;
+                    for (std::size_t b = 0; b < 3; ++b)
+                        CHECK (t.eq.hz[b] >= 10.0f && t.eq.hz[b] <= 16000.0f && std::abs (t.eq.gainDb[b]) <= 18.0f);
+                }
 
             for (const auto& a : song.arrangements)
                 for (const auto& m : a.markers)
@@ -376,7 +384,7 @@ TEST (flp_real_files)
     CHECK (threeOscDecoded == threeOsc);
     CHECK (wrappedParsed == wrapped);
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
-    std::printf ("  %d marcadores, %d mudanças de compasso\n", markers, signatures);
+    std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);
     CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
@@ -1146,6 +1154,48 @@ TEST (schedule_index_matches_full_scan)
 
     CHECK (events > 500);
     CHECK (mismatches == 0);
+}
+
+TEST (mixer_track_eq_defaults_and_boost)
+{
+    // os padrões do FL: 90 Hz, 1,5 kHz e 8 kHz; Q do pico 0,632; inclinação das prateleiras 0,607
+    lynx::TrackEq eq;
+    CHECK (std::abs (lynx::TrackEq::peakQ (eq.width[1]) - 0.632) < 0.01);
+    CHECK (std::abs (lynx::TrackEq::shelfSlope (eq.width[0]) - 0.607) < 0.01);
+    CHECK (! eq.active());
+
+    // +12 dB no pico em 1,5 kHz numa trilha: um seno de 1,5 kHz sobe ~4x
+    lynx::Song song = lynx::Song::makeDefault();
+    song.mixer[1].eq.gainDb[1] = 12.0f;
+    for (auto& c : song.channels)
+        c.mixerTrack = 1;
+    song.channels[4].instrument = lynx::InstrumentKind::synth;
+    song.channels[4].synth = {};
+    song.channels[4].synth.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    song.channels[4].synth.cutoff = 20000.0f;
+    auto render = [] (const lynx::Song& s) {
+        auto state = lynx::RackState::build (s, nullptr, 48000.0);
+        lynx::RackRenderer renderer;
+        renderer.prepare (48000.0);
+        lynx::LiveEventQueue live;
+        lynx::NoteEvent on; // 1,5 kHz ~ tecla 90,6: usa a 91 (1568 Hz), ainda no pico largo
+        on.channel = 4;
+        on.key = 91;
+        on.velocity = 1.0f;
+        live.push (on);
+        std::vector<float> l (24000), r (24000);
+        for (int pos = 0; pos < 24000; pos += 480)
+            renderer.process (state.get(), false, 0.0, 480, l.data() + pos, r.data() + pos, pos == 0 ? &live : nullptr);
+        float peak = 0.0f;
+        for (std::size_t i = 12000; i < 24000; ++i)
+            peak = std::max (peak, std::abs (l[i]));
+        return peak;
+    };
+    const auto boosted = render (song);
+    song.mixer[1].eq.gainDb[1] = 0.0f;
+    const auto flat = render (song);
+    CHECK (flat > 0.01f);
+    CHECK (boosted / flat > 3.0f && boosted / flat < 4.2f);
 }
 
 TEST (bars_follow_time_signature_markers)

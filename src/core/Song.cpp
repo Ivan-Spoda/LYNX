@@ -677,6 +677,16 @@ Clip splitClip (Clip& clip, std::int64_t tick)
     return rest;
 }
 
+double TrackEq::peakQ (float w) noexcept
+{
+    return 0.0999 * (std::pow (1001.0, std::clamp ((double) w, 0.0, 1.0)) - 1.0) + 0.1;
+}
+
+double TrackEq::shelfSlope (float w) noexcept
+{
+    return 1.9 * std::clamp ((double) w, 0.0, 1.0) + 0.1;
+}
+
 std::int64_t swingDelay (std::int64_t start, float swing, float channelMix) noexcept
 {
     if (swing <= 0.0f || channelMix <= 0.0f)

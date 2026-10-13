@@ -539,6 +539,20 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             track.pan = std::clamp (control.value / 6400.0f, -1.0f, 1.0f);
         else if (p == flp::ControlId::mixerStereo)
             track.stereo = std::clamp (control.value / 64.0f, -1.0f, 1.0f);
+        else if (p >= flp::ControlId::mixerEqBase && p < flp::ControlId::mixerEqBase + 24 && (p - flp::ControlId::mixerEqBase) % 8 < 3)
+        {
+            // EQ da trilha: p = 0x1FD0 + grupo·8 + banda (grupo 0 ganho, 1 frequência, 2 largura; REA_rodada6 §1)
+            const auto group = (p - flp::ControlId::mixerEqBase) / 8;
+            const auto band = (std::size_t) ((p - flp::ControlId::mixerEqBase) % 8);
+            const auto v = (double) control.value;
+
+            if (group == 0)
+                track.eq.gainDb[band] = (float) std::clamp (v * 0.01, -18.0, 18.0);
+            else if (group == 1)
+                track.eq.hz[band] = (float) std::clamp (10.0 + 159.9 * (std::pow (101.0, v / 65536.0) - 1.0), 10.0, 16000.0);
+            else
+                track.eq.width[band] = (float) std::clamp (v / 65536.0, 0.0, 1.0);
+        }
         else if (p >= flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
             for (auto& send : track.sends)
                 if (send.target == p - flp::ControlId::mixerSendBase)

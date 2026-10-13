@@ -210,6 +210,22 @@ struct MixerSend
     bool operator== (const MixerSend& o) const noexcept { return target == o.target && level == o.level; }
 };
 
+// EQ embutido de cada trilha do mixer (as 3 bandas do FL: prateleira grave, pico, prateleira aguda),
+// depois dos slots de efeito e antes do fader (REA_rodada6 §1).
+struct TrackEq
+{
+    std::array<float, 3> gainDb { 0.0f, 0.0f, 0.0f };          // ±18
+    std::array<float, 3> hz { 90.0f, 1500.0f, 8000.0f };       // 10 Hz .. 16 kHz
+    std::array<float, 3> width { 0.267f, 0.267f, 0.267f };     // 0..1: Q do pico / inclinação das prateleiras
+
+    bool active() const noexcept { return gainDb[0] != 0.0f || gainDb[1] != 0.0f || gainDb[2] != 0.0f; }
+    bool operator== (const TrackEq&) const = default;
+
+    // conversões do FL: pico Q = 0,0999·(1001^w − 1) + 0,1; prateleiras S = 1,9·w + 0,1
+    static double peakQ (float w) noexcept;
+    static double shelfSlope (float w) noexcept;
+};
+
 struct MixerTrack
 {
     std::string name;
@@ -224,6 +240,7 @@ struct MixerTrack
     bool invertPhase = false;
     bool swapChannels = false;
     std::vector<MixerSend> sends;    // para outros inserts
+    TrackEq eq;
 };
 
 struct Note

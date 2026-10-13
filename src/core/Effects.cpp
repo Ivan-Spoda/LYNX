@@ -1,5 +1,7 @@
 #include "core/Effects.h"
 
+#include "core/Biquad.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -66,69 +68,6 @@ float distortionDriveDb (float v) { return v * 36.0f; }
 float distortionToneHz (float v) { return logRange (v, 800.0f, 20000.0f); }
 float chorusRateHz (float v) { return logRange (v, 0.05f, 5.0f); }
 float chorusDepthMs (float v) { return v * 8.0f; }
-
-// ---------------------------------------------------------------------------
-// Biquad (fórmulas clássicas do "Audio EQ Cookbook" de R. Bristow-Johnson)
-
-struct Biquad
-{
-    double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
-    double z1[2] {}, z2[2] {};
-
-    void reset() noexcept { z1[0] = z1[1] = z2[0] = z2[1] = 0.0; }
-
-    float process (float x, int ch) noexcept
-    {
-        const auto y = b0 * x + z1[ch];
-        z1[ch] = b1 * x - a1 * y + z2[ch];
-        z2[ch] = b2 * x - a2 * y;
-        return (float) y;
-    }
-
-    void set (double nb0, double nb1, double nb2, double a0, double na1, double na2) noexcept
-    {
-        b0 = nb0 / a0; b1 = nb1 / a0; b2 = nb2 / a0; a1 = na1 / a0; a2 = na2 / a0;
-    }
-
-    // passa-baixas/altas/banda (cookbook); o passa-banda tem ganho 0 dB no pico
-    void filter (double sr, int type, double hz, double q) noexcept
-    {
-        const auto w = 2.0 * pi * std::min (hz, sr * 0.45) / sr;
-        const auto cw = std::cos (w);
-        const auto alpha = std::sin (w) / (2.0 * q);
-
-        if (type == 0)
-            set ((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
-        else if (type == 1)
-            set ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
-        else
-            set (alpha, 0, -alpha, 1 + alpha, -2 * cw, 1 - alpha);
-    }
-
-    void peaking (double sr, double hz, double q, double db) noexcept
-    {
-        const auto a = std::pow (10.0, db / 40.0);
-        const auto w = 2.0 * pi * hz / sr;
-        const auto alpha = std::sin (w) / (2.0 * q);
-        set (1 + alpha * a, -2 * std::cos (w), 1 - alpha * a, 1 + alpha / a, -2 * std::cos (w), 1 - alpha / a);
-    }
-
-    void shelf (double sr, double hz, double db, bool high) noexcept
-    {
-        const auto a = std::pow (10.0, db / 40.0);
-        const auto w = 2.0 * pi * hz / sr;
-        const auto cw = std::cos (w);
-        const auto alpha = std::sin (w) / 2.0 * std::sqrt (2.0); // inclinação S = 1
-        const auto sq = 2.0 * std::sqrt (a) * alpha;
-
-        if (high)
-            set (a * ((a + 1) + (a - 1) * cw + sq), -2 * a * ((a - 1) + (a + 1) * cw), a * ((a + 1) + (a - 1) * cw - sq),
-                 (a + 1) - (a - 1) * cw + sq, 2 * ((a - 1) - (a + 1) * cw), (a + 1) - (a - 1) * cw - sq);
-        else
-            set (a * ((a + 1) - (a - 1) * cw + sq), 2 * a * ((a - 1) - (a + 1) * cw), a * ((a + 1) - (a - 1) * cw - sq),
-                 (a + 1) + (a - 1) * cw + sq, -2 * ((a - 1) + (a + 1) * cw), (a + 1) + (a - 1) * cw - sq);
-    }
-};
 
 // ---------------------------------------------------------------------------
 

@@ -145,6 +145,7 @@ struct ControlId
     static constexpr int mixerVolume = 0x1FC0;
     static constexpr int mixerPan = 0x1FC1;
     static constexpr int mixerStereo = 0x1FC2; // separação ±64
+    static constexpr int mixerEqBase = 0x1FD0;  // EQ da trilha: + grupo·8 + banda (REA_rodada6 §1)
     static constexpr int mixerSendBase = 0x2000; // + trilha de destino
     static constexpr int pluginParamBase = 0x8000;
     static constexpr std::uint32_t tempo = 0x40000005; // automação de tempo: 0..1 = 60..180 BPM (conferido nos demos)

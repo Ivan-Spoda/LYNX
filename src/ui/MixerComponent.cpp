@@ -468,6 +468,98 @@ void MixerStrips::selectTrack (int track)
         onSelectionChanged (selected);
 }
 
+namespace
+{
+// Os 3 knobs de cada banda do EQ embutido da trilha (ganho, frequência, largura).
+class TrackEqEditor final : public juce::Component
+{
+public:
+    TrackEqEditor (AudioEngine& e, int t)
+        : engine (e),
+          track (t)
+    {
+        const juce::String bands[] = { "Graves", utf8 ("Médios"), "Agudos" };
+        const auto& eq = engine.getSong().mixer[(std::size_t) track].eq;
+
+        for (int b = 0; b < 3; ++b)
+        {
+            titles[(std::size_t) b].setText (bands[b], juce::dontSendNotification);
+            titles[(std::size_t) b].setJustificationType (juce::Justification::centred);
+            addAndMakeVisible (titles[(std::size_t) b]);
+
+            auto& gain = knobs[(std::size_t) b][0];
+            setup (gain, -18.0, 18.0, 0.1, " dB", eq.gainDb[(std::size_t) b]);
+            gain.setDoubleClickReturnValue (true, 0.0);
+
+            auto& hz = knobs[(std::size_t) b][1];
+            setup (hz, 10.0, 16000.0, 1.0, " Hz", eq.hz[(std::size_t) b]);
+            hz.setSkewFactorFromMidPoint (1000.0);
+
+            auto& width = knobs[(std::size_t) b][2];
+            setup (width, 0.0, 1.0, 0.01, "", eq.width[(std::size_t) b]);
+            width.setTooltip (b == 1 ? utf8 ("Largura do pico (Q)") : utf8 ("Inclinação da prateleira"));
+        }
+
+        setSize (3 * 90, 3 * 74 + 24);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop (20);
+
+        for (int b = 0; b < 3; ++b)
+        {
+            titles[(std::size_t) b].setBounds (header.removeFromLeft (90));
+            auto column = area.removeFromLeft (90);
+
+            for (auto& k : knobs[(std::size_t) b])
+                k.setBounds (column.removeFromTop (74));
+        }
+    }
+
+private:
+    void setup (juce::Slider& s, double lo, double hi, double step, const char* suffix, float value)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 16);
+        s.setRange (lo, hi, step);
+        s.setTextValueSuffix (suffix);
+        s.setValue (value, juce::dontSendNotification);
+        s.onValueChange = [this] { apply(); };
+        addAndMakeVisible (s);
+    }
+
+    void apply()
+    {
+        TrackEq eq;
+
+        for (std::size_t b = 0; b < 3; ++b)
+        {
+            eq.gainDb[b] = (float) knobs[b][0].getValue();
+            eq.hz[b] = (float) knobs[b][1].getValue();
+            eq.width[b] = (float) knobs[b][2].getValue();
+        }
+
+        engine.editSong ([t = track, eq] (Song& s) {
+            if (t < (int) s.mixer.size())
+                s.mixer[(std::size_t) t].eq = eq;
+        });
+    }
+
+    AudioEngine& engine;
+    int track;
+    std::array<juce::Label, 3> titles;
+    std::array<std::array<juce::Slider, 3>, 3> knobs; // [banda][ganho, frequência, largura]
+};
+} // namespace
+
+void MixerStrips::showTrackEq (int t)
+{
+    auto editor = std::make_unique<TrackEqEditor> (engine, t);
+    juce::CallOutBox::launchAsynchronously (std::move (editor), getScreenBounds().withSize (10, 10).translated (getMouseXYRelative().x, getMouseXYRelative().y), nullptr);
+}
+
 void MixerStrips::showMenu (int t)
 {
     const auto& song = engine.getSong();
@@ -510,6 +602,7 @@ void MixerStrips::showMenu (int t)
                             [this, t, v = value] { engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].stereo = v; }); });
 
         menu.addSubMenu (utf8 ("Separação estéreo"), stereo);
+        menu.addItem (utf8 ("EQ da trilha..."), [this, t] { showTrackEq (t); });
         menu.addItem (utf8 ("Inverter fase"), true, track.invertPhase, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].invertPhase = ! s.mixer[(std::size_t) t].invertPhase; });
         });

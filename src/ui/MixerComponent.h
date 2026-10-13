@@ -58,6 +58,7 @@ private:
     juce::Rectangle<int> soloArea (int track) const;
     juce::Rectangle<int> routeArea (int track) const;
     void showMenu (int track);
+    void showTrackEq (int track);
 
     AudioEngine& engine;
     int selected = 0;

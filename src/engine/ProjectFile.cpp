@@ -434,6 +434,9 @@ juce::String toJson (const Song& song)
             o->setProperty ("invertPhase", true);
         if (t.swapChannels)
             o->setProperty ("swap", true);
+        if (! (t.eq == TrackEq {})) // [ganhos dB, frequências Hz, larguras 0..1] das 3 bandas
+            o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
+                                                           t.eq.width[0], t.eq.width[1], t.eq.width[2] });
 
         if (! t.sends.empty())
         {
@@ -753,6 +756,14 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 track.colour = 0xFF000000u | (std::uint32_t) t["colour"].toString().getHexValue32();
             track.invertPhase = (bool) t.getProperty ("invertPhase", false);
             track.swapChannels = (bool) t.getProperty ("swap", false);
+
+            if (const auto& eq = t["eq"]; eq.isArray() && eq.size() == 9)
+                for (std::size_t b = 0; b < 3; ++b)
+                {
+                    track.eq.gainDb[b] = juce::jlimit (-18.0f, 18.0f, (float) (double) eq[(int) b]);
+                    track.eq.hz[b] = juce::jlimit (10.0f, 16000.0f, (float) (double) eq[(int) b + 3]);
+                    track.eq.width[b] = juce::jlimit (0.0f, 1.0f, (float) (double) eq[(int) b + 6]);
+                }
 
             if (auto* sends = t["sends"].getArray())
                 for (const auto& send : *sends)
