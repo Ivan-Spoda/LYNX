@@ -20,8 +20,6 @@ namespace lynx
 {
 using IONode = juce::AudioProcessorGraph::AudioGraphIOProcessor;
 
-namespace
-{
 // Procura a instalação mais recente do FL Studio para resolver %FLStudio...%.
 FlPathRoots findFlStudioRoots()
 {
@@ -46,7 +44,6 @@ FlPathRoots findFlStudioRoots()
 
     return roots;
 }
-} // namespace
 
 namespace
 {

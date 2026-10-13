@@ -403,6 +403,25 @@ TEST (flp_real_files)
     }
 
     CHECK (threeOscDecoded == threeOsc);
+
+    // presets de canal do 3x Osc que vêm com o FL (.fst): todos viram ajustes do synth
+    int presets = 0, presetsDecoded = 0;
+    const auto presetDir = std::filesystem::path (realFlpDir) / "Patches" / "Channel presets" / "3x Osc";
+    if (std::filesystem::is_directory (presetDir))
+        for (auto& entry : std::filesystem::directory_iterator (presetDir))
+            if (entry.path().extension() == ".fst")
+            {
+                ++presets;
+                std::ifstream in (entry.path(), std::ios::binary);
+                std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+                if (auto synth = lynx::synthFromFlPreset (bytes))
+                {
+                    ++presetsDecoded;
+                    CHECK (synth->osc[0].level + synth->osc[1].level + (synth->am ? 0.0f : synth->osc[2].level) <= 1.001f);
+                }
+            }
+    std::printf ("  %d presets de 3x Osc, %d lidos\n", presets, presetsDecoded);
+    CHECK (presetsDecoded == presets);
     CHECK (wrappedParsed == wrapped);
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
     std::printf ("  %d marcadores, %d mudanças de compasso, %d trilhas com EQ\n", markers, signatures, trackEqs);

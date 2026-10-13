@@ -9,6 +9,7 @@
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
+#include "core/FlpImport.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
 #include "engine/PluginHost.h"
@@ -24,6 +25,9 @@ namespace lynx
 //
 // O Song só é tocado pela thread da UI; cada edição publica um snapshot
 // imutável (RackState) para a thread de áudio.
+// Pastas da instalação mais recente do FL Studio (vazias se não houver).
+FlPathRoots findFlStudioRoots();
+
 class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::MidiInputCallback,
                           public juce::ChangeBroadcaster,

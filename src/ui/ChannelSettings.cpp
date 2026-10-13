@@ -1,5 +1,6 @@
 #include "ui/ChannelSettings.h"
 
+#include "core/FlpImport.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/Theme.h"
@@ -617,6 +618,11 @@ public:
         };
         addAndMakeVisible (presetBox);
 
+        flPresets.setButtonText ("Presets do FL...");
+        flPresets.setTooltip (utf8 ("Os presets de canal do 3x Osc que vêm com o FL Studio (Patches\\Channel presets\\3x Osc)"));
+        flPresets.onClick = [this] { showFlPresets(); };
+        addAndMakeVisible (flPresets);
+
         filterTypeBox.addItemList ({ "Passa-baixas", "Passa-banda", "Passa-altas", "Rejeita-faixa" }, 1);
         filterTypeBox.setTooltip ("Tipo do filtro");
         filterTypeBox.onChange = [this] { apply(); };
@@ -642,7 +648,7 @@ public:
 
         refresh();
         engine.addChangeListener (this);
-        setSize (620, 410);
+        setSize (720, 410);
     }
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
@@ -656,6 +662,7 @@ public:
         presetBox.setBounds (topRow.removeFromLeft (200));
         mono.setBounds (topRow.removeFromLeft (90).withTrimmedLeft (16));
         am.setBounds (topRow.removeFromLeft (60));
+        flPresets.setBounds (topRow.removeFromLeft (130).reduced (4, 0));
         portaOn.setBounds (topRow.removeFromLeft (70));
         filterTypeBox.setBounds (topRow.removeFromRight (140));
         area.removeFromTop (6);
@@ -701,6 +708,65 @@ private:
 
     juce::TextButton modulationButton;
     juce::ToggleButton mono, am, portaOn;
+    juce::TextButton flPresets;
+
+    // menu com os .fst do 3x Osc da instalação do FL, em ordem alfabética
+    void showFlPresets()
+    {
+        const auto roots = findFlStudioRoots();
+        const auto folder = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Channel presets/3x Osc");
+        auto files = folder.findChildFiles (juce::File::findFiles, false, "*.fst");
+        std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) {
+            return a.getFileName().compareNatural (b.getFileName()) < 0;
+        });
+
+        if (files.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Presets do FL",
+                                                    utf8 ("Não achei os presets do 3x Osc (instale o FL Studio ou confira a pasta Patches\\Channel presets\\3x Osc)."));
+            return;
+        }
+
+        juce::PopupMenu menu;
+        juce::PopupMenu sub;
+        juce::juce_wchar letter = 0;
+
+        // agrupa por letra inicial (são ~170)
+        for (const auto& f : files)
+        {
+            const auto first = juce::CharacterFunctions::toUpperCase (f.getFileName()[0]);
+
+            if (first != letter && sub.getNumItems() > 0)
+            {
+                menu.addSubMenu (juce::String::charToString (letter), sub);
+                sub = {};
+            }
+
+            letter = first;
+            sub.addItem (f.getFileNameWithoutExtension(), [this, f] { loadFlPreset (f); });
+        }
+
+        if (sub.getNumItems() > 0)
+            menu.addSubMenu (juce::String::charToString (letter), sub);
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&flPresets));
+    }
+
+    void loadFlPreset (const juce::File& file)
+    {
+        juce::MemoryBlock data;
+
+        if (! file.loadFileAsData (data) || current() == nullptr)
+            return;
+
+        const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+
+        if (auto synth = synthFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize())))
+            engine.editSong ([c = channel, s = *synth] (Song& song) { song.channels[(std::size_t) c].synth = s; });
+        else
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Presets do FL",
+                                                    utf8 ("Este preset não é de 3x Osc ou não pôde ser lido."));
+    }
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
 

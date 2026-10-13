@@ -287,7 +287,9 @@ struct Project
     const Channel* findChannel (int index) const noexcept;
 };
 
-Project parseProject (std::span<const std::uint8_t> file);
+// `channelPreset`: arquivo de preset de canal do FL (.fst): os eventos são de um canal só (índice 0),
+// sem o evento de novo canal.
+Project parseProject (std::span<const std::uint8_t> file, bool channelPreset = false);
 
 // Utilitários expostos para testes
 std::uint32_t parseVersionNumber (const std::string& version);

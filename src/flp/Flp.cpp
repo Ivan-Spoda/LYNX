@@ -326,19 +326,25 @@ const Channel* Project::findChannel (int index) const noexcept
     return it != channels.end() ? &*it : nullptr;
 }
 
-Project parseProject (std::span<const std::uint8_t> file)
+Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 {
     EventReader reader (file);
     Project project;
     project.header = reader.header();
 
-    if (project.header.format != 0)
+    if (project.header.format != 0 && ! channelPreset)
         project.warnings.push_back ("formato " + std::to_string (project.header.format) + " não é projeto");
 
     // Os eventos são contextuais: um NewChannel/NewPattern/Arrangement define
     // a quem pertencem os eventos seguintes, até o próximo seletor.
     enum class Section { global, channel, arrangement, mixer } section = Section::global;
     int currentChannel = -1, currentPattern = -1, currentArrangement = -1;
+
+    if (channelPreset)
+    {
+        section = Section::channel;
+        currentChannel = 0;
+    }
     bool hasFineTempo = false;
     bool hasTimeSignature = false;
     std::string pendingInsertName;

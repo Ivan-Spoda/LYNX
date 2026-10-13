@@ -321,6 +321,29 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
     });
 }
 
+std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>& bytes)
+{
+    try
+    {
+        auto project = flp::parseProject (bytes, true);
+
+        if (project.channels.empty() || project.channels.front().pluginName != "3x Osc")
+            return std::nullopt;
+
+        project.channels.front().type = flp::ChannelType::native; // gerador nativo (o .fst não diz)
+        const auto song = importFlp (project);
+
+        if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
+            return std::nullopt;
+
+        return song.channels.front().synth;
+    }
+    catch (const flp::Error&)
+    {
+        return std::nullopt;
+    }
+}
+
 Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 {
     Song song;
