@@ -929,9 +929,23 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 showImportReport();
         });
         menu.addItem ("Sobre o LYNX", [] {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "LYNX",
-                                                    utf8 ("LYNX " JUCE_APPLICATION_VERSION_STRING "\nDAW leve em C++/JUCE, com o fluxo de trabalho do FL Studio.\n"
-                                                          "Implementação independente: nenhum código da Image-Line foi copiado."));
+            struct Logo final : juce::Component
+            {
+                Logo() { setSize (300, 150); }
+                void paint (juce::Graphics& g) override
+                {
+                    g.drawImageWithin (logoImage(), 0, 0, getWidth(), getHeight(), juce::RectanglePlacement::centred);
+                }
+            };
+            auto* logo = new Logo();
+            auto* window = new juce::AlertWindow ("LYNX " JUCE_APPLICATION_VERSION_STRING,
+                                                  utf8 ("DAW leve em C++/JUCE, com o fluxo de trabalho do FL Studio.\n"
+                                                        "Implementação independente: nenhum código da Image-Line foi copiado."),
+                                                  juce::MessageBoxIconType::NoIcon);
+            window->addCustomComponent (logo);
+            window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([logo] (int) { delete logo; }), true);
+            keepAboveMainWindow (*window);
         });
     }
 

@@ -1,5 +1,7 @@
 #include "ui/WindowOwner.h"
 
+#include "ui/LogoData.h"
+
 #if JUCE_WINDOWS
  #include <windows.h>
 #endif
@@ -20,8 +22,16 @@ void setMainWindowForOwnership (juce::Component* window)
     mainWindow() = window;
 }
 
+juce::Image logoImage()
+{
+    return juce::ImageCache::getFromMemory (logo::png256, (int) sizeof (logo::png256));
+}
+
 void keepAboveMainWindow (juce::Component& window)
 {
+    if (auto* top = dynamic_cast<juce::TopLevelWindow*> (&window))
+        if (auto* peer = top->getPeer())
+            peer->setIcon (logoImage());
    #if JUCE_WINDOWS
     auto* owner = mainWindow().getComponent();
     if (owner == nullptr || owner == &window || window.getWindowHandle() == nullptr || owner->getWindowHandle() == nullptr)

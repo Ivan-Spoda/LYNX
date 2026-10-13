@@ -921,6 +921,7 @@ private:
             : DocumentWindow (name, lynx::theme::window, DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
+            setIcon (lynx::logoImage());
             content = new lynx::MainComponent (engine);
             setContentOwned (content, true);
             setResizable (true, true);
