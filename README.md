@@ -102,6 +102,11 @@ tools/        flpdump, renderwav
 docs/         arquitetura, estado, roadmap e a análise comportamental do FL Studio
 ```
 
+## Documentação
+- `docs/ESTADO.md`: o que já funciona e o que falta; `docs/ROADMAP.md`: fases
+- `docs/TESTE_MANUAL.md`: roteiro para ouvir/mexer no que os testes automáticos não cobrem
+- `docs/analise/REA_rodada*.md`: o comportamento do FL Studio levantado com o REA (clean-room)
+
 ## Sobre o FL Studio
 
 O LYNX é uma implementação independente. O FL Studio foi estudado para entender o
