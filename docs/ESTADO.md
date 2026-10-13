@@ -116,6 +116,22 @@ Atualizado em 2026-10-13.
 - **MIDI learn**: clique direito em knobs/faders/parâmetros de plugin → "Ligar a controlador MIDI".
 - **Compasso** da música (menu da pattern), importado do `.flp`.
 
+## Confirmado x aproximado (import do FL)
+Tudo o que o import faz com plugins do FL vem dos documentos `docs/analise/REA_rodada*.md`. A rodada 17
+verificou as hipóteses (decompilação + manual oficial) e o código foi corrigido. O que **ainda não tem
+confirmação** e por isso é uma aproximação declarada (ou ficou de fora):
+- Sakura (escalas do ADSR, Hi-Cut, decay da corda): aproximação pelo nome dos controles.
+- Harmor: escala de frequência dos filtros (herdada do Harmless) e o comportamento com o envelope de
+  volume desligado (o LYNX usa portão com release curto).
+- Sytrus: unidade da profundidade do FM (o LYNX usa 4·g ciclos).
+- Toxic Biohazard: sem FM e sem filtro (índice e corte não confirmados); BassDrum: sem a queda de afinação e
+  o clique; Kepler: sem LFO e chorus (profundidades/taxas não confirmadas).
+- BooBass, Drumpad, Effector (X/Y), Squeeze, Vintage Phaser, GMS (FM): aproximações; a rodada 18 está
+  verificando.
+- Love Philter: tipos BP/notch (largura), passa-tudo e Mango não são aplicados; o Mod Y -> volume
+  (sidechain) espera a confirmação do modo do articulador.
+- FLEX: os pacotes são protegidos; o LYNX não os abre (patch do synth pelo nome do preset).
+
 ## Funcionando e verificado
 - Áudio no app: o grafo estava sem conexões (os nós eram conectados antes de o grafo ter
   canais de saída). Corrigido e coberto pelo `LYNX.exe --selftest`.
