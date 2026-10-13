@@ -244,7 +244,8 @@ enum class EffectKind : std::uint8_t
     peakController, // não muda o som: mede o pico e serve de fonte para automações ao vivo (Peak Controller do FL)
     pitchShift,   // muda a afinação sem mudar a duração (duas cabeças de leitura em crossfade)
     freqShift,    // desloca todas as frequências em Hz (banda lateral única, sem preservar harmonia)
-    parallel      // contêiner: ramos de efeitos em paralelo somados (o Patcher do FL); ver EffectSlot::branches
+    parallel,     // contêiner: ramos de efeitos em paralelo somados (o Patcher do FL); ver EffectSlot::branches
+    lofi          // redução de taxa (segura amostras) e de bits (o Lo-fi do Effector do FL)
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

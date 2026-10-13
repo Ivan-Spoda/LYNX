@@ -759,10 +759,11 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double b
             slot->params[0] = x;
             slot->params[1] = 1.0f - 0.5f * y;
             break;
-        case 1: // Lo-fi: distorção leve e escura
-            slot = makeEffectSlot (EffectKind::distortion);
-            slot->params[0] = 0.3f * x;
-            slot->params[1] = 0.6f * (1.0f - y);
+        case 1: // Lo-fi: segura 128X³ + 1 amostras, 65536/(2048Y² + 1) níveis (REA_rodada18 §3.2); crossfade
+            slot = makeEffectSlot (EffectKind::lofi);
+            slot->params[0] = x;
+            slot->params[1] = y;
+            slot->params[2] = 1.0f;
             break;
         case 2: case 3: // Flanger / Phaser
             slot = makeEffectSlot (EffectKind::chorus);
@@ -813,12 +814,10 @@ std::optional<EffectSlot> effector (const std::vector<std::uint8_t>& d, double b
             slot->params[3] = 1.0f;
             slot->params[4] = 0.0f; // só o molhado: o dry/wet do slot faz a mistura
             break;
-        case 7: // Stereo: largura
+        case 7: // Stereo: p = 2X − 1; Y·p vira diferença de nível (balanço). O atraso Haas de até 2 ms fica de fora
         {
             slot = makeEffectSlot (EffectKind::utility);
-            const auto w = 2.0 * x;
-            slot->params[2] = slot->params[5] = utilityMatrixValue ((1.0 + w) / 2.0);
-            slot->params[3] = slot->params[4] = utilityMatrixValue ((1.0 - w) / 2.0);
+            slot->params[1] = (float) clamp01 (0.5 + 0.5 * y * (2.0 * x - 1.0));
             break;
         }
         default: return std::nullopt; // Trans, Grain, Vox, Ring

@@ -997,6 +997,49 @@ inline double hz (float v)
 }
 } // namespace fshift
 
+// Lo-fi: segura cada amostra por 128·t³ + 1 amostras e quantiza em 65536/(2048·b² + 1) níveis
+// (as leis do Lo-fi do Effector do FL, REA_rodada18 §3.2); mistura dry/wet linear.
+namespace lofi
+{
+int holdSamples (float v) { return (int) (128.0f * v * v * v) + 1; }
+double levels (float v) { return 65536.0 / (2048.0 * v * v + 1.0); }
+} // namespace lofi
+
+class LoFi final : public Effect
+{
+public:
+    void prepare (double) noexcept override { reset(); }
+    void reset() noexcept override
+    {
+        held[0] = held[1] = 0.0f;
+        countdown = 0;
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto hold = lofi::holdSamples (params[0]);
+        const auto step = (float) (2.0 / lofi::levels (params[1]));
+        const auto mix = params[2];
+        auto quantize = [step] (float x) { return step * std::floor (x / step + 0.5f); };
+
+        for (int i = 0; i < n; ++i)
+        {
+            if (--countdown <= 0)
+            {
+                countdown = hold;
+                held[0] = quantize (l[i]);
+                held[1] = quantize (r[i]);
+            }
+            l[i] += mix * (held[0] - l[i]);
+            r[i] += mix * (held[1] - r[i]);
+        }
+    }
+
+private:
+    float held[2] {};
+    int countdown = 0;
+};
+
 class FreqShift final : public Effect
 {
 public:
@@ -1334,6 +1377,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
     static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
     static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
+    static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Quantidade", 0.8496f }, { "Tensão", 0.5f },
                                                                   { "Queda", 0.4959f }, { "Base do LFO", 0.0f } } };
     static const EffectInfo parametric = [] {
@@ -1384,6 +1428,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::pitchShift: return pitchShift;
         case EffectKind::freqShift: return freqShift;
         case EffectKind::parallel: return parallelInfo;
+        case EffectKind::lofi: return lofiInfo;
     }
     return eq;
 }
@@ -1555,6 +1600,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
+        case EffectKind::lofi:
+            if (param == 0)
+                std::snprintf (text, sizeof (text), "%.0f Hz", 44100.0 / lofi::holdSamples (v));
+            else if (param == 1)
+                std::snprintf (text, sizeof (text), "%.1f bits", std::log2 (lofi::levels (v)));
+            else
+                std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            return text;
+
         case EffectKind::plugin:
         case EffectKind::parallel:
             break;
@@ -1599,6 +1653,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::pitchShift: return std::make_unique<PitchShift>();
         case EffectKind::freqShift: return std::make_unique<FreqShift>();
         case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // vazio: use makeParallelEffect
+        case EffectKind::lofi: return std::make_unique<LoFi>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();

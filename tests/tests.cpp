@@ -4463,3 +4463,25 @@ TEST (love_philter_map_evaluation)
     CHECK (std::abs (lynx::lovePhilterMapAt (steps, 0.46875) - 0.5) < 1e-9);
     CHECK (lynx::lovePhilterMapAt ({}, 0.3) == 1.0);
 }
+
+TEST (lofi_holds_and_quantizes)
+{
+    auto fx = lynx::makeEffect (lynx::EffectKind::lofi);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::lofi);
+    slot.params[0] = 0.5f; // 128·0,125 + 1 = 17 amostras
+    slot.params[1] = 1.0f; // 65536/2049 ≈ 32 níveis
+    std::vector<float> l (170), r (170);
+    for (std::size_t i = 0; i < l.size(); ++i)
+        l[i] = r[i] = 0.9f * (float) std::sin (0.05 * (double) i);
+    const auto original = l;
+    fx->process (l.data(), r.data(), 170, slot.params, 120.0);
+    for (int i = 0; i < 17; ++i)
+        CHECK (l[(std::size_t) i] == l[0]);
+    CHECK (l[17] != l[16]);
+    const auto step = 2.0f * 2049.0f / 65536.0f;
+    for (auto v : l)
+        CHECK (std::abs (v / step - std::round (v / step)) < 1e-3f);
+    CHECK (std::abs (l[0] - original[0]) <= step);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::lofi, 1, 0.0f, 120.0) == "16.0 bits");
+}

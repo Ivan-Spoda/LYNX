@@ -102,6 +102,7 @@ const char* effectId (EffectKind k)
         case EffectKind::pitchShift: return "pitchShift";
         case EffectKind::freqShift: return "freqShift";
         case EffectKind::parallel: return "parallel";
+        case EffectKind::lofi: return "lofi";
     }
     return "eq";
 }
@@ -197,7 +198,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi })
         if (id == effectId (k))
             return k;
 
