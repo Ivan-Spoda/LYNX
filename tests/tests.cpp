@@ -15,6 +15,7 @@
 #include "core/Effects.h"
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
+#include "core/FlSynths.h"
 #include "core/FlWrapper.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -350,6 +351,12 @@ TEST (plugin_state_decoders_survive_garbage)
             for (const auto& o : synth.osc)
                 CHECK (std::isfinite (o.level) && o.level >= 0.0f && o.level <= 1.0f);
 
+        float harmlessGain = 1.0f;
+        if (lynx::synthFromHarmless (blob, 120.0, synth, harmlessGain))
+            CHECK (std::isfinite (harmlessGain) && std::isfinite (synth.cutoff) && std::isfinite (synth.attack));
+        if (lynx::synthFromFruitKick (blob, synth))
+            CHECK (std::isfinite (synth.decay) && std::isfinite (synth.pitchEnv.amount));
+
         lynx::ForeignPlugin foreign;
         lynx::parseFlWrapper (blob, foreign);
         std::vector<std::uint8_t> component, controller;
@@ -369,6 +376,7 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
+    int harmless = 0, harmlessDecoded = 0;
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     // import com os samples da instalação (o realFlpDir é ...\Data): para DirectWave/FPC
@@ -490,6 +498,20 @@ TEST (flp_real_files)
                 for (const auto& slot : insert.slots)
                     countWrapper (slot.plugin, slot.state);
 
+            // Harmless: todo estado dos demos vira synth, com valores finitos
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Harmless")
+                {
+                    ++harmless;
+                    lynx::SynthSettings hs;
+                    float g = 1.0f;
+                    if (lynx::synthFromHarmless (c.pluginState, 128.0, hs, g))
+                    {
+                        ++harmlessDecoded;
+                        CHECK (std::isfinite (g) && hs.cutoff >= 20.0f && hs.cutoff <= 20000.0f && std::isfinite (hs.decay) && std::isfinite (hs.release));
+                    }
+                }
+
             // 3x Osc: todo estado dos demos decodifica, com níveis que somam no máximo 1
             for (const auto& c : p.channels)
                 if (c.pluginName == "3x Osc")
@@ -558,6 +580,8 @@ TEST (flp_real_files)
     }
 
     CHECK (threeOscDecoded == threeOsc);
+    std::printf ("  Harmless: %d canais, %d decodificados\n", harmless, harmlessDecoded);
+    CHECK (harmlessDecoded == harmless && harmless > 100);
 
     // presets de canal do 3x Osc que vêm com o FL (.fst): todos viram ajustes do synth
     int presets = 0, presetsDecoded = 0;

@@ -3,6 +3,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlSamplers.h"
+#include "core/FlSynths.h"
 #include "core/FlWrapper.h"
 #include "core/SynthPresets.h"
 
@@ -632,6 +633,27 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
             def.plugin.name = def.plugin.foreign.name;
+
+        // Harmless / Fruit Kick (REA_rodada10): aproximados pelo synth interno; os LFOs do canal ficam
+        if (def.instrument == InstrumentKind::synth)
+        {
+            const auto name = lowercase (c.pluginName);
+            SynthSettings fromPlugin;
+            float pluginGain = 1.0f;
+            auto adopt = [&] {
+                for (int i = 0; i < lfoTargets; ++i)
+                    if (def.synth.lfo[(std::size_t) i].amount != 0.0f)
+                        fromPlugin.lfo[(std::size_t) i] = def.synth.lfo[(std::size_t) i];
+                def.synth = fromPlugin;
+                const auto g = channelGain (def.volume) * pluginGain;
+                def.volume = std::clamp ((float) (std::log (10.0 * g + 1.0) / std::log (11.0)), 0.0f, 1.0f);
+            };
+
+            if (name == "harmless" && synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                adopt();
+            else if (name == "fruit kick" && synthFromFruitKick (c.pluginState, fromPlugin))
+                adopt();
+        }
 
         // 3x Osc: osciladores do estado do plugin; envelope e filtro vêm do canal (REA_rodada4)
         if (def.instrument == InstrumentKind::synth && c.pluginName == "3x Osc" && synthFrom3xOsc (c.pluginState, def.synth))
