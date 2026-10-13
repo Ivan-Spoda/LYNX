@@ -733,6 +733,13 @@ private:
                     break;
                 }
 
+            for (int c = 0; c < (int) offline.getSong().channels.size(); ++c)
+                if (offline.getSong().channels[(std::size_t) c].instrument == lynx::InstrumentKind::controller)
+                {
+                    saveWindow (lynx::makeChannelSettingsPanel (offline, c), "-controller.png");
+                    break;
+                }
+
             // EQ paramétrico: o de curva mais marcada (no .flp importado, com os ajustes do FL)
             {
                 int bestTrack = -1, bestSlot = -1;

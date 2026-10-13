@@ -98,7 +98,7 @@ Ordem pensada para ter algo usável o quanto antes e nunca quebrar a regra do mo
 - [x] Pitch Shifter, Frequency Shifter, Emphasis, Low Lifter, Send, Transporter, Squeeze (rodada 15)
 - [x] Envelope Controller (canal controlador + automação ao vivo)
 - [x] Patcher em ramos paralelos simples (contêiner); links de X-Y Controller / Control Surface (valor fixo)
-- [ ] Patcher M/S e multibanda, editor do canal controlador
+- [ ] Patcher M/S e multibanda
 - [x] Kepler, Wave Traveller; FLEX pelo nome do preset (os pacotes são protegidos e não são abertos)
 - [x] BooBass; Drumpad pelo nome do patch (bateria do LYNX ou tambor no synth)
 - [x] PoiZone, BassDrum, Toxic Biohazard (rodada 15)
