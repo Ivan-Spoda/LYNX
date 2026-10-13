@@ -556,8 +556,9 @@ TEST (patcher_branch_heads_follow_rea)
     CHECK (low.valid && low.slot && low.note.empty());
     if (low.slot)
     {
-        CHECK (lynx::peq::type (low.slot->params[(std::size_t) lynx::peq::param (0, 0)]) == lynx::peq::BandType::highCut);
-        CHECK (lynx::peq::slopeStages (low.slot->params[(std::size_t) lynx::peq::slopeParam]) == 2);
+        // banda grave = só o passa-baixas do Crossover, combo 3 (24 dB/oit)
+        CHECK (low.slot->kind == lynx::EffectKind::crossover && low.slot->params[0] == 0.0f && low.slot->params[3] == 1.0f);
+        CHECK (std::lround (low.slot->params[5] * 7.0f) == 3);
     }
     const auto mid = lynx::patcherBranchHead ("Frequency Splitter", split, 2);
     CHECK (mid.valid && mid.gain == 0.0f); // em 2 bandas a média é muda
@@ -4577,4 +4578,47 @@ TEST (effector_algorithms)
         CHECK (std::abs (out[3000 + 500] - in[500]) < 0.01f); // depois do crossfade, é o começo de novo
         CHECK (std::abs (out[1000] - in[1000]) < 1e-6f);
     }
+}
+
+TEST (crossover_linkwitz_riley_sums_flat)
+{
+    // banda grave + banda aguda do mesmo corte: soma com módulo 1 (Linkwitz-Riley; nas de 12 e 36 dB o HP é invertido)
+    for (const auto combo : { 1, 3, 4, 5, 6, 7 })
+        for (const auto testHz : { 200.0, 1000.0, 5000.0 })
+        {
+            auto run = [&] (bool high) {
+                auto fx = lynx::makeEffect (lynx::EffectKind::crossover);
+                fx->prepare (48000.0);
+                auto slot = lynx::makeEffectSlot (lynx::EffectKind::crossover);
+                const auto value = (float) (std::log2 (1000.0 / 30.0) / 9.0589);
+                slot.params[high ? 0 : 3] = 1.0f;
+                slot.params[high ? 1 : 4] = value;
+                slot.params[high ? 2 : 5] = (float) combo / 7.0f;
+                std::vector<float> l (24000), r (24000);
+                for (std::size_t i = 0; i < l.size(); ++i)
+                    l[i] = r[i] = (float) std::sin (2.0 * 3.141592653589793 * testHz * (double) i / 48000.0);
+                fx->process (l.data(), r.data(), 24000, slot.params, 120.0);
+                return l;
+            };
+            const auto low = run (false), high = run (true);
+            double peak = 0.0;
+            for (std::size_t i = 12000; i < low.size(); ++i)
+                peak = std::max (peak, (double) std::abs (low[i] + high[i]));
+            CHECK (std::abs (peak - 1.0) < 0.02);
+        }
+    // 96 dB/oit: duas oitavas acima do corte o passa-baixas já está abaixo de −150 dB... na prática, muito baixo
+    auto fx = lynx::makeEffect (lynx::EffectKind::crossover);
+    fx->prepare (48000.0);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::crossover);
+    slot.params[3] = 1.0f;
+    slot.params[4] = (float) (std::log2 (500.0 / 30.0) / 9.0589);
+    slot.params[5] = 1.0f;
+    std::vector<float> l (24000), r (24000);
+    for (std::size_t i = 0; i < l.size(); ++i)
+        l[i] = r[i] = (float) std::sin (2.0 * 3.141592653589793 * 2000.0 * (double) i / 48000.0);
+    fx->process (l.data(), r.data(), 24000, slot.params, 120.0);
+    float peak = 0.0f;
+    for (std::size_t i = 12000; i < l.size(); ++i)
+        peak = std::max (peak, std::abs (l[i]));
+    CHECK (peak < 1e-4f);
 }

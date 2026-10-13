@@ -246,7 +246,8 @@ enum class EffectKind : std::uint8_t
     freqShift,    // desloca todas as frequências em Hz (banda lateral única, sem preservar harmonia)
     parallel,     // contêiner: ramos de efeitos em paralelo somados (o Patcher do FL); ver EffectSlot::branches
     lofi,         // redução de taxa (segura amostras) e de bits (o Lo-fi do Effector do FL)
-    effector      // o Effector do FL: 12 algoritmos com X/Y, LFO e Mod Rate (core/Effector.h)
+    effector,     // o Effector do FL: 12 algoritmos com X/Y, LFO e Mod Rate (core/Effector.h)
+    crossover     // banda de um divisor de frequências (Frequency Splitter do FL): passa-altas e/ou passa-baixas Linkwitz-Riley
 };
 
 constexpr int maxEffectParams = 40; // o EQ paramétrico de 7 bandas usa a maior parte

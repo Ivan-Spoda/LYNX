@@ -1007,6 +1007,129 @@ int holdSamples (float v) { return (int) (128.0f * v * v * v) + 1; }
 double levels (float v) { return 65536.0 / (2048.0 * v * v + 1.0); }
 } // namespace lofi
 
+// Crossover (banda do Frequency Splitter do FL, REA_rodada17 §1.2): passa-altas e/ou passa-baixas com a
+// estrutura de cada inclinação — 6 dB: 1ª ordem; 12: 1 biquad Q 0,5 (HP invertido); 18: Butterworth 3
+// (no FL é uma estrutura com passa-tudo não detalhada: aproximação); 24: 2× Q 0,707; 36: Q 0,5412/1,3066/
+// 0,7070 (HP invertido); 48: Butterworth 4 ao quadrado; 72: Butterworth 6 ao quadrado; 96: Butterworth 8 ao
+// quadrado. Parâmetros: 0 liga o HP, 1 corte do HP, 2 inclinação do HP, 3 liga o LP, 4 corte do LP, 5 inclinação.
+namespace xover
+{
+double hz (float v) { return 30.0 * std::pow (2.0, 9.0589 * std::clamp (v, 0.0f, 1.0f)); }
+float hzValue (double hz) { return (float) std::clamp (std::log2 (hz / 30.0) / 9.0589, 0.0, 1.0); }
+int combo (float v) { return std::clamp ((int) std::lround (v * 7.0f), 0, 7); }
+constexpr int dbPerOctave[8] { 6, 12, 18, 24, 36, 48, 72, 96 };
+
+struct Design
+{
+    std::vector<double> qs; // biquads de 2ª ordem
+    bool firstOrder = false;
+    bool invertHighPass = false;
+};
+
+Design design (int c)
+{
+    switch (c)
+    {
+        case 0: return { {}, true, false };
+        case 1: return { { 0.5 }, false, true };
+        case 2: return { { 1.0 }, true, false };
+        case 3: return { { 0.7071, 0.7071 }, false, false };
+        case 4: return { { 0.5412, 1.3066, 0.7070 }, false, true };
+        case 5: return { { 0.5412, 1.3066, 0.5412, 1.3066 }, false, false };
+        case 6: return { { 0.5176, 0.7071, 1.9319, 0.5176, 0.7071, 1.9319 }, false, false };
+        default: return { { 0.5098, 0.6013, 0.9000, 2.5629, 0.5098, 0.6013, 0.9000, 2.5629 }, false, false };
+    }
+}
+} // namespace xover
+
+class Crossover final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = sr;
+        last.fill (-1.0f);
+        reset();
+    }
+
+    void reset() noexcept override
+    {
+        for (auto& side : sides)
+        {
+            for (auto& b : side.biquads)
+                b.reset();
+            side.firstState[0] = side.firstState[1] = 0.0;
+            side.firstIn[0] = side.firstIn[1] = 0.0;
+        }
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        if (p[0] != last[0] || p[1] != last[1] || p[2] != last[2] || p[3] != last[3] || p[4] != last[4] || p[5] != last[5])
+        {
+            for (int i = 0; i < 6; ++i)
+                last[(std::size_t) i] = p[(std::size_t) i];
+            configure (sides[0], p[0] > 0.5f, true, xover::hz (p[1]), xover::combo (p[2]));
+            configure (sides[1], p[3] > 0.5f, false, xover::hz (p[4]), xover::combo (p[5]));
+        }
+
+        for (auto& side : sides)
+            if (side.active)
+                for (int i = 0; i < n; ++i)
+                {
+                    l[i] = (float) side.process (l[i], 0);
+                    r[i] = (float) side.process (r[i], 1);
+                }
+    }
+
+private:
+    struct Side
+    {
+        bool active = false, highPass = false, firstOrder = false;
+        double sign = 1.0;
+        std::array<Biquad, 8> biquads;
+        int count = 0;
+        double a = 0.0; // 1ª ordem (transformação bilinear)
+        double firstState[2] {}, firstIn[2] {};
+
+        double process (double x, int ch) noexcept
+        {
+            if (firstOrder)
+            {
+                // passa-baixas de 1ª ordem: y = a·(x + x[n−1]) + (1 − 2a)·y[n−1]; o passa-altas é o complemento
+                const auto lp = a * (x + firstIn[ch]) + (1.0 - 2.0 * a) * firstState[ch];
+                firstIn[ch] = x;
+                firstState[ch] = lp;
+                x = highPass ? x - lp : lp;
+            }
+            for (int i = 0; i < count; ++i)
+                x = biquads[(std::size_t) i].process (x, ch);
+            return sign * x;
+        }
+    };
+
+    void configure (Side& side, bool on, bool highPass, double hz, int combo)
+    {
+        side.active = on;
+        if (! on)
+            return;
+        const auto d = xover::design (combo);
+        side.highPass = highPass;
+        side.firstOrder = d.firstOrder;
+        side.sign = highPass && d.invertHighPass ? -1.0 : 1.0;
+        side.count = (int) d.qs.size();
+        const auto f = std::clamp (hz, 10.0, 0.49 * sampleRate);
+        const auto k = std::tan (3.141592653589793 * f / sampleRate);
+        side.a = k / (1.0 + k);
+        for (int i = 0; i < side.count; ++i)
+            side.biquads[(std::size_t) i].filter (sampleRate, highPass ? 1 : 0, f, d.qs[(std::size_t) i]);
+    }
+
+    double sampleRate = 44100.0;
+    std::array<Side, 2> sides {};
+    std::array<float, 6> last {};
+};
+
 class LoFi final : public Effect
 {
 public:
@@ -1379,6 +1502,8 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitons", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Janela", 0.4f } } };
     static const EffectInfo freqShift { "Frequency shifter", { { "Deslocamento", 0.5f }, { "Mix", 1.0f }, { "Estéreo", 0.0f } } };
     static const EffectInfo parallelInfo { "Patcher (paralelo)", {} };
+    static const EffectInfo crossoverInfo { "Crossover", { { "Passa-altas", 0.0f }, { "Corte PA", 0.3f }, { "Incl. PA", 3.0f / 7.0f },
+                                                           { "Passa-baixas", 0.0f }, { "Corte PB", 0.7f }, { "Incl. PB", 3.0f / 7.0f } } };
     static const EffectInfo lofiInfo { "Lo-fi", { { "Taxa", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
     static const EffectInfo effectorInfo { "Effector", { { "Tipo", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
@@ -1435,6 +1560,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::parallel: return parallelInfo;
         case EffectKind::lofi: return lofiInfo;
         case EffectKind::effector: return effectorInfo;
+        case EffectKind::crossover: return crossoverInfo;
     }
     return eq;
 }
@@ -1618,6 +1744,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::effector:
             return effector::formatParam (param, v, bpm);
 
+        case EffectKind::crossover:
+            if (param == 0 || param == 3)
+                return v > 0.5f ? "ligado" : "desligado";
+            if (param == 1 || param == 4)
+                std::snprintf (text, sizeof (text), "%.0f Hz", xover::hz (v));
+            else
+                std::snprintf (text, sizeof (text), "%d dB/oit", xover::dbPerOctave[xover::combo (v)]);
+            return text;
+
         case EffectKind::plugin:
         case EffectKind::parallel:
             break;
@@ -1664,6 +1799,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // vazio: use makeParallelEffect
         case EffectKind::lofi: return std::make_unique<LoFi>();
         case EffectKind::effector: return effector::make();
+        case EffectKind::crossover: return std::make_unique<Crossover>();
         case EffectKind::plugin: break; // criado pelo app (RackState::Factories)
     }
     return std::make_unique<Eq>();
