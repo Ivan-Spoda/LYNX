@@ -231,6 +231,13 @@ struct MixerInsert
     std::uint32_t colour = 0;    // 0xRRGGBB (0 = sem cor gravada)
     std::vector<int> routes;      // trilhas de destino (0 = Master)
     bool hasRoutes = false;
+
+    struct Slot
+    {
+        int index = 0;      // 0..9
+        std::string plugin; // nome interno (0xC9), ex.: "Fruity Limiter"
+    };
+    std::vector<Slot> slots;
 };
 
 struct Project

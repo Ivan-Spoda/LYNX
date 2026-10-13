@@ -46,7 +46,8 @@ enum : std::uint32_t
     evMixerRoutes = 0xEB,       // um byte por trilha de destino
     evChannelLevels = 0xDB,
     evChannelColour = 0x80,
-    evMixerInsertColour = 0x95, // u32 0x00BBGGRR; vem antes do 0xEC que abre o insert     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
+    evMixerInsertColour = 0x95, // u32 0x00BBGGRR; vem antes do 0xEC que abre o insert
+    evMixerSlotIndex = 0x62,    // u16: fecha o slot de efeito descrito pelos eventos anteriores     // u32 0x00BBGGRR (também aparece nos slots do mixer)     // i32 pan, i32 volume, i32 afinação (centésimos), ...
     evPlaylistTrack = 0xEE,     // u32 índice (1..500), u32 cor, u32 ícone, u8 habilitada, ...
     evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
@@ -336,6 +337,7 @@ Project parseProject (std::span<const std::uint8_t> file)
     bool hasFineTempo = false;
     bool hasTimeSignature = false;
     std::string pendingInsertName;
+    std::string pendingSlotPlugin;
     std::uint32_t pendingInsertColour = 0;
 
     auto text = [&] (const Event& e)
@@ -533,9 +535,17 @@ Project parseProject (std::span<const std::uint8_t> file)
                 break;
 
             case evPluginInternalName:
-                // Também aparece nos slots do mixer; só interessa dentro de um canal.
+                // aparece nos canais (gerador) e nos slots do mixer (efeito, fechado pelo 0x62)
                 if (section == Section::channel && channel().pluginName.empty())
                     channel().pluginName = text (e);
+                else if (section == Section::mixer)
+                    pendingSlotPlugin = text (e);
+                break;
+
+            case evMixerSlotIndex:
+                if (section == Section::mixer && ! project.mixer.empty() && ! pendingSlotPlugin.empty())
+                    project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin });
+                pendingSlotPlugin.clear();
                 break;
 
             case evSamplePath:

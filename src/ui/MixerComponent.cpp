@@ -170,8 +170,9 @@ void MixerStrips::paint (juce::Graphics& g)
         {
             const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
             g.setColour (theme::accentOrange);
-            g.setFont (juce::FontOptions (9.0f));
-            g.drawText ("PDC " + juce::String (ms, 1) + " ms", x, 3, w - 6, 11, juce::Justification::centredLeft);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 36).withWidth (w - 40),
+                        juce::Justification::centredLeft); // o Master não tem solo: usa o lugar dele
         }
 
         if (! track.effects.empty())

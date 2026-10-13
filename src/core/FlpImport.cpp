@@ -1,5 +1,6 @@
 #include "core/FlpImport.h"
 
+#include "core/Effects.h"
 #include "core/SynthPresets.h"
 
 #include <algorithm>
@@ -60,6 +61,29 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
     }
 
     return flPath;
+}
+
+std::optional<EffectKind> effectForFlPlugin (const std::string& name)
+{
+    static const std::pair<const char*, EffectKind> table[] = {
+        { "Fruity Parametric EQ 2", EffectKind::eq },  { "Fruity Parametric EQ", EffectKind::eq },  { "Fruity 7 Band EQ", EffectKind::eq },
+        { "Fruity Limiter", EffectKind::limiter },     { "Maximus", EffectKind::limiter },           { "Fruity Soft Clipper", EffectKind::distortion },
+        { "Fruity Reeverb 2", EffectKind::reverb },    { "Fruity Reeverb", EffectKind::reverb },     { "LuxeVerb", EffectKind::reverb },
+        { "Fruity Delay 3", EffectKind::delay },       { "Fruity Delay 2", EffectKind::delay },      { "Fruity Delay Bank", EffectKind::delay },
+        { "Fruity Delay", EffectKind::delay },         { "Fruity Compressor", EffectKind::compressor },
+        { "Fruity Multiband Compressor", EffectKind::compressor }, { "Soundgoodizer", EffectKind::compressor },
+        { "Fruity WaveShaper", EffectKind::distortion }, { "Fruity Fast Dist", EffectKind::distortion },
+        { "Fruity Blood Overdrive", EffectKind::distortion }, { "Distructor", EffectKind::distortion },
+        { "Fruity Flangus", EffectKind::chorus },      { "Fruity Chorus", EffectKind::chorus },      { "Hyper Chorus", EffectKind::chorus },
+        { "Vintage Chorus", EffectKind::chorus },      { "Fruity Flanger", EffectKind::chorus },
+        { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
+    };
+
+    for (const auto& [plugin, kind] : table)
+        if (name == plugin)
+            return kind;
+
+    return std::nullopt;
 }
 
 AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int>& channelMap, int mixerTracks)
@@ -259,6 +283,44 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
             for (auto target : insert.routes)
                 if (target > 0 && target < tracks && target != insert.index)
                     track.sends.push_back ({ target, target >= 100 ? 0.0f : 1.0f });
+        }
+    }
+
+    // efeitos nativos do FL viram os efeitos internos parecidos (parâmetros no padrão: o estado
+    // interno dos plugins do FL não é conhecido); os outros ficam de fora
+    for (const auto& insert : project.mixer)
+    {
+        if (insert.index < 0 || insert.index >= tracks)
+            continue;
+
+        auto& track = song.mixer[(std::size_t) insert.index];
+
+        for (const auto& slot : insert.slots)
+        {
+            const auto kind = effectForFlPlugin (slot.plugin);
+
+            if (! kind || (int) track.effects.size() >= maxEffectSlots)
+                continue;
+
+            auto fx = makeEffectSlot (*kind);
+
+            if (*kind == EffectKind::filter)
+                fx.params[1] = 1.0f; // aberto: sem os ajustes do FL, melhor não abafar
+
+            if (slot.plugin == "Fruity Soft Clipper")
+                fx.params[0] = 0.15f; // drive baixo
+
+            // bypass e dry/wet do slot (0xE1, p = 0x1F00 / 0x1F01)
+            for (const auto& control : project.controls)
+                if (control.id.isMixer() && control.id.track() == insert.index && control.id.slot() == slot.index)
+                {
+                    if (control.id.param() == 0x1F00)
+                        fx.enabled = control.value != 0;
+                    else if (control.id.param() == 0x1F01)
+                        fx.mix = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+                }
+
+            track.effects.push_back (fx);
         }
     }
 
