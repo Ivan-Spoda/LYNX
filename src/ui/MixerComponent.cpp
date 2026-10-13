@@ -165,6 +165,15 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (12.0f));
         g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 2, 16, w - 8, 16, juce::Justification::centred, 1, 0.7f);
 
+        // latência compensada (PDC) no Master
+        if (t == 0 && engine.getLatencySamples() > 0)
+        {
+            const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
+            g.setColour (theme::accentOrange);
+            g.setFont (juce::FontOptions (9.0f));
+            g.drawText ("PDC " + juce::String (ms, 1) + " ms", x, 3, w - 6, 11, juce::Justification::centredLeft);
+        }
+
         if (! track.effects.empty())
         {
             g.setColour (theme::accentBlue);
