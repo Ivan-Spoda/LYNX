@@ -176,10 +176,13 @@ std::int64_t PlaylistComponent::snap (double tick, bool enabled) const
     const auto index = juce::jlimit (0, 5, snapBox.getSelectedId() - 1);
     auto grid = grids[index];
 
-    if (grid == 0) // compasso
-        grid = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+    if (! enabled)
+        return (std::int64_t) std::floor (tick);
 
-    if (! enabled || grid <= 1)
+    if (grid == 0) // compasso (respeita as mudanças de compasso)
+        return engine.getSong().barAt ((std::int64_t) std::max (0.0, std::floor (tick))).tick;
+
+    if (grid <= 1)
         return (std::int64_t) std::floor (tick);
 
     return (std::int64_t) std::floor (tick / (double) grid) * grid;
@@ -236,20 +239,19 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.drawHorizontalLine (y + trackHeight - 1, (float) grid.getX(), (float) grid.getRight());
         }
 
-        const auto firstBeat = (std::int64_t) std::floor (scrollTicks / ppq);
-        const auto lastBeat = (std::int64_t) std::ceil (xToTick (grid.getRight()) / ppq);
         const auto beatPixels = ppq * pixelsPerTick;
 
-        for (auto beat = firstBeat; beat <= lastBeat; ++beat)
+        for (const auto& b : song.barsBetween ((std::int64_t) std::max (0.0, scrollTicks), (std::int64_t) xToTick (grid.getRight()) + 1))
         {
-            const auto tick = beat * ppq;
-            const auto isBar = tick % bar == 0;
+            g.setColour (juce::Colour (0xff181b1f));
+            g.drawVerticalLine ((int) tickToX ((double) b.tick), (float) grid.getY(), (float) grid.getBottom());
 
-            if (! isBar && beatPixels < 8.0)
+            if (beatPixels < 8.0)
                 continue; // muito afastado: só linhas de compasso
 
-            g.setColour (isBar ? juce::Colour (0xff181b1f) : juce::Colour (0xff24292e));
-            g.drawVerticalLine ((int) tickToX ((double) tick), (float) grid.getY(), (float) grid.getBottom());
+            g.setColour (juce::Colour (0xff24292e));
+            for (auto tick = b.tick + ppq; tick < b.tick + b.length; tick += ppq)
+                g.drawVerticalLine ((int) tickToX ((double) tick), (float) grid.getY(), (float) grid.getBottom());
         }
 
         // região de loop
@@ -395,18 +397,41 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
         const auto barPixels = bar * pixelsPerTick;
         const auto every = barPixels < 30.0 ? (barPixels < 10.0 ? 16 : 4) : 1; // números mais espaçados quando afastado
-        const auto firstBar = (std::int64_t) std::floor (scrollTicks / (double) bar);
-        const auto lastBar = (std::int64_t) std::ceil (xToTick (grid.getRight()) / (double) bar);
 
-        for (auto b = firstBar; b <= lastBar; ++b)
+        for (const auto& b : song.barsBetween ((std::int64_t) std::max (0.0, scrollTicks), (std::int64_t) xToTick (grid.getRight()) + 1))
         {
-            if (b % every != 0)
+            if ((b.number - 1) % every != 0)
                 continue;
 
-            const auto x = (int) tickToX ((double) (b * bar));
+            const auto x = (int) tickToX ((double) b.tick);
             g.setColour (theme::text.withAlpha (0.7f));
             g.drawVerticalLine (x, 12.0f, (float) timelineHeight);
-            g.drawText (juce::String (b + 1), x + 3, 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
+            g.drawText (juce::String (b.number), x + 3, 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
+        }
+
+        // marcadores: bandeirinha com o nome; mudanças de compasso mostram a fração
+        g.setFont (juce::FontOptions (11.0f));
+
+        for (const auto& m : song.markers())
+        {
+            const auto x = (float) tickToX ((double) m.tick);
+
+            if (x < (float) ruler.getX() - 200.0f || x > (float) ruler.getRight())
+                continue;
+
+            auto label = juce::String::fromUTF8 (m.name.c_str());
+            if (const auto fraction = juce::String (m.numerator) + "/" + juce::String (m.denominator); m.isSignature() && label != fraction)
+                label = fraction + (label.isEmpty() ? "" : " " + label);
+            if (label.isEmpty())
+                label = "*";
+
+            const auto width = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 8.0f;
+            const auto tag = juce::Rectangle<float> (x, (float) timelineHeight - 11.0f, width, 11.0f);
+            g.setColour ((m.isSignature() ? theme::accentGreen : juce::Colour (0xffe0b050)).withAlpha (0.85f));
+            g.fillRect (tag);
+            g.drawVerticalLine ((int) x, 0.0f, (float) timelineHeight);
+            g.setColour (juce::Colours::black);
+            g.drawText (label, tag.reduced (3.0f, 0.0f), juce::Justification::centredLeft, false);
         }
 
         if (playheadTick >= 0.0)
@@ -709,7 +734,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     {
         if (e.mods.isPopupMenu())
         {
-            engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false);
+            showRulerMenu (e.x);
             return;
         }
 
@@ -995,6 +1020,72 @@ void PlaylistComponent::renameTrack (int track)
                                      if ((int) s.playlistTracks.size() <= track)
                                          s.playlistTracks.resize ((std::size_t) track + 1);
                                      s.playlistTracks[(std::size_t) track].name = name;
+                                 });
+                             }),
+                             true);
+}
+
+void PlaylistComponent::showRulerMenu (int x)
+{
+    const auto& song = engine.getSong();
+    const auto tick = juce::jmax<std::int64_t> (0, snap (xToTick (x), true));
+
+    // marcador perto do clique (até 6 px)
+    int near = -1;
+    for (int i = 0; i < (int) song.markers().size(); ++i)
+        if (std::abs (tickToX ((double) song.markers()[(std::size_t) i].tick) - x) <= 6.0)
+            near = i;
+
+    juce::PopupMenu menu;
+    menu.addItem ("Adicionar marcador aqui...", [this, tick] { editMarkerName (tick, -1); });
+
+    juce::PopupMenu signatures;
+    for (auto [n, d] : { std::pair { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 4 }, { 7, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } })
+        signatures.addItem (juce::String (n) + "/" + juce::String (d), [this, tick, n = n, d = d] {
+            engine.editSong ([tick, n, d] (Song& s) { s.addMarker ({ tick, {}, n, d }); });
+        });
+    menu.addSubMenu (utf8 ("Mudança de compasso aqui"), signatures);
+
+    if (near >= 0)
+    {
+        menu.addSeparator();
+        menu.addItem ("Renomear marcador...", [this, near] { editMarkerName (0, near); });
+        menu.addItem ("Remover marcador", [this, near] {
+            engine.editSong ([near] (Song& s) {
+                if (near < (int) s.markers().size())
+                    s.markers().erase (s.markers().begin() + near);
+            });
+        });
+    }
+
+    if (song.hasLoop())
+    {
+        menu.addSeparator();
+        menu.addItem ("Remover loop", [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void PlaylistComponent::editMarkerName (std::int64_t tick, int existing)
+{
+    const auto& markers = engine.getSong().markers();
+    const auto current = existing >= 0 && existing < (int) markers.size() ? juce::String::fromUTF8 (markers[(std::size_t) existing].name.c_str())
+                                                                          : juce::String ("Marcador");
+    auto* window = new juce::AlertWindow (existing >= 0 ? "Renomear marcador" : "Novo marcador", {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", current);
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancelar", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, tick, existing, window] (int result) {
+                                 if (result != 1)
+                                     return;
+
+                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
+                                 engine.editSong ([tick, existing, name] (Song& s) {
+                                     if (existing < 0)
+                                         s.addMarker ({ tick, name, 0, 4 });
+                                     else if (existing < (int) s.markers().size())
+                                         s.markers()[(std::size_t) existing].name = name;
                                  });
                              }),
                              true);

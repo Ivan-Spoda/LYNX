@@ -383,10 +383,78 @@ void Song::removeAutomation (int index)
     });
 }
 
+std::vector<Marker>& Song::markers()
+{
+    if (arrangements.empty())
+        arrangements.push_back ({ "Arrangement 1", {}, 0, 0, {} });
+
+    return arrangements[(std::size_t) std::clamp (currentArrangement, 0, (int) arrangements.size() - 1)].markers;
+}
+
+const std::vector<Marker>& Song::markers() const
+{
+    static const std::vector<Marker> none;
+    return arrangements.empty() ? none : arrangements[(std::size_t) std::clamp (currentArrangement, 0, (int) arrangements.size() - 1)].markers;
+}
+
+void Song::addMarker (Marker marker)
+{
+    auto& list = markers();
+    const auto at = std::upper_bound (list.begin(), list.end(), marker.tick, [] (std::int64_t t, const Marker& m) { return t < m.tick; });
+    list.insert (at, std::move (marker));
+}
+
+std::vector<Bar> Song::barsBetween (std::int64_t from, std::int64_t to) const
+{
+    std::vector<Bar> bars;
+    auto barLength = [] (int numerator, int denominator) {
+        return std::max<std::int64_t> (1, (std::int64_t) ppq * 4 * std::max (1, numerator) / std::max (1, denominator));
+    };
+
+    Bar bar { 0, barLength (beatsPerBar, 4), 1 };
+    const auto& list = markers();
+    std::size_t next = 0;
+
+    while (bar.tick < to)
+    {
+        // mudanças de compasso que caem no começo deste compasso valem para ele
+        while (next < list.size() && (! list[next].isSignature() || list[next].tick <= bar.tick))
+        {
+            if (list[next].isSignature())
+                bar.length = barLength (list[next].numerator, list[next].denominator);
+            ++next;
+        }
+
+        // a próxima mudança corta este compasso e começa um novo ali
+        const auto end = next < list.size() ? std::min (bar.tick + bar.length, list[next].tick) : bar.tick + bar.length;
+
+        if (end > from)
+            bars.push_back ({ bar.tick, end - bar.tick, bar.number });
+
+        bar = { end, bar.length, bar.number + 1 };
+
+        // sem mudanças pela frente: o resto é aritmética (evita andar compasso a compasso até `from`)
+        if (bar.tick < from && next >= list.size())
+        {
+            const auto skip = (from - bar.tick) / bar.length;
+            bar.tick += skip * bar.length;
+            bar.number += (int) skip;
+        }
+    }
+
+    return bars;
+}
+
+Bar Song::barAt (std::int64_t tick) const
+{
+    const auto bars = barsBetween (std::max<std::int64_t> (0, tick), std::max<std::int64_t> (0, tick) + 1);
+    return bars.empty() ? Bar { 0, (std::int64_t) ppq * std::max (1, beatsPerBar), 1 } : bars.front();
+}
+
 void Song::selectArrangement (int index)
 {
     if (arrangements.empty())
-        arrangements.push_back ({ "Arrangement 1", {}, 0, 0 });
+        arrangements.push_back ({ "Arrangement 1", {}, 0, 0, {} });
 
     currentArrangement = std::clamp (currentArrangement, 0, (int) arrangements.size() - 1);
     index = std::clamp (index, 0, (int) arrangements.size() - 1);
@@ -417,6 +485,7 @@ int Song::addArrangement (const std::string& name, bool copyCurrent)
         a.clips = playlist;
         a.loopStart = loopStart;
         a.loopEnd = loopEnd;
+        a.markers = markers();
     }
 
     arrangements.push_back (std::move (a));

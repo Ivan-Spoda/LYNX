@@ -264,7 +264,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0;
 
     for (auto& entry : std::filesystem::recursive_directory_iterator (realFlpDir))
     {
@@ -283,6 +283,14 @@ TEST (flp_real_files)
 
             const auto song = lynx::importFlp (p);
             CHECK (! song.patterns.empty());
+
+            for (const auto& a : song.arrangements)
+                for (const auto& m : a.markers)
+                {
+                    ++markers;
+                    signatures += m.isSignature();
+                    CHECK (m.tick >= 0);
+                }
 
             // Fruity Wrapper (canais e slots do mixer): todo blob dos demos é lido
             auto countWrapper = [&] (const std::string& plugin, const std::vector<std::uint8_t>& state) {
@@ -367,6 +375,8 @@ TEST (flp_real_files)
     CHECK (threeOscDecoded == threeOsc);
     CHECK (wrappedParsed == wrapped);
     std::printf ("  %d plugins no Fruity Wrapper, %d lidos\n", wrapped, wrappedParsed);
+    std::printf ("  %d marcadores, %d mudanças de compasso\n", markers, signatures);
+    CHECK (markers > 300 && signatures > 60);
     std::printf ("  %d canais 3x Osc, %d decodificados\n", threeOsc, threeOscDecoded);
     std::printf ("  %d arquivos .flp lidos, %d com notas, %d com playlist, %d automações (%d com alvo), %d envios\n",
                  files, withNotes, withPlaylist, automations, automationsWithTarget, sends);
@@ -994,6 +1004,33 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     blob[0] = 13;
     CHECK (! lynx::parseFlWrapper (blob, p));
     CHECK (! lynx::parseFlWrapper ({ 12, 0, 0, 0 }, p));
+}
+
+TEST (bars_follow_time_signature_markers)
+{
+    lynx::Song song;
+    song.beatsPerBar = 4;
+    const auto bar4 = (std::int64_t) lynx::ppq * 4;
+    auto bars = song.barsBetween (0, bar4 * 3);
+    CHECK (bars.size() == 3 && bars[2].tick == bar4 * 2 && bars[2].number == 3);
+
+    // 7/4 a partir do compasso 3, e 3/4 no meio de um compasso de 7 (corta e recomeça)
+    song.addMarker ({ bar4 * 2, "Verso", 7, 4 });
+    song.addMarker ({ bar4, "Nome só", 0, 4 });
+    const auto seven = (std::int64_t) lynx::ppq * 7;
+    song.addMarker ({ bar4 * 2 + seven + lynx::ppq * 2, "", 3, 4 });
+    bars = song.barsBetween (0, bar4 * 2 + seven * 2);
+    CHECK (bars.size() >= 5);
+    CHECK (bars[1].length == bar4 && bars[2].tick == bar4 * 2 && bars[2].length == seven);
+    CHECK (bars[3].length == lynx::ppq * 2);                                // cortado pela mudança
+    CHECK (bars[4].length == lynx::ppq * 3 && bars[4].number == 5);
+    CHECK (song.markers()[0].name == "Nome só");                            // ordenados por tick
+
+    // de longe: começa no compasso certo sem perder a numeração
+    const auto far = song.barsBetween (lynx::ppq * 3000, lynx::ppq * 3001);
+    CHECK (far.size() == 1 && far[0].length == lynx::ppq * 3);
+    CHECK (song.barAt (lynx::ppq * 3000).number == far[0].number);
+    CHECK ((lynx::ppq * 3000 - far[0].tick) < far[0].length);
 }
 
 TEST (flp_import_brings_playlist)

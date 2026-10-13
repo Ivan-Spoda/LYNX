@@ -219,12 +219,24 @@ struct PlaylistTrackInfo
     bool enabled = true;  // false = trilha mutada
 };
 
+// Marcador de tempo da Playlist: 0x94 (u32: tipo << 24 | posição em ticks), seguido de
+// 0x21/0x22 (numerador/denominador) e 0xCD (nome). Tipo 8 = mudança de compasso (visto nos demos:
+// 7/4, 6/4, 3/4); 0 = marcador comum; os outros são ações (loop, pausa...).
+struct TimeMarker
+{
+    std::uint32_t position = 0;
+    int type = 0;
+    int numerator = 4, denominator = 4;
+    std::string name;
+};
+
 struct Arrangement
 {
     int index = 0;
     std::string name;
     std::vector<PlaylistItem> items;
     std::vector<PlaylistTrackInfo> tracks; // só as que o arquivo descreve
+    std::vector<TimeMarker> markers;
 };
 
 struct MixerInsert

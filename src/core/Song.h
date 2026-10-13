@@ -350,11 +350,31 @@ struct PlaylistTrack
 Clip splitClip (Clip& clip, std::int64_t tick);
 
 // Um arranjo da Playlist (o FL permite vários por projeto).
+// Marcador da Playlist (como os "time markers" do FL). Com numerador > 0 é uma mudança de
+// compasso: um compasso novo começa ali, com numerador/denominador.
+struct Marker
+{
+    std::int64_t tick = 0;
+    std::string name;
+    int numerator = 0, denominator = 4;
+
+    bool isSignature() const noexcept { return numerator > 0; }
+    bool operator== (const Marker&) const = default;
+};
+
+// Um compasso da régua: onde começa, quantos tempos (semínimas) tem e o número (1, 2, ...).
+struct Bar
+{
+    std::int64_t tick = 0, length = 0;
+    int number = 1;
+};
+
 struct Arrangement
 {
     std::string name;
     std::vector<Clip> clips;               // vazio no arrangement atual: os clips dele moram em Song::playlist
     std::int64_t loopStart = 0, loopEnd = 0;
+    std::vector<Marker> markers;           // ordenados por tick (ficam aqui mesmo no arrangement atual)
 };
 
 struct Song
@@ -371,7 +391,7 @@ struct Song
     std::int64_t loopStart = 0, loopEnd = 0; // trecho em loop na Playlist (ticks); loopEnd <= loopStart = desligado
 
     // Arrangements: `playlist` e o loop acima são os do atual; os outros ficam guardados aqui.
-    std::vector<Arrangement> arrangements { Arrangement { "Arrangement 1", {}, 0, 0 } };
+    std::vector<Arrangement> arrangements { Arrangement { "Arrangement 1", {}, 0, 0, {} } };
     int currentArrangement = 0;
 
     void selectArrangement (int index);
@@ -399,6 +419,16 @@ struct Song
     }
 
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
+
+    // Marcadores do arrangement atual.
+    std::vector<Marker>& markers();
+    const std::vector<Marker>& markers() const;
+    void addMarker (Marker marker); // mantém a ordem
+
+    // Compassos que tocam [from, to), levando em conta as mudanças de compasso dos marcadores
+    // (antes da primeira vale beatsPerBar/4).
+    std::vector<Bar> barsBetween (std::int64_t from, std::int64_t to) const;
+    Bar barAt (std::int64_t tick) const;
 
     std::vector<MixerTrack> mixer; // [0] = Master; vazio = tudo direto na saída
     std::vector<Automation> automations;

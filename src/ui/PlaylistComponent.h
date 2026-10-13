@@ -87,6 +87,8 @@ private:
     void setSelection (std::vector<int> indices);
     void sortClips(); // ordena mantendo a seleção (sem passo de desfazer)
     void showClipMenu (int clip);
+    void showRulerMenu (int x);                           // marcadores, compasso e loop
+    void editMarkerName (std::int64_t tick, int existing); // existing = índice, ou -1 para criar
     void deleteSelection();
     void copySelection();
     void pasteClips();

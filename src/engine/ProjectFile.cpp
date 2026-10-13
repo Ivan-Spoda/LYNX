@@ -1,5 +1,7 @@
 #include "engine/ProjectFile.h"
 
+#include <algorithm>
+
 #include "engine/Text.h"
 
 namespace lynx::ProjectFile
@@ -369,7 +371,9 @@ juce::String toJson (const Song& song)
             root->setProperty ("playlistTracks", tracks);
     }
 
-    if (song.arrangements.size() > 1)
+    const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
+
+    if (song.arrangements.size() > 1 || anyMarkers)
     {
         juce::Array<juce::var> arrangements;
 
@@ -385,6 +389,15 @@ juce::String toJson (const Song& song)
 
                 if (a.loopEnd > a.loopStart)
                     o->setProperty ("loop", juce::Array<juce::var> { (juce::int64) a.loopStart, (juce::int64) a.loopEnd });
+            }
+
+            // marcadores: [tick, nome, numerador, denominador] (numerador 0 = marcador comum)
+            if (! a.markers.empty())
+            {
+                juce::Array<juce::var> markers;
+                for (const auto& m : a.markers)
+                    markers.add (juce::Array<juce::var> { (juce::int64) m.tick, str (m.name), m.numerator, m.denominator });
+                o->setProperty ("markers", markers);
             }
 
             arrangements.add (juce::var (o.release()));
@@ -688,6 +701,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 arrangement.loopEnd = juce::jmax<juce::int64> (arrangement.loopStart, (juce::int64) loop[1]);
             }
 
+            if (auto* markers = a["markers"].getArray())
+                for (const auto& m : *markers)
+                    if (m.isArray() && m.size() == 4)
+                        arrangement.markers.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) m[0]), m[1].toString().toStdString(),
+                                                         juce::jlimit (0, 32, (int) m[2]), juce::jlimit (1, 32, (int) m[3]) });
+
+            std::stable_sort (arrangement.markers.begin(), arrangement.markers.end(), [] (const Marker& x, const Marker& y) { return x.tick < y.tick; });
             song.arrangements.push_back (std::move (arrangement));
         }
 

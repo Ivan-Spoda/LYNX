@@ -607,10 +607,23 @@ void MainComponent::timerCallback()
     const auto& song = engine.getSong();
     const auto loop = song.mode == PlayMode::song ? song.songLength()
                                                    : song.patterns[(std::size_t) song.currentPattern].effectiveLength (song.beatsPerBar);
-    const auto beats = std::fmod (transport.positionTicks.load(), (double) loop) / ppq;
-    const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load());
-    const auto bar = (int) (beats / beatsPerBar) + 1;
-    const auto beat = (int) std::fmod (beats, (double) beatsPerBar) + 1;
+    const auto ticks = std::fmod (transport.positionTicks.load(), (double) juce::jmax<std::int64_t> (1, loop));
+    const auto beats = ticks / ppq;
+    int bar = 0, beat = 0;
+
+    if (song.mode == PlayMode::song) // na música vale a régua da Playlist (com as mudanças de compasso)
+    {
+        const auto current = song.barAt ((std::int64_t) ticks);
+        bar = current.number;
+        beat = (int) ((ticks - (double) current.tick) / ppq) + 1;
+    }
+    else
+    {
+        const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load());
+        bar = (int) (beats / beatsPerBar) + 1;
+        beat = (int) std::fmod (beats, (double) beatsPerBar) + 1;
+    }
+
     const auto step = (int) (std::fmod (beats, 1.0) * stepsPerBeat) + 1;
 
     positionLabel.setText (juce::String::formatted ("%d : %d : %d", bar, beat, step), juce::dontSendNotification);

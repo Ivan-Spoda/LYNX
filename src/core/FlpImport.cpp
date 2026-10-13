@@ -710,6 +710,26 @@ Song importFlp (const flp::Project& project, const FlpImportOptions& options)
 
         Arrangement a;
         a.name = arrangement.name.empty() ? "Arrangement " + std::to_string (song.arrangements.size() + 1) : arrangement.name;
+
+        // marcadores; os de tipo 8 mudam o compasso (as ações de loop/pausa viram marcadores comuns)
+        for (const auto& m : arrangement.markers)
+        {
+            Marker marker;
+            marker.tick = rescale (m.position);
+            marker.name = m.name;
+            marker.name.erase (0, marker.name.find_first_not_of (' '));
+            marker.name.erase (marker.name.find_last_not_of (' ') + 1);
+
+            if (m.type == 8 && m.numerator >= 1 && m.numerator <= 32 && m.denominator >= 1 && m.denominator <= 32)
+            {
+                marker.numerator = m.numerator;
+                marker.denominator = m.denominator;
+            }
+
+            a.markers.push_back (std::move (marker));
+        }
+
+        std::stable_sort (a.markers.begin(), a.markers.end(), [] (const Marker& x, const Marker& y) { return x.tick < y.tick; });
         importedTracks.push_back (&arrangement.tracks);
 
         if (song.arrangements.empty())

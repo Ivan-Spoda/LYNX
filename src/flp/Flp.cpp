@@ -54,6 +54,10 @@ enum : std::uint32_t
     evPlaylistItems = 0xE9,
     evMixerInsertParams = 0xEC, // abre um novo insert do mixer
     evArrangementName = 0xF1,
+    evTimeMarker = 0x94,          // u32 tipo << 24 | posição
+    evTimeMarkerNumerator = 0x21, // u8
+    evTimeMarkerDenominator = 0x22,
+    evTimeMarkerName = 0xCD,
 };
 
 constexpr std::size_t noteRecordSize = 24;
@@ -575,6 +579,27 @@ Project parseProject (std::span<const std::uint8_t> file)
             case evArrangementName:
                 if (section == Section::arrangement)
                     arrangement().name = text (e);
+                break;
+
+            case evTimeMarker:
+                if (currentArrangement < 0)
+                {
+                    currentArrangement = 0;
+                    arrangement();
+                }
+                arrangement().markers.push_back ({ e.value & 0xFFFFFFu, (int) (e.value >> 24), 4, 4, {} });
+                break;
+
+            case evTimeMarkerNumerator:
+            case evTimeMarkerDenominator:
+                if (currentArrangement >= 0 && ! arrangement().markers.empty())
+                    (e.id == evTimeMarkerNumerator ? arrangement().markers.back().numerator : arrangement().markers.back().denominator)
+                        = (int) e.value;
+                break;
+
+            case evTimeMarkerName:
+                if (currentArrangement >= 0 && ! arrangement().markers.empty())
+                    arrangement().markers.back().name = text (e);
                 break;
 
             case evPlaylistItems:
