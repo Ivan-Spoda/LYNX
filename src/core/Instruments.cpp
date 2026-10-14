@@ -479,7 +479,15 @@ public:
     void configure (const ChannelDef& channel, double songBpm) noexcept override
     {
         bpm.store (std::max (1.0, songBpm)); // first: the synced LFO uses it when reading the settings
+        updateFrames (channel.synth);
         mailbox.write (channel.synth);
+    }
+
+    ~SynthInstrument() override
+    {
+        delete incomingFrames.exchange (nullptr);
+        delete retiredFrames.exchange (nullptr);
+        delete activeFrames;
     }
 
     void startModulation (SynthVoice& v, float pan) noexcept
@@ -627,6 +635,14 @@ public:
     {
         if (mailbox.read (settings))
             updateCoefficients();
+        // new spectrum frames (built in configure): the old set goes back for the other thread to free
+        if (retiredFrames.load() == nullptr)
+            if (auto* frames = incomingFrames.exchange (nullptr))
+            {
+                retiredFrames.store (activeFrames); // a set with count 0 stays active as "static spectrum"
+                activeFrames = frames;
+                evolving = frames->count > 1;
+            }
 
         for (auto& v : voices)
         {
@@ -635,6 +651,15 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
+                if (evolving) // evolving spectrum: the two frames around the note's age
+                {
+                    const auto t = v.age / sampleRate;
+                    const auto x = std::min ((double) (activeFrames->count - 1), (activeFrames->count - 1) * std::sqrt (t / activeFrames->span));
+                    const auto k = std::min ((int) x, activeFrames->count - 2);
+                    frameA = &activeFrames->tables[(std::size_t) k];
+                    frameB = &activeFrames->tables[(std::size_t) k + 1];
+                    frameMix = (float) (x - k);
+                }
                 // ADSR envelope
                 switch (v.stage)
                 {
@@ -828,11 +853,19 @@ private:
                 int level = 0;
                 while (level < wavetableLevels - 1 && (double) (1024 >> level) * dt > 0.5)
                     ++level;
-                const auto& t = wavetables[(std::size_t) level];
                 const auto pos = phase * wavetableSize;
                 const auto i = std::min ((int) pos, wavetableSize - 1);
                 const auto f = (float) (pos - i);
-                return t[(std::size_t) i] + f * (t[(std::size_t) i + 1] - t[(std::size_t) i]);
+                auto read = [&] (const Tables& tables) {
+                    const auto& t = tables[(std::size_t) level];
+                    return t[(std::size_t) i] + f * (t[(std::size_t) i + 1] - t[(std::size_t) i]);
+                };
+                if (evolving)
+                {
+                    const auto a = read (*frameA);
+                    return a + frameMix * (read (*frameB) - a);
+                }
+                return read (wavetables);
             }
         }
 
@@ -841,7 +874,83 @@ private:
 
     // band-limited wavetables of the spectrum (IFFT per level; level j holds harmonics ≤ 1024 >> j)
     static constexpr int wavetableSize = 2048, wavetableLevels = 10;
-    std::array<std::array<float, wavetableSize + 1>, wavetableLevels> wavetables {};
+    using Tables = std::array<std::array<float, wavetableSize + 1>, wavetableLevels>;
+    Tables wavetables {};
+
+    // evolving spectrum: `count` snapshots at t_f = span·(f/(count − 1))², harmonic h scaled by 10^(−3t/decay_h)
+    struct Frames
+    {
+        int count = 0;
+        double span = 1.0;
+        std::vector<Tables> tables;
+    };
+    static constexpr int frameCount = 8;
+    std::atomic<Frames*> incomingFrames { nullptr }, retiredFrames { nullptr };
+    Frames* activeFrames = nullptr;              // audio thread only
+    bool evolving = false;
+    const Tables* frameA = nullptr;
+    const Tables* frameB = nullptr;
+    float frameMix = 0.0f;
+    // configure() side: what the last frames were built from
+    std::array<float, SynthSettings::spectrumSize> framedSpectrum {}, framedPhase {}, framedDecay {};
+
+    static void fillTables (Tables& tables, const std::array<float, SynthSettings::spectrumSize>& amplitude,
+                            const std::array<float, SynthSettings::spectrumSize>& phase, std::vector<std::complex<double>>& bins)
+    {
+        for (int level = 0; level < wavetableLevels; ++level)
+        {
+            std::fill (bins.begin(), bins.end(), std::complex<double> {});
+            const auto top = std::min (SynthSettings::spectrumSize, 1024 >> level);
+            for (int h = 1; h <= top; ++h)
+            {
+                // a·sin(2π(h·t + φ)) = Im: coefficient −i·a/2·e^(i2πφ) at +h and its conjugate at −h
+                const auto a = (double) amplitude[(std::size_t) h - 1] * (2.0 / 3.141592653589793); // 1/n saw = LYNX's ±1 saw
+                const auto c = std::polar (a / 2.0, twoPi * phase[(std::size_t) h - 1] - twoPi / 4.0);
+                bins[(std::size_t) h] = c;
+                bins[(std::size_t) (wavetableSize - h)] = std::conj (c);
+            }
+            fftInPlace (bins, true);
+            auto& t = tables[(std::size_t) level];
+            for (int i = 0; i < wavetableSize; ++i)
+                t[(std::size_t) i] = (float) bins[(std::size_t) i].real();
+            t[(std::size_t) wavetableSize] = t[0];
+        }
+    }
+
+    // called from configure() (off the audio thread): builds the frames when the evolving spectrum changes
+    void updateFrames (const SynthSettings& s)
+    {
+        delete retiredFrames.exchange (nullptr);
+        const auto spectral = std::any_of (s.osc.begin(), s.osc.end(), [] (const SynthOscillator& o) { return o.wave == Waveform::spectral; });
+        const auto evolving = spectral && std::any_of (s.spectrumDecay.begin(), s.spectrumDecay.end(), [] (float t) { return t > 0.0f; });
+        const auto wasEvolving = std::any_of (framedDecay.begin(), framedDecay.end(), [] (float t) { return t > 0.0f; });
+        if (! evolving && ! wasEvolving)
+            return;
+        if (evolving && framedSpectrum == s.spectrum && framedPhase == s.spectrumPhase && framedDecay == s.spectrumDecay)
+            return;
+        framedSpectrum = s.spectrum;
+        framedPhase = s.spectrumPhase;
+        framedDecay = evolving ? s.spectrumDecay : std::array<float, SynthSettings::spectrumSize> {};
+
+        auto* frames = new Frames; // count 0 = back to the static spectrum
+        if (evolving)
+        {
+            frames->count = frameCount;
+            frames->span = std::min (60.0, (double) *std::max_element (s.spectrumDecay.begin(), s.spectrumDecay.end()));
+            frames->tables.resize ((std::size_t) frameCount);
+            std::vector<std::complex<double>> bins ((std::size_t) wavetableSize);
+            for (int f = 0; f < frameCount; ++f)
+            {
+                const auto t = frames->span * std::pow ((double) f / (frameCount - 1), 2.0);
+                auto amplitude = s.spectrum;
+                for (std::size_t h = 0; h < amplitude.size(); ++h)
+                    if (s.spectrumDecay[h] > 0.0f)
+                        amplitude[h] *= (float) std::pow (10.0, -3.0 * t / s.spectrumDecay[h]);
+                fillTables (frames->tables[(std::size_t) f], amplitude, s.spectrumPhase, bins);
+            }
+        }
+        delete incomingFrames.exchange (frames);
+    }
     std::array<float, SynthSettings::spectrumSize> builtSpectrum {}, builtPhase {};
     bool wavetablesBuilt = false;
     std::vector<std::complex<double>> fftBins = std::vector<std::complex<double>> ((std::size_t) wavetableSize);
@@ -853,25 +962,7 @@ private:
         builtSpectrum = settings.spectrum;
         builtPhase = settings.spectrumPhase;
         wavetablesBuilt = true;
-        auto& bins = fftBins; // allocated together with the instrument (off the audio thread)
-        for (int level = 0; level < wavetableLevels; ++level)
-        {
-            std::fill (bins.begin(), bins.end(), std::complex<double> {});
-            const auto top = std::min (SynthSettings::spectrumSize, 1024 >> level);
-            for (int h = 1; h <= top; ++h)
-            {
-                // a·sin(2π(h·t + φ)) = Im: coefficient −i·a/2·e^(i2πφ) at +h and its conjugate at −h
-                const auto a = (double) settings.spectrum[(std::size_t) h - 1] * (2.0 / 3.141592653589793); // 1/n saw = LYNX's ±1 saw
-                const auto c = std::polar (a / 2.0, twoPi * settings.spectrumPhase[(std::size_t) h - 1] - twoPi / 4.0);
-                bins[(std::size_t) h] = c;
-                bins[(std::size_t) (wavetableSize - h)] = std::conj (c);
-            }
-            fftInPlace (bins, true);
-            auto& t = wavetables[(std::size_t) level];
-            for (int i = 0; i < wavetableSize; ++i)
-                t[(std::size_t) i] = (float) bins[(std::size_t) i].real();
-            t[(std::size_t) wavetableSize] = t[0];
-        }
+        fillTables (wavetables, settings.spectrum, settings.spectrumPhase, fftBins); // bins allocated with the instrument
     }
 
 

@@ -4945,3 +4945,27 @@ TEST (parallel_container_inner_links_modulate)
     const auto [lo0, hi0] = levels (false);
     CHECK (std::abs (hi0 - lo0) < 1e-4f);
 }
+
+TEST (synth_spectrum_decays_per_harmonic)
+{
+    // harmonic 1 holds, harmonic 3 falls 60 dB in 0.2 s: early the 3rd is as loud as the 1st, later it is gone
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::spectral, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+    s.decay = 0.0f;
+    s.sustain = 1.0f;
+    s.spectrum[0] = 1.0f;
+    s.spectrum[2] = 1.0f;
+    s.spectrumDecay[2] = 0.2f;
+    const auto x = renderSynthNote (s, 57, 48000); // 220 Hz, 48 kHz, 1 s
+    // equal 2400-sample windows (Goertzel power grows with the window): 10…60 ms and 500…550 ms
+    const auto early1 = goertzel (x, 220.0, 480, 2880), early3 = goertzel (x, 660.0, 480, 2880);
+    const auto late1 = goertzel (x, 220.0, 24000, 26400), late3 = goertzel (x, 660.0, 24000, 26400);
+    CHECK (early3 > 0.05 * early1); // ≈ −9 dB on average over 10…60 ms
+    CHECK (late3 < 1e-4 * late1);
+    CHECK (std::abs (10.0 * std::log10 (late1 / early1)) < 1.0); // the 1st holds
+    // without per-harmonic decay the spectrum stays as it is
+    s.spectrumDecay[2] = 0.0f;
+    const auto y = renderSynthNote (s, 57, 48000);
+    CHECK (std::abs (10.0 * std::log10 (goertzel (y, 660.0, 24000, 26400) / goertzel (y, 660.0, 480, 2880))) < 1.0);
+}

@@ -83,8 +83,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   cutoff LFO, song-locked LFO; exact timbre (12 colours incl. Custom, harmonic mask, detune ±1200/±2400,
   6-band timbre EQ, low-harmonics protection, Sub 1/3/4).
 - **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
-  weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator;
-  cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
+  weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
+  with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
   key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct.
@@ -116,8 +116,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Kepler: chorus (the LYNX synth has none); "Range" ×10 (Exo only); LFO BPM sync.
 - Harmless: the filter as a per-partial curve (LYNX uses a biquad); p39 outside ±1200/±2400; stereo tremolo
   (2.5 Hz) and vibrato (6 Hz); resonance width.
-- Ogun: one static spectrum per channel — per-partial decay/release become one overall envelope (the time for the
-  whole spectrum to fall 40 dB), ALT DECAY's morph and the read-start phase offset are not reproduced, articulators
+- Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
+  share an energy-weighted decay; the per-partial release is one overall envelope; ALT DECAY's morph and the read-start phase offset are not reproduced, articulators
   are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
   key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
 - Sytrus: only one carrier per channel uses the exact spectrum; the others and the FM modulator use basic shapes.
@@ -164,4 +164,4 @@ Confirmed empirically on the demo projects:
 
 ## Open items
 - ASIO (Steinberg SDK licensing).
-- Ogun's per-partial decay, Vocodex's internal carrier synth, Harmor's per-partial resonance and image synthesis.
+- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth, Harmor's per-partial resonance and image synthesis.

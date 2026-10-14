@@ -180,6 +180,9 @@ struct SynthSettings
     static constexpr int spectrumSize = 256;
     std::array<float, spectrumSize> spectrum {};
     std::array<float, spectrumSize> spectrumPhase {};
+    // per-harmonic decay: seconds for harmonic h to fall 60 dB from the note start (0 = holds); lets the
+    // spectrum evolve during the note (Ogun's per-partial decay)
+    std::array<float, spectrumSize> spectrumDecay {};
     ModEnvelope filterEnv;   // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;    // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget

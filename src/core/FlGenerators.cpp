@@ -238,6 +238,7 @@ double ogunEnvelopeAt (const OgunEnvelope& env, double x)
 struct OgunSpectrum
 {
     std::array<float, SynthSettings::spectrumSize> amplitude {}, phase {};
+    std::array<float, SynthSettings::spectrumSize> decay {}; // per index, seconds to −60 dB (0 = holds)
     int octave = 0;
     double decaySeconds = -1.0, releaseSeconds = -1.0;
 };
@@ -365,7 +366,7 @@ bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body,
 
     out.octave = std::max (-2, 7 - richness);
     const auto stride = 1 << (richness - 7 + out.octave);
-    std::array<double, SynthSettings::spectrumSize> energy {}, strongest {};
+    std::array<double, SynthSettings::spectrumSize> energy {}, strongest {}, weightedTau {};
     std::vector<double> amp ((std::size_t) m, 0.0);
     for (int i = 0; i < m; ++i)
     {
@@ -378,6 +379,8 @@ bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body,
             continue;
         const auto k = (std::size_t) index - 1;
         energy[k] += a * a;
+        if (decayKnob >= 0.0) // τ_h = (t − 0.025)·B·E_dec + 0.025 to −40 dB (§1.7)
+            weightedTau[k] += a * a * std::max (0.001, (decayKnob - 0.025) * b[(std::size_t) i] * mapAt (decayEq, i) + 0.025);
         if (a > strongest[k])
         {
             strongest[k] = a;
@@ -385,7 +388,11 @@ bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body,
         }
     }
     for (std::size_t k = 0; k < energy.size(); ++k)
+    {
         out.amplitude[k] = (float) (std::sqrt (energy[k]) * pi / 2.0); // physical level (round 23 convention)
+        if (energy[k] > 0.0 && decayKnob >= 0.0)
+            out.decay[k] = (float) std::min (60.0, 1.5 * weightedTau[k] / energy[k]); // −40 dB → −60 dB
+    }
 
     // time for the summed energy to fall 40 dB when partial h falls 40 dB in τ_h = (t − 0.025)·B·E + 0.025
     auto overall = [&] (double knob, const std::vector<double>& eq)
@@ -659,9 +666,10 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     const auto transpose = std::clamp (p[1], -24, 24) + std::clamp (p[2], -50, 50) / 100.0;
 
     // REA_rodada24 §1: Ogun is an inverse-FFT spectral synth; its initial spectrum goes into the "spectral"
-    // oscillator. Approximations: one static spectrum (per-partial decay → one overall envelope, ALT DECAY's
-    // morph towards the Decay EQ is not reproduced), articulators at their neutral values, Seed 2 "Random" = one
-    // fixed draw, partials of dense spectra (richness > 4) binned onto the nearest harmonic of f/4.
+    // oscillator, with each harmonic's own decay (spectrumDecay, 8 frames per note). Approximations: binned
+    // partials share an energy-weighted decay, the release is one overall envelope, ALT DECAY's morph towards the
+    // Decay EQ is not reproduced, articulators at their neutral values, Seed 2 "Random" = one fixed draw,
+    // partials of dense spectra (richness > 9) binned onto the nearest harmonic of f/4.
     // Without readable maps the old waveform approximation is used.
     OgunSpectrum spectrum;
     const auto spectral = ogunSpectrum (p, *body, spectrum);
@@ -669,6 +677,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     {
         s.spectrum = spectrum.amplitude;
         s.spectrumPhase = spectrum.phase;
+        s.spectrumDecay = spectrum.decay; // each harmonic decays at its own rate (the envelope then holds)
         s.osc = { SynthOscillator { Waveform::spectral, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
         setPitch (s.osc[0], transpose);
         s.osc[0].octave = std::clamp (s.osc[0].octave + spectrum.octave, -3, 3);
@@ -685,7 +694,8 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     }
 
     // spectral: the 40 dB fall of the whole spectrum → LYNX's 60 dB times (×1.5)
-    const auto decay = spectral ? (spectrum.decaySeconds < 0.0 ? -1.0 : 1.5 * spectrum.decaySeconds) : seconds (p[6]);
+    // (with the per-harmonic decay in the spectrum, the volume envelope holds)
+    const auto decay = spectral ? -1.0 : seconds (p[6]);
     const auto release = spectral ? 1.5 * spectrum.releaseSeconds : seconds (p[7]);
     s.attack = 0.0f;
     if (decay < 0.0)

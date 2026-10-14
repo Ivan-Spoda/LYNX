@@ -418,6 +418,13 @@ juce::String toJson (const Song& song)
                 }
                 synth->setProperty ("spectrum", amplitudes.joinIntoString (" "));
                 synth->setProperty ("spectrumPhase", phases.joinIntoString (" "));
+                if (std::any_of (c.synth.spectrumDecay.begin(), c.synth.spectrumDecay.end(), [] (float t) { return t != 0.0f; }))
+                {
+                    juce::StringArray decays;
+                    for (auto t : c.synth.spectrumDecay)
+                        decays.add (juce::String (t, 4));
+                    synth->setProperty ("spectrumDecay", decays.joinIntoString (" "));
+                }
             }
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
@@ -795,6 +802,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     const auto values = juce::StringArray::fromTokens (s.getProperty (key, "").toString(), " ", "");
                     for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
                         (*target)[(std::size_t) h] = juce::jlimit (-16.0f, 16.0f, values[h].getFloatValue());
+                }
+                {
+                    const auto values = juce::StringArray::fromTokens (s.getProperty ("spectrumDecay", "").toString(), " ", "");
+                    for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
+                        def.synth.spectrumDecay[(std::size_t) h] = juce::jlimit (0.0f, 60.0f, values[h].getFloatValue());
                 }
                 def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
                 if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)
