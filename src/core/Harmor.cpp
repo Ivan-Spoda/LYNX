@@ -1,4 +1,5 @@
 #include "core/Harmor.h"
+#include "core/HarmlessFx.h"
 #include "core/Song.h"
 
 #include <algorithm>
@@ -206,6 +207,7 @@ struct StateData
     std::array<PartData, 2> parts;
     bool hasGlobal = false;
     std::array<std::int32_t, 53> g {};
+    std::array<std::int32_t, 6> order { 0, 1, 2, 3, 4, 5 }; // effects-rack unit order
     std::array<std::uint8_t, 0x3d> gmisc {};
     std::size_t globalOffset = 0;
 
@@ -366,6 +368,7 @@ std::optional<StateData> parseState (const std::vector<std::uint8_t>& d)
         S.hasGlobal = true;
         S.globalOffset = o;
         std::memcpy (S.g.data(), d.data() + o, 0xd4);
+        std::memcpy (S.order.data(), d.data() + o + 0xd4, 0x18);
         std::memcpy (S.gmisc.data(), d.data() + o + 0xd4 + 0x18, 0x3d);
     }
     if (! S.hasGlobal)
@@ -2452,9 +2455,27 @@ struct Patch
     int actCount = 0;
     std::vector<float> declick;
     std::vector<std::string> fallbacks;
+    std::shared_ptr<harmor::FxHook> rack; // the effects rack (this patch's own instance), null when every unit is off
 };
 
-std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm)
+// Harmor's effects rack (REA_rodada38) through the engine's FxHook slot
+class RackHook final : public harmor::FxHook
+{
+public:
+    explicit RackHook (const hlfx::HarmorRackSettings& s) { rack.prepare (s); }
+    bool enabled() const noexcept override { return rack.enabled(); }
+    bool quiet() const noexcept override { return rack.quiet(); }
+    void process (float* l, float* r, const float* fl, const float* fr, int n, bool voices) noexcept override
+    {
+        rack.process (l, r, fl, fr, n, voices);
+    }
+    void advance (int n) noexcept override { rack.advance (n); }
+
+private:
+    hlfx::HarmorRack rack;
+};
+
+std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm, const std::vector<std::uint8_t>& compState = {})
 {
     auto P = std::make_shared<Patch>();
     P->fs = fs, P->bpm = bpm;
@@ -2512,9 +2533,27 @@ std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm)
     P->monoMode = S.GI (8);
     P->vrmode = S.GI (12);
     P->legLim = S.g[3] > 0 ? (double) S.g[3] : 2147483647.0;
-    // the effects rack (distortion/compressor/chorus/delay/reverb, REA_rodada34 §1.24) is not decoded: off
-    if (S.GI (48) != 0 || S.GI (52) != 0 || S.g[22] != 0 || S.g[39] != 0 || S.g[32] != 0)
-        P->fallbacks.push_back ("effects rack (off)");
+    // the effects rack (REA_rodada38): distortion, chorus, delay, reverb, compressor in the state's order
+    {
+        hlfx::HarmorRackSettings rs;
+        std::copy (S.g.begin(), S.g.end(), rs.g.begin());
+        rs.order = { S.order[0], S.order[1], S.order[2], S.order[3], S.order[4], S.order[5] };
+        rs.distortion = S.GI (48);
+        rs.precision = P->prec;
+        rs.fs = fs, rs.bpm = bpm;
+        if (S.GI (52) > 0)
+        {
+            if (! compState.empty())
+                rs.comp = hlfx::makeMaximusPreset (hlfx::withMaximusParams (
+                    compState, { { 5, S.g[49] }, { 8, S.g[50] }, { 21, S.g[51] }, { 34, S.g[52] } }));
+            rs.compMix = S.g[49];
+            if (rs.comp == nullptr)
+                P->fallbacks.push_back ("compressor preset " + std::to_string (S.GI (52)) + " not available (off)");
+        }
+        auto hook = std::make_shared<RackHook> (rs);
+        if (hook->enabled())
+            P->rack = std::move (hook);
+    }
     if (P->actCount > 0)
         P->fallbacks.push_back ("harmonic randomness module (absent: never active in FL's data)");
     return P;
@@ -2776,8 +2815,11 @@ public:
     void setPatch (const Patch* p) noexcept
     {
         P = p;
+        fx = p != nullptr ? p->rack.get() : nullptr;
         reset();
     }
+
+    bool rackQuiet() const noexcept { return fx == nullptr || fx->quiet(); }
 
     void seedRandom (std::uint32_t s) noexcept { mt.seed (s); }
     void setMtState (const std::vector<std::uint32_t>& st) noexcept
@@ -3025,6 +3067,13 @@ public:
             return;
         std::fill (mixL.begin(), mixL.begin() + n, 0.0);
         std::fill (mixR.begin(), mixR.begin() + n, 0.0);
+        const bool voices = liveCount > 0;
+        split = fx != nullptr && fx->enabled();
+        if (split)
+        {
+            std::fill (fxL.begin(), fxL.begin() + n, 0.0);
+            std::fill (fxR.begin(), fxR.begin() + n, 0.0);
+        }
         // part tremolo (Gen_Render): depth ramp reset when no record of the part sounds
         for (int ai = 0; ai < P->actCount; ++ai)
             tremolo (P->act[(std::size_t) ai], n);
@@ -3046,8 +3095,18 @@ public:
             live[(std::size_t) kept++] = ri;
         }
         liveCount = kept;
-        if (fx != nullptr)
-            fx->process (mixL.data(), mixR.data(), n);
+        if (split)
+        {
+            // the effects rack on the float mix (Gen_Render: the voices are mixed into float buffers)
+            for (int j = 0; j < n; ++j)
+            {
+                rackL[(std::size_t) j] = (float) mixL[(std::size_t) j], rackR[(std::size_t) j] = (float) mixR[(std::size_t) j];
+                rackFxL[(std::size_t) j] = (float) fxL[(std::size_t) j], rackFxR[(std::size_t) j] = (float) fxR[(std::size_t) j];
+            }
+            fx->process (rackL.data(), rackR.data(), rackFxL.data(), rackFxR.data(), n, voices);
+            for (int j = 0; j < n; ++j)
+                mixL[(std::size_t) j] = (double) rackL[(std::size_t) j], mixR[(std::size_t) j] = (double) rackR[(std::size_t) j];
+        }
         masterVolume (n);
         for (int j = 0; j < n; ++j)
         {
@@ -3064,6 +3123,8 @@ public:
             return;
         for (int ai = 0; ai < P->actCount; ++ai)
             tremolo (P->act[(std::size_t) ai], n, false);
+        if (fx != nullptr)
+            fx->advance (n);
         rampMaster (n);
         advance (n);
     }
@@ -3083,7 +3144,9 @@ private:
     std::array<float, 64> lastMaps {};
     std::array<PartRun, 2> run {};
     double masterCur = 1.0;
-    std::array<double, maxHostBlock> mixL {}, mixR {}, mono {};
+    std::array<double, maxHostBlock> mixL {}, mixR {}, mono {}, fxL {}, fxR {};
+    std::array<float, maxHostBlock> rackL {}, rackR {}, rackFxL {}, rackFxR {};
+    bool split = false;
     std::array<double, 4 * maxHostBlock> gains {};
     std::array<double, 8 * maxHostBlock> laneSums {};
     std::array<float, bankSize> tmpT {}, tmpT0 {}, tmpA {}, tmpB {};
@@ -4508,6 +4571,20 @@ private:
             const auto* g1 = g0 + maxHostBlock;
             const auto* g2 = g1 + maxHostBlock;
             const auto* g3p = g2 + maxHostBlock;
+            // dry and FX-send outputs: summed (no rack) or kept apart for the rack, where the FX send joins at unit 4
+            auto add = [&] (int j, double yl, double yr) {
+                const auto at = (std::size_t) (t + j);
+                if (split)
+                {
+                    mixL[at] += yl * g0[j], mixR[at] += yr * g1[j];
+                    fxL[at] += yl * g2[j], fxR[at] += yr * g3p[j];
+                }
+                else
+                {
+                    mixL[at] += yl * (g0[j] + g2[j]);
+                    mixR[at] += yr * (g1[j] + g3p[j]);
+                }
+            };
             if (trem)
             {
                 // the record fades the part tremolo in over its first 0.1 s
@@ -4517,26 +4594,18 @@ private:
                     for (int j = 0; j < m; ++j)
                     {
                         const auto r = std::min (r0 + (float) j * P->kfade, 1.0f);
-                        const auto yl = y[j] * (double) (r * R.TL[(std::size_t) (t + j)] + (1.0f - r));
-                        const auto yr = y[j] * (double) (r * R.TR[(std::size_t) (t + j)] + (1.0f - r));
-                        mixL[(std::size_t) (t + j)] += yl * (g0[j] + g2[j]);
-                        mixR[(std::size_t) (t + j)] += yr * (g1[j] + g3p[j]);
+                        add (j, y[j] * (double) (r * R.TL[(std::size_t) (t + j)] + (1.0f - r)),
+                             y[j] * (double) (r * R.TR[(std::size_t) (t + j)] + (1.0f - r)));
                     }
                     v.e8 -= m;
                 }
                 else
                     for (int j = 0; j < m; ++j)
-                    {
-                        mixL[(std::size_t) (t + j)] += (y[j] * (double) R.TL[(std::size_t) (t + j)]) * (g0[j] + g2[j]);
-                        mixR[(std::size_t) (t + j)] += (y[j] * (double) R.TR[(std::size_t) (t + j)]) * (g1[j] + g3p[j]);
-                    }
+                        add (j, y[j] * (double) R.TL[(std::size_t) (t + j)], y[j] * (double) R.TR[(std::size_t) (t + j)]);
             }
             else
                 for (int j = 0; j < m; ++j)
-                {
-                    mixL[(std::size_t) (t + j)] += y[j] * (g0[j] + g2[j]);
-                    mixR[(std::size_t) (t + j)] += y[j] * (g1[j] + g3p[j]);
-                }
+                    add (j, y[j], y[j]);
             t += m;
         }
     }
@@ -4686,7 +4755,7 @@ public:
                 current = std::move (pending), pending.reset();
             if (current != nullptr && current->fs != sr && ! state.empty())
                 if (auto S = parseState (state))
-                    current = buildPatch (*S, sr, bpm);
+                    current = buildPatch (*S, sr, bpm, compState);
             retired.reset();
         }
         engine.setPoolSize (current.get());
@@ -4700,15 +4769,29 @@ public:
         pitchCents.store (channel.sampler.pitch * 100.0f);
         const std::lock_guard<std::mutex> lock (mutex);
         retired.reset();
-        if (channel.pluginState == state && b == bpm)
+        // the rack compressor's Maximus state (FlpImport: modelParams = size, bytes…)
+        std::vector<std::uint8_t> comp;
+        const auto& mp = channel.modelParams;
+        if (! mp.empty())
+        {
+            const auto count = (std::size_t) std::max (0.0f, mp[0]);
+            if (count > 0 && mp.size() >= count + 1)
+            {
+                comp.resize (count);
+                for (std::size_t k = 0; k < count; ++k)
+                    comp[k] = (std::uint8_t) std::clamp ((int) mp[k + 1], 0, 255);
+            }
+        }
+        if (channel.pluginState == state && b == bpm && comp == compState)
             return;
         state = channel.pluginState;
+        compState = std::move (comp);
         bpm = b;
         std::shared_ptr<const Patch> built;
         try
         {
             if (auto S = parseState (state))
-                built = buildPatch (*S, preparedRate.load(), bpm);
+                built = buildPatch (*S, preparedRate.load(), bpm, compState);
         }
         catch (...)
         {
@@ -4743,7 +4826,7 @@ public:
 
     void allNotesOff() noexcept override { engine.allNotesOff(); }
 
-    bool idle() const noexcept override { return engine.idle(); }
+    bool idle() const noexcept override { return engine.idle() && engine.rackQuiet(); }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
@@ -4760,7 +4843,7 @@ public:
         for (int done = 0; done < n; done += Engine::maxHostBlock)
         {
             const auto m = std::min (Engine::maxHostBlock, n - done);
-            if (engine.idle())
+            if (engine.idle() && engine.rackQuiet())
                 engine.skip (m); // nothing sounds: only the plugin-wide phases and ramps run
             else
                 engine.render (left + done, right + done, m);
@@ -4791,7 +4874,7 @@ private:
     std::atomic<bool> hasPending { false };
     std::atomic<double> preparedRate { 44100.0 };
     std::atomic<float> pitchCents { 0.0f };
-    std::vector<std::uint8_t> state;
+    std::vector<std::uint8_t> state, compState;
     double bpm = 120.0, rate = 44100.0, channelVol = 1.0, channelPan = 0.0;
     float nextPan = 0.0f, nextCents = 0.0f;
 };
@@ -4823,10 +4906,16 @@ int harmorParamOffset (const std::vector<std::uint8_t>& state, int part, int ind
     if (! S)
         return -1;
     if (part < 0)
-        return index >= 0 && index < 53 ? (int) (S->globalOffset + 4 * (std::size_t) index) : -1;
+        return index >= 0 && index < 59 ? (int) (S->globalOffset + 4 * (std::size_t) index) : -1; // (53…58: the rack order)
     if (part > 1 || ! S->parts[(std::size_t) part].present || index < 0 || index >= 386)
         return -1;
     return (int) (S->parts[(std::size_t) part].paramOffset + 4 * (std::size_t) index);
+}
+
+int harmorCompressorType (const std::vector<std::uint8_t>& state)
+{
+    const auto S = parseState (state);
+    return S ? std::max (0, S->GI (52)) : 0;
 }
 
 std::unique_ptr<Instrument> makeHarmorInstrument() { return std::make_unique<HarmorInstrument>(); }
@@ -4834,12 +4923,13 @@ std::unique_ptr<Instrument> makeHarmorInstrument() { return std::make_unique<Har
 namespace harmor
 {
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
-                                    int length, int block, const std::vector<std::uint32_t>& mt, double bpm)
+                                    int length, int block, const std::vector<std::uint32_t>& mt, double bpm,
+                                    const std::vector<std::uint8_t>& compressorState)
 {
     const auto S = parseState (state);
     if (! S || length <= 0)
         return {};
-    const auto patch = buildPatch (*S, sampleRate, bpm);
+    const auto patch = buildPatch (*S, sampleRate, bpm, compressorState);
     auto engine = std::make_unique<Engine>();
     engine->setPoolSize (patch.get());
     engine->setPatch (patch.get());
