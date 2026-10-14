@@ -1,11 +1,13 @@
 #include "core/Effects.h"
 
 #include "core/Effector.h"
+#include "core/PitcherDsp.h"
 #include "core/VintagePhaser.h"
 
 #include "core/Biquad.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -1628,10 +1630,13 @@ private:
     double bandwidthPercent = 50.0, attackCoeff = 0.99, releaseCoeff = 0.999;
 };
 
-// Pitch correction (FL's Pitcher; laws in REA_rodada15 §1 and rodada19 §6). Parameters: 0 Correction Speed,
-// 1 Fine Tune, 2 Bypass All, 3 Note A Freq, 4 range (index/5: min f 220/170/110/80/55/25 Hz), 5…16 note
-// mask C…B (1 = allowed), 17…28 Key Bypass C…B. The detector (YIN) and the shifter (two heads) are LYNX's own:
-// FL's have not been decoded.
+// Pitch correction (FL's Pitcher; laws in REA_rodada15 §1, rodada19 §6 and rodada30 §2). Parameters: 0 Correction
+// Speed, 1 Fine Tune, 2 Bypass All, 3 Note A Freq, 4 range (index/5: min f 220/170/110/80/55/25 Hz), 5…16 note
+// mask C…B (1 = allowed), 17…28 Key Bypass C…B, 29 Formant, 30 Gender, 31 Pitch Reference (0 left, 0.5
+// independent, 1 right), 32 Stereo, 33 Harmonize, 34 MIDI, 35 Octaves, 36 Replace/Mix, 37 Vel, 38…41 Voice 1…4 pan.
+// The DSP is FL's (core/PitcherDsp.h). MIDI mode and Harmonize take held notes, but LYNX effects receive no MIDI:
+// no note is ever held, so MIDI mode corrects nothing (only Fine applies) and Harmonize passes the voice-0 dry
+// signal (Replace) or the dry input alone (Mix) — what FL does with nothing arriving on the Pitcher's MIDI port.
 namespace pcorr
 {
 constexpr double minHz[6] { 220.0, 170.0, 110.0, 80.0, 55.0, 25.0 };
@@ -1642,177 +1647,47 @@ double noteA (float v) { return 55.0 * std::pow (2.0, (2.0 * v - 1.0) / 12.0); }
 class PitchCorrect final : public Effect
 {
 public:
-    static constexpr int decimation = 4, history = 4096, hop = 256;
-    static constexpr double windowSeconds = 0.04;
+    PitchCorrect() { dsp.reserve (maxSampleRate); }
 
-    PitchCorrect()
-    {
-        ring.assign ((std::size_t) history, 0.0f);
-        diff.assign ((std::size_t) history, 0.0f);
-        const auto size = (std::size_t) (0.13 * maxSampleRate) + 8;
-        buffer[0].assign (size, 0.0f);
-        buffer[1].assign (size, 0.0f);
-    }
-
-    void prepare (double sr) noexcept override
-    {
-        sampleRate = sr;
-        length = (int) std::min<std::size_t> (buffer[0].size(), (std::size_t) (0.13 * sr) + 8);
-        reset();
-    }
-
-    void reset() noexcept override
-    {
-        std::fill (ring.begin(), ring.end(), 0.0f);
-        std::fill (buffer[0].begin(), buffer[0].end(), 0.0f);
-        std::fill (buffer[1].begin(), buffer[1].end(), 0.0f);
-        ringWrite = 0;
-        decimCount = 0;
-        decimSum = 0.0f;
-        hopCount = 0;
-        detectedHz = 0.0;
-        correction = 0.0;
-        wet = 0.0f;
-        write = 0;
-        phase = 0.0;
-    }
+    void prepare (double sr) noexcept override { dsp.prepare (sr); }
+    void reset() noexcept override { dsp.reset(); }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
-        const auto u = 1.0 - (double) std::clamp (p[0], 0.0f, 1.0f);
-        const auto coeff = u < 0.01 ? 1.0 : std::min (1.0, 8.82 / (sampleRate * (3.0 * u * u * u + 0.001)));
-        const auto fine = 2.0 * p[1] - 1.0;
-        const auto window = std::min (windowSeconds * sampleRate, (double) length - 4.0);
-        const auto wetCoeff = (float) (1.0 / (0.01 * sampleRate));
-
-        for (int i = 0; i < n; ++i)
+        auto on = [&p] (int i) { return p[(std::size_t) i] > 0.5f; };
+        pitcher::Params q;
+        q.speed = std::clamp (p[0], 0.0f, 1.0f);
+        q.fine = p[1];
+        q.bypassAll = on (2);
+        q.aRef = p[3];
+        q.range = pcorr::range (p[4]);
+        for (int k = 0; k < 12; ++k)
         {
-            // detector: mono decimated by 4, YIN every `hop` samples
-            decimSum += 0.5f * (l[i] + r[i]);
-            if (++decimCount == decimation)
-            {
-                ring[(std::size_t) ringWrite] = decimSum / decimation;
-                ringWrite = (ringWrite + 1) % history;
-                decimCount = 0;
-                decimSum = 0.0f;
-            }
-            if (++hopCount >= hop)
-            {
-                hopCount = 0;
-                detectedHz = detect (pcorr::minHz[pcorr::range (p[4])]);
-                target = targetFor (p);
-            }
-
-            // correction smoothed by the Correction Speed pole; with no detected pitch it returns to zero
-            correction += coeff * ((detectedHz > 0.0 ? target : 0.0) - correction);
-            const auto ratio = std::pow (2.0, (correction + fine) / 12.0);
-            const auto step = (1.0 - ratio) / window;
-
-            float* io[2] = { l + i, r + i };
-            buffer[0][(std::size_t) write] = *io[0];
-            buffer[1][(std::size_t) write] = *io[1];
-            const auto phaseB = phase + 0.5 >= 1.0 ? phase - 0.5 : phase + 0.5;
-            const auto gainA = (float) std::sin (3.141592653589793 * phase);
-            const auto gainB = (float) std::sin (3.141592653589793 * phaseB);
-            // with no correction the sound passes dry (two stopped heads would sum different delays = comb filter);
-            // the dry <-> shifted transition is smooth (~10 ms)
-            const auto shifting = std::abs (correction + fine) > 0.05; // 5 cents: below that it is inaudible
-            wet += ((shifting ? 1.0f : 0.0f) - wet) * wetCoeff;
-            if (wet > 1e-4f)
-                for (int c = 0; c < 2; ++c)
-                {
-                    const auto shifted = gainA * read (c, 1.0 + phase * window) + gainB * read (c, 1.0 + phaseB * window);
-                    *io[c] += (shifted - *io[c]) * wet;
-                }
-            phase += step;
-            phase -= std::floor (phase);
-            if (++write >= length)
-                write = 0;
+            q.scale[(std::size_t) k] = on (5 + k);
+            q.keyBypass[(std::size_t) k] = on (17 + k);
         }
+        q.formant = on (29);
+        q.gender = p[30];
+        q.pitchRef = p[31];
+        q.stereo = p[32];
+        q.harmonize = on (33);
+        q.midi = on (34);
+        q.octaves = on (35);
+        q.mix = on (36);
+        q.vel = on (37);
+        for (int j = 0; j < 4; ++j)
+            q.voicePan[(std::size_t) j] = p[(std::size_t) (38 + j)];
+        dsp.process (l, r, n, q);
+        latency.store (dsp.latency(), std::memory_order_relaxed);
     }
+
+    // The DSP's own delay: 9 samples on the plain path, 257 on the formant path (its pass-through delay; voiced
+    // PSOLA grains are placed about one period + 70 samples back). FL's reported PDC latency is not confirmed.
+    int latencySamples() const noexcept override { return latency.load (std::memory_order_relaxed); }
 
 private:
-    // YIN (de Cheveigné & Kawahara) on the decimated signal: period with normalized difference below 0.15
-    double detect (double fmin) noexcept
-    {
-        const auto fs = sampleRate / decimation;
-        const auto maxLag = std::min (history / 2 - 2, (int) std::ceil (fs / fmin));
-        const auto minLag = std::max (2, (int) (fs / 1200.0));
-        const auto w = std::min (history - maxLag - 1, maxLag * 2);
-        if (maxLag <= minLag || w <= 0)
-            return 0.0;
-        auto at = [this] (int back) { return ring[(std::size_t) ((ringWrite - 1 - back + 2 * history) % history)]; };
-        double energy = 0.0;
-        for (int j = 0; j < w; ++j)
-            energy += (double) at (j) * at (j);
-        if (energy / w < 1e-6)
-            return 0.0; // silence
-        double running = 0.0;
-        diff[0] = 1.0f;
-        for (int tau = 1; tau <= maxLag; ++tau)
-        {
-            double d = 0.0;
-            for (int j = 0; j < w; ++j)
-            {
-                const auto x = (double) at (j) - at (j + tau);
-                d += x * x;
-            }
-            running += d;
-            diff[(std::size_t) tau] = (float) (running > 0.0 ? d * tau / running : 1.0);
-        }
-        for (int tau = minLag; tau < maxLag; ++tau)
-            if (diff[(std::size_t) tau] < 0.15f)
-            {
-                while (tau + 1 < maxLag && diff[(std::size_t) tau + 1] < diff[(std::size_t) tau])
-                    ++tau;
-                // parabolic interpolation of the minimum
-                const double a = diff[(std::size_t) tau - 1], b = diff[(std::size_t) tau], c = diff[(std::size_t) tau + 1];
-                const auto den = a + c - 2.0 * b;
-                const auto t = tau + (std::abs (den) > 1e-12 ? 0.5 * (a - c) / den : 0.0);
-                return fs / t;
-            }
-        return 0.0;
-    }
-
-    // nearest allowed note: n = 9 + 12·log2(f/A); Key Bypass on the chosen note = no correction
-    double targetFor (const EffectParams& p) const noexcept
-    {
-        if (detectedHz <= 0.0 || p[2] > 0.5f)
-            return 0.0;
-        const auto noteNumber = 9.0 + 12.0 * std::log2 (detectedHz / pcorr::noteA (p[3]));
-        auto best = 0.0, bestDistance = 1e9;
-        for (int k = (int) std::floor (noteNumber) - 12; k <= (int) std::ceil (noteNumber) + 12; ++k)
-            if (p[(std::size_t) (5 + ((k % 12) + 12) % 12)] > 0.5f && std::abs (k - noteNumber) < bestDistance)
-            {
-                bestDistance = std::abs (k - noteNumber);
-                best = k;
-            }
-        if (bestDistance > 100.0 || p[(std::size_t) (17 + (((int) best % 12) + 12) % 12)] > 0.5f)
-            return 0.0;
-        return best - noteNumber;
-    }
-
-    float read (int c, double delay) const noexcept
-    {
-        auto position = (double) write - delay;
-        while (position < 0.0)
-            position += length;
-        const auto i0 = (int) position;
-        const auto frac = (float) (position - i0);
-        const auto i1 = i0 + 1 >= length ? 0 : i0 + 1;
-        const auto& b = buffer[(std::size_t) c];
-        return b[(std::size_t) i0] + (b[(std::size_t) i1] - b[(std::size_t) i0]) * frac;
-    }
-
-    double sampleRate = 44100.0;
-    std::vector<float> ring, diff;
-    int ringWrite = 0, decimCount = 0, hopCount = 0;
-    float decimSum = 0.0f;
-    double detectedHz = 0.0, target = 0.0, correction = 0.0;
-    float wet = 0.0f;
-    std::array<std::vector<float>, 2> buffer;
-    int length = 1, write = 0;
-    double phase = 0.0;
+    pitcher::Pitcher dsp;
+    std::atomic<int> latency { 9 };
 };
 
 class LoFi final : public Effect
@@ -2279,6 +2154,11 @@ const EffectInfo& effectInfo (EffectKind kind)
         static const char* bypass[] = { "C off", "C# off", "D off", "D# off", "E off", "F off", "F# off", "G off", "G# off", "A off", "A# off", "B off" };
         for (const auto* name : bypass)
             info.params.push_back ({ name, 0.0f });
+        // added later (REA round 30); the defaults keep older projects as they were: plain shifter, no harmony
+        info.params.insert (info.params.end(), { { "Formant", 0.0f }, { "Gender", 0.5f }, { "Pitch ref.", 0.0f }, { "Stereo", 1.0f },
+                                                 { "Harmonize", 0.0f }, { "MIDI", 0.0f }, { "Octaves", 0.0f }, { "Mix", 0.0f },
+                                                 { "Vel", 0.0f }, { "Voice 1 pan", 0.5f }, { "Voice 2 pan", 0.5f },
+                                                 { "Voice 3 pan", 0.5f }, { "Voice 4 pan", 0.5f } });
         return info;
     }();
     static const EffectInfo lofiInfo { "Lo-fi", { { "Rate", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
@@ -2541,7 +2421,17 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 1: std::snprintf (text, sizeof (text), "%+.0f ct", (2.0f * v - 1.0f) * 100.0f); break;
                 case 3: std::snprintf (text, sizeof (text), "%.1f Hz", pcorr::noteA (v) * 8.0); break;
                 case 4: std::snprintf (text, sizeof (text), "%.0f Hz min.", pcorr::minHz[pcorr::range (v)]); break;
-                default: return v > 0.5f ? (param >= 17 ? "bypassed" : "yes") : (param >= 17 ? "-" : (param == 2 ? "no" : "no"));
+                case 30: std::snprintf (text, sizeof (text), "x%.2f", std::pow (2.0, 2.0 * v - 1.0)); break;
+                case 31: return (int) (v + v) == 0 ? "left" : ((int) (v + v) == 1 ? "independent" : "right");
+                case 32: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+                case 36: return v > 0.5f ? "mix" : "replace";
+                case 38: case 39: case 40: case 41:
+                    std::snprintf (text, sizeof (text), "%+.0f%%", (2.0f * v - 1.0f) * 100.0f);
+                    break;
+                default:
+                    if (param >= 29)
+                        return v > 0.5f ? "on" : "off";
+                    return v > 0.5f ? (param >= 17 ? "bypassed" : "yes") : (param >= 17 ? "-" : "no");
             }
             return text;
 

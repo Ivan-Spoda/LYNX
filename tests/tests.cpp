@@ -4890,20 +4890,92 @@ TEST (pitch_correction_pulls_to_allowed_note)
     CHECK (std::abs (run (slot.params, 452.0) - 452.0) < 4.0);
 }
 
-TEST (pitch_correction_passes_dry_when_in_tune)
+TEST (pitch_correction_bypass_is_a_pure_delay)
 {
-    // already in-tune note (440 Hz): output equals input, without the two-head coloration
-    auto fx = lynx::makeEffect (lynx::EffectKind::pitchCorrect);
-    fx->prepare (48000.0);
-    auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchCorrect);
-    std::vector<float> l (48000), r;
-    for (std::size_t i = 0; i < l.size(); ++i)
-        l[i] = 0.5f * (float) std::sin (2.0 * 3.141592653589793 * 440.0 * (double) i / 48000.0);
-    r = l;
-    const auto in = l;
-    fx->process (l.data(), r.data(), (int) l.size(), slot.params, 120.0);
-    for (std::size_t i = 24000; i < l.size(); ++i)
-        CHECK (std::abs (l[i] - in[i]) < 0.01f);
+    // FL's Pitcher with Bypass All still runs its shifter: the plain path is an exact 9-sample delay, the formant
+    // path (256-Hann overlap-add) an exact 257-sample delay, and Gender changes nothing without a shift
+    // (REA_rodada30 §2.4/2.5); both are reported as latency
+    std::vector<float> in (48000);
+    for (std::size_t i = 0; i < in.size(); ++i)
+        in[i] = 0.5f * (float) std::sin (2.0 * 3.141592653589793 * 440.0 * (double) i / 48000.0)
+              + 0.2f * (float) std::sin (2.0 * 3.141592653589793 * 1234.5 * (double) i / 48000.0);
+    auto run = [&] (bool formant, float gender, int& latency) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::pitchCorrect);
+        fx->prepare (48000.0);
+        auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchCorrect);
+        slot.params[2] = 1.0f;
+        slot.params[29] = formant ? 1.0f : 0.0f;
+        slot.params[30] = gender;
+        auto l = in, r = in;
+        for (std::size_t i = 0; i < l.size(); i += 480)
+            fx->process (l.data() + i, r.data() + i, 480, slot.params, 120.0);
+        latency = fx->latencySamples();
+        return l;
+    };
+    int latency = 0;
+    auto plain = run (false, 0.5f, latency);
+    CHECK (latency == 9);
+    auto worst = 0.0f;
+    for (std::size_t i = 4000; i < in.size(); ++i)
+        worst = std::max (worst, std::abs (plain[i] - in[i - 9]));
+    CHECK (worst < 1e-5f);
+    auto formant = run (true, 0.8f, latency);
+    CHECK (latency == 257);
+    worst = 0.0f;
+    for (std::size_t i = 4000; i < in.size(); ++i)
+        worst = std::max (worst, std::abs (formant[i] - in[i - 257]));
+    CHECK (worst < 1e-5f);
+}
+
+TEST (pitch_correction_formant_path)
+{
+    // Formant on: PSOLA keeps the correction (output pitch = grain spacing) while Gender resamples the grains:
+    // the spectrum of a saw moves up with Gender > 0.5 and down with Gender < 0.5
+    auto run = [] (float gender) {
+        auto fx = lynx::makeEffect (lynx::EffectKind::pitchCorrect);
+        fx->prepare (48000.0);
+        auto slot = lynx::makeEffectSlot (lynx::EffectKind::pitchCorrect); // chromatic, instant, A 440
+        slot.params[29] = 1.0f;
+        slot.params[30] = gender;
+        std::vector<float> l (48000 * 2), r;
+        for (std::size_t i = 0; i < l.size(); ++i)
+            l[i] = 0.5f * (float) (2.0 * std::fmod (452.0 * (double) i / 48000.0, 1.0) - 1.0); // saw
+        r = l;
+        fx->process (l.data(), r.data(), (int) l.size(), slot.params, 120.0);
+        l.erase (l.begin(), l.begin() + 48000);
+        return l;
+    };
+    // period by autocorrelation (lags 60…160 = 300…800 Hz)
+    auto pitch = [] (const std::vector<float>& x) {
+        auto best = 0.0, bestLag = 0.0;
+        for (int lag = 60; lag <= 160; ++lag)
+        {
+            auto sum = 0.0;
+            for (std::size_t i = 0; i + (std::size_t) lag < x.size(); ++i)
+                sum += (double) x[i] * x[i + (std::size_t) lag];
+            if (sum > best)
+            {
+                best = sum;
+                bestLag = lag;
+            }
+        }
+        return 48000.0 / bestLag;
+    };
+    // brightness: energy of the first difference relative to the energy
+    auto brightness = [] (const std::vector<float>& x) {
+        auto e = 0.0, d = 0.0;
+        for (std::size_t i = 1; i < x.size(); ++i)
+        {
+            e += (double) x[i] * x[i];
+            d += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]);
+        }
+        return d / e;
+    };
+    const auto neutral = run (0.5f), up = run (0.8f), down = run (0.3f);
+    CHECK (std::abs (pitch (neutral) - 440.0) < 5.0); // 452 Hz pulled to A
+    CHECK (std::abs (pitch (up) - 440.0) < 5.0);      // Gender does not move the pitch
+    CHECK (brightness (up) > 1.5 * brightness (neutral));
+    CHECK (brightness (down) < 0.7 * brightness (neutral));
 }
 
 TEST (parallel_container_inner_links_modulate)

@@ -106,8 +106,10 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input become LYNX's compressor listening to the source track.
-- **Pitcher:** pitch correction with FL's laws (speed, Fine, A reference, the note mask stored in the state,
-  Key Bypass, range).
+- **Pitcher:** FL's DSP (REA round 30, bit-exact against the reference model): integer-lag AMDF detector,
+  nearest-allowed-note correction with FL's laws (speed, Fine, A reference, the note mask stored in the state, Key
+  Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
+  PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
 - **Fruity Squeeze** and **Vintage Phaser:** FL's algorithms (REA round 29) — Squeeze within 5·10⁻⁹ of the reference model
@@ -145,8 +147,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   carriers (detuned, panned, offset or FM-modulated) and the FM modulator use basic shapes.
 - Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
   (control slot → live link); pulse curves with more than 10 cycles.
-- Pitcher: the pitch detector (YIN) and shifter (two heads) are LYNX's own; Formant/Gender, Harmonize and MIDI
-  modes are not implemented.
+- Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
+  with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
+  latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
 - Vocodex: becomes the LYNX vocoder with two side inputs (modulator/carrier from ModIn/CarIn); its band filters,
   per-band maps, carrier noise, HP/LP, Soundgoodizer and unison differ, the output level is not calibrated against FL,
   and the internal Sytrus carrier (CarIn = "---") is not available (only the modulator passes).

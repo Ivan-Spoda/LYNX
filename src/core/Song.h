@@ -277,7 +277,7 @@ enum class EffectKind : std::uint8_t
     vintagePhaser // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
 };
 
-constexpr int maxEffectParams = 40; // the 7-band parametric EQ uses most of them
+constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
 constexpr int maxEffectSlots = 10; // as in FL
 using EffectParams = std::array<float, maxEffectParams>;
 

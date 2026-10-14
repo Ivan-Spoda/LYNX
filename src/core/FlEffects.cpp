@@ -921,6 +921,19 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             slot.params[(std::size_t) (5 + k)] = mask[k] != 0 ? 1.0f : 0.0f;
             slot.params[(std::size_t) (17 + k)] = p[5 + k] != 0.0f ? 1.0f : 0.0f;
         }
+        // Formant/Gender, Pitch Reference, harmony and MIDI (REA_rodada30 §2; MIDI notes do not reach LYNX effects)
+        auto flag = [&p] (int i) { return p[i] != 0.0f ? 1.0f : 0.0f; };
+        slot.params[29] = flag (22);
+        slot.params[30] = std::clamp (p[2], 0.0f, 1.0f);
+        slot.params[31] = std::clamp (p[24], 0.0f, 1.0f);
+        slot.params[32] = std::clamp (p[1], 0.0f, 1.0f);
+        slot.params[33] = flag (27);
+        slot.params[34] = flag (25);
+        slot.params[35] = flag (26);
+        slot.params[36] = flag (30);
+        slot.params[37] = flag (31);
+        for (int j = 0; j < 4; ++j)
+            slot.params[(std::size_t) (38 + j)] = std::clamp (p[17 + j], 0.0f, 1.0f);
         return slot;
     }
 
