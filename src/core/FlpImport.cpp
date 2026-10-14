@@ -1002,6 +1002,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
+            else if (def.instrument == InstrumentKind::sakura || def.instrument == InstrumentKind::drumpad
+                     || def.instrument == InstrumentKind::boobass || def.instrument == InstrumentKind::drumsynth
+                     || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
+                     || def.instrument == InstrumentKind::harmor)
+                ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
