@@ -169,6 +169,8 @@ struct SynthSettings
     float cutoff = 2500.0f;  // Hz
     float resonance = 0.0f;  // 0..1
     int filterType = 0;      // 0 low-pass, 1 band-pass, 2 high-pass, 3 band-stop
+    bool ladder = false;     // 4-pole ladder (Toxic Biohazard's filter, REA_rodada26 §2) instead of the 2-pole SVF
+    int chorus = 0;          // Kepler's chorus on the channel output: 0 off, 1 I, 2 II, 3 I+II (REA_rodada26 §3)
     float keyTrack = 0.0f;   // cutoff follows the note: octaves per octave from key 48 (C3, 130.81 Hz)
     // kick pitch sweep: f = f_note·(1 + sweep·s⁴), s = e^(−t/sweepTime) (BassDrum's "Peak"/"Slide")
     float sweep = 0.0f;      // 0 = off
@@ -183,6 +185,8 @@ struct SynthSettings
     // per-harmonic decay: seconds for harmonic h to fall 60 dB from the note start (0 = holds); lets the
     // spectrum evolve during the note (Ogun's per-partial decay)
     std::array<float, spectrumSize> spectrumDecay {};
+    // level each harmonic decays towards (0 = silence): A(t) = target + (A₀ − target)·10^(−3t/decay) — Ogun's ALT DECAY
+    std::array<float, spectrumSize> spectrumTarget {};
     ModEnvelope filterEnv;   // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;    // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget

@@ -424,10 +424,21 @@ juce::String toJson (const Song& song)
                     for (auto t : c.synth.spectrumDecay)
                         decays.add (juce::String (t, 4));
                     synth->setProperty ("spectrumDecay", decays.joinIntoString (" "));
+                    if (std::any_of (c.synth.spectrumTarget.begin(), c.synth.spectrumTarget.end(), [] (float a) { return a != 0.0f; }))
+                    {
+                        juce::StringArray targets;
+                        for (auto a : c.synth.spectrumTarget)
+                            targets.add (juce::String (a, 6));
+                        synth->setProperty ("spectrumTarget", targets.joinIntoString (" "));
+                    }
                 }
             }
             synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
             synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
+            if (c.synth.ladder)
+                synth->setProperty ("ladder", true);
+            if (c.synth.chorus > 0)
+                synth->setProperty ("chorus", c.synth.chorus);
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
             if (c.synth.porta)
@@ -790,6 +801,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
                     def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
                     def.synth.filterType = f.size() >= 3 ? juce::jlimit (0, 3, (int) f[2]) : 0;
+                    def.synth.ladder = (bool) s.getProperty ("ladder", false);
+                    def.synth.chorus = juce::jlimit (0, 3, (int) s.getProperty ("chorus", 0));
                 }
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);
@@ -807,6 +820,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     const auto values = juce::StringArray::fromTokens (s.getProperty ("spectrumDecay", "").toString(), " ", "");
                     for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
                         def.synth.spectrumDecay[(std::size_t) h] = juce::jlimit (0.0f, 60.0f, values[h].getFloatValue());
+                    const auto targets = juce::StringArray::fromTokens (s.getProperty ("spectrumTarget", "").toString(), " ", "");
+                    for (int h = 0; h < targets.size() && h < SynthSettings::spectrumSize; ++h)
+                        def.synth.spectrumTarget[(std::size_t) h] = juce::jlimit (0.0f, 16.0f, targets[h].getFloatValue());
                 }
                 def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
                 if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)

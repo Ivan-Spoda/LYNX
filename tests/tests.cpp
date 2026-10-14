@@ -5002,3 +5002,75 @@ TEST (worker_pool_runs_each_index_once_per_round)
     CHECK (outside.load() == 0);
     CHECK (wrongRound.load() == 0);
 }
+
+TEST (ladder_filter_follows_toxic_law)
+{
+    // the 4-pole ladder: −24 dB/oct far above the cutoff (vs −12 for the SVF), resonance raises the corner, and
+    // the input saturation keeps it bounded even at full resonance
+    auto level = [] (bool ladder, float res, double hz) {
+        lynx::SynthSettings s;
+        s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+        s.cutoff = 500.0f;
+        s.resonance = res;
+        s.ladder = ladder;
+        const auto key = (int) std::lround (69.0 + 12.0 * std::log2 (hz / 440.0));
+        const auto x = renderSynthNote (s, key, 48000);
+        double e = 0.0, peak = 0.0;
+        for (std::size_t i = 24000; i < 48000; ++i)
+            e += (double) x[i] * x[i], peak = std::max (peak, (double) std::abs (x[i]));
+        return std::pair { std::sqrt (e / 24000.0), peak };
+    };
+    const auto low = level (true, 0.0f, 110.0).first, high = level (true, 0.0f, 3520.0).first;   // 3 octaves above 500 Hz… 2.8
+    const auto svfHigh = level (false, 0.0f, 3520.0).first / level (false, 0.0f, 110.0).first;
+    CHECK (20.0 * std::log10 (high / low) < -55.0);               // ≈ 24 dB/oct over ~2.8 octaves
+    CHECK (20.0 * std::log10 (svfHigh) > -45.0);                  // the 2-pole SVF falls much less
+    const auto corner0 = level (true, 0.0f, 523.25).first, corner1 = level (true, 0.6f, 523.25).first;
+    CHECK (corner1 > 1.5 * corner0);                               // resonance boosts near the cutoff
+    const auto loud = level (true, 1.0f, 523.25);
+    CHECK (std::isfinite (loud.first) && loud.second < 20.0);      // self-oscillation stays bounded
+}
+
+TEST (synth_spectrum_settles_on_target)
+{
+    // ALT DECAY-like morph: harmonic 3 starts at 1 and settles on 0.25 (−12 dB) instead of fading out
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::spectral, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+    s.decay = 0.0f;
+    s.sustain = 1.0f;
+    s.spectrum[0] = 1.0f;
+    s.spectrum[2] = 1.0f;
+    s.spectrumDecay[2] = 0.1f;
+    s.spectrumTarget[2] = 0.25f;
+    const auto x = renderSynthNote (s, 57, 48000);
+    const auto ratio = goertzel (x, 660.0, 24000, 26400) / goertzel (x, 220.0, 24000, 26400);
+    CHECK (std::abs (10.0 * std::log10 (ratio) - 20.0 * std::log10 (0.25)) < 1.0);
+}
+
+TEST (kepler_chorus_is_stereo_and_keeps_level)
+{
+    // chorus I on a sine: L and R differ (opposite LFO phases), the level stays close to the dry one
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+    auto dry = s;
+    s.chorus = 1;
+    auto render = [] (const lynx::SynthSettings& set) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+        inst->prepare (48000.0);
+        lynx::ChannelDef c;
+        c.synth = set;
+        inst->configure (c, 120.0);
+        inst->noteOn (69, 1.0f);
+        std::vector<float> l (96000), r (96000);
+        inst->render (l.data(), r.data(), 96000, 1.0f, 1.0f);
+        return std::pair { l, r };
+    };
+    const auto [l, r] = render (s);
+    const auto [dl, dr] = render (dry);
+    double diff = 0.0, e = 0.0, ed = 0.0;
+    for (std::size_t i = 48000; i < 96000; ++i)
+        diff += std::abs (l[i] - r[i]), e += (double) l[i] * l[i], ed += (double) dl[i] * dl[i];
+    CHECK (diff / 48000.0 > 1e-3);
+    CHECK (std::abs (10.0 * std::log10 (e / ed)) < 3.0);
+}

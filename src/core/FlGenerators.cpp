@@ -239,6 +239,7 @@ struct OgunSpectrum
 {
     std::array<float, SynthSettings::spectrumSize> amplitude {}, phase {};
     std::array<float, SynthSettings::spectrumSize> decay {}; // per index, seconds to −60 dB (0 = holds)
+    std::array<float, SynthSettings::spectrumSize> target {}; // ALT DECAY: level each index settles on
     int octave = 0;
     double decaySeconds = -1.0, releaseSeconds = -1.0;
 };
@@ -366,10 +367,20 @@ bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body,
 
     out.octave = std::max (-2, 7 - richness);
     const auto stride = 1 << (richness - 7 + out.octave);
-    std::array<double, SynthSettings::spectrumSize> energy {}, strongest {}, weightedTau {};
+    std::array<double, SynthSettings::spectrumSize> energy {}, strongest {}, weightedTau {}, targetEnergy {};
     std::vector<double> amp ((std::size_t) m, 0.0);
     for (int i = 0; i < m; ++i)
     {
+        // ALT DECAY (REA_rodada26 §1.3): every partial moves from its impulse level towards Y = the same law with the
+        // Decay EQ, X_k = Y + (A₀ − Y)·(1 − c)^k; it settles on Y instead of fading out
+        if (altDecay && decayKnob >= 0.0)
+            if (const auto index = (int) std::lround ((i + 1.0) / stride); index >= 1 && index <= SynthSettings::spectrumSize)
+            {
+                const auto y = 2.0 / std::sqrt ((double) m) * d[(std::size_t) i] * gain / rms * mapAt (decayEq, i);
+                targetEnergy[(std::size_t) index - 1] += y * y;
+                if (y > strongest[(std::size_t) index - 1] && (i < first || i > last))
+                    out.phase[(std::size_t) index - 1] = (float) std::fmod (theta[(std::size_t) i] / (2.0 * pi) + 0.25, 1.0);
+            }
         if (i < first || i > last)
             continue;
         const auto a = 2.0 / std::sqrt ((double) m) * d[(std::size_t) i] * gain / rms * mapAt (impulse, i);
@@ -390,7 +401,14 @@ bool ogunSpectrum (const std::int32_t* p, const std::vector<std::uint8_t>& body,
     for (std::size_t k = 0; k < energy.size(); ++k)
     {
         out.amplitude[k] = (float) (std::sqrt (energy[k]) * pi / 2.0); // physical level (round 23 convention)
-        if (energy[k] > 0.0 && decayKnob >= 0.0)
+        if (altDecay && decayKnob >= 0.0)
+        {
+            // the gap to Y falls 40 dB in max(0, t_dec − 0.025) s for every partial (per-frame c = 1 − 0.01^(1/T))
+            out.target[k] = (float) (std::sqrt (targetEnergy[k]) * pi / 2.0);
+            if (energy[k] > 0.0 || targetEnergy[k] > 0.0)
+                out.decay[k] = (float) std::min (60.0, 1.5 * std::max (0.001, decayKnob - 0.025));
+        }
+        else if (energy[k] > 0.0 && decayKnob >= 0.0)
             out.decay[k] = (float) std::min (60.0, 1.5 * weightedTau[k] / energy[k]); // −40 dB → −60 dB
     }
 
@@ -668,7 +686,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
     // REA_rodada24 §1: Ogun is an inverse-FFT spectral synth; its initial spectrum goes into the "spectral"
     // oscillator, with each harmonic's own decay (spectrumDecay, 8 frames per note). Approximations: binned
     // partials share an energy-weighted decay, the release is one overall envelope, ALT DECAY's morph towards the
-    // Decay EQ is not reproduced, articulators at their neutral values, Seed 2 "Random" = one fixed draw,
+    // Decay EQ uses a target per harmonic (REA_rodada26 §1.3), articulators at their neutral values, Seed 2 "Random" = one fixed draw,
     // partials of dense spectra (richness > 9) binned onto the nearest harmonic of f/4.
     // Without readable maps the old waveform approximation is used.
     OgunSpectrum spectrum;
@@ -678,6 +696,7 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
         s.spectrum = spectrum.amplitude;
         s.spectrumPhase = spectrum.phase;
         s.spectrumDecay = spectrum.decay; // each harmonic decays at its own rate (the envelope then holds)
+        s.spectrumTarget = spectrum.target;
         s.osc = { SynthOscillator { Waveform::spectral, 0, 0.0f, 1.0f }, SynthOscillator {}, SynthOscillator {} };
         setPitch (s.osc[0], transpose);
         s.osc[0].octave = std::clamp (s.osc[0].octave + spectrum.octave, -3, 3);
@@ -940,12 +959,13 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     // LFO1 (REA_rodada17 §6, rodada18 §7, rodada19 §3): a single, nearly sinusoidal global LFO, value ±1;
     // rate 21.739·2^(−T(x)) Hz; vibrato ±A(k10) octaves and cutoff ±A_c(k23) octaves (peaks); delay = linear
     // ramp of D(k7) s. The ×10 "Range" only exists on the Kepler Exo panel (left off here); BPM Sync
-    // (k6) was not read. Chorus I/II: the LYNX synth has no chorus.
+    // (k6) was not read. Chorus (panel 30): mode trunc(3x + 0.5) = Off / I / II / I+II, FL's chain (REA_rodada26 §3).
     static constexpr double lfoRateTable[11] = { 7.4422, 5.8074, 4.3499, 3.6563, 3.1131, 2.6712, 2.0463, 1.3093, 0.8515, 0.2838, 0.0 };
     static constexpr double vibratoTable[11] = { 0, 0.00116, 0.00813, 0.01506, 0.02196, 0.02882, 0.05259, 0.07819, 0.12057, 0.17728, 0.21388 };
     static constexpr double lfoCutoffTable[11] = { 0, 0.0914, 0.38038, 0.662, 0.96846, 1.23732, 1.48249, 1.85735, 2.27554, 2.66441, 2.82 };
     static constexpr double lfoDelayTable[11] = { 0, 0.229, 0.447, 0.547, 0.833, 1.0, 2.074, 4.775, 5.612, 6.774, 6.706 };
     ChannelLfo lfo;
+    s.chorus = std::clamp ((int) (3.0f * k[30] + 0.5f), 0, 3);
     lfo.period = (float) (1.0 / (21.739 * std::exp2 (-table (lfoRateTable, k[5]))));
     lfo.attack = (float) table (lfoDelayTable, k[7]);
     lfo.global = true;
@@ -1197,8 +1217,8 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
     // matrix cell into it (REA_rodada18 §8: target operator t receives from source j the cell 109 + 6j + t,
     // phase deviation = 2·cell·output cycles). Filter (REA_rodada19 §4): mode p300 (0 off, 1 LP, 2 BP,
     // 3 HP), cutoff 2^(9u + 5) Hz at note 60, key-track 0.09·KT octave per semitone, envelope ±9·EGAmt octaves
-    // with EGAmt = sign(2x − 1)(2x − 1)². FL's filter has 4 poles and LYNX's 2 (approximate slope);
-    // the resonance has no confirmed scale.
+    // with EGAmt = sign(2x − 1)(2x − 1)². The filter is FL's 4-pole ladder (REA_rodada26 §2: table, resonance
+    // scale R(u), input saturation), with the resonance p16 as is.
     int carrier = -1;
     for (int i = 0; i < 6; ++i)
         if (p[25 + i] >= 0.5f && (carrier < 0 || p[103 + i] > p[103 + carrier]))
@@ -1241,7 +1261,8 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
         s.filterType = filterMode == 1 ? 0 : filterMode == 2 ? 1 : 2;
         s.keyTrack = (float) kt;
         s.cutoff = (float) std::clamp (std::exp2 (9.0 * u + 5.0 - kt), 20.0, 20000.0); // LYNX measures at key 48
-        s.resonance = std::clamp (0.9f * p[16], 0.0f, 0.95f);
+        s.ladder = true; // FL's 4-pole filter with its resonance scale (REA_rodada26 §2)
+        s.resonance = std::clamp (p[16], 0.0f, 1.0f);
         const auto eg = 2.0 * p[23] - 1.0;
         const auto egAmount = 9.0 * (eg < 0.0 ? -eg * eg : eg * eg);
         if (std::abs (egAmount) > 0.01)

@@ -87,8 +87,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
-  key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct.
-- **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay. **BassDrum:** Peak `1 + 100x³·s⁴`.
+  key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
+  saturation, LP/BP/HP outputs).
+- **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay; Chorus I / II / I+II (FL's chain).
+  **BassDrum:** Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **Morphine:** average spectrum of the generators on the harmonics oscillator.
 - **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
@@ -112,12 +114,15 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Sakura: physical strings become saw + triangle; string decay taken at key 60; Hi-Cut applied at the output.
 - BooBass: the source is an internal sample not stored in the project (LYNX uses a saw). Drumpad: the physical
   mesh model is not reproduced.
-- Toxic: FL's filter has 4 poles (LYNX's has 2); resonance scale; linear filter envelope.
-- Kepler: chorus (the LYNX synth has none); "Range" ×10 (Exo only); LFO BPM sync.
+- Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
+  linear filter envelope.
+- Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) without its optional noise/gate and with the
+  0.5 Hz pre-filter high-pass; "Range" ×10 (Exo only); LFO BPM sync.
 - Harmless: the filter as a per-partial curve (LYNX uses a biquad); p39 outside ±1200/±2400; stereo tremolo
   (2.5 Hz) and vibrato (6 Hz); resonance width.
 - Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
-  share an energy-weighted decay; the per-partial release is one overall envelope; ALT DECAY's morph and the read-start phase offset are not reproduced, articulators
+  share an energy-weighted decay; ALT DECAY morphs every harmonic towards its Decay EQ level (REA round 26); the
+  per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
   are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
   key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
 - Sytrus: carriers an integer multiple above the main one join its exact spectrum (sharing its envelope); other

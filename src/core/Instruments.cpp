@@ -369,9 +369,57 @@ struct SvfCoefficients
 {
     float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f, k = 2.0f;
     int mode = 0;
+    // 4-pole ladder (Toxic Biohazard, REA_rodada26 §2): f = 2fc/fs, k = 3.6f − 1.6f² − 1, p = (k + 1)/2, feedback
+    // res·R(u) with u = (log2 fc − 5)/9; stages s = (x + x_prev)·p − k·s_prev; input saturated by
+    // v·(1 − 3a + 4a² − 2a³), a = min(|v|/15, 1). (FL builds its table for 44.1 kHz; LYNX keeps fc in Hz at any rate.)
+    bool ladder = false;
+    float lp = 0.0f, lk = 0.0f, feedback = 0.0f;
 
-    void set (double cutoffHz, float resonance, double sampleRate, int filterMode = 0) noexcept
+    void setLadder (double cutoffHz, float resonance, double sampleRate, int filterMode) noexcept
     {
+        ladder = true;
+        mode = std::clamp (filterMode, 0, 2);
+        const auto fc = std::clamp (cutoffHz, 32.0, 16384.0 * sampleRate / 44100.0);
+        const auto f = 2.0 * fc / sampleRate;
+        const auto kk = 3.6 * f - 1.6 * f * f - 1.0, p = (kk + 1.0) / 2.0;
+        const auto u = std::clamp ((std::log2 (fc) - 5.0) / 9.0, 0.0, 1.0);
+        const auto r = 1.96 * std::pow (1.0 - u, 1.5)
+                       + 0.98 * (0.95 * std::exp ((1.0 - p) * 1.386249) + (u > 0.7 ? 8.0 / 9.0 * (u - 0.7) * (u - 0.7) : 0.0));
+        lp = (float) p;
+        lk = (float) kk;
+        feedback = (float) (std::clamp (resonance, 0.0f, 1.0f) * r);
+    }
+
+    // state: s1…s4 and the previous input of each stage
+    float processLadder (float in, std::array<float, 8>& st) const noexcept
+    {
+        auto v = in - feedback * st[3];
+        const auto a = std::min (std::abs (v) / 15.0f, 1.0f);
+        v *= 1.0f - 3.0f * a + 4.0f * a * a - 2.0f * a * a * a;
+        auto x = v;
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto s = (x + st[(std::size_t) i + 4]) * lp - lk * st[(std::size_t) i];
+            st[(std::size_t) i + 4] = x;
+            st[(std::size_t) i] = s;
+            x = s;
+        }
+        switch (mode)
+        {
+            case 1: return st[2] - st[3];
+            case 2: return v - st[3];
+            default: return st[3];
+        }
+    }
+
+    void set (double cutoffHz, float resonance, double sampleRate, int filterMode = 0, bool useLadder = false) noexcept
+    {
+        if (useLadder)
+        {
+            setLadder (cutoffHz, resonance, sampleRate, filterMode);
+            return;
+        }
+        ladder = false;
         const auto fc = std::clamp (cutoffHz, 20.0, sampleRate * 0.45);
         const auto g = (float) std::tan (3.14159265358979 * fc / sampleRate);
         k = 2.0f - 1.9f * std::clamp (resonance, 0.0f, 1.0f); // 2 = no resonance
@@ -399,6 +447,108 @@ struct SvfCoefficients
     }
 };
 
+// Kepler's chorus (REA_rodada26 §3): mono input → high-pass (0.5 Hz) → two RBJ low-passes (7 kHz, Q 0.707) →
+// one delay line read by two taps (L and R LFO phases) with Catmull-Rom interpolation → 1-pole low-pass 7 kHz →
+// equal-power mix (m → 0.5). Delay = base + depth·w(LFO), smoothed by s = 1 − 0.1^(20/fs). Noise/gate not modelled.
+class KeplerChorus
+{
+public:
+    void prepare (double sr) noexcept
+    {
+        sampleRate = sr;
+        smooth = 1.0 - std::pow (0.1, 20.0 / sr);
+        const auto th = std::tan (3.141592653589793 * 0.5 / sr);
+        hpB = 1.0 / (1.0 + th);
+        hpA = (1.0 - th) / (1.0 + th);
+        const auto tl = std::tan (3.141592653589793 * 7000.0 / sr);
+        lpB = tl / (1.0 + tl);
+        lpA = (1.0 - tl) / (1.0 + tl);
+        const auto w0 = 2.0 * 3.141592653589793 * 7000.0 / sr, alpha = std::sin (w0) / (2.0 * 0.707), a0 = 1.0 + alpha;
+        bq = { (1.0 - std::cos (w0)) / 2.0 / a0, (1.0 - std::cos (w0)) / a0, (1.0 - std::cos (w0)) / 2.0 / a0,
+               -2.0 * std::cos (w0) / a0, (1.0 - alpha) / a0 };
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        line.fill (0.0f);
+        write = 0;
+        phase = 0.0f;
+        delay = { 0.01, 0.01 };
+        mix = 0.0;
+        outputGain = 0.0;
+        hpX = hpY = 0.0;
+        biquad = {};
+        post = {};
+    }
+
+    // in place on a mono-summed signal; left/right receive the stereo result
+    void process (float* left, float* right, int n, int mode) noexcept
+    {
+        const auto rate = mode == 3 ? 8.0 : mode == 2 ? 0.6 : 0.4;
+        const auto offset = mode == 3 ? 0.0286111f : 0.5f;
+        const auto base = mode == 3 ? 0.00285 : 0.00108, depth = mode == 3 ? 0.00052 : 0.00415;
+        const auto increment = (float) (rate / sampleRate);
+        for (int i = 0; i < n; ++i)
+        {
+            const double dry = 0.5 * ((double) left[i] + right[i]);
+            // pre-filter (high-pass, then two low-pass biquads) into the delay line
+            const auto hp = hpB * (dry - hpX) + hpA * hpY;
+            hpX = dry;
+            hpY = hp;
+            auto x = hp;
+            for (auto& st : biquad)
+            {
+                const auto y = bq[0] * x + st[0];
+                st[0] = bq[1] * x - bq[3] * y + st[1];
+                st[1] = bq[2] * x - bq[4] * y;
+                x = y;
+            }
+            line[(std::size_t) write] = (float) x;
+
+            mix += (0.5 - mix) * smooth;
+            outputGain += (1.0 - outputGain) * smooth; // the unit fades in after it starts (§3.3 step 10)
+            const auto wetGain = std::sqrt (mix), dryGain = std::sqrt (1.0 - mix);
+            for (int c = 0; c < 2; ++c)
+            {
+                auto ph = phase + (c == 1 ? offset : 0.0f);
+                ph -= std::floor (ph);
+                const double w = mode == 3 ? (std::sin (2.0 * 3.141592653589793 * ph) + 1.0) / 2.0
+                                 : ph < 0.25f ? 2.0 * ph + 0.5 : ph < 0.75f ? 1.5 - 2.0 * ph : 2.0 * ph - 1.5;
+                auto& d = delay[(std::size_t) c];
+                d += (base + depth * w - d) * smooth;
+                const auto samples = d * sampleRate;
+                const auto whole = (int) samples;
+                const auto t = samples - whole;
+                auto tap = [&] (int back) { return (double) line[(std::size_t) ((write - back) & mask)]; };
+                const auto y0 = tap (whole - 1), y1 = tap (whole), y2 = tap (whole + 1), y3 = tap (whole + 2);
+                const auto wet = y1 + 0.5 * t * (y2 - y0 + t * (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3 + t * (3.0 * (y1 - y2) + y3 - y0)));
+                auto& p = post[(std::size_t) c];
+                const auto filtered = lpB * (wet + p[0]) + lpA * p[1];
+                p[0] = wet;
+                p[1] = filtered;
+                (c == 0 ? left : right)[i] = (float) ((filtered * wetGain + dry * dryGain) * outputGain);
+            }
+            phase += increment;
+            if (phase >= 1.0f)
+                phase -= 1.0f;
+            write = (write + 1) & mask;
+        }
+    }
+
+private:
+    static constexpr int size = 32768, mask = size - 1;
+    double sampleRate = 44100.0, smooth = 0.001;
+    double hpB = 1.0, hpA = 0.0, lpB = 0.5, lpA = 0.0;
+    std::array<double, 5> bq {};
+    std::array<std::array<double, 2>, 2> biquad {}, post {};
+    double hpX = 0.0, hpY = 0.0, mix = 0.0, outputGain = 0.0;
+    std::array<double, 2> delay { 0.01, 0.01 };
+    std::array<float, size> line {};
+    int write = 0;
+    float phase = 0.0f; // float32 LFO phase, as in FL (§3.5)
+};
+
 struct SynthVoice
 {
     float panL = 1.0f, panR = 1.0f;
@@ -414,6 +564,7 @@ struct SynthVoice
     std::array<double, 3> phase {};
     float low = 0.0f, band = 0.0f; // filter states
     float lowR = 0.0f, bandR = 0.0f; // right-side filter (only with per-oscillator pan)
+    std::array<std::array<float, 8>, 2> ladder {}; // ladder filter states (left, right)
 
     std::array<ModState, 2> mod {}; // filter, pitch
     std::array<LfoState, lfoTargets> lfo {};
@@ -472,6 +623,7 @@ public:
     {
         sampleRate = sr;
         lastPhaseDelta = 0.0;
+        chorusUnit.prepare (sr);
         updateCoefficients();
         allNotesOff();
     }
@@ -644,6 +796,34 @@ public:
                 evolving = frames->count > 1;
             }
 
+        // Kepler chorus: voices without the channel's volume/pan → chorus (mono in, stereo out) → volume/pan
+        if (settings.chorus > 0)
+        {
+            const auto anyActive = std::any_of (voices.begin(), voices.end(), [] (const SynthVoice& v) { return v.active; });
+            if (anyActive)
+                chorusTail = (int) (0.05 * sampleRate); // the delay (≤ 5.2 ms) and filters ring a little after the last voice
+            for (int done = 0; done < n; done += scratchSize)
+            {
+                const auto m = std::min (scratchSize, n - done);
+                std::fill (scratchL.begin(), scratchL.begin() + m, 0.0f);
+                std::fill (scratchR.begin(), scratchR.begin() + m, 0.0f);
+                renderVoices (scratchL.data(), scratchR.data(), m, 1.0f, 1.0f);
+                chorusUnit.process (scratchL.data(), scratchR.data(), m, settings.chorus);
+                for (int i = 0; i < m; ++i)
+                {
+                    left[done + i] += scratchL[(std::size_t) i] * gl;
+                    right[done + i] += scratchR[(std::size_t) i] * gr;
+                }
+            }
+            if (! anyActive)
+                chorusTail = std::max (0, chorusTail - n);
+            return;
+        }
+        renderVoices (left, right, n, gl, gr);
+    }
+
+    void renderVoices (float* left, float* right, int n, float gl, float gr) noexcept
+    {
         for (auto& v : voices)
         {
             if (! v.active)
@@ -716,7 +896,7 @@ public:
                         }
 
                         if (filterModulated)
-                            v.filter.set (settings.cutoff * std::exp2 (octaves), settings.resonance, sampleRate, settings.filterType);
+                            v.filter.set (settings.cutoff * std::exp2 (octaves), settings.resonance, sampleRate, settings.filterType, settings.ladder);
                     }
 
                     v.lfoGain += v.lfoGainStep;
@@ -775,8 +955,8 @@ public:
 
                 // resonant low-pass filter (state variable "TPT": stable at any cutoff)
                 const auto& f = filterModulated ? v.filter : sharedFilter;
-                auto outL = f.process (sum, v.low, v.band);
-                auto outR = stereoOscillators ? f.process (sumR, v.lowR, v.bandR) : outL;
+                auto outL = f.ladder ? f.processLadder (sum, v.ladder[0]) : f.process (sum, v.low, v.band);
+                auto outR = ! stereoOscillators ? outL : f.ladder ? f.processLadder (sumR, v.ladder[1]) : f.process (sumR, v.lowR, v.bandR);
 
                 if (useBands)
                 {
@@ -802,10 +982,15 @@ public:
 
     bool idle() const noexcept override
     {
-        return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
+        return chorusTail <= 0 && std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
     }
 
 private:
+    static constexpr int scratchSize = 1024;
+    std::array<float, scratchSize> scratchL {}, scratchR {};
+    KeplerChorus chorusUnit;
+    int chorusTail = 0;
+
     // sine of a 0..1 phase via a refined parabola (error < 0.1%), much cheaper than std::sin
     static float fastSine (double phase) noexcept
     {
@@ -892,7 +1077,7 @@ private:
     const Tables* frameB = nullptr;
     float frameMix = 0.0f;
     // configure() side: what the last frames were built from
-    std::array<float, SynthSettings::spectrumSize> framedSpectrum {}, framedPhase {}, framedDecay {};
+    std::array<float, SynthSettings::spectrumSize> framedSpectrum {}, framedPhase {}, framedDecay {}, framedTarget {};
 
     static void fillTables (Tables& tables, const std::array<float, SynthSettings::spectrumSize>& amplitude,
                             const std::array<float, SynthSettings::spectrumSize>& phase, std::vector<std::complex<double>>& bins)
@@ -926,8 +1111,10 @@ private:
         const auto wasEvolving = std::any_of (framedDecay.begin(), framedDecay.end(), [] (float t) { return t > 0.0f; });
         if (! evolving && ! wasEvolving)
             return;
-        if (evolving && framedSpectrum == s.spectrum && framedPhase == s.spectrumPhase && framedDecay == s.spectrumDecay)
+        if (evolving && framedSpectrum == s.spectrum && framedPhase == s.spectrumPhase && framedDecay == s.spectrumDecay
+            && framedTarget == s.spectrumTarget)
             return;
+        framedTarget = s.spectrumTarget;
         framedSpectrum = s.spectrum;
         framedPhase = s.spectrumPhase;
         framedDecay = evolving ? s.spectrumDecay : std::array<float, SynthSettings::spectrumSize> {};
@@ -945,7 +1132,8 @@ private:
                 auto amplitude = s.spectrum;
                 for (std::size_t h = 0; h < amplitude.size(); ++h)
                     if (s.spectrumDecay[h] > 0.0f)
-                        amplitude[h] *= (float) std::pow (10.0, -3.0 * t / s.spectrumDecay[h]);
+                        amplitude[h] = s.spectrumTarget[h]
+                                       + (amplitude[h] - s.spectrumTarget[h]) * (float) std::pow (10.0, -3.0 * t / s.spectrumDecay[h]);
                 fillTables (frames->tables[(std::size_t) f], amplitude, s.spectrumPhase, bins);
             }
         }
@@ -987,7 +1175,7 @@ private:
         osc3Modulates = settings.am || settings.fm > 0.0f;
         fmDecayCoeff = settings.fmDecay > 0.0f ? decayCoefficient (std::max (0.001, (double) settings.fmDecay), sampleRate) : 1.0f;
 
-        sharedFilter.set (settings.cutoff, settings.resonance, sampleRate, settings.filterType);
+        sharedFilter.set (settings.cutoff, settings.resonance, sampleRate, settings.filterType, settings.ladder);
         modEnv[0] = ModCoefficients::make (settings.filterEnv, sampleRate);
         modEnv[1] = ModCoefficients::make (settings.pitchEnv, sampleRate);
         auto anyLfo = false;
