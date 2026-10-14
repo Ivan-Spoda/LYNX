@@ -455,6 +455,78 @@ private:
     int channel;
 };
 
+// Physical-model channels (Sakura, Drumpad; REA_rodada28): knobs for the main raw FL parameters (0..1)
+class ModelPanel final : public juce::Component
+{
+public:
+    ModelPanel (AudioEngine& e, int c)
+        : engine (e),
+          channel (c)
+    {
+        const auto& def = engine.getSong().channels[(std::size_t) channel];
+        sakura = def.instrument == InstrumentKind::sakura;
+        static const std::pair<int, const char*> sakuraKnobs[] = {
+            { 0, "Master" }, { 1, "Tune" }, { 2, "Attack" }, { 3, "Decay" }, { 4, "Sustain" }, { 5, "Release" },
+            { 6, "Str1 decay" }, { 9, "Str1 damp" }, { 11, "Str2 decay" }, { 14, "Str2 damp" }, { 16, "Saturation" },
+            { 17, "String mix" }, { 18, "Stereo sep" }, { 19, "Comb ratio" }, { 22, "Comb level" }, { 24, "Lo-cut" },
+            { 29, "Hi-cut" }, { 30, "Hi-cut res" }, { 31, "Noise level" }, { 32, "Noise rate" } };
+        static const std::pair<int, const char*> drumpadKnobs[] = {
+            { 2, "Mallet amp" }, { 3, "Mallet decay" }, { 4, "Mallet noise" }, { 6, "Decay" }, { 7, "Cutoff" },
+            { 8, "Tension" }, { 9, "Phase" }, { 10, "Material" }, { 11, "Size" }, { 12, "Shape" }, { 13, "Low freq" },
+            { 18, "Mid freq" }, { 19, "Mid level" }, { 24, "High freq" }, { 25, "High level" }, { 27, "Lo-fi" },
+            { 28, "Hold" }, { 29, "Pitch" } };
+        auto add = [&] (int index, const char* name) {
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (0.0, 1.0, 0.001);
+            knob->setValue (index < (int) def.modelParams.size() ? def.modelParams[(std::size_t) index] : 0.0, juce::dontSendNotification);
+            knob->setName (name);
+            knob->onValueChange = [this, index, k = knob.get()] {
+                engine.editSong ([c = channel, index, v = (float) k->getValue()] (Song& song) {
+                    auto& params = song.channels[(std::size_t) c].modelParams;
+                    if (index < (int) params.size())
+                        params[(std::size_t) index] = v;
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (sakura)
+            for (const auto& [index, name] : sakuraKnobs)
+                add (index, name);
+        else
+            for (const auto& [index, name] : drumpadKnobs)
+                add (index, name);
+        setSize (720, 384);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::panel);
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (14.0f));
+        g.drawText (sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
+                           : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
+                    10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
+        g.setFont (juce::FontOptions (12.0f));
+        for (const auto& k : knobs)
+            g.drawText (k->getName(), k->getBounds().withHeight (14).translated (0, -14), juce::Justification::centred);
+    }
+
+    void resized() override
+    {
+        constexpr int columns = 7, w = 96, h = 92;
+        for (std::size_t i = 0; i < knobs.size(); ++i)
+            knobs[i]->setBounds (12 + (int) (i % columns) * (w + 4), 46 + (int) (i / columns) * (h + 18), w, h);
+    }
+
+private:
+    AudioEngine& engine;
+    int channel;
+    bool sakura = true;
+    std::vector<std::unique_ptr<juce::Slider>> knobs;
+};
+
 class SettingsPanel final : public juce::Component,
                             private juce::ChangeListener
 {
@@ -1078,6 +1150,9 @@ public:
             setContentOwned (new SynthPanel (engine, channel), true);
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
             setContentOwned (new ControllerPanel (engine, channel), true);
+        else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
+                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad)
+            setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
 
@@ -1152,6 +1227,9 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return std::make_unique<SynthPanel> (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
         return std::make_unique<ControllerPanel> (engine, channel);
+    if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
+        kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad)
+        return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
 }

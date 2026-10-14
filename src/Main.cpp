@@ -1189,6 +1189,14 @@ private:
                     break;
                 }
 
+            for (const auto kind : { lynx::InstrumentKind::sakura, lynx::InstrumentKind::drumpad })
+                for (int c = 0; c < (int) offline.getSong().channels.size(); ++c)
+                    if (offline.getSong().channels[(std::size_t) c].instrument == kind)
+                    {
+                        saveWindow (lynx::makeChannelSettingsPanel (offline, c), kind == lynx::InstrumentKind::sakura ? "-sakura.png" : "-drumpad.png");
+                        break;
+                    }
+
             // parametric EQ: the one with the most pronounced curve (in an imported .flp, with FL's settings)
             {
                 int bestTrack = -1, bestSlot = -1;
