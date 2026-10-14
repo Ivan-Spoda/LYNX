@@ -14,7 +14,9 @@ enum class Icon
     newFile, open, save, exportAudio, settings, help, undo, redo,
     channelRack, pianoRoll, playlist, mixer, browser,
     folder, file, audioFile, plugin, preset, project,
-    draw, erase, select, slice, mute, link, magnet, scissors
+    draw, erase, select, slice, mute, link, magnet, scissors,
+    // workspace and control contract
+    detach, dock, restore, keyboard, automate, rightClick, tap
 };
 
 namespace icons
@@ -46,6 +48,14 @@ public:
     void setFlat (bool shouldBeFlat);                    // no background at rest (toolbar style)
     void setCorners (bool roundLeft, bool roundRight);   // for segmented groups
     int getIdealWidth (int height) const;
+
+    // Optional extra gestures: when set, a right-click calls onRightClick instead of clicking the button,
+    // and a double-click calls onDoubleClick (after the two single clicks).
+    std::function<void()> onRightClick, onDoubleClick;
+
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
 
