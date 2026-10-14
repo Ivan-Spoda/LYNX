@@ -1258,7 +1258,7 @@ void EffectsPanel::showSlotMenu (int slot)
     };
     if (kind == EffectKind::compressor)
         sideMenu ("Sidechain from", false);
-    if (kind == EffectKind::vocoder)
+    if (kind == EffectKind::vocoder || kind == EffectKind::vocodex)
     {
         sideMenu ("Modulator from", false);
         sideMenu ("Carrier from", true);

@@ -32,6 +32,7 @@
 #include "core/SoftClip.h"
 #include "core/Slicer.h"
 #include "core/Templates.h"
+#include "core/Vocodex.h"
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/Song.h"
@@ -4827,6 +4828,214 @@ TEST (vocoder_follows_modulator)
     CHECK (rms (40000, 48000) < 0.1 * rms (6000, 20000)); // modulator silent: the vocoder fades out (100 ms release)
     for (std::size_t i = 0; i < l.size(); ++i)
         CHECK (l[i] == r[i] && std::isfinite (l[i]));    // mono output
+}
+
+// Vocodex (REA_rodada35): a synthetic state in FL's layout (version 8, 13 maps, 20 parameters, the 0x24 block,
+// 13 map-axis bytes, tone, notes)
+struct VocodexSpec
+{
+    // Wet, SG, ModVol, ModHP, CarVol, CarLP, CarNoise, CarNoiseHP, Hold, Att, AttCurve, Rel, RelCurve, Freeze, BW,
+    // Flatness, ModBW, ModPitch, FatPitch, FatPan
+    std::array<std::int32_t, 20> params { 1000, 0, 0, 0, 0, 65536, 0, 0, 0, 2000, 0, 3000, 0, 0, 1000, 0, 2000, 0, 0, 0 };
+    std::array<std::int32_t, 7> block { 0, 2, 0, 24, 1, 1, 2 }; // hold mode, order, unison, bands, draft field, ModIn, CarIn
+    std::array<std::uint8_t, 8> flags { 0, 1, 0, 1, 1, 0, 0, 0 }; // L-R, MIN TIMES, TO MOD, THREADED, subtractive, TO NOISE, FROM CAR, FROM CONS
+
+    std::vector<std::uint8_t> bytes() const
+    {
+        std::vector<std::uint8_t> d;
+        auto put = [&d] (const void* p, std::size_t n) { d.insert (d.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+        auto i32 = [&] (std::int32_t v) { put (&v, 4); };
+        i32 (8 << 16);
+        for (int m = 0; m < 13; ++m)
+        {
+            const double y0 = m == 8 ? 0.1429 : (m == 3 || m == 4 || m == 11) ? 0.0 : 0.5;
+            const double y1 = m == 8 ? 0.9918 : y0;
+            i32 (1), i32 (0), i32 (2);
+            for (const auto& [dx, y] : { std::pair { 0.0, y0 }, std::pair { 1.0, y1 } })
+            {
+                put (&dx, 8), put (&y, 8);
+                i32 (0), i32 (0); // tension (f32 0), flags
+            }
+            const std::array<std::uint8_t, 20> tail {};
+            put (tail.data(), tail.size());
+        }
+        for (auto v : params)
+            i32 (v);
+        for (auto v : block)
+            i32 (v);
+        put (flags.data(), flags.size());
+        const std::array<std::uint8_t, 13> axis {};
+        put (axis.data(), axis.size());
+        d.push_back (3), put ("PWM", 3);
+        i32 (1), i32 (60);
+        return d;
+    }
+};
+
+std::vector<float> vocodexSaw (int n, double hz, double fs)
+{
+    std::vector<float> out ((std::size_t) n);
+    for (int i = 0; i < n; ++i)
+        out[(std::size_t) i] = (float) (2.0 * std::fmod (i * hz / fs, 1.0) - 1.0) * 0.4f;
+    return out;
+}
+
+TEST (vocodex_state_parse_and_conversion)
+{
+    VocodexSpec spec;
+    spec.block = { 1, 3, 2, 40, 0, 2, 1 };
+    spec.params[17] = -1200;
+    const auto raw = spec.bytes();
+    const auto s = lynx::vocodex::parseState (raw);
+    CHECK (s.has_value());
+    if (! s)
+        return;
+    CHECK (s->version == 8 && s->holdMode == 1 && s->order == 3 && s->unison == 2 && s->bands == 40);
+    CHECK (s->draft() && s->modIn == 2 && s->carIn == 1 && s->minTimes && s->subtractiveGate && ! s->lrEncoding);
+    CHECK (s->params[lynx::vocodex::modPitch] == -1200 && s->params[lynx::vocodex::carLp] == 65536);
+    CHECK (s->maps[8].x.size() == 2 && std::abs (s->maps[8].y[1] - 0.9918) < 1e-12 && s->maps[8].x[1] == 1.0);
+    CHECK (s->tone == "PWM" && s->notes.size() == 1 && s->notes[0] == 60);
+
+    const auto v = lynx::vocodexEffect (raw);
+    CHECK (v && v->slot.kind == lynx::EffectKind::vocodex && v->slot.state == raw && v->modIn == 2 && v->carIn == 1 && v->notes.empty());
+    spec.block[6] = -1; // internal synth carrier: not available yet → reported
+    spec.params[1] = 150; // Soundgoodizer stage
+    const auto w = lynx::vocodexEffect (spec.bytes());
+    CHECK (w && w->carIn == -1 && w->notes.size() == 2);
+    CHECK (! lynx::vocodex::parseState ({ 1, 2, 3 }).has_value());
+}
+
+TEST (vocodex_vocodes_side_inputs)
+{
+    // modulator on side input 1 (noise in the first half), carrier on side input 2 (saw), own input silent: the
+    // output follows the modulator's envelope and fades after it stops
+    VocodexSpec spec;
+    lynx::EffectSlot slot = lynx::makeEffectSlot (lynx::EffectKind::vocodex);
+    slot.state = spec.bytes();
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (48000.0);
+    CHECK (fx->latencySamples() == 0);
+    const auto car = vocodexSaw (48000, 110.0, 48000.0);
+    std::vector<float> mod (48000), l (48000, 0.0f), r (48000, 0.0f);
+    std::uint32_t seed = 7;
+    for (std::size_t i = 0; i < mod.size(); ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        mod[i] = i < 24000 ? ((float) (seed >> 8) / 16777216.0f - 0.5f) : 0.0f;
+    }
+    for (int done = 0; done < 48000; done += 512)
+    {
+        const int n = std::min (512, 48000 - done);
+        fx->setSidechain (mod.data() + done, mod.data() + done);
+        fx->setSidechain2 (car.data() + done, car.data() + done);
+        fx->process (l.data() + done, r.data() + done, n, slot.params, 120.0);
+    }
+    auto rms = [&] (int from, int to) {
+        double e = 0.0;
+        for (int i = from; i < to; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i] + (double) r[(std::size_t) i] * r[(std::size_t) i];
+        return std::sqrt (e / (2.0 * (to - from)));
+    };
+    CHECK (rms (6000, 20000) > 0.02);
+    CHECK (rms (40000, 48000) < 0.01 * rms (6000, 20000));
+    CHECK (std::abs (l[0]) < 1e-6f); // the gains ramp up from 0 when the plugin is created
+}
+
+TEST (vocodex_draft_latency_and_pass_through)
+{
+    // carrier pass-through at unit gain only (Wet 0): after a Flush the gains snap, so the output is the carrier,
+    // 16 samples late in Draft
+    VocodexSpec spec;
+    spec.params[0] = 0;      // Wet
+    spec.params[4] = 12800;  // CarVol = 1
+    for (const int draftField : { 1, 0 })
+    {
+        spec.block[4] = draftField;
+        const auto s = lynx::vocodex::parseState (spec.bytes());
+        CHECK (s.has_value());
+        lynx::vocodex::Engine engine;
+        engine.prepare (*s, 44100.0, 300, s->draft());
+        CHECK (engine.latencySamples() == (draftField == 0 ? 16 : 0));
+        engine.flush();
+        const auto saw = vocodexSaw (3000, 220.0, 44100.0);
+        std::vector<float> car (6000), mod (6000, 0.0f), out (6000);
+        for (int i = 0; i < 3000; ++i)
+            car[(std::size_t) (2 * i)] = car[(std::size_t) (2 * i + 1)] = saw[(std::size_t) i];
+        static constexpr int sizes[] { 300, 37, 128, 1, 255, 16, 299 }; // uneven blocks exercise the FIFOs
+        for (int done = 0, k = 0, n = 0; done < 3000; done += n, ++k)
+        {
+            n = std::min (sizes[k % 7], 3000 - done);
+            engine.process (mod.data() + 2 * done, mod.data() + 2 * done, car.data() + 2 * done, out.data() + 2 * done, n);
+        }
+        const int lag = engine.latencySamples();
+        auto maxError = 0.0f;
+        for (int i = lag; i < 3000; ++i)
+            maxError = std::max (maxError, std::abs (out[(std::size_t) (2 * i)] - saw[(std::size_t) (i - lag)]));
+        CHECK (maxError == 0.0f);
+    }
+}
+
+TEST (vocodex_soundgoodizer_stage_limits_the_output)
+{
+    // SG > 0: the vocoder's output (loud here: Wet 2000) goes through the Soundgoodizer approximation, whose
+    // master limiter keeps the peaks under −0.2 dBFS; its look-ahead is reported as latency
+    VocodexSpec spec;
+    spec.params[0] = 2000;
+    spec.params[1] = 250;
+    lynx::EffectSlot slot = lynx::makeEffectSlot (lynx::EffectKind::vocodex);
+    slot.state = spec.bytes();
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (48000.0);
+    CHECK (fx->latencySamples() == 72); // 1.5 ms at 48 kHz
+    const auto car = vocodexSaw (48000, 110.0, 48000.0);
+    std::vector<float> mod (48000), l (48000, 0.0f), r (48000, 0.0f);
+    for (std::size_t i = 0; i < mod.size(); ++i)
+        mod[i] = 0.9f * (float) std::sin (0.07 * (double) i) * (float) std::sin (0.0003 * (double) i);
+    auto peak = 0.0f;
+    for (int done = 0; done < 48000; done += 512)
+    {
+        const int n = std::min (512, 48000 - done);
+        fx->setSidechain (mod.data() + done, mod.data() + done);
+        fx->setSidechain2 (car.data() + done, car.data() + done);
+        fx->process (l.data() + done, r.data() + done, n, slot.params, 120.0);
+    }
+    for (std::size_t i = 0; i < l.size(); ++i)
+        peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
+    CHECK (peak > 0.5f && peak <= 0.9775f);
+}
+
+TEST (vocodex_tail_bypass_and_noise)
+{
+    // both inputs silent for longer than 0.5 s + hold + release: the own input passes unchanged
+    VocodexSpec spec;
+    const auto s = lynx::vocodex::parseState (spec.bytes());
+    CHECK (s.has_value());
+    lynx::vocodex::Engine engine;
+    engine.prepare (*s, 44100.0, 512, false);
+    std::vector<float> zero (1024, 0.0f), own (1024), out (1024);
+    for (std::size_t i = 0; i < own.size(); ++i)
+        own[i] = 0.25f * (float) std::sin (0.01 * (double) i);
+    for (int b = 0; b < 80; ++b)
+        engine.process (own.data(), zero.data(), zero.data(), out.data(), 512);
+    CHECK (out == own);
+
+    // carrier noise: the IPP-compatible generator restarts from the same seed after a Flush
+    spec.params[6] = 9000;
+    const auto noisy = lynx::vocodex::parseState (spec.bytes());
+    lynx::vocodex::Engine a;
+    a.prepare (*noisy, 44100.0, 512, false);
+    std::vector<float> mod (1024), first (1024), second (1024);
+    for (std::size_t i = 0; i < mod.size(); ++i)
+        mod[i] = 0.3f * (float) std::sin (0.05 * (double) i);
+    a.flush();
+    a.process (own.data(), mod.data(), zero.data(), first.data(), 512);
+    a.flush();
+    a.process (own.data(), mod.data(), zero.data(), second.data(), 512);
+    CHECK (first == second);
+    auto energy = 0.0;
+    for (auto v : first)
+        energy += (double) v * v;
+    CHECK (energy > 1e-6 && std::isfinite (energy));
 }
 
 TEST (synth_spectral_oscillator)

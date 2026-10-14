@@ -279,7 +279,8 @@ enum class EffectKind : std::uint8_t
     vocoder,      // Fruity Vocoder channel vocoder: L modulates, R is the carrier (mono output)
     pitchCorrect, // pitch correction (FL's Pitcher): detects the pitch and pulls it to the nearest allowed note
     squeeze,      // FL's Fruity Squeeze, exact (REA_rodada29 §2): quantiser, periodic gate, filter; raw values / max
-    vintagePhaser // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
+    vintagePhaser, // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
+    vocodex       // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
@@ -315,6 +316,7 @@ struct EffectSlot
     int sidechain2 = -1;  // second side input (vocoder carrier); −1 = none
     std::vector<EffectBranch> branches;           // used when kind == parallel
     std::vector<EffectLink> links;                // used when kind == parallel
+    std::vector<std::uint8_t> state;              // FL's raw plugin state, for exact effects built from it (vocodex)
 };
 
 // Send from one track to another (post-fader), like FL's routing between inserts.
