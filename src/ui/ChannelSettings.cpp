@@ -1,11 +1,13 @@
 #include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
 
+#include <cstring>
 #include <functional>
 
 #include "core/DrumSynthLive.h"
 #include "core/FlSynths.h"
 #include "core/FlpImport.h"
+#include "core/Harmor.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/Theme.h"
@@ -469,6 +471,7 @@ public:
         boobass = def.instrument == InstrumentKind::boobass;
         drumsynth = def.instrument == InstrumentKind::drumsynth;
         harmless = def.instrument == InstrumentKind::harmless;
+        harmor = def.instrument == InstrumentKind::harmor;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -522,7 +525,39 @@ public:
             { 54, "Cutoff", 0, 8192 }, { 59, "Resonance", 0, 1000 }, { 52, "Filter env", -1000, 1000 },
             { 31, "Pluck", 0, 1000 }, { 23, "Mask mix", 0, 1000 }, { 65, "Unison", 1, 9 }, { 67, "Uni detune", 0, 256 },
             { 25, "Tremolo", 0, 1000 }, { 71, "Phaser mix", 0, 1000 }, { 79, "Harmonizer", 0, 1000 } };
-        if (harmless)
+        // Harmor: raw FL integers inside the saved state (part A, and the global master / A–B mix; REA_rodada34)
+        struct HarmorKnob { int part, index; const char* name; double low, high; };
+        static const HarmorKnob harmorKnobs[] = {
+            { -1, 12, "Master vol", 0, 2000 }, { -1, 10, "A/B mix", 0, 1000 }, { 0, 11, "A volume", -1000, 1000 },
+            { 0, 4, "Timbre mix", 0, 1000 }, { 0, 52, "Cutoff", 0, 8192 }, { 0, 57, "Resonance", 0, 1000 },
+            { 0, 75, "Pluck", 0, 1000 }, { 0, 34, "Unison", 1, 9 }, { 0, 38, "Uni detune", 0, 256 },
+            { 0, 27, "Harmonizer", 0, 1000 }, { 0, 76, "Phaser mix", 0, 1000 }, { 0, 23, "Harm. blur", 0, 10000 },
+            { 0, 45, "Vibrato", 0, 1000 }, { 0, 17, "Tremolo", 0, 1000 } };
+        auto addHarmor = [&] (const HarmorKnob& k) {
+            const auto at = harmorParamOffset (def.pluginState, k.part, k.index);
+            if (at < 0)
+                return;
+            std::int32_t value = 0;
+            std::memcpy (&value, def.pluginState.data() + at, 4);
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (k.low, k.high, 1.0);
+            knob->setValue (value, juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, k, s = knob.get()] {
+                engine.editSong ([c = channel, k, v = (std::int32_t) s->getValue()] (Song& song) {
+                    auto& st = song.channels[(std::size_t) c].pluginState;
+                    if (const auto o = harmorParamOffset (st, k.part, k.index); o >= 0)
+                        std::memcpy (st.data() + o, &v, 4);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (harmor)
+            for (const auto& k : harmorKnobs)
+                addHarmor (k);
+        else if (harmless)
             for (const auto& k : harmlessKnobs)
                 add (k.index, k.name, k.low, k.high);
         else if (drumsynth)
@@ -549,6 +584,7 @@ public:
                                     + (wavesFound ? utf8 (" (next hit; recorded waves from your FL installation)")
                                                   : utf8 (" (next hit; recorded waves not found: silent)"))
                     : harmless ? utf8 ("Harmless — FL's additive engine (chorus/delay/reverb/compressor rack off)")
+                    : harmor ? utf8 ("Harmor — FL's additive engine (effects rack off; image synthesis not decoded)")
                     : boobass ? utf8 ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -568,7 +604,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1198,7 +1234,7 @@ public:
             setContentOwned (new ControllerPanel (engine, channel), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1276,7 +1312,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return std::make_unique<ControllerPanel> (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

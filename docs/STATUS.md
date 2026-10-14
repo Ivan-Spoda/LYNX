@@ -57,7 +57,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
   installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
-  FL's DLL on 135 of 139 demo channels); Sytrus, Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  FL's DLL on 135 of 139 demo channels); Harmor on its additive engine (REA round 34: both parts, 520-partial bank,
+  module chain, articulators; within −150 dB of the reference model on 88 of the 89 demo channels it runs, 85 of 99
+  demo channels within −60 dB of FL's DLL); Sytrus, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -79,11 +81,23 @@ accordingly. Highlights of what is **confirmed and applied**:
   time), Stereo, Trancer, Stutter, Vowel and Ring; Filter, Flanger (tape delay) and Phaser exact — impulse
   responses within 6·10⁻⁸ of FL's own engine (REA round 27); Reverb exact (FL's own diffusion network, size and
   damping law; −100 dB or better against the DLL at 44.1/48/96 kHz, REA round 33).
-- **Harmor:** cutoff in log2 Hz (73.4 Hz–17.7 kHz) with keytracking from 130.81 Hz, filter types 0–18, part
-  volume `(3^x − 1)/2` (up to +12 dB), level², filter envelope centred at 0.5 (±2·(hi − lo)·amt); exact timbre
-  from the Timbre 1/2 curves, blend, local EQ (1/n) and per-harmonic phase; unison with FL's per-voice detune
-  table, pan and gain; resonance peak from the type's table (Classic … Lowpass, Custom shapes) and the resonance mask
-  (REA round 25).
+- **Harmor:** its own instrument (`core/Harmor.cpp`, REA round 34; the channel keeps the plugin's raw state): per
+  enabled part × unison voice a record with a 520-partial sine bank (self-oscillation, Sub 1/3/4, 516 harmonics,
+  linear or logarithmic spacing, per-partial amplitude glide, partials entering after pitch drops), targets rebuilt
+  every 2 ms control block from the two timbres through the part's user-ordered module chain — local EQ, prism
+  (both modes, from level), harmonizer, filters 1/2 (shapes 0–7, 9, 14, custom 17/18, octave/Hz scale, key tracking,
+  knob smoothing, envelope/adaptive envelope, serial/parallel mix) with resonance (100–108, custom 110/111, masks),
+  phaser (200–210, incl. the frequency phaser), pluck, time and harmonic blur with mask, protection, clip modes 0–4,
+  volume order — then subs below, self-oscillation, top fade, global EQ (with mix), auto-gain; the 43 articulators per
+  part with FL's point curves (modes 0–12), envelopes (ADSR scales, sustain-level offset), LFOs (global phase,
+  tension/skew/pulse width), key/velocity/X/Y/Z/random/unison maps and time smoothing; unison types 0–4 (random and Hz
+  included) with the per-partial pitch curve; vibrato, stereo tremolo, legato/portamento/mono, master volume ramp;
+  table reads nearest or interpolated by the precision setting. FL's level law (part gain·(Final.Vol + offset)·unison
+  gain through √2·cos/sin, channel volume applied once — checked against the DLL at FL's default channel volume:
+  0.000 dB). Bit-for-bit to float32 output rounding against the reference model on 88 of the 89 demo channels it
+  runs (the 89th, −79 dB: numpy's float32 `exp`, which is not correctly rounded, in the per-partial unison curve) and
+  on all ~31 synthetic feature cases at 44.1 and 48 kHz (the frequency phaser at precision 0: −96 dB, the same
+  `exp`). The old spectral-oscillator conversion remains for unreadable states and for the synth's "FL presets" button.
 - **Sytrus:** FM depth 4·g cycles; ring modulation `1 − |a| + a·mod`; exact operator waveform (base shape,
   Half/Even, Skew, Sine shaper, normalisation, Tension, Absolute, Pre-filter) turned into a spectrum by FFT.
 - **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
@@ -135,10 +149,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
 **Still approximated or left out** (no confirmation yet):
-- Harmor: the resonance becomes an SVF Q with the same peak over the pass-band — Harmor's bump sits at
-  fc·2^(p60/1200) with its own width (p59) and skirts (Classic −6 dB, Lowpass dip above), which the SVF cannot
-  follow; Well, Noise, self-oscillation, Hz scale and adaptive width are left out; image/blur/prism/FX; with the volume envelope off FL keeps the note
-  until it is stolen — LYNX uses a short declick release.
+- Harmor (REA round 34 open items; `harmorFallbacks()` lists what a state uses): image/resynthesis data is ignored
+  (the part plays its timbres; 8 demo channels carry images), arpeggio envelope points act as normal points (3 demo
+  channels), the Noise resonance (type 109) is skipped, the blur variant of misc +0x46 runs as the normal blur (its one
+  demo channel still lands at −85 dB), phaser/harmonizer mask curves, timbre blend modes ≠ 0 and non-neutral global
+  envelope scales are ignored, filter shapes 8/10–13/15/16 and unknown resonance/phaser types switch that stage off,
+  clip modes > 4 switch the clip off, the harmonic-randomness module is absent (never active in FL's data) and the
+  effects rack (distortion/compressor/chorus/delay/reverb) is off — a hook (`harmor::FxHook`) takes the dry output
+  before the master volume, where FL runs it (round 36 found Harmless's rack shared with Harmor; Harmor's own
+  parameter mapping is not decoded). FL seeds its Mersenne Twister from the clock, LYNX with a fixed value per
+  instance: random unison, free/spectral phases and random maps are deterministic and differ from any FL render by
+  design. Tempo-synced envelope/LFO rates, the phaser rate and the portamento time follow the song tempo (the
+  reference was measured at 120 BPM). The polyphony limit is LYNX's (a pool of six notes' worth of records, 16–96;
+  the oldest are stolen). Two demo channels stay at −58/−55 dB against the DLL as in the model (last-ulp `exp` amplified by positive phase randomness;
+  an unexplained ~4 kHz residual).
 - Sakura: mod wheel, pitch bend and channel pressure are 0 as matrix sources (LYNX sends no CCs to it); the LFO steps
   once per LYNX render block; with the resonators on the output is within −72 dB of the reference (their float32
   feedback amplifies rounding); strings longer than 9 600 samples (notes below ~20 Hz) are shortened.
@@ -227,4 +251,5 @@ Confirmed empirically on the demo projects:
 
 ## Open items
 - Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
-  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's per-partial resonance and image synthesis.
+  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes, Noise resonance and
+  effects rack.

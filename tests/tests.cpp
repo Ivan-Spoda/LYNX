@@ -25,6 +25,7 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/Harmless.h"
+#include "core/Harmor.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -736,6 +737,7 @@ TEST (flp_real_files)
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0;
+    int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -876,6 +878,26 @@ TEST (flp_real_files)
                 }
             for (const auto& c : song.channels)
                 harmlessKind += c.instrument == lynx::InstrumentKind::harmless ? 1 : 0;
+
+            // Harmor: every state in the demos plays on the exact engine (REA_rodada34) and sounds, with finite samples
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Harmor")
+                {
+                    ++harmor;
+                    harmorUsable += lynx::harmorStateUsable (c.pluginState) ? 1 : 0;
+                }
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::harmor)
+                {
+                    ++harmorKind;
+                    const auto y = lynx::harmor::renderReference (c.pluginState, { { 0, 60, 0.8, 1.0, 0.0, 6000 }, { 2000, 67, 0.6, 1.0, 0.0, 8000 } }, 44100.0, 11025);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    harmorSounding += e > 1e-6 ? 1 : 0;
+                }
 
             // Sytrus: every state in the demos (zlib + 10 units) decodes, with finite values
             for (const auto& c : p.channels)
@@ -1244,6 +1266,8 @@ TEST (flp_real_files)
                 lynx::synthFromBassDrum (blob, synth, gain);
                 lynx::synthFromHarmless (blob, 120.0, synth, gain);
                 lynx::harmlessParams (blob);
+                if (lynx::harmorStateUsable (blob))
+                    lynx::harmorFallbacks (blob);
                 lynx::parseEnvelopeController (blob);
                 lynx::parseKeyboardController (blob);
                 lynx::parseLovePhilter (blob);
@@ -1334,6 +1358,8 @@ TEST (flp_real_files)
     CHECK (harmlessDecoded == harmless && harmless > 100);
     std::printf ("  Harmless: %d states parsed for the engine, %d channels imported as Harmless\n", harmlessParsed, harmlessKind);
     CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
+    std::printf ("  Harmor: %d channels, %d states usable by the engine, %d imported as Harmor (%d sounding)\n", harmor, harmorUsable, harmorKind, harmorSounding);
+    CHECK (harmorUsable == harmor && harmor > 90 && harmorKind >= harmor && harmorSounding >= harmorKind * 9 / 10);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -5697,6 +5723,184 @@ TEST (kepler_lfo_bpm_sync)
     k[6] = 0.0f; // free rate in seconds
     std::memcpy (state.data() + 0x21, k, sizeof k);
     CHECK (lynx::synthFromKepler (state, s, gain) && ! s.lfo[lynx::lfoPitch].sync);
+}
+
+namespace
+{
+// A Harmor state written from scratch (REA_rodada11 §4.1 layout, version 18): part A only — a decaying-harmonics
+// timbre, low-pass + resonance, filter envelope, 3-voice unison, vibrato, pluck, tremolo, volume envelope with a
+// velocity map — and the global block. Every other curve is neutral.
+std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f64 = [&] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    struct Pt { double dx, y, tension; int mode; };
+    auto curve = [&] (const std::vector<Pt>& pts, std::array<std::int32_t, 5> hdr) {
+        i32 (3), i32 (3), i32 ((std::int32_t) pts.size());
+        for (const auto& p : pts)
+        {
+            f64 (p.dx), f64 (p.y);
+            const auto t = (float) p.tension;
+            std::uint32_t u;
+            std::memcpy (&u, &t, 4);
+            i32 ((std::int32_t) u);
+            b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+        }
+        for (auto h : hdr)
+            i32 (h);
+    };
+    const std::array<std::int32_t, 5> off { 0, 0, -1, -1, -1 }, on { 0, 1, -1, -1, -1 };
+    auto flat = [&] (double y, std::array<std::int32_t, 5> hdr = { 0, 0, -1, -1, -1 }) { curve ({ { 0, y, 0, 0 }, { 1, y, 0, 2 } }, hdr); };
+    i32 (18);
+    i32 (1 | 4);
+    std::vector<std::uint8_t> part;
+    std::swap (b, part);
+    std::array<std::int32_t, 386> p {};
+    const std::pair<int, int> values[] = { { 0, 500 }, { 3, 1000 }, { 9, 1024 }, { 11, 1000 }, { 12, 1000 }, { 17, 300 }, { 18, 4000 },
+        { 19, 500 }, { 20, 1000 }, { 24, 500 }, { 25, 500 }, { 28, 500 }, { 29, 256 }, { 30, -1 }, { 31, -1 }, { 33, -1 }, { 34, 3 },
+        { 35, 1 }, { 37, 192 }, { 38, 128 }, { 39, 500 }, { 40, 10000 }, { 41, 1 }, { 42, 10000 }, { 43, 1 }, { 45, 200 }, { 46, 500 },
+        { 47, 1 }, { 49, -140 }, { 50, 1200 }, { 51, 0 }, { 52, 5000 }, { 54, 500 }, { 56, 600 }, { 57, 300 }, { 59, 500 }, { 60, 600 },
+        { 64, 8192 }, { 66, 500 }, { 72, 600 }, { 74, 1000 }, { 75, 600 }, { 78, 5000 }, { 79, 500 }, { 80, 3000 } };
+    for (const auto& [i, v] : values)
+        p[(std::size_t) i] = v;
+    for (auto v : p)
+        i32 (v);
+    for (int i = 0; i < 12; ++i)
+        i32 (i); // module order
+    std::array<std::uint8_t, 0x4b> misc {};
+    auto put = [&] (int o, std::int32_t v) { std::memcpy (misc.data() + o, &v, 4); };
+    const float one = 1.0f;
+    put (0x08, 107), put (0x1c, 1), put (0x28, 200), std::memcpy (misc.data() + 0x30, &one, 4);
+    put (0x34, 0), put (0x38, 4), put (0x3c, 100), put (0x40, 108);
+    misc[0x44] = 1;
+    b.insert (b.end(), misc.begin(), misc.end());
+    static const int mode1[] = { 0, 2, 4, 5, 12, 13, 14, 15, 17, 18, 23, 24, 27, 28, 29, 30, 33, 36, 38, 39, 40, 41, 42 };
+    for (int k = 0; k < 43; ++k)
+    {
+        const bool centred = std::find (std::begin (mode1), std::end (mode1), k) != std::end (mode1);
+        const double neutral = centred ? 0.5 : 1.0;
+        i32 (3);
+        i32 (1065353216), i32 (1065353216), i32 (1065353216);
+        if (k == 1) // volume envelope: attack, decay to the sustain point, release
+            curve ({ { 0, 0, 0, 0 }, { 0.01, 1, 0.3, 0 }, { 0.3, 0.6, -0.4, 0 }, { 0.4, 0, 0.2, 0 } }, { 0, 1, 1, -1, 2 });
+        else if (k == 4) // filter-1 envelope
+            curve ({ { 0, 1, 0, 0 }, { 0.25, 0.2, -0.5, 0 } }, { 0, 1, -1, -1, -1 });
+        else
+            flat (neutral);
+        for (int a : { 128, 128, 0, 128 })
+            i32 (a);
+        if (k == 0 && panLfo) // pan LFO
+            flat (1.0, on);
+        else
+            flat (0.5);
+        for (int a : { k == 0 ? 40000 : 0, 0, 0, 0 })
+            i32 (a);
+        i32 (0);
+        for (int m = 2; m < 11; ++m)
+            if (k == 1 && m == 3)
+                curve ({ { 0, 0.2, 0, 0 }, { 1, 1, -0.3, 0 } }, off); // velocity → volume
+            else
+                flat (neutral);
+    }
+    for (int c = 0; c < 26; ++c)
+        if (c == 2 || c == 3)
+            curve ({ { 0, 0.25, 0, 0 }, { 0.006, 0.12, -0.46, 0 }, { 0.994, 0, 0, 0 } }, off); // timbres
+        else if (c == 14)
+            curve ({ { 0, 1, 0, 0 }, { 1, 0, 0, 0 } }, off); // pluck curve
+        else
+            flat (c == 0 || c == 17 ? 0.25 : (c == 5 ? 0.0 : (c == 6 || c == 10 || c == 11 || (c >= 18 && c <= 24) ? 1.0 : 0.5)));
+    std::swap (b, part);
+    i32 ((std::int32_t) part.size());
+    b.insert (b.end(), part.begin(), part.end());
+    std::array<std::int32_t, 53> g {};
+    g[0] = g[1] = g[2] = 256, g[10] = 500, g[11] = 1000, g[12] = 1000, g[15] = 1000;
+    for (auto v : g)
+        i32 (v);
+    for (int i = 0; i < 6; ++i)
+        i32 (i);
+    std::array<std::uint8_t, 0x3d> gm {};
+    const std::int32_t cr = 200, vr = 1;
+    std::memcpy (gm.data() + 12, &vr, 4);
+    std::memcpy (gm.data() + 24, &cr, 4);
+    b.insert (b.end(), gm.begin(), gm.end());
+    return b;
+}
+} // namespace
+
+TEST (harmor_engine)
+{
+    // REA_rodada34: state parsing, the additive engine against our reference model (hmodel.py), host levels, voice end
+    const auto blob = harmorTestState();
+    if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
+    CHECK (lynx::harmorStateUsable (blob));
+    CHECK (lynx::harmorFallbacks (blob).size() == 1); // (only the harmonic-randomness note)
+    const auto at = lynx::harmorParamOffset (blob, 0, 52);
+    std::int32_t cutoff = 0;
+    CHECK (at > 0 && (std::memcpy (&cutoff, blob.data() + at, 4), cutoff == 5000));
+    CHECK (lynx::harmorParamOffset (blob, 1, 52) < 0 && lynx::harmorParamOffset (blob, -1, 12) > at);
+    auto broken = blob;
+    broken.resize (broken.size() / 2);
+    CHECK (! lynx::harmorStateUsable (broken));
+    auto old = blob;
+    old[0] = 15; // articulators and curves are stored from version 16
+    CHECK (! lynx::harmorStateUsable (old));
+
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::harmor;
+    c.pluginState = blob;
+    auto render = [] (const lynx::ChannelDef& def, int total, float gl, float gr, int offAt) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::harmor);
+        inst->configure (def, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        inst->noteOn (60, 0.78125f);
+        for (int s = 0; s < total; s += 512)
+        {
+            if (s == offAt)
+                inst->noteOff (60);
+            inst->render (l.data() + s, r.data() + s, std::min (512, total - s), gl, gr);
+        }
+        return std::make_tuple (l, r, std::move (inst));
+    };
+    {
+        // reference model (REA round 34 hmodel.py; C5 at FL velocity 100, Final.Vol 1, centre, released at 6144, the
+        // Mersenne Twister seeded like LYNX's)
+        auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
+        const std::tuple<int, float, float> golden[] {
+            { 0, 0.0f, 0.0f }, { 100, 0.08034249f, 0.07985926f }, { 1000, 0.01197212f, 0.02992321f }, { 3000, -0.00065450f, 0.04010218f },
+            { 6000, 0.14123290f, 0.03816114f }, { 7000, 0.06512973f, -0.02774833f }, { 8191, 0.02622915f, -0.00915109f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+        // after the release the volume envelope ends, the record declicks and the instrument goes idle
+        std::vector<float> tail (44100), tailR (tail.size());
+        inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+        CHECK (std::abs (tail.back()) == 0.0f);
+    }
+    // the reference renderer gives the same samples as the instrument
+    {
+        const auto ref = lynx::harmor::renderReference (blob, { { 0, 60, 0.78125, 1.0, 0.0, 6144 } }, 44100.0, 8192);
+        const auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
+        double worst = 0.0;
+        for (int i = 0; i < 8192; ++i)
+            worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) });
+        CHECK (worst == 0.0);
+    }
+    // FL's level law applied once: half the channel volume halves the output; full right pan silences the left side
+    const auto full = std::get<0> (render (c, 2048, 1.0f, 1.0f, -1));
+    const auto half = std::get<0> (render (c, 2048, 0.5f, 0.5f, -1));
+    CHECK (std::abs (half[1000] - 0.5f * full[1000]) < 1e-6f && std::abs (full[1000]) > 0.01f);
+    auto mono = c;
+    mono.pluginState = harmorTestState (false); // no pan LFO ...
+    const std::int32_t one = 1;
+    std::memcpy (mono.pluginState.data() + lynx::harmorParamOffset (mono.pluginState, 0, 34), &one, 4); // ... nor unison spread
+    const auto [pl, pr, pi] = render (mono, 2048, 0.0f, 1.41421356f, -1);
+    double el = 0.0, er = 0.0;
+    for (int i = 0; i < 2048; ++i)
+        el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
+    CHECK (el < 1e-10 * er && er > 1e-3);
 }
 
 TEST (harmless_engine)
