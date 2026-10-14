@@ -14,7 +14,8 @@ enum class Icon
     newFile, open, save, exportAudio, settings, help, undo, redo,
     channelRack, pianoRoll, playlist, mixer, browser,
     folder, file, audioFile, plugin, preset, project,
-    draw, erase, select, slice, mute, link, magnet, scissors
+    draw, erase, select, slice, mute, link, magnet, scissors,
+    brush, knife, zoom, listen, slip, ghost // editor tools (Piano Roll / Playlist)
 };
 
 namespace icons
