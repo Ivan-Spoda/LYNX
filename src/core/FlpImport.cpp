@@ -2,6 +2,7 @@
 #include "core/DrumSynthLive.h"
 #include "core/Harmless.h"
 #include "core/HarmlessFx.h"
+#include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
@@ -392,6 +393,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             // the synth's preset button keeps the synth approximation of a Sakura patch
             SynthSettings synth;
             if (synthFromSakura (project.channels.front().pluginState, synth))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::sytrus)
+        {
+            // likewise for Sytrus: the preset button fills the built-in synth with the 3-oscillator conversion
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromSytrus (project.channels.front().pluginState, song.bpm, synth, gain))
                 return synth;
         }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::harmless)
@@ -825,8 +834,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
                 adopt();
-            else if (name == "sytrus" && synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "sytrus")
+            {
+                // FL's Sytrus engine from the raw state (REA_rodada31); the 3-oscillator conversion stays as a fallback
+                if (sytrus::stateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::sytrus;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "harmor" && synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "gms" && synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))

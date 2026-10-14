@@ -74,6 +74,12 @@ struct SampleData
     bool isStereo() const noexcept { return isMapped() ? mappedRight != nullptr : ! right.empty(); }
 };
 
+// Offline rendering (export) in progress. Instruments that, like FL's plugins, have separate render-quality settings
+// switch to them while it is set (Sytrus: oversampling and envelope accuracy, REA_rodada31 §1.2); they read it in
+// prepare()/configure(), so set it before preparing the graph for the render and clear it afterwards.
+void setOfflineRendering (bool on) noexcept;
+bool offlineRendering() noexcept;
+
 // `sample` is only used by the sampler; without a sample the sampler is silent.
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);
 

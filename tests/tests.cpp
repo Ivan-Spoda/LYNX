@@ -32,6 +32,7 @@
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
 #include "core/Slicer.h"
+#include "core/SytrusEngine.h"
 #include "core/Templates.h"
 #include "core/Vocodex.h"
 #include "core/TimeStretch.h"
@@ -736,7 +737,8 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
-    int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0;
+    int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
+        sytrusSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -892,6 +894,28 @@ TEST (flp_real_files)
                     ++sytrus;
                     lynx::SynthSettings ss;
                     float g = 1.0f;
+                    // the Sytrus engine (REA_rodada31) reads every demo state; the first 24 play a short note (render settings)
+                    if (lynx::sytrus::stateUsable (c.pluginState))
+                    {
+                        ++sytrusEngine;
+                        if (sytrusRendered < 24)
+                        {
+                            ++sytrusRendered;
+                            lynx::sytrus::Engine e;
+                            e.prepare (44100.0, true, 512);
+                            e.setPatch (lynx::sytrus::parsePatch (c.pluginState));
+                            lynx::sytrus::NoteParams note;
+                            e.noteOn (note);
+                            std::vector<float> l (8192), r (8192);
+                            e.render (l.data(), r.data(), 8192, 0.551f, 0.0f);
+                            bool finite = true;
+                            double energy = 0.0;
+                            for (std::size_t k = 0; k < l.size(); ++k)
+                                finite = finite && std::isfinite (l[k]) && std::isfinite (r[k]), energy += (double) l[k] * l[k];
+                            CHECK (finite);
+                            sytrusSounding += energy > 1e-6;
+                        }
+                    }
                     if (lynx::synthFromSytrus (c.pluginState, 128.0, ss, g))
                     {
                         ++sytrusDecoded;
@@ -1059,7 +1083,10 @@ TEST (flp_real_files)
 
     CHECK (threeOscDecoded == threeOsc);
     std::printf ("  Harmless: %d channels, %d decoded\n", harmless, harmlessDecoded);
-    std::printf ("  Sytrus: %d channels, %d decoded\n", sytrus, sytrusDecoded);
+    std::printf ("  Sytrus: %d channels, %d decoded, %d by the engine (%d of %d rendered sound)\n", sytrus, sytrusDecoded, sytrusEngine,
+                 sytrusSounding, sytrusRendered);
+    CHECK (sytrusEngine == sytrus);
+    CHECK (sytrusSounding >= sytrusRendered * 3 / 4);
     for (const auto& [name, counter] : generators)
     {
         std::printf ("  %s: %d channels, %d decoded\n", name.c_str(), counter.first, counter.second);
@@ -5858,6 +5885,258 @@ TEST (harmless_rack)
         rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
         CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
     }
+}
+
+// ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
+// A Sytrus state built from scratch (version 25 layout, our own values — no FL preset data), zlib "stored" blocks.
+namespace
+{
+struct SytrusTestPatch
+{
+    std::vector<std::int32_t> main = std::vector<std::int32_t> (240, 0); // 962-byte main block as ints (+ mute bytes)
+    struct Op
+    {
+        int p[10] { 0, 256, 0, 0, 0, 0, 0, 0, 0, 0 };
+        int ratio = 20000, offset = 0, noise = 0;
+        std::vector<float> amps { 1.0f };
+        std::uint8_t flags[8] {};
+        int env1[3] { -1, -1, -1 }; // volume envelope: on (≠ −1 → on), decay point, sustain point
+        std::vector<std::pair<double, double>> env1pts;
+    } ops[6];
+    struct Filt
+    {
+        int p[10] { 0, 0, 128, 0, 128, 0, 0, 128, 128, 0 };
+        int type = 3;
+    } filts[3];
+    std::array<std::array<std::uint8_t, 23>, 3> delays {};
+    std::array<std::int32_t, 9> reverb { 19, 221, 0, 50, 80, 30, 221, 2, 0 };
+    bool reverbOn = false;
+    int eqmode = 0;
+
+    SytrusTestPatch()
+    {
+        main[0] = 128, main[1] = 128;
+        for (int i = 0; i < 8; ++i)
+            main[(std::size_t) (165 + i)] = (i % 4 == 2) ? 0 : 128;
+        main[173] = 1, main[175] = 128, main[188] = 128, main[189] = -1, main[190] = main[191] = 256;
+    }
+    void cell (int layer, int row, int col, int v) { main[(std::size_t) (3 + layer * 81 + row * 9 + col)] = v; }
+
+    std::vector<std::uint8_t> blob() const
+    {
+        std::vector<std::uint8_t> b;
+        auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+        auto f32 = [&] (float v) { std::int32_t x; std::memcpy (&x, &v, 4); i32 (x); };
+        auto f64 = [&] (double v) { std::uint64_t x; std::memcpy (&x, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (x >> (8 * k))); };
+        // point lists: kind 1 envelope, 2 LFO, 3 map / shaper curve; format version 3
+        auto env = [&] (int kind, const std::vector<std::pair<double, double>>& pts, int on, int decay, int sus) {
+            i32 (kind), i32 (3), i32 ((std::int32_t) pts.size());
+            for (const auto& [dt, y] : pts)
+                f64 (dt), f64 (y), f32 (0.0f), i32 (0);
+            i32 (0), i32 (on), i32 (decay), i32 (-1), i32 (sus);
+        };
+        for (int i = 0; i < 240; ++i)
+            if (4 * i + 4 <= 0x320)
+                i32 (main[(std::size_t) i]);
+        b.resize (962, 0); // mute bytes: none muted
+        i32 (0);                    // global declick amount
+        b.push_back (0), b.push_back (0), b.push_back (0); // OSC grouping, DC stage, GIBBS OFF
+        for (int k = 0; k < 9; ++k)
+            b.push_back (k == 7 ? 1 : 0); // flag group (release multiplier on, as Default.fst)
+        for (const auto& d : delays)
+            b.insert (b.end(), d.begin(), d.end());
+        for (auto v : reverb)
+            i32 (v);
+        b.push_back (reverbOn ? 1 : 0), b.push_back (0);
+        i32 (eqmode);
+        for (int k = 0; k < 3; ++k)
+            i32 (0), i32 (30000), i32 (20000), i32 (k);
+        b.push_back (0); // no info text
+        for (int u = 0; u < 10; ++u)
+        {
+            const int narts = u < 6 ? 6 : (u < 9 ? 8 : 2);
+            for (int j = 0; j < 10; ++j)
+                i32 (u < 6 ? ops[u].p[j] : (u < 9 ? filts[u - 6].p[j] : 0));
+            if (u < 6)
+            {
+                const auto& o = ops[u];
+                const auto at = b.size();
+                b.resize (at + 0x828, 0);
+                auto put = [&] (std::size_t off, const void* src, std::size_t n) { std::memcpy (b.data() + at + off, src, n); };
+                put (0, &o.ratio, 4), put (4, &o.offset, 4), put (8, &o.noise, 4);
+                put (0xc, o.amps.data(), 4 * o.amps.size());
+                const std::int32_t shape[5] { 0, 0, 0, 0, 128 };
+                put (0x80c, shape, sizeof shape);
+                put (0x820, o.flags, 8);
+            }
+            else if (u < 9)
+            {
+                const auto at = b.size();
+                b.resize (at + 0x30, 0);
+                std::memcpy (b.data() + at + 0x2c, &filts[u - 6].type, 4);
+                env (3, { { 0.0, 0.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                b.push_back (0);
+            }
+            for (int k = 0; k < narts; ++k)
+            {
+                const bool add = k == 0 || k == 3 || (u >= 6 && u <= 8 && (k == 2 || k == 3)) || (u < 6 && k == 4);
+                const double neutral = add ? 0.5 : 1.0;
+                i32 (3), i32 (0), f32 (1.0f), f32 (1.0f);
+                if (u < 6 && k == 1 && ops[u].env1[0] != -1)
+                    env (1, ops[u].env1pts, -1, ops[u].env1[1], ops[u].env1[2]);
+                else
+                    env (1, { { 0.0, 0.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                i32 (128), i32 (128), i32 (0), i32 (128);
+                env (2, { { 0.0, 1.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                i32 (40000), i32 (0), i32 (0), i32 (0), i32 (0);
+                for (int m = 0; m < 6; ++m)
+                    env (3, { { 0.0, neutral }, { 1.0, neutral } }, 0, -1, -1);
+            }
+        }
+        b.push_back (0), b.push_back (0);
+        // zlib with stored blocks
+        std::vector<std::uint8_t> z { 0x78, 0x01 };
+        for (std::size_t at = 0; at < b.size(); at += 65535)
+        {
+            const auto n = std::min<std::size_t> (65535, b.size() - at);
+            z.push_back (at + n >= b.size() ? 1 : 0);
+            z.push_back ((std::uint8_t) n), z.push_back ((std::uint8_t) (n >> 8));
+            z.push_back ((std::uint8_t) ~n), z.push_back ((std::uint8_t) (~n >> 8));
+            z.insert (z.end(), b.begin() + (std::ptrdiff_t) at, b.begin() + (std::ptrdiff_t) (at + n));
+        }
+        std::uint32_t a = 1, c = 0;
+        for (auto x : b)
+            a = (a + x) % 65521, c = (c + a) % 65521;
+        for (int k = 3; k >= 0; --k)
+            z.push_back ((std::uint8_t) (((c << 16) | a) >> (8 * k)));
+        std::vector<std::uint8_t> out { 25, 0, 0, 0 };
+        out.insert (out.end(), z.begin(), z.end());
+        return out;
+    }
+};
+
+// renders like FL's Gen_Render calls: notes start/release at the block that contains them
+std::pair<std::vector<float>, std::vector<float>> sytrusRender (const std::vector<std::uint8_t>& blob, bool renderMode, int n,
+                                                                std::vector<std::array<int, 3>> notes, double fs = 44100.0)
+{
+    lynx::sytrus::Engine e;
+    e.setTempo (120.0);
+    e.prepare (fs, renderMode, 512);
+    e.setPatch (lynx::sytrus::parsePatch (blob));
+    std::vector<float> l ((std::size_t) n), r ((std::size_t) n);
+    for (int n0 = 0; n0 < n; n0 += 512)
+    {
+        for (std::size_t k = 0; k < notes.size(); ++k)
+        {
+            if (notes[k][1] >= n0 && notes[k][1] < n0 + 512)
+            {
+                lynx::sytrus::NoteParams p;
+                p.key = (float) notes[k][0];
+                p.id = (std::int64_t) k + 1;
+                e.noteOn (p);
+            }
+            if (notes[k][2] >= n0 && notes[k][2] < n0 + 512)
+                e.release ((std::int64_t) k + 1);
+        }
+        e.render (l.data() + n0, r.data() + n0, std::min (512, n - n0), 1.0f, 0.0f);
+    }
+    return { l, r };
+}
+} // namespace
+
+TEST (sytrus_engine_sine)
+{
+    // one sine operator, ratio 1, OUT 256, no envelopes: C5 = 523.2511 Hz at 0.7071 (centre of the pan law, §6.1)
+    SytrusTestPatch t;
+    t.cell (0, 0, 8, 256);
+    const auto blob = t.blob();
+    CHECK (lynx::sytrus::stateUsable (blob));
+    CHECK (lynx::sytrus::parsePatch (blob) != nullptr);
+    auto broken = blob;
+    broken.resize (broken.size() / 2);
+    CHECK (! lynx::sytrus::stateUsable (broken));
+    const auto [l, r] = sytrusRender (blob, false, 8192, { { 60, 0, 4096 } });
+    double worst = 0.0;
+    for (int k = 0; k < 4000; ++k)
+        worst = std::max (worst, std::abs ((double) l[(std::size_t) k] - 0.70710678 * std::sin (2.0 * 3.14159265358979 * 523.251130601197 * k / 44100.0)));
+    CHECK (worst < 2e-5);
+    CHECK (l == r);
+    // envelope-less voice end (§4.9, §6.2): finished at a tick after the note-off, then the L/R gains (0.7071) ramp to 0
+    // at 0.001 per sample: the last non-zero sample is 4895 for a release at 4096 — the DLL's own figure (EXEC, §6.2)
+    int last = 0;
+    for (int k = 0; k < 8192; ++k)
+        if (l[(std::size_t) k] != 0.0f)
+            last = k;
+    CHECK (last == 4895);
+    // key 69 = 880 Hz; 48 kHz
+    const auto [l2, r2] = sytrusRender (blob, false, 4096, { { 69, 0, -1 } }, 48000.0);
+    worst = 0.0;
+    for (int k = 0; k < 4000; ++k)
+        worst = std::max (worst, std::abs ((double) l2[(std::size_t) k] - 0.70710678 * std::sin (2.0 * 3.14159265358979 * 880.0 * k / 48000.0)));
+    CHECK (worst < 5e-5);
+    (void) r2;
+}
+
+TEST (sytrus_engine_reference)
+{
+    // FM 2→1, Vanilla LP filter, volume envelope, unison 3, delay and reverb, 2× oversampling with the 8-sample
+    // envelope tick (render settings): against our Python reference model of REA_rodada31 (sytmodel.render)
+    SytrusTestPatch t;
+    t.main[195] = 0, t.main[196] = 1, t.main[193] = 0, t.main[194] = 1;
+    t.main[173] = 3, t.main[174] = 64, t.main[176] = 100;
+    t.ops[1].ratio = 40000;
+    t.cell (0, 0, 1, 128); // op 2 → op 1 FM
+    t.cell (0, 0, 8, 128);
+    t.cell (0, 6, 0, 256); // op 1 → filter 1
+    t.cell (0, 6, 8, 256);
+    t.cell (0, 0, 7, 200); // FX send
+    t.filts[0].p[0] = 1, t.filts[0].p[2] = 180, t.filts[0].p[3] = 60;
+    t.ops[0].env1[0] = 0, t.ops[0].env1[1] = 1, t.ops[0].env1[2] = 2;
+    t.ops[0].env1pts = { { 0.0, 0.0 }, { 0.05, 1.0 }, { 0.1, 0.6 }, { 0.2, 0.0 } };
+    const std::int32_t d0[5] { 40, 100, 50, 100, 0 };
+    std::memcpy (t.delays[0].data(), d0, 20);
+    t.delays[0][22] = 1;
+    t.reverb = { 19, 221, 10, 50, 80, 30, 100, 2, 100 };
+    t.reverbOn = true;
+    const auto blob = t.blob();
+    const auto [l, r] = sytrusRender (blob, true, 12000, { { 60, 0, 6000 } });
+    // reference values (model render_mode=True, 44.1 kHz, block 512, key 60, velocity 0.78125, release at 6000); the same
+    // state rendered by FL's own Sytrus DLL in render mode differs from this by −136 dB (EXEC, REA round 31 harness)
+    const std::array<std::pair<int, float>, 8> golden { { { 100, -0.00235529384f }, { 777, -0.175126165f }, { 2000, 0.30976975f }, { 4321, -0.0213534199f },
+                                                          { 6100, 0.202372357f }, { 7000, 0.249530748f }, { 9000, 0.0307101421f }, { 11999, 0.176390275f } } };
+    for (const auto& [i, v] : golden)
+        CHECK (std::abs (l[(std::size_t) i] - v) < 1e-6f);
+    const std::array<std::pair<int, float>, 3> goldenR { { { 777, -0.166890964f }, { 4321, -0.212358952f }, { 9000, -0.0251909085f } } };
+    for (const auto& [i, v] : goldenR)
+        CHECK (std::abs (r[(std::size_t) i] - v) < 1e-6f);
+}
+
+TEST (sytrus_instrument)
+{
+    // the LYNX instrument: state in ChannelDef::pluginState, channel volume/pan recovered from the rack gains
+    SytrusTestPatch t;
+    t.cell (0, 0, 8, 256);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sytrus;
+    c.pluginState = t.blob();
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sytrus);
+    inst->prepare (44100.0);
+    inst->configure (c, 120.0);
+    CHECK (inst->idle());
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (60, 100.0f / 128.0f);
+    // rack gains for volume V and pan p: √2·V·cos((1 + p)π/4), √2·V·sin(…); V = 0.5, p = 0 → Final.Vol 0.5
+    inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    double peak = 0.0;
+    for (int k = 1000; k < 4096; ++k)
+        peak = std::max (peak, (double) std::abs (l[(std::size_t) k]));
+    CHECK (std::abs (peak - 0.5 * 0.70710678) < 1e-3); // Final.Vol 0.5 × the plugin's centre pan law
+    CHECK (! inst->idle());
+    inst->noteOff (60);
+    std::vector<float> tail (44100 * 3), tailR (tail.size());
+    inst->render (tail.data(), tailR.data(), (int) tail.size(), 0.5f, 0.5f);
+    CHECK (inst->idle());
+    CHECK (tail.back() == 0.0f);
 }
 
 TEST (harmless_engine)

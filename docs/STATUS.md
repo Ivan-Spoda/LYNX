@@ -59,7 +59,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
   FL's DLL on 135 of 139 demo channels) and its effects rack (REA round 36: chorus, delay, reverb and the Maximus
   compressor with Harmless's own presets read from the user's FL installation; the model with the rack is within −60 dB
-  of the DLL on 135 of 139 demo channels); Sytrus, Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  of the DLL on 135 of 139 demo channels); Sytrus on its engine (REA round 31: the whole instance from the raw plugin
+  state — operators, FM/RM matrix, articulators, unison, portamento, filters, effects chain; FL's render settings when
+  exporting, its live ones when playing); Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -86,8 +88,21 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the Timbre 1/2 curves, blend, local EQ (1/n) and per-harmonic phase; unison with FL's per-voice detune
   table, pan and gain; resonance peak from the type's table (Classic … Lowpass, Custom shapes) and the resonance mask
   (REA round 25).
-- **Sytrus:** FM depth 4·g cycles; ring modulation `1 − |a| + a·mod`; exact operator waveform (base shape,
-  Half/Even, Skew, Sine shaper, normalisation, Tension, Absolute, Pre-filter) turned into a spectrum by FFT.
+- **Sytrus:** its own engine (`core/SytrusEngine.cpp`, REA round 31) driven by the plugin's saved state: 16 384-point
+  operator tables with linear read-out and the 4-lane block reader, noise (shared LCG), plucked mode (IPP's uniform
+  generator), band limiting (4 096 live / 16 384 export), CENTER/DECLICK, GLOBAL phase; the FM/RM matrix in FL's
+  per-sample order (PM `4·g·out·MOD`, feedback `g·35/128`); every articulator (envelopes with all curve shapes 0–9,
+  LFOs, key/velocity/unison/Mod X/Y/random maps, TEMPO, GLOBAL LFOs, global ADSR, velocity options) at FL's control
+  tick; volume/MOD/pan ramps, output pan law and the voice-end ramp; unison (4 modes, sub layer, OSC grouping),
+  portamento, GLOBAL PITCH, MONO KEY; the 3 filter units (13 types, ALT, HQ 2×, FLAT, waveshaper) and the post-voice
+  chain (decimators, chorus, 3 delays, the shared reverb, 3-band EQ, DC stage). LYNX uses the state's *render*
+  oversampling/tick settings while exporting (as FL does) and the live ones while playing. Against FL's own DLL on
+  the 268 demo channels (one note, 0.5 s): median −116.9 dB live / −122.7 dB with the export settings; 265 / 264
+  channels within −60 dB (268 / 267 when fed the DLL's own sine tables — the rest are chaotic FM patches); four
+  overlapping notes with a key re-trigger (voice management, MONO KEY): 262/268 (REA round 31 §10).
+  CPU: idle effects bypass themselves (exact), voices on the same tick grid are rendered in lockstep and the block
+  reader runs in SSE2 — all bit-identical; "Overcome – Sytrus" (72 instances, several at 8× even live) plays in
+  0.46× real time on one thread, 0.17× on four.
 - **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
   partials per voice record (self-oscillation, Sub 1/3/4, 524 harmonics; partial count and band limit per quality,
   10 ms amplitude glide), targets rebuilt every control block (88/44/8 samples at 44.1 kHz) in FL's order — colour ×
@@ -180,8 +195,18 @@ accordingly. Highlights of what is **confirmed and applied**:
   per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
   are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
   key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
-- Sytrus: carriers an integer multiple above the main one join its exact spectrum (sharing its envelope); other
-  carriers (detuned, panned, offset or FM-modulated) and the FM modulator use basic shapes.
+- Sytrus: chaotic FM patches (two-way FM loops, strong self-feedback) cannot be sample-exact — FL builds sine tables
+  with IPP's tone generator (≈1 ulp from an exact sine) and the chaos amplifies it (statistically equivalent);
+  random maps use a fixed per-instance seed (FL's is clock-seeded, so they are not reproducible in FL either); the
+  noise generator is per instance (FL shares one across all Sytrus instances in the process); the mixer send of the
+  FX bus (main int 0x2F4) is not routed; the GLOBAL envelope hand-over is exact only when the held voice rests on
+  its sustain point (inside a segment FL's hand-over is not decoded: 3 demo channels); curve modes 10–12, the Mod X/Y
+  SMOOTH coefficient and FL's polyphony setting (FPE_MaxPoly; LYNX: mono channels → 1, otherwise unlimited) are not
+  reproduced; the FX tail length is inferred (100 samples + the chorus ring incl. one block); with the export
+  settings a few demo patches still differ at −61…−80 dB (unison + full-noise operators into the FX bus, noise-heavy
+  resonant Vanilla HP); the polyphony limit was not exercised against the DLL. States older than version 17 still use
+  the old 3-oscillator conversion. Export with the render settings is CPU-heavy: most demo patches run their voices
+  8× oversampled when FL exports, and LYNX does the same.
 - Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
   (control slot → live link); pulse curves with more than 10 cycles.
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL

@@ -40,7 +40,8 @@ enum class InstrumentKind : std::uint8_t
     drumpad,    // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
     boobass,    // FL's BooBass engine (REA_rodada29 §4); multisample read from the user's DLL (samplePath), 3 knobs
     drumsynth,  // FL's Fruity DrumSynth Live (REA_rodada30 §1): 120 patches in modelParams, recorded waves from the user's DLL
-    harmless    // FL's Harmless additive engine (REA_rodada32): raw state in modelParams (layout in core/Harmless.h)
+    harmless,   // FL's Harmless additive engine (REA_rodada32): raw state in modelParams (layout in core/Harmless.h)
+    sytrus      // FL's Sytrus engine (REA_rodada31): the plugin's raw saved state in ChannelDef::pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -244,6 +245,7 @@ struct ChannelDef
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
     std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth / harmless: FL's raw state parameters
+    std::vector<std::uint8_t> pluginState; // instrument == sytrus: the FL plugin's saved state (record 0xD5), as FL wrote it
     SamplerSettings sampler; // used when instrument == sampler
     SynthSettings synth;     // used when instrument == synth
     float swingMix = 1.0f;   // how much of the global swing applies to this channel (0..1), as in FL

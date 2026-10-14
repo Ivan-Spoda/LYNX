@@ -5,6 +5,7 @@
 #include "engine/Text.h"
 
 #include "core/FlpImport.h"
+#include "core/Instruments.h"
 #include "core/Dither.h"
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
@@ -158,6 +159,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
 
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
+    setOfflineRendering (true); // instruments with FL render-quality settings use them (Sytrus)
     transport.sampleRate.store (sampleRate);
     graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
     graph.prepareToPlay (sampleRate, blockSize);
@@ -230,6 +232,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
         rackProcessor->setMetering (true);
 
     graph.releaseResources();
+    setOfflineRendering (false);
     return cancelled ? -1.0f : peak;
 }
 
