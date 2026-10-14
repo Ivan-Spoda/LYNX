@@ -1,5 +1,6 @@
 #include "core/FlpImport.h"
 #include "core/DrumSynthLive.h"
+#include "core/Harmless.h"
 #include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
@@ -392,6 +393,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             if (synthFromSakura (project.channels.front().pluginState, synth))
                 return synth;
         }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::harmless)
+        {
+            // ... and of a Harmless patch
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromHarmless (project.channels.front().pluginState, song.bpm, synth, gain))
+                return synth;
+        }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
             return std::nullopt;
 
@@ -761,7 +770,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
             def.plugin.name = def.plugin.foreign.name;
 
-        // Harmless / Fruit Kick (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
+        // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
         if (def.instrument == InstrumentKind::synth)
         {
@@ -778,8 +787,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 def.volume = std::clamp ((float) (std::log (10.0 * g + 1.0) / std::log (11.0)), 0.0f, 1.0f);
             };
 
-            if (name == "harmless" && synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
-                adopt();
+            if (name == "harmless")
+            {
+                // FL's additive engine (REA_rodada32); the internal synth approximation stays as the fallback
+                if (auto params = harmlessParams (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::harmless;
+                    def.modelParams = std::move (*params);
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "fruit kick" && synthFromFruitKick (c.pluginState, fromPlugin))
                 adopt();
             else if (name == "minisynth" && synthFromMiniSynth (c.pluginState, song.bpm, fromPlugin))
@@ -924,14 +943,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
-            else if (plugin == "harmless" || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
+            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "harmor" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
             else if (((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
-                     || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::drumsynth))
+                     || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::drumsynth)
+                     || (plugin == "harmless" && def.instrument == InstrumentKind::harmless))
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)

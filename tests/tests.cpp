@@ -24,6 +24,7 @@
 #include "core/Inflate.h"
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
+#include "core/Harmless.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -733,7 +734,7 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
-    int harmless = 0, harmlessDecoded = 0, sytrus = 0, sytrusDecoded = 0;
+    int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -869,7 +870,11 @@ TEST (flp_real_files)
                         ++harmlessDecoded;
                         CHECK (std::isfinite (g) && hs.cutoff >= 20.0f && hs.cutoff <= 20000.0f && std::isfinite (hs.decay) && std::isfinite (hs.release));
                     }
+                    if (const auto hp = lynx::harmlessParams (c.pluginState))
+                        harmlessParsed += (int) hp->size() == lynx::harmlessParamCount ? 1 : 0;
                 }
+            for (const auto& c : song.channels)
+                harmlessKind += c.instrument == lynx::InstrumentKind::harmless ? 1 : 0;
 
             // Sytrus: every state in the demos (zlib + 10 units) decodes, with finite values
             for (const auto& c : p.channels)
@@ -1237,6 +1242,7 @@ TEST (flp_real_files)
                 lynx::synthFromToxic (blob, synth, gain);
                 lynx::synthFromBassDrum (blob, synth, gain);
                 lynx::synthFromHarmless (blob, 120.0, synth, gain);
+                lynx::harmlessParams (blob);
                 lynx::parseEnvelopeController (blob);
                 lynx::parseKeyboardController (blob);
                 lynx::parseLovePhilter (blob);
@@ -1325,6 +1331,8 @@ TEST (flp_real_files)
     CHECK (gmsDecoded == gmsPresets);
     CHECK (sytrusDecoded == sytrus);
     CHECK (harmlessDecoded == harmless && harmless > 100);
+    std::printf ("  Harmless: %d states parsed for the engine, %d channels imported as Harmless\n", harmlessParsed, harmlessKind);
+    CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -5480,4 +5488,85 @@ TEST (kepler_lfo_bpm_sync)
     k[6] = 0.0f; // free rate in seconds
     std::memcpy (state.data() + 0x21, k, sizeof k);
     CHECK (lynx::synthFromKepler (state, s, gain) && ! s.lfo[lynx::lfoPitch].sync);
+}
+
+TEST (harmless_engine)
+{
+    // REA_rodada32: state parsing, the additive engine against our reference model (hlmodel.py), host levels, voice end
+    std::vector<std::uint8_t> blob;
+    auto put = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) blob.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    std::array<std::int32_t, 100> p {}; // the reference's clean patch: Saw, open filter, no modulation
+    for (int i = 11; i < 23; ++i)
+        p[(std::size_t) i] = 1000;
+    p[27] = 1000, p[28] = 250, p[31] = 1000, p[36] = 1000, p[37] = 1, p[47] = 1, p[49] = 500, p[51] = -300, p[54] = 8192;
+    p[56] = 500, p[65] = 1, p[66] = 128, p[67] = 128, p[68] = 64, p[89] = 3000, p[91] = 500, p[95] = 144, p[97] = 500, p[98] = 500;
+    // + resonance, pluck, 3-voice unison, tremolo, LFO on pitch
+    p[54] = 3500, p[59] = 600, p[31] = 500, p[65] = 3, p[67] = 150, p[25] = 300, p[86] = 0, p[42] = 200, p[89] = 5000;
+    put (12);
+    for (auto v : p)
+        put (v);
+    for (int i = 0; i < 7; ++i)
+        put (0);
+    put (524); // Custom colour table: 524 × (amplitude, phase)
+    for (int i = 0; i < 1048; ++i)
+    {
+        const auto f = i < 524 ? 1.0f / (float) (i + 1) : 0.25f;
+        std::uint32_t bits = 0;
+        std::memcpy (&bits, &f, 4);
+        put ((std::int32_t) bits);
+    }
+    const auto parsed = lynx::harmlessParams (blob);
+    CHECK (parsed && (int) parsed->size() == lynx::harmlessParamCount);
+    CHECK (parsed && (*parsed)[54] == 3500.0f && (*parsed)[99] == 0.0f && (*parsed)[lynx::harmlessCustomFlagIndex] == 1.0f);
+    CHECK (parsed && (*parsed)[lynx::harmlessCustomIndex + 1] == 0.5f && (*parsed)[lynx::harmlessCustomIndex + 524] == 0.25f);
+    auto old = blob;
+    old[0] = 3; // versions below 4 are not Harmless states we know
+    CHECK (! lynx::harmlessParams (old));
+    old = blob;
+    old.resize (300);
+    CHECK (! lynx::harmlessParams (old));
+
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::harmless;
+    c.modelParams = *parsed;
+    c.modelParams[lynx::harmlessCustomFlagIndex] = 0.0f; // colour 0 (Saw): the custom table is not read
+    auto render = [] (const lynx::ChannelDef& def, int total, float gl, float gr, int offAt) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::harmless);
+        inst->configure (def, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        inst->noteOn (60, 0.78125f);
+        for (int s = 0; s < total; s += 512)
+        {
+            if (s == offAt)
+                inst->noteOff (60);
+            inst->render (l.data() + s, r.data() + s, std::min (512, total - s), gl, gr);
+        }
+        return std::make_tuple (l, r, std::move (inst));
+    };
+    {
+        // reference model (REA round 32 hlmodel.py, C5 at FL velocity 100, channel volume 1, centre, released at 6144)
+        auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
+        const std::tuple<int, float, float> golden[] {
+            { 0, 0.0f, 0.0f }, { 10, -0.02220994f, -0.06232700f }, { 100, 0.40623373f, 0.17308202f }, { 1000, -0.04091963f, -0.26821208f },
+            { 3000, 0.14519004f, 0.11027778f }, { 6000, 0.50411958f, 0.27901855f }, { 8191, 0.02117692f, -0.01466602f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+        // after the release the record fades out (below 1e-4, then 30 ms) and the instrument goes idle
+        std::vector<float> tail (44100), tailR (tail.size());
+        inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+    // FL's level law applied once: half the channel volume halves the output; full right pan silences the left side
+    const auto full = std::get<0> (render (c, 2048, 1.0f, 1.0f, -1));
+    const auto half = std::get<0> (render (c, 2048, 0.5f, 0.5f, -1));
+    CHECK (std::abs (half[100] - 0.5f * full[100]) < 1e-6f && std::abs (full[100]) > 0.1f);
+    auto mono = c;
+    mono.modelParams[25] = 0.0f; // no tremolo, no unison pan spread
+    mono.modelParams[65] = 1.0f;
+    const auto [pl, pr, pi] = render (mono, 2048, 0.0f, 1.41421356f, -1);
+    double el = 0.0, er = 0.0;
+    for (int i = 0; i < 2048; ++i)
+        el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
+    CHECK (el < 1e-10 * er && er > 1.0);
 }

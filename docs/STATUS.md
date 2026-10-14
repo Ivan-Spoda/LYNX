@@ -55,7 +55,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
-  installation; within −138 dB of the reference model verified against FL's DLLs); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
+  (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
+  FL's DLL on 135 of 139 demo channels); Sytrus, Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -84,10 +86,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   (REA round 25).
 - **Sytrus:** FM depth 4·g cycles; ring modulation `1 − |a| + a·mod`; exact operator waveform (base shape,
   Half/Even, Skew, Sine shaper, normalisation, Tension, Absolute, Pre-filter) turned into a spectrum by FFT.
-- **Harmless:** cutoff range with per-type margins, keytracking, centred non-adaptive filter envelope, one-sided
-  cutoff LFO, song-locked LFO; exact timbre (12 colours incl. Custom, harmonic mask, detune ±1200/±2400,
-  6-band timbre EQ, low-harmonics protection, Sub 1/3/4); stereo tremolo (2.5 Hz rectified, L/R in anti-phase) and
-  6 Hz vibrato with FL's laws and fade-ins.
+- **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
+  partials per voice record (self-oscillation, Sub 1/3/4, 524 harmonics; partial count and band limit per quality,
+  10 ms amplitude glide), targets rebuilt every control block (88/44/8 samples at 44.1 kHz) in FL's order — colour ×
+  6-band EQ, harmonic mask (+LFO), harmonizer (4 positions), per-partial filter (17 shapes, octave/Hz scale, key
+  tracking, knob smoothing, tension-curve filter envelope), resonance (8 shapes, adaptive width, track motion,
+  self-oscillation partial, Noise gates), phaser (10 tables, 3 scales, Freq type), pluck, low-harmonics protection;
+  volume envelope with FL's smoothers and the 30 ms end/steal fade, all LFO shapes (global/retriggered, attack),
+  6 Hz vibrato, stereo tremolo, unison (detune tables, pan, phase, attack, LFO offsets), portamento/mono/legato,
+  grittiness, both phase-randomness modes; FL's level law (`0.75·(3^x − 1)/2`·Final.Vol·unison gain through the
+  cos/sin pan law, channel volume applied once). The old synth approximation remains for unreadable states and for
+  the synth's "FL presets" button.
 - **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
   weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
   with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
@@ -140,8 +149,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   ×10 (Exo only); a synced LFO1 is locked to the song position at note start (FL runs it from the host's beat delta);
   old (version < 4) synced states use the stored rate, as FL's engine right after loading (whether FL re-sends the
   converted rate is not confirmed).
-- Harmless: the filter as a per-partial curve (LYNX uses a biquad; FL's law is in REA round 27 §1.3); p39 outside
-  ±1200/±2400; resonance shapes.
+- Harmless: the effects rack (chorus/delay/reverb/compressor) is not decoded and stays off (its compressor holds FL's
+  demo peaks near 0.976; without it LYNX's output can reach full scale); the editor's quality
+  (0/1) is used for playback and export alike (FL renders with quality 2; LYNX's engine does not tell instruments
+  when it renders offline); FL seeds its random draws from the clock, LYNX from a fixed seed (spectral-random
+  phases, Noise resonance and the LFO "voice random" are deterministic and differ from any FL render by design);
+  the Freq phaser at quality 0/1 follows FL's law but not the error pattern of its 11-bit exponential; host
+  answers for the release-time factor (p30) and release velocity (p46) are 1 and 0 (FL's not observed); Mod X/Y
+  (Final.FCut/FRes) are 0; FL's per-channel max polyphony is not imported (LYNX's limit is its 96-record pool);
+  the LFO/phaser phases follow song-position jumps but not the start of playback.
 - Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
   share an energy-weighted decay; ALT DECAY morphs every harmonic towards its Decay EQ level (REA round 26); the
   per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
