@@ -394,6 +394,7 @@ and harmonizer masks, timbre blend modes ≠ 0, non-neutral global envelope scal
 
 Distortion (global misc `+48` type), compressor (`+52`), chorus (g32), delay (g39), reverb (g22) run on the plugin
 output before the master volume; the DSP was not decoded — **not confirmed**. All verifications switch them off.
+**Decoded in `REA_rodada38.md`** (unit order, FX-send join, parameter mapping of every unit, Maximus's RMS detector).
 
 ### 1.25 Verification against the DLL **[EXEC + model]**
 

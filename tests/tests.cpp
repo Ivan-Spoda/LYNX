@@ -5990,8 +5990,10 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
     static const int mode1[] = { 0, 2, 4, 5, 12, 13, 14, 15, 17, 18, 23, 24, 27, 28, 29, 30, 33, 36, 38, 39, 40, 41, 42 };
     for (int k = 0; k < 43; ++k)
     {
+        static const int mode2[] = { 2, 14, 23, 28, 30, 38, 39, 41, 42 }; // ×2 around 0.5: 1.0 is neutral
         const bool centred = std::find (std::begin (mode1), std::end (mode1), k) != std::end (mode1);
-        const double neutral = centred ? 0.5 : 1.0;
+        const bool doubled = std::find (std::begin (mode2), std::end (mode2), k) != std::end (mode2);
+        const double neutral = centred && ! doubled ? 0.5 : 1.0;
         i32 (3);
         i32 (1065353216), i32 (1065353216), i32 (1065353216);
         if (k == 1) // volume envelope: attack, decay to the sustain point, release
@@ -6081,8 +6083,8 @@ TEST (harmor_engine)
         // Mersenne Twister seeded like LYNX's)
         auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
         const std::tuple<int, float, float> golden[] {
-            { 0, 0.0f, 0.0f }, { 100, 0.08034249f, 0.07985926f }, { 1000, 0.01197212f, 0.02992321f }, { 3000, -0.00065450f, 0.04010218f },
-            { 6000, 0.14123290f, 0.03816114f }, { 7000, 0.06512973f, -0.02774833f }, { 8191, 0.02622915f, -0.00915109f } };
+            { 0, 0.0f, 0.0f }, { 100, 0.00947693f, 0.04249846f }, { 1000, 0.08140575f, -0.03251422f }, { 3000, 0.05928446f, -0.00247572f },
+            { 6000, 0.02997839f, 0.14549091f }, { 7000, -0.01121871f, 0.04197952f }, { 8191, 0.00314545f, 0.03857505f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
         // after the release the volume envelope ends, the record declicks and the instrument goes idle
@@ -6261,8 +6263,8 @@ TEST (harmless_rack)
         const auto found = lynx::hlfx::maximusStateFromFst (fst);
         CHECK (found && *found == st);
         auto rms = st;
-        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
-        CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada38: Harmor's preset 2)
+        CHECK (lynx::hlfx::makeMaximusPreset (rms) != nullptr);
     }
 }
 
@@ -6516,6 +6518,72 @@ TEST (sytrus_instrument)
     inst->render (tail.data(), tailR.data(), (int) tail.size(), 0.5f, 0.5f);
     CHECK (inst->idle());
     CHECK (tail.back() == 0.0f);
+}
+
+TEST (harmor_effects_rack)
+{
+    // REA_rodada38: the rack runs in the state's unit order and the records' FX send joins it at unit 4 — with the FX
+    // amount at 1000 every record output bypasses a reverb placed before unit 4 (EXEC: −600 dB vs the rack off)
+    auto blob = harmorTestState (false);
+    auto set = [&] (std::vector<std::uint8_t>& st, int part, int index, std::int32_t v) {
+        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, index), &v, 4);
+    };
+    set (blob, 0, 10, 1000); // all to the FX send
+    auto render = [] (const std::vector<std::uint8_t>& st) {
+        return lynx::harmor::renderReference (st, { { 0, 60, 0.8, 1.0, 0.0, 6000 } }, 44100.0, 12000);
+    };
+    const auto dry = render (blob);
+    auto rev = blob;
+    set (rev, -1, 22, 1); // reverb on: room 50, diffusion 100, decay 2^3·0.1 s, high cut / damping off, wet 0.8
+    set (rev, -1, 24, 1050), set (rev, -1, 26, 50), set (rev, -1, 27, 100), set (rev, -1, 28, 300), set (rev, -1, 29, 1050);
+    set (rev, -1, 30, 2), set (rev, -1, 31, 800);
+    const auto bypassed = render (rev);
+    double eb = 0.0, db = 0.0;
+    for (std::size_t i = 0; i < dry.size(); ++i)
+        eb += (double) (bypassed[i] - dry[i]) * (bypassed[i] - dry[i]), db += (double) dry[i] * dry[i];
+    CHECK (eb < 1e-12 * db && db > 1e-3); // (float rounding of the rack's buffers only)
+    auto after = rev;
+    const std::int32_t order[6] { 0, 1, 2, 4, 3, 5 }; // the join before the reverb
+    for (int k = 0; k < 6; ++k)
+        set (after, -1, 53 + k, order[k]);
+    const auto wet = render (after);
+    double e = 0.0, d = 0.0;
+    bool finite = true;
+    for (std::size_t i = 0; i < wet.size(); ++i)
+        e += (double) (wet[i] - dry[i]) * (wet[i] - dry[i]), d += (double) dry[i] * dry[i], finite = finite && std::isfinite (wet[i]);
+    CHECK (finite && e > 1e-4 * d && d > 1e-3);
+    // a distortion (type 6) and a delay on the dry path change the sound, stay finite, and the instrument ends quiet
+    auto dist = harmorTestState (false);
+    {
+        const auto at = lynx::harmorParamOffset (dist, -1, 0) + 0xd4 + 0x18 + 48; // global misc +48: distortion type
+        const std::int32_t six = 6;
+        std::memcpy (dist.data() + at, &six, 4);
+    }
+    set (dist, -1, 17, 600), set (dist, -1, 19, 1000), set (dist, -1, 21, 1100);
+    set (dist, -1, 39, 1), set (dist, -1, 40, 2), set (dist, -1, 41, 400), set (dist, -1, 42, 96), set (dist, -1, 44, 800);
+    set (dist, -1, 47, 1050);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::harmor;
+    c.pluginState = dist;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::harmor);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (44100 * 4), r (l.size());
+    inst->noteOn (60, 0.8f);
+    double energy = 0.0;
+    for (int s = 0; s < (int) l.size(); s += 512)
+    {
+        if (s == 8192)
+            inst->noteOff (60);
+        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+    }
+    for (std::size_t i = 0; i < l.size(); ++i)
+        finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
+    CHECK (finite && energy > 1.0);
+    std::vector<float> tail (44100 * 6), tailR (tail.size());
+    for (int s = 0; s < (int) tail.size(); s += 512)
+        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+    CHECK (inst->idle());
 }
 
 TEST (harmless_engine)

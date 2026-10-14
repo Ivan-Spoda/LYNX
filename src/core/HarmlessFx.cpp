@@ -391,8 +391,8 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
         buildGainTable (curve, m->scale, B);
         B.g20 = (B.pre * B.post) * B.gain[0];
         const auto thr = q (11);
-        if (thr > 0 || (q (19) != 0 && mode == 0))
-            return nullptr; // saturation mode B, RMS detector: not decoded (not used by Harmless's presets)
+        if (thr > 0)
+            return nullptr; // saturation mode B: not decoded (not used by Harmless's or Harmor's presets)
         if (thr < 0)
         {
             const auto top0 = (q (19) == 0 && mode < 1) ? B.peak : 4.0;
@@ -610,6 +610,52 @@ struct PeakWindow
     }
 };
 
+// the RMS detector (envelope mode 1; SG class at 0x780020, process FUN_00780b90 + FUN_00780ab0/FUN_00780a60,
+// REA_rodada38 §R): L² + R² summed over the last W samples (a float running sum kept as a double between blocks),
+// scaled by 1/(2W) (the sum kept in x87 extended precision), clamped below at 0 (ippsThreshold_LT) and square-rooted (ippsSqrt)
+struct RmsWindow
+{
+    int W = 1, idx = 0;
+    double sum = 0.0;
+    float scale = 0.5f;
+    std::vector<float> ring;
+
+    void setLength (int w)
+    {
+        W = std::max (1, w);
+        ring.assign ((std::size_t) W, 0.0f);
+        scale = (float) (1.0 / (double) (W * 2));
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        std::fill (ring.begin(), ring.end(), 0.0f);
+        idx = 0;
+        sum = 0.0;
+    }
+
+    void run (const float* L, const float* R, float* out, int n) noexcept
+    {
+        // the running sum stays in an x87 register over the block (fldl … fstpl): extended precision, saved as a double
+        auto acc = (long double) sum;
+        auto k = idx;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = L[i] * L[i] + R[i] * R[i];
+            if (++k >= W)
+                k = 0;
+            acc = (acc - (long double) ring[(std::size_t) k]) + (long double) x;
+            ring[(std::size_t) k] = x;
+            out[i] = (float) (acc * (long double) scale);
+        }
+        sum = (double) acc;
+        idx = k;
+        for (int i = 0; i < n; ++i)
+            out[i] = std::sqrt (std::max (out[i], 0.0f));
+    }
+};
+
 // FUN_0077f350: L-frame delay (swap ring)
 struct FrameDelay
 {
@@ -684,6 +730,9 @@ public:
             const auto rel2N = q (14) == 0 ? attN : (tms (q (14)) * 2.0 * 0.001 * fs * k * 2.0) / std::sqrt ((double) na);
             const auto sus = (int) rint (tms (q (18)) * 2.0 * 0.001 * fs);
             B.det.setLength (std::max (std::max (L, 1), sus * k));
+            B.rms = q (19) != 0;
+            if (B.rms)
+                B.rmsDet.setLength (std::max (std::max (L, 1), sus * k));
             B.att.assign ((std::size_t) na, Smoother { f32 (coefFor (rel2N)), f32 (coefFor (attN)), 0.0f });
             const auto R = tms (q (16)) * 2.0 * 0.001 * fs * k;
             B.rel.clear();
@@ -762,7 +811,7 @@ public:
                 s.s = pr->band[(std::size_t) b].g20;
             for (auto& s : B.rel)
                 s.s = 0.0f;
-            B.delay.reset();
+            B.delay.reset(); // (the detector keeps its window: SG's reset FUN_00845940 does not touch it)
         }
         for (auto& st : stages)
             for (auto& q : st)
@@ -876,7 +925,9 @@ private:
     {
         int mode = 3, L = 0;
         float g18 = 1.0f;
+        bool rms = false;
         PeakWindow det;
+        RmsWindow rmsDet;
         std::vector<Smoother> att, rel;
         FrameDelay delay;
     };
@@ -902,7 +953,10 @@ private:
         float* g = gain.data();
         if (B.mode == 0)
         {
-            B.det.run (xl, xr, g, n);
+            if (B.rms)
+                B.rmsDet.run (xl, xr, g, n);
+            else
+                B.det.run (xl, xr, g, n);
             for (auto& s : B.rel)
                 s.run (g, n);
             const auto k = f32 ((double) S.pre * 8192.25);
@@ -993,8 +1047,9 @@ private:
 // Chorus, delay, reverb (REA_rodada36 §1)
 // =================================================================================================================
 
-// chorus records (table 0x7ee73c + 0x20·type, DATA): order, depth/1024, speed/1024, delay/128, spread/128, cross/128
-struct Rack::Chorus
+// the chorus of the shared effects library (REA_rodada31 §7.3): order N, depth, speed, delay, spread, cross (the
+// library's fields), dry gain and wet volume
+struct ChorusUnit
 {
     struct Tap
     {
@@ -1008,19 +1063,12 @@ struct Rack::Chorus
     std::vector<float> ringL, ringR; // input history, power-of-two length
     int mask = 0, w = 0;
 
-    Chorus (int type, float mixKnob, double fs)
+    ChorusUnit (int N, float depth, float speed, float dly, float spread, float cross, float dryGain, float vol, double fs)
     {
-        static constexpr int rec[8][6] { { 4, 512, 768, 8, 128, -32 }, { 5, 1024, 856, 0, 128, 68 }, { 7, 512, 512, 128, 128, 54 },
-                                         { 6, 561, 854, 0, 0, 38 },    { 1, 136, 312, 0, 0, 128 },   { 2, 86, 632, 0, 0, 0 },
-                                         { 1, 42, 944, 0, 0, -22 },    { 9, 81, 170, 0, 0, -66 } };
         static constexpr float q[20] { 0.967f, 1.039f, 1.021f, 0.1013f, 0.977f, 1.033f, 0.997f, 0.971f, 1.061f, 0.947f,
                                        1.031f, 0.1009f, 1.063f, 0.953f, 0.991f, 1.049f, 0.983f, 1.051f, 1.019f, 1.069f };
-        const auto* r = rec[std::clamp (type, 1, 8) - 1];
-        const auto N = r[0];
-        const auto depth = (float) r[1] * 0.0009765625f, speed = (float) r[2] * 0.0009765625f;
-        const auto dly = (float) r[3] * 0.0078125f, spread = (float) r[4] * 0.0078125f, cross = (float) r[5] * 0.0078125f;
-        dry = g5 (mixKnob);
-        const auto vol = g5 (f32 (1.0 - (double) mixKnob));
+        N = std::max (N, 1);
+        dry = dryGain;
         const auto A = f32 ((std::pow (11.0, (double) depth) - 1.0) * (1092.5 / 10.0));
         const auto B = (2147483648.0 / ((double) f32 (std::pow (101.0, (double) f32 (1.0f - speed)) - 1.0) * 75000.0 + 50000.0)) * 500.0;
         const auto C = f32 ((std::pow (11.0, (double) dly) - 1.0) * (4410.0 / 10.0));
@@ -1114,6 +1162,22 @@ struct Rack::Chorus
     }
 };
 
+// Harmless's chorus records (table 0x7ee73c + 0x20·type, DATA): order, depth/1024, speed/1024, delay/128, spread/128,
+// cross/128; the rack's mix knob gives the dry gain and the wet volume
+struct Rack::Chorus : ChorusUnit
+{
+    static ChorusUnit make (int type, float mixKnob, double fs)
+    {
+        static constexpr int rec[8][6] { { 4, 512, 768, 8, 128, -32 }, { 5, 1024, 856, 0, 128, 68 }, { 7, 512, 512, 128, 128, 54 },
+                                         { 6, 561, 854, 0, 0, 38 },    { 1, 136, 312, 0, 0, 128 },   { 2, 86, 632, 0, 0, 0 },
+                                         { 1, 42, 944, 0, 0, -22 },    { 9, 81, 170, 0, 0, -66 } };
+        const auto* r = rec[std::clamp (type, 1, 8) - 1];
+        return ChorusUnit (r[0], (float) r[1] * 0.0009765625f, (float) r[2] * 0.0009765625f, (float) r[3] * 0.0078125f,
+                           (float) r[4] * 0.0078125f, (float) r[5] * 0.0078125f, g5 (mixKnob), g5 (f32 (1.0 - (double) mixKnob)), fs);
+    }
+    Chorus (int type, float mixKnob, double fs) : ChorusUnit (make (type, mixKnob, fs)) {}
+};
+
 // delay records (table 0x7ee67c + 8·type, DATA): stereo offset in ms (sign = side), ping-pong
 struct Rack::Delay
 {
@@ -1183,9 +1247,9 @@ struct Rack::Delay
     }
 };
 
-// reverb records (table 0x7ee67c + 0x20·type, DATA): lowcut Hz, highcut ×100 Hz, predelay, room, diffusion,
-// decay ×0.1 s, damping ×100 Hz, colour; DSP of the shared Reverb_x64.dll (REA_rodada31 §7.5)
-struct Rack::Reverb
+// the shared Reverb_x64.dll (REA_rodada31 §7.5) with the library wrapper's fields: lowcut Hz (0 off), highcut and
+// damping in hundreds of Hz (0 off), predelay samples, room, diffusion, decay in samples, colour
+struct ReverbUnit
 {
     std::array<std::vector<float>, 12> buf;
     std::array<int, 12> L {}, P {};
@@ -1195,35 +1259,30 @@ struct Rack::Reverb
     float cHc = 1, cLc = 0, cDamp = 1, cIn = 0, c1 = 0, c2 = 0, g = 0, c48 = 0, c44 = 0;
     float s10 = 0, s14 = 0, s18 = 0, s3c = 0, s40 = 0, s4c = 0, s50 = 0, s54 = 0, s58 = 0;
 
-    Reverb (int type, double fs)
+    ReverbUnit (float lowcut, float highcut, int preS, int room, int diffusion, float decaySamples, float damping, int colourIndex, double fs)
     {
-        static constexpr int rec[6][8] { { 75, 40, 0, 40, 100, 15, 40, 2 },  { 0, 115, 18, 40, 100, 22, 50, 2 },
-                                         { 34, 21, 27, 90, 100, 45, 31, 3 }, { 400, 60, 31, 60, 65, 23, 37, 1 },
-                                         { 100, 36, 0, 35, 100, 6, 36, 2 },  { 100, 60, 0, 17, 100, 5, 30, 2 } };
         static constexpr int lines[12] { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
         static constexpr int tapsL[7] { 266, 2974, 1913, 2496, 1690, 187, 1566 };
         static constexpr int tapsR[7] { 353, 3627, 1728, 3173, 1811, 335, 621 };
         static constexpr double colour[5] { 0.2, 0.6, 1.0, 1.5, 3.0 };
-        const auto* r = rec[std::clamp (type, 1, 6) - 1];
         const auto rate = (long long) fs;
-        const auto preS = (int) rint ((double) r[2] * (double) rate / 384.0);
-        const auto decay = (double) f32 ((double) r[5] * (double) rate / 10.0);
+        const auto decay = (double) decaySamples;
         const auto f17 = (double) f32 (1.0 / (double) rate), half = (double) f32 ((double) rate * 0.5);
-        if (r[0] != 0)
+        if (lowcut != 0.0f)
         {
-            const auto t = (double) f32 (std::tan (std::min ((double) r[0], half) * pi * f17));
+            const auto t = (double) f32 (std::tan (std::min ((double) lowcut, half) * pi * f17));
             cLc = f32 ((t - 1.0) / (t + 1.0));
         }
-        auto lp = [&] (int v) {
-            if (v == 0)
+        auto lp = [&] (float v) {
+            if (v == 0.0f)
                 return 1.0f;
             const auto x = (double) f32 (2.0 - std::cos (std::min ((double) v, half) * 628.3185307179587 * f17));
             return f32 (1.0 - (x - std::sqrt (x * x - 1.0)));
         };
-        cHc = lp (r[1]);
-        cDamp = lp (r[6]);
+        cHc = lp (highcut);
+        cDamp = lp (damping);
         auto muldiv = [] (long long a, long long b, long long c) { return (int) ((a * b) / c); };
-        const auto sc = muldiv (rate, r[3] + 15, 115);
+        const auto sc = muldiv (rate, room + 15, 115);
         for (int i = 0; i < 12; ++i)
         {
             L[(std::size_t) i] = std::max (1, muldiv (lines[i], sc, 20000));
@@ -1231,7 +1290,7 @@ struct Rack::Reverb
         }
         for (int i = 0; i < 7; ++i)
             tl[(std::size_t) i] = muldiv (tapsL[i], sc, 20000), tr[(std::size_t) i] = muldiv (tapsR[i], sc, 20000);
-        const auto dv = (double) f32 (r[4] * 0.01), f13 = (double) f32 (f17 * 0.5);
+        const auto dv = (double) f32 (diffusion * 0.01), f13 = (double) f32 (f17 * 0.5);
         if (dv != 0.0)
         {
             auto e = [&] (int a, int b, double k) { return f32 (std::exp (std::log (0.001) * (double) f32 ((a + b) * f13) / (dv * k))); };
@@ -1239,7 +1298,7 @@ struct Rack::Reverb
         }
         const auto ssum = (double) (L[5] + L[7] + L[9] + L[11]);
         g = f32 (std::pow (std::exp (std::log (0.001) * ssum / decay), 0.25));
-        auto r2 = (double) f32 ((double) f32 (std::pow (std::exp (std::log (0.001) * ssum / (double) f32 (decay * colour[std::clamp (r[7], 0, 4)])), 0.25)) / (double) g);
+        auto r2 = (double) f32 ((double) f32 (std::pow (std::exp (std::log (0.001) * ssum / (double) f32 (decay * colour[std::clamp (colourIndex, 0, 4)])), 0.25)) / (double) g);
         c48 = f32 ((r2 - 1.0) * 0.5);
         if (r2 > 1.0)
             r2 = 1.0;
@@ -1319,6 +1378,23 @@ struct Rack::Reverb
                        - w74 * tap (9, tr[4])) + tap (10, tr[5]) + w70 * tap (11, tr[6]);
         }
     }
+};
+
+// Harmless's reverb records (table 0x7ee67c + 0x20·type, DATA): lowcut Hz, highcut ×100 Hz, predelay, room,
+// diffusion, decay ×0.1 s, damping ×100 Hz, colour
+struct Rack::Reverb : ReverbUnit
+{
+    static ReverbUnit make (int type, double fs)
+    {
+        static constexpr int rec[6][8] { { 75, 40, 0, 40, 100, 15, 40, 2 },  { 0, 115, 18, 40, 100, 22, 50, 2 },
+                                         { 34, 21, 27, 90, 100, 45, 31, 3 }, { 400, 60, 31, 60, 65, 23, 37, 1 },
+                                         { 100, 36, 0, 35, 100, 6, 36, 2 },  { 100, 60, 0, 17, 100, 5, 30, 2 } };
+        const auto* r = rec[std::clamp (type, 1, 6) - 1];
+        const auto rate = (long long) fs;
+        return ReverbUnit ((float) r[0], (float) r[1], (int) rint ((double) r[2] * (double) rate / 384.0), r[3], r[4],
+                           f32 ((double) r[5] * (double) rate / 10.0), (float) r[6], r[7], fs);
+    }
+    Reverb (int type, double fs) : ReverbUnit (make (type, fs)) {}
 };
 
 Rack::Rack() = default;
@@ -1416,4 +1492,684 @@ void Rack::advance (int n) noexcept
     if (comp)
         comp->silence (n);
 }
+// =================================================================================================================
+// Harmor's rack (REA_rodada38): Gen_Render's unit list (FUN_00892e10) over the record mix
+// =================================================================================================================
+
+std::vector<std::uint8_t> withMaximusParams (std::vector<std::uint8_t> state, const std::vector<std::pair<int, int>>& params)
+{
+    for (const auto& [index, value] : params)
+        if (index >= 0 && index < 59 && 4 + 4 * (std::size_t) index + 4 <= state.size())
+            std::memcpy (state.data() + 4 + 4 * (std::size_t) index, &value, 4);
+    return state;
+}
+
+namespace
+{
+const double ln2 = 0.69314718055994529;
+constexpr float rampEps = 5.960464477539063e-08f; // 0x91b14c
+
+// the library's stereo gain with a one-pole ramp (FUN_007a4cc0 snap, FUN_007a4a90 / FUN_007a4c00 multiply,
+// FUN_007a49b0 / FUN_007a4b10 multiply-add, FUN_007a4c70 values): per sample d ← d·c, gain = target + d
+struct StereoRamp
+{
+    float tL = 0, tR = 0, cL = 0, cR = 0, coef = 1;
+
+    bool settled() noexcept
+    {
+        if (! (std::fabs (tL - cL) >= rampEps) && ! (std::fabs (tR - cR) >= rampEps))
+        {
+            cL = tL, cR = tR;
+            return true;
+        }
+        return false;
+    }
+
+    void mul (const float* iL, const float* iR, float* oL, float* oR, int n) noexcept
+    {
+        if (settled())
+        {
+            if (tL == 0.0f && tR == 0.0f && ! std::signbit (tL) && ! std::signbit (tR))
+                std::fill (oL, oL + n, 0.0f), std::fill (oR, oR + n, 0.0f);
+            else
+                for (int i = 0; i < n; ++i)
+                    oL[i] = iL[i] * tL, oR[i] = iR[i] * tR;
+            return;
+        }
+        auto dL = cL - tL, dR = cR - tR;
+        for (int i = 0; i < n; ++i)
+        {
+            dL = dL * coef, dR = dR * coef;
+            oL[i] = iL[i] * (dL + tL), oR[i] = iR[i] * (dR + tR);
+        }
+        cL = dL + tL, cR = dR + tR;
+    }
+
+    void mulAdd (const float* iL, const float* iR, float* oL, float* oR, int n) noexcept
+    {
+        if (settled())
+        {
+            std::uint32_t bl = 0, br = 0;
+            std::memcpy (&bl, &tL, 4);
+            std::memcpy (&br, &tR, 4);
+            if (bl != 0 || br != 0)
+                for (int i = 0; i < n; ++i)
+                    oL[i] = iL[i] * tL + oL[i], oR[i] = iR[i] * tR + oR[i];
+            return;
+        }
+        auto dL = cL - tL, dR = cR - tR;
+        for (int i = 0; i < n; ++i)
+        {
+            dL = dL * coef, dR = dR * coef;
+            oL[i] = iL[i] * (dL + tL) + oL[i], oR[i] = iR[i] * (dR + tR) + oR[i];
+        }
+        cL = dL + tL, cR = dR + tR;
+    }
+
+    void values (float* oL, float* oR, int n) noexcept
+    {
+        auto dL = cL - tL, dR = cR - tR;
+        for (int i = 0; i < n; ++i)
+        {
+            dL = dL * coef, dR = dR * coef;
+            oL[i] = dL + tL, oR[i] = dR + tR;
+        }
+        cL = dL + tL, cR = dR + tR;
+    }
+
+    bool allZero() const noexcept // FUN_007a4d30 (bit patterns)
+    {
+        std::uint32_t b[4] {};
+        std::memcpy (&b[0], &tL, 4), std::memcpy (&b[1], &tR, 4), std::memcpy (&b[2], &cL, 4), std::memcpy (&b[3], &cR, 4);
+        return b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0;
+    }
+};
+
+// 16.3515987·2^(v/100) Hz (the library's frequency law: float v·0.01, exp in double, × the run-time float 16.35)
+float noteHz (int v) noexcept
+{
+    return f32 (std::exp ((double) ((float) v * 0.01f) * ln2) * (double) 16.3515987f);
+}
+
+// FUN_0062d460: L = cos((1 + pan)·π/4)·v, R = sin(…)·v (x87)
+void panLaw (float pan, float v, float& l, float& r) noexcept
+{
+    const auto t = ((long double) 1 + (long double) pan) * (long double) 0.78539816339744830961566;
+    l = (float) (std::cos ((double) t) * (double) v);
+    r = (float) (std::sin ((double) t) * (double) v);
+}
+} // namespace
+
+struct HarmorRack::Impl
+{
+    HarmorRackSettings S;
+    double fs = 44100.0;
+    std::array<int, 6> list {};
+    int count = 0;
+    int counter = 0, reload = 0;
+    bool on = false;
+    long long quietFor = 0, quietNeeded = 0;
+
+    // distortion (FUN_008944a0)
+    int distType = 0, stages = 1, F = 2;
+    StereoRamp bias, drive, dry, wet;
+    bool biasFlag = false, post = false;
+    float qMul = 0.0f, qInv = 0.0f; // types ≥ 11 (+0x2cd0, +0x2cd4)
+    std::array<Halfband, 3> up {}, down {};
+    std::array<Biquad, 2> postLp {};
+    float dcC2 = 0.0f, dcC1 = 0.96f;
+    long double dcV[2] {}, dcP[2] {};
+
+    // chorus
+    std::unique_ptr<ChorusUnit> chorus;
+
+    // delay (FUN_00892f90 set-up, FUN_00893fc0 process; library FUN_007a5xxx)
+    bool delayOn = false, delayLoop = false;
+    int dMode = 0, D = 1, S0 = 1, rp = 0, oL = 0, oR = 0;
+    float fbTarget = 0.5f, fbCur = 0.0f, maxStep = 0.001f;
+    std::vector<float> ringL, ringR;
+    StereoRamp inGain;
+    std::array<Biquad, 2> dFilt {};
+    std::array<bool, 2> dFiltOn {};
+
+    // reverb
+    std::unique_ptr<ReverbUnit> reverb;
+    StereoRamp revWet;
+
+    // compressor
+    std::unique_ptr<Maximus> comp;
+
+    std::array<float, maxBlock * 8> xL {}, xR {}, aL {}, aR {}, bL {}, bR {}, cL {}, cR {};
+    std::array<float, maxBlock> tL {}, tR {}, mono {};
+
+    void prepare (const HarmorRackSettings& s)
+    {
+        S = s;
+        fs = s.fs;
+        const auto& g = s.g;
+        const auto rampCoef = f32 (std::exp (ln001 / (0.015 * fs))); // the rate object's +0x40
+        // tail counter reload (FUN_008937f0): 30 ms, 530 ms with the distortion on, + the chorus ring
+        distType = s.distortion;
+        reload = (int) rint ((double) (distType > 0 ? 0x212 : 0x1e) * 0.001 * fs);
+        chorus.reset();
+        if (g[32] > 0)
+        {
+            const auto m = (float) std::abs (g[38]) * 0.001f;
+            const auto sign = g[38] == 0 ? 0.0f : (g[38] < 0 ? -1.0f : 1.0f);
+            chorus = std::make_unique<ChorusUnit> (g[32], (float) g[33] * 0.0009765625f, (float) g[34] * 0.0009765625f,
+                                                   (float) g[35] * 0.0078125f, (float) g[36] * 0.0078125f, (float) g[37] * 0.0078125f,
+                                                   g5 (m), sign * g5 (1.0f - m), fs);
+            reload += 384 + chorus->maxDelay;
+        }
+        counter = reload;
+
+        // distortion set-up (ProcessParam cases 0x315…0x319, rate set-up)
+        stages = std::clamp (s.precision + 1, 1, 3);
+        F = 1 << stages;
+        for (auto& h : up)
+            h.reset();
+        for (auto& h : down)
+            h.reset();
+        dcV[0] = dcV[1] = dcP[0] = dcP[1] = 0;
+        dcC2 = f32 ((44100.0 / fs) * 2.2834999999999997e-05);
+        if (distType > 0)
+            setupDistortion (g);
+        post = distType > 0 && g[21] != 1100;
+        if (post)
+        {
+            const auto f = std::min (noteHz (g[21]), f32 (0.4999 * fs) * (float) F);
+            for (auto& q : postLp)
+            {
+                q.design (1, (double) f * ((2.0 * pi / fs) / (double) F), 0.70710678118654746);
+                q.reset();
+            }
+        }
+        for (auto* r : { &bias, &drive, &dry, &wet })
+            r->coef = f32 (std::exp (ln001 / ((double) (F * 15) * 0.001 * fs)));
+
+        // delay
+        delayOn = g[39] > 0;
+        if (delayOn)
+        {
+            dMode = std::clamp (g[40], 0, 2);
+            const auto offMs = f32 ((std::exp ((double) std::abs (g[43]) * 0.015625 * ln2) - 1.0) * 1.9607843137254901);
+            const auto off = (int) rint ((double) offMs * 0.001 * fs);
+            double t = 0.0;
+            if (g[42] < 0)
+                t = (std::exp ((double) g[42] * -0.010416666666666666 * ln2) - 1.0) * 0.06666666666666667;
+            else
+                t = ((double) g[42] * 0.3125) / (double) (float) s.bpm;
+            D = std::max (1, (int) rint ((double) ((float) t * (float) fs)));
+            oL = g[43] > 0 ? 0 : off;
+            oR = g[43] > 0 ? off : 0;
+            S0 = off + 384 + D;
+            ringL.assign ((std::size_t) S0, 0.0f);
+            ringR.assign ((std::size_t) S0, 0.0f);
+            rp = 0;
+            fbTarget = (float) g[41] * 0.001f;
+            fbCur = 0.5f; // the library constructor's feedback (FUN_007a5290); the ramp starts there (EXEC)
+            maxStep = f32 (0.001 * 44100.0 / fs);
+            auto vol = (float) g[44] * 0.001f;
+            vol = vol * vol * vol;
+            auto pan = (float) g[45] * 0.0078125f;
+            if (dMode > 0)
+                pan = -pan;
+            if (pan == 0.0f && ! std::signbit (pan))
+                inGain.tL = inGain.tR = vol;
+            else if (vol == 0.0f)
+                inGain.tL = inGain.tR = 0.0f;
+            else
+                panLaw (pan, vol * 1.41421354f, inGain.tL, inGain.tR);
+            inGain.cL = inGain.cR = 0.0f; // (from 0 at state load, EXEC)
+            inGain.coef = rampCoef;
+            delayLoop = g[48] > 0;
+            const int types[2] { 4, 1 };
+            for (int k = 0; k < 2; ++k)
+            {
+                dFiltOn[(std::size_t) k] = g[(std::size_t) (46 + k)] != k * 1050;
+                if (dFiltOn[(std::size_t) k])
+                {
+                    const auto f = std::min (noteHz (g[(std::size_t) (46 + k)]), f32 (0.4999 * fs));
+                    dFilt[(std::size_t) k].design (types[k], (double) f * (2.0 * pi / fs), 1.0);
+                    dFilt[(std::size_t) k].reset();
+                }
+            }
+        }
+
+        // reverb (FUN_00893470)
+        reverb.reset();
+        if (g[22] > 0)
+        {
+            const auto rate = (long long) fs;
+            double pre = 0.0;
+            if (g[25] < 0)
+                pre = (std::exp ((double) g[25] * -0.015625 * ln2) - 1.0) * 0.015873015873015872;
+            else
+                pre = ((double) g[25] * 0.3125) / (double) (float) s.bpm;
+            const auto preS = (int) rint (pre * (double) rate);
+            const auto decay = f32 (std::exp ((double) ((float) g[28] * 0.01f) * ln2) * 0.1 * (double) rate);
+            const auto lc = g[23] > 0 ? noteHz (g[23]) : 0.0f;
+            auto hz100 = [&] (int v) {
+                return v < 1050 ? f32 (std::exp ((double) ((float) v * 0.01f) * ln2) * (double) 16.3515987f * (double) 0.01f) : 0.0f;
+            };
+            reverb = std::make_unique<ReverbUnit> (lc, hz100 (g[24]), preS, g[26], g[27], decay, hz100 (g[29]), g[30], fs);
+            const auto w = (double) ((float) g[31] * 0.001f);
+            revWet.tL = revWet.tR = f32 (w * w * w * 0.5);
+            revWet.cL = revWet.cR = 0.0f; // the ramp starts from 0 at state load (EXEC)
+            revWet.coef = rampCoef;
+        }
+
+        // compressor (hosted SG.dll with Harmor's own preset)
+        comp.reset();
+        if (s.comp != nullptr && s.comp->valid)
+        {
+            comp = std::make_unique<Maximus>();
+            comp->prepare (s.comp, fs, s.compMix);
+        }
+
+        // the unit list (FUN_00892e10)
+        count = 0;
+        for (const auto t : s.order)
+        {
+            const bool present = t == 0 ? distType > 0 : t == 1 ? chorus != nullptr : t == 2 ? delayOn : t == 3 ? reverb != nullptr
+                                                     : t == 4 ? true : comp != nullptr;
+            if (present && count < 6)
+                list[(std::size_t) count++] = t;
+        }
+        on = distType > 0 || chorus || delayOn || reverb || comp;
+        quietNeeded = (long long) (0.25 * fs) + reload + (delayOn ? (long long) D * 2 + oL + oR : 0)
+                      + (reverb ? (long long) reverb->pre.size() + reverb->L[5] + reverb->L[9] : 0) + (long long) (1.6 * fs);
+        quietFor = quietNeeded;
+    }
+
+    void setupDistortion (const std::array<int, 53>& g)
+    {
+        const auto type = distType;
+        // volume (g19) and mix (g20): wet = vol·(1 − |mix|)/normaliser, dry = mix
+        const auto v = (float) g[19] * 0.001f;
+        const auto vol = v == 1.0f ? 1.0f : f32 ((std::exp ((double) (v * 1.09861231f)) - 1.0) * (double) 0.5f);
+        const auto mixF = (float) g[20] * 0.001f;
+        dry.tL = dry.tR = mixF;
+        const auto d12 = (double) vol * (1.0 - std::fabs ((double) mixF));
+        const auto g17 = g[17];
+        biasFlag = true;
+        float dr = 0.0f, wt = 0.0f;
+        if (type >= 1 && type <= 3)
+        {
+            const auto d = std::exp ((double) ((float) g17 * 0.01f - 4.0f) * ln2);
+            dr = f32 (d * pi);
+            wt = f32 (d12 / (std::tanh (d) * pi));
+        }
+        else if (type == 4)
+        {
+            const auto d = std::exp ((double) ((float) g17 * 0.01f - 2.0f) * ln2);
+            const auto t = std::tanh (d * 4.0);
+            dr = f32 (d * pi);
+            wt = f32 (d12 / (t * t * t * pi));
+        }
+        else if (type == 5)
+        {
+            const auto d = std::exp (((double) g17 * 0.025 - 5.0) * ln2);
+            dr = f32 (d);
+            wt = f32 (d12 / (std::log (d + 1.0) * (double) ((float) g17 * 0.001f + 1.0f)));
+        }
+        else if (type == 6)
+        {
+            const auto d = std::exp (((double) g17 * 0.005 - 3.0) * ln2);
+            dr = f32 (d * pi);
+            wt = f32 (d12 / (std::tanh (d) * pi));
+        }
+        else if (type == 7)
+        {
+            const auto d = std::exp (((double) g17 * 0.002 - 1.0) * ln2) * pi;
+            dr = f32 (d * d);
+            wt = f32 (d12 / std::sqrt (d));
+        }
+        else if (type == 8)
+        {
+            const auto d = std::exp ((double) ((float) g17 * 0.01f - 4.0f) * ln2);
+            dr = f32 (d * pi);
+            wt = f32 (d12 / (std::tanh (d) * pi));
+        }
+        else if (type == 9)
+        {
+            const auto b = f32 (std::exp ((double) g[18] * 0.004 * ln2));
+            bias.tL = bias.tR = b;
+            dr = f32 (std::exp ((7.0 - (double) g17 * 0.007) * ln2) * pi);
+            wt = f32 (d12 / (double) (dr * b));
+            biasFlag = false;
+        }
+        else if (type == 10)
+        {
+            dr = f32 (std::exp ((9.0 - (double) g17 * 0.007) * ln2));
+            wt = f32 (d12 / (double) dr);
+        }
+        else
+        {
+            const auto q = f32 (std::exp ((double) g[18] * 0.02 * ln2) * 1024.0);
+            dr = q;
+            qMul = f32 (std::exp ((10.0 - (double) g17 * 0.007) * ln2) / std::log ((double) (q + 1.0f)));
+            qInv = 1.0f / qMul;
+            wt = f32 (d12 / (double) q);
+            biasFlag = false;
+        }
+        drive.tL = drive.tR = dr;
+        wet.tL = wet.tR = wt;
+        if (biasFlag)
+        {
+            const auto b = (float) ((double) g[18] * 0.002);
+            const auto f = type == 8 ? b * b * dr : f32 ((double) (b * b) * 0.75);
+            bias.tL = f;
+            bias.tR = b <= 0.0f ? -f : f; // (an integer test on the float's bits: g18 ≤ 0 → negated, EXEC)
+            biasFlag = type != 8;
+        }
+        for (auto* r : { &bias, &drive, &dry, &wet })
+            r->cL = r->tL, r->cR = r->tR; // the ramps start at their targets (EXEC)
+    }
+
+    void distortion (float* L, float* R, int n) noexcept
+    {
+        // up-sampling cascade (FUN_00863fd0): stage S−1 first
+        const float* sl = L;
+        const float* sr = R;
+        int m = n;
+        float* outs[2][2] { { aL.data(), aR.data() }, { bL.data(), bR.data() } };
+        int k = 0;
+        for (int st = stages - 1; st >= 0; --st, k ^= 1)
+        {
+            up[(std::size_t) st].up (sl, sr, outs[k][0], outs[k][1], m);
+            sl = outs[k][0], sr = outs[k][1];
+            m *= 2;
+        }
+        auto* xl = const_cast<float*> (sl);
+        auto* xr = const_cast<float*> (sr);
+        float* dl = xL.data();
+        float* drr = xR.data();
+        dry.mul (xl, xr, dl, drr, m);
+        float* yl = cL.data();
+        float* yr = cR.data();
+        if (biasFlag && ! bias.allZero())
+        {
+            bias.values (yl, yr, m);
+            for (int i = 0; i < m; ++i)
+                xl[i] = yl[i] + xl[i], xr[i] = yr[i] + xr[i];
+        }
+        drive.mul (xl, xr, xl, xr, m);
+        shape (xl, xr, yl, yr, m);
+        wet.mulAdd (yl, yr, dl, drr, m);
+        if (post)
+            for (auto& q : postLp)
+                q.process (dl, drr, dl, drr, m);
+        // down-sampling cascade (FUN_00864070): in place, the last stage into the output
+        for (int st = stages - 1; st >= 0; --st)
+        {
+            m /= 2;
+            float* ol = st == 0 ? xl : dl;
+            float* orr = st == 0 ? xr : drr;
+            down[(std::size_t) st].down (dl, drr, ol, orr, m);
+        }
+        // DC stage (FUN_0062a3c0, x87): v += (x − p)·c2, p += v, v ·= c1, out = x − p
+        float* ch[2] { xl, xr };
+        float* out[2] { L, R };
+        for (int c = 0; c < 2; ++c)
+        {
+            auto v = dcV[c], pp = dcP[c];
+            for (int i = 0; i < n; ++i)
+            {
+                const auto x = (long double) ch[c][i];
+                v = v + (x - pp) * (long double) dcC2;
+                pp = pp + v;
+                v = v * (long double) dcC1;
+                out[c][i] = (float) (x - pp);
+            }
+            dcV[c] = (long double) (double) v, dcP[c] = (long double) (double) pp;
+        }
+    }
+
+    void shape (float* xl, float* xr, float* yl, float* yr, int m) noexcept
+    {
+        auto sgn1 = [] (float x) { return std::signbit (x) ? -1.0f : 1.0f; }; // AndC 0x80000000, OrC 1.0
+        float* ch[2] { xl, xr };
+        float* out[2] { yl, yr };
+        for (int c = 0; c < 2; ++c)
+        {
+            auto* x = ch[c];
+            auto* y = out[c];
+            switch (distType)
+            {
+                case 1:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::tanh (x[i]);
+                    break;
+                case 2:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::exp (std::tanh (x[i])) + -1.0f;
+                    break;
+                case 3:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::tanh (std::exp (x[i]) + -1.0f);
+                    break;
+                case 4:
+                    for (int i = 0; i < m; ++i)
+                    {
+                        const auto t = std::tanh (x[i]);
+                        y[i] = t * (t * t);
+                    }
+                    break;
+                case 5:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::log (std::fabs (x[i]) + 1.0f) * sgn1 (x[i]);
+                    break;
+                case 6:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::cbrt (std::tanh ((x[i] * x[i]) * x[i]));
+                    break;
+                case 7:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::sin (std::sqrt (std::fabs (x[i]))) * sgn1 (x[i]);
+                    break;
+                case 9:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::sin (x[i]);
+                    break;
+                case 10:
+                    for (int i = 0; i < m; ++i)
+                        y[i] = std::round (x[i]);
+                    break;
+                case 8:
+                    break;
+                default:
+                    for (int i = 0; i < m; ++i)
+                    {
+                        const auto l = std::log (std::fabs (x[i]) + 1.0f) * qMul;
+                        y[i] = std::expm1 (std::round (l) * qInv) * sgn1 (x[i]);
+                    }
+                    break;
+            }
+        }
+        if (distType == 8)
+        {
+            // tanh(x)·tanh(x + b)·tanh(x + 2b), b = the bias ramp
+            float* bl = aL.data() == xl ? bL.data() : aL.data();
+            float* br = aR.data() == xr ? bR.data() : aR.data();
+            bias.values (bl, br, m);
+            for (int i = 0; i < m; ++i)
+            {
+                yl[i] = std::tanh (xl[i]), yr[i] = std::tanh (xr[i]);
+                auto ul = xl[i] + bl[i], ur = xr[i] + br[i];
+                yl[i] = yl[i] * std::tanh (ul), yr[i] = yr[i] * std::tanh (ur);
+                ul = bl[i] + ul, ur = br[i] + ur;
+                yl[i] = yl[i] * std::tanh (ul), yr[i] = yr[i] * std::tanh (ur);
+            }
+        }
+        else if (distType == 9)
+            bias.mulAdd (xl, xr, yl, yr, m);
+    }
+
+    void delay (float* L, float* R, int n, bool active) noexcept
+    {
+        for (int at = 0; at < n; at += 384)
+        {
+            const auto c = std::min (384, n - at);
+            float* tl = tL.data() + at;
+            float* tr = tR.data() + at;
+            if (! active)
+                inGain.cL = inGain.tL, inGain.cR = inGain.tR;
+            else
+            {
+                inGain.mul (L + at, R + at, tl, tr, c);
+                if (! delayLoop)
+                    for (int k = 0; k < 2; ++k)
+                        if (dFiltOn[(std::size_t) k])
+                            dFilt[(std::size_t) k].process (tl, tr, tl, tr, c);
+                const auto w = rp + D;
+                for (int i = 0; i < c; ++i)
+                {
+                    auto& a = ringL[(std::size_t) ((w + oL + i) % S0)];
+                    a = a + tl[i];
+                    auto& b = ringR[(std::size_t) ((w + oR + i) % S0)];
+                    b = b + tr[i];
+                }
+            }
+            int left = c, o = 0;
+            while (left > 0)
+            {
+                auto seg = std::min (D, S0 - rp); // FUN_007a5260: up to the write pointer or the ring end
+                seg = std::min (seg, left);
+                if (delayLoop)
+                    for (int k = 0; k < 2; ++k)
+                        if (dFiltOn[(std::size_t) k])
+                            dFilt[(std::size_t) k].process (ringL.data() + rp, ringR.data() + rp, ringL.data() + rp, ringR.data() + rp, seg);
+                // feedback ramp (FUN_0062d390)
+                const auto start = fbCur;
+                auto step = fbTarget - start;
+                if (step != 0.0f)
+                {
+                    fbCur = fbTarget;
+                    step = step / (float) seg;
+                    if (maxStep < std::fabs (step))
+                    {
+                        step = std::copysign (maxStep, step);
+                        fbCur = start + step * (float) seg;
+                        if (std::fabs (fbCur) < 5.960464477539063e-08f)
+                            fbCur = 0.0f, step = -start / (float) seg;
+                    }
+                }
+                auto g = start;
+                for (int i = 0; i < seg; ++i)
+                {
+                    const auto r = rp;
+                    auto w = rp + D;
+                    if (w >= S0)
+                        w -= S0;
+                    const auto a = ringL[(std::size_t) r], b = ringR[(std::size_t) r];
+                    ringL[(std::size_t) r] = 0.0f, ringR[(std::size_t) r] = 0.0f;
+                    float outL = a, outR = b, fl = a, fr = b;
+                    if (dMode == 1)
+                        outL = b, outR = a;
+                    else if (dMode == 2)
+                        outL = b, outR = a, fl = b, fr = a;
+                    tl[o + i] = outL, tr[o + i] = outR;
+                    auto u = fl * g + ringL[(std::size_t) w];
+                    auto v = fr * g + ringR[(std::size_t) w];
+                    ringL[(std::size_t) w] = std::fabs (u) < 5.960464477539063e-08f ? 0.0f : u;
+                    ringR[(std::size_t) w] = std::fabs (v) < 5.960464477539063e-08f ? 0.0f : v;
+                    g = g + step;
+                    if (++rp >= S0)
+                        rp = 0;
+                }
+                left -= seg, o += seg;
+            }
+            for (int i = 0; i < c; ++i)
+                L[at + i] = L[at + i] + tl[i], R[at + i] = R[at + i] + tr[i];
+        }
+    }
+
+    void process (float* L, float* R, const float* fxL, const float* fxR, int n, bool voices) noexcept
+    {
+        if (voices)
+            counter = reload;
+        else if (counter > 0)
+            counter -= n;
+        auto active = counter;
+        for (int k = 0; k < count; ++k)
+            switch (list[(std::size_t) k])
+            {
+                case 0:
+                    if (active >= 1)
+                        distortion (L, R, n);
+                    break;
+                case 1:
+                    if (active < 1)
+                        chorus->advance (n);
+                    else
+                    {
+                        chorus->process (L, R, tL.data(), tR.data(), n);
+                        if (chorus->dry != 1.0f)
+                            for (int i = 0; i < n; ++i)
+                                L[i] = L[i] * chorus->dry, R[i] = R[i] * chorus->dry;
+                        for (int i = 0; i < n; ++i)
+                            L[i] = L[i] + tL[(std::size_t) i], R[i] = R[i] + tR[(std::size_t) i];
+                    }
+                    break;
+                case 2:
+                    delay (L, R, n, active >= 1);
+                    active = 0x7fffffff;
+                    break;
+                case 3:
+                    for (int i = 0; i < n; ++i)
+                        mono[(std::size_t) i] = L[i] + R[i];
+                    reverb->process (mono.data(), tL.data(), tR.data(), n);
+                    revWet.mulAdd (tL.data(), tR.data(), L, R, n);
+                    active = 0x7fffffff;
+                    break;
+                case 4:
+                    if (fxL != nullptr)
+                        for (int i = 0; i < n; ++i)
+                            L[i] = L[i] + fxL[i], R[i] = R[i] + fxR[i];
+                    break;
+                default:
+                    comp->process (L, R, n);
+                    active = 0x7fffffff;
+                    break;
+            }
+        float peak = 0.0f;
+        for (int i = 0; i < n; ++i)
+            peak = std::max (peak, std::max (std::fabs (L[i]), std::fabs (R[i])));
+        if (voices || peak > 1.0e-7f)
+            quietFor = 0;
+        else
+            quietFor += n;
+    }
+
+    void advance (int n) noexcept
+    {
+        if (counter > 0)
+            counter -= n;
+        if (chorus)
+            chorus->advance (n);
+        if (delayOn)
+        {
+            inGain.cL = inGain.tL, inGain.cR = inGain.tR;
+            fbCur = fbTarget;
+        }
+        if (reverb)
+        {
+            revWet.cL = revWet.tL, revWet.cR = revWet.tR;
+        }
+        if (comp)
+            comp->silence (n);
+    }
+};
+
+HarmorRack::HarmorRack() : d (std::make_unique<Impl>()) {}
+HarmorRack::~HarmorRack() = default;
+void HarmorRack::prepare (const HarmorRackSettings& settings) { d->prepare (settings); }
+bool HarmorRack::enabled() const noexcept { return d->on; }
+void HarmorRack::process (float* left, float* right, const float* fxL, const float* fxR, int n, bool voices) noexcept
+{
+    d->process (left, right, fxL, fxR, n, voices);
+}
+void HarmorRack::advance (int n) noexcept { d->advance (n); }
+bool HarmorRack::quiet() const noexcept { return ! d->on || d->quietFor >= d->quietNeeded; }
 } // namespace lynx::hlfx
