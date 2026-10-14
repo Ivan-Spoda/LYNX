@@ -5225,3 +5225,57 @@ TEST (squeeze_matches_fl_model)
     fx->process (z.data(), z2.data(), 512, slot.params, 120.0);
     CHECK (z[10] == 0.0f);
 }
+
+TEST (sakura_matrix_and_effects)
+{
+    // REA_rodada29 §1: velocity → level follows 10^(2m)·0.05 (vel 1 vs 0.5 → ×10 in amplitude); the delay leaves
+    // an echo after the note has ended and keeps the instrument from going idle until its tail is silent
+    auto base = [] {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::sakura;
+        c.modelParams.assign (146, 0.0f);
+        const std::pair<int, float> values[] { { 0, 0.375f }, { 1, 0.5f }, { 3, 0.5f }, { 4, 1.0f }, { 6, 0.95f }, { 9, 0.3f },
+                                               { 11, 0.95f }, { 14, 0.3f }, { 18, 0.5f }, { 19, 0.5f }, { 27, 0.5f }, { 28, 1.0f },
+                                               { 29, 0.7f }, { 31, 1.0f }, { 32, 0.5f }, { 111, 3.0f }, { 113, 0.5f } };
+        for (const auto& [i, v] : values)
+            c.modelParams[(std::size_t) i] = v;
+        return c;
+    };
+    auto render = [] (const lynx::ChannelDef& c, float velocity, int held, int total) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::sakura);
+        inst->prepare (48000.0);
+        inst->configure (c, 120.0);
+        inst->noteOn (60, velocity);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        for (int s = 0; s < total; s += 256)
+        {
+            if (s == held)
+                inst->noteOff (60);
+            inst->render (l.data() + s, r.data() + s, std::min (256, total - s), 1.0f, 1.0f);
+        }
+        return std::make_pair (l, std::move (inst));
+    };
+    auto energy = [] (const std::vector<float>& x, int from, int to) {
+        double e = 0.0;
+        for (int i = from; i < to; ++i)
+            e += (double) x[(std::size_t) i] * x[(std::size_t) i];
+        return e;
+    };
+    auto c = base();
+    c.modelParams[79] = 6.0f; // slot 1: velocity → level, amount 1
+    c.modelParams[80] = 1.0f;
+    c.modelParams[82] = 1.0f;
+    const auto loud = energy (render (c, 1.0f, 24064, 24064).first, 0, 24064);
+    const auto soft = energy (render (c, 0.5f, 24064, 24064).first, 0, 24064);
+    CHECK (loud > 1e-6 && std::abs (loud / soft - 100.0) < 1.0);
+
+    auto d = base();
+    auto [dry, dryInst] = render (d, 0.8f, 4864, 72000);
+    d.modelParams[63] = 1.0f; // delay on: time 0.5 → ≈ 0.52 s, wet 1, no feedback: one echo
+    d.modelParams[64] = 0.5f;
+    d.modelParams[69] = 1.0f;
+    auto [wet, wetInst] = render (d, 0.8f, 4864, 72000);
+    CHECK (energy (wet, 26000, 40000) > 100.0 * energy (dry, 26000, 40000) + 1e-9); // the note ends near 0.2 s
+    CHECK (dryInst->idle() || energy (dry, 70000, 72000) < 1e-12);
+    CHECK (! wetInst->idle()); // the echo tail has not been silent for 3 s yet
+}

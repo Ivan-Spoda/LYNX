@@ -119,9 +119,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   until it is stolen — LYNX uses a short declick release.
 - Effector: the Reverb's diffusion network and the role of Y are LYNX's (only FL's decay time is reproduced, within
   the LYNX reverb's ≈ 0.6…10.5 s).
-- Sakura: modulation matrix only for the level destination with velocity/note sources (EG/LFO shapes, the other
-  destinations, resonators, chorus, reverb and delay were not decoded); strings longer than 9 600 samples (notes
-  below ~20 Hz) are shortened.
+- Sakura: mod wheel, pitch bend and channel pressure are 0 as matrix sources (LYNX sends no CCs to it); the LFO steps
+  once per LYNX render block; with the resonators on the output is within −72 dB of the reference (their float32
+  feedback amplifies rounding); strings longer than 9 600 samples (notes below ~20 Hz) are shortened.
 - Drumpad: no key tracking (FL's DSP has none; the host's per-note pitch value is not confirmed).
 - BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
   36 are clamped (FL reads outside its table there).

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -28,11 +29,17 @@ struct HighPass
 
     void design (double f, double q, double fs) noexcept
     {
+        retune (f, q, fs);
+        x1 = x2 = y1 = y2 = 0.0;
+    }
+
+    // new coefficients, state kept
+    void retune (double f, double q, double fs) noexcept
+    {
         const auto w = 2.0 * pi * f / fs, s = std::sin (w), c = std::cos (w);
         b = (1.0 + c) / (s / q + 2.0);
         a1 = -2.0 * q * c / (q + s);
         a2 = (q - s) / (q + s);
-        x1 = x2 = y1 = y2 = 0.0;
     }
 
     double tick (double x) noexcept
@@ -102,11 +109,79 @@ void renderResampled (Source& source, double internalRate, double hostRate, doub
 }
 
 // ---------------------------------------------------------------------------
-// Sakura (REA_rodada28 §1): exciter → 4 string loops (near/far × 2 strings) → combs → stereo mix → amp envelope
-// → 32 Hz high-pass → master gain. Modulation matrix routings, EG/LFO destinations, resonators and FX are not
-// modelled (their shapes were not confirmed).
+// Sakura (REA_rodada28 §1, REA_rodada29 §1): exciter → 4 string loops (near/far × 2 strings) → combs → stereo mix
+// → amp envelope, at 48 kHz, with a per-voice modulation EG, one global LFO and the 8-slot modulation matrix
+// re-evaluated per internal chunk (≤ 48 samples). Then, at the host rate: 32 Hz high-pass → resonator bank →
+// chorus → reverb → delay → master gain.
 
 using SakuraParams = std::array<float, sakuraParamCount>;
+
+double f32 (double x) noexcept { return (double) (float) x; }
+double flushTiny (double x) noexcept { return x > -1e-9 && x < 1e-9 ? 0.0 : x; }
+
+// Modulation envelope (REA_rodada29 §1.1): straight segments, stepped once per internal chunk of n samples (the
+// phase is advanced before the value is computed); output clamped at ≥ 0 and stored as float.
+struct SakuraEg
+{
+    double ia = 0.0, id = 0.0, ir = 0.0, sustain = 0.0, start = 0.0, phase = 0.0, out = 0.0, releaseLevel = 0.0;
+    int stage = 0;
+
+    void begin (double a, double d, double s) noexcept
+    {
+        ia = (1.0 / 48000.0) / std::max (a, 0.001);
+        id = (1.0 / 48000.0) / std::max (d, 0.001);
+        ir = 1.0 / (0.001 * 48000.0);
+        sustain = s;
+        start = phase = out = releaseLevel = 0.0; // a fresh voice's EG is idle: the attack starts from 0
+        stage = 0;
+    }
+
+    void release (double r) noexcept
+    {
+        if (stage == 2)
+            return;
+        ir = 1.0 / (std::max (r, 0.001) * 48000.0);
+        releaseLevel = out;
+        stage = 2;
+        phase = 0.0;
+    }
+
+    double tick (int n) noexcept
+    {
+        double v;
+        if (stage == 0)
+        {
+            phase += n * ia;
+            if (phase >= 1.0)
+                v = 1.0, stage = 1, phase = 0.0;
+            else
+                v = (1.0 - start) * phase + start;
+        }
+        else if (stage == 1)
+        {
+            phase += n * id;
+            if (phase >= 1.0)
+            {
+                if (sustain == 0.0)
+                    stage = 2; // ends here (the release segment then falls from 0)
+                v = sustain;
+                phase = 1.0;
+            }
+            else
+                v = (sustain - 1.0) * phase + 1.0;
+        }
+        else
+        {
+            phase += n * ir;
+            if (phase >= 1.0)
+                v = 0.0, phase = 1.0;
+            else
+                v = (0.0 - releaseLevel) * phase + releaseLevel;
+        }
+        out = f32 (std::max (v, 0.0));
+        return out;
+    }
+};
 
 struct SakuraVoice
 {
@@ -117,7 +192,14 @@ struct SakuraVoice
     std::array<std::vector<float>, 4> loops;
     std::array<std::vector<float>, 2> combs;
     int ptr[4] {}, combPtr[2] {};
-    double kdc[4] {}, step = 0.0;
+    double kdc[4] {}, freq = 0.0, rate = 1.0, velocity = 0.0;
+    // matrix sources as of the last chunk: EG, LFO × depth, release gate
+    SakuraEg eg;
+    double egValue = 0.0, lfoValue = 0.0, gate = 0.0;
+    // per-chunk laws
+    double step = 0.0, threshold = 1.0, ladderG = 0.0, ladderR = 0.0;
+    double coef[4] {}, sharp[4] {}, fbTarget[4] {}, gainTarget[4] {};
+    double hcTarget = 0.0, hcRate = 0.0, envTarget = 0.0, envRate = 0.0;
     // state
     std::uint32_t seed = 0;
     double hold = 0.0, s[3] {}, z4 = 0.0, hiCutEnv = 0.0;
@@ -126,9 +208,678 @@ struct SakuraVoice
     double acc = 0.0, prev[2] {}, cur[2] {};
     double env = 0.0, elapsed = 0.0, release = -1.0;
     HighPass lowCut;
-    int blockLeft = 0;
-    double hcTarget = 0.0, hcRate = 0.0, envTarget = 0.0, envRate = 0.0;
-    double level = 1.0; // modulation-matrix level relative to the default ×5 (velocity/note routings)
+};
+
+// ---- effects (REA_rodada29 §1.4–1.8): all at the host rate, float arithmetic where the engine rounds ----
+
+// One half of a "tape": samples with their tape positions (stamps). Indices 0…2 are a guard holding the tail of
+// the page before it (stamps shifted by −1), so slot i of the page lives at i + guard.
+struct TapePage
+{
+    static constexpr int guard = 3;
+    std::vector<float> value;
+    std::vector<double> stamp;
+    int count = 0, read = 0;
+
+    void allocate (int capacity)
+    {
+        value.assign ((std::size_t) capacity + 8, 0.0f);
+        stamp.assign ((std::size_t) capacity + 8, 0.0);
+        count = read = 0;
+    }
+
+    void clear() noexcept
+    {
+        std::fill (value.begin(), value.end(), 0.0f);
+        std::fill (stamp.begin(), stamp.end(), 0.0);
+        count = read = 0;
+    }
+};
+
+// Common delay element (§1.4): reads the previous lap at the current tape position (linear interpolation between
+// stamps), writes the new sample stamped with the advanced position, swaps the pages at each lap.
+struct Tape
+{
+    TapePage pages[2];
+    int writing = 0;
+    double position = 0.0;
+
+    void allocate (int length)
+    {
+        pages[0].allocate (length);
+        pages[1].allocate (length);
+        writing = 0;
+    }
+
+    void clear() noexcept
+    {
+        pages[0].clear();
+        pages[1].clear();
+        writing = 0;
+    }
+
+    double readAt (double pos) noexcept
+    {
+        constexpr int g = TapePage::guard;
+        auto& pg = pages[1 - writing];
+        while (pg.count != 0)
+        {
+            const auto r = pg.read;
+            if (pg.count + 1 <= r)
+                break;
+            const auto t = pg.stamp[(std::size_t) (r + g)];
+            if (pos <= t)
+            {
+                const auto f5 = f32 (pg.stamp[(std::size_t) (r - 1 + g)]), f3 = f32 (t);
+                auto fr = 0.0;
+                if (f5 < f3)
+                    fr = (pos - f5) / f32 (f3 - f5);
+                const auto v0 = (double) pg.value[(std::size_t) (r - 1 + g)];
+                return flushTiny (f32 (f32 ((double) pg.value[(std::size_t) (r + g)] - v0) * fr + v0));
+            }
+            pg.read = r + 1;
+        }
+        return 0.0;
+    }
+
+    // writes w (already float) at stamp newPosition; returns the new tape position
+    double write (double w, double newPosition) noexcept
+    {
+        constexpr int g = TapePage::guard;
+        if (newPosition >= 1.0)
+        {
+            auto& wr = pages[writing];
+            auto& rd = pages[1 - writing];
+            const auto n = rd.count;
+            for (int k = 1; k <= 3; ++k)
+            {
+                wr.value[(std::size_t) (g - k)] = rd.value[(std::size_t) (n - k + g)];
+                wr.stamp[(std::size_t) (g - k)] = rd.stamp[(std::size_t) (n - k + g)] - 1.0;
+            }
+            wr.value[(std::size_t) (wr.count + g)] = (float) w;
+            wr.stamp[(std::size_t) (wr.count + g)] = newPosition;
+            wr.read = 0;
+            writing = 1 - writing;
+            newPosition -= 1.0;
+            pages[writing].count = 0;
+        }
+        auto& wr = pages[writing];
+        wr.value[(std::size_t) (wr.count + g)] = (float) w;
+        wr.stamp[(std::size_t) (wr.count + g)] = newPosition;
+        ++wr.count;
+        return newPosition;
+    }
+};
+
+// Modulated tape delay (CTapeDelay): speed × (1 + depth·t²(3 − 2t)) with a triangle LFO, speed smoothing 0.005 and
+// wet smoothing 0.01 per sample, written value = input + feedback × read, output = read × wet.
+struct TapeDelay
+{
+    Tape tape;
+    int length = 4;
+    double startPosition = 0.0, minSpeed = 0.25, speed = 0.0, wet = 1.0, feedback = 0.0, increment = 0.0, depth = 0.0;
+    double speedSmoothed = 0.0, wetSmoothed = 0.0, phase = 0.0;
+
+    void allocate (int n, double pos0)
+    {
+        length = std::max (4, n);
+        startPosition = pos0;
+        minSpeed = 1.0 / length;
+        tape.allocate (length);
+        restart();
+    }
+
+    // state of a freshly built line (time 0.5, wet 1, no feedback/modulation)
+    void restart() noexcept
+    {
+        setTime (0.5);
+        wet = 1.0;
+        feedback = increment = depth = 0.0;
+        tape.position = startPosition;
+        speedSmoothed = speed;
+        wetSmoothed = phase = 0.0;
+        tape.clear();
+    }
+
+    void setTime (double p) noexcept
+    {
+        p = std::clamp (p, 0.0, 0.99);
+        const auto a = 2.0 / length;
+        speed = 1.0 / ((p * (1.0 - a) + a) * length);
+    }
+
+    void setRate (double hz, double fs) noexcept { increment = std::max (hz, 0.0) / fs; }
+    void setDepth (double d) noexcept { depth = f32 (std::clamp (d, 0.0, 1.0)); }
+
+    double tick (double x) noexcept
+    {
+        x = flushTiny (x);
+        auto ph = phase;
+        const auto tri = ph < 0.5 ? ph + ph : 1.0 - (((ph - 0.5) + ph) - 0.5);
+        ph += increment;
+        auto mult = (3.0 - (tri + tri)) * tri * (depth * tri) + 1.0;
+        if (mult <= 1.0)
+            mult = 1.0;
+        if (ph >= 1.0)
+            ph -= (int) ph;
+        phase = ph;
+        const auto val = tape.readAt (tape.position);
+        const auto spd = std::max (std::min (mult * speedSmoothed, 0.2), minSpeed);
+        const auto w = f32 (f32 (val * feedback) + x);
+        const auto out = f32 (val * wetSmoothed);
+        tape.position = tape.write (w, tape.position + spd);
+        const auto ws = f32 (f32 (wet - wetSmoothed) * 0.01 + wetSmoothed);
+        wetSmoothed = ws > -1e-9 && ws < 1e-9 ? 0.0 : ws;
+        speedSmoothed = (speed - speedSmoothed) * 0.005 + speedSmoothed;
+        return out;
+    }
+};
+
+// Resonator unit (CStringDelay): constant-speed tape with a 1-pole low-pass (0.5) in the feedback; output = read
+struct StringDelay
+{
+    Tape tape;
+    int length = 4;
+    double minSpeed = 0.25, feedback = 0.0, speed = 0.0, z = 0.0;
+
+    void allocate (int n)
+    {
+        length = std::max (4, n);
+        minSpeed = 1.0 / length;
+        tape.allocate (length);
+        restart();
+    }
+
+    void restart() noexcept
+    {
+        setTime (0.5);
+        tape.position = z = 0.0;
+        tape.clear();
+    }
+
+    void setTime (double p) noexcept
+    {
+        p = std::clamp (p, 0.0, 0.99);
+        const auto a = 2.0 / length;
+        speed = std::max (std::min (1.0 / ((p * (1.0 - a) + a) * length), 0.2), minSpeed);
+    }
+
+    double tick (double x) noexcept
+    {
+        x = flushTiny (x);
+        const auto val = tape.readAt (tape.position);
+        const auto next = tape.position + speed;
+        z = f32 (f32 (val - z) * 0.5 + z);
+        tape.position = tape.write (f32 (f32 (z * feedback) + x), next);
+        return val;
+    }
+};
+
+// 2-pole high-pass of the effects (float version of HighPass)
+struct HighPassF
+{
+    double b = 0.0, a1 = 0.0, a2 = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+
+    void design (double f, double q, double fs) noexcept
+    {
+        const auto w = 2.0 * pi * f / fs, s = f32 (std::sin (f32 (w))), c = f32 (std::cos (f32 (w)));
+        const auto k = f32 (1.0 / f32 (s + q));
+        b = f32 (f32 (c + 1.0) / f32 (f32 (s / q) + 2.0));
+        a1 = f32 (f32 (c * k) * q * -2.0);
+        a2 = f32 (f32 (q - s) * k);
+        x1 = x2 = y1 = y2 = 0.0;
+    }
+
+    double tick (double x) noexcept
+    {
+        x = flushTiny (x);
+        const auto y = flushTiny (f32 (f32 (f32 (f32 (f32 (x - f32 (x1 + x1)) + x2) * b) - f32 (y1 * a1)) - f32 (a2 * y2)));
+        x2 = x1;
+        y2 = y1;
+        x1 = x;
+        y1 = y;
+        return y;
+    }
+};
+
+// Resonator bank (§1.5): 8 resonators on L + R, each two string delays in series (time p and 1.05·p, the second
+// fed the negated output of the first); odd/even resonators weighted 0.75/1.25 per side, 32 Hz HP, added to the dry.
+struct SakuraResonators
+{
+    StringDelay a[8], b[8];
+    HighPassF hp[2];
+    bool on[8] {};
+    double time[8] {}, feedback[8] {};
+
+    void allocate (double fs)
+    {
+        for (int k = 0; k < 8; ++k)
+            a[k].allocate ((int) (fs * 0.1)), b[k].allocate ((int) (fs * 0.1));
+        hp[0].design (32.0, 1.0, fs);
+        hp[1].design (32.0, 1.0, fs);
+    }
+
+    void restart (double fs) noexcept
+    {
+        for (int k = 0; k < 8; ++k)
+            a[k].restart(), b[k].restart(), on[k] = false;
+        hp[0].design (32.0, 1.0, fs);
+        hp[1].design (32.0, 1.0, fs);
+    }
+
+    void setParameters (const SakuraParams& p) noexcept
+    {
+        for (int k = 0; k < 8; ++k)
+        {
+            const auto enable = p[(std::size_t) (55 + k)] != 0.0f;
+            if (enable && ! on[k]) // switching a resonator on clears both of its units
+                a[k].restart(), b[k].restart();
+            on[k] = enable;
+            time[k] = f32 (1.0 - f32 (std::pow ((double) p[(std::size_t) (39 + k)], 0.1)));
+            feedback[k] = f32 (std::sqrt (std::max (0.0, (double) p[(std::size_t) (47 + k)])) * 0.9999);
+        }
+    }
+
+    void process (double* left, double* right, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = f32 (left[i] + right[i]);
+            double sl = 0.0, sr = 0.0;
+            for (int k = 0; k < 8; ++k)
+            {
+                if (! on[k])
+                    continue;
+                a[k].setTime (time[k]);
+                b[k].setTime (time[k] * 1.05);
+                a[k].feedback = b[k].feedback = feedback[k];
+                const auto y = b[k].tick (-a[k].tick (x));
+                sl = f32 (sl + ((k & 1) != 0 ? 1.25 : 0.75) * y);
+                sr = f32 (sr + ((k & 1) != 0 ? 0.75 : 1.25) * y);
+            }
+            left[i] = f32 (hp[0].tick (sl) + left[i]);
+            right[i] = f32 (hp[1].tick (sr) + right[i]);
+        }
+    }
+};
+
+// Chorus (§1.6): three unfed tape delays (20 ms × 1.1 / 0.854 / 1) on L + R; L += b + a, R += b + c.
+// Wet polarity: FL stores −Wet and re-applies it at every rebuild, so the sign flips with each later sample-rate
+// change; LYNX uses +Wet (state applied after the sample rate is set), as recommended in REA_rodada29 §5.1.
+struct SakuraChorus
+{
+    TapeDelay a, b, c;
+
+    void allocate (double fs)
+    {
+        const auto d = fs * (double) 0.02f; // a float constant promoted to double
+        a.allocate ((int) (d * 1.1), 0.0);
+        b.allocate ((int) (d * 0.854), 0.467);
+        c.allocate ((int) d, 0.778);
+    }
+
+    void restart() noexcept { a.restart(), b.restart(), c.restart(); }
+
+    void setParameters (const SakuraParams& p, double fs) noexcept
+    {
+        const auto r = (double) p[71] * 5.0 + 0.1;
+        a.setRate (r * 0.896, fs);
+        b.setRate (r, fs);
+        c.setRate (r * 0.689, fs);
+        const auto depth = std::pow ((double) p[72], 3.0);
+        for (auto* t : { &a, &b, &c })
+            t->setDepth (depth), t->wet = (double) p[73];
+    }
+
+    void process (double* left, double* right, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = f32 (left[i] + right[i]);
+            const auto ya = a.tick (x), yc = c.tick (x), yb = b.tick (x);
+            left[i] = f32 (f32 (yb + ya) + left[i]);
+            right[i] = f32 (f32 (yb + yc) + right[i]);
+        }
+    }
+};
+
+// Delay (§1.7): per channel three tape delays in series-additive form y ← y + D(y); feedback −0.99·Fdbk², wet
+// Wet² × 1 / Blur / Blur², optional tempo sync (index 112).
+struct SakuraDelay
+{
+    TapeDelay lines[6];
+
+    void allocate (double fs)
+    {
+        const auto n = (double) (int) (fs + fs);
+        lines[0].allocate ((int) n, 0.0);
+        lines[1].allocate ((int) (n * 0.63), 0.27);
+        lines[2].allocate ((int) (n * 0.41), 0.4);
+        lines[3].allocate ((int) n, 0.3);
+        lines[4].allocate ((int) (n * 0.76), 0.62);
+        lines[5].allocate ((int) (n * 0.54), 0.87);
+    }
+
+    void restart() noexcept
+    {
+        for (auto& l : lines)
+            l.restart();
+    }
+
+    void setParameters (const SakuraParams& p, double fs, double bpm) noexcept
+    {
+        const auto time = (double) p[64], fb = (double) p[65], spd = (double) p[66], dep = (double) p[67];
+        const auto blur = (double) p[68], wet = (double) p[69];
+        const auto sync = (int) p[112];
+        auto t = f32 (f32 (time * time) + 0.01);
+        if (sync >= 1 && sync <= 9 && bpm > 0.0)
+        {
+            static constexpr double ratio[9] { 1.0 / 15, 1.0 / 30, 1.0 / 45, 1.0 / 60, 1.0 / 120, 1.0 / 180, 1.0 / 240, 1.0 / 480,
+                                               1.0 / 960 };
+            t = f32 (0.5 / (bpm * ratio[sync - 1]));
+        }
+        const auto r0 = f32 (spd * spd) * 20.0;
+        const auto w2 = f32 (wet * wet);
+        const double wets[3] { w2, f32 (w2 * blur), f32 (f32 (blur * blur) * w2) };
+        for (int k = 0; k < 6; ++k)
+        {
+            auto& l = lines[k];
+            l.setRate ((k & 1) != 0 ? r0 * 1.1 : r0, fs);
+            l.setTime (t);
+            l.feedback = f32 (f32 (fb * fb) * -0.99);
+            l.setDepth (f32 (dep * dep * dep * dep));
+            l.wet = wets[k % 3];
+        }
+    }
+
+    void process (double* left, double* right, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            auto y = left[i];
+            y = f32 (y + lines[0].tick (y));
+            y = f32 (y + lines[1].tick (y));
+            left[i] = f32 (lines[2].tick (y) + y);
+            y = right[i];
+            y = f32 (y + lines[3].tick (y));
+            y = f32 (y + lines[4].tick (y));
+            right[i] = f32 (lines[5].tick (y) + y);
+        }
+    }
+};
+
+// Reverb (§1.8): plate-style tank (4 input all-passes, predelay, two cross-coupled halves with bass shelf, damping,
+// decay all-passes and delays, 14 output taps) plus one early-reflection tap per side. Float arithmetic as the
+// engine's. Sakura fixes 15 of its 18 parameters; Mix, Decay and Color drive the other three.
+class SakuraReverb
+{
+public:
+    void allocate (double sampleRate)
+    {
+        fs = (float) sampleRate;
+        fsi = (int) sampleRate;
+        defaults();
+        const auto room = (long long) toInt (4, q[4]);
+        const auto S = ((room + 15) * fsi) / 115;
+        static constexpr int tank[12] { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
+        for (int j = 0; j < 12; ++j)
+        {
+            len[j] = std::max (1, (int) ((S * tank[j]) / 20000));
+            buf[j].assign ((std::size_t) len[j], 0.0f);
+        }
+        static constexpr int taps[14] { 266, 2974, 1913, 2496, 1690, 187, 1566, 353, 3627, 1728, 3173, 1811, 335, 621 };
+        for (int k = 0; k < 14; ++k)
+            tap[k] = (int) ((S * taps[k]) / 20000);
+        const auto sc = (float) (((room + 3) * fsi) / 103);
+        erLeft = (int) ((float) (1102.0f * 3.4013603e-05f) * sc);
+        erRight = (int) ((float) (837.0f * 3.4013603e-05f) * sc);
+        const auto m = (float) std::min (erLeft, erRight);
+        gainErLeft = (m * 0.5f) / (float) erLeft;
+        gainErRight = (m * 0.36f) / (float) erRight;
+        int bits = 0;
+        for (auto u = (int) (sampleRate * 0.3163265306); u != 0; u >>= 1)
+            ++bits;
+        erLength = 1 << (bits + 1);
+        er.assign ((std::size_t) erLength, 0.0f);
+        lengthPre = std::max (1, (fsi * toInt (3, q[3])) / 1000);
+        pre.assign ((std::size_t) lengthPre, 1e-30f);
+        controls[0] = controls[1] = controls[2] = -1.0f;
+        restart();
+    }
+
+    void restart() noexcept
+    {
+        for (int j = 0; j < 12; ++j)
+            std::fill (buf[j].begin(), buf[j].end(), 0.0f), idx[j] = 0;
+        std::fill (pre.begin(), pre.end(), 1e-30f);
+        std::fill (er.begin(), er.end(), 0.0f);
+        ipre = ier = 0;
+        s280 = s284 = s288 = s2bc = s2c0 = s2c4 = s2c8 = s2ac = s2b0 = 0.0f;
+        level = -1000.0f; // the level is set directly on the first sample
+    }
+
+    // Mix (75), Decay (76), Color (77); the coefficients are recomputed only when they change
+    void setParameters (const SakuraParams& p) noexcept
+    {
+        if (p[75] == controls[0] && p[76] == controls[1] && p[77] == controls[2])
+            return;
+        controls[0] = p[75], controls[1] = p[76], controls[2] = p[77];
+        defaults();
+        auto x = p[75];
+        q[12] = x * 0.999f + 0.001f;
+        x = p[76];
+        q[8] = x * x * x * 0.6f;
+        x = p[77];
+        q[2] = x * x * x;
+        coefficients();
+    }
+
+    void process (double* left, double* right, int n) noexcept
+    {
+        const auto half = 0.5f, tiny = 1e-30f;
+        const auto mask = erLength - 1;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto xl = gin * (float) left[i], xr = gin * (float) right[i];
+            auto s = ((((xr + xl) * half) + tiny) - s280) * cHc + s280;
+            s280 = s;
+            const auto y = ((s - s284) * cLc) + s288;
+            s288 = s;
+            s284 = y;
+            if (cLc != 0.0f)
+                s = ((s - y) * half) + tiny;
+            // early reflections: only the first tap of each side has a non-zero gain
+            float erl = 0.0f, err = 0.0f;
+            if (ger != 0.0f)
+            {
+                erl = er[(std::size_t) ((erLeft + ier) & mask)] * gainErLeft;
+                err = er[(std::size_t) ((erRight + ier) & mask)] * gainErRight;
+            }
+            // input diffusion
+            const auto v1 = allPass (0, s, c29c, c29c);
+            const auto v2 = allPass (1, v1, c2a0, c29c);
+            er[(std::size_t) ier] = v1;
+            ier = ier > 0 ? (ier - 1) & mask : erLength - 1;
+            const auto v3 = allPass (2, v2, c29c, c29c);
+            const auto v4 = allPass (3, v3, c2a0, c29c);
+            auto pd = pre[(std::size_t) ipre];
+            pre[(std::size_t) ipre] = v4;
+            ipre = ipre > 0 ? ipre - 1 : lengthPre - 1;
+            pd = pd + 1e-20f;
+            // tank, first half (fed by the end of the second half)
+            auto x = buf[11][(std::size_t) idx[11]] * g;
+            auto a = ((x - s2c0) * c2b4) + s2bc;
+            s2bc = x;
+            s2c0 = a;
+            auto yy = (((((a + x) * c2b8) + x) + pd) - s2ac) * c2a8 + s2ac;
+            s2ac = yy;
+            auto v = allPass (4, yy, c294, c294);
+            auto w = delay (5, v) * g;
+            v = allPass (6, w, c298, c298);
+            buf[7][(std::size_t) idx[7]] = v;
+            idx[7] = idx[7] > 0 ? idx[7] - 1 : len[7] - 1;
+            // second half
+            x = buf[7][(std::size_t) idx[7]] * g;
+            a = ((x - s2c8) * c2b4) + s2c4;
+            s2c4 = x;
+            s2c8 = a;
+            yy = (((((a + x) * c2b8) + x) + pd) - s2b0) * c2a8 + s2b0;
+            s2b0 = yy;
+            v = allPass (8, yy, c294, c294);
+            w = delay (9, v) * g;
+            v = allPass (10, w, c298, c298);
+            buf[11][(std::size_t) idx[11]] = v;
+            idx[11] = idx[11] > 0 ? idx[11] - 1 : len[11] - 1;
+            // output taps (read after the index updates)
+            const auto t40 = read (9, tap[0]), t55 = read (9, tap[1]), t48 = read (10, tap[2]), t47 = read (11, tap[3]);
+            const auto t4 = read (5, tap[4]), t5 = read (6, tap[5]), t6 = read (7, tap[6]), t7 = read (5, tap[8]);
+            const auto t8 = read (5, tap[7]), t9 = read (6, tap[9]), t10 = read (7, tap[10]), t11 = read (9, tap[11]);
+            const auto t12 = read (10, tap[12]), t13 = read (11, tap[13]);
+            auto lv = level, target = levelTarget;
+            if (! (lv >= -99.0f))
+                lv = levelTarget;
+            lv = ((target - lv) * 0.001f) + lv;
+            level = lv;
+            const auto wl = (lv * (((((((t40 - (k43 * t55)) - (k44 * t48)) - (k56 * t47)) + (k42 * t4)) + t5) + (k45 * t6))))
+                            + (ger * erl);
+            const auto wr = (lv * ((((((((k43 * t7) + t8) - (k44 * t9)) - (k56 * t10)) - (k42 * t11)) + t12) + (k45 * t13))))
+                            + (ger * err);
+            const auto mid = wr + wl, side = (wl - wr) * width;
+            left[i] = (double) (((xl * dry) + side) + mid);
+            right[i] = (double) ((xr * dry) + (mid - side));
+        }
+    }
+
+private:
+    // the reverb's parameter floats as Sakura builds it (defaults; High damping off, Diffusion 100 %)
+    void defaults() noexcept
+    {
+        static constexpr std::uint32_t bits[18] { 0x3f5b83f4, 0x3c99e459, 0x3e25ed09, 0, 0x3efd6a05, 0x3f800000,
+                                                  0x3e924925, 0x3e76474b, 0x3d901495, 0x3e25ed09, 0x3f5b83f4, 0x3f463b97,
+                                                  0x3f128bdc, 0x3f000000, 0, 0, 0, 0 };
+        for (int i = 0; i < 18; ++i)
+            q[i] = std::bit_cast<float> (bits[i]);
+        q[9] = 1.0f;
+        q[5] = 1.0f;
+    }
+
+    // float → integer "display" value: floor(x·scale + offset)
+    static int toInt (int i, float x) noexcept
+    {
+        static constexpr float conv[18][2] { { 421, -360.5f }, { 2981, 19.5f }, { 216, 5.5f }, { 250, 0.5f }, { 99, 1.5f },
+                                             { 100, 0.5f }, { 28, 2.5f }, { 1975, 25.5f }, { 199, 1.5f }, { 216, 5.5f },
+                                             { 421, -360.5f }, { 421, -360.5f }, { 421, -360.5f }, { 200, 0.5f }, { 1, 0.5f },
+                                             { 1, 0.5f }, { 1, 0.5f }, { 1, 0.5f } };
+        return (int) std::floor ((double) (x * conv[i][0] + conv[i][1]));
+    }
+
+    static float db (int v) noexcept { return v <= -361 ? 0.0f : (float) std::pow (10.0, (double) ((float) v * 0.005f)); }
+
+    float onePole (int v) const noexcept
+    {
+        if ((float) v < 221.0f)
+        {
+            const auto c = (float) std::cos ((double) (((float) v * 628.31854f) / fs));
+            const auto b = 2.0f - c;
+            return 1.0f - (b - (float) std::sqrt ((double) ((b * b) - 1.0f)));
+        }
+        return 1.0f;
+    }
+
+    void coefficients() noexcept
+    {
+        int p[18];
+        for (int i = 0; i < 18; ++i)
+            p[i] = toInt (i, q[i]);
+        const auto fpi = (float) pi;
+        gin = p[14] != 0 ? 0.0f : db (p[0]);
+        if ((float) p[1] > 19.0f)
+        {
+            const auto xx = std::min (fs * 0.5f, (float) p[1]);
+            const auto t = (float) std::tan ((double) ((xx * fpi) / fs));
+            cLc = (t - 1.0f) / (t + 1.0f);
+        }
+        else
+            cLc = 0.0f;
+        cHc = onePole (p[2]);
+        const auto diff = (float) p[5] * 0.01f, inv = 1.0f / fs;
+        const auto* L = len;
+        if (diff != 0.0f)
+        {
+            c29c = (float) std::exp ((double) (((float) (L[1] + L[0]) * (-49.34111f / diff)) * inv));
+            c2a0 = (float) std::exp ((double) (((-31.398888f / diff) * (float) (L[2] + L[3])) * inv));
+            c294 = (float) std::exp ((double) ((((float) (L[4] + L[8]) * -3.4538777f) / fs) * (2.857143f / diff)));
+            c298 = (float) std::exp ((double) (((-3.4538777f / fs) * (float) (L[6] + L[10])) * (1.9607843f / diff)));
+        }
+        else
+            c29c = c2a0 = c294 = c298 = 0.0f;
+        const auto tsum = ((float) (L[11] + L[9] + L[5] + L[7]) / fs) * -6.9077554f;
+        const auto t60 = (float) p[8] * 0.1f;
+        g = (float) std::pow ((double) (float) std::exp ((double) (tsum / t60)), 0.25);
+        const auto gb = (float) std::pow ((double) (float) std::exp ((double) ((10.0f / ((float) p[6] * t60)) * tsum)), 0.25);
+        const auto r = gb / g;
+        c2b8 = (r - 1.0f) * 0.5f;
+        const auto rr = std::min (r, 1.0f);
+        const auto t = (float) std::tan ((double) (((float) p[7] * fpi) / fs));
+        c2b4 = (t - rr) / (rr + t);
+        c2a8 = onePole (p[9]);
+        dry = p[15] != 0 ? 0.0f : db (p[10]);
+        ger = p[16] != 0 ? 0.0f : db (p[11]) * 0.5f;
+        levelTarget = p[17] != 0 ? 0.0f : db (p[12]) * 0.3f;
+        width = (float) p[13] * 0.01f;
+        const auto k = 1.0f - g;
+        k42 = k * 0.6f + g;
+        k43 = k * 0.25f + g;
+        k44 = k * 0.7f + g;
+        k56 = k * 0.2f + g;
+        k45 = k * 0.5f + g;
+    }
+
+    float allPass (int j, float x, float cr, float cw) noexcept
+    {
+        auto& b = buf[j];
+        auto i = idx[j];
+        const auto v = b[(std::size_t) i] - (cr * x);
+        b[(std::size_t) i] = (cw * v) + x;
+        idx[j] = i > 0 ? i - 1 : len[j] - 1;
+        return v;
+    }
+
+    float delay (int j, float x) noexcept
+    {
+        auto& b = buf[j];
+        const auto i = idx[j];
+        const auto o = b[(std::size_t) i];
+        b[(std::size_t) i] = x;
+        idx[j] = i > 0 ? i - 1 : len[j] - 1;
+        return o;
+    }
+
+    float read (int j, int offset) const noexcept
+    {
+        auto s = offset + idx[j];
+        if (s >= len[j])
+            s -= len[j];
+        return buf[j][(std::size_t) s];
+    }
+
+    float fs = 48000.0f;
+    int fsi = 48000;
+    float q[18] {}, controls[3] { -1.0f, -1.0f, -1.0f };
+    std::vector<float> buf[12], pre, er;
+    int len[12] {}, idx[12] {}, tap[14] {}, lengthPre = 1, ipre = 0, erLength = 1, ier = 0, erLeft = 0, erRight = 0;
+    float gainErLeft = 0.0f, gainErRight = 0.0f;
+    float gin = 1.0f, cLc = 0.0f, cHc = 1.0f, c29c = 0.0f, c2a0 = 0.0f, c294 = 0.0f, c298 = 0.0f, g = 0.0f;
+    float c2b8 = 0.0f, c2b4 = 0.0f, c2a8 = 1.0f, dry = 1.0f, ger = 0.0f, levelTarget = 0.0f, width = 0.0f;
+    float k42 = 0.0f, k43 = 0.0f, k44 = 0.0f, k56 = 0.0f, k45 = 0.0f;
+    float s280 = 0.0f, s284 = 0.0f, s288 = 0.0f, s2bc = 0.0f, s2c0 = 0.0f, s2c4 = 0.0f, s2c8 = 0.0f, s2ac = 0.0f, s2b0 = 0.0f;
+    float level = -1000.0f;
+};
+
+struct SakuraSettings
+{
+    SakuraParams params {};
+    double bpm = 0.0;
 };
 
 class SakuraInstrument final : public Instrument
@@ -137,6 +888,7 @@ public:
     static constexpr double fs = 48000.0;
     static constexpr int maxVoices = 12;
     static constexpr int maxLength = 9600; // FL allows 48 000 (notes down to 1 Hz); LYNX keeps ≥ 20 Hz × 4 in memory
+    static constexpr int internalCapacity = 8192; // 48 kHz samples rendered per pass
 
     SakuraInstrument()
     {
@@ -147,27 +899,46 @@ public:
             for (auto& c : v.combs)
                 c.assign (maxLength + 1, 0.0f);
         }
+        voiceL.assign (internalCapacity, 0.0);
+        voiceR.assign (internalCapacity, 0.0);
+        computeStatic();
+        prepare (48000.0);
     }
 
     void prepare (double sr) noexcept override
     {
         hostRate = sr;
+        // host samples per pass, so that the 48 kHz samples it needs fit in the voice buffers
+        maxHostBlock = std::clamp ((int) ((internalCapacity - 2) / (fs / sr)), 1, 4096);
+        hostL.assign ((std::size_t) maxHostBlock, 0.0);
+        hostR.assign ((std::size_t) maxHostBlock, 0.0);
         outHp[0].design (32.0, 1.0, sr);
         outHp[1].design (32.0, 1.0, sr);
+        // the effects are (re)built whenever the sample rate is set; the LFO phase restarts
+        resonators.allocate (sr);
+        chorus.allocate (sr);
+        reverb.allocate (sr);
+        delay.allocate (sr);
+        fxOn[0] = fxOn[1] = fxOn[2] = fxOn[3] = false;
+        lfoPhase = 0.0;
+        quietSamples = 1 << 30;
+        position = 1.0;
+        previous = current = {};
         allNotesOff();
     }
 
-    void configure (const ChannelDef& channel, double) noexcept override
+    void configure (const ChannelDef& channel, double bpm) noexcept override
     {
-        SakuraParams p {};
-        for (std::size_t i = 0; i < p.size() && i < channel.modelParams.size(); ++i)
-            p[i] = std::isfinite (channel.modelParams[i]) ? channel.modelParams[i] : 0.0f;
-        mailbox.write (p);
+        SakuraSettings s;
+        for (std::size_t i = 0; i < s.params.size() && i < channel.modelParams.size(); ++i)
+            s.params[i] = std::isfinite (channel.modelParams[i]) ? channel.modelParams[i] : 0.0f;
+        s.bpm = bpm;
+        mailbox.write (s);
     }
 
     void noteOn (int key, float velocity) noexcept override
     {
-        mailbox.read (params); // the note's lengths and laws come from the latest settings
+        readSettings(); // the note's lengths and laws come from the latest settings
         SakuraVoice* target = nullptr;
         for (auto& v : voices)
             if (! v.active)
@@ -177,15 +948,19 @@ public:
             }
         if (target == nullptr)
             target = &voices[(std::size_t) (nextSteal++ % maxVoices)];
-        start (*target, key);
-        target->level = matrixLevel (velocity, key);
+        start (*target, key, velocity);
     }
 
+    // release (and matrix source 8 "release gate") from the next chunk on, i.e. the start of the next host block
     void noteOff (int key) noexcept override
     {
         for (auto& v : voices)
             if (v.active && v.key == key && v.release < 0.0)
+            {
                 v.release = 0.0;
+                v.gate = 1.0;
+                v.eg.release (egRelease);
+            }
     }
 
     void allNotesOff() noexcept override
@@ -194,67 +969,48 @@ public:
             v.active = false;
     }
 
+    // idle once no voice sounds and the effects' tails have been silent for 3 s (delay lines are up to 2 s)
     bool idle() const noexcept override
     {
-        return std::none_of (voices.begin(), voices.end(), [] (const SakuraVoice& v) { return v.active; });
+        return std::none_of (voices.begin(), voices.end(), [] (const SakuraVoice& v) { return v.active; })
+               && quietSamples >= (int) (3.0 * hostRate);
     }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
-        mailbox.read (params);
-        // × 1/√2: FL's per-voice levels are Vol·cos/sin((1 + pan)π/4) and LYNX's channel gains √2·cos/sin (§4)
-        const auto master = (float) (std::pow (10.0, 4.8 * params[0] - 1.8) * 0.70710678);
-        struct Source
+        readSettings();
+        applyEffectSettings();
+        while (n > 0)
         {
-            SakuraInstrument& self;
-            std::array<float, 2> tick() noexcept { return self.tickVoices(); }
-        } source { *this };
-        // render at 48 kHz into the stereo stream, resampled to the host, then the 32 Hz HP and master gain
-        for (int i = 0; i < n; ++i)
-        {
-            float l = 0.0f, r = 0.0f;
-            renderResampled (source, fs, hostRate, position, &l, &r, 1, 1.0f, 1.0f, previous, current);
-            left[i] += (float) outHp[0].tick (l) * master * gl;
-            right[i] += (float) outHp[1].tick (r) * master * gr;
+            const auto block = std::min (n, maxHostBlock);
+            renderBlock (left, right, block, gl, gr);
+            left += block;
+            right += block;
+            n -= block;
         }
     }
 
 private:
     double p (int i) const noexcept { return i >= 0 && i < sakuraParamCount ? (double) params[(std::size_t) i] : 0.0; }
 
-    // modulation matrix, destination 1 (level, §1.9): m = Σ amount²·source over the slots routed to it (sign by
-    // "invert"); with no routed slot on destinations 0/1, m = 1. Level = 10^(2m)·0.05 (m = 1 → ×5, the default).
-    // Static sources only: velocity (vel/127) and note number × 0.0125; mod wheel, pressure, bend and the release
-    // gate are 0 while the note is held; EG and LFO shapes were not decoded (their slots count as 0).
-    double matrixLevel (float velocity, int key) const noexcept
+    void readSettings() noexcept
     {
-        bool routed = false;
-        double m = 0.0;
-        for (int slot = 0; slot < 8; ++slot)
-        {
-            const auto source = (int) p (79 + 4 * slot), destination = (int) p (82 + 4 * slot);
-            if (source == 0 || (destination != 0 && destination != 1))
-                continue;
-            routed = true;
-            if (destination != 1)
-                continue;
-            const auto amount = p (80 + 4 * slot) * p (80 + 4 * slot) * (p (81 + 4 * slot) != 0.0 ? -1.0 : 1.0);
-            const auto value = source == 6 ? std::clamp ((double) velocity, 0.0, 1.0) : source == 7 ? key * 0.0125 : 0.0;
-            m += amount * value;
-        }
-        if (! routed)
-            m = 1.0;
-        return std::pow (10.0, 2.0 * m) * 0.05 / 5.0;
+        SakuraSettings s;
+        if (! mailbox.read (s))
+            return;
+        params = s.params;
+        bpm = s.bpm;
+        computeStatic();
     }
 
     static void damping (double a, double offsetSquared, double& nearC, double& farC) noexcept
     {
-        const auto base = std::pow (50.0, 2.57 - 0.8995 * a * a * a) * (2.0 / 44100.0);
+        const auto base = std::pow (50.0, 2.57 - 0.8995 * std::pow (a, 3.0)) * (2.0 / 44100.0);
         nearC = std::min (1.0, base);
         farC = std::min (1.0, (1.0 - offsetSquared) * base);
     }
 
-    void start (SakuraVoice& v, int key) noexcept
+    void start (SakuraVoice& v, int key, float velocity) noexcept
     {
         static constexpr double octaves[7] { 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0 };
         auto f = 220.0 * std::pow (2.0, (key - 57) / 12.0) * octaves[std::clamp ((int) (p (113) * 6.0), 0, 6)];
@@ -274,7 +1030,8 @@ private:
         l2 = std::clamp (l2, 1, maxLength);
         v.lens[0] = v.lens[1] = l1;
         v.lens[2] = v.lens[3] = l2;
-        const auto rate = 48000.0 / l1;
+        v.freq = f;
+        v.rate = 48000.0 / l1;
         v.kdc[0] = v.kdc[1] = 1.0 / l1;
         v.kdc[2] = v.kdc[3] = 1.0 / l2;
         const auto ratio = p (19);
@@ -291,8 +1048,9 @@ private:
             std::fill (v.combs[(std::size_t) c].begin(), v.combs[(std::size_t) c].begin() + v.combLen[c], 0.0f);
             v.combPtr[c] = 0;
         }
-        const auto tune = std::clamp ((int) (p (1) * 198.0 - 99.0), -99, 99) * 0.01;
-        v.step = f / rate * std::pow (2.0, tune / 12.0);
+        v.velocity = std::clamp ((double) velocity, 0.0, 1.0);
+        v.eg.begin (egAttack, egDecay, egSustain);
+        v.egValue = v.lfoValue = v.gate = 0.0;
         v.seed = 0;
         v.hold = 0.0;
         v.s[0] = v.s[1] = v.s[2] = 0.0;
@@ -301,112 +1059,237 @@ private:
         v.prev[0] = v.prev[1] = v.cur[0] = v.cur[1] = 0.0;
         v.env = v.elapsed = 0.0;
         v.release = -1.0;
-        v.lowCut.design (std::pow (2.0, 9.3 * clamp01 (p (24)) + 5.0), 10.0 * p (25) + 1.0, fs);
-        v.blockLeft = 0;
+        v.lowCut.design (std::pow (2.0, 9.3 * clamp01 (p (24)) + 5.0), loCutQ, fs); // state cleared; retuned per chunk
         v.key = key;
         v.active = true;
-        for (int j = 0; j < 4; ++j)
-            v.fbs[j] = v.gains[j] = 0.0;
-        computeStatic();
-        for (int j = 0; j < 4; ++j)
-            v.fbs[j] = feedback[j], v.gains[j] = mixGain[j];
     }
 
-    // per-block static values (no modulation)
+    // values that depend only on the parameters
     void computeStatic() noexcept
     {
-        saturation = 100.0 * std::pow (p (16), 6.0);
-        threshold = 0.996 * std::pow (1.0 - clamp01 (p (32)), 0.25);
+        auto sign = [this] (int i) { return p (i) != 0.0 ? -1.0 : 1.0; };
+        saturation = 100.0 * std::pow (std::pow (p (16), 2.0), 3.0);
         drive = 1000.0 * std::pow (p (33), 4.0);
-        noiseA = (1.0 - p (31)) * (1.0 - p (31));
+        noiseA = std::pow (1.0 - p (31), 2.0);
         noiseB = p (31);
-        ladderG = clamp01 (p (29) * p (29));
-        ladderR = std::max (-10.0 * p (30) * (1.0 - ladderG), -4.0);
-        double c0, c1, c2, c3;
-        damping (clamp01 (p (9)), p (8) * p (8), c0, c1);
-        damping (clamp01 (p (14)), p (13) * p (13), c2, c3);
-        const auto sh1 = -0.5 * p (10) * p (10), sh2 = -0.5 * p (15) * p (15);
-        coef[0] = c0, coef[1] = c1, coef[2] = c2, coef[3] = c3;
-        sharp[0] = (1.0 - c0) * sh1, sharp[1] = (1.0 - c1) * sh1, sharp[2] = (1.0 - c2) * sh2, sharp[3] = (1.0 - c3) * sh2;
-        const auto fb1 = std::pow (clamp01 (p (6)), 0.05) * (p (7) != 0.0 ? -1.0 : 1.0);
-        const auto fb2 = std::pow (clamp01 (p (11)), 0.05) * (p (12) != 0.0 ? -1.0 : 1.0);
-        feedback[0] = feedback[1] = fb1;
-        feedback[2] = feedback[3] = fb2;
-        const auto sep = clamp01 (p (18)), sep2 = clamp01 (1.0 - p (18));
-        const auto g1 = (1.0 - p (17)) * 100.0 * 0.05, g2 = p (17) * 100.0 * 0.05;
-        mixGain[0] = (1.0 - sep) * g1, mixGain[1] = sep * g1, mixGain[2] = (1.0 - sep2) * g2, mixGain[3] = sep2 * g2;
-        combFeedback = std::sqrt (std::max (0.0, p (20))) * (p (21) != 0.0 ? -1.0 : 1.0);
-        combLevel = p (22) * (p (23) != 0.0 ? -1.0 : 1.0);
-        auto f32 = [] (double x) { return (double) (float) x; };
+        loCutQ = 10.0 * p (25) + 1.0;
+        sharp1 = -0.5 * std::pow (p (10), 2.0);
+        sharp2 = -0.5 * std::pow (p (15), 2.0);
+        combFeedback = std::sqrt (std::max (0.0, p (20))) * sign (21);
+        combLevel = p (22) * sign (23);
+        tune = std::clamp ((int) (p (1) * 198.0 - 99.0), -99, 99) * 0.01;
         attack = f32 (35.0 * std::pow (p (2), 5.0) + 0.001);
         decay = f32 (50.0 * std::pow (p (3), 5.0) + 0.001);
-        sustain = f32 (p (4) * p (4));
+        sustain = f32 (std::pow (p (4), 2.0));
         releaseTime = f32 (10.0 * std::pow (p (5), 5.0) + 0.1);
-        hcAttack = f32 (p (26) * p (26) * 0.5);
-        hcDecay = p (27);
-        hcSustain = p (28) * p (28);
+        egAttack = f32 (10.0 * std::pow (p (34), 3.0) + 0.001);
+        egDecay = f32 (50.0 * std::pow (p (35), 5.0) + 0.001);
+        egSustain = f32 (std::pow (p (36), 2.0));
+        egRelease = f32 (50.0 * std::pow (p (37), 5.0) + 0.1);
+        lfoRate = f32 (10.0 * std::pow (p (38), 3.0) + 0.01);
+        // matrix slots (REA_rodada29 §1.3): source, amount² (negated by "invert"), destination
+        for (int k = 0; k < 8; ++k)
+        {
+            slotSource[k] = (int) p (79 + 4 * k);
+            slotAmount[k] = std::pow (p (80 + 4 * k), 2.0) * sign (81 + 4 * k);
+            slotDestination[k] = (int) p (82 + 4 * k);
+        }
     }
 
-    // one 48 kHz sample of all voices
-    std::array<float, 2> tickVoices() noexcept
+    void applyEffectSettings() noexcept
     {
-        double outL = 0.0, outR = 0.0;
+        const bool on[4] { std::any_of (params.begin() + 55, params.begin() + 63, [] (float x) { return x != 0.0f; }),
+                           params[70] != 0.0f, params[74] != 0.0f, params[63] != 0.0f };
+        // an effect switched on starts from its freshly built state
+        if (on[0] && ! fxOn[0])
+            resonators.restart (hostRate);
+        if (on[1] && ! fxOn[1])
+            chorus.restart();
+        if (on[2] && ! fxOn[2])
+            reverb.restart();
+        if (on[3] && ! fxOn[3])
+            delay.restart();
+        for (int i = 0; i < 4; ++i)
+            fxOn[i] = on[i];
+        if (on[0])
+            resonators.setParameters (params);
+        if (on[1])
+            chorus.setParameters (params, hostRate);
+        if (on[2])
+            reverb.setParameters (params);
+        if (on[3])
+            delay.setParameters (params, hostRate, bpm);
+    }
+
+    // one host block: LFO step, the 48 kHz samples it needs (chunks of ≤ 48 per voice), resampling, HP, effects
+    void renderBlock (float* left, float* right, int n, float gl, float gr) noexcept
+    {
+        // global LFO (§1.2): value at the start of the host block, then the phase advances by n host samples
+        lfoValue = f32 (std::cos (2.0 * pi * lfoPhase));
+        lfoPhase = f32 (lfoPhase + f32 (n * lfoRate) * (1.0 / hostRate));
+        if (lfoPhase > 1.0)
+            lfoPhase = f32 (lfoPhase - 1.0);
+
+        const auto step = fs / hostRate;
+        int needed = 0;
+        {
+            auto pos = position;
+            for (int i = 0; i < n; ++i)
+            {
+                while (pos >= 1.0)
+                    ++needed, pos -= 1.0;
+                pos += step;
+            }
+        }
+        std::fill (voiceL.begin(), voiceL.begin() + needed, 0.0);
+        std::fill (voiceR.begin(), voiceR.begin() + needed, 0.0);
+        bool sounding = false;
         for (auto& v : voices)
             if (v.active)
+                renderVoice (v, needed), sounding = true;
+
+        int k = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            while (position >= 1.0)
+            {
+                previous = current;
+                current = { (float) voiceL[(std::size_t) k], (float) voiceR[(std::size_t) k] };
+                ++k;
+                position -= 1.0;
+            }
+            const auto f = (float) position;
+            hostL[(std::size_t) i] = outHp[0].tick (previous[0] + (current[0] - previous[0]) * f);
+            hostR[(std::size_t) i] = outHp[1].tick (previous[1] + (current[1] - previous[1]) * f);
+            position += step;
+        }
+
+        if (fxOn[0])
+            resonators.process (hostL.data(), hostR.data(), n);
+        if (fxOn[1])
+            chorus.process (hostL.data(), hostR.data(), n);
+        if (fxOn[2])
+            reverb.process (hostL.data(), hostR.data(), n);
+        if (fxOn[3])
+            delay.process (hostL.data(), hostR.data(), n);
+
+        // × 1/√2: FL's per-voice levels are Vol·cos/sin((1 + pan)π/4) and LYNX's channel gains √2·cos/sin (§4)
+        const auto master = std::pow (10.0, 4.8 * p (0) - 1.8) * 0.70710678;
+        double peak = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto l = hostL[(std::size_t) i] * master, r = hostR[(std::size_t) i] * master;
+            peak = std::max (peak, std::max (std::abs (l), std::abs (r)));
+            left[i] += (float) l * gl;
+            right[i] += (float) r * gr;
+        }
+        quietSamples = sounding || peak > 1e-6 ? 0 : std::min (quietSamples + n, 1 << 30);
+    }
+
+    void renderVoice (SakuraVoice& v, int count) noexcept
+    {
+        for (int done = 0; done < count;)
+        {
+            const auto n = std::min (48, count - done);
+            if (! chunkLaws (v, n))
+            {
+                v.active = false;
+                return;
+            }
+            for (int i = 0; i < n; ++i)
             {
                 const auto [l, r] = tickVoice (v);
-                outL += l;
-                outR += r;
+                voiceL[(std::size_t) (done + i)] += l;
+                voiceR[(std::size_t) (done + i)] += r;
             }
-        return { (float) outL, (float) outR };
+            done += n;
+        }
+    }
+
+    // laws re-evaluated per internal chunk of n samples (REA_rodada29 §1.3), in the engine's order; false when the
+    // release has run out (the voice ends)
+    bool chunkLaws (SakuraVoice& v, int n) noexcept
+    {
+        // matrix sources: 1 EG, 2 LFO × depth, 3 mod wheel, 4 pitch bend, 5 pressure (no MIDI CC routing: 0),
+        // 6 velocity, 7 note × 0.0125, 8 release gate
+        double src[9] { 0.0, v.egValue, v.lfoValue, 0.0, 0.0, 0.0, v.velocity, v.key * 0.0125, v.gate };
+        auto mod = [&] (int d) noexcept
+        {
+            double total = 0.0;
+            bool routed = false;
+            for (int k = 0; k < 8; ++k)
+            {
+                if (slotDestination[k] != d || slotSource[k] == 0)
+                    continue;
+                routed = true;
+                total += slotAmount[k] * (slotSource[k] >= 1 && slotSource[k] <= 8 ? src[slotSource[k]] : 0.0);
+            }
+            return (d == 0 || d == 1) && ! routed ? 1.0 : total;
+        };
+        // pitch (destination 3) is evaluated before the EG/LFO update: it uses the previous chunk's values
+        const auto m3 = mod (3);
+        v.step = v.freq / v.rate * std::pow (2.0, tune / 12.0 + m3 / 6.0);
+        v.egValue = src[1] = v.eg.tick (n);
+        v.lfoValue = src[2] = mod (0) * lfoValue;
+        v.threshold = 0.996 * std::pow (1.0 - clamp01 (p (32) + mod (14)), 0.25);
+        const auto hcAttack = f32 (std::pow (clamp01 (mod (6) + p (26)), 2.0) * 0.5);
+        const auto hcDecay = clamp01 (mod (7) + p (27));
+        const auto hcSustain = std::pow (p (28), 2.0);
+        v.ladderG = clamp01 (std::pow (mod (5) * 0.5 + p (29), 2.0));
+        v.ladderR = std::max (-10.0 * p (30) * (1.0 - v.ladderG), -4.0);
+        v.lowCut.retune (std::pow (2.0, 9.3 * clamp01 (mod (4) * 0.5 + p (24)) + 5.0), loCutQ, fs); // keeps its state
+        const auto a1 = clamp01 (mod (11) + mod (13) + p (9)), a2 = clamp01 (mod (12) + mod (13) + p (14));
+        damping (a1, std::pow (p (8), 2.0), v.coef[0], v.coef[1]);
+        damping (a2, std::pow (p (13), 2.0), v.coef[2], v.coef[3]);
+        v.sharp[0] = (1.0 - v.coef[0]) * sharp1, v.sharp[1] = (1.0 - v.coef[1]) * sharp1;
+        v.sharp[2] = (1.0 - v.coef[2]) * sharp2, v.sharp[3] = (1.0 - v.coef[3]) * sharp2;
+        const auto fb1 = std::pow (clamp01 (mod (10) + mod (8) + p (6)), 0.05) * (p (7) != 0.0 ? -1.0 : 1.0);
+        const auto fb2 = std::pow (clamp01 (mod (10) + mod (9) + p (11)), 0.05) * (p (12) != 0.0 ? -1.0 : 1.0);
+        v.fbTarget[0] = v.fbTarget[1] = fb1;
+        v.fbTarget[2] = v.fbTarget[3] = fb2;
+        const auto sep = clamp01 (mod (2) + p (18)), sep2 = clamp01 (mod (2) + 1.0 - p (18));
+        const auto level = std::pow (10.0, 2.0 * mod (1)) * 0.05;
+        const auto g1 = (1.0 - p (17)) * level, g2 = p (17) * level;
+        v.gainTarget[0] = (1.0 - sep) * g1, v.gainTarget[1] = sep * g1;
+        v.gainTarget[2] = (1.0 - sep2) * g2, v.gainTarget[3] = sep2 * g2;
+        if (v.release < 0.0)
+        {
+            if (hcAttack < v.elapsed)
+                v.hcRate = 0.0002 / (3.0 * std::pow (hcDecay, 3.0) + 0.001), v.hcTarget = hcSustain;
+            else
+                v.hcTarget = 1.0, v.hcRate = hcAttack >= 0.001 ? 0.0002 / hcAttack : 1.0;
+            if (attack <= v.elapsed)
+                v.envTarget = sustain, v.envRate = 8.82 / (decay * 48000.0);
+            else
+                v.envTarget = 5.0, v.envRate = 4.658742368e-06 / attack;
+        }
+        else
+        {
+            v.hcRate = 0.002;
+            v.hcTarget = 0.0;
+            if (releaseTime < v.release)
+                return false;
+            v.envTarget = 0.0;
+            v.envRate = 8.82 / (releaseTime * 48000.0);
+            v.release += n * 2.0833333333333333e-05;
+        }
+        for (int j = 0; j < 4; ++j) // the smoothed values restart from their targets at each chunk
+            v.fbs[j] = v.fbTarget[j], v.gains[j] = v.gainTarget[j];
+        v.elapsed += n * 2.0833333333333333e-05;
+        return true;
     }
 
     std::array<double, 2> tickVoice (SakuraVoice& v) noexcept
     {
-        constexpr double blockSeconds = 48.0 / 48000.0;
-        if (v.blockLeft <= 0) // 48-sample control block: envelope targets and smoothed values reset
-        {
-            v.blockLeft = 48;
-            computeStatic();
-            if (v.release < 0.0)
-            {
-                if (hcAttack < v.elapsed)
-                    v.hcRate = 0.0002 / (3.0 * hcDecay * hcDecay * hcDecay + 0.001), v.hcTarget = hcSustain;
-                else
-                    v.hcTarget = 1.0, v.hcRate = hcAttack >= 0.001 ? 0.0002 / hcAttack : 1.0;
-                if (attack <= v.elapsed)
-                    v.envTarget = sustain, v.envRate = 8.82 / (decay * 48000.0);
-                else
-                    v.envTarget = 5.0, v.envRate = 4.658742368e-06 / attack;
-            }
-            else
-            {
-                v.hcRate = 0.002;
-                v.hcTarget = 0.0;
-                if (releaseTime < v.release)
-                {
-                    v.active = false;
-                    return { 0.0, 0.0 };
-                }
-                v.envTarget = 0.0;
-                v.envRate = 8.82 / (releaseTime * 48000.0);
-                v.release += blockSeconds;
-            }
-            for (int j = 0; j < 4; ++j)
-                v.fbs[j] = feedback[j], v.gains[j] = mixGain[j];
-            v.elapsed += blockSeconds;
-        }
-        --v.blockLeft;
-
         // exciter: sample-and-hold noise / click → Lo-Cut → 4-pole Hi-Cut with envelope, resonance and drive
         const auto x = v.seed * (1.0 / 4294967296.0);
         v.seed = lcg (lcg (lcg (lcg (v.seed))));
-        if (x > threshold)
+        if (x > v.threshold)
             v.hold = x;
         const auto y = v.lowCut.tick (noiseA * v.hold + noiseB);
         v.hiCutEnv += (v.hcTarget - v.hiCutEnv) * v.hcRate;
-        const auto c = ladderG * v.hiCutEnv;
-        v.s[0] += ((ladderR * v.z4 + y) - v.s[0]) * c;
+        const auto c = v.ladderG * v.hiCutEnv;
+        v.s[0] += ((v.ladderR * v.z4 + y) - v.s[0]) * c;
         v.s[1] += (v.s[0] - v.s[1]) * c;
         v.s[2] += (v.s[1] - v.s[2]) * c;
         const auto w = v.z4 + (v.s[2] - v.z4) * c;
@@ -435,8 +1318,8 @@ private:
                 auto& line = v.loops[(std::size_t) j];
                 const auto r = (double) line[(std::size_t) v.ptr[j]];
                 rr[j] = r;
-                v.slow[j] += ((sharp[j] * v.z[j] + r) - v.slow[j]) * coef[j];
-                const auto vv = v.z[j] + (v.slow[j] - v.z[j]) * coef[j];
+                v.slow[j] += ((v.sharp[j] * v.z[j] + r) - v.slow[j]) * v.coef[j];
+                const auto vv = v.z[j] + (v.slow[j] - v.z[j]) * v.coef[j];
                 v.z[j] = vv / (vv * vv * saturation + 1.0);
                 line[(std::size_t) v.ptr[j]] = (float) (v.fbs[j] * v.z[j] + d[j]);
                 ++v.ptr[j];
@@ -456,28 +1339,39 @@ private:
             ++v.combPtr[1];
             for (int j = 0; j < 4; ++j)
             {
-                v.fbs[j] += (feedback[j] - v.fbs[j]) * 0.05;
-                v.gains[j] += (mixGain[j] - v.gains[j]) * 0.001;
+                v.fbs[j] += (v.fbTarget[j] - v.fbs[j]) * 0.05;
+                v.gains[j] += (v.gainTarget[j] - v.gains[j]) * 0.001;
             }
         }
-        const auto outL = ((v.cur[0] - v.prev[0]) * v.acc + v.prev[0]) * v.env * v.level;
-        const auto outR = ((v.cur[1] - v.prev[1]) * v.acc + v.prev[1]) * v.env * v.level;
+        const auto outL = ((v.cur[0] - v.prev[0]) * v.acc + v.prev[0]) * v.env;
+        const auto outR = ((v.cur[1] - v.prev[1]) * v.acc + v.prev[1]) * v.env;
         v.env = std::min (1.0, (v.envTarget - v.env) * v.envRate + v.env);
         return { outL, outR };
     }
 
-    Mailbox<SakuraParams> mailbox;
+    Mailbox<SakuraSettings> mailbox;
     SakuraParams params {};
+    double bpm = 0.0;
     std::array<SakuraVoice, maxVoices> voices {};
     int nextSteal = 0;
     double hostRate = 48000.0, position = 1.0;
+    int maxHostBlock = 4096, quietSamples = 0;
     std::array<float, 2> previous {}, current {};
+    std::vector<double> voiceL, voiceR, hostL, hostR;
     HighPass outHp[2];
-    // static per-block values
-    double saturation = 0.0, threshold = 1.0, drive = 0.0, noiseA = 1.0, noiseB = 0.0, ladderG = 0.0, ladderR = 0.0;
-    double coef[4] {}, sharp[4] {}, feedback[4] {}, mixGain[4] {};
-    double combFeedback = 0.0, combLevel = 0.0;
-    double attack = 0.001, decay = 0.001, sustain = 1.0, releaseTime = 0.1, hcAttack = 0.0, hcDecay = 0.0, hcSustain = 0.0;
+    double lfoPhase = 0.0, lfoValue = 1.0;
+    SakuraResonators resonators;
+    SakuraChorus chorus;
+    SakuraReverb reverb;
+    SakuraDelay delay;
+    bool fxOn[4] {};
+    // values that depend only on the parameters
+    double saturation = 0.0, drive = 0.0, noiseA = 1.0, noiseB = 0.0, loCutQ = 1.0, sharp1 = 0.0, sharp2 = 0.0;
+    double combFeedback = 0.0, combLevel = 0.0, tune = 0.0;
+    double attack = 0.001, decay = 0.001, sustain = 1.0, releaseTime = 0.1;
+    double egAttack = 0.001, egDecay = 0.001, egSustain = 0.0, egRelease = 0.1, lfoRate = 0.01;
+    int slotSource[8] {}, slotDestination[8] {};
+    double slotAmount[8] {};
 };
 
 // ---------------------------------------------------------------------------
