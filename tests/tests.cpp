@@ -3201,6 +3201,136 @@ TEST (note_edit_selection_operations)
     CHECK (q.notes.size() == before - 2);
 }
 
+TEST (note_edit_quick_operations)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+
+    // split: only strictly inside; the tail is appended and does not slide again
+    lynx::Pattern p;
+    p.notes = { { 0, 4 * step, 0, 60 } };
+    p.notes[0].slide = true;
+    CHECK (ne::split (p, 0, 0) == -1 && ne::split (p, 0, 4 * step) == -1);
+    CHECK (ne::split (p, 0, step) == 1 && p.notes[0].length == step && p.notes[1].start == step && p.notes[1].length == 3 * step
+           && ! p.notes[1].slide);
+
+    // chop to grid: a 2.5-step note from half a step becomes 3 pieces cut on the step lines
+    lynx::Pattern c;
+    c.notes = { { step / 2, step * 5 / 2, 0, 60 }, { 0, step, 1, 50 } };
+    const auto pieces = ne::chop (c, { 0, 1 }, step);
+    CHECK (pieces.size() == 4 && c.notes.size() == 4);
+    CHECK (c.notes[0].length == step / 2 && c.notes[2].start == step && c.notes[2].length == step && c.notes[3].start == 2 * step
+           && c.notes[3].length == step);
+
+    // join: touching and overlapping notes of the same key and channel merge; others stay
+    lynx::Pattern j;
+    j.notes = { { 0, step, 0, 60 }, { step, step, 0, 60 }, { step * 3 / 2, step * 2, 0, 60 }, { 5 * step, step, 0, 60 },
+                { step, step, 0, 62 }, { step, step, 1, 60 } };
+    CHECK (ne::join (j, { 0, 1, 2, 3, 4, 5 }) == 2 && j.notes.size() == 4);
+    CHECK (j.notes[0].start == 0 && j.notes[0].length == step * 7 / 2);
+
+    // legato: each note reaches the next start (a chord ends together); the last keeps its length
+    lynx::Pattern l;
+    l.notes = { { 0, 10, 0, 60 }, { 0, 10, 0, 64 }, { step, 10, 0, 62 }, { 3 * step, 10, 0, 65 }, { step, 10, 1, 40 } };
+    ne::legato (l, { 0, 1, 2, 3, 4 });
+    CHECK (l.notes[0].length == step && l.notes[1].length == step && l.notes[2].length == 2 * step && l.notes[3].length == 10
+           && l.notes[4].length == 10);
+
+    // shrink to grid and full quantise (start and end)
+    ne::shrinkToGrid (l, { 3 }, step / 2);
+    CHECK (l.notes[3].length == step / 2);
+    lynx::Pattern q;
+    q.notes = { { 10, step - 30, 0, 60 }, { step + 100, 20, 0, 60 } };
+    ne::quantizeFull (q, { 0, 1 }, step);
+    CHECK (q.notes[0].start == 0 && q.notes[0].length == step && q.notes[1].start == step && q.notes[1].length == step);
+
+    // rotate inside the bar, wrapping
+    lynx::Pattern r;
+    r.notes = { { 0, step, 0, 60 }, { bar - step, step, 0, 62 } };
+    ne::rotate (r, { 0, 1 }, step, bar, 1);
+    CHECK (r.notes[0].start == step && r.notes[1].start == 0);
+    ne::rotate (r, { 0, 1 }, step, bar, -2);
+    CHECK (r.notes[0].start == bar - step && r.notes[1].start == bar - 2 * step);
+    r.notes.push_back ({ bar + step, step, 0, 64 }); // alone in the second bar: wraps inside that bar
+    ne::rotate (r, { 2 }, step, bar, -2);
+    CHECK (r.notes[2].start == 2 * bar - step);
+}
+
+TEST (note_edit_grid_and_time_text)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+    CHECK (ne::snapDown (250.0, step) == step && ne::snapDown (-1.0, step) == -step && ne::snapDown (17.9, 1) == 17);
+    CHECK (ne::snapNearest (1000.0, { 400, 1100, 980 }, 50.0, step) == 980);
+    CHECK (ne::snapNearest (1000.0, { 400 }, 50.0, step) == 960); // too far: falls back to the grid
+    // screen grid: 24 px per step shows steps; zoomed out it climbs to beats, bars and bar multiples
+    CHECK (ne::screenStep (24.0 / step, bar) == step);
+    CHECK (ne::screenStep (96.0 / bar, bar) == lynx::ppq);
+    CHECK (ne::screenStep (8.0 / bar, bar) == 2 * bar);
+    CHECK (ne::screenStep (200.0 / step, bar) == step / 4);
+
+    CHECK (ne::formatTime (0, 4) == "1:1:0" && ne::formatTime (bar + 5 * step + 7, 4) == "2:6:7");
+    CHECK (ne::formatTime (step * 2, 4, true) == "0:2:0");
+    std::int64_t t = 0;
+    CHECK (ne::parseTime ("2:6:7", 4, t) && t == bar + 5 * step + 7);
+    CHECK (ne::parseTime ("3", 4, t) && t == 2 * bar);
+    CHECK (ne::parseTime ("0:2:0", 4, t, true) && t == 2 * step);
+    CHECK (! ne::parseTime ("0:1:0", 4, t) && ! ne::parseTime ("1:17:0", 4, t) && ! ne::parseTime ("1:1:240", 4, t)
+           && ! ne::parseTime ("a", 4, t) && ! ne::parseTime ("", 4, t));
+    CHECK (ne::parseTime ("1:12:0", 3, t) && ! ne::parseTime ("1:13:0", 3, t)); // 3/4: 12 steps per bar
+}
+
+TEST (playlist_clip_edges_and_time_selection)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t beat = lynx::ppq;
+
+    // left-edge trim: content stays in place, cannot reveal what is before the content's start
+    lynx::Clip c { 0, 0, 4 * beat, 4 * beat, beat };
+    ne::trimStart (c, 5 * beat, beat);
+    CHECK (c.start == 5 * beat && c.offset == 2 * beat && c.length == 3 * beat);
+    ne::trimStart (c, 0, beat);
+    CHECK (c.start == 3 * beat && c.offset == 0 && c.length == 5 * beat);
+    ne::trimStart (c, 100 * beat, beat);
+    CHECK (c.length == beat && c.end() == 8 * beat);
+
+    // slip moves the content, not the clip
+    lynx::Clip s { 0, 0, 0, 2 * beat, beat };
+    ne::slip (s, beat / 2);
+    CHECK (s.offset == beat / 2 && s.start == 0 && s.length == 2 * beat);
+    ne::slip (s, beat);
+    CHECK (s.offset == 0);
+    ne::slip (s, -3 * beat);
+    CHECK (s.offset == 3 * beat);
+
+    // insert / delete time across all tracks, markers included
+    std::vector<lynx::Clip> clips { { 0, 0, 0, 2 * beat, 0 }, { 0, 1, 4 * beat, 2 * beat, 0 }, { 0, 2, beat, 6 * beat, 0 } };
+    std::vector<lynx::Marker> markers { { 5 * beat, "A" }, { beat / 2, "B" } };
+    ne::insertTime (clips, markers, 2 * beat, 4 * beat);
+    CHECK (clips[0].start == 0 && clips[1].start == 8 * beat && clips[2].start == beat && markers[0].tick == 9 * beat
+           && markers[1].tick == beat / 2);
+
+    std::vector<lynx::Clip> d { { 0, 0, 0, 2 * beat, 0 },             // before: kept
+                                { 0, 1, 3 * beat, beat, 0 },          // inside: deleted
+                                { 0, 2, beat, 6 * beat, 0 },          // spans the cut: head + tail
+                                { 0, 3, 3 * beat, 4 * beat, 0 },      // tail outside: trimmed and moved
+                                { 0, 4, 8 * beat, beat, 0 } };        // after: moved left
+    std::vector<lynx::Marker> dm { { 3 * beat, "in" }, { 9 * beat, "after" } };
+    ne::deleteTime (d, dm, 2 * beat, 5 * beat);
+    CHECK (d.size() == 5);
+    CHECK (d[1].track == 2 && d[1].start == beat && d[1].length == beat);
+    CHECK (d[2].track == 2 && d[2].start == 2 * beat && d[2].offset == 4 * beat && d[2].length == 2 * beat);
+    CHECK (d[3].track == 3 && d[3].start == 2 * beat && d[3].offset == 2 * beat && d[3].length == 2 * beat);
+    CHECK (d[4].start == 5 * beat && dm.size() == 1 && dm[0].tick == 6 * beat);
+
+    // time selection: overlapping clips; Ctrl+B repeats what starts inside it after itself
+    std::vector<lynx::Clip> r { { 0, 0, 0, beat, 0 }, { 0, 1, beat, 2 * beat, 0 }, { 0, 0, 4 * beat, beat, 0 } };
+    CHECK ((ne::clipsInTime (r, beat / 2, 2 * beat) == std::vector<int> { 0, 1 }));
+    const auto added = ne::repeatTime (r, 0, 4 * beat, {});
+    CHECK (added.size() == 2 && r[3].start == 4 * beat && r[4].start == 5 * beat && r[4].track == 1);
+    CHECK (ne::repeatTime (r, 0, 2 * beat, { 2 }).size() == 1 && r.back().start == 6 * beat);
+}
+
 TEST (recorder_builds_notes_in_pattern_and_song_mode)
 {
     auto song = lynx::Song::makeDefault();

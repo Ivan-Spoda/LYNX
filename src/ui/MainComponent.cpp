@@ -12,6 +12,7 @@
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
+#include "ui/EditorTools.h"
 #include "ui/ExportDialog.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
@@ -301,6 +302,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         b->setFlat (true);
 
     ui::installSliderContract();
+    addAndMakeVisible (gridBox); // global grid (editors)
     engine.addChangeListener (this);
     setTypingPiano (typingPiano);
     refreshToolbar();
@@ -380,13 +382,17 @@ void MainComponent::resized()
         toolbar.removeFromLeft (8);
     };
 
+    // below ~1440 px the file buttons (also in the File menu and on Ctrl+N/O/S/R) and the panel icons
+    // (F5..F9, View menu) give their room to the editors' grid and the pattern group
+    const auto wide = getWidth() >= 1440;
     place (logo, h, 6);
     divide();
-    place (newButton, h);
-    place (openButton, h);
-    place (saveButton, h);
-    place (exportButton, h, 0);
-    divide();
+    place (newButton, wide ? h : 100000, wide ? 2 : 0);
+    place (openButton, wide ? h : 100000, wide ? 2 : 0);
+    place (saveButton, wide ? h : 100000, wide ? 2 : 0);
+    place (exportButton, wide ? h : 100000, 0);
+    if (wide)
+        divide();
     place (playButton, h + 6);
     place (stopButton, h + 6);
     place (recordButton, h + 6, 0);
@@ -412,10 +418,16 @@ void MainComponent::resized()
     place (swingLabel, showSwing ? swingWidth : 100000, 4);
     place (swingSlider, showSwing ? h : 100000, 0);
 
+    // global grid of the Piano Roll and Playlist (shown whole or not at all)
+    const auto showGrid = toolbar.getWidth() >= 15 + 130 + 132; // before the scope, which yields its room
+    if (showGrid)
+        divide();
+    place (gridBox, showGrid ? 130 : 100000, 0);
+
     // panel shortcuts (F5..F9), pinned next to the settings button when there is room
     {
         const auto panelsWidth = workspace::panelCount * (h - 4) + 15;
-        const auto showPanels = toolbar.getWidth() >= panelsWidth + 132;
+        const auto showPanels = wide && toolbar.getWidth() >= panelsWidth + 132;
         auto right = showPanels ? toolbar.removeFromRight (panelsWidth) : juce::Rectangle<int>();
 
         if (showPanels)
@@ -583,6 +595,7 @@ juce::String MainComponent::shortcutText (const char* actionId) const
 void MainComponent::setTypingPiano (bool on)
 {
     typingPiano = on;
+    EditorGlobals::get().typingPiano = on; // the editors' single-letter tool keys only work while it is off
     typingPianoButton.setToggleState (on, juce::dontSendNotification);
     typingPianoButton.setTooltip ((on ? tr ("Typing keyboard as a piano: on (Z..M and Q..P play the selected channels)")
                                       : tr ("Typing keyboard as a piano: off (letter and number keys are shortcuts)"))

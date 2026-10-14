@@ -8,23 +8,27 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
+#include "ui/EditorTools.h"
 
 namespace lynx
 {
 // FL-style Playlist (arrangement): tracks vertically, time horizontally.
-//  - left click on empty space "paints" the current pattern (and starts dragging it)
-//  - dragging a clip moves it (time and track); the right edge changes the length
+//  - a tool strip (Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen, Slip); with the Pencil:
+//    left click on empty space "paints" the current source (and starts dragging it), dragging a clip moves
+//    it (time and track), its edges trim it without moving the content (Shift+edge too), and the fade
+//    handles of audio clips set the fades
+//  - every tool: right click deletes (dragging deletes several; press and hold on empty space = Knife),
+//    Ctrl+drag selects (Ctrl+click adds), Alt ignores the grid; Shift+drag on a clip drags a copy;
+//    Alt+Shift+drag inside a clip slips its content
 //  - clicking a clip makes its pattern the current one; double click opens it in the Channel Rack
-//  - right click deletes (dragging deletes several)
-//  - clicking the ruler sets the playback position and enables Song mode
+//  - ruler: click sets the playback position (Song mode); Ctrl+drag makes a time selection (it loops and
+//    selects the clips it touches); a double click clears it
 //  - dragging an audio file into the Playlist creates an audio clip
-//  - Alt disables snap (1 beat); wheel scrolls, Shift+wheel horizontal, Ctrl+wheel zoom
-//  - Ctrl+drag selects with a rectangle; Ctrl+click adds; selected clips move together;
-//    Shift+drag on a clip drags a copy
-//  - dragging on the ruler marks the loop region; right click on the ruler disables the loop
+//  - wheel scrolls, Shift+wheel horizontal, Ctrl+wheel zoom
 //  - right click on a clip's name strip opens its menu (split, make unique, etc.)
 //  - track header: LED mutes the track; right click renames
-//  - keys (via handleKey): Delete, Ctrl+A/C/X/V/B, Esc
+//  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V, Ctrl+B (repeats the
+//    time selection when there is one), Ctrl+Ins / Ctrl+Del insert / remove the time selection, Esc
 class PlaylistComponent final : public juce::Component,
                                 public juce::FileDragAndDropTarget,
                                 public juce::DragAndDropTarget,
@@ -67,15 +71,21 @@ public:
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;
 
+    // For snapshots: the tool in use and a time selection over [fromBar, toBar).
+    void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }
+    void setTimeSelectionForSnapshot (int fromBar, int toBar);
+
     static constexpr int headerWidth = 96;
+    static constexpr int toolbarHeight = 28;
     static constexpr int timelineHeight = 24;
+    static constexpr int headerHeight = toolbarHeight + timelineHeight;
     static constexpr int trackHeight = 38;
     static constexpr int scrollBarSize = 12;
 
     static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
-    enum class Drag { none, move, resize, erase, seek, loop, select, fadeIn, fadeOut };
+    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -87,8 +97,18 @@ private:
     int trackToY (int track) const;
     int yToTrack (int y) const;
     int numTracks() const;
+    std::int64_t gridTicks() const; // the grid step in use (resolving Screen / Nearest note)
     std::int64_t snap (double tick, bool enabled) const;
+    std::vector<std::int64_t> snapCandidates() const;
     int clipAt (int x, int y, bool& onRightEdge) const;
+    int clipAt (int x, int y, bool& onRightEdge, bool& onLeftEdge) const;
+    Clip makeBrushClip (int track, std::int64_t start) const; // what a click on empty space places
+    void cutWithKnife (juce::Point<int> from, juce::Point<int> to, bool snapOn);
+    void zoomToTicks (double from, double to);
+    void zoomOut (int anchorX);
+    void setTimeSelection (std::int64_t from, std::int64_t to); // also selects the clips it touches
+    void insertTimeSelection();
+    void deleteTimeSelection();
     // fade handle of an audio clip under the mouse: 1 = fade-in, 2 = fade-out, 0 = none
     int fadeHandleAt (int clip, juce::Point<int> p) const;
     void updateScrollBars();
@@ -119,7 +139,8 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox arrangementBox;
-    juce::ComboBox snapBox; // Playlist grid (default: 1 beat)
+    juce::ComboBox snapBox; // "Follow global grid" or this editor's own grid
+    ToolStrip tools { true };
 
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px per 4-beat bar
     double scrollTicks = 0.0;
@@ -132,6 +153,12 @@ private:
     std::vector<int> selection, selectionBefore;
     juce::Rectangle<int> rubberBand;
     std::int64_t loopAnchor = 0;
+    juce::ModifierKeys downMods;
+    bool startedOnEmpty = false, erasedSomething = false, holdExpired = false, muteTarget = false;
+    std::vector<int> touchedClips;
+    std::int64_t nextPaintTick = 0;
+    Clip paintClip;
+    juce::Point<int> knifeFrom, knifeTo;
     std::size_t knownClipCount = 0;
     static inline std::vector<Clip> clipboard;
     std::int64_t grabOffset = 0;

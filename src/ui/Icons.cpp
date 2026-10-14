@@ -375,6 +375,54 @@ Shape make (Icon icon)
             st.addCentredArc (12.0f, 12.0f, 5.5f, 5.5f, 0.0f, -pi * 0.35f, pi * 0.35f, true);
             st.addCentredArc (12.0f, 12.0f, 8.5f, 8.5f, 0.0f, -pi * 0.3f, pi * 0.3f, true);
             break;
+        // --- editor tools ---
+        case Icon::brush: // a round brush: handle, ferrule and a filled tip
+        {
+            line (st, 19.0f, 4.5f, 12.5f, 11.0f);
+            juce::Path ferrule;
+            polyline (ferrule, { { 11.0f, 10.0f }, { 14.0f, 13.0f }, { 12.5f, 14.5f }, { 9.5f, 11.5f } }, true);
+            st.addPath (ferrule);
+            juce::Path tip;
+            tip.startNewSubPath (9.0f, 12.5f);
+            tip.quadraticTo (4.5f, 13.0f, 4.5f, 19.5f);
+            tip.quadraticTo (11.0f, 19.5f, 11.5f, 15.0f);
+            tip.closeSubPath();
+            fi.addPath (tip);
+            break;
+        }
+        case Icon::knife: // a blade with a handle, cutting down to the left
+        {
+            juce::Path blade;
+            polyline (blade, { { 4.5f, 19.5f }, { 13.5f, 8.0f }, { 17.0f, 11.5f } }, true);
+            st.addPath (blade.createPathWithRoundedCorners (1.0f));
+            line (st, 15.5f, 9.5f, 20.0f, 5.0f);
+            break;
+        }
+        case Icon::zoom: // magnifier with a plus
+            st.addEllipse (4.5f, 4.5f, 11.0f, 11.0f);
+            line (st, 14.0f, 14.0f, 19.5f, 19.5f);
+            line (st, 10.0f, 7.5f, 10.0f, 12.5f);
+            line (st, 7.5f, 10.0f, 12.5f, 10.0f);
+            break;
+        case Icon::listen: // headphones
+        {
+            juce::Path band;
+            band.addCentredArc (12.0f, 13.0f, 7.5f, 7.5f, 0.0f, -pi * 0.5f, pi * 0.5f, true);
+            st.addPath (band);
+            st.addRoundedRectangle (4.5f, 13.0f, 3.5f, 6.5f, 1.2f);
+            st.addRoundedRectangle (16.0f, 13.0f, 3.5f, 6.5f, 1.2f);
+            break;
+        }
+        case Icon::slip: // a fixed frame with content arrows inside
+            st.addRoundedRectangle (4.5f, 6.0f, 15.0f, 12.0f, 1.5f);
+            polyline (st, { { 9.5f, 9.5f }, { 7.0f, 12.0f }, { 9.5f, 14.5f } });
+            polyline (st, { { 14.5f, 9.5f }, { 17.0f, 12.0f }, { 14.5f, 14.5f } });
+            line (st, 7.5f, 12.0f, 16.5f, 12.0f);
+            break;
+        case Icon::ghost: // two overlapping notes, the back one hollow
+            st.addRoundedRectangle (4.5f, 6.0f, 11.0f, 5.0f, 1.5f);
+            fi.addRoundedRectangle (8.5f, 13.0f, 11.0f, 5.0f, 1.5f);
+            break;
     }
 
     return s;

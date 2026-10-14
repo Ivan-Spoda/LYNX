@@ -16,7 +16,8 @@ enum class Icon
     folder, file, audioFile, plugin, preset, project,
     draw, erase, select, slice, mute, link, magnet, scissors,
     // workspace and control contract
-    detach, dock, restore, keyboard, automate, rightClick, tap
+    detach, dock, restore, keyboard, automate, rightClick, tap,
+    brush, knife, zoom, listen, slip, ghost // editor tools (Piano Roll / Playlist)
 };
 
 namespace icons
