@@ -20,6 +20,9 @@ public:
     std::function<void (const juce::File&)> onOpenProject;
 
     void resized() override;
+
+    // --snapshot: waits (up to timeoutMs) for the folder listing so the tree is drawn filled
+    void waitForListing (int timeoutMs);
     void paint (juce::Graphics& g) override;
 
     static constexpr const char* dragDescription = "lynx-arquivo";

@@ -4,6 +4,7 @@
 #include <map>
 
 #include "engine/Text.h"
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -14,7 +15,7 @@ class PluginWindow final : public juce::DocumentWindow
 {
 public:
     PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title)
-        : DocumentWindow (title, theme::window, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
           owner (std::move (keepAlive)),
           plugin (p)
     {
@@ -64,7 +65,7 @@ class ScanThread final : public juce::ThreadWithProgressWindow
 {
 public:
     ScanThread (AudioEngine& e, std::function<void (int)> done)
-        : juce::ThreadWithProgressWindow (utf8 ("Scanning for plugins (VST3 and CLAP)..."), true, true),
+        : juce::ThreadWithProgressWindow (tr ("Scanning for plugins (VST3 and CLAP)..."), true, true),
           engine (e),
           onDone (std::move (done))
     {
@@ -141,13 +142,13 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
     }
 
     if (added == 0)
-        menu.addItem (utf8 ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
+        menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
 
     menu.addSeparator();
-    menu.addItem (utf8 ("Scan for plugins (VST3 and CLAP)..."), [&engine] {
+    menu.addItem (tr ("Scan for plugins (VST3 and CLAP)..."), [&engine] {
         scanPluginsWithProgress (engine, [] (int found) {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
-                                                    juce::String (found) + utf8 (" new plugin(s) found."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugins"),
+                                                    tr ("{0} new plugin(s) found.", { juce::String (found) }));
         });
     });
 }
