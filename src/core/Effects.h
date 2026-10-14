@@ -80,6 +80,8 @@ public:
     // Sidechain input for the next process(): another track's output, or nullptr if that track is
     // silent. Only called when the slot has a sidechain.
     virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}
+    // Second side input (Vocodex carrier), same rules; only called when the slot has `sidechain2`.
+    virtual void setSidechain2 (const float* /*left*/, const float* /*right*/) noexcept {}
     // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };

@@ -148,6 +148,8 @@ juce::var effectToVar (const EffectSlot& slot)
         e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
     if (slot.sidechain >= 0)
         e->setProperty ("sidechain", slot.sidechain);
+    if (slot.sidechain2 >= 0)
+        e->setProperty ("sidechain2", slot.sidechain2);
 
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
@@ -207,6 +209,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
 
     slot.plugin = pluginFromVar (e["plugin"]);
     slot.sidechain = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain", -1));
+    slot.sidechain2 = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain2", -1));
 
     if (auto* branches = e["branches"].getArray())
         for (const auto& b : *branches)

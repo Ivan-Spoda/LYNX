@@ -289,6 +289,7 @@ struct EffectSlot
     float mix = 1.0f;       // slot dry/wet (as in FL): 0 = dry signal only
     PluginRef plugin;                             // used when kind == plugin
     int sidechain = -1;   // mixer track whose (post-fader) output feeds the effect's detector (compressor); −1 = none
+    int sidechain2 = -1;  // second side input (vocoder carrier); −1 = none
     std::vector<EffectBranch> branches;           // used when kind == parallel
     std::vector<EffectLink> links;                // used when kind == parallel
 };

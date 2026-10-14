@@ -1300,6 +1300,15 @@ public:
 
         const auto listen = std::clamp ((int) std::lround (p[2] * 2.0f), 0, 2);
         const auto swap = p[3] > 0.5f, hold = p[12] > 0.5f;
+        // "Side inputs" (Vocodex): modulator = side input 1 or the own input, carrier = side input 2 or the own
+        // input, each in mono (L + R)/2; a configured side input that is silent gives silence
+        const auto separate = p[16] > 0.5f;
+        const float* modL = useSide[0] ? side[0][0] : nullptr;
+        const float* modR = useSide[0] ? side[0][1] : nullptr;
+        const float* carL = useSide[1] ? side[1][0] : nullptr;
+        const float* carR = useSide[1] ? side[1][1] : nullptr;
+        const bool modSide = useSide[0], carSide = useSide[1];
+        useSide = { false, false };
         const auto gMod = listen == 0 ? 1.0 : listen == 1 ? 0.0 : vocoder::curve11 (p[13] * 160.0 / 128.0);
         const auto gCar = listen == 1 ? 1.0 : listen == 0 ? 0.0 : vocoder::curve11 (p[14] * 160.0 / 128.0);
         const auto wet = listen == 2 ? vocoder::curve11 (p[15] * 160.0 / 128.0) : 0.0;
@@ -1307,7 +1316,13 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            const double mod = swap ? r[i] : l[i], car = swap ? l[i] : r[i];
+            double mod = swap ? r[i] : l[i], car = swap ? l[i] : r[i];
+            if (separate)
+            {
+                const auto own = 0.5 * ((double) l[i] + r[i]);
+                mod = modSide ? (modL != nullptr ? 0.5 * ((double) modL[i] + modR[i]) : 0.0) : own;
+                car = carSide ? (carL != nullptr ? 0.5 * ((double) carL[i] + carR[i]) : 0.0) : own;
+            }
             double sum = 0.0;
             if (gain > 0.0)
                 for (int k = 0; k < activeBands; ++k)
@@ -1335,7 +1350,22 @@ public:
         }
     }
 
+    void setSidechain (const float* left, const float* right) noexcept override
+    {
+        side[0] = { left, right };
+        useSide[0] = true;
+    }
+
+    void setSidechain2 (const float* left, const float* right) noexcept override
+    {
+        side[1] = { left, right };
+        useSide[1] = true;
+    }
+
 private:
+    std::array<std::array<const float*, 2>, 2> side {};
+    std::array<bool, 2> useSide { false, false };
+
     struct Band
     {
         std::array<Biquad, 3> analysis, synthesis;
@@ -2026,7 +2056,7 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
                                                        { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulator", 0.0f },
-                                                       { "Carrier", 0.0f }, { "Wet", 0.8f } } };
+                                                       { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo pitchCorrectInfo = [] {
         EffectInfo info { "Pitch correction", { { "Speed", 1.0f }, { "Fine", 0.5f }, { "Bypass all", 0.0f }, { "A freq.", 0.5f },
                                                      { "Range", 0.4f } } };

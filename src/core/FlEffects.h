@@ -68,6 +68,16 @@ struct LovePhilterConversion
 // compressor's detector; REA_rodada22 §1)
 std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_t>& state);
 
+// Vocodex as the LYNX vocoder in "side inputs" mode (REA_rodada20 §4.2): ModIn/CarIn index the track's inputs
+// list (0 = own input; CarIn < 0 = internal synth carrier)
+struct VocodexConversion
+{
+    EffectSlot slot;
+    int modIn = 0, carIn = 0;
+    std::vector<std::string> notes;
+};
+std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& state);
+
 std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 
 // Current value (0..1) of output `output` of a static controller (Fruity X-Y Controller, Control

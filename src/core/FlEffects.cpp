@@ -798,6 +798,91 @@ std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std
 }
 } // namespace
 
+std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& d)
+{
+    // REA_rodada20 §4.2.1: u32 version (8 in the high word), 13 maps (i32 version, i32, i32 n, n × 24 B, 20 B),
+    // 20 × i32 parameters, a 0x24-byte block (hold mode, order, unison, bands, draft, ModIn, CarIn, 8 × u8)
+    if (d.size() < 4)
+        return std::nullopt;
+    auto version = (std::uint32_t) i32At (d, 0);
+    if (version > 0xffff)
+        version >>= 16;
+    if (version < 5 || version > 8) // older blocks are laid out differently
+        return std::nullopt;
+    std::size_t pos = 4;
+    std::vector<std::pair<double, double>> distribution; // map 8: (x, y)
+    for (int m = 0; m < 13; ++m)
+    {
+        if (pos + 12 > d.size())
+            return std::nullopt;
+        const auto n = i32At (d, pos + 8);
+        if (n < 0 || n > 10000 || pos + 12 + (std::size_t) n * 24 + 20 > d.size())
+            return std::nullopt;
+        double x = 0.0;
+        for (int k = 0; k < n; ++k)
+        {
+            double dx = 0.0, y = 0.0;
+            std::memcpy (&dx, d.data() + pos + 12 + 24 * (std::size_t) k, 8);
+            std::memcpy (&y, d.data() + pos + 20 + 24 * (std::size_t) k, 8);
+            x += dx;
+            if (m == 8 && std::isfinite (y))
+                distribution.emplace_back (x, y);
+        }
+        pos += 12 + (std::size_t) n * 24 + 20;
+    }
+    if (pos + 20 * 4 + 0x24 > d.size())
+        return std::nullopt;
+    auto tag = [&] (int t) { return i32At (d, pos + 4 * (std::size_t) t); };
+    const auto block = pos + 20 * 4;
+    const auto order = i32At (d, block + 4), bands = i32At (d, block + 12);
+    VocodexConversion out;
+    out.modIn = i32At (d, block + 20);
+    out.carIn = i32At (d, block + 24);
+    if (d[block + 28] != 0) // L-R encoding: modulator left, carrier right (the Fruity Vocoder's layout)
+        out.modIn = out.carIn = 0;
+
+    auto slot = makeEffectSlot (EffectKind::vocoder);
+    slot.params[16] = d[block + 28] != 0 ? 0.0f : 1.0f; // separate inputs, unless L-R encoded
+    slot.params[0] = (float) std::clamp (std::round (std::log2 (std::clamp (bands, 5, 100) / 4.0)), 0.0, 5.0) / 5.0f; // nearest of 4…128
+    slot.params[1] = (float) (std::clamp (order, 1, 3) - 1) / 2.0f;
+    slot.params[2] = 1.0f; // mix
+    // band range from map 8 (§4.2.3): y → Hz through the inverse of FL's scale (a = 65.41 Hz, b = 21 096 Hz, p = 3/28)
+    auto hz = [] (double y) {
+        constexpr double a = 65.40639, b = 21096.16, p = 3.0 / 28.0;
+        const auto f = y < p ? a * y / p : a + (b - a) * a / b * (std::exp ((y - p) / (1.0 - p) * std::log (1.0 + b / a)) - 1.0);
+        return std::clamp (f, 20.0, 20000.0);
+    };
+    double lo = 0.1429, hi = 0.9918;
+    if (! distribution.empty())
+    {
+        lo = hi = distribution.front().second;
+        for (const auto& [x, y] : distribution)
+            lo = std::min (lo, y), hi = std::max (hi, y);
+    }
+    auto freqParam = [] (double f) { return (float) clamp01 (std::log (1.0 + (f - 10.0) / 159.9) / std::log (101.0)); };
+    slot.params[4] = freqParam (hz (lo));
+    slot.params[5] = freqParam (hz (hi));
+    slot.params[6] = 1.0f; // log spacing
+    slot.params[8] = (float) clamp01 ((std::clamp (tag (17), -1200, 1200) + 1200) / 2400.0); // Mod pitch → carrier bank shift
+    // attack/release (×map 6/7 at ×1): (501^(v/10000) − 1)·2 ms and ·4 ms; the LYNX vocoder starts at 10 ms
+    slot.params[10] = (float) clamp01 (((std::pow (501.0, std::clamp (tag (9), 0, 10000) / 10000.0) - 1.0) * 2.0 - 10.0) / 990.0);
+    slot.params[11] = (float) clamp01 (((std::pow (501.0, std::clamp (tag (11), 0, 10000) / 10000.0) - 1.0) * 4.0 - 10.0) / 990.0);
+    // pass-through curve11(v/12800) and wet (7^(v/1000) − 1)/6 onto the vocoder's curve11(1.25·p)
+    auto curve11Param = [] (double gain) { return (float) clamp01 (std::log (1.0 + 10.0 * std::max (0.0, gain)) / std::log (11.0) / 1.25); };
+    auto curve11 = [] (double x) { return (std::pow (11.0, x) - 1.0) / 10.0; };
+    slot.params[13] = curve11Param (curve11 (std::clamp (tag (2), 0, 16000) / 12800.0));
+    slot.params[14] = curve11Param (curve11 (std::clamp (tag (4), 0, 16000) / 12800.0));
+    slot.params[15] = curve11Param ((std::pow (7.0, std::clamp (tag (0), 0, 2000) / 1000.0) - 1.0) / 6.0);
+    if (out.carIn < 0)
+    {
+        slot.params[2] = 0.0f; // the internal Sytrus carrier is not available: only the modulator passes
+        out.notes.push_back ("Vocodex: internal carrier synth not available (modulator only)");
+    }
+    out.notes.push_back ("Vocodex: approximated by the vocoder (band filters, noise, HP/LP, Soundgoodizer and unison differ)");
+    out.slot = slot;
+    return out;
+}
+
 std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_t>& state)
 {
     EffectSlot slot;
@@ -812,6 +897,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder")
         return fruityVocoder (state, nullptr);
+    if (pluginName == "Vocodex")
+        if (auto v = vocodexEffect (state))
+            return v->slot;
     if (pluginName == "Pitcher")
     {
         // "SSLF" + u32 + "1RTP" + 33 f32 (raw parameters 0…32) + 12 B note mask + f32 (REA_rodada19 §6)

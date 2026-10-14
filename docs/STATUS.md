@@ -125,7 +125,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   (control slot → live link); curve type 5; pan law and pan-LFO tension.
 - Pitcher: the pitch detector (YIN) and shifter (two heads) are LYNX's own; Formant/Gender, Harmonize and MIDI
   modes are not implemented.
-- Vocodex: needs two side inputs or its internal synth — left out.
+- Vocodex: becomes the LYNX vocoder with two side inputs (modulator/carrier from ModIn/CarIn); its band filters,
+  per-band maps, carrier noise, HP/LP, Soundgoodizer and unison differ, the output level is not calibrated against FL,
+  and the internal Sytrus carrier (CarIn = "---") is not available (only the modulator passes).
 - Squeeze, Vintage Phaser: approximations.
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
@@ -162,4 +164,4 @@ Confirmed empirically on the demo projects:
 
 ## Open items
 - ASIO (Steinberg SDK licensing).
-- Ogun's per-partial decay, Vocodex, Harmor's per-partial resonance and image synthesis.
+- Ogun's per-partial decay, Vocodex's internal carrier synth, Harmor's per-partial resonance and image synthesis.

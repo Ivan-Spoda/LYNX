@@ -1057,6 +1057,7 @@ TEST (flp_real_files)
 
     // demo Gross Beat: the volume slot becomes the gate (those using an envelope slot get steps < 1)
     {
+        int vocodexes = 0, vocodexSides = 0;
         int lovePhilterLinks[4] {}; // live links: cutoff, resonance; inside containers: cutoff, resonance
         int embeddedZones = 0, lovePhilters = 0, lovePhiltersRead = 0, lovePhiltersConverted = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
@@ -1104,6 +1105,13 @@ TEST (flp_real_files)
                                     }
                                 }
                             }
+                            else if (slot.plugin == "Vocodex")
+                            {
+                                const auto v = lynx::vocodexEffect (slot.state);
+                                CHECK (v.has_value());
+                                vocodexes += v.has_value();
+                                vocodexSides += v && (v->modIn > 0 || v->carIn > 0);
+                            }
                             else if (slot.plugin == "Effector")
                                 effectors += lynx::effectFromFl (slot.plugin, slot.state).has_value();
                             else if (slot.plugin == "Patcher")
@@ -1138,6 +1146,8 @@ TEST (flp_real_files)
         std::printf ("  Gross Beat: %d slots, %d with gate; Effector: %d converted; Love Philter: %d, %d read\n", gates, shaped, effectors,
                      lovePhilters, lovePhiltersRead);
         CHECK (lovePhiltersRead == lovePhilters && lovePhiltersConverted == lovePhilters);
+        std::printf ("  Vocodex: %d converted, %d with side inputs\n", vocodexes, vocodexSides);
+        CHECK (vocodexes >= 9);
         std::printf ("  Love Philter live links: %d cutoff, %d resonance; in multi-unit containers: %d cutoff, %d resonance\n",
                      lovePhilterLinks[0], lovePhilterLinks[1], lovePhilterLinks[2], lovePhilterLinks[3]);
         CHECK (lovePhilterLinks[2] + lovePhilterLinks[3] > 0);
@@ -4728,6 +4738,47 @@ TEST (rhythm_gain_and_autopan)
     ap->process (a.data(), b.data(), 24000, pan.params, 120.0);
     CHECK (std::abs (a[0] - 1.0f) < 1e-3f && std::abs (b[0] - 1.0f) < 1e-3f);
     CHECK (a[6000] < 0.01f && std::abs (b[6000] - 1.0f) < 1e-3f); // ¼ cycle later: fully right
+}
+
+TEST (vocoder_side_inputs_split_modulator_and_carrier)
+{
+    // "Side inputs" mode (Vocodex): modulator from side input 1 (noise in the first half), carrier from side input 2
+    // (saw), own input silent → the output follows the side modulator; with input 1 silent, the output is silent
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::vocoder);
+    slot.params[16] = 1.0f;
+    auto fx = lynx::makeEffect (lynx::EffectKind::vocoder);
+    fx->prepare (48000.0);
+    std::vector<float> modL (48000), car (48000), l (48000, 0.0f), r (48000, 0.0f);
+    std::uint32_t seed = 1;
+    for (std::size_t i = 0; i < modL.size(); ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        modL[i] = i < 24000 ? ((float) (seed >> 8) / 16777216.0f - 0.5f) : 0.0f;
+        car[i] = (float) (2.0 * std::fmod ((double) i * 220.0 / 48000.0, 1.0) - 1.0) * 0.5f;
+    }
+    for (int done = 0; done < 48000; done += 480)
+    {
+        fx->setSidechain (modL.data() + done, modL.data() + done);
+        fx->setSidechain2 (car.data() + done, car.data() + done);
+        fx->process (l.data() + done, r.data() + done, 480, slot.params, 120.0);
+    }
+    auto rms = [&] (int from, int to) {
+        double e = 0.0;
+        for (int i = from; i < to; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        return std::sqrt (e / (to - from));
+    };
+    CHECK (rms (6000, 20000) > 0.01);
+    CHECK (rms (40000, 48000) < 0.1 * rms (6000, 20000));
+    // the side modulator configured but silent: nothing comes out (the own input is not used instead)
+    std::vector<float> a (4800, 0.3f), b (4800, 0.3f);
+    for (int done = 0; done < 4800; done += 480)
+    {
+        fx->setSidechain (nullptr, nullptr);
+        fx->setSidechain2 (car.data() + done, car.data() + done);
+        fx->process (a.data() + done, b.data() + done, 480, slot.params, 120.0);
+    }
+    CHECK (std::abs (a[4700]) < 0.05f);
 }
 
 TEST (vocoder_follows_modulator)

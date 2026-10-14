@@ -1234,22 +1234,34 @@ void EffectsPanel::showSlotMenu (int slot)
             menu.addSubMenu ("FL presets", presets);
     }
 
-    // sidechain: another track's output feeds the detector (currently used by the compressor)
-    if ((*slots())[(std::size_t) slot].kind == EffectKind::compressor)
-    {
+    // side inputs: another track's output feeds the compressor's detector, or the vocoder's modulator/carrier
+    const auto kind = (*slots())[(std::size_t) slot].kind;
+    auto sideMenu = [&] (const char* title, bool second) {
         juce::PopupMenu side;
-        const auto current = (*slots())[(std::size_t) slot].sidechain;
-        side.addItem ("None", true, current < 0, [this, slot] {
-            engine.editSong ([t = track, slot] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].sidechain = -1; });
-        });
+        const auto& fx = (*slots())[(std::size_t) slot];
+        const auto current = second ? fx.sidechain2 : fx.sidechain;
+        auto assign = [this, slot, second] (int source) {
+            engine.editSong ([tr = track, slot, second, source] (Song& s) {
+                auto& target = s.mixer[(std::size_t) tr].effects[(std::size_t) slot];
+                (second ? target.sidechain2 : target.sidechain) = source;
+                if (target.kind == EffectKind::vocoder && source >= 0)
+                    target.params[16] = 1.0f; // separate inputs (otherwise L = modulator, R = carrier)
+            });
+        };
+        side.addItem ("None", true, current < 0, [assign] { assign (-1); });
         const auto& song = engine.getSong();
         for (int t = 1; t < (int) song.mixer.size(); ++t)
             if (t != track)
                 side.addItem (juce::String (t) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), true, current == t,
-                              [this, slot, t] {
-                                  engine.editSong ([tr = track, slot, t] (Song& s) { s.mixer[(std::size_t) tr].effects[(std::size_t) slot].sidechain = t; });
-                              });
-        menu.addSubMenu ("Sidechain from", side);
+                              [assign, t] { assign (t); });
+        menu.addSubMenu (title, side);
+    };
+    if (kind == EffectKind::compressor)
+        sideMenu ("Sidechain from", false);
+    if (kind == EffectKind::vocoder)
+    {
+        sideMenu ("Modulator from", false);
+        sideMenu ("Carrier from", true);
     }
     menu.addItem ("Move up", slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });

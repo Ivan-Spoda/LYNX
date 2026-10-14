@@ -1135,6 +1135,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 ++options.report->converted["Fruity Limiter (sidechain)"];
                         }
                 }
+                else if (slot.plugin == "Vocodex")
+                {
+                    // ModIn/CarIn index the same inputs list as the sidechains (REA_rodada22 §1)
+                    if (const auto v = vocodexEffect (slot.state))
+                    {
+                        fx.sidechain = sidechainSource (insert.index, v->modIn);
+                        fx.sidechain2 = sidechainSource (insert.index, v->carIn);
+                        if (options.report != nullptr)
+                            for (const auto& note : v->notes)
+                                ++options.report->droppedEffects[note];
+                    }
+                }
                 else if (slot.plugin == "Fruity Compressor" && slot.state.size() >= 0x24 && fx.kind == EffectKind::compressor)
                 {
                     std::int32_t version = 0, k = 0;

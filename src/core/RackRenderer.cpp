@@ -210,8 +210,9 @@ void RackState::buildMixerGraph()
     std::vector<std::vector<int>> sidechainListeners ((std::size_t) tracks);
     for (int t = 1; t < tracks; ++t)
         for (const auto& fx : song.mixer[(std::size_t) t].effects)
-            if (fx.sidechain > 0 && fx.sidechain < tracks && fx.sidechain != t)
-                sidechainListeners[(std::size_t) fx.sidechain].push_back (t);
+            for (const auto source : { fx.sidechain, fx.sidechain2 })
+                if (source > 0 && source < tracks && source != t)
+                    sidechainListeners[(std::size_t) source].push_back (t);
 
     for (auto t : mixerOrder) // sources before destinations: the depth is already computed
     {
@@ -730,12 +731,20 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
 
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept
 {
-    const auto source = slot.sidechain;
-    if (source < 0 || source == track || source >= (int) state.song.mixer.size())
-        return;
     // the source was already processed in this pass (earlier layer); silent = no signal in the detector
-    const auto active = (std::size_t) source < trackActive.size() && trackActive[(std::size_t) source] != 0;
-    effect.setSidechain (active ? trackBuffer (source, 0) : nullptr, active ? trackBuffer (source, 1) : nullptr);
+    for (const auto second : { false, true })
+    {
+        const auto source = second ? slot.sidechain2 : slot.sidechain;
+        if (source < 0 || source == track || source >= (int) state.song.mixer.size())
+            continue;
+        const auto active = (std::size_t) source < trackActive.size() && trackActive[(std::size_t) source] != 0;
+        const auto* left = active ? trackBuffer (source, 0) : nullptr;
+        const auto* right = active ? trackBuffer (source, 1) : nullptr;
+        if (second)
+            effect.setSidechain2 (left, right);
+        else
+            effect.setSidechain (left, right);
+    }
 }
 
 void RackRenderer::runEffects (const RackState& state, int track, int n) noexcept

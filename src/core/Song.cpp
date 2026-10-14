@@ -248,8 +248,9 @@ std::vector<int> Song::mixerOrder() const
             if (s.target > 0 && s.target < n)
                 next[(std::size_t) t].push_back (s.target);
         for (const auto& fx : mixer[(std::size_t) t].effects)
-            if (fx.sidechain > 0 && fx.sidechain < n && fx.sidechain != t)
-                next[(std::size_t) fx.sidechain].push_back (t);
+            for (const auto source : { fx.sidechain, fx.sidechain2 })
+                if (source > 0 && source < n && source != t)
+                    next[(std::size_t) source].push_back (t);
     }
     for (int t = 1; t < n; ++t)
         for (const auto target : next[(std::size_t) t])
