@@ -1,0 +1,11 @@
+language: Português (Brasil)
+countries: br
+
+# LYNX interface in Brazilian Portuguese (JUCE LocalisedStrings format).
+# One line per string: "English text" = "Texto em português"  (escapes: \n \t \" \\)
+# English is the source language; tools/i18n_keys.py --missing lists strings still untranslated.
+# After editing, run: python3 tools/make_i18n.py  (embeds this file in src/ui/I18nData.h)
+#
+# Glossary: Channel Rack, Piano Roll, Playlist, Mixer and Browser are proper names (not translated);
+# pattern, sample, plugin, preset, insert, send, step, slot, loop, stem, velocity stay as Brazilian
+# producers say them; track = faixa, bar = compasso, clip = clipe, automation = automação.
