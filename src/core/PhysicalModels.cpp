@@ -1,4 +1,5 @@
 #include "core/PhysicalModels.h"
+#include "core/Sha256.h"
 
 #include <algorithm>
 #include <array>
@@ -6,6 +7,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 
 namespace lynx
@@ -783,8 +787,410 @@ private:
     std::array<float, 2> previous {}, current {};
     int silentFor = 0;
 };
+
+// ---------------------------------------------------------------------------
+// BooBass (REA_rodada29 §4): a 6-zone 16-bit multisample compiled into the user's own BooBass_Eng_x64.dll (read at run
+// time, never shipped), attack (16 kHz) crossfaded into a single-cycle loop (16 384-point table), dB-linear envelope,
+// 3-band EQ twice with sin saturation, slew limiter, 4-section low-pass. Monophonic, velocity has no effect.
+
+struct BooBassZone
+{
+    std::vector<float> attack; // with 4 guard samples on each side
+    std::vector<float> loop;   // 16 384 + 8 (4 guards each side)
+    int root = 0;
+    double attackLength = 0.0;
+};
+struct BooBassTables
+{
+    std::array<BooBassZone, 6> zones;
+};
+
+constexpr const char* booBassSha256 = "4e10efcd9f945860911e7cdff9c4065c4f193b58ddffc8304b45add1db51705f";
+
+std::unique_ptr<BooBassTables> loadBooBassTables (const std::string& path)
+{
+    std::ifstream in (path, std::ios::binary);
+    if (! in) // FL-style path on a system with '/' separators (the command-line tools on Linux)
+    {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        in.open (local, std::ios::binary);
+    }
+    if (! in)
+        return nullptr;
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    if (b.size() < 0x1000 || sha256Hex (b.data(), b.size()) != booBassSha256)
+        return nullptr; // only the decoded build
+    auto rd = [&] (std::size_t off, auto& v) { if (off + sizeof (v) <= b.size()) std::memcpy (&v, b.data() + off, sizeof (v)); };
+    std::uint32_t pe = 0;
+    rd (0x3c, pe);
+    std::uint16_t sections = 0, optSize = 0;
+    rd (pe + 6, sections);
+    rd (pe + 20, optSize);
+    std::uint64_t base = 0;
+    rd (pe + 48, base);
+    struct Section { std::uint32_t va, vs, ro, rs; };
+    std::vector<Section> secs;
+    for (std::uint32_t i = 0, o = pe + 24 + optSize; i < sections; ++i, o += 40)
+    {
+        Section s {};
+        rd (o + 8, s.vs);
+        rd (o + 12, s.va);
+        rd (o + 16, s.rs);
+        rd (o + 20, s.ro);
+        secs.push_back (s);
+    }
+    auto offset = [&] (std::uint64_t va) -> std::size_t {
+        const auto r = va - base;
+        for (const auto& s : secs)
+            if (r >= s.va && r < (std::uint64_t) s.va + std::max (s.vs, s.rs))
+                return (std::size_t) (s.ro + r - s.va);
+        return b.size();
+    };
+    auto u64 = [&] (std::uint64_t va) { std::uint64_t v = 0; rd (offset (va), v); return v; };
+    auto i32 = [&] (std::uint64_t va) { std::int32_t v = 0; rd (offset (va), v); return v; };
+    auto f32 = [&] (std::uint64_t va) { float v = 0; rd (offset (va), v); return v; };
+    auto samples = [&] (std::uint64_t descriptor) {
+        const auto data = u64 (descriptor), bytes = (std::size_t) std::max (0, i32 (u64 (descriptor + 8)));
+        std::vector<std::int16_t> s (bytes / 2);
+        const auto at = offset (data);
+        if (at + bytes > b.size() || s.empty())
+            return std::vector<std::int16_t> {};
+        std::memcpy (s.data(), b.data() + at, s.size() * 2);
+        return s;
+    };
+    auto tables = std::make_unique<BooBassTables>();
+    for (int z = 0; z < 6; ++z)
+    {
+        auto& zone = tables->zones[(std::size_t) z];
+        const auto att = samples (base + 0xCB920 + 16 * (std::uint64_t) z), loop = samples (base + 0xCB980 + 16 * (std::uint64_t) z);
+        if (att.empty() || loop.empty())
+            return nullptr;
+        zone.root = i32 (base + 0xCB9E0 + 4 * (std::uint64_t) z);
+        const auto attDb = f32 (base + 0xCB9F8 + 4 * (std::uint64_t) z), loopDb = f32 (base + 0xCBA10 + 4 * (std::uint64_t) z);
+        const auto ga = (float) std::pow (10.0, -attDb / 20.0);
+        zone.attack.assign (att.size() + 8, 0.0f);
+        for (std::size_t i = 0; i < att.size(); ++i)
+            zone.attack[i + 4] = att[i] * 3.0517578e-05f * ga * 0.5f;
+        for (int g = 0; g < 4; ++g)
+            zone.attack[(std::size_t) g] = zone.attack[4], zone.attack[att.size() + 4 + (std::size_t) g] = zone.attack[att.size() + 3];
+        zone.attackLength = (double) att.size() - 1.0;
+        // one loop cycle → 16 384-point periodic Catmull-Rom table, × −0.5·10^(−dB/20)
+        const auto n = (int) loop.size();
+        std::vector<float> src ((std::size_t) n);
+        for (int i = 0; i < n; ++i)
+            src[(std::size_t) i] = loop[(std::size_t) i] * 3.0517578e-05f;
+        const auto gl = (float) std::pow (10.0, -loopDb / 20.0);
+        zone.loop.assign (16384 + 8, 0.0f);
+        const auto step = (float) n * 6.1035156e-05f;
+        float pos = 0.0f;
+        for (int k = 0; k < 16384; ++k)
+        {
+            const auto i = (int) pos;
+            const auto t = pos - (float) i;
+            auto at = [&] (int j) { return src[(std::size_t) (((j % n) + n) % n)]; };
+            const auto xm1 = at (i - 1), x0 = at (i), x1 = at (i + 1), x2 = at (i + 2);
+            const auto A = (x2 - xm1) * 0.5f + (x0 - x1) * 1.5f;
+            const auto B = ((xm1 - x0 * 2.5f) + x1) + x1 - x2 * 0.5f;
+            const auto C = (x1 - xm1) * 0.5f;
+            zone.loop[(std::size_t) k + 4] = -((((A * t + B) * t + C) * t + x0) * gl) * 0.5f;
+            pos += step;
+        }
+        for (int g = 0; g < 4; ++g)
+            zone.loop[(std::size_t) g] = zone.loop[16384 + (std::size_t) g], zone.loop[16388 + (std::size_t) g] = zone.loop[4 + (std::size_t) g];
+    }
+    static constexpr int roots[6] { 1100, 1600, 2300, 2800, 3500, 4000 };
+    for (int z = 0; z < 6; ++z)
+        if (tables->zones[(std::size_t) z].root != roots[z])
+            return nullptr;
+    return tables;
+}
+
+class BooBassInstrument final : public Instrument
+{
+public:
+    ~BooBassInstrument() override
+    {
+        delete incoming.exchange (nullptr);
+        delete retired.exchange (nullptr);
+        delete tables;
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        fs = sr;
+        k44 = (float) (44100.0 / sr);
+        fs44 = (float) (sr / 44100.0);
+        c1 = k44 * 0.025f;
+        c2 = k44 * 0.155f;
+        inc0 = 267955.84f / (float) sr;
+        rate0 = 16000.0f / (float) sr;
+        gainCurve[0] = gainCurve[1] = 0.0f;
+        for (int i = 2; i < 48; ++i)
+            gainCurve[(std::size_t) i] = (float) std::pow (10.0, (i - 48) / 20.0);
+        gainCurve[48] = 1.0f;
+        gainCurve[49] = 0.0f;
+        const auto w = k44 * 0.18f;
+        pb = (w * 3.6f - w * 1.6f * w) - 1.0f;
+        pa = (pb + 1.0f) * 0.5f;
+        active = false;
+    }
+
+    void configure (const ChannelDef& channel, double) noexcept override
+    {
+        delete retired.exchange (nullptr);
+        if (channel.samplePath != loadedPath)
+        {
+            loadedPath = channel.samplePath;
+            if (auto t = loadBooBassTables (loadedPath))
+                delete incoming.exchange (t.release());
+        }
+        std::array<float, 3> k { 32767, 32767, 32767 };
+        for (std::size_t i = 0; i < 3 && i < channel.modelParams.size(); ++i)
+            k[i] = channel.modelParams[i];
+        knobs.write (k);
+    }
+
+    void noteOn (int key, float) noexcept override
+    {
+        take();
+        if (tables == nullptr)
+            return;
+        // FL's final pitch = 100·(key − 60) cents (round 28 §4); p = trunc(pitch + 2400) cents above 16.35 Hz.
+        // Keys below 36 (p < 0) read outside FL's table: LYNX clamps p at 0 (its own choice)
+        currentKey = key;
+        const auto p = std::clamp ((int) (100.0f * (key - 60) + 2400.0f), 0, 9600);
+        int z = 5;
+        while (z >= 0 && tables->zones[(std::size_t) z].root > p)
+            --z;
+        if (z < 0)
+            z = 0;
+        else if (z <= 4 && std::abs (tables->zones[(std::size_t) z + 1].root - p) < std::abs (tables->zones[(std::size_t) z].root - p))
+            ++z;
+        zone = z;
+        pitch = p;
+        setPitch (p);
+        attackPos = 0.0f;
+        phase = 0.0f;
+        const auto decay = (int) ((float) fs / ((float) std::pow (2.0, p / 1200.0) * 4.088681640625f));
+        const auto sustain = (int) ((float) (tables->zones[(std::size_t) z].attack.size() - 8 << 4) * fs44);
+        const auto release = (int) ((float) fs / 55.0f);
+        counts = { 0, decay, sustain, release, -1 };
+        targets = { 1.0f, 0.9375f, 0.0f, 0.0f, 0.0f };
+        slopes = { 0.0f, decay ? (0.9375f - 1.0f) / decay : 0.0f, sustain ? (0.0f - 0.9375f) / sustain : 0.0f, 0.0f, 0.0f };
+        stage = 0;
+        countdown = counts[0];
+        slope = slopes[0];
+        value = 0.0f;
+        gainsNow = gainsTarget;
+        active = true;
+    }
+
+    void noteOff (int key) noexcept override
+    {
+        if (active && key == currentKey && stage < 3)
+        {
+            const auto r = counts[3];
+            countdown = r;
+            if (r)
+                slope = -value / (float) r;
+            stage = 3;
+        }
+    }
+
+    void allNotesOff() noexcept override { active = false; }
+    bool idle() const noexcept override { return ! active; }
+
+    void render (float* left, float* right, int n, float gl, float gr) noexcept override
+    {
+        take();
+        if (! active || tables == nullptr)
+            return;
+        // FL's per-voice level Vol·cos/sin((1 + pan)π/4) vs LYNX's √2·cos/sin channel gains (REA_rodada28 §4)
+        gl *= 0.70710678f;
+        gr *= 0.70710678f;
+        for (int done = 0; done < n && active; done += 256)
+        {
+            const auto m = std::min (256, n - done);
+            renderBlock (m);
+            for (int i = 0; i < m; ++i)
+            {
+                left[done + i] += block[(std::size_t) i] * gl;
+                right[done + i] += block[(std::size_t) i] * gr;
+            }
+        }
+    }
+
+private:
+    void take() noexcept
+    {
+        std::array<float, 3> k;
+        if (knobs.read (k))
+            setKnobs (k);
+        if (retired.load() == nullptr)
+            if (auto* t = incoming.exchange (nullptr))
+            {
+                retired.store (tables);
+                tables = t;
+                active = false;
+            }
+    }
+
+    void setKnobs (const std::array<float, 3>& k) noexcept
+    {
+        auto x = [&] (int i) { return std::clamp (k[(std::size_t) i], 0.0f, 65535.0f) / 65535.0f; };
+        const auto xb = x (0), xm = x (1), xt = x (2);
+        auto on = [] (float v) { return v >= 0.1f; };
+        gainsTarget[0] = on (xb) ? (float) std::pow (10.0, (xb * 12.0f - 12.0f) / 20.0f) : 0.0f;
+        bassSat = on (xb) ? (float) std::pow (10.0, (xb * 24.0f - 24.0f) / 20.0f) : 0.0f;
+        gainsTarget[1] = on (xm) ? (float) std::pow (10.0, (xm * 10.0f - 10.0f) / 20.0f) : 0.0f;
+        gainsTarget[2] = on (xt) ? (float) std::pow (10.0, (xt * 12.0f - 9.0f) / 20.0f) : 0.0f;
+    }
+
+    void setPitch (int p) noexcept
+    {
+        p = std::min (p, 9600);
+        increment = (float) (std::pow (2.0, p / 1200.0) * inc0);
+        const auto d = p - tables->zones[(std::size_t) zone].root;
+        const auto r = d == 0 ? 1.0f : d > 0 ? (float) std::pow (2.0, d / 1200.0) : (float) (1.0 / std::pow (2.0, -d / 1200.0));
+        rate = r * rate0;
+    }
+
+    void tickEnvelope() noexcept
+    {
+        if (countdown == 0)
+            while (true)
+            {
+                if (stage == 2)
+                {
+                    const auto r = counts[3];
+                    targets[3] = 0.0f;
+                    slopes[3] = r ? -value / (float) r : 0.0f;
+                    stage = 3;
+                    countdown = counts[3];
+                }
+                else
+                {
+                    value = targets[(std::size_t) stage];
+                    ++stage;
+                    countdown = counts[(std::size_t) stage];
+                }
+                slope = slopes[(std::size_t) stage];
+                if (countdown != 0)
+                    break;
+            }
+        --countdown;
+        value += slope;
+    }
+
+    float sample() noexcept
+    {
+        const auto& zn = tables->zones[(std::size_t) zone];
+        auto L = [&] (int i) { return zn.loop[(std::size_t) (i + 4)]; };
+        auto A = [&] (int i) { return zn.attack[(std::size_t) (i + 4)]; };
+        const auto i0 = (int) phase;
+        const auto v0 = L (i0);
+        phase += increment;
+        auto i1 = (int) phase;
+        if (i1 > 0x3fff)
+            phase -= 16384.0f, i1 -= 0x4000;
+        auto x = v0 + (L (i1) - v0) * (phase - (float) i1);
+        float xf = 1.0f;
+        if (attackPos < (float) zn.attackLength)
+        {
+            const auto ia = (int) attackPos;
+            const auto fa = attackPos - (float) ia;
+            const auto a = (A (ia + 1) - A (ia)) * fa + A (ia);
+            attackPos += rate;
+            xf = attackPos / (float) zn.attackLength;
+            x = a + (x - a) * xf;
+        }
+        const auto e = std::clamp (value, 0.0f, 1.0f);
+        const auto ei = (int) (e * 48.0f);
+        x *= (gainCurve[(std::size_t) ei + 1] - gainCurve[(std::size_t) ei]) * (e * 48.0f - (float) ei) + gainCurve[(std::size_t) ei];
+        tickEnvelope();
+        if (x > -5.9604652e-08f && x < 5.9604652e-08f)
+            x = 0.0f;
+        const auto gB = gainsNow[0], gM = gainsNow[1], gT = gainsNow[2];
+        lp[0] = (x - lp[0]) * c1 + lp[0];
+        lp[1] = (x - lp[1]) * c2 + lp[1];
+        const auto y = ((lp[1] - lp[0]) * gM + lp[0] * gB) + (x - lp[1]) * gT;
+        lp[2] = (y - lp[2]) * c1 + lp[2];
+        lp[3] = (y - lp[3]) * c2 + lp[3];
+        auto v = lp[2];
+        if (v < -1.0f)
+            lp[2] = v = -1.0f;
+        else if (v > 1.0f)
+            lp[2] = v = 1.0f;
+        const auto limit = (xf + 0.032812502f) * k44;
+        const auto sat = (float) std::sin (v * 1.5707963267948966);
+        const auto target = ((((sat - v) * bassSat + v) * gB + (lp[3] - v) * gM) + (y - lp[3]) * gT) * 3.0f - slew;
+        slew += std::clamp (target, -limit, limit);
+        return slew;
+    }
+
+    void renderBlock (int n) noexcept
+    {
+        setPitch (pitch);
+        std::array<float, 3> delta {};
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            auto d = gainsTarget[k] - gainsNow[k];
+            if (d > -5.9604652e-08f && d < 5.9604652e-08f)
+                d = 0.0f;
+            else
+            {
+                d /= (float) n;
+                if (d > -5.9604652e-08f && d < 5.9604652e-08f)
+                    d = 0.0f;
+                d *= 16.0f;
+            }
+            delta[k] = d;
+        }
+        auto count = n;
+        for (int i = 0; i < n; ++i)
+        {
+            auto x = sample();
+            if ((count & 15) == 0)
+                for (std::size_t k = 0; k < 3; ++k)
+                    gainsNow[k] += delta[k];
+            --count;
+            if (x > -5.9604652e-08f && x < 5.9604652e-08f)
+                x = 0.0f;
+            for (int s = 0; s < 4; ++s)
+            {
+                const auto ys = (pa * x + pa * postX[(std::size_t) s]) - pb * postY[(std::size_t) s];
+                postX[(std::size_t) s] = x;
+                postY[(std::size_t) s] = ys;
+                x = ys;
+            }
+            block[(std::size_t) i] = x;
+        }
+        if (stage == 4)
+            active = false;
+    }
+
+    std::atomic<BooBassTables*> incoming { nullptr }, retired { nullptr };
+    BooBassTables* tables = nullptr; // audio thread
+    std::string loadedPath;          // configure() side
+    Mailbox<std::array<float, 3>> knobs;
+    double fs = 44100.0;
+    float k44 = 1, fs44 = 1, c1 = 0.025f, c2 = 0.155f, inc0 = 6.0f, rate0 = 0.36f, pa = 0, pb = 0;
+    std::array<float, 50> gainCurve {};
+    std::array<float, 3> gainsTarget {}, gainsNow {};
+    float bassSat = 0.0f;
+    bool active = false;
+    int zone = 0, pitch = 0, currentKey = -1, stage = 0, countdown = 0;
+    std::array<int, 5> counts {};
+    std::array<float, 5> targets {}, slopes {};
+    float slope = 0.0f, value = 0.0f, increment = 0.0f, rate = 0.0f, attackPos = 0.0f, phase = 0.0f, slew = 0.0f;
+    std::array<float, 4> lp {}, postX {}, postY {};
+    std::array<float, 256> block {};
+};
 } // namespace
 
 std::unique_ptr<Instrument> makeSakuraInstrument() { return std::make_unique<SakuraInstrument>(); }
 std::unique_ptr<Instrument> makeDrumpadInstrument() { return std::make_unique<DrumpadInstrument>(); }
+std::unique_ptr<Instrument> makeBooBassInstrument() { return std::make_unique<BooBassInstrument>(); }
+bool booBassDllUsable (const std::string& path) { return loadBooBassTables (path) != nullptr; }
 } // namespace lynx

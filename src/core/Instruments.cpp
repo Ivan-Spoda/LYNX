@@ -189,6 +189,7 @@ private:
             case InstrumentKind::controller:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
+            case InstrumentKind::boobass:
                 break;
         }
 
@@ -1931,6 +1932,9 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     if (kind == InstrumentKind::drumpad)
         return makeDrumpadInstrument();
+
+    if (kind == InstrumentKind::boobass)
+        return makeBooBassInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

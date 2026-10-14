@@ -465,6 +465,7 @@ public:
     {
         const auto& def = engine.getSong().channels[(std::size_t) channel];
         sakura = def.instrument == InstrumentKind::sakura;
+        boobass = def.instrument == InstrumentKind::boobass;
         static const std::pair<int, const char*> sakuraKnobs[] = {
             { 0, "Master" }, { 1, "Tune" }, { 2, "Attack" }, { 3, "Decay" }, { 4, "Sustain" }, { 5, "Release" },
             { 6, "Str1 decay" }, { 9, "Str1 damp" }, { 11, "Str2 decay" }, { 14, "Str2 damp" }, { 16, "Saturation" },
@@ -478,7 +479,7 @@ public:
         auto add = [&] (int index, const char* name) {
             auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
             knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
-            knob->setRange (0.0, 1.0, 0.001);
+            knob->setRange (0.0, boobass ? 65535.0 : 1.0, boobass ? 1.0 : 0.001);
             knob->setValue (index < (int) def.modelParams.size() ? def.modelParams[(std::size_t) index] : 0.0, juce::dontSendNotification);
             knob->setName (name);
             knob->onValueChange = [this, index, k = knob.get()] {
@@ -491,7 +492,11 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        if (sakura)
+        static const std::pair<int, const char*> booBassKnobs[] = { { 0, "Bass" }, { 1, "Mid" }, { 2, "Treble" } };
+        if (boobass)
+            for (const auto& [index, name] : booBassKnobs)
+                add (index, name);
+        else if (sakura)
             for (const auto& [index, name] : sakuraKnobs)
                 add (index, name);
         else
@@ -505,8 +510,9 @@ public:
         g.fillAll (theme::panel);
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (14.0f));
-        g.drawText (sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
-                           : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
+        g.drawText (boobass ? utf8 ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
+                    : sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
+                             : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
                     10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
         g.setFont (juce::FontOptions (12.0f));
         for (const auto& k : knobs)
@@ -523,7 +529,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true;
+    bool sakura = true, boobass = false;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
 
@@ -1151,7 +1157,7 @@ public:
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
             setContentOwned (new ControllerPanel (engine, channel), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad)
+                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1228,7 +1234,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
         return std::make_unique<ControllerPanel> (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-        kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad)
+        kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

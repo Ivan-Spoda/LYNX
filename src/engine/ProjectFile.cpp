@@ -67,6 +67,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::controller: return "controller";
         case InstrumentKind::sakura: return "sakura";
         case InstrumentKind::drumpad: return "drumpad";
+        case InstrumentKind::boobass: return "boobass";
     }
     return "synth";
 }
@@ -75,7 +76,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
-                    InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad })
+                    InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass })
         if (id == instrumentId (k))
             return k;
 

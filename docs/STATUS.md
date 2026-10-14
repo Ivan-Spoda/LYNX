@@ -55,8 +55,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller, DrumSynth Live (by
   sample); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
-  Morphine, PoiZone, BassDrum and BooBass on the built-in synth; Sakura and Drumpad on physical models rebuilt from
-  their engines (REA round 28, within −138/−150 dB of the reference renders verified against FL's DLLs).
+  Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
+  (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
   or name, preferring the format FL used) and their state is restored (VST3 and CLAP); automations of a VST3
   follow FL's persistent parameter slots (record 4 → ParamID; skipped with the plugin sandbox on).
@@ -122,7 +123,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   destinations, resonators, chorus, reverb and delay were not decoded); strings longer than 9 600 samples (notes
   below ~20 Hz) are shortened.
 - Drumpad: no key tracking (FL's DSP has none; the host's per-note pitch value is not confirmed).
-- BooBass: the source is an internal sample not stored in the project (LYNX uses a saw).
+- BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
+  36 are clamped (FL reads outside its table there).
 - Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
   linear filter envelope.
 - Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) without its optional noise/gate and with the

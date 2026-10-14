@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
@@ -788,8 +789,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
             else if (name == "kepler" && synthFromKepler (c.pluginState, fromPlugin, pluginGain))
                 adopt();
-            else if (name == "boobass" && synthFromBooBass (c.pluginState, fromPlugin))
-                adopt();
+            else if (name == "boobass")
+            {
+                // FL's engine with its multisample read at run time from the user's own BooBass DLL (REA_rodada29 §4)
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\BooBass\\BooBass_Eng_x64.dll", options.roots);
+                auto word = [&] (std::size_t at) { std::uint32_t v = 0; std::memcpy (&v, c.pluginState.data() + at, 4); return v; };
+                if (c.pluginState.size() >= 16 && word (0) == 1 && ! dll.empty() && options.fileExists && options.fileExists (dll)
+                    && booBassDllUsable (dll))
+                {
+                    def.instrument = InstrumentKind::boobass;
+                    def.samplePath = dll;
+                    for (std::size_t k = 0; k < 3; ++k)
+                        def.modelParams.push_back ((float) std::clamp ((int) word (4 + 4 * k), 0, 65535));
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromBooBass (c.pluginState, fromPlugin))
+                    adopt();
+            }
             else if (name == "poizone" && synthFromPoiZone (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "bassdrum" && synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))

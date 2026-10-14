@@ -37,7 +37,8 @@ enum class InstrumentKind : std::uint8_t
     plugin,    // external instrument (VST3), created by the app
     controller, // makes no sound: notes trigger envelopes that modulate other parameters (FL's Envelope Controller)
     sakura,     // physical string model (FL's Sakura engine, REA_rodada28 §1); parameters in ChannelDef::modelParams
-    drumpad     // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
+    drumpad,    // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
+    boobass     // FL's BooBass engine (REA_rodada29 §4); multisample read from the user's DLL (samplePath), 3 knobs
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
