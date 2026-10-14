@@ -1853,6 +1853,20 @@ TEST (synth_pitch_and_filter_envelopes)
         return e;
     };
     CHECK (hf (0, 2400) > 4.0 * hf (40000, 42400));
+
+    // Toxic Biohazard's envelope (REA_rodada33 §2): exponential towards 5 clipped at 1, so the cutoff is still near
+    // its base early in the attack, fully open at A = 0.2 s and back down after the exponential decay
+    lynx::SynthSettings toxic = pluck;
+    toxic.filterEnv = { 5.0f, 0.2f, 0.0f, 0.1f, 0.0f, 0.1f, 1 };
+    const auto t = render (toxic, 48000);
+    auto thf = [&] (int from, int to) {
+        double e = 0.0;
+        for (int i = from + 1; i < to; ++i)
+            e += std::pow ((double) t[(std::size_t) i] - t[(std::size_t) i - 1], 2.0);
+        return e;
+    };
+    CHECK (thf (9000, 9600) > 4.0 * thf (300, 900));
+    CHECK (thf (9000, 9600) > 4.0 * thf (40000, 40600));
 }
 
 TEST (synth_mono_reuses_the_sounding_voice)
@@ -5438,4 +5452,32 @@ TEST (drumsynth_live_engine)
     const auto full = std::get<0> (render (tone, { 60, 0 }, 4096));
     const auto half = std::get<0> (render (tone, { 60, 0 }, 4096, 0.5f, 0.5f));
     CHECK (std::abs (half[100] - 0.25f * full[100]) < 1e-6f && std::abs (full[100]) > 0.01f);
+}
+
+TEST (kepler_lfo_bpm_sync)
+{
+    // REA_rodada33 §3.4: with BPM Sync (k6 ≥ 0.5) the LFO1 period is n/192 beats, n = trunc((2^(7(1 − x)) − 1)·48.370079 + 1.1)
+    std::vector<std::uint8_t> state (0x21 + 34 * 4, 0);
+    auto putU32 = [&] (std::size_t o, std::uint32_t v) { std::memcpy (state.data() + o, &v, 4); };
+    putU32 (12, 9);
+    std::memcpy (state.data() + 16, "Kepler-1", 9);
+    putU32 (0x19, 4);
+    putU32 (0x1D, 34);
+    float k[34] {};
+    k[5] = 0.602085769f; // "Pads - Kepler" demo: n = 286
+    k[6] = 1.0f;
+    k[10] = 1.0f; // vibrato on
+    k[33] = 1.0f;
+    std::memcpy (state.data() + 0x21, k, sizeof k);
+    lynx::SynthSettings s;
+    float gain = 0.0f;
+    CHECK (lynx::synthFromKepler (state, s, gain));
+    CHECK (s.lfo[lynx::lfoPitch].sync && s.lfo[lynx::lfoPitch].secondsTiming);
+    CHECK (std::abs (s.lfo[lynx::lfoPitch].period - 286.0f / 192.0f) < 1e-6f);
+    k[5] = 0.0f; // slowest: 32 beats
+    std::memcpy (state.data() + 0x21, k, sizeof k);
+    CHECK (lynx::synthFromKepler (state, s, gain) && std::abs (s.lfo[lynx::lfoPitch].period - 32.0f) < 1e-6f);
+    k[6] = 0.0f; // free rate in seconds
+    std::memcpy (state.data() + 0x21, k, sizeof k);
+    CHECK (lynx::synthFromKepler (state, s, gain) && ! s.lfo[lynx::lfoPitch].sync);
 }

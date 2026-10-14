@@ -9,22 +9,28 @@ namespace lynx::ProjectFile
 {
 namespace
 {
-// cutoff/pitch envelopes: [amount, attack, hold, decay, sustain, release]; only the active ones
+// cutoff/pitch envelopes: [amount, attack, hold, decay, sustain, release(, shape)]; only the active ones
 void writeEnvelopes (juce::DynamicObject& o, const ModEnvelope& filter, const ModEnvelope& pitch)
 {
     for (auto [name, env] : { std::pair { "filterEnv", &filter }, { "pitchEnv", &pitch } })
         if (env->amount != 0.0f)
-            o.setProperty (name, juce::Array<juce::var> { env->amount, env->attack, env->hold, env->decay, env->sustain, env->release });
+        {
+            juce::Array<juce::var> values { env->amount, env->attack, env->hold, env->decay, env->sustain, env->release };
+            if (env->shape != 0)
+                values.add (env->shape);
+            o.setProperty (name, values);
+        }
 }
 
 void readEnvelopes (const juce::var& o, ModEnvelope& filter, ModEnvelope& pitch)
 {
     for (auto [name, env, limit] : { std::tuple { "filterEnv", &filter, 10.0f }, { "pitchEnv", &pitch, 48.0f } })
-        if (const auto& e = o[name]; e.isArray() && e.size() == 6)
+        if (const auto& e = o[name]; e.isArray() && (e.size() == 6 || e.size() == 7))
         {
-            auto time = [&] (int i) { return juce::jlimit (0.0f, 20.0f, (float) (double) e[i]); };
+            const auto shape = e.size() == 7 ? juce::jlimit (0, 1, (int) e[6]) : 0;
+            auto time = [&] (int i) { return juce::jlimit (0.0f, shape == 1 ? 50.0f : 20.0f, (float) (double) e[i]); };
             *env = { juce::jlimit (-limit, limit, (float) (double) e[0]), time (1), time (2), time (3),
-                     juce::jlimit (0.0f, 1.0f, (float) (double) e[4]), time (5) };
+                     juce::jlimit (0.0f, 1.0f, (float) (double) e[4]), time (5), shape };
         }
 }
 
@@ -35,7 +41,12 @@ void writeLfos (juce::DynamicObject& o, const std::array<ChannelLfo, lfoTargets>
 
     for (int i = 0; i < lfoTargets; ++i)
         if (const auto& l = lfo[(std::size_t) i]; l.amount != 0.0f)
-            list.add (juce::Array<juce::var> { i, l.amount, l.period, l.sync, l.shape, l.delay, l.attack, l.global });
+        {
+            juce::Array<juce::var> values { i, l.amount, l.period, l.sync, l.shape, l.delay, l.attack, l.global };
+            if (l.secondsTiming)
+                values.add (true);
+            list.add (values);
+        }
 
     if (! list.isEmpty())
         o.setProperty ("lfo", list);
@@ -49,7 +60,8 @@ void readLfos (const juce::var& o, std::array<ChannelLfo, lfoTargets>& lfo)
                 if (const auto i = (int) e[0]; i >= 0 && i < lfoTargets)
                     lfo[(std::size_t) i] = { juce::jlimit (-48.0f, 48.0f, (float) (double) e[1]), juce::jlimit (0.005f, 64.0f, (float) (double) e[2]),
                                              (bool) e[3], juce::jlimit (0, 2, (int) e[4]), juce::jlimit (0.0f, 64.0f, (float) (double) e[5]),
-                                             juce::jlimit (0.0f, 64.0f, (float) (double) e[6]), e.size() >= 8 && (bool) e[7] };
+                                             juce::jlimit (0.0f, 64.0f, (float) (double) e[6]), e.size() >= 8 && (bool) e[7],
+                                             e.size() >= 9 && (bool) e[8] };
 }
 
 const char* instrumentId (InstrumentKind k)

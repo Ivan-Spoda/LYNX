@@ -247,12 +247,17 @@ struct ModState
     float level = 0.0f;
     float releaseStep = 0.0f; // fixed on note release: from the current level down to 0
     int stage = 0, held = 0;
+    // Toxic shape: samples left in the current 128-sample block, elapsed time and the block's target/coefficient
+    int blockLeft = 0;
+    double elapsed = 0.0;
+    float target = 0.0f, coefficient = 0.0f;
 };
 
 struct ModCoefficients
 {
-    bool active = false;
+    bool active = false, toxic = false;
     float amount = 0.0f, attackStep = 1.0f, decayStep = 1.0f, releasePerLevel = 1.0f, sustain = 0.0f;
+    float toxicAttack = 0.0f, toxicDecay = 0.0f, toxicRelease = 0.0f; // per-sample coefficients
     int holdSamples = 0;
 
     static ModCoefficients make (const ModEnvelope& e, double sampleRate) noexcept
@@ -260,6 +265,18 @@ struct ModCoefficients
         ModCoefficients c;
         c.active = e.amount != 0.0f;
         c.amount = e.amount;
+        if (e.shape == 1)
+        {
+            // REA_rodada33 §2.1–2.2: times in seconds (floor 0.001), sustain level as is
+            auto seconds = [] (float t) { return std::max (t, 0.001f); };
+            c.toxic = true;
+            c.attackStep = seconds (e.attack); // the attack stage lasts while elapsed < A
+            c.sustain = e.sustain;
+            c.toxicAttack = (float) (8.82 / ((double) seconds (e.attack) * 39.441975 * sampleRate));
+            c.toxicDecay = (float) (8.82 / ((double) seconds (e.decay) * sampleRate));
+            c.toxicRelease = (float) (8.82 / ((double) seconds (e.release) * sampleRate));
+            return c;
+        }
         c.attackStep = (float) (1.0 / (std::max (0.0005, (double) e.attack) * sampleRate));
         c.holdSamples = (int) (std::max (0.0f, e.hold) * sampleRate);
         c.sustain = std::clamp (e.sustain, 0.0f, 1.0f);
@@ -270,6 +287,24 @@ struct ModCoefficients
 
     void advance (ModState& m) const noexcept
     {
+        if (toxic)
+        {
+            // stage chosen at each block start (released → 0, attack → 5 while elapsed < A, else decay → S + 1e-7);
+            // one-pole step every sample, clipped at 1
+            if (--m.blockLeft < 0)
+            {
+                m.blockLeft = 127;
+                if (m.stage == 4)
+                    m.target = 0.0f, m.coefficient = toxicRelease;
+                else if ((double) attackStep <= m.elapsed)
+                    m.target = sustain + 1.0e-7f, m.coefficient = toxicDecay;
+                else
+                    m.target = 5.0f, m.coefficient = toxicAttack;
+                m.elapsed += 128.0 / 44100.0;
+            }
+            m.level = std::min (1.0f, (m.target - m.level) * m.coefficient + m.level);
+            return;
+        }
         switch (m.stage)
         {
             case 0:
@@ -321,8 +356,9 @@ struct LfoCoefficients
         c.amount = l.amount;
         const auto unit = l.sync ? 60.0 / std::max (1.0, bpm) : 1.0; // beats -> seconds
         c.increment = 1.0 / (std::max (0.005, (double) l.period * unit) * sampleRate);
-        c.delaySamples = std::max (0.0, (double) l.delay * unit * sampleRate);
-        c.fadeStep = l.attack > 0.0f ? (float) (1.0 / ((double) l.attack * unit * sampleRate)) : 1.0f;
+        const auto timeUnit = l.secondsTiming ? 1.0 : unit;
+        c.delaySamples = std::max (0.0, (double) l.delay * timeUnit * sampleRate);
+        c.fadeStep = l.attack > 0.0f ? (float) (1.0 / ((double) l.attack * timeUnit * sampleRate)) : 1.0f;
         c.shape = std::clamp (l.shape, 0, 2);
         c.global = l.global;
         // period in beats (synced) or in seconds converted via BPM

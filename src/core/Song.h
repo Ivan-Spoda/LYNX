@@ -80,6 +80,9 @@ struct ModEnvelope
     float decay = 0.3f;
     float sustain = 0.0f; // 0..1
     float release = 0.2f;
+    // 0 = LYNX's linear AHDSR; 1 = Toxic Biohazard's filter envelope (REA_rodada33 §2: exponential stages chosen per
+    // 128-sample block, attack towards 5 clipped at 1, elapsed time counted in 1/44100 s)
+    int shape = 0;
 
     bool operator== (const ModEnvelope&) const = default;
 };
@@ -95,6 +98,7 @@ struct ChannelLfo
     float delay = 0.0f;   // seconds (or beats with `sync`) before starting
     float attack = 0.0f;  // fade-in, in the same unit
     bool global = false;  // phase locked to the song position (FL's "Global" button) instead of restarting per note
+    bool secondsTiming = false; // delay and fade-in stay in seconds even with `sync` (Kepler's LFO1)
 
     bool operator== (const ChannelLfo&) const = default;
 };

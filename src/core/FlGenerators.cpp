@@ -971,8 +971,9 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     }
     // LFO1 (REA_rodada17 §6, rodada18 §7, rodada19 §3): a single, nearly sinusoidal global LFO, value ±1;
     // rate 21.739·2^(−T(x)) Hz; vibrato ±A(k10) octaves and cutoff ±A_c(k23) octaves (peaks); delay = linear
-    // ramp of D(k7) s. The ×10 "Range" only exists on the Kepler Exo panel (left off here); BPM Sync
-    // (k6) was not read. Chorus (panel 30): mode trunc(3x + 0.5) = Off / I / II / I+II, FL's chain (REA_rodada26 §3).
+    // ramp of D(k7) s. The ×10 "Range" only exists on the Kepler Exo panel (left off here). BPM Sync (k6 ≥ 0.5,
+    // REA_rodada33 §3.4): period n/192 beats, n = trunc((2^(7(1 − x)) − 1)·48.370079 + 1.1) from the rate knob as
+    // stored (what the engine uses right after loading, also for old states). Chorus (panel 30): mode trunc(3x + 0.5) = Off / I / II / I+II, FL's chain (REA_rodada26 §3).
     static constexpr double lfoRateTable[11] = { 7.4422, 5.8074, 4.3499, 3.6563, 3.1131, 2.6712, 2.0463, 1.3093, 0.8515, 0.2838, 0.0 };
     static constexpr double vibratoTable[11] = { 0, 0.00116, 0.00813, 0.01506, 0.02196, 0.02882, 0.05259, 0.07819, 0.12057, 0.17728, 0.21388 };
     static constexpr double lfoCutoffTable[11] = { 0, 0.0914, 0.38038, 0.662, 0.96846, 1.23732, 1.48249, 1.85735, 2.27554, 2.66441, 2.82 };
@@ -980,6 +981,14 @@ bool synthFromKepler (const std::vector<std::uint8_t>& state, SynthSettings& syn
     ChannelLfo lfo;
     s.chorus = std::clamp ((int) (3.0f * k[30] + 0.5f), 0, 3);
     lfo.period = (float) (1.0 / (21.739 * std::exp2 (-table (lfoRateTable, k[5]))));
+    if (k[6] >= 0.5f)
+    {
+        const auto curve = std::exp2 ((1.0f - k[5]) * 7.0f) - 1.0f; // float32 steps, as the engine
+        const auto n = (int) (curve * 48.370079f + 1.1f);
+        lfo.sync = true;
+        lfo.period = (float) std::max (1, n) / 192.0f;
+        lfo.secondsTiming = true;
+    }
     lfo.attack = (float) table (lfoDelayTable, k[7]);
     lfo.global = true;
     if (const auto oct = table (vibratoTable, k[10]); oct > 1e-4)
@@ -1279,8 +1288,8 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
         const auto eg = 2.0 * p[23] - 1.0;
         const auto egAmount = 9.0 * (eg < 0.0 ? -eg * eg : eg * eg);
         if (std::abs (egAmount) > 0.01)
-            // FL's exponential pole gets close to the target in ~half the time T; LYNX's envelope is linear
-            s.filterEnv = { (float) egAmount, seconds (p[19]), 0.0f, 0.5f * seconds (p[20]), p[21] * p[21], 0.5f * seconds (p[22]) };
+            // FL's own envelope law (REA_rodada33 §2): T = max(50x⁴, 0.00101) s, sustain x², exponential stages
+            s.filterEnv = { (float) egAmount, seconds (p[19]), 0.0f, seconds (p[20]), p[21] * p[21], seconds (p[22]), 1 };
     }
     gain = 1.0f;
     synth = s;

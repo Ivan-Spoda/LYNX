@@ -94,8 +94,10 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
   key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
-  saturation, LP/BP/HP outputs).
-- **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay; Chorus I / II / I+II (FL's chain).
+  saturation, LP/BP/HP outputs); FL's filter envelope (time law `max(50x⁴, 0.00101)` s, exponential stages chosen
+  per 128-sample block, within 1.6·10⁻⁸ of the DLL at 44.1/48/96 kHz, REA round 33).
+- **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay, BPM sync (period n/192 beats, REA round 33);
+  Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
   **BassDrum:** Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **Morphine:** average spectrum of the generators on the harmonics oscillator.
@@ -132,9 +134,12 @@ accordingly. Highlights of what is **confirmed and applied**:
 - BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
   36 are clamped (FL reads outside its table there).
 - Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
-  linear filter envelope.
-- Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) without its optional noise/gate and with the
-  0.5 Hz pre-filter high-pass; "Range" ×10 (Exo only); LFO BPM sync.
+  the filter envelope moves the cutoff on LYNX's 16-sample control tick (FL: every sample, quantised to 9/65535 oct);
+  the re-trigger fade of a reused voice is left out.
+- Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) with the 0.5 Hz pre-filter high-pass; "Range"
+  ×10 (Exo only); a synced LFO1 is locked to the song position at note start (FL runs it from the host's beat delta);
+  old (version < 4) synced states use the stored rate, as FL's engine right after loading (whether FL re-sends the
+  converted rate is not confirmed).
 - Harmless: the filter as a per-partial curve (LYNX uses a biquad; FL's law is in REA round 27 §1.3); p39 outside
   ±1200/±2400; resonance shapes.
 - Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
