@@ -918,6 +918,14 @@ void RackRenderer::process (const RackState* state,
 
         while (queue->pop (e))
         {
+            if (e.type == NoteEvent::Type::choke && e.channel < 0) // panic: every channel stops sounding
+            {
+                for (auto& instrument : state->instruments)
+                    if (instrument != nullptr)
+                        instrument->allNotesOff();
+                continue;
+            }
+
             if (e.channel < 0 || e.channel >= (int) state->instruments.size())
                 continue;
 
