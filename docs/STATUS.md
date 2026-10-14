@@ -98,6 +98,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   the 268 demo channels (one note, 0.5 s): median −116.9 dB live / −122.7 dB with the export settings; 265 / 264
   channels within −60 dB (268 / 267 when fed the DLL's own sine tables — the rest are chaotic FM patches); four
   overlapping notes with a key re-trigger (voice management, MONO KEY): 262/268 (REA round 31 §10).
+  CPU: idle effects bypass themselves (exact), voices on the same tick grid are rendered in lockstep and the block
+  reader runs in SSE2 — all bit-identical; "Overcome – Sytrus" (72 instances, several at 8× even live) plays in
+  0.46× real time on one thread, 0.17× on four.
 - **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
   partials per voice record (self-oscillation, Sub 1/3/4, 524 harmonics; partial count and band limit per quality,
   10 ms amplitude glide), targets rebuilt every control block (88/44/8 samples at 44.1 kHz) in FL's order — colour ×
