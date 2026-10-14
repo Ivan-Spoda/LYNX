@@ -272,6 +272,14 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
         uiRecorded.push_back ({ estimatedPositionNow(), channel, key, velocity, on });
 }
 
+void AudioEngine::panic()
+{
+    NoteEvent e;
+    e.type = NoteEvent::Type::choke;
+    e.channel = -1; // every channel
+    liveEvents.push (e);
+}
+
 double AudioEngine::estimatedPositionNow() const noexcept
 {
     // the position only moves block by block; interpolate by the time since the last block
@@ -424,13 +432,19 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
     const auto on = m.isNoteOn();
     NoteEvent e;
     e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
-    e.channel = liveChannel.load();
     e.key = m.getNoteNumber();
     e.velocity = on ? m.getFloatVelocity() : 0.0f;
-    midiEvents.push (e);
+    const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
 
-    if (transport.recording.load() && transport.playing.load())
-        midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, on });
+    // the primary selected channel, then the other selected ones
+    for (int i = -1; i < extra; ++i)
+    {
+        e.channel = i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load();
+        midiEvents.push (e);
+
+        if (transport.recording.load() && transport.playing.load())
+            midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, on });
+    }
 }
 
 void AudioEngine::enableAllMidiInputs()
@@ -551,6 +565,7 @@ void AudioEngine::setSong (Song newSong)
     redoStack.clear();
     song = std::move (newSong);
     selectedChannel = 0;
+    selectedChannels = { 0 };
     modified = false;
     publishSong();
 }
@@ -619,14 +634,42 @@ void AudioEngine::redo()
 void AudioEngine::setSelectedChannel (int channel)
 {
     channel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), channel);
+    setChannelSelection ({ channel }, channel);
+}
 
-    liveChannel.store (channel);
+void AudioEngine::setChannelSelection (std::vector<int> channels, int primary)
+{
+    const auto count = (int) song.channels.size();
+    std::sort (channels.begin(), channels.end());
+    channels.erase (std::unique (channels.begin(), channels.end()), channels.end());
+    channels.erase (std::remove_if (channels.begin(), channels.end(), [count] (int c) { return c < 0 || c >= count; }), channels.end());
+    primary = juce::jlimit (0, juce::jmax (0, count - 1), primary);
 
-    if (channel != selectedChannel)
+    if (std::find (channels.begin(), channels.end(), primary) == channels.end())
+        channels.insert (std::lower_bound (channels.begin(), channels.end(), primary), primary);
+
+    if (channels == selectedChannels && primary == selectedChannel)
     {
-        selectedChannel = channel;
-        sendChangeMessage();
+        publishSelection();
+        return;
     }
+
+    selectedChannels = std::move (channels);
+    selectedChannel = primary;
+    publishSelection();
+    sendChangeMessage();
+}
+
+void AudioEngine::publishSelection()
+{
+    liveChannel.store (selectedChannel);
+    int extra = 0;
+
+    for (auto c : selectedChannels)
+        if (c != selectedChannel && extra < maxLiveChannels)
+            extraLiveChannels[(std::size_t) extra++].store (c);
+
+    extraLiveCount.store (extra);
 }
 
 bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
@@ -694,7 +737,14 @@ void AudioEngine::publishSong()
 {
     song.currentPattern = juce::jlimit (0, juce::jmax (0, (int) song.patterns.size() - 1), song.currentPattern);
     selectedChannel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), selectedChannel);
-    liveChannel.store (selectedChannel);
+    {
+        const auto count = (int) song.channels.size();
+        selectedChannels.erase (std::remove_if (selectedChannels.begin(), selectedChannels.end(), [count] (int c) { return c >= count; }),
+                                selectedChannels.end());
+        if (std::find (selectedChannels.begin(), selectedChannels.end(), selectedChannel) == selectedChannels.end())
+            selectedChannels.insert (std::lower_bound (selectedChannels.begin(), selectedChannels.end(), selectedChannel), selectedChannel);
+    }
+    publishSelection();
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
 

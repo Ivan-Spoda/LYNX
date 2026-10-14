@@ -376,6 +376,8 @@ struct Note
     bool muted = false;       // disabled note (does not play, stays in the pattern)
     bool slide = false;       // glides the sounding note to this pitch (without retriggering), as in FL
     bool porta = false;       // inverts the channel's porta on this note (the note glides from the previous one; as in FL)
+    float release = 0.5f;     // release velocity 0..1 (Note inspector; stored, not yet used by the instruments)
+    float modX = 0.5f, modY = 0.5f; // two free per-note modulation values 0..1 (stored, not yet routed)
 };
 
 // Swing delay (FL's formula, docs/analise/REA_rodada3.md §3): only notes whose nearest step
@@ -477,6 +479,7 @@ struct Clip
     int automation = -1;      // automation clips: index into Song::automations
     std::int64_t fadeIn = 0, fadeOut = 0; // audio clips: fades (ticks)
     float gain = 1.0f;        // audio clips: clip volume
+    bool muted = false;       // clip-level mute (the Mute tool); independent of the track mute
 
     std::int64_t end() const noexcept { return start + length; }
 };

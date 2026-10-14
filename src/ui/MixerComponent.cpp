@@ -10,6 +10,7 @@
 #include "ui/PluginWindow.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
+#include "ui/ValueControl.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -368,12 +369,19 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             onSelectionChanged (t);
     }
 
-    if (e.mods.isPopupMenu() && (part == Part::pan || part == Part::fader))
+    if (part == Part::pan || part == Part::fader)
     {
-        juce::PopupMenu menu;
-        addAutomationItem (menu, engine, { part == Part::pan ? AutomationTargetKind::mixerPan : AutomationTargetKind::mixerVolume, t });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
-        return;
+        if (e.mods.isPopupMenu())
+        {
+            ui::showValueMenu (*this, &engine, specFor (part, t), valueOf (part, t), [this, part, t] (double v) { setValue (part, t, v); });
+            return;
+        }
+
+        if (ui::isResetClick (e))
+        {
+            setValue (part, t, specFor (part, t).defaultValue);
+            return;
+        }
     }
 
     if (e.mods.isPopupMenu())
@@ -400,7 +408,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             dragTrack = t;
             dragStartValue = part == Part::pan ? track.pan : track.volume;
 
-            if (part == Part::fader) // clicking the track jumps the fader there
+            if (part == Part::fader && ! e.mods.isCtrlDown()) // clicking the track jumps the fader there
             {
                 const auto area = faderArea (t);
                 const auto capY = area.getBottom() - track.volume * (float) area.getHeight();
@@ -411,6 +419,8 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
                     engine.editSong ([t, v = dragStartValue] (Song& s) { s.mixer[(std::size_t) t].volume = v; });
                 }
             }
+
+            drag.begin (e, dragStartValue);
             return;
 
         case Part::route:
@@ -436,24 +446,100 @@ void MixerStrips::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    if (dragPart == Part::fader)
+    setValue (dragPart, t, drag.update (e, specFor (dragPart, t)));
+}
+
+ui::ValueSpec MixerStrips::specFor (Part part, int t) const
+{
+    const auto& song = engine.getSong();
+    const auto name = t >= 0 && t < (int) song.mixer.size() ? juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()) : juce::String();
+
+    if (part == Part::pan)
     {
-        const auto height = (float) faderArea (t).getHeight();
-        const auto fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
-        const auto v = juce::jlimit (0.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / height * fine);
-        engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].volume = v; });
+        auto spec = ui::panSpec (name + " - " + tr ("Pan"));
+        spec.pixelsForRange = 150.0;
+        spec.target = AutomationTarget { AutomationTargetKind::mixerPan, t };
+        return spec;
     }
-    else
+
+    auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
+    spec.pixelsForRange = juce::jmax (60, faderArea (juce::jmax (0, t)).getHeight());
+    spec.target = AutomationTarget { AutomationTargetKind::mixerVolume, t };
+    return spec;
+}
+
+double MixerStrips::valueOf (Part part, int t) const
+{
+    const auto& track = engine.getSong().mixer[(std::size_t) t];
+    return part == Part::pan ? track.pan : track.volume;
+}
+
+void MixerStrips::setValue (Part part, int t, double value)
+{
+    if (t < 0 || t >= (int) engine.getSong().mixer.size())
+        return;
+
+    if (part == Part::pan)
+        engine.editSong ([t, v = (float) value] (Song& s) { s.mixer[(std::size_t) t].pan = v; });
+    else if (part == Part::fader)
+        engine.editSong ([t, v = (float) value] (Song& s) { s.mixer[(std::size_t) t].volume = v; });
+}
+
+void MixerStrips::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    const auto t = trackAt (e.x);
+
+    if (t >= 0 && t < (int) engine.getSong().mixer.size())
+        if (const auto part = partAt (t, e.getPosition()); part == Part::pan || part == Part::fader)
+        {
+            if (const auto v = ui::wheelValue (valueOf (part, t), e, wheel, specFor (part, t)))
+                setValue (part, t, *v);
+            return;
+        }
+
+    juce::Component::mouseWheelMove (e, wheel);
+}
+
+ui::Hint MixerStrips::hintAt (juce::Point<int> p)
+{
+    const auto active = dragPart == Part::pan || dragPart == Part::fader;
+    const auto t = active ? dragTrack : trackAt (p.x);
+    ui::Hint h;
+
+    if (t < 0 || t >= (int) engine.getSong().mixer.size())
     {
-        const auto v = juce::jlimit (-1.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / 75.0f);
-        engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].pan = v; });
+        if (t == (int) engine.getSong().mixer.size())
+            h.text = tr ("Add a mixer insert");
+        return h;
     }
+
+    const auto part = active ? dragPart : partAt (t, p);
+    const auto name = juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str());
+
+    switch (part)
+    {
+        case Part::pan:
+        case Part::fader:
+            return ui::valueHint (specFor (part, t), valueOf (part, t), tr ("drag (Ctrl: fine), wheel, Alt+click resets"));
+        case Part::mute: h.text = name + " - " + tr ("Mute"); break;
+        case Part::solo: h.text = name + " - " + tr ("Solo"); break;
+        case Part::route: h.text = name + " - " + tr ("Send from the selected insert to this one (drag after enabling: level)"); break;
+        case Part::add: h.text = tr ("Add a mixer insert"); break;
+        case Part::body:
+        case Part::none:
+            h.text = name + " - " + tr ("Click selects the insert, right-click opens its menu");
+            h.hasMenu = true;
+            break;
+    }
+
+    return h;
 }
 
 void MixerStrips::mouseUp (const juce::MouseEvent&)
 {
     dragPart = Part::none;
     dragTrack = -1;
+    drag.end();
 }
 
 void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
@@ -1026,10 +1112,18 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         selectedSlot = i;
         repaint();
 
-        if (! e.mods.isPopupMenu() && mixBounds (i).contains (e.getPosition()))
+        if (mixBounds (i).contains (e.getPosition()))
         {
-            dragParam = mixParam;
-            dragStart = (*s)[(std::size_t) i].mix;
+            if (e.mods.isPopupMenu())
+                ui::showValueMenu (*this, &engine, specFor (mixParam, i), valueOf (mixParam, i), [this, i] (double v) { setValue (mixParam, i, v); });
+            else if (ui::isResetClick (e))
+                setValue (mixParam, i, 1.0);
+            else
+            {
+                dragParam = mixParam;
+                dragStart = (*s)[(std::size_t) i].mix;
+                drag.begin (e, dragStart);
+            }
             return;
         }
 
@@ -1073,15 +1167,137 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
     if (dragParam >= 0 && e.mods.isPopupMenu())
     {
-        juce::PopupMenu menu;
-        addAutomationItem (menu, engine, { AutomationTargetKind::effectParam, track, selectedSlot, dragParam });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        const auto p = dragParam;
+        ui::showValueMenu (*this, &engine, specFor (p, selectedSlot), valueOf (p, selectedSlot),
+                           [this, p, slot = selectedSlot] (double v) { setValue (p, slot, v); });
+        dragParam = -1;
+        return;
+    }
+
+    if (dragParam >= 0 && ui::isResetClick (e))
+    {
+        setValue (dragParam, selectedSlot, specFor (dragParam, selectedSlot).defaultValue);
         dragParam = -1;
         return;
     }
 
     if (dragParam >= 0)
+    {
         dragStart = (*s)[(std::size_t) selectedSlot].params[(std::size_t) dragParam];
+        drag.begin (e, dragStart);
+    }
+}
+
+ui::ValueSpec EffectsPanel::specFor (int param, int slot) const
+{
+    const auto& song = engine.getSong();
+    ui::ValueSpec spec;
+    spec.pixelsForRange = 150.0;
+
+    if (const auto* s = slots(); s == nullptr || slot < 0 || slot >= (int) s->size())
+        return spec;
+
+    const auto& fx = (*slots())[(std::size_t) slot];
+    const auto& info = effectInfo (fx.kind);
+    const auto trackName = juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str());
+
+    if (param == mixParam)
+    {
+        spec = ui::percentSpec (trackName + " - " + utf8 (info.name) + " - " + tr ("Mix"), 1.0);
+        spec.target = AutomationTarget { AutomationTargetKind::effectMix, track, slot };
+        return spec;
+    }
+
+    if (param < 0 || param >= (int) info.params.size())
+        return spec;
+
+    spec.name = trackName + " - " + utf8 (info.name) + " - " + utf8 (info.params[(std::size_t) param].name);
+    spec.defaultValue = info.params[(std::size_t) param].defaultValue;
+    spec.toText = [kind = fx.kind, param, bpm = song.bpm] (double v) { return utf8 (formatEffectParam (kind, param, (float) v, bpm).c_str()); };
+    spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
+    spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
+    return spec;
+}
+
+double EffectsPanel::valueOf (int param, int slot) const
+{
+    const auto* s = slots();
+
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return 0.0;
+
+    const auto& fx = (*s)[(std::size_t) slot];
+    return param == mixParam ? fx.mix : (param >= 0 && param < (int) fx.params.size() ? fx.params[(std::size_t) param] : 0.0f);
+}
+
+void EffectsPanel::setValue (int param, int slot, double value)
+{
+    const auto* s = slots();
+
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return;
+
+    if (param == mixParam)
+        engine.editSong ([t = track, slot, v = (float) value] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].mix = v; });
+    else if (param >= 0)
+        engine.editSong ([t = track, slot, param, v = (float) value] (Song& song) {
+            song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) param] = v;
+        });
+}
+
+int EffectsPanel::mixKnobAt (juce::Point<int> p) const
+{
+    for (int i = 0; slots() != nullptr && i < (int) slots()->size(); ++i)
+        if (mixBounds (i).contains (p))
+            return i;
+
+    return -1;
+}
+
+void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    if (const auto slot = mixKnobAt (e.getPosition()); slot >= 0)
+    {
+        if (const auto v = ui::wheelValue (valueOf (mixParam, slot), e, wheel, specFor (mixParam, slot)))
+            setValue (mixParam, slot, *v);
+        return;
+    }
+
+    if (const auto p = knobAt (e.getPosition()); p >= 0)
+    {
+        if (const auto v = ui::wheelValue (valueOf (p, selectedSlot), e, wheel, specFor (p, selectedSlot)))
+            setValue (p, selectedSlot, *v);
+        return;
+    }
+
+    juce::Component::mouseWheelMove (e, wheel);
+}
+
+ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
+{
+    const auto gesture = tr ("drag (Ctrl: fine), wheel, Alt+click resets");
+
+    if (dragParam == mixParam || (dragParam >= 0 && drag.isActive()))
+        return ui::valueHint (specFor (dragParam, dragParam == mixParam ? juce::jmax (0, selectedSlot) : selectedSlot),
+                              valueOf (dragParam, dragParam == mixParam ? juce::jmax (0, selectedSlot) : selectedSlot), gesture);
+
+    if (const auto slot = mixKnobAt (p); slot >= 0)
+        return ui::valueHint (specFor (mixParam, slot), valueOf (mixParam, slot), gesture);
+
+    if (const auto param = knobAt (p); param >= 0)
+        return ui::valueHint (specFor (param, selectedSlot), valueOf (param, selectedSlot), gesture);
+
+    ui::Hint h;
+    for (int i = 0; i < maxEffectSlots; ++i)
+        if (slotBounds (i).contains (p))
+        {
+            const auto used = slots() != nullptr && i < (int) slots()->size();
+            h.text = used ? tr ("Effect slot: click edits, the LED bypasses, right-click: replace, move, delete")
+                          : tr ("Empty slot: click to add an effect");
+            h.hasMenu = used;
+        }
+
+    return h;
 }
 
 void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
@@ -1094,24 +1310,20 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
 
     if (dragParam == mixParam)
     {
-        const auto v = juce::jlimit (0.0f, 1.0f, dragStart - (float) e.getDistanceFromDragStartY() / 150.0f);
-        engine.editSong ([t = track, slot = selectedSlot, v] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot].mix = v; });
+        setValue (mixParam, selectedSlot, drag.update (e, specFor (mixParam, selectedSlot)));
         return;
     }
 
     if (dragParam < 0)
         return;
 
-    const auto fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
-    const auto v = juce::jlimit (0.0f, 1.0f, dragStart - (float) e.getDistanceFromDragStartY() / 150.0f * fine);
-    engine.editSong ([t = track, slot = selectedSlot, p = dragParam, v] (Song& song) {
-        song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) p] = v;
-    });
+    setValue (dragParam, selectedSlot, drag.update (e, specFor (dragParam, selectedSlot)));
 }
 
 void EffectsPanel::mouseUp (const juce::MouseEvent&)
 {
     dragParam = -1;
+    drag.end();
 }
 
 void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)

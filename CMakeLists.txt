@@ -45,6 +45,12 @@ add_library(lynx_core STATIC
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
+# workflow shell (key map, workspace layout, rack operations)
+target_sources(lynx_core PRIVATE
+    src/core/KeyMap.cpp
+    src/core/Workspace.cpp
+    src/core/RackOps.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
@@ -111,7 +117,14 @@ if(LYNX_BUILD_APP)
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
         src/ui/Icons.cpp
-        src/ui/I18n.cpp)
+        src/ui/I18n.cpp
+        src/ui/EditorTools.cpp)
+
+    # workflow shell: workspace desktop, control contract, dialogs
+    target_sources(LYNX PRIVATE
+        src/ui/Workspace.cpp
+        src/ui/ValueControl.cpp
+        src/ui/Dialogs.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 

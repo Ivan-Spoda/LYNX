@@ -45,6 +45,10 @@
 #include "core/Song.h"
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
+#include "core/KeyMap.h"
+#include "core/RackOps.h"
+#include "core/ValueMath.h"
+#include "core/Workspace.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
 
@@ -3223,6 +3227,136 @@ TEST (note_edit_selection_operations)
     CHECK (q.notes.size() == before - 2);
 }
 
+TEST (note_edit_quick_operations)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+
+    // split: only strictly inside; the tail is appended and does not slide again
+    lynx::Pattern p;
+    p.notes = { { 0, 4 * step, 0, 60 } };
+    p.notes[0].slide = true;
+    CHECK (ne::split (p, 0, 0) == -1 && ne::split (p, 0, 4 * step) == -1);
+    CHECK (ne::split (p, 0, step) == 1 && p.notes[0].length == step && p.notes[1].start == step && p.notes[1].length == 3 * step
+           && ! p.notes[1].slide);
+
+    // chop to grid: a 2.5-step note from half a step becomes 3 pieces cut on the step lines
+    lynx::Pattern c;
+    c.notes = { { step / 2, step * 5 / 2, 0, 60 }, { 0, step, 1, 50 } };
+    const auto pieces = ne::chop (c, { 0, 1 }, step);
+    CHECK (pieces.size() == 4 && c.notes.size() == 4);
+    CHECK (c.notes[0].length == step / 2 && c.notes[2].start == step && c.notes[2].length == step && c.notes[3].start == 2 * step
+           && c.notes[3].length == step);
+
+    // join: touching and overlapping notes of the same key and channel merge; others stay
+    lynx::Pattern j;
+    j.notes = { { 0, step, 0, 60 }, { step, step, 0, 60 }, { step * 3 / 2, step * 2, 0, 60 }, { 5 * step, step, 0, 60 },
+                { step, step, 0, 62 }, { step, step, 1, 60 } };
+    CHECK (ne::join (j, { 0, 1, 2, 3, 4, 5 }) == 2 && j.notes.size() == 4);
+    CHECK (j.notes[0].start == 0 && j.notes[0].length == step * 7 / 2);
+
+    // legato: each note reaches the next start (a chord ends together); the last keeps its length
+    lynx::Pattern l;
+    l.notes = { { 0, 10, 0, 60 }, { 0, 10, 0, 64 }, { step, 10, 0, 62 }, { 3 * step, 10, 0, 65 }, { step, 10, 1, 40 } };
+    ne::legato (l, { 0, 1, 2, 3, 4 });
+    CHECK (l.notes[0].length == step && l.notes[1].length == step && l.notes[2].length == 2 * step && l.notes[3].length == 10
+           && l.notes[4].length == 10);
+
+    // shrink to grid and full quantise (start and end)
+    ne::shrinkToGrid (l, { 3 }, step / 2);
+    CHECK (l.notes[3].length == step / 2);
+    lynx::Pattern q;
+    q.notes = { { 10, step - 30, 0, 60 }, { step + 100, 20, 0, 60 } };
+    ne::quantizeFull (q, { 0, 1 }, step);
+    CHECK (q.notes[0].start == 0 && q.notes[0].length == step && q.notes[1].start == step && q.notes[1].length == step);
+
+    // rotate inside the bar, wrapping
+    lynx::Pattern r;
+    r.notes = { { 0, step, 0, 60 }, { bar - step, step, 0, 62 } };
+    ne::rotate (r, { 0, 1 }, step, bar, 1);
+    CHECK (r.notes[0].start == step && r.notes[1].start == 0);
+    ne::rotate (r, { 0, 1 }, step, bar, -2);
+    CHECK (r.notes[0].start == bar - step && r.notes[1].start == bar - 2 * step);
+    r.notes.push_back ({ bar + step, step, 0, 64 }); // alone in the second bar: wraps inside that bar
+    ne::rotate (r, { 2 }, step, bar, -2);
+    CHECK (r.notes[2].start == 2 * bar - step);
+}
+
+TEST (note_edit_grid_and_time_text)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+    CHECK (ne::snapDown (250.0, step) == step && ne::snapDown (-1.0, step) == -step && ne::snapDown (17.9, 1) == 17);
+    CHECK (ne::snapNearest (1000.0, { 400, 1100, 980 }, 50.0, step) == 980);
+    CHECK (ne::snapNearest (1000.0, { 400 }, 50.0, step) == 960); // too far: falls back to the grid
+    // screen grid: 24 px per step shows steps; zoomed out it climbs to beats, bars and bar multiples
+    CHECK (ne::screenStep (24.0 / step, bar) == step);
+    CHECK (ne::screenStep (96.0 / bar, bar) == lynx::ppq);
+    CHECK (ne::screenStep (8.0 / bar, bar) == 2 * bar);
+    CHECK (ne::screenStep (200.0 / step, bar) == step / 4);
+
+    CHECK (ne::formatTime (0, 4) == "1:1:0" && ne::formatTime (bar + 5 * step + 7, 4) == "2:6:7");
+    CHECK (ne::formatTime (step * 2, 4, true) == "0:2:0");
+    std::int64_t t = 0;
+    CHECK (ne::parseTime ("2:6:7", 4, t) && t == bar + 5 * step + 7);
+    CHECK (ne::parseTime ("3", 4, t) && t == 2 * bar);
+    CHECK (ne::parseTime ("0:2:0", 4, t, true) && t == 2 * step);
+    CHECK (! ne::parseTime ("0:1:0", 4, t) && ! ne::parseTime ("1:17:0", 4, t) && ! ne::parseTime ("1:1:240", 4, t)
+           && ! ne::parseTime ("a", 4, t) && ! ne::parseTime ("", 4, t));
+    CHECK (ne::parseTime ("1:12:0", 3, t) && ! ne::parseTime ("1:13:0", 3, t)); // 3/4: 12 steps per bar
+}
+
+TEST (playlist_clip_edges_and_time_selection)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t beat = lynx::ppq;
+
+    // left-edge trim: content stays in place, cannot reveal what is before the content's start
+    lynx::Clip c { 0, 0, 4 * beat, 4 * beat, beat };
+    ne::trimStart (c, 5 * beat, beat);
+    CHECK (c.start == 5 * beat && c.offset == 2 * beat && c.length == 3 * beat);
+    ne::trimStart (c, 0, beat);
+    CHECK (c.start == 3 * beat && c.offset == 0 && c.length == 5 * beat);
+    ne::trimStart (c, 100 * beat, beat);
+    CHECK (c.length == beat && c.end() == 8 * beat);
+
+    // slip moves the content, not the clip
+    lynx::Clip s { 0, 0, 0, 2 * beat, beat };
+    ne::slip (s, beat / 2);
+    CHECK (s.offset == beat / 2 && s.start == 0 && s.length == 2 * beat);
+    ne::slip (s, beat);
+    CHECK (s.offset == 0);
+    ne::slip (s, -3 * beat);
+    CHECK (s.offset == 3 * beat);
+
+    // insert / delete time across all tracks, markers included
+    std::vector<lynx::Clip> clips { { 0, 0, 0, 2 * beat, 0 }, { 0, 1, 4 * beat, 2 * beat, 0 }, { 0, 2, beat, 6 * beat, 0 } };
+    std::vector<lynx::Marker> markers { { 5 * beat, "A" }, { beat / 2, "B" } };
+    ne::insertTime (clips, markers, 2 * beat, 4 * beat);
+    CHECK (clips[0].start == 0 && clips[1].start == 8 * beat && clips[2].start == beat && markers[0].tick == 9 * beat
+           && markers[1].tick == beat / 2);
+
+    std::vector<lynx::Clip> d { { 0, 0, 0, 2 * beat, 0 },             // before: kept
+                                { 0, 1, 3 * beat, beat, 0 },          // inside: deleted
+                                { 0, 2, beat, 6 * beat, 0 },          // spans the cut: head + tail
+                                { 0, 3, 3 * beat, 4 * beat, 0 },      // tail outside: trimmed and moved
+                                { 0, 4, 8 * beat, beat, 0 } };        // after: moved left
+    std::vector<lynx::Marker> dm { { 3 * beat, "in" }, { 9 * beat, "after" } };
+    ne::deleteTime (d, dm, 2 * beat, 5 * beat);
+    CHECK (d.size() == 5);
+    CHECK (d[1].track == 2 && d[1].start == beat && d[1].length == beat);
+    CHECK (d[2].track == 2 && d[2].start == 2 * beat && d[2].offset == 4 * beat && d[2].length == 2 * beat);
+    CHECK (d[3].track == 3 && d[3].start == 2 * beat && d[3].offset == 2 * beat && d[3].length == 2 * beat);
+    CHECK (d[4].start == 5 * beat && dm.size() == 1 && dm[0].tick == 6 * beat);
+
+    // time selection: overlapping clips; Ctrl+B repeats what starts inside it after itself
+    std::vector<lynx::Clip> r { { 0, 0, 0, beat, 0 }, { 0, 1, beat, 2 * beat, 0 }, { 0, 0, 4 * beat, beat, 0 } };
+    CHECK ((ne::clipsInTime (r, beat / 2, 2 * beat) == std::vector<int> { 0, 1 }));
+    const auto added = ne::repeatTime (r, 0, 4 * beat, {});
+    CHECK (added.size() == 2 && r[3].start == 4 * beat && r[4].start == 5 * beat && r[4].track == 1);
+    CHECK (ne::repeatTime (r, 0, 2 * beat, { 2 }).size() == 1 && r.back().start == 6 * beat);
+}
+
 TEST (recorder_builds_notes_in_pattern_and_song_mode)
 {
     auto song = lynx::Song::makeDefault();
@@ -4682,6 +4816,288 @@ TEST (translations_embedded_table_is_up_to_date)
     const auto text = i18ntest::readFile ("resources/i18n/pt-BR.txt");
     CHECK (text.size() == sizeof (lynx::i18n::data::ptBR));
     CHECK (std::memcmp (text.data(), lynx::i18n::data::ptBR, std::min (text.size(), sizeof (lynx::i18n::data::ptBR))) == 0);
+}
+
+// --- workflow shell: pattern/channel operations, key map, workspace layout, control math -------------
+
+TEST (workflow_pattern_navigation_and_insert)
+{
+    auto song = lynx::Song::makeDefault();
+    song.patterns.resize (3);
+    song.patterns[1].name = "B";
+    song.patterns[2].name = "C";
+    song.patterns[2].notes.push_back ({});
+    song.currentPattern = 0;
+    CHECK (lynx::stepPattern (song, 1) == 1 && lynx::stepPattern (song, -1) == 0 && lynx::stepPattern (song, 10) == 2);
+    // pattern 0 has the default notes, 1 is empty, 2 has a note
+    CHECK (! lynx::isPatternEmpty (song.patterns[0]) && lynx::isPatternEmpty (song.patterns[1]));
+    CHECK (lynx::findNextEmptyPattern (song, 0) == 1 && lynx::findNextEmptyPattern (song, 1) == -1);
+    CHECK (lynx::gotoNextEmptyPattern (song) == 1 && song.currentPattern == 1);
+    song.patterns[1].notes.push_back ({});
+    const auto before = song.patterns.size();
+    CHECK (lynx::gotoNextEmptyPattern (song) == (int) before && song.patterns.size() == before + 1);
+    CHECK (song.patterns.back().name == "Pattern 1" || song.patterns.back().name.rfind ("Pattern ", 0) == 0);
+
+    // insert keeps Playlist clips on their patterns
+    lynx::Clip clip;
+    clip.pattern = 2;
+    song.playlist = { clip };
+    song.arrangements.push_back ({ "Other", { clip }, 0, 0, {} });
+    CHECK (lynx::insertPattern (song, 1, "New") == 1 && song.currentPattern == 1);
+    CHECK (song.patterns[1].name == "New" && song.patterns[1].notes.empty() && song.patterns[3].name == "C");
+    CHECK (song.playlist[0].pattern == 3 && song.arrangements[1].clips[0].pattern == 3);
+}
+
+TEST (workflow_split_pattern_by_channel)
+{
+    auto song = lynx::Song::makeDefault();
+    song.patterns.resize (1);
+    auto& p = song.patterns[0];
+    p.name = "Beat";
+    p.notes.clear();
+    for (int i = 0; i < 4; ++i)
+        p.notes.push_back ({ (std::int64_t) i * lynx::ticksPerStep, lynx::ticksPerStep, i % 2 == 0 ? 0 : 2, 60 });
+    song.channels[2].colour = 0xff112233;
+    lynx::Clip clip;
+    clip.pattern = 0;
+    song.playlist = { clip };
+    const auto created = lynx::splitPatternByChannel (song, 0);
+    CHECK (created == 2 && song.patterns.size() == 3);
+    CHECK (song.patterns[0].notes.size() == 4); // the original is unchanged
+    CHECK (song.patterns[1].name == "Beat - " + song.channels[0].name && song.patterns[1].notes.size() == 2);
+    CHECK (song.patterns[2].colour == 0xff112233u && song.patterns[2].notes.size() == 2 && song.patterns[2].notes[0].channel == 2);
+    CHECK (song.playlist[0].pattern == 0);
+    CHECK (lynx::splitPatternByChannel (song, 99) == 0);
+}
+
+TEST (workflow_channel_selection)
+{
+    lynx::ChannelSelection s;
+    s.selectOnly (2);
+    s.toggle (5);
+    s.toggle (0);
+    CHECK ((s.rows == std::vector<int> { 0, 2, 5 }) && s.contains (5) && ! s.contains (3));
+    s.toggle (2);
+    CHECK ((s.rows == std::vector<int> { 0, 5 }));
+    s.selectOnly (3);
+    s.extendTo (6);
+    CHECK ((s.rows == std::vector<int> { 3, 4, 5, 6 }));
+    s.extendTo (1);
+    CHECK ((s.rows == std::vector<int> { 1, 2, 3 }));
+    s.selectOnly (4);
+    s.toggle (4); // the last one stays
+    CHECK ((s.rows == std::vector<int> { 4 }));
+    s.selectAll (3);
+    CHECK ((s.rows == std::vector<int> { 0, 1, 2 }));
+    s.rows = { 7, 9 };
+    s.clamp (5);
+    CHECK (s.rows.size() == 1 && s.rows[0] < 5);
+}
+
+TEST (workflow_move_clone_insert_channels)
+{
+    auto song = lynx::Song::makeDefault();
+    const auto names = [&] {
+        std::vector<std::string> n;
+        for (const auto& c : song.channels)
+            n.push_back (c.name);
+        return n;
+    };
+    const auto original = names();
+    const auto count = (int) song.channels.size();
+    CHECK (count >= 4);
+
+    // references that must follow their channel
+    song.patterns[0].notes.push_back ({ 0, 240, 1, 64 });
+    lynx::Automation a;
+    a.target = { lynx::AutomationTargetKind::channelVolume, 1 };
+    song.automations.push_back (a);
+    song.midiLinks.push_back ({ 7, -1, { lynx::AutomationTargetKind::channelPan, 3 } });
+    lynx::Clip audio;
+    audio.kind = lynx::ClipKind::audio;
+    audio.channel = 3;
+    song.playlist.push_back (audio);
+
+    std::vector<int> selection { 1, 3 };
+    CHECK (lynx::moveChannels (song, selection, -1));
+    CHECK ((selection == std::vector<int> { 0, 2 }));
+    CHECK (song.channels[0].name == original[1] && song.channels[1].name == original[0] && song.channels[2].name == original[3]
+           && song.channels[3].name == original[2]);
+    CHECK (song.automations[0].target.index == 0 && song.midiLinks[0].target.index == 2 && song.playlist.back().channel == 2);
+    CHECK (std::any_of (song.patterns[0].notes.begin(), song.patterns[0].notes.end(),
+                        [] (const lynx::Note& n) { return n.channel == 0 && n.key == 64; }));
+    CHECK (! lynx::moveChannels (song, selection, -1)); // the block is at the top
+    CHECK (lynx::moveChannels (song, selection, 1) && (selection == std::vector<int> { 1, 3 }) && names() == original);
+
+    // clone: settings, not notes, right below, with a new name
+    song.channels[1].volume = 0.33f;
+    const auto notesBefore = song.patterns[0].notes.size();
+    const auto clone = lynx::cloneChannel (song, 1);
+    CHECK (clone == 2 && (int) song.channels.size() == count + 1);
+    CHECK (song.channels[2].name == original[1] + " #2" && song.channels[2].volume == 0.33f);
+    CHECK (song.patterns[0].notes.size() == notesBefore);
+    CHECK (song.channels[3].name == original[2] && song.automations[0].target.index == 1);
+    CHECK (lynx::cloneChannel (song, 1) == 2 && song.channels[2].name == original[1] + " #3");
+
+    // remove several
+    CHECK (lynx::removeChannels (song, { 2, 3, 2 }) == 2 && (int) song.channels.size() == count);
+    CHECK (names() == original);
+}
+
+TEST (workflow_send_channels_to_free_inserts)
+{
+    auto song = lynx::Song::makeDefault();
+    for (auto& c : song.channels)
+        c.mixerTrack = 0;
+    song.mixer[1].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::delay)); // not free: has effects
+    song.channels[0].mixerTrack = 2;                                                   // not free: used
+    song.setRoute (5, 3, true);                                                        // 3 is not free: receives a send
+    CHECK (! lynx::isInsertFree (song, 1) && ! lynx::isInsertFree (song, 2) && ! lynx::isInsertFree (song, 3) && lynx::isInsertFree (song, 4));
+    song.channels[1].colour = 0xff445566;
+    const auto tracks = lynx::sendChannelsToFreeInserts (song, { 1, 2 });
+    CHECK ((tracks == std::vector<int> { 4, 5 }) || (tracks == std::vector<int> { 4, 6 }));
+    CHECK (song.channels[1].mixerTrack == 4 && song.mixer[4].name == song.channels[1].name && song.mixer[4].colour == 0xff445566u);
+    CHECK (song.mixer[(std::size_t) tracks[1]].name == song.channels[2].name);
+
+    // with no free insert left, a new one is added at the end
+    auto full = lynx::Song::makeDefault();
+    full.mixer = lynx::Song::defaultMixer (1);
+    full.channels[0].mixerTrack = 1;
+    const auto added = lynx::sendChannelsToFreeInserts (full, { 1 });
+    CHECK (added.size() == 1 && added[0] == 2 && full.mixer.size() == 3 && full.channels[1].mixerTrack == 2);
+}
+
+TEST (workflow_palette_random_colour)
+{
+    const auto& palette = lynx::lynxPalette();
+    for (std::uint32_t seed = 0; seed < 50; ++seed)
+    {
+        const auto current = palette[seed % palette.size()];
+        const auto c = lynx::randomPaletteColour (current, seed);
+        CHECK (c != current && std::find (palette.begin(), palette.end(), c) != palette.end());
+    }
+}
+
+TEST (workflow_key_map)
+{
+    using namespace lynx::keys;
+    KeyMap map;
+    const auto global = Context::global, rack = Context::channelRack;
+    CHECK (map.find ({ space, none }, global, true) == "transport.playStop");
+    CHECK (map.find ({ space, ctrl }, global, true) == "transport.pause");
+    CHECK (map.find ({ f6, none }, global, true) == "panel.channelRack");
+    CHECK (map.find ({ f8, alt }, global, false) == "panel.browser");
+    CHECK (map.find ({ insert, ctrl | shift }, global, false) == "pattern.insert");
+    CHECK (map.find ({ numpadPlus, none }, rack, true) == "pattern.next");
+    // panel context: only while focused
+    CHECK (map.find ({ 'L', ctrl }, rack, true) == "rack.sendToInserts");
+    CHECK (map.find ({ 'L', ctrl }, global, true).empty());
+    CHECK (map.find ({ up, alt }, rack, false) == "rack.moveUp");
+    // typing piano: note keys play, other plain keys only for whilePiano actions; chords always work
+    CHECK (KeyMap::playsNote ({ 'Z', none }, true) && ! KeyMap::playsNote ({ 'Z', none }, false) && ! KeyMap::playsNote ({ 'Z', ctrl }, true));
+    CHECK (map.find ({ 'L', none }, global, true) == "transport.toggleMode");
+    CHECK (map.find ({ '1', none }, rack, false) == "rack.mute1" && map.find ({ '0', none }, rack, false) == "rack.mute10");
+    CHECK (map.find ({ '1', none }, rack, true).empty()); // a plain digit is not a shortcut while the piano is on
+    CHECK (map.find ({ '2', ctrl }, rack, true) == "rack.solo2");
+    CHECK (typingPianoNote ('Z') == 60 && typingPianoNote ('q') == 72 && typingPianoNote ('P') == 88 && typingPianoNote ('L') == -1);
+    CHECK (map.conflicts().empty());
+
+    // chord text
+    CHECK (toString ({ f4, ctrl | shift }) == "Ctrl+Shift+F4" && toString ({ numpadMinus, none }) == "Numpad -");
+    CHECK (parseChord ("Shift+Ctrl+Ins") == (Chord { insert, ctrl | shift }));
+    CHECK (parseChord ("alt+up") == (Chord { up, alt }) && parseChord ("k") == (Chord { 'K', none }));
+    CHECK (parseChord ("Numpad +") == (Chord { numpadPlus, none }) && ! parseChord ("F13") && ! parseChord ("Ctrl+"));
+    for (const auto& a : actions())
+        for (const auto& c : a.defaults)
+            CHECK (parseChord (toString (c)) == c);
+
+    // JSON overrides
+    std::vector<std::string> errors;
+    CHECK (map.loadJson (R"({ "pattern.next": "Ctrl+Right", "rack.clone": ["Alt+D", "Ctrl+D"], "help.shortcuts": "", "nope": "F1", "file.open": "Hyper+Q" })", &errors));
+    CHECK (errors.size() == 2);
+    CHECK (map.find ({ right, ctrl }, global, false) == "pattern.next" && map.find ({ numpadPlus, none }, global, false).empty());
+    CHECK (map.find ({ 'D', ctrl }, rack, false) == "rack.clone" && map.find ({ f1, none }, global, false).empty());
+    map.setChords ("pattern.previous", { { right, ctrl } });
+    CHECK (map.conflicts().size() == 1);
+    KeyMap reloaded;
+    CHECK (reloaded.loadJson (map.toJson()) && reloaded.chordsFor ("rack.clone") == map.chordsFor ("rack.clone"));
+    CHECK (! map.loadJson ("[1, 2]") && ! map.loadJson ("{\"a\": }"));
+    map.resetToDefaults();
+    CHECK (map.find ({ numpadPlus, none }, global, false) == "pattern.next");
+}
+
+TEST (workflow_workspace_layout)
+{
+    using namespace lynx::workspace;
+    auto l = Layout::makeDefault (1280, 620);
+    // every visible panel is inside the desktop; the default shows Browser, Playlist and Channel Rack
+    for (const auto& p : l.panels)
+        CHECK (p.bounds.x >= 0 && p.bounds.y >= 0 && p.bounds.right() <= 1280 && p.bounds.bottom() <= 620 && p.bounds.w >= minWidth);
+    CHECK (l[Panel::browser].visible && l[Panel::playlist].visible && l[Panel::channelRack].visible);
+    CHECK (! l[Panel::pianoRoll].visible && ! l[Panel::mixer].visible);
+    CHECK (l[Panel::playlist].bounds.x == l[Panel::browser].bounds.right() && l[Panel::playlist].bounds.right() == 1280);
+    CHECK (l.isFrontmost (Panel::channelRack) && l.focused == Panel::channelRack);
+
+    // toggle: show+focus, focus, hide
+    CHECK (l.toggle (Panel::mixer) && l.focused == Panel::mixer && l.isFrontmost (Panel::mixer));
+    CHECK (l.toggle (Panel::channelRack) && l.focused == Panel::channelRack && l.isFrontmost (Panel::channelRack));
+    CHECK (! l.toggle (Panel::channelRack) && ! l[Panel::channelRack].visible && l.focused == Panel::mixer);
+    l.toggleMaximised (Panel::playlist);
+    CHECK (l[Panel::playlist].maximised && l.focused == Panel::playlist);
+
+    // save and load at another size: positions scale
+    l[Panel::mixer].detached = true;
+    l[Panel::mixer].windowBounds = { 100, 50, 900, 500 };
+    const auto text = l.serialise();
+    const auto big = Layout::parse (text, 2560, 1240);
+    CHECK (big.has_value());
+    if (big)
+    {
+        CHECK ((*big)[Panel::playlist].maximised && (*big)[Panel::mixer].detached && (*big)[Panel::mixer].windowBounds.w == 900);
+        CHECK (std::abs ((*big)[Panel::playlist].bounds.x - 2 * l[Panel::playlist].bounds.x) <= 1);
+        CHECK (big->order == l.order && big->focused == l.focused);
+    }
+    CHECK (! Layout::parse ("garbage", 100, 100) && ! Layout::parse ("lynx-layout 1\npanel nowhere 1 0 0 0 0 1 1 0 0 0 0\n", 100, 100));
+
+    // resize keeps panels inside and edges glued to the border
+    l.resize (1000, 500);
+    CHECK (l[Panel::playlist].bounds.right() == 1000 && l[Panel::browser].bounds.bottom() == 500);
+    for (const auto& p : l.panels)
+        CHECK (p.bounds.right() <= 1000 && p.bounds.bottom() <= 500);
+
+    // off-screen panels come back
+    l[Panel::pianoRoll].bounds = { 5000, -300, 400, 300 };
+    CHECK (l.bringBackOffscreen() == 1 && l[Panel::pianoRoll].bounds.x + 400 <= 1000 && l[Panel::pianoRoll].bounds.y == 0);
+
+    // snapping: to the desktop, to another panel, and resizing one edge
+    CHECK ((snap ({ 5, 6, 200, 100 }, {}, 1000, 500) == Rect { 0, 0, 200, 100 }));
+    CHECK ((snap ({ 304, 50, 200, 100 }, { { 0, 0, 300, 400 } }, 1000, 500) == Rect { 300, 50, 200, 100 }));
+    CHECK ((snap ({ 304, 50, 200, 100 }, { { 0, 0, 300, 400 } }, 1000, 500, 2) == Rect { 304, 50, 200, 100 })); // out of range
+    CHECK ((snap ({ 100, 100, 195, 100 }, { { 300, 0, 300, 400 } }, 1000, 500, 8, right) == Rect { 100, 100, 200, 100 }));
+    CHECK ((snap ({ 100, 100, 195, 100 }, { { 300, 1000, 300, 400 } }, 2000, 2000, 8, right) == Rect { 100, 100, 195, 100 })); // not facing
+}
+
+TEST (workflow_control_math)
+{
+    using namespace lynx::controls;
+    CHECK (std::abs (dragValue (0.5, 75, 0, 1, 150, false) - 1.0) < 1e-9);
+    CHECK (std::abs (dragValue (0.5, 75, 0, 1, 150, true) - 0.55) < 1e-9);
+    CHECK (dragValue (0.5, -1000, -1, 1, 150, false) == -1.0);
+    CHECK (std::abs (wheelValue (0.5, 1, 0, 1, false) - 0.52) < 1e-9 && std::abs (wheelValue (0.5, -1, 0, 1, true) - 0.498) < 1e-9);
+    CHECK (wheelValue (3, 1, 0, 10, true, 1) == 4.0); // integer controls move at least one step
+    CHECK (std::abs (snapToInterval (0.234, 0, 0.1) - 0.2) < 1e-9);
+
+    CHECK (tempoDrag (130.0, 8, false, false) == 132.0 && tempoDrag (130.0, -3, false, false) == 130.0);
+    CHECK (std::abs (tempoDrag (130.0, 25, true, false) - 130.25) < 1e-9);
+    CHECK (std::abs (tempoDrag (130.0, 8, false, true) - 130.2) < 1e-9);
+    CHECK (tempoDrag (520.0, 400, false, false) == lynx::maxTempo && halfTempo (15.0) == lynx::minTempo && doubleTempo (130.0) == 260.0);
+
+    TapTempo tap;
+    CHECK (! tap.tap (1000.0));
+    CHECK (tap.tap (1500.0) == 120.0);
+    CHECK (tap.tap (2000.0) == 120.0 && tap.count() == 3);
+    CHECK (std::abs (*tap.tap (2400.0) - 128.57) < 0.01); // average of 500, 500, 400 ms
+    CHECK (! tap.tap (9000.0) && tap.count() == 1); // a long pause starts over
 }
 
 int main (int argc, char** argv)

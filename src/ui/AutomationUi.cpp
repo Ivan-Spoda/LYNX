@@ -456,8 +456,9 @@ void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)
     const auto name = describeAutomationTarget (engine, target).toStdString();
 
     engine.editSong ([&] (Song& s) {
+        // the Playlist time selection gives the clip its place and length; otherwise the whole song
         const auto bar = (std::int64_t) ppq * std::max (1, s.beatsPerBar);
-        const auto length = s.playlist.empty() ? bar * 4 : s.songLength();
+        const auto length = s.hasLoop() ? s.loopEnd - s.loopStart : s.playlist.empty() ? bar * 4 : s.songLength();
 
         Automation a;
         a.name = name;
@@ -473,6 +474,7 @@ void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)
         clip.kind = ClipKind::automation;
         clip.automation = (int) s.automations.size() - 1;
         clip.track = track;
+        clip.start = s.hasLoop() ? s.loopStart : 0;
         clip.length = length;
         s.playlist.push_back (clip);
     });

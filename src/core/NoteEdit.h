@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "core/Song.h"
@@ -62,7 +63,75 @@ std::vector<int> duplicate (Pattern& pattern, const std::vector<int>& indices, s
 // Rounds the notes' start to the nearest multiple of `grid` (length kept).
 void quantize (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
 
+// Rounds start and end to the nearest multiple of `grid` (the length stays at least one grid unit).
+void quantizeFull (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
+
 // Moves the notes by (deltaTicks, deltaKeys), clamping so none leaves [0, ...) and [0, 127].
 // Returns the offset actually applied.
 void move (Pattern& pattern, const std::vector<int>& indices, std::int64_t& deltaTicks, int& deltaKeys);
+
+// --- quick note operations (each is one undo step in the Piano Roll) -----------------
+
+// Splits note `index` at `tick` (absolute) when the tick is strictly inside it. The original keeps the
+// head; the tail is appended. Returns the tail's index, or -1 when nothing was split.
+int split (Pattern& pattern, int index, std::int64_t tick);
+
+// Chop to grid: cuts every note at each multiple of `grid` that falls inside it. Returns the indices of
+// all the resulting pieces (originals included; the vector is not re-sorted).
+std::vector<int> chop (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
+
+// Join: merges notes of the same channel and key that touch (end == next start) or overlap into one
+// note (the first one's properties are kept). Returns the number of notes removed.
+int join (Pattern& pattern, const std::vector<int>& indices);
+
+// Legato: each note (per channel) lasts until the next later start among the given notes; notes that
+// start together (a chord) end together. The last ones keep their length.
+void legato (Pattern& pattern, const std::vector<int>& indices);
+
+// Shrink to grid: every length becomes one grid unit.
+void shrinkToGrid (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid);
+
+// Rotate within the bar: moves the notes `steps` grid units (negative = left), wrapping inside the
+// whole bars the notes start in (`bar` = ticks per bar).
+void rotate (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid, std::int64_t bar, int steps);
+
+// --- grid --------------------------------------------------------------------------
+
+// The multiple of `step` at or before `tick` (step <= 1: whole ticks).
+std::int64_t snapDown (double tick, std::int64_t step);
+
+// The candidate closest to `tick` when it lies within `maxDistance` ticks; otherwise snapDown (tick, fallbackStep).
+std::int64_t snapNearest (double tick, const std::vector<std::int64_t>& candidates, double maxDistance, std::int64_t fallbackStep);
+
+// The finest of the usual grid steps (1/4 step, 1/2 step, step, beat, bar, then whole multiples of bars)
+// whose width on screen is at least `minPixels`, i.e. the lines the editor draws ("Screen" grid).
+std::int64_t screenStep (double pixelsPerTick, std::int64_t bar, double minPixels = 16.0);
+
+// "bar:step:tick" (bar and step from 1, tick from 0; 16 steps per 4/4 bar) <-> ticks.
+std::string formatTime (std::int64_t ticks, int beatsPerBar, bool isLength = false); // lengths count bars and steps from 0
+bool parseTime (const std::string& text, int beatsPerBar, std::int64_t& ticks, bool isLength = false);
+
+// --- Playlist clips ------------------------------------------------------------------
+
+// Moves the clip's left edge to `newStart` without moving its content (the offset follows). The start
+// cannot go before the content's beginning (offset 0) nor past end - minLength.
+void trimStart (Clip& clip, std::int64_t newStart, std::int64_t minLength);
+
+// Slip: moves the content under the clip by `delta` ticks (positive = later); the clip stays put.
+// The offset never goes below 0.
+void slip (Clip& clip, std::int64_t delta);
+
+// Inserts `length` ticks of silence at `at`: clips starting at or after it (and markers) move right.
+void insertTime (std::vector<Clip>& clips, std::vector<Marker>& markers, std::int64_t at, std::int64_t length);
+
+// Removes [from, to) from the timeline: what lies inside is deleted, clips crossing an edge are cut,
+// and everything after `to` (clips and markers) moves left.
+void deleteTime (std::vector<Clip>& clips, std::vector<Marker>& markers, std::int64_t from, std::int64_t to);
+
+// Indices of the clips that overlap [from, to).
+std::vector<int> clipsInTime (const std::vector<Clip>& clips, std::int64_t from, std::int64_t to);
+
+// Repeats the time selection [from, to) right after itself: copies of `sources` (or, if empty, of the
+// clips that start inside it) shifted by its length. Returns the new indices.
+std::vector<int> repeatTime (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::vector<int> sources);
 } // namespace lynx::noteedit
