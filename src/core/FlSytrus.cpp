@@ -1010,6 +1010,12 @@ double shapingAt (const Envelope& e, double x)
                     f = t - (std::pow (u, 6.0) - u) * tension;
                     break;
                 }
+                case 9: // REA_rodada25 §3.3: t − (t − g)·|T|, g = sin(πt/2) (T > 0) or 1 − cos(πt/2)
+                {
+                    const auto g = tension > 0.0 ? std::sin (t * 3.141592653589793 / 2.0) : 1.0 - std::cos (t * 3.141592653589793 / 2.0);
+                    f = t - (t - g) * std::abs (tension);
+                    break;
+                }
                 default:
                     if (std::abs (tension) > 1e-9)
                     {
@@ -1052,6 +1058,7 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         bool present = false;
         std::vector<std::int32_t> p;
         int filterType[2] { 0, 0 };
+        int resonanceType[2] { 108, 108 }; // codes 100 Classic … 108 Lowpass, 109 Noise, 110/111 Custom shape 1/2
         int blendMode = 0, partialMode = 1;
         std::vector<Articulator> art;
         std::vector<Envelope> shaping; // 26 curves: 0 Local EQ, 1 phase, 2/3 Timbre 1/2… (REA_rodada23 §1.1)
@@ -1076,6 +1083,7 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
         {
             std::memcpy (&part.filterType[0], misc + 52, 4);
             std::memcpy (&part.filterType[1], misc + 56, 4);
+            std::memcpy (part.resonanceType, misc + 0x3C, sizeof (part.resonanceType)); // codes (REA_rodada25 §1.1)
             std::memcpy (&part.blendMode, misc, 4);
             std::memcpy (&part.partialMode, misc + 0x1C, 4);
         }
@@ -1187,8 +1195,7 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     // filter 1 (or 2 if filter 1 is open). REA_rodada18 §1.2/§1.4: the knob is linear in log2(Hz) between
     // 73.416 Hz and 17 739.7 Hz for a 130.81 Hz note (key 48) and tracks the keyboard with
     // KT = p55/1000 (p67 on filter 2). Types 0…18 = combo without separators; only low-pass/band-pass/high-pass
-    // and band-reject have an equivalent. Harmor's resonance (per-harmonic curve) has no confirmed
-    // equivalent in LYNX's filter and is left out.
+    // and band-reject have an equivalent.
     const auto& p = main.p;
     int which = p[52] < 8192 ? 0 : p[64] < 8192 ? 1 : -1;
     out.cutoff = 20000.0f;
@@ -1211,6 +1218,49 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
             out.filterType = lynxType;
             out.cutoff = (float) std::clamp (std::exp2 (lo + freq / 8192.0 * (hi - lo)), 20.0, 20000.0);
             out.keyTrack = (float) std::clamp ((which == 0 ? p[55] : p[67]) / 1000.0, -2.0, 2.0);
+
+            // resonance (REA_rodada25): per partial FL multiplies by 2^(r·M(f)·T(pos)), r = p57/1000 (p69), T = the
+            // type's table (peak at f_b = fc·2^(p60/1200)), M = the "resonance mask" curve squared over 32.7 Hz…16.7 kHz.
+            // LYNX's SVF gets the same peak over the pass-band: Δ = 6.0206·r·M(f_b)·(T_peak − T_below) dB →
+            // Q = √(G²(1 + √(1 − 1/G²))/2), G = 10^(Δ/20) (approximation: no offset, width p59 or skirts)
+            const auto resAmount = std::clamp (which == 0 ? p[57] : p[69], 0, 1000) / 1000.0;
+            const auto code = main.resonanceType[which];
+            double peak = 0.0, below = 0.0;
+            switch (code)
+            {
+                case 100: peak = 6.0; below = -1.0; break;  // Classic
+                case 101: peak = 6.25; break;               // Cuberdon
+                case 102: peak = 5.8; break;                // Pedestal
+                case 103: peak = 6.9; break;                // Sedge hat
+                case 104: peak = 5.4; break;                // Wide bump
+                case 105: peak = 6.2; break;                // Double cone
+                case 107: peak = 2.168; break;              // Wormhole
+                case 108: peak = 6.0; below = -0.8; break;  // Lowpass
+                case 110: case 111:                          // Custom shape 1/2: T = 24·(y − 0.5)
+                    if (main.shaping.size() == 26)
+                    {
+                        const auto& e = main.shaping[(std::size_t) (12 + code - 110)];
+                        double top = 0.0;
+                        for (const auto& pt : e.points)
+                            top = std::max (top, pt.second);
+                        peak = 24.0 * (top - 0.5);
+                        below = 24.0 * (shapingAt (e, 0.0) - 0.5);
+                    }
+                    break;
+                default: break; // 106 Well (cut only), 109 Noise (not decoded)
+            }
+            if (resAmount > 0.0 && peak > below)
+            {
+                const auto bump = out.cutoff * std::exp2 (std::clamp (which == 0 ? p[60] : p[72], -2400, 2400) / 1200.0);
+                const auto x = std::clamp ((std::log2 (bump) - std::log2 (32.7032)) / 9.0, 0.0, 1.0);
+                const auto m = main.shaping.size() == 26 ? std::pow (shapingAt (main.shaping[(std::size_t) (20 + which)], x), 2.0) : 1.0;
+                const auto deltaDb = 6.0206 * resAmount * m * (peak - below);
+                if (const auto g = std::pow (10.0, deltaDb / 20.0); g > 1.0)
+                {
+                    const auto q = std::sqrt (g * g * (1.0 + std::sqrt (1.0 - 1.0 / (g * g))) / 2.0);
+                    out.resonance = (float) std::clamp ((2.0 - 1.0 / q) / 1.9, 0.0, 1.0);
+                }
+            }
 
             // frequency envelope (articulator 4/5, additive with center 0.5, REA_rodada19 §2.1):
             // shifts by 2·(hi − lo)·amt·(y − 0.5) octaves, amt = p56/1000 (p68 on filter 2)

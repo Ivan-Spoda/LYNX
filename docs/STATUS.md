@@ -75,7 +75,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Harmor:** cutoff in log2 Hz (73.4 Hz–17.7 kHz) with keytracking from 130.81 Hz, filter types 0–18, part
   volume `(3^x − 1)/2` (up to +12 dB), level², filter envelope centred at 0.5 (±2·(hi − lo)·amt); exact timbre
   from the Timbre 1/2 curves, blend, local EQ (1/n) and per-harmonic phase; unison with FL's per-voice detune
-  table, pan and gain.
+  table, pan and gain; resonance peak from the type's table (Classic … Lowpass, Custom shapes) and the resonance mask
+  (REA round 25).
 - **Sytrus:** FM depth 4·g cycles; ring modulation `1 − |a| + a·mod`; exact operator waveform (base shape,
   Half/Even, Skew, Sine shaper, normalisation, Tension, Absolute, Pre-filter) turned into a spectrum by FFT.
 - **Harmless:** cutoff range with per-type margins, keytracking, centred non-adaptive filter envelope, one-sided
@@ -92,7 +93,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Morphine:** average spectrum of the generators on the harmonics oscillator.
 - **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
   octaves), 7 (all-pass) and 11 (Mango); pattern envelopes on volume (rhythmic envelope effect, in beats, looped,
-  song-locked, tension curves), pan LFO (auto-pan effect), cutoff envelope/LFO as live automation (single unit).
+  song-locked, tension curves), pan LFO (auto-pan effect), cutoff and resonance envelope/LFO as live
+  modulation of the EQ (top-level live automation, or links inside the parallel container with several units).
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input become LYNX's compressor listening to the source track.
@@ -102,7 +104,9 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
 
 **Still approximated or left out** (no confirmation yet):
-- Harmor: resonance (per-harmonic curve), image/blur/prism/FX; with the volume envelope off FL keeps the note
+- Harmor: the resonance becomes an SVF Q with the same peak over the pass-band — Harmor's bump sits at
+  fc·2^(p60/1200) with its own width (p59) and skirts (Classic −6 dB, Lowpass dip above), which the SVF cannot
+  follow; Well, Noise, self-oscillation, Hz scale and adaptive width are left out; image/blur/prism/FX; with the volume envelope off FL keeps the note
   until it is stolen — LYNX uses a short declick release.
 - Effector: the Filter cascade (FL's is not tabulated), exact Flanger/Phaser feedback topology, Reverb decay.
 - Sakura: physical strings become saw + triangle; string decay taken at key 60; Hi-Cut applied at the output.
@@ -117,8 +121,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
   key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
 - Sytrus: only one carrier per channel uses the exact spectrum; the others and the FM modulator use basic shapes.
-- Love Philter: Mango Hz inferred from its pole; cutoff modulation only for single-unit Love Philters;
-  resonance modulation; curve type 5; pan law and pan-LFO tension.
+- Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
+  (control slot → live link); curve type 5; pan law and pan-LFO tension.
 - Pitcher: the pitch detector (YIN) and shifter (two heads) are LYNX's own; Formant/Gender, Harmonize and MIDI
   modes are not implemented.
 - Vocodex: needs two side inputs or its internal synth — left out.
@@ -158,4 +162,4 @@ Confirmed empirically on the demo projects:
 
 ## Open items
 - ASIO (Steinberg SDK licensing).
-- Ogun's per-partial decay, Vocodex, Harmor resonance and image synthesis.
+- Ogun's per-partial decay, Vocodex, Harmor's per-partial resonance and image synthesis.

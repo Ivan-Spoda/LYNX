@@ -74,9 +74,10 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Gross Beat, Frequency Splitter, Effector (round 14); Effector rebuilt with all 12 algorithms (rounds 18–19)
 - [x] Controller links: Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface
 - [x] Patcher graphs of any shape (round 20)
-- [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs (rounds 16–20)
+- [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs, cutoff/resonance modulation in every unit (rounds 16–20)
 - [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20)
 - [x] Sidechain links (round 22)
 - [ ] Vocodex (needs two side inputs or its internal synth)
 - [x] Ogun's FFT spectral engine: initial spectrum (round 24); per-partial decay still approximated
+- [x] Harmor resonance: types, mask and offset (round 25) as an SVF peak
 - [x] FLEX by preset name only (its packs are encrypted and never opened)
