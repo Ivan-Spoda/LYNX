@@ -8,6 +8,8 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "engine/PluginHost.h"
+#include "ui/I18n.h"
+#include "ui/Theme.h"
 #include "ui/WindowOwner.h"
 
 #if JUCE_WINDOWS
@@ -176,9 +178,9 @@ public:
         if (closing || ! showAlerts)
             return;
         juce::MessageManager::callAsync ([title = pluginName] {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
-                                                    title + juce::String::fromUTF8 (" stopped responding (separate process). "
-                                                                                    "It has been muted; save the project and reopen it to reload."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("Plugin"),
+                                                    lynx::tr ("{0} stopped responding (separate process). "
+                                                              "It has been muted; save the project and reopen it to reload.", { title }));
         });
     }
 
@@ -298,10 +300,10 @@ public:
     RemoteEditor (juce::AudioProcessor& p, std::function<void()> show)
         : AudioProcessorEditor (p), showWindow (std::move (show))
     {
-        text.setText (juce::String::fromUTF8 ("This plugin runs in a separate process: its interface opens in its own window."),
+        text.setText (tr ("This plugin runs in a separate process: its interface opens in its own window."),
                       juce::dontSendNotification);
         text.setJustificationType (juce::Justification::centred);
-        button.setButtonText (juce::String::fromUTF8 ("Show the plugin window"));
+        button.setButtonText (tr ("Show the plugin window"));
         button.onClick = [this] { showWindow(); };
         addAndMakeVisible (text);
         addAndMakeVisible (button);
@@ -309,7 +311,7 @@ public:
         showWindow();
     }
 
-    void paint (juce::Graphics& g) override { g.fillAll (juce::Colour (0xff2b3035)); }
+    void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg1); }
 
     void resized() override
     {
@@ -466,7 +468,7 @@ class SandboxWindow final : public juce::DocumentWindow
 {
 public:
     explicit SandboxWindow (const juce::String& title)
-        : DocumentWindow (title, juce::Colour (0xff2b3035), DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
     {
         setUsingNativeTitleBar (true);
         setAlwaysOnTop (true);

@@ -36,6 +36,8 @@ add_library(lynx_core STATIC
     src/core/DrumSynthLive.cpp
     src/core/Harmless.cpp
     src/core/Harmor.cpp
+    src/core/HarmlessFx.cpp
+    src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
     src/core/Vocodex.cpp
     src/core/FlPatcher.cpp
@@ -106,7 +108,10 @@ if(LYNX_BUILD_APP)
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ChannelSettings.cpp
-        src/ui/BrowserComponent.cpp)
+        src/ui/BrowserComponent.cpp
+        src/ui/Theme.cpp
+        src/ui/Icons.cpp
+        src/ui/I18n.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 

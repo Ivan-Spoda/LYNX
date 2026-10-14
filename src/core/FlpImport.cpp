@@ -2,6 +2,8 @@
 #include "core/DrumSynthLive.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
+#include "core/HarmlessFx.h"
+#include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
@@ -392,6 +394,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             // the synth's preset button keeps the synth approximation of a Sakura patch
             SynthSettings synth;
             if (synthFromSakura (project.channels.front().pluginState, synth))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::sytrus)
+        {
+            // likewise for Sytrus: the preset button fills the built-in synth with the 3-oscillator conversion
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromSytrus (project.channels.front().pluginState, song.bpm, synth, gain))
                 return synth;
         }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::harmless)
@@ -804,6 +814,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::harmless;
                     def.modelParams = std::move (*params);
                     adoptedFromPlugin = true;
+                    // rack compressor: Harmless's own preset <n>.fst from the user's installation (REA_rodada36 §2)
+                    const auto compType = (int) def.modelParams[(std::size_t) harmlessComboIndex + 3];
+                    if (compType > 0)
+                    {
+                        const auto path = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Harmless\\Data\\Compression\\"
+                                                             + std::to_string (compType) + ".fst",
+                                                         options.roots);
+                        std::optional<std::vector<std::uint8_t>> state;
+                        if (! path.empty() && options.readFile && (! options.fileExists || options.fileExists (path)))
+                            state = hlfx::maximusStateFromFst (options.readFile (path));
+                        if (state && hlfx::makeMaximusPreset (*state) != nullptr)
+                        {
+                            def.modelParams.push_back ((float) state->size());
+                            for (const auto byte : *state)
+                                def.modelParams.push_back ((float) byte);
+                        }
+                        else if (options.report != nullptr)
+                            ++options.report->droppedEffects["Harmless compressor (preset not found)"];
+                    }
                 }
                 else if (synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
                     adopt();
@@ -814,8 +843,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
                 adopt();
-            else if (name == "sytrus" && synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "sytrus")
+            {
+                // FL's Sytrus engine from the raw state (REA_rodada31); the 3-oscillator conversion stays as a fallback
+                if (sytrus::stateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::sytrus;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromSytrus (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "harmor")
             {
                 // FL's additive engine from the raw state (REA_rodada34); the spectral-oscillator conversion stays as

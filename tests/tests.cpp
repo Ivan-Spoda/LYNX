@@ -1,10 +1,14 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <set>
+#include <sstream>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -26,12 +30,14 @@
 #include "core/FlWrapper.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
+#include "core/HarmlessFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
 #include "core/Slicer.h"
+#include "core/SytrusEngine.h"
 #include "core/Templates.h"
 #include "core/Vocodex.h"
 #include "core/TimeStretch.h"
@@ -40,6 +46,7 @@
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
 #include "flp/Flp.h"
+#include "ui/I18nData.h"
 
 namespace
 {
@@ -736,12 +743,14 @@ TEST (flp_real_files)
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
     int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
-    int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0;
+    int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
+        sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
+    int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -789,6 +798,12 @@ TEST (flp_real_files)
                     hasFpc = hasFpc || c.pluginName == "FPC";
                 for (const auto& c : full.channels)
                 {
+                    if (c.instrument == lynx::InstrumentKind::harmless && c.modelParams.size() >= (std::size_t) lynx::harmlessParamCount
+                        && c.modelParams[(std::size_t) lynx::harmlessComboIndex + 3] > 0.5f)
+                    {
+                        ++harmlessCompWanted;
+                        harmlessCompLoaded += c.modelParams.size() > (std::size_t) lynx::harmlessCompIndex + 1000 ? 1 : 0;
+                    }
                     flKeysChannels += c.zones.size() == 30 && c.zones.front().path.find ("CHANGPIANO") != std::string::npos ? 1 : 0;
                     if (c.sampler.slices.size() >= 4)
                     {
@@ -906,6 +921,28 @@ TEST (flp_real_files)
                     ++sytrus;
                     lynx::SynthSettings ss;
                     float g = 1.0f;
+                    // the Sytrus engine (REA_rodada31) reads every demo state; the first 24 play a short note (render settings)
+                    if (lynx::sytrus::stateUsable (c.pluginState))
+                    {
+                        ++sytrusEngine;
+                        if (sytrusRendered < 24)
+                        {
+                            ++sytrusRendered;
+                            lynx::sytrus::Engine e;
+                            e.prepare (44100.0, true, 512);
+                            e.setPatch (lynx::sytrus::parsePatch (c.pluginState));
+                            lynx::sytrus::NoteParams note;
+                            e.noteOn (note);
+                            std::vector<float> l (8192), r (8192);
+                            e.render (l.data(), r.data(), 8192, 0.551f, 0.0f);
+                            bool finite = true;
+                            double energy = 0.0;
+                            for (std::size_t k = 0; k < l.size(); ++k)
+                                finite = finite && std::isfinite (l[k]) && std::isfinite (r[k]), energy += (double) l[k] * l[k];
+                            CHECK (finite);
+                            sytrusSounding += energy > 1e-6;
+                        }
+                    }
                     if (lynx::synthFromSytrus (c.pluginState, 128.0, ss, g))
                     {
                         ++sytrusDecoded;
@@ -1073,7 +1110,10 @@ TEST (flp_real_files)
 
     CHECK (threeOscDecoded == threeOsc);
     std::printf ("  Harmless: %d channels, %d decoded\n", harmless, harmlessDecoded);
-    std::printf ("  Sytrus: %d channels, %d decoded\n", sytrus, sytrusDecoded);
+    std::printf ("  Sytrus: %d channels, %d decoded, %d by the engine (%d of %d rendered sound)\n", sytrus, sytrusDecoded, sytrusEngine,
+                 sytrusSounding, sytrusRendered);
+    CHECK (sytrusEngine == sytrus);
+    CHECK (sytrusSounding >= sytrusRendered * 3 / 4);
     for (const auto& [name, counter] : generators)
     {
         std::printf ("  %s: %d channels, %d decoded\n", name.c_str(), counter.first, counter.second);
@@ -1360,6 +1400,8 @@ TEST (flp_real_files)
     CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
     std::printf ("  Harmor: %d channels, %d states usable by the engine, %d imported as Harmor (%d sounding)\n", harmor, harmorUsable, harmorKind, harmorSounding);
     CHECK (harmorUsable == harmor && harmor > 90 && harmorKind >= harmor && harmorSounding >= harmorKind * 9 / 10);
+    std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
+    CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -4472,6 +4514,176 @@ TEST (project_templates_render_sound)
     CHECK (lynx::makeTemplate (0).patterns[0].notes.empty());
 }
 
+// --- interface translations (resources/i18n) -------------------------------------------------------
+
+namespace i18ntest
+{
+std::string readFile (const std::filesystem::path& path)
+{
+    std::ifstream in (path, std::ios::binary);
+    return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+}
+
+std::string unescape (const std::string& s)
+{
+    std::string out;
+    for (std::size_t i = 0; i < s.size(); ++i)
+    {
+        if (s[i] == '\\' && i + 1 < s.size())
+        {
+            const auto n = s[++i];
+            out += n == 'n' ? '\n' : n == 't' ? '\t' : n;
+        }
+        else
+            out += s[i];
+    }
+    return out;
+}
+
+// reads a quoted string starting at s[pos] == '"'; returns the raw (escaped) contents and moves pos past the closing quote
+bool quoted (const std::string& s, std::size_t& pos, std::string& raw)
+{
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    raw.clear();
+    for (++pos; pos < s.size() && s[pos] != '"' && s[pos] != '\n'; ++pos)
+    {
+        if (s[pos] == '\\' && pos + 1 < s.size())
+            raw += s[pos++];
+        raw += s[pos];
+    }
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    ++pos;
+    return true;
+}
+
+// JUCE LocalisedStrings format: "english" = "translation"; duplicates are reported in `duplicates`
+std::map<std::string, std::string> parseTable (const std::string& text, std::vector<std::string>& duplicates)
+{
+    std::map<std::string, std::string> table;
+    std::istringstream lines (text);
+    std::string line;
+    while (std::getline (lines, line))
+    {
+        std::size_t pos = line.find_first_not_of (" \t");
+        std::string key, value;
+        if (pos == std::string::npos || ! quoted (line, pos, key))
+            continue;
+        pos = line.find ('"', pos);
+        if (pos == std::string::npos || ! quoted (line, pos, value))
+            value.clear();
+        const auto k = unescape (key);
+        if (table.count (k) != 0)
+            duplicates.push_back (k);
+        table[k] = unescape (value);
+    }
+    return table;
+}
+
+// string literals passed to tr() / TR_NOOP() in the sources (adjacent literals are concatenated)
+std::map<std::string, std::string> sourceKeys (const std::filesystem::path& srcDir)
+{
+    std::map<std::string, std::string> keys;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (srcDir))
+    {
+        const auto ext = entry.path().extension().string();
+        if (! entry.is_regular_file() || (ext != ".cpp" && ext != ".h"))
+            continue;
+
+        // drop // comment lines (they may quote tr ("...") as an example)
+        std::string text, line;
+        std::istringstream in (readFile (entry.path()));
+        while (std::getline (in, line))
+        {
+            const auto first = line.find_first_not_of (" \t");
+            text += (first != std::string::npos && line.compare (first, 2, "//") == 0) ? std::string() : line;
+            text += '\n';
+        }
+
+        auto isIdent = [] (char c) { return std::isalnum ((unsigned char) c) || c == '_'; };
+        for (const std::string name : { "tr", "TR_NOOP" })
+            for (auto at = text.find (name); at != std::string::npos; at = text.find (name, at + 1))
+            {
+                if ((at > 0 && isIdent (text[at - 1])) || isIdent (text[at + name.size()]))
+                    continue;
+                auto pos = text.find_first_not_of (" \t\n", at + name.size());
+                if (pos == std::string::npos || text[pos] != '(')
+                    continue;
+                pos = text.find_first_not_of (" \t\n", pos + 1);
+                std::string key, raw;
+                bool any = false;
+                while (pos != std::string::npos && quoted (text, pos, raw))
+                {
+                    key += raw;
+                    any = true;
+                    pos = text.find_first_not_of (" \t\n", pos);
+                }
+                if (any)
+                    keys.emplace (unescape (key), entry.path().filename().string());
+            }
+    }
+    return keys;
+}
+
+std::set<std::string> placeholders (const std::string& s)
+{
+    std::set<std::string> found;
+    for (auto open = s.find ('{'); open != std::string::npos; open = s.find ('{', open + 1))
+        if (const auto close = s.find ('}', open); close != std::string::npos && close - open <= 3)
+            found.insert (s.substr (open, close - open + 1));
+    return found;
+}
+} // namespace i18ntest
+
+TEST (translations_cover_every_ui_string)
+{
+    using namespace i18ntest;
+    const auto text = readFile ("resources/i18n/pt-BR.txt");
+    CHECK (! text.empty());
+
+    std::vector<std::string> duplicates;
+    const auto table = parseTable (text, duplicates);
+    CHECK (table.size() > 300);
+    CHECK (duplicates.empty());
+    for (const auto& d : duplicates)
+        std::printf ("  duplicate pt-BR entry: \"%s\"\n", d.c_str());
+
+    const auto keys = sourceKeys ("src");
+    CHECK (keys.size() > 300);
+
+    int missing = 0;
+    for (const auto& [key, file] : keys)
+        if (auto it = table.find (key); it == table.end() || it->second.empty())
+        {
+            ++missing;
+            std::printf ("  no pt-BR translation for \"%s\" (%s)\n", key.c_str(), file.c_str());
+        }
+    CHECK (missing == 0);
+
+    // no empty values, and every {n} placeholder survives the translation
+    int empty = 0, badPlaceholders = 0;
+    for (const auto& [english, portuguese] : table)
+    {
+        empty += portuguese.empty() ? 1 : 0;
+        if (placeholders (english) != placeholders (portuguese))
+        {
+            ++badPlaceholders;
+            std::printf ("  placeholders differ: \"%s\"\n", english.c_str());
+        }
+    }
+    CHECK (empty == 0);
+    CHECK (badPlaceholders == 0);
+}
+
+TEST (translations_embedded_table_is_up_to_date)
+{
+    // src/ui/I18nData.h must be regenerated (tools/make_i18n.py) whenever the .txt changes
+    const auto text = i18ntest::readFile ("resources/i18n/pt-BR.txt");
+    CHECK (text.size() == sizeof (lynx::i18n::data::ptBR));
+    CHECK (std::memcmp (text.data(), lynx::i18n::data::ptBR, std::min (text.size(), sizeof (lynx::i18n::data::ptBR))) == 0);
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)
@@ -5901,6 +6113,409 @@ TEST (harmor_engine)
     for (int i = 0; i < 2048; ++i)
         el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
     CHECK (el < 1e-10 * er && er > 1e-3);
+}
+
+// our own Maximus v7 state (layout REA_rodada8 §1.1): 7 globals, 4 × 13 band parameters, 8 envelopes (dx, y, tension, type)
+static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, const std::array<std::array<int, 13>, 4>& bands,
+                                                   const std::array<std::vector<std::array<double, 4>>, 8>& envs, int oversampling)
+{
+    std::vector<std::uint8_t> d;
+    auto put = [&] (const void* v, std::size_t n) { d.insert (d.end(), (const std::uint8_t*) v, (const std::uint8_t*) v + n); };
+    auto i32 = [&] (std::int32_t v) { put (&v, 4); };
+    i32 (7);
+    for (int copy = 0; copy < 2; ++copy)
+    {
+        for (auto v : g)
+            i32 (v);
+        for (const auto& b : bands)
+            for (auto v : b)
+                i32 (v);
+    }
+    d.resize (0x1fe, 0);
+    std::memcpy (d.data() + 0x1f4, &oversampling, 4);
+    for (const auto& e : envs)
+    {
+        i32 (3), i32 (2), i32 ((std::int32_t) e.size());
+        for (const auto& pt : e)
+        {
+            const double dx = pt[0], y = pt[1];
+            const float t = (float) pt[2];
+            put (&dx, 8), put (&y, 8), put (&t, 4);
+            const std::uint8_t flags[4] { (std::uint8_t) pt[3], 0, 0, 0 };
+            put (flags, 4);
+        }
+        i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
+    }
+    return d;
+}
+
+TEST (harmless_rack)
+{
+    // REA_rodada36: Harmless's effects rack against our reference model (rack.py / maxmodel.py, which match the
+    // installation's Harmless_x64.dll and SG_x64.dll), 44.1 kHz, host blocks of 512
+    std::vector<float> inL (8192), inR (8192);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+    }
+    auto run = [&] (const std::array<int, 100>& p, int compType, std::shared_ptr<const lynx::hlfx::MaximusPreset> comp, int total, int voicesUntil) {
+        lynx::hlfx::Rack rack;
+        std::array<int, 7> t {};
+        t[3] = compType;
+        rack.prepare (p, t, 44100.0, 120.0, std::move (comp));
+        std::vector<float> l (inL.begin(), inL.begin() + total), r (inR.begin(), inR.begin() + total);
+        for (int s = 0; s < total; s += 512)
+            rack.process (l.data() + s, r.data() + s, std::min (512, total - s), s < voicesUntil);
+        return std::make_pair (l, r);
+    };
+    {
+        // chorus type 3 (mix 400), ping-pong delay type 2 (vol 600, feedback 500, 1/4 beat), reverb type 4 (vol 700)
+        std::array<int, 100> p {};
+        p[90] = 3, p[91] = 400, p[92] = 2, p[93] = 600, p[94] = 500, p[95] = 48, p[96] = 4, p[97] = 700;
+        const auto [l, r] = run (p, 0, nullptr, 8192, 4096);
+        const std::tuple<int, float, float> golden[] { { 0, 0.0f, 0.0f }, { 500, -0.25248247f, 0.15141529f }, { 3000, -0.65128994f, -0.64854866f },
+                                                       { 5000, -0.54308629f, -0.36827448f }, { 6000, -0.98378551f, -0.72790027f },
+                                                       { 8191, 0.50599128f, -0.43637198f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+    }
+    {
+        // the delay alone: an impulse comes back after round(time·fs·0.3125/bpm) samples × (11^0.6 − 1)/10, then × feedback
+        std::array<int, 100> p {};
+        p[92] = 1, p[93] = 600, p[94] = 500, p[95] = 48;
+        lynx::hlfx::Rack rack;
+        rack.prepare (p, {}, 44100.0, 120.0, nullptr);
+        std::vector<float> l (16384), r (16384);
+        l[0] = 1.0f;
+        for (int s = 0; s < 16384; s += 512)
+            rack.process (l.data() + s, r.data() + s, 512, s == 0);
+        const auto D = 5512; // 48·44100·0.3125/120 = 5512.5 → 5512 (round half to even)
+        const auto vol = (float) ((std::exp ((double) (600 * 0.001f) * (double) (float) std::log (11.0)) - 1.0) * (double) 0.1f);
+        CHECK (std::abs (l[(std::size_t) D] - vol) < 1e-7f && std::abs (l[(std::size_t) D - 1]) < 1e-12f);
+        // the feedback ramps from 0.5 toward 0.5: the second echo is vol·0.5
+        CHECK (std::abs (l[(std::size_t) (2 * D)] - vol * 0.5f) < 1e-7f && std::abs (r[(std::size_t) D]) < 1e-12f);
+    }
+    // the compressor: Maximus states of our own (no preset data), checked against SG_x64.dll by REA round 36
+    using Env = std::vector<std::array<double, 4>>;
+    const Env def { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    auto band = [] (int mode, int pre = 1000, int post = 1000, int sep = 0, int sat = 0, int ceil = 1000, int att = 1115, int rel2 = 0,
+                    int sus = 2882) { return std::array<int, 13> { mode, pre, post, sep, sat, ceil, att, rel2, 2, 5000, 3, sus, 0 }; };
+    {
+        // master brickwall at −0.22 dB only (bands off / compression off)
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, -1 }, { band (3), band (1), band (3), band (0) },
+                                          { def, def, def, def, def, def, def, def }, 0);
+        const auto preset = lynx::hlfx::makeMaximusPreset (st);
+        CHECK (preset != nullptr);
+        std::array<int, 100> p {};
+        p[98] = 1000;
+        const auto [l, r] = run (p, 1, preset, 4096, 4096);
+        const std::tuple<int, float, float> golden[] { { 100, 0.02499794f, 0.88166064f }, { 1000, 0.56971455f, -0.62808162f },
+                                                       { 2047, -0.27541649f, 0.70913559f }, { 3000, 0.32431602f, -0.37985173f },
+                                                       { 4095, -0.12743534f, -0.15237498f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+        float peak = 0.0f;
+        for (int i = 2048; i < 4096; ++i)
+            peak = std::max ({ peak, std::abs (l[(std::size_t) i]), std::abs (r[(std::size_t) i]) });
+        CHECK (peak < 0.9751f);
+    }
+    {
+        // 24 dB crossovers, ×2 oversampling, low cut, stereo separation, saturation A, a knee with tension (type 7) and
+        // exponential tensions (type 0), release 2 on the master, band mix 600
+        const Env knee { { 0.0, 0.0, 0.0, 0 }, { 0.35, 0.35, 0.0, 0 }, { 0.65, 0.6, 0.36, 7 } };
+        const Env t0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.14, 0 }, { 0.5, 0.5, 0.0, 0 } };
+        const Env m0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.6, 0.085, 0 } };
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 891, 600, 32768 },
+                                          { band (1, 1264, 1296, 500, -500, 1200), band (0, 1340, 1000, -348, 0, 1000, 1115, 0, 1570),
+                                            band (0, 1364, 1152, 0, 0, 1000, 1115, 0, 1186), band (0, 1000, 1000, 0, -196, 1000, 1115, 4464, 1538) },
+                                          { def, def, knee, def, t0, def, m0, def }, 1);
+        const auto preset = lynx::hlfx::makeMaximusPreset (st);
+        CHECK (preset != nullptr);
+        std::array<int, 100> p {};
+        p[98] = 600;
+        const auto [l, r] = run (p, 2, preset, 4096, 4096);
+        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856275f, -0.63261062f },
+                                                       { 2047, 0.20268074f, 0.5414567f }, { 3000, -0.25614089f, -0.49984524f },
+                                                       { 4095, 0.10172816f, 0.0505573f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+    }
+    {
+        // an .fst wrapper around a state is found; unsupported states are rejected
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, -1 }, { band (3), band (1), band (3), band (0) },
+                                          { def, def, def, def, def, def, def, def }, 0);
+        std::vector<std::uint8_t> fst { 'F', 'L', 'h', 'd', 6, 0, 0, 0, 0, 0, 1, 0, 0x60, 0, 'F', 'L', 'd', 't' };
+        std::vector<std::uint8_t> body { 0xC9, 8, 'M', 'a', 'x', 'i', 'm', 'u', 's', 0, 0xD5 };
+        for (auto n = st.size(); ; n >>= 7)
+        {
+            body.push_back ((std::uint8_t) ((n & 0x7f) | (n >= 0x80 ? 0x80 : 0)));
+            if (n < 0x80)
+                break;
+        }
+        body.insert (body.end(), st.begin(), st.end());
+        const auto len = (std::uint32_t) body.size();
+        for (int k = 0; k < 4; ++k)
+            fst.push_back ((std::uint8_t) (len >> (8 * k)));
+        fst.insert (fst.end(), body.begin(), body.end());
+        const auto found = lynx::hlfx::maximusStateFromFst (fst);
+        CHECK (found && *found == st);
+        auto rms = st;
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
+        CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
+    }
+}
+
+// ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
+// A Sytrus state built from scratch (version 25 layout, our own values — no FL preset data), zlib "stored" blocks.
+namespace
+{
+struct SytrusTestPatch
+{
+    std::vector<std::int32_t> main = std::vector<std::int32_t> (240, 0); // 962-byte main block as ints (+ mute bytes)
+    struct Op
+    {
+        int p[10] { 0, 256, 0, 0, 0, 0, 0, 0, 0, 0 };
+        int ratio = 20000, offset = 0, noise = 0;
+        std::vector<float> amps { 1.0f };
+        std::uint8_t flags[8] {};
+        int env1[3] { -1, -1, -1 }; // volume envelope: on (≠ −1 → on), decay point, sustain point
+        std::vector<std::pair<double, double>> env1pts;
+    } ops[6];
+    struct Filt
+    {
+        int p[10] { 0, 0, 128, 0, 128, 0, 0, 128, 128, 0 };
+        int type = 3;
+    } filts[3];
+    std::array<std::array<std::uint8_t, 23>, 3> delays {};
+    std::array<std::int32_t, 9> reverb { 19, 221, 0, 50, 80, 30, 221, 2, 0 };
+    bool reverbOn = false;
+    int eqmode = 0;
+
+    SytrusTestPatch()
+    {
+        main[0] = 128, main[1] = 128;
+        for (int i = 0; i < 8; ++i)
+            main[(std::size_t) (165 + i)] = (i % 4 == 2) ? 0 : 128;
+        main[173] = 1, main[175] = 128, main[188] = 128, main[189] = -1, main[190] = main[191] = 256;
+    }
+    void cell (int layer, int row, int col, int v) { main[(std::size_t) (3 + layer * 81 + row * 9 + col)] = v; }
+
+    std::vector<std::uint8_t> blob() const
+    {
+        std::vector<std::uint8_t> b;
+        auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+        auto f32 = [&] (float v) { std::int32_t x; std::memcpy (&x, &v, 4); i32 (x); };
+        auto f64 = [&] (double v) { std::uint64_t x; std::memcpy (&x, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (x >> (8 * k))); };
+        // point lists: kind 1 envelope, 2 LFO, 3 map / shaper curve; format version 3
+        auto env = [&] (int kind, const std::vector<std::pair<double, double>>& pts, int on, int decay, int sus) {
+            i32 (kind), i32 (3), i32 ((std::int32_t) pts.size());
+            for (const auto& [dt, y] : pts)
+                f64 (dt), f64 (y), f32 (0.0f), i32 (0);
+            i32 (0), i32 (on), i32 (decay), i32 (-1), i32 (sus);
+        };
+        for (int i = 0; i < 240; ++i)
+            if (4 * i + 4 <= 0x320)
+                i32 (main[(std::size_t) i]);
+        b.resize (962, 0); // mute bytes: none muted
+        i32 (0);                    // global declick amount
+        b.push_back (0), b.push_back (0), b.push_back (0); // OSC grouping, DC stage, GIBBS OFF
+        for (int k = 0; k < 9; ++k)
+            b.push_back (k == 7 ? 1 : 0); // flag group (release multiplier on, as Default.fst)
+        for (const auto& d : delays)
+            b.insert (b.end(), d.begin(), d.end());
+        for (auto v : reverb)
+            i32 (v);
+        b.push_back (reverbOn ? 1 : 0), b.push_back (0);
+        i32 (eqmode);
+        for (int k = 0; k < 3; ++k)
+            i32 (0), i32 (30000), i32 (20000), i32 (k);
+        b.push_back (0); // no info text
+        for (int u = 0; u < 10; ++u)
+        {
+            const int narts = u < 6 ? 6 : (u < 9 ? 8 : 2);
+            for (int j = 0; j < 10; ++j)
+                i32 (u < 6 ? ops[u].p[j] : (u < 9 ? filts[u - 6].p[j] : 0));
+            if (u < 6)
+            {
+                const auto& o = ops[u];
+                const auto at = b.size();
+                b.resize (at + 0x828, 0);
+                auto put = [&] (std::size_t off, const void* src, std::size_t n) { std::memcpy (b.data() + at + off, src, n); };
+                put (0, &o.ratio, 4), put (4, &o.offset, 4), put (8, &o.noise, 4);
+                put (0xc, o.amps.data(), 4 * o.amps.size());
+                const std::int32_t shape[5] { 0, 0, 0, 0, 128 };
+                put (0x80c, shape, sizeof shape);
+                put (0x820, o.flags, 8);
+            }
+            else if (u < 9)
+            {
+                const auto at = b.size();
+                b.resize (at + 0x30, 0);
+                std::memcpy (b.data() + at + 0x2c, &filts[u - 6].type, 4);
+                env (3, { { 0.0, 0.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                b.push_back (0);
+            }
+            for (int k = 0; k < narts; ++k)
+            {
+                const bool add = k == 0 || k == 3 || (u >= 6 && u <= 8 && (k == 2 || k == 3)) || (u < 6 && k == 4);
+                const double neutral = add ? 0.5 : 1.0;
+                i32 (3), i32 (0), f32 (1.0f), f32 (1.0f);
+                if (u < 6 && k == 1 && ops[u].env1[0] != -1)
+                    env (1, ops[u].env1pts, -1, ops[u].env1[1], ops[u].env1[2]);
+                else
+                    env (1, { { 0.0, 0.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                i32 (128), i32 (128), i32 (0), i32 (128);
+                env (2, { { 0.0, 1.0 }, { 1.0, 1.0 } }, 0, -1, -1);
+                i32 (40000), i32 (0), i32 (0), i32 (0), i32 (0);
+                for (int m = 0; m < 6; ++m)
+                    env (3, { { 0.0, neutral }, { 1.0, neutral } }, 0, -1, -1);
+            }
+        }
+        b.push_back (0), b.push_back (0);
+        // zlib with stored blocks
+        std::vector<std::uint8_t> z { 0x78, 0x01 };
+        for (std::size_t at = 0; at < b.size(); at += 65535)
+        {
+            const auto n = std::min<std::size_t> (65535, b.size() - at);
+            z.push_back (at + n >= b.size() ? 1 : 0);
+            z.push_back ((std::uint8_t) n), z.push_back ((std::uint8_t) (n >> 8));
+            z.push_back ((std::uint8_t) ~n), z.push_back ((std::uint8_t) (~n >> 8));
+            z.insert (z.end(), b.begin() + (std::ptrdiff_t) at, b.begin() + (std::ptrdiff_t) (at + n));
+        }
+        std::uint32_t a = 1, c = 0;
+        for (auto x : b)
+            a = (a + x) % 65521, c = (c + a) % 65521;
+        for (int k = 3; k >= 0; --k)
+            z.push_back ((std::uint8_t) (((c << 16) | a) >> (8 * k)));
+        std::vector<std::uint8_t> out { 25, 0, 0, 0 };
+        out.insert (out.end(), z.begin(), z.end());
+        return out;
+    }
+};
+
+// renders like FL's Gen_Render calls: notes start/release at the block that contains them
+std::pair<std::vector<float>, std::vector<float>> sytrusRender (const std::vector<std::uint8_t>& blob, bool renderMode, int n,
+                                                                std::vector<std::array<int, 3>> notes, double fs = 44100.0)
+{
+    lynx::sytrus::Engine e;
+    e.setTempo (120.0);
+    e.prepare (fs, renderMode, 512);
+    e.setPatch (lynx::sytrus::parsePatch (blob));
+    std::vector<float> l ((std::size_t) n), r ((std::size_t) n);
+    for (int n0 = 0; n0 < n; n0 += 512)
+    {
+        for (std::size_t k = 0; k < notes.size(); ++k)
+        {
+            if (notes[k][1] >= n0 && notes[k][1] < n0 + 512)
+            {
+                lynx::sytrus::NoteParams p;
+                p.key = (float) notes[k][0];
+                p.id = (std::int64_t) k + 1;
+                e.noteOn (p);
+            }
+            if (notes[k][2] >= n0 && notes[k][2] < n0 + 512)
+                e.release ((std::int64_t) k + 1);
+        }
+        e.render (l.data() + n0, r.data() + n0, std::min (512, n - n0), 1.0f, 0.0f);
+    }
+    return { l, r };
+}
+} // namespace
+
+TEST (sytrus_engine_sine)
+{
+    // one sine operator, ratio 1, OUT 256, no envelopes: C5 = 523.2511 Hz at 0.7071 (centre of the pan law, §6.1)
+    SytrusTestPatch t;
+    t.cell (0, 0, 8, 256);
+    const auto blob = t.blob();
+    CHECK (lynx::sytrus::stateUsable (blob));
+    CHECK (lynx::sytrus::parsePatch (blob) != nullptr);
+    auto broken = blob;
+    broken.resize (broken.size() / 2);
+    CHECK (! lynx::sytrus::stateUsable (broken));
+    const auto [l, r] = sytrusRender (blob, false, 8192, { { 60, 0, 4096 } });
+    double worst = 0.0;
+    for (int k = 0; k < 4000; ++k)
+        worst = std::max (worst, std::abs ((double) l[(std::size_t) k] - 0.70710678 * std::sin (2.0 * 3.14159265358979 * 523.251130601197 * k / 44100.0)));
+    CHECK (worst < 2e-5);
+    CHECK (l == r);
+    // envelope-less voice end (§4.9, §6.2): finished at a tick after the note-off, then the L/R gains (0.7071) ramp to 0
+    // at 0.001 per sample: the last non-zero sample is 4895 for a release at 4096 — the DLL's own figure (EXEC, §6.2)
+    int last = 0;
+    for (int k = 0; k < 8192; ++k)
+        if (l[(std::size_t) k] != 0.0f)
+            last = k;
+    CHECK (last == 4895);
+    // key 69 = 880 Hz; 48 kHz
+    const auto [l2, r2] = sytrusRender (blob, false, 4096, { { 69, 0, -1 } }, 48000.0);
+    worst = 0.0;
+    for (int k = 0; k < 4000; ++k)
+        worst = std::max (worst, std::abs ((double) l2[(std::size_t) k] - 0.70710678 * std::sin (2.0 * 3.14159265358979 * 880.0 * k / 48000.0)));
+    CHECK (worst < 5e-5);
+    (void) r2;
+}
+
+TEST (sytrus_engine_reference)
+{
+    // FM 2→1, Vanilla LP filter, volume envelope, unison 3, delay and reverb, 2× oversampling with the 8-sample
+    // envelope tick (render settings): against our Python reference model of REA_rodada31 (sytmodel.render)
+    SytrusTestPatch t;
+    t.main[195] = 0, t.main[196] = 1, t.main[193] = 0, t.main[194] = 1;
+    t.main[173] = 3, t.main[174] = 64, t.main[176] = 100;
+    t.ops[1].ratio = 40000;
+    t.cell (0, 0, 1, 128); // op 2 → op 1 FM
+    t.cell (0, 0, 8, 128);
+    t.cell (0, 6, 0, 256); // op 1 → filter 1
+    t.cell (0, 6, 8, 256);
+    t.cell (0, 0, 7, 200); // FX send
+    t.filts[0].p[0] = 1, t.filts[0].p[2] = 180, t.filts[0].p[3] = 60;
+    t.ops[0].env1[0] = 0, t.ops[0].env1[1] = 1, t.ops[0].env1[2] = 2;
+    t.ops[0].env1pts = { { 0.0, 0.0 }, { 0.05, 1.0 }, { 0.1, 0.6 }, { 0.2, 0.0 } };
+    const std::int32_t d0[5] { 40, 100, 50, 100, 0 };
+    std::memcpy (t.delays[0].data(), d0, 20);
+    t.delays[0][22] = 1;
+    t.reverb = { 19, 221, 10, 50, 80, 30, 100, 2, 100 };
+    t.reverbOn = true;
+    const auto blob = t.blob();
+    const auto [l, r] = sytrusRender (blob, true, 12000, { { 60, 0, 6000 } });
+    // reference values (model render_mode=True, 44.1 kHz, block 512, key 60, velocity 0.78125, release at 6000); the same
+    // state rendered by FL's own Sytrus DLL in render mode differs from this by −136 dB (EXEC, REA round 31 harness)
+    const std::array<std::pair<int, float>, 8> golden { { { 100, -0.00235529384f }, { 777, -0.175126165f }, { 2000, 0.30976975f }, { 4321, -0.0213534199f },
+                                                          { 6100, 0.202372357f }, { 7000, 0.249530748f }, { 9000, 0.0307101421f }, { 11999, 0.176390275f } } };
+    for (const auto& [i, v] : golden)
+        CHECK (std::abs (l[(std::size_t) i] - v) < 1e-6f);
+    const std::array<std::pair<int, float>, 3> goldenR { { { 777, -0.166890964f }, { 4321, -0.212358952f }, { 9000, -0.0251909085f } } };
+    for (const auto& [i, v] : goldenR)
+        CHECK (std::abs (r[(std::size_t) i] - v) < 1e-6f);
+}
+
+TEST (sytrus_instrument)
+{
+    // the LYNX instrument: state in ChannelDef::pluginState, channel volume/pan recovered from the rack gains
+    SytrusTestPatch t;
+    t.cell (0, 0, 8, 256);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sytrus;
+    c.pluginState = t.blob();
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sytrus);
+    inst->prepare (44100.0);
+    inst->configure (c, 120.0);
+    CHECK (inst->idle());
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (60, 100.0f / 128.0f);
+    // rack gains for volume V and pan p: √2·V·cos((1 + p)π/4), √2·V·sin(…); V = 0.5, p = 0 → Final.Vol 0.5
+    inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    double peak = 0.0;
+    for (int k = 1000; k < 4096; ++k)
+        peak = std::max (peak, (double) std::abs (l[(std::size_t) k]));
+    CHECK (std::abs (peak - 0.5 * 0.70710678) < 1e-3); // Final.Vol 0.5 × the plugin's centre pan law
+    CHECK (! inst->idle());
+    inst->noteOff (60);
+    std::vector<float> tail (44100 * 3), tailR (tail.size());
+    inst->render (tail.data(), tailR.data(), (int) tail.size(), 0.5f, 0.5f);
+    CHECK (inst->idle());
+    CHECK (tail.back() == 0.0f);
 }
 
 TEST (harmless_engine)

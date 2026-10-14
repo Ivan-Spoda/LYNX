@@ -2,6 +2,7 @@
 #include "core/FlSynths.h"
 #include "core/DrumSynthLive.h"
 #include "core/Harmless.h"
+#include "core/SytrusEngine.h"
 #include "core/Harmor.h"
 #include "core/PhysicalModels.h"
 
@@ -195,6 +196,7 @@ private:
             case InstrumentKind::boobass:
             case InstrumentKind::drumsynth:
             case InstrumentKind::harmless:
+            case InstrumentKind::sytrus:
             case InstrumentKind::harmor:
                 break;
         }
@@ -1958,6 +1960,14 @@ private:
 };
 } // namespace
 
+namespace
+{
+std::atomic<bool> offlineRenderingFlag { false };
+}
+
+void setOfflineRendering (bool on) noexcept { offlineRenderingFlag.store (on); }
+bool offlineRendering() noexcept { return offlineRenderingFlag.load(); }
+
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
     if (kind == InstrumentKind::controller)
@@ -1983,6 +1993,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     if (kind == InstrumentKind::harmless)
         return makeHarmlessInstrument();
+    if (kind == InstrumentKind::sytrus)
+        return makeSytrusInstrument();
 
     if (kind == InstrumentKind::harmor)
         return makeHarmorInstrument();

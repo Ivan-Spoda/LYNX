@@ -17,6 +17,7 @@
 #include "WavReader.h"
 #include "core/FlpImport.h"
 #include "core/RackRenderer.h"
+#include "core/WorkerPool.h"
 
 namespace
 {
@@ -110,7 +111,9 @@ int main (int argc, char** argv)
     constexpr int sampleRate = 44100;
     constexpr int blockSize = 256;
     const auto tps = lynx::ticksPerSample (song.bpm, sampleRate);
-    const auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
+    auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
+    if (const char* s = std::getenv ("LYNX_SECONDS"); s != nullptr && std::atof (s) > 0) // benchmark: render only the start
+        totalSamples = std::min (totalSamples, (std::size_t) (std::atof (s) * sampleRate));
 
     std::printf ("%.1f BPM, %zu channels, pattern \"%s\" (%zu notes), %d loops, %.1f s\n", song.bpm,
                  song.channels.size(), pattern.name.c_str(), pattern.notes.size(), loops,
@@ -118,10 +121,12 @@ int main (int argc, char** argv)
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
-        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "audio clip", "plugin", "controller", "sakura", "drumpad", "boobass", "drumsynth", "harmless", "harmor" };
+        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "audio clip", "plugin", "controller", "sakura", "drumpad", "boobass", "drumsynth", "harmless", "sytrus", "harmor" };
         std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
     }
 
+    // like the app's export: instruments with FL render-quality settings use them (LYNX_LIVE=1: the live ones)
+    lynx::setOfflineRendering (std::getenv ("LYNX_LIVE") == nullptr);
     std::map<std::string, std::shared_ptr<const lynx::SampleData>> cache;
     auto state = lynx::RackState::build (song, nullptr, sampleRate, [&] (const std::string& p) {
         auto& entry = cache[p];
@@ -145,6 +150,13 @@ int main (int argc, char** argv)
         std::printf ("mixer: %zu edges (%zu with PDC delay), %zu tracks with effects\n", edges, delayed, tracksWithFx);
     }
     lynx::RackRenderer renderer;
+    // LYNX_THREADS=n: n worker threads for the channels and mixer layers, as the app's audio engine uses
+    std::unique_ptr<lynx::WorkerPool> pool;
+    if (const char* t = std::getenv ("LYNX_THREADS"); t != nullptr && std::atoi (t) > 0)
+    {
+        pool = std::make_unique<lynx::WorkerPool> (std::atoi (t));
+        renderer.setWorkerPool (pool.get());
+    }
     renderer.prepare (sampleRate);
 
     std::vector<float> left (totalSamples), right (totalSamples);

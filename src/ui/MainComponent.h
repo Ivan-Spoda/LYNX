@@ -6,6 +6,7 @@
 
 #include "engine/AudioEngine.h"
 #include "ui/BrowserComponent.h"
+#include "ui/Icons.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/PianoRollComponent.h"
 #include "ui/MixerComponent.h"
@@ -37,6 +38,12 @@ public:
 
     // For --snapshot mode: 0 = Channel Rack, 1 = Piano Roll (on the channel with the most notes), 2 = Playlist, 3 = Mixer.
     void selectTabForSnapshot (int tab);
+    void waitForBrowserForSnapshot() { browser.waitForListing (5000); }
+    juce::StringArray getMenuNamesForSnapshot() { return getMenuBarNames(); }
+    juce::PopupMenu getMenuForSnapshot (int index) { return getMenuForIndex (index, {}); }
+    static std::unique_ptr<juce::Component> makeHelpContent();
+    static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
+    std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
         mixer.selectTrack (track);
@@ -59,7 +66,9 @@ private:
     void rememberRecent (const juce::File& file);
     juce::MenuBarComponent menuBar { this };
     juce::RecentlyOpenedFilesList recent;
-    static constexpr int menuHeight = 22;
+    static constexpr int menuHeight = 26;
+    static constexpr int toolbarHeight = 50;
+    static constexpr int statusHeight = 24;
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();
@@ -78,21 +87,24 @@ private:
 
     AudioEngine& engine;
 
-    juce::ImageComponent logo; // the LYNX icon in the corner of the bar (like FL's fruit)
-    juce::TextButton newButton { "New" }, openButton { "Open" }, saveButton { "Save" }, exportButton { "Export" };
-    juce::TextButton playButton { "Play" };
-    juce::TextButton stopButton { "Stop" };
-    juce::TextButton modeButton { "PAT" };
-    juce::TextButton recordButton { "Rec" };
-    juce::TextButton recordMenuButton { "v" };
-    juce::ToggleButton metronomeButton { "Metro" };
+    juce::ImageComponent logo; // the LYNX icon in the corner of the bar
+    IconButton newButton { "new", Icon::newFile }, openButton { "open", Icon::open }, saveButton { "save", Icon::save },
+        exportButton { "export", Icon::exportAudio };
+    IconButton playButton { "play", Icon::play };
+    IconButton stopButton { "stop", Icon::stop };
+    IconButton recordButton { "record", Icon::record };
+    IconButton recordMenuButton { "recordMenu", Icon::chevronDown };
+    IconButton patternModeButton { "patternMode", Icon::pattern }, songModeButton { "songMode", Icon::song };
+    IconButton metronomeButton { "metronome", Icon::metronome };
     juce::Slider bpmSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
     juce::ComboBox patternBox;
-    juce::TextButton newPatternButton { "+" };
-    juce::TextButton patternMenuButton { "..." };
+    IconButton newPatternButton { "newPattern", Icon::plus };
+    IconButton patternMenuButton { "patternMenu", Icon::more };
     juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::Label swingLabel;
-    juce::TextButton settingsButton { "Audio..." };
+    IconButton settingsButton { "settings", Icon::settings };
+    std::vector<int> dividers; // x positions of the toolbar group separators
+    void showLanguageChoice (const juce::String& id);
     juce::Label positionLabel;
 
     // output oscilloscope in the bar (like FL's)
@@ -124,6 +136,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
+    juce::String importedSuffix; // " (imported from FL Studio)" in the title until saved as .lynx
     juce::String projectName; // suggested name for export (also from an imported .flp)
     std::set<int> heldKeys; // PC keyboard keys currently playing notes (keyCode)
 

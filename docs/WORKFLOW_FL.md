@@ -1,0 +1,844 @@
+# FL Studio's workflow: a clean-room study for LYNX
+
+Last updated: 2026-10-14. Status: study / design input. No code was changed while it was written.
+
+LYNX interprets FL Studio's *workflow*: the way a producer moves between the Channel Rack, Piano Roll,
+Playlist and Mixer. It keeps its own look, names and code. This document has four parts:
+
+1. what that workflow is,
+2. the interactions producers rely on, each tied to the official manual page that describes it,
+3. where LYNX stands today (with file references) and a prioritised plan,
+4. what must stay different for clean-room and branding reasons.
+
+## Sources and rules
+
+- **[DOC]**: the official Image-Line FL Studio online manual. Each `[DOC]` tag is a link to the page (and
+  anchor) that describes the behaviour. All descriptions here are **paraphrased**; nothing is quoted. The pages
+  were read in October 2026 through a summarising web reader, so exact key combinations are worth re-checking on
+  the live page before they are built. Where two manual pages disagree, both readings are given and marked
+  **CONFLICT**.
+- **[DATA]**: FL Studio 2026's installed data files under `C:\Program Files\Image-Line\FL Studio 2026\`
+  (folder names, plain-text presets). Only names and structure are reported. No content was copied.
+- **LYNX**: the LYNX source (`src/ui/*`, `src/core/*`, `src/engine/*`) and docs (`docs/STATUS.md`,
+  `docs/ROADMAP.md`). File references are `file:line` under `src/` as of this date.
+- **Not documented** means the manual pages read do not say. Nothing in this document guesses at FL's
+  behaviour beyond what a source states.
+- No decompilation was used for this study. The REA rounds in `docs/analise/` cover the engine and file format,
+  not the UI.
+
+---
+
+## 1. The core workflow model
+
+### 1.1 Patterns are the building block; the Playlist arranges them
+- A **pattern** holds notes, and optionally event automation, for *any number of channels*. The step sequencer
+  and the Piano Roll are two editors over the same pattern data. [DOC][wf] [DOC][plp]
+- The **Playlist** arranges clips in time. There are three kinds: pattern clips, audio clips and automation
+  clips. A placed pattern becomes a *pattern clip* that shows the pattern's name. [DOC][plp]
+- **Playlist tracks are generic lanes**: any clip type can go on any track, clips may overlap, and tracks are
+  not bound to an instrument or a mixer insert. Mixer routing comes from the channels, so one pattern clip can
+  feed many inserts. [DOC][pl]
+- An optional per-track mode binds one channel, one Playlist track and one mixer insert together ("instrument" or
+  "audio" track). "Unassigned" returns the track to free mode. [DOC][pl-trackmode]
+- **Arrangements** are alternative Playlist layouts. They share the same Channel Rack and Mixer, so an edit there
+  affects every arrangement. [DOC][pl]
+- Documented four-step flow: load instruments and write patterns → arrange clips in the Playlist → route
+  channels to Mixer inserts and add effects → export. The Playlist only plays in Song mode. [DOC][wf]
+
+### 1.2 The Channel Rack is the hub
+- Every sound source is a **channel** in the rack: an instrument, a sampler, or a holder for an audio clip or
+  automation clip. [DOC][cr] [DOC][ac]
+- Each row has, from left to right: an on/off LED (solo through modifiers), a pan knob and a volume knob (both
+  sent to the instrument, not the mixer), an optional **mixer insert number**, the **channel button** (its name),
+  a **selection indicator**, and either step buttons or a mini piano-roll preview. [DOC][cr]
+- Selection matters: the selected channels are what copy/paste acts on, and they receive live MIDI input.
+  [DOC][cr]
+- Clicking the channel button opens that channel's settings and plugin window. [DOC][cr]
+
+### 1.3 Step sequencer and Piano Roll
+- Each step is a 1/16 note. Once a channel has non-step notes, a read-only mini piano roll replaces its step row.
+  [DOC][cr-steps]
+- Steps are a view of the Piano Roll. Notes stay "step-compatible" while they are zero-length and on the grid.
+  The manual describes how to turn piano-roll notes back into steps: select all, snap off, discard lengths,
+  quantise. [DOC][cr-steps]
+- The **graph editor** gives each step a value in lanes for note, velocity, release, fine pitch, Mod X/Y, shift,
+  pan and repeat. [DOC][cr-graph]
+- The Piano Roll edits **one target channel of the current pattern** at a time. Notes of other channels show as
+  **ghost notes**. [DOC][pr]
+
+### 1.4 Mixer inserts and routing
+- 500 inserts plus Master, and a "Current" insert that carries the selected insert's output for analysis tools.
+  New channels go to Master unless assigned elsewhere. [DOC][mx]
+- Every insert sends to Master by default. Sends to other inserts are made by selecting the source insert and
+  clicking a send switch on the destination. A send at level 0 is a **sidechain-only** link. [DOC][mx]
+- Each insert has 10 effect slots, processed top to bottom, each with a wet/dry mix and an enable switch.
+  [DOC][mxp]
+
+### 1.5 The Browser feeds everything by drag-and-drop
+- One tree of samples, presets, plugins and project contents. Items load by being dropped on a target: the rack
+  makes a channel, the Playlist makes an audio clip, a mixer insert or slot takes an effect, and an instrument
+  preset dropped on an insert also sets up routing. [DOC][br] [DOC][br-use]
+- Clicking an audio file previews it. [DOC][br]
+
+### 1.6 Plugin windows
+- Every plugin, native or third-party, sits in a common **wrapper** window. Its header holds the plugin menu,
+  preset browsing arrows, minimise and close. [DOC][wrap]
+- Clicking a channel button opens or closes its window. By default, opening another channel's window closes the
+  previous one; Alt+click keeps several open. [DOC][wrap] [DOC][cr]
+
+### 1.7 Pattern mode vs Song mode
+- One transport, two scopes: **PAT** loops the current pattern and **SONG** plays the Playlist. The L key toggles
+  between them. [DOC][tb] [DOC][sc]
+- Right-clicking PAT opens the Channel Rack; right-clicking SONG opens the Playlist. The song-position slider
+  follows whichever scope is active. [DOC][tb]
+
+### 1.8 Recording
+- Arm Record, then press Play. A **recording filter** chooses what is captured: automation, notes, audio, or
+  clips from the live-launch mode. [DOC][tb-rec]
+- Notes go into the current pattern. In Song mode a pattern clip is also placed where playback started.
+  [DOC][rn]
+- Audio records per mixer insert, by choosing an input on the insert. In Song mode the take becomes a Playlist
+  audio clip. [DOC][ra] [DOC][ra-pl]
+- Related toggles: count-in, metronome, wait-for-input, blend (overdub), loop record and step edit. [DOC][tb]
+
+### 1.9 Automation clips
+- An automation clip is a channel-like source that draws a curve in the Playlist. [DOC][ac]
+- To create one, right-click a native control and choose "create automation clip". Other routes:
+  - "last tweaked" for third-party parameters,
+  - converting event data from the Piano Roll or event editor,
+  - volume or pan automation for an audio clip. [DOC][ac] [DOC][pl-clipmenu]
+- The clip remembers the control's value at creation as an **initial value**. The control returns to it at the
+  start of the song. [DOC][ac]
+
+### 1.10 "Everything is a window"
+- The Playlist, Channel Rack, Piano Roll, Mixer, Channel Settings, Event editor and plugins are all **child
+  windows on one desktop**. They can be moved, resized, overlapped and maximised, and they snap to each other
+  (Alt stops the snapping). [DOC][iface]
+- Any of them can be made **Detached**, which turns it into a separate OS window for a second monitor. [DOC][iface]
+  [DOC][wrap]
+- Window keys:
+  - F5 Playlist, F6 Channel Rack, F7 Piano Roll, F9 Mixer, Alt+F8 Browser, F8 plugin picker.
+  - F12 closes all windows, Alt+F12 closes plugin windows, Ctrl+F12 closes the unfocused ones.
+  - A layout can be "realigned" to its default, saved and restored, and off-screen windows can be brought back.
+  [DOC][view]
+- **CONFLICT**: one page labels F6 "Step Sequencer"; the View menu calls it "Channel Rack". [DOC][sc] [DOC][view]
+
+### 1.11 Toolbar, transport, hint bar
+- A configurable toolbar of panels: menus, transport, PAT/SONG, tempo, time display, global snap, pattern
+  selector, recording toggles, CPU/memory, shortcut icons for each window, and the hint bar. Its layout comes
+  from presets. [DOC][tb]
+- [DATA] `System/Config/Toolbar presets/*.tpr` are plain-text toolbar layouts, one panel per entry with a width
+  and a row. There are presets for older versions and for a single-line toolbar.
+- The **hint bar** describes the control under the mouse and shows its value while it is being changed. Small
+  icons mark whether the control can be automated, can be linked to MIDI, or has a right-click menu. [DOC][tb]
+
+### 1.12 Undo history
+- Edits are undoable, and there is a history list (in the Browser, under the current project). Clicking an entry
+  jumps to that state, newest at the bottom. Settings include a maximum number of undo levels and whether knob
+  tweaks are recorded. [DOC][edit] [DOC][envgen] [DOC][br]
+- **CONFLICT** on Ctrl+Z:
+  - One page says Ctrl+Z toggles between undoing and redoing the last edit, and Ctrl+Alt+Z steps back.
+    [DOC][sc]
+  - The Edit menu says Ctrl+Alt+Z steps back, Ctrl+Z steps forward, and Ctrl+Z toggles only at the newest step.
+    [DOC][edit]
+  - An "alternate undo mode" makes Ctrl+Z step backwards. [DOC][envgen]
+
+### 1.13 Templates, autosave
+- File → New uses the last chosen template. File → New from template lists templates by category, and users can
+  save their own. The startup project can be empty, the default template or the last project. [DOC][file]
+  [DOC][envgen]
+- [DATA] `Data/Templates/` holds each template as a project file plus a small `.nfo` with a one-line description
+  and a menu icon index. Categories on disk:
+  - Advanced (Electronic / Instrumental genre starters), Empty, Minimal (basic kit, with or without a master
+    limiter, delay/reverb sends), Other, Performance, Power User, and Utility (chord progression, drum mix,
+    record audio, vocoder, surround …).
+  - The manual names different categories (Genre / Minimal / Other / Utility). [DOC][file]
+- Autosave has several frequency levels. The most frequent ones also save before risky operations. Backups go to
+  a backup folder, and "revert to last backup" restores one. [DOC][envfiles] [DOC][file]
+- [DATA] `System/Config/NamePresets_{Channel,Pattern,MixerTrack,MixerSlot,PlaylistTrack}.txt` are lists of
+  suggested names with a colour and icon index, shown in rename dialogs.
+- [DATA] `System/Config/Typing to piano/*.scr` map PC keys to notes. Their notes say that unmapped keys stay
+  free for shortcuts and "locked" keys do nothing. The default map puts four rows of the keyboard on four octaves.
+
+---
+
+## 2. Interactions producers rely on
+
+Each interaction has an ID, which section 3 uses for the gap matrix.
+
+### 2.1 Global (G)
+
+| ID | Interaction (paraphrased) | Source |
+|---|---|---|
+| G1 | F5/F6/F7/F9 show the Playlist / Channel Rack / Piano Roll / Mixer; Alt+F8 the Browser; F8 a quick plugin picker | [DOC][view] |
+| G2 | F12 closes all windows, Alt+F12 closes plugin windows, Ctrl+F12 closes unfocused windows; Esc closes the focused window; Tab cycles windows | [DOC][view] [DOC][sc] |
+| G3 | Windows are child windows on one desktop: free move/resize/overlap, snapping (Alt disables), each can be **Detached** to its own OS window | [DOC][iface] |
+| G4 | Window layouts: realign to default, bring back off-screen windows, layout presets, save/restore a custom layout | [DOC][view] |
+| G5 | Enter toggles the Playlist between maximised and restored | [DOC][sc] |
+| G6 | Space play/stop; Ctrl+Space play/pause; Play pressed again stops and rewinds; double-click Stop = panic; right-click Stop = "remember seek time" | [DOC][sc] [DOC][tb] |
+| G7 | L toggles PAT/SONG; right-click PAT/SONG opens the matching window | [DOC][sc] [DOC][tb] |
+| G8 | Tempo: drag to change; fine digits; right-click for type-in, tap tempo, nudge, presets, half speed, automation | [DOC][tb] |
+| G9 | **Global snap** in the toolbar, used by every editor whose own snap is set to "Main"; it also sets record quantise; Backspace toggles it; Alt while dragging bypasses snap | [DOC][tb-snap] [DOC][sc] |
+| G10 | Right-click on snap sets the default note length | [DOC][tb-snap] |
+| G11 | Pattern selector: +/− (numpad) next/previous, numpad 1–9 picks a pattern, right-click lists all; F4 next empty pattern; F2 rename/colour; Alt+C clone; Shift+Ctrl+Ins insert; Del delete; "split by channel" | [DOC][tb] [DOC][pat-menu] [DOC][sc] |
+| G12 | Hint bar: hover description + live value + capability icons | [DOC][tb] |
+| G13 | Undo/redo with a clickable history list; maximum levels; knob tweaks optionally undoable | [DOC][edit] [DOC][envgen] |
+| G14 | Ctrl+N saves a *new version* (MyProj_2…), not a new project; Ctrl+S/Ctrl+Shift+S save/save-as; Ctrl+R export WAV; Alt+0..9 recent files | [DOC][sc] [DOC][file] |
+| G15 | Templates by category; save as template; default startup choice | [DOC][file] [DOC][envgen] |
+| G16 | Typing keyboard as piano (Ctrl+T); while on, single-key shortcuts are disabled | [DOC][sc] [DATA] |
+| G17 | Toolbar shortcut icons for each window; right-clicking the Piano Roll/Playlist icons opens them maximised | [DOC][tb] |
+| G18 | Recent-change "last tweaked" tools: create automation or link from the last moved control | [DOC][tools] [DOC][ac] |
+
+### 2.2 Common control behaviour (K)
+
+| ID | Interaction | Source |
+|---|---|---|
+| K1 | Knob/slider: drag up/down; **Ctrl+drag fine**; Shift while dragging disables value snapping | [DOC][iface] |
+| K2 | **Alt+click or middle-click resets** to default | [DOC][iface] |
+| K3 | Right-click a control: type in value, larger control, link to controller, create automation clip, "init song with this position" | [DOC][iface] [DOC][ac] |
+| K4 | Number displays: drag to change, hover top/bottom edge to step by one, click-and-hold to type | [DOC][iface] |
+| K5 | Multi-link: link several controls to controllers in the order they were tweaked | [DOC][link] |
+| K6 | Mouse wheel and double-click on knobs | not documented ([DOC][iface]) |
+| K7 | Tickable menu items can be right-clicked to try them without closing the menu | [DOC][iface] |
+
+### 2.3 Channel Rack and step sequencer (C)
+
+| ID | Interaction | Source |
+|---|---|---|
+| C1 | Step: left-click turns on, right-click turns off; an option makes left-click toggle | [DOC][cr-steps] [DOC][cr] |
+| C2 | Drag-painting across steps; Shift/Ctrl/Alt on steps | not documented ([DOC][cr]) |
+| C3 | "Mute removed steps" option: a removed step keeps its data, muted | [DOC][cr-opt] |
+| C4 | Graph editor (Ctrl+K): per-step lanes; drag a column, Ctrl scales all, right-drag draws a ramp, Alt+click resets | [DOC][cr-graph] |
+| C5 | Channel button: left-click opens/closes settings + plugin; Ctrl+click auditions without opening; Alt+click keeps other windows open; Shift+wheel moves the channel; right-click = channel menu | [DOC][cr] [DOC][wrap] |
+| C6 | Channel menu: piano roll, graph editor, rename/colour/icon (random colour key in the dialog), load sample, insert, replace, **clone** (settings without notes), delete, cut/copy/paste note data, **fill every 2/4/8 steps**, advanced fill (incl. Euclidean), **rotate left/right**, burn MIDI to pattern | [DOC][cr-btn] [DOC][fill] |
+| C7 | Selection: click a selector; right-click toggles independently; right-drag multi-selects; double-click selects all; Up/Down select neighbour; **Alt+Up/Down moves** selected channels; sort by colour/name/insert/type; "select unused" | [DOC][cr] [DOC][sc] |
+| C8 | Mute LED: left-click mute; right-click solo menu; Ctrl+click solo; Shift+click locks state | [DOC][cr] |
+| C9 | Number keys 1–0 mute channels 1–10, Ctrl+number solos | [DOC][sc] |
+| C10 | Mixer insert field (Alt+M shows it): drag vertically; **Ctrl+L assigns selected channels to free inserts** (named after the channel); click "TRACK" in channel settings = next free insert; double-click opens the mixer there | [DOC][cr] [DOC][csm] |
+| C11 | Ctrl+C/X/V copy step/score data between channels and patterns via the selection | [DOC][sc] [DOC][cr] |
+| C12 | Shift+Ctrl+Left/Right shifts note data by one snap unit | [DOC][sc] |
+| C13 | Filter groups: show only a group's channels; Alt+G adds the selection to a group; PgUp/PgDn switch groups; new channels join the current group | [DOC][cr-filter] |
+| C14 | Global swing knob; per-channel swing mix multiplies it; "set swing mix for selected" | [DOC][cr] [DOC][csx] [DOC][cr-swing] |
+| C15 | Pattern length: auto (to the last bar with data) or set; drag the rack corner to show more steps; 1–512 steps | [DOC][cr] |
+| C16 | Shift+wheel on the rack title changes pattern | [DOC][cr] [DOC][sc] |
+| C17 | Layer channel: forwards notes to children (set from the selection); random / crossfade / round-robin options | [DOC][lay] |
+| C18 | Clone channels (Alt+C), delete (Alt+Del), zip/unzip (Alt+Z/U) | [DOC][sc] |
+| C19 | Per-channel cut groups / "cut itself" | [DOC][csx] |
+| C20 | Loop ghost steps: per-channel looping shows ghost steps; "burn to pattern" makes them real | [DOC][cr] |
+
+### 2.4 Piano Roll (R)
+
+| ID | Interaction | Source |
+|---|---|---|
+| R1 | **Tools**: Draw (P), Paint (B), Paint-drums (N), Delete (D), Mute (T), Slice (C), Select (E), Zoom (Z), Playback/scrub (Y); right-click-hold a tool icon + wheel switches tools | [DOC][pr] |
+| R2 | Draw: left-click adds, drag moves, **right-click deletes** (right-drag deletes many); right-click-hold on empty grid = temporary slice | [DOC][pr] |
+| R3 | Paint: drag lays a run of notes; Shift = monophonic paint (replaces overlaps) | [DOC][pr] |
+| R4 | New notes use the **last-clicked note's length**; right-click snap sets the default length | [DOC][pr] [DOC][tb-snap] |
+| R5 | Resize from the right edge in snap steps (Alt = free); left-edge resize is an option (Ctrl+Alt+Home); stretch a selection with a handle or Right-Shift+edge | [DOC][pr] [DOC][prm] |
+| R6 | Selection: Ctrl+drag box; Ctrl+Shift adds; Ctrl-click empty deselects; Ctrl+click/drag on the ruler selects a time range, on the keyboard a pitch range | [DOC][pr] |
+| R7 | Move locks: click a note then Shift+drag = time only; Ctrl+drag = pitch only | [DOC][pr] |
+| R8 | Shift+left-click clones the selection | [DOC][sc-pr] |
+| R9 | Double-click a note → **Note properties** (pan, velocity, release, Mod X/Y, slide, porta, colour, time, duration) applied to the whole selection | [DOC][pr] [DOC][sc-pr] |
+| R10 | Event lane: velocity/pan/release/Mod X/Y/fine pitch or controller automation; Shift+drag sets crossed notes to one value; Alt+click resets; Alt+wheel over a note edits; "turn into automation clip" | [DOC][pr-ev] [DOC][prm] |
+| R11 | Snap: Main / Line / Cell / none / step & beat fractions / bar / **Events** (snap to existing and ghost notes) / markers | [DOC][prm-snap] |
+| R12 | **Ghost notes**: other channels in the pattern drawn solid grey, other clips' notes hollow; Alt+V toggles; Ctrl+Alt+V makes them editable; **double right-click a ghost switches to that channel** | [DOC][pr] [DOC][sc-pr] |
+| R13 | Target channel selector in the title bar (channels with notes are ticked); wheel steps through channels with notes, Ctrl+wheel through all; G/K previous/next channel, H/J previous/next with notes | [DOC][pr] [DOC][sc-pr] |
+| R14 | Scale: snap-to-scale toggle and root/scale menu; shading of out-of-scale rows; snapping of incoming MIDI; key markers | [DOC][pr-key] |
+| R15 | Chord stamp: a whole shape per click, following snap and scale; "only one" mode; top-down / bottom-up modes | [DOC][pr-stamp] |
+| R16 | Colour groups (16): draw in a colour, Alt+C recolours, Shift+C selects a colour; groups behave as separate mono/slide voices | [DOC][pr-col] |
+| R17 | Slide (S) and porta (O) note toggles | [DOC][pr] |
+| R18 | Keys: Ctrl+X/C/V (paste at the left of the view), **Ctrl+B duplicate right**, Del, Shift+Left/Right move by snap, Alt+arrows nudge, Shift+Up/Down semitone, Ctrl+Up/Down octave, Shift+Ctrl+Left/Right rotate within the bar | [DOC][prm-edit] [DOC][sc-pr] |
+| R19 | Selection keys: Ctrl+A / Ctrl+D, Shift+I invert, Shift+R/M random select, Shift+O select off-grid notes; Ctrl+Enter select the span around the selection | [DOC][sc-pr] |
+| R20 | Space editing: Ctrl+Ins insert space, Ctrl+Del delete space, Ctrl+Alt+Ins slice + insert | [DOC][sc-pr] |
+| R21 | Alt+M / Alt+Shift+M mute / unmute the selection; Shift+G / Alt+G group / ungroup notes | [DOC][sc-pr] |
+| R22 | **Quick tools** (no dialog): quick quantise (CONFLICT: printed as both Ctrl+Q and a Ctrl+Alt variant), Shift+Q starts-only quantise, **Ctrl+U quick chop**, **Ctrl+G glue**, **Ctrl+L quick legato**, Shift+D discard lengths | [DOC][prm-tools] [DOC][prm] |
+| R23 | **Tool dialogs** (Accept/Reset, undoable): Arpeggiate (Alt+A), Strum (Alt+S), Chop (Alt+U), Quantise (Alt+Q), Articulate (Alt+L), Flip (Alt+Y), Randomise (Alt+R), Limit (Alt+K), Scale levels (Alt+X), Flam (Alt+F), slice-by-period tool (Alt+W), LFO into the event lane (Alt+O), melody generator (Alt+E), chord progression (Alt+P) | [DOC][arp] [DOC][strum] [DOC][chop] [DOC][qnt] [DOC][art] [DOC][flip] [DOC][rnd] [DOC][lim] [DOC][scl] [DOC][flam] [DOC][claw] [DOC][lfo] [DOC][riff] [DOC][chord] |
+| R24 | Zoom/scroll: PgUp/PgDn zoom, Shift+1..5 zoom presets / all / selection, Shift+0 centre on the playhead; middle-drag pans both axes; middle-drag on the keyboard zooms vertically | [DOC][sc-pr] |
+| R25 | Preview: clicking the keyboard auditions (not during playback unless an option is on); the playback tool scrubs | [DOC][pr] [DOC][prm] |
+| R26 | Whether drawing or moving a note auditions it | not documented ([DOC][pr]) |
+| R27 | Time markers in the roll (Alt+T named, Ctrl+T auto); per-pattern time signature (Shift+Alt+T) | [DOC][sc-pr] [DOC][pr] |
+| R28 | MIDI file import/export from the roll (Ctrl+M / Shift+Ctrl+M) | [DOC][sc-pr] |
+| R29 | Play button in the roll: right-click returns to the last start / roll start | [DOC][pr] |
+
+### 2.5 Playlist (P)
+
+| ID | Interaction | Source |
+|---|---|---|
+| P1 | Tools: Draw (P), Paint (B), Delete (D), Mute (T), **Slip (S)**, Ripple (Shift+S), Slice (C), Select (E), Zoom (CONFLICT: Z vs Shift+Z), Playback (Y) | [DOC][pl] [DOC][sc-pl] |
+| P2 | In any tool: right-click = delete, double right-click = mute, double-click = clip properties, middle-drag = pan, Ctrl = select, Shift = paint/copy, Alt = no snap | [DOC][sc-pl] [DOC][pl] |
+| P3 | **Clip source selector**: left-click on empty track space places the current source; right-click (or Ctrl+F8) opens the project picker with hover preview | [DOC][pl] [DOC][pl-pp] |
+| P4 | Picker panel (Alt+P): every pattern/audio/automation source; rename, colour, select unused, sort, preview | [DOC][pl-picker] |
+| P5 | Clip edges: Shift+drag the start/end edge to trim without moving content; left-edge resize option; slip moves content inside a fixed clip; ripple resizes while the content at the other end slips | [DOC][pl] [DOC][pl-work] |
+| P6 | Move by left-drag; Shift+drag copies the selection; Ctrl+drag box selects; Shift+arrows move the selection in time / across tracks | [DOC][pl-work] [DOC][sc-pl] |
+| P7 | Wheel nudge (CONFLICT: Shift+Alt+wheel by default, Shift+wheel with an option) | [DOC][pl] [DOC][sc-pl] |
+| P8 | Clip menu: preview, select source, channel settings, rename, colour, **make unique** (also Shift+V+drag), select all similar, delete, chop (grid-based; for audio by bar/beat, also shuffled) | [DOC][pl-clipmenu] |
+| P9 | Audio clip menu extras: volume/pan automation for the clip, crossfades, time-stretch tools, "make unique as sample" (copies the file) | [DOC][pl-clipmenu] |
+| P10 | Double-click a pattern clip opens the Piano Roll or the Channel Rack per the "edit patterns in" setting; Alt+double-click opens the other one | [DOC][pl] [DOC][pl-editin] |
+| P11 | Track header menu: rename/colour/icon, auto-name, track mode, size/lock, group with the track above, merge pattern clips, consolidate, mute all clips, insert/delete/clone/move | [DOC][pl-trackmenu] |
+| P12 | Track mute/solo; grouped tracks mute together; Shift+wheel over headers reorders tracks | [DOC][pl] [DOC][sc-pl] |
+| P13 | Ruler: click = song position; **Ctrl+drag = time selection across all tracks** (it loops, and clip parts outside it are shown as not playing); Shift+drag moves/copies it; double-click clears | [DOC][pl-time] [DOC][pl-markers] |
+| P14 | Space editing on the time selection: Ctrl+Ins insert space, Ctrl+Del delete space; Insert slices at the cursor | [DOC][pl] [DOC][sc-pl] |
+| P15 | **Ctrl+B duplicates** the selection to the right; with a time selection, that sets the repeat interval | [DOC][pl-menu] [DOC][sc-pl] |
+| P16 | Markers: named/auto markers, loop/skip/pause/start/stop-recording actions, song loop marker sets the render end; jump to previous/next marker | [DOC][pl-markers] |
+| P17 | Zoom: Ctrl+wheel around the mouse; drag the scrollbar ends; PgUp/PgDn; Shift+1..5, Shift+0; Ctrl+right-click zooms to the selection / everything | [DOC][pl] [DOC][sc-pl] |
+| P18 | Track height for all tracks; drag a divider for one | [DOC][pl] |
+| P19 | Merge pattern clips (Ctrl+G), group/ungroup clips (Shift+G / Alt+G), Alt+M mute selection, quantise (CONFLICT: Ctrl+Q vs Shift+Q; Alt+Q full) | [DOC][pl] [DOC][sc-pl] |
+| P20 | Arrangements: dropdown in the title bar; add, clone, rename, delete, merge one into another | [DOC][pl] |
+| P21 | Clip focus selector: chooses which clip type is on top for picking stacked clips | [DOC][pl-focus] |
+| P22 | Audio clip keys: transpose (7/8), reverse (9), stretch mode, fades view | [DOC][sc-pl] |
+| P23 | Dropping a plugin/audio file on a track header creates a linked instrument/audio track | [DOC][pl-trackmode] |
+| P24 | Live clip launching ("performance" mode, Ctrl+P in the Playlist) | [DOC][perf] |
+
+### 2.6 Automation clips (A)
+
+| ID | Interaction | Source |
+|---|---|---|
+| A1 | Right-click a control → create automation clip. The length is the Playlist time selection, or the whole song without one. The clip goes on the highest empty track in view | [DOC][ac] |
+| A2 | Points: right-drag adds; Shift+right-click adds without changing level; left-drag moves (Shift locks vertical, Ctrl horizontal, Alt no snap); right-click point menu: delete, type in value, copy/paste value | [DOC][ac] |
+| A3 | Tension handle per segment (Ctrl fine, right-click resets); curve types per segment (single, double, hold, stairs, pulse, wave, smooth …) | [DOC][ac] |
+| A4 | Ctrl+drag selects points; dragging the last point stretches the clip; step mode draws freehand; slide mode keeps later points' spacing | [DOC][ac] |
+| A5 | LFO overlay on the envelope (speed, tension, skew, pulse width, level; multiply vs add) | [DOC][ac] |
+| A6 | Clip settings: min/max re-range, playback speed | [DOC][ac] |
+| A7 | Initial value stored at creation; "init song with this position" | [DOC][ac] |
+| A8 | Make unique on an automation clip; tempo automation from the tempo display (60–180 BPM default) | [DOC][ac] [DOC][tb] |
+
+### 2.7 Mixer (M)
+
+| ID | Interaction | Source |
+|---|---|---|
+| M1 | Select an insert by clicking its fader/pan; multi-select with Ctrl+Shift+click or drag over labels; selected faders move together | [DOC][mx] |
+| M2 | Reorder inserts: Alt+Left/Right or Shift+wheel (CONFLICT: the menu page says Shift+Left/Right) | [DOC][mx] [DOC][mxm] |
+| M3 | Send switch on each insert: select a source, click the destination's switch → a send knob appears; right-click → route or sidechain to this track only | [DOC][mx] |
+| M4 | Right-click an insert: route/sidechain *selected to this* or *this to selected* (each with an "only" variant); create submix; reset routing | [DOC][mxm] |
+| M5 | **Link selected channels to this insert** (Ctrl+L), "…starting from this insert" (Ctrl+Shift+L); Alt+L selects the channels linked to it | [DOC][mxm] [DOC][sc] |
+| M6 | Mute: left-click; Solo: right-click or Ctrl+click; Ctrl+right-click unmutes all; Alt+click solos along the signal path; Shift+click locks | [DOC][mx] |
+| M7 | Rename/colour: F2, middle-click the label, or the menu; random colour in the dialog | [DOC][mx] [DOC][mxm] |
+| M8 | Effect slot: left-click selects, right-click the arrow → plugin picker; click the name → its window; **wheel over a slot reorders it**; mix knob; enable switch; slot menu (replace, presets, A/B "spare state", move up/down, rename) | [DOC][mx] [DOC][mxp] |
+| M9 | FX switch per insert: left-click toggles all effects, right-click opens/closes all effect windows | [DOC][mx] |
+| M10 | Insert record arm (left-click; right-click with file naming); input selector arms the insert; pickup point | [DOC][mx] [DOC][ra] [DOC][mxt] |
+| M11 | Docks (left/middle/right), view sizes, routing cables view, separators, groups | [DOC][mx] [DOC][mxm] |
+| M12 | Track properties panel (Ctrl+Enter): 3-band EQ (left-drag freq/gain, right-drag width/gain), delay comp with wheel/Ctrl+wheel | [DOC][mxt] |
+| M13 | Save/load an insert's state (chain + settings); drag a saved state onto another insert | [DOC][mxm] |
+| M14 | Add inserts with "+"; trim unused inserts | [DOC][mx] [DOC][mxm] |
+| M15 | Clicking above/below the fader handle moves it smoothly there | [DOC][mx] |
+
+### 2.8 Browser (B)
+
+| ID | Interaction | Source |
+|---|---|---|
+| B1 | Click audio previews the first seconds; Alt+click (or an option) plays it fully; Shift+click from the mouse position | [DOC][br] |
+| B2 | Shift+Up/Down steps through files, previewing each, and **swaps each one into the selected channel** | [DOC][br] [DOC][sc] |
+| B3 | Enter / middle-click / "send to selected channel" loads the item into the selected channel | [DOC][br] [DOC][br-use] |
+| B4 | Drop targets: rack (new channel), Playlist (audio clip), mixer insert or slot (effect), mixer insert (instrument + routing), track header (linked track); Alt while dropping keeps the window closed | [DOC][br] [DOC][br-use] [DOC][mx] |
+| B5 | Dropping on an existing channel / on the Piano Roll | not documented ([DOC][br]) |
+| B6 | Search (Ctrl+F): wildcards, AND/OR/NOT, exact phrase, current folder only, F2/F3 previous/next result | [DOC][br] |
+| B7 | Tabs (all, current project, plugin database, starred), user folders, layouts (tree, columns, samples with waveforms, plugin grid), tags, favourites (star) | [DOC][br] |
+| B8 | Current-project tab: history, patterns, automatable controls (right-click → automation / link) | [DOC][br] |
+| B9 | Quick plugin picker (F8): generators on one side, effects on the other; type to filter; double-click loads into a new channel or the selected insert | [DOC][br-picker] |
+| B10 | Docks left/right; can detach; Backspace/Shift+Backspace navigate back/forward | [DOC][br] |
+
+### 2.9 Plugin windows (W)
+
+| ID | Interaction | Source |
+|---|---|---|
+| W1 | Common header: plugin menu, preset arrows (previous/next), right-click preset name = plugin's own preset list, minimise, close | [DOC][wrap] |
+| W2 | Channel button toggles the window; another channel closes it unless Alt+click | [DOC][wrap] [DOC][cr] |
+| W3 | Menu: replace, delete, presets (save/browse/randomise), A/B spare state, parameter list for linking, processing options, rename/colour, **Detached** | [DOC][wrap] |
+| W4 | Settings tab: MIDI ports, release velocity, pitch-bend range, notes-off on stop, processing options | [DOC][wrap] |
+| W5 | Shift+F12 aligns plugin windows; Alt+F12 closes them all | [DOC][view] |
+| W6 | A "remember window position" option | not documented ([DOC][wrap]) |
+
+### 2.10 Recording (X)
+
+| ID | Interaction | Source |
+|---|---|---|
+| X1 | R arms; Play records; right-click Record = filter (automation / notes / audio / clips) + record quantise | [DOC][tb-rec] |
+| X2 | Count-in (bars set by right-click), metronome (Ctrl+M), wait-for-input (Ctrl+I), blend/overdub, loop record | [DOC][tb] [DOC][sc] |
+| X3 | Notes go to the current pattern; in Song mode a pattern clip is placed at the start point (an empty clip placed first decides the track) | [DOC][rn] |
+| X4 | Recorded MIDI is quantised by global snap unless it is set to line/cell/none | [DOC][rn] [DOC][rn-q] |
+| X5 | Automation recording: moving controls while recording writes event data to the pattern; it can be converted to a clip later | [DOC][rau] |
+| X6 | Audio: per-insert input; Song-mode takes become Playlist clips (each loop pass a separate clip, earlier takes audible only with blend on) | [DOC][ra] [DOC][ra-pl] [DOC][ra-loop] |
+| X7 | Step edit (Ctrl+E): each key adds a note at the cursor and advances one step; numpad keys skip or go back | [DOC][rs] |
+| X8 | Always-on capture of recent playing that can be dumped into a pattern afterwards | [DOC][rn] |
+| X9 | Cancel a take; recording start/stop markers limit the recorded region | [DOC][rn] [DOC][pl-markers] |
+
+---
+
+## 3. Gap analysis
+
+Legend: **Yes** = present and close to the documented behaviour · **Partial** = present with a different
+gesture or reduced scope · **No** = absent (searched, not found). Locations are under `src/`.
+
+### 3.1 Gap matrix
+
+**Global**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| G1 | Partial | F5/F6/F7/F9 switch **tabs** of one `TabbedComponent` (`ui/MainComponent.cpp:150-155, 302-343`); F8 toggles the Browser side panel. No quick plugin picker |
+| G2 | No | No F12 family; Esc only deselects inside the editors |
+| G3 | No | Only one editor is visible at a time (tabs). Plugin, automation, channel-settings and EQ windows are native `DocumentWindow`s kept above the main window (`ui/WindowOwner.cpp`) |
+| G4 | No | — |
+| G5 | No | — |
+| G6 | Partial | Space = play/pause (`MainComponent.cpp:387`); separate Stop button rewinds. No Ctrl+Space, no "Play again = stop + rewind", no panic on Stop |
+| G7 | Partial | L and the PAT/SONG button (`MainComponent.cpp:92-93, 392`); the right-click shortcut to a window is missing |
+| G8 | Partial | `IncDecButtons` slider 10–522 BPM; right-click = automation/MIDI link (`MainComponent.cpp:97-101, 360-368`). No drag on the digits, tap tempo, nudge or half speed |
+| G9 | No | Snap exists only per editor (`ui/PianoRollComponent.cpp:73-78`, `ui/PlaylistComponent.cpp:25-26`); no global snap, no "Main" mode, no Backspace toggle. Alt bypass: Yes |
+| G10 | No | The default note length is implicitly the last resized note (R4) |
+| G11 | Partial | Toolbar combo + "+" + "…" menu with rename, colour, length, clone, delete (`MainComponent.cpp:103-119, 443-514`). No keys (+/−, F4, F2), no insert, no split by channel |
+| G12 | No | A static shortcut line (`MainComponent.cpp:143`), replaced only during MIDI learn. Tooltips only |
+| G13 | Partial | Snapshot undo with 100 steps, one step per mouse gesture (`engine/AudioEngine.cpp:555-611`); Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. No history list |
+| G14 | Partial | Ctrl+N new, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+R export, recent-files menu (`MainComponent.cpp:250-358, 833-957`). No save-new-version |
+| G15 | Partial | 4 built-in templates in "New from template" (`core/Templates.cpp:57`); no user templates |
+| G16 | Partial | The PC keyboard is always a piano when Ctrl/Alt are not held (`MainComponent.cpp:22-39, 345-355`). There is no toggle, so single-letter shortcuts (tools, L) clash with notes. Only L is protected |
+| G17 | No | No window shortcut icons (tabs act as the window switcher) |
+| G18 | No | No "last tweaked" |
+
+**Controls**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| K1 | Partial | Rack knobs: drag only (`ui/ChannelRackComponent.cpp:285-298`). Mixer fader and effect knobs: **Shift** = fine (`ui/MixerComponent.cpp:428-434`). Ctrl-fine nowhere |
+| K2 | Partial | Reset is **double-click** (rack `:379-382`, mixer `:457-458`, effects `:1112-1117`); no Alt+click or middle-click |
+| K3 | Partial | `addAutomationItem` gives create automation clip / MIDI learn / unlink (`ui/AutomationUi.cpp:498-515`). No type-in value, no reset item, no "init song with this position". The effect wet/dry knob has no menu |
+| K4 | No | — |
+| K5 | No | — |
+| K7 | No | — |
+
+**Channel Rack**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| C1 | Yes | Left toggles and paints by drag, right erases (`ChannelRackComponent.cpp:315-328, 391-412`) |
+| C2 | Yes (own) | Drag-paint/erase is a LYNX design choice (FL: not documented) |
+| C3 | No | — |
+| C4 | No | No graph editor and no per-step velocity/pitch in the rack |
+| C5 | Partial | Left-click selects + auditions C5 while held; **double-click** opens the plugin/Piano Roll (`:306-313, 367-368, 385-388`). No click-to-toggle window, no Shift+wheel move |
+| C6 | Partial | Menu has piano roll, instrument replace, rename, colour, clear notes, delete, arpeggiator, sampler slicing (`:414-541`). Missing: clone, insert, fill every N, rotate, advanced/Euclidean fill, copy/paste note data. The settings windows for model channels exist (`ui/ChannelSettings.cpp:1197-1202`) but have no menu entry |
+| C7 | No | Single selection only; no reorder, sort or select-unused |
+| C8 | Partial | Left mute; right-click or Ctrl+click solo (`:267-283`). No lock |
+| C9 | No | — |
+| C10 | Partial | Route box: vertical drag (6 px per insert), double-click = next free insert (`:300-304, 339-345, 383-384`). No Ctrl+L for a selection, no naming of the insert after the channel |
+| C11 | No | No step-data clipboard in the rack |
+| C12 | No | — |
+| C13 | No | — |
+| C14 | Partial | Global swing knob in the toolbar (`MainComponent.cpp:121-128`); per-channel swing mix exists in the model and is imported, but there is no UI for it |
+| C15 | Partial | Length via the pattern menu (Automatic, 1–32 bars); the grid follows the length (`ChannelRackComponent.cpp:89-99`). No corner drag |
+| C16 | No | — |
+| C17 | No | — |
+| C18 | No | — |
+| C19 | Yes | Cut groups, mono (STATUS.md, channel settings) |
+| C20 | No | — |
+
+**Piano Roll**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| R1 | No | No tool palette; gestures are button + modifier based |
+| R2 | Partial | Left click adds and drags, right-click/right-drag deletes (`ui/PianoRollComponent.cpp:721-857`). No temporary slice |
+| R3 | No | — |
+| R4 | Yes | The resized length becomes the next default (`:938-954`) |
+| R5 | Partial | Right-edge resize, Alt = free. No left edge, no stretch |
+| R6 | Partial | Ctrl+drag box; Shift+drag adds; Ctrl+click toggles one note. No ruler/keyboard range selection |
+| R7 | No | Moves are free in both axes |
+| R8 | Partial | Shift+drag on a note drags a copy (`:785-805`) |
+| R9 | No | No note-properties dialog (per-note values exist in the model; STATUS.md) |
+| R10 | Partial | Lane with velocity / pan / fine pitch (`:141-148, 639-687`). No release/Mod X/Y lanes, no controller automation lane, no "turn into automation clip" |
+| R11 | Partial | 10 fixed snap values (`:73-78`); no Main/Line/Cell/Events/markers |
+| R12 | Partial | Other channels drawn dimmed (`:409-419`); not clickable, no toggle, no out-of-pattern ghosts, no switch-to-channel |
+| R13 | No | The roll follows the rack selection; no selector in the roll, no G/K/H/J |
+| R14 | Partial | Scale highlight combo (12 roots × 8 scales, `:57-71`), shading only; no snap-to-scale |
+| R15 | Partial | Chord stamp combo of 11 shapes (`:47-55`); no "only one" or inversion modes |
+| R16 | No | — |
+| R17 | Partial | Slide toggle in the toolbar; Ctrl+P toggles porta on the selection |
+| R18 | Partial | Ctrl+X/C/V (paste in place, not at the view's left), Ctrl+B, Del, arrows: Up/Down ±1 (Shift = octave), Left/Right by snap (Shift = bar) (`:1075-1161`). Different key mapping from FL; no rotate |
+| R19 | Partial | Ctrl+A, Esc. No invert/random/off-grid selection |
+| R20 | No | — |
+| R21 | Partial | Ctrl+M toggles mute on the selection; no note grouping |
+| R22 | Partial | Ctrl+Q quantises starts only (`core/NoteEdit.cpp:91-101`). No chop, glue, legato or discard-lengths |
+| R23 | No | None of the tool dialogs (the arpeggiator exists as a *live channel effect*, not a note tool) |
+| R24 | Partial | Wheel / Shift+wheel scroll, Ctrl+wheel horizontal zoom (`:981-997`). No vertical zoom, presets, middle-drag pan |
+| R25 | Yes | Keyboard click auditions; clicking/moving a note also auditions (a LYNX choice, R26) |
+| R27 | No | Markers exist only on the Playlist ruler |
+| R28 | Yes | MIDI menu import/export (`:1163-1209`) |
+| R29 | No | — |
+
+**Playlist**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| P1 | No | No tool palette |
+| P2 | Partial | Right-click deletes (right-drag many), Ctrl selects, Shift copies, Alt no snap (`ui/PlaylistComponent.cpp:753-768, 796-820, 933-951`). Right-click on the name strip opens the clip menu instead of deleting. No double-right-click mute |
+| P3 | Partial | Picker panel selects the source; click on empty space places it (`:844-882, 1604-1739`). No source menu, no hover preview |
+| P4 | Partial | Picker lists patterns / audio / automation (`:1604-1739`); no right-click actions |
+| P5 | Partial | Right-edge resize only (`:993-1009`). No left trim, slip or ripple. **Bug:** audio-clip fade handles are drawn (`:537-553`) and change the cursor on hover (`:1426`), and the drag code exists (`:917-931`), but `mouseDown` (`:715-883`) never enters `Drag::fadeIn/fadeOut` (`fadeHandleAt`, `:637`, is only called from the hover code). Fades cannot be edited |
+| P6 | Partial | Drag, group move, Shift+drag copy, Ctrl+box. No Shift+arrow moves |
+| P7 | No | — |
+| P8 | Partial | Split, make unique, select all of this pattern, open in rack, delete (`:1115-1277`). Missing: per-clip mute, colour, rename, chop |
+| P9 | Partial | Clip volume, normalise, remove fades. No clip automation, crossfades, reverse |
+| P10 | Partial | Double-click a pattern clip switches to the **Channel Rack** tab; automation clips open their editor (`:1436-1450`). No "edit in" preference |
+| P11 | Partial | LED mute, right-click rename (`:718-731`). Missing: menu, colour, height, solo, insert/delete/move, group |
+| P12 | Partial | Track mute only |
+| P13 | Partial | Click seeks (forces Song mode); drag sets the loop region (`:733-745, 894-915`). The region does not select clips; no Ctrl modifier |
+| P14 | No | — |
+| P15 | Partial | Ctrl+B duplicates by the span rounded to bars (`:1367-1419`); no time-selection interval |
+| P16 | Partial | Ruler menu: add/rename/remove marker, time-signature change, remove loop (`:1049-1089`). No marker actions, no jumps |
+| P17 | Partial | Ctrl+wheel zoom; no presets, no vertical zoom, no zoom to selection |
+| P18 | No | — |
+| P19 | No | — |
+| P20 | Yes | Arrangement combo: new, clone, rename, remove (`:54-135`); no merge |
+| P21 | No | — |
+| P22 | No | — |
+| P23 | No | — |
+| P24 | No | — |
+
+**Automation**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| A1 | Partial | Right-click any knob → clip on a new bottom track + its editor opens (`ui/AutomationUi.cpp:435-470`). Fixed length; ignores the time selection |
+| A2 | Partial | Separate editor window: click adds, drag moves, right-click deletes (`AutomationUi.cpp:36-348`). No axis locks, no type-in |
+| A3 | Partial | Alt+drag on a segment sets tension; no curve-type menu |
+| A4–A6 | No | — |
+| A7 | No | — |
+| A8 | Partial | Make unique and tempo automation exist |
+
+**Mixer**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| M1 | Partial | Single selection by clicking a strip (`ui/MixerComponent.cpp:351-358`) |
+| M2 | No | — |
+| M3 | Partial | Send arrow buttons on other strips when one is selected; drag right after enabling sets the level (`:264-286, 335-349, 420-426`). Sidechain is configured on the compressor slot ("Sidechain from"), not on the route |
+| M4 | Partial | "Send only to this track", "Send only to Master again" (`:564-641`) |
+| M5 | Partial | "Route channel X here" (for one channel) in the strip menu; no shortcut, no selection |
+| M6 | Partial | Mute LED; an "S" button toggles solo (not exclusive); solo along the path exists (STATUS.md). No right-click solo |
+| M7 | Partial | Rename in the menu; colour only shown if imported (`:150-154`) |
+| M8 | Partial | 10 slots, click empty → add menu, bypass LED, dry/wet, menu with replace / presets / sidechain / move up/down / delete (`:999-1288`). No wheel/drag reorder, no A/B |
+| M9 | No | — |
+| M10 | No | Audio arm is global (Rec "v" menu), not per insert |
+| M11 | No | — |
+| M12 | Partial | Track EQ callout with 9 sliders (`:475-562`) |
+| M13 | No | — |
+| M14 | Partial | "+" adds an insert (`:323-333`); no delete/trim/reorder |
+| M15 | Yes (variant) | Clicking the rail jumps the fader (`:392-402`) |
+
+**Browser**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| B1 | Partial | Selecting an audio file previews it (`ui/BrowserComponent.cpp:136-142`) |
+| B2 | No | — |
+| B3 | Partial | Double-click makes a *new* channel (`:144-193`) |
+| B4 | Partial | Rack and Playlist accept drops (`ChannelRackComponent.cpp:688-713`, `PlaylistComponent.cpp:1461-1504`); dropping onto a rack row replaces that channel's sample. No mixer targets |
+| B6 | No | — |
+| B7 | Partial | Root-folder combo (`BrowserComponent.cpp:80-91`); no tabs, user folders, tags or favourites |
+| B8 | No | — |
+| B9 | No | Plugins are added through nested menus |
+| B10 | Partial | Fixed left panel |
+
+**Plugin windows**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| W1 | Partial | Native window with minimise and close (`ui/PluginWindow.cpp`); no header bar, presets or menu |
+| W2 | No | Opening again brings the window to the front; it does not toggle (`PluginWindow.cpp:101-112`) |
+| W3 | Partial | Always detached; parameters are reachable through the "Automate plugin parameter" submenus |
+| W4, W5 | No | — |
+
+**Recording**
+
+| ID | LYNX | Where / note |
+|---|---|---|
+| X1 | Partial | Rec button + "v" menu (notes always, audio arm) (`MainComponent.cpp:72-90`) |
+| X2 | Partial | Metronome; no count-in, wait-for-input, overdub/replace choice or loop record |
+| X3 | Partial | Notes go into the current pattern, one undo step per take (`engine/AudioEngine.cpp:487-543`); no Song-mode clip placement |
+| X4 | No | No input quantise |
+| X5 | No | — |
+| X6 | Partial | Input → 24-bit WAV → new audio channel + clip on a new track (`AudioEngine.cpp:286-405`); not tested by a human (STATUS.md) |
+| X7, X8, X9 | No | — |
+
+### 3.2 Prioritised implementation list
+
+The specs below are **LYNX's own design**. They borrow the *idea* of FL's workflow, not its names, look or exact
+key map. Where an FL key is a widely shared convention (Ctrl+B duplicate, Space play, F-keys for panels), LYNX
+may keep it. All key bindings should live in one remappable table (see P1-14).
+
+#### P1: the core feel of the workflow
+
+1. **Workspace desktop (G1, G3, G4, G5, G17).** Replace the tab bar with a *workspace*: Playlist, Channel
+   Rack, Piano Roll, Mixer and Browser become movable, resizable, overlapping panels inside the main window.
+   - Each panel has a title strip with *maximise*, *detach* (moves it into its own native window and back) and
+     *close*. Panels snap to each other and to the edges; Alt disables snapping.
+   - F5/F6/F7/F9/F8 **toggle and focus** a panel: the first press shows and focuses it, a press while focused
+     hides it. Enter maximises or restores the Playlist.
+   - "Workspace → Reset layout" and "Save layout as…" go to `%APPDATA%\LYNX\layouts`. The layout is saved with
+     the user settings, not the project.
+   - Keyboard shortcuts go to the focused panel.
+2. **Edit tools in the Piano Roll and Playlist (R1, R2, R3, P1, P2).** Add a tool strip to both editors: Pencil,
+   Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen (and Slip in the Playlist).
+   - Keys (when the typing piano is off): P, B, D, T, C, E, Z, Y, S.
+   - Rules for every tool: right-click always deletes, Alt always bypasses snap, Ctrl always selects.
+   - Right-press-and-hold on empty grid gives a temporary Knife.
+   - The current gestures stay as the Pencil's behaviour, so nothing breaks.
+3. **Global grid + per-editor "Follow" snap (G9, G10, R11).** Add a grid selector to the main toolbar. Each
+   editor's grid combo gets a "Follow global" entry, which becomes the default.
+   - Add a "Screen" grid that follows the visible grid lines, and a "Nearest note" grid that snaps to existing
+     notes and ghosts.
+   - Backspace toggles the global grid between its last value and none.
+   - Right-click the grid selector → "Default note length" for new notes.
+4. **Pattern navigation keys (G11, C16).** Numpad +/− for next/previous pattern; F4 jumps to the next empty
+   pattern and offers a name; F2 opens a combined rename + colour dialog (a key in it picks a random colour from
+   LYNX's palette).
+   - Add Insert pattern and Split by channel to the pattern menu.
+   - Shift+wheel over the rack title changes the pattern.
+5. **Channel Rack selection and organisation (C7, C10, C18, C6).** Add a selection column to each row.
+   - Click selects one row, Ctrl+click toggles, Shift+click selects a range. Up/Down move the selection;
+     Alt+Up/Down move the selected rows.
+   - "Clone channel" (settings without notes), "Insert channel here" and "Delete selected".
+   - **"Send selection to free inserts" (Ctrl+L)** creates one insert per selected channel, named and
+     coloured after it.
+   - The selection also drives MIDI input and step copy/paste.
+6. **Channel button = window toggle (C5, W2).** A single click on the channel name opens or closes that
+   channel's editor: plugin UI or settings. Opening another channel's editor closes the previous one unless Alt
+   is held, and Settings → "Keep editors open" turns the auto-close off.
+   - Ctrl+click auditions only. This moves the current "click = audition" to Ctrl+click.
+   - Expose the existing model-channel settings windows (`ChannelSettings.cpp:1197-1202`) here.
+7. **One control contract for every knob and fader (K1, K2, K3, K4).** Create a shared `lynx::ui::ValueControl`
+   helper that every knob, fader, route box and number display uses:
+   - drag to change, Ctrl+drag fine, wheel = small step (Ctrl+wheel finer);
+   - Alt+click or middle-click resets (double-click also resets, as today);
+   - right-click menu: *Type value…, Reset, Create automation clip, Link to MIDI controller…, Unlink*.
+   This also fixes the inconsistencies the inventory found: Shift-fine only on the mixer, no wheel on the rack
+   or mixer, no menu on the effect wet/dry knob.
+8. **Hint strip (G12).** Replace the static shortcut line with a strip at the bottom of the main window.
+   - It shows a one-line hint for the control under the mouse, the live value while dragging, and small markers
+     for "can be automated" and "has a menu".
+   - Hints come from a `hint` property set on each component, through the control contract in item 7.
+   - LYNX's own icons; the MIDI-learn prompt keeps working.
+9. **Piano Roll channel switching and ghost notes (R12, R13).** Add a channel selector to the roll's toolbar
+   (channels with notes in this pattern are marked; wheel steps through them).
+   - Previous/next channel keys, previous/next channel with notes keys.
+   - Double right-click a ghost note to switch to its channel. A ghost toggle in the toolbar.
+   - Ghosts also from overlapping Playlist clips (shown hollow) when the roll was opened from a clip.
+10. **Clip edge editing (P5) and the fade bug.** First fix the fade handles: `mouseDown` must call
+    `fadeHandleAt` before the move/resize logic. Then:
+    - left-edge trim (adjusts `offset` and `start` together);
+    - Shift+drag an edge = trim without moving content;
+    - Slip tool or Alt+Shift+drag inside the clip = move content under a fixed clip.
+11. **Note inspector (R9, R7, R5).** Double-click a note to open a small inspector with velocity, pan, release,
+    fine pitch, two "mod" values, slide/porta, time and length.
+    - Edits apply to the whole selection, with Apply / Revert.
+    - Also: Shift+drag locks to time and Ctrl+drag to pitch after the first move, and an opt-in left-edge resize.
+12. **Quick note operations (R22, R18).** Add one-key note operations, each one undo step and acting on the
+    selection (or all notes when nothing is selected):
+    - *Chop to grid* (Ctrl+U), *Join touching notes* (Ctrl+G), *Make legato* (Ctrl+L inside the roll),
+      *Shrink to grid* (Shift+D), *Quantise starts* (Shift+Q) and *Quantise* (Ctrl+Q, starts + lengths).
+    - Rotate within the bar (Ctrl+Shift+Left/Right).
+13. **Playlist time selection (P13, P14, P15, A1).** Ctrl+drag on the ruler makes a *time selection* that also
+    selects the clips inside it and becomes the loop. It is cleared with a double-click.
+    - Ctrl+B with a time selection repeats it after itself.
+    - Ctrl+Ins / Ctrl+Del insert or remove that much time across all tracks.
+    - New automation clips take its length.
+14. **Typing-piano toggle and a remappable key table (G16).** Make the PC keyboard piano a toolbar toggle
+    (Ctrl+T). When it is off, single letters are shortcuts (tools, L, numbers to mute channels 1–10).
+    - When it is on, only Ctrl/Alt chords and F-keys are shortcuts.
+    - Move every binding into one data table (`core/KeyMap`), which can be loaded from JSON. This avoids the
+      clash between notes and future single-key tools.
+15. **Transport details (G6, G7, G8).** Space toggles play/stop and returns to the start point. Ctrl+Space
+    pauses. Double-click Stop = all notes off.
+    - Right-click PAT/SONG focuses the matching panel.
+    - The tempo display becomes a drag-able number (whole BPM on the integer part, decimals on the fraction).
+      Its right-click menu: type in, tap, half speed, automation.
+
+#### P2: deepens the workflow
+
+- **Step graph lanes (C4).** A collapsible lane under the rack row for per-step velocity, pan and fine pitch.
+  Drag sets a value, right-drag draws a ramp, Alt+click resets. It writes the same note fields the Piano Roll uses.
+- **Step fill and rotate (C6, C20).** Channel menu → *Fill every 2/4/8*, *Euclidean fill…* (pulses / length /
+  rotation, with a preview), *Rotate left/right*.
+- **Mixer selection and routing gestures (M1, M2, M3, M4, M5, M6).**
+  - Multi-select inserts; selected faders move together; Alt+Left/Right reorder.
+  - Right-click the send button → "Sidechain only" (a level-0 route that LYNX's compressor already treats as a
+    sidechain).
+  - Menu: *Route selected here / here only*, *Link selected channels here* (Ctrl+L in the Mixer).
+  - Mute = left-click, solo = right-click or Ctrl+click on the same LED, matching the rack.
+- **Effect slot handling (M8, M9).** Drag a slot to reorder it, or wheel over it; a per-insert "all effects
+  on/off" switch; right-click that switch to open or close all effect windows; an A/B compare buffer per slot.
+- **Browser search and audition-swap (B2, B3, B6, B10).**
+  - Ctrl+F opens a filter box (wildcards, AND/NOT).
+  - Up/Down auditions the files in turn. Shift+Up/Down swaps each one into the selected sampler channel; Enter
+    loads it there.
+  - Drop targets on mixer inserts and slots (effects, plugin presets).
+  - User folders.
+- **Quick-add palette (B9).** A searchable plugin list (F8 in LYNX) with instruments and effects. Double-click
+  adds it to a new channel or to the selected insert, depending on which panel is focused.
+- **History panel (G13).** A list of undo steps with names (the action labels already passed to `editSong`).
+  Clicking a step jumps there. Keep conventional undo (Ctrl+Z back, Ctrl+Y/Ctrl+Shift+Z forward). FL's
+  toggle-style undo is deliberately *not* copied.
+- **Recording set (X1, X2, X3, X4, X9).**
+  - A record menu with filters (notes, audio, automation).
+  - Count-in bars, "start on first note" (wait-for-input), *Overdub vs Replace*.
+  - Input quantise follows the global grid.
+  - In Song mode a take places a pattern clip at the start point.
+- **Automation clip editing (A2, A3, A4, A6).** Edit inline in the Playlist as well as in the window. Axis locks
+  (Shift/Ctrl), right-click a point to type a value, a curve-shape menu per segment (single, double, hold,
+  stairs, pulse, wave, smooth), min/max re-range.
+- **Note tool dialogs, first set (R23).** *Strum*, *Arpeggiate (offline)*, *Flip*, *Randomise*, *Scale
+  velocities*, *Fit to range*. Each is a small modal dialog with a live preview, Apply/Revert, and one undo step.
+- **Clip menu completion (P8, P9, P11, P12).**
+  - Clips: mute, colour, rename, chop to grid.
+  - Tracks: colour, height, solo, insert/delete/move, and a track header menu.
+  - Double-click a pattern clip opens the Piano Roll when the pattern has piano-roll notes, else the rack. A
+    preference sets this.
+- **Scale snap (R14).** "Snap to scale" when drawing or moving notes, and for incoming MIDI.
+- **Zoom presets (R24, P17).** PgUp/PgDn, zoom to selection, show all, vertical zoom (Ctrl+Alt+wheel), and
+  middle-drag pan.
+- **Per-insert record arm (M10).**
+
+#### P3: later or optional
+
+- Filter groups in the rack (C13); layer channels (C17); per-channel loop/ghost steps (C20).
+- Colour groups as separate voices (R16); Events-to-automation conversion (R10).
+- Space editing in the Piano Roll (R20); random and off-grid selection (R19).
+- Melody and chord generators (R23, last two). These need original LYNX designs and are not in scope for
+  workflow parity.
+- Bound channel ↔ track ↔ insert "instrument tracks" (P23).
+- Live clip launching (P24); always-on capture buffer (X8); step entry (X7).
+- Mixer docks, views, routing cables, insert state presets (M11, M13); browser tabs, tags, favourites (B7).
+- Toolbar customisation presets (DATA: toolbar preset files); save-new-version (G14); user templates (G15).
+- Plugin window header with preset arrows, rename and MIDI options (W1, W3, W4).
+
+---
+
+## 4. What must stay different (clean-room and branding)
+
+- **Source of knowledge.** Behaviour comes only from the public manual (paraphrased), the names and structure of
+  installed data files, and observation. No Image-Line code, text, images, icons or skins go into LYNX. This
+  document quotes nothing.
+- **Look.** LYNX keeps its own theme (`ui/Theme.h`), its own layout proportions, its own control drawing and its
+  own icon set. Do not reproduce FL's:
+  - colour scheme or skins;
+  - step-button, LED, knob or fader art;
+  - window title-bar style or toolbar panel arrangement;
+  - splash, mascot or logo.
+  The workspace (P1-1) must not mimic FL's window frames.
+- **Names.** Generic terms are fine: Channel Rack, Step sequencer, Piano Roll, Playlist, Mixer, Browser,
+  pattern, clip, automation clip, ghost notes, make unique, quantise, strum, arpeggiate, chop. Avoid
+  Image-Line's product or brand-specific names in LYNX's UI:
+  - plugin and tool names: anything "Fruity", Edison, Riff Machine, the period-slicing tool's name, Patcher,
+    NewTone/NewTime, FL Cloud, Gopher;
+  - feature names: "Performance mode", "Spare state", "Score logger".
+  Use LYNX names: e.g. Quick-add palette, Note inspector, A/B compare, Live launch, Capture buffer, Hint strip.
+  Imported effects and instruments may *mention* the FL plugin they came from in the import report, as today,
+  for interoperability.
+- **Sounds and content.** Do not ship FL's samples, presets, templates, demo projects or metronome sounds.
+  - LYNX may *read* them from the user's own FL installation (as it does for imports and browser roots).
+  - LYNX templates (`core/Templates.cpp`) and the metronome stay original.
+  - LYNX's name presets, toolbar presets and typing-piano maps must be written from scratch. They must not be
+    converted from FL's `NamePresets_*.txt`, `.tpr` or `.scr` files.
+- **Key map.** Common conventions (Space, Ctrl+Z/C/X/V/B, F-keys for panels, L for the mode) are fine to share.
+  The full map lives in LYNX's own remappable table (P1-14), so the default map is LYNX's choice and not a copy
+  of FL's list.
+- **Deliberate differences already chosen.** Conventional undo/redo instead of toggle-style undo;
+  drag-painting of steps (not documented for FL); auditioning notes while drawing; standard Ctrl+N = new
+  project.
+- **Trademarks.** "FL Studio" and "Image-Line" are mentioned only to describe compatibility, e.g. ".flp import".
+  This study is internal design documentation.
+
+---
+
+## Appendix: manual pages cited
+
+Base: `https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/`
+
+[iface]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_interface.htm
+[wf]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_workflow.htm
+[sc]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm
+[sc-pr]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm#shortcuts_pianoroll
+[sc-pl]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/basics_shortcuts.htm#shortcuts_playlist
+[view]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_view.htm
+[edit]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_edit.htm
+[file]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_file.htm
+[tools]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_tools.htm
+[pat-menu]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_patterns.htm
+[tb]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm
+[tb-snap]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm#panel_globalsnap
+[tb-rec]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm#record_button
+[envgen]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/envsettings_general.htm
+[envfiles]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/envsettings_files.htm
+[cr]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm
+[cr-steps]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#Stepsequencer
+[cr-graph]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#channelrack_grapheditor
+[cr-btn]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#channelrack_channelbutton
+[cr-opt]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#channelrack_optionsmenu
+[cr-filter]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#channel_filter_groups
+[cr-swing]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/channelrack.htm#channelmenu_swingmacros
+[csm]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/chansettings_main.htm
+[csx]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/chansettings_misc.htm
+[lay]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/chansettings_layer.htm
+[fill]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/stepsequencer_advancedfilltool.htm
+[pr]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll.htm
+[pr-ev]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll.htm#Pianoroll_eventeditor
+[pr-key]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll.htm#pianoroll_KeySignatures
+[pr-stamp]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll.htm#chordstamp_icon
+[pr-col]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll.htm#Pianoroll_ColorGroups
+[prm]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_menu.htm
+[prm-snap]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_menu.htm#PianoRoll_Snap
+[prm-tools]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_menu.htm#PianoRoll_Tools
+[prm-edit]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_menu.htm#pianorollmenu_edit
+[arp]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_arpeggiate.htm
+[strum]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_strum.htm
+[chop]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_chp.htm
+[qnt]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_qnt.htm
+[art]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_articulate.htm
+[flip]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_flip.htm
+[rnd]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_random.htm
+[lim]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_limit.htm
+[scl]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_scale.htm
+[flam]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_flam.htm
+[claw]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_claw.htm
+[lfo]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_lfo.htm
+[riff]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_riff.htm
+[chord]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/pianoroll_chordprogression.htm
+[pl]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm
+[pl-clipmenu]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#ClipMenus
+[pl-menu]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#Playlist_Menu
+[pl-editin]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#EditIn
+[pl-work]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#Working_with_Clips
+[pl-focus]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#Playlist_ClipFocus
+[pl-picker]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#Playlist_picker_panel
+[pl-pp]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#ProjectPicker
+[pl-trackmode]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#playlist_trackmode
+[pl-trackmenu]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#track_rightclick_menu
+[pl-time]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#playwithtime
+[pl-markers]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist.htm#Playlist_TimeMarkers
+[plp]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist_patterns.htm
+[ac]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist_automationclip.htm
+[perf]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/playlist_performance.htm
+[rn]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_scores.htm
+[rn-q]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_scores.htm#recbutton_quantization
+[ra]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_audio.htm
+[ra-pl]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_audio.htm#PlaylistRecording
+[ra-loop]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_audio.htm#PlaylistLoopRecording
+[rau]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_automation.htm
+[rs]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/recording_step.htm
+[mx]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer.htm
+[mxm]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer_mixermenu.htm
+[mxp]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer_plugin.htm
+[mxt]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer_trackprops.htm
+[br]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/browser.htm
+[br-use]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/browser.htm#UsingBrowserContent
+[br-picker]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/browser.htm#Plugin_Picker
+[wrap]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/plugins/wrapper.htm
+[link]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/automation_linking.htm
+
+Full list of the pages above, for readers of the raw file: basics_interface, basics_workflow, basics_shortcuts,
+menu_view, menu_edit, menu_file, menu_tools, menu_patterns, toolbar_panels, envsettings_general,
+envsettings_files, channelrack, chansettings_main, chansettings_misc, chansettings_layer,
+stepsequencer_advancedfilltool, pianoroll, pianoroll_menu, pianoroll_arpeggiate, pianoroll_strum, pianoroll_chp,
+pianoroll_qnt, pianoroll_articulate, pianoroll_flip, pianoroll_random, pianoroll_limit, pianoroll_scale,
+pianoroll_flam, pianoroll_claw, pianoroll_lfo, pianoroll_riff, pianoroll_chordprogression, playlist,
+playlist_patterns, playlist_automationclip, playlist_performance, recording_scores, recording_audio,
+recording_automation, recording_step, mixer, mixer_mixermenu, mixer_plugin, mixer_trackprops, browser,
+plugins/wrapper, automation_linking (all `.htm`).

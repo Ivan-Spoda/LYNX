@@ -1048,6 +1048,45 @@ FX-unit panning articulator additive (§4.2).
 
 ---
 
+## 10. Port to LYNX (`src/core/SytrusEngine.cpp`) — findings **[EXEC + C++ port]**
+
+The engine was ported 1:1 from §2–§7 and the reference model, then compared with the installation's DLL through
+`run/syt.exe` on all 268 demo channels (same notes and block size as §8.2; harness `r31/cpp/sytharness.cpp`, driver
+`r31/cpp/cmp.py`). Live settings: the C++ output equals the model's on every channel (median −116.9 dB against the
+DLL, 265/268 within −60 dB; 268/268 with the DLL's operator tables). Running the whole battery with the FL-render
+settings (`FPD_ProcessMode` with `PM_IsRendering`, all 268 channels instead of the 14 of §8.2) exposed three
+render-mode behaviours that the model did not have; they were measured with the DLL and folded into the port:
+
+- **FX tail** (§7.1 step 2): with only `100 + chorus ring` samples the chorus tail of channel 6 is cut while the DLL's
+  continues; adding one FX block to the ring length matches (−44 → −115 dB). The exact ring length is **inference**.
+- **Delay feedback ramp after the render-mode rebuild** (§7.4): a fresh unit starts from 0.5 in live mode, but after
+  the dispatcher's render-mode rebuild it starts **on its target** (channel 44: −22 → −166 dB on an isolated delay with
+  feedback 0).
+- **Interpolated waveshaper kernels** (§5.5 step 4, used while rendering): linear interpolation between the two table
+  points around the exact position `|x·pre·N|` (`floor` + fraction, odd-symmetric), and the **unipolar** kernel is
+  interpolated as well (position `x·pre·N/2 + N/2`). The model's round-to-nearest fraction and nearest-point unipolar
+  read were wrong (channels 89/116: −73/−72 → −131/−122 dB; 217, unipolar: −63 → −113 dB).
+
+Result with the render settings: median −122.7 dB, 264/268 channels within −60 dB (267/268 with the DLL's operator
+tables; the remaining one is chaotic FM on band-limited tables). Still open in render mode: channels 168 (unison +
+full-noise operators into the FX bus, −69 dB), 225/226 (noise-heavy resonant Vanilla HP, −61/−64 dB) and 100 (−81 dB).
+
+A **four-note battery** (keys 60/64/67/60, overlapping, the last one re-triggering a releasing key; live settings)
+exercised the voice management that §8.2 does not:
+
+- **Kill** (MONO KEY, polyphony limit; §6.2): besides state 9 on the voice, its articulators are set finished (a
+  later tick must not bring the voice back to "released") and its output gain targets drop to 0 **at once**, so the
+  ramp-out starts with the next sub-block (channel 141: −2 → −51 → −117 dB). Released voices of the same key are
+  killed too ("not already finishing" = state < 9).
+- **GLOBAL envelope** (§4.7): the copy of the first still-held voice's envelope state plus the adoption of its tick
+  grid (the new voice evaluates once at its start, then on the held voice's ticks) is exact when the held voice rests
+  on its sustain point (channel 23: −26 → −110 dB). When the held voice is inside a segment FL hands the envelope over
+  differently — the new voice rises from a lower level and the old one stops at its next point (channels 216, 239,
+  240) — **not decoded**.
+
+Result: 262/268 channels within −60 dB (265/268 with the DLL's operator tables), median −118 dB; the three left are the
+GLOBAL-envelope hand-over case above.
+
 ## Evidence index
 
 | Source | What it established | Marker |
