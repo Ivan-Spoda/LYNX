@@ -730,6 +730,67 @@ bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthS
         }
     }
 
+    // other carriers an integer multiple above the main one (same pan, no offset, no strong FM) join its spectrum:
+    // harmonic h of carrier k lands on h·m, scaled by its level relative to the main carrier, summed as phasors.
+    // (They then share the main carrier's envelope, as every carrier already did; REA_rodada23 §2 for each shape.)
+    if (carriers.size() >= 2 && s.units[(std::size_t) carriers[0]].ratio > 1e-6 && std::abs (s.units[(std::size_t) carriers[0]].offsetHz) < 1e-6)
+    {
+        auto fmOn = [&] (int i) {
+            double fm = 0.0;
+            for (int j = 0; j < 6; ++j)
+                if (j != i)
+                    fm += std::abs (curve (s.cell (0, i, j)) * opVolume (j));
+            return fm;
+        };
+        std::array<std::complex<double>, SynthSettings::spectrumSize> sum {};
+        auto add = [&] (const Unit& op, int multiple, double scale) {
+            std::array<float, SynthSettings::spectrumSize> a {}, ph {};
+            if (! operatorSpectrum (op, a, ph))
+                return false;
+            for (int h = 1; h * multiple <= SynthSettings::spectrumSize; ++h)
+                sum[(std::size_t) (h * multiple - 1)] += std::polar ((double) a[(std::size_t) h - 1] * scale, 2.0 * 3.141592653589793 * ph[(std::size_t) h - 1]);
+            return true;
+        };
+        const auto& mainOp = s.units[(std::size_t) carriers[0]];
+        const auto mainLevel = std::max (1e-6, (double) out.osc[0].level);
+        std::vector<int> merged;
+        if (fmOn (carriers[0]) < 0.15 && add (mainOp, 1, 1.0))
+            for (std::size_t k = 1; k < carriers.size(); ++k)
+            {
+                const auto& op = s.units[(std::size_t) carriers[k]];
+                const auto m = op.ratio / mainOp.ratio, multiple = std::round (m);
+                if (op.ratio <= 1e-6 || std::abs (op.offsetHz) > 1e-6 || multiple < 1.0 || std::abs (m - multiple) > 1e-3 * multiple
+                    || std::abs (out.osc[k].pan - out.osc[0].pan) > 0.02f || fmOn (carriers[k]) >= 0.15)
+                    continue;
+                if (add (op, (int) multiple, out.osc[k].level / mainLevel))
+                    merged.push_back ((int) k);
+            }
+        if (! merged.empty())
+        {
+            for (std::size_t h = 0; h < sum.size(); ++h)
+            {
+                out.spectrum[h] = (float) std::abs (sum[h]);
+                out.spectrumPhase[h] = (float) (std::arg (sum[h]) / (2.0 * 3.141592653589793));
+                if (out.spectrumPhase[h] < 0.0f)
+                    out.spectrumPhase[h] += 1.0f;
+            }
+            out.osc[0].wave = Waveform::spectral;
+            for (auto it = merged.rbegin(); it != merged.rend(); ++it)
+            {
+                out.osc[(std::size_t) *it] = {};
+                carriers.erase (carriers.begin() + *it);
+            }
+            for (std::size_t k = 0; k < 3; ++k) // keep the remaining carriers in the first slots
+                if (out.osc[k].level == 0.0f)
+                    for (std::size_t j = k + 1; j < 3; ++j)
+                        if (out.osc[j].level > 0.0f)
+                        {
+                            std::swap (out.osc[k], out.osc[j]);
+                            break;
+                        }
+        }
+    }
+
     // strong RM on the main carrier: ring with the modulator on osc 3, carrier × (1 − |a| + |a|·mod)
     // (REA_rodada18 §2; the sign of a inverts the modulator phase and is not reproduced)
     if (carriers.size() < 3)

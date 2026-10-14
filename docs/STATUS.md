@@ -120,7 +120,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   share an energy-weighted decay; the per-partial release is one overall envelope; ALT DECAY's morph and the read-start phase offset are not reproduced, articulators
   are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
   key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
-- Sytrus: only one carrier per channel uses the exact spectrum; the others and the FM modulator use basic shapes.
+- Sytrus: carriers an integer multiple above the main one join its exact spectrum (sharing its envelope); other
+  carriers (detuned, panned, offset or FM-modulated) and the FM modulator use basic shapes.
 - Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
   (control slot → live link); curve type 5; pan law and pan-LFO tension.
 - Pitcher: the pitch detector (YIN) and shifter (two heads) are LYNX's own; Formant/Gender, Harmonize and MIDI
