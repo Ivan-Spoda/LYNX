@@ -895,6 +895,16 @@ TEST (flp_real_files)
                 if (c.pluginName == "Harmor")
                 {
                     decoded = lynx::synthFromHarmor (c.pluginState, gs, g);
+                    if (decoded)
+                    {
+                        // REA_rodada25 §4: most resonant settings stay below Q ≈ 3, a few saturate
+                        CHECK (gs.resonance >= 0.0f && gs.resonance <= 1.0f);
+                        static int resonant = 0, strong = 0, total = 0;
+                        resonant += gs.resonance > 0.0f;
+                        strong += gs.resonance > 0.9f;
+                        if (++total % 50 == 0)
+                            std::printf ("  Harmor resonance: %d with a peak, %d with Q > ~5 (of %d)\n", resonant, strong, total);
+                    }
                     static int saw = 0, square = 0, other = 0, total = 0;
                     if (decoded && std::any_of (gs.osc.begin(), gs.osc.end(), [] (const lynx::SynthOscillator& o) { return o.wave == lynx::Waveform::spectral; }))
                     {
@@ -1047,6 +1057,7 @@ TEST (flp_real_files)
 
     // demo Gross Beat: the volume slot becomes the gate (those using an envelope slot get steps < 1)
     {
+        int lovePhilterLinks[4] {}; // live links: cutoff, resonance; inside containers: cutoff, resonance
         int embeddedZones = 0, lovePhilters = 0, lovePhiltersRead = 0, lovePhiltersConverted = 0, gates = 0, shaped = 0, effectors = 0, patchers = 0, serial = 0, parallel = 0, generatorPatchers = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
             if (entry.path().extension() == ".flp")
@@ -1077,6 +1088,20 @@ TEST (flp_real_files)
                                     for (const auto& fx : conv->slots)
                                         for (auto v : fx.params)
                                             CHECK (std::isfinite (v) && v >= 0.0f && v <= 1.0f);
+                                    for (const auto& fx : conv->slots)
+                                        for (const auto& link : fx.links)
+                                        {
+                                            const auto& chain = fx.branches[(std::size_t) link.branch].chain;
+                                            CHECK (link.source < (int) chain.size() && chain[(std::size_t) link.target].kind == lynx::EffectKind::parametricEq);
+                                            lovePhilterLinks[2 + (link.param == lynx::peq::param (0, 3) ? 1 : 0)]++;
+                                        }
+                                    for (const auto& link : conv->links)
+                                    {
+                                        lovePhilterLinks[link.param == lynx::peq::param (0, 3) ? 1 : 0]++;
+                                        CHECK (link.curve.size() == 33);
+                                        for (auto v : link.curve)
+                                            CHECK (std::isfinite (v) && v >= 0.0f && v <= 1.0f);
+                                    }
                                 }
                             }
                             else if (slot.plugin == "Effector")
@@ -1113,6 +1138,9 @@ TEST (flp_real_files)
         std::printf ("  Gross Beat: %d slots, %d with gate; Effector: %d converted; Love Philter: %d, %d read\n", gates, shaped, effectors,
                      lovePhilters, lovePhiltersRead);
         CHECK (lovePhiltersRead == lovePhilters && lovePhiltersConverted == lovePhilters);
+        std::printf ("  Love Philter live links: %d cutoff, %d resonance; in multi-unit containers: %d cutoff, %d resonance\n",
+                     lovePhilterLinks[0], lovePhilterLinks[1], lovePhilterLinks[2], lovePhilterLinks[3]);
+        CHECK (lovePhilterLinks[2] + lovePhilterLinks[3] > 0);
         std::printf ("  DirectWave: %d zones with embedded audio\n", embeddedZones);
         CHECK (embeddedZones == 12);
         std::printf ("  Patcher: %d in the mixer (%d serial, %d reduced to serial/parallel), %d as instrument with generator\n", patchers, serial,
@@ -4826,4 +4854,43 @@ TEST (pitch_correction_passes_dry_when_in_tune)
     fx->process (l.data(), r.data(), (int) l.size(), slot.params, 120.0);
     for (std::size_t i = 24000; i < l.size(); ++i)
         CHECK (std::abs (l[i] - in[i]) < 0.01f);
+}
+
+TEST (parallel_container_inner_links_modulate)
+{
+    // one branch: utility (gain) + a control-only auto-pan LFO (1 beat); the link maps the LFO 0..1 onto the
+    // utility gain −24 dB..0 dB, so the level must swing; without the link it stays put
+    auto container = lynx::makeEffectSlot (lynx::EffectKind::parallel);
+    auto gain = lynx::makeEffectSlot (lynx::EffectKind::utility);
+    auto lfo = lynx::makeEffectSlot (lynx::EffectKind::autoPan);
+    lfo.params[0] = 1.0f / 64.0f;
+    lfo.params[4] = 1.0f; // control only: audio passes unchanged
+    container.branches.push_back ({ { gain, lfo }, 1.0f });
+    lynx::EffectLink link;
+    link.source = 1;
+    link.param = 0;
+    for (int i = 0; i <= 32; ++i)
+        link.curve.push_back (0.5f * (float) i / 32.0f);
+
+    auto levels = [&] (bool linked) {
+        auto slot = container;
+        if (linked)
+            slot.links.push_back (link);
+        auto fx = lynx::makeParallelEffect (slot);
+        fx->prepare (48000.0);
+        float lo = 1e9f, hi = 0.0f;
+        for (int block = 0; block < 94; ++block) // ~1 beat at 120 BPM in 256-sample blocks
+        {
+            std::vector<float> l (256, 1.0f), r (256, 1.0f);
+            fx->setSongPosition (block * 256.0 / 48000.0 * 2.0 * 960.0); // the engine positions every block
+            fx->process (l.data(), r.data(), 256, slot.params, 120.0);
+            lo = std::min (lo, std::abs (l[128]));
+            hi = std::max (hi, std::abs (l[128]));
+        }
+        return std::pair { lo, hi };
+    };
+    const auto [lo, hi] = levels (true);
+    CHECK (hi > 0.8f && lo < 0.12f);
+    const auto [lo0, hi0] = levels (false);
+    CHECK (std::abs (hi0 - lo0) < 1e-4f);
 }
