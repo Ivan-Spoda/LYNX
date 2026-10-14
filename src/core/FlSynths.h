@@ -91,7 +91,7 @@ struct LovePhilterArticulator
     {
         bool on = false, tempo = false, frozen = false;
         float amplitude = 0.5f;
-        std::int32_t speed = 0, skew = 0, width = 0;
+        std::int32_t speed = 0, tension = 0, skew = 0, width = 0; // tension: +0xD4 (FUN_007886b0, REA_rodada27 §3.3)
         std::uint32_t phase = 0; // offset in 2^−32 cycles
     } lfo;
 };

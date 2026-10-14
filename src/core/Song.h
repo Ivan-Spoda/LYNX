@@ -171,6 +171,10 @@ struct SynthSettings
     int filterType = 0;      // 0 low-pass, 1 band-pass, 2 high-pass, 3 band-stop
     bool ladder = false;     // 4-pole ladder (Toxic Biohazard's filter, REA_rodada26 §2) instead of the 2-pole SVF
     int chorus = 0;          // Kepler's chorus on the channel output: 0 off, 1 I, 2 II, 3 I+II (REA_rodada26 §3)
+    // Harmless (REA_rodada27 §1.1/§1.2): stereo tremolo depth d (2.5 Hz, |1.25·cos|/|1.25·sin| per side) and vibrato depth
+    // in cents (6 Hz), both on free-running global phases; a voice fades into them over 0.1 s / 1/3 s (r²)
+    float stereoTremolo = 0.0f;
+    float vibratoCents = 0.0f;
     float keyTrack = 0.0f;   // cutoff follows the note: octaves per octave from key 48 (C3, 130.81 Hz)
     // kick pitch sweep: f = f_note·(1 + sweep·s⁴), s = e^(−t/sweepTime) (BassDrum's "Peak"/"Slide")
     float sweep = 0.0f;      // 0 = off

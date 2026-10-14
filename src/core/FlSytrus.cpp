@@ -1647,6 +1647,7 @@ std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t
                 std::int32_t k[5] {};
                 std::memcpy (k, r.data + knobsAt, lfoVersion >= 3 ? 20 : 16);
                 a.lfo.speed = k[0];
+                a.lfo.tension = k[1];
                 a.lfo.skew = k[2];
                 a.lfo.width = k[3];
                 a.lfo.phase = (std::uint32_t) k[4];

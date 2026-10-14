@@ -1404,24 +1404,56 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             double period = 0.0;
             for (std::size_t k = 1; k < env.points.size(); ++k)
                 period += env.points[k].dt;
-            const auto points = env.points.size();
-            if (! env.tempo || period <= 1e-6 || points > 12 || points == 0)
+            // points (x in beats, level, tension 0..1); curve type 5 ("pulse", REA_rodada27 §3.2) becomes steps: a square
+            // wave of n + 1 cycles between the two levels, n = round(0.001·(1000001^(1 − 0.6|t|) − 1)), flips at x = j/P
+            // (P = 2(n + 1)), starting on the previous level for t ≥ 0 and on the point's level for t < 0
+            struct GatePoint { double x, y, tension; };
+            std::vector<GatePoint> gatePoints;
+            const auto depth = std::clamp ((double) vol.envDepth, 0.0, 1.0);
+            double x = 0.0;
+            for (std::size_t k = 0; k < env.points.size(); ++k)
+            {
+                const auto& pt = env.points[k];
+                const auto level = pt.y * depth;
+                if (k > 0 && pt.curve == 5 && ! gatePoints.empty())
+                {
+                    const auto t = (double) pt.tension;
+                    const auto steps = 2 * ((int) std::round (0.001 * (std::pow (1000001.0, 1.0 - 0.6 * std::abs (t)) - 1.0)) + 1);
+                    if (steps <= 22)
+                    {
+                        const auto from = gatePoints.back().y, eps = 1e-6 * pt.dt;
+                        auto valueAt = [&] (int j) { return (j % 2 == 0) == (t >= 0.0) ? from : level; }; // interval j of P
+                        if (valueAt (0) != from)
+                            gatePoints.push_back ({ x + eps, valueAt (0), 0.5 });
+                        for (int j = 1; j < steps; ++j)
+                        {
+                            const auto at = x + pt.dt * j / steps;
+                            gatePoints.push_back ({ at - eps, valueAt (j - 1), 0.5 });
+                            gatePoints.push_back ({ at, valueAt (j), 0.5 });
+                        }
+                        if (valueAt (steps - 1) != level)
+                            gatePoints.push_back ({ x + pt.dt - eps, valueAt (steps - 1), 0.5 });
+                    }
+                    else
+                        out.notes.push_back ("Love Philter: pulse curve with too many cycles treated as simple");
+                }
+                else if (k > 0 && pt.curve != 0)
+                    out.notes.push_back ("Love Philter: envelope curve of type " + std::to_string (pt.curve) + " treated as simple");
+                x += k > 0 ? pt.dt : 0.0;
+                gatePoints.push_back ({ x, level, (pt.tension + 1.0) / 2.0 });
+            }
+            if (! env.tempo || period <= 1e-6 || gatePoints.size() > 12 || gatePoints.empty())
                 out.notes.push_back ("Love Philter: volume envelope outside the supported format");
             else
             {
                 auto gate = makeEffectSlot (EffectKind::rhythmGain);
                 gate.params[0] = (float) std::min (1.0, period / 64.0);
-                gate.params[1] = (float) points / 12.0f;
-                double x = 0.0;
-                for (std::size_t k = 0; k < points; ++k)
+                gate.params[1] = (float) gatePoints.size() / 12.0f;
+                for (std::size_t k = 0; k < gatePoints.size(); ++k)
                 {
-                    if (k > 0)
-                        x += env.points[k].dt;
-                    gate.params[2 + 3 * k] = (float) clamp01 (x / period);
-                    gate.params[3 + 3 * k] = (float) clamp01 (env.points[k].y * std::clamp ((double) vol.envDepth, 0.0, 1.0));
-                    gate.params[4 + 3 * k] = (float) clamp01 ((env.points[k].tension + 1.0) / 2.0);
-                    if (env.points[k].curve != 0 && k > 0)
-                        out.notes.push_back ("Love Philter: envelope curve of type " + std::to_string (env.points[k].curve) + " treated as simple");
+                    gate.params[2 + 3 * k] = (float) clamp01 (gatePoints[k].x / period);
+                    gate.params[3 + 3 * k] = (float) clamp01 (gatePoints[k].y);
+                    gate.params[4 + 3 * k] = (float) clamp01 (gatePoints[k].tension);
                 }
                 chain.push_back (gate);
             }
@@ -1438,14 +1470,22 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             autoPan.params[1] = (float) clamp01 (depth * 0.5 + 0.5);
             autoPan.params[2] = (float) (lfo.phase / 4294967296.0);
             autoPan.params[3] = (float) clamp01 (pan * 0.5 + 0.5);
+            autoPan.params[5] = 1.0f; // FL's pan law (REA_rodada27 §3.1)
+            autoPan.params[6] = (float) clamp01 ((std::clamp (lfo.tension, -128, 128) + 128) / 256.0); // §3.3
             chain.push_back (autoPan);
             if (lfo.skew != 0 || lfo.width != 0)
                 out.notes.push_back ("Love Philter: pan LFO shape approximated by a triangle");
         }
         else if (std::abs (pan) > 1e-3)
         {
+            // FL's pan law (REA_rodada27 §3.1): √2·cos/sin((1 + pan)π/4) with the far side folded into the near one
+            float ll, rl, lr, rr;
+            flPanMatrix (pan, ll, rl, lr, rr);
             auto utility = makeEffectSlot (EffectKind::utility);
-            utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
+            utility.params[2] = utilityMatrixValue (ll);
+            utility.params[3] = utilityMatrixValue (rl);
+            utility.params[4] = utilityMatrixValue (lr);
+            utility.params[5] = utilityMatrixValue (rr);
             chain.push_back (utility);
         }
         // cutoff and resonance envelope/LFO: live modulation of the EQ, added by modulateUnit (below)

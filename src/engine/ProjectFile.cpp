@@ -439,6 +439,10 @@ juce::String toJson (const Song& song)
                 synth->setProperty ("ladder", true);
             if (c.synth.chorus > 0)
                 synth->setProperty ("chorus", c.synth.chorus);
+            if (c.synth.stereoTremolo > 0.0f)
+                synth->setProperty ("stereoTremolo", c.synth.stereoTremolo);
+            if (c.synth.vibratoCents > 0.0f)
+                synth->setProperty ("vibratoCents", c.synth.vibratoCents);
             if (c.synth.mono)
                 synth->setProperty ("mono", true);
             if (c.synth.porta)
@@ -803,6 +807,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     def.synth.filterType = f.size() >= 3 ? juce::jlimit (0, 3, (int) f[2]) : 0;
                     def.synth.ladder = (bool) s.getProperty ("ladder", false);
                     def.synth.chorus = juce::jlimit (0, 3, (int) s.getProperty ("chorus", 0));
+                    def.synth.stereoTremolo = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("stereoTremolo", 0.0));
+                    def.synth.vibratoCents = juce::jlimit (0.0f, 100.0f, (float) (double) s.getProperty ("vibratoCents", 0.0));
                 }
 
                 def.synth.mono = (bool) s.getProperty ("mono", false);

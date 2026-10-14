@@ -239,6 +239,10 @@ bool synthFromHarmless (const std::vector<std::uint8_t>& d, double bpm, SynthSet
 
     // --- LFO: period 64/2^(|v|/1000) beats; phase locked to the song with p87; targets pitch (bipolar, ct) and cutoff
     // (unipolar: 0…6·x58 octaves = offset of A/2 ± A/2); p25 is a separate 2.5 Hz tremolo, not the LFO ---
+    // stereo tremolo d = 0.001·p25 and vibrato 0.075·p41 cents (REA_rodada27 §1.1/§1.2)
+    s.stereoTremolo = (float) std::clamp (p (25), 0, 1000) / 1000.0f;
+    s.vibratoCents = 0.075f * (float) std::clamp (p (41), 0, 1000);
+
     const auto shape = std::clamp (p (86), 0, 13);
     const auto speed = std::abs (std::clamp (p (89), -8000, 8000));
 

@@ -5074,3 +5074,90 @@ TEST (kepler_chorus_is_stereo_and_keeps_level)
     CHECK (diff / 48000.0 > 1e-3);
     CHECK (std::abs (10.0 * std::log10 (e / ed)) < 3.0);
 }
+
+TEST (fl_pan_law_matches_love_philter_dll)
+{
+    // values printed by the installation's Love Philter pan routine for vol 0.8 (REA_rodada27 §3.1, lppan.txt)
+    struct Row { double pan, ll, rr, rl, lr; };
+    const Row rows[] = { { -1.5, 0.239782482, -0.432956904, 0.805467963, 0.0 }, { -0.5, 0.805467963, 0.432956904, 0.239782482, 0.0 },
+                         { 0.0, 0.8, 0.8, 0.0, 0.0 }, { 0.75, 0.220719516, 0.707889318, 0.0, 0.401742548 },
+                         { 1.0, 0.0, 0.565685451, 0.0, 0.565685451 } };
+    for (const auto& row : rows)
+    {
+        float ll, rl, lr, rr;
+        lynx::flPanMatrix (row.pan, ll, rl, lr, rr);
+        CHECK (std::abs (0.8 * ll - row.ll) < 1e-6 && std::abs (0.8 * rr - row.rr) < 1e-6);
+        CHECK (std::abs (0.8 * rl - row.rl) < 1e-6 && std::abs (0.8 * lr - row.lr) < 1e-6);
+    }
+}
+
+TEST (effector_units_match_fl_dll_impulse_responses)
+{
+    // impulse responses of the installation's Effector engine (REA_rodada27 §2, eu_<kind>_<X>_<Y>.txt; LFO off,
+    // wet 1, blocks of 256): samples 1, 10, 100 and 1000
+    struct Case { int kind; float x, y; double v[4]; };
+    const Case cases[] = { { 3, 0.5f, 0.5f, { -0.603055418, 0.159798339, -0.0055043716, -1.06241259e-06 } },
+                           { 4, 0.2f, 0.5f, { 4.68885949e-26, 4.20032622e-19, 0.000487731799, 2.27715846e-09 } },
+                           { 4, 0.8f, 0.3f, { -0.293783396, -0.0306414738, -0.00068128563, 1.358577e-15 } } };
+    for (const auto& c : cases)
+    {
+        auto fx = lynx::effector::make();
+        fx->prepare (44100.0);
+        lynx::EffectParams p {};
+        p[lynx::effector::type] = c.kind / 11.0f;
+        p[lynx::effector::wetMix] = 1.0f;
+        p[lynx::effector::paramX] = c.x;
+        p[lynx::effector::paramY] = c.y;
+        p[lynx::effector::modX] = p[lynx::effector::modY] = 0.5f;
+        p[lynx::effector::modRate] = 0.5f;
+        p[lynx::effector::inputLevel] = 1.0f;
+        p[lynx::effector::outputGain] = 0.5f;
+        std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+        l[0] = r[0] = 1.0f;
+        for (int d = 0; d < 1024; d += 256)
+            fx->process (l.data() + d, r.data() + d, 256, p, 120.0);
+        const int at[4] { 1, 10, 100, 1000 };
+        for (int k = 0; k < 4; ++k)
+            CHECK (std::abs (l[(std::size_t) at[k]] - c.v[k]) < 2e-7 + 1e-5 * std::abs (c.v[k]));
+    }
+}
+
+TEST (harmless_stereo_tremolo_and_vibrato)
+{
+    // tremolo d = 1: each side swings between 0 and 1.25 at 5 Hz, L and R in anti-phase; vibrato modulates the pitch
+    lynx::SynthSettings s;
+    s.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+    s.cutoff = 20000.0f;
+    s.stereoTremolo = 1.0f;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::synth);
+    inst->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.synth = s;
+    inst->configure (c, 120.0);
+    inst->noteOn (69, 1.0f);
+    std::vector<float> l (48000), r (48000);
+    inst->render (l.data(), r.data(), 48000, 1.0f, 1.0f);
+    auto envelope = [] (const std::vector<float>& x, int at) { float m = 0.0f; for (int i = at; i < at + 120; ++i) m = std::max (m, std::abs (x[(std::size_t) i])); return m; };
+    // θ = 2π·2.5·t: at t = 0.4 s cos = 1 (L peak 1.25×), sin = 0 (R near 0); at t = 0.5 s the opposite
+    CHECK (envelope (l, 19200) > 4.0f * envelope (r, 19200));
+    CHECK (envelope (r, 24000) > 4.0f * envelope (l, 24000));
+
+    // vibrato 100 cents: zero crossings vary in spacing; without it they are regular
+    auto crossingsSpread = [] (float cents) {
+        lynx::SynthSettings v;
+        v.osc[0] = { lynx::Waveform::sine, 0, 0.0f, 1.0f };
+        v.cutoff = 20000.0f;
+        v.vibratoCents = cents;
+        const auto x = renderSynthNote (v, 69, 48000);
+        std::vector<int> zc;
+        for (int i = 24000; i < 48000; ++i)
+            if (x[(std::size_t) i - 1] < 0.0f && x[(std::size_t) i] >= 0.0f)
+                zc.push_back (i);
+        int lo = 1 << 30, hi = 0;
+        for (std::size_t k = 1; k < zc.size(); ++k)
+            lo = std::min (lo, zc[k] - zc[k - 1]), hi = std::max (hi, zc[k] - zc[k - 1]);
+        return hi - lo;
+    };
+    CHECK (crossingsSpread (0.0f) <= 1);
+    CHECK (crossingsSpread (100.0f) >= 4);
+}

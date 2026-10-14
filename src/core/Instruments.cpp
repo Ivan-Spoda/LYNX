@@ -877,6 +877,12 @@ public:
 
                         if (lfos[lfoPitch].active)
                             semitones += lfos[lfoPitch].amount * lfos[lfoPitch].tick (v.lfo[lfoPitch], 16);
+                        if (settings.vibratoCents > 0.0f) // 6 Hz global phase, depth × r², r = 3·age/fs ≤ 1
+                        {
+                            const auto r = std::min (1.0, 3.0 * (v.age + 1) / sampleRate);
+                            const auto phase = vibratoPhase + 6.0 * i / sampleRate;
+                            semitones += (float) (settings.vibratoCents / 100.0 * r * r * std::sin (2.0 * 3.141592653589793 * phase));
+                        }
                         if (lfos[lfoCutoff].active)
                             octaves += lfos[lfoCutoff].amount * lfos[lfoCutoff].tick (v.lfo[lfoCutoff], 16);
                         if (lfos[lfoVolume].active)
@@ -970,14 +976,28 @@ public:
                 }
 
                 const auto s = 0.3f * v.level * v.velocity * v.lfoGain;
-                left[i] += outL * s * gl * v.panL;
-                right[i] += outR * s * gr * v.panR;
+                auto tl = 1.0f, tr = 1.0f;
+                if (settings.stereoTremolo > 0.0f) // rectified 2.5 Hz, L/R a quarter period apart; 0.1 s fade-in per voice
+                {
+                    const auto theta = 2.0 * 3.141592653589793 * (tremoloPhase + 2.5 * i / sampleRate);
+                    const auto d = (double) settings.stereoTremolo;
+                    const auto r = std::min (1.0, v.age / std::max (1.0, std::round (0.1 * sampleRate)));
+                    tl = (float) (1.0 + r * d * (std::abs (1.25 * std::cos (theta)) - 1.0));
+                    tr = (float) (1.0 + r * d * (std::abs (1.25 * std::sin (theta)) - 1.0));
+                }
+                left[i] += outL * s * gl * v.panL * tl;
+                right[i] += outR * s * gr * v.panR * tr;
                 ++v.age;
             }
 
             if (v.stage == 3 && v.level < 0.0005f)
                 v.active = false;
         }
+        // global free-running phases (Harmless tremolo and vibrato)
+        tremoloPhase += 2.5 * n / sampleRate;
+        tremoloPhase -= std::floor (tremoloPhase);
+        vibratoPhase += 6.0 * n / sampleRate;
+        vibratoPhase -= std::floor (vibratoPhase);
     }
 
     bool idle() const noexcept override
@@ -990,6 +1010,7 @@ private:
     std::array<float, scratchSize> scratchL {}, scratchR {};
     KeplerChorus chorusUnit;
     int chorusTail = 0;
+    double tremoloPhase = 0.0, vibratoPhase = 0.0;
 
     // sine of a 0..1 phase via a refined parabola (error < 0.1%), much cheaper than std::sin
     static float fastSine (double phase) noexcept
@@ -1187,7 +1208,8 @@ private:
         }
 
         filterModulated = modEnv[0].active || lfos[lfoCutoff].active || settings.keyTrack != 0.0f;
-        modulated = modEnv[0].active || modEnv[1].active || anyLfo || settings.keyTrack != 0.0f || settings.sweep > 0.0f;
+        modulated = modEnv[0].active || modEnv[1].active || anyLfo || settings.keyTrack != 0.0f || settings.sweep > 0.0f
+                    || settings.vibratoCents > 0.0f;
         sweepCoeff = std::exp (-16.0 / (std::max (0.0005, (double) settings.sweepTime) * sampleRate)); // per 16-sample tick
         useBands = settings.bandGain != std::array<float, 3> { 1.0f, 1.0f, 1.0f };
         toneCoeff[0] = (float) std::min (1.0, 0.025 * 44100.0 / sampleRate); // ≈ 178 Hz (REA_rodada18 §11)

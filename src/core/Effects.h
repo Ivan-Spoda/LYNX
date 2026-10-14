@@ -87,6 +87,9 @@ public:
 };
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind);
+
+// FL's mode-0 pan law as a 2×2 matrix (outL = ll·inL + rl·inR, outR = lr·inL + rr·inR), unit volume (REA_rodada27 §3.1)
+void flPanMatrix (double pan, float& ll, float& rl, float& lr, float& rr) noexcept;
 // `parallel` container holding the effects of the slot's branches.
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot);
 } // namespace lynx

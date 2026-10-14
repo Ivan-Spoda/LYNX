@@ -1215,6 +1215,31 @@ private:
 // Auto-pan (REA_rodada20 §1.5): triangle (+1 at φ = 0, −1 at 0.5) with phase 0.75 + offset + beats/period.
 // Parameters: 0 period/64 beats, 1 depth ((a + 1)/2, a = maximum pan excursion), 2 phase
 // offset (cycles), 3 fixed pan ((p + 1)/2). Pan law: the utility's balance (FL's has not been decoded).
+} // namespace
+
+// FL's mode-0 pan law (REA_rodada27 §3.1): G_L = √2·cos((1 + pan)π/4), G_R = √2·sin((1 + pan)π/4) (unit volume),
+// the near side keeps 1 − f/2 of its input and gets f/2 of the other, f = 1 − (far gain); no clamp of pan
+void flPanMatrix (double pan, float& ll, float& rl, float& lr, float& rr) noexcept
+{
+    const auto angle = (1.0 + pan) * 3.141592653589793 / 4.0;
+    const auto gl = std::sqrt (2.0) * std::cos (angle), gr = std::sqrt (2.0) * std::sin (angle);
+    ll = (float) gl, rr = (float) gr, rl = lr = 0.0f;
+    if (pan < 0.0)
+    {
+        const auto f = 1.0 - gr;
+        ll = (float) (gl * (1.0 - f / 2.0));
+        rl = (float) (gl * f / 2.0);
+    }
+    else if (pan > 0.0)
+    {
+        const auto f = 1.0 - gl;
+        rr = (float) (gr * (1.0 - f / 2.0));
+        lr = (float) (gr * f / 2.0);
+    }
+}
+
+namespace
+{
 class AutoPan final : public Effect
 {
 public:
@@ -1234,10 +1259,29 @@ public:
         }
         if (p[4] > 0.5f) // control only (live automation source)
             return;
+        // LFO tension (Love Philter, REA_rodada27 §3.3): applied to |w| with the sign kept, T = 256·(p6 − 0.5)
+        const auto tension = 256.0 * (p[6] - 0.5);
+        const auto q = tension == 0.0 ? 0.0 : (tension > 0.0 ? 1.0 : -1.0) * (std::pow (1e18, 0.05 * (std::pow (21.0, std::abs (tension) / 128.0) - 1.0)) - 1.0);
+        const auto flLaw = p[5] > 0.5f;
         for (int i = 0; i < n; ++i, phase += step)
         {
             const auto f = phase - std::floor (phase);
-            const auto w = f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f;
+            auto w = f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f;
+            if (q != 0.0)
+            {
+                const auto y = std::abs (w);
+                const auto shaped = q > 0.0 ? 1.0 - (std::pow (1.0 + q, 1.0 - y) - 1.0) / q : (std::pow (1.0 - q, y) - 1.0) / -q;
+                w = w < 0.0 ? -shaped : shaped;
+            }
+            if (flLaw) // FL's mode-0 pan law with the far side folded into the near one (REA_rodada27 §3.1)
+            {
+                float ll, rl, lr, rr;
+                flPanMatrix (fixed + depth * w, ll, rl, lr, rr);
+                const auto a = l[i], b = r[i];
+                l[i] = ll * a + rl * b;
+                r[i] = lr * a + rr * b;
+                continue;
+            }
             const auto pan = std::clamp (fixed + depth * w, -1.0, 1.0);
             l[i] *= (float) (pan > 0.0 ? 1.0 - pan : 1.0);
             r[i] *= (float) (pan < 0.0 ? 1.0 + pan : 1.0);
@@ -2051,7 +2095,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         info.params.push_back ({ "Control only", 0.0f });
         return info;
     }();
-    static const EffectInfo autoPanInfo { "Auto-pan", { { "Period", 1.0f / 64.0f }, { "Depth", 0.75f }, { "Phase", 0.0f }, { "Pan", 0.5f }, { "Control only", 0.0f } } };
+    static const EffectInfo autoPanInfo { "Auto-pan", { { "Period", 1.0f / 64.0f }, { "Depth", 0.75f }, { "Phase", 0.0f }, { "Pan", 0.5f }, { "Control only", 0.0f },
+                                                        { "FL pan law", 0.0f }, { "Tension", 0.5f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },

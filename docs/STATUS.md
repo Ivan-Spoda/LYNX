@@ -71,7 +71,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
   locked to the song, Mod Rate/Tempo Reduce, input/output gain; exact Distort cascade, Lo-fi, Delay (Mod Rate
-  time), Reverb (dry kept), Stereo, Trancer, Stutter, Vowel and Ring.
+  time), Reverb (dry kept, FL's T60 law), Stereo, Trancer, Stutter, Vowel and Ring; Filter, Flanger (tape delay)
+  and Phaser exact — impulse responses within 6·10⁻⁸ of FL's own engine (REA round 27).
 - **Harmor:** cutoff in log2 Hz (73.4 Hz–17.7 kHz) with keytracking from 130.81 Hz, filter types 0–18, part
   volume `(3^x − 1)/2` (up to +12 dB), level², filter envelope centred at 0.5 (±2·(hi − lo)·amt); exact timbre
   from the Timbre 1/2 curves, blend, local EQ (1/n) and per-harmonic phase; unison with FL's per-voice detune
@@ -81,7 +82,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   Half/Even, Skew, Sine shaper, normalisation, Tension, Absolute, Pre-filter) turned into a spectrum by FFT.
 - **Harmless:** cutoff range with per-type margins, keytracking, centred non-adaptive filter envelope, one-sided
   cutoff LFO, song-locked LFO; exact timbre (12 colours incl. Custom, harmonic mask, detune ±1200/±2400,
-  6-band timbre EQ, low-harmonics protection, Sub 1/3/4).
+  6-band timbre EQ, low-harmonics protection, Sub 1/3/4); stereo tremolo (2.5 Hz rectified, L/R in anti-phase) and
+  6 Hz vibrato with FL's laws and fade-ins.
 - **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
   weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
   with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
@@ -96,7 +98,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
   octaves), 7 (all-pass) and 11 (Mango); pattern envelopes on volume (rhythmic envelope effect, in beats, looped,
   song-locked, tension curves), pan LFO (auto-pan effect), cutoff and resonance envelope/LFO as live
-  modulation of the EQ (top-level live automation, or links inside the parallel container with several units).
+  modulation of the EQ (top-level live automation, or links inside the parallel container with several units);
+  FL's pan law (√2·cos/sin with the far side folded in), pan-LFO tension, pulse curves (type 5) as steps.
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input become LYNX's compressor listening to the source track.
@@ -110,7 +113,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   fc·2^(p60/1200) with its own width (p59) and skirts (Classic −6 dB, Lowpass dip above), which the SVF cannot
   follow; Well, Noise, self-oscillation, Hz scale and adaptive width are left out; image/blur/prism/FX; with the volume envelope off FL keeps the note
   until it is stolen — LYNX uses a short declick release.
-- Effector: the Filter cascade (FL's is not tabulated), exact Flanger/Phaser feedback topology, Reverb decay.
+- Effector: the Reverb's diffusion network and the role of Y are LYNX's (only FL's decay time is reproduced, within
+  the LYNX reverb's ≈ 0.6…10.5 s).
 - Sakura: physical strings become saw + triangle; string decay taken at key 60; Hi-Cut applied at the output.
 - BooBass: the source is an internal sample not stored in the project (LYNX uses a saw). Drumpad: the physical
   mesh model is not reproduced.
@@ -118,8 +122,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   linear filter envelope.
 - Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) without its optional noise/gate and with the
   0.5 Hz pre-filter high-pass; "Range" ×10 (Exo only); LFO BPM sync.
-- Harmless: the filter as a per-partial curve (LYNX uses a biquad); p39 outside ±1200/±2400; stereo tremolo
-  (2.5 Hz) and vibrato (6 Hz); resonance width.
+- Harmless: the filter as a per-partial curve (LYNX uses a biquad; FL's law is in REA round 27 §1.3); p39 outside
+  ±1200/±2400; resonance shapes.
 - Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
   share an energy-weighted decay; ALT DECAY morphs every harmonic towards its Decay EQ level (REA round 26); the
   per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
@@ -128,7 +132,7 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Sytrus: carriers an integer multiple above the main one join its exact spectrum (sharing its envelope); other
   carriers (detuned, panned, offset or FM-modulated) and the FM modulator use basic shapes.
 - Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
-  (control slot → live link); curve type 5; pan law and pan-LFO tension.
+  (control slot → live link); pulse curves with more than 10 cycles.
 - Pitcher: the pitch detector (YIN) and shifter (two heads) are LYNX's own; Formant/Gender, Harmonize and MIDI
   modes are not implemented.
 - Vocodex: becomes the LYNX vocoder with two side inputs (modulator/carrier from ModIn/CarIn); its band filters,

@@ -103,7 +103,14 @@ public:
         phaserState = {};
         phaserFeedback[0] = phaserFeedback[1] = 0.0;
         phaserSweep = -1.0;
-        ladder = {};
+        filterLow = {};
+        filterHigh = {};
+        tapeTime.fill (-1e18); // nothing written yet: reads interpolate towards the first point (value 0)
+        tapeTime[0] = 0.0;
+        tapeValue = {};
+        tapeWrite = tapeRead = 0;
+        tapePosition = 0.0;
+        tapeRate = -1.0;
         trancer = 0.0;
         ringPhase = 0.0;
         for (auto& b : vowel)
@@ -229,44 +236,63 @@ private:
         return shortLine[(std::size_t) ch][i0] + f * (shortLine[(std::size_t) ch][i1] - shortLine[(std::size_t) ch][i0]);
     }
 
-    // 2 Flanger: delay X² (+ LFO·ModX) of a 5 ms line, feedback −0.96·Y', dry + w·wet
+    // 2 Flanger (REA_rodada27 §2.2): a "tape" delay of D = 2 + d·(L − 2) samples, L = ⌊0.005·fs⌋, d = X² + LFO·ModX;
+    // the tape speed 1/D glides with 0.005 per sample (capped at 0.9); the line is written with −x + fb·r
+    // (fb = −0.96·Y') and read one unit behind; output x + w·r
     void flanger (float* l, float* r, int n, float x, float lfoX, float y, float wet) noexcept
     {
-        const auto position = clamp01 (x * x + lfoX);
-        const auto delay = std::max (1.0, position * 0.005 * fs);
-        const auto feedback = -0.96f * y;
-        const auto size = shortLine[0].size();
+        const auto length = std::floor (fs * 0.005);
+        auto speed = [length] (double d) { return 1.0 / ((d * (1.0 - 2.0 / length) + 2.0 / length) * length); };
+        const auto target = speed (std::clamp ((double) x * x + lfoX, 0.0, 1.0));
+        if (tapeRate < 0.0)
+            tapeRate = speed (0.5); // the unit starts at d = 0.5
+        const auto feedback = -0.96 * y;
         for (int i = 0; i < n; ++i)
         {
             const auto w = nextWet (wet);
+            // read at position − 1, between the first written point at or after it and the one before
+            // (positions only grow, so the read index only moves forward)
+            const auto q = tapePosition - 1.0;
+            while (tapeRead != tapeWrite && tapeTime[tapeRead] < q)
+                tapeRead = (tapeRead + 1) & tapeMask;
+            const auto previous = (tapeRead - 1) & tapeMask;
+            const auto t0 = tapeTime[previous], t1 = tapeTime[tapeRead];
+            const auto f = t1 > t0 ? std::clamp ((q - t0) / (t1 - t0), 0.0, 1.0) : 0.0;
+            tapePosition += std::min (tapeRate, 0.9);
+            const auto slot = (tapeWrite + 1) & tapeMask;
             for (int ch = 0; ch < 2; ++ch)
             {
                 auto& s = ch == 0 ? l[i] : r[i];
-                const auto delayed = readShort (ch, delay);
-                shortLine[(std::size_t) ch][shortWrite] = -(s + feedback * delayed); // inverted delay input
-                s += w * delayed;
+                const auto& values = tapeValue[(std::size_t) ch];
+                const auto delayed = values[previous] + (values[tapeRead] - values[previous]) * f;
+                tapeValue[(std::size_t) ch][slot] = feedback * delayed - s;
+                s = (float) (s + w * delayed);
             }
-            shortWrite = (shortWrite + 1) % size;
+            tapeTime[slot] = tapePosition;
+            tapeWrite = slot;
+            tapeRate += (target - tapeRate) * 0.005;
         }
     }
 
     // 3 Phaser: 6 first-order all-passes per channel with feedback 0.98·(0.6Y')^(1/3); dry + w·wet
+    // (REA_rodada27 §2.3: g = S·(1 + 0.5X')·19 950/fs + 50/fs, S following max(X'², 10⁻⁵) at 0.001 per sample)
     void phaser (float* l, float* r, int n, float x, float lfoX, float y, float wet) noexcept
     {
-        const auto target = (double) x * x;
+        const auto xm = std::clamp ((double) x + lfoX, 0.0, 1.0); // X' = X + LFO·ModX
+        const auto target = std::max (xm * xm, 1e-5);
         if (phaserSweep < 0.0)
             phaserSweep = target;
         const auto feedback = 0.98 * std::cbrt (0.6 * y);
         for (int i = 0; i < n; ++i)
         {
+            const auto g = std::clamp (phaserSweep * (1.0 + 0.5 * xm) * (20000.0 - 50.0) / fs + 50.0 / fs, 0.001, 0.499);
             phaserSweep += 0.001 * (target - phaserSweep);
-            const auto g = std::clamp (phaserSweep * (1.0 + 0.5 * lfoX) * (20000.0 - 50.0) / fs + 50.0 / fs, 0.001, 0.499);
             const auto a = (1.0 - g) / (1.0 + g);
             const auto w = nextWet (wet);
             for (int ch = 0; ch < 2; ++ch)
             {
                 auto& s = ch == 0 ? l[i] : r[i];
-                auto v = (double) s + feedback * phaserFeedback[ch];
+                auto v = (double) s - 1e-6 + feedback * phaserFeedback[ch]; // FL's −10⁻⁶ input offset
                 for (auto& st : phaserState[(std::size_t) ch])
                 {
                     const auto out = -a * v + st;
@@ -279,30 +305,51 @@ private:
         }
     }
 
-    // 4 Filter: s = 2(0.8X + 0.1); s ≤ 1 low-pass (coef. s³), s > 1 high-pass (coef. 0.5(s − 1)³).
-    // FL's cascade (4 sections with feedback) was not tabulated: here 4 poles with feedback.
+    // 4 Filter (REA_rodada27 §2.1): s = 2(0.8X' + 0.1).
+    // s ≤ 1, low-pass: 4 sections, each v ← v − k·(last pole of the section), 8 one-poles with coefficient s³, ×(1 + 0.6k),
+    //   k = 0.7Y' + 0.2 (×(1 − 6.4516(s − 0.845))² above s = 0.845).
+    // s > 1, high-pass: v = x − 6.2568Y'·(low-pass state of stage 16), then 32 one-pole high-passes, coefficient 0.5(s − 1)³.
     void filter (float* l, float* r, int n, float x, float y, float wet) noexcept
     {
         const auto s = 2.0 * (0.8 * x + 0.1);
         const auto hp = s > 1.0;
-        const auto c = std::clamp (hp ? 0.5 * std::pow (s - 1.0, 3.0) : s * s * s, 1e-5, 1.0);
-        const auto res = hp ? std::min (0.95, 0.15 * 6.2568 * y) : (0.7 * y + 0.2) * std::min (1.0, 1.25 * (1.0 - c));
+        const auto c = hp ? 0.5 * std::pow (s - 1.0, 3.0) : s * s * s;
+        auto k = 0.7 * y + 0.2;
+        if (! hp && s > 0.845)
+        {
+            const auto fade = 1.0 - (s - 0.845) * 6.451613903045654;
+            k *= fade * fade;
+        }
+        const auto gain = 1.0 + 0.6 * k, highFeedback = 6.2568 * y;
         for (int i = 0; i < n; ++i)
         {
             const auto w = nextWet (wet);
             for (int ch = 0; ch < 2; ++ch)
             {
                 auto& smp = ch == 0 ? l[i] : r[i];
-                auto& st = ladder[(std::size_t) ch];
-                auto v = smp - 3.6 * res * st[3];
-                v = v / (1.0 + std::abs (v)); // light saturation in the feedback
-                for (auto& stage : st)
+                double v = smp;
+                if (! hp)
+                    for (auto& section : filterLow[(std::size_t) ch])
+                    {
+                        v -= k * section[7];
+                        for (auto& pole : section)
+                        {
+                            pole += (v - pole) * c;
+                            v = pole;
+                        }
+                        v *= gain;
+                    }
+                else
                 {
-                    stage += c * (v - stage);
-                    v = stage;
+                    auto& st = filterHigh[(std::size_t) ch];
+                    v -= highFeedback * st[15];
+                    for (auto& stage : st)
+                    {
+                        stage += (v - stage) * c;
+                        v -= stage;
+                    }
                 }
-                const auto out = hp ? smp - v : v;
-                smp = (float) ((1.0 - w) * smp + w * out);
+                smp = (float) ((1.0 - w) * smp + w * v);
             }
         }
     }
@@ -337,15 +384,18 @@ private:
         }
     }
 
-    // 6 Reverb: dry stays at gain 1 and the reverb of w·input is added (REA_rodada19 §1.6).
-    // Decay 0.75X'³ and damping Y'² approximated with the LYNX reverb.
+    // 6 Reverb: dry stays at gain 1 and the reverb of w·input is added (REA_rodada19 §1.6). Decay (REA_rodada27 §2.4):
+    // T60 = 0.1·⌊149.25X'³ + 1.5⌋ s, reproduced with the LYNX reverb's comb feedback g = 10^(−3·0.0298/T60) (mean comb
+    // ≈ 29.8 ms; the LYNX reverb covers ≈ 0.6…10.5 s); its diffusion network and the role of Y are approximations.
     void reverbUnit (float* l, float* r, int n, float x, float y, float wet, double bpm) noexcept
     {
         EffectParams rp {};
         const auto& info = effectInfo (EffectKind::reverb);
         for (std::size_t i = 0; i < info.params.size(); ++i)
             rp[i] = info.params[i].defaultValue;
-        rp[0] = x * x * x;                 // room
+        const auto t60 = 0.1 * std::floor (149.25 * x * x * x + 1.5);
+        const auto combGain = std::pow (10.0, -3.0 * 0.02984 / t60);
+        rp[0] = (float) std::clamp ((combGain - 0.7) / 0.28, 0.0, 1.0); // LYNX room: comb feedback 0.7 + 0.28·room
         rp[1] = y * y;                     // damping
         rp[3] = 0.225f * x * x * x + 0.5f; // reverb level
         rp[4] = 0.0f;                      // wet only
@@ -520,7 +570,14 @@ private:
     int holdCount = 0;
     std::array<std::array<double, 6>, 2> phaserState {};
     double phaserFeedback[2] {}, phaserSweep = -1.0;
-    std::array<std::array<double, 4>, 2> ladder {};
+    std::array<std::array<std::array<double, 8>, 4>, 2> filterLow {}; // Filter, low-pass: 4 sections × 8 poles
+    std::array<std::array<double, 32>, 2> filterHigh {};              // Filter, high-pass: 32 stages
+    // Flanger "tape": samples written at a position that advances by `tapeRate` per sample, read 1 unit behind
+    static constexpr std::size_t tapeSize = 4096, tapeMask = tapeSize - 1;
+    std::array<double, tapeSize> tapeTime {};
+    std::array<std::array<double, tapeSize>, 2> tapeValue {};
+    std::size_t tapeWrite = 0, tapeRead = 0;
+    double tapePosition = 0.0, tapeRate = -1.0;
     double trancer = 0.0, ringPhase = 0.0;
     std::array<Biquad, 8> vowel {};
     float wetSmooth = -1.0f;
