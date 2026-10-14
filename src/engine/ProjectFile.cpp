@@ -166,6 +166,24 @@ juce::var effectToVar (const EffectSlot& slot)
             branches.add (juce::var (o.release()));
         }
         e->setProperty ("branches", branches);
+        if (! slot.links.empty())
+        {
+            juce::Array<juce::var> links;
+            for (const auto& link : slot.links)
+            {
+                auto o = std::make_unique<juce::DynamicObject>();
+                o->setProperty ("branch", link.branch);
+                o->setProperty ("source", link.source);
+                o->setProperty ("target", link.target);
+                o->setProperty ("param", link.param);
+                juce::Array<juce::var> curve;
+                for (auto v : link.curve)
+                    curve.add (v);
+                o->setProperty ("curve", curve);
+                links.add (juce::var (o.release()));
+            }
+            e->setProperty ("links", links);
+        }
     }
     return juce::var (e.release());
 }
@@ -200,6 +218,20 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
                     if (auto c = effectFromVar (child))
                         branch.chain.push_back (std::move (*c)); // containers can be nested
             slot.branches.push_back (std::move (branch));
+        }
+    if (auto* links = e["links"].getArray())
+        for (const auto& l : *links)
+        {
+            EffectLink link;
+            link.branch = (int) l.getProperty ("branch", 0);
+            link.source = (int) l.getProperty ("source", 0);
+            link.target = (int) l.getProperty ("target", 0);
+            link.param = juce::jlimit (0, maxEffectParams - 1, (int) l.getProperty ("param", 0));
+            if (auto* curve = l["curve"].getArray())
+                for (const auto& v : *curve)
+                    link.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));
+            if (link.branch >= 0 && link.branch < (int) slot.branches.size() && link.curve.size() >= 2)
+                slot.links.push_back (std::move (link));
         }
     return slot;
 }

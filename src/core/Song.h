@@ -273,6 +273,14 @@ struct EffectBranch
     float gain = 1.0f;
 };
 
+// Live modulation inside a `parallel` container: the control output of child `source` of branch `branch`
+// drives parameter `param` of child `target` of the same branch, through `curve` (33 points over 0..1).
+struct EffectLink
+{
+    int branch = 0, source = 0, target = 0, param = 0;
+    std::vector<float> curve;
+};
+
 struct EffectSlot
 {
     EffectKind kind = EffectKind::eq;
@@ -282,6 +290,7 @@ struct EffectSlot
     PluginRef plugin;                             // used when kind == plugin
     int sidechain = -1;   // mixer track whose (post-fader) output feeds the effect's detector (compressor); −1 = none
     std::vector<EffectBranch> branches;           // used when kind == parallel
+    std::vector<EffectLink> links;                // used when kind == parallel
 };
 
 // Send from one track to another (post-fader), like FL's routing between inserts.

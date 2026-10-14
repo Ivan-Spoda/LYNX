@@ -1360,45 +1360,34 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
             utility.params[1] = (float) clamp01 (pan * 0.5 + 0.5);
             chain.push_back (utility);
         }
-        // cutoff: handled as live automation only with a single unit (below); resonance: not applied
-        const auto& res = unit.articulators[3];
-        const auto& cut = unit.articulators[2];
-        if (res.pattern.on || res.lfo.on || (active.size() > 1 && (cut.pattern.on || cut.lfo.on)))
-            out.notes.push_back ("Love Philter: cutoff or resonance envelope/LFO not applied");
+        // cutoff and resonance envelope/LFO: live modulation of the EQ, added by modulateUnit (below)
         return chain;
     };
 
-    if (active.empty())
-    {
-        out.slots.push_back (philterSlot ({}, 0.0)); // no unit enabled: the Love Philter is silent
-        return out;
-    }
-
-    if (active.size() == 1)
-    {
-        const auto u = active.front();
-        out.slots = unitEffects (u);
-        const auto& unit = state->units[(std::size_t) u];
-
-        // cutoff envelope/LFO (additive, REA_rodada20 §1.4/§1.5): c = CUT/256 + (y − 0.5)·ENV/128, or
-        // c = CUT/256 + A·d_L·W; a "control-only" slot generates the value and a live automation drives the EQ cutoff
-        if (const auto& cut = unit.articulators[2]; (cut.pattern.on || cut.lfo.on) && out.slots[0].kind == EffectKind::parametricEq)
-        {
-            const auto cut0 = std::clamp (unit.params[1], 0, 256) / 256.0, res0 = std::clamp (unit.params[2], 0, 256) / 256.0;
-            auto addLink = [&] (EffectSlot control, const std::function<double (double)>& cutoffOf) {
-                LovePhilterConversion::LiveLink link;
-                link.source = (int) out.slots.size();
-                link.target = 0;
-                link.param = peq::param (0, 1);
+    // cutoff/resonance envelope and LFO (additive, REA_rodada20 §1.4/§1.5): c = CUT/256 + (y − 0.5)·d_E (for the
+    // cutoff d_E = ENV/128·depth) or + A·d_L·W, and r = RES/256 + the same terms; a "control-only" slot generates
+    // the value and a live automation drives the EQ's frequency or Q
+    // the chain's EQ (slot 0) gets one control-only slot per enabled envelope/LFO, appended to `chain`;
+    // `addLink (source, param, curve)` records the live link from that slot to the EQ
+    auto modulateUnit = [&] (const LovePhilterUnit& unit, std::vector<EffectSlot>& chain,
+                             const std::function<void (int, int, std::vector<float>)>& recordLink) {
+        const auto cut0 = std::clamp (unit.params[1], 0, 256) / 256.0, res0 = std::clamp (unit.params[2], 0, 256) / 256.0;
+        auto modulate = [&] (const auto& art, bool cutoff, double envDepth) {
+            if (! (art.pattern.on || art.lfo.on) || chain.empty() || chain[0].kind != EffectKind::parametricEq)
+                return;
+            auto addLink = [&] (EffectSlot control, const std::function<double (double)>& valueOf) {
+                std::vector<float> curve;
                 for (int i = 0; i <= 32; ++i)
                 {
-                    const auto band = philterBand (unit, std::clamp (cutoffOf (i / 32.0), 0.0, 1.0), res0);
-                    link.curve.push_back (peq::hzValue (band.hz));
+                    const auto v = std::clamp (valueOf (i / 32.0), 0.0, 1.0);
+                    const auto band = cutoff ? philterBand (unit, v, res0) : philterBand (unit, cut0, v);
+                    curve.push_back (cutoff ? peq::hzValue (band.hz) : peq::qValue (band.q));
                 }
-                out.slots.push_back (std::move (control));
-                out.links.push_back (std::move (link));
+                recordLink ((int) chain.size(), peq::param (0, cutoff ? 1 : 3), std::move (curve));
+                chain.push_back (std::move (control));
             };
-            const auto& env = cut.pattern;
+            const auto start = cutoff ? cut0 : res0;
+            const auto& env = art.pattern;
             double period = 0.0;
             for (std::size_t k = 1; k < env.points.size(); ++k)
                 period += env.points[k].dt;
@@ -1417,22 +1406,40 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
                     control.params[4 + 3 * k] = (float) clamp01 ((env.points[k].tension + 1.0) / 2.0);
                 }
                 control.params[38] = 1.0f;
-                const auto depth = std::clamp (unit.params[0], -128, 128) / 128.0 * cut.envDepth;
-                addLink (std::move (control), [=] (double y) { return cut0 + (y - 0.5) * depth; });
+                addLink (std::move (control), [=] (double y) { return start + (y - 0.5) * envDepth; });
             }
             else if (env.on)
-                out.notes.push_back ("Love Philter: cutoff envelope outside the supported format");
-            if (const auto& lfo = cut.lfo; lfo.on && lfo.tempo && ! lfo.frozen)
+                out.notes.push_back (std::string ("Love Philter: ") + (cutoff ? "cutoff" : "resonance") + " envelope outside the supported format");
+            if (const auto& lfo = art.lfo; lfo.on && lfo.tempo && ! lfo.frozen)
             {
                 auto control = makeEffectSlot (EffectKind::autoPan);
                 const auto period = 625.0 / (std::pow (10001.0, std::clamp (lfo.speed, 1, 65536) / 65536.0) - 1.0);
                 control.params[0] = (float) std::clamp (period / 64.0, 1e-4, 1.0);
                 control.params[2] = (float) (lfo.phase / 4294967296.0);
                 control.params[4] = 1.0f;
-                const auto amount = lfo.amplitude * cut.lfoDepth;
-                addLink (std::move (control), [=] (double v) { return cut0 + amount * (2.0 * v - 1.0); });
+                const auto amount = lfo.amplitude * art.lfoDepth;
+                addLink (std::move (control), [=] (double v) { return start + amount * (2.0 * v - 1.0); });
             }
-        }
+        };
+        modulate (unit.articulators[2], true, std::clamp (unit.params[0], -128, 128) / 128.0 * unit.articulators[2].envDepth);
+        modulate (unit.articulators[3], false, unit.articulators[3].envDepth);
+    };
+
+    if (active.empty())
+    {
+        out.slots.push_back (philterSlot ({}, 0.0)); // no unit enabled: the Love Philter is silent
+        return out;
+    }
+
+    if (active.size() == 1)
+    {
+        const auto u = active.front();
+        out.slots = unitEffects (u);
+        const auto& unit = state->units[(std::size_t) u];
+
+        modulateUnit (unit, out.slots, [&] (int source, int param, std::vector<float> curve) {
+            out.links.push_back ({ source, 0, param, std::move (curve) });
+        });
         const auto base = 8 + 44 * u;
         const auto masterGain = master;
         // Mod X (k = 6) / Mod Y (k = 7) drive the volume utility, if any
@@ -1464,7 +1471,14 @@ std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::
 
     auto container = makeEffectSlot (EffectKind::parallel);
     for (const auto u : active)
-        container.branches.push_back ({ unitEffects (u), 1.0f });
+    {
+        auto chain = unitEffects (u);
+        const auto branch = (int) container.branches.size();
+        modulateUnit (state->units[(std::size_t) u], chain, [&] (int source, int param, std::vector<float> curve) {
+            container.links.push_back ({ branch, source, 0, param, std::move (curve) });
+        });
+        container.branches.push_back ({ std::move (chain), 1.0f });
+    }
     out.slots.push_back (std::move (container));
     return out;
 }

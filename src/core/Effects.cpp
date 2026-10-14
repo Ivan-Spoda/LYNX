@@ -1723,6 +1723,14 @@ public:
                     branch.chain.push_back ({ makeEffect (child.kind), child });
             branches.push_back (std::move (branch));
         }
+        for (const auto& link : slot.links)
+            if (link.branch >= 0 && link.branch < (int) branches.size() && link.curve.size() >= 2)
+            {
+                const auto& chain = branches[(std::size_t) link.branch].chain;
+                if (link.source >= 0 && link.source < (int) chain.size() && link.target >= 0 && link.target < (int) chain.size()
+                    && link.param >= 0 && link.param < maxEffectParams)
+                    links.push_back (link);
+            }
         for (auto& buffer : scratch)
             buffer.assign ((std::size_t) capacity, 0.0f);
     }
@@ -1781,6 +1789,16 @@ private:
         std::fill (sumL, sumL + n, 0.0f);
         std::fill (sumR, sumR + n, 0.0f);
 
+        // inner links: the control child's latest output sets the target's parameter (one block of lag)
+        for (const auto& link : links)
+        {
+            auto& chain = branches[(std::size_t) link.branch].chain;
+            const auto x = std::clamp (chain[(std::size_t) link.source].effect->controlOutput (0), 0.0f, 1.0f) * (float) (link.curve.size() - 1);
+            const auto i = std::min ((std::size_t) x, link.curve.size() - 2);
+            const auto f = x - (float) i;
+            chain[(std::size_t) link.target].slot.params[(std::size_t) link.param] = link.curve[i] + (link.curve[i + 1] - link.curve[i]) * f;
+        }
+
         for (auto& b : branches)
         {
             std::copy (inL, inL + n, wL);
@@ -1815,6 +1833,7 @@ private:
     }
 
     std::vector<Branch> branches;
+    std::vector<EffectLink> links;
     std::array<std::vector<float>, 8> scratch;
 };
 
