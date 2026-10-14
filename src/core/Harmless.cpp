@@ -794,6 +794,91 @@ const float unisonTable[3][9] {
       1.1668611764907837f, 0.8539709448814392f, 1.2062726020812988f, 1.0f } };
 
 // ---------------------------------------------------------------------------------------------------------------
+// The sine-bank kernel: groups of 8 partials kept in registers over a segment of m samples; each partial runs the
+// two-term recurrence x ← c·x − y and adds (T + (a − T)·kamp^j)·x into its lane sum acc[8·j + lane]. The same IEEE
+// operations in the same order whatever the vector width, so the AVX build gives bit-identical results.
+
+#if defined(__GNUC__)
+#define HARMLESS_INLINE inline __attribute__ ((always_inline))
+#else
+#define HARMLESS_INLINE inline
+#endif
+
+HARMLESS_INLINE void bankKernelBody (double* osc0, double* osc1, const double* oscC, const double* T, const double* A, int top,
+                                     int m, const double* kp, double* acc) noexcept
+{
+    for (int g = 0; g < top; g += 8)
+    {
+        double x[8], y[8], c[8], t[8], d[8];
+#pragma GCC unroll 8
+        for (int l = 0; l < 8; ++l)
+        {
+            const auto i = (std::size_t) (g + l);
+            x[l] = osc0[i], y[l] = osc1[i], c[l] = oscC[i];
+            t[l] = T[i];
+            d[l] = A[i] - T[i];
+        }
+        for (int j = 0; j < m; ++j)
+        {
+            const auto k = kp[j];
+            auto* a = acc + 8 * j;
+#pragma GCC unroll 8
+            for (int l = 0; l < 8; ++l)
+            {
+                const auto s = x[l];
+                a[l] += (t[l] + d[l] * k) * s;
+                x[l] = c[l] * s - y[l];
+                y[l] = s;
+            }
+        }
+#pragma GCC unroll 8
+        for (int l = 0; l < 8; ++l)
+            osc0[(std::size_t) (g + l)] = x[l], osc1[(std::size_t) (g + l)] = y[l];
+    }
+}
+
+void bankKernelPlain (double* osc0, double* osc1, const double* oscC, const double* T, const double* A, int top, int m,
+                      const double* kp, double* acc) noexcept
+{
+    bankKernelBody (osc0, osc1, oscC, T, A, top, m, kp, acc);
+}
+
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__)) && ! defined(HARMLESS_NO_AVX)
+#define HARMLESS_AVX 1
+// 4-wide doubles where the CPU and the OS support AVX (no FMA: contraction is off, so the rounding is unchanged)
+__attribute__ ((target ("avx"))) void bankKernelAvx (double* osc0, double* osc1, const double* oscC, const double* T,
+                                                     const double* A, int top, int m, const double* kp, double* acc) noexcept
+{
+    bankKernelBody (osc0, osc1, oscC, T, A, top, m, kp, acc);
+}
+
+bool cpuHasAvx() noexcept
+{
+    unsigned a = 1, b = 0, c = 0, d = 0;
+    __asm__ __volatile__ ("cpuid" : "+a"(a), "=b"(b), "=c"(c), "=d"(d) : "c"(0));
+    if ((c & (1u << 27)) == 0 || (c & (1u << 28)) == 0) // OSXSAVE, AVX
+        return false;
+    unsigned lo = 0, hi = 0;
+    __asm__ __volatile__ ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    return (lo & 6u) == 6u; // the OS saves the XMM and YMM state
+}
+#endif
+
+void bankKernel (double* osc0, double* osc1, const double* oscC, const double* T, const double* A, int top, int m,
+                 const double* kp, double* acc) noexcept
+{
+#ifdef HARMLESS_AVX
+    static const bool avx = cpuHasAvx();
+    if (avx)
+    {
+        bankKernelAvx (osc0, osc1, oscC, T, A, top, m, kp, acc);
+        return;
+    }
+#endif
+    bankKernelPlain (osc0, osc1, oscC, T, A, top, m, kp, acc);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // One voice record: a full independent copy of the voice (bank, envelopes, filter state, LFO) per unison sub-voice
 
 struct Record
@@ -859,6 +944,7 @@ public:
         records.resize (maxRecords);
         notes.resize (maxNotes);
         order.reserve (maxNotes);
+        reset();
     }
 
     Patch P;
@@ -875,6 +961,9 @@ public:
     {
         for (auto& r : records)
             r.used = false;
+        freeCount = maxRecords;
+        for (int i = 0; i < maxRecords; ++i)
+            freeList[(std::size_t) i] = maxRecords - 1 - i;
         for (auto& n : notes)
             n.used = false;
         order.clear();
@@ -888,7 +977,7 @@ public:
 
     bool idle() const noexcept
     {
-        return std::none_of (records.begin(), records.end(), [] (const Record& r) { return r.used; });
+        return freeCount == maxRecords; // (a scan of the 50 KB records would miss the cache on every call)
     }
 
     // velocity 0…1 (FL velocity / 128); volFactor: Final.Vol / channel volume; pan: note pan; pitchOffset: cents
@@ -1053,9 +1142,7 @@ public:
     {
         std::fill (mixL.begin(), mixL.begin() + n, 0.0);
         std::fill (mixR.begin(), mixR.begin() + n, 0.0);
-        bool live = false;
-        for (const auto& r : records)
-            live = live || (r.used && ! r.dead);
+        const auto live = freeCount < maxRecords; // dead records were returned at the end of the previous block
         if (! live)
             tremPrev = P.trem;
         bool trem = false;
@@ -1133,6 +1220,8 @@ public:
 
 private:
     std::vector<Record> records;
+    std::array<int, maxRecords> freeList {}; // free record indices (a stack)
+    int freeCount = 0;
     std::vector<Note> notes;
     std::vector<int> order; // notes in creation order (the voice mix order)
     std::array<double, maxHostBlock> mono {}, mixL {}, mixR {}, tremL {}, tremR {}, envBuf {};
@@ -1185,7 +1274,7 @@ private:
         const auto oldest = order.front();
         auto& nt = notes[(std::size_t) oldest];
         for (int k = 0; k < nt.count; ++k)
-            records[(std::size_t) nt.records[(std::size_t) k]].used = false;
+            freeRecord (nt.records[(std::size_t) k]);
         nt.count = 0;
         if (slot == oldest)
             slot = -1;
@@ -1201,16 +1290,24 @@ private:
 
     int allocateRecord() noexcept
     {
-        for (int i = 0; i < maxRecords; ++i)
-            if (! records[(std::size_t) i].used)
-                return i;
-        return -1;
+        if (freeCount == 0)
+            return -1;
+        const auto r = freeList[(std::size_t) --freeCount];
+        records[(std::size_t) r].used = true;
+        return r;
+    }
+
+    void freeRecord (int r) noexcept
+    {
+        if (! records[(std::size_t) r].used)
+            return;
+        records[(std::size_t) r].used = false;
+        freeList[(std::size_t) freeCount++] = r;
     }
 
     // capacity fallback (LYNX's own, outside FL's behaviour): stop the oldest records at once
     void ensureFreeRecords (int needed) noexcept
     {
-        auto freeCount = (int) std::count_if (records.begin(), records.end(), [] (const Record& r) { return ! r.used; });
         while (freeCount < needed)
         {
             int victim = -1;
@@ -1228,8 +1325,7 @@ private:
                 return;
             auto& nt = notes[(std::size_t) victim];
             for (int k = 0; k < nt.count; ++k)
-                records[(std::size_t) nt.records[(std::size_t) k]].used = false;
-            freeCount += nt.count;
+                freeRecord (nt.records[(std::size_t) k]);
             nt.count = 0;
             nt.stamped = false;
             if (nt.released && victim != slot)
@@ -1264,7 +1360,7 @@ private:
             {
                 const auto r = nt.records[(std::size_t) k];
                 if (records[(std::size_t) r].dead)
-                    records[(std::size_t) r].used = false;
+                    freeRecord (r);
                 else
                     nt.records[(std::size_t) kept++] = r;
             }
@@ -1500,6 +1596,45 @@ private:
             amps[(std::size_t) i + 4] = (double) (a[(std::size_t) i] * inv);
     }
 
+    // band-limit gains of positions [from, to) from their frequencies (§1.3)
+    void bandLimit (Record& v, int from, int to) const noexcept
+    {
+        const auto fs = P.fs;
+        const auto lo1 = 32.0 / fs, lo0 = 16.0 / fs, hi0 = 16000.0 / fs, hi1 = 17000.0 / fs;
+        for (int i = from; i < to; ++i)
+        {
+            const auto f = f32 (v.freq[(std::size_t) i]);
+            double b = 1.0;
+            if (f > hi0)
+            {
+                const auto r = 1.0 - (f - hi0) * (1.0 / (hi1 - hi0));
+                b = r * r;
+            }
+            if (f > hi1)
+                b = 0.0;
+            if (f < lo1)
+            {
+                const auto r = 1.0 - (lo1 - f) * (1.0 / (lo1 - lo0));
+                b = r * r;
+            }
+            if (f < lo0)
+                b = 0.0;
+            v.bl[(std::size_t) i] = b;
+        }
+    }
+
+    // positions [0, limit) can have a non-zero target: at quality 0/1 the band limit zeroes the rest (the first 8
+    // always count: position 0's gain is set later and the low-harmonics protection reads 0…7)
+    int activeLimit (const Record& v, int N, bool freqPhaser) const noexcept
+    {
+        if (P.quality >= 2 || freqPhaser)
+            return N;
+        int last = N;
+        while (last > 8 && v.bl[(std::size_t) last - 1] == 0.0)
+            --last;
+        return last;
+    }
+
     // the target amplitudes of one control block, in the order of §1.4
     void controlBlock (Record& v, double vibPh, double knobTarget) noexcept
     {
@@ -1541,6 +1676,11 @@ private:
         localAc = f32 (f32 (localAc + f32 (P.lfoPitch * v.L)) + det);
         const auto changed = localAc != v.prevAc;
         const auto oldCnt = v.cnt;
+        // with the band limit at quality 0/1, positions whose gain is 0 get a target of exactly 0 whatever the stages
+        // compute: only the positions below `lim` go through the pipeline (the pluck and Noise generator states still
+        // advance for all N)
+        const auto freqPhaser = P.p[71] != 0 && P.phType == 9;
+        int lim = activeLimit (v, v.cnt, freqPhaser);
         if (changed)
         {
             const auto lf0 = f32 (log2Of440 + (f32 (f32 (localAc * (double) 0.01f) + 60.0) - 57.0) * 0.08333333333333333);
@@ -1564,8 +1704,11 @@ private:
                 for (int i = 0; i < N; ++i)
                     v.freq[(std::size_t) i] += P.gritTable[(std::size_t) i] * gs;
             }
+            if (! freqPhaser)
+                bandLimit (v, 1, N);
+            lim = activeLimit (v, N, freqPhaser);
             const auto fsF = (float) fs, invLn2 = (float) (1.0 / ln2);
-            for (int i = 0; i < N; ++i)
+            for (int i = 0; i < lim; ++i)
             {
                 v.hz[(std::size_t) i] = (float) v.freq[(std::size_t) i] * fsF;
                 // ln in float: computed as the correctly rounded float of the double log (§1.3: FL uses IPP Ln_32f)
@@ -1580,15 +1723,15 @@ private:
             m = f32 (m + f32 (v.U * std::min (P.mixLfo, f32 (1.0 - m))));
         else if (P.mixLfo < 0.0)
             m = f32 (m + f32 (v.U * std::max (P.mixLfo, -m)));
-        for (int i = 0; i < N; ++i)
+        for (int i = 0; i < lim; ++i)
             amps[(std::size_t) i] = P.a570[(std::size_t) i];
         const auto oneMinusM = f32 (1.0 - m);
         if (m > 0.0 && P.p[34] == 0)
-            for (int i = 4; i < N; ++i)
+            for (int i = 4; i < lim; ++i)
                 amps[(std::size_t) i] = f32 (P.a570[(std::size_t) i] * (P.mask[(std::size_t) ((i - 4) % 12)] * m + oneMinusM));
         const auto harmonize = P.p[79] != 0;
         if (P.p[85] == 0 && harmonize)
-            harmonizer (v, N);
+            harmonizer (v, lim);
 
         // 4. filter (§1.6)
         const auto kt = f32 (f32 (v.lf0 + -7.0) * P.kt);
@@ -1615,14 +1758,14 @@ private:
             if (P.p[55] == 0)
             {
                 const auto k = (float) P.W, off = (float) f32 (origin - f32 (pos * P.W));
-                for (int i = 0; i < N; ++i)
+                for (int i = 0; i < lim; ++i)
                     amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * shapeRead (table, v.l2[(std::size_t) i] * k + off, interp));
             }
             else
             {
                 const auto b = f32 (P.W * 0.9);
                 const auto k = (float) f32 (b / fc), off = (float) f32 (origin - b);
-                for (int i = 0; i < N; ++i)
+                for (int i = 0; i < lim; ++i)
                     amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * shapeRead (table, v.hz[(std::size_t) i] * k + off, interp));
             }
         }
@@ -1654,7 +1797,8 @@ private:
                     x = 0.0f;
                 if (x > 0.0f)
                     x = keep;
-                amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * (double) x);
+                if (i < lim)
+                    amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * (double) x);
             }
             v.nacc += P.noiseStep;
             if (v.nacc >= 1.0)
@@ -1672,7 +1816,7 @@ private:
             const auto kf = (float) k;
             const auto off = P.p[60] == 0 ? (float) f32 (ro - f32 (f32 (pos + P.rOffset) * k)) : (float) f32 (ro - fc * P.rMul * k);
             const auto gc = (float) f32 (P.rC - v.lf0), raf = (float) ra;
-            for (int i = 0; i < N; ++i)
+            for (int i = 0; i < lim; ++i)
             {
                 const auto x = (P.p[60] == 0 ? v.l2[(std::size_t) i] : v.hz[(std::size_t) i]) * kf + off;
                 const auto R = (float) shapeRead (table, x, interp);
@@ -1684,7 +1828,7 @@ private:
             }
         }
         if (P.p[85] == 1 && harmonize)
-            harmonizer (v, N);
+            harmonizer (v, lim);
 
         // 6. phaser (§1.9)
         bool freqMod = false;
@@ -1716,7 +1860,7 @@ private:
             const auto mixv = P.phMix;
             const auto oneMinus = f32 (1.0 - mixv);
             const auto amt = P.phType == 9 ? (double) f32 ((double) f32 (mixv * mixv * mixv) * ln2 * 0.25) : 0.0;
-            for (int i = 0; i < N; ++i)
+            for (int i = 0; i < lim; ++i)
             {
                 const auto x = (octave ? v.l2[(std::size_t) i] : v.hz[(std::size_t) i]) * kf + offf;
                 double Pv = 0.0;
@@ -1740,7 +1884,7 @@ private:
             freqMod = P.phType == 9;
         }
         if (P.p[85] == 2 && harmonize)
-            harmonizer (v, N);
+            harmonizer (v, lim);
 
         // 7. pluck (§1.11)
         if (v.pluckOn)
@@ -1774,14 +1918,15 @@ private:
                 }
                 for (int i = 0; i < N; ++i)
                 {
-                    amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * (double) v.pluckLevel[(std::size_t) i]);
+                    if (i < lim)
+                        amps[(std::size_t) i] = f32 (amps[(std::size_t) i] * (double) v.pluckLevel[(std::size_t) i]);
                     v.pluckLevel[(std::size_t) i] = v.pluckLevel[(std::size_t) i] * v.pluckDecay[(std::size_t) i];
                 }
             }
             ++v.pluckCnt;
         }
         if (P.p[85] == 3 && harmonize)
-            harmonizer (v, N);
+            harmonizer (v, lim);
 
         // 8. low-harmonics protection (toward colour × EQ), 9. special gains
         for (int i = 0; i < 8; ++i)
@@ -1792,27 +1937,8 @@ private:
         // 10. band limit (§1.3), partials entering the bank, initial phases
         if (changed || freqMod)
         {
-            const auto lo1 = 32.0 / fs, lo0 = 16.0 / fs, hi0 = 16000.0 / fs, hi1 = 17000.0 / fs;
-            for (int i = 1; i < N; ++i)
-            {
-                const auto f = f32 (v.freq[(std::size_t) i]);
-                double b = 1.0;
-                if (f > hi0)
-                {
-                    const auto r = 1.0 - (f - hi0) * (1.0 / (hi1 - hi0));
-                    b = r * r;
-                }
-                if (f > hi1)
-                    b = 0.0;
-                if (f < lo1)
-                {
-                    const auto r = 1.0 - (lo1 - f) * (1.0 / (lo1 - lo0));
-                    b = r * r;
-                }
-                if (f < lo0)
-                    b = 0.0;
-                v.bl[(std::size_t) i] = b;
-            }
+            if (freqMod)
+                bandLimit (v, 1, N); // (otherwise already done with the new frequencies)
             if (oldCnt < N && ! v.first)
             {
                 // FUN_00746080: partials entering the bank get their phase + f_j · (elapsed time estimate)
@@ -1866,8 +1992,10 @@ private:
             v.bl[0] = b;
         }
         // quality 2 (per-sample bank path): the targets are stored before the band-limit gains are applied
-        for (int i = 0; i < N; ++i)
+        for (int i = 0; i < lim; ++i)
             v.T[(std::size_t) i] = f32 (P.quality < 2 ? amps[(std::size_t) i] * v.bl[(std::size_t) i] : amps[(std::size_t) i]);
+        for (int i = lim; i < N; ++i)
+            v.T[(std::size_t) i] = 0.0;
         v.prevAc = freqMod ? f32 (2147483648.0) : localAc;
         v.first = false;
     }
@@ -1942,36 +2070,8 @@ private:
         v.oscAge += m;
         // per-lane sums over all groups (lane l holds the partials ≡ l mod 8), combined once per sample at the end
         std::fill (laneSums.begin(), laneSums.begin() + 8 * m, 0.0);
-        const auto* kp = kpow.data();
         auto* acc = laneSums.data();
-        for (int g = 0; g < top; g += 8)
-        {
-            double x[8], y[8], c[8], t[8], d[8];
-#pragma GCC unroll 8
-            for (int l = 0; l < 8; ++l)
-            {
-                const auto i = (std::size_t) (g + l);
-                x[l] = v.osc0[i], y[l] = v.osc1[i], c[l] = v.oscC[i];
-                t[l] = v.T[i];
-                d[l] = v.a[i] - v.T[i];
-            }
-            for (int j = 0; j < m; ++j)
-            {
-                const auto k = kp[j];
-                auto* a = acc + 8 * j;
-#pragma GCC unroll 8
-                for (int l = 0; l < 8; ++l)
-                {
-                    const auto s = x[l];
-                    a[l] += (t[l] + d[l] * k) * s;
-                    x[l] = c[l] * s - y[l];
-                    y[l] = s;
-                }
-            }
-#pragma GCC unroll 8
-            for (int l = 0; l < 8; ++l)
-                v.osc0[(std::size_t) (g + l)] = x[l], v.osc1[(std::size_t) (g + l)] = y[l];
-        }
+        bankKernel (v.osc0.data(), v.osc1.data(), v.oscC.data(), v.T.data(), v.a.data(), top, m, kpow.data(), acc);
         for (int j = 0; j < m; ++j)
         {
             const auto* a = acc + 8 * j;
