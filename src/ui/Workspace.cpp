@@ -454,10 +454,29 @@ void Workspace::activate (Panel panel)
 
     layout.bringToFront (panel);
 
-    if (! layout[panel].detached)
+    if (! layout[panel].detached && ! isBackgroundPanel (panel))
         frames[(std::size_t) panel]->toFront (false);
 
     setFocusedPanel (panel);
+}
+
+void Workspace::fitPanelContent (Panel panel, int contentWidth, int contentHeight)
+{
+    auto& state = layout[panel];
+
+    if (! layoutReady || state.maximised || state.detached)
+        return;
+
+    auto r = state.bounds;
+    if (contentWidth > 0)
+        r.w = contentWidth + 2 * edge;
+    if (contentHeight > 0)
+        r.h = contentHeight + titleHeight + edge;
+
+    r.w = juce::jlimit (workspace::minWidth, juce::jmax (workspace::minWidth, getWidth() - r.x), r.w);
+    r.h = juce::jlimit (workspace::minHeight, juce::jmax (workspace::minHeight, getHeight() - r.y), r.h);
+    state.bounds = r;
+    applyLayout();
 }
 
 void Workspace::setFocusedPanel (Panel panel)
@@ -547,10 +566,11 @@ void Workspace::applyLayout()
         frame.refreshButtons();
     }
 
-    // stacking order (back to front)
-    for (auto panel : layout.order)
-        if (! layout[panel].detached)
-            frames[(std::size_t) panel]->toFront (false);
+    // stacking order (back to front): the background panels first, then the floating ones
+    for (auto background : { true, false })
+        for (auto panel : layout.order)
+            if (! layout[panel].detached && isBackgroundPanel (panel) == background)
+                frames[(std::size_t) panel]->toFront (false);
 
     setFocusedPanel (layout.focused);
     repaint();
@@ -565,15 +585,24 @@ void Workspace::resized()
     {
         layout = workspace::Layout::makeDefault (getWidth(), getHeight());
 
+        bool restored = false;
+
         if (pendingState.isNotEmpty())
             if (auto saved = workspace::Layout::parse (pendingState.toStdString(), getWidth(), getHeight()))
+            {
                 layout = *saved;
+                restored = true;
+            }
 
         layoutReady = true;
-    }
-    else
-        layout.resize (getWidth(), getHeight());
+        applyLayout();
 
+        if (! restored && onDefaultLayout)
+            onDefaultLayout();
+        return;
+    }
+
+    layout.resize (getWidth(), getHeight());
     applyLayout();
 }
 
@@ -601,6 +630,9 @@ void Workspace::resetLayout()
     layout = workspace::Layout::makeDefault (juce::jmax (1, getWidth()), juce::jmax (1, getHeight()));
     layoutReady = true;
     applyLayout();
+
+    if (onDefaultLayout)
+        onDefaultLayout();
 }
 
 int Workspace::bringBackOffscreen()

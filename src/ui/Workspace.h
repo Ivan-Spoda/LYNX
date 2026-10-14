@@ -67,6 +67,15 @@ public:
     std::function<bool (const juce::KeyPress&)> onKeyInDetachedWindow;
     std::function<void (Panel, const juce::MouseEvent&, const juce::MouseWheelDetails&)> onTitleWheel;
     std::function<void (Panel, const juce::MouseEvent&)> onTitleRightClick;
+    std::function<void()> onDefaultLayout; // after the default layout was (re)built: fit panels to their content
+
+    // Resizes a floating panel's content area to `contentWidth` x `contentHeight` (0 = keep that side),
+    // keeping its top-left corner and staying inside the desktop. Ignored while maximized or detached.
+    void fitPanelContent (Panel panel, int contentWidth, int contentHeight);
+
+    // The Playlist and the Browser are the background of the desktop: the floating panels (Channel Rack,
+    // Piano Roll, Mixer) always stay above them, as pop-up windows.
+    static bool isBackgroundPanel (Panel panel) noexcept { return panel == Panel::playlist || panel == Panel::browser; }
 
     void paint (juce::Graphics& g) override;
     void resized() override;

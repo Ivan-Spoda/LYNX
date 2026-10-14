@@ -260,14 +260,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     workspace.setTitleTooltip (Panel::channelRack, tr ("Shift+wheel here changes the pattern"));
     workspace.onFocusChanged = [this] (Panel) { refreshPanelButtons(); };
     workspace.onKeyInDetachedWindow = [this] (const juce::KeyPress& key) { return keyPressed (key); };
-    workspace.onTitleWheel = [this] (Panel panel, const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) {
-        if (panel == Panel::channelRack && e.mods.isShiftDown())
+    workspace.onTitleWheel = [this] (Panel panel, const juce::MouseEvent& ev, const juce::MouseWheelDetails& wheel) {
+        if (panel == Panel::channelRack && ev.mods.isShiftDown())
             selectPattern (stepPattern (engine.getSong(), (wheel.deltaY != 0.0f ? wheel.deltaY : -wheel.deltaX) > 0.0f ? -1 : 1));
     };
     workspace.onTitleRightClick = [this] (Panel panel, const juce::MouseEvent&) {
         if (panel == Panel::channelRack)
             showPatternMenu();
     };
+    workspace.onDefaultLayout = [this] { fitChannelRack (true); };
     workspace.setPersistent (persistent);
     playlist.onOpenPattern = [this] { showPanel (Panel::channelRack); };
     picker.onOpenPattern = [this] { showPanel (Panel::channelRack); };
@@ -308,6 +309,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     refreshToolbar();
     refreshPanelButtons();
 
+    fittedChannelCount = (int) engine.getSong().channels.size();
+    hintBar.setHint ({ idleHint(), {}, false, false });
     setWantsKeyboardFocus (true);
     setSize (1180, 642);
     startTimerHz (30);
@@ -718,6 +721,17 @@ void MainComponent::togglePanel (Panel panel)
     refreshPanelButtons();
 }
 
+void MainComponent::fitChannelRack (bool width)
+{
+    rack.updateSize();
+    const auto scrollbar = rackViewport.getScrollBarThickness();
+    const auto maxWidth = juce::jmax (300, workspace.getWidth() - 2 * 16 - 260);
+    const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
+    const auto needsHorizontal = rack.getWidth() > contentWidth;
+    workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
+    fittedChannelCount = (int) engine.getSong().channels.size();
+}
+
 void MainComponent::showPanel (Panel panel)
 {
     workspace.show (panel);
@@ -814,9 +828,9 @@ void MainComponent::showDesktopForSnapshot (bool extraPanels)
 
     if (extraPanels)
     {
+        workspace.show (Panel::mixer);
         workspace.show (Panel::pianoRoll);
         pianoRoll.scrollToNotes();
-        workspace.show (Panel::mixer);
         workspace.show (Panel::channelRack);
     }
 
@@ -992,6 +1006,9 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
     refreshModeButton();
     tempoDisplay.repaint();
+
+    if ((int) song.channels.size() != fittedChannelCount && fittedChannelCount >= 0) // a row was added or removed
+        fitChannelRack (false);
 
     if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (swingSlider.getValue() - song.swing) > 1e-6)
         refreshToolbar();
@@ -1792,7 +1809,7 @@ std::unique_ptr<juce::Component> MainComponent::makeHelpContent()
             { "Ctrl+N / Ctrl+O", TR_NOOP ("New project / open") },
             { "Ctrl+S / Ctrl+Shift+S", TR_NOOP ("Save / save as") },
             { "Ctrl+R", TR_NOOP ("Export audio") },
-            { "F5 F6 F7 F9 F8", TR_NOOP ("Show, focus or hide: Playlist, Channel Rack, Piano Roll, Mixer, Browser") },
+            { "F5 F6 F7 F9 F8", TR_NOOP ("Panels: Playlist, Channel Rack, Piano Roll, Mixer, Browser") },
             { "Enter", TR_NOOP ("Maximize or restore the Playlist") },
             { "L", TR_NOOP ("Pattern / song mode") },
             { "Ctrl+T", TR_NOOP ("Typing keyboard as a piano on/off") },

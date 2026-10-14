@@ -89,6 +89,8 @@ private:
 
     // panels
     void togglePanel (Panel panel);
+    void fitChannelRack (bool width); // the Channel Rack pop-up sizes itself to its rows (and steps)
+    int fittedChannelCount = -1;
     void showPanel (Panel panel);
     void refreshPanelButtons();
     void saveLayoutAs();

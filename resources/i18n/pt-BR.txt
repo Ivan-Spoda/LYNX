@@ -651,7 +651,7 @@ countries: br
 "Keep channel editors open (a channel button click doesn't close the previous editor)" = "Manter editores de canal abertos (clicar num canal não fecha o editor anterior)"
 "Edit keyboard shortcuts (keys.json)..." = "Editar atalhos de teclado (keys.json)..."
 "Reload keyboard shortcuts" = "Recarregar atalhos de teclado"
-"Show, focus or hide: Playlist, Channel Rack, Piano Roll, Mixer, Browser" = "Mostrar, focar ou esconder: Playlist, Channel Rack, Piano Roll, Mixer, Browser"
+"Panels: Playlist, Channel Rack, Piano Roll, Mixer, Browser" = "Painéis: Playlist, Channel Rack, Piano Roll, Mixer, Browser"
 "PC keyboard as a piano (selected channels)" = "Teclado do PC como piano (canais selecionados)"
 "Numpad +/-  F4  F2" = "Numpad +/-  F4  F2"
 "Next/previous pattern, next empty, rename and color" = "Pattern próximo/anterior, próximo vazio, renomear e colorir"

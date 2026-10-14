@@ -100,8 +100,8 @@ ValueSpec panSpec (const juce::String& name)
             return std::nullopt;
 
         auto pan = *v / 100.0;
-        const auto t = lower.trim();
-        if (t.contains ("left") || t.contains ("esq") || t.startsWithChar ('l') || t.endsWithChar ('l')) // "50 L", "50% left", "esquerda"
+        const auto trimmed = lower.trim();
+        if (trimmed.contains ("left") || trimmed.contains ("esq") || trimmed.startsWithChar ('l') || trimmed.endsWithChar ('l')) // "50 L", "50% left", "esquerda"
             pan = -std::abs (pan);
         return pan;
     };

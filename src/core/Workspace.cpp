@@ -64,9 +64,10 @@ Layout Layout::makeDefault (int width, int height)
     const auto rackHeight = std::min (h - 2 * gap, std::max (240, h * 55 / 100));
     l[Panel::channelRack] = state ({ browserWidth + gap, gap, rackWidth, rackHeight }, true);
 
-    l[Panel::pianoRoll] = state ({ browserWidth + 2 * gap, 2 * gap, w - browserWidth - 4 * gap, h - 4 * gap }, false);
+    // floating pop-ups over the Playlist: the Piano Roll in the upper part, the Mixer along the bottom
+    l[Panel::pianoRoll] = state ({ browserWidth + 2 * gap, 2 * gap, w - browserWidth - 4 * gap, std::max (minHeight, h * 52 / 100) }, false);
 
-    const auto mixerTop = h * 30 / 100;
+    const auto mixerTop = h * 40 / 100;
     l[Panel::mixer] = state ({ browserWidth, mixerTop, w - browserWidth, h - mixerTop }, false);
 
     for (auto& p : l.panels)
