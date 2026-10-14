@@ -44,6 +44,8 @@ public:
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
     std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
+    PianoRollComponent& getPianoRollForSnapshot() { return pianoRoll; }
+    PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
         mixer.selectTrack (track);
@@ -103,6 +105,7 @@ private:
     juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::Label swingLabel;
     IconButton settingsButton { "settings", Icon::settings };
+    GlobalGridBox gridBox; // global grid of the editors (see ui/EditorTools.h)
     std::vector<int> dividers; // x positions of the toolbar group separators
     void showLanguageChoice (const juce::String& id);
     juce::Label positionLabel;

@@ -230,6 +230,8 @@ MainComponent::MainComponent (AudioEngine& e)
     for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &recordMenuButton, &newPatternButton, &patternMenuButton, &settingsButton })
         b->setFlat (true);
 
+    addAndMakeVisible (gridBox); // global grid (editors)
+
     engine.addChangeListener (this);
     refreshToolbar();
 
@@ -349,6 +351,12 @@ void MainComponent::resized()
         divide();
     place (swingLabel, showSwing ? swingWidth : 100000, 4);
     place (swingSlider, showSwing ? h : 100000, 0);
+
+    // global grid of the Piano Roll and Playlist (shown whole or not at all)
+    const auto showGrid = toolbar.getWidth() >= 15 + 130 + 132; // before the scope, which yields its room
+    if (showGrid)
+        divide();
+    place (gridBox, showGrid ? 130 : 100000, 0);
     toolbar.removeFromLeft (juce::jmin (8, toolbar.getWidth()));
 
     if (toolbar.getWidth() > 210)

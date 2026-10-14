@@ -1146,6 +1146,12 @@ private:
             saveSnapshot (ui, prefix + "-pianoroll.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            // the Playlist with a time selection over bars 2-3 (it selects the clips it touches) and the Knife tool
+            ui.getPlaylistForSnapshot().setTimeSelectionForSnapshot (1, 3);
+            ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::knife);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-playlist-timesel.png");
+            ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::pencil);
             ui.selectTabForSnapshot (3);
             // LYNX_SNAPSHOT_TRACK=n: shows the effects of that mixer track
             if (const auto track = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_TRACK", {}); track.isNotEmpty())
@@ -1243,6 +1249,12 @@ private:
                 if (bestTrack >= 0)
                     saveWindow (lynx::makeParametricEqEditor (offline, bestTrack, bestSlot), "-peq.png");
             }
+
+            // Note inspector for the Piano Roll's notes (its selection, or all of the channel's notes)
+            if (auto inspector = ui.getPianoRollForSnapshot().makeNoteInspectorForSnapshot())
+                saveWindow (std::move (inspector), "-noteinspector.png");
+            if (auto inspector = ui.getPianoRollForSnapshot().makeNoteInspectorForSnapshot (true))
+                saveWindow (std::move (inspector), "-noteinspector-one.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
