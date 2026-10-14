@@ -1596,8 +1596,9 @@ public:
             carrier = makeInternalCarrier (*state);
         if (state && state->params[sg] > 0)
         {
-            sgSlot = soundgoodizerApproximation (0, state->params[sg]);
-            sgEffect = makeEffect (sgSlot.kind);
+            sgSlots = soundgoodizerApproximation (0, state->params[sg]);
+            for (const auto& slot : sgSlots)
+                sgEffects.push_back (makeEffect (slot.kind));
         }
         for (auto* v : { &ownBuf, &modBuf, &carBuf, &outBuf, &zeros })
             v->assign (2 * chunk, 0.0f);
@@ -1609,19 +1610,27 @@ public:
             engine.prepare (*state, sr, chunk, state->draft());
         if (carrier != nullptr)
             carrier->prepare (sr);
-        if (sgEffect != nullptr)
-            sgEffect->prepare (sr);
+        for (auto& e : sgEffects)
+            e->prepare (sr);
     }
 
     void reset() noexcept override
     {
         if (runsEngine())
             engine.flush();
-        if (sgEffect != nullptr)
-            sgEffect->reset();
+        for (auto& e : sgEffects)
+            e->reset();
     }
 
-    int latencySamples() const noexcept override { return runsEngine() ? engine.latencySamples() : 0; }
+    int latencySamples() const noexcept override
+    {
+        if (! runsEngine())
+            return 0;
+        auto latency = engine.latencySamples();
+        for (const auto& e : sgEffects)
+            latency += e->latencySamples(); // the Soundgoodizer's limiter look-ahead
+        return latency;
+    }
 
     void setSidechain (const float* left, const float* right) noexcept override
     {
@@ -1696,8 +1705,9 @@ public:
             for (int k = 0; k < len; ++k)
                 L[k] = outBuf[(std::size_t) (2 * k)], R[k] = outBuf[(std::size_t) (2 * k + 1)];
         }
-        if (sgEffect != nullptr && runsEngine())
-            sgEffect->process (l, r, n, sgSlot.params, bpm);
+        if (runsEngine())
+            for (std::size_t i = 0; i < sgEffects.size(); ++i)
+                sgEffects[i]->process (l, r, n, sgSlots[i].params, bpm);
     }
 
 private:
@@ -1706,8 +1716,8 @@ private:
     std::optional<State> state;
     Engine engine;
     std::unique_ptr<Carrier> carrier;
-    EffectSlot sgSlot;
-    std::unique_ptr<Effect> sgEffect;
+    std::vector<EffectSlot> sgSlots;
+    std::vector<std::unique_ptr<Effect>> sgEffects;
     std::vector<float> ownBuf, modBuf, carBuf, outBuf, zeros;
     std::array<std::array<const float*, 2>, 2> side {};
     std::array<bool, 2> useSide { false, false };

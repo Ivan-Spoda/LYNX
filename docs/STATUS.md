@@ -162,7 +162,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
 - Vocodex: the Soundgoodizer stage (SG > 0, all demo instances) is LYNX's Soundgoodizer approximation (preset A,
-  amount = SG) on the engine's output — FL hosts its own Soundgoodizer with `Data/SG.dat`, not decoded yet; the
+  amount = SG, then the presets' −0.2 dB master limiter) on the engine's output — FL hosts its own Soundgoodizer
+  with `Data/SG.dat`, not decoded yet (on the "Vocodex demo" inputs FL's SG_x64.dll with SG.dat peaks at −0.39 dBFS
+  and sits ≈1.7 dB above the approximation, median of 100 ms windows); the
   internal Sytrus carrier (CarIn = "---", Ookay and NewStuff) is not available, so that Vocodex passes its
   modulator unchanged (`vocodex::makeInternalCarrier` is the hook for it); map segments with tension ≠ 0 are read
   as straight lines (no demo uses them).

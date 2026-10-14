@@ -5,7 +5,8 @@
 // state (EffectSlot::state) and builds the whole engine from it: band layout and per-band maps, 64-bit band-pass
 // filter banks with 2× / octave-level multirate, PEAK/RMS followers, gate, saturation, smoother, unison, carrier
 // noise, consonant/carrier contour, pass-through and the gain ramps. Draft re-blocks into 16-frame chunks (16 samples
-// of latency, reported to PDC). The Soundgoodizer stage (SG > 0) is LYNX's Soundgoodizer approximation.
+// of latency, reported to PDC). The Soundgoodizer stage (SG > 0) is LYNX's Soundgoodizer approximation
+// (compressor + the presets' −0.2 dB master limiter, whose look-ahead adds to the latency).
 
 #include <array>
 #include <cstdint>

@@ -4967,6 +4967,35 @@ TEST (vocodex_draft_latency_and_pass_through)
     }
 }
 
+TEST (vocodex_soundgoodizer_stage_limits_the_output)
+{
+    // SG > 0: the vocoder's output (loud here: Wet 2000) goes through the Soundgoodizer approximation, whose
+    // master limiter keeps the peaks under −0.2 dBFS; its look-ahead is reported as latency
+    VocodexSpec spec;
+    spec.params[0] = 2000;
+    spec.params[1] = 250;
+    lynx::EffectSlot slot = lynx::makeEffectSlot (lynx::EffectKind::vocodex);
+    slot.state = spec.bytes();
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (48000.0);
+    CHECK (fx->latencySamples() == 72); // 1.5 ms at 48 kHz
+    const auto car = vocodexSaw (48000, 110.0, 48000.0);
+    std::vector<float> mod (48000), l (48000, 0.0f), r (48000, 0.0f);
+    for (std::size_t i = 0; i < mod.size(); ++i)
+        mod[i] = 0.9f * (float) std::sin (0.07 * (double) i) * (float) std::sin (0.0003 * (double) i);
+    auto peak = 0.0f;
+    for (int done = 0; done < 48000; done += 512)
+    {
+        const int n = std::min (512, 48000 - done);
+        fx->setSidechain (mod.data() + done, mod.data() + done);
+        fx->setSidechain2 (car.data() + done, car.data() + done);
+        fx->process (l.data() + done, r.data() + done, n, slot.params, 120.0);
+    }
+    for (std::size_t i = 0; i < l.size(); ++i)
+        peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
+    CHECK (peak > 0.5f && peak <= 0.9775f);
+}
+
 TEST (vocodex_tail_bypass_and_noise)
 {
     // both inputs silent for longer than 0.5 s + hold + release: the own input passes unchanged

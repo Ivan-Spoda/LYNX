@@ -797,15 +797,21 @@ std::optional<EffectSlot> fruityVocoder (const std::vector<std::uint8_t>& d, std
 }
 } // namespace
 
-EffectSlot soundgoodizerApproximation (int preset, int amount)
+std::vector<EffectSlot> soundgoodizerApproximation (int preset, int amount)
 {
-    // a Soundgoodizer state (version, preset, amount) through the same conversion as the plugin's own slots
+    // a Soundgoodizer state (version, preset, amount) through the same conversion as the plugin's own slots, then
+    // the master limiter of its Maximus presets (a–d.dat: −0.2 dB ceiling, 86 ms release; REA_rodada8 §2)
     std::vector<std::uint8_t> state (12, 0);
     const std::int32_t words[3] { 1, preset, amount };
     std::memcpy (state.data(), words, sizeof (words));
-    EffectSlot slot;
-    soundgoodizer (state, slot);
-    return slot;
+    std::vector<EffectSlot> chain (1);
+    soundgoodizer (state, chain[0]);
+    auto limiterSlot = makeEffectSlot (EffectKind::limiter);
+    limiterSlot.params[0] = clamp01 ((-0.2 + 12.0) / 12.0);
+    limiterSlot.params[1] = 0.0f;
+    limiterSlot.params[2] = limiterReleaseValue (86.0);
+    chain.push_back (limiterSlot);
+    return chain;
 }
 
 std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& d)
