@@ -64,6 +64,175 @@ struct Biquad
     }
 };
 
+// Effector's reverb engine (REA_rodada33 §1), double precision like the reference model (≤ −100 dB from FL's DLL)
+class EffectorReverb
+{
+public:
+    void prepare (double rate)
+    {
+        fs = rate;
+        const auto ifs = (long long) rate;
+        const auto bn = ((100 + 15) * ifs) / 115; // room = 100
+        static constexpr int tank[12] { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
+        for (int j = 0; j < 12; ++j)
+        {
+            length[j] = std::max (1, (int) (bn * tank[j] / 20000));
+            line[(std::size_t) j].assign ((std::size_t) length[j], 0.0);
+        }
+        struct Tap { int line, offset, sign; double weight; }; // weight < 0 = "one"
+        static constexpr Tap tl[7] { { 9, 266, 1, -1 }, { 9, 2974, -1, 0.25 }, { 10, 1913, -1, 0.7 }, { 11, 2496, -1, 0.2 },
+                                     { 5, 1690, 1, 0.6 }, { 6, 187, 1, -1 }, { 7, 1566, 1, 0.5 } };
+        static constexpr Tap tr[7] { { 5, 3627, 1, 0.25 }, { 5, 353, 1, -1 }, { 6, 1728, -1, 0.7 }, { 7, 3173, -1, 0.2 },
+                                     { 9, 1811, -1, 0.6 }, { 10, 335, 1, -1 }, { 11, 621, 1, 0.5 } };
+        for (int k = 0; k < 7; ++k)
+        {
+            taps[0][(std::size_t) k] = { tl[k].line, (int) (bn * tl[k].offset / 20000), tl[k].sign, tl[k].weight };
+            taps[1][(std::size_t) k] = { tr[k].line, (int) (bn * tr[k].offset / 20000), tr[k].sign, tr[k].weight };
+        }
+        const auto diff = 1.0;
+        c1 = std::exp (-49.34111022949219 / diff * (length[0] + length[1]) / rate);
+        c2 = std::exp (-31.398887634277344 / diff * (length[2] + length[3]) / rate);
+        c3 = std::exp (-3.4538776874542236 * (length[4] + length[8]) / rate * (2.857142925262451 / diff));
+        c4 = std::exp (-3.4538776874542236 * (length[6] + length[10]) / rate * (1.9607843160629272 / diff));
+        const auto hp = std::floor ((float) ((float) (0.1f * 2981.0f) + 19.5f)); // 317 Hz
+        const auto t = std::tan (std::min (0.5 * rate, (double) hp) * 3.141592653589793 / rate);
+        hpCoef = (t - 1.0) / (t + 1.0);
+        bandwidth = lowPass (pint (1.0f, 216.0f, 5.5f));
+        lastD = lastDamp = lastWet = -1000;
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        for (auto& b : line)
+            std::fill (b.begin(), b.end(), 0.0);
+        ptr.fill (0);
+        preValue = 0.0;
+        sBw = hpX = hpY = apAx = apAy = apBx = apBy = lpA = lpB = 0.0;
+        gain = -1000.0;
+    }
+
+    void configure (float x, float y) noexcept
+    {
+        const auto x3 = (float) (0.75f * x * x * x);
+        const auto d = pint (x3, 199.0f, 1.5f), damp = pint ((float) (y * y), 216.0f, 5.5f);
+        const auto wet = pint ((float) ((float) (x3 * 0.3f) + 0.5f), 421.0f, -360.5f);
+        if (d == lastD && damp == lastDamp && wet == lastWet)
+            return;
+        lastD = d, lastDamp = damp, lastWet = wet;
+        const auto s = (length[5] + length[7] + length[9] + length[11]) / fs * -6.907755374908447;
+        g = std::pow (std::exp (s / (d * 0.1)), 0.25);
+        const auto g2 = std::pow (std::exp (10.0 / (10 * d * 0.1) * s), 0.25); // low-frequency ratio 10, crossover 500 Hz
+        const auto ratio = g2 / g;
+        lfMix = (ratio - 1.0) * 0.5;
+        const auto rm = std::min (ratio, 1.0);
+        const auto t = std::tan (500.0 * 3.141592653589793 / fs);
+        lfAp = (t - rm) / (rm + t);
+        damping = lowPass (damp);
+        target = (wet < -360 ? 0.0 : std::pow (10.0, 0.005 * wet)) * 0.3;
+        for (int c = 0; c < 2; ++c)
+            for (auto& tap : taps[(std::size_t) c])
+                tap.gain = tap.sign * (tap.weight < 0.0 ? 1.0 : (1.0 - g) * tap.weight + g);
+    }
+
+    void tick (float inL, float inR, float& outL, float& outR) noexcept
+    {
+        sBw = (((double) inR + inL) * 0.5 + 1e-30 - sBw) * bandwidth + sBw;
+        auto v = sBw;
+        const auto yh = (v - hpY) * hpCoef + hpX;
+        hpX = v;
+        hpY = yh;
+        if (hpCoef != 0.0)
+            v = (v - yh) * 0.5 + 1e-30;
+        auto step = [&] (int j) { auto& p = ptr[(std::size_t) j]; p = p ? p - 1 : length[j] - 1; };
+        auto at = [&] (int j) -> double& { return line[(std::size_t) j][(std::size_t) ptr[(std::size_t) j]]; };
+        // input diffusers
+        auto t = at (0) - c1 * v;
+        at (0) = c1 * t + v;
+        step (0);
+        auto u = at (1) - t * c2;
+        at (1) = u * c1 + t;
+        step (1);
+        t = at (2) - c1 * u;
+        at (2) = c1 * t + u;
+        step (2);
+        u = at (3) - t * c2;
+        at (3) = u * c1 + t;
+        step (3);
+        const auto tin = preValue + 1e-20; // 1-sample pre-delay
+        preValue = u;
+        // tank half A
+        auto f = line[11][(std::size_t) ptr[11]] * g;
+        auto y = (f - apAy) * lfAp + apAx;
+        apAx = f;
+        apAy = y;
+        lpA = ((y + f) * lfMix + f + tin - lpA) * damping + lpA;
+        auto w = at (4) - c3 * lpA;
+        at (4) = c3 * w + lpA;
+        step (4);
+        auto o = at (5);
+        at (5) = w;
+        step (5);
+        o *= g;
+        w = at (6) - c4 * o;
+        at (6) = w * c4 + o;
+        step (6);
+        at (7) = w;
+        step (7);
+        o = at (7) * g;
+        // tank half B
+        y = (o - apBy) * lfAp + apBx;
+        apBx = o;
+        apBy = y;
+        lpB = ((y + o) * lfMix + o + tin - lpB) * damping + lpB;
+        w = at (8) - c3 * lpB;
+        at (8) = c3 * w + lpB;
+        step (8);
+        o = at (9);
+        at (9) = w;
+        step (9);
+        o *= g;
+        w = at (10) - c4 * o;
+        at (10) = w * c4 + o;
+        step (10);
+        at (11) = w;
+        step (11);
+        double acc[2] {};
+        for (int c = 0; c < 2; ++c)
+            for (const auto& tap : taps[(std::size_t) c])
+            {
+                auto i = ptr[(std::size_t) tap.line] + tap.offset;
+                if (i >= length[tap.line])
+                    i -= length[tap.line];
+                acc[c] += tap.gain * line[(std::size_t) tap.line][(std::size_t) i];
+            }
+        gain = gain < -99.0 ? target : (target - gain) * 0.001 + gain;
+        const auto aL = gain * acc[0], aR = gain * acc[1];
+        const auto mid = aL + aR, side = aL - aR; // width 1, dry 0
+        outL = (float) (side + mid);
+        outR = (float) (mid - side);
+    }
+
+private:
+    static int pint (float v, float k, float c) noexcept { return (int) std::floor ((float) ((float) (v * k) + c)); }
+    double lowPass (int i100) const noexcept
+    {
+        if (i100 >= 221)
+            return 1.0;
+        const auto b = 2.0 - std::cos (i100 * 628.3185424804688 / fs);
+        return 1.0 - (b - std::sqrt (b * b - 1.0));
+    }
+
+    struct Tap { int line = 0, offset = 0, sign = 1; double weight = 0.0, gain = 0.0; };
+    double fs = 44100.0;
+    std::array<std::vector<double>, 12> line;
+    std::array<int, 12> length {}, ptr {};
+    std::array<std::array<Tap, 7>, 2> taps {};
+    double c1 = 0, c2 = 0, c3 = 0, c4 = 0, hpCoef = 0, bandwidth = 1, g = 0, lfMix = 0, lfAp = 0, damping = 1, target = 0, gain = -1000;
+    double preValue = 0, sBw = 0, hpX = 0, hpY = 0, apAx = 0, apAy = 0, apBx = 0, apBy = 0, lpA = 0, lpB = 0;
+    int lastD = -1000, lastDamp = -1000, lastWet = -1000;
+};
+
 class Effector final : public Effect
 {
 public:
@@ -75,13 +244,12 @@ public:
         stutter[1].assign (stutter[0].size(), 0.0f);
         shortLine[0].assign ((std::size_t) (0.006 * maxRate) + 8, 0.0f);
         shortLine[1].assign (shortLine[0].size(), 0.0f);
-        reverb = makeEffect (EffectKind::reverb);
     }
 
     void prepare (double sr) noexcept override
     {
         fs = std::min (sr, maxRate);
-        reverb->prepare (fs);
+        rev.prepare (fs);
         reset();
     }
 
@@ -116,7 +284,7 @@ public:
         for (auto& b : vowel)
             b.z1[0] = b.z1[1] = b.z2[0] = b.z2[1] = 0.0;
         wetSmooth = -1.0f;
-        reverb->reset();
+        rev.reset();
     }
 
     void setSongPosition (double ticks) noexcept override { songBeats = ticks / ppq; }
@@ -384,37 +552,21 @@ private:
         }
     }
 
-    // 6 Reverb: dry stays at gain 1 and the reverb of w·input is added (REA_rodada19 §1.6). Decay (REA_rodada27 §2.4):
-    // T60 = 0.1·⌊149.25X'³ + 1.5⌋ s, reproduced with the LYNX reverb's comb feedback g = 10^(−3·0.0298/T60) (mean comb
-    // ≈ 29.8 ms; the LYNX reverb covers ≈ 0.6…10.5 s); its diffusion network and the role of Y are approximations.
-    void reverbUnit (float* l, float* r, int n, float x, float y, float wet, double bpm) noexcept
+    // 6 Reverb (REA_rodada33 §1): the dry signal stays and the reverb of w·input is added. Mono input → bandwidth
+    // one-pole (open) → 317 Hz high-pass → 4 diffusion all-passes → 1-sample pre-delay → figure-of-eight tank (each
+    // half: low-frequency all-pass mix, damping low-pass, all-pass, delay, ×g, all-pass, delay, ×g) → 7 taps per side.
+    // X: decay T = 0.1·⌊149.25X'³ + 1.5⌋ s and wet 0.3·10^(⌊421(0.225X'³ + 0.5) − 360.5⌋/200); Y: damping cutoff
+    // 100·⌊216Y'² + 5.5⌋ Hz (open from 22.1 kHz). Line lengths scale with the rate (B·N/20000).
+    void reverbUnit (float* l, float* r, int n, float x, float y, float wet, double) noexcept
     {
-        EffectParams rp {};
-        const auto& info = effectInfo (EffectKind::reverb);
-        for (std::size_t i = 0; i < info.params.size(); ++i)
-            rp[i] = info.params[i].defaultValue;
-        const auto t60 = 0.1 * std::floor (149.25 * x * x * x + 1.5);
-        const auto combGain = std::pow (10.0, -3.0 * 0.02984 / t60);
-        rp[0] = (float) std::clamp ((combGain - 0.7) / 0.28, 0.0, 1.0); // LYNX room: comb feedback 0.7 + 0.28·room
-        rp[1] = y * y;                     // damping
-        rp[3] = 0.225f * x * x * x + 0.5f; // reverb level
-        rp[4] = 0.0f;                      // wet only
-        for (int start = 0; start < n; start += 256)
+        rev.configure (x, y);
+        for (int i = 0; i < n; ++i)
         {
-            const auto count = std::min (256, n - start);
-            std::array<float, 256> wl {}, wr {};
-            for (int i = 0; i < count; ++i)
-            {
-                const auto w = nextWet (wet);
-                wl[(std::size_t) i] = w * l[start + i];
-                wr[(std::size_t) i] = w * r[start + i];
-            }
-            reverb->process (wl.data(), wr.data(), count, rp, bpm);
-            for (int i = 0; i < count; ++i)
-            {
-                l[start + i] += wl[(std::size_t) i];
-                r[start + i] += wr[(std::size_t) i];
-            }
+            const auto w = nextWet (wet);
+            float outL, outR;
+            rev.tick (w * l[i], w * r[i], outL, outR);
+            l[i] += outL;
+            r[i] += outR;
         }
     }
 
@@ -581,7 +733,7 @@ private:
     double trancer = 0.0, ringPhase = 0.0;
     std::array<Biquad, 8> vowel {};
     float wetSmooth = -1.0f;
-    std::unique_ptr<Effect> reverb;
+    EffectorReverb rev;
 };
 } // namespace
 

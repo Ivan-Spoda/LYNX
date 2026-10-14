@@ -74,8 +74,9 @@ accordingly. Highlights of what is **confirmed and applied**:
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
   locked to the song, Mod Rate/Tempo Reduce, input/output gain; exact Distort cascade, Lo-fi, Delay (Mod Rate
-  time), Reverb (dry kept, FL's T60 law), Stereo, Trancer, Stutter, Vowel and Ring; Filter, Flanger (tape delay)
-  and Phaser exact — impulse responses within 6·10⁻⁸ of FL's own engine (REA round 27).
+  time), Stereo, Trancer, Stutter, Vowel and Ring; Filter, Flanger (tape delay) and Phaser exact — impulse
+  responses within 6·10⁻⁸ of FL's own engine (REA round 27); Reverb exact (FL's own diffusion network, size and
+  damping law; −100 dB or better against the DLL at 44.1/48/96 kHz, REA round 33).
 - **Harmor:** cutoff in log2 Hz (73.4 Hz–17.7 kHz) with keytracking from 130.81 Hz, filter types 0–18, part
   volume `(3^x − 1)/2` (up to +12 dB), level², filter envelope centred at 0.5 (±2·(hi − lo)·amt); exact timbre
   from the Timbre 1/2 curves, blend, local EQ (1/n) and per-harmonic phase; unison with FL's per-voice detune
@@ -120,8 +121,6 @@ accordingly. Highlights of what is **confirmed and applied**:
   fc·2^(p60/1200) with its own width (p59) and skirts (Classic −6 dB, Lowpass dip above), which the SVF cannot
   follow; Well, Noise, self-oscillation, Hz scale and adaptive width are left out; image/blur/prism/FX; with the volume envelope off FL keeps the note
   until it is stolen — LYNX uses a short declick release.
-- Effector: the Reverb's diffusion network and the role of Y are LYNX's (only FL's decay time is reproduced, within
-  the LYNX reverb's ≈ 0.6…10.5 s).
 - Sakura: mod wheel, pitch bend and channel pressure are 0 as matrix sources (LYNX sends no CCs to it); the LFO steps
   once per LYNX render block; with the resonators on the output is within −72 dB of the reference (their float32
   feedback amplifies rounding); strings longer than 9 600 samples (notes below ~20 Hz) are shortened.
