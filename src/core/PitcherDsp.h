@@ -244,12 +244,13 @@ public:
                 auto* A = amdf[c].data();
                 const auto* H = hist[c].data();
                 const auto h0 = histPos;
-                for (int k = 0, j = h0; k < N; ++k)
-                {
-                    A[k] += std::abs (H[j] - y);
-                    if (++j == N)
-                        j = 0;
-                }
+                // two contiguous runs of the ring (no wrap test inside): each A[k] still gets the same single
+                // addition, so the result is unchanged, and the loops vectorise
+                const auto first = N - h0;
+                for (int k = 0; k < first; ++k)
+                    A[k] += std::abs (H[h0 + k] - y);
+                for (int k = first; k < N; ++k)
+                    A[k] += std::abs (H[k - first] - y);
                 hist[c][(std::size_t) h0] = y;
                 sm[c] = freq[c] == 0.0f ? 0.0f : (target[c] - sm[c]) * speed + sm[c];
             }
