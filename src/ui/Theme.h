@@ -10,6 +10,8 @@
 namespace lynx::theme
 {
 // --- colours -----------------------------------------------------------------------------------
+// (aliases repeat the hex value: juce::Colour is not constexpr, and copying another inline
+// variable during static initialisation is not reliably ordered across translation units)
 namespace colour
 {
 // backgrounds by elevation (0 = deepest)
@@ -36,9 +38,9 @@ inline const juce::Colour accentMuted { 0xff5c1f24 };  // tinted backgrounds (ar
 inline const juce::Colour onAccent { 0xffffffff };     // text/icons drawn on the accent
 
 // semantic
-inline const juce::Colour selection { accent };                       // selected notes/clips outline
+inline const juce::Colour selection { 0xffe5383b }; // = accent: selected notes/clips outline
 inline const juce::Colour selectionFill { 0x2ee5383b };               // selection rectangles
-inline const juce::Colour playhead { accent };
+inline const juce::Colour playhead { 0xffe5383b }; // = accent
 inline const juce::Colour record { 0xffff3b3f };
 inline const juce::Colour automation { 0xff4cc9c0 };                   // automation curves and clips
 inline const juce::Colour info { 0xff6ea8fe };                         // secondary values (pan, links)
@@ -50,9 +52,10 @@ inline const juce::Colour meterMid { 0xfff5c542 };
 inline const juce::Colour meterClip { 0xffff3b3f };
 
 // step sequencer / editors
+inline const juce::Colour knobArc { 0xffc5c9d1 };     // rotary value arcs at rest (accent while touched)
 inline const juce::Colour stepOff { 0xff2a2d34 };
 inline const juce::Colour stepOffAlt { 0xff33363f };   // every other group of 4 steps
-inline const juce::Colour stepOn { accent };
+inline const juce::Colour stepOn { 0xffe5383b }; // = accent
 inline const juce::Colour stepNote { 0xffe8a3a6 };     // a step that only has a Piano Roll note
 inline const juce::Colour gridBar { 0xff3a3e47 };      // bar lines
 inline const juce::Colour gridBeat { 0xff262930 };     // beat lines
@@ -121,23 +124,39 @@ inline juce::Colour tame (juce::Colour c)
     return c.withMultipliedSaturation (0.8f).withBrightness (juce::jmin (c.getBrightness(), 0.72f));
 }
 
+// Upper case for small caption headers, including accented Latin letters (ã -> Ã), which the C
+// runtime's towupper leaves alone on Windows.
+inline juce::String caps (const juce::String& text)
+{
+    juce::String out;
+    for (auto c : text)
+    {
+        if ((c >= 0xe0 && c <= 0xfe && c != 0xf7))
+            c -= 0x20;
+        else
+            c = juce::CharacterFunctions::toUpperCase (c);
+        out += juce::String::charToString (c);
+    }
+    return out;
+}
+
 // Draws a rotary value arc in the LYNX style (used by custom-painted knobs too).
 void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arc, bool hover = false);
 
 // --- legacy names (kept so code written against the old palette keeps compiling) ---------------
-inline const juce::Colour window { colour::bg1 };
-inline const juce::Colour panel { colour::bg2 };
-inline const juce::Colour toolbar { colour::bg3 };
-inline const juce::Colour channelButton { colour::bg4 };
-inline const juce::Colour channelButtonSelected { colour::bg6 };
-inline const juce::Colour knobBackground { colour::bg0 };
-inline const juce::Colour stepOn { colour::stepOn };
-inline const juce::Colour stepOnOffGrid { colour::stepNote };
-inline const juce::Colour accentOrange { colour::accent };
-inline const juce::Colour accentGreen { colour::ledOn };
-inline const juce::Colour accentBlue { colour::info };
-inline const juce::Colour playhead { colour::playhead };
-inline const juce::Colour text { colour::textPrimary };
+inline const juce::Colour window { 0xff15161a }; // = colour::bg1
+inline const juce::Colour panel { 0xff1b1d22 }; // = colour::bg2
+inline const juce::Colour toolbar { 0xff23262c }; // = colour::bg3
+inline const juce::Colour channelButton { 0xff2c2f37 }; // = colour::bg4
+inline const juce::Colour channelButtonSelected { 0xff434852 }; // = colour::bg6
+inline const juce::Colour knobBackground { 0xff0e0f12 }; // = colour::bg0
+inline const juce::Colour stepOn { 0xffe5383b }; // = colour::stepOn
+inline const juce::Colour stepOnOffGrid { 0xffe8a3a6 }; // = colour::stepNote
+inline const juce::Colour accentOrange { 0xffe5383b }; // = colour::accent
+inline const juce::Colour accentGreen { 0xff3ddc84 }; // = colour::ledOn
+inline const juce::Colour accentBlue { 0xff6ea8fe }; // = colour::info
+inline const juce::Colour playhead { 0xffe5383b }; // = colour::playhead
+inline const juce::Colour text { 0xffeceef2 }; // = colour::textPrimary
 
 // --- LookAndFeel ---------------------------------------------------------------------------------
 class LookAndFeel final : public juce::LookAndFeel_V4

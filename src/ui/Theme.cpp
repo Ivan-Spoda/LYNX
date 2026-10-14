@@ -76,23 +76,25 @@ void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, 
     {
         juce::Path arc;
         arc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, juce::jmin (from, to), juce::jmax (from, to), true);
-        g.setColour (arcColour);
+        g.setColour (hover && arcColour == knobArc ? accent : arcColour);
         g.strokePath (arc, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
-    // body
-    const auto bodyRadius = arcRadius - thickness * 0.5f - juce::jmax (1.5f, size * 0.06f);
+    // body: a flat cap with a hairline rim, and a short pointer near the edge
+    const auto bodyRadius = juce::jmin (arcRadius - thickness * 0.5f - juce::jmax (1.5f, size * 0.07f), 22.0f);
     if (bodyRadius > 2.0f)
     {
-        g.setColour (hover ? bg6 : bg5);
-        g.fillEllipse (centre.x - bodyRadius, centre.y - bodyRadius, bodyRadius * 2.0f, bodyRadius * 2.0f);
+        const auto body = juce::Rectangle<float> (bodyRadius * 2.0f, bodyRadius * 2.0f).withCentre (centre);
+        g.setColour (hover ? bg5 : bg4);
+        g.fillEllipse (body);
+        g.setColour (bg6.withAlpha (0.7f));
+        g.drawEllipse (body.reduced (0.5f), 1.0f);
 
-        // pointer
-        const auto inner = bodyRadius * 0.25f;
-        const auto outer = bodyRadius * 0.92f;
+        const auto inner = bodyRadius * (bodyRadius > 8.0f ? 0.42f : 0.15f);
+        const auto outer = bodyRadius * 0.86f;
         g.setColour (textPrimary);
         g.drawLine (centre.x + std::sin (to) * inner, centre.y - std::cos (to) * inner, centre.x + std::sin (to) * outer,
-                    centre.y - std::cos (to) * outer, juce::jmax (1.5f, size * 0.06f));
+                    centre.y - std::cos (to) * outer, juce::jlimit (1.5f, 2.5f, size * 0.05f));
     }
 }
 
@@ -147,7 +149,7 @@ LookAndFeel::LookAndFeel()
     setColour (juce::Slider::backgroundColourId, bg0);
     setColour (juce::Slider::trackColourId, accent);
     setColour (juce::Slider::thumbColourId, textPrimary);
-    setColour (juce::Slider::rotarySliderFillColourId, accent);
+    setColour (juce::Slider::rotarySliderFillColourId, knobArc);
     setColour (juce::Slider::rotarySliderOutlineColourId, bg0);
     setColour (juce::Slider::textBoxTextColourId, textPrimary);
     setColour (juce::Slider::textBoxBackgroundColourId, bg0);
@@ -409,7 +411,7 @@ void LookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rec
 {
     g.setFont (uiFont (type::small, true));
     g.setColour (textSecondary);
-    g.drawFittedText (sectionName.toUpperCase(), area.reduced (14, 0).withTrimmedTop (4), juce::Justification::centredLeft, 1);
+    g.drawFittedText (caps (sectionName), area.reduced (14, 0).withTrimmedTop (4), juce::Justification::centredLeft, 1);
 }
 
 void LookAndFeel::drawMenuBarBackground (juce::Graphics& g, int width, int height, bool, juce::MenuBarComponent&)
