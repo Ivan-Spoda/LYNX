@@ -19,6 +19,10 @@
 
 #include "core/Inflate.h"
 
+#if defined(__SSE2__) || defined(_M_X64)
+ #include <emmintrin.h>
+#endif
+
 // the DLL rounds every float32 product and sum separately: no fused multiply-adds in this file
 #if defined(__clang__)
 #pragma clang fp contract(off)
@@ -43,9 +47,13 @@ inline double rne (double x) noexcept
 {
     if (! (std::abs (x) < 2251799813685248.0))
         return x;
+#if defined(__SSE2__) || defined(_M_X64)
+    return (double) _mm_cvtsd_si64 (_mm_set_sd (x)); // cvtsd2si: the MXCSR mode, round-to-nearest-even in LYNX and FL
+#else
     volatile double big = 6755399441055744.0; // not folded by the optimiser
     const double b = big;
     return (x + b) - b;
+#endif
 }
 inline long long rnd (double x) noexcept { return (long long) rne (x); }
 
@@ -913,6 +921,21 @@ std::vector<float> opWave (const UnitRaw& U, bool gibbs)
     }
     t[(std::size_t) kN] = t[0];
     return t;
+}
+
+// the noise LCG s ← s·0x08088405 + 1 advanced n steps at once (affine map squared)
+u32 lcgJump (u32 s, std::uint64_t n) noexcept
+{
+    u32 a = 0x08088405u, c = 1u, A = 1u, C = 0u;
+    while (n > 0)
+    {
+        if (n & 1)
+            A = A * a, C = C * a + c;
+        c = c * a + c;
+        a = a * a;
+        n >>= 1;
+    }
+    return A * s + C;
 }
 
 // uniform generator of the pluck excitation (FL's IPP ippsRandUniform_Direct_32f, generic path; §2.6)
@@ -2072,6 +2095,18 @@ struct Decim2
     void processCh (int c, double* x, int n2) noexcept
     {
         const auto n = n2 / 2;
+        if (ya[c][0] == 0 && ya[c][1] == 0 && ya[c][2] == 0 && yb[c][0] == 0 && yb[c][1] == 0 && yb[c][2] == 0 && xa[c][0] == 0
+            && xa[c][1] == 0 && xa[c][2] == 0 && xb[c][0] == 0 && xb[c][1] == 0 && xb[c][2] == 0)
+        {
+            bool zero = true;
+            for (int i = 0; i < n2 && zero; ++i)
+                zero = x[i] == 0.0;
+            if (zero) // zero in, zero states: zero out (exact)
+            {
+                std::fill (x, x + n, 0.0);
+                return;
+            }
+        }
         double a0 = ya[c][0], a1 = ya[c][1], a2 = ya[c][2], b0 = yb[c][0], b1 = yb[c][1], b2 = yb[c][2];
         double xa0 = xa[c][0], xa1 = xa[c][1], xa2 = xa[c][2], xb0 = xb[c][0], xb1 = xb[c][1], xb2 = xb[c][2];
         for (int i = 0; i < n; ++i)
@@ -2128,6 +2163,7 @@ struct DelayRec
 struct Delay
 {
     int mode = 0, D = 1, oL = 0, oR = 0, size = 1, rpos = 0;
+    long long zeroRun = 1 << 30; // consecutive zero ring reads (≥ size: the ring is empty)
     double fb = 0.0, gain = 0.0;
     bool toFx = false;
     std::vector<double> bl, br;
@@ -2160,6 +2196,8 @@ struct Delay
         const auto w = (rpos + D) % size;
         for (int i = 0; i < n; ++i)
         {
+            if (xl[i] != 0.0 || xr[i] != 0.0)
+                zeroRun = 0;
             bl[(std::size_t) ((w + oL + i) % size)] += xl[i];
             br[(std::size_t) ((w + oR + i) % size)] += xr[i];
         }
@@ -2170,11 +2208,17 @@ struct Delay
     {
         double s0, slope;
         ramp.block (fb, n, s0, slope);
+        if (zeroRun >= size) // the whole ring is zero: nothing to read, feed back or output
+        {
+            rpos = (rpos + n) % size;
+            return;
+        }
         auto r = rpos;
         for (int i = 0; i < n; ++i)
         {
             const auto f = s0 + slope * i;
             const auto a = bl[(std::size_t) r], b = br[(std::size_t) r];
+            zeroRun = (a == 0.0 && b == 0.0) ? zeroRun + 1 : 0;
             bl[(std::size_t) r] = 0.0, br[(std::size_t) r] = 0.0;
             const auto w = (r + D) % size;
             double yl, yr, fl, fr;
@@ -2211,6 +2255,7 @@ struct Chorus
     int maxdelay = 8;
     std::vector<double> hl, hr; // ring (power of two)
     int mask = 0, wpos = 0;
+    long long zeroRun = 1 << 30; // consecutive zero input samples
 
     void build (const int* p, double fxrate, int maxBlock)
     {
@@ -2279,6 +2324,14 @@ struct Chorus
         {
             hl[(std::size_t) ((wpos + i) & mask)] = xl[i];
             hr[(std::size_t) ((wpos + i) & mask)] = xr[i];
+            zeroRun = (xl[i] == 0.0 && xr[i] == 0.0) ? zeroRun + 1 : 0;
+        }
+        // every sample this block reads is zero: the output is exactly 0, only the LFOs move
+        if (zeroRun >= (long long) n + maxdelay + 2)
+        {
+            advance (n);
+            wpos = (wpos + n) & mask;
+            return;
         }
         for (auto& t : taps)
         {
@@ -2290,7 +2343,7 @@ struct Chorus
                 auto v = F (std::abs ((double) ((float) sp * t.p8)) - (double) t.p10);
                 v = F ((double) v * ((double) t.p9 - std::abs ((double) v)) + (double) t.p3);
                 ph = ph + t.inc;
-                const auto k = (int) std::floor ((double) v);
+                const auto k = (int) v; // (v ≥ P3 − P0 ≥ 8 > 0: truncation = floor)
                 const auto a = H[(std::size_t) ((wpos + i - k) & mask)], b = H[(std::size_t) ((wpos + i - k - 1) & mask)];
                 const auto smp = F (a) + (v - (float) k) * F (b - a);
                 yl[i] += (double) (smp * t.gl);
@@ -2420,6 +2473,8 @@ struct Reverb
     {
         const auto lcI = r[0], hcI = r[1], preI = r[2], room = r[3], dif = r[4], dec = r[5], dampI = r[6], col = r[7], wetI = r[8];
         const auto rate = (long long) fxrate;
+        this->rate = (int) rate;
+        quietIn = 0, lastPeak = 0.0, bypassed = false;
         const double lc = lcI == 19 ? 0.0 : (double) lcI;
         const double hc = hcI == 221 ? 0.0 : (double) hcI;
         const double damp = dampI == 221 ? 0.0 : (double) dampI;
@@ -2478,9 +2533,38 @@ struct Reverb
         s10 = s14 = s18 = s3c = s40 = s4c = s50 = s54 = s58 = 0.0;
     }
 
+    // after 2 s of zero input with an output below 1e-9 the tank is cleared and the unit stops working until the
+    // input comes back (the tail left is below −180 dB; the DLL keeps computing it)
+    long long quietIn = 0;
+    double lastPeak = 0.0;
+    bool bypassed = false;
+    int rate = 44100;
+
+    void clear() noexcept
+    {
+        for (auto& b : buf)
+            std::fill (b.begin(), b.end(), 0.0);
+        std::fill (pre.begin(), pre.end(), 0.0);
+        s10 = s14 = s18 = s3c = s40 = s4c = s50 = s54 = s58 = 0.0;
+    }
+
     // x: mono input; adds wet·output to (ol, or)
     void process (const double* xl, const double* xr, int n, double* ol, double* orr) noexcept
     {
+        bool inZero = true;
+        for (int s = 0; s < n && inZero; ++s)
+            inZero = xl[s] + xr[s] == 0.0;
+        quietIn = inZero ? quietIn + n : 0;
+        if (! inZero)
+            bypassed = false;
+        else if (! bypassed && quietIn > 2LL * rate && lastPeak < 1e-9)
+        {
+            bypassed = true;
+            clear();
+        }
+        if (bypassed)
+            return;
+        double peak = 0.0;
         auto ap = [&] (int i, double v, double c) {
             const auto p = pos[i];
             auto& B = buf[(std::size_t) i];
@@ -2554,7 +2638,9 @@ struct Reverb
                               + tap (10, tr[5]) + w70 * tap (11, tr[6]);
             ol[s] += outL * wet;
             orr[s] += outR * wet;
+            peak = std::max (peak, std::abs (outL * wet) + std::abs (outR * wet));
         }
+        lastPeak = peak;
     }
 };
 
@@ -2792,6 +2878,9 @@ struct Voice
     std::array<FiltV, 3> filts;
     Voice* slaves[18] {};
     int nslaves = 0;
+    u32 lcg = 0;                // the noise generator's position for this voice in the current block
+    Voice* lcgOwner = nullptr;  // grouped unison: slaves draw from their master's sequence
+    int noiseOps = 0;           // noise operators rendered per sample
 
     float out (int u, int k) const noexcept { return (float) arts[(std::size_t) (kArtBase[u] + k)].out; }
     bool artActive (int u, int k) const noexcept { return arts[(std::size_t) (kArtBase[u] + k)].active(); }
@@ -2919,7 +3008,10 @@ struct Engine::Impl
     float lastPitch = 0;
     std::vector<Voice> pool;
     std::vector<Voice*> act; // top-level voices in creation order (rendered last to first)
-    std::array<std::vector<float>, 6> opBuf, acc;
+    static constexpr int kBatch = 4; // voices rendered in lockstep (their per-sample chains interleave)
+    std::array<std::array<std::vector<float>, 6>, kBatch> opBufs;
+    std::array<std::vector<float>, 6>* ob = &opBufs[0]; // operator buffers of the voice being rendered
+    std::array<std::vector<float>, 6> acc;
     std::array<std::vector<float>, 3> fBuf;
     std::vector<float> xin, sh, gains;
     FiltScratch fw;
@@ -2929,6 +3021,8 @@ struct Engine::Impl
     std::uint64_t bandStamp = 0;
     Post post;
     long long fxTail = 0, tailLen = 0, silentOut = 0;
+    bool runningTime = false;
+    bool computeRunningTime() const noexcept;
     std::array<std::vector<float>, 6> overrides;
     std::array<std::vector<cd>, 6> overrideSpectrum;
 
@@ -2977,8 +3071,9 @@ struct Engine::Impl
             glfoOn[i] = d.lfoOn && (d.lfoFlags & 2) != 0;
             glfoPhase[i] = 0xC0000000u; // §4.5: the plugin-wide phase starts at ¾ cycle
         }
-        for (auto& b : opBuf)
-            b.assign ((std::size_t) maxSub + 4, 0.0f);
+        for (auto& set : opBufs)
+            for (auto& b : set)
+                b.assign ((std::size_t) maxSub + 4, 0.0f);
         for (auto& b : acc)
             b.assign ((std::size_t) maxSub + 4, 0.0f);
         for (auto& b : fBuf)
@@ -2995,6 +3090,7 @@ struct Engine::Impl
         // as the ring's length — the block term is inferred from EXEC: without it the chorus tail of demo channel 6 is
         // cut while the DLL's continues)
         silentOut = 0;
+        runningTime = computeRunningTime();
         tailLen = (long long) (fs * K * 100 / 44100) + (long long) (post.hasChorus ? post.chorusRing() + maxBlock * (1 << post.fo) : 0) * K / (1 << post.fo);
         fxTail = 0;
         // voice pool: 16 note groups of the patch's unison size (×2 with the sub layer), at least 32 voices
@@ -3549,6 +3645,10 @@ struct Engine::Impl
             else
                 o.dkC = 0.0f, o.dkI = F (1.0 / o.dkN), o.dkY = 0.0f;
         }
+        v.noiseOps = 0;
+        for (const auto& o : v.ops)
+            v.noiseOps += o.active && o.noiseOn ? 1 : 0;
+        v.lcgOwner = nullptr;
         v.tcnt = -tick;
         v.state = 1;
     }
@@ -3708,7 +3808,23 @@ struct Engine::Impl
 
     void renderOps (Voice& v, int m)
     {
-        int ps[6], nps = 0;
+        int ps[6];
+        const auto nps = prepOps (v, ps);
+        if (nps > 0)
+        {
+            Voice* vs[1] { &v };
+            const int* pss[1] { ps };
+            std::array<std::vector<float>, 6>* bufs[1] { ob };
+            u32* lcgs[1] { v.lcgOwner != nullptr ? &v.lcgOwner->lcg : &v.lcg };
+            perSample (vs, 1, pss, nps, m, bufs, lcgs);
+        }
+        finishOps (v, m);
+    }
+
+    // per sub-block operator set-up: frequency, table, increment, phase wrap; returns the per-sample list
+    int prepOps (Voice& v, int* ps)
+    {
+        int nps = 0;
         for (int u = 0; u < 6; ++u)
         {
             auto& o = v.ops[(std::size_t) u];
@@ -3738,13 +3854,16 @@ struct Engine::Impl
             else
                 o.phi = o.phi + (double) (1 - rnd (o.phi * invN)) * N;
         }
-        if (nps > 0)
-            perSample (v, ps, nps, m);
+        return nps;
+    }
+
+    void finishOps (Voice& v, int m)
+    {
         for (int u = 0; u < 6; ++u)
         {
             auto& o = v.ops[(std::size_t) u];
             if (o.active && ! o.persample)
-                blockOp (o, opBuf[(std::size_t) u].data(), m);
+                blockOp (o, (*ob)[(std::size_t) u].data(), m);
         }
     }
 
@@ -3794,70 +3913,113 @@ struct Engine::Impl
 
     // per-sample operators in index order (FUN_00870580; x87 intermediates modelled in double). The running values
     // live in local arrays for the sub-block (no aliasing with the output buffers), written back at the end.
-    void perSample (Voice& v, const int* ps, int nps, int m)
+    // nv voices of the same patch (same per-sample list) in lockstep: their dependency chains interleave
+    void perSample (Voice* const* vs, int nv, const int* const* pss, int nps, int m, std::array<std::vector<float>, 6>* const* bufs,
+                    u32* const* lcgs)
     {
-        auto& ops = v.ops;
-        double phi[6], inc[6];
-        float fmacc[6], rmacc[6], mod[6], cur[6];
-        for (int u = 0; u < 6; ++u)
+        struct K
         {
-            const auto& o = ops[(std::size_t) u];
-            phi[u] = o.phi, inc[u] = (double) o.inc;
-            fmacc[u] = o.fmacc, rmacc[u] = o.rmacc, mod[u] = o.mod, cur[u] = o.curVol;
-        }
-        float* out[6];
-        for (int u = 0; u < 6; ++u)
-            out[u] = opBuf[(std::size_t) u].data();
-        for (int k = 0; k < m; ++k)
+            const float* t;
+            float* out;
+            OpV* op;
+            int u, mask, nrm, nfm;
+            bool pluck, noise;
+            double n10c, n108, n110, modInc, volInc;
+            int rmT[6], fmT[6];
+            double rmA[6], rmB[6], fmAmt[6];
+        };
+        struct S
+        {
+            double phi[6], inc[6];
+            float fmacc[6], rmacc[6], mod[6], cur[6];
+            u32 lcg;
+            K k[6];
+        } st[kBatch];
+        for (int j = 0; j < nv; ++j)
+        {
+            auto& ops = vs[j]->ops;
+            auto& s = st[j];
+            for (int u = 0; u < 6; ++u)
+            {
+                const auto& o = ops[(std::size_t) u];
+                s.phi[u] = o.phi, s.inc[u] = (double) o.inc;
+                s.fmacc[u] = o.fmacc, s.rmacc[u] = o.rmacc, s.mod[u] = o.mod, s.cur[u] = o.curVol;
+            }
+            s.lcg = *lcgs[j];
             for (int q = 0; q < nps; ++q)
             {
-                const auto u = ps[q];
+                const auto u = pss[j][q];
                 auto& o = ops[(std::size_t) u];
-                double w;
-                if (o.pluck)
-                    w = pluckSampleD (o);
-                else
-                {
-                    const auto fmod = (double) fmacc[u] * (double) mod[u];
-                    const auto ph = phi[u];
-                    phi[u] = inc[u] + ph;
-                    const auto x = ph + fmod;
-                    fmacc[u] = 0.0f;
-                    const auto fl = rne (x - 0.5);
-                    const auto i = (int) ((long long) fl & (o.N - 1));
-                    const auto t0 = (double) o.table[i];
-                    w = t0 + ((double) o.table[i + 1] - t0) * (x - fl);
-                }
-                if (o.noiseOn)
-                {
-                    noise = noise * 0x8088405u + 1u;
-                    w = w * (double) o.n10c + ((double) noise * (double) o.n108 - (double) o.n110);
-                }
-                const auto prev = (double) rmacc[u];
-                const auto md = mod[u];
-                rmacc[u] = md;
-                mod[u] = F ((double) md + (double) o.modInc);
-                w = ((1.0 + prev) - (double) md) * w;
+                auto& c = s.k[q];
+                c.t = o.table, c.out = (*bufs[j])[(std::size_t) u].data(), c.op = &o, c.u = u, c.mask = o.N - 1;
+                c.nrm = o.nrm, c.nfm = o.nfm, c.pluck = o.pluck, c.noise = o.noiseOn;
+                c.n10c = o.n10c, c.n108 = o.n108, c.n110 = o.n110, c.modInc = o.modInc, c.volInc = o.volInc;
                 for (int r = 0; r < o.nrm; ++r)
-                {
-                    const auto t = o.rmT[r];
-                    rmacc[t] = F (((double) o.rmA[r] * w + (double) o.rmB[r]) * (double) rmacc[t]);
-                }
-                const auto vv = (double) cur[u] + (double) o.volInc;
-                w = w * vv;
-                cur[u] = (float) vv;
-                out[u][k] = (float) w;
+                    c.rmT[r] = o.rmT[r], c.rmA[r] = o.rmA[r], c.rmB[r] = o.rmB[r];
                 for (int f = 0; f < o.nfm; ++f)
+                    c.fmT[f] = o.fmT[f], c.fmAmt[f] = o.fmAmt[f];
+            }
+        }
+        for (int k = 0; k < m; ++k)
+            for (int j = 0; j < nv; ++j)
+            {
+                auto& s = st[j];
+                for (int q = 0; q < nps; ++q)
                 {
-                    const auto t = o.fmT[f];
-                    fmacc[t] = F ((double) o.fmAmt[f] * w + (double) fmacc[t]);
+                    const auto& c = s.k[q];
+                    const auto u = c.u;
+                    double w;
+                    if (c.pluck)
+                        w = pluckSampleD (*c.op);
+                    else
+                    {
+                        const auto fmod = (double) s.fmacc[u] * (double) s.mod[u];
+                        const auto ph = s.phi[u];
+                        s.phi[u] = s.inc[u] + ph;
+                        const auto x = ph + fmod;
+                        s.fmacc[u] = 0.0f;
+                        const auto fl = rne (x - 0.5);
+                        const auto i = (int) ((long long) fl & c.mask);
+                        const auto t0 = (double) c.t[i];
+                        w = t0 + ((double) c.t[i + 1] - t0) * (x - fl);
+                    }
+                    if (c.noise)
+                    {
+                        s.lcg = s.lcg * 0x8088405u + 1u;
+                        w = w * c.n10c + ((double) s.lcg * c.n108 - c.n110);
+                    }
+                    const auto prev = (double) s.rmacc[u];
+                    const auto md = s.mod[u];
+                    s.rmacc[u] = md;
+                    s.mod[u] = F ((double) md + c.modInc);
+                    w = ((1.0 + prev) - (double) md) * w;
+                    for (int r = 0; r < c.nrm; ++r)
+                    {
+                        const auto t = c.rmT[r];
+                        s.rmacc[t] = F ((c.rmA[r] * w + c.rmB[r]) * (double) s.rmacc[t]);
+                    }
+                    const auto vv = (double) s.cur[u] + c.volInc;
+                    w = w * vv;
+                    s.cur[u] = (float) vv;
+                    c.out[k] = (float) w;
+                    for (int f = 0; f < c.nfm; ++f)
+                    {
+                        const auto t = c.fmT[f];
+                        s.fmacc[t] = F (c.fmAmt[f] * w + (double) s.fmacc[t]);
+                    }
                 }
             }
-        for (int u = 0; u < 6; ++u)
+        for (int j = 0; j < nv; ++j)
         {
-            auto& o = ops[(std::size_t) u];
-            o.phi = phi[u];
-            o.fmacc = fmacc[u], o.rmacc = rmacc[u], o.mod = mod[u], o.curVol = cur[u];
+            auto& ops = vs[j]->ops;
+            const auto& s = st[j];
+            *lcgs[j] = s.lcg;
+            for (int u = 0; u < 6; ++u)
+            {
+                auto& o = ops[(std::size_t) u];
+                o.phi = s.phi[u];
+                o.fmacc = s.fmacc[u], o.rmacc = s.rmacc[u], o.mod = s.mod[u], o.curVol = s.cur[u];
+            }
         }
     }
 
@@ -3897,7 +4059,7 @@ struct Engine::Impl
             auto& o = v.ops[(std::size_t) u];
             if (! o.active)
                 continue;
-            auto* x = opBuf[(std::size_t) u].data();
+            auto* x = (*ob)[(std::size_t) u].data();
             if (o.dc)
             {
                 auto s_ = o.dcs, v_ = o.dcv;
@@ -3931,7 +4093,7 @@ struct Engine::Impl
         {
             auto& o = v.ops[(std::size_t) u];
             if (o.active && o.outGain != 0.0f)
-                mix (v, opBuf[(std::size_t) u].data(), Ml.data() + pos, Mr.data() + pos, m, o.pL, o.L, o.pR, o.R);
+                mix (v, (*ob)[(std::size_t) u].data(), Ml.data() + pos, Mr.data() + pos, m, o.pL, o.L, o.pR, o.R);
         }
         for (int k = 0; k < 3; ++k)
         {
@@ -3943,7 +4105,7 @@ struct Engine::Impl
         {
             auto& o = v.ops[(std::size_t) u];
             if (o.active && o.fxGain != 0.0f)
-                mix (v, opBuf[(std::size_t) u].data(), Fl.data() + pos, Fr.data() + pos, m, o.pFL, o.FL, o.pFR, o.FR);
+                mix (v, (*ob)[(std::size_t) u].data(), Fl.data() + pos, Fr.data() + pos, m, o.pFL, o.FL, o.pFR, o.FR);
         }
         for (int k = 0; k < 3; ++k)
         {
@@ -3991,7 +4153,7 @@ struct Engine::Impl
             for (int i = 0; i < f.nin; ++i)
             {
                 const auto j = f.inSrc[i];
-                const float* src = j < 6 ? opBuf[(std::size_t) j].data() : fBuf[(std::size_t) (j - 6)].data();
+                const float* src = j < 6 ? (*ob)[(std::size_t) j].data() : fBuf[(std::size_t) (j - 6)].data();
                 const auto g = f.inG[i];
                 if (i == 0)
                     for (int s = 0; s < m; ++s)
@@ -4078,18 +4240,66 @@ struct Engine::Impl
             q += m;
             v.tcnt -= m;
         }
-        if (v.state >= 9)
+        endCheck (v);
+    }
+
+    void endCheck (Voice& v) noexcept
+    {
+        if (v.state < 9)
+            return;
+        bool silent = true;
+        for (const auto& o : v.ops)
+            if (o.active && ((o.outGain != 0 && (o.pL != 0 || o.pR != 0)) || (o.fxGain != 0 && (o.pFL != 0 || o.pFR != 0))))
+                silent = false;
+        for (const auto& f : v.filts)
+            if (f.active && ((f.outGain != 0 && (f.pL != 0 || f.pR != 0)) || (f.fxGain != 0 && (f.pFL != 0 || f.pFR != 0))))
+                silent = false;
+        if (silent)
+            v.state = 10;
+    }
+
+    // voices on the same tick grid rendered sub-block by sub-block together (same results as one after the other:
+    // per sample, each voice's contributions are still added to the buses in render order)
+    void renderBatch (Voice* const* vs, int nb, int n)
+    {
+        int q = 0;
+        while (q < n)
         {
-            bool silent = true;
-            for (const auto& o : v.ops)
-                if (o.active && ((o.outGain != 0 && (o.pL != 0 || o.pR != 0)) || (o.fxGain != 0 && (o.pFL != 0 || o.pFR != 0))))
-                    silent = false;
-            for (const auto& f : v.filts)
-                if (f.active && ((f.outGain != 0 && (f.pL != 0 || f.pR != 0)) || (f.fxGain != 0 && (f.pFL != 0 || f.pFR != 0))))
-                    silent = false;
-            if (silent)
-                v.state = 10;
+            if (vs[0]->tcnt <= 0)
+                for (int j = 0; j < nb; ++j)
+                {
+                    auto& v = *vs[j];
+                    const auto first = v.tcnt < 0;
+                    v.tcnt = v.tick;
+                    tickVoice (v, first);
+                }
+            const auto m = std::min (vs[0]->tcnt, n - q);
+            int ps[kBatch][6];
+            const int* pss[kBatch];
+            std::array<std::vector<float>, 6>* bufs[kBatch];
+            u32* lcgs[kBatch];
+            int nps = 0;
+            for (int j = 0; j < nb; ++j)
+            {
+                ob = &opBufs[(std::size_t) j];
+                nps = prepOps (*vs[j], ps[j]);
+                pss[j] = ps[j], bufs[j] = ob, lcgs[j] = &vs[j]->lcg;
+            }
+            if (nps > 0)
+                perSample (vs, nb, pss, nps, m, bufs, lcgs);
+            for (int j = 0; j < nb; ++j)
+            {
+                ob = &opBufs[(std::size_t) j];
+                finishOps (*vs[j], m);
+                postOps (*vs[j], m, q);
+            }
+            ob = &opBufs[0];
+            q += m;
+            for (int j = 0; j < nb; ++j)
+                vs[j]->tcnt -= m;
         }
+        for (int j = 0; j < nb; ++j)
+            endCheck (*vs[j]);
     }
 
     void renderSub (Voice& v, int m, int pos)
@@ -4106,7 +4316,7 @@ struct Engine::Impl
                     if (! sv.ops[(std::size_t) u].active)
                         continue;
                     auto* a = acc[(std::size_t) u].data();
-                    const auto* b = opBuf[(std::size_t) u].data();
+                    const auto* b = (*ob)[(std::size_t) u].data();
                     if (sv.slot6)
                         for (int k = 0; k < m; ++k)
                             a[k] = a[k] + b[k] * sv.w34;
@@ -4121,7 +4331,7 @@ struct Engine::Impl
                 if (! v.ops[(std::size_t) u].active)
                     continue;
                 auto* a = acc[(std::size_t) u].data();
-                auto* b = opBuf[(std::size_t) u].data();
+                auto* b = (*ob)[(std::size_t) u].data();
                 for (int k = 0; k < m; ++k)
                     b[k] = a[k] + b[k] * v.w34;
             }
@@ -4283,6 +4493,7 @@ struct Engine::Impl
                 sv->w34 = sv->uvol;
                 sv->slot6 = j > 1;
                 sv->isSlave = true;
+                sv->lcgOwner = master;
                 master->slaves[master->nslaves++] = sv;
             }
             act.push_back (master);
@@ -4325,6 +4536,9 @@ struct Engine::Impl
         std::fill (Fl.begin(), Fl.begin() + nv, 0.0f);
         std::fill (Fr.begin(), Fr.begin() + nv, 0.0f);
         const bool link = P->S.b4f7at (5) != 0; // the plugin does not send "link velocity off" (§1.3)
+        // the voices draw from the noise generator one after the other (last to first, a whole block each): each
+        // voice's start in the sequence is known in advance, so voices can be rendered in lockstep
+        auto seq = noise;
         for (auto it = act.rbegin(); it != act.rend(); ++it)
         {
             auto& v = **it;
@@ -4333,7 +4547,36 @@ struct Engine::Impl
             v.fpan = finalPan + v.notePan;
             for (int s = 0; s < v.nslaves; ++s)
                 v.slaves[s]->fvol = fv, v.slaves[s]->fpan = v.fpan;
-            renderVoice (v, nv);
+            if (v.state >= 10)
+                continue;
+            v.lcg = seq;
+            auto draws = v.noiseOps;
+            for (int s = 0; s < v.nslaves; ++s)
+                draws += v.slaves[s]->noiseOps;
+            seq = lcgJump (seq, (std::uint64_t) nv * (std::uint64_t) draws);
+        }
+        noise = seq;
+        for (std::size_t i = act.size(); i > 0;)
+        {
+            // a batch: consecutive voices (render order) on the same tick grid, without unison slaves
+            Voice* batch[kBatch];
+            int nb = 0;
+            while (i > 0 && nb < kBatch)
+            {
+                auto* v = act[i - 1];
+                const bool fits = v->nslaves == 0 && v->state < 10 && ! (v->tcnt < 0 && v->gridTcnt > 0)
+                                  && (nb == 0 || (v->tcnt == batch[0]->tcnt && v->tick == batch[0]->tick));
+                if (! fits)
+                    break;
+                batch[nb++] = v;
+                --i;
+            }
+            if (nb >= 2)
+                renderBatch (batch, nb, nv);
+            else if (nb == 1)
+                renderVoice (*batch[0], nv);
+            else
+                renderVoice (*act[--i], nv);
         }
         const bool anyVoice = ! act.empty();
         for (auto it = act.begin(); it != act.end();)
@@ -4497,15 +4740,17 @@ bool Engine::idle() const noexcept { return impl->P == nullptr || (impl->act.emp
 
 int Engine::activeVoices() const noexcept { return (int) impl->act.size(); }
 
-bool Engine::followsRunningTime() const noexcept
+bool Engine::followsRunningTime() const noexcept { return impl->runningTime; }
+
+bool Engine::Impl::computeRunningTime() const noexcept
 {
-    if (impl->P == nullptr)
+    if (P == nullptr)
         return false;
     for (int i = 0; i < kNumArts; ++i)
-        if (impl->glfoOn[i])
+        if (glfoOn[i])
             return true;
     for (int u = 0; u < 6; ++u)
-        if (! impl->P->wave[(std::size_t) u].empty() && impl->P->S.units[(std::size_t) u].op[0x823] != 0)
+        if (! P->wave[(std::size_t) u].empty() && P->S.units[(std::size_t) u].op[0x823] != 0)
             return true;
     return false;
 }

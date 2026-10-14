@@ -111,7 +111,9 @@ int main (int argc, char** argv)
     constexpr int sampleRate = 44100;
     constexpr int blockSize = 256;
     const auto tps = lynx::ticksPerSample (song.bpm, sampleRate);
-    const auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
+    auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
+    if (const char* s = std::getenv ("LYNX_SECONDS"); s != nullptr && std::atof (s) > 0) // benchmark: render only the start
+        totalSamples = std::min (totalSamples, (std::size_t) (std::atof (s) * sampleRate));
 
     std::printf ("%.1f BPM, %zu channels, pattern \"%s\" (%zu notes), %d loops, %.1f s\n", song.bpm,
                  song.channels.size(), pattern.name.c_str(), pattern.notes.size(), loops,
