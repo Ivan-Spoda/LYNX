@@ -5,6 +5,7 @@
 #include "ui/ChannelSettings.h"
 
 #include "engine/Text.h"
+#include "ui/I18n.h"
 #include "ui/BrowserComponent.h"
 
 #include "ui/PluginWindow.h"
@@ -14,6 +15,7 @@ namespace lynx
 {
 namespace
 {
+// English name (used for new channel names stored in the song)
 juce::String instrumentName (InstrumentKind k)
 {
     switch (k)
@@ -24,7 +26,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::clap: return "Clap";
         case InstrumentKind::synth: return "Synth";
         case InstrumentKind::sampler: return "Sampler";
-        case InstrumentKind::audioClip: return utf8 ("Audio clip");
+        case InstrumentKind::audioClip: return "Audio clip";
         case InstrumentKind::plugin: return "Plugin";
         case InstrumentKind::controller: return "Controller";
         case InstrumentKind::sakura: return "Sakura";
@@ -36,6 +38,23 @@ juce::String instrumentName (InstrumentKind k)
     return "?";
 }
 
+// name shown in menus (translated)
+juce::String instrumentLabel (InstrumentKind k)
+{
+    switch (k)
+    {
+        case InstrumentKind::kick: return tr ("Kick");
+        case InstrumentKind::snare: return tr ("Snare");
+        case InstrumentKind::hat: return tr ("Hat");
+        case InstrumentKind::clap: return tr ("Clap");
+        case InstrumentKind::synth: return tr ("Synth");
+        case InstrumentKind::sampler: return tr ("Sampler");
+        case InstrumentKind::audioClip: return tr ("Audio clip");
+        case InstrumentKind::controller: return tr ("Controller");
+        default: return instrumentName (k);
+    }
+}
+
 constexpr InstrumentKind builtInKinds[] = { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat,
                                             InstrumentKind::clap, InstrumentKind::synth };
 
@@ -45,30 +64,6 @@ void setStep (Pattern& p, int channel, int step, bool on)
         p.toggleStep (channel, step);
 }
 
-void drawKnob (juce::Graphics& g, juce::Rectangle<float> r, float value01, bool bipolar, juce::Colour colour)
-{
-    const auto size = juce::jmin (r.getWidth(), r.getHeight()) - 6.0f;
-    const auto area = r.withSizeKeepingCentre (size, size);
-    const auto centre = area.getCentre();
-    const auto radius = size / 2.0f;
-    constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
-    constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
-
-    g.setColour (theme::knobBackground);
-    g.fillEllipse (area);
-
-    const auto from = bipolar ? start + range * 0.5f : start;
-    const auto to = start + range * value01;
-    juce::Path arc;
-    arc.addCentredArc (centre.x, centre.y, radius - 1.5f, radius - 1.5f, 0.0f, juce::jmin (from, to), juce::jmax (from, to), true);
-    g.setColour (colour);
-    g.strokePath (arc, juce::PathStrokeType (2.5f));
-
-    // JUCE angles: 0 = 12 o'clock, clockwise
-    const auto length = radius - 3.0f;
-    g.setColour (juce::Colours::white);
-    g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * length, centre.y - std::cos (to) * length, 1.5f);
-}
 } // namespace
 
 ChannelRackComponent::ChannelRackComponent (AudioEngine& e)
@@ -155,7 +150,8 @@ bool ChannelRackComponent::cellHasNote (int channel, int step) const
 
 void ChannelRackComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel);
+    using namespace theme::colour;
+    g.fillAll (bg2);
 
     const auto& song = engine.getSong();
 
@@ -166,7 +162,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
     const auto steps = numSteps();
     const auto clip = g.getClipBounds();
     const auto selected = engine.getSelectedChannel();
-    g.setFont (juce::FontOptions (14.0f));
+    g.setFont (theme::font (theme::type::body));
 
     for (int row = 0; row < (int) song.channels.size(); ++row)
     {
@@ -178,47 +174,54 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         const auto& channel = song.channels[(std::size_t) row];
         const auto nameArea = juce::Rectangle<float> ((float) nameLeft(), (float) y + 3, (float) nameWidth, (float) rowHeight - 6);
 
-        g.setColour (theme::muteLed (channel.muted));
-        g.fillEllipse ((float) 9, (float) y + rowHeight / 2.0f - 5, 10, 10);
+        if (row == selected) // the whole row is subtly lifted
+        {
+            g.setColour (bg3);
+            g.fillRect (0, y + 1, getWidth(), rowHeight - 2);
+        }
 
-        drawKnob (g, { (float) muteWidth, (float) y, (float) knobWidth, (float) rowHeight }, (channel.pan + 1.0f) / 2.0f,
-                  true, theme::accentBlue);
-        drawKnob (g, { (float) muteWidth + knobWidth, (float) y, (float) knobWidth, (float) rowHeight }, channel.volume,
-                  false, theme::accentGreen);
+        g.setColour (theme::muteLed (channel.muted));
+        g.fillEllipse ((float) 9, (float) y + rowHeight / 2.0f - 4.5f, 9, 9);
+
+        theme::drawKnob (g, juce::Rectangle<float> ((float) muteWidth, (float) y, (float) knobWidth, (float) rowHeight).reduced (1.0f, 2.0f),
+                         (channel.pan + 1.0f) / 2.0f, true, info);
+        theme::drawKnob (g, juce::Rectangle<float> ((float) muteWidth + knobWidth, (float) y, (float) knobWidth, (float) rowHeight).reduced (1.0f, 2.0f),
+                         channel.volume, false, knobArc);
 
         // small box with the mixer insert ("-" = straight to Master), as in FL
         const auto routeArea = juce::Rectangle<float> ((float) (muteWidth + 2 * knobWidth) + 1, (float) y + 7,
                                                        (float) routeWidth - 3, (float) rowHeight - 14);
-        g.setColour (theme::knobBackground);
-        g.fillRoundedRectangle (routeArea, 3.0f);
-        g.setColour (channel.mixerTrack > 0 ? theme::accentOrange : theme::text.withAlpha (0.5f));
-        g.setFont (juce::FontOptions (12.0f));
+        g.setColour (bg0);
+        g.fillRoundedRectangle (routeArea, theme::radius::sm);
+        g.setColour (channel.mixerTrack > 0 ? textPrimary : textDisabled);
+        g.setFont (theme::font (theme::type::caption, true));
         g.drawText (channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
                     juce::Justification::centred);
-        g.setFont (juce::FontOptions (14.0f));
+        g.setFont (theme::font (theme::type::body));
 
-        // channel colour (from the .flp or user-picked) blended into the button, as in FL
-        auto button = row == selected ? theme::channelButtonSelected : theme::channelButton;
-        if (channel.colour != 0)
-            button = button.interpolatedWith (juce::Colour (channel.colour), 0.55f);
-        g.setColour (button);
-        g.fillRoundedRectangle (nameArea, 4.0f);
+        // name button: neutral surface with the channel colour (from the .flp or user-picked) as a strip
+        g.setColour (row == selected ? bg6 : bg4);
+        g.fillRoundedRectangle (nameArea, theme::radius::md);
 
         if (row == selected)
         {
-            g.setColour (theme::accentOrange);
-            g.fillRoundedRectangle (nameArea.withWidth (4.0f), 2.0f);
+            g.setColour (accent);
+            g.drawRoundedRectangle (nameArea.reduced (0.5f), theme::radius::md, 1.0f);
         }
 
-        g.setColour (channel.muted ? juce::Colours::grey : juce::Colours::white);
-        g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.reduced (10, 0).toNearestInt(),
+        g.setColour (channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : bg6.brighter (0.2f));
+        g.fillRoundedRectangle (nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f);
+
+        g.setColour (channel.muted ? textDisabled : textPrimary);
+        g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
                     juce::Justification::centredLeft, true);
 
         if (channel.instrument == InstrumentKind::audioClip)
         {
-            g.setColour (theme::text.withAlpha (0.35f));
-            g.drawText (utf8 ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
-            g.setFont (juce::FontOptions (14.0f));
+            g.setColour (textDisabled);
+            g.setFont (theme::font (theme::type::small));
+            g.drawText (tr ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
+            g.setFont (theme::font (theme::type::body));
             continue;
         }
 
@@ -232,20 +235,32 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             const auto onGrid = pattern.hasStep (row, step);
             const auto any = onGrid || cellHasNote (row, step);
 
-            g.setColour (any ? (onGrid ? theme::stepOn : theme::stepOnOffGrid) : theme::stepOff (step));
-            g.fillRoundedRectangle (r.toFloat(), 3.0f);
+            g.setColour (any ? (onGrid ? stepOn : stepNote) : theme::stepOff (step));
+            g.fillRoundedRectangle (r.toFloat(), theme::radius::sm);
         }
     }
 
     const auto addY = 4 + (int) song.channels.size() * rowHeight;
-    g.setColour (juce::Colours::white.withAlpha (0.5f));
-    g.drawText (utf8 ("+ add channel (or drop an audio file)"), nameLeft() + 2, addY,
-                400, rowHeight, juce::Justification::centredLeft);
+    {
+        const auto addArea = juce::Rectangle<float> ((float) nameLeft(), (float) addY + 3, (float) nameWidth, (float) rowHeight - 6);
+        const float dash[] = { 3.0f, 3.0f };
+        juce::Path outline, dashed;
+        outline.addRoundedRectangle (addArea.reduced (0.5f), theme::radius::md);
+        juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dash, 2);
+        g.setColour (borderStrong);
+        g.fillPath (dashed);
+        g.setColour (textSecondary);
+        g.setFont (theme::font (theme::type::small));
+        g.drawText (tr ("+ add channel"), addArea.toNearestInt(), juce::Justification::centred);
+        g.setColour (textDisabled);
+        g.drawText (tr ("or drop an audio file here"), gridLeft() + 4, addY, 400, rowHeight, juce::Justification::centredLeft);
+    }
 
     if (playheadStep >= 0 && playheadStep < steps)
     {
-        g.setColour (theme::playhead.withAlpha (0.35f));
-        g.fillRect (gridLeft() + playheadStep * stepWidth, 0, stepWidth - 2, addY);
+        g.setColour (playhead.withAlpha (0.28f));
+        g.fillRoundedRectangle (juce::Rectangle<float> ((float) (gridLeft() + playheadStep * stepWidth), 2.0f, (float) stepWidth - 2.0f,
+                                                        (float) addY - 2.0f), theme::radius::sm);
     }
 }
 
@@ -417,12 +432,12 @@ void ChannelRackComponent::showChannelMenu (int channel)
     juce::PopupMenu instruments;
 
     for (auto kind : builtInKinds)
-        instruments.addItem (instrumentName (kind), true, c.instrument == kind, [this, channel, kind] {
+        instruments.addItem (instrumentLabel (kind), true, c.instrument == kind, [this, channel, kind] {
             engine.editSong ([channel, kind] (Song& s) { s.channels[(std::size_t) channel].instrument = kind; });
         });
 
     instruments.addSeparator();
-    instruments.addItem ("Sampler (choose file)...", [this, channel] { chooseSample (channel); });
+    instruments.addItem (tr ("Sampler (choose file)..."), [this, channel] { chooseSample (channel); });
 
     juce::PopupMenu plugins;
     addPluginItems (plugins, engine, true, [this, channel] (PluginRef ref) {
@@ -434,42 +449,42 @@ void ChannelRackComponent::showChannelMenu (int channel)
         });
         openPluginWindow (channel);
     });
-    instruments.addSubMenu ("Plugin (VST3/CLAP)", plugins);
+    instruments.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
 
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
 
     if (c.instrument == InstrumentKind::sampler)
     {
-        menu.addItem (juce::String ("Sample: ") + juce::File (juce::String::fromUTF8 (c.samplePath.c_str())).getFileName(),
+        menu.addItem (tr ("Sample: {0}", { juce::File (juce::String::fromUTF8 (c.samplePath.c_str())).getFileName() }),
                       false, false, [] {});
-        menu.addItem (utf8 ("Sampler settings (pitch, envelope, reverse)..."),
+        menu.addItem (tr ("Sampler settings (pitch, envelope, reverse)..."),
                       [this, channel] { openChannelSettings (engine, channel); });
 
         if (c.sampler.slices.empty())
-            menu.addItem (utf8 ("Slice sample (slicer): one slice per key and a pattern with the loop"), [this, channel] { sliceChannel (channel); });
+            menu.addItem (tr ("Slice sample (slicer): one slice per key and a pattern with the loop"), [this, channel] { sliceChannel (channel); });
         else
-            menu.addItem (utf8 ("Undo slices (") + juce::String ((int) c.sampler.slices.size()) + ")", [this, channel] {
+            menu.addItem (tr ("Undo slices ({0})", { juce::String ((int) c.sampler.slices.size()) }), [this, channel] {
                 engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].sampler.slices.clear(); });
             });
     }
 
     if (c.instrument == InstrumentKind::synth)
-        menu.addItem (utf8 ("Synth settings (oscillators, envelope, filter)..."), [this, channel] { openChannelSettings (engine, channel); });
+        menu.addItem (tr ("Synth settings (oscillators, envelope, filter)..."), [this, channel] { openChannelSettings (engine, channel); });
 
     if (c.instrument == InstrumentKind::plugin)
     {
-        menu.addItem (utf8 ("Open plugin editor"), [this, channel] { openPluginWindow (channel); });
+        menu.addItem (tr ("Open plugin editor"), [this, channel] { openPluginWindow (channel); });
 
         if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
             addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::channelParam, channel, 0, 0 });
     }
 
-    menu.addItem ("Piano Roll", [this] {
+    menu.addItem (tr ("Piano Roll"), [this] {
         if (onOpenPianoRoll)
             onOpenPianoRoll();
     });
-    menu.addSubMenu ("Instrument", instruments);
+    menu.addSubMenu (tr ("Instrument"), instruments);
     {
         // channel arpeggiator
         const auto arp = c.arp;
@@ -477,21 +492,21 @@ void ChannelRackComponent::showChannelMenu (int channel)
             engine.editSong ([channel, change] (Song& s) { change (s.channels[(std::size_t) channel].arp); });
         };
         juce::PopupMenu arpMenu;
-        const char* directions[] = { "Off", "Up", "Down", "Up and down", "Random" };
+        const char* directions[] = { TR_NOOP ("Off"), TR_NOOP ("Up"), TR_NOOP ("Down"), TR_NOOP ("Up and down"), TR_NOOP ("Random") };
 
         for (int d = 0; d < 5; ++d)
-            arpMenu.addItem (utf8 (directions[d]), true, arp.direction == d, [set, d] { set ([d] (ArpSettings& a) { a.direction = d; }); });
+            arpMenu.addItem (tr (directions[d]), true, arp.direction == d, [set, d] { set ([d] (ArpSettings& a) { a.direction = d; }); });
 
         arpMenu.addSeparator();
         juce::PopupMenu range, speed, gate, repeat;
 
         for (int o = 1; o <= 4; ++o)
-            range.addItem (juce::String (o) + (o == 1 ? " octave" : " octaves"), true, arp.range == o, [set, o] { set ([o] (ArpSettings& a) { a.range = o; }); });
+            range.addItem (o == 1 ? tr ("1 octave") : tr ("{0} octaves", { juce::String (o) }), true, arp.range == o, [set, o] { set ([o] (ArpSettings& a) { a.range = o; }); });
 
-        const std::pair<const char*, float> speeds[] = { { "1/4", 1.0f }, { "1/8", 0.5f }, { "1/8 triplet", 1.0f / 3.0f },
-                                                          { "1/16", 0.25f }, { "1/16 triplet", 1.0f / 6.0f }, { "1/32", 0.125f } };
+        const std::pair<const char*, float> speeds[] = { { "1/4", 1.0f }, { "1/8", 0.5f }, { TR_NOOP ("1/8 triplet"), 1.0f / 3.0f },
+                                                          { "1/16", 0.25f }, { TR_NOOP ("1/16 triplet"), 1.0f / 6.0f }, { "1/32", 0.125f } };
         for (const auto& [name, beats] : speeds)
-            speed.addItem (name, true, std::abs (arp.stepBeats - beats) < 1e-4f, [set, b = beats] { set ([b] (ArpSettings& a) { a.stepBeats = b; }); });
+            speed.addItem (tr (name), true, std::abs (arp.stepBeats - beats) < 1e-4f, [set, b = beats] { set ([b] (ArpSettings& a) { a.stepBeats = b; }); });
 
         for (int g : { 25, 50, 75, 100 })
             gate.addItem (juce::String (g) + "%", true, std::abs (arp.gate - g / 100.0f) < 1e-4f, [set, g] { set ([g] (ArpSettings& a) { a.gate = g / 100.0f; }); });
@@ -499,17 +514,17 @@ void ChannelRackComponent::showChannelMenu (int channel)
         for (int n : { 1, 2, 3, 4 })
             repeat.addItem (juce::String (n) + "x", true, arp.repeat == n, [set, n] { set ([n] (ArpSettings& a) { a.repeat = n; }); });
 
-        arpMenu.addSubMenu (utf8 ("Range"), range);
-        arpMenu.addSubMenu ("Speed", speed);
-        arpMenu.addSubMenu ("Gate", gate);
-        arpMenu.addSubMenu (utf8 ("Repeat"), repeat);
-        menu.addSubMenu (arp.enabled() ? utf8 ("Arpeggiator (on)") : utf8 ("Arpeggiator"), arpMenu);
+        arpMenu.addSubMenu (tr ("Range"), range);
+        arpMenu.addSubMenu (tr ("Speed"), speed);
+        arpMenu.addSubMenu (tr ("Gate"), gate);
+        arpMenu.addSubMenu (tr ("Repeat"), repeat);
+        menu.addSubMenu (arp.enabled() ? tr ("Arpeggiator (on)") : tr ("Arpeggiator"), arpMenu);
     }
 
-    menu.addItem ("Rename...", [this, channel] { rename (channel); });
+    menu.addItem (tr ("Rename..."), [this, channel] { rename (channel); });
     {
         juce::PopupMenu colours;
-        colours.addItem (utf8 ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
+        colours.addItem (tr ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
 
         for (auto c : { 0xff485156u, 0xffa14547u, 0xffa16f45u, 0xffa19d45u, 0xff6ca145u, 0xff45a175u, 0xff45a1a0u, 0xff457ca1u,
                         0xff4f45a1u, 0xff8a5096u, 0xffa1458au })
@@ -523,9 +538,9 @@ void ChannelRackComponent::showChannelMenu (int channel)
             colours.addItem (std::move (item));
         }
 
-        menu.addSubMenu ("Colour", colours);
+        menu.addSubMenu (tr ("Color"), colours);
     }
-    menu.addItem ("Clear notes in this pattern", [this, channel] {
+    menu.addItem (tr ("Clear notes in this pattern"), [this, channel] {
         engine.editSong ([channel] (Song& s) {
             auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
             notes.erase (std::remove_if (notes.begin(), notes.end(), [channel] (const Note& n) { return n.channel == channel; }),
@@ -533,7 +548,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
         });
     });
     menu.addSeparator();
-    menu.addItem ("Delete channel", engine.getSong().channels.size() > 1, false, [this, channel] {
+    menu.addItem (tr ("Delete channel"), engine.getSong().channels.size() > 1, false, [this, channel] {
         engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
     });
 
@@ -545,7 +560,7 @@ void ChannelRackComponent::showAddChannelMenu()
     juce::PopupMenu menu;
 
     for (auto kind : builtInKinds)
-        menu.addItem (instrumentName (kind), [this, kind] {
+        menu.addItem (instrumentLabel (kind), [this, kind] {
             engine.editSong ([kind] (Song& s) {
                 ChannelDef c;
                 c.name = instrumentName (kind).toStdString();
@@ -557,7 +572,7 @@ void ChannelRackComponent::showAddChannelMenu()
         });
 
     menu.addSeparator();
-    menu.addItem ("Sampler (choose file)...", [this] { chooseSample (-1); });
+    menu.addItem (tr ("Sampler (choose file)..."), [this] { chooseSample (-1); });
 
     juce::PopupMenu plugins;
     addPluginItems (plugins, engine, true, [this] (PluginRef ref) {
@@ -573,14 +588,14 @@ void ChannelRackComponent::showAddChannelMenu()
         engine.setSelectedChannel (added);
         openPluginWindow (added); // as in FL: the plugin opens when added
     });
-    menu.addSubMenu ("Plugin (VST3/CLAP)", plugins);
+    menu.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
 void ChannelRackComponent::chooseSample (int channel)
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Choose sample", juce::File(), engine.getSampleLibrary().wildcard());
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Choose sample"), juce::File(), engine.getSampleLibrary().wildcard());
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this, channel] (const juce::FileChooser& chooser) {
                                   if (chooser.getResult().existsAsFile())
@@ -592,8 +607,8 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 {
     if (engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Sample",
-                                                utf8 ("Could not read ") + file.getFileName());
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"),
+                                                tr ("Could not read {0}", { file.getFileName() }));
         return;
     }
 
@@ -627,16 +642,16 @@ void ChannelRackComponent::openPluginWindow (int channel)
         return;
     }
 
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
-                                            utf8 ("This plugin could not be loaded (it is not installed or has not been scanned)."));
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Plugin"),
+                                            tr ("This plugin could not be loaded (it is not installed or has not been scanned)."));
 }
 
 void ChannelRackComponent::rename (int channel)
 {
-    auto* window = new juce::AlertWindow ("Rename channel", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow (tr ("Rename channel"), {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()));
-    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, channel, window] (int result) {
                                  const auto name = window->getTextEditorContents ("name").trim().toStdString();
