@@ -15,6 +15,8 @@ namespace PluginWindows
 // `owner` is the adapter (PluginInstrument/PluginEffect) that holds the plugin.
 void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title);
 void closeAll();
+bool isOpen (const juce::AudioPluginInstance& plugin);
+void close (const juce::AudioPluginInstance& plugin);
 } // namespace PluginWindows
 
 // Scans the VST3 folders with a progress window. `onDone(newCount)` runs on the UI thread.

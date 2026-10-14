@@ -5,6 +5,7 @@
 #include "ui/ChannelSettings.h"
 
 #include "engine/Text.h"
+#include "ui/Dialogs.h"
 #include "ui/I18n.h"
 #include "ui/BrowserComponent.h"
 
@@ -65,7 +66,13 @@ void setStep (Pattern& p, int channel, int step, bool on)
         p.toggleStep (channel, step);
 }
 
+juce::String channelName (const Song& song, int row)
+{
+    return row >= 0 && row < (int) song.channels.size() ? juce::String::fromUTF8 (song.channels[(std::size_t) row].name.c_str()) : juce::String();
+}
 } // namespace
+
+bool ChannelRackComponent::keepEditorsOpen = false;
 
 ChannelRackComponent::ChannelRackComponent (AudioEngine& e)
     : engine (e)
@@ -129,8 +136,10 @@ ChannelRackComponent::Area ChannelRackComponent::areaAt (int x, int y, int& row)
         return Area::volume;
     if (x < nameLeft())
         return Area::route;
-    if (x < gridLeft())
+    if (x < selectLeft())
         return Area::name;
+    if (x < gridLeft())
+        return Area::select;
 
     return Area::grid;
 }
@@ -162,7 +171,8 @@ void ChannelRackComponent::paint (juce::Graphics& g)
     const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
     const auto steps = numSteps();
     const auto clip = g.getClipBounds();
-    const auto selected = engine.getSelectedChannel();
+    const auto primary = engine.getSelectedChannel();
+    const auto& selection = engine.getSelectedChannels();
     g.setFont (theme::font (theme::type::body));
 
     for (int row = 0; row < (int) song.channels.size(); ++row)
@@ -173,9 +183,10 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             continue;
 
         const auto& channel = song.channels[(std::size_t) row];
+        const auto selected = std::binary_search (selection.begin(), selection.end(), row);
         const auto nameArea = juce::Rectangle<float> ((float) nameLeft(), (float) y + 3, (float) nameWidth, (float) rowHeight - 6);
 
-        if (row == selected) // the whole row is subtly lifted
+        if (selected) // selected rows are subtly lifted
         {
             g.setColour (bg3);
             g.fillRect (0, y + 1, getWidth(), rowHeight - 2);
@@ -184,12 +195,13 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         g.setColour (theme::muteLed (channel.muted));
         g.fillEllipse ((float) 9, (float) y + rowHeight / 2.0f - 4.5f, 9, 9);
 
+        const auto touched = knobDrag != Area::none && knobRow == row;
         theme::drawKnob (g, juce::Rectangle<float> ((float) muteWidth, (float) y, (float) knobWidth, (float) rowHeight).reduced (1.0f, 2.0f),
-                         (channel.pan + 1.0f) / 2.0f, true, info);
+                         (channel.pan + 1.0f) / 2.0f, true, touched && knobDrag == Area::pan ? accent : info);
         theme::drawKnob (g, juce::Rectangle<float> ((float) muteWidth + knobWidth, (float) y, (float) knobWidth, (float) rowHeight).reduced (1.0f, 2.0f),
-                         channel.volume, false, knobArc);
+                         channel.volume, false, touched && knobDrag == Area::volume ? accent : knobArc);
 
-        // small box with the mixer insert ("-" = straight to Master), as in FL
+        // small box with the mixer insert ("-" = straight to Master)
         const auto routeArea = juce::Rectangle<float> ((float) (muteWidth + 2 * knobWidth) + 1, (float) y + 7,
                                                        (float) routeWidth - 3, (float) rowHeight - 14);
         g.setColour (bg0);
@@ -201,10 +213,10 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         g.setFont (theme::font (theme::type::body));
 
         // name button: neutral surface with the channel colour (from the .flp or user-picked) as a strip
-        g.setColour (row == selected ? bg6 : bg4);
+        g.setColour (row == primary ? bg6 : bg4);
         g.fillRoundedRectangle (nameArea, theme::radius::md);
 
-        if (row == selected)
+        if (row == primary)
         {
             g.setColour (accent);
             g.drawRoundedRectangle (nameArea.reduced (0.5f), theme::radius::md, 1.0f);
@@ -216,6 +228,11 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         g.setColour (channel.muted ? textDisabled : textPrimary);
         g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
                     juce::Justification::centredLeft, true);
+
+        // selector: a slim pill, lit when the row is selected
+        const auto pill = juce::Rectangle<float> ((float) selectLeft() + 3.0f, (float) y + 7.0f, (float) selectWidth - 6.0f, (float) rowHeight - 14.0f);
+        g.setColour (selected ? accent : ledOff);
+        g.fillRoundedRectangle (pill, 3.0f);
 
         if (channel.instrument == InstrumentKind::audioClip)
         {
@@ -265,6 +282,271 @@ void ChannelRackComponent::paint (juce::Graphics& g)
     }
 }
 
+// --- the control contract for the knobs and the route box ----------------------------------------
+
+ui::ValueSpec ChannelRackComponent::specFor (Area area, int row) const
+{
+    const auto name = channelName (engine.getSong(), row);
+
+    if (area == Area::pan)
+    {
+        auto spec = ui::panSpec (name + " - " + tr ("Pan"));
+        spec.target = AutomationTarget { AutomationTargetKind::channelPan, row };
+        return spec;
+    }
+
+    if (area == Area::volume)
+    {
+        auto spec = ui::percentSpec (name + " - " + tr ("Volume"), 0.78);
+        spec.target = AutomationTarget { AutomationTargetKind::channelVolume, row };
+        return spec;
+    }
+
+    // route box: the mixer insert, as a number
+    ui::ValueSpec spec;
+    spec.name = name + " - " + tr ("Mixer insert");
+    spec.maximum = juce::jmax (0, (int) engine.getSong().mixer.size() - 1);
+    spec.interval = 1.0;
+    spec.pixelsForRange = 6.0 * juce::jmax (1.0, spec.maximum);
+    spec.toText = [] (double v) { return v < 0.5 ? tr ("Master") : tr ("Insert {0}", { juce::String (juce::roundToInt (v)) }); };
+    spec.fromText = [] (const juce::String& t) -> std::optional<double> {
+        if (t.trim().startsWithIgnoreCase ("m"))
+            return 0.0;
+        const auto digits = t.retainCharacters ("0123456789");
+        return digits.isEmpty() ? std::nullopt : std::optional<double> (digits.getDoubleValue());
+    };
+    return spec;
+}
+
+double ChannelRackComponent::valueOf (Area area, int row) const
+{
+    const auto& c = engine.getSong().channels[(std::size_t) row];
+    return area == Area::pan ? c.pan : area == Area::volume ? c.volume : (double) c.mixerTrack;
+}
+
+void ChannelRackComponent::setValue (Area area, int row, double value)
+{
+    if (row < 0 || row >= (int) engine.getSong().channels.size())
+        return;
+
+    if (area == Area::pan)
+        engine.editSong ([row, v = (float) value] (Song& s) { s.channels[(std::size_t) row].pan = v; });
+    else if (area == Area::volume)
+        engine.editSong ([row, v = (float) value] (Song& s) { s.channels[(std::size_t) row].volume = v; });
+    else if (area == Area::route)
+    {
+        const auto track = juce::roundToInt (value);
+        if (track != engine.getSong().channels[(std::size_t) row].mixerTrack)
+            engine.editSong ([row, track] (Song& s) { s.channels[(std::size_t) row].mixerTrack = track; });
+    }
+}
+
+// --- selection -----------------------------------------------------------------------------------
+
+void ChannelRackComponent::selectRows (std::vector<int> rows, int primary)
+{
+    engine.setChannelSelection (std::move (rows), primary);
+    repaint();
+}
+
+void ChannelRackComponent::clickSelector (int row, const juce::ModifierKeys& mods)
+{
+    ChannelSelection selection;
+    selection.rows = engine.getSelectedChannels();
+    selection.anchor = selectionAnchor;
+
+    if (mods.isShiftDown())
+        selection.extendTo (row);
+    else if (mods.isCtrlDown() || mods.isPopupMenu())
+        selection.toggle (row);
+    else
+        selection.selectOnly (row);
+
+    selectionAnchor = selection.anchor;
+    const auto primary = selection.contains (row) ? row : selection.rows.front();
+    selectRows (selection.rows, primary);
+}
+
+void ChannelRackComponent::selectRelative (int delta, bool extend)
+{
+    const auto count = (int) engine.getSong().channels.size();
+
+    if (count == 0)
+        return;
+
+    const auto row = juce::jlimit (0, count - 1, engine.getSelectedChannel() + delta);
+
+    if (extend)
+    {
+        ChannelSelection selection;
+        selection.anchor = selectionAnchor;
+        selection.extendTo (row);
+        selectRows (selection.rows, row);
+    }
+    else
+    {
+        selectionAnchor = row;
+        selectRows ({ row }, row);
+    }
+}
+
+void ChannelRackComponent::selectAll()
+{
+    ChannelSelection selection;
+    selection.selectAll ((int) engine.getSong().channels.size());
+    selectRows (selection.rows, engine.getSelectedChannel());
+}
+
+bool ChannelRackComponent::moveSelected (int delta)
+{
+    auto rows = engine.getSelectedChannels();
+    const auto primary = engine.getSelectedChannel();
+    const auto primaryIndex = (int) (std::find (rows.begin(), rows.end(), primary) - rows.begin());
+    bool moved = false;
+    std::vector<int> after;
+
+    engine.editSong ([&] (Song& s) {
+        after = rows;
+        moved = moveChannels (s, after, delta);
+    });
+
+    if (! moved)
+        return false;
+
+    const auto newPrimary = primaryIndex < (int) after.size() ? after[(std::size_t) primaryIndex] : after.front();
+    openEditorRow = -1;
+    selectionAnchor = juce::jlimit (0, (int) engine.getSong().channels.size() - 1, selectionAnchor + delta);
+    selectRows (after, newPrimary);
+    return true;
+}
+
+void ChannelRackComponent::cloneSelected()
+{
+    auto rows = engine.getSelectedChannels();
+    std::vector<int> clones;
+
+    engine.editSong ([&] (Song& s) {
+        // from the bottom up, so earlier clones don't shift the rows still to clone
+        for (auto it = rows.rbegin(); it != rows.rend(); ++it)
+            cloneChannel (s, *it);
+    });
+
+    // each clone sits right below its original: original i (sorted) ends at rows[i] + i, its clone one below
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        clones.push_back (rows[i] + (int) i + 1);
+
+    if (! clones.empty())
+        selectRows (clones, clones.front());
+}
+
+void ChannelRackComponent::deleteSelected()
+{
+    const auto rows = engine.getSelectedChannels();
+    const auto count = (int) engine.getSong().channels.size();
+
+    if (rows.empty() || (int) rows.size() >= count) // at least one channel stays
+        return;
+
+    for (auto r : rows)
+        closeEditor (r);
+
+    engine.editSong ([rows] (Song& s) { removeChannels (s, rows); });
+    openEditorRow = -1;
+    const auto row = juce::jlimit (0, juce::jmax (0, (int) engine.getSong().channels.size() - 1), rows.front());
+    selectRows ({ row }, row);
+}
+
+void ChannelRackComponent::sendSelectedToInserts()
+{
+    const auto rows = engine.getSelectedChannels();
+    engine.editSong ([rows] (Song& s) { sendChannelsToFreeInserts (s, rows); });
+}
+
+void ChannelRackComponent::toggleMute (int channel)
+{
+    if (channel >= 0 && channel < (int) engine.getSong().channels.size())
+        engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].muted = ! s.channels[(std::size_t) channel].muted; });
+}
+
+void ChannelRackComponent::solo (int row)
+{
+    if (row < 0 || row >= (int) engine.getSong().channels.size())
+        return;
+
+    // only this channel plays; repeating on the already-soloed channel unmutes all
+    engine.editSong ([row] (Song& s) {
+        const auto alone = ! s.channels[(std::size_t) row].muted
+                           && std::all_of (s.channels.begin(), s.channels.end(), [&] (const ChannelDef& c) {
+                                  return &c == &s.channels[(std::size_t) row] || c.muted;
+                              });
+
+        for (std::size_t i = 0; i < s.channels.size(); ++i)
+            s.channels[i].muted = alone ? false : i != (std::size_t) row;
+    });
+}
+
+// --- channel editors ---------------------------------------------------------------------------
+
+bool ChannelRackComponent::isEditorOpen (int channel)
+{
+    if (channel < 0 || channel >= (int) engine.getSong().channels.size())
+        return false;
+
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::plugin)
+    {
+        if (auto* plugin = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
+            return PluginWindows::isOpen (plugin->getInstance());
+        return false;
+    }
+
+    return isChannelSettingsOpen (channel);
+}
+
+void ChannelRackComponent::closeEditor (int channel)
+{
+    if (channel < 0 || channel >= (int) engine.getSong().channels.size())
+        return;
+
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::plugin)
+    {
+        if (auto* plugin = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
+            PluginWindows::close (plugin->getInstance());
+    }
+    else
+        closeChannelSettings (channel);
+}
+
+void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
+{
+    if (channel < 0 || channel >= (int) engine.getSong().channels.size())
+        return;
+
+    const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
+
+    if (kind != InstrumentKind::plugin && ! hasChannelSettings (kind))
+        return; // built-in drums and audio clips have no editor window: the click only selects
+
+    if (isEditorOpen (channel))
+    {
+        closeEditor (channel);
+        if (openEditorRow == channel)
+            openEditorRow = -1;
+        return;
+    }
+
+    if (! keepOthers && ! keepEditorsOpen && openEditorRow != channel)
+        closeEditor (openEditorRow);
+
+    if (kind == InstrumentKind::plugin)
+        openPluginWindow (channel);
+    else
+        openChannelSettings (engine, channel);
+
+    openEditorRow = channel;
+}
+
+// --- mouse -------------------------------------------------------------------------------------
+
 void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 {
     int row = 0;
@@ -282,50 +564,85 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 
         case Area::mute:
             if (e.mods.isPopupMenu() || e.mods.isCtrlDown())
-            {
-                // solo as in FL: only this channel plays; repeating on the already-soloed channel unmutes all
-                engine.editSong ([row] (Song& s) {
-                    const auto alone = ! s.channels[(std::size_t) row].muted
-                                       && std::all_of (s.channels.begin(), s.channels.end(), [&] (const ChannelDef& c) {
-                                              return &c == &s.channels[(std::size_t) row] || c.muted;
-                                          });
-
-                    for (std::size_t i = 0; i < s.channels.size(); ++i)
-                        s.channels[i].muted = alone ? false : i != (std::size_t) row;
-                });
-            }
+                solo (row);
             else
-                engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].muted = ! s.channels[(std::size_t) row].muted; });
+                toggleMute (row);
             return;
 
         case Area::pan:
         case Area::volume:
+        case Area::route:
+        {
+            const auto spec = specFor (area, row);
+
             if (e.mods.isPopupMenu())
             {
                 juce::PopupMenu menu;
-                addAutomationItem (menu, engine, { area == Area::pan ? AutomationTargetKind::channelPan : AutomationTargetKind::channelVolume, row });
+                menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (area, row)));
+                ui::addValueItems (menu, *this, &engine, spec, valueOf (area, row), [this, area, row] (double v) { setValue (area, row, v); });
+
+                if (area == Area::route)
+                {
+                    menu.addSeparator();
+                    menu.addItem (tr ("Next free insert"), [this, row] {
+                        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
+                    });
+                    menu.addItem (tr ("Send the selected channels to free inserts") + "\tCtrl+L", [this] { sendSelectedToInserts(); });
+                }
+
                 menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+                return;
+            }
+
+            if (ui::isResetClick (e))
+            {
+                setValue (area, row, spec.defaultValue);
                 return;
             }
 
             knobDrag = area;
             knobRow = row;
-            knobStartValue = area == Area::pan ? song.channels[(std::size_t) row].pan : song.channels[(std::size_t) row].volume;
+            drag.begin (e, valueOf (area, row));
+            repaint();
             return;
-
-        case Area::route:
-            knobDrag = area;
-            knobRow = row;
-            routeStartValue = song.channels[(std::size_t) row].mixerTrack;
-            return;
+        }
 
         case Area::name:
-            engine.setSelectedChannel (row);
-
             if (e.mods.isPopupMenu())
+            {
+                if (! std::binary_search (engine.getSelectedChannels().begin(), engine.getSelectedChannels().end(), row))
+                    clickSelector (row, {});
+                else
+                    selectRows (engine.getSelectedChannels(), row);
                 showChannelMenu (row);
-            else
+                return;
+            }
+
+            if (e.mods.isShiftDown())
+            {
+                clickSelector (row, e.mods);
+                return;
+            }
+
+            if (! std::binary_search (engine.getSelectedChannels().begin(), engine.getSelectedChannels().end(), row)
+                || engine.getSelectedChannels().size() > 1)
+            {
+                selectionAnchor = row;
+                selectRows ({ row }, row);
+            }
+
+            if (e.mods.isCtrlDown()) // audition without opening anything
+            {
+                auditionRow = row;
                 engine.sendLiveNote (row, 60, 0.8f, true);
+                return;
+            }
+
+            toggleEditor (row, e.mods.isAltDown());
+            return;
+
+        case Area::select:
+            clickSelector (row, e.mods);
             return;
 
         case Area::grid:
@@ -347,28 +664,9 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 
 void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
 {
-    if (knobDrag != Area::none)
+    if (knobDrag != Area::none && drag.isActive())
     {
-        const auto delta = (float) -e.getDistanceFromDragStartY() / 150.0f;
-        const auto row = knobRow;
-
-        if (knobDrag == Area::route)
-        {
-            const auto tracks = juce::jmax (1, (int) engine.getSong().mixer.size());
-            const auto value = juce::jlimit (0, tracks - 1, routeStartValue - e.getDistanceFromDragStartY() / 6);
-            if (value != engine.getSong().channels[(std::size_t) row].mixerTrack)
-                engine.editSong ([row, value] (Song& s) { s.channels[(std::size_t) row].mixerTrack = value; });
-        }
-        else if (knobDrag == Area::pan)
-        {
-            const auto value = juce::jlimit (-1.0f, 1.0f, knobStartValue + delta * 2.0f);
-            engine.editSong ([row, value] (Song& s) { s.channels[(std::size_t) row].pan = value; });
-        }
-        else
-        {
-            const auto value = juce::jlimit (0.0f, 1.0f, knobStartValue + delta);
-            engine.editSong ([row, value] (Song& s) { s.channels[(std::size_t) row].volume = value; });
-        }
+        setValue (knobDrag, knobRow, drag.update (e, specFor (knobDrag, knobRow)));
         return;
     }
 
@@ -376,15 +674,19 @@ void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
         applyPaint (e);
 }
 
-void ChannelRackComponent::mouseUp (const juce::MouseEvent& e)
+void ChannelRackComponent::mouseUp (const juce::MouseEvent&)
 {
-    int row = 0;
+    if (auditionRow >= 0)
+        engine.sendLiveNote (auditionRow, 60, 0.0f, false);
 
-    if (areaAt (e.getMouseDownX(), e.getMouseDownY(), row) == Area::name && ! e.mods.isPopupMenu())
-        engine.sendLiveNote (row, 60, 0.0f, false);
-
+    auditionRow = -1;
     paintMode = PaintMode::none;
+
+    if (knobDrag != Area::none)
+        repaint();
+
     knobDrag = Area::none;
+    drag.end();
 }
 
 void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
@@ -392,16 +694,82 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
     int row = 0;
     const auto area = areaAt (e.x, e.y, row);
 
-    if (area == Area::pan)
-        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].pan = 0.0f; });
-    else if (area == Area::volume)
-        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].volume = 0.8f; });
+    if (area == Area::pan || area == Area::volume)
+        setValue (area, row, specFor (area, row).defaultValue);
     else if (area == Area::route)
         engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
-    else if (area == Area::name && engine.getSong().channels[(std::size_t) row].instrument == InstrumentKind::plugin)
-        openPluginWindow (row);
-    else if (area == Area::name && onOpenPianoRoll)
+    else if (area == Area::select && ! e.mods.isPopupMenu())
+        selectAll();
+    else if (area == Area::name && ! e.mods.isAnyModifierKeyDown() && onOpenPianoRoll)
         onOpenPianoRoll();
+}
+
+void ChannelRackComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    int row = 0;
+    const auto area = areaAt (e.x, e.y, row);
+
+    if (area == Area::pan || area == Area::volume || area == Area::route)
+    {
+        if (const auto v = ui::wheelValue (valueOf (area, row), e, wheel, specFor (area, row)))
+            setValue (area, row, *v);
+        return;
+    }
+
+    if ((area == Area::name || area == Area::select) && e.mods.isShiftDown()) // Shift+wheel moves the channel
+    {
+        const auto delta = (wheel.deltaY != 0.0f ? wheel.deltaY : -wheel.deltaX) > 0.0f ? -1 : 1;
+        selectRows ({ row }, row);
+        moveSelected (delta);
+        return;
+    }
+
+    juce::Component::mouseWheelMove (e, wheel); // scroll the viewport
+}
+
+ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
+{
+    int row = 0;
+    const auto area = areaAt (p.x, p.y, row);
+    const auto& song = engine.getSong();
+    ui::Hint h;
+
+    if (row >= 0 && row < (int) song.channels.size() && (area == Area::pan || area == Area::volume || area == Area::route))
+    {
+        const auto active = knobDrag != Area::none && drag.isActive();
+        const auto shownArea = active ? knobDrag : area;
+        const auto shownRow = active ? knobRow : row;
+        h = ui::valueHint (specFor (shownArea, shownRow), valueOf (shownArea, shownRow),
+                           shownArea == Area::route ? tr ("drag or wheel to route, double-click: next free insert")
+                                                    : tr ("drag (Ctrl: fine), wheel, Alt+click resets"));
+        return h;
+    }
+
+    const auto name = channelName (song, row);
+
+    switch (area)
+    {
+        case Area::mute:
+            h.text = name + " - " + tr ("Click: mute.  Ctrl+click or right-click: solo");
+            break;
+        case Area::name:
+            h.text = name + " - " + tr ("Click: open/close the editor (Alt keeps others open).  Ctrl+click: audition.  Double-click: Piano Roll");
+            h.hasMenu = true;
+            break;
+        case Area::select:
+            h.text = name + " - " + tr ("Select (Ctrl: add/remove, Shift: range, double-click: all).  Alt+Up/Down moves the selection");
+            break;
+        case Area::grid:
+            h.text = name + " - " + tr ("Steps: click turns on and drags to paint, right-click erases");
+            break;
+        case Area::addRow:
+            h.text = tr ("Add a channel (or drop audio files on the rack)");
+            break;
+        default:
+            break;
+    }
+
+    return h;
 }
 
 void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
@@ -426,6 +794,8 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
     if (on)
         engine.sendLiveNote (row, 60, 0.78f, true);
 }
+
+// --- menus -------------------------------------------------------------------------------------
 
 void ChannelRackComponent::showChannelMenu (int channel)
 {
@@ -469,9 +839,10 @@ void ChannelRackComponent::showChannelMenu (int channel)
                 engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].sampler.slices.clear(); });
             });
     }
-
-    if (c.instrument == InstrumentKind::synth)
+    else if (c.instrument == InstrumentKind::synth)
         menu.addItem (tr ("Synth settings (oscillators, envelope, filter)..."), [this, channel] { openChannelSettings (engine, channel); });
+    else if (hasChannelSettings (c.instrument))
+        menu.addItem (tr ("Channel settings..."), [this, channel] { openChannelSettings (engine, channel); });
 
     if (c.instrument == InstrumentKind::plugin)
     {
@@ -522,20 +893,20 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addSubMenu (arp.enabled() ? tr ("Arpeggiator (on)") : tr ("Arpeggiator"), arpMenu);
     }
 
-    menu.addItem (tr ("Rename..."), [this, channel] { rename (channel); });
+    menu.addItem (tr ("Rename and color...") + "\tF2", [this, channel] { rename (channel); });
     {
         juce::PopupMenu colours;
         colours.addItem (tr ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
 
-        for (auto c : { 0xff485156u, 0xffa14547u, 0xffa16f45u, 0xffa19d45u, 0xff6ca145u, 0xff45a175u, 0xff45a1a0u, 0xff457ca1u,
-                        0xff4f45a1u, 0xff8a5096u, 0xffa1458au })
+        for (auto colour : lynxPalette())
         {
             juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (c));
+            juce::Graphics (swatch).fillAll (juce::Colour (colour));
             juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
             item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.action = [this, channel, c] { engine.editSong ([channel, c] (Song& s) { s.channels[(std::size_t) channel].colour = c; }); };
+            item.isTicked = c.colour == colour;
+            item.action = [this, channel, colour] { engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; }); };
             colours.addItem (std::move (item));
         }
 
@@ -548,49 +919,78 @@ void ChannelRackComponent::showChannelMenu (int channel)
                          notes.end());
         });
     });
+
+    // organisation (acts on the selection)
+    const auto selected = (int) engine.getSelectedChannels().size();
+    const auto count = (int) engine.getSong().channels.size();
     menu.addSeparator();
-    menu.addItem (tr ("Delete channel"), engine.getSong().channels.size() > 1, false, [this, channel] {
-        engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
-    });
+    menu.addItem (selected > 1 ? tr ("Clone {0} channels", { juce::String (selected) }) : tr ("Clone channel"), [this] { cloneSelected(); });
+    {
+        juce::PopupMenu insert;
+        addInstrumentItems (insert, channel);
+        menu.addSubMenu (tr ("Insert channel here"), insert);
+    }
+    menu.addItem (tr ("Move up") + "\tAlt+Up", engine.getSelectedChannels().front() > 0, false, [this] { moveSelected (-1); });
+    menu.addItem (tr ("Move down") + "\tAlt+Down", engine.getSelectedChannels().back() < count - 1, false, [this] { moveSelected (1); });
+    menu.addItem (tr ("Send to free mixer inserts") + "\tCtrl+L", [this] { sendSelectedToInserts(); });
+    menu.addSeparator();
+
+    if (selected > 1)
+        menu.addItem (tr ("Delete {0} channels", { juce::String (selected) }) + "\tAlt+Del", selected < count, false, [this] { deleteSelected(); });
+    else
+        menu.addItem (tr ("Delete channel") + "\tAlt+Del", count > 1, false, [this, channel] {
+            closeEditor (channel);
+            engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
+            openEditorRow = -1;
+        });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
-void ChannelRackComponent::showAddChannelMenu()
+void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insertAt)
 {
-    juce::PopupMenu menu;
+    // a new channel of `kind`, at the end (insertAt < 0) or at a row
+    auto add = [this, insertAt] (ChannelDef c) {
+        int index = 0;
+        engine.editSong ([&] (Song& s) {
+            c.mixerTrack = s.nextFreeInsert();
+            index = insertAt < 0 ? (s.channels.push_back (c), (int) s.channels.size() - 1) : insertChannel (s, insertAt, c);
+        });
+        selectionAnchor = index;
+        selectRows ({ index }, index);
+        return index;
+    };
 
     for (auto kind : builtInKinds)
-        menu.addItem (instrumentLabel (kind), [this, kind] {
-            engine.editSong ([kind] (Song& s) {
-                ChannelDef c;
-                c.name = instrumentName (kind).toStdString();
-                c.instrument = kind;
-                c.mixerTrack = s.nextFreeInsert();
-                s.channels.push_back (c);
-            });
-            engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
+        menu.addItem (instrumentLabel (kind), [add, kind] {
+            ChannelDef c;
+            c.name = instrumentName (kind).toStdString();
+            c.instrument = kind;
+            add (c);
         });
 
     menu.addSeparator();
-    menu.addItem (tr ("Sampler (choose file)..."), [this] { chooseSample (-1); });
+
+    if (insertAt < 0)
+        menu.addItem (tr ("Sampler (choose file)..."), [this] { chooseSample (-1); });
 
     juce::PopupMenu plugins;
-    addPluginItems (plugins, engine, true, [this] (PluginRef ref) {
-        engine.editSong ([ref] (Song& s) {
-            ChannelDef c;
-            c.name = ref.name;
-            c.instrument = InstrumentKind::plugin;
-            c.plugin = ref;
-            c.mixerTrack = s.nextFreeInsert();
-            s.channels.push_back (c);
-        });
-        const auto added = (int) engine.getSong().channels.size() - 1;
-        engine.setSelectedChannel (added);
-        openPluginWindow (added); // as in FL: the plugin opens when added
+    addPluginItems (plugins, engine, true, [this, add] (PluginRef ref) {
+        ChannelDef c;
+        c.name = ref.name;
+        c.instrument = InstrumentKind::plugin;
+        c.plugin = ref;
+        const auto added = add (c);
+        openPluginWindow (added); // the plugin opens when added
+        openEditorRow = added;
     });
     menu.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
+}
 
+void ChannelRackComponent::showAddChannelMenu (int insertAt)
+{
+    juce::PopupMenu menu;
+    addInstrumentItems (menu, insertAt);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
@@ -649,18 +1049,15 @@ void ChannelRackComponent::openPluginWindow (int channel)
 
 void ChannelRackComponent::rename (int channel)
 {
-    auto* window = new juce::AlertWindow (tr ("Rename channel"), {}, juce::MessageBoxIconType::NoIcon);
-    window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()));
-    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-
-    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, channel, window] (int result) {
-                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
-
-                                 if (result == 1 && ! name.empty() && channel < (int) engine.getSong().channels.size())
-                                     engine.editSong ([channel, name] (Song& s) { s.channels[(std::size_t) channel].name = name; });
-                             }),
-                             true);
+    const auto& c = engine.getSong().channels[(std::size_t) channel];
+    showNameAndColourDialog (tr ("Rename channel"), juce::String::fromUTF8 (c.name.c_str()), c.colour,
+                             [this, channel] (const juce::String& name, std::uint32_t colour) {
+                                 if (channel < (int) engine.getSong().channels.size())
+                                     engine.editSong ([channel, n = name.toStdString(), colour] (Song& s) {
+                                         s.channels[(std::size_t) channel].name = n;
+                                         s.channels[(std::size_t) channel].colour = colour;
+                                     });
+                             });
 }
 
 void ChannelRackComponent::sliceChannel (int channel)
