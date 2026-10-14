@@ -1,4 +1,5 @@
 #include "core/Harmless.h"
+#include "core/HarmlessFx.h"
 #include "core/Song.h"
 
 #include <algorithm>
@@ -950,6 +951,7 @@ public:
     Patch P;
     Globals G;
     Random random;
+    hlfx::Rack rack;          // the effects rack on the mix (REA_rodada36)
     long long N = 0;          // plugin sample counter
     double tremPrev = 0.0;
     int slot = -1;            // current note of the channel
@@ -1208,11 +1210,24 @@ public:
                     v.env.kill();
             }
         }
-        for (int j = 0; j < n; ++j)
+        if (rack.enabled())
         {
-            left[j] += (float) mixL[(std::size_t) j];
-            right[j] += (float) mixR[(std::size_t) j];
+            // the DLL mixes the voices into a float buffer and runs the rack on it in place
+            for (int j = 0; j < n; ++j)
+                rackL[(std::size_t) j] = (float) mixL[(std::size_t) j], rackR[(std::size_t) j] = (float) mixR[(std::size_t) j];
+            rack.process (rackL.data(), rackR.data(), n, live);
+            for (int j = 0; j < n; ++j)
+            {
+                left[j] += rackL[(std::size_t) j];
+                right[j] += rackR[(std::size_t) j];
+            }
         }
+        else
+            for (int j = 0; j < n; ++j)
+            {
+                left[j] += (float) mixL[(std::size_t) j];
+                right[j] += (float) mixR[(std::size_t) j];
+            }
         G.advance (P, n);
         N += n;
         collect();
@@ -1225,6 +1240,7 @@ private:
     std::vector<Note> notes;
     std::vector<int> order; // notes in creation order (the voice mix order)
     std::array<double, maxHostBlock> mono {}, mixL {}, mixR {}, tremL {}, tremR {}, envBuf {};
+    std::array<float, maxHostBlock> rackL {}, rackR {};
     std::array<double, maxControlBlock + 1> kpow {};
     std::array<double, 8 * maxControlBlock> laneSums {};
     std::array<double, bankSize> amps {}; // the target amplitudes being built in a control block
@@ -2160,6 +2176,7 @@ private:
 struct Settings
 {
     std::array<float, harmlessParamCount> raw {};
+    std::shared_ptr<const hlfx::MaximusPreset> comp; // the rack compressor's preset (built off the audio thread)
     double bpm = 120.0;
     float pitchCents = 0.0f; // channel pitch/fine/root shift, cents relative to C5
 };
@@ -2192,7 +2209,9 @@ Settings defaultSettings() noexcept
 // does not tell an instrument when it renders offline, so FL's quality 2 for rendering (§1.2) is not used.
 // Random sources: deterministic per instrument (see Random); FL's are clock-seeded, so spectral-random phases, Noise
 // resonance and the LFO "voice random" differ from any given FL render by design.
-// The effects rack (chorus/delay/reverb/compressor) is not decoded and is off.
+// Effects rack (REA_rodada36): chorus, delay and reverb from the plugin's own preset tables; the compressor is FL's
+// Maximus engine with Harmless's preset <n>.fst, read by the importer from the user's FL installation (without it the
+// compressor stays off and the import report says so). The delay's time follows the project tempo at load.
 
 class HarmlessInstrument final : public Instrument
 {
@@ -2220,6 +2239,18 @@ public:
                 s.raw[i] = std::isfinite (channel.modelParams[i]) ? channel.modelParams[i] : 0.0f;
         s.bpm = bpm > 0.0 ? bpm : 120.0;
         s.pitchCents = channel.sampler.pitch * 100.0f;
+        const auto& mp = channel.modelParams;
+        if (mp.size() > (std::size_t) harmlessCompIndex)
+        {
+            const auto count = (std::size_t) std::max (0.0f, mp[(std::size_t) harmlessCompIndex]);
+            if (count > 0 && mp.size() >= (std::size_t) harmlessCompIndex + 1 + count)
+            {
+                std::vector<std::uint8_t> state (count);
+                for (std::size_t k = 0; k < count; ++k)
+                    state[k] = (std::uint8_t) std::clamp ((int) mp[(std::size_t) harmlessCompIndex + 1 + k], 0, 255);
+                s.comp = hlfx::makeMaximusPreset (state);
+            }
+        }
         mailbox.write (s);
     }
 
@@ -2249,7 +2280,7 @@ public:
 
     void allNotesOff() noexcept override { engine.allNotesOff(); }
 
-    bool idle() const noexcept override { return engine.idle(); }
+    bool idle() const noexcept override { return engine.idle() && engine.rack.quiet(); }
 
     // the LFO (global mode) and phaser phases follow song-position jumps as FL's song-position event sets them
     // (§1.9, §1.12); continuous playback and a stopped transport leave them running
@@ -2277,14 +2308,15 @@ public:
         sinceTicks += n;
         if (n <= 0)
             return;
-        if (engine.idle())
+        if (engine.idle() && engine.rack.quiet())
         {
-            // nothing sounds: only the plugin-wide phases and counters run
+            // nothing sounds: only the plugin-wide phases and counters run (the rack's included)
             for (int done = 0; done < n; done += Engine::maxHostBlock)
             {
                 const auto m = std::min (Engine::maxHostBlock, n - done);
                 engine.G.advance (engine.P, m);
                 engine.N += m;
+                engine.rack.advance (m);
             }
             engine.tremPrev = engine.P.trem;
             return;
@@ -2302,7 +2334,7 @@ private:
         if (mailbox.read (incoming))
         {
             const auto changed = std::memcmp (incoming.raw.data(), settings.raw.data(), sizeof (float) * settings.raw.size()) != 0
-                                 || incoming.bpm != settings.bpm;
+                                 || incoming.bpm != settings.bpm || incoming.comp != settings.comp;
             settings = incoming;
             if (changed)
                 rebuild();
@@ -2313,6 +2345,7 @@ private:
     {
         const auto& raw = settings.raw;
         engine.P.build (raw.data(), rate, (int) std::lround (raw[(std::size_t) harmlessComboIndex + 6]), settings.bpm);
+        engine.rack.prepare (engine.P.p, engine.P.t, rate, settings.bpm, settings.comp);
     }
 
     Engine engine;

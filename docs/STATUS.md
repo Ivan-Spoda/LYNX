@@ -57,7 +57,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
   installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
-  FL's DLL on 135 of 139 demo channels); Sytrus, Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  FL's DLL on 135 of 139 demo channels) and its effects rack (REA round 36: chorus, delay, reverb and the Maximus
+  compressor with Harmless's own presets read from the user's FL installation; the model with the rack is within −60 dB
+  of the DLL on 135 of 139 demo channels); Sytrus, Harmor, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -95,8 +97,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   volume envelope with FL's smoothers and the 30 ms end/steal fade, all LFO shapes (global/retriggered, attack),
   6 Hz vibrato, stereo tremolo, unison (detune tables, pan, phase, attack, LFO offsets), portamento/mono/legato,
   grittiness, both phase-randomness modes; FL's level law (`0.75·(3^x − 1)/2`·Final.Vol·unison gain through the
-  cos/sin pan law, channel volume applied once). The old synth approximation remains for unreadable states and for
-  the synth's "FL presets" button.
+  cos/sin pan law, channel volume applied once). Its effects rack (`core/HarmlessFx.cpp`, REA round 36) runs on the
+  voice mix in FL's order: chorus (8 records of FL's chorus library, ⌊D⌋ taps), delay (normal / ping-pong with stereo
+  offsets, tempo-synced time, feedback ramp), reverb (FL's shared plate reverb with 6 records) and the compressor =
+  FL's Maximus engine (low cut, ×2 oversampling, Linkwitz–Riley crossovers, peak-window detector, √-scaled attack /
+  release / release-2 stages, drawn-curve gain tables with tensions, lookahead, saturation, band mix) loaded with
+  `Harmless/Data/Compression/<n>.fst` from the user's installation. The old synth approximation remains for unreadable
+  states and for the synth's "FL presets" button.
 - **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
   weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
   with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
@@ -149,8 +156,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   ×10 (Exo only); a synced LFO1 is locked to the song position at note start (FL runs it from the host's beat delta);
   old (version < 4) synced states use the stored rate, as FL's engine right after loading (whether FL re-sends the
   converted rate is not confirmed).
-- Harmless: the effects rack (chorus/delay/reverb/compressor) is not decoded and stays off (its compressor holds FL's
-  demo peaks near 0.976; without it LYNX's output can reach full scale); the editor's quality
+- Harmless: the rack compressor needs the user's FL installation (its four presets are read from it; otherwise it
+  stays off and the import report says so); the chorus/delay use the x87 kernels FL picks on the test machine (another
+  CPU may make FL round the chorus delay instead of truncating it — not confirmed); a fresh delay starts its feedback
+  ramp at the stored value (FL's host call order not observed); Maximus features unused by the presets (RMS detector,
+  saturation B, other curve segment types, linear-phase mode) are not decoded; the editor's quality
   (0/1) is used for playback and export alike (FL renders with quality 2; LYNX's engine does not tell instruments
   when it renders offline); FL seeds its random draws from the clock, LYNX from a fixed seed (spectral-random
   phases, Noise resonance and the LFO "voice random" are deterministic and differ from any FL render by design);

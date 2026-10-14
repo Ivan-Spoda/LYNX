@@ -1,6 +1,7 @@
 #include "core/FlpImport.h"
 #include "core/DrumSynthLive.h"
 #include "core/Harmless.h"
+#include "core/HarmlessFx.h"
 #include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
@@ -795,6 +796,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::harmless;
                     def.modelParams = std::move (*params);
                     adoptedFromPlugin = true;
+                    // rack compressor: Harmless's own preset <n>.fst from the user's installation (REA_rodada36 §2)
+                    const auto compType = (int) def.modelParams[(std::size_t) harmlessComboIndex + 3];
+                    if (compType > 0)
+                    {
+                        const auto path = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Harmless\\Data\\Compression\\"
+                                                             + std::to_string (compType) + ".fst",
+                                                         options.roots);
+                        std::optional<std::vector<std::uint8_t>> state;
+                        if (! path.empty() && options.readFile && (! options.fileExists || options.fileExists (path)))
+                            state = hlfx::maximusStateFromFst (options.readFile (path));
+                        if (state && hlfx::makeMaximusPreset (*state) != nullptr)
+                        {
+                            def.modelParams.push_back ((float) state->size());
+                            for (const auto byte : *state)
+                                def.modelParams.push_back ((float) byte);
+                        }
+                        else if (options.report != nullptr)
+                            ++options.report->droppedEffects["Harmless compressor (preset not found)"];
+                    }
                 }
                 else if (synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
                     adopt();
