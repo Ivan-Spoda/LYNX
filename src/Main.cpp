@@ -13,6 +13,8 @@
 #include "engine/Text.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
+#include "ui/Dialogs.h"
+#include "core/RackOps.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
@@ -1129,7 +1131,7 @@ private:
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         {
             lynx::AudioEngine offline (false);
-            lynx::MainComponent ui (offline);
+            lynx::MainComponent ui (offline, false); // default layout and keys, nothing saved
             // LYNX_SNAPSHOT_SIZE=WxH (default 1280x720)
             const auto size = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_SIZE", "1280x720"), "x", "");
             ui.setSize (juce::jlimit (800, 3840, size[0].getIntValue()), juce::jlimit (450, 2160, size[1].getIntValue()));
@@ -1140,6 +1142,16 @@ private:
             offline.dispatchPendingMessages(); // change notifications are asynchronous
 
             ui.waitForBrowserForSnapshot();
+
+            // the workspace desktop: the default layout, then with the Piano Roll and Mixer floating too
+            // (and a sample hint in the status strip, as when hovering a knob)
+            ui.showDesktopForSnapshot (false);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-desktop.png");
+            ui.showDesktopForSnapshot (true);
+            ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
+            saveSnapshot (ui, prefix + "-desktop-all.png");
+
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
@@ -1186,6 +1198,7 @@ private:
             };
             saveAlert (ui.makeConfirmDiscardWindow(), "-confirm.png");
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
+            saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
 
             if (! offline.getSong().automations.empty())
             {

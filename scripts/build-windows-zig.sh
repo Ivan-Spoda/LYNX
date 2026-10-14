@@ -79,7 +79,7 @@ APP_SOURCES=(src/Main.cpp
              src/platform/MingwFixes.cpp)
 
 # workflow shell: core (key map, workspace layout, rack operations) and UI (workspace desktop, control contract)
-APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp)
+APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

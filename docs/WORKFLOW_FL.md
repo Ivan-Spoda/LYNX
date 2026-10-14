@@ -1,6 +1,7 @@
 # FL Studio's workflow: a clean-room study for LYNX
 
-Last updated: 2026-10-14. Status: study / design input. No code was changed while it was written.
+Last updated: 2026-10-14. Status: study / design input, with the gap statuses of P1 items 1, 4-8, 14 and 15 updated after
+they were built on `feature/wf-shell` (marked **Done** / **Partial (shell)** below).
 
 LYNX interprets FL Studio's *workflow*: the way a producer moves between the Channel Rack, Piano Roll,
 Playlist and Mixer. It keeps its own look, names and code. This document has four parts:
@@ -375,33 +376,33 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| G1 | Partial | F5/F6/F7/F9 switch **tabs** of one `TabbedComponent` (`ui/MainComponent.cpp:150-155, 302-343`); F8 toggles the Browser side panel. No quick plugin picker |
+| G1 | **Done** (shell) | F5 Playlist, F6 Channel Rack, F7 Piano Roll, F9 Mixer, F8 and Alt+F8 Browser **toggle and focus** floating panels (`ui/Workspace.*`, `core/Workspace.cpp` `Layout::toggle`). F8 shows the Browser until the quick-add palette (P2) exists. Keys checked on [DOC][sc] |
 | G2 | No | No F12 family; Esc only deselects inside the editors |
-| G3 | No | Only one editor is visible at a time (tabs). Plugin, automation, channel-settings and EQ windows are native `DocumentWindow`s kept above the main window (`ui/WindowOwner.cpp`) |
-| G4 | No | — |
-| G5 | No | — |
-| G6 | Partial | Space = play/pause (`MainComponent.cpp:387`); separate Stop button rewinds. No Ctrl+Space, no "Play again = stop + rewind", no panic on Stop |
-| G7 | Partial | L and the PAT/SONG button (`MainComponent.cpp:92-93, 392`); the right-click shortcut to a window is missing |
-| G8 | Partial | `IncDecButtons` slider 10–522 BPM; right-click = automation/MIDI link (`MainComponent.cpp:97-101, 360-368`). No drag on the digits, tap tempo, nudge or half speed |
+| G3 | **Done** (shell) | Workspace desktop: panels move by their title strip, resize by their edges, overlap, maximise (button or double-click on the title) and **detach** into a native window and back. Snapping to other panels and the edges (`workspace::snap`); Alt while dragging turns it off, as on [DOC][iface]. Plugin, settings and automation windows stay native windows |
+| G4 | **Done** | View → Reset layout, Save layout as…, Load layout (`%APPDATA%\LYNX\layouts\*.txt`), Bring back off-screen panels. The current layout is saved in the user settings (`workspace.txt`), not the project |
+| G5 | **Done** | Enter maximises/restores the Playlist (key map `panel.maximisePlaylist`) |
+| G6 | **Done** (except remember-seek) | Space and the Play button: play, or stop and go back to where playback started; Ctrl+Space pauses; Stop returns to the start; **double-click Stop = all notes off** (`AudioEngine::panic`, a channel −1 choke in `RackRenderer`). Right-click Stop ("remember seek time") not done. Keys checked on [DOC][sc] and [DOC][tb] |
+| G7 | **Done** | L toggles; right-click Pattern shows the Channel Rack, right-click Song shows the Playlist ([DOC][tb]; that page is itself inconsistent, LYNX follows the per-button reading) |
+| G8 | **Done** (LYNX variant) | Tempo display (`MainComponent::TempoDisplay`): drag the whole number (1 BPM per 4 px) or the decimals (0.01 BPM/px), Ctrl finer, wheel, double-click types, Alt/middle-click resets. Right-click: type value, **tap tempo** (call-out pad, from the 2nd tap, `controls::TapTempo`), **half / double** (permanent, not FL's temporary half speed), reset, automation clip, MIDI link. No nudge |
 | G9 | No | Snap exists only per editor (`ui/PianoRollComponent.cpp:73-78`, `ui/PlaylistComponent.cpp:25-26`); no global snap, no "Main" mode, no Backspace toggle. Alt bypass: Yes |
 | G10 | No | The default note length is implicitly the last resized note (R4) |
-| G11 | Partial | Toolbar combo + "+" + "…" menu with rename, colour, length, clone, delete (`MainComponent.cpp:103-119, 443-514`). No keys (+/−, F4, F2), no insert, no split by channel |
-| G12 | No | A static shortcut line (`MainComponent.cpp:143`), replaced only during MIDI learn. Tooltips only |
+| G11 | **Done** (most) | Numpad +/− next/previous, F4 next empty pattern (then the naming dialog), F2 rename + colour dialog (F2 inside it = random palette colour), Ctrl+Shift+Ins insert before the current one, "Split by channel" in the pattern menu and the new **Patterns** menu (`core/RackOps.cpp`). Keys checked on [DOC][pat-menu] and [DOC][sc]. Not done: numpad 1–9 direct pick, Alt+C pattern clone key (Alt+C clones channels in the rack; pattern clone stays in the menu), Del, move up/down |
+| G12 | **Done** | Hint strip in the status bar: describes the control under the mouse (`ui::HintSource`, hint property or tooltip), shows its live value while it is dragged, and marks "can be automated" and "has a right-click menu" with LYNX icons. MIDI learn prompt kept |
 | G13 | Partial | Snapshot undo with 100 steps, one step per mouse gesture (`engine/AudioEngine.cpp:555-611`); Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. No history list |
 | G14 | Partial | Ctrl+N new, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+R export, recent-files menu (`MainComponent.cpp:250-358, 833-957`). No save-new-version |
 | G15 | Partial | 4 built-in templates in "New from template" (`core/Templates.cpp:57`); no user templates |
-| G16 | Partial | The PC keyboard is always a piano when Ctrl/Alt are not held (`MainComponent.cpp:22-39, 345-355`). There is no toggle, so single-letter shortcuts (tools, L) clash with notes. Only L is protected |
-| G17 | No | No window shortcut icons (tabs act as the window switcher) |
+| G16 | **Done** | Ctrl+T and a toolbar toggle; saved in the user settings. Every binding lives in `core/KeyMap` (remappable via `%APPDATA%\LYNX\keys.json`, Options → Edit keyboard shortcuts). While the piano is on its keys win; other plain printable keys only work for actions marked `whilePiano` (L); chords, F-keys and Space/Enter/arrows always work |
+| G17 | **Done** | Toolbar icons for the five panels (click toggles, right-click shows the panel maximised) |
 | G18 | No | No "last tweaked" |
 
 **Controls**
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| K1 | Partial | Rack knobs: drag only (`ui/ChannelRackComponent.cpp:285-298`). Mixer fader and effect knobs: **Shift** = fine (`ui/MixerComponent.cpp:428-434`). Ctrl-fine nowhere |
-| K2 | Partial | Reset is **double-click** (rack `:379-382`, mixer `:457-458`, effects `:1112-1117`); no Alt+click or middle-click |
-| K3 | Partial | `addAutomationItem` gives create automation clip / MIDI learn / unlink (`ui/AutomationUi.cpp:498-515`). No type-in value, no reset item, no "init song with this position". The effect wet/dry knob has no menu |
-| K4 | No | — |
+| K1 | **Done** | One contract (`ui/ValueControl.*`, math in `core/ValueMath.h`): drag, **Ctrl+drag fine** (switchable mid-drag), wheel (Ctrl finer) on rack knobs and route box, mixer faders/pans, effect knobs and wet/dry, tempo, swing and every plain `juce::Slider` (global contract). No value snapping, so no Shift override |
+| K2 | **Done** | Alt+click or middle-click resets; double-click still resets |
+| K3 | **Done** (most) | One menu: Type value…, Reset, Create automation clip, Link to MIDI controller, Unlink (wet/dry included). No "init song with this position" or larger-control view |
+| K4 | Partial | The tempo display is a draggable number; other number displays (route box) use the knob contract. No edge-hover stepping |
 | K5 | No | — |
 | K7 | No | — |
 
@@ -413,20 +414,20 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | C2 | Yes (own) | Drag-paint/erase is a LYNX design choice (FL: not documented) |
 | C3 | No | — |
 | C4 | No | No graph editor and no per-step velocity/pitch in the rack |
-| C5 | Partial | Left-click selects + auditions C5 while held; **double-click** opens the plugin/Piano Roll (`:306-313, 367-368, 385-388`). No click-to-toggle window, no Shift+wheel move |
-| C6 | Partial | Menu has piano roll, instrument replace, rename, colour, clear notes, delete, arpeggiator, sampler slicing (`:414-541`). Missing: clone, insert, fill every N, rotate, advanced/Euclidean fill, copy/paste note data. The settings windows for model channels exist (`ui/ChannelSettings.cpp:1197-1202`) but have no menu entry |
-| C7 | No | Single selection only; no reorder, sort or select-unused |
+| C5 | **Done** | Click opens/closes the channel's editor (plugin window or settings), closing the previous one unless Alt is held or Options → Keep channel editors open is on; Ctrl+click auditions; Shift+wheel on the name/selector moves the channel; double-click opens the Piano Roll. Built-in drums and audio clips have no editor (the click only selects). Checked on [DOC][cr] |
+| C6 | Partial | Menu has piano roll, instrument replace, rename **and colour dialog** (F2-style random colour), colour, clear notes, arpeggiator, sampler slicing, **clone, insert channel here, move up/down, send to free inserts, delete selected**, and "Channel settings…" for the model channels. Missing: fill every N, rotate, advanced/Euclidean fill, copy/paste note data (P2) |
+| C7 | **Done** (LYNX gestures) | Selector column: click selects, Ctrl+click or right-click toggles, Shift+click range, double-click all; Up/Down, Shift+Up/Down; **Alt+Up/Down moves**. The selection drives live MIDI (up to 16 extra channels) and the PC keyboard. No sort or select-unused |
 | C8 | Partial | Left mute; right-click or Ctrl+click solo (`:267-283`). No lock |
-| C9 | No | — |
-| C10 | Partial | Route box: vertical drag (6 px per insert), double-click = next free insert (`:300-304, 339-345, 383-384`). No Ctrl+L for a selection, no naming of the insert after the channel |
+| C9 | **Done** | 1..0 mute, Ctrl+1..0 solo channels 1–10 while the rack has focus and the typing piano is off |
+| C10 | **Done** (most) | Ctrl+L (and menus) send the selection to free inserts, naming and colouring each insert after its channel (`sendChannelsToFreeInserts`). Route box follows the control contract. No Alt+M toggle |
 | C11 | No | No step-data clipboard in the rack |
 | C12 | No | — |
 | C13 | No | — |
 | C14 | Partial | Global swing knob in the toolbar (`MainComponent.cpp:121-128`); per-channel swing mix exists in the model and is imported, but there is no UI for it |
 | C15 | Partial | Length via the pattern menu (Automatic, 1–32 bars); the grid follows the length (`ChannelRackComponent.cpp:89-99`). No corner drag |
-| C16 | No | — |
+| C16 | **Done** | Shift+wheel over the Channel Rack panel title changes the pattern (the title shows the pattern's name) |
 | C17 | No | — |
-| C18 | No | — |
+| C18 | Partial | Alt+C clones the selected channels (settings, not notes), Alt+Del deletes them. No zip/unzip |
 | C19 | Yes | Cut groups, mono (STATUS.md, channel settings) |
 | C20 | No | — |
 
@@ -542,7 +543,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | ID | LYNX | Where / note |
 |---|---|---|
 | W1 | Partial | Native window with minimise and close (`ui/PluginWindow.cpp`); no header bar, presets or menu |
-| W2 | No | Opening again brings the window to the front; it does not toggle (`PluginWindow.cpp:101-112`) |
+| W2 | **Done** | The channel button toggles the plugin window (`PluginWindows::isOpen/close`) |
 | W3 | Partial | Always detached; parameters are reachable through the "Automate plugin parameter" submenus |
 | W4, W5 | No | — |
 
@@ -565,6 +566,11 @@ key map. Where an FL key is a widely shared convention (Ctrl+B duplicate, Space 
 may keep it. All key bindings should live in one remappable table (see P1-14).
 
 #### P1: the core feel of the workflow
+
+Status (branch `feature/wf-shell`): items 1, 4, 5, 6, 7, 8, 14 and 15 are built; items 2, 3, 9–13 belong to the
+editors' branch. Remaining gaps inside the built items: panel snapping does not apply to detached windows; F8 shows the
+Browser until the quick-add palette exists; no right-click on Stop (remember seek time), tempo nudge or temporary
+half speed; no numpad 1–9 pattern pick or pattern move up/down; no channel zip/unzip, sort or select-unused.
 
 1. **Workspace desktop (G1, G3, G4, G5, G17).** Replace the tab bar with a *workspace*: Playlist, Channel
    Rack, Piano Roll, Mixer and Browser become movable, resizable, overlapping panels inside the main window.

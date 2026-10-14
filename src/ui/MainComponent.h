@@ -1,9 +1,11 @@
 #pragma once
 
-#include <set>
+#include <map>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/KeyMap.h"
+#include "core/ValueMath.h"
 #include "engine/AudioEngine.h"
 #include "ui/BrowserComponent.h"
 #include "ui/Icons.h"
@@ -11,6 +13,8 @@
 #include "ui/PianoRollComponent.h"
 #include "ui/MixerComponent.h"
 #include "ui/PlaylistComponent.h"
+#include "ui/ValueControl.h"
+#include "ui/Workspace.h"
 
 namespace lynx
 {
@@ -21,14 +25,15 @@ class MainComponent final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
-    explicit MainComponent (AudioEngine& engine);
+    // `restoreUserSettings`: load/save the workspace layout, key map and UI options from the user
+    // settings (off for --snapshot, which must look the same on every machine).
+    explicit MainComponent (AudioEngine& engine, bool restoreUserSettings = true);
     ~MainComponent() override;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
-    void mouseDown (const juce::MouseEvent& e) override; // right-click on BPM: tempo automation
 
     // Opens .lynx or .flp (also used by the command line).
     void openFile (const juce::File& file);
@@ -36,11 +41,15 @@ public:
     // Asks "save changes?" if there are any; `then` runs unless the user cancels.
     void confirmDiscard (std::function<void()> then);
 
-    // For --snapshot mode: 0 = Channel Rack, 1 = Piano Roll (on the channel with the most notes), 2 = Playlist, 3 = Mixer.
+    // For --snapshot mode: 0 = Channel Rack, 1 = Piano Roll (on the channel with the most notes), 2 = Playlist, 3 = Mixer,
+    // each maximized on the workspace; showDesktopForSnapshot shows the default layout (with `extraPanels`, the
+    // Piano Roll and Mixer floating too).
     void selectTabForSnapshot (int tab);
+    void showDesktopForSnapshot (bool extraPanels);
     void waitForBrowserForSnapshot() { browser.waitForListing (5000); }
     juce::StringArray getMenuNamesForSnapshot() { return getMenuBarNames(); }
     juce::PopupMenu getMenuForSnapshot (int index) { return getMenuForIndex (index, {}); }
+    void setHintForSnapshot (const ui::Hint& hint) { hintBar.setHint (hint); }
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
     std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
@@ -52,23 +61,61 @@ public:
     }
 
 private:
+    using Panel = workspace::Panel;
+
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
-    void togglePlay();
     void showAudioSettings();
     void showImportReport();
     void showHelp();
+
+    // transport
+    void playStop();     // Space: play, or stop and go back to where playback started
+    void playPause();    // Ctrl+Space: pause / resume where it is
+    void stopAndRewind(); // the Stop button
+    double playStartTicks = 0.0;
+
+    // key map and actions
+    bool runAction (const std::string& id);
+    keys::Context focusContext() const;
+    void loadKeyMap();
+    void editKeyMap();
+    keys::KeyMap keyMap;
+    bool typingPiano = false; // off by default so single-letter editor tools work (the manual does not state a default)
+    void setTypingPiano (bool on);
+    juce::String shortcutText (const char* actionId) const; // "\tF5" for menus ("" when unbound)
+
+    // panels
+    void togglePanel (Panel panel);
+    void showPanel (Panel panel);
+    void refreshPanelButtons();
+    void saveLayoutAs();
+    juce::PopupMenu layoutsMenu();
+
+    // patterns
+    void selectPattern (int index);
+    void nextEmptyPattern();
+    void insertPatternHere();
+    void splitPatternByChannelNow();
+    void showRenamePattern (int index);
+
+    // user settings (UI options)
+    juce::File uiSettingsFile() const;
+    void loadUiSettings();
+    void saveUiSettings();
+    bool persistent = true;
 
     // menu bar
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex (int index, const juce::String& name) override;
     void menuItemSelected (int, int) override {}
     void rememberRecent (const juce::File& file);
+    juce::PopupMenu makePatternMenu();
     juce::MenuBarComponent menuBar { this };
     juce::RecentlyOpenedFilesList recent;
     static constexpr int menuHeight = 26;
     static constexpr int toolbarHeight = 50;
-    static constexpr int statusHeight = 24;
+    static constexpr int statusHeight = 26;
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();
@@ -83,7 +130,6 @@ private:
     void toggleMode();
     void refreshModeButton();
     void showPatternMenu();
-    void renamePattern (int index);
 
     AudioEngine& engine;
 
@@ -96,18 +142,52 @@ private:
     IconButton recordMenuButton { "recordMenu", Icon::chevronDown };
     IconButton patternModeButton { "patternMode", Icon::pattern }, songModeButton { "songMode", Icon::song };
     IconButton metronomeButton { "metronome", Icon::metronome };
-    juce::Slider bpmSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
+    IconButton typingPianoButton { "typingPiano", Icon::keyboard };
+
+    // tempo: a number dragged by its digits (whole BPM or decimals), with tap tempo in its menu
+    class TempoDisplay final : public juce::Component,
+                               public ui::HintSource
+    {
+    public:
+        explicit TempoDisplay (AudioEngine& e) : engine (e) {}
+        void paint (juce::Graphics& g) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        void mouseDoubleClick (const juce::MouseEvent& e) override;
+        void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+        ui::Hint hintAt (juce::Point<int> position) override;
+        void showMenu();
+        void showTap();
+
+    private:
+        bool isOnDecimals (int x) const;
+        void setBpm (double bpm);
+        ui::ValueSpec spec() const;
+        AudioEngine& engine;
+        double startBpm = 0.0;
+        bool dragOnDecimals = false, dragging = false;
+        int decimalX = 0; // x of the decimal point, from the last paint
+    };
+    TempoDisplay tempoDisplay { engine };
+
     juce::ComboBox patternBox;
     IconButton newPatternButton { "newPattern", Icon::plus };
     IconButton patternMenuButton { "patternMenu", Icon::more };
     juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::Label swingLabel;
     IconButton settingsButton { "settings", Icon::settings };
+    // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
+    std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
+                                                                 IconButton { "rackPanel", Icon::channelRack },
+                                                                 IconButton { "pianoRollPanel", Icon::pianoRoll },
+                                                                 IconButton { "mixerPanel", Icon::mixer },
+                                                                 IconButton { "browserPanel", Icon::browser } };
     std::vector<int> dividers; // x positions of the toolbar group separators
     void showLanguageChoice (const juce::String& id);
     juce::Label positionLabel;
 
-    // output oscilloscope in the bar (like FL's)
+    // output oscilloscope in the bar
     class Scope final : public juce::Component
     {
     public:
@@ -121,7 +201,20 @@ private:
     };
     Scope scope { engine };
     juce::Label cpuLabel;
-    juce::Label hintLabel;
+
+    // hint strip: what the control under the mouse does, its live value, and markers for
+    // "can be automated" and "has a right-click menu"
+    class HintBar final : public juce::Component
+    {
+    public:
+        void setHint (const ui::Hint& hint);
+        void paint (juce::Graphics& g) override;
+
+    private:
+        ui::Hint current;
+    };
+    HintBar hintBar;
+    juce::String idleHint() const;
 
     ChannelRackComponent rack;
     juce::Viewport rackViewport;
@@ -130,15 +223,14 @@ private:
     PatternPicker picker { engine, playlist };
     PlaylistArea playlistArea { picker, playlist };
     MixerComponent mixer;
-    juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
     BrowserComponent browser;
-    bool browserVisible = true;
+    Workspace workspace; // after the panels' contents: it is destroyed first
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
     juce::String importedSuffix; // " (imported from FL Studio)" in the title until saved as .lynx
     juce::String projectName; // suggested name for export (also from an imported .flp)
-    std::set<int> heldKeys; // PC keyboard keys currently playing notes (keyCode)
+    std::map<int, std::vector<int>> heldKeys; // PC keyboard keys playing notes (keyCode -> channels)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

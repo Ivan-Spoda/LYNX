@@ -118,6 +118,12 @@ if(LYNX_BUILD_APP)
         src/ui/Icons.cpp
         src/ui/I18n.cpp)
 
+    # workflow shell: workspace desktop, control contract, dialogs
+    target_sources(LYNX PRIVATE
+        src/ui/Workspace.cpp
+        src/ui/ValueControl.cpp
+        src/ui/Dialogs.cpp)
+
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 
     target_compile_definitions(LYNX PRIVATE
