@@ -1139,6 +1139,7 @@ private:
 
             offline.dispatchPendingMessages(); // change notifications are asynchronous
 
+            ui.waitForBrowserForSnapshot();
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
@@ -1176,6 +1177,15 @@ private:
             };
 
             saveWindow (lynx::makeExportPanel (offline), "-export.png");
+            saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
+            saveMenus (ui, prefix + "-menus.png");
+
+            auto saveAlert = [&] (std::unique_ptr<juce::AlertWindow> alert, const juce::String& name) {
+                alert->setOpaque (true);
+                saveWindow (std::move (alert), name);
+            };
+            saveAlert (ui.makeConfirmDiscardWindow(), "-confirm.png");
+            saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
 
             if (! offline.getSong().automations.empty())
             {
@@ -1236,6 +1246,101 @@ private:
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
+    }
+
+    // the menu bar's menus side by side, drawn with the LookAndFeel as they appear when opened
+    static void saveMenus (lynx::MainComponent& ui, const juce::String& path)
+    {
+        auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();
+        const auto names = ui.getMenuNamesForSnapshot();
+        struct Laid
+        {
+            juce::PopupMenu menu;
+            int width = 0, height = 0;
+        };
+        std::vector<Laid> menus;
+        const auto border = lf.getPopupMenuBorderSize();
+        const auto itemHeight = 26;
+
+        for (int m = 0; m < names.size(); ++m)
+        {
+            Laid laid { ui.getMenuForSnapshot (m) };
+            int width = 160, height = 2 * border;
+
+            for (juce::PopupMenu::MenuItemIterator it (laid.menu); it.next();)
+            {
+                const auto& item = it.getItem();
+                int w = 0, h = 0;
+                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                if (item.shortcutKeyDescription.isNotEmpty() || item.text.containsChar ('\t'))
+                    w += 90;
+                width = juce::jmax (width, w + 10);
+                height += h;
+            }
+
+            laid.width = width;
+            laid.height = height;
+            menus.push_back (std::move (laid));
+        }
+
+        int totalWidth = 16, totalHeight = 0;
+        for (const auto& l : menus)
+        {
+            totalWidth += l.width + 16;
+            totalHeight = juce::jmax (totalHeight, l.height + 32);
+        }
+
+        juce::Image image (juce::Image::ARGB, totalWidth, totalHeight, true);
+        {
+            juce::Graphics g (image);
+            g.fillAll (lynx::theme::colour::bg1);
+            int x = 16;
+
+            for (int m = 0; m < (int) menus.size(); ++m)
+            {
+                const auto& l = menus[(std::size_t) m];
+                g.setColour (lynx::theme::colour::textSecondary);
+                g.setFont (lynx::theme::font (lynx::theme::type::small, true));
+                g.drawText (names[m], x, 0, l.width, 24, juce::Justification::centredLeft);
+                {
+                    juce::Graphics::ScopedSaveState state (g);
+                    g.reduceClipRegion (x, 24, l.width, l.height);
+                    g.setOrigin (x, 24);
+                    lf.drawPopupMenuBackground (g, l.width, l.height);
+                    int y = border;
+                    bool first = true;
+
+                    for (juce::PopupMenu::MenuItemIterator it (l.menu); it.next();)
+                    {
+                        const auto& item = it.getItem();
+                        int w = 0, h = 0;
+                        lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                        const juce::Rectangle<int> r (0, y, l.width, h);
+                        auto text = item.text, shortcut = item.shortcutKeyDescription;
+                        if (text.containsChar ('\t'))
+                        {
+                            shortcut = text.fromFirstOccurrenceOf ("\t", false, false);
+                            text = text.upToFirstOccurrenceOf ("\t", false, false);
+                        }
+
+                        if (item.isSectionHeader)
+                            lf.drawPopupMenuSectionHeader (g, r, text);
+                        else
+                            lf.drawPopupMenuItem (g, r, item.isSeparator, item.isEnabled, first && ! item.isSeparator && m == 0, item.isTicked,
+                                                  item.subMenu != nullptr, text, shortcut, item.image.get(), nullptr);
+                        first = false;
+                        y += h;
+                    }
+                }
+                x += l.width + 16;
+            }
+        }
+
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (image, *out);
     }
 
     static void saveSnapshot (juce::Component& c, const juce::String& path)
