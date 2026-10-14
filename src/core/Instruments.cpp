@@ -1,6 +1,7 @@
 #include "core/Instruments.h"
 #include "core/FlSynths.h"
 #include "core/DrumSynthLive.h"
+#include "core/Harmless.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -192,6 +193,7 @@ private:
             case InstrumentKind::drumpad:
             case InstrumentKind::boobass:
             case InstrumentKind::drumsynth:
+            case InstrumentKind::harmless:
                 break;
         }
 
@@ -1940,6 +1942,9 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     if (kind == InstrumentKind::drumsynth)
         return makeDrumSynthInstrument();
+
+    if (kind == InstrumentKind::harmless)
+        return makeHarmlessInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }
