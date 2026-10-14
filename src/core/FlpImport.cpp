@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/DrumSynthLive.h"
 #include "core/PhysicalModels.h"
 
 #include "core/Effects.h"
@@ -426,6 +427,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     // FL channels may have sparse indices; we map them to dense indices.
     std::map<int, int> channelMap;
     std::vector<std::pair<int, std::vector<DrumPad>>> drumKits; // FPC channels to split at the end
+    std::optional<std::string> drumSynthDll; // the user's DrumSynth Live engine DLL, once checked ("" = not usable)
 
     for (const auto& c : project.channels)
     {
@@ -709,9 +711,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.controllerState = c.pluginState;
         }
 
-        // Fruity DrumSynth Live: the FL drum sample with the same name as the chosen sound
+        // Fruity DrumSynth Live: its engine with all 120 patches (REA_rodada30 §1); the recorded waveforms some patches
+        // use are read at run time from the user's own engine DLL (without it they are silent, the synthesis is not).
+        // Fallback when the state can't be parsed: the FL drum sample with the same name as the editor's sound
         if (c.pluginName == "Fruity DrumSynth Live")
-            if (const auto sound = drumSynthLiveSound (c.pluginState))
+        {
+            if (auto params = drumSynthLiveParams (c.pluginState))
+            {
+                def.instrument = InstrumentKind::drumsynth;
+                def.modelParams = std::move (*params);
+                if (! drumSynthDll)
+                {
+                    drumSynthDll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Fruity DrumSynth Live\\drumsynth_eng_x64.dll",
+                                                  options.roots);
+                    if (drumSynthDll->empty() || ! options.fileExists || ! options.fileExists (*drumSynthDll) || ! drumSynthDllUsable (*drumSynthDll))
+                        drumSynthDll = std::string();
+                }
+                def.samplePath = *drumSynthDll;
+            }
+            else if (const auto sound = drumSynthLiveSound (c.pluginState))
                 for (const auto& candidate : drumSampleCandidates (*sound))
                     if (auto path = existing (candidate); ! path.empty())
                     {
@@ -719,6 +737,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         def.samplePath = std::move (path);
                         break;
                     }
+        }
 
         if (c.pluginName == "FPC")
             if (auto pads = fpcPads (c.pluginState))
@@ -911,7 +930,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
                 ++r.approximated[c.pluginName];
-            else if ((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
+            else if (((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
+                     || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::drumsynth))
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)

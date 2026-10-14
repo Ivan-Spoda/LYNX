@@ -30,6 +30,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::sakura: return "Sakura";
         case InstrumentKind::drumpad: return "Drumpad";
         case InstrumentKind::boobass: return "BooBass";
+        case InstrumentKind::drumsynth: return "DrumSynth Live";
     }
     return "?";
 }

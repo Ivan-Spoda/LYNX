@@ -3,6 +3,7 @@
 
 #include <functional>
 
+#include "core/DrumSynthLive.h"
 #include "core/FlSynths.h"
 #include "core/FlpImport.h"
 #include "core/SynthPresets.h"
@@ -466,6 +467,17 @@ public:
         const auto& def = engine.getSong().channels[(std::size_t) channel];
         sakura = def.instrument == InstrumentKind::sakura;
         boobass = def.instrument == InstrumentKind::boobass;
+        drumsynth = def.instrument == InstrumentKind::drumsynth;
+        // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
+        if (drumsynth)
+        {
+            if (lynx::drumSynthEditorKeyIndex < (int) def.modelParams.size())
+                editorKey = (int) def.modelParams[(std::size_t) lynx::drumSynthEditorKeyIndex];
+            if (drumSynthKeyToSlot (editorKey) < 0)
+                editorKey = 60;
+            wavesFound = ! def.samplePath.empty();
+        }
+        const auto offset = drumsynth ? drumSynthPatchParams * drumSynthKeyToSlot (editorKey) : 0;
         static const std::pair<int, const char*> sakuraKnobs[] = {
             { 0, "Master" }, { 1, "Tune" }, { 2, "Attack" }, { 3, "Decay" }, { 4, "Sustain" }, { 5, "Release" },
             { 6, "Str1 decay" }, { 9, "Str1 damp" }, { 11, "Str2 decay" }, { 14, "Str2 damp" }, { 16, "Saturation" },
@@ -476,10 +488,14 @@ public:
             { 8, "Tension" }, { 9, "Phase" }, { 10, "Material" }, { 11, "Size" }, { 12, "Shape" }, { 13, "Low freq" },
             { 18, "Mid freq" }, { 19, "Mid level" }, { 24, "High freq" }, { 25, "High level" }, { 27, "Lo-fi" },
             { 28, "Hold" }, { 29, "Pitch" } };
-        auto add = [&] (int index, const char* name) {
+        auto add = [&] (int index, const char* name, double low = 0.0, double high = -1.0) {
             auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
             knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
-            knob->setRange (0.0, boobass ? 65535.0 : 1.0, boobass ? 1.0 : 0.001);
+            index += offset;
+            if (high > low)
+                knob->setRange (low, high, 1.0);
+            else
+                knob->setRange (0.0, boobass ? 65535.0 : 1.0, boobass ? 1.0 : 0.001);
             knob->setValue (index < (int) def.modelParams.size() ? def.modelParams[(std::size_t) index] : 0.0, juce::dontSendNotification);
             knob->setName (name);
             knob->onValueChange = [this, index, k = knob.get()] {
@@ -493,7 +509,16 @@ public:
             knobs.push_back (std::move (knob));
         };
         static const std::pair<int, const char*> booBassKnobs[] = { { 0, "Bass" }, { 1, "Mid" }, { 2, "Treble" } };
-        if (boobass)
+        struct Ranged { int index; const char* name; double low, high; };
+        static const Ranged drumSynthKnobs[] = {
+            { 0, "Level", 0, 128 }, { 1, "Pan", -64, 64 }, { 2, "Tone", -50, 50 }, { 3, "Harmonics", -50, 50 },
+            { 4, "Osc1 freq", 0, 1000 }, { 7, "Osc1 decay", 0, 127 }, { 8, "Osc1 level", 0, 127 }, { 10, "Osc2 freq", 0, 1000 },
+            { 13, "Osc2 decay", 0, 127 }, { 14, "Osc2 level", 0, 127 }, { 17, "Wave mix", 0, 127 }, { 21, "Release", 0, 127 },
+            { 23, "Click", 0, 100 }, { 33, "Ring mod", 0, 127 } };
+        if (drumsynth)
+            for (const auto& k : drumSynthKnobs)
+                add (k.index, k.name, k.low, k.high);
+        else if (boobass)
             for (const auto& [index, name] : booBassKnobs)
                 add (index, name);
         else if (sakura)
@@ -510,7 +535,10 @@ public:
         g.fillAll (theme::panel);
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (14.0f));
-        g.drawText (boobass ? utf8 ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
+        g.drawText (drumsynth ? utf8 ("DrumSynth Live — FL's engine, patch on key ") + juce::String (editorKey)
+                                    + (wavesFound ? utf8 (" (next hit; recorded waves from your FL installation)")
+                                                  : utf8 (" (next hit; recorded waves not found: silent)"))
+                    : boobass ? utf8 ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
                     10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
@@ -529,7 +557,8 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false;
+    bool sakura = true, boobass = false, drumsynth = false, wavesFound = false;
+    int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
 
@@ -1157,7 +1186,8 @@ public:
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
             setContentOwned (new ControllerPanel (engine, channel), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass)
+                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
+                 || kind == InstrumentKind::drumsynth)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1234,7 +1264,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
         return std::make_unique<ControllerPanel> (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-        kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass)
+        kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
+                 || kind == InstrumentKind::drumsynth)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

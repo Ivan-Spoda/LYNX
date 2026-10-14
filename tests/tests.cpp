@@ -9,9 +9,11 @@
 #include <functional>
 #include <iterator>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/Dither.h"
+#include "core/DrumSynthLive.h"
 #include "core/Effects.h"
 #include "core/Effector.h"
 #include "core/FlpImport.h"
@@ -959,10 +961,7 @@ TEST (flp_real_files)
                 else if (c.pluginName == "FLEX")
                     decoded = lynx::flexPresetName (c.pluginState).has_value() ? 2 : 0;
                 else if (c.pluginName == "Fruity DrumSynth Live")
-                {
-                    const auto sound = lynx::drumSynthLiveSound (c.pluginState);
-                    decoded = sound && ! lynx::drumSampleCandidates (*sound).empty();
-                }
+                    decoded = lynx::drumSynthLiveParams (c.pluginState).has_value() ? 2 : 0;
                 if (decoded < 0)
                     continue;
                 auto& counter = generators[c.pluginName];
@@ -5278,4 +5277,93 @@ TEST (sakura_matrix_and_effects)
     CHECK (energy (wet, 26000, 40000) > 100.0 * energy (dry, 26000, 40000) + 1e-9); // the note ends near 0.2 s
     CHECK (dryInst->idle() || energy (dry, 70000, 72000) < 1e-12);
     CHECK (! wetInst->idle()); // the echo tail has not been silent for 3 s yet
+}
+
+TEST (drumsynth_live_engine)
+{
+    // REA_rodada30 §1: key → patch slot, state parsing, the engine against our reference model (no DLL: synthesised
+    // sources only, noise from the fallback seed), voice modes, patch level/pan
+    CHECK (lynx::drumSynthKeyToSlot (48) == 0 && lynx::drumSynthKeyToSlot (71) == 23 && lynx::drumSynthKeyToSlot (0) == 24);
+    CHECK (lynx::drumSynthKeyToSlot (47) == 71 && lynx::drumSynthKeyToSlot (72) == 72 && lynx::drumSynthKeyToSlot (119) == 119);
+    CHECK (lynx::drumSynthKeyToSlot (120) == -1);
+
+    // a version 3 state: 120 names, 120 × 38 ints (send track −1 becomes 0 below version 4), flags
+    std::vector<std::uint8_t> blob;
+    auto put = [&] (std::uint32_t v) { for (int k = 0; k < 4; ++k) blob.push_back ((std::uint8_t) (v >> (8 * k))); };
+    put (3);
+    put (66);
+    for (int i = 0; i < 120; ++i)
+        blob.push_back (2), blob.push_back ('a'), blob.push_back ((std::uint8_t) ('0' + i % 10));
+    for (int i = 0; i < 120 * 38; ++i)
+        put ((std::uint32_t) (i % 38 == 36 ? -1 : i % 38 == 4 ? 300 : 0));
+    put (0);
+    const auto parsed = lynx::drumSynthLiveParams (blob);
+    CHECK (parsed && (int) parsed->size() == lynx::drumSynthParamCount);
+    CHECK (parsed && (*parsed)[36] == 0.0f && (*parsed)[38 * 7 + 4] == 300.0f && (*parsed)[(std::size_t) lynx::drumSynthEditorKeyIndex] == 66.0f);
+    blob.resize (500);
+    CHECK (! lynx::drumSynthLiveParams (blob));
+
+    // patch on key 60 (slot 12): tone-mode Osc1 with sweep and click, noise-band Osc2, ring, 2 retriggers
+    const int patch[38] { 100, 0, 10, -20, 300, 40, 50, 70, 90, 30, 600, 60, 10, 60, 80, -1, 0, 0, 2, 40, 60, 127, 0, 20, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 30, -1, 0, 0, 64 };
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::drumsynth;
+    c.modelParams.assign ((std::size_t) lynx::drumSynthParamCount, 0.0f);
+    for (int s = 0; s < 120; ++s)
+        c.modelParams[(std::size_t) (38 * s + 15)] = c.modelParams[(std::size_t) (38 * s + 34)] = -1.0f;
+    for (int i = 0; i < 38; ++i)
+        c.modelParams[(std::size_t) (38 * 12 + i)] = (float) patch[i];
+    auto render = [] (const lynx::ChannelDef& def, std::vector<int> keys, int total, float gl = 1.0f, float gr = 1.0f) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::drumsynth);
+        inst->configure (def, 120.0);
+        inst->prepare (48000.0);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        for (int s = 0; s < total; s += 512)
+        {
+            for (std::size_t k = 0; k + 1 < keys.size(); k += 2)
+                if (keys[k + 1] == s)
+                    inst->noteOn (keys[k], 100.0f / 128.0f);
+            inst->render (l.data() + s, r.data() + s, std::min (512, total - s), gl, gr);
+        }
+        return std::make_tuple (l, r, std::move (inst));
+    };
+    {
+        auto [l, r, inst] = render (c, { 60, 0 }, 9600);
+        // reference model (REA round 30 dsl_model.py, seed 0x56CE, FL velocity 100, V = 1, centre: × g(100)·cos(π/4))
+        const std::pair<int, float> golden[] { { 0, -0.0074092713f }, { 10, -0.13961405f }, { 100, -0.47290668f }, { 1000, -0.29188696f },
+                                               { 3000, -0.22130175f }, { 6000, -0.049537566f }, { 9599, 0.010392102f } };
+        for (const auto& [i, v] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - v) < 2e-6f && std::abs (r[(std::size_t) i] - v) < 2e-6f);
+        std::vector<float> tail (48000 * 4), tailR (tail.size());
+        inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle()); // the engine reported the voice finished
+    }
+    auto energy = [] (const std::vector<float>& x, int from, int to) {
+        double e = 0.0;
+        for (int i = from; i < to; ++i)
+            e += (double) x[(std::size_t) i] * x[(std::size_t) i];
+        return e;
+    };
+    // a key without a patch level (slot 0, level 0) and a key outside the 120 patches are silent
+    CHECK (energy (std::get<0> (render (c, { 48, 0, 125, 0 }, 4096)), 0, 4096) == 0.0);
+    // mono: a second hit on the same key cuts the first; poly: both ring together (Osc2 off: no noise, deterministic)
+    auto tone = c;
+    tone.modelParams[38 * 12 + 14] = 0.0f;
+    const auto single = std::get<0> (render (tone, { 60, 0 }, 8192));
+    const auto mono = std::get<0> (render (tone, { 60, 0, 60, 2048 }, 8192));
+    auto poly = tone;
+    poly.modelParams[38 * 12 + 24] = 1.0f;
+    const auto both = std::get<0> (render (poly, { 60, 0, 60, 2048 }, 8192));
+    double monoDiff = 0.0, polyDiff = 0.0;
+    for (int i = 2048 + 300; i < 8192; ++i) // after the cut fade: mono = only the second hit, a copy of the first
+        monoDiff += std::abs (mono[(std::size_t) i] - single[(std::size_t) i - 2048]), polyDiff += std::abs (both[(std::size_t) i] - single[(std::size_t) i - 2048]);
+    CHECK (monoDiff < 1e-3 && polyDiff > 1.0);
+    // patch pan +64 → right only; channel volume counts twice (FL applies Final.Vol in the engine and at the host)
+    auto right = c;
+    right.modelParams[38 * 12 + 1] = 64.0f;
+    const auto [pl, pr, pi] = render (right, { 60, 0 }, 4096);
+    CHECK (energy (pl, 0, 4096) < 1e-12 * energy (pr, 0, 4096) && energy (pr, 0, 4096) > 1.0);
+    const auto full = std::get<0> (render (tone, { 60, 0 }, 4096));
+    const auto half = std::get<0> (render (tone, { 60, 0 }, 4096, 0.5f, 0.5f));
+    CHECK (std::abs (half[100] - 0.25f * full[100]) < 1e-6f && std::abs (full[100]) > 0.01f);
 }

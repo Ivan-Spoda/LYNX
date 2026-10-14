@@ -68,6 +68,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::sakura: return "sakura";
         case InstrumentKind::drumpad: return "drumpad";
         case InstrumentKind::boobass: return "boobass";
+        case InstrumentKind::drumsynth: return "drumsynth";
     }
     return "synth";
 }
@@ -76,7 +77,8 @@ InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
-                    InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass })
+                    InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass,
+                    InstrumentKind::drumsynth })
         if (id == instrumentId (k))
             return k;
 
@@ -745,7 +747,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             {
                 const auto values = juce::StringArray::fromTokens (c.getProperty ("modelParams", "").toString(), " ", "");
-                for (int k = 0; k < values.size() && k < 256; ++k)
+                for (int k = 0; k < values.size() && k < 8192; ++k) // (DrumSynth Live: 4562)
                     def.modelParams.push_back (values[k].getFloatValue());
             }
             if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())

@@ -38,7 +38,8 @@ enum class InstrumentKind : std::uint8_t
     controller, // makes no sound: notes trigger envelopes that modulate other parameters (FL's Envelope Controller)
     sakura,     // physical string model (FL's Sakura engine, REA_rodada28 §1); parameters in ChannelDef::modelParams
     drumpad,    // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
-    boobass     // FL's BooBass engine (REA_rodada29 §4); multisample read from the user's DLL (samplePath), 3 knobs
+    boobass,    // FL's BooBass engine (REA_rodada29 §4); multisample read from the user's DLL (samplePath), 3 knobs
+    drumsynth   // FL's Fruity DrumSynth Live (REA_rodada30 §1): 120 patches in modelParams, recorded waves from the user's DLL
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -237,7 +238,7 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = straight to Master
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
-    std::vector<float> modelParams; // instrument == sakura / drumpad: FL's raw state parameters
+    std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth: FL's raw state parameters
     SamplerSettings sampler; // used when instrument == sampler
     SynthSettings synth;     // used when instrument == synth
     float swingMix = 1.0f;   // how much of the global swing applies to this channel (0..1), as in FL

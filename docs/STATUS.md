@@ -53,8 +53,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
-- Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller, DrumSynth Live (by
-  sample); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+- Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
+  engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
+  installation; within −138 dB of the reference model verified against FL's DLLs); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -123,6 +124,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   once per LYNX render block; with the resonators on the output is within −72 dB of the reference (their float32
   feedback amplifies rounding); strings longer than 9 600 samples (notes below ~20 Hz) are shortened.
 - Drumpad: no key tracking (FL's DSP has none; the host's per-note pitch value is not confirmed).
+- DrumSynth Live: the recorded waves (8 of the 24 default sounds use one) and the exact noise seed need the exact
+  drumsynth_eng_x64.dll build (SHA-256 checked; otherwise those waves are silent and the noise starts from another
+  seed); sends to other tracks (p35/p36), Mod X/Y and FL's link-velocity default are not modelled (Final.Vol = channel
+  volume); a cut voice fades over 256 samples (FL's host ramp is not confirmed).
 - BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
   36 are clamped (FL reads outside its table there).
 - Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
