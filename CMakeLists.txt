@@ -44,6 +44,12 @@ add_library(lynx_core STATIC
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
 
+# workflow shell (key map, workspace layout, rack operations)
+target_sources(lynx_core PRIVATE
+    src/core/KeyMap.cpp
+    src/core/Workspace.cpp
+    src/core/RackOps.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
