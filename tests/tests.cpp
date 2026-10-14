@@ -4969,3 +4969,36 @@ TEST (synth_spectrum_decays_per_harmonic)
     const auto y = renderSynthNote (s, 57, 48000);
     CHECK (std::abs (10.0 * std::log10 (goertzel (y, 660.0, 24000, 26400) / goertzel (y, 660.0, 480, 2880))) < 1.0);
 }
+
+TEST (worker_pool_runs_each_index_once_per_round)
+{
+    // rounds of alternating sizes (a stalled worker must never run an index of a later round), each index
+    // exactly once, and nothing running after parallelFor returns
+    lynx::WorkerPool pool (3);
+    std::vector<std::atomic<int>> hits (64);
+    std::atomic<int> round { 0 }, outside { 0 }, wrongRound { 0 };
+    std::atomic<bool> open { false };
+    int failures = 0;
+    for (int r = 1; r <= 20000; ++r)
+    {
+        const auto n = (r % 3 == 0) ? 64 : (r % 3 == 1 ? 2 : 9);
+        for (int i = 0; i < n; ++i)
+            hits[(std::size_t) i].store (0);
+        round.store (r);
+        open.store (true);
+        auto fn = [&, r] (int i) {
+            if (! open.load())
+                outside.fetch_add (1);
+            if (round.load() != r)
+                wrongRound.fetch_add (1);
+            hits[(std::size_t) i].fetch_add (1);
+        };
+        pool.parallelFor (n, fn);
+        open.store (false);
+        for (int i = 0; i < n; ++i)
+            failures += hits[(std::size_t) i].load() != 1;
+    }
+    CHECK (failures == 0);
+    CHECK (outside.load() == 0);
+    CHECK (wrongRound.load() == 0);
+}

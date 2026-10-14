@@ -6,6 +6,7 @@
 // indices from an atomic counter; the calling thread also works and spin-waits.
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <semaphore>
 #include <thread>
@@ -44,11 +45,14 @@ private:
     std::counting_semaphore<> wake { 0 };
     std::atomic<bool> quit { false };
 
-    // current work (published before `next` goes back to 0)
+    // current work (published before `ticket`). The ticket packs generation (bits 40+), count (bits 20…39) and the
+    // next index (bits 0…19), so an index taken by a late worker always carries its own round's count: a worker
+    // that stalls between taking an index and running it can never run an index of a later round (no ABA)
     void* context = nullptr;
     Call call = nullptr;
-    std::atomic<int> count { 0 };
-    std::atomic<int> next { 0 };
+    static constexpr int indexBits = 20;
+    std::atomic<std::uint64_t> ticket { 0 };
+    std::uint64_t generation = 0; // caller thread only
     std::atomic<int> done { 0 };
 };
 } // namespace lynx

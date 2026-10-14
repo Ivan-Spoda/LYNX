@@ -49,6 +49,9 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // a crash in any mode (UI, command line) writes its backtrace to %APPDATA%\LYNX\autosave
+        juce::SystemStats::setApplicationCrashHandler (onCrash);
+
         // child process of a sandboxed plugin: no window or audio of its own
         if (lynx::runPluginSandboxWorker (commandLine))
             return;
@@ -224,7 +227,6 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         engine = std::make_unique<lynx::AudioEngine>();
         crashEngine = engine.get();
-        juce::SystemStats::setApplicationCrashHandler (onCrash);
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
         lynx::setMainWindowForOwnership (mainWindow.get());
 

@@ -6,7 +6,7 @@ namespace lynx
 {
 WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart)
 {
-    next.store (1 << 30); // nothing to take until the first parallelFor
+    // ticket 0: count 0, nothing to take until the first parallelFor
 
     for (int i = 0; i < n; ++i)
         threads.emplace_back ([this, onThreadStart] { workerLoop (onThreadStart); });
@@ -41,14 +41,16 @@ void WorkerPool::workerLoop (std::function<void()> onStart)
 
 void WorkerPool::work() noexcept
 {
+    constexpr auto mask = (std::uint64_t (1) << indexBits) - 1;
     while (true)
     {
-        const auto i = next.fetch_add (1, std::memory_order_acq_rel);
+        const auto t = ticket.fetch_add (1, std::memory_order_acq_rel);
+        const auto i = t & mask, n = (t >> indexBits) & mask;
 
-        if (i >= count.load (std::memory_order_acquire))
+        if (i >= n)
             return;
 
-        call (context, i);
+        call (context, (int) i);
         done.fetch_add (1, std::memory_order_acq_rel);
     }
 }
@@ -58,7 +60,7 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     if (n <= 0)
         return;
 
-    if (n == 1 || threads.empty())
+    if (n == 1 || threads.empty() || n >= (1 << indexBits))
     {
         for (int i = 0; i < n; ++i)
             fn (ctx, i);
@@ -68,8 +70,9 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     context = ctx;
     call = fn;
     done.store (0, std::memory_order_relaxed);
-    count.store (n, std::memory_order_release);
-    next.store (0, std::memory_order_release); // from here on the workers may take indices
+    ++generation;
+    const auto base = generation << (2 * indexBits);
+    ticket.store (base | ((std::uint64_t) n << indexBits), std::memory_order_release); // from here on the workers may take indices
 
     wake.release ((std::ptrdiff_t) std::min<int> ((int) threads.size(), n - 1));
     work();
@@ -77,6 +80,6 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     while (done.load (std::memory_order_acquire) < n)
         std::this_thread::yield();
 
-    next.store (1 << 30, std::memory_order_release); // late workers take nothing
+    ticket.store (base, std::memory_order_release); // count 0: late workers take nothing
 }
 } // namespace lynx
