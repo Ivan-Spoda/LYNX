@@ -2220,6 +2220,11 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     record (vst3State, 1, std::vector<std::uint8_t> (64, 0));
     record (vst3State, 3, bytes ("COMPONENTE"));
     record (vst3State, 2, bytes ("CONTROLADOR"));
+    // record 4: 3 slots → ParamIDs 700, −1 (empty), 0xFFFFFF01
+    std::vector<std::uint8_t> slots;
+    for (auto v : { 3u, 700u, 0xFFFFFFFFu, 0xFFFFFF01u })
+        u32 (slots, v);
+    record (vst3State, 4, slots);
 
     u32 (blob, 12);
     record (blob, 0x01, std::vector<std::uint8_t> (20, 0xFF));
@@ -2240,6 +2245,14 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     std::vector<std::uint8_t> component, controller;
     CHECK (lynx::splitFlVst3State (p.state, component, controller));
     CHECK (component == bytes ("COMPONENTE") && controller == bytes ("CONTROLADOR"));
+    const auto saved = lynx::flVst3ParamSlots (p.state);
+    CHECK (saved == (std::vector<std::int32_t> { 700, -1, (std::int32_t) 0xFFFFFF01u }));
+
+    // FL's slot assignment: saved slots keep their ParamID wherever it now sits; the empty slot stays empty;
+    // a vanished ParamID (0xFFFFFF01) leaves its slot dead; parameters without a slot get slots 3, 4… in list order
+    const auto positions = lynx::flVst3SlotPositions (saved, { 5u, 700u, 9u });
+    CHECK (positions == (std::vector<int> { 1, -1, -1, 0, 2 }));
+    CHECK (lynx::flVst3SlotPositions ({}, { 5u, 6u }) == (std::vector<int> { 0, 1 })); // new instance: slot = position
 
     // version out of range or no type: not a usable wrapper
     blob[0] = 13;

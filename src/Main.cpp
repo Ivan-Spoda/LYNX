@@ -2,6 +2,7 @@
 
 #include "core/Effects.h"
 #include "core/SynthPresets.h"
+#include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
@@ -548,6 +549,21 @@ private:
                     put32 (1);
                     record (1, juce::MemoryBlock (64, true));
 
+                    // record 4 (REA_rodada22 §2.3): slots 0/1 hold the ParamIDs of parameters 2 and 0, so FL's
+                    // automations k = 0, 1, 2 mean positions 2, 0 and 1 (the first parameter without a slot)
+                    juce::MemoryBlock slots;
+                    const auto paramId = [&] (int i) {
+                        const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (plugin->getParameters()[i]);
+                        return hosted != nullptr ? (std::uint32_t) hosted->getParameterID().getLargeIntValue() : 0u;
+                    };
+                    const bool reorder = plugin->getParameters().size() >= 3;
+                    if (reorder)
+                    {
+                        for (auto v : { 2u, paramId (2), paramId (0) })
+                            slots.append (&v, 4);
+                        report << "slot_param_ids=" << (juce::int64) paramId (2) << "," << (juce::int64) paramId (0) << "\n";
+                    }
+
                     if (auto xml = juce::AudioProcessor::getXmlFromBinary (juceState.getData(), (int) juceState.getSize()))
                         for (auto [tag, id] : { std::pair { "IComponent", 3u }, { "IEditController", 2u } })
                             if (auto* child = xml->getChildByName (tag))
@@ -557,6 +573,8 @@ private:
                                 record (id, data);
                                 report << tag << "_bytes=" << (int) data.getSize() << "\n";
                             }
+                    if (reorder)
+                        record (4, slots);
 
                     plugin.reset();
 
@@ -565,8 +583,25 @@ private:
                     f.format = lynx::ForeignPlugin::Format::vst3;
                     f.name = vst3->name.toStdString(); // no class ID: find it by name (fallback)
                     f.state = flState;
+                    {
+                        std::vector<std::uint8_t> comp, ctrl;
+                        report << "split=" << (int) lynx::splitFlVst3State (flState, comp, ctrl) << " component=" << (int) comp.size()
+                               << " saved_slots=" << (int) lynx::flVst3ParamSlots (flState).size() << "\n";
+                    }
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        lynx::Automation a;
+                        a.target = { lynx::AutomationTargetKind::channelParam, 4, 0, k };
+                        song.automations.push_back (a);
+                    }
                     const auto adopted = host.adoptFlPlugins (song);
                     report << "adopted=" << adopted << "\n";
+                    juce::String mapped;
+                    for (const auto& a : song.automations)
+                        if (a.target.kind == lynx::AutomationTargetKind::channelParam && a.target.index == 4)
+                            mapped << (mapped.isEmpty() ? "" : ",") << a.target.param;
+                    report << "slot_positions=" << mapped << "\n";
+                    const auto slotsOk = ! reorder || mapped == "2,0,1";
 
                     offline.setSong (song);
 
@@ -574,7 +609,7 @@ private:
                     {
                         const auto value = loaded->getInstance().getParameters()[0]->getValue();
                         report << "restored_value=" << value << "\n";
-                        ok = adopted == 1 && std::abs (value - target) < 0.02f;
+                        ok = adopted == 1 && std::abs (value - target) < 0.02f && slotsOk;
                     }
                 }
             }

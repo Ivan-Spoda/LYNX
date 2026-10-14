@@ -57,7 +57,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
   sample); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Sakura, Morphine, PoiZone, BassDrum, BooBass and Drumpad on the built-in synth.
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
-  or name) and their state is restored (VST3 and CLAP).
+  or name, preferring the format FL used) and their state is restored (VST3 and CLAP); automations of a VST3
+  follow FL's persistent parameter slots (record 4 → ParamID; skipped with the plugin sandbox on).
 - FL presets: 169 3x Osc channel presets, ~2800 `.fst` synth presets and the effect presets of the supported
   effects.
 - An import report lists what was converted, approximated or left out.
@@ -157,5 +158,4 @@ Confirmed empirically on the demo projects:
 
 ## Open items
 - ASIO (Steinberg SDK licensing).
-- VST3 parameter mapping for automation of wrapped third-party plugins (FL stores slot → ParamID in record 4).
 - Ogun's per-partial decay, Vocodex, Harmor resonance and image synthesis.

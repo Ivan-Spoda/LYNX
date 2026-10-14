@@ -65,7 +65,7 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] 3x Osc → built-in synth (round 4); channel filter, envelopes, LFOs, AM, porta (round 6)
 - [x] FL native effects with their saved settings (rounds 7–8, 14–15, 18–20, 22)
 - [x] Third-party VST3/CLAP plugins in the Fruity Wrapper, with state (rounds 5, 22)
-- [ ] VST3 parameter map (record 4: slot k → ParamID) for automation of wrapped plugins (no demo uses it)
+- [x] VST3 parameter map (record 4: slot k → ParamID) for automation of wrapped plugins (checked with Surge XT via `--wrappertest`; no demo uses it)
 - [x] Playlist markers and time-signature changes; metronome following them
 - [x] FPC, DirectWave, FL Keys, Fruity Slicer/Slicex as samplers (rounds 8–9)
 - [x] Harmless, MiniSynth, DX10, Fruit Kick (rounds 10, 21, 24)

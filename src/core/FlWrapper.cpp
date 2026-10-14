@@ -148,4 +148,51 @@ bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::
 
     return ! component.empty() || ! controller.empty();
 }
+
+std::vector<std::int32_t> flVst3ParamSlots (const std::vector<std::uint8_t>& state)
+{
+    std::vector<std::int32_t> slots;
+
+    if (state.size() < 4 || u32At (state, 0) > 1)
+        return slots;
+
+    Reader r { state, 4 };
+    forEachRecord (r, [&] (std::uint32_t id, const std::uint8_t* p, std::size_t n) {
+        if (id != 4 || n < 4)
+            return;
+        std::uint32_t count = 0;
+        std::memcpy (&count, p, 4);
+        if (count > (n - 4) / 4)
+            return;
+        slots.resize (count);
+        std::memcpy (slots.data(), p + 4, count * 4);
+    });
+
+    return slots;
+}
+
+std::vector<int> flVst3SlotPositions (const std::vector<std::int32_t>& savedSlots, const std::vector<std::uint32_t>& paramIds)
+{
+    std::vector<int> positions (savedSlots.size(), -1);
+    std::vector<bool> hasSlot (paramIds.size(), false);
+
+    for (std::size_t slot = 0; slot < savedSlots.size(); ++slot)
+    {
+        if (savedSlots[slot] == -1)
+            continue;
+        for (std::size_t i = 0; i < paramIds.size(); ++i)
+            if (paramIds[i] == (std::uint32_t) savedSlots[slot] && ! hasSlot[i])
+            {
+                positions[slot] = (int) i;
+                hasSlot[i] = true;
+                break;
+            }
+    }
+
+    for (std::size_t i = 0; i < paramIds.size(); ++i)
+        if (! hasSlot[i])
+            positions.push_back ((int) i);
+
+    return positions;
+}
 } // namespace lynx

@@ -329,6 +329,12 @@ const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plu
     if (name.isEmpty() && fileName.isEmpty())
         return nullptr;
 
+    // a plugin installed in several formats: prefer the one FL used (VST3 → VST3, CLAP → CLAP), whose state carries over
+    const auto sameFormat = plugin.format == ForeignPlugin::Format::vst3   ? juce::String ("VST3")
+                            : plugin.format == ForeignPlugin::Format::clap ? juce::String (ClapPluginFormat::formatName)
+                                                                           : juce::String();
+    const juce::PluginDescription* byName = nullptr;
+
     for (const auto& d : types)
     {
         if (d.isInstrument != instrument)
@@ -339,10 +345,15 @@ const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plu
 
         if ((name.isNotEmpty() && (candidate == name || candidateFile == name))
             || (fileName.isNotEmpty() && (candidate == fileName || candidateFile == fileName)))
-            return &d;
+        {
+            if (d.pluginFormatName == sameFormat)
+                return &d;
+            if (byName == nullptr)
+                byName = &d;
+        }
     }
 
-    return nullptr;
+    return byName;
 }
 
 int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
@@ -394,15 +405,64 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
         return true;
     };
 
-    for (auto& channel : song.channels)
-        if (channel.plugin.foreign.format != ForeignPlugin::Format::none && adopt (channel.plugin, true))
-            channel.instrument = InstrumentKind::plugin;
+    // FL automates a VST3 by "slot" (record 4: slot → ParamID); LYNX by position in JUCE's list, which is
+    // getParameterInfo order (REA_rodada22 §2.3). Needs the plugin's current list: only when something is
+    // automated, in-process (skipped with the sandbox on, where k stays the position — FL's default for a new instance).
+    auto remapVst3Slots = [&] (const ForeignPlugin& f, const juce::PluginDescription& d, auto&& isThisPlugin) {
+        if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3" || pluginSandboxEnabled())
+            return;
+        const auto saved = flVst3ParamSlots (f.state);
+        auto automated = false;
+        song.forEachTarget ([&] (AutomationTarget& t) { automated = automated || isThisPlugin (t); });
+        if (saved.empty() || ! automated)
+            return;
 
-    for (auto& track : song.mixer)
-        std::erase_if (track.effects, [&] (EffectSlot& slot) {
-            return slot.kind == EffectKind::plugin && slot.plugin.foreign.format != ForeignPlugin::Format::none
-                   && ! adopt (slot.plugin, false);
+        juce::String error;
+        const auto instance = formats.createPluginInstance (d, 44100.0, 512, error);
+        if (instance == nullptr)
+            return;
+        std::vector<std::uint32_t> ids;
+        for (auto* p : instance->getParameters())
+        {
+            const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (p);
+            ids.push_back (hosted != nullptr ? (std::uint32_t) hosted->getParameterID().getLargeIntValue() : 0xffffffffu);
+        }
+        const auto positions = flVst3SlotPositions (saved, ids);
+        song.forEachTarget ([&] (AutomationTarget& t) {
+            if (isThisPlugin (t))
+                t.param = t.param >= 0 && t.param < (int) positions.size() ? positions[(std::size_t) t.param] : -1;
         });
+    };
+
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+    {
+        auto& channel = song.channels[(std::size_t) c];
+        if (channel.plugin.foreign.format == ForeignPlugin::Format::none)
+            continue;
+        const auto foreign = channel.plugin.foreign;
+        if (adopt (channel.plugin, true))
+        {
+            channel.instrument = InstrumentKind::plugin;
+            if (const auto* d = findForeign (foreign, true))
+                remapVst3Slots (foreign, *d, [c] (const AutomationTarget& t) { return t.kind == AutomationTargetKind::channelParam && t.index == c; });
+        }
+    }
+
+    // backwards: removing an unmatched slot shifts only the slots after it (their automations follow)
+    for (int track = 0; track < (int) song.mixer.size(); ++track)
+        for (int slot = (int) song.mixer[(std::size_t) track].effects.size() - 1; slot >= 0; --slot)
+        {
+            auto& fx = song.mixer[(std::size_t) track].effects[(std::size_t) slot];
+            if (fx.kind != EffectKind::plugin || fx.plugin.foreign.format == ForeignPlugin::Format::none)
+                continue;
+            const auto foreign = fx.plugin.foreign;
+            if (! adopt (fx.plugin, false))
+                song.removeEffectSlot (track, slot);
+            else if (const auto* d = findForeign (foreign, false))
+                remapVst3Slots (foreign, *d, [track, slot] (const AutomationTarget& t) {
+                    return t.kind == AutomationTargetKind::effectParam && t.index == track && t.slot == slot;
+                });
+        }
 
     return found;
 }
