@@ -128,7 +128,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 <td width="33%" valign="top">
 
 #### Instruments
-- 3-oscillator synth with a harmonics oscillator
+- 3-oscillator synth with an evolving harmonics oscillator, SVF or 4-pole ladder filter and a vintage chorus
 - Sampler with zones, slices, time-stretch (WSOLA) and disk streaming
 - Built-in drums (kick, snare, hat, clap)
 - VST3 and CLAP plugins, optionally sandboxed in a separate process
@@ -139,7 +139,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 #### Effects
 - EQ, 7-band parametric EQ, compressor with sidechain, limiter
 - Delay, reverb, chorus, filter, distortion, lo-fi
-- Effector (12 algorithms), vocoder, pitch correction
+- Effector (12 algorithms), vocoder with side inputs, pitch correction
 - Volume gate, rhythmic envelope, auto-pan, Linkwitz-Riley crossover
 - Pitch shift, frequency shifter, utility, parallel container (Patcher)
 
@@ -152,6 +152,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Exports WAV 16/24/32f, FLAC and OGG, song or pattern, with dither
 - Note recording (PC keyboard and MIDI) and audio input recording
 - Undo/redo on every edit
+- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO
 
 </td>
 </tr>
@@ -192,6 +193,7 @@ LYNX.exe --plugintest plugin.vst3 rep.txt      test a VST3 or CLAP plugin
 LYNX.exe --sandboxtest plugin.vst3 rep.txt     test a plugin in a separate process (including a hung one)
 LYNX.exe --scantest folder rep.txt             scan a folder for plugins (separate processes)
 LYNX.exe --devices rep.txt                     list audio drivers and outputs
+LYNX.exe --devicetest "ASIO" "driver" rep.txt  open a driver for 1 s of silence and report it
 ```
 
 ## Shortcuts
@@ -275,7 +277,7 @@ LYNX is an independent implementation. FL Studio was studied only to understand 
 
 FL Studio is a registered trademark of Image-Line Software. LYNX is not affiliated with Image-Line. VST is a registered trademark of Steinberg Media Technologies GmbH.
 
-Built with [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap) and the [WavPack](https://www.wavpack.com) decoder — their licences are listed in [`THIRD_PARTY.md`](THIRD_PARTY.md).
+Built with [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap), the [WavPack](https://www.wavpack.com) decoder and the Steinberg ASIO SDK — their licences are listed in [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
 ## License
 
