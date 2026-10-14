@@ -25,6 +25,7 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/Harmless.h"
+#include "core/HarmlessFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -740,6 +741,7 @@ TEST (flp_real_files)
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
+    int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -787,6 +789,12 @@ TEST (flp_real_files)
                     hasFpc = hasFpc || c.pluginName == "FPC";
                 for (const auto& c : full.channels)
                 {
+                    if (c.instrument == lynx::InstrumentKind::harmless && c.modelParams.size() >= (std::size_t) lynx::harmlessParamCount
+                        && c.modelParams[(std::size_t) lynx::harmlessComboIndex + 3] > 0.5f)
+                    {
+                        ++harmlessCompWanted;
+                        harmlessCompLoaded += c.modelParams.size() > (std::size_t) lynx::harmlessCompIndex + 1000 ? 1 : 0;
+                    }
                     flKeysChannels += c.zones.size() == 30 && c.zones.front().path.find ("CHANGPIANO") != std::string::npos ? 1 : 0;
                     if (c.sampler.slices.size() >= 4)
                     {
@@ -1334,6 +1342,8 @@ TEST (flp_real_files)
     CHECK (harmlessDecoded == harmless && harmless > 100);
     std::printf ("  Harmless: %d states parsed for the engine, %d channels imported as Harmless\n", harmlessParsed, harmlessKind);
     CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
+    std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
+    CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -5697,6 +5707,157 @@ TEST (kepler_lfo_bpm_sync)
     k[6] = 0.0f; // free rate in seconds
     std::memcpy (state.data() + 0x21, k, sizeof k);
     CHECK (lynx::synthFromKepler (state, s, gain) && ! s.lfo[lynx::lfoPitch].sync);
+}
+
+// our own Maximus v7 state (layout REA_rodada8 §1.1): 7 globals, 4 × 13 band parameters, 8 envelopes (dx, y, tension, type)
+static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, const std::array<std::array<int, 13>, 4>& bands,
+                                                   const std::array<std::vector<std::array<double, 4>>, 8>& envs, int oversampling)
+{
+    std::vector<std::uint8_t> d;
+    auto put = [&] (const void* v, std::size_t n) { d.insert (d.end(), (const std::uint8_t*) v, (const std::uint8_t*) v + n); };
+    auto i32 = [&] (std::int32_t v) { put (&v, 4); };
+    i32 (7);
+    for (int copy = 0; copy < 2; ++copy)
+    {
+        for (auto v : g)
+            i32 (v);
+        for (const auto& b : bands)
+            for (auto v : b)
+                i32 (v);
+    }
+    d.resize (0x1fe, 0);
+    std::memcpy (d.data() + 0x1f4, &oversampling, 4);
+    for (const auto& e : envs)
+    {
+        i32 (3), i32 (2), i32 ((std::int32_t) e.size());
+        for (const auto& pt : e)
+        {
+            const double dx = pt[0], y = pt[1];
+            const float t = (float) pt[2];
+            put (&dx, 8), put (&y, 8), put (&t, 4);
+            const std::uint8_t flags[4] { (std::uint8_t) pt[3], 0, 0, 0 };
+            put (flags, 4);
+        }
+        i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
+    }
+    return d;
+}
+
+TEST (harmless_rack)
+{
+    // REA_rodada36: Harmless's effects rack against our reference model (rack.py / maxmodel.py, which match the
+    // installation's Harmless_x64.dll and SG_x64.dll), 44.1 kHz, host blocks of 512
+    std::vector<float> inL (8192), inR (8192);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+    }
+    auto run = [&] (const std::array<int, 100>& p, int compType, std::shared_ptr<const lynx::hlfx::MaximusPreset> comp, int total, int voicesUntil) {
+        lynx::hlfx::Rack rack;
+        std::array<int, 7> t {};
+        t[3] = compType;
+        rack.prepare (p, t, 44100.0, 120.0, std::move (comp));
+        std::vector<float> l (inL.begin(), inL.begin() + total), r (inR.begin(), inR.begin() + total);
+        for (int s = 0; s < total; s += 512)
+            rack.process (l.data() + s, r.data() + s, std::min (512, total - s), s < voicesUntil);
+        return std::make_pair (l, r);
+    };
+    {
+        // chorus type 3 (mix 400), ping-pong delay type 2 (vol 600, feedback 500, 1/4 beat), reverb type 4 (vol 700)
+        std::array<int, 100> p {};
+        p[90] = 3, p[91] = 400, p[92] = 2, p[93] = 600, p[94] = 500, p[95] = 48, p[96] = 4, p[97] = 700;
+        const auto [l, r] = run (p, 0, nullptr, 8192, 4096);
+        const std::tuple<int, float, float> golden[] { { 0, 0.0f, 0.0f }, { 500, -0.25248247f, 0.15141529f }, { 3000, -0.65128994f, -0.64854866f },
+                                                       { 5000, -0.54308629f, -0.36827448f }, { 6000, -0.98378551f, -0.72790027f },
+                                                       { 8191, 0.50599128f, -0.43637198f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+    }
+    {
+        // the delay alone: an impulse comes back after round(time·fs·0.3125/bpm) samples × (11^0.6 − 1)/10, then × feedback
+        std::array<int, 100> p {};
+        p[92] = 1, p[93] = 600, p[94] = 500, p[95] = 48;
+        lynx::hlfx::Rack rack;
+        rack.prepare (p, {}, 44100.0, 120.0, nullptr);
+        std::vector<float> l (16384), r (16384);
+        l[0] = 1.0f;
+        for (int s = 0; s < 16384; s += 512)
+            rack.process (l.data() + s, r.data() + s, 512, s == 0);
+        const auto D = 5512; // 48·44100·0.3125/120 = 5512.5 → 5512 (round half to even)
+        const auto vol = (float) ((std::exp ((double) (600 * 0.001f) * (double) (float) std::log (11.0)) - 1.0) * (double) 0.1f);
+        CHECK (std::abs (l[(std::size_t) D] - vol) < 1e-7f && std::abs (l[(std::size_t) D - 1]) < 1e-12f);
+        // the feedback ramps from 0.5 toward 0.5: the second echo is vol·0.5
+        CHECK (std::abs (l[(std::size_t) (2 * D)] - vol * 0.5f) < 1e-7f && std::abs (r[(std::size_t) D]) < 1e-12f);
+    }
+    // the compressor: Maximus states of our own (no preset data), checked against SG_x64.dll by REA round 36
+    using Env = std::vector<std::array<double, 4>>;
+    const Env def { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    auto band = [] (int mode, int pre = 1000, int post = 1000, int sep = 0, int sat = 0, int ceil = 1000, int att = 1115, int rel2 = 0,
+                    int sus = 2882) { return std::array<int, 13> { mode, pre, post, sep, sat, ceil, att, rel2, 2, 5000, 3, sus, 0 }; };
+    {
+        // master brickwall at −0.22 dB only (bands off / compression off)
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, -1 }, { band (3), band (1), band (3), band (0) },
+                                          { def, def, def, def, def, def, def, def }, 0);
+        const auto preset = lynx::hlfx::makeMaximusPreset (st);
+        CHECK (preset != nullptr);
+        std::array<int, 100> p {};
+        p[98] = 1000;
+        const auto [l, r] = run (p, 1, preset, 4096, 4096);
+        const std::tuple<int, float, float> golden[] { { 100, 0.02499794f, 0.88166064f }, { 1000, 0.56971455f, -0.62808162f },
+                                                       { 2047, -0.27541649f, 0.70913559f }, { 3000, 0.32431602f, -0.37985173f },
+                                                       { 4095, -0.12743534f, -0.15237498f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+        float peak = 0.0f;
+        for (int i = 2048; i < 4096; ++i)
+            peak = std::max ({ peak, std::abs (l[(std::size_t) i]), std::abs (r[(std::size_t) i]) });
+        CHECK (peak < 0.9751f);
+    }
+    {
+        // 24 dB crossovers, ×2 oversampling, low cut, stereo separation, saturation A, a knee with tension (type 7) and
+        // exponential tensions (type 0), release 2 on the master, band mix 600
+        const Env knee { { 0.0, 0.0, 0.0, 0 }, { 0.35, 0.35, 0.0, 0 }, { 0.65, 0.6, 0.36, 7 } };
+        const Env t0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.14, 0 }, { 0.5, 0.5, 0.0, 0 } };
+        const Env m0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.6, 0.085, 0 } };
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 891, 600, 32768 },
+                                          { band (1, 1264, 1296, 500, -500, 1200), band (0, 1340, 1000, -348, 0, 1000, 1115, 0, 1570),
+                                            band (0, 1364, 1152, 0, 0, 1000, 1115, 0, 1186), band (0, 1000, 1000, 0, -196, 1000, 1115, 4464, 1538) },
+                                          { def, def, knee, def, t0, def, m0, def }, 1);
+        const auto preset = lynx::hlfx::makeMaximusPreset (st);
+        CHECK (preset != nullptr);
+        std::array<int, 100> p {};
+        p[98] = 600;
+        const auto [l, r] = run (p, 2, preset, 4096, 4096);
+        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856275f, -0.63261062f },
+                                                       { 2047, 0.20268074f, 0.5414567f }, { 3000, -0.25614089f, -0.49984524f },
+                                                       { 4095, 0.10172816f, 0.0505573f } };
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+    }
+    {
+        // an .fst wrapper around a state is found; unsupported states are rejected
+        const auto st = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, -1 }, { band (3), band (1), band (3), band (0) },
+                                          { def, def, def, def, def, def, def, def }, 0);
+        std::vector<std::uint8_t> fst { 'F', 'L', 'h', 'd', 6, 0, 0, 0, 0, 0, 1, 0, 0x60, 0, 'F', 'L', 'd', 't' };
+        std::vector<std::uint8_t> body { 0xC9, 8, 'M', 'a', 'x', 'i', 'm', 'u', 's', 0, 0xD5 };
+        for (auto n = st.size(); ; n >>= 7)
+        {
+            body.push_back ((std::uint8_t) ((n & 0x7f) | (n >= 0x80 ? 0x80 : 0)));
+            if (n < 0x80)
+                break;
+        }
+        body.insert (body.end(), st.begin(), st.end());
+        const auto len = (std::uint32_t) body.size();
+        for (int k = 0; k < 4; ++k)
+            fst.push_back ((std::uint8_t) (len >> (8 * k)));
+        fst.insert (fst.end(), body.begin(), body.end());
+        const auto found = lynx::hlfx::maximusStateFromFst (fst);
+        CHECK (found && *found == st);
+        auto rms = st;
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
+        CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
+    }
 }
 
 TEST (harmless_engine)
