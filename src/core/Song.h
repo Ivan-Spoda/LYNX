@@ -40,6 +40,7 @@ enum class InstrumentKind : std::uint8_t
     drumpad,    // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
     boobass,    // FL's BooBass engine (REA_rodada29 §4); multisample read from the user's DLL (samplePath), 3 knobs
     drumsynth,  // FL's Fruity DrumSynth Live (REA_rodada30 §1): 120 patches in modelParams, recorded waves from the user's DLL
+    harmless,   // FL's Harmless additive engine (REA_rodada32): raw state in modelParams (layout in core/Harmless.h)
     sytrus      // FL's Sytrus engine (REA_rodada31): the plugin's raw saved state in ChannelDef::pluginState
 };
 
@@ -243,7 +244,7 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = straight to Master
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
-    std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth: FL's raw state parameters
+    std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth / harmless: FL's raw state parameters
     std::vector<std::uint8_t> pluginState; // instrument == sytrus: the FL plugin's saved state (record 0xD5), as FL wrote it
     SamplerSettings sampler; // used when instrument == sampler
     SynthSettings synth;     // used when instrument == synth
@@ -280,7 +281,8 @@ enum class EffectKind : std::uint8_t
     vocoder,      // Fruity Vocoder channel vocoder: L modulates, R is the carrier (mono output)
     pitchCorrect, // pitch correction (FL's Pitcher): detects the pitch and pulls it to the nearest allowed note
     squeeze,      // FL's Fruity Squeeze, exact (REA_rodada29 §2): quantiser, periodic gate, filter; raw values / max
-    vintagePhaser // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
+    vintagePhaser, // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
+    vocodex       // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
@@ -316,6 +318,7 @@ struct EffectSlot
     int sidechain2 = -1;  // second side input (vocoder carrier); −1 = none
     std::vector<EffectBranch> branches;           // used when kind == parallel
     std::vector<EffectLink> links;                // used when kind == parallel
+    std::vector<std::uint8_t> state;              // FL's raw plugin state, for exact effects built from it (vocodex)
 };
 
 // Send from one track to another (post-fader), like FL's routing between inserts.

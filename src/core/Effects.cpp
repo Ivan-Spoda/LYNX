@@ -3,6 +3,7 @@
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
 #include "core/VintagePhaser.h"
+#include "core/Vocodex.h"
 
 #include "core/Biquad.h"
 
@@ -1820,10 +1821,8 @@ public:
             Branch branch;
             branch.gain = b.gain;
             for (const auto& child : b.chain)
-                if (child.kind == EffectKind::parallel) // nested containers (Patcher series-parallel graphs)
-                    branch.chain.push_back ({ makeParallelEffect (child), child });
-                else if (child.kind != EffectKind::plugin)
-                    branch.chain.push_back ({ makeEffect (child.kind), child });
+                if (child.kind != EffectKind::plugin) // nested containers too (Patcher series-parallel graphs)
+                    branch.chain.push_back ({ makeEffect (child), child });
             branches.push_back (std::move (branch));
         }
         for (const auto& link : slot.links)
@@ -2131,6 +2130,7 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
                                                        { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulator", 0.0f },
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
+    static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2224,6 +2224,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::pitchCorrect: return pitchCorrectInfo;
         case EffectKind::squeeze: return squeezeInfo;
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
+        case EffectKind::vocodex: return vocodexInfo;
     }
     return eq;
 }
@@ -2492,6 +2493,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::plugin:
         case EffectKind::parallel:
+        case EffectKind::vocodex:
             break;
     }
 
@@ -2513,6 +2515,15 @@ EffectSlot makeEffectSlot (EffectKind kind)
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)
 {
     return std::make_unique<ParallelEffect> (slot);
+}
+
+std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
+{
+    if (slot.kind == EffectKind::parallel)
+        return makeParallelEffect (slot);
+    if (slot.kind == EffectKind::vocodex)
+        return vocodex::make (slot.state);
+    return makeEffect (slot.kind);
 }
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind)
@@ -2542,6 +2553,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vocoder: return std::make_unique<Vocoder>();
         case EffectKind::squeeze: return std::make_unique<Squeeze>();
         case EffectKind::vintagePhaser: return makeVintagePhaser();
+        case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

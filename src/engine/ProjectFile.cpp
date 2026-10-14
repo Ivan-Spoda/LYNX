@@ -81,6 +81,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::drumpad: return "drumpad";
         case InstrumentKind::boobass: return "boobass";
         case InstrumentKind::drumsynth: return "drumsynth";
+        case InstrumentKind::harmless: return "harmless";
         case InstrumentKind::sytrus: return "sytrus";
     }
     return "synth";
@@ -91,7 +92,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
                     InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass,
-                    InstrumentKind::drumsynth, InstrumentKind::sytrus })
+                    InstrumentKind::drumsynth, InstrumentKind::harmless, InstrumentKind::sytrus })
         if (id == instrumentId (k))
             return k;
 
@@ -129,6 +130,7 @@ const char* effectId (EffectKind k)
         case EffectKind::pitchCorrect: return "pitchCorrect";
         case EffectKind::squeeze: return "squeeze";
         case EffectKind::vintagePhaser: return "vintagePhaser";
+        case EffectKind::vocodex: return "vocodex";
     }
     return "eq";
 }
@@ -170,6 +172,8 @@ juce::var effectToVar (const EffectSlot& slot)
         e->setProperty ("sidechain", slot.sidechain);
     if (slot.sidechain2 >= 0)
         e->setProperty ("sidechain2", slot.sidechain2);
+    if (! slot.state.empty()) // FL's raw state of an exact effect (Vocodex), base64
+        e->setProperty ("state", juce::Base64::toBase64 (slot.state.data(), slot.state.size()));
 
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
@@ -230,6 +234,12 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     slot.plugin = pluginFromVar (e["plugin"]);
     slot.sidechain = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain", -1));
     slot.sidechain2 = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain2", -1));
+    if (e.hasProperty ("state"))
+    {
+        juce::MemoryOutputStream raw;
+        if (juce::Base64::convertFromBase64 (raw, e["state"].toString()))
+            slot.state.assign ((const std::uint8_t*) raw.getData(), (const std::uint8_t*) raw.getData() + raw.getDataSize());
+    }
 
     if (auto* branches = e["branches"].getArray())
         for (const auto& b : *branches)
@@ -262,7 +272,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex })
         if (id == effectId (k))
             return k;
 

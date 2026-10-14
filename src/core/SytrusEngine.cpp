@@ -3880,8 +3880,47 @@ struct Engine::Impl
         const auto fv = o.inc * 4.0f;
         const auto ph0 = (float) o.phi;
         float lanes[4] { ph0 + 0.0f * fv, ph0 + 0.25f * fv, ph0 + 0.5f * fv, ph0 + 0.75f * fv };
-        float* xs = xin.data(); // phase positions (scratch; filters use it later)
         float* vols = gains.data();
+        auto vol = o.curVol;
+        const auto vi = o.volInc;
+        if (vi == 0.0f)
+            std::fill (vols, vols + m, vol);
+        else
+            for (int k = 0; k < m; ++k)
+            {
+                vol = vol + vi;
+                vols[k] = vol;
+            }
+        const auto* t = o.table;
+        const auto mask = o.N - 1;
+#if defined(__SSE2__) || defined(_M_X64)
+        // 4 lanes in one register: truncation, fraction, two table reads per lane, interpolation and volume — the
+        // same float operations in the same order as the scalar form
+        auto x4 = _mm_loadu_ps (lanes);
+        const auto f4 = _mm_set1_ps (fv);
+        const auto m4 = _mm_set1_epi32 (mask);
+        alignas (16) std::int32_t idx[4];
+        alignas (16) float r[4];
+        for (int j = 0; j < m; j += 4)
+        {
+            const auto ii = _mm_cvttps_epi32 (x4); // positive and < 2^31 (φ ≤ 1.5·N + m·N/2)
+            const auto fr = _mm_sub_ps (x4, _mm_cvtepi32_ps (ii));
+            _mm_store_si128 ((__m128i*) idx, _mm_and_si128 (ii, m4));
+            const auto t0 = _mm_setr_ps (t[idx[0]], t[idx[1]], t[idx[2]], t[idx[3]]);
+            const auto t1 = _mm_setr_ps (t[idx[0] + 1], t[idx[1] + 1], t[idx[2] + 1], t[idx[3] + 1]);
+            const auto y = _mm_add_ps (t0, _mm_mul_ps (_mm_sub_ps (t1, t0), fr));
+            if (j + 4 <= m)
+                _mm_storeu_ps (buf + j, _mm_mul_ps (y, _mm_loadu_ps (vols + j)));
+            else
+            {
+                _mm_store_ps (r, y);
+                for (int c = 0; j + c < m; ++c)
+                    buf[j + c] = r[c] * vols[j + c];
+            }
+            x4 = _mm_add_ps (x4, f4);
+        }
+#else
+        float* xs = xin.data();
         const auto groups = (m + 3) >> 2;
         for (int g = 0; g < groups; ++g)
             for (int c = 0; c < 4; ++c)
@@ -3889,30 +3928,20 @@ struct Engine::Impl
                 xs[4 * g + c] = lanes[c];
                 lanes[c] = lanes[c] + fv;
             }
-        auto vol = o.curVol;
-        const auto vi = o.volInc;
-        for (int k = 0; k < m; ++k)
-        {
-            vol = vol + vi;
-            vols[k] = vol;
-        }
-        const auto* t = o.table;
-        const auto mask = o.N - 1;
         for (int k = 0; k < m; ++k)
         {
             const auto x = xs[k];
-            const auto ii = (int) x; // positive and < 2^31 (φ ≤ 1.5·N + m·N/2)
+            const auto ii = (int) x;
             const auto fr = x - (float) ii;
             const auto i = ii & mask;
             const auto t0 = t[i], t1 = t[i + 1];
             buf[k] = (t0 + (t1 - t0) * fr) * vols[k];
         }
+#endif
         o.curVol = vol;
         o.phi = m * (double) o.inc + o.phi;
     }
 
-    // per-sample operators in index order (FUN_00870580; x87 intermediates modelled in double). The running values
-    // live in local arrays for the sub-block (no aliasing with the output buffers), written back at the end.
     // nv voices of the same patch (same per-sample list) in lockstep: their dependency chains interleave
     void perSample (Voice* const* vs, int nv, const int* const* pss, int nps, int m, std::array<std::vector<float>, 6>* const* bufs,
                     u32* const* lcgs)

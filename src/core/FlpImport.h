@@ -25,7 +25,7 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots);
 struct FlpImportReport
 {
     std::map<std::string, int> converted;    // generators truly converted (3x Osc, FPC, DirectWave...)
-    std::map<std::string, int> approximated; // approximated by the internal synth (Harmless, DX10...)
+    std::map<std::string, int> approximated; // approximated by the internal synth (MiniSynth, DX10...)
     std::map<std::string, int> unsupported;  // no equivalent: play with a synth preset chosen by name
     std::map<std::string, int> droppedEffects; // effects with no equivalent (removed from the mixer)
     int missingSamples = 0;

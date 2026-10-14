@@ -468,6 +468,7 @@ public:
         sakura = def.instrument == InstrumentKind::sakura;
         boobass = def.instrument == InstrumentKind::boobass;
         drumsynth = def.instrument == InstrumentKind::drumsynth;
+        harmless = def.instrument == InstrumentKind::harmless;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -515,7 +516,16 @@ public:
             { 4, "Osc1 freq", 0, 1000 }, { 7, "Osc1 decay", 0, 127 }, { 8, "Osc1 level", 0, 127 }, { 10, "Osc2 freq", 0, 1000 },
             { 13, "Osc2 decay", 0, 127 }, { 14, "Osc2 level", 0, 127 }, { 17, "Wave mix", 0, 127 }, { 21, "Release", 0, 127 },
             { 23, "Click", 0, 100 }, { 33, "Ring mod", 0, 127 } };
-        if (drumsynth)
+        // Harmless: raw FL values (REA_rodada21/32 ranges)
+        static const Ranged harmlessKnobs[] = {
+            { 36, "Volume", 0, 2000 }, { 26, "Attack", 0, 1000 }, { 27, "Decay", 0, 1000 }, { 28, "Release", 0, 1000 },
+            { 54, "Cutoff", 0, 8192 }, { 59, "Resonance", 0, 1000 }, { 52, "Filter env", -1000, 1000 },
+            { 31, "Pluck", 0, 1000 }, { 23, "Mask mix", 0, 1000 }, { 65, "Unison", 1, 9 }, { 67, "Uni detune", 0, 256 },
+            { 25, "Tremolo", 0, 1000 }, { 71, "Phaser mix", 0, 1000 }, { 79, "Harmonizer", 0, 1000 } };
+        if (harmless)
+            for (const auto& k : harmlessKnobs)
+                add (k.index, k.name, k.low, k.high);
+        else if (drumsynth)
             for (const auto& k : drumSynthKnobs)
                 add (k.index, k.name, k.low, k.high);
         else if (boobass)
@@ -538,6 +548,7 @@ public:
         g.drawText (drumsynth ? utf8 ("DrumSynth Live — FL's engine, patch on key ") + juce::String (editorKey)
                                     + (wavesFound ? utf8 (" (next hit; recorded waves from your FL installation)")
                                                   : utf8 (" (next hit; recorded waves not found: silent)"))
+                    : harmless ? utf8 ("Harmless — FL's additive engine (chorus/delay/reverb/compressor rack off)")
                     : boobass ? utf8 ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? utf8 ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : utf8 ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -557,7 +568,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1187,7 +1198,7 @@ public:
             setContentOwned (new ControllerPanel (engine, channel), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1265,7 +1276,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return std::make_unique<ControllerPanel> (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
