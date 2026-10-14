@@ -1265,6 +1265,7 @@ private:
 
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
+            lynx::applyWindowChrome (*this);
             content->grabKeyboardFocus();
         }
 
