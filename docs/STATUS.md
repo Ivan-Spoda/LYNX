@@ -102,6 +102,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   runs (the 89th, −79 dB: numpy's float32 `exp`, which is not correctly rounded, in the per-partial unison curve) and
   on all ~31 synthetic feature cases at 44.1 and 48 kHz (the frequency phaser at precision 0: −96 dB, the same
   `exp`). The old spectral-oscillator conversion remains for unreadable states and for the synth's "FL presets" button.
+  CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
+  along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
+  Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
 - **Sytrus:** its own engine (`core/SytrusEngine.cpp`, REA round 31) driven by the plugin's saved state: 16 384-point
   operator tables with linear read-out and the 4-lane block reader, noise (shared LCG), plucked mode (IPP's uniform
   generator), band limiting (4 096 live / 16 384 export), CENTER/DECLICK, GLOBAL phase; the FM/RM matrix in FL's
