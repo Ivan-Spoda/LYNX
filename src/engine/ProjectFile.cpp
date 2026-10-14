@@ -81,6 +81,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::drumpad: return "drumpad";
         case InstrumentKind::boobass: return "boobass";
         case InstrumentKind::drumsynth: return "drumsynth";
+        case InstrumentKind::sytrus: return "sytrus";
     }
     return "synth";
 }
@@ -90,7 +91,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
                     InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass,
-                    InstrumentKind::drumsynth })
+                    InstrumentKind::drumsynth, InstrumentKind::sytrus })
         if (id == instrumentId (k))
             return k;
 
@@ -397,6 +398,8 @@ juce::String toJson (const Song& song)
 
         if (! c.controllerState.empty())
             o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
+        if (! c.pluginState.empty())
+            o->setProperty ("pluginState", juce::Base64::toBase64 (c.pluginState.data(), c.pluginState.size()));
         if (! c.modelParams.empty())
         {
             juce::StringArray values;
@@ -761,6 +764,15 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 const auto values = juce::StringArray::fromTokens (c.getProperty ("modelParams", "").toString(), " ", "");
                 for (int k = 0; k < values.size() && k < 8192; ++k) // (DrumSynth Live: 4562)
                     def.modelParams.push_back (values[k].getFloatValue());
+            }
+            if (const auto encoded = c["pluginState"].toString(); encoded.isNotEmpty())
+            {
+                juce::MemoryOutputStream decoded;
+                if (juce::Base64::convertFromBase64 (decoded, encoded))
+                {
+                    const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
+                    def.pluginState.assign (bytes, bytes + decoded.getDataSize());
+                }
             }
             if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())
             {

@@ -34,6 +34,7 @@ add_library(lynx_core STATIC
     src/core/FlGenerators.cpp
     src/core/PhysicalModels.cpp
     src/core/DrumSynthLive.cpp
+    src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
