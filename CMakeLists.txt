@@ -51,6 +51,13 @@ target_sources(lynx_core PRIVATE
     src/core/Workspace.cpp
     src/core/RackOps.cpp)
 
+# workflow P2 (note tools, mixer operations, history labels, browser search)
+target_sources(lynx_core PRIVATE
+    src/core/NoteTools.cpp
+    src/core/MixerOps.cpp
+    src/core/History.cpp
+    src/core/SearchQuery.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})

@@ -7014,3 +7014,6 @@ TEST (harmless_engine)
         el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
     CHECK (el < 1e-10 * er && er > 1.0);
 }
+
+// Workflow P2 (docs/WORKFLOW_FL.md)
+#include "WorkflowP2Tests.inc"

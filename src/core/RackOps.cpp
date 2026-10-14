@@ -1,6 +1,9 @@
 #include "core/RackOps.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <functional>
 #include <numeric>
 
 namespace lynx
@@ -154,6 +157,216 @@ int splitPatternByChannel (Song& song, int index)
         song.currentPattern += (int) created.size();
 
     return (int) created.size();
+}
+
+namespace
+{
+std::string nextCopyName (const std::string& base, const std::function<bool (const std::string&)>& taken)
+{
+    for (int n = 2;; ++n)
+    {
+        const auto name = base + " #" + std::to_string (n);
+        if (! taken (name))
+            return name;
+    }
+}
+} // namespace
+
+int clonePattern (Song& song, int index)
+{
+    if (index < 0 || index >= (int) song.patterns.size())
+        return -1;
+
+    auto copy = song.patterns[(std::size_t) index];
+    copy.name = nextCopyName (copy.name, [&song] (const std::string& name) {
+        return std::any_of (song.patterns.begin(), song.patterns.end(), [&] (const Pattern& p) { return p.name == name; });
+    });
+    shiftPatternClips (song, index + 1, 1);
+    song.patterns.insert (song.patterns.begin() + index + 1, std::move (copy));
+    song.currentPattern = index + 1;
+    return index + 1;
+}
+
+bool movePattern (Song& song, int index, int delta)
+{
+    const auto other = index + (delta < 0 ? -1 : 1);
+
+    if (delta == 0 || index < 0 || index >= (int) song.patterns.size() || other < 0 || other >= (int) song.patterns.size())
+        return false;
+
+    std::swap (song.patterns[(std::size_t) index], song.patterns[(std::size_t) other]);
+    song.forEachClipList ([index, other] (std::vector<Clip>& clips) {
+        for (auto& c : clips)
+            if (c.kind == ClipKind::pattern)
+                c.pattern = c.pattern == index ? other : c.pattern == other ? index : c.pattern;
+    });
+
+    if (song.currentPattern == index)
+        song.currentPattern = other;
+    else if (song.currentPattern == other)
+        song.currentPattern = index;
+
+    return true;
+}
+
+// --- step sequencer ----------------------------------------------------------------------------
+
+int patternSteps (const Song& song, const Pattern& pattern) noexcept
+{
+    return std::clamp ((int) (pattern.effectiveLength (song.beatsPerBar) / ticksPerStep), 16, 512);
+}
+
+std::vector<bool> euclideanRhythm (int pulses, int steps, int rotation)
+{
+    if (steps <= 0)
+        return {};
+
+    pulses = std::clamp (pulses, 0, steps);
+    std::vector<bool> out ((std::size_t) steps, false);
+
+    // step i is an onset when the running count floor(i * pulses / steps) goes up there: the onsets
+    // are spread as evenly as integers allow, and the first step is always one
+    for (int i = 0; i < steps; ++i)
+        out[(std::size_t) i] = pulses > 0 && (i * pulses) % steps < pulses;
+
+    rotation = ((rotation % steps) + steps) % steps;
+    std::rotate (out.rbegin(), out.rbegin() + rotation, out.rend());
+    return out;
+}
+
+void fillEverySteps (Pattern& pattern, int channel, int every, int steps, int offset)
+{
+    every = std::max (1, every);
+
+    for (int s = std::max (0, offset); s < steps; s += every)
+        if (! pattern.hasStep (channel, s))
+            pattern.toggleStep (channel, s);
+}
+
+void setStepRhythm (Pattern& pattern, int channel, const std::vector<bool>& rhythm, int steps)
+{
+    const auto end = (std::int64_t) steps * ticksPerStep;
+    auto& notes = pattern.notes;
+    notes.erase (std::remove_if (notes.begin(), notes.end(),
+                                 [&] (const Note& n) { return n.channel == channel && n.start < end && n.start % ticksPerStep == 0; }),
+                 notes.end());
+
+    if (! rhythm.empty())
+        for (int s = 0; s < steps; ++s)
+            if (rhythm[(std::size_t) s % rhythm.size()])
+            {
+                Note n;
+                n.start = (std::int64_t) s * ticksPerStep;
+                n.channel = channel;
+                notes.push_back (n);
+            }
+
+    pattern.sortNotes();
+}
+
+void rotateSteps (Pattern& pattern, int channel, int delta, int steps)
+{
+    if (steps <= 0)
+        return;
+
+    const auto length = (std::int64_t) steps * ticksPerStep;
+    const auto shift = (std::int64_t) delta * ticksPerStep;
+
+    for (auto& n : pattern.notes)
+        if (n.channel == channel && n.start < length)
+            n.start = ((n.start + shift) % length + length) % length;
+
+    pattern.sortNotes();
+}
+
+std::vector<int> notesInStep (const Pattern& pattern, int channel, int step)
+{
+    const auto from = (std::int64_t) step * ticksPerStep;
+    std::vector<int> out;
+
+    for (int i = 0; i < (int) pattern.notes.size(); ++i)
+    {
+        const auto& n = pattern.notes[(std::size_t) i];
+        if (n.channel == channel && n.start >= from && n.start < from + ticksPerStep)
+            out.push_back (i);
+    }
+
+    return out;
+}
+
+// --- channel organisation ----------------------------------------------------------------------
+
+std::vector<int> channelSortOrder (const Song& song, ChannelSort by)
+{
+    std::vector<int> order (song.channels.size());
+    std::iota (order.begin(), order.end(), 0);
+
+    auto lower = [] (std::string s) {
+        for (auto& c : s)
+            c = (char) std::tolower ((unsigned char) c);
+        return s;
+    };
+
+    // colour order: by hue, uncoloured channels last
+    auto hue = [] (std::uint32_t argb) {
+        if (argb == 0)
+            return 1000.0;
+        const auto r = ((argb >> 16) & 0xff) / 255.0, g = ((argb >> 8) & 0xff) / 255.0, b = (argb & 0xff) / 255.0;
+        const auto mx = std::max ({ r, g, b }), mn = std::min ({ r, g, b }), d = mx - mn;
+        if (d <= 1e-9)
+            return 400.0 + mx; // greys after the colours
+        double h = mx == r ? std::fmod ((g - b) / d, 6.0) : mx == g ? (b - r) / d + 2.0 : (r - g) / d + 4.0;
+        h = h < 0.0 ? h * 60.0 + 360.0 : h * 60.0;
+        return h >= 345.0 ? h - 360.0 : h; // reds just below 360 sort with the other reds, first
+    };
+
+    const auto& c = song.channels;
+    std::stable_sort (order.begin(), order.end(), [&] (int a, int b) {
+        const auto& x = c[(std::size_t) a];
+        const auto& y = c[(std::size_t) b];
+        switch (by)
+        {
+            case ChannelSort::name: return lower (x.name) < lower (y.name);
+            case ChannelSort::colour: return hue (x.colour) < hue (y.colour);
+            case ChannelSort::insert: return (x.mixerTrack <= 0 ? 1 << 20 : x.mixerTrack) < (y.mixerTrack <= 0 ? 1 << 20 : y.mixerTrack);
+            case ChannelSort::type: return (int) x.instrument < (int) y.instrument;
+        }
+        return false;
+    });
+
+    return order;
+}
+
+std::vector<int> unusedChannels (const Song& song)
+{
+    std::vector<char> used (song.channels.size(), 0);
+    auto mark = [&used] (int channel) {
+        if (channel >= 0 && channel < (int) used.size())
+            used[(std::size_t) channel] = 1;
+    };
+
+    for (const auto& p : song.patterns)
+        for (const auto& n : p.notes)
+            mark (n.channel);
+
+    auto markClips = [&mark] (const std::vector<Clip>& clips) {
+        for (const auto& clip : clips)
+            if (clip.kind == ClipKind::audio)
+                mark (clip.channel);
+    };
+    markClips (song.playlist);
+    for (const auto& a : song.arrangements)
+        markClips (a.clips);
+
+    for (const auto& a : song.automations)
+        mark (a.source.channel);
+
+    std::vector<int> out;
+    for (int i = 0; i < (int) used.size(); ++i)
+        if (! used[(std::size_t) i])
+            out.push_back (i);
+
+    return out;
 }
 
 // --- channel selection -------------------------------------------------------------------------

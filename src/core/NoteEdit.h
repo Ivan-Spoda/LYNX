@@ -134,4 +134,19 @@ std::vector<int> clipsInTime (const std::vector<Clip>& clips, std::int64_t from,
 // Repeats the time selection [from, to) right after itself: copies of `sources` (or, if empty, of the
 // clips that start inside it) shifted by its length. Returns the new indices.
 std::vector<int> repeatTime (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::vector<int> sources);
+
+// --- ripple editing and time-selection moves (docs/WORKFLOW_FL.md P2) -------------------------
+
+// Ripple delete: removes the clips and closes each gap: on the same track, the clips after a removed
+// clip move left by its length.
+void rippleDelete (std::vector<Clip>& clips, std::vector<int> indices);
+
+// Ripple resize: clip `index` gets `newLength` (at least 1) and every later clip on its track moves by the
+// change, so nothing after it overlaps or opens a gap.
+void rippleResize (std::vector<Clip>& clips, int index, std::int64_t newLength);
+
+// Moves (or copies) what lies inside the time selection [from, to) by `delta` ticks: clips crossing its
+// edges are cut there first, so only the part inside moves. Returns the indices of the moved clips (or
+// of the copies). The start never goes below 0.
+std::vector<int> moveTimeRange (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::int64_t delta, bool copy);
 } // namespace lynx::noteedit

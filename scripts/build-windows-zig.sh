@@ -80,6 +80,8 @@ APP_SOURCES=(src/Main.cpp
 
 # workflow shell: core (key map, workspace layout, rack operations) and UI (workspace desktop, control contract)
 APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
+# workflow P2: core (note tools, mixer operations, history labels, browser search)
+APP_SOURCES+=(src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
