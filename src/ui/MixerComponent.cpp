@@ -8,6 +8,8 @@
 #include "engine/Text.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
+#include "ui/I18n.h"
+#include "ui/Icons.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -23,7 +25,7 @@ constexpr int feedsHeight = 46;
 juce::String faderToDb (float volume)
 {
     if (volume <= 0.0001f)
-        return "-inf";
+        return juce::String::fromUTF8 ("-\xe2\x88\x9e");
 
     const auto db = juce::Decibels::gainToDecibels (faderGain (volume));
     return (db > 0 ? "+" : "") + juce::String (db, 1);
@@ -128,10 +130,11 @@ MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
 
 void MixerStrips::paint (juce::Graphics& g)
 {
+    using namespace theme;
     const auto& song = engine.getSong();
     const auto tracks = (int) song.mixer.size();
     const auto clip = g.getClipBounds();
-    g.fillAll (theme::window);
+    g.fillAll (colour::bg1);
 
     for (int t = 0; t < tracks; ++t)
     {
@@ -143,79 +146,71 @@ void MixerStrips::paint (juce::Graphics& g)
 
         const auto& track = song.mixer[(std::size_t) t];
         const auto strip = juce::Rectangle<int> (x, 2, w - 4, getHeight() - 4);
+        const auto isSelected = t == selected;
 
-        g.setColour (t == selected ? juce::Colour (0xff3c444d) : (t == 0 ? juce::Colour (0xff343a41) : theme::panel));
-        g.fillRoundedRectangle (strip.toFloat(), 4.0f);
+        g.setColour (isSelected ? colour::bg4 : (t == 0 ? colour::bg3 : colour::bg2));
+        g.fillRoundedRectangle (strip.toFloat(), radius::md);
 
-        if (track.colour != 0) // colored band at the top, as in FL's mixer
+        if (track.colour != 0) // thin colour band at the top
         {
-            g.setColour (juce::Colour (track.colour));
-            g.fillRoundedRectangle (strip.toFloat().withHeight (4.0f), 2.0f);
+            g.setColour (tame (juce::Colour (track.colour)));
+            g.fillRoundedRectangle (strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f);
         }
 
-        if (t == selected)
+        if (isSelected)
         {
-            g.setColour (theme::accentOrange);
-            g.drawRoundedRectangle (strip.toFloat(), 4.0f, 1.5f);
+            g.setColour (colour::accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (strip.toFloat().reduced (0.5f), radius::md, 1.0f);
+            g.setColour (colour::accent);
+            g.fillRoundedRectangle (strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f);
         }
 
         // header: number and name
-        g.setColour (theme::text.withAlpha (0.55f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 4, w - 4, 12, juce::Justification::centred);
-        g.setColour (track.muted ? juce::Colours::grey : theme::text);
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 2, 16, w - 8, 16, juce::Justification::centred, 1, 0.7f);
+        g.setColour (isSelected ? colour::accent : colour::textSecondary);
+        g.setFont (font (type::caption, isSelected));
+        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 5, w - 4, 12, juce::Justification::centred);
+        g.setColour (track.muted ? colour::textDisabled : colour::textPrimary);
+        g.setFont (font (type::small));
+        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 3, 17, w - 10, 15, juce::Justification::centred, 1, 0.7f);
 
         // compensated latency (PDC) on the Master
         if (t == 0 && engine.getLatencySamples() > 0)
         {
             const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
-            g.setColour (theme::accentOrange);
-            g.setFont (juce::FontOptions (10.0f));
-            g.drawText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 36).withWidth (w - 40),
-                        juce::Justification::centredLeft); // the Master has no solo: use its spot
+            g.setColour (colour::textSecondary);
+            g.setFont (font (10.0f));
+            g.drawFittedText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 34).withWidth (w - 40),
+                              juce::Justification::centredLeft, 1, 0.8f); // the Master has no solo: use its spot
         }
 
         if (! track.effects.empty())
         {
-            g.setColour (theme::accentBlue);
-            g.setFont (juce::FontOptions (9.0f));
-            g.drawText ("FX " + juce::String ((int) track.effects.size()), x + w - 30, 3, 24, 11, juce::Justification::centredRight);
+            g.setColour (colour::info);
+            g.setFont (font (9.0f, true));
+            g.drawText ("FX " + juce::String ((int) track.effects.size()), x + w - 31, 5, 24, 11, juce::Justification::centredRight);
         }
 
         // pan
-        {
-            const auto area = panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f);
-            const auto centre = area.getCentre();
-            constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
-            constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
-            const auto to = start + range * (track.pan + 1.0f) * 0.5f;
-            const auto mid = start + range * 0.5f;
-
-            g.setColour (theme::knobBackground);
-            g.fillEllipse (area);
-            juce::Path arc;
-            arc.addCentredArc (centre.x, centre.y, 11.5f, 11.5f, 0.0f, juce::jmin (mid, to), juce::jmax (mid, to), true);
-            g.setColour (theme::accentBlue);
-            g.strokePath (arc, juce::PathStrokeType (2.5f));
-            g.setColour (juce::Colours::white);
-            g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * 9.0f, centre.y - std::cos (to) * 9.0f, 1.5f);
-        }
+        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (28.0f, 28.0f), (track.pan + 1.0f) * 0.5f, true, colour::info);
 
         // mute and solo
         {
-            const auto m = muteArea (t).toFloat();
-            g.setColour (theme::muteLed (track.muted));
-            g.fillEllipse (m.withSizeKeepingCentre (12.0f, 12.0f));
+            const auto m = muteArea (t).toFloat().withSizeKeepingCentre (12.0f, 12.0f);
+            g.setColour (muteLed (track.muted));
+            g.fillEllipse (m);
+            if (! track.muted)
+            {
+                g.setColour (colour::ledOn.withAlpha (0.25f));
+                g.drawEllipse (m.expanded (2.0f), 1.0f);
+            }
 
             if (t > 0)
             {
                 const auto s = soloArea (t).toFloat().reduced (2.0f);
-                g.setColour (track.solo ? theme::accentOrange : theme::knobBackground);
-                g.fillRoundedRectangle (s, 3.0f);
-                g.setColour (track.solo ? juce::Colours::black : theme::text.withAlpha (0.6f));
-                g.setFont (juce::FontOptions (11.0f));
+                g.setColour (track.solo ? colour::accent : colour::bg0);
+                g.fillRoundedRectangle (s, radius::sm);
+                g.setColour (track.solo ? colour::onAccent : colour::textSecondary);
+                g.setFont (font (type::caption, true));
                 g.drawText ("S", s.toNearestInt(), juce::Justification::centred);
             }
         }
@@ -223,42 +218,58 @@ void MixerStrips::paint (juce::Graphics& g)
         // meters + fader
         {
             const auto area = faderArea (t);
-            const auto meterW = 6;
-            const auto meters = area.withWidth (meterW * 2 + 3);
+            const auto meterW = 5;
+            const auto meters = area.withWidth (meterW * 2 + 2);
             const auto fader = area.withTrimmedLeft (meterW * 2 + 8);
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterW + 3), meters.getY(), meterW, meters.getHeight());
-                g.setColour (theme::knobBackground);
-                g.fillRect (bar);
+                const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterW + 2), meters.getY(), meterW, meters.getHeight());
+                g.setColour (colour::bg0);
+                g.fillRoundedRectangle (bar.toFloat(), 1.5f);
 
                 const auto level = (std::size_t) t * 2 + (std::size_t) ch < levels.size() ? levels[(std::size_t) t * 2 + (std::size_t) ch] : 0.0f;
                 const auto h = (int) (meterPosition (level) * (float) bar.getHeight());
                 const auto lit = bar.withTop (bar.getBottom() - h);
-                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffff4040), (float) bar.getX(), (float) bar.getY(),
-                                                         theme::accentGreen, (float) bar.getX(), (float) bar.getBottom(), false));
+                juce::ColourGradient gradient (colour::meterClip, (float) bar.getX(), (float) bar.getY(), colour::meterLow, (float) bar.getX(),
+                                               (float) bar.getBottom(), false);
+                gradient.addColour (1.0 - meterPosition (juce::Decibels::decibelsToGain (0.0f)), colour::meterClip); // above 0 dB: clip zone
+                gradient.addColour (1.0 - meterPosition (juce::Decibels::decibelsToGain (-6.0f)), colour::meterMid);
+                gradient.addColour (1.0 - meterPosition (juce::Decibels::decibelsToGain (-18.0f)), colour::meterLow);
+                g.setGradientFill (gradient);
                 g.fillRect (lit);
+
+                if (level >= 1.0f) // clip indicator
+                {
+                    g.setColour (colour::meterClip);
+                    g.fillRect (bar.withHeight (3));
+                }
             }
 
             // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
-            g.setColour (theme::knobBackground);
-            g.fillRoundedRectangle (railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight(), 2.0f);
-            const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
-            g.setColour (theme::text.withAlpha (0.3f));
-            g.drawHorizontalLine ((int) unityY, (float) fader.getX(), (float) fader.getRight());
-
             const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
-            const auto cap = juce::Rectangle<float> ((float) fader.getX() + 2.0f, capY - 7.0f, (float) fader.getWidth() - 4.0f, 14.0f);
-            g.setColour (juce::Colour (0xffb8bec5));
-            g.fillRoundedRectangle (cap, 3.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.6f));
-            g.drawHorizontalLine ((int) capY, cap.getX() + 2.0f, cap.getRight() - 2.0f);
+            g.setColour (colour::bg0);
+            g.fillRoundedRectangle (railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight(), 2.0f);
+            g.setColour (colour::bg6.brighter (0.15f).withAlpha (track.muted ? 0.4f : 1.0f));
+            g.fillRoundedRectangle (railX - 2.0f, capY, 4.0f, juce::jmax (0.0f, (float) fader.getBottom() - capY), 2.0f);
+            const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
+            g.setColour (colour::textDisabled);
+            g.drawHorizontalLine ((int) unityY, (float) fader.getX(), railX - 5.0f);
+            g.drawHorizontalLine ((int) unityY, railX + 5.0f, (float) fader.getRight());
 
-            g.setColour (theme::text.withAlpha (0.6f));
-            g.setFont (juce::FontOptions (10.0f));
-            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, 14, juce::Justification::centred);
+            const auto capWidth = juce::jmin ((float) fader.getWidth() - 2.0f, 26.0f);
+            const auto cap = juce::Rectangle<float> (capWidth, 12.0f).withCentre ({ railX, capY });
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRoundedRectangle (cap.translated (0.0f, 1.5f), radius::sm);
+            g.setColour (juce::Colour (0xffd4d7dd)); // same cap as the LookAndFeel's linear faders
+            g.fillRoundedRectangle (cap, radius::sm);
+            g.setColour (colour::bg0.withAlpha (0.8f));
+            g.fillRect (cap.withSizeKeepingCentre (capWidth - 8.0f, 1.5f));
+
+            g.setColour (colour::textSecondary);
+            g.setFont (font (type::caption));
+            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 4, w - 4, 14, juce::Justification::centred);
         }
 
         // send from the selected track to this one
@@ -270,10 +281,10 @@ void MixerStrips::paint (juce::Graphics& g)
 
             if (possible)
             {
-                g.setColour (on ? theme::accentOrange.withAlpha (0.85f) : theme::knobBackground);
-                g.fillRoundedRectangle (r, 4.0f);
-                g.setColour (on ? juce::Colours::black : theme::text.withAlpha (0.45f));
-                g.setFont (juce::FontOptions (10.0f));
+                g.setColour (on ? colour::accent : colour::bg0);
+                g.fillRoundedRectangle (r, radius::sm);
+                g.setColour (on ? colour::onAccent : colour::textSecondary);
+                g.setFont (font (10.0f, on));
                 juce::String label = juce::String::fromUTF8 ("\xe2\x86\x92"); // arrow
 
                 if (on && t > 0)
@@ -292,8 +303,8 @@ void MixerStrips::paint (juce::Graphics& g)
                 if (juce::jlimit (0, tracks - 1, c.mixerTrack) == t)
                     feeds.add (juce::String::fromUTF8 (c.name.c_str()));
 
-            g.setColour (theme::accentOrange.withAlpha (0.8f));
-            g.setFont (juce::FontOptions (10.0f));
+            g.setColour (colour::textSecondary);
+            g.setFont (font (10.0f));
             const auto text = feeds.size() > 3 ? feeds[0] + ", " + feeds[1] + " +" + juce::String (feeds.size() - 2) : feeds.joinIntoString (", ");
             g.drawFittedText (text, x + 3, getHeight() - feedsHeight + 16, w - 10, feedsHeight - 20, juce::Justification::centredTop, 2, 0.8f);
         }
@@ -302,12 +313,12 @@ void MixerStrips::paint (juce::Graphics& g)
     // "+" button
     if (tracks < maxMixerTracks)
     {
-        const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60);
-        g.setColour (theme::panel);
-        g.fillRoundedRectangle (add.toFloat(), 4.0f);
-        g.setColour (theme::text.withAlpha (0.6f));
-        g.setFont (juce::FontOptions (22.0f));
-        g.drawText ("+", add, juce::Justification::centred);
+        const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60).toFloat();
+        g.setColour (colour::bg2);
+        g.fillRoundedRectangle (add, radius::md);
+        g.setColour (colour::border);
+        g.drawRoundedRectangle (add.reduced (0.5f), radius::md, 1.0f);
+        icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), colour::textSecondary);
     }
 }
 
@@ -479,7 +490,7 @@ public:
         : engine (e),
           track (t)
     {
-        const juce::String bands[] = { "Low", utf8 ("Mid"), "High" };
+        const juce::String bands[] = { tr ("Low"), tr ("Mid"), tr ("High") };
         const auto& eq = engine.getSong().mixer[(std::size_t) track].eq;
 
         for (int b = 0; b < 3; ++b)
@@ -498,7 +509,7 @@ public:
 
             auto& width = knobs[(std::size_t) b][2];
             setup (width, 0.0, 1.0, 0.01, "", eq.width[(std::size_t) b]);
-            width.setTooltip (b == 1 ? utf8 ("Peak width (Q)") : utf8 ("Shelf slope"));
+            width.setTooltip (b == 1 ? tr ("Peak width (Q)") : tr ("Shelf slope"));
         }
 
         setSize (3 * 90, 3 * 74 + 24);
@@ -569,13 +580,11 @@ void MixerStrips::showMenu (int t)
     menu.addSectionHeader (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
 
     if (channel < (int) song.channels.size())
-        menu.addItem (utf8 ("Route channel \"") + juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str())
-                          + utf8 ("\" here"),
+        menu.addItem (tr ("Route channel \"{0}\" here", { juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()) }),
                       [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
 
     if (selected > 0 && selected != t && (t == 0 || song.canRoute (selected, t) || song.routes (selected, t)))
-        menu.addItem (utf8 ("Send \"") + juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str())
-                          + utf8 ("\" only to this track"),
+        menu.addItem (tr ("Send \"{0}\" only to this track", { juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str()) }),
                       [this, from = selected, t] {
                           engine.editSong ([from, t] (Song& s) {
                               s.mixer[(std::size_t) from].sends.clear();
@@ -585,7 +594,7 @@ void MixerStrips::showMenu (int t)
                       });
 
     if (t > 0 && (! song.mixer[(std::size_t) t].sends.empty() || ! song.mixer[(std::size_t) t].toMaster))
-        menu.addItem (utf8 ("Send only to the Master again"), [this, t] {
+        menu.addItem (tr ("Send only to the Master again"), [this, t] {
             engine.editSong ([t] (Song& s) {
                 s.mixer[(std::size_t) t].sends.clear();
                 s.mixer[(std::size_t) t].toMaster = true;
@@ -595,32 +604,32 @@ void MixerStrips::showMenu (int t)
     {
         const auto& track = song.mixer[(std::size_t) t];
         juce::PopupMenu stereo;
-        const std::pair<const char*, float> widths[] = { { "Mono", 1.0f }, { "Narrower", 0.5f }, { "Normal", 0.0f },
-                                                          { "Wider", -0.5f }, { "Very wide", -1.0f } };
+        const std::pair<const char*, float> widths[] = { { TR_NOOP ("Mono"), 1.0f }, { TR_NOOP ("Narrower"), 0.5f }, { TR_NOOP ("Normal"), 0.0f },
+                                                          { TR_NOOP ("Wider"), -0.5f }, { TR_NOOP ("Very wide"), -1.0f } };
 
         for (const auto& [label, value] : widths)
-            stereo.addItem (juce::String::fromUTF8 (label), true, std::abs (track.stereo - value) < 0.01f,
+            stereo.addItem (tr (label), true, std::abs (track.stereo - value) < 0.01f,
                             [this, t, v = value] { engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].stereo = v; }); });
 
-        menu.addSubMenu (utf8 ("Stereo separation"), stereo);
-        menu.addItem (utf8 ("Track EQ..."), [this, t] { showTrackEq (t); });
-        menu.addItem (utf8 ("Invert phase"), true, track.invertPhase, [this, t] {
+        menu.addSubMenu (tr ("Stereo separation"), stereo);
+        menu.addItem (tr ("Track EQ..."), [this, t] { showTrackEq (t); });
+        menu.addItem (tr ("Invert phase"), true, track.invertPhase, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].invertPhase = ! s.mixer[(std::size_t) t].invertPhase; });
         });
-        menu.addItem (utf8 ("Swap left/right"), true, track.swapChannels, [this, t] {
+        menu.addItem (tr ("Swap left/right"), true, track.swapChannels, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].swapChannels = ! s.mixer[(std::size_t) t].swapChannels; });
         });
         menu.addSeparator();
     }
 
     if (t > 0)
-        menu.addItem (utf8 ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
+        menu.addItem (tr ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
 
-    menu.addItem ("Rename...", [this, t] {
-        auto* window = new juce::AlertWindow ("Rename track", {}, juce::MessageBoxIconType::NoIcon);
+    menu.addItem (tr ("Rename..."), [this, t] {
+        auto* window = new juce::AlertWindow (tr ("Rename track"), {}, juce::MessageBoxIconType::NoIcon);
         window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str()));
-        window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
         window->enterModalState (true, juce::ModalCallbackFunction::create ([this, t, window] (int result) {
                                      const auto name = window->getTextEditorContents ("name").trim().toStdString();
                                      if (result == 1 && ! name.empty() && t < (int) engine.getSong().mixer.size())
@@ -628,7 +637,7 @@ void MixerStrips::showMenu (int t)
                                  }),
                                  true);
     });
-    menu.addItem ("Reset (0 dB, center, no mute/solo)", [this, t] {
+    menu.addItem (tr ("Reset (0 dB, center, no mute/solo)"), [this, t] {
         engine.editSong ([t] (Song& s) {
             auto& track = s.mixer[(std::size_t) t];
             track.volume = unityFader;
@@ -785,19 +794,19 @@ void EffectsPanel::showGatePatterns()
         float (*level) (int);
     };
     static const Pattern patterns[] = {
-        { "All open", [] (int) { return 1.0f; } },
-        { "1/2 beat gate", [] (int i) { return (i % 4) < 2 ? 1.0f : 0.0f; } },
-        { "1 beat gate", [] (int i) { return (i % 8) < 4 ? 1.0f : 0.0f; } },
-        { "Offbeat", [] (int i) { return (i % 8) >= 4 ? 1.0f : 0.0f; } },
-        { "Sidechain (ramp per beat)", [] (int i) { return std::min (1.0f, 0.15f + (float) (i % 8) / 5.0f); } },
-        { "Trance gate", [] (int i) { return (i % 4) == 3 ? 0.0f : (i % 16) >= 12 ? 0.4f : 1.0f; } },
-        { "Fade-in over the bar", [] (int i) { return (float) (i + 1) / 32.0f; } },
-        { "Fade-out over the bar", [] (int i) { return 1.0f - (float) i / 32.0f; } },
+        { TR_NOOP ("All open"), [] (int) { return 1.0f; } },
+        { TR_NOOP ("1/2 beat gate"), [] (int i) { return (i % 4) < 2 ? 1.0f : 0.0f; } },
+        { TR_NOOP ("1 beat gate"), [] (int i) { return (i % 8) < 4 ? 1.0f : 0.0f; } },
+        { TR_NOOP ("Offbeat"), [] (int i) { return (i % 8) >= 4 ? 1.0f : 0.0f; } },
+        { TR_NOOP ("Sidechain (ramp per beat)"), [] (int i) { return std::min (1.0f, 0.15f + (float) (i % 8) / 5.0f); } },
+        { TR_NOOP ("Trance gate"), [] (int i) { return (i % 4) == 3 ? 0.0f : (i % 16) >= 12 ? 0.4f : 1.0f; } },
+        { TR_NOOP ("Fade-in over the bar"), [] (int i) { return (float) (i + 1) / 32.0f; } },
+        { TR_NOOP ("Fade-out over the bar"), [] (int i) { return 1.0f - (float) i / 32.0f; } },
     };
 
     juce::PopupMenu menu;
     for (const auto& p : patterns)
-        menu.addItem (utf8 (p.name), [this, level = p.level] {
+        menu.addItem (tr (p.name), [this, level = p.level] {
             engine.editSong ([t = track, slot = selectedSlot, level] (Song& song) {
                 auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) slot].params;
                 for (int i = 0; i < 32; ++i)
@@ -828,8 +837,9 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
 
 void EffectsPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel);
-    g.setColour (theme::window);
+    using namespace theme;
+    g.fillAll (colour::bg2);
+    g.setColour (colour::border);
     g.drawVerticalLine (0, 0.0f, (float) getHeight());
 
     const auto* s = slots();
@@ -838,48 +848,53 @@ void EffectsPanel::paint (juce::Graphics& g)
         return;
 
     const auto& song = engine.getSong();
-    g.setColour (theme::accentOrange);
-    g.setFont (juce::FontOptions (14.0f));
-    g.drawText (utf8 ("Effects — ") + juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()), 10, 4,
+    g.setColour (colour::textPrimary);
+    g.setFont (font (type::title, true));
+    g.drawText (tr ("Effects: {0}", { juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) }), 10, 4,
                 getWidth() - 20, panelHeader - 8, juce::Justification::centredLeft, true);
 
-    g.setFont (juce::FontOptions (13.0f));
+    g.setFont (font (type::body));
 
     for (int i = 0; i < maxEffectSlots; ++i)
     {
         const auto r = slotBounds (i);
         const auto filled = i < (int) s->size();
-        g.setColour (i == selectedSlot ? theme::channelButtonSelected : theme::channelButton.darker (filled ? 0.0f : 0.4f));
-        g.fillRoundedRectangle (r.toFloat(), 3.0f);
+        const auto isSelected = i == selectedSlot && filled;
+        g.setColour (isSelected ? colour::bg5 : filled ? colour::bg3 : colour::bg2.brighter (0.03f));
+        g.fillRoundedRectangle (r.toFloat(), radius::sm);
+
+        if (! filled)
+        {
+            g.setColour (colour::border);
+            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), radius::sm, 1.0f);
+        }
+
+        if (isSelected)
+        {
+            g.setColour (colour::accent);
+            g.fillRoundedRectangle (r.toFloat().withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f);
+        }
 
         if (filled)
         {
             const auto& slot = (*s)[(std::size_t) i];
-            g.setColour (theme::muteLed (! slot.enabled));
-            g.fillEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 5, 10, 10);
-            g.setColour (slot.enabled ? theme::text : juce::Colours::grey);
+            g.setColour (muteLed (! slot.enabled));
+            g.fillEllipse ((float) r.getX() + 8, (float) r.getCentreY() - 4, 8, 8);
+            g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
-                                                        : utf8 (effectInfo (slot.kind).name);
+                                                        : juce::String::fromUTF8 (effectInfo (slot.kind).name);
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
-                name << utf8 (" ← ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
+                name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
 
             // slot's dry/wet knob
-            const auto knob = mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f);
-            constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
-            constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
-            g.setColour (theme::knobBackground);
-            g.fillEllipse (knob);
-            juce::Path arc;
-            arc.addCentredArc (knob.getCentreX(), knob.getCentreY(), 7.5f, 7.5f, 0.0f, start, start + range * slot.mix, true);
-            g.setColour (slot.enabled ? theme::accentBlue : juce::Colours::grey);
-            g.strokePath (arc, juce::PathStrokeType (2.0f));
+            drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (20.0f, 20.0f), slot.mix, false,
+                      slot.enabled ? colour::info : colour::textDisabled);
         }
         else if (i == (int) s->size())
         {
-            g.setColour (theme::text.withAlpha (0.45f));
-            g.drawText (juce::String (i + 1) + utf8 (". (empty — click to add)"), r.withTrimmedLeft (24),
-                        juce::Justification::centredLeft);
+            g.setColour (colour::textDisabled);
+            g.drawText (juce::String (i + 1) + ". " + tr ("(empty: click to add)"), r.withTrimmedLeft (24), juce::Justification::centredLeft);
         }
     }
 
@@ -888,16 +903,25 @@ void EffectsPanel::paint (juce::Graphics& g)
 
     const auto& slot = (*s)[(std::size_t) selectedSlot];
 
+    auto drawButton = [&g] (juce::Rectangle<int> button, const juce::String& text, Icon icon) {
+        g.setColour (colour::bg4);
+        g.fillRoundedRectangle (button.toFloat(), radius::md);
+        const auto f = juce::Font (font (type::body));
+        const auto textWidth = juce::GlyphArrangement::getStringWidth (f, text);
+        auto content = button.toFloat().withSizeKeepingCentre (juce::jmin ((float) button.getWidth() - 12.0f, textWidth + 22.0f), (float) button.getHeight());
+        icons::draw (g, icon, content.removeFromLeft (16.0f).withSizeKeepingCentre (16.0f, 16.0f), colour::textSecondary);
+        content.removeFromLeft (6.0f);
+        g.setColour (colour::textPrimary);
+        g.setFont (f);
+        g.drawFittedText (text, content.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
+    };
+
     if (slot.kind == EffectKind::plugin)
     {
         const auto button = pluginButtonBounds();
-        g.setColour (theme::channelButton);
-        g.fillRoundedRectangle (button.toFloat(), 4.0f);
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (13.0f));
-        g.drawText (utf8 ("Open plugin interface"), button, juce::Justification::centred);
-        g.setColour (theme::text.withAlpha (0.5f));
-        g.setFont (juce::FontOptions (11.0f));
+        drawButton (button, tr ("Open plugin interface"), Icon::plugin);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
         g.drawText (juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
         return;
     }
@@ -905,11 +929,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     if (slot.kind == EffectKind::parametricEq)
     {
         const auto button = pluginButtonBounds();
-        g.setColour (theme::channelButton);
-        g.fillRoundedRectangle (button.toFloat(), 4.0f);
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (13.0f));
-        g.drawText (utf8 ("Open parametric EQ"), button, juce::Justification::centred);
+        drawButton (button, tr ("Open parametric EQ"), Icon::settings);
         const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
         drawParametricEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
         return;
@@ -918,19 +938,20 @@ void EffectsPanel::paint (juce::Graphics& g)
     if (slot.kind == EffectKind::parallel) // container: list the branches
     {
         auto y = knobBounds (0).getY() - 28;
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (14.0f));
-        g.drawText (utf8 (effectInfo (slot.kind).name), 10, y, getWidth() - 20, 20, juce::Justification::centredLeft);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setColour (colour::textPrimary);
+        g.setFont (font (type::title, true));
+        g.drawText (juce::String::fromUTF8 (effectInfo (slot.kind).name), 10, y, getWidth() - 20, 20, juce::Justification::centredLeft);
+        g.setFont (font (type::small));
         for (std::size_t b = 0; b < slot.branches.size(); ++b)
         {
             y += 22;
-            juce::String line = "Branch " + juce::String ((int) b + 1) + juce::String::formatted (" (x%.2f): ", slot.branches[b].gain);
+            juce::String chain;
             if (slot.branches[b].chain.empty())
-                line += "dry";
+                chain = tr ("dry");
             for (std::size_t c = 0; c < slot.branches[b].chain.size(); ++c)
-                line += (c > 0 ? " -> " : "") + utf8 (effectInfo (slot.branches[b].chain[c].kind).name);
-            g.setColour (theme::text.withAlpha (0.8f));
+                chain += (c > 0 ? " -> " : "") + juce::String::fromUTF8 (effectInfo (slot.branches[b].chain[c].kind).name);
+            const auto line = tr ("Branch {0} (x{1}): {2}", { juce::String ((int) b + 1), juce::String (slot.branches[b].gain, 2), chain });
+            g.setColour (colour::textSecondary);
             g.drawText (line, 14, y, getWidth() - 28, 20, juce::Justification::centredLeft, true);
         }
         return;
@@ -938,30 +959,30 @@ void EffectsPanel::paint (juce::Graphics& g)
 
     const auto& info = effectInfo (slot.kind);
     const auto gate = slot.kind == EffectKind::volumeGate;
-    g.setColour (theme::text);
-    g.setFont (juce::FontOptions (14.0f));
-    g.drawText (utf8 (info.name), 10, (gate ? gateStepsBounds().getY() : knobBounds (0).getY()) - 28, getWidth() - 20, 20,
+    g.setColour (colour::textPrimary);
+    g.setFont (font (type::title, true));
+    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : knobBounds (0).getY()) - 28, getWidth() - 20, 20,
                 juce::Justification::centredLeft);
 
     if (gate) // 32 steps = 1 bar of 4 beats
     {
         const auto area = gateStepsBounds().toFloat();
-        g.setColour (theme::knobBackground);
-        g.fillRoundedRectangle (area, 3.0f);
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (area, radius::sm);
         const auto w = area.getWidth() / 32.0f;
         for (int i = 0; i < 32; ++i)
         {
             const auto h = area.getHeight() * juce::jlimit (0.0f, 1.0f, slot.params[(std::size_t) i]);
-            g.setColour ((slot.enabled ? theme::accentOrange : juce::Colours::grey).withAlpha ((i / 8) % 2 == 0 ? 1.0f : 0.75f));
+            g.setColour ((slot.enabled ? colour::accent : colour::textDisabled).withAlpha ((i / 8) % 2 == 0 ? 1.0f : 0.7f));
             g.fillRect (area.getX() + i * w + 1.0f, area.getBottom() - h, w - 2.0f, h);
         }
-        g.setColour (theme::text.withAlpha (0.3f));
+        g.setColour (colour::gridBar);
         for (int beat = 1; beat < 4; ++beat)
             g.drawVerticalLine ((int) (area.getX() + beat * 8 * w), area.getY(), area.getBottom());
-        g.setColour (theme::text.withAlpha (0.5f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 ("1 bar: draw the steps; right-click = patterns"), area.withY (area.getBottom() + 2).withHeight (14),
-                    juce::Justification::centredLeft);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawFittedText (tr ("1 bar: draw the steps; right-click = patterns"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
     }
 
     for (int p = gate ? 32 : 0; p < shownParams (slot); ++p)
@@ -970,27 +991,13 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto value = slot.params[(std::size_t) p];
         // 38 px knob; in tight grids (Effector) it shrinks to fit name and value below
         const auto knobHeight = juce::jlimit (30, 44, r.getHeight() - 30);
-        const auto diameter = (float) knobHeight - 6.0f;
-        const auto area = r.withHeight (knobHeight).toFloat().withSizeKeepingCentre (diameter, diameter);
-        const auto centre = area.getCentre();
-        constexpr auto start = juce::MathConstants<float>::pi * 1.25f;
-        constexpr auto range = juce::MathConstants<float>::pi * 1.5f;
-        const auto to = start + range * value;
+        drawKnob (g, r.withHeight (knobHeight).toFloat(), value, false, slot.enabled ? colour::knobArc : colour::textDisabled, dragParam == p);
 
-        g.setColour (theme::knobBackground);
-        g.fillEllipse (area);
-        juce::Path arc;
-        arc.addCentredArc (centre.x, centre.y, diameter / 2.0f - 2.0f, diameter / 2.0f - 2.0f, 0.0f, start, to, true);
-        g.setColour (slot.enabled ? theme::accentOrange : juce::Colours::grey);
-        g.strokePath (arc, juce::PathStrokeType (3.0f));
-        g.setColour (juce::Colours::white);
-        const auto needle = diameter / 2.0f - 6.0f;
-        g.drawLine (centre.x, centre.y, centre.x + std::sin (to) * needle, centre.y - std::cos (to) * needle, 2.0f);
-
-        g.setColour (theme::text.withAlpha (0.8f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14, juce::Justification::centred);
-        g.setColour (theme::accentBlue);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawFittedText (juce::String::fromUTF8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14,
+                          juce::Justification::centred, 1, 0.8f);
+        g.setColour (colour::textPrimary);
         g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm).c_str()), r.getX(), r.getY() + knobHeight + 16,
                     r.getWidth(), 14, juce::Justification::centred);
     }
@@ -1144,8 +1151,8 @@ void EffectsPanel::openPluginWindow (int slot)
         return;
     }
 
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Plugin",
-                                            utf8 ("This plugin could not be loaded (it is not installed or has not been scanned)."));
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Plugin"),
+                                            tr ("This plugin could not be loaded (it is not installed or has not been scanned)."));
 }
 
 void EffectsPanel::showAddMenu (int)
@@ -1153,7 +1160,7 @@ void EffectsPanel::showAddMenu (int)
     juce::PopupMenu menu;
 
     for (auto kind : allEffects)
-        menu.addItem (utf8 (effectInfo (kind).name), [this, kind] {
+        menu.addItem (juce::String::fromUTF8 (effectInfo (kind).name), [this, kind] {
             engine.editSong ([t = track, kind] (Song& song) {
                 auto& effects = song.mixer[(std::size_t) t].effects;
                 if ((int) effects.size() < maxEffectSlots)
@@ -1179,7 +1186,7 @@ void EffectsPanel::showAddMenu (int)
         repaint();
     });
     menu.addSeparator();
-    menu.addSubMenu ("Plugin (VST3/CLAP)", plugins);
+    menu.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
@@ -1189,13 +1196,13 @@ void EffectsPanel::showSlotMenu (int slot)
     juce::PopupMenu replace;
 
     for (auto kind : allEffects)
-        replace.addItem (utf8 (effectInfo (kind).name), [this, slot, kind] {
+        replace.addItem (juce::String::fromUTF8 (effectInfo (kind).name), [this, slot, kind] {
             engine.editSong ([t = track, slot, kind] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot] = makeEffectSlot (kind); });
         });
 
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;
-    menu.addSubMenu ("Replace with", replace);
+    menu.addSubMenu (tr ("Replace with"), replace);
 
     // FL presets (Plugin presets\Effects\<plugin>) that map to this effect
     {
@@ -1231,24 +1238,24 @@ void EffectsPanel::showSlotMenu (int slot)
         }
 
         if (presets.getNumItems() > 0)
-            menu.addSubMenu ("FL presets", presets);
+            menu.addSubMenu (tr ("FL presets"), presets);
     }
 
     // side inputs: another track's output feeds the compressor's detector, or the vocoder's modulator/carrier
     const auto kind = (*slots())[(std::size_t) slot].kind;
-    auto sideMenu = [&] (const char* title, bool second) {
+    auto sideMenu = [&] (const juce::String& title, bool second) {
         juce::PopupMenu side;
         const auto& fx = (*slots())[(std::size_t) slot];
         const auto current = second ? fx.sidechain2 : fx.sidechain;
         auto assign = [this, slot, second] (int source) {
-            engine.editSong ([tr = track, slot, second, source] (Song& s) {
-                auto& target = s.mixer[(std::size_t) tr].effects[(std::size_t) slot];
+            engine.editSong ([tk = track, slot, second, source] (Song& s) {
+                auto& target = s.mixer[(std::size_t) tk].effects[(std::size_t) slot];
                 (second ? target.sidechain2 : target.sidechain) = source;
                 if (target.kind == EffectKind::vocoder && source >= 0)
                     target.params[16] = 1.0f; // separate inputs (otherwise L = modulator, R = carrier)
             });
         };
-        side.addItem ("None", true, current < 0, [assign] { assign (-1); });
+        side.addItem (tr ("None"), true, current < 0, [assign] { assign (-1); });
         const auto& song = engine.getSong();
         for (int t = 1; t < (int) song.mixer.size(); ++t)
             if (t != track)
@@ -1257,17 +1264,17 @@ void EffectsPanel::showSlotMenu (int slot)
         menu.addSubMenu (title, side);
     };
     if (kind == EffectKind::compressor)
-        sideMenu ("Sidechain from", false);
+        sideMenu (tr ("Sidechain from"), false);
     if (kind == EffectKind::vocoder || kind == EffectKind::vocodex)
     {
-        sideMenu ("Modulator from", false);
-        sideMenu ("Carrier from", true);
+        sideMenu (tr ("Modulator from"), false);
+        sideMenu (tr ("Carrier from"), true);
     }
-    menu.addItem ("Move up", slot > 0, false, [this, slot] {
+    menu.addItem (tr ("Move up"), slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;
     });
-    menu.addItem ("Move down", slot < count - 1, false, [this, slot] {
+    menu.addItem (tr ("Move down"), slot < count - 1, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot + 1); });
         selectedSlot = slot + 1;
     });
@@ -1278,7 +1285,7 @@ void EffectsPanel::showSlotMenu (int slot)
     }
 
     menu.addSeparator();
-    menu.addItem ("Delete", [this, slot] {
+    menu.addItem (tr ("Delete"), [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
         selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
         repaint();

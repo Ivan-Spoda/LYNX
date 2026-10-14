@@ -2,6 +2,7 @@
 
 #include "core/FlpImport.h"
 #include "engine/Text.h"
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -34,15 +35,15 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     };
 
     const auto data = fl.getChildFile ("Data");
-    add ("FL samples (Packs)", data.getChildFile ("Patches").getChildFile ("Packs"));
-    add ("FL demo projects", data.getChildFile ("Demo projects"));
-    add ("FL MIDI", data.getChildFile ("Patches").getChildFile ("Scores"));
-    add ("3x Osc presets (FL)", data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
-    add ("Synth presets (FL)", data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
-    add ("Documents", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
-    add (utf8 ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
-    add (utf8 ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
-    add ("Downloads", juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads"));
+    add (tr ("FL samples (Packs)"), data.getChildFile ("Patches").getChildFile ("Packs"));
+    add (tr ("FL demo projects"), data.getChildFile ("Demo projects"));
+    add (tr ("FL MIDI"), data.getChildFile ("Patches").getChildFile ("Scores"));
+    add (tr ("3x Osc presets (FL)"), data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
+    add (tr ("Synth presets (FL)"), data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
+    add (tr ("Documents"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
+    add (tr ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
+    add (tr ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
+    add (tr ("Downloads"), juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads"));
 
     rootBox.onChange = [this] { setRoot (rootBox.getSelectedId() - 1); };
     rootBox.setWantsKeyboardFocus (false);
@@ -52,15 +53,17 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     tree.setItemHeight (20);
     tree.setDragAndDropDescription (dragDescription);
     tree.addListener (this);
-    tree.setColour (juce::TreeView::backgroundColourId, theme::panel);
-    tree.setColour (juce::FileTreeComponent::highlightColourId, theme::accentOrange.withAlpha (0.4f));
+    tree.setColour (juce::TreeView::backgroundColourId, theme::colour::bg2);
     tree.setWantsKeyboardFocus (false);
     addAndMakeVisible (tree);
 
     thread.startThread (juce::Thread::Priority::low);
 
     if (! roots.isEmpty())
-        rootBox.setSelectedId (1);
+    {
+        rootBox.setSelectedId (1, juce::dontSendNotification);
+        setRoot (0);
+    }
 }
 
 BrowserComponent::~BrowserComponent()
@@ -76,6 +79,20 @@ void BrowserComponent::setRoot (int index)
         list.setDirectory (roots[index], true, true);
 }
 
+void BrowserComponent::waitForListing (int timeoutMs)
+{
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    while (list.isStillLoading() && juce::Time::getMillisecondCounter() < end)
+        juce::Thread::sleep (20);
+    list.dispatchPendingMessages();
+    // the tree lays new items out asynchronously; re-setting the root item does it now
+    if (auto* root = tree.getRootItem())
+    {
+        tree.setRootItem (nullptr);
+        tree.setRootItem (root);
+    }
+}
+
 void BrowserComponent::resized()
 {
     auto area = getLocalBounds().reduced (4);
@@ -86,7 +103,7 @@ void BrowserComponent::resized()
 
 void BrowserComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel);
+    g.fillAll (theme::colour::bg2);
 }
 
 void BrowserComponent::selectionChanged()
@@ -139,8 +156,8 @@ void BrowserComponent::fileDoubleClicked (const juce::File& file)
             engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
         }
         else
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Preset",
-                                                    utf8 ("LYNX reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
+                                                    tr ("LYNX reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
         return;
     }
 

@@ -2,58 +2,241 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// Palette and LookAndFeel: dark bluish-grey tones, accents in orange,
-// green and blue, in the spirit of FL Studio.
+// LYNX design tokens: the single source of colours, type sizes, spacing and radii for the whole UI,
+// plus the LookAndFeel that draws every stock JUCE widget with them.
+//
+// Identity: dark, flat, high contrast, with one red accent used sparingly (selection, active
+// states, playhead/record, primary actions). Surfaces get lighter as they rise ("elevation").
 namespace lynx::theme
 {
-inline const juce::Colour window { 0xff1e2226 };
-inline const juce::Colour panel { 0xff2b3036 };
-inline const juce::Colour toolbar { 0xff32383f };
-inline const juce::Colour channelButton { 0xff434a52 };
-inline const juce::Colour channelButtonSelected { 0xff56606b };
-inline const juce::Colour knobBackground { 0xff1b1e22 };
-inline const juce::Colour stepOn { 0xffe8e8e8 };
-inline const juce::Colour stepOnOffGrid { 0xff9fd3ff };
-inline const juce::Colour accentOrange { 0xffff9a3c };
-inline const juce::Colour accentGreen { 0xff7ed957 };
-inline const juce::Colour accentBlue { 0xff58b7ff };
-inline const juce::Colour playhead { 0xff30c0ff };
-inline const juce::Colour text { 0xffe6e6e6 };
+// --- colours -----------------------------------------------------------------------------------
+// (aliases repeat the hex value: juce::Colour is not constexpr, and copying another inline
+// variable during static initialisation is not reliably ordered across translation units)
+namespace colour
+{
+// backgrounds by elevation (0 = deepest)
+inline const juce::Colour bg0 { 0xff0e0f12 };   // editor canvases, insets, meter wells
+inline const juce::Colour bg1 { 0xff15161a };   // app background, menu bar, status bar
+inline const juce::Colour bg2 { 0xff1b1d22 };   // panels (browser, rack, mixer strips)
+inline const juce::Colour bg3 { 0xff23262c };   // raised surfaces: toolbar, headers, popups
+inline const juce::Colour bg4 { 0xff2c2f37 };   // controls at rest
+inline const juce::Colour bg5 { 0xff363a43 };   // controls hovered
+inline const juce::Colour bg6 { 0xff434852 };   // controls pressed / neutral "on"
 
+inline const juce::Colour border { 0xff2a2d34 };       // hairlines between areas
+inline const juce::Colour borderStrong { 0xff3b3f48 }; // control outlines
+
+inline const juce::Colour textPrimary { 0xffeceef2 };
+inline const juce::Colour textSecondary { 0xffa1a6b0 };
+inline const juce::Colour textDisabled { 0xff60656f };
+
+// the red accent
+inline const juce::Colour accent { 0xffe5383b };
+inline const juce::Colour accentHover { 0xfff2545a };
+inline const juce::Colour accentPressed { 0xffc12a30 };
+inline const juce::Colour accentMuted { 0xff5c1f24 };  // tinted backgrounds (armed, selected rows)
+inline const juce::Colour onAccent { 0xffffffff };     // text/icons drawn on the accent
+
+// semantic
+inline const juce::Colour selection { 0xffe5383b }; // = accent: selected notes/clips outline
+inline const juce::Colour selectionFill { 0x2ee5383b };               // selection rectangles
+inline const juce::Colour playhead { 0xffe5383b }; // = accent
+inline const juce::Colour record { 0xffff3b3f };
+inline const juce::Colour automation { 0xff4cc9c0 };                   // automation curves and clips
+inline const juce::Colour info { 0xff6ea8fe };                         // secondary values (pan, links)
+inline const juce::Colour ledOn { 0xff3ddc84 };                        // "active/unmuted" LEDs
+inline const juce::Colour ledOff { 0xff3a3e47 };
+inline const juce::Colour warning { 0xfff5b942 };                      // markers, missing items
+inline const juce::Colour meterLow { 0xff3ddc84 };
+inline const juce::Colour meterMid { 0xfff5c542 };
+inline const juce::Colour meterClip { 0xffff3b3f };
+
+// step sequencer / editors
+inline const juce::Colour knobArc { 0xffc5c9d1 };     // rotary value arcs at rest (accent while touched)
+inline const juce::Colour stepOff { 0xff2a2d34 };
+inline const juce::Colour stepOffAlt { 0xff33363f };   // every other group of 4 steps
+inline const juce::Colour stepOn { 0xffe5383b }; // = accent
+inline const juce::Colour stepNote { 0xffe8a3a6 };     // a step that only has a Piano Roll note
+inline const juce::Colour gridBar { 0xff3a3e47 };      // bar lines
+inline const juce::Colour gridBeat { 0xff262930 };     // beat lines
+inline const juce::Colour gridStep { 0xff1d1f24 };     // step lines
+inline const juce::Colour keyWhite { 0xffd9dbe0 };
+inline const juce::Colour keyBlack { 0xff17181c };
+inline const juce::Colour rowWhite { 0xff1c1e23 };     // Piano Roll rows of white keys
+inline const juce::Colour rowBlack { 0xff16171b };     // rows of black keys
+inline const juce::Colour noteSoft { 0xffb3545a };     // note colour at velocity 0
+inline const juce::Colour noteHard { 0xffff6b6e };     // note colour at velocity 1
+inline const juce::Colour noteMuted { 0xff4a4e57 };
+inline const juce::Colour audioClip { 0xff5a87b8 };
+} // namespace colour
+
+// --- typography ----------------------------------------------------------------------------------
+namespace type
+{
+inline constexpr float caption = 11.0f;  // grid numbers, small captions
+inline constexpr float small = 12.0f;    // secondary labels, status bar, tooltips
+inline constexpr float body = 13.0f;     // default control text
+inline constexpr float title = 15.0f;    // panel titles
+inline constexpr float display = 20.0f;  // the transport position
+} // namespace type
+
+inline juce::FontOptions font (float size, bool bold = false)
+{
+    return juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain);
+}
+
+inline juce::FontOptions monoFont (float size)
+{
+    return juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), size, juce::Font::plain);
+}
+
+// --- spacing and radii ---------------------------------------------------------------------------
+namespace space
+{
+inline constexpr int xs = 2, sm = 4, md = 8, lg = 12, xl = 16;
+}
+
+namespace radius
+{
+inline constexpr float sm = 3.0f, md = 4.0f, lg = 6.0f;
+}
+
+// --- helpers -------------------------------------------------------------------------------------
 inline juce::Colour stepOff (int step)
 {
-    return (step / 4) % 2 == 0 ? juce::Colour (0xff4a525b) : juce::Colour (0xff5b4f4f); // alternating groups of 4
+    return (step / 4) % 2 == 0 ? colour::stepOff : colour::stepOffAlt; // alternating groups of 4
 }
 
 inline juce::Colour muteLed (bool muted)
 {
-    return muted ? juce::Colour (0xff505050) : accentGreen;
+    return muted ? colour::ledOff : colour::ledOn;
 }
 
-// Piano Roll note colour by velocity (soft = greenish, hard = orange).
+// Piano Roll note colour by velocity (soft = dark rose, hard = bright red).
 inline juce::Colour noteColour (float velocity)
 {
-    return juce::Colour (0xff7ed957).interpolatedWith (accentOrange, juce::jlimit (0.0f, 1.0f, velocity));
+    return colour::noteSoft.interpolatedWith (colour::noteHard, juce::jlimit (0.0f, 1.0f, velocity));
 }
 
+// A user/channel colour toned down to sit on the dark surfaces without shouting.
+inline juce::Colour tame (juce::Colour c)
+{
+    return c.withMultipliedSaturation (0.8f).withBrightness (juce::jmin (c.getBrightness(), 0.72f));
+}
+
+// Upper case for small caption headers, including accented Latin letters (ã -> Ã), which the C
+// runtime's towupper leaves alone on Windows.
+inline juce::String caps (const juce::String& text)
+{
+    juce::String out;
+    for (auto c : text)
+    {
+        if ((c >= 0xe0 && c <= 0xfe && c != 0xf7))
+            c -= 0x20;
+        else
+            c = juce::CharacterFunctions::toUpperCase (c);
+        out += juce::String::charToString (c);
+    }
+    return out;
+}
+
+// Draws a rotary value arc in the LYNX style (used by custom-painted knobs too).
+void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arc, bool hover = false);
+
+// --- legacy names (kept so code written against the old palette keeps compiling) ---------------
+inline const juce::Colour window { 0xff15161a }; // = colour::bg1
+inline const juce::Colour panel { 0xff1b1d22 }; // = colour::bg2
+inline const juce::Colour toolbar { 0xff23262c }; // = colour::bg3
+inline const juce::Colour channelButton { 0xff2c2f37 }; // = colour::bg4
+inline const juce::Colour channelButtonSelected { 0xff434852 }; // = colour::bg6
+inline const juce::Colour knobBackground { 0xff0e0f12 }; // = colour::bg0
+inline const juce::Colour stepOn { 0xffe5383b }; // = colour::stepOn
+inline const juce::Colour stepOnOffGrid { 0xffe8a3a6 }; // = colour::stepNote
+inline const juce::Colour accentOrange { 0xffe5383b }; // = colour::accent
+inline const juce::Colour accentGreen { 0xff3ddc84 }; // = colour::ledOn
+inline const juce::Colour accentBlue { 0xff6ea8fe }; // = colour::info
+inline const juce::Colour playhead { 0xffe5383b }; // = colour::playhead
+inline const juce::Colour text { 0xffeceef2 }; // = colour::textPrimary
+
+// --- LookAndFeel ---------------------------------------------------------------------------------
 class LookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
-    LookAndFeel()
-        : juce::LookAndFeel_V4 (juce::LookAndFeel_V4::ColourScheme {
-              window, panel, toolbar, juce::Colour (0xff4d5560), text, toolbar, juce::Colours::white, accentOrange,
-              text })
-    {
-        setColour (juce::TextButton::buttonOnColourId, accentOrange.darker (0.3f));
-        setColour (juce::ComboBox::backgroundColourId, panel);
-        setColour (juce::TabbedButtonBar::tabOutlineColourId, juce::Colours::transparentBlack);
-        setColour (juce::TabbedButtonBar::frontOutlineColourId, juce::Colours::transparentBlack);
-        setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
-        setColour (juce::TabbedButtonBar::tabTextColourId, text.withAlpha (0.6f));
-        setColour (juce::TabbedButtonBar::frontTextColourId, accentOrange);
-        setColour (juce::Slider::rotarySliderFillColourId, accentOrange);
-        setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff4a525b));
-        setColour (juce::Slider::thumbColourId, juce::Colours::white);
-    }
+    LookAndFeel();
+
+    // property set on a Button / TabBarButton to draw one of lynx::Icon next to (or instead of) its text
+    static constexpr const char* iconProperty = "lynxIcon";
+
+    // buttons
+    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool highlighted, bool down) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool highlighted, bool down) override;
+    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
+    void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
+    void drawTickBox (juce::Graphics&, juce::Component&, float x, float y, float w, float h, bool ticked, bool enabled, bool highlighted, bool down) override;
+
+    // combo boxes and menus
+    void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown, int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox&) override;
+    juce::Font getComboBoxFont (juce::ComboBox&) override;
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
+    void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+    void drawPopupMenuItem (juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator, bool isActive, bool isHighlighted,
+                            bool isTicked, bool hasSubMenu, const juce::String& text, const juce::String& shortcutKeyText,
+                            const juce::Drawable* icon, const juce::Colour* textColour) override;
+    void drawPopupMenuSectionHeader (juce::Graphics&, const juce::Rectangle<int>& area, const juce::String& sectionName) override;
+    juce::Font getPopupMenuFont() override;
+    void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight, int& idealWidth, int& idealHeight) override;
+    int getPopupMenuBorderSize() override { return 4; }
+    void drawMenuBarBackground (juce::Graphics&, int width, int height, bool isMouseOverBar, juce::MenuBarComponent&) override;
+    void drawMenuBarItem (juce::Graphics&, int width, int height, int itemIndex, const juce::String& itemText, bool isMouseOverItem,
+                          bool isMenuOpen, bool isMouseOverBar, juce::MenuBarComponent&) override;
+    juce::Font getMenuBarFont (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
+    int getMenuBarItemWidth (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
+
+    // sliders
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPosProportional, float rotaryStartAngle,
+                           float rotaryEndAngle, juce::Slider&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float minSliderPos, float maxSliderPos,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
+    juce::Label* createSliderTextBox (juce::Slider&) override;
+    juce::Button* createSliderButton (juce::Slider&, bool isIncrement) override;
+    juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
+
+    // scrollbars
+    void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool isScrollbarVertical, int thumbStartPosition,
+                        int thumbSize, bool isMouseOver, bool isMouseDown) override;
+    int getDefaultScrollbarWidth() override { return 10; }
+    bool areScrollbarButtonsVisible() override { return false; }
+
+    // tabs
+    int getTabButtonBestWidth (juce::TabBarButton&, int tabDepth) override;
+    void drawTabButton (juce::TabBarButton&, juce::Graphics&, bool isMouseOver, bool isMouseDown) override;
+    void drawTabbedButtonBarBackground (juce::TabbedButtonBar&, juce::Graphics&) override;
+    void drawTabAreaBehindFrontButton (juce::TabbedButtonBar&, juce::Graphics&, int w, int h) override;
+
+    // text
+    void fillTextEditorBackground (juce::Graphics&, int width, int height, juce::TextEditor&) override;
+    void drawTextEditorOutline (juce::Graphics&, int width, int height, juce::TextEditor&) override;
+    void drawLabel (juce::Graphics&, juce::Label&) override;
+
+    // tooltips, alerts, windows
+    juce::Rectangle<int> getTooltipBounds (const juce::String& tipText, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override;
+    void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
+    void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
+    int getAlertWindowButtonHeight() override { return 30; }
+    juce::Font getAlertWindowTitleFont() override;
+    juce::Font getAlertWindowMessageFont() override;
+    juce::Font getAlertWindowFont() override;
+    void drawDocumentWindowTitleBar (juce::DocumentWindow&, juce::Graphics&, int w, int h, int titleSpaceX, int titleSpaceW,
+                                     const juce::Image* icon, bool drawTitleTextOnLeft) override;
+    juce::Button* createDocumentWindowButton (int buttonType) override;
+    void drawCornerResizer (juce::Graphics&, int w, int h, bool isMouseOver, bool isMouseDragging) override;
+    void drawProgressBar (juce::Graphics&, juce::ProgressBar&, int width, int height, double progress, const juce::String& textToShow) override;
+    void drawGroupComponentOutline (juce::Graphics&, int w, int h, const juce::String& text, const juce::Justification&, juce::GroupComponent&) override;
+
+    // file browser (the LYNX browser panel is a FileTreeComponent)
+    void drawFileBrowserRow (juce::Graphics&, int width, int height, const juce::File& file, const juce::String& filename, juce::Image* icon,
+                             const juce::String& fileSizeDescription, const juce::String& fileTimeDescription, bool isDirectory,
+                             bool isItemSelected, int itemIndex, juce::DirectoryContentsDisplayComponent&) override;
+    void drawTreeviewPlusMinusBox (juce::Graphics&, const juce::Rectangle<float>& area, juce::Colour backgroundColour, bool isOpen, bool isMouseOver) override;
 };
 } // namespace lynx::theme

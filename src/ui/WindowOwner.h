@@ -9,6 +9,9 @@ namespace lynx
 void setMainWindowForOwnership (juce::Component* mainWindow);
 void keepAboveMainWindow (juce::Component& window); // call after the window is visible; sets the LYNX icon
 
+// Native window chrome in the LYNX colours (dark title bar on Windows). keepAboveMainWindow calls it.
+void applyWindowChrome (juce::Component& window);
+
 // The LYNX logo (256 px, with transparency).
 juce::Image logoImage();
 } // namespace lynx

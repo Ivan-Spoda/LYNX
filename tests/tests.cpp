@@ -1,10 +1,14 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <set>
+#include <sstream>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -41,6 +45,7 @@
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
 #include "flp/Flp.h"
+#include "ui/I18nData.h"
 
 namespace
 {
@@ -4481,6 +4486,176 @@ TEST (project_templates_render_sound)
     }
 
     CHECK (lynx::makeTemplate (0).patterns[0].notes.empty());
+}
+
+// --- interface translations (resources/i18n) -------------------------------------------------------
+
+namespace i18ntest
+{
+std::string readFile (const std::filesystem::path& path)
+{
+    std::ifstream in (path, std::ios::binary);
+    return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char>() };
+}
+
+std::string unescape (const std::string& s)
+{
+    std::string out;
+    for (std::size_t i = 0; i < s.size(); ++i)
+    {
+        if (s[i] == '\\' && i + 1 < s.size())
+        {
+            const auto n = s[++i];
+            out += n == 'n' ? '\n' : n == 't' ? '\t' : n;
+        }
+        else
+            out += s[i];
+    }
+    return out;
+}
+
+// reads a quoted string starting at s[pos] == '"'; returns the raw (escaped) contents and moves pos past the closing quote
+bool quoted (const std::string& s, std::size_t& pos, std::string& raw)
+{
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    raw.clear();
+    for (++pos; pos < s.size() && s[pos] != '"' && s[pos] != '\n'; ++pos)
+    {
+        if (s[pos] == '\\' && pos + 1 < s.size())
+            raw += s[pos++];
+        raw += s[pos];
+    }
+    if (pos >= s.size() || s[pos] != '"')
+        return false;
+    ++pos;
+    return true;
+}
+
+// JUCE LocalisedStrings format: "english" = "translation"; duplicates are reported in `duplicates`
+std::map<std::string, std::string> parseTable (const std::string& text, std::vector<std::string>& duplicates)
+{
+    std::map<std::string, std::string> table;
+    std::istringstream lines (text);
+    std::string line;
+    while (std::getline (lines, line))
+    {
+        std::size_t pos = line.find_first_not_of (" \t");
+        std::string key, value;
+        if (pos == std::string::npos || ! quoted (line, pos, key))
+            continue;
+        pos = line.find ('"', pos);
+        if (pos == std::string::npos || ! quoted (line, pos, value))
+            value.clear();
+        const auto k = unescape (key);
+        if (table.count (k) != 0)
+            duplicates.push_back (k);
+        table[k] = unescape (value);
+    }
+    return table;
+}
+
+// string literals passed to tr() / TR_NOOP() in the sources (adjacent literals are concatenated)
+std::map<std::string, std::string> sourceKeys (const std::filesystem::path& srcDir)
+{
+    std::map<std::string, std::string> keys;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (srcDir))
+    {
+        const auto ext = entry.path().extension().string();
+        if (! entry.is_regular_file() || (ext != ".cpp" && ext != ".h"))
+            continue;
+
+        // drop // comment lines (they may quote tr ("...") as an example)
+        std::string text, line;
+        std::istringstream in (readFile (entry.path()));
+        while (std::getline (in, line))
+        {
+            const auto first = line.find_first_not_of (" \t");
+            text += (first != std::string::npos && line.compare (first, 2, "//") == 0) ? std::string() : line;
+            text += '\n';
+        }
+
+        auto isIdent = [] (char c) { return std::isalnum ((unsigned char) c) || c == '_'; };
+        for (const std::string name : { "tr", "TR_NOOP" })
+            for (auto at = text.find (name); at != std::string::npos; at = text.find (name, at + 1))
+            {
+                if ((at > 0 && isIdent (text[at - 1])) || isIdent (text[at + name.size()]))
+                    continue;
+                auto pos = text.find_first_not_of (" \t\n", at + name.size());
+                if (pos == std::string::npos || text[pos] != '(')
+                    continue;
+                pos = text.find_first_not_of (" \t\n", pos + 1);
+                std::string key, raw;
+                bool any = false;
+                while (pos != std::string::npos && quoted (text, pos, raw))
+                {
+                    key += raw;
+                    any = true;
+                    pos = text.find_first_not_of (" \t\n", pos);
+                }
+                if (any)
+                    keys.emplace (unescape (key), entry.path().filename().string());
+            }
+    }
+    return keys;
+}
+
+std::set<std::string> placeholders (const std::string& s)
+{
+    std::set<std::string> found;
+    for (auto open = s.find ('{'); open != std::string::npos; open = s.find ('{', open + 1))
+        if (const auto close = s.find ('}', open); close != std::string::npos && close - open <= 3)
+            found.insert (s.substr (open, close - open + 1));
+    return found;
+}
+} // namespace i18ntest
+
+TEST (translations_cover_every_ui_string)
+{
+    using namespace i18ntest;
+    const auto text = readFile ("resources/i18n/pt-BR.txt");
+    CHECK (! text.empty());
+
+    std::vector<std::string> duplicates;
+    const auto table = parseTable (text, duplicates);
+    CHECK (table.size() > 300);
+    CHECK (duplicates.empty());
+    for (const auto& d : duplicates)
+        std::printf ("  duplicate pt-BR entry: \"%s\"\n", d.c_str());
+
+    const auto keys = sourceKeys ("src");
+    CHECK (keys.size() > 300);
+
+    int missing = 0;
+    for (const auto& [key, file] : keys)
+        if (auto it = table.find (key); it == table.end() || it->second.empty())
+        {
+            ++missing;
+            std::printf ("  no pt-BR translation for \"%s\" (%s)\n", key.c_str(), file.c_str());
+        }
+    CHECK (missing == 0);
+
+    // no empty values, and every {n} placeholder survives the translation
+    int empty = 0, badPlaceholders = 0;
+    for (const auto& [english, portuguese] : table)
+    {
+        empty += portuguese.empty() ? 1 : 0;
+        if (placeholders (english) != placeholders (portuguese))
+        {
+            ++badPlaceholders;
+            std::printf ("  placeholders differ: \"%s\"\n", english.c_str());
+        }
+    }
+    CHECK (empty == 0);
+    CHECK (badPlaceholders == 0);
+}
+
+TEST (translations_embedded_table_is_up_to_date)
+{
+    // src/ui/I18nData.h must be regenerated (tools/make_i18n.py) whenever the .txt changes
+    const auto text = i18ntest::readFile ("resources/i18n/pt-BR.txt");
+    CHECK (text.size() == sizeof (lynx::i18n::data::ptBR));
+    CHECK (std::memcmp (text.data(), lynx::i18n::data::ptBR, std::min (text.size(), sizeof (lynx::i18n::data::ptBR))) == 0);
 }
 
 int main (int argc, char** argv)

@@ -5,6 +5,7 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -53,7 +54,8 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (theme::window);
+        using namespace theme;
+        g.fillAll (colour::bg1);
         const auto* a = current();
 
         if (a == nullptr)
@@ -63,7 +65,7 @@ public:
         const auto area = plotArea();
         const auto bar = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar);
 
-        g.setColour (juce::Colour (0xff262b30));
+        g.setColour (colour::bg0);
         g.fillRect (area);
 
         // grid: beats and bars
@@ -78,20 +80,20 @@ public:
                 continue;
 
             const auto x = (int) tickToX ((double) tick);
-            g.setColour (isBar ? juce::Colour (0xff15181b) : juce::Colour (0xff2c3238));
+            g.setColour (isBar ? colour::gridBar : colour::gridBeat);
             g.drawVerticalLine (x, (float) area.getY(), (float) area.getBottom());
 
             if (isBar)
             {
-                g.setColour (theme::text.withAlpha (0.6f));
-                g.setFont (juce::FontOptions (11.0f));
+                g.setColour (colour::textSecondary);
+                g.setFont (font (type::caption));
                 g.drawText (juce::String (tick / bar + 1), x + 3, 2, 40, 16, juce::Justification::centredLeft);
             }
         }
 
         for (auto v : { 0.25f, 0.5f, 0.75f })
         {
-            g.setColour (juce::Colour (0xff2f353c));
+            g.setColour (colour::gridStep.brighter (0.15f));
             g.drawHorizontalLine ((int) valueToY (v), (float) area.getX(), (float) area.getRight());
         }
 
@@ -109,34 +111,43 @@ public:
                 curve.lineTo ((float) x, y);
         }
 
-        g.setColour (theme::accentGreen);
-        g.strokePath (curve, juce::PathStrokeType (2.0f));
+        // soft fill under the curve, then the line
+        auto fill = curve;
+        fill.lineTo ((float) area.getRight(), (float) area.getBottom());
+        fill.lineTo ((float) area.getX(), (float) area.getBottom());
+        fill.closeSubPath();
+        g.setColour (colour::automation.withAlpha (0.10f));
+        g.fillPath (fill);
+        g.setColour (colour::automation);
+        g.strokePath (curve, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         for (std::size_t i = 0; i < points.size(); ++i)
         {
             const auto p = pointPosition (points[i]);
-            g.setColour ((int) i == hoverPoint || (int) i == dragPoint ? juce::Colours::white : theme::accentGreen);
-            g.fillEllipse (p.x - 5.0f, p.y - 5.0f, 10.0f, 10.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.6f));
-            g.drawEllipse (p.x - 5.0f, p.y - 5.0f, 10.0f, 10.0f, 1.0f);
+            const auto active = (int) i == hoverPoint || (int) i == dragPoint;
+            g.setColour (colour::bg0);
+            g.fillEllipse (p.x - 6.0f, p.y - 6.0f, 12.0f, 12.0f);
+            g.setColour (active ? colour::textPrimary : colour::automation);
+            g.fillEllipse (p.x - 4.5f, p.y - 4.5f, 9.0f, 9.0f);
         }
 
         // playback cursor (at the position of the clip currently playing)
         if (playhead >= 0.0)
         {
-            g.setColour (theme::playhead);
+            g.setColour (colour::playhead);
             g.drawVerticalLine ((int) tickToX (playhead), (float) area.getY(), (float) area.getBottom());
         }
 
-        g.setColour (theme::text.withAlpha (0.45f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText (utf8 ("Click: new point · drag: move · right-click: delete · Alt+drag: curve · Ctrl+wheel: zoom"),
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawText (tr ("Click: new point · drag: move · right-click: delete · Alt+drag: curve · Ctrl+wheel: zoom"),
                     area.getX(), getHeight() - 18, area.getWidth(), 16, juce::Justification::centredLeft);
 
         if (hoverPoint >= 0 && hoverPoint < (int) points.size())
         {
             const auto p = pointPosition (points[(std::size_t) hoverPoint]);
-            g.setColour (theme::text);
+            g.setColour (colour::textPrimary);
+            g.setFont (font (type::small));
             const auto value = points[(std::size_t) hoverPoint].value;
             g.drawText (a->target.kind == AutomationTargetKind::tempo ? juce::String (tempoFromValue (value), 1) + " BPM"
                                                                        : juce::String (juce::roundToInt (value * 100.0f)) + "%",
@@ -311,7 +322,7 @@ private:
         }
 
         if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
-            w->setName (utf8 ("Automation - ") + juce::String::fromUTF8 (current()->name.c_str()));
+            w->setName (tr ("Automation - {0}", { juce::String::fromUTF8 (current()->name.c_str()) }));
 
         repaint();
     }
@@ -351,7 +362,7 @@ class AutomationWindow final : public juce::DocumentWindow
 {
 public:
     AutomationWindow (AudioEngine& engine, int index, const juce::String& title)
-        : juce::DocumentWindow (title, theme::window, DocumentWindow::closeButton)
+        : juce::DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (true);
         setContentOwned (new AutomationEditor (engine, index), true);
@@ -391,15 +402,15 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
 
     switch (t.kind)
     {
-        case AutomationTargetKind::channelVolume: return channelName + " - Volume";
-        case AutomationTargetKind::channelPan: return channelName + " - Pan";
-        case AutomationTargetKind::mixerVolume: return trackName + " - Volume";
-        case AutomationTargetKind::mixerPan: return trackName + " - Pan";
+        case AutomationTargetKind::channelVolume: return channelName + " - " + tr ("Volume");
+        case AutomationTargetKind::channelPan: return channelName + " - " + tr ("Pan");
+        case AutomationTargetKind::mixerVolume: return trackName + " - " + tr ("Volume");
+        case AutomationTargetKind::mixerPan: return trackName + " - " + tr ("Pan");
 
         case AutomationTargetKind::channelParam:
         case AutomationTargetKind::effectParam:
         {
-            juce::String param = juce::String ("Param ") + juce::String (t.param + 1);
+            juce::String param = tr ("Param {0}", { juce::String (t.param + 1) });
 
             if (auto* plugin = pluginFor (engine, t))
             {
@@ -418,18 +429,18 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
             return (t.kind == AutomationTargetKind::channelParam ? channelName : trackName) + " - " + param;
         }
 
-        case AutomationTargetKind::tempo: return "Tempo";
+        case AutomationTargetKind::tempo: return tr ("Tempo");
         case AutomationTargetKind::effectMix:
         {
             juce::String effect = "FX " + juce::String (t.slot + 1);
             if (t.index < (int) song.mixer.size() && t.slot >= 0 && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
                 effect = utf8 (effectInfo (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind).name);
-            return trackName + " - " + effect + " - Mix";
+            return trackName + " - " + effect + " - " + tr ("Mix");
         }
         case AutomationTargetKind::none: break;
     }
 
-    return utf8 ("(no target)");
+    return tr ("(no target)");
 }
 
 void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)
@@ -482,7 +493,7 @@ void openAutomationEditor (AudioEngine& engine, int index)
         }
 
     windows().push_back (std::make_unique<AutomationWindow> (
-        engine, index, utf8 ("Automation - ") + nameOf (engine.getSong().automations[(std::size_t) index].name)));
+        engine, index, tr ("Automation - {0}", { nameOf (engine.getSong().automations[(std::size_t) index].name) })));
 }
 
 void closeAutomationEditors()
@@ -497,8 +508,8 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
 
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
-    menu.addItem (utf8 ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
-    menu.addItem (utf8 ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
+    menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
+    menu.addItem (tr ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
     });
 
@@ -506,7 +517,7 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
     const auto linked = std::find_if (links.begin(), links.end(), [&] (const MidiLink& l) { return l.target == target; });
 
     if (linked != links.end())
-        menu.addItem (utf8 ("Unlink controller (CC ") + juce::String (linked->cc) + ")", [&engine, target] {
+        menu.addItem (tr ("Unlink controller (CC {0})", { juce::String (linked->cc) }), [&engine, target] {
             engine.editSong ([target] (Song& s) {
                 s.midiLinks.erase (std::remove_if (s.midiLinks.begin(), s.midiLinks.end(), [&] (const MidiLink& l) { return l.target == target; }),
                                    s.midiLinks.end());
@@ -530,8 +541,8 @@ void addPluginParameterItems (juce::PopupMenu& menu, AudioEngine& engine, juce::
     }
 
     if (list.isEmpty())
-        params.addItem (utf8 ("(the plugin exposes no parameters)"), false, false, [] {});
+        params.addItem (tr ("(the plugin exposes no parameters)"), false, false, [] {});
 
-    menu.addSubMenu (utf8 ("Automate plugin parameter"), params);
+    menu.addSubMenu (tr ("Automate plugin parameter"), params);
 }
 } // namespace lynx

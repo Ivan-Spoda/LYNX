@@ -4,11 +4,62 @@
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
-
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
 {
+namespace
+{
+constexpr float clipTitleHeight = 14.0f;
+
+// Text colour readable on a clip's title band.
+juce::Colour clipTitleText (juce::Colour band)
+{
+    return band.getPerceivedBrightness() > 0.62f ? theme::colour::bg0 : theme::colour::textPrimary;
+}
+
+// Clip body (dark tint of the clip colour) with a solid title band; returns the body below the band.
+juce::Rectangle<float> paintClipFrame (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour base, const juce::String& name)
+{
+    using namespace theme;
+    g.setColour (base.interpolatedWith (colour::bg1, 0.62f));
+    g.fillRoundedRectangle (r, radius::sm);
+
+    const auto title = r.withHeight (juce::jmin (clipTitleHeight, r.getHeight()));
+    juce::Path band;
+    band.addRoundedRectangle (title.getX(), title.getY(), title.getWidth(), title.getHeight(), radius::sm, radius::sm, true, true, false, false);
+    g.setColour (base);
+    g.fillPath (band);
+
+    if (r.getWidth() > 24.0f)
+    {
+        g.setColour (clipTitleText (base));
+        g.setFont (font (type::caption, true));
+        g.drawText (name, title.reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
+    }
+
+    return r.withTrimmedTop (title.getHeight());
+}
+
+void paintClipOutline (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour base, bool selected, bool current)
+{
+    using namespace theme;
+    if (selected)
+    {
+        g.setColour (colour::selection);
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::sm, 2.0f);
+    }
+    else
+    {
+        g.setColour (current ? colour::textPrimary.withAlpha (0.55f) : base.darker (0.3f));
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::sm, current ? 1.2f : 1.0f);
+    }
+}
+
+const char* const snapNames[] = { TR_NOOP ("No snap"), TR_NOOP ("1/4 step"), TR_NOOP ("1/2 step"), TR_NOOP ("Step"), TR_NOOP ("Beat"), TR_NOOP ("Bar") };
+} // namespace
+
 PlaylistComponent::PlaylistComponent (AudioEngine& e)
     : engine (e)
 {
@@ -22,14 +73,15 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
-    snapBox.addItemList ({ "No snap", "1/4 step", "1/2 step", "Step", "Beat", "Bar" }, 1);
+    for (int i = 0; i < (int) std::size (snapNames); ++i)
+        snapBox.addItem (tr (snapNames[i]), i + 1);
     snapBox.setSelectedId (5, juce::dontSendNotification);
-    snapBox.setTooltip ("Playlist snap (grid); hold Alt while dragging to disable");
+    snapBox.setTooltip (tr ("Playlist snap (grid); hold Alt while dragging to disable"));
     snapBox.setWantsKeyboardFocus (false);
     snapBox.setMouseClickGrabsKeyboardFocus (false);
     addAndMakeVisible (snapBox);
 
-    arrangementBox.setTooltip (utf8 ("Arrangement (as in FL, a project can have several)"));
+    arrangementBox.setTooltip (tr ("Arrangement (as in FL, a project can have several)"));
     arrangementBox.setWantsKeyboardFocus (false);
     arrangementBox.setMouseClickGrabsKeyboardFocus (false);
     arrangementBox.onChange = [this] { arrangementChosen(); };
@@ -72,10 +124,10 @@ void PlaylistComponent::refreshArrangementBox()
             arrangementBox.addItem (names[i], i + 1);
 
         arrangementBox.addSeparator();
-        arrangementBox.addItem (utf8 ("New arrangement"), newArrangement);
-        arrangementBox.addItem (utf8 ("Clone this one"), cloneArrangement);
-        arrangementBox.addItem (utf8 ("Rename..."), renameArrangementAction);
-        arrangementBox.addItem (utf8 ("Remove this one"), removeArrangementAction);
+        arrangementBox.addItem (tr ("New arrangement"), newArrangement);
+        arrangementBox.addItem (tr ("Clone this one"), cloneArrangement);
+        arrangementBox.addItem (tr ("Rename..."), renameArrangementAction);
+        arrangementBox.addItem (tr ("Remove this one"), removeArrangementAction);
         arrangementBox.setItemEnabled (removeArrangementAction, names.size() > 1);
     }
 
@@ -121,10 +173,10 @@ void PlaylistComponent::arrangementChosen()
 void PlaylistComponent::renameArrangement()
 {
     const auto index = engine.getSong().currentArrangement;
-    auto* window = new juce::AlertWindow ("Rename arrangement", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow (tr ("Rename arrangement"), {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().arrangements[(std::size_t) index].name.c_str()));
-    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
                                  const auto name = window->getTextEditorContents ("name").trim().toStdString();
 
@@ -219,7 +271,8 @@ void PlaylistComponent::paint (juce::Graphics& g)
     const auto bar = (std::int64_t) ppq * song.beatsPerBar;
     const auto tracks = numTracks();
 
-    g.fillAll (theme::window);
+    using namespace theme;
+    g.fillAll (colour::bg1);
 
     // --- tracks and grid ---------------------------------------------------
     {
@@ -233,9 +286,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (y > grid.getBottom() || y + trackHeight < grid.getY())
                 continue;
 
-            g.setColour (t % 2 == 0 ? juce::Colour (0xff2c3238) : juce::Colour (0xff292e34));
+            g.setColour (t % 2 == 0 ? colour::bg2 : colour::bg2.interpolatedWith (colour::bg1, 0.5f));
             g.fillRect (grid.getX(), y, grid.getWidth(), trackHeight);
-            g.setColour (juce::Colour (0xff1d2125));
+            g.setColour (colour::bg0);
             g.drawHorizontalLine (y + trackHeight - 1, (float) grid.getX(), (float) grid.getRight());
         }
 
@@ -243,13 +296,13 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
         for (const auto& b : song.barsBetween ((std::int64_t) std::max (0.0, scrollTicks), (std::int64_t) xToTick (grid.getRight()) + 1))
         {
-            g.setColour (juce::Colour (0xff181b1f));
+            g.setColour (colour::gridBar);
             g.drawVerticalLine ((int) tickToX ((double) b.tick), (float) grid.getY(), (float) grid.getBottom());
 
             if (beatPixels < 8.0)
                 continue; // zoomed far out: bar lines only
 
-            g.setColour (juce::Colour (0xff24292e));
+            g.setColour (colour::gridBeat);
             for (auto tick = b.tick + ppq; tick < b.tick + b.length; tick += ppq)
                 g.drawVerticalLine ((int) tickToX ((double) tick), (float) grid.getY(), (float) grid.getBottom());
         }
@@ -258,9 +311,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
         if (song.hasLoop())
         {
             const auto lx0 = (float) tickToX ((double) song.loopStart), lx1 = (float) tickToX ((double) song.loopEnd);
-            g.setColour (theme::accentGreen.withAlpha (0.05f));
+            g.setColour (colour::accent.withAlpha (0.06f));
             g.fillRect (juce::Rectangle<float> (lx0, (float) grid.getY(), lx1 - lx0, (float) grid.getHeight()));
-            g.setColour (theme::accentGreen.withAlpha (0.35f));
+            g.setColour (colour::accent.withAlpha (0.45f));
             g.drawVerticalLine ((int) lx0, (float) grid.getY(), (float) grid.getBottom());
             g.drawVerticalLine ((int) lx1, (float) grid.getY(), (float) grid.getBottom());
         }
@@ -269,11 +322,11 @@ void PlaylistComponent::paint (juce::Graphics& g)
         if (! song.playlist.empty())
         {
             const auto endX = (float) tickToX ((double) song.songLength());
-            g.setColour (juce::Colours::black.withAlpha (0.25f));
+            g.setColour (colour::bg0.withAlpha (0.45f));
             g.fillRect (juce::Rectangle<float> (endX, (float) grid.getY(), (float) grid.getRight() - endX, (float) grid.getHeight()));
         }
 
-        g.setFont (juce::FontOptions (11.0f));
+        g.setFont (font (type::caption));
 
         for (int i = 0; i < (int) song.playlist.size(); ++i)
         {
@@ -295,10 +348,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 paintAutomationClip (g, c, r);
 
                 if (isSelected (i))
-                {
-                    g.setColour (juce::Colour (0xffff6f6f));
-                    g.drawRoundedRectangle (r, 3.0f, 2.0f);
-                }
+                    paintClipOutline (g, r, colour::automation, true, false);
                 continue;
             }
 
@@ -307,33 +357,16 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 paintAudioClip (g, c, r);
 
                 if (isSelected (i))
-                {
-                    g.setColour (juce::Colour (0xffff6f6f));
-                    g.drawRoundedRectangle (r, 3.0f, 2.0f);
-                }
+                    paintClipOutline (g, r, colour::audioClip, true, false);
                 continue;
             }
 
-            const auto colour = patternColour (song, c.pattern);
+            const auto base = tame (patternColour (song, c.pattern));
             const auto current = c.pattern == song.currentPattern;
             const auto selected = isSelected (i);
 
-            g.setColour (colour.withAlpha (0.85f));
-            g.fillRoundedRectangle (r, 3.0f);
-            g.setColour (selected ? juce::Colour (0xffff6f6f) : current ? juce::Colours::white : colour.darker (0.6f));
-            g.drawRoundedRectangle (r, 3.0f, selected ? 2.0f : current ? 1.5f : 1.0f);
-
-            // name strip
-            const auto title = r.withHeight (13.0f);
-            g.setColour (colour.darker (0.4f));
-            g.fillRoundedRectangle (title, 3.0f);
-
-            if (r.getWidth() > 24)
-            {
-                g.setColour (juce::Colours::white);
-                g.drawText (juce::String::fromUTF8 (song.patterns[(std::size_t) c.pattern].name.c_str()),
-                            title.reduced (3, 0).toNearestInt(), juce::Justification::centredLeft, true);
-            }
+            // body + name strip
+            const auto clipBody = paintClipFrame (g, r, base, juce::String::fromUTF8 (song.patterns[(std::size_t) c.pattern].name.c_str()));
 
             // note thumbnail
             const auto& notes = song.patterns[(std::size_t) c.pattern].notes;
@@ -347,9 +380,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
                     high = juce::jmax (high, n.key);
                 }
 
-                const auto body = r.withTrimmedTop (15.0f).reduced (2.0f, 2.0f);
+                const auto body = clipBody.reduced (2.0f, 3.0f);
                 const auto keySpan = (float) juce::jmax (1, high - low);
-                g.setColour (colour.darker (0.75f));
+                g.setColour (base.brighter (0.25f));
 
                 for (const auto& n : notes)
                 {
@@ -362,37 +395,41 @@ void PlaylistComponent::paint (juce::Graphics& g)
                     g.fillRect (nx, ny, nw, 2.0f);
                 }
             }
+
+            paintClipOutline (g, r, base, selected, current);
         }
 
         if (! rubberBand.isEmpty())
         {
-            g.setColour (theme::accentBlue.withAlpha (0.15f));
+            g.setColour (colour::selectionFill);
             g.fillRect (rubberBand);
-            g.setColour (theme::accentBlue);
+            g.setColour (colour::selection);
             g.drawRect (rubberBand);
         }
 
         if (playheadTick >= 0.0)
         {
-            g.setColour (theme::playhead);
-            g.drawVerticalLine ((int) tickToX (playheadTick), (float) grid.getY(), (float) grid.getBottom());
+            g.setColour (colour::playhead);
+            g.fillRect (juce::Rectangle<float> ((float) tickToX (playheadTick) - 0.5f, (float) grid.getY(), 1.5f, (float) grid.getHeight()));
         }
     }
 
     // --- ruler ---------------------------------------------------------------
     {
         const auto ruler = juce::Rectangle<int> (headerWidth, 0, grid.getWidth(), timelineHeight);
-        g.setColour (theme::toolbar);
+        g.setColour (colour::bg3);
         g.fillRect (ruler);
+        g.setColour (colour::border);
+        g.fillRect (ruler.withTop (ruler.getBottom() - 1));
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (ruler);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (font (type::small));
 
         if (song.hasLoop())
         {
             const auto lx0 = (float) tickToX ((double) song.loopStart), lx1 = (float) tickToX ((double) song.loopEnd);
-            g.setColour (theme::accentGreen.withAlpha (0.55f));
-            g.fillRect (juce::Rectangle<float> (lx0, 0.0f, lx1 - lx0, 6.0f));
+            g.setColour (colour::accent.withAlpha (0.75f));
+            g.fillRect (juce::Rectangle<float> (lx0, 0.0f, lx1 - lx0, 4.0f));
         }
 
         const auto barPixels = bar * pixelsPerTick;
@@ -404,13 +441,14 @@ void PlaylistComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto x = (int) tickToX ((double) b.tick);
-            g.setColour (theme::text.withAlpha (0.7f));
+            g.setColour (colour::textDisabled);
             g.drawVerticalLine (x, 12.0f, (float) timelineHeight);
+            g.setColour (colour::textSecondary);
             g.drawText (juce::String (b.number), x + 3, 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
         }
 
         // markers: small flag with the name; time signature changes show the fraction
-        g.setFont (juce::FontOptions (11.0f));
+        g.setFont (font (type::caption, true));
 
         for (const auto& m : song.markers())
         {
@@ -427,10 +465,10 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
             const auto width = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 8.0f;
             const auto tag = juce::Rectangle<float> (x, (float) timelineHeight - 11.0f, width, 11.0f);
-            g.setColour ((m.isSignature() ? theme::accentGreen : juce::Colour (0xffe0b050)).withAlpha (0.85f));
-            g.fillRect (tag);
+            g.setColour (m.isSignature() ? colour::info : colour::warning);
+            g.fillRoundedRectangle (tag, 2.0f);
             g.drawVerticalLine ((int) x, 0.0f, (float) timelineHeight);
-            g.setColour (juce::Colours::black);
+            g.setColour (colour::bg0);
             g.drawText (label, tag.reduced (3.0f, 0.0f), juce::Justification::centredLeft, false);
         }
 
@@ -439,7 +477,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             const auto x = (float) tickToX (playheadTick);
             juce::Path tri;
             tri.addTriangle (x - 6, 0, x + 6, 0, x, 9);
-            g.setColour (theme::playhead);
+            g.setColour (colour::playhead);
             g.fillPath (tri);
         }
     }
@@ -449,7 +487,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
         const auto headers = juce::Rectangle<int> (0, timelineHeight, headerWidth, grid.getHeight());
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (headers);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setColour (colour::bg2);
+        g.fillRect (headers);
+        g.setFont (font (type::small));
 
         for (int t = 0; t < tracks; ++t)
         {
@@ -460,19 +500,22 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
             const auto muted = song.isTrackMuted (t);
             const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
-            g.setColour (theme::channelButton.darker (muted ? 0.4f : 0.0f));
-            g.fillRect (2, y + 1, headerWidth - 4, trackHeight - 3);
-            g.setColour (theme::muteLed (muted));
-            g.fillEllipse (6.0f, (float) y + trackHeight / 2.0f - 5.0f, 10.0f, 10.0f);
-            g.setColour (theme::text.withAlpha (muted ? 0.4f : 0.8f));
+            g.setColour (muted ? colour::bg2 : colour::bg3);
+            g.fillRoundedRectangle (juce::Rectangle<float> (2.0f, (float) y + 1.0f, (float) headerWidth - 4.0f, (float) trackHeight - 3.0f), radius::sm);
+            g.setColour (muteLed (muted));
+            g.fillEllipse (7.0f, (float) y + trackHeight / 2.0f - 4.0f, 8.0f, 8.0f);
+            g.setColour (muted ? colour::textDisabled : (custom ? colour::textPrimary : colour::textSecondary));
             g.drawFittedText (custom ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
-                                     : "Track " + juce::String (t + 1),
+                                     : tr ("Track {0}", { juce::String (t + 1) }),
                               20, y, headerWidth - 24, trackHeight, juce::Justification::centredLeft, 2, 0.8f);
         }
     }
 
-    g.setColour (theme::toolbar);
+    g.setColour (colour::bg3);
     g.fillRect (0, 0, headerWidth, timelineHeight);
+    g.setColour (colour::border);
+    g.fillRect (0, timelineHeight - 1, headerWidth, 1);
+    g.fillRect (headerWidth - 1, 0, 1, getHeight());
 }
 
 const std::vector<float>* PlaylistComponent::waveformFor (const std::string& path)
@@ -516,29 +559,15 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         return;
 
     const auto& channel = song.channels[(std::size_t) c.channel];
-    const auto colour = juce::Colour (0xff4f7f9f); // audio clips in blue, as a highlight
-
-    g.setColour (colour.withAlpha (0.85f));
-    g.fillRoundedRectangle (r, 3.0f);
-    g.setColour (colour.darker (0.6f));
-    g.drawRoundedRectangle (r, 3.0f, 1.0f);
-
-    const auto title = r.withHeight (13.0f);
-    g.setColour (colour.darker (0.4f));
-    g.fillRoundedRectangle (title, 3.0f);
-
-    if (r.getWidth() > 24)
-    {
-        g.setColour (juce::Colours::white);
-        g.drawText (juce::String::fromUTF8 (channel.name.c_str()), title.reduced (3, 0).toNearestInt(),
-                    juce::Justification::centredLeft, true);
-    }
+    const auto colour = theme::colour::audioClip;
+    paintClipFrame (g, r, colour, juce::String::fromUTF8 (channel.name.c_str()));
+    paintClipOutline (g, r, colour, false, false);
 
     // fades: ramps and handles at the top corners
     {
         const auto inX = r.getX() + (float) (c.fadeIn * pixelsPerTick);
         const auto outX = r.getRight() - (float) (c.fadeOut * pixelsPerTick);
-        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.setColour (theme::colour::textPrimary.withAlpha (0.8f));
 
         if (c.fadeIn > 0)
             g.drawLine (r.getX(), r.getBottom(), inX, r.getY() + 14.0f, 1.2f);
@@ -564,7 +593,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
     const auto centreY = body.getCentreY();
     const auto halfHeight = body.getHeight() / 2.0f;
     const auto clip = g.getClipBounds().toFloat();
-    g.setColour (colour.darker (0.8f).withAlpha (0.9f));
+    g.setColour (colour.brighter (0.2f));
 
     for (auto x = std::max (body.getX(), clip.getX()); x < std::min (body.getRight(), clip.getRight()); x += 1.0f)
     {
@@ -594,22 +623,10 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
         return;
 
     const auto& automation = song.automations[(std::size_t) c.automation];
-    const auto colour = automation.target.kind == AutomationTargetKind::none ? juce::Colour (0xff555555) : juce::Colour (0xff5f7a5a);
-
-    g.setColour (colour.withAlpha (0.55f));
-    g.fillRoundedRectangle (r, 3.0f);
-    g.setColour (colour.darker (0.6f));
-    g.drawRoundedRectangle (r, 3.0f, 1.0f);
-
-    const auto title = r.withHeight (13.0f);
-    g.setColour (colour.darker (0.4f));
-    g.fillRoundedRectangle (title, 3.0f);
-
-    if (r.getWidth() > 24)
-    {
-        g.setColour (juce::Colours::white);
-        g.drawText (juce::String::fromUTF8 (automation.name.c_str()), title.reduced (3, 0).toNearestInt(), juce::Justification::centredLeft, true);
-    }
+    const auto colour = automation.target.kind == AutomationTargetKind::none ? theme::colour::textDisabled
+                                                                              : theme::colour::automation.withMultipliedSaturation (0.75f).withMultipliedBrightness (0.8f);
+    paintClipFrame (g, r, colour, juce::String::fromUTF8 (automation.name.c_str()));
+    paintClipOutline (g, r, colour, false, false);
 
     // automation curve over the clip's range
     const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 2.0f);
@@ -630,7 +647,7 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
         started = true;
     }
 
-    g.setColour (juce::Colour (0xffb8f0a8));
+    g.setColour (automation.target.kind == AutomationTargetKind::none ? theme::colour::textSecondary : theme::colour::automation.brighter (0.3f));
     g.strokePath (curve, juce::PathStrokeType (1.5f));
 }
 
@@ -1028,10 +1045,10 @@ void PlaylistComponent::renameTrack (int track)
 {
     const auto& tracks = engine.getSong().playlistTracks;
     const auto current = track < (int) tracks.size() ? juce::String::fromUTF8 (tracks[(std::size_t) track].name.c_str()) : juce::String();
-    auto* window = new juce::AlertWindow ("Rename track", {}, juce::MessageBoxIconType::NoIcon);
-    window->addTextEditor ("name", current.isNotEmpty() ? current : "Track " + juce::String (track + 1));
-    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    auto* window = new juce::AlertWindow (tr ("Rename track"), {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", current.isNotEmpty() ? current : tr ("Track {0}", { juce::String (track + 1) }));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, track, window] (int result) {
                                  if (result != 1)
                                      return;
@@ -1058,20 +1075,20 @@ void PlaylistComponent::showRulerMenu (int x)
             near = i;
 
     juce::PopupMenu menu;
-    menu.addItem ("Add marker here...", [this, tick] { editMarkerName (tick, -1); });
+    menu.addItem (tr ("Add marker here..."), [this, tick] { editMarkerName (tick, -1); });
 
     juce::PopupMenu signatures;
     for (auto [n, d] : { std::pair { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 4 }, { 7, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } })
         signatures.addItem (juce::String (n) + "/" + juce::String (d), [this, tick, n = n, d = d] {
             engine.editSong ([tick, n, d] (Song& s) { s.addMarker ({ tick, {}, n, d }); });
         });
-    menu.addSubMenu (utf8 ("Time signature change here"), signatures);
+    menu.addSubMenu (tr ("Time signature change here"), signatures);
 
     if (near >= 0)
     {
         menu.addSeparator();
-        menu.addItem ("Rename marker...", [this, near] { editMarkerName (0, near); });
-        menu.addItem ("Remove marker", [this, near] {
+        menu.addItem (tr ("Rename marker..."), [this, near] { editMarkerName (0, near); });
+        menu.addItem (tr ("Remove marker"), [this, near] {
             engine.editSong ([near] (Song& s) {
                 if (near < (int) s.markers().size())
                     s.markers().erase (s.markers().begin() + near);
@@ -1082,7 +1099,7 @@ void PlaylistComponent::showRulerMenu (int x)
     if (song.hasLoop())
     {
         menu.addSeparator();
-        menu.addItem ("Remove loop", [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
+        menu.addItem (tr ("Remove loop"), [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -1092,11 +1109,11 @@ void PlaylistComponent::editMarkerName (std::int64_t tick, int existing)
 {
     const auto& markers = engine.getSong().markers();
     const auto current = existing >= 0 && existing < (int) markers.size() ? juce::String::fromUTF8 (markers[(std::size_t) existing].name.c_str())
-                                                                          : juce::String ("Marker");
-    auto* window = new juce::AlertWindow (existing >= 0 ? "Rename marker" : "New marker", {}, juce::MessageBoxIconType::NoIcon);
+                                                                          : tr ("Marker");
+    auto* window = new juce::AlertWindow (existing >= 0 ? tr ("Rename marker") : tr ("New marker"), {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", current);
-    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, tick, existing, window] (int result) {
                                  if (result != 1)
                                      return;
@@ -1122,7 +1139,7 @@ void PlaylistComponent::showClipMenu (int index)
     const auto splitAt = snap (xToTick (getMouseXYRelative().x) + ppq / 2.0, true);
 
     if (splitAt > clip.start && splitAt < clip.end())
-        menu.addItem (utf8 ("Split here"), [this, index, splitAt] {
+        menu.addItem (tr ("Split here"), [this, index, splitAt] {
             setSelection ({});
             engine.editSong ([index, splitAt] (Song& s) {
                 auto rest = splitClip (s.playlist[(std::size_t) index], splitAt);
@@ -1135,7 +1152,7 @@ void PlaylistComponent::showClipMenu (int index)
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
         // like FL's "Make unique": the chosen clips switch to using a copy of the pattern
-        menu.addItem (utf8 ("Make unique"), [this, targets] {
+        menu.addItem (tr ("Make unique"), [this, targets] {
             engine.editSong ([targets] (Song& s) {
                 std::map<int, int> copies; // original pattern -> copy
 
@@ -1160,7 +1177,7 @@ void PlaylistComponent::showClipMenu (int index)
                 s.currentPattern = copies.empty() ? s.currentPattern : copies.begin()->second;
             });
         });
-        menu.addItem ("Select all of this pattern", [this, p = clip.pattern] {
+        menu.addItem (tr ("Select all of this pattern"), [this, p = clip.pattern] {
             std::vector<int> same;
             const auto& playlist = engine.getSong().playlist;
 
@@ -1170,7 +1187,7 @@ void PlaylistComponent::showClipMenu (int index)
 
             setSelection (same);
         });
-        menu.addItem ("Open in Channel Rack", [this] {
+        menu.addItem (tr ("Open in Channel Rack"), [this] {
             if (onOpenPattern)
                 onOpenPattern();
         });
@@ -1192,9 +1209,9 @@ void PlaylistComponent::showClipMenu (int index)
             });
         }
 
-        menu.addSubMenu ("Clip volume", gains);
+        menu.addSubMenu (tr ("Clip volume"), gains);
 
-        menu.addItem ("Normalize", [this, targets] {
+        menu.addItem (tr ("Normalize"), [this, targets] {
             // clip gain so that the peak of the played segment reaches 0 dB (at most +24 dB)
             const auto& song = engine.getSong();
             const auto secondsPerTick = 60.0 / (juce::jmax (1.0, song.bpm) * ppq);
@@ -1235,7 +1252,7 @@ void PlaylistComponent::showClipMenu (int index)
         });
 
         if (clip.fadeIn > 0 || clip.fadeOut > 0)
-            menu.addItem ("Remove fades", [this, targets] {
+            menu.addItem (tr ("Remove fades"), [this, targets] {
                 engine.editSong ([targets] (Song& s) {
                     for (auto i : targets)
                         s.playlist[(std::size_t) i].fadeIn = s.playlist[(std::size_t) i].fadeOut = 0;
@@ -1246,8 +1263,8 @@ void PlaylistComponent::showClipMenu (int index)
     if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) engine.getSong().automations.size())
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().automations[(std::size_t) clip.automation].name.c_str()));
-        menu.addItem (utf8 ("Edit points..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
-        menu.addItem (utf8 ("Make unique"), [this, index] {
+        menu.addItem (tr ("Edit points..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
+        menu.addItem (tr ("Make unique"), [this, index] {
             engine.editSong ([index] (Song& s) {
                 auto& c = s.playlist[(std::size_t) index];
                 auto copy = s.automations[(std::size_t) c.automation];
@@ -1256,13 +1273,13 @@ void PlaylistComponent::showClipMenu (int index)
                 c.automation = (int) s.automations.size() - 1;
             });
         });
-        menu.addItem (utf8 ("Delete automation (all of its clips)"), [this, a = clip.automation] {
+        menu.addItem (tr ("Delete automation (all of its clips)"), [this, a = clip.automation] {
             setSelection ({});
             engine.editSong ([a] (Song& s) { s.removeAutomation (a); });
         });
     }
 
-    menu.addItem (targets.size() > 1 ? "Delete selected" : "Delete", [this, targets] {
+    menu.addItem (targets.size() > 1 ? tr ("Delete selected") : tr ("Delete"), [this, targets] {
         setSelection ({});
         engine.editSong ([targets] (Song& s) {
             auto sorted = targets;
@@ -1622,7 +1639,7 @@ std::vector<PatternPicker::Row> PatternPicker::rows() const
 {
     const auto& song = engine.getSong();
     std::vector<Row> list;
-    list.push_back ({ ClipKind::pattern, -1, "Patterns", {} });
+    list.push_back ({ ClipKind::pattern, -1, tr ("Patterns"), {} });
 
     for (int i = 0; i < (int) song.patterns.size(); ++i)
         list.push_back ({ ClipKind::pattern, i, juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()),
@@ -1633,15 +1650,15 @@ std::vector<PatternPicker::Row> PatternPicker::rows() const
         if (song.channels[(std::size_t) c].instrument == InstrumentKind::audioClip)
         {
             if (! audioHeader)
-                list.push_back ({ ClipKind::audio, -1, utf8 ("Audio"), {} });
+                list.push_back ({ ClipKind::audio, -1, tr ("Audio"), {} });
             audioHeader = true;
-            list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), juce::Colour (0xff4f7fa6) });
+            list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), theme::colour::audioClip });
         }
 
     if (! song.automations.empty())
-        list.push_back ({ ClipKind::automation, -1, utf8 ("Automation"), {} });
+        list.push_back ({ ClipKind::automation, -1, tr ("Automation"), {} });
     for (int a = 0; a < (int) song.automations.size(); ++a)
-        list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), juce::Colour (0xff6f8f5f) });
+        list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), theme::colour::automation });
 
     return list;
 }
@@ -1659,12 +1676,15 @@ void PatternPicker::paint (juce::Graphics& g)
 {
     const auto& song = engine.getSong();
     const auto list = rows();
-    g.fillAll (theme::panel);
-    g.setColour (theme::toolbar);
+    using namespace theme;
+    g.fillAll (colour::bg2);
+    g.setColour (colour::bg3);
     g.fillRect (0, 0, getWidth(), headerHeight);
-    g.setColour (theme::text.withAlpha (0.8f));
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("Picker", 8, 0, getWidth() - 16, headerHeight, juce::Justification::centredLeft);
+    g.setColour (colour::border);
+    g.fillRect (0, headerHeight - 1, getWidth(), 1);
+    g.setColour (colour::textSecondary);
+    g.setFont (font (type::small, true));
+    g.drawText (theme::caps (tr ("Picker")), 10, 0, getWidth() - 20, headerHeight, juce::Justification::centredLeft);
 
     for (int i = scroll; i < (int) list.size(); ++i)
     {
@@ -1677,30 +1697,30 @@ void PatternPicker::paint (juce::Graphics& g)
 
         if (row.index < 0) // section title
         {
-            g.setColour (theme::text.withAlpha (0.5f));
-            g.setFont (juce::FontOptions (11.0f));
-            g.drawText (row.name, 8, y, getWidth() - 16, rowHeight, juce::Justification::bottomLeft);
+            g.setColour (colour::textDisabled);
+            g.setFont (font (type::caption, true));
+            g.drawText (theme::caps (row.name), 10, y, getWidth() - 20, rowHeight - 3, juce::Justification::bottomLeft);
             continue;
         }
 
         const auto r = juce::Rectangle<int> (4, y + 2, getWidth() - 8, rowHeight - 4);
         const auto current = row.kind == ClipKind::pattern ? (playlist.brush.kind == ClipKind::pattern && row.index == song.currentPattern)
                                                            : (playlist.brush.kind == row.kind && playlist.brush.index == row.index);
-        g.setColour (current ? row.colour.withAlpha (0.9f) : row.colour.withAlpha (0.35f));
-        g.fillRoundedRectangle (r.toFloat(), 3.0f);
+        const auto rowColour = tame (row.colour);
+        const auto box = r.toFloat();
+        g.setColour (current ? rowColour.interpolatedWith (colour::bg3, 0.35f) : colour::bg3);
+        g.fillRoundedRectangle (box, radius::sm);
 
-        if (current)
-        {
-            g.setColour (juce::Colours::white);
-            g.drawRoundedRectangle (r.toFloat(), 3.0f, 1.2f);
-        }
+        // colour swatch on the left; the current row gets the accent strip instead
+        g.setColour (current ? colour::accent : rowColour);
+        g.fillRoundedRectangle (box.withWidth (3.0f), 1.5f);
 
-        g.setColour (current ? juce::Colours::white : theme::text.withAlpha (0.85f));
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawText (row.name, r.reduced (6, 0), juce::Justification::centredLeft, true);
+        g.setColour (current ? clipTitleText (rowColour.interpolatedWith (colour::bg3, 0.35f)) : colour::textPrimary.withAlpha (0.85f));
+        g.setFont (font (type::small, current));
+        g.drawText (row.name, r.withTrimmedLeft (10).withTrimmedRight (4), juce::Justification::centredLeft, true);
     }
 
-    g.setColour (theme::window);
+    g.setColour (colour::border);
     g.drawVerticalLine (getWidth() - 1, 0.0f, (float) getHeight());
 }
 

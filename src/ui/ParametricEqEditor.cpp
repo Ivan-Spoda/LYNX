@@ -5,6 +5,7 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -16,9 +17,10 @@ constexpr double rangeDb = 24.0; // the graph spans -24 to +24 dB
 
 juce::Colour bandColour (int band)
 {
-    static const juce::Colour colours[] = { juce::Colour (0xffff6b6b), juce::Colour (0xffffa94d), juce::Colour (0xffffe066),
-                                            juce::Colour (0xff8ce99a), juce::Colour (0xff66d9e8), juce::Colour (0xff74c0fc),
-                                            juce::Colour (0xffd0bfff) };
+    // one hue per band, at the same lightness so none dominates the red curve
+    static const juce::Colour colours[] = { juce::Colour (0xfff2767b), juce::Colour (0xfff2a46b), juce::Colour (0xffe8cf6a),
+                                            juce::Colour (0xff86d993), juce::Colour (0xff62cfd0), juce::Colour (0xff7aa9f5),
+                                            juce::Colour (0xffb59af2) };
     return colours[band % 7];
 }
 
@@ -40,6 +42,16 @@ float yForDb (juce::Rectangle<float> area, double db)
 double dbForY (juce::Rectangle<float> area, float y)
 {
     return juce::jlimit (-18.0, 18.0, (double) ((area.getCentreY() - y) / (area.getHeight() * 0.5f)) * rangeDb);
+}
+
+// display names of peq::BandType (core names, translated here)
+const char* const bandTypeNames[] = { TR_NOOP ("Off"), TR_NOOP ("Peak"), TR_NOOP ("Low shelf"), TR_NOOP ("High shelf"),
+                                      TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Band-pass"), TR_NOOP ("Notch") };
+
+juce::String bandTypeName (peq::BandType t)
+{
+    const auto i = (int) t;
+    return i >= 0 && i < (int) std::size (bandTypeNames) ? tr (bandTypeNames[i]) : juce::String::fromUTF8 (peq::typeName (t));
 }
 
 bool hasGain (peq::BandType t)
@@ -78,13 +90,15 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (theme::window);
+        using namespace theme;
+        g.fillAll (colour::bg1);
         const auto* s = current();
 
         if (s == nullptr)
         {
-            g.setColour (theme::text);
-            g.drawText (utf8 ("The EQ was removed from this slot."), getLocalBounds(), juce::Justification::centred);
+            g.setColour (colour::textSecondary);
+            g.setFont (font (type::body));
+            g.drawText (tr ("The EQ was removed from this slot."), getLocalBounds(), juce::Justification::centred);
             return;
         }
 
@@ -101,23 +115,28 @@ public:
 
             const auto centre = handlePosition (*s, b);
             const auto r = juce::Rectangle<float> (16.0f, 16.0f).withCentre (centre);
-            g.setColour (bandColour (b).withAlpha (b == selected ? 1.0f : 0.75f));
+            if (b == selected)
+            {
+                g.setColour (bandColour (b).withAlpha (0.25f));
+                g.fillEllipse (r.expanded (4.0f));
+            }
+            g.setColour (bandColour (b).withAlpha (b == selected ? 1.0f : 0.8f));
             g.fillEllipse (r);
-            g.setColour (juce::Colours::black);
-            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.setColour (colour::bg0);
+            g.setFont (font (type::caption, true));
             g.drawText (juce::String (b + 1), r, juce::Justification::centred);
         }
 
         // footer: the selected band and the output
         auto footer = getLocalBounds().removeFromBottom (54).reduced (12, 6);
-        g.setFont (juce::FontOptions (13.0f));
+        g.setFont (font (type::body));
 
         if (selected >= 0)
         {
             const auto& p = s->params;
             const auto t = peq::type (p[(std::size_t) peq::param (selected, 0)]);
             juce::String text;
-            text << "Band " << (selected + 1) << ": " << utf8 (peq::typeName (t)) << "   "
+            text << tr ("Band {0}: {1}", { juce::String (selected + 1), bandTypeName (t) }) << "   "
                  << juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::param (selected, 1), p[(std::size_t) peq::param (selected, 1)], 120.0).c_str());
 
             if (hasGain (t))
@@ -133,15 +152,15 @@ public:
         }
         else
         {
-            g.setColour (theme::text.withAlpha (0.6f));
-            g.drawText (utf8 ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"),
-                        footer.removeFromTop (20), juce::Justification::centredLeft);
+            g.setColour (colour::textSecondary);
+            g.drawFittedText (tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"),
+                              footer.removeFromTop (20), juce::Justification::centredLeft, 1, 0.8f);
         }
 
-        g.setColour (theme::text.withAlpha (0.8f));
-        g.drawText (utf8 ("Output: ") + juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::outputParam, s->params[peq::outputParam], 120.0).c_str())
-                        + utf8 ("   (drag vertically here)"),
-                    outputArea(), juce::Justification::centredLeft);
+        g.setColour (colour::textPrimary);
+        g.drawFittedText (tr ("Output: {0}   (drag vertically here)",
+                              { juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::outputParam, s->params[peq::outputParam], 120.0).c_str()) }),
+                          outputArea(), juce::Justification::centredLeft, 1, 0.8f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -284,12 +303,12 @@ private:
     void showBandMenu (int band)
     {
         juce::PopupMenu menu;
-        menu.addSectionHeader ("Band " + juce::String (band + 1));
+        menu.addSectionHeader (tr ("Band {0}", { juce::String (band + 1) }));
         const auto* s = current();
         const auto currentType = peq::type (s->params[(std::size_t) peq::param (band, 0)]);
 
         for (int t = 0; t < peq::bandTypes; ++t)
-            menu.addItem (utf8 (peq::typeName ((peq::BandType) t)), true, (int) currentType == t, [this, band, t] {
+            menu.addItem (bandTypeName ((peq::BandType) t), true, (int) currentType == t, [this, band, t] {
                 setParams ({ { peq::param (band, 0), peq::typeValue ((peq::BandType) t) } });
             });
 
@@ -316,7 +335,7 @@ class ParametricEqWindow final : public juce::DocumentWindow
 {
 public:
     ParametricEqWindow (AudioEngine& engine, int track, int slot, const juce::String& title)
-        : DocumentWindow (title, theme::window, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
     {
         setUsingNativeTitleBar (true);
         setContentOwned (new ParametricEqEditor (engine, track, slot), true);
@@ -349,22 +368,23 @@ void ParametricEqWindow::closeButtonPressed()
 void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, const EffectParams& params, double sampleRate,
                             bool enabled, int highlightBand)
 {
-    g.setColour (theme::knobBackground);
-    g.fillRoundedRectangle (area, 4.0f);
+    using namespace theme;
+    g.setColour (colour::bg0);
+    g.fillRoundedRectangle (area, radius::md);
 
     // grid: frequency decades and ±6/12/18 dB
-    g.setColour (juce::Colours::white.withAlpha (0.07f));
+    g.setColour (colour::gridBeat);
     for (double hz : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
         g.drawVerticalLine ((int) xForHz (area, hz), area.getY(), area.getBottom());
     for (double db : { -18.0, -12.0, -6.0, 6.0, 12.0, 18.0 })
         g.drawHorizontalLine ((int) yForDb (area, db), area.getX(), area.getRight());
-    g.setColour (juce::Colours::white.withAlpha (0.18f));
+    g.setColour (colour::gridBar);
     g.drawHorizontalLine ((int) yForDb (area, 0.0), area.getX(), area.getRight());
 
     if (area.getWidth() > 300.0f)
     {
-        g.setColour (theme::text.withAlpha (0.4f));
-        g.setFont (juce::FontOptions (10.0f));
+        g.setColour (colour::textDisabled);
+        g.setFont (font (10.0f));
         for (auto [hz, label] : { std::pair { 100.0, "100" }, { 1000.0, "1k" }, { 10000.0, "10k" } })
             g.drawText (label, (int) xForHz (area, hz) + 3, (int) area.getBottom() - 14, 30, 12, juce::Justification::centredLeft);
     }
@@ -388,10 +408,11 @@ void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, cons
     fill.lineTo (area.getRight(), area.getCentreY());
     fill.lineTo (area.getX(), area.getCentreY());
     fill.closeSubPath();
-    const auto colour = enabled ? (highlightBand >= 0 ? bandColour (highlightBand) : theme::accentOrange) : juce::Colours::grey;
-    g.setColour (colour.withAlpha (0.15f));
+    const auto curveColour = enabled ? (highlightBand >= 0 ? bandColour (highlightBand) : colour::accent) : colour::textDisabled;
+    g.setGradientFill (juce::ColourGradient (curveColour.withAlpha (0.22f), area.getX(), area.getY(), curveColour.withAlpha (0.04f), area.getX(),
+                                             area.getCentreY(), false));
     g.fillPath (fill);
-    g.setColour (colour);
+    g.setColour (curveColour);
     g.strokePath (curve, juce::PathStrokeType (2.0f));
 }
 
@@ -415,8 +436,8 @@ void open (AudioEngine& engine, int track, int slot)
 
     const auto& mixer = engine.getSong().mixer;
     const auto name = track < (int) mixer.size() ? juce::String::fromUTF8 (mixer[(std::size_t) track].name.c_str()) : juce::String();
-    const auto title = utf8 ("Parametric EQ - ") + (track == 0 ? juce::String ("Master") : name.isNotEmpty() ? name : "Insert " + juce::String (track))
-                       + " (slot " + juce::String (slot + 1) + ")";
+    const auto title = tr ("Parametric EQ - {0} (slot {1})",
+                           { track == 0 ? juce::String ("Master") : name.isNotEmpty() ? name : "Insert " + juce::String (track), juce::String (slot + 1) });
     open[key] = std::make_unique<ParametricEqWindow> (engine, track, slot, title);
 }
 

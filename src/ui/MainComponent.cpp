@@ -13,6 +13,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
+#include "ui/I18n.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -54,52 +55,89 @@ MainComponent::MainComponent (AudioEngine& e)
 {
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     addAndMakeVisible (browser);
-    newButton.onClick = [this] { newProject(); };
     logo.setImage (logoImage(), juce::RectanglePlacement::centred);
     logo.setTooltip ("LYNX " JUCE_APPLICATION_VERSION_STRING);
     addAndMakeVisible (logo);
+
+    newButton.setTooltip (tr ("New project") + " (Ctrl+N)");
+    newButton.onClick = [this] { newProject(); };
+    openButton.setTooltip (tr ("Open project") + " (Ctrl+O)");
     openButton.onClick = [this] { chooseFileToOpen(); };
+    saveButton.setTooltip (tr ("Save project") + " (Ctrl+S)");
     saveButton.onClick = [this] { save (false); };
-    exportButton.setTooltip (utf8 ("Export audio: WAV, FLAC or OGG (Ctrl+R)"));
+    exportButton.setTooltip (tr ("Export audio: WAV, FLAC or OGG") + " (Ctrl+R)");
     exportButton.onClick = [this] { exportAudio(); };
+
+    playButton.setTooltip (tr ("Play / pause") + " (Space)");
     playButton.onClick = [this] { togglePlay(); };
+    stopButton.setTooltip (tr ("Stop and return to the start"));
     stopButton.onClick = [this]
     {
         engine.stop();
         engine.rewind();
     };
-    recordButton.setClickingTogglesState (false);
+    recordButton.setOnColour (theme::colour::record);
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
-    recordMenuButton.setTooltip (utf8 ("What to record"));
+    recordMenuButton.setTooltip (tr ("What to record"));
     recordMenuButton.onClick = [this] {
         juce::PopupMenu menu;
-        menu.addItem (utf8 ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
-        menu.addItem (utf8 ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
+        menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
+        menu.addItem (tr ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
 
             if (engine.getLastRecordingError().isNotEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Audio input"),
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio input"),
                                                         engine.getLastRecordingError());
         });
         menu.addSeparator();
-        menu.addItem (utf8 ("Open recordings folder"), [] {
+        menu.addItem (tr ("Open recordings folder"), [] {
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
     };
 
-    modeButton.setTooltip ("Pattern or Song (L key)");
-    modeButton.onClick = [this] { toggleMode(); };
+    // Pattern / Song: a two-segment switch (L toggles)
+    patternModeButton.setText (tr ("Pattern"));
+    songModeButton.setText (tr ("Song"));
+    patternModeButton.setCorners (true, false);
+    songModeButton.setCorners (false, true);
+    for (auto* b : { &patternModeButton, &songModeButton })
+    {
+        b->setOnColour (theme::colour::bg6);
+        b->setIconColourWhenOn (theme::colour::textPrimary);
+    }
+    patternModeButton.setTooltip (tr ("Pattern mode: plays the current pattern in a loop") + " (L)");
+    songModeButton.setTooltip (tr ("Song mode: plays the Playlist arrangement") + " (L)");
+    patternModeButton.onClick = [this] {
+        if (engine.getSong().mode != PlayMode::pattern)
+            toggleMode();
+    };
+    songModeButton.onClick = [this] {
+        if (engine.getSong().mode != PlayMode::song)
+            toggleMode();
+    };
+
+    metronomeButton.setClickingTogglesState (true);
+    metronomeButton.setOnColour (theme::colour::bg6);
+    metronomeButton.setIconColourWhenOn (theme::colour::accent);
+    metronomeButton.setTooltip (tr ("Metronome"));
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
+    settingsButton.setTooltip (tr ("Audio settings"));
     settingsButton.onClick = [this] { showAudioSettings(); };
 
     bpmSlider.setRange (minTempo, maxTempo, 0.1);
+    bpmSlider.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
     bpmSlider.addMouseListener (this, true);
-    bpmSlider.setTooltip (utf8 ("Tempo (right-click: create tempo automation)"));
+    bpmSlider.setTooltip (tr ("Tempo (drag or type; right-click: tempo automation)"));
     bpmSlider.setValue (engine.getSong().bpm, juce::dontSendNotification);
     bpmSlider.onValueChange = [this] { engine.editSong ([v = bpmSlider.getValue()] (Song& s) { s.bpm = v; }); };
+    bpmSlider.setColour (juce::Slider::textBoxTextColourId, theme::colour::textPrimary);
+    bpmSlider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    bpmSlider.setTextValueSuffix (" BPM");
+    bpmSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 80, 32);
 
+    patternBox.setTooltip (tr ("Current pattern"));
     patternBox.onChange = [this]
     {
         const auto index = patternBox.getSelectedItemIndex();
@@ -108,7 +146,7 @@ MainComponent::MainComponent (AudioEngine& e)
             engine.editSong ([index] (Song& s) { s.currentPattern = index; }, false);
     };
 
-    newPatternButton.setTooltip ("New pattern");
+    newPatternButton.setTooltip (tr ("New pattern"));
     newPatternButton.onClick = [this]
     {
         engine.editSong ([] (Song& s) {
@@ -123,36 +161,52 @@ MainComponent::MainComponent (AudioEngine& e)
     swingSlider.setValue (engine.getSong().swing, juce::dontSendNotification);
     swingSlider.onValueChange = [this] {
         engine.editSong ([v = (float) swingSlider.getValue()] (Song& s) { s.swing = v; });
-        swingSlider.setTooltip ("Swing: " + juce::String (juce::roundToInt (swingSlider.getValue() * 100.0)) + "%");
+        swingSlider.setTooltip (tr ("Swing: {0}%", { juce::String (juce::roundToInt (swingSlider.getValue() * 100.0)) }));
     };
-    swingSlider.setTooltip ("Swing: 0%");
-    swingLabel.setText ("Swing", juce::dontSendNotification);
-    swingLabel.setFont (juce::FontOptions (11.0f));
+    swingSlider.setTooltip (tr ("Swing: {0}%", { "0" }));
+    swingLabel.setText (tr ("Swing"), juce::dontSendNotification);
+    swingLabel.setFont (theme::font (theme::type::caption, true));
+    swingLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
     swingLabel.setJustificationType (juce::Justification::centredRight);
 
-    patternMenuButton.setTooltip ("Pattern: rename, color, clone, length, delete");
+    patternMenuButton.setTooltip (tr ("Pattern: rename, color, clone, length, delete"));
     patternMenuButton.onClick = [this] { showPatternMenu(); };
 
-    positionLabel.setFont (juce::FontOptions (18.0f));
+    positionLabel.setFont (theme::monoFont (17.0f));
     positionLabel.setJustificationType (juce::Justification::centred);
+    positionLabel.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+    positionLabel.setTooltip (tr ("Position: bar : beat : step"));
+    positionLabel.setText ("1 : 1 : 1", juce::dontSendNotification);
     cpuLabel.setJustificationType (juce::Justification::centredRight);
-    cpuLabel.setFont (juce::FontOptions (12.0f));
-    cpuLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setFont (juce::FontOptions (12.0f));
-    hintLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    hintLabel.setText (utf8 ("F1 help   Space: play/pause   Z..M / Q..P: play the channel   F5 playlist   F6 rack   F7 piano roll   F8 browser   F9 mixer   L pattern/song   Ctrl+Z/Y undo/redo   Ctrl+S save   Ctrl+O open   Ctrl+R export"),
+    cpuLabel.setFont (theme::font (theme::type::small));
+    cpuLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+    hintLabel.setFont (theme::font (theme::type::small));
+    hintLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+    hintLabel.setMinimumHorizontalScale (1.0f);
+    hintLabel.setText (tr ("F1 help   Space play/pause   Z..M / Q..P play the channel   F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 Browser   F9 Mixer   L pattern/song"),
                        juce::dontSendNotification);
 
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
     rackViewport.setViewedComponent (&rack, false);
     rackViewport.setScrollBarsShown (true, true);
 
-    tabs.setTabBarDepth (28);
+    tabs.setTabBarDepth (36);
     tabs.setOutline (0);
-    tabs.addTab ("Channel Rack", theme::toolbar, &rackViewport, false);
-    tabs.addTab ("Piano Roll", theme::toolbar, &pianoRoll, false);
-    tabs.addTab ("Playlist", theme::toolbar, &playlistArea, false);
-    tabs.addTab ("Mixer", theme::toolbar, &mixer, false);
+    tabs.setIndent (6);
+    tabs.addTab ("Channel Rack", theme::colour::bg2, &rackViewport, false);
+    tabs.addTab ("Piano Roll", theme::colour::bg2, &pianoRoll, false);
+    tabs.addTab ("Playlist", theme::colour::bg2, &playlistArea, false);
+    tabs.addTab ("Mixer", theme::colour::bg2, &mixer, false);
+    {
+        const Icon tabIcons[] = { Icon::channelRack, Icon::pianoRoll, Icon::playlist, Icon::mixer };
+        const char* tabTips[] = { "F6", "F7", "F5", "F9" };
+        for (int i = 0; i < 4; ++i)
+            if (auto* b = tabs.getTabbedButtonBar().getTabButton (i))
+            {
+                b->getProperties().set (theme::LookAndFeel::iconProperty, (int) tabIcons[i]);
+                b->setTooltip (tabTips[i]);
+            }
+    }
     playlist.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
     picker.onOpenPattern = [this] { tabs.setCurrentTabIndex (rackTab); };
 
@@ -162,16 +216,19 @@ MainComponent::MainComponent (AudioEngine& e)
     addAndMakeVisible (menuBar);
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
-                                                             &modeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton, &patternMenuButton, &swingLabel, &swingSlider,
-                                                             &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs, &scope })
+                                                             &patternModeButton, &songModeButton, &metronomeButton, &bpmSlider, &patternBox, &newPatternButton,
+                                                             &patternMenuButton, &swingLabel, &swingSlider, &settingsButton, &positionLabel, &cpuLabel, &hintLabel, &tabs, &scope })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
     }
 
     for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
-                                                             &modeButton, &metronomeButton, &newPatternButton, &patternMenuButton, &settingsButton })
+                                                             &patternModeButton, &songModeButton, &metronomeButton, &newPatternButton, &patternMenuButton, &settingsButton })
         b->setWantsKeyboardFocus (false);
+
+    for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &recordMenuButton, &newPatternButton, &patternMenuButton, &settingsButton })
+        b->setFlat (true);
 
     engine.addChangeListener (this);
     refreshToolbar();
@@ -193,58 +250,124 @@ MainComponent::~MainComponent()
 
 void MainComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::window);
-    g.setColour (theme::toolbar);
-    g.fillRect (0, menuHeight, getWidth(), 46);
+    using namespace theme;
+    g.fillAll (colour::bg1);
+
+    // toolbar
+    const auto bar = juce::Rectangle<int> (0, menuHeight, getWidth(), toolbarHeight);
+    g.setColour (colour::bg3);
+    g.fillRect (bar);
+    g.setColour (colour::border);
+    g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 1));
+
+    for (auto x : dividers)
+        g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
+
+    // transport position: an inset display
+    if (! positionLabel.getBounds().isEmpty())
+    {
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (positionLabel.getBounds().toFloat(), radius::md);
+    }
+
+    // BPM inset behind the value
+    if (bpmSlider.isVisible())
+    {
+        auto r = bpmSlider.getBounds().toFloat();
+        r = r.withWidth (80.0f);
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (r, radius::md);
+    }
+
+    // status bar
+    const auto status = getLocalBounds().removeFromBottom (statusHeight);
+    g.setColour (colour::bg1);
+    g.fillRect (status);
+    g.setColour (colour::border);
+    g.fillRect (status.withHeight (1));
+
+    if (browserVisible)
+    {
+        g.setColour (colour::border);
+        g.fillRect (browser.getRight(), bar.getBottom(), 1, status.getY() - bar.getBottom());
+    }
 }
 
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
     menuBar.setBounds (area.removeFromTop (menuHeight));
-    auto toolbar = area.removeFromTop (46).reduced (8);
+    auto toolbar = area.removeFromTop (toolbarHeight).reduced (10, 9);
+    dividers.clear();
+    const auto h = toolbar.getHeight(); // 32
 
-    auto place = [&toolbar] (juce::Component& c, int width, int gapAfter = 4) {
-        c.setBounds (toolbar.removeFromLeft (width));
-        toolbar.removeFromLeft (gapAfter);
+    // the settings button is pinned to the right; groups that don't fit in a narrow window are hidden
+    settingsButton.setBounds (toolbar.removeFromRight (h));
+    toolbar.removeFromRight (8);
+
+    auto place = [&toolbar] (juce::Component& c, int width, int gapAfter = 2) {
+        const auto fits = width <= toolbar.getWidth();
+        c.setVisible (fits);
+        c.setBounds (fits ? toolbar.removeFromLeft (width) : juce::Rectangle<int>());
+        toolbar.removeFromLeft (juce::jmin (gapAfter, toolbar.getWidth()));
+    };
+    auto divide = [&] {
+        if (toolbar.getWidth() < 15 + h)
+            return;
+        toolbar.removeFromLeft (7);
+        dividers.push_back (toolbar.getX());
+        toolbar.removeFromLeft (8);
     };
 
-    place (logo, 30, 8);
-    place (newButton, 50);
-    place (openButton, 52);
-    place (saveButton, 56);
-    place (exportButton, 66, 12);
-    place (playButton, 54);
-    place (stopButton, 50, 4);
-    place (recordButton, 40, 0);
-    place (recordMenuButton, 16, 4);
-    place (modeButton, 52, 8);
-    place (metronomeButton, 64);
-    place (bpmSlider, 124, 10);
-    place (patternBox, 140);
-    place (newPatternButton, 28);
-    place (patternMenuButton, 28, 6);
-    place (swingLabel, 38, 0);
-    place (swingSlider, 30);
+    place (logo, h, 6);
+    divide();
+    place (newButton, h);
+    place (openButton, h);
+    place (saveButton, h);
+    place (exportButton, h, 0);
+    divide();
+    place (playButton, h + 6);
+    place (stopButton, h + 6);
+    place (recordButton, h + 6, 0);
+    place (recordMenuButton, 18, 0);
+    divide();
+    place (patternModeButton, patternModeButton.getIdealWidth (h), 1);
+    place (songModeButton, songModeButton.getIdealWidth (h), 0);
+    divide();
+    place (metronomeButton, h, 8);
+    place (bpmSlider, 128, 0);
+    const auto showPattern = toolbar.getWidth() >= 15 + 150 + 2 + 2 * h; // the pattern group shows whole or not at all
+    if (showPattern)
+        divide();
+    place (patternBox, showPattern ? 150 : 100000, 2);
+    place (newPatternButton, showPattern ? h : 100000, 0);
+    place (patternMenuButton, showPattern ? h : 100000, 0);
 
-    settingsButton.setBounds (toolbar.removeFromRight (74));
-    toolbar.removeFromRight (6);
+    const auto swingWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (theme::font (theme::type::caption, true)), swingLabel.getText())) + 4;
+    const auto showSwing = toolbar.getWidth() >= 15 + swingWidth + 4 + h;
+    if (showSwing)
+        divide();
+    place (swingLabel, showSwing ? swingWidth : 100000, 4);
+    place (swingSlider, showSwing ? h : 100000, 0);
+    toolbar.removeFromLeft (juce::jmin (8, toolbar.getWidth()));
 
-    if (toolbar.getWidth() > 220)
-        scope.setBounds (toolbar.removeFromRight (juce::jmin (160, toolbar.getWidth() - 110)));
+    if (toolbar.getWidth() > 210)
+        scope.setBounds (toolbar.removeFromRight (juce::jmin (180, toolbar.getWidth() - 132)));
     else
         scope.setBounds ({});
 
-    positionLabel.setBounds (toolbar);
+    toolbar.removeFromRight (juce::jmin (8, toolbar.getWidth()));
+    positionLabel.setBounds (toolbar.getWidth() >= 110 ? toolbar.removeFromRight (juce::jmin (toolbar.getWidth(), 124)) : juce::Rectangle<int>());
 
-    auto status = area.removeFromBottom (20).reduced (8, 0);
+    auto status = area.removeFromBottom (statusHeight).reduced (10, 0);
     cpuLabel.setBounds (status.removeFromRight (90));
     hintLabel.setBounds (status);
+
     if (browserVisible)
-        browser.setBounds (area.removeFromLeft (240).reduced (4, 4));
+        browser.setBounds (area.removeFromLeft (250));
 
     browser.setVisible (browserVisible);
-    tabs.setBounds (area.reduced (6, 4));
+    tabs.setBounds (area.withTrimmedLeft (browserVisible ? 1 : 0));
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
@@ -447,7 +570,7 @@ void MainComponent::showPatternMenu()
     const auto& pattern = song.patterns[(std::size_t) index];
 
     juce::PopupMenu colours;
-    colours.addItem (utf8 ("Automatic"), true, pattern.colour == 0,
+    colours.addItem (tr ("Automatic"), true, pattern.colour == 0,
                      [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].colour = 0; }); });
     colours.addSeparator();
 
@@ -468,22 +591,22 @@ void MainComponent::showPatternMenu()
     }
 
     juce::PopupMenu lengths;
-    lengths.addItem (utf8 ("Automatic (from notes)"), true, pattern.lengthTicks == 0,
+    lengths.addItem (tr ("Automatic (from notes)"), true, pattern.lengthTicks == 0,
                      [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = 0; }); });
 
     for (int bars : { 1, 2, 4, 8, 16, 32 })
     {
         const auto ticks = (std::int64_t) bars * ppq * juce::jmax (1, song.beatsPerBar);
-        lengths.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), true, pattern.lengthTicks == ticks,
+        lengths.addItem (bars == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (bars) }), true, pattern.lengthTicks == ticks,
                          [this, index, ticks] { engine.editSong ([index, ticks] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = ticks; }); });
     }
 
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (pattern.name.c_str()));
-    menu.addItem ("Rename...", [this, index] { renamePattern (index); });
-    menu.addSubMenu ("Color", colours);
-    menu.addSubMenu ("Length", lengths);
-    menu.addItem ("Clone", [this, index] {
+    menu.addItem (tr ("Rename..."), [this, index] { renamePattern (index); });
+    menu.addSubMenu (tr ("Color"), colours);
+    menu.addSubMenu (tr ("Length"), lengths);
+    menu.addItem (tr ("Clone"), [this, index] {
         engine.editSong ([index] (Song& s) {
             auto copy = s.patterns[(std::size_t) index];
             copy.name += " (copy)";
@@ -505,9 +628,9 @@ void MainComponent::showPatternMenu()
         signatures.addItem (juce::String (beats) + "/4", true, song.beatsPerBar == beats,
                             [this, beats] { engine.editSong ([beats] (Song& s) { s.beatsPerBar = beats; }); });
 
-    menu.addSubMenu (utf8 ("Song time signature"), signatures);
+    menu.addSubMenu (tr ("Song time signature"), signatures);
     menu.addSeparator();
-    menu.addItem ("Delete pattern", song.patterns.size() > 1, false,
+    menu.addItem (tr ("Delete pattern"), song.patterns.size() > 1, false,
                   [this, index] { engine.editSong ([index] (Song& s) { s.removePattern (index); }); });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patternMenuButton));
@@ -515,10 +638,10 @@ void MainComponent::showPatternMenu()
 
 void MainComponent::renamePattern (int index)
 {
-    auto* window = new juce::AlertWindow ("Rename pattern", {}, juce::MessageBoxIconType::NoIcon);
+    auto* window = new juce::AlertWindow (tr ("Rename pattern"), {}, juce::MessageBoxIconType::NoIcon);
     window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) index].name.c_str()));
-    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, index, window] (int result) {
                                  const auto name = window->getTextEditorContents ("name").trim().toStdString();
@@ -532,17 +655,18 @@ void MainComponent::renamePattern (int index)
 void MainComponent::refreshModeButton()
 {
     const auto recording = engine.isRecording();
-    recordButton.setColour (juce::TextButton::buttonColourId, recording ? juce::Colour (0xffd03030) : theme::toolbar.brighter (0.1f));
+    recordButton.setToggleState (recording, juce::dontSendNotification);
     const auto inputs = engine.getActiveMidiInputs();
-    recordButton.setTooltip (utf8 ("Record while playing: notes (PC keyboard and MIDI)")
-                             + (engine.isAudioRecordingArmed() ? utf8 (" and input audio") : juce::String())
-                             + utf8 ("\nMIDI inputs: ") + (inputs.isEmpty() ? utf8 ("none") : inputs.joinIntoString (", ")));
-    recordMenuButton.setColour (juce::TextButton::buttonColourId,
-                                engine.isAudioRecordingArmed() ? juce::Colour (0xffa03030) : theme::toolbar.brighter (0.1f));
+    recordButton.setTooltip ((engine.isAudioRecordingArmed() ? tr ("Record while playing: notes (PC keyboard and MIDI) and input audio")
+                                                             : tr ("Record while playing: notes (PC keyboard and MIDI)"))
+                             + "\n" + tr ("MIDI inputs: {0}", { inputs.isEmpty() ? tr ("none") : inputs.joinIntoString (", ") }));
+    recordMenuButton.setToggleState (engine.isAudioRecordingArmed(), juce::dontSendNotification);
+    recordMenuButton.setOnColour (theme::colour::accentMuted);
 
     const auto songMode = engine.getSong().mode == PlayMode::song;
-    modeButton.setButtonText (songMode ? "SONG" : "PAT");
-    modeButton.setColour (juce::TextButton::buttonColourId, songMode ? theme::accentGreen.darker (0.5f) : theme::accentOrange.darker (0.5f));
+    patternModeButton.setToggleState (! songMode, juce::dontSendNotification);
+    songModeButton.setToggleState (songMode, juce::dontSendNotification);
+    metronomeButton.setToggleState (engine.getTransport().metronome.load(), juce::dontSendNotification);
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -572,8 +696,10 @@ void MainComponent::Scope::update()
 void MainComponent::Scope::paint (juce::Graphics& g)
 {
     const auto area = getLocalBounds().toFloat();
-    g.setColour (theme::knobBackground);
-    g.fillRoundedRectangle (area, 3.0f);
+    g.setColour (theme::colour::bg0);
+    g.fillRoundedRectangle (area, theme::radius::md);
+    g.setColour (theme::colour::border);
+    g.drawHorizontalLine ((int) area.getCentreY(), area.getX() + 4.0f, area.getRight() - 4.0f);
 
     juce::Path wave;
     const auto mid = area.getCentreY();
@@ -590,8 +716,8 @@ void MainComponent::Scope::paint (juce::Graphics& g)
             wave.lineTo (area.getX() + (float) x, y);
     }
 
-    g.setColour (theme::accentGreen.withAlpha (0.85f));
-    g.strokePath (wave, juce::PathStrokeType (1.2f));
+    g.setColour (theme::colour::accent.withAlpha (0.9f));
+    g.strokePath (wave, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 void MainComponent::timerCallback()
@@ -640,10 +766,12 @@ void MainComponent::timerCallback()
 
     // MIDI learn waiting for a controller
     static const auto normalHint = hintLabel.getText();
-    const auto hint = engine.isLearningMidi() ? utf8 ("Move a knob/fader on the MIDI controller to link it to the parameter...") : normalHint;
+    const auto hint = engine.isLearningMidi() ? tr ("Move a knob/fader on the MIDI controller to link it to the parameter...") : normalHint;
     if (hintLabel.getText() != hint)
         hintLabel.setText (hint, juce::dontSendNotification);
-    playButton.setButtonText (transport.playing.load() ? "Pause" : "Play");
+    const auto playing = transport.playing.load();
+    playButton.setIcon (playing ? Icon::pause : Icon::play);
+    playButton.setToggleState (playing, juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (engine.getDeviceManager().getCpuUsage() * 100.0, 1) + "%",
                       juce::dontSendNotification);
 
@@ -657,7 +785,17 @@ void MainComponent::updateTitle()
 {
     if (auto* window = getTopLevelComponent())
         window->setName ((engine.isModified() ? "* " : "")
-                         + (projectName.isNotEmpty() ? "LYNX - " + projectName : juce::String ("LYNX")));
+                         + (projectName.isNotEmpty() ? "LYNX - " + projectName : juce::String ("LYNX")) + importedSuffix);
+}
+
+std::unique_ptr<juce::AlertWindow> MainComponent::makeConfirmDiscardWindow()
+{
+    auto window = std::make_unique<juce::AlertWindow> (tr ("Save changes?"), tr ("The project has unsaved changes."),
+                                                       juce::MessageBoxIconType::QuestionIcon);
+    window->addButton (tr ("Save"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Discard"), 2);
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    return window;
 }
 
 void MainComponent::confirmDiscard (std::function<void()> then)
@@ -668,12 +806,7 @@ void MainComponent::confirmDiscard (std::function<void()> then)
         return;
     }
 
-    auto* window = new juce::AlertWindow (utf8 ("Save changes?"),
-                                          utf8 ("The project has unsaved changes."),
-                                          juce::MessageBoxIconType::QuestionIcon);
-    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton ("Discard", 2);
-    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    auto* window = makeConfirmDiscardWindow().release();
     window->enterModalState (true, juce::ModalCallbackFunction::create ([this, then] (int result) {
                                  if (result == 1)
                                  {
@@ -706,6 +839,7 @@ void MainComponent::newProject()
         engine.setSong (Song::makeDefault());
         currentFile = juce::File();
         projectName = {};
+        importedSuffix = {};
         updateTitle();
     });
 }
@@ -717,7 +851,7 @@ void MainComponent::chooseFileToOpen()
 
 void MainComponent::chooseFileToOpenNow()
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Open project", currentFile.getParentDirectory(),
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Open project"), currentFile.getParentDirectory(),
                                                        juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.mid;*.midi");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -737,7 +871,7 @@ void MainComponent::openFile (const juce::File& file)
 
         if (! song)
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
             return;
         }
 
@@ -748,8 +882,8 @@ void MainComponent::openFile (const juce::File& file)
         projectName = file.getFileNameWithoutExtension();
         rememberRecent (file);
 
-        if (auto* window = getTopLevelComponent())
-            window->setName ("LYNX - " + projectName + " (imported from MIDI)");
+        importedSuffix = " " + tr ("(imported from MIDI)");
+        updateTitle();
         return;
     }
 
@@ -757,15 +891,15 @@ void MainComponent::openFile (const juce::File& file)
     {
         if (! engine.importFlpFile (file, error))
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
             return;
         }
 
         currentFile = juce::File(); // imported: "Save" asks where to write the .lynx
         projectName = file.getFileNameWithoutExtension();
         rememberRecent (file);
-        if (auto* window = getTopLevelComponent())
-            window->setName ("LYNX - " + file.getFileNameWithoutExtension() + " (imported from FL)");
+        importedSuffix = " " + tr ("(imported from FL Studio)");
+        updateTitle();
 
         showImportReport();
         return;
@@ -775,7 +909,7 @@ void MainComponent::openFile (const juce::File& file)
 
     if (! song)
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not open"), error);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
         return;
     }
 
@@ -784,6 +918,7 @@ void MainComponent::openFile (const juce::File& file)
     engine.setSong (std::move (*song));
     currentFile = file;
     projectName = file.getFileNameWithoutExtension();
+    importedSuffix = {};
     rememberRecent (file);
     updateTitle();
 }
@@ -808,10 +943,11 @@ void MainComponent::save (bool askForFile)
             rememberRecent (file);
             currentFile = file;
             projectName = file.getFileNameWithoutExtension();
+            importedSuffix = {};
             updateTitle();
         }
         else
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, utf8 ("Could not save"), error);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
     };
 
     if (! askForFile && currentFile != juce::File())
@@ -820,7 +956,7 @@ void MainComponent::save (bool askForFile)
         return;
     }
 
-    fileChooser = std::make_unique<juce::FileChooser> ("Save project", currentFile.getParentDirectory(),
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Save project"), currentFile.getParentDirectory(),
                                                        juce::String ("*") + ProjectFile::extension);
 
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
@@ -832,7 +968,7 @@ void MainComponent::save (bool askForFile)
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "View", utf8 ("Options"), "Help" };
+    return { tr ("File"), tr ("Edit"), tr ("View"), tr ("Options"), tr ("Help") };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -841,7 +977,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
     if (index == 0)
     {
-        menu.addItem ("New\tCtrl+N", [this] { newProject(); });
+        menu.addItem (tr ("New") + "\tCtrl+N", [this] { newProject(); });
 
         juce::PopupMenu templates;
         const auto names = templateNames();
@@ -853,11 +989,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                     engine.setSong (makeTemplate (i));
                     currentFile = juce::File();
                     projectName = {};
+                    importedSuffix = {};
                     updateTitle();
                 });
             });
-        menu.addSubMenu ("New from template", templates);
-        menu.addItem ("Open...\tCtrl+O", [this] { chooseFileToOpen(); });
+        menu.addSubMenu (tr ("New from template"), templates);
+        menu.addItem (tr ("Open...") + "\tCtrl+O", [this] { chooseFileToOpen(); });
 
         juce::PopupMenu recentMenu;
         for (int i = 0; i < recent.getNumFiles(); ++i)
@@ -867,23 +1004,23 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                                 false, [this, file] { confirmDiscard ([this, file] { openFile (file); }); });
         }
         if (recent.getNumFiles() == 0)
-            recentMenu.addItem ("(none)", false, false, [] {});
-        menu.addSubMenu ("Open recent", recentMenu);
+            recentMenu.addItem (tr ("(none)"), false, false, [] {});
+        menu.addSubMenu (tr ("Open recent"), recentMenu);
 
-        menu.addItem ("Save\tCtrl+S", [this] { save (false); });
-        menu.addItem ("Save as...\tCtrl+Shift+S", [this] { save (true); });
+        menu.addItem (tr ("Save") + "\tCtrl+S", [this] { save (false); });
+        menu.addItem (tr ("Save as...") + "\tCtrl+Shift+S", [this] { save (true); });
         menu.addSeparator();
-        menu.addItem (utf8 ("Export audio...\tCtrl+R"), [this] { exportAudio(); });
-        menu.addItem ("Open autosave folder", [] {
+        menu.addItem (tr ("Export audio...") + "\tCtrl+R", [this] { exportAudio(); });
+        menu.addItem (tr ("Open autosave folder"), [] {
             juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave").startAsProcess();
         });
         menu.addSeparator();
-        menu.addItem ("Exit", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
+        menu.addItem (tr ("Exit"), [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
     }
     else if (index == 1)
     {
-        menu.addItem ("Undo\tCtrl+Z", engine.canUndo(), false, [this] { engine.undo(); });
-        menu.addItem ("Redo\tCtrl+Y", engine.canRedo(), false, [this] { engine.redo(); });
+        menu.addItem (tr ("Undo") + "\tCtrl+Z", engine.canUndo(), false, [this] { engine.undo(); });
+        menu.addItem (tr ("Redo") + "\tCtrl+Y", engine.canRedo(), false, [this] { engine.redo(); });
     }
     else if (index == 2)
     {
@@ -894,66 +1031,118 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem ("Browser\tF8", true, browserVisible, [this] {
             browserVisible = ! browserVisible;
             resized();
+            repaint();
         });
     }
     else if (index == 3)
     {
-        menu.addItem (utf8 ("Audio settings..."), [this] { showAudioSettings(); });
-        menu.addItem (utf8 ("Scan for plugins (VST3 and CLAP)..."), [this] {
+        menu.addItem (tr ("Audio settings..."), [this] { showAudioSettings(); });
+        menu.addItem (tr ("Scan for plugins (VST3 and CLAP)..."), [this] {
             scanPluginsWithProgress (engine, [] (int found) {
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
-                                                        juce::String (found) + utf8 (" new plugin(s) found."));
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugins"),
+                                                        found == 1 ? tr ("1 new plugin found.") : tr ("{0} new plugins found.", { juce::String (found) }));
             });
         });
-        menu.addItem (utf8 ("Run plugins in a separate process (protects LYNX from crashes)"), true, pluginSandboxEnabled(), [] {
+        menu.addItem (tr ("Run plugins in a separate process (protects LYNX from crashes)"), true, pluginSandboxEnabled(), [] {
             setPluginSandboxEnabled (! pluginSandboxEnabled());
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Plugins",
-                                                    utf8 (pluginSandboxEnabled()
-                                                              ? "On: plugins opened from now on run in a separate process. "
-                                                                "If one crashes, it goes silent and LYNX keeps running. Reopen the project to apply this to plugins already open."
-                                                              : "Off: plugins opened from now on run inside LYNX."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugins"),
+                                                    pluginSandboxEnabled()
+                                                        ? tr ("On: plugins opened from now on run in a separate process. "
+                                                              "If one crashes, it goes silent and LYNX keeps running. Reopen the project to apply this to plugins already open.")
+                                                        : tr ("Off: plugins opened from now on run inside LYNX."));
         });
-        menu.addItem (utf8 ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
+        menu.addItem (tr ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
         });
-        menu.addItem (utf8 ("Metronome"), true, engine.getTransport().metronome.load(), [this] {
+        menu.addItem (tr ("Metronome"), true, engine.getTransport().metronome.load(), [this] {
             metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
         });
+        menu.addSeparator();
+
+        juce::PopupMenu languages;
+        for (const auto& language : i18n::languages())
+        {
+            const juce::String id (language.id);
+            languages.addItem (juce::String::fromUTF8 (language.nativeName), true, i18n::saved() == id, [this, id] { showLanguageChoice (id); });
+        }
+        menu.addSubMenu (tr ("Language"), languages);
     }
     else
     {
-        menu.addItem ("Shortcuts\tF1", [this] { showHelp(); });
-        menu.addItem (utf8 ("Last FL import report"), [this] {
+        menu.addItem (tr ("Shortcuts") + "\tF1", [this] { showHelp(); });
+        menu.addItem (tr ("Last FL Studio import report"), [this] {
             const auto& r = engine.getImportReport();
             if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
                 && engine.getMissingPlugins().isEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("FL Studio import"),
-                                                        utf8 ("Nothing to report (no .flp imported in this session, or everything was converted)."));
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"),
+                                                        tr ("Nothing to report (no .flp imported in this session, or everything was converted)."));
             else
                 showImportReport();
         });
-        menu.addItem ("About LYNX", [] {
-            struct Logo final : juce::Component
-            {
-                Logo() { setSize (300, 150); }
-                void paint (juce::Graphics& g) override
-                {
-                    g.drawImageWithin (logoImage(), 0, 0, getWidth(), getHeight(), juce::RectanglePlacement::centred);
-                }
-            };
-            auto* logo = new Logo();
-            auto* window = new juce::AlertWindow ("LYNX " JUCE_APPLICATION_VERSION_STRING,
-                                                  utf8 ("Lightweight C++/JUCE DAW with the FL Studio workflow.\n"
-                                                        "Independent implementation: no Image-Line code was copied."),
-                                                  juce::MessageBoxIconType::NoIcon);
-            window->addCustomComponent (logo);
-            window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-            window->enterModalState (true, juce::ModalCallbackFunction::create ([logo] (int) { delete logo; }), true);
+        menu.addItem (tr ("About LYNX"), [] {
+            auto* window = makeAboutWindow().release();
+            window->enterModalState (true, nullptr, true);
             keepAboveMainWindow (*window);
         });
     }
 
     return menu;
+}
+
+std::unique_ptr<juce::AlertWindow> MainComponent::makeAboutWindow()
+{
+    struct Logo final : juce::Component
+    {
+        Logo() { setSize (300, 150); }
+        void paint (juce::Graphics& g) override
+        {
+            g.drawImageWithin (logoImage(), 0, 0, getWidth(), getHeight(), juce::RectanglePlacement::centred);
+        }
+    };
+    struct About final : juce::AlertWindow
+    {
+        About()
+            : juce::AlertWindow ("LYNX " JUCE_APPLICATION_VERSION_STRING,
+                                 tr ("Lightweight C++/JUCE DAW with the FL Studio workflow.\n"
+                                     "Independent implementation: no Image-Line code was copied."),
+                                 juce::MessageBoxIconType::NoIcon)
+        {
+            addCustomComponent (&logo);
+        }
+        Logo logo;
+    };
+    auto window = std::make_unique<About>();
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    return std::unique_ptr<juce::AlertWindow> (window.release());
+}
+
+void MainComponent::showLanguageChoice (const juce::String& id)
+{
+    if (id == i18n::saved())
+        return;
+
+    i18n::save (id);
+    const auto restart = [this] {
+        confirmDiscard ([] {
+            juce::File::getSpecialLocation (juce::File::currentExecutableFile).startAsProcess();
+            juce::JUCEApplication::quit();
+        });
+    };
+
+    // the message is shown in the language just chosen
+    const auto table = i18n::tableText (id);
+    const juce::LocalisedStrings strings (table, false);
+    auto say = [&] (const char* text) { return table.isEmpty() ? juce::String::fromUTF8 (text) : strings.translate (juce::String::fromUTF8 (text)); };
+
+    auto* window = new juce::AlertWindow (say (TR_NOOP ("Language")), say (TR_NOOP ("The new language is applied when LYNX restarts.")),
+                                          juce::MessageBoxIconType::InfoIcon);
+    window->addButton (say (TR_NOOP ("Restart now")), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (say (TR_NOOP ("Later")), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([restart] (int result) {
+                                 if (result == 1)
+                                     restart();
+                             }),
+                             true);
 }
 
 void MainComponent::rememberRecent (const juce::File& file)
@@ -963,39 +1152,113 @@ void MainComponent::rememberRecent (const juce::File& file)
     menuItemsChanged();
 }
 
+std::unique_ptr<juce::Component> MainComponent::makeHelpContent()
+{
+    // shortcut sheet: sections of "keys - action" rows, in two columns
+    struct Row
+    {
+        const char* keys;
+        const char* action;
+    };
+    struct Section
+    {
+        const char* title;
+        std::vector<Row> rows;
+    };
+
+    static const std::vector<Section> sections {
+        { TR_NOOP ("General"),
+          { { TR_NOOP ("Space"), TR_NOOP ("Play / pause") },
+            { "Ctrl+Z / Ctrl+Y", TR_NOOP ("Undo / redo") },
+            { "Ctrl+N / Ctrl+O", TR_NOOP ("New project / open") },
+            { "Ctrl+S / Ctrl+Shift+S", TR_NOOP ("Save / save as") },
+            { "Ctrl+R", TR_NOOP ("Export audio") },
+            { "F5 F6 F7 F9", TR_NOOP ("Playlist, Channel Rack, Piano Roll, Mixer") },
+            { "F8", TR_NOOP ("Show or hide the Browser") },
+            { "L", TR_NOOP ("Pattern / song mode") },
+            { "Z..M  Q..P", TR_NOOP ("PC keyboard as a piano (selected channel)") } } },
+        { TR_NOOP ("Channel Rack and Mixer"),
+          { { TR_NOOP ("Right-click the LED"), TR_NOOP ("Solo the channel") },
+            { TR_NOOP ("Right-click the name"), TR_NOOP ("Channel menu") },
+            { TR_NOOP ("Right-click a knob/fader"), TR_NOOP ("Automation or link to a MIDI controller") },
+            { TR_NOOP ("Arrow under a strip"), TR_NOOP ("Send from the selected track to this one") },
+            { TR_NOOP ("Right-click the BPM"), TR_NOOP ("Tempo automation") } } },
+        { "Piano Roll",
+          { { TR_NOOP ("Click"), TR_NOOP ("Create a note (or chord, via the selector)") },
+            { TR_NOOP ("Drag"), TR_NOOP ("Move; the right edge changes the length") },
+            { TR_NOOP ("Right-click"), TR_NOOP ("Delete") },
+            { TR_NOOP ("Ctrl+drag"), TR_NOOP ("Select (Ctrl+click adds to the selection)") },
+            { TR_NOOP ("Shift+drag"), TR_NOOP ("Copy") },
+            { "Ctrl+A/C/X/V", TR_NOOP ("Select all, copy, cut, paste") },
+            { "Ctrl+B / Ctrl+Q", TR_NOOP ("Duplicate / quantize") },
+            { "Ctrl+M / Ctrl+P", TR_NOOP ("Mute / portamento") },
+            { TR_NOOP ("Arrows"), TR_NOOP ("Move (Shift = octave/bar)") },
+            { TR_NOOP ("Alt / Ctrl+wheel"), TR_NOOP ("Disable snap / zoom") } } },
+        { "Playlist",
+          { { TR_NOOP ("Click"), TR_NOOP ("Paint the current pattern") },
+            { TR_NOOP ("Drag on the ruler"), TR_NOOP ("Set the loop (right-click clears)") },
+            { TR_NOOP ("Right-click a clip name"), TR_NOOP ("Split, make unique...") },
+            { TR_NOOP ("Track LED"), TR_NOOP ("Mute the track") },
+            { "Ctrl+A/C/X/V  Ctrl+B", TR_NOOP ("Edit and duplicate") } } },
+    };
+
+    struct Sheet final : juce::Component
+    {
+        Sheet() { setSize (920, 466); }
+
+        void paint (juce::Graphics& g) override
+        {
+            using namespace theme;
+            g.fillAll (colour::bg2);
+            const auto columnWidth = (getWidth() - 3 * 24) / 2;
+            int column = 0, y = 20;
+
+            for (std::size_t i = 0; i < sections.size(); ++i)
+            {
+                if (i == 2) // second column
+                {
+                    column = 1;
+                    y = 20;
+                }
+
+                const auto x = 24 + column * (columnWidth + 24);
+                const auto& section = sections[i];
+                g.setColour (colour::accent);
+                g.fillRoundedRectangle ((float) x, (float) y + 4.0f, 3.0f, 12.0f, 1.5f);
+                g.setColour (colour::textPrimary);
+                g.setFont (font (type::title, true));
+                g.drawText (tr (section.title), x + 10, y, columnWidth - 10, 20, juce::Justification::centredLeft);
+                y += 28;
+
+                for (const auto& row : section.rows)
+                {
+                    const auto keys = tr (row.keys);
+                    g.setFont (font (type::small, true));
+                    const auto keyWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), keys)) + 14;
+                    g.setColour (colour::bg4);
+                    g.fillRoundedRectangle ((float) x, (float) y + 1.0f, (float) keyWidth, 18.0f, radius::sm);
+                    g.setColour (colour::textPrimary);
+                    g.drawText (keys, x, y + 1, keyWidth, 18, juce::Justification::centred);
+                    g.setColour (colour::textSecondary);
+                    g.setFont (font (type::body));
+                    g.drawFittedText (tr (row.action), x + keyWidth + 10, y, columnWidth - keyWidth - 10, 20, juce::Justification::centredLeft, 1, 0.85f);
+                    y += 24;
+                }
+
+                y += 14;
+            }
+        }
+    };
+
+    return std::make_unique<Sheet>();
+}
+
 void MainComponent::showHelp()
 {
-    const auto text = utf8 (
-        "GENERAL\n"
-        "  Space   play/pause        Ctrl+Z / Ctrl+Y  undo / redo\n"
-        "  Ctrl+N new   Ctrl+O open   Ctrl+S save   Ctrl+Shift+S save as   Ctrl+R export\n"
-        "  F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 browser   F9 Mixer   L pattern/song\n"
-        "  Z..M and Q..P   PC keyboard as a piano (selected channel)\n\n"
-        "PIANO ROLL\n"
-        "  click creates a note (or chord, via the selector), drag moves, right edge changes the length\n"
-        "  right-click deletes   Ctrl+drag selects   Ctrl+click adds to selection   Shift+drag copies\n"
-        "  Ctrl+A/C/X/V   Ctrl+B duplicate   Ctrl+Q quantize   Ctrl+M mute   Ctrl+P porta   Delete remove\n"
-        "  arrows move (Shift = octave/bar)   Alt disables snap   Ctrl+wheel zoom\n"
-        "  bottom lane: velocity / pan / pitch   Slide button: sliding notes\n\n"
-        "PLAYLIST\n"
-        "  click paints the current pattern   drag on the ruler sets the loop (right-click clears)\n"
-        "  right-click the clip name: split, make unique...   track LED mutes\n"
-        "  Ctrl+A/C/X/V   Ctrl+B duplicate   Delete remove\n\n"
-        "CHANNEL RACK AND MIXER\n"
-        "  right-click the channel LED: solo   right-click the name: channel menu\n"
-        "  right-click any knob/fader: automation or link to a MIDI controller\n"
-        "  arrow at the bottom of a mixer strip: send from the selected track to this one\n"
-        "  right-click the BPM: tempo automation");
-
-    auto* label = new juce::Label ({}, text);
-    label->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
-    label->setJustificationType (juce::Justification::topLeft);
-    label->setSize (760, 520);
-
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (label);
-    options.dialogTitle = utf8 ("LYNX shortcuts");
-    options.dialogBackgroundColour = theme::panel;
+    options.content.setOwned (makeHelpContent().release());
+    options.dialogTitle = tr ("LYNX shortcuts");
+    options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;
     options.resizable = true;
     options.escapeKeyTriggersCloseButton = true;
@@ -1022,18 +1285,18 @@ void MainComponent::showImportReport()
     juce::String text;
 
     if (! r.approximated.empty())
-        text << utf8 ("Approximated by the built-in synth:\n") << list (r.approximated) << "\n\n";
+        text << tr ("Approximated by the built-in synth:") << "\n" << list (r.approximated) << "\n\n";
     if (! r.unsupported.empty())
-        text << utf8 ("No equivalent (played with a synth preset):\n") << list (r.unsupported) << "\n\n";
+        text << tr ("No equivalent (played with a synth preset):") << "\n" << list (r.unsupported) << "\n\n";
     if (! missing.isEmpty())
-        text << utf8 ("Plugins not found (Options > Scan for plugins):\n  ") << missing.joinIntoString ("\n  ") << "\n\n";
+        text << tr ("Plugins not found (Options > Scan for plugins):") << "\n  " << missing.joinIntoString ("\n  ") << "\n\n";
     if (! r.droppedEffects.empty())
-        text << utf8 ("Effects with no equivalent (left out):\n") << list (r.droppedEffects) << "\n\n";
+        text << tr ("Effects with no equivalent (left out):") << "\n" << list (r.droppedEffects) << "\n\n";
     if (r.missingSamples > 0)
-        text << utf8 ("Samples missing on this machine: ") << r.missingSamples << "\n";
+        text << tr ("Samples missing on this machine: {0}", { juce::String (r.missingSamples) }) << "\n";
 
     if (text.isNotEmpty())
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, utf8 ("FL Studio import"), text.trimEnd());
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"), text.trimEnd());
 }
 
 void MainComponent::showAudioSettings()
@@ -1044,7 +1307,8 @@ void MainComponent::showAudioSettings()
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (selector.release());
-    options.dialogTitle = utf8 ("Audio settings");
+    options.dialogTitle = tr ("Audio settings");
+    options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;
     options.resizable = false;
     if (auto* dialog = options.launchAsync())
