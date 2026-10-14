@@ -31,7 +31,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_ASIO 1'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
-    echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.0"'
+    echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.1"'
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
 } > "$OUT/JuceConfig.h.new"
 # only replace the file if it changed, so the module cache is not invalidated
