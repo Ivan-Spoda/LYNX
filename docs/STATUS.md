@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-13. Everything below is verified by the core tests (more than a million checks), the
+Last updated: 2026-10-14. Everything below is verified by the core tests (more than a million checks), the
 app's self-test (`LYNX.exe --selftest`), off-screen UI snapshots (`--snapshot`) and a regression run that
 exports the 30 demo projects shipped with FL Studio 2026.
 
@@ -115,6 +115,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
+  project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
+  oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
+  carrier noise, consonant/carrier contour, mod/car pass-through filters and FL's gain ramps; ModIn/CarIn routing and
+  L-R encoding. Bit-exact against the reference model (which is within −137 dB of FL's DLL) on all 77 comparison
+  cases, the 10 demo instances included. Draft follows the stored button for playback and export alike (LYNX has
+  no "HQ for all plugins" option): octave levels and 16-frame re-blocking, its 16 samples of latency reported to PDC.
 - **Fruity Squeeze** and **Vintage Phaser:** FL's algorithms (REA round 29) — Squeeze within 5·10⁻⁹ of the reference model
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
@@ -154,9 +161,11 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
-- Vocodex: becomes the LYNX vocoder with two side inputs (modulator/carrier from ModIn/CarIn); its band filters,
-  per-band maps, carrier noise, HP/LP, Soundgoodizer and unison differ, the output level is not calibrated against FL,
-  and the internal Sytrus carrier (CarIn = "---") is not available (only the modulator passes).
+- Vocodex: the Soundgoodizer stage (SG > 0, all demo instances) is LYNX's Soundgoodizer approximation (preset A,
+  amount = SG) on the engine's output — FL hosts its own Soundgoodizer with `Data/SG.dat`, not decoded yet; the
+  internal Sytrus carrier (CarIn = "---", Ookay and NewStuff) is not available, so that Vocodex passes its
+  modulator unchanged (`vocodex::makeInternalCarrier` is the hook for it); map segments with tension ≠ 0 are read
+  as straight lines (no demo uses them).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
@@ -199,4 +208,5 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth, Harmor's per-partial resonance and image synthesis.
+- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
+  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's per-partial resonance and image synthesis.

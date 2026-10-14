@@ -395,6 +395,12 @@ private:
         auto utilitySlot = lynx::makeEffectSlot (lynx::EffectKind::utility);
         utilitySlot.params[1] = 0.2f;
         rich.mixer[2].effects.push_back (utilitySlot);
+        auto vocodexSlot = lynx::makeEffectSlot (lynx::EffectKind::vocodex); // FL's raw state travels as base64
+        for (int i = 0; i < 300; ++i)
+            vocodexSlot.state.push_back ((std::uint8_t) (i * 37));
+        vocodexSlot.sidechain = 1;
+        vocodexSlot.sidechain2 = 2;
+        rich.mixer[3].effects.push_back (vocodexSlot);
         rich.addMarker ({ 3840, "Refrão", 0, 4 });
         rich.addMarker ({ 7680, {}, 7, 8 });
         const auto richBack = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (rich), error);
@@ -410,6 +416,8 @@ private:
                             && paramsClose (richBack->mixer[2].effects[0].params, peqSlot.params)
                             && richBack->mixer[2].effects[1].kind == lynx::EffectKind::utility
                             && paramsClose (richBack->mixer[2].effects[1].params, utilitySlot.params)
+                            && richBack->mixer[3].effects.size() == 1 && richBack->mixer[3].effects[0].kind == lynx::EffectKind::vocodex
+                            && richBack->mixer[3].effects[0].state == vocodexSlot.state && richBack->mixer[3].effects[0].sidechain2 == 2
                             && richBack->markers() == rich.markers();
 
         // undo/redo

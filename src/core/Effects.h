@@ -87,6 +87,9 @@ public:
 };
 
 std::unique_ptr<Effect> makeEffect (EffectKind kind);
+// The effect of a slot: like makeEffect (kind), but also builds the effects that need more than the kind
+// (`parallel` containers, the Vocodex from its raw state).
+std::unique_ptr<Effect> makeEffect (const EffectSlot& slot);
 
 // FL's mode-0 pan law as a 2×2 matrix (outL = ll·inL + rl·inR, outR = lr·inL + rr·inR), unit volume (REA_rodada27 §3.1)
 void flPanMatrix (double pan, float& ll, float& rl, float& lr, float& rr) noexcept;
