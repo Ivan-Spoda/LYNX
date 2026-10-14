@@ -5201,3 +5201,27 @@ TEST (physical_models_sound_and_end)
         CHECK (inst->idle());
     }
 }
+
+TEST (squeeze_matches_fl_model)
+{
+    // Fruity Squeeze: Steps quantises, Mix 0 passes the input dry ×Volume/127; a silent block is left untouched
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::squeeze);
+    slot.params[1] = 0.0f; // mix 0: dry only
+    auto fx = lynx::makeEffect (lynx::EffectKind::squeeze);
+    fx->prepare (44100.0);
+    std::vector<float> l (512, 0.3f), r (512, -0.2f);
+    fx->process (l.data(), r.data(), 512, slot.params, 120.0);
+    CHECK (std::abs (l[100] - 0.3f) < 1e-6f && std::abs (r[100] + 0.2f) < 1e-6f); // Volume 127/127
+    slot.params[1] = 1.0f;          // wet only
+    slot.params[2] = 32000.0f / 32768.0f; // 32768^(1 − 32000/32768) ≈ 1.27 levels per unit → heavy quantisation
+    std::vector<float> a (512), b (512);
+    for (int i = 0; i < 512; ++i)
+        a[(std::size_t) i] = b[(std::size_t) i] = 0.4f * (float) std::sin (i * 0.05);
+    fx->process (a.data(), b.data(), 512, slot.params, 120.0);
+    const auto levels = std::pow (32768.0f, 1.0f - 32000.0f / 32768.0f);
+    for (int i = 0; i < 512; i += 37)
+        CHECK (std::abs (a[(std::size_t) i] * levels - std::nearbyint (a[(std::size_t) i] * levels)) < 1e-3f);
+    std::vector<float> z (512, 0.0f), z2 (512, 0.0f);
+    fx->process (z.data(), z2.data(), 512, slot.params, 120.0);
+    CHECK (z[10] == 0.0f);
+}

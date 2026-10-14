@@ -1,4 +1,5 @@
 #include "core/FlEffects.h"
+#include "core/VintagePhaser.h"
 #include "core/FlSynths.h"
 
 #include <algorithm>
@@ -715,18 +716,15 @@ bool fruitySend (const std::vector<std::uint8_t>& d, EffectSlot& slot)
     return true;
 }
 
-// Squeeze: quantization (few bits) + filter; approximated by light distortion, with its mix
+// Fruity Squeeze (REA_rodada29 §2): the exact effect; state = u32 version + 12 raw i32 controls
 bool squeeze (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
     if (d.size() < 4 + 12 * 4)
         return false;
-    auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
-    const auto levels = std::pow (32768.0, 1.0 - std::clamp (param (2), 1, 32768) / 32768.0);
-    slot.params[0] = clamp01 (0.6 * (1.0 - std::log2 (std::max (2.0, levels)) / 15.0)); // fewer levels, more "dirt"
-    slot.params[1] = param (3) != 0 ? clamp01 (std::clamp (param (6), 0, 65536) / 65536.0) : 0.8f;
-    slot.params[2] = 1.0f;
-    slot.params[3] = 0.5f;
-    slot.mix = clamp01 (std::clamp (param (1), 0, 128) / 128.0);
+    slot = makeEffectSlot (EffectKind::squeeze);
+    for (int i = 0; i < 12; ++i)
+        slot.params[(std::size_t) i] = (float) clamp01 (std::clamp (i32At (d, 4 + 4 * (std::size_t) i), 0, (int) squeezeMax[(std::size_t) i])
+                                                        / (double) squeezeMax[(std::size_t) i]);
     return true;
 }
 
@@ -900,6 +898,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Vocodex")
         if (auto v = vocodexEffect (state))
             return v->slot;
+    if (pluginName == "Vintage Phaser") // the exact effect (REA_rodada29 §3)
+        return vintagePhaserFromFl (state);
     if (pluginName == "Pitcher")
     {
         // "SSLF" + u32 + "1RTP" + 33 f32 (raw parameters 0…32) + 12 B note mask + f32 (REA_rodada19 §6)

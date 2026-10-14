@@ -33,6 +33,7 @@ add_library(lynx_core STATIC
     src/core/FlSytrus.cpp
     src/core/FlGenerators.cpp
     src/core/PhysicalModels.cpp
+    src/core/VintagePhaser.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)

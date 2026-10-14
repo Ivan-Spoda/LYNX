@@ -94,7 +94,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Pitch Shifter", EffectKind::pitchShift },  { "Frequency Shifter", EffectKind::freqShift },
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
-        { "Vintage Phaser", EffectKind::chorus },     { "Fruity Squeeze", EffectKind::distortion },
+        { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
     };
 
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")

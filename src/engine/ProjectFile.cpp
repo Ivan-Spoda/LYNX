@@ -111,6 +111,8 @@ const char* effectId (EffectKind k)
         case EffectKind::autoPan: return "autoPan";
         case EffectKind::vocoder: return "vocoder";
         case EffectKind::pitchCorrect: return "pitchCorrect";
+        case EffectKind::squeeze: return "squeeze";
+        case EffectKind::vintagePhaser: return "vintagePhaser";
     }
     return "eq";
 }
@@ -244,7 +246,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser })
         if (id == effectId (k))
             return k;
 

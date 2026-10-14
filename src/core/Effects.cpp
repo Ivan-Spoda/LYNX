@@ -1,6 +1,7 @@
 #include "core/Effects.h"
 
 #include "core/Effector.h"
+#include "core/VintagePhaser.h"
 
 #include "core/Biquad.h"
 
@@ -1240,6 +1241,159 @@ void flPanMatrix (double pan, float& ll, float& rl, float& lr, float& rr) noexce
 
 namespace
 {
+// Fruity Squeeze (REA_rodada29 §2), float32 like FL: silence bypass per block → (filter, pre) → quantiser
+// Lq = 32768^(1 − Steps/32768) → periodic gate Impact/Preserve (samples at 44.1 kHz × fs/44100) → (filter, post)
+// → (dry·(128 − Mix) + wet·Mix)/128 × Volume/127. The SVF (2 passes per sample, LP/HP/BP/notch/peak) is always
+// designed for 44.1 kHz, whatever the rate (as FL does). Parameters are FL's raw values divided by their maximum.
+} // namespace
+const std::array<float, 12> squeezeMax { 160, 128, 32768, 1, 4, 65536, 65536, 1, 3, 44100, 44100, 65536 };
+namespace
+{
+class Squeeze final : public Effect
+{
+public:
+    void prepare (double sr) noexcept override
+    {
+        rate = (float) (sr / 44100.0);
+        reset();
+    }
+    void reset() noexcept override
+    {
+        for (auto& f : filters)
+            f.low = f.band = 0.0f;
+        counterA = counterB = 0.0f;
+        gateOn = false;
+        last.fill (-1.0f);
+    }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        bool changed = false;
+        for (std::size_t i = 0; i < 12; ++i)
+            if (p[i] != last[i])
+                last[i] = p[i], changed = true;
+        if (changed)
+            configure (p);
+        bool silent = true;
+        for (int i = 0; i < n && silent; ++i)
+            silent = std::abs (l[i]) <= 1e-6f && std::abs (r[i]) <= 1e-6f;
+        if (silent)
+            return; // FL leaves (near-)silent blocks untouched
+        for (int i = 0; i < n; ++i)
+        {
+            const float dryL = l[i], dryR = r[i];
+            float x[2] { l[i], r[i] };
+            if (! post && filterOn)
+                for (int c = 0; c < 2; ++c)
+                    x[c] = filters[(std::size_t) c].tick (x[c], type, coefF, coefQ);
+            if (steps < 32768.0f)
+                for (auto& v : x)
+                    v = (float) std::nearbyint (v * steps) / steps; // round half to even, like the DLL
+            if (impact > 0.0f)
+            {
+                float w0, w1;
+                if (! gateOn)
+                {
+                    if (counterA <= preserve)
+                        counterA += 1.0f, w1 = 0.0f, w0 = 1.0f;
+                    else
+                    {
+                        gateOn = true;
+                        const auto fr = counterA - preserve;
+                        w1 = fr, w0 = 1.0f - fr, counterB = fr, counterA = 0.0f;
+                    }
+                }
+                else if (counterB <= impact)
+                    counterB += 1.0f, w1 = 1.0f, w0 = 0.0f;
+                else
+                {
+                    gateOn = false;
+                    const auto fr = counterB - impact;
+                    w1 = 1.0f - fr, w0 = fr, counterB = 0.0f, counterA = fr;
+                }
+                const auto g = (float) (amountRaw * 1.52587890625e-05 * w1);
+                for (auto& v : x)
+                    v = g * v + w0 * v;
+            }
+            if (post && filterOn)
+                for (int c = 0; c < 2; ++c)
+                    x[c] = filters[(std::size_t) c].tick (x[c], type, coefF, coefQ);
+            l[i] = (dryL * dry + x[0] * wet) * gain;
+            r[i] = (dryR * dry + x[1] * wet) * gain;
+        }
+    }
+
+private:
+    struct Svf
+    {
+        float low = 0.0f, band = 0.0f;
+        float tick (float in, int mode, float f, float q) noexcept
+        {
+            constexpr float tiny = 1.1754943508222875e-38f;
+            if (std::abs (in) < tiny)
+                in = 0.0f;
+            float acc[5] {};
+            for (int k = 0; k < 2; ++k)
+            {
+                auto t = in - q * band;
+                if (std::abs (t) < tiny)
+                    t = 0.0f;
+                low = low + f * band;
+                const auto high = t - low;
+                band = f * high + band;
+                const float values[5] { low, band, high, t, low - high };
+                for (int i = 0; i < 5; ++i)
+                    acc[i] += values[i] * 0.5f;
+            }
+            static constexpr int pick[5] { 0, 2, 1, 3, 4 }; // FL's types: LP, HP, BP, notch, peak
+            return acc[pick[std::clamp (mode, 0, 4)]];
+        }
+    };
+
+    int raw (const EffectParams& p, int k) const noexcept { return (int) std::lround (std::clamp (p[(std::size_t) k], 0.0f, 1.0f) * squeezeMax[(std::size_t) k]); }
+
+    void configure (const EffectParams& p) noexcept
+    {
+        gain = (float) raw (p, 0) * (1.0f / 127.0f);
+        const auto mix = (float) raw (p, 1);
+        dry = (128.0f - mix) / 128.0f;
+        wet = mix / 128.0f;
+        steps = std::pow (32768.0f, 1.0f - (float) raw (p, 2) / 32768.0f);
+        filterOn = raw (p, 3) != 0;
+        type = raw (p, 4);
+        post = raw (p, 7) == 1;
+        amountRaw = raw (p, 11);
+        auto gateLength = [this] (int v) { return (std::pow (44101.0f, (float) v / 44100.0f) - 1.0f) * rate; };
+        const auto preserveRaw = raw (p, 10);
+        auto impactRaw = raw (p, 9);
+        switch (raw (p, 8)) // Relation: Impact follows Preserve
+        {
+            case 1: impactRaw = preserveRaw; break;
+            case 2: impactRaw = preserveRaw * 2; break;
+            case 3: impactRaw = preserveRaw >> 1; break;
+            default: break;
+        }
+        impact = gateLength (impactRaw);
+        preserve = gateLength (preserveRaw);
+        // SVF at 44.1 kHz: cutoff exp-mapped between 50 Hz and 0.75·44100, q = min(2, 2/f − f/2, 2(1 − res^0.25))
+        const float fs = 44100.0f, lo = 50.0f, hi = fs * 0.75f;
+        const auto x = (float) raw (p, 6) / 65536.0f, res = (float) raw (p, 5) / 65536.0f;
+        auto hz = std::exp (x * (std::log (hi) - std::log (lo)) + std::log (lo));
+        hz = std::clamp (hz, lo, hi);
+        const auto ratio = std::min (hz / (fs * 2.0f), 0.25f);
+        coefF = (float) (std::sin (ratio * 3.141592653589793) * 2.0);
+        const auto a = (1.0f - std::pow (res, 0.25f)) * 2.0f;
+        coefQ = std::min (std::min (2.0f / coefF - coefF * 0.5f, 2.0f), a);
+    }
+
+    float rate = 1.0f, gain = 1.0f, dry = 0.5f, wet = 0.5f, steps = 32768.0f, impact = 0.0f, preserve = 0.0f;
+    float coefF = 0.5f, coefQ = 1.0f, counterA = 0.0f, counterB = 0.0f;
+    int type = 0, amountRaw = 0;
+    bool filterOn = false, post = false, gateOn = false;
+    std::array<Svf, 2> filters {};
+    std::array<float, 12> last {};
+};
+
 class AutoPan final : public Effect
 {
 public:
@@ -2102,6 +2256,20 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
                                                        { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulator", 0.0f },
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
+    // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
+    static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
+                                                       { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
+                                                       { "Cutoff", 0.5f }, { "Filter post", 0.0f }, { "Relation", 0.0f },
+                                                       { "Impact", 0.0f }, { "Preserve", 7500.0f / 44100.0f }, { "Amount", 0.0f } } };
+    // the engine's normalised values in core order (VST 22/23 swapped); defaults = the front-end's new instance
+    static const EffectInfo vintagePhaserInfo { "Vintage Phaser", {
+        { "Min freq.", 0.4375f }, { "Max freq.", 0.7758789f }, { "Feedback", 0.5f }, { "Manual", 0.0f }, { "Manual freq.", 0.0f },
+        { "HQ", 0.0f }, { "LFO speed", 0.0f }, { "Tempo sync", 0.0f }, { "Sine", 0.0f }, { "Tension", 0.0f }, { "Start phase", 0.0f },
+        { "L/R phase", 0.0f }, { "Delay", 0.0f }, { "Keep pitch", 0.0f }, { "Delay mix", 0.0f }, { "Delay stereo", 0.5f },
+        { "Delay time", 0.0f }, { "Delay sync", 0.0f }, { "Delay fdbk", 0.0f }, { "Delay LP", 0.0f }, { "Delay HP", 0.0f },
+        { "Mix", 0.5f }, { "Noise", 0.0f }, { "Mono input", 0.0f }, { "Gate", 0.0f }, { "Colour gain", 0.0f }, { "Colour freq.", 0.0f },
+        { "Input HP", 0.0f }, { "Fdbk HP", 0.0f }, { "Rate 1", 0.0f }, { "Rate 2", 1.0f }, { "Depth scale", 1.0f },
+        { "Pull-down", 0.0f }, { "Engine V2", 1.0f }, { "Drive", 0.0f }, { "Invert fdbk", 0.0f } } };
     static const EffectInfo pitchCorrectInfo = [] {
         EffectInfo info { "Pitch correction", { { "Speed", 1.0f }, { "Fine", 0.5f }, { "Bypass all", 0.0f }, { "A freq.", 0.5f },
                                                      { "Range", 0.4f } } };
@@ -2174,6 +2342,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::autoPan: return autoPanInfo;
         case EffectKind::vocoder: return vocoderInfo;
         case EffectKind::pitchCorrect: return pitchCorrectInfo;
+        case EffectKind::squeeze: return squeezeInfo;
+        case EffectKind::vintagePhaser: return vintagePhaserInfo;
     }
     return eq;
 }
@@ -2375,6 +2545,24 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             }
             return text;
 
+        case EffectKind::squeeze:
+            std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * squeezeMax[(std::size_t) std::clamp (param, 0, 11)]));
+            return text;
+
+        case EffectKind::vintagePhaser:
+            switch (param)
+            {
+                case 0: case 1: case 4: std::snprintf (text, sizeof (text), "%.0f Hz", 1.25 * std::pow (2.0, 14.0 * v)); break;
+                case 3: case 5: case 7: case 12: case 13: case 17: case 23: case 24: case 33: case 35: return v >= 0.5f ? "on" : "off";
+                case 8: return v >= 0.5f ? "sine" : "triangle";
+                case 25: std::snprintf (text, sizeof (text), "%.1f dB", 30.0f * v); break;
+                case 26: std::snprintf (text, sizeof (text), "%.0f Hz", 50.0f + 600.0f * v); break;
+                case 27: case 28: std::snprintf (text, sizeof (text), "%.0f Hz", 195.0f * v * v * v + 5.0f); break;
+                case 34: std::snprintf (text, sizeof (text), "%+.1f dB", 30.0f * v - 15.0f); break;
+                default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+            }
+            return text;
+
         case EffectKind::vocoder:
             switch (param)
             {
@@ -2462,6 +2650,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::rhythmGain: return std::make_unique<RhythmGain>();
         case EffectKind::autoPan: return std::make_unique<AutoPan>();
         case EffectKind::vocoder: return std::make_unique<Vocoder>();
+        case EffectKind::squeeze: return std::make_unique<Squeeze>();
+        case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

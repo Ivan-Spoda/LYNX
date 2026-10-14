@@ -270,7 +270,9 @@ enum class EffectKind : std::uint8_t
     rhythmGain,   // gain following a curve of points in beats, looped, locked to the song (Love Philter envelopes)
     autoPan,      // pan moved by a triangle LFO locked to the song (Love Philter pan LFO)
     vocoder,      // Fruity Vocoder channel vocoder: L modulates, R is the carrier (mono output)
-    pitchCorrect  // pitch correction (FL's Pitcher): detects the pitch and pulls it to the nearest allowed note
+    pitchCorrect, // pitch correction (FL's Pitcher): detects the pitch and pulls it to the nearest allowed note
+    squeeze,      // FL's Fruity Squeeze, exact (REA_rodada29 §2): quantiser, periodic gate, filter; raw values / max
+    vintagePhaser // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
 };
 
 constexpr int maxEffectParams = 40; // the 7-band parametric EQ uses most of them

@@ -108,6 +108,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   Key Bypass, range).
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Fruity Squeeze** and **Vintage Phaser:** FL's algorithms (REA round 29) — Squeeze within 5·10⁻⁹ of the reference model
+  (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
 **Still approximated or left out** (no confirmation yet):
 - Harmor: the resonance becomes an SVF Q with the same peak over the pass-band — Harmor's bump sits at
@@ -141,7 +143,6 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Vocodex: becomes the LYNX vocoder with two side inputs (modulator/carrier from ModIn/CarIn); its band filters,
   per-band maps, carrier noise, HP/LP, Soundgoodizer and unison differ, the output level is not calibrated against FL,
   and the internal Sytrus carrier (CarIn = "---") is not available (only the modulator passes).
-- Squeeze, Vintage Phaser: approximations.
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
