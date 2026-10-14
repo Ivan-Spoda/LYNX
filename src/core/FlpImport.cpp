@@ -383,6 +383,13 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
         project.channels.front().type = flp::ChannelType::native; // native generator (the .fst doesn't say)
         const auto song = importFlp (project);
 
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::sakura)
+        {
+            // the synth's preset button keeps the synth approximation of a Sakura patch
+            SynthSettings synth;
+            if (synthFromSakura (project.channels.front().pluginState, synth))
+                return synth;
+        }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
             return std::nullopt;
 
@@ -767,8 +774,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
                 adopt();
-            else if (name == "sakura" && synthFromSakura (c.pluginState, fromPlugin))
-                adopt();
+            else if (name == "sakura")
+            {
+                // the physical string model (REA_rodada28 §1); the old saw + triangle stays as a fallback
+                if (auto params = sakuraParams (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::sakura;
+                    def.modelParams = std::move (*params);
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromSakura (c.pluginState, fromPlugin))
+                    adopt();
+            }
             else if (name == "kepler" && synthFromKepler (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "boobass" && synthFromBooBass (c.pluginState, fromPlugin))
@@ -781,6 +798,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if (name == "morphine" && synthFromMorphine (c.pluginState, fromPlugin, pluginGain))
                 adopt();
+            else if (name == "drumpad" && drumpadParams (c.pluginState))
+            {
+                // the physical drum model (REA_rodada28 §2)
+                const auto dp = drumpadParams (c.pluginState);
+                def.instrument = InstrumentKind::drumpad;
+                def.modelParams.assign (dp->begin(), dp->end());
+                adoptedFromPlugin = true;
+            }
             else if (name == "drumpad")
                 if (const auto patch = drumpadPatchName (c.pluginState))
                 {

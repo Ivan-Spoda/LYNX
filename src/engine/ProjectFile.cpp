@@ -65,6 +65,8 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::audioClip: return "audioClip";
         case InstrumentKind::plugin: return "plugin";
         case InstrumentKind::controller: return "controller";
+        case InstrumentKind::sakura: return "sakura";
+        case InstrumentKind::drumpad: return "drumpad";
     }
     return "synth";
 }
@@ -73,7 +75,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
 {
     for (auto k : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap,
                     InstrumentKind::synth, InstrumentKind::sampler, InstrumentKind::audioClip,
-                    InstrumentKind::plugin, InstrumentKind::controller })
+                    InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad })
         if (id == instrumentId (k))
             return k;
 
@@ -378,6 +380,13 @@ juce::String toJson (const Song& song)
 
         if (! c.controllerState.empty())
             o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
+        if (! c.modelParams.empty())
+        {
+            juce::StringArray values;
+            for (auto v : c.modelParams)
+                values.add (juce::String (v, 7));
+            o->setProperty ("modelParams", values.joinIntoString (" "));
+        }
 
         if (! c.zones.empty()) // [file, root, min key, max key, min velocity, max velocity, tune, gain]
         {
@@ -731,6 +740,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             def.muted = (bool) c.getProperty ("muted", false);
             def.samplePath = c["sample"].toString().toStdString();
 
+            {
+                const auto values = juce::StringArray::fromTokens (c.getProperty ("modelParams", "").toString(), " ", "");
+                for (int k = 0; k < values.size() && k < 256; ++k)
+                    def.modelParams.push_back (values[k].getFloatValue());
+            }
             if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())
             {
                 juce::MemoryOutputStream decoded;

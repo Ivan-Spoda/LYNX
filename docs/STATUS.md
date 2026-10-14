@@ -55,7 +55,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller, DrumSynth Live (by
   sample); Sytrus, Harmor, Harmless, GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
-  Sakura, Morphine, PoiZone, BassDrum, BooBass and Drumpad on the built-in synth.
+  Morphine, PoiZone, BassDrum and BooBass on the built-in synth; Sakura and Drumpad on physical models rebuilt from
+  their engines (REA round 28, within −138/−150 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
   or name, preferring the format FL used) and their state is restored (VST3 and CLAP); automations of a VST3
   follow FL's persistent parameter slots (record 4 → ParamID; skipped with the plugin sandbox on).
@@ -115,9 +116,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   until it is stolen — LYNX uses a short declick release.
 - Effector: the Reverb's diffusion network and the role of Y are LYNX's (only FL's decay time is reproduced, within
   the LYNX reverb's ≈ 0.6…10.5 s).
-- Sakura: physical strings become saw + triangle; string decay taken at key 60; Hi-Cut applied at the output.
-- BooBass: the source is an internal sample not stored in the project (LYNX uses a saw). Drumpad: the physical
-  mesh model is not reproduced.
+- Sakura: modulation matrix only for the level destination with velocity/note sources (EG/LFO shapes, the other
+  destinations, resonators, chorus, reverb and delay were not decoded); strings longer than 9 600 samples (notes
+  below ~20 Hz) are shortened.
+- Drumpad: no key tracking (FL's DSP has none; the host's per-note pitch value is not confirmed).
+- BooBass: the source is an internal sample not stored in the project (LYNX uses a saw).
 - Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
   linear filter envelope.
 - Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) without its optional noise/gate and with the

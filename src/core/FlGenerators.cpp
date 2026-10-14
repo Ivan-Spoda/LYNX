@@ -781,6 +781,19 @@ bool synthFromOgun (const std::vector<std::uint8_t>& state, SynthSettings& synth
 
 // ---- Sakura ----
 
+std::optional<std::vector<float>> sakuraParams (const std::vector<std::uint8_t>& state)
+{
+    // "SSLF" + size + "Skr1" + 146 floats, raw (index 111 is an integer mode; REA_rodada28 §1.1)
+    if (state.size() < 12 + 146 * 4 || std::memcmp (state.data(), "SSLF", 4) != 0 || u32At (state.data(), 8) != 0x536B7231)
+        return std::nullopt;
+    std::vector<float> p (146);
+    std::memcpy (p.data(), state.data() + 12, sizeof (float) * 146);
+    for (std::size_t k = 0; k < 114; ++k) // floats 114…145 are not parameters
+        if (! std::isfinite (p[k]))
+            return std::nullopt;
+    return p;
+}
+
 bool synthFromSakura (const std::vector<std::uint8_t>& state, SynthSettings& synth)
 {
     if (state.size() < 12 + 146 * 4 || std::memcmp (state.data(), "SSLF", 4) != 0 || u32At (state.data(), 8) != 0x536B7231)

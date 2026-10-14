@@ -1,5 +1,6 @@
 #include "core/Instruments.h"
 #include "core/FlSynths.h"
+#include "core/PhysicalModels.h"
 
 #include <algorithm>
 #include <atomic>
@@ -186,6 +187,8 @@ private:
             case InstrumentKind::audioClip:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
+            case InstrumentKind::sakura:
+            case InstrumentKind::drumpad:
                 break;
         }
 
@@ -1922,6 +1925,12 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     if (kind == InstrumentKind::synth)
         return std::make_unique<SynthInstrument>();
+
+    if (kind == InstrumentKind::sakura)
+        return makeSakuraInstrument();
+
+    if (kind == InstrumentKind::drumpad)
+        return makeDrumpadInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

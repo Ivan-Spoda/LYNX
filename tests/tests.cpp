@@ -5161,3 +5161,43 @@ TEST (harmless_stereo_tremolo_and_vibrato)
     CHECK (crossingsSpread (0.0f) <= 1);
     CHECK (crossingsSpread (100.0f) >= 4);
 }
+
+TEST (physical_models_sound_and_end)
+{
+    // Sakura: a plucked string with default-ish parameters rings and fades after the release; Drumpad: a hit decays
+    for (const auto kind : { lynx::InstrumentKind::sakura, lynx::InstrumentKind::drumpad })
+    {
+        lynx::ChannelDef c;
+        c.instrument = kind;
+        if (kind == lynx::InstrumentKind::sakura)
+        {
+            c.modelParams.assign (146, 0.5f);
+            c.modelParams[111] = 3.0f;  // both strings at the note
+            c.modelParams[113] = 0.5f;  // octave ×1
+            c.modelParams[6] = c.modelParams[11] = 0.99f; // long decay
+            c.modelParams[31] = 0.0f;   // noise exciter
+        }
+        else
+        {
+            c.modelParams.assign (38, 0.5f);
+            c.modelParams[0] = 1.0f;    // retrigger noise
+            c.modelParams[30] = c.modelParams[31] = c.modelParams[32] = c.modelParams[33] = 0.0f; // no velocity morph
+        }
+        auto inst = lynx::makeInstrument (kind);
+        inst->prepare (48000.0);
+        inst->configure (c, 120.0);
+        inst->noteOn (60, 0.8f);
+        std::vector<float> l (48000), r (48000);
+        inst->render (l.data(), r.data(), 24000, 1.0f, 1.0f);
+        inst->noteOff (60);
+        inst->render (l.data() + 24000, r.data() + 24000, 24000, 1.0f, 1.0f);
+        double early = 0.0;
+        for (int i = 0; i < 12000; ++i)
+            early += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        CHECK (early > 1e-6);
+        CHECK (std::all_of (l.begin(), l.end(), [] (float v) { return std::isfinite (v); }));
+        std::vector<float> tail (480000), tailR (480000);
+        inst->render (tail.data(), tailR.data(), 480000, 1.0f, 1.0f); // 10 s later the voice has ended
+        CHECK (inst->idle());
+    }
+}

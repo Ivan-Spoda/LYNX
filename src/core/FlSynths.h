@@ -167,5 +167,7 @@ std::optional<std::string> drumpadPatchName (const std::vector<std::uint8_t>& st
 SynthSettings drumToneForName (const std::string& patchName);
 // Drumpad: the 38 state parameters (2 Mallet Amplitude, 29 Pitch, …; REA_rodada18 §12)
 std::optional<std::array<float, 38>> drumpadParams (const std::vector<std::uint8_t>& state);
+// Sakura: the 146 raw state floats (0…113 are parameters) for the physical string model (REA_rodada28 §1)
+std::optional<std::vector<float>> sakuraParams (const std::vector<std::uint8_t>& state);
 std::vector<std::string> drumSampleCandidates (const std::string& soundName);
 } // namespace lynx

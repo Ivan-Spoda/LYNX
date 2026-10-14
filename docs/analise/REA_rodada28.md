@@ -134,9 +134,9 @@ Per 48 kHz sample, per voice:
 1. **Source.** A uniform value `u ∈ [0, 1)` from a 32-bit LCG (`s ← s·0x0BB38435 + 0x3619636B`, `u = s·2⁻³²`; one
    global generator, four draws per sample for the four SIMD lanes). Sample-and-hold: the held value `h` is replaced
    by `u` only when `u > θ`, `θ = 0.996·(1 − clamp(Rate + m14))^0.25` (Rate = index 32). Source value
-   `x = (1 − L)²·h + L`, with L = index 31 as stored (`1 − x_param`): at **Exc Noise Level = 0 the source is the
-   constant 1** (a step at note-on — the "click"); at 1 it is the held noise (manual: "balance between a single click"
-   and noise **[DOC]**).
+   `x = (1 − p)²·h + p`, p = index 31 parameter value (the engine stores `1 − p` and squares it): at
+   **p = 1 the source is the constant 1** (a step at note-on — the "click"); at p = 0 it is the held noise (manual:
+   "balance between a single click" and noise **[DOC]**; the slider direction in the UI was not checked).
 2. **Lo-Cut:** 2-pole high-pass, `f_lc = 2^(9.3·u_lc + 5)` Hz (32 Hz…20.2 kHz), `u_lc = clamp(Lo-Cut + 0.5·m4)`,
    `Q = 1 + 10·Res`, `w = 2π f_lc/48000`: `y = b·(x − 2x₋₁ + x₋₂) − a1·y₋₁ − a2·y₋₂`,
    `b = (1 + cos w)/(2 + sin w/Q)`, `a1 = −2Q·cos w/(Q + sin w)`, `a2 = (Q − sin w)/(Q + sin w)`.
@@ -373,7 +373,7 @@ Not matched: noise **without** retrigger (unknown initial generator state — st
 |---|---|---|
 | S1 | Sakura rate | fixed 48 kHz internal, linear resampling to host **[DECOMP+EXEC]** |
 | S2 | Sakura pitch | integer loop `N = trunc(48000/f)` clocked at `f·L1/48000` per sample; no all-pass; S2 ratio 4,3,2,1,½,⅓,¼ by integer lengths **[DECOMP+EXEC]** |
-| S3 | Sakura exciter | click (constant 1) ↔ sample-and-hold noise (θ = 0.996(1 − Rate)^0.25); 2-pole HP 2^(9.3u+5) Hz; 4-pole LP g = Cutoff², r = −10·Res(1 − g), drive 1000x⁴; per-lane DC-blocked injection **[DECOMP+EXEC]** |
+| S3 | Sakura exciter | `(1 − p)²·noise + p` (p = Exc Noise Level; 1 = click/constant, 0 = sample-and-hold noise, θ = 0.996(1 − Rate)^0.25); 2-pole HP 2^(9.3u+5) Hz; 4-pole LP g = Cutoff², r = −10·Res(1 − g), drive 1000x⁴; per-lane DC-blocked injection **[DECOMP+EXEC]** |
 | S4 | Sakura loop | 2× 1-pole LP c = min(1, 50^(2.57 − 0.8995a³)·2/44100), far lane × (1 − Offset²); sharpness −0.5x²(1 − c); saturation v/(1 + 100x⁶v²); feedback ±Decay^0.05 **[DECOMP+EXEC]** |
 | S5 | Sakura pickup/mix | out = near lane + Level·comb(far lane, length Ratio·L, fb √Fdbk); L/R linear pan by Sep; ×5·(1 − Mix)/5·Mix **[DECOMP+EXEC]** |
 | S6 | Sakura output | HP 32 Hz Q 1, master 10^(4.8x − 1.8) **[DECOMP+EXEC]** |
@@ -443,3 +443,105 @@ Reference implementations (verified against the DLL): `tmp/r28/py/sakura_model.p
 - Sakura: EG and LFO shapes; resonator, chorus, reverb and delay laws; FL host "compute L/R volume" law.
 - Both: semantics of FL's `FinalLevels.Pitch` (decides whether Drumpad follows the key through the host value).
 - Drumpad: initial noise generator state when the noise retrigger is off.
+
+---
+
+## 4. Host per-voice levels (follow-up)
+
+**Additional target:** `FLEngine_x64.dll` `6d9c5ab09c1d5594012ac2c31cf9ed08e73f42164ed0964cccae10a95d9b8e02` (= round 18;
+Delphi). New Ghidra project `/tmp/r28gh_FLE` (imported **without** automatic analysis); because of its size, the
+relevant code was located with our own brute-force RIP-relative reference finder `tmp/r28/py/rip.py` and the
+direct-call finder `tmp/r18/calls.py`, and read with `objdump` (linear disassembly kept in `/tmp/r28_fle.dis`).
+Host functions used: host object VMT `0x13141b8` (round 18) — slot 6 `FUN_0132af20` (voice event handler), slot 31
+`FUN_0132acb0` → `FUN_006a3a00` (compute L/R volume); pan laws `0x6a3990` / `0x6a39c0` (FPU) and `0x6a6040` /
+`0x6a60b0` (SSE variants), selected by the start-up code at `0x6a6cd6…0x6a6e99`; pan-law mode setter `0x6a3a70`
+(called from `0x1363475` with a project setting at `+0x3c0`); voice FinalLevels builder `0xd265e0`; channel level
+updaters `0xfe9d20` (volume), `0xfe9c00…0xfe9ce6` (pan), `0xfe9fc0` (pitch); channel defaults `0xfe9157…0xfe91bb`;
+constants at `0x6a6913…0x6a69f2`. The harness `run/plug.c` gained optional host stand-ins (pan law A, chosen
+FinalLevels Vol/Pan) and a direct float(float) call (`PLUGCALLF`), used only for the EXEC checks below.
+
+### 4.1 What FL passes per voice **[DECOMP]**
+
+The host voice object carries the SDK's two `TLevelParams` blocks (Pan, Vol, Pitch, FCut, FRes): **InitLevels at
+voice `+0x278`** and **FinalLevels at `+0x28c`**; the generator channel object (voice `+0x260`) holds the channel
+levels at `+0x198` (Pan), `+0x19c` (Vol), `+0x1a0` (Pitch), `+0x1a4` (FCut), `+0x1a8` (FRes).
+
+- **Channel level** (recomputed when the knobs change):
+  - `chan.Vol = g(V/12800)·g(W/12800)`, `g(v) = (11^v − 1)/10` (exactly 1 when v = 1), V = channel volume
+    (`+0x170`, default **10000** → `g = 0.5510`), W = a second volume factor (`+0x188`, default 12800 → 1; its UI
+    source was not identified). `chan.Vol = 0` in one channel state (`+0x160 = 1` without `+0x32e`; not identified).
+  - `chan.Pan = (P + P_mod − 6400)/6400` (P = `+0x16c`, default 6400 = centre; `P_mod` = `+0x184`, default 0).
+  - `chan.Pitch = pitch(+0x174) + fine(+0x154 of the channel's sub-object) − 100·root(+0x15c)` in cents, plus a global
+    pitch when `+0x28f` is set (in another mode, `+0x6ec`, the pitch is sent as an event and
+    `chan.Pitch = −100·root`).
+- **FinalLevels** (`0xd265e0`, called at note start and on changes):
+  - `Final.Vol = Init.Vol·chan.Vol` **only if the voice's "link velocity" flag is set**, otherwise
+    **`Final.Vol = chan.Vol`**. The flag is the SDK voice event 6 handled by host slot 6 (`value > 0` → on).
+  - `Final.Pan = Init.Pan + chan.Pan`, then, if the voice offset `+0x25c` ≠ 0, `clamp(… + offset, −1, 1)`.
+  - `Final.Pitch = Init.Pitch + chan.Pitch + voice(+0x1e0)`; `Final.FCut/FRes = Init + chan`.
+  - Optional extra terms: a modulation matrix when the channel flag `+0x6ed` is set, and a parent level object
+    (`+0x214`: × its Vol, + its Pan, + its Pitch + 6000, × a per-index table) — both not identified in the UI.
+- **Velocity in Init.Vol.** The host answers "get velocity" (voice event 3) with
+  `ln(1 + 10·Init.Vol)/ln 11 × 0.78125` (`0x15f49f0 = 1/ln 11` from the start-up code). Reading FL's velocity as
+  0…1 with 100/128 = 0.78125 as the default, this means **`Init.Vol = (11^(vel/100) − 1)/10`** (vel = FL note velocity
+  0…128; 100 → 1.0, 128 → 2.06) — **inference** (the code that writes Init.Vol was not located).
+- **Compute L/R volume** (host slot 31, `FUN_006a3a00`): pan clamped to ±1, then
+  - mode ≠ 1 (law A, default code path): **`L = Vol·cos((1 + pan)·π/4)`, `R = Vol·sin((1 + pan)·π/4)`**
+    (centre: both `0.7071·Vol`);
+  - mode 1 (law B): `Vol' = 0.7071·Vol`; pan < 0: `L = Vol'`, `R = (1 + pan)·Vol'`; pan ≥ 0: `R = Vol'`,
+    `L = (1 − pan)·Vol'` (centre also `0.7071·Vol`).
+  The mode is a project setting (`+0x3c0` of the object read at `0x1363468`); which UI option it is was not
+  identified, and the value in the demo project was not read.
+
+### 4.2 How Sakura and Drumpad use them **[DECOMP + EXEC]**
+
+Both wrappers are the same framework code (Sakura `FUN_180004980`/`FUN_180003e60`, Drumpad `FUN_1800048f0`/
+`FUN_180003dd0`):
+- **At TriggerVoice** they send voice event 6 with value 0 → **link velocity OFF**, so `Final.Vol = chan.Vol`
+  (the note velocity never scales the output through FL's levels). The engine receives
+  `note = trunc(Init.Pitch/100)` and a MIDI velocity **`trunc(127·ln(1 + 10·Init.Vol)/ln 21)`**, clamped 0…127
+  (EXEC with the DLLs' own function: Init.Vol 0.1 → 28.91, 1.0 → 100.03, 2.0 → 127.0, identical in both). With the
+  inferred Init.Vol law this is `≈ trunc(1.0003·vel)`, i.e. the FL velocity. In Sakura that velocity only reaches the
+  sound through the matrix (source 6); in Drumpad through `√(vel/127)` in the morph slots (§2.2).
+- **Every block** (`FUN_180003e60` / `FUN_180003dd0`) they read each held note's **FinalLevels**, call the host's
+  compute-L/R-volume with `(Final.Pan, Final.Vol)`, and store **L, R** in the engine's per-note tables `+0x20`/`+0x220`
+  (the `T_L`, `T_R` of §1.6 and the per-voice gains of §2.7), the pitch offset `Final.Pitch/100 − note + 60` in
+  `+0x420`, and Final.FCut/FRes in `+0x620`/`+0x820` (not read by either DSP). Notes without levels inherit the
+  values of the nearest held note (the whole 128-entry table is filled).
+- **EXEC** (harness host using law A, `Final.Vol = g(10000/12800) = 0.5510`, pan 0): Sakura and Drumpad outputs
+  drop by **−8.19 dB** (= `20·log10(0.5510·0.7071)`) relative to unit tables; with pan −0.5 a clean Sakura patch
+  gives L/R factors 0.9239/0.3827 of the unit level (= cos/sin(π/8)) and Drumpad 0.5091·/0.2109· (= 0.551·cos/sin(π/8)).
+  The output is linear in `T_L/T_R`.
+- **Pitch:** `T_note = Final.Pitch/100 − note + 60` = `(Init.Pitch − 100·note)/100 + chan.Pitch/100 + 60 + voice/100`.
+  Since the wrapper takes the note as `trunc(Init.Pitch/100)`, Init.Pitch is the absolute key in cents (**inference**),
+  so **`T_note ≈ pitch knob + fine (in semitones) − root + 60`**: 0 for a channel with root C5 and pitch 0. Sakura
+  tracks the key through its own note number; **Drumpad follows only the channel pitch/fine/root shift (±12
+  semitones clamp), not the key**.
+
+### 4.3 Additional output scaling re-checked **[DECOMP + EXEC]**
+
+- Sakura: master `10^(4.8·x₀ − 1.8)` × CC7 × CC10 pan; the synth constructor (`FUN_18002e670`) sets CC7 = 1.0 and
+  CC10 = 0.5 (centre → unity) and the wrapper's ProcessEvent handles only tempo and max-polyphony (no MIDI volume),
+  so no other factor. The only factor left at 1 in the §1.12 harness was **`T_L/T_R`**.
+- Drumpad: the only factor left at 1 in §2.9 was likewise the per-voice gains (`T_L/T_R` → `+0x49e8/+0x49ec`); the
+  synth-level `0.5·CC7` function `FUN_18001e300` is not on the Gen_Render path (EXEC: output gain 1).
+- Host side: within the channel code only the voice FinalLevels builder, the "MIDI-style" event path and a sampler
+  L/R computation read `chan.Vol`; **no host multiplication of a native generator's Gen_Render output by the
+  channel volume/pan was found** (**inference**: channel volume and pan reach these plugins only through
+  FinalLevels). The mixer insert/master levels downstream are not part of this question.
+
+### 4.4 Formulas for LYNX
+
+Per voice, multiply the Sakura/Drumpad stereo output (which in the Python models assumes `T_L = T_R = 1`) by
+```
+Vol   = (11^(V/12800) − 1)/10 · (11^(W/12800) − 1)/10      (V = channel volume 0…12800, W normally 12800 → 1)
+pan   = clamp(note pan + (P − 6400)/6400, −1, 1)              (P = channel pan, 6400 = centre)
+T_L   = Vol·cos((1 + pan)·π/4),   T_R = Vol·sin((1 + pan)·π/4)   (centre: 0.7071·Vol)
+```
+**and do not apply the channel volume/pan again** at the channel level for these two plugins. At default settings
+this is −8.19 dB versus unit gain (−3.01 dB from the pan law if LYNX already applies `g(V)` separately). Velocity:
+pass `vel7 = trunc(127·ln(1 + 10·Init.Vol)/ln 21)` (≈ the FL velocity) to the engine; do not scale the output by
+velocity. Sakura pitch offset `T_note` = channel pitch + fine (semitones) − root + 60 (0 by default); Drumpad pitch
+factor `2^(clamp(12·bend + T_note, −12, 12)/12)`, no key tracking. **Not confirmed:** which pan-law mode (A/B) the
+project uses (both give 0.7071·Vol at centre), the UI meaning of W, `+0x6ed`, `+0x214`, the note-pan scaling of
+Init.Pan, and the code writing Init.Vol.

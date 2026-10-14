@@ -35,7 +35,9 @@ enum class InstrumentKind : std::uint8_t
     sampler,
     audioClip, // sampler without transposition that stops at the end of the clip (audio clip channel, as in FL)
     plugin,    // external instrument (VST3), created by the app
-    controller // makes no sound: notes trigger envelopes that modulate other parameters (FL's Envelope Controller)
+    controller, // makes no sound: notes trigger envelopes that modulate other parameters (FL's Envelope Controller)
+    sakura,     // physical string model (FL's Sakura engine, REA_rodada28 §1); parameters in ChannelDef::modelParams
+    drumpad     // physical drum model (FL's Drumpad engine, REA_rodada28 §2); parameters in ChannelDef::modelParams
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -234,6 +236,7 @@ struct ChannelDef
     int mixerTrack = 0;     // 0 = straight to Master
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
+    std::vector<float> modelParams; // instrument == sakura / drumpad: FL's raw state parameters
     SamplerSettings sampler; // used when instrument == sampler
     SynthSettings synth;     // used when instrument == synth
     float swingMix = 1.0f;   // how much of the global swing applies to this channel (0..1), as in FL
