@@ -149,6 +149,14 @@ Confirmed empirically on the demo projects:
   chunk; others are plain Ogg files with a `.wav` extension. Paths use `%FLStudioFactoryData%` (install folder),
   `%FLStudioData%` (install\Data) and `%FLStudioUserData%` (Documents\Image-Line\FL Studio).
 
+## Audio drivers
+- Windows Audio (shared, exclusive and low-latency), DirectSound and **ASIO** (Steinberg ASIO SDK 2.3.4 headers,
+  GPLv3 option). `LYNX.exe --devicetest "ASIO" "<driver>" report.txt` opens a driver, runs 1 s of silent callbacks
+  and reports rate, block size and latency: "FL Studio ASIO" works (44.1 kHz, 512, 86 callbacks/s). On the test
+  machine "Realtek ASIO" ends the process while loading (exit code 116) — Steinberg's own SDK host sample does the
+  same, so it is the driver. In the Zig/MinGW build a driver that crashes while opening/closing is not contained
+  (JUCE's `__try` guard needs MSVC; the CMake/MSVC build keeps it).
+
 ## Plugin hosting
 - Optional separate-process plugins: each plugin runs in a child `LYNX.exe --lynx-plugin-host`. Audio
   (up to 8 channels × 4096), MIDI (up to 1024 events) and parameter changes (up to 512 per block, both ways) go
@@ -164,5 +172,4 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- ASIO (Steinberg SDK licensing).
 - Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth, Harmor's per-partial resonance and image synthesis.

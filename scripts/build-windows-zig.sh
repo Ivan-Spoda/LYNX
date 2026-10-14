@@ -28,7 +28,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_WEB_BROWSER 0'
     echo '#define JUCE_USE_WINDOWS_MEDIA_FORMAT 0'
     echo '#define JUCE_PLUGINHOST_VST3 1'
-    echo '#define JUCE_ASIO 0'
+    echo '#define JUCE_ASIO 1'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
     echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.0"'
@@ -39,7 +39,7 @@ cmp -s "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h" 2>/dev/null && rm "$OUT/JuceC
 
 COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
         -include "$OUT/JuceConfig.h" -include cmake/mingw/mingw_compat.h
-        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Isrc)
+        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/asiosdk/common -Isrc)
 
 export ZIG OUT JUCE_DIR TARGET
 export COMMON_STR="${COMMON[*]}"
@@ -49,7 +49,11 @@ for m in "${MODULES[@]}"; do echo "$m"; done | xargs -P "$JOBS" -I{} bash -c '
     m={}; obj="$OUT/juce/$m.o"
     if [[ ! -f "$obj" || "$OUT/JuceConfig.h" -nt "$obj" ]]; then
         echo "  JUCE $m"
-        $ZIG c++ $COMMON_STR -w -c "$JUCE_DIR/modules/$m/$m.cpp" -o "$obj"
+        extra=""
+        # JUCE ASIO uses MSVC __try/__except: clang accepts it with -fms-extensions, but on MinGW it does not catch
+        # (a driver crashing while being opened/closed is not contained in this build; the MSVC build keeps the guard)
+        [[ "$m" == juce_audio_devices ]] && extra="-fms-extensions -DJUCE_DONT_AUTOLINK_TO_WIN32_LIBRARIES=1"
+        $ZIG c++ $COMMON_STR $extra -w -c "$JUCE_DIR/modules/$m/$m.cpp" -o "$obj"
     fi'
 
 # Extra units that JUCE's CMake compiles along with the modules

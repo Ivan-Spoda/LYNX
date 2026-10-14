@@ -102,11 +102,13 @@ if(LYNX_BUILD_APP)
         src/ui/ChannelSettings.cpp
         src/ui/BrowserComponent.cpp)
 
+    target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
+
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
-        JUCE_ASIO=0                      # enable once the ASIO SDK is available
+        JUCE_ASIO=1                      # ASIO SDK headers in third_party/asiosdk (GPLv3 option)
         JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LYNX,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:LYNX,JUCE_VERSION>")

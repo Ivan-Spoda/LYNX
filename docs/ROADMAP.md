@@ -56,7 +56,7 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Render an insert to audio (freeze)
 - [x] Render/export to WAV/FLAC/OGG (no MP3: JUCE has no MP3 encoder)
 - [x] WASAPI exclusive and "Low Latency" (from JUCE; listed in Audio settings)
-- [ ] ASIO (needs Steinberg's SDK; license decision pending)
+- [x] ASIO via the Steinberg ASIO SDK's GPLv3 option (2025), compatible with LYNX's AGPL-3.0
 - [x] GPU UI: JUCE 8 draws with Direct2D on Windows
 - [x] Idle channels skipped by the renderer
 

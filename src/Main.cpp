@@ -123,6 +123,75 @@ public:
             return;
         }
 
+        if (args.contains ("--devicetest"))
+        {
+            // LYNX.exe --devicetest "type" "device" report.txt: opens that output device, receives 1 s of callbacks
+            // writing silence, closes it and reports rate, block size, latency and callbacks (driver check, no sound)
+            const auto i = args.indexOf ("--devicetest");
+            const auto typeName = args[i + 1].unquoted(), deviceName = args[i + 2].unquoted();
+            juce::String report;
+            const juce::File reportFile (args[i + 3].unquoted());
+            auto step = [&] (const juce::String& line) { report << line << "\n"; reportFile.replaceWithText (report); }; // progress survives a driver that ends the process
+            step ("step=start");
+            juce::AudioDeviceManager manager;
+            std::unique_ptr<juce::AudioIODevice> device;
+            for (auto* type : manager.getAvailableDeviceTypes())
+                if (type->getTypeName() == typeName)
+                {
+                    type->scanForDevices();
+                    step ("step=create");
+                    device.reset (type->createDevice (deviceName, {}));
+                    step ("step=created");
+                }
+            struct Silence final : juce::AudioIODeviceCallback
+            {
+                std::atomic<int> calls { 0 };
+                void audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int channels, int n,
+                                                       const juce::AudioIODeviceCallbackContext&) override
+                {
+                    for (int c = 0; c < channels; ++c)
+                        if (out[c] != nullptr)
+                            juce::FloatVectorOperations::clear (out[c], n);
+                    ++calls;
+                }
+                void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+                void audioDeviceStopped() override {}
+            } silence;
+            bool ok = false;
+            if (device == nullptr)
+                step ("error=device not found");
+            else
+            {
+                step ("step=open");
+                juce::BigInteger outputs;
+                outputs.setRange (0, 2, true);
+                const auto rates = device->getAvailableSampleRates();
+                const auto rate = device->getCurrentSampleRate() > 0 ? device->getCurrentSampleRate()
+                                  : rates.contains (48000.0) ? 48000.0 : rates.isEmpty() ? 44100.0 : rates[0];
+                step ("rates=" + juce::String (rates.size()) + " chosen=" + juce::String (rate) + " default_block=" + juce::String (device->getDefaultBufferSize()));
+                const auto error = device->open ({}, outputs, rate, device->getDefaultBufferSize());
+                if (error.isNotEmpty())
+                    step ("error=" + error);
+                else
+                {
+                    step ("step=start_callbacks");
+                    device->start (&silence);
+                    juce::Thread::sleep (1000);
+                    device->stop();
+                    report << "rate=" << device->getCurrentSampleRate() << "\n"
+                           << "block=" << device->getCurrentBufferSizeSamples() << "\n"
+                           << "output_latency=" << device->getOutputLatencyInSamples() << "\n"
+                           << "callbacks=" << silence.calls.load() << "\n";
+                    ok = silence.calls.load() > 0;
+                    device->close();
+                }
+            }
+            step (juce::String ("result=") + (ok ? "OK" : "FAILED"));
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
+            return;
+        }
+
         if (args.contains ("--scantest"))
         {
             // LYNX.exe --scantest folder report.txt: scan (in child processes) without touching the user's list

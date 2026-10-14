@@ -1,0 +1,5 @@
+Steinberg ASIO SDK 2.3.4 (2025-10-15), from https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip
+(sha256 d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca).
+Only the three interface headers JUCE needs are kept (common/asio.h, asiosys.h, iasiodrv.h), unmodified.
+LYNX uses the SDK under its GPLv3 option (dual licence, see LICENSE.txt), which is compatible with LYNX's AGPL-3.0.
+ASIO is a trademark of Steinberg Media Technologies GmbH.
