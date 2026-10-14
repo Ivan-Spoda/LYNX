@@ -931,7 +931,15 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     else if (is ("Maximus"))
         maximus (state, slot);
     else if (is ("Soundgoodizer"))
-        soundgoodizer (state, slot);
+    {
+        // the compressor approximation followed by its presets' master limiter (REA_rodada8 §2; FL's own SG DLL checked in REA_rodada35),
+        // as one serial branch
+        if (state.size() >= 12)
+        {
+            slot = makeEffectSlot (EffectKind::parallel);
+            slot.branches.push_back ({ soundgoodizerApproximation (i32At (state, 4), i32At (state, 8)), 1.0f });
+        }
+    }
     else if (is ("Fruity Fast Dist"))
         fastDist (state, slot);
     else if (is ("Fruity Filter"))
