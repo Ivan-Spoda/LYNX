@@ -14,6 +14,7 @@
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/ExportDialog.h"
+#include "ui/I18n.h"
 #include "ui/MainComponent.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Theme.h"
@@ -57,6 +58,9 @@ public:
             return;
 
         const auto args = juce::StringArray::fromTokens (commandLine, true);
+
+        // interface language: saved in %APPDATA%\LYNX\language.txt; --lang pt-BR overrides it for this run
+        lynx::i18n::initialise (args);
 
         if (args.contains ("--showcase"))
         {
