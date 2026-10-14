@@ -271,6 +271,7 @@ void MainComponent::paint (juce::Graphics& g)
     }
 
     // BPM inset behind the value
+    if (bpmSlider.isVisible())
     {
         auto r = bpmSlider.getBounds().toFloat();
         r = r.withWidth (80.0f);
@@ -300,11 +301,19 @@ void MainComponent::resized()
     dividers.clear();
     const auto h = toolbar.getHeight(); // 32
 
+    // the settings button is pinned to the right; groups that don't fit in a narrow window are hidden
+    settingsButton.setBounds (toolbar.removeFromRight (h));
+    toolbar.removeFromRight (8);
+
     auto place = [&toolbar] (juce::Component& c, int width, int gapAfter = 2) {
-        c.setBounds (toolbar.removeFromLeft (width));
-        toolbar.removeFromLeft (gapAfter);
+        const auto fits = width <= toolbar.getWidth();
+        c.setVisible (fits);
+        c.setBounds (fits ? toolbar.removeFromLeft (width) : juce::Rectangle<int>());
+        toolbar.removeFromLeft (juce::jmin (gapAfter, toolbar.getWidth()));
     };
     auto divide = [&] {
+        if (toolbar.getWidth() < 15 + h)
+            return;
         toolbar.removeFromLeft (7);
         dividers.push_back (toolbar.getX());
         toolbar.removeFromLeft (8);
@@ -327,24 +336,28 @@ void MainComponent::resized()
     divide();
     place (metronomeButton, h, 8);
     place (bpmSlider, 128, 0);
-    divide();
-    place (patternBox, 150, 2);
-    place (newPatternButton, h, 0);
-    place (patternMenuButton, h, 0);
-    divide();
-    place (swingLabel, juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (theme::font (theme::type::caption, true)), swingLabel.getText())) + 4, 4);
-    place (swingSlider, h, 0);
+    const auto showPattern = toolbar.getWidth() >= 15 + 150 + 2 + 2 * h; // the pattern group shows whole or not at all
+    if (showPattern)
+        divide();
+    place (patternBox, showPattern ? 150 : 100000, 2);
+    place (newPatternButton, showPattern ? h : 100000, 0);
+    place (patternMenuButton, showPattern ? h : 100000, 0);
 
-    settingsButton.setBounds (toolbar.removeFromRight (h));
-    toolbar.removeFromRight (8);
+    const auto swingWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (theme::font (theme::type::caption, true)), swingLabel.getText())) + 4;
+    const auto showSwing = toolbar.getWidth() >= 15 + swingWidth + 4 + h;
+    if (showSwing)
+        divide();
+    place (swingLabel, showSwing ? swingWidth : 100000, 4);
+    place (swingSlider, showSwing ? h : 100000, 0);
+    toolbar.removeFromLeft (juce::jmin (8, toolbar.getWidth()));
 
-    if (toolbar.getWidth() > 230)
-        scope.setBounds (toolbar.removeFromRight (juce::jmin (180, toolbar.getWidth() - 140)));
+    if (toolbar.getWidth() > 210)
+        scope.setBounds (toolbar.removeFromRight (juce::jmin (180, toolbar.getWidth() - 132)));
     else
         scope.setBounds ({});
 
-    toolbar.removeFromRight (8);
-    positionLabel.setBounds (toolbar.getWidth() >= 110 ? toolbar.removeFromRight (juce::jmin (toolbar.getWidth(), 140)) : juce::Rectangle<int>());
+    toolbar.removeFromRight (juce::jmin (8, toolbar.getWidth()));
+    positionLabel.setBounds (toolbar.getWidth() >= 110 ? toolbar.removeFromRight (juce::jmin (toolbar.getWidth(), 124)) : juce::Rectangle<int>());
 
     auto status = area.removeFromBottom (statusHeight).reduced (10, 0);
     cpuLabel.setBounds (status.removeFromRight (90));
