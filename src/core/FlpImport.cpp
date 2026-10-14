@@ -1094,6 +1094,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     };
     std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // Love Philter automation
 
+    // data files of the user's FL installation that some effects load at run time (Soundgoodizer's presets,
+    // REA_rodada40); nothing of them is stored in LYNX itself, only in the imported project
+    const FlDataReader flData = [&options] (const std::string& relative) -> std::vector<std::uint8_t> {
+        const auto path = resolveFlPath ("%FLStudioFactoryData%\\" + relative, options.roots);
+        if (path.empty() || ! options.readFile || (options.fileExists && ! options.fileExists (path)))
+            return {};
+        return options.readFile (path);
+    };
+    // exact engines that fell back to their approximation (for the report)
+    auto noteFallback = [&options] (const std::string& plugin, const EffectSlot& fx) {
+        if (options.report == nullptr || fx.kind == EffectKind::maximus)
+            return;
+        if (plugin == "Maximus")
+            ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
+        else if (plugin == "Soundgoodizer")
+            ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+    };
+
     for (const auto& insert : project.mixer)
     {
         if (insert.index < 0 || insert.index >= tracks)
@@ -1164,8 +1182,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                     if (! head.note.empty() && options.report != nullptr)
                                         ++options.report->droppedEffects[head.note];
                                 }
-                                else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
+                                else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm, flData); fx && fx->kind != EffectKind::plugin)
+                                {
+                                    noteFallback (node.plugin, *fx);
                                     chain.push_back (std::move (*fx));
+                                }
                                 else if (options.report != nullptr)
                                     ++options.report->droppedEffects[node.plugin + " (in Patcher)"];
                                 break;
@@ -1245,7 +1266,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     made->plugin.foreign = std::move (foreign);
                 }
                 else
-                    made = effectFromFl (slot.plugin, slot.state, song.bpm); // native effect with the saved settings (REA_rodada7)
+                {
+                    made = effectFromFl (slot.plugin, slot.state, song.bpm, flData); // native effect with the saved settings (REA_rodada7)
+                    if (made)
+                        noteFallback (slot.plugin, *made);
+                }
 
                 if (! made)
                 {
@@ -1284,7 +1309,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (slot.plugin == "Vocodex")
                 {
                     // ModIn/CarIn index the same inputs list as the sidechains (REA_rodada22 §1)
-                    if (const auto v = vocodexEffect (slot.state))
+                    if (const auto v = vocodexEffect (slot.state, flData))
                     {
                         fx.sidechain = sidechainSource (insert.index, v->modIn);
                         fx.sidechain2 = sidechainSource (insert.index, v->carIn);

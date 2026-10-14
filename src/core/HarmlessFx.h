@@ -25,7 +25,34 @@ std::optional<std::vector<std::uint8_t>> maximusStateFromFst (const std::vector<
 struct MaximusPreset;
 std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::uint8_t>& state);
 
+// Which build of the engine runs the state: Shared/SG_x64.dll (= Maximus_x64.dll, bit-identical on the demo states)
+// or the older copy inside Soundgoodizer_x64.dll (16-bit saturation tables, another curve end; REA_rodada40 §3)
+enum class MaximusBuild { shared, soundgoodizer };
+std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::uint8_t>& state, MaximusBuild build);
+
 class Maximus;
+
+// The Maximus engine on its own, as FL's mixer Maximus, Soundgoodizer and Vocodex's SG stage run it (Eff_Render on
+// the host's blocks; blocks longer than 512 frames are split). mixParameter: parameter 5 (band mix, 0…1000).
+class MaximusProcessor
+{
+public:
+    MaximusProcessor();
+    ~MaximusProcessor();
+    MaximusProcessor (const MaximusProcessor&) = delete;
+    MaximusProcessor& operator= (const MaximusProcessor&) = delete;
+
+    void prepare (std::shared_ptr<const MaximusPreset> preset, double sampleRate, int mixParameter);
+    void process (float* left, float* right, int n) noexcept;
+    void reset() noexcept;
+    int latencySamples() const noexcept; // reported to the host (FL compensates it)
+
+private:
+    std::unique_ptr<Maximus> engine;
+};
+
+// parameter 5 (band mix) stored in the state
+int maximusMixParameter (const MaximusPreset& preset) noexcept;
 
 // The whole rack of one Harmless instance (state lives here; the presets are shared)
 class Rack

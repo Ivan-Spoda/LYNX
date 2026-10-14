@@ -4,6 +4,7 @@
 #include "core/PitcherDsp.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
+#include "core/MaximusFx.h"
 
 #include "core/Biquad.h"
 
@@ -2131,6 +2132,7 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Release", 90.0f / 990.0f }, { "Hold", 0.0f }, { "Modulator", 0.0f },
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
+    static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2225,6 +2227,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::squeeze: return squeezeInfo;
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
+        case EffectKind::maximus: return maximusInfo;
     }
     return eq;
 }
@@ -2494,6 +2497,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
+        case EffectKind::maximus:
             break;
     }
 
@@ -2523,6 +2527,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return makeParallelEffect (slot);
     if (slot.kind == EffectKind::vocodex)
         return vocodex::make (slot.state);
+    if (slot.kind == EffectKind::maximus)
+        return maximusfx::make (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2554,6 +2560,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::squeeze: return std::make_unique<Squeeze>();
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

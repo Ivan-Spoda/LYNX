@@ -31,6 +31,7 @@
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/HarmlessFx.h"
+#include "core/MaximusFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -751,6 +752,7 @@ TEST (flp_real_files)
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
+    int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -819,6 +821,28 @@ TEST (flp_real_files)
                     padChannels += c.name.find (" - ") != std::string::npos && c.instrument == lynx::InstrumentKind::sampler ? 1 : 0;
                 }
                 fpcKits += hasFpc;
+                // Maximus / Soundgoodizer become the exact engine (REA_rodada40); Vocodex carries SG.dat (and its
+                // carrier's Sytrus preset) read from the installation
+                for (const auto& insert : p.mixer)
+                    for (const auto& slot : insert.slots)
+                    {
+                        maximusSlots += slot.plugin == "Maximus";
+                        sgzSlots += slot.plugin == "Soundgoodizer";
+                        vocodexSlots += slot.plugin == "Vocodex";
+                    }
+                for (const auto& t : full.mixer)
+                    for (const auto& fx : t.effects)
+                    {
+                        if (fx.kind == lynx::EffectKind::maximus)
+                        {
+                            const auto blob = lynx::maximusfx::unpack (fx.state);
+                            CHECK (blob && lynx::maximusfx::presetOf (*blob) != nullptr);
+                            if (blob)
+                                (blob->build == lynx::hlfx::MaximusBuild::soundgoodizer ? sgzExact : maximusExact) += 1;
+                        }
+                        if (fx.kind == lynx::EffectKind::vocodex)
+                            vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
+                    }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
                     {
@@ -1402,6 +1426,12 @@ TEST (flp_real_files)
     CHECK (harmorUsable == harmor && harmor > 90 && harmorKind >= harmor && harmorSounding >= harmorKind * 9 / 10);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
+    std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
+                 maximusSlots, sgzExact, sgzSlots, vocodexWithData, vocodexSlots);
+    // REA_rodada40 §6: in Demo projects the 6 states left on the approximation use the Frequency Splitter linear-phase
+    // option (4) or the legacy linear-phase FIR (2); the other Data folders add states with options not decoded
+    CHECK (maximusSlots - maximusExact <= 18 && maximusExact >= 95 && sgzExact == sgzSlots && sgzSlots > 90);
+    CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -6210,9 +6240,10 @@ TEST (harmless_rack)
         std::array<int, 100> p {};
         p[98] = 1000;
         const auto [l, r] = run (p, 1, preset, 4096, 4096);
-        const std::tuple<int, float, float> golden[] { { 100, 0.02499794f, 0.88166064f }, { 1000, 0.56971455f, -0.62808162f },
-                                                       { 2047, -0.27541649f, 0.70913559f }, { 3000, 0.32431602f, -0.37985173f },
-                                                       { 4095, -0.12743534f, -0.15237498f } };
+        // SG_x64.dll's own output (EXEC, REA_rodada40: bit-identical to the port)
+        const std::tuple<int, float, float> golden[] { { 100, 0.024997942f, 0.88166064f }, { 1000, 0.56971401f, -0.62808102f },
+                                                       { 2047, -0.27541628f, 0.709135f }, { 3000, 0.32431623f, -0.37985197f },
+                                                       { 4095, -0.12743522f, -0.15237485f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
         float peak = 0.0f;
@@ -6235,9 +6266,10 @@ TEST (harmless_rack)
         std::array<int, 100> p {};
         p[98] = 600;
         const auto [l, r] = run (p, 2, preset, 4096, 4096);
-        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856275f, -0.63261062f },
-                                                       { 2047, 0.20268074f, 0.5414567f }, { 3000, -0.25614089f, -0.49984524f },
-                                                       { 4095, 0.10172816f, 0.0505573f } };
+        // SG_x64.dll's own output (EXEC, REA_rodada40; the port is within −142 dB of it)
+        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856543f, -0.63262129f },
+                                                       { 2047, 0.20268451f, 0.54145539f }, { 3000, -0.25613472f, -0.49985155f },
+                                                       { 4095, 0.10172445f, 0.050564945f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
     }
@@ -6261,9 +6293,106 @@ TEST (harmless_rack)
         const auto found = lynx::hlfx::maximusStateFromFst (fst);
         CHECK (found && *found == st);
         auto rms = st;
-        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
-        CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada40)
+        CHECK (lynx::hlfx::makeMaximusPreset (rms) != nullptr);
+        auto legacy = st;
+        legacy[0x1fd] = 1; // the legacy linear-phase FIR crossover: not decoded
+        CHECK (lynx::hlfx::makeMaximusPreset (legacy) == nullptr);
     }
+}
+
+TEST (maximus_engine)
+{
+    // REA_rodada40: the engine on its own (MaximusProcessor), states of our own against the installation's DLLs
+    // (goldens = the DLL's output for the same input, EXEC), and the containers of the mixer effect and Vocodex
+    std::vector<float> inL (4096), inR (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+    }
+    auto run = [&] (std::shared_ptr<const lynx::hlfx::MaximusPreset> preset, int mix) {
+        lynx::hlfx::MaximusProcessor m;
+        m.prepare (std::move (preset), 44100.0, mix);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 512)
+            m.process (l.data() + s, r.data() + s, 512);
+        return std::make_pair (l, r);
+    };
+    using Env = std::vector<std::array<double, 4>>;
+    const Env def { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    const Env knee { { 0.0, 0.0, 0.0, 0 }, { 0.35, 0.35, 0.0, 0 }, { 0.65, 0.6, 0.36, 7 } };
+    const Env t0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.14, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    const Env m0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.6, 0.085, 0 } };
+    auto band = [] (int mode, int pre = 1000, int post = 1000, int sep = 0, int sat = 0, int ceil = 1000, int att = 1115, int rel2 = 0,
+                    int sus = 2882, int rms = 0) { return std::array<int, 13> { mode, pre, post, sep, sat, ceil, att, rel2, 2, 5000, 3, sus, rms }; };
+    auto check = [] (const std::pair<std::vector<float>, std::vector<float>>& out, const std::vector<std::tuple<int, float, float>>& golden) {
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (out.first[(std::size_t) i] - gl) < 2e-6f && std::abs (out.second[(std::size_t) i] - gr) < 2e-6f);
+    };
+    // RMS detectors, saturation mode B, a 5 Hz low cut, 12 dB high split (SG_x64.dll: port within −152 dB)
+    auto st3 = maximusTestState ({ 19800, 1, 48065, 0, 1115, 1000, 0 },
+                                 { band (0, 1500, 1000, 0, 400, 900, 1115, 0, 2882, 1), band (0, 1340, 1000, 0, 0, 1000, 1115, 0, 1570, 1),
+                                   band (1, 1000, 1200, 0, 1000, 1000), band (0, 1000, 1000, 0, 250, 1000, 1115, 4464, 2882, 1) },
+                                 { def, def, knee, def, t0, def, m0, def }, 0);
+    const auto p3 = lynx::hlfx::makeMaximusPreset (st3);
+    CHECK (p3 != nullptr);
+    check (run (p3, 1000), { { 100, 0.0f, 0.0f }, { 1000, 0.87061065f, 0.64004499f }, { 2047, -0.97266865f, 0.60940075f },
+                             { 3000, 0.96658099f, 0.9250561f }, { 4095, 0.99094611f, -0.964059f } });
+    // the same with solo on (UI byte 0x1EF) and the low band selected (0x1E0): bit-identical to SG_x64.dll
+    auto solo = st3;
+    solo[0x1ef] = 1;
+    std::memset (solo.data() + 0x1e0, 0, 4);
+    check (run (lynx::hlfx::makeMaximusPreset (solo), 1000),
+           { { 100, 3.2922967e-06f, 0.00036916698f }, { 1000, 0.15653539f, -0.047913823f }, { 2047, -0.17336531f, 0.019099623f },
+             { 3000, 0.17185682f, -0.017173048f }, { 4095, 0.16714551f, 0.019473195f } });
+    // Soundgoodizer_x64.dll's own build with a v4 file (its presets' layout): a copy of the round-36 state without
+    // oversampling, through a byte-identical copy of the installation's DLL with this file as its preset (EXEC)
+    const auto st2 = maximusTestState ({ 19800, 1, 48065, 1, 891, 600, 32768 },
+                                       { band (1, 1264, 1296, 500, -500, 1200), band (0, 1340, 1000, -348, 0, 1000, 1115, 0, 1570),
+                                         band (0, 1364, 1152, 0, 0, 1000, 1115, 0, 1186), band (0, 1000, 1000, 0, -196, 1000, 1115, 4464, 1538) },
+                                       { def, def, knee, def, t0, def, m0, def }, 0);
+    std::vector<std::uint8_t> v4 { 4, 0, 0, 0 };
+    v4.insert (v4.end(), st2.begin() + 4, st2.begin() + 0x1f5);
+    v4.insert (v4.end(), st2.begin() + 0x1fe, st2.end());
+    const auto p4 = lynx::hlfx::makeMaximusPreset (v4, lynx::hlfx::MaximusBuild::soundgoodizer);
+    CHECK (p4 != nullptr);
+    check (run (p4, 600), { { 100, 0.0f, 0.0f }, { 1000, -0.60926896f, -0.6652832f }, { 2047, 0.40872875f, 0.36375371f },
+                            { 3000, -0.41941205f, -0.61312866f }, { 4095, -0.12878418f, 0.27944946f } });
+    CHECK (lynx::hlfx::makeMaximusPreset (st2, lynx::hlfx::MaximusBuild::soundgoodizer) != nullptr); // v7: also read by that build
+    // the mixer effect's container and the effect itself
+    lynx::maximusfx::Blob blob;
+    blob.build = lynx::hlfx::MaximusBuild::soundgoodizer;
+    blob.mix = 600;
+    blob.state = v4;
+    const auto packed = lynx::maximusfx::pack (blob);
+    const auto back = lynx::maximusfx::unpack (packed);
+    CHECK (back && back->build == blob.build && back->mix == 600 && back->state == v4);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::maximus);
+    slot.state = packed;
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (44100.0);
+    {
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 1024) // longer host blocks are split into the engine's 512-frame calls
+            fx->process (l.data() + s, r.data() + s, 1024, slot.params, 120.0);
+        const auto ref = run (p4, 600);
+        CHECK (l == ref.first && r == ref.second);
+    }
+    const std::vector<std::uint8_t> sgState { 3, 0, 0, 0, 2, 0, 0, 0, 0x78, 2, 0, 0 };
+    const auto sg = lynx::maximusfx::parseSoundgoodizer (sgState);
+    CHECK (sg && sg->preset == 2 && sg->amount == 632 && std::string (lynx::maximusfx::soundgoodizerPresetFile (2)) == "c.dat");
+    CHECK (lynx::soundgoodizerPresetPath (sgState) == "Plugins\\Fruity\\Effects\\Soundgoodizer\\Data\\Presets\\c.dat");
+    CHECK (lynx::soundgoodizerExact (sgState, v4).has_value() && ! lynx::soundgoodizerExact (sgState, {}).has_value());
+    // Vocodex's appended installation data survives a round trip and leaves FL's state untouched
+    const std::vector<std::uint8_t> flState { 8, 0, 0, 0, 1, 2, 3 };
+    lynx::vocodex::InstallData data;
+    data.sgDat = st2;
+    data.carrierState = { 9, 9, 9 };
+    const auto joined = lynx::vocodex::appendInstallData (flState, data);
+    const auto [raw, files] = lynx::vocodex::splitInstallData (joined);
+    CHECK (raw == flState && files.sgDat == st2 && files.carrierState == data.carrierState);
+    CHECK (lynx::vocodex::splitInstallData (flState).first == flState);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
