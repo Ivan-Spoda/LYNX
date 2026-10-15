@@ -13,7 +13,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [feature/signing]   # TEMPORARY: CI check before merge
   workflow_dispatch:
 
 permissions:
