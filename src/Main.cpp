@@ -1516,17 +1516,22 @@ private:
 
                 ui.selectTabForSnapshot (2);
                 auto& playlist = ui.getPlaylistForSnapshot();
-                playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
-                saveSnapshot (ui, prefix + "-playlist-audio.png");
-                playlist.setViewForSnapshot (1400.0, 0, std::max (0, firstTrack - 3));
-                saveSnapshot (ui, prefix + "-playlist-audio-zoom.png");
-                lynx::ui::WaveformCache::stereo = true;
-                saveSnapshot (ui, prefix + "-playlist-audio-stereo.png");
-                lynx::ui::WaveformCache::stereo = false;
-                lynx::ui::WaveformCache::spectral = false;
-                playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
-                saveSnapshot (ui, prefix + "-playlist-audio-classic.png");
-                lynx::ui::WaveformCache::spectral = true;
+                playlist.setTimeSelectionForSnapshot (0, 0);
+                {
+                    // the Playlist alone (the floating Channel Rack would cover the clips)
+                    auto saveSnapshot = [&playlist] (juce::Component&, const juce::String& file) { saveArea (playlist, playlist.getLocalBounds(), file); };
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio.png");
+                    playlist.setViewForSnapshot (1400.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-zoom.png");
+                    lynx::ui::WaveformCache::stereo = true;
+                    saveSnapshot (ui, prefix + "-playlist-audio-stereo.png");
+                    lynx::ui::WaveformCache::stereo = false;
+                    lynx::ui::WaveformCache::spectral = false;
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-classic.png");
+                    lynx::ui::WaveformCache::spectral = true;
+                }
 
                 saveWindow (lynx::makeChannelSettingsPanel (offline, samplerChannel), "-sampler-wave.png");
 

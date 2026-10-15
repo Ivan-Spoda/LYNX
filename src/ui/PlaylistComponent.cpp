@@ -666,7 +666,38 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
 
     const auto& channel = song.channels[(std::size_t) c.channel];
     const auto colour = theme::colour::audioClip;
-    const auto frameBody = paintClipFrame (g, r, colour, juce::String::fromUTF8 (channel.name.c_str()));
+    const auto name = juce::String::fromUTF8 (channel.name.c_str());
+
+    // waveform (ui/WaveformView): analysed in the background, drawn at any zoom with its band colours; it uses
+    // the clip's whole height (tracks are short) and the title band is laid over it, translucent
+    const auto path = juce::String::fromUTF8 (channel.samplePath.c_str());
+    const auto summary = ui::WaveformCache::getInstance()->find (path, [this, path] { return engine.getSampleLibrary().load (path); });
+
+    if (summary == nullptr)
+        paintClipFrame (g, r, colour, name);
+    else
+    {
+        g.setColour (colour.interpolatedWith (theme::colour::bg1, 0.62f));
+        g.fillRoundedRectangle (r, theme::radius::sm);
+        const auto body = r.reduced (1.0f, 1.0f);
+        const auto framesPerTick = 60.0 / (song.bpm * ppq) * summary->sampleRate;
+        // r's left edge is the clip start, i.e. tick `offset` of the audio
+        const auto startFrame = ((double) c.offset + (double) (body.getX() - r.getX()) / pixelsPerTick) * framesPerTick;
+        ui::paintWaveform (g, body, *summary, startFrame, framesPerTick / pixelsPerTick,
+                           ui::currentWaveStyle (colour.brighter (0.35f), ui::normalisingGain (*summary)));
+
+        const auto title = r.withHeight (juce::jmin (clipTitleHeight, r.getHeight()));
+        juce::Path band;
+        band.addRoundedRectangle (title.getX(), title.getY(), title.getWidth(), title.getHeight(), theme::radius::sm, theme::radius::sm, true, true, false, false);
+        g.setColour (colour.withAlpha (0.55f));
+        g.fillPath (band);
+        if (r.getWidth() > 24.0f)
+        {
+            g.setColour (theme::colour::textPrimary);
+            g.setFont (theme::font (theme::type::caption, true));
+            g.drawText (name, title.reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
+        }
+    }
     paintClipOutline (g, r, colour, false, false);
 
     // fades: ramps and handles at the top corners
@@ -686,20 +717,6 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
             g.fillRect (juce::Rectangle<float> (outX - 5.0f, r.getY() + 13.0f, 5.0f, 5.0f));
         }
     }
-
-    // waveform (ui/WaveformView): analysed in the background, drawn at any zoom with its band colours
-    const auto path = juce::String::fromUTF8 (channel.samplePath.c_str());
-    const auto summary = ui::WaveformCache::getInstance()->find (path, [this, path] { return engine.getSampleLibrary().load (path); });
-
-    if (summary == nullptr)
-        return;
-
-    const auto body = frameBody.reduced (1.0f, 1.0f);
-    const auto framesPerTick = 60.0 / (song.bpm * ppq) * summary->sampleRate;
-    // r's left edge is the clip start, i.e. tick `offset` of the audio
-    const auto startFrame = ((double) c.offset + (double) (body.getX() - r.getX()) / pixelsPerTick) * framesPerTick;
-    ui::paintWaveform (g, body, *summary, startFrame, framesPerTick / pixelsPerTick,
-                       ui::currentWaveStyle (colour.brighter (0.35f), ui::normalisingGain (*summary)));
 }
 
 void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
