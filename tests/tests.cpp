@@ -50,6 +50,7 @@
 #include "core/FruityShapers.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
+#include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
@@ -921,6 +922,7 @@ TEST (flp_real_files)
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     int flPeqSlots = 0, flPeqExact = 0;                                        // REA_rodada50
     int basicSlots = 0, basicExact = 0; // REA_rodada58: PanOMatic, Balance, Blood Overdrive
+    int filterSlots = 0, filterExact = 0; // REA_rodada63: Fast LP, Free Filter, Fruity Filter
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
@@ -1173,6 +1175,7 @@ TEST (flp_real_files)
                         flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
                         basicSlots += slot.plugin == "Fruity PanOMatic" || slot.plugin == "Fruity Balance" || slot.plugin == "Fruity Blood Overdrive";
+                        filterSlots += slot.plugin == "Fruity Fast LP" || slot.plugin == "Fruity Free Filter" || slot.plugin == "Fruity Filter";
                         chorusSlots += lynx::chorusControls (slot.plugin) > 0 && slot.state.size() >= 4 ? 1 : 0;
                     }
                 for (const auto& t : full.mixer)
@@ -1193,6 +1196,8 @@ TEST (flp_real_files)
                         flPeqExact += fx.kind == lynx::EffectKind::parametricEq && lynx::peq::flLaw (fx.params);
                         basicExact += fx.kind == lynx::EffectKind::fruityPanOMatic || fx.kind == lynx::EffectKind::fruityBalance
                                       || fx.kind == lynx::EffectKind::fruityBloodOverdrive;
+                        filterExact += fx.kind == lynx::EffectKind::fruityFastLP || fx.kind == lynx::EffectKind::fruityFreeFilter
+                                       || fx.kind == lynx::EffectKind::fruityFilter;
                         delay2Exact += fx.kind == lynx::EffectKind::fruityDelay2;
                         delay3Exact += fx.kind == lynx::EffectKind::fruityDelay3;
                         chorusExact += fx.kind == lynx::EffectKind::fruityChorus || fx.kind == lynx::EffectKind::hyperChorus || fx.kind == lynx::EffectKind::vintageChorus ? 1 : 0;
@@ -1916,6 +1921,8 @@ TEST (flp_real_files)
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
     // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
     CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    std::printf ("  Fruity Fast LP / Free Filter / Filter: %d of %d slots on the exact engines\n", filterExact, filterSlots);
+    CHECK (filterExact >= filterSlots && filterSlots >= 53); // REA_rodada63
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     CHECK (delay2Exact == delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
@@ -8778,6 +8785,85 @@ TEST (fruity_panomatic_balance_blood_overdrive)
     CHECK (lynx::effectFromFl ("Fruity PanOMatic", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::utility);
     CHECK (lynx::effectFromFl ("Fruity Balance", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::utility);
     CHECK (lynx::effectFromFl ("Fruity Blood Overdrive", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
+}
+
+TEST (fruity_fast_lp_free_filter_filter)
+{
+    // REA_rodada63: goldens from the installation's DLLs (EXEC) on our own states, 44.1 kHz, blocks of 512 (the wrapper
+    // splits the host blocks below into calls of 512, as the DLL ran)
+    const lynx::ScopedFlushDenormals ftz;
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
+    auto state = [] (const char* hex) {
+        std::vector<std::uint8_t> b;
+        for (const char* p = hex; p[0] && p[1]; p += 2)
+            b.push_back ((std::uint8_t) std::strtol (std::string (p, 2).c_str(), nullptr, 16));
+        return b;
+    };
+    auto viaImport = [&] (const char* plugin, const char* hex, lynx::EffectKind kind, std::initializer_list<Gold> gold) {
+        const auto slot = lynx::effectFromFl (plugin, state (hex), 120.0);
+        CHECK (slot && slot->kind == kind);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 1024, slot->params, 120.0);
+        fx->process (l.data() + 2048, r.data() + 2048, 2048, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    using K = lynx::EffectKind;
+    viaImport ("Fruity Fast LP", "01000000e0010000bc020000", K::fruityFastLP,
+               { { 100, -2.876206159591675f, 1.5413906574249268f }, { 1000, 0.12972253561019897f, 0.02936629205942154f },
+                 { 2047, -0.2262123078107834f, -0.15169914066791534f }, { 3000, 0.12972258031368256f, -0.0798468142747879f },
+                 { 4095, 0.0011161785805597901f, -0.08101501315832138f } });
+    viaImport ("Fruity Fast LP", "01000000890000008a000000", K::fruityFastLP,
+               { { 100, -0.7748895883560181f, -0.2310182899236679f }, { 1000, -0.01256702933460474f, -0.0086913350969553f },
+                 { 2047, -0.010225297883152962f, -0.014700239524245262f }, { 3000, -0.012712989933788776f, -0.008916046470403671f },
+                 { 4095, -0.008918046951293945f, -0.020280027762055397f } });
+    viaImport ("Fruity Free Filter", "02000000c2010000200300002c0100008403000001", K::fruityFreeFilter, // low shelf, CENTER
+               { { 100, -0.6178444623947144f, -0.13762974739074707f }, { 1000, -1.6557703018188477f, 0.8969771862030029f },
+                 { 2047, 0.6539966464042664f, -0.21659433841705322f }, { 3000, -1.6404345035552979f, 0.4286947548389435f },
+                 { 4095, -1.2272151708602905f, -0.5219485759735107f } });
+    viaImport ("Fruity Free Filter", "020000008a02000058020000bc020000c800000000", K::fruityFreeFilter, // high shelf
+               { { 100, -0.06996861100196838f, -0.11112016439437866f }, { 1000, -0.47636136412620544f, 0.31258222460746765f },
+                 { 2047, 0.1628853678703308f, -0.3169582486152649f }, { 3000, -0.47636136412620544f, -0.22028093039989471f },
+                 { 4095, -0.0975298061966896f, 0.05710025131702423f } });
+    viaImport ("Fruity Free Filter", "020000006400000000040000a9000000a402000001", K::fruityFreeFilter, // low pass 16 kHz
+               { { 100, 1.3032524585723877f, -0.007953938096761703f }, { 1000, 0.18662987649440765f, 2.155099391937256f },
+                 { 2047, 0.5824014544487f, 0.05704556778073311f }, { 3000, 0.18981599807739258f, -0.6362011432647705f },
+                 { 4095, 1.2624475955963135f, 2.497816324234009f } });
+    viaImport ("Fruity Filter", "020000004b01000076000000000400002c010000580200000100000001", K::fruityFilter, // x2, CENTER
+               { { 100, 0.2685631811618805f, 0.16885951161384583f }, { 1000, -0.20637311041355133f, 0.13557639718055725f },
+                 { 2047, 0.07038643211126328f, -0.15532609820365906f }, { 3000, -0.20311756432056427f, -0.09958365559577942f },
+                 { 4095, 0.08275680989027023f, 0.010792487300932407f } });
+    viaImport ("Fruity Filter", "01000000bc020000f401000000000000000400000000000000000000", K::fruityFilter, // band pass
+               { { 100, -0.4368843734264374f, -0.12492841482162476f }, { 1000, -0.3362128436565399f, -0.09686881303787231f },
+                 { 2047, 0.21920710802078247f, 0.3213832974433899f }, { 3000, -0.3362128436565399f, 0.4016203284263611f },
+                 { 4095, -0.14230486750602722f, -0.22842440009117126f } });
+    // an old Free Filter layout (type·10) is converted to the current scale; parameter texts
+    {
+        const auto slot = lynx::effectFromFl ("Fruity Free Filter", state ("010000003c00000000020000a9000000a4020000"), 120.0);
+        CHECK (slot && slot->kind == K::fruityFreeFilter);
+        if (slot)
+        {
+            CHECK (lynx::flfilter::freeFilterFromParams (slot->params.data()).type == 100 + (int) std::nearbyint (5.5 / 7.0 * 600.0));
+            CHECK (lynx::formatEffectParam (K::fruityFreeFilter, 0, slot->params[0], 120.0) == "Peaking");
+        }
+        CHECK (lynx::formatEffectParam (K::fruityFreeFilter, 1, 1.0f, 120.0) == "16000 Hz");
+        CHECK (lynx::formatEffectParam (K::fruityFilter, 0, 1.0f, 120.0) == "7350 Hz");
+    }
+    // unreadable states keep the old approximations
+    CHECK (lynx::effectFromFl ("Fruity Fast LP", { 1, 2, 3 }, 120.0)->kind == K::filter);
+    CHECK (lynx::effectFromFl ("Fruity Free Filter", { 1, 2, 3 }, 120.0)->kind == K::filter);
+    CHECK (lynx::effectFromFl ("Fruity Filter", { 9, 0, 0, 0 }, 120.0)->kind == K::filter);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
