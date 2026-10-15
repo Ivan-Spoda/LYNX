@@ -13,6 +13,8 @@ const std::vector<EditToolInfo>& editTools()
     static const std::vector<EditToolInfo> list {
         { EditTool::pencil, Icon::draw, TR_NOOP ("Pencil"), TR_NOOP ("Click adds, drag moves, drag an edge resizes"), 'P' },
         { EditTool::brush, Icon::brush, TR_NOOP ("Brush"), TR_NOOP ("Drag to paint a run of notes or clips"), 'B' },
+        { EditTool::drumPaint, Icon::drumBrush, TR_NOOP ("Drum brush"),
+          TR_NOOP ("Drag to paint one short hit per grid cell, on whatever key is under the mouse"), 'N' },
         { EditTool::eraser, Icon::erase, TR_NOOP ("Eraser"), TR_NOOP ("Click or drag to delete"), 'D' },
         { EditTool::mute, Icon::mute, TR_NOOP ("Mute"), TR_NOOP ("Click or drag to mute or unmute"), 'T' },
         { EditTool::knife, Icon::knife, TR_NOOP ("Knife"), TR_NOOP ("Drag a line to cut; a click cuts at the cursor"), 'C' },
@@ -37,7 +39,8 @@ ToolStrip::ToolStrip (bool includeSlip)
 {
     for (const auto& info : editTools())
     {
-        if (info.tool == EditTool::slip && ! includeSlip)
+        // the Playlist has Slip, the Piano Roll the drum brush
+        if ((info.tool == EditTool::slip && ! includeSlip) || (info.tool == EditTool::drumPaint && includeSlip))
             continue;
 
         auto button = std::make_unique<IconButton> (info.name, info.icon);
@@ -216,8 +219,8 @@ const std::vector<Option>& options()
 {
     static const std::vector<Option> list {
         { Kind::none, 1, TR_NOOP ("No snap") },
-        { Kind::screen, 0, TR_NOOP ("Screen grid") },
-        { Kind::nearest, 0, TR_NOOP ("Nearest note") },
+        { Kind::screen, 0, TR_NOOP ("Line (follows zoom)") },
+        { Kind::nearest, 0, TR_NOOP ("Events (edges)") },
         { Kind::ticks, ticksPerStep / 6, TR_NOOP ("1/6 step") },
         { Kind::ticks, ticksPerStep / 4, TR_NOOP ("1/4 step") },
         { Kind::ticks, ticksPerStep / 3, TR_NOOP ("1/3 step") },
@@ -234,7 +237,7 @@ const std::vector<Option>& options()
 void fillEditorBox (juce::ComboBox& box)
 {
     box.clear (juce::dontSendNotification);
-    box.addItem (tr ("Follow global grid"), followId);
+    box.addItem (tr ("Main (toolbar snap)"), followId);
     box.addSeparator();
 
     for (int i = 0; i < (int) options().size(); ++i)
@@ -259,7 +262,46 @@ const Option& resolve (const juce::ComboBox& editorBox)
     const auto index = id <= followId ? EditorGlobals::get().getGridOption() : id - 2;
     return options()[(std::size_t) juce::jlimit (0, (int) options().size() - 1, index)];
 }
+
+juce::String describe (const Option& option)
+{
+    switch (option.kind)
+    {
+        case Kind::none: return tr ("free: notes and clips move by single ticks");
+        case Kind::screen: return tr ("snaps to the grid lines drawn at this zoom (zoom in for a finer grid)");
+        case Kind::nearest: return tr ("snaps to the nearest start or end of another note or clip (ghost notes too); elsewhere to the lines");
+        case Kind::bar: return tr ("snaps to whole bars");
+        case Kind::ticks: break;
+    }
+    return tr ("a fixed grid of {0}", { tr (option.name) });
+}
 } // namespace grid
+
+SnapBox::SnapBox (bool isEditor) : editor (isEditor)
+{
+    setScrollWheelEnabled (true);
+}
+
+ui::Hint SnapBox::hintAt (juce::Point<int>)
+{
+    ui::Hint h;
+    h.text = getProperties().contains ("lynxHint") ? getProperties()["lynxHint"].toString() : getTooltip();
+    h.hasMenu = true;
+
+    if (getSelectedId() <= 0)
+        return h;
+
+    const auto followsMain = editor && getSelectedId() == grid::followId;
+    const auto& option = followsMain ? grid::options()[(std::size_t) juce::jlimit (0, (int) grid::options().size() - 1,
+                                                                                    EditorGlobals::get().getGridOption())]
+                                     : editor ? grid::resolve (*this)
+                                              : grid::options()[(std::size_t) juce::jlimit (0, (int) grid::options().size() - 1, getSelectedId() - 1)];
+    const auto what = followsMain ? tr ("Main: follows the toolbar snap, now {0}", { tr (option.name) }) + " - " + grid::describe (option)
+                                  : tr (option.name) + ": " + grid::describe (option);
+    h.text = h.text.isEmpty() ? what : what + "  |  " + h.text;
+    h.value = tr (option.name).upToFirstOccurrenceOf (" (", false, false);
+    return h;
+}
 
 EditorGlobals& EditorGlobals::get()
 {
@@ -294,7 +336,7 @@ void EditorGlobals::setDefaultNoteLength (std::int64_t ticks)
     }
 }
 
-GlobalGridBox::GlobalGridBox()
+GlobalGridBox::GlobalGridBox() : SnapBox (false)
 {
     grid::fillGlobalBox (*this);
     setTooltip (tr ("Global grid: used by the Piano Roll and Playlist when their grid follows it. Backspace turns it off and on; "

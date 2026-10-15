@@ -62,15 +62,22 @@ void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, 
     constexpr auto range = pi * 1.5f;
     const auto value = juce::jlimit (0.0f, 1.0f, value01);
 
-    // track
+    // track: lighter than every panel surface, so a knob at rest (a centred pan has no value arc) is
+    // still visible on the dark rows
     juce::Path track;
     track.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f, start, start + range, true);
-    g.setColour (bg0);
+    g.setColour (hover ? knobTrack.brighter (0.25f) : knobTrack);
     g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     // value arc
     const auto from = bipolar ? start + range * 0.5f : start;
     const auto to = start + range * value;
+
+    if (bipolar) // the centre (default) mark at the top of the ring
+    {
+        g.setColour (textSecondary);
+        g.fillEllipse (juce::Rectangle<float> (thickness, thickness).withCentre ({ centre.x, centre.y - arcRadius }));
+    }
 
     if (std::abs (to - from) > 0.001f)
     {

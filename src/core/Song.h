@@ -55,7 +55,9 @@ enum class InstrumentKind : std::uint8_t
     toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
     threeosc,   // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
     autogun,    // FL's Autogun (REA_rodada57 §1): Ogun's engine on the raw saved state (pluginState), SG.dat path in samplePath
-    transistorbass // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    transistorbass, // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    simsynth,   // FL's SimSynth engine (REA_rodada64 §1–4): the plugin's raw saved state (564 bytes) in ChannelDef::pluginState
+    wasp        // FL 2026's Wasp / Wasp XT (REA_rodada64 §5): a 64-bit placeholder that keeps its state and makes no sound
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -318,7 +320,10 @@ enum class EffectKind : std::uint8_t
     fruityBloodOverdrive, // FL's Fruity Blood Overdrive, exact (REA_rodada58, core/FruityBasicFx.h): 6 controls / range
     grossBeat,    // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
     fruityDelayBank, // FL's Fruity Delay Bank, exact (REA_rodada56, core/FruityDelayBank.h): FL's state in EffectSlot::state, params = its 4 global controls / 128
-    fruityMultiband  // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
+    fruityMultiband, // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
+    fruityFastDist, // FL's Fruity Fast Dist, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlanger   // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
@@ -538,6 +543,7 @@ struct PlaylistTrack
 {
     std::string name;  // empty = "Track N"
     bool muted = false; // clips on this track don't play
+    int height = 0;     // Playlist row height in px (0 = the default)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.
