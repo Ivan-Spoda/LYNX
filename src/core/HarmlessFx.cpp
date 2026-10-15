@@ -200,6 +200,7 @@ struct MaximusPreset
     };
     std::array<Band, 4> band {};
     bool valid = false;
+    bool legacyFir = false; // "Linear-phase filters (legacy mode)": windowed-sinc FIR band split (FUN_0083c200)
     MaximusBuild build = MaximusBuild::shared;
 };
 
@@ -413,10 +414,11 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
     m->oversampling = byteAt (0x1f4) | (byteAt (0x1f5) << 8) | (byteAt (0x1f6) << 16) | (byteAt (0x1f7) << 24);
     if (m->oversampling < 0 || m->oversampling > 1)
         return nullptr; // only ×1 and ×2 are used by the presets and the demo projects
-    // menu options read with the block: "Master Mid mode" (+0x324) and the legacy linear-phase FIR crossover (+0x325)
-    // are not decoded for rendering (REA_rodada40 §2.5); solo (+0x317) of the editor's band (+0x308) is
-    if (byteAt (0x1fc) != 0 || byteAt (0x1fd) != 0)
+    // menu options read with the block: "Master Mid mode" (+0x324) is not decoded for rendering; the legacy
+    // linear-phase FIR crossover (+0x325) and solo (+0x317) of the editor's band (+0x308) are (REA_rodada40 §2.5)
+    if (byteAt (0x1fc) != 0)
         return nullptr;
+    m->legacyFir = byteAt (0x1fd) != 0;
     const auto solo = byteAt (0x1ef) != 0;
     const auto soloBand = i32At (d, 0x1e0);
     std::size_t pos = 4 + block;
@@ -802,6 +804,119 @@ struct FrameDelay
 };
 } // namespace
 
+namespace
+{
+// the legacy linear-phase band split (REA_rodada40 §2.5): FUN_0083c0d0 (windowed sinc), FUN_0062ac70 type 0 (4-term
+// Blackman-Harris), FUN_0083c070 (spectral inversion), FUN_0083c200 (placement in the N-tap buffer), taps converted to
+// float and run by ippsFIR_32f per channel (FUN_0083bce0)
+std::vector<double> sincLowpass (int L, double fc)
+{
+    std::vector<double> h ((std::size_t) L);
+    const auto w = fc * 6.283185307179586;
+    for (int i = 0; i < L; ++i)
+    {
+        if (i == (L - 1) / 2)
+            h[(std::size_t) i] = fc * 2.0;
+        else
+        {
+            const auto d = (double) ((float) i - (float) (L - 1) * 0.5f);
+            h[(std::size_t) i] = std::sin (w * d) / (d * 3.141592653589793);
+        }
+    }
+    const auto a = 6.283185307179586 / (double) (L - 1);
+    for (int i = 0; i < L; ++i)
+    {
+        const auto c1 = std::cos (a * (double) i), c2 = std::cos (a * 2.0 * (double) i), c3 = std::cos (a * 3.0 * (double) i);
+        h[(std::size_t) i] *= ((0.35875 - c1 * 0.48829) + c2 * 0.14128) - c3 * 0.01168;
+    }
+    return h;
+}
+
+void invert (std::vector<double>& h)
+{
+    for (auto& v : h)
+        v *= -1.0;
+    h[(h.size() - 1) / 2] += 1.0;
+}
+
+// kind 0 low-pass (f1, L1), 3 high-pass (f1, L1), 1 band-pass (f1, L1 / f2, L2); placed in the middle of N taps
+std::vector<float> legacyTaps (int N, int kind, double f1, int L1, double f2, int L2)
+{
+    std::vector<double> buf ((std::size_t) N, 0.0);
+    f1 = std::min (f1, 0.5), f2 = std::min (f2, 0.5);
+    L1 |= 1, L2 |= 1;
+    auto place = [&] (std::vector<double>& to, const std::vector<double>& h) {
+        const auto at = (N - (int) h.size()) / 2;
+        for (std::size_t i = 0; i < h.size(); ++i)
+            to[(std::size_t) at + i] = h[i];
+    };
+    if (kind == 0)
+        place (buf, sincLowpass (L1, f1));
+    else if (kind == 3)
+    {
+        auto h = sincLowpass (L1, f1);
+        invert (h);
+        place (buf, h);
+    }
+    else
+    {
+        std::vector<double> hi ((std::size_t) N, 0.0);
+        place (buf, sincLowpass (L1, f1));
+        auto h = sincLowpass (L2, f2);
+        invert (h);
+        place (hi, h);
+        for (int i = 0; i < N; ++i)
+            buf[(std::size_t) i] += hi[(std::size_t) i];
+        if (kind == 1)
+            invert (buf);
+    }
+    std::vector<float> taps ((std::size_t) N);
+    for (int i = 0; i < N; ++i)
+        taps[(std::size_t) i] = (float) buf[(std::size_t) i];
+    return taps;
+}
+
+struct Fir
+{
+    std::vector<float> taps;
+    std::array<std::vector<float>, 2> hist; // the last N − 1 inputs, then the block
+
+    void reset() noexcept
+    {
+        for (auto& h : hist)
+            std::fill (h.begin(), h.end(), 0.0f);
+    }
+
+    void prepare (std::vector<float> t, int maxFrames)
+    {
+        taps = std::move (t);
+        for (auto& h : hist)
+            h.assign (taps.size() - 1 + (std::size_t) maxFrames, 0.0f);
+    }
+
+    void process (const float* inL, const float* inR, float* outL, float* outR, int n) noexcept
+    {
+        const auto N = (int) taps.size();
+        const float* in[2] { inL, inR };
+        float* out[2] { outL, outR };
+        for (int c = 0; c < 2; ++c)
+        {
+            auto& h = hist[(std::size_t) c];
+            std::copy (in[c], in[c] + n, h.begin() + (N - 1));
+            for (int i = 0; i < n; ++i)
+            {
+                double acc = 0.0;
+                const float* x = h.data() + i + N - 1;
+                for (int k = 0; k < N; ++k)
+                    acc += (double) taps[(std::size_t) k] * (double) x[-k];
+                out[c][i] = (float) acc;
+            }
+            std::copy (h.begin() + n, h.begin() + n + (N - 1), h.begin());
+        }
+    }
+};
+} // namespace
+
 class Maximus
 {
 public:
@@ -853,6 +968,7 @@ public:
             }
             B.delay.setLength (L);
         }
+        const auto latencyBands = latency;
         latency = latency / K + band[3].L;
         reportedLatency = latency;
         tailLength = latency + (int) rint (fs * 1.5);
@@ -895,6 +1011,35 @@ public:
         for (int i = 0; i <= sH; ++i)
             stages[2].push_back (stage (4, fH, sH));
         inPlaceStages = std::min (sL + 1, (int) stages[1].size() - 1);
+        firOn = P.legacyFir;
+        if (firOn)
+        {
+            // FUN_00840bb0: N = round(0.004·band rate) | 1 (≥ 5); FUN_00844e10: per split round(K·c·(slope + 1)/f) | 1
+            // (≥ 5, ≤ N) with c = 27 500 (the high split of Soundgoodizer_x64.dll's build: 110 000)
+            auto N = (int) rint (rateB * 0.004) | 1;
+            N = std::max (N, 5);
+            auto len = [&] (double c, int slope, float f) {
+                const auto v = (double) K * c * (double) (slope + 1) / (double) f;
+                auto L = (int) rint (v);
+                L = (L | 1) < 6 ? 5 : (L | 1);
+                return std::min (L, N);
+            };
+            const auto Ll = len (27500.0, sL, fL);
+            const auto Lh = len (P.build == MaximusBuild::soundgoodizer ? 110000.0 : 27500.0, sH, fH);
+            const auto nl = (double) (float) (fL / (float) rateB), nh = (double) (float) (fH / (float) rateB);
+            fir[0].prepare (legacyTaps (N, 0, nl, Ll, 0.0, 0), maxFrames);
+            if (sL < 0)
+                fir[1].prepare (sH >= 0 ? legacyTaps (N, 0, nh, Lh, 0.0, 0) : std::vector<float> ((std::size_t) N, 0.0f), maxFrames);
+            else if (sH < 0)
+                fir[1].prepare (legacyTaps (N, 3, nl, Ll, 0.0, 0), maxFrames);
+            else
+                fir[1].prepare (legacyTaps (N, 1, nl, Ll, nh, Lh), maxFrames);
+            fir[2].prepare (legacyTaps (N, 3, nh, Lh, 0.0, 0), maxFrames);
+            band[0].g18 = band[2].g18 = 1.0f;
+            firLatency = (N - 1) / 2;
+            reportedLatency = (latencyBands + firLatency) / K + band[3].L;
+            tailLength = reportedLatency + (int) rint (fs * 1.5);
+        }
 
         // low cut: four high-pass stages at 0.8·f (FUN_00840b40, FUN_0083a5c0)
         lowCut.clear();
@@ -932,6 +1077,8 @@ public:
                 q.reset();
         for (auto& q : lowCut)
             q.reset();
+        for (auto& f : fir)
+            f.reset();
         for (auto& h : up)
             h.reset();
         for (auto& h : down)
@@ -985,6 +1132,8 @@ public:
             float* yr = br.data();
             if (st.empty())
                 std::copy (XL, XL + nb, yl), std::copy (XR, XR + nb, yr);
+            else if (firOn) // the legacy linear-phase split: every band from the input (FUN_0083bce0)
+                fir[(std::size_t) b].process (XL, XR, yl, yr, nb);
             else if (b == 1 && b != first)
             {
                 const float* sl = XL;
@@ -1013,7 +1162,15 @@ public:
             processBand (b, yl, yr, nb);
             if (B.mode < 2)
             {
-                if (! haveSum)
+                if (! haveSum && b == 2)
+                {
+                    // the high band is the first one on: its buffer is the sum buffer, and the final add (ippsAdd_32f
+                    // of the band and the sum) doubles it (FUN_00843a40)
+                    for (int i = 0; i < nb; ++i)
+                        sl[(std::size_t) i] = yl[i] + yl[i], sr[(std::size_t) i] = yr[i] + yr[i];
+                    haveSum = true;
+                }
+                else if (! haveSum)
                     std::copy (yl, yl + nb, sl.data()), std::copy (yr, yr + nb, sr.data()), haveSum = true;
                 else
                     for (int i = 0; i < nb; ++i)
@@ -1155,7 +1312,9 @@ public:
 private:
     std::shared_ptr<const MaximusPreset> pr;
     double fs = 44100.0;
-    int K = 1, first = 0, inPlaceStages = 0, tailLength = 0, counter = 0, reportedLatency = 0;
+    int K = 1, first = 0, inPlaceStages = 0, tailLength = 0, counter = 0, reportedLatency = 0, firLatency = 0;
+    bool firOn = false;
+    std::array<Fir, 3> fir {};
     float mix = 1.0f;
     bool mixOn = false;
     std::array<BandState, 4> band {};
