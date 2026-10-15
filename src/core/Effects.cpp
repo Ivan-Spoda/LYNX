@@ -6,6 +6,7 @@
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 #include "core/StereoFx.h"
 
 #include "core/Biquad.h"
@@ -2150,6 +2151,11 @@ const EffectInfo& effectInfo (EffectKind kind)
         info.params.push_back ({ fldyn::compressorParamName (fldyn::compressorControls), 1.0f });
         return info;
     }();
+    // FL's controls over their ranges (core/FruityShapers.h); defaults = a new FL instance; the curve is in EffectSlot::state
+    static const EffectInfo waveShaperInfo { "Fruity WaveShaper", { { "Pre amp", 0.5f }, { "Mix", 1.0f }, { "Post gain", 1.0f },
+                                                                    { "Oversampling", 0.0f }, { "HQ", 0.0f }, { "Smooth", 0.0f },
+                                                                    { "Center", 0.0f }, { "Unipolar", 0.0f } } };
+    static const EffectInfo softClipperInfo { "Fruity Soft Clipper", { { "Threshold", 99.0f / 126.0f }, { "Post", 128.0f / 160.0f } } };
     // FL's controls over their ranges (core/StereoFx.h); defaults = a new FL instance
     static const EffectInfo stereoShaperInfo { "Stereo Shaper", { { "R > L", 0.5f }, { "Left", 0.75f }, { "Right", 0.75f }, { "L > R", 0.5f },
                                                                  { "Delay", 0.5f }, { "Phase", 0.5f }, { "Effects post", 0.0f },
@@ -2258,6 +2264,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::maximus: return maximusInfo;
         case EffectKind::fruityLimiter: return fruityLimiterInfo;
         case EffectKind::fruityCompressor: return fruityCompressorInfo;
+        case EffectKind::fruityWaveShaper: return waveShaperInfo;
+        case EffectKind::fruitySoftClipper: return softClipperInfo;
         case EffectKind::stereoShaper: return stereoShaperInfo;
         case EffectKind::stereoEnhancer: return stereoEnhancerInfo;
         case EffectKind::transientProcessor: return transientProcessorInfo;
@@ -2533,6 +2541,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::fruityCompressor:
             return fldyn::compressorParamText (param, v);
+        case EffectKind::fruityWaveShaper:
+            return flshape::waveShaperParamText (param, v);
+
+        case EffectKind::fruitySoftClipper:
+            return flshape::softClipperParamText (param, v);
         case EffectKind::stereoShaper:
             return stereofx::stereoShaperParamText (param, v);
 
@@ -2580,6 +2593,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::fruityWaveShaper)
+        return flshape::makeWaveShaper (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2614,6 +2629,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::fruityLimiter: return fldyn::makeLimiter();
         case EffectKind::fruityCompressor: return fldyn::makeCompressor();
+        case EffectKind::fruityWaveShaper: return flshape::makeWaveShaper ({}); // FL's default curve; use makeEffect (slot)
+        case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::stereoShaper: return stereofx::makeStereoShaper();
         case EffectKind::stereoEnhancer: return stereofx::makeStereoEnhancer();
         case EffectKind::transientProcessor: return stereofx::makeTransientProcessor();

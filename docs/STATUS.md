@@ -66,9 +66,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2,
-  Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor, Spreader,
-  Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
+  Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
+  Spreader, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
@@ -308,6 +308,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
   at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
   bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
+- **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
+  51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
+  evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),
+  polyphase IIR half-band oversampling ×2…×16, per-sample smoothing, CENTER DC removal; exports use FL's rendering
+  behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
+  and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
+  (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
 - **Stereo Shaper, Stereo Enhancer, Transient Processor, Spreader:** FL's exact engines (`core/StereoFx`, REA round
   54) — Shaper: (3^x − 1)/2 matrix law, delay, all-pass dephasing, pre/post order, the In/Out difference for Patcher
   buses; Enhancer: pan/volume/separation matrix, phase-offset delay, inversion; Transient Processor: its split,
@@ -354,6 +361,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   in FL (shared by every instance), LYNX starts one per instance like a fresh FL process, so random phases differ from a
   given FL render by design; FL's max-polyphony event value and its rate-before-state order at channel creation are taken
   from the GMS findings (inference).
+- Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
+  sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
 - Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
   on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
   self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
