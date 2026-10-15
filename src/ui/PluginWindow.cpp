@@ -116,6 +116,16 @@ void closeAll()
 {
     windows().clear();
 }
+
+bool isOpen (const juce::AudioPluginInstance& plugin)
+{
+    return windows().count (const_cast<juce::AudioPluginInstance*> (&plugin)) > 0;
+}
+
+void close (const juce::AudioPluginInstance& plugin)
+{
+    windows().erase (const_cast<juce::AudioPluginInstance*> (&plugin));
+}
 } // namespace PluginWindows
 
 void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onDone)

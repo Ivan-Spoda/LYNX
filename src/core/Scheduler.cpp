@@ -130,7 +130,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
     for (const auto& clip : song.playlist)
     {
-        if (song.isTrackMuted (clip.track))
+        if (clip.muted || song.isTrackMuted (clip.track))
             continue;
 
         if (clip.kind == ClipKind::audio)

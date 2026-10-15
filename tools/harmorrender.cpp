@@ -1,6 +1,6 @@
 // Renders a Harmor state with LYNX's engine exactly like our round-34 reference model drives it (verification
 // harness, REA_rodada34 §1.25): harmorrender <state.bin> <out.f32> <length> <mt.txt|-> <rate> [blk=N] [bpm=X]
-//   [note=start,key,velocity,finalVol,finalPan,release ...]. Writes interleaved stereo float32; mt.txt holds the
+//   [comp=<Harmor System\Compression\n.fst>] [note=start,key,velocity,finalVol,finalPan,release ...]. Writes interleaved stereo float32; mt.txt holds the
 // DLL's Mersenne-Twister state (index, then 624 words) or "-" for LYNX's fixed seed.
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "core/HarmlessFx.h"
 #include "core/Harmor.h"
 
 int main (int argc, char** argv)
@@ -34,11 +35,19 @@ int main (int argc, char** argv)
     int blk = 512;
     double bpm = 120.0;
     std::vector<lynx::harmor::RefNote> notes;
+    std::vector<std::uint8_t> comp;
     for (int i = 6; i < argc; ++i)
     {
         const std::string a = argv[i];
         if (a.rfind ("blk=", 0) == 0)
             blk = std::atoi (a.c_str() + 4);
+        else if (a.rfind ("comp=", 0) == 0)
+        {
+            std::ifstream f (a.substr (5), std::ios::binary);
+            const std::vector<std::uint8_t> fst ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+            if (auto st = lynx::hlfx::maximusStateFromFst (fst))
+                comp = *st;
+        }
         else if (a.rfind ("bpm=", 0) == 0)
             bpm = std::atof (a.c_str() + 4);
         else if (a.rfind ("note=", 0) == 0)
@@ -48,7 +57,7 @@ int main (int argc, char** argv)
                 notes.push_back (n);
         }
     }
-    const auto out = lynx::harmor::renderReference (state, notes, rate, length, blk, mt, bpm);
+    const auto out = lynx::harmor::renderReference (state, notes, rate, length, blk, mt, bpm, comp);
     if (out.empty())
     {
         std::fprintf (stderr, "state not usable\n");

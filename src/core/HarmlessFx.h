@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace lynx::hlfx
@@ -94,4 +95,48 @@ private:
     bool on = false;
     std::array<float, maxBlock> scratchL {}, scratchR {}, mono {};
 };
+// Harmor's effects rack (docs/analise/REA_rodada38.md): the same library units as Harmless's (chorus, delay, shared
+// reverb, the hosted Maximus) fed from Harmor's global parameters instead of fixed records, plus Harmor's own
+// distortion; the six units run in the state's order and the records' FX-send mix joins the chain at unit 4.
+struct HarmorRackSettings
+{
+    std::array<int, 53> g {};                      // Harmor's global parameters
+    std::array<int, 6> order { 0, 1, 2, 3, 4, 5 }; // unit order (state's 6-integer block): 0 distortion, 1 chorus,
+                                                   // 2 delay, 3 reverb, 4 FX-send join, 5 compressor
+    int distortion = 0;                            // distortion type (global misc +48), 0 = off
+    int precision = 0;                             // global misc +28 (oversampling 2^(precision+1), max 8×)
+    double fs = 44100.0, bpm = 120.0;
+    std::shared_ptr<const MaximusPreset> comp;     // compressor preset with globals 49–52 applied; null = off
+    int compMix = 1000;                            // global 49 (Maximus parameter 5)
+};
+
+class HarmorRack
+{
+public:
+    HarmorRack();
+    ~HarmorRack();
+    HarmorRack (const HarmorRack&) = delete;
+    HarmorRack& operator= (const HarmorRack&) = delete;
+
+    void prepare (const HarmorRackSettings& settings);
+    bool enabled() const noexcept;
+
+    // one host block (n ≤ maxBlock): left/right hold the records' dry mix and receive the rack's output; fxL/fxR are
+    // the records' FX-send mix; voices: records existed in this block
+    void process (float* left, float* right, const float* fxL, const float* fxR, int n, bool voices) noexcept;
+
+    // no records and the rack is quiet: only the free-running phases, ramps and counters advance
+    void advance (int n) noexcept;
+    bool quiet() const noexcept;
+
+    static constexpr int maxBlock = 512;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> d;
+};
+
+// a Maximus state with some parameters replaced (index, value): Harmor sends its globals 49–52 as the hosted
+// plugin's parameters 5, 8, 21 and 34 after loading the preset
+std::vector<std::uint8_t> withMaximusParams (std::vector<std::uint8_t> state, const std::vector<std::pair<int, int>>& params);
 } // namespace lynx::hlfx

@@ -331,7 +331,7 @@ void RackState::buildAutomationTables()
     {
         const auto& c = song.playlist[(std::size_t) i];
 
-        if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0 && ! song.isTrackMuted (c.track))
+        if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0 && ! c.muted && ! song.isTrackMuted (c.track))
             automationClips[(std::size_t) c.automation].push_back (i);
     }
 
@@ -918,6 +918,14 @@ void RackRenderer::process (const RackState* state,
 
         while (queue->pop (e))
         {
+            if (e.type == NoteEvent::Type::choke && e.channel < 0) // panic: every channel stops sounding
+            {
+                for (auto& instrument : state->instruments)
+                    if (instrument != nullptr)
+                        instrument->allNotesOff();
+                continue;
+            }
+
             if (e.channel < 0 || e.channel >= (int) state->instruments.size())
                 continue;
 

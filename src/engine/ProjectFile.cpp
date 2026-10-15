@@ -319,12 +319,14 @@ juce::var clipsToVar (const std::vector<Clip>& list)
                                       (juce::int64) c.offset, (int) c.kind,
                                       c.kind == ClipKind::automation ? c.automation : c.channel };
 
-        // [.., fade-in, fade-out, gain] only when not default
-        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f)
+        // [.., fade-in, fade-out, gain, muted] only when not default
+        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted)
         {
             clip.add ((juce::int64) c.fadeIn);
             clip.add ((juce::int64) c.fadeOut);
             clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
+            if (c.muted)
+                clip.add (true);
         }
 
         clips.add (clip);
@@ -356,6 +358,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
                 clip.fadeIn = juce::jmax<juce::int64> (0, (juce::int64) c[7]);
                 clip.fadeOut = juce::jmax<juce::int64> (0, (juce::int64) c[8]);
                 clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
+                clip.muted = c.size() >= 11 && (bool) c[10];
             }
 
             if (c.size() >= 7 && (int) c[5] == 2)
@@ -571,14 +574,18 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, fine pitch, muted] only when not default
-            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta)
+            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f; // [.., release, mod X, mod Y]
+            if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta || extra)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
                 note.add (juce::roundToInt (n.finePitch * 10.0f) / 10.0);
                 note.add (n.muted);
                 note.add (n.slide);
-                if (n.porta)
-                    note.add (true);
+                if (n.porta || extra)
+                    note.add (n.porta);
+                if (extra)
+                    for (auto v : { n.release, n.modX, n.modY })
+                        note.add (juce::roundToInt (v * 1000.0f) / 1000.0);
             }
 
             notes.add (note);
@@ -970,6 +977,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         note.muted = (bool) n[7];
                         note.slide = n.size() >= 9 && (bool) n[8];
                         note.porta = n.size() >= 10 && (bool) n[9];
+
+                        if (n.size() >= 13)
+                        {
+                            note.release = juce::jlimit (0.0f, 1.0f, (float) (double) n[10]);
+                            note.modX = juce::jlimit (0.0f, 1.0f, (float) (double) n[11]);
+                            note.modY = juce::jlimit (0.0f, 1.0f, (float) (double) n[12]);
+                        }
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())
