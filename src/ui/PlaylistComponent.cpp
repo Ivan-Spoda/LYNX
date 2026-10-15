@@ -621,6 +621,22 @@ const std::vector<float>* PlaylistComponent::waveformFor (const std::string& pat
     return peaks.empty() ? nullptr : &peaks;
 }
 
+void PlaylistComponent::paintOverChildren (juce::Graphics& g)
+{
+    if (! ripple)
+        return;
+
+    // ripple editing is on: a small tag in the grid's top-right corner
+    const auto grid = gridArea();
+    const auto tag = juce::Rectangle<float> ((float) grid.getRight() - 70.0f, (float) grid.getY() + 4.0f, 64.0f, 18.0f);
+    g.setColour (theme::colour::accentMuted);
+    g.fillRoundedRectangle (tag, theme::radius::sm);
+    g.setColour (theme::colour::accent);
+    g.drawRoundedRectangle (tag.reduced (0.5f), theme::radius::sm, 1.0f);
+    g.setFont (theme::font (theme::type::caption, true));
+    g.drawText (tr ("Ripple"), tag.toNearestInt(), juce::Justification::centred);
+}
+
 void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
 {
     const auto& song = engine.getSong();
@@ -719,6 +735,75 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
 
     g.setColour (automation.target.kind == AutomationTargetKind::none ? theme::colour::textSecondary : theme::colour::automation.brighter (0.3f));
     g.strokePath (curve, juce::PathStrokeType (1.5f));
+
+    // the points inside the clip, as handles (edited right here)
+    if (r.getWidth() > 24.0f)
+        for (const auto& p : automation.points)
+        {
+            const auto songTick = (double) (c.start + p.tick - c.offset);
+            if (songTick < (double) c.start || songTick > (double) c.end())
+                continue;
+            const auto x = (float) tickToX (songTick);
+            const auto y = body.getBottom() - p.value * body.getHeight();
+            g.setColour (theme::colour::bg0);
+            g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+            g.setColour (theme::colour::automation.brighter (0.5f));
+            g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
+        }
+}
+
+juce::Rectangle<float> PlaylistComponent::automationBody (const Clip& c) const
+{
+    const auto x0 = (float) tickToX ((double) c.start), x1 = (float) tickToX ((double) c.end());
+    const auto y = (float) trackToY (c.track);
+    const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
+    return r.withTrimmedTop (14.0f).reduced (1.0f, 2.0f);
+}
+
+int PlaylistComponent::automationPointAt (int clip, juce::Point<int> pos) const
+{
+    const auto& song = engine.getSong();
+
+    if (clip < 0 || clip >= (int) song.playlist.size() || song.playlist[(std::size_t) clip].kind != ClipKind::automation)
+        return -1;
+
+    const auto& c = song.playlist[(std::size_t) clip];
+    if (c.automation < 0 || c.automation >= (int) song.automations.size())
+        return -1;
+
+    const auto body = automationBody (c);
+    const auto& points = song.automations[(std::size_t) c.automation].points;
+
+    for (int i = (int) points.size() - 1; i >= 0; --i)
+    {
+        const auto songTick = (double) (c.start + points[(std::size_t) i].tick - c.offset);
+        if (songTick < (double) c.start || songTick > (double) c.end())
+            continue;
+        const juce::Point<float> at ((float) tickToX (songTick), body.getBottom() - points[(std::size_t) i].value * body.getHeight());
+        if (at.getDistanceFrom (pos.toFloat()) <= 6.0f)
+            return i;
+    }
+
+    return -1;
+}
+
+bool PlaylistComponent::isOnAutomationCurve (int clip, juce::Point<int> pos) const
+{
+    const auto& song = engine.getSong();
+
+    if (clip < 0 || clip >= (int) song.playlist.size() || song.playlist[(std::size_t) clip].kind != ClipKind::automation)
+        return false;
+
+    const auto& c = song.playlist[(std::size_t) clip];
+    if (c.automation < 0 || c.automation >= (int) song.automations.size())
+        return false;
+
+    const auto body = automationBody (c);
+    if (! body.expanded (0.0f, 4.0f).contains (pos.toFloat()))
+        return false;
+
+    const auto value = song.automations[(std::size_t) c.automation].valueAt ((double) c.offset + xToTick (pos.x) - (double) c.start);
+    return std::abs (body.getBottom() - value * body.getHeight() - (float) pos.y) <= 5.0f;
 }
 
 int PlaylistComponent::fadeHandleAt (int index, juce::Point<int> p) const
@@ -862,6 +947,15 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     downMods = e.mods;
     startedOnEmpty = erasedSomething = holdExpired = false;
 
+    if (e.mods.isMiddleButtonDown() && e.x >= headerWidth) // middle-drag pans, in every tool
+    {
+        drag = Drag::pan;
+        panStartTicks = scrollTicks;
+        panStartY = scrollY;
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        return;
+    }
+
     // track header: LED mutes; right click renames
     if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
@@ -895,6 +989,19 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
         loopAnchor = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), ! e.mods.isAltDown()));
 
+        // Shift+drag inside the time selection moves it with what it holds (Ctrl+Shift: a copy)
+        if (const auto& song = engine.getSong(); e.mods.isShiftDown() && song.hasLoop() && xToTick (e.x) >= (double) song.loopStart
+                                                    && xToTick (e.x) < (double) song.loopEnd)
+        {
+            drag = Drag::timeMove;
+            timeMoveOriginals = song.playlist;
+            timeMoveFrom = song.loopStart;
+            timeMoveTo = song.loopEnd;
+            timeMoveAnchor = loopAnchor;
+            timeMoveCopy = e.mods.isCtrlDown();
+            return;
+        }
+
         if (e.mods.isCtrlDown())
         {
             drag = Drag::loop;
@@ -915,6 +1022,18 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
     if (e.mods.isRightButtonDown())
     {
+        // on an automation point: delete that point
+        if (const auto point = automationPointAt (hit, e.getPosition()); point >= 0)
+        {
+            const auto automation = engine.getSong().playlist[(std::size_t) hit].automation;
+            engine.editSong ([automation, point] (Song& s) {
+                auto& points = s.automations[(std::size_t) automation].points;
+                if (points.size() > 1 && point < (int) points.size())
+                    points.erase (points.begin() + point);
+            });
+            return;
+        }
+
         // on the name strip: clip menu; on the body: delete (press and hold on empty space: Knife)
         if (hit >= 0 && e.y < trackToY (engine.getSong().playlist[(std::size_t) hit].track) + 15)
         {
@@ -922,13 +1041,28 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
+        // double right-click on a clip: the first click deleted it; bring it back muted (or unmuted)
+        if (e.getNumberOfClicks() >= 2 && lastClipEraseTime != 0 && lastClipErasePos.getDistanceFrom (e.getPosition()) < 6
+            && juce::Time::getMillisecondCounter() - lastClipEraseTime < 1000)
+        {
+            lastClipEraseTime = 0;
+            engine.undo();
+            bool r = false, l = false;
+            if (const auto clip = clipAt (e.x, e.y, r, l); clip >= 0)
+                engine.editSong ([clip] (Song& s) { s.playlist[(std::size_t) clip].muted = ! s.playlist[(std::size_t) clip].muted; });
+            return;
+        }
+
         drag = Drag::erase;
         startedOnEmpty = hit < 0;
         setSelection ({}); // indices change while deleting
+        lastClipEraseTime = 0;
 
         if (hit >= 0)
         {
             erasedSomething = true;
+            lastClipEraseTime = juce::Time::getMillisecondCounter();
+            lastClipErasePos = e.getPosition();
             engine.editSong ([hit] (Song& s) { s.playlist.erase (s.playlist.begin() + hit); });
         }
         return;
@@ -1026,6 +1160,36 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             break;
     }
 
+    // automation clip: drag a point, or click on the curve to add one (Pencil and Brush)
+    if (hit >= 0 && ! e.mods.isShiftDown() && (tool == EditTool::pencil || tool == EditTool::brush))
+    {
+        auto point = automationPointAt (hit, e.getPosition());
+
+        if (point < 0 && isOnAutomationCurve (hit, e.getPosition()))
+        {
+            const auto& c = engine.getSong().playlist[(std::size_t) hit];
+            AutomationPoint p;
+            p.tick = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) - c.start + c.offset);
+            const auto body = automationBody (c);
+            p.value = juce::jlimit (0.0f, 1.0f, (body.getBottom() - (float) e.y) / juce::jmax (1.0f, body.getHeight()));
+            engine.editSong ([a = c.automation, p] (Song& s) {
+                auto& points = s.automations[(std::size_t) a].points;
+                points.push_back (p);
+                std::stable_sort (points.begin(), points.end(), [] (auto& l, auto& r) { return l.tick < r.tick; });
+            });
+            point = automationPointAt (hit, e.getPosition());
+        }
+
+        if (point >= 0)
+        {
+            setSelection ({});
+            drag = Drag::autoPoint;
+            autoClip = hit;
+            autoPoint = point;
+            return;
+        }
+    }
+
     // audio clip fade handles (drawn at the top corners of the body)
     if (hit >= 0)
         if (const auto fade = fadeHandleAt (hit, e.getPosition()); fade != 0)
@@ -1074,6 +1238,15 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     if (hit >= 0)
     {
         grabClips (rightEdge ? Drag::resize : leftEdge ? Drag::trimLeft : Drag::move);
+
+        if (drag == Drag::resize && ripple)
+        {
+            setSelection ({}); // a ripple resize works on the grabbed clip only
+            dragIndices = { hit };
+            dragOriginals = { engine.getSong().playlist[(std::size_t) hit] };
+            rippleOriginals = engine.getSong().playlist;
+        }
+
         const auto& c = engine.getSong().playlist[(std::size_t) hit];
 
         if (c.kind == ClipKind::pattern && c.pattern != engine.getSong().currentPattern)
@@ -1116,6 +1289,61 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
     {
         case Drag::none:
             return;
+
+        case Drag::pan:
+            scrollTicks = juce::jmax (0.0, panStartTicks - e.getDistanceFromDragStartX() / pixelsPerTick);
+            scrollY = juce::jmax (0, panStartY - e.getDistanceFromDragStartY());
+            updateScrollBars();
+            repaint();
+            return;
+
+        case Drag::autoPoint:
+        {
+            const auto& song = engine.getSong();
+            if (autoClip < 0 || autoClip >= (int) song.playlist.size())
+                return;
+            const auto& c = song.playlist[(std::size_t) autoClip];
+            if (c.automation < 0 || c.automation >= (int) song.automations.size())
+                return;
+            const auto& points = song.automations[(std::size_t) c.automation].points;
+            if (autoPoint < 0 || autoPoint >= (int) points.size())
+                return;
+
+            // the point stays between its neighbours; Shift pressed after the click keeps the time, Ctrl the value
+            auto tick = snap (xToTick (e.x), snapOn) - c.start + c.offset;
+            const auto lo = autoPoint > 0 ? points[(std::size_t) autoPoint - 1].tick : 0;
+            const auto hi = autoPoint + 1 < (int) points.size() ? points[(std::size_t) autoPoint + 1].tick : std::numeric_limits<std::int64_t>::max();
+            tick = juce::jlimit (lo, hi, tick);
+            const auto body = automationBody (c);
+            auto value = juce::jlimit (0.0f, 1.0f, (body.getBottom() - (float) e.y) / juce::jmax (1.0f, body.getHeight()));
+
+            if (e.mods.isShiftDown() && ! downMods.isShiftDown())
+                tick = points[(std::size_t) autoPoint].tick;
+            if (e.mods.isCtrlDown() && ! downMods.isCtrlDown())
+                value = points[(std::size_t) autoPoint].value;
+
+            engine.editSong ([a = c.automation, i = autoPoint, tick, value] (Song& s) {
+                auto& p = s.automations[(std::size_t) a].points[(std::size_t) i];
+                p.tick = tick;
+                p.value = value;
+            });
+            return;
+        }
+
+        case Drag::timeMove:
+        {
+            const auto here = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
+            const auto delta = juce::jmax (-timeMoveFrom, here - timeMoveAnchor);
+            std::vector<int> moved;
+            engine.editSong ([&] (Song& s) {
+                s.playlist = timeMoveOriginals;
+                moved = noteedit::moveTimeRange (s.playlist, timeMoveFrom, timeMoveTo, delta, timeMoveCopy);
+                s.loopStart = timeMoveFrom + delta;
+                s.loopEnd = timeMoveTo + delta;
+            });
+            setSelection (moved);
+            return;
+        }
 
         case Drag::seek:
         case Drag::listen:
@@ -1308,6 +1536,15 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
             if (engine.getSong().playlist[(std::size_t) dragClip].length == grabbed.length + delta)
                 return;
 
+            if (ripple && ! rippleOriginals.empty()) // the later clips on the track follow the end
+            {
+                engine.editSong ([this, length = juce::jmax (minimum, grabbed.length + delta)] (Song& s) {
+                    s.playlist = rippleOriginals;
+                    noteedit::rippleResize (s.playlist, dragClip, length);
+                });
+                return;
+            }
+
             engine.editSong ([this, delta, minimum] (Song& s) {
                 for (std::size_t j = 0; j < dragIndices.size(); ++j)
                 {
@@ -1377,8 +1614,15 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
     if (drag == Drag::listen)
         engine.stop();
 
-    if (drag == Drag::move || drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::paint)
+    if (drag == Drag::pan)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    if (drag == Drag::move || drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::paint || drag == Drag::timeMove)
         sortClips();
+
+    rippleOriginals.clear();
+    timeMoveOriginals.clear();
+    autoClip = autoPoint = -1;
 
     drag = Drag::none;
     dragClip = -1;
@@ -1541,6 +1785,21 @@ void PlaylistComponent::showRulerMenu (int x)
     {
         menu.addSeparator();
         menu.addItem (tr ("Remove loop"), [this] { engine.editSong ([] (Song& s) { s.loopStart = s.loopEnd = 0; }, false); });
+    }
+
+    menu.addSeparator();
+    menu.addItem (tr ("Ripple editing (resizing and deleting move the later clips)") + "\tShift+S", true, ripple, [this] { setRipple (! ripple); });
+    {
+        juce::PopupMenu zoom;
+        zoom.addItem (tr ("Zoom in") + "\tPageUp", [this] { runAction ("playlist.zoomIn"); });
+        zoom.addItem (tr ("Zoom out") + "\tPageDown", [this] { runAction ("playlist.zoomOut"); });
+        zoom.addItem (tr ("Zoom: one bar") + "\tShift+1", [this] { runAction ("playlist.zoom1"); });
+        zoom.addItem (tr ("Zoom: four bars") + "\tShift+2", [this] { runAction ("playlist.zoom2"); });
+        zoom.addItem (tr ("Zoom: sixteen bars") + "\tShift+3", [this] { runAction ("playlist.zoom3"); });
+        zoom.addItem (tr ("Zoom to show everything") + "\tShift+4", [this] { runAction ("playlist.zoomAll"); });
+        zoom.addItem (tr ("Zoom to the selection") + "\tShift+5", [this] { runAction ("playlist.zoomSelection"); });
+        zoom.addItem (tr ("Centre the view on the playhead") + "\tShift+0", [this] { runAction ("playlist.centrePlayhead"); });
+        menu.addSubMenu (tr ("Zoom"), zoom);
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -1734,6 +1993,99 @@ void PlaylistComponent::showClipMenu (int index)
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
+void PlaylistComponent::setRipple (bool on)
+{
+    ripple = on;
+    repaint();
+}
+
+void PlaylistComponent::rippleDeleteSelection()
+{
+    if (selection.empty())
+        return;
+
+    auto doomed = selection;
+    setSelection ({});
+    engine.editSong ([&doomed] (Song& s) { noteedit::rippleDelete (s.playlist, doomed); });
+}
+
+void PlaylistComponent::zoomAroundCentre (double factor)
+{
+    const auto grid = gridArea();
+    const auto centre = xToTick (grid.getCentreX());
+    pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), pixelsPerTick * factor);
+    scrollTicks = juce::jmax (0.0, centre - (grid.getCentreX() - headerWidth) / pixelsPerTick);
+    updateScrollBars();
+    repaint();
+}
+
+void PlaylistComponent::zoomToBars (int bars)
+{
+    const auto bar = (double) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+    const auto from = std::floor (scrollTicks / bar) * bar;
+    zoomToTicks (from, from + bars * bar);
+}
+
+void PlaylistComponent::zoomAll()
+{
+    zoomToTicks (0.0, (double) engine.getSong().songLength());
+}
+
+void PlaylistComponent::zoomToSelection()
+{
+    const auto& song = engine.getSong();
+
+    if (song.hasLoop() && selection.empty())
+        return zoomToTicks ((double) song.loopStart, (double) song.loopEnd);
+
+    if (selection.empty())
+        return zoomAll();
+
+    std::int64_t from = INT64_MAX, to = 0;
+    int top = 1 << 20;
+    for (auto i : selection)
+        if (i >= 0 && i < (int) song.playlist.size())
+        {
+            from = juce::jmin (from, song.playlist[(std::size_t) i].start);
+            to = juce::jmax (to, song.playlist[(std::size_t) i].end());
+            top = juce::jmin (top, song.playlist[(std::size_t) i].track);
+        }
+
+    zoomToTicks ((double) from, (double) to);
+    scrollY = juce::jmax (0, top * trackHeight);
+    updateScrollBars();
+    repaint();
+}
+
+void PlaylistComponent::centreOnPlayhead()
+{
+    const auto& song = engine.getSong();
+    const auto tick = std::fmod (engine.getTransport().positionTicks.load(), (double) juce::jmax<std::int64_t> (1, song.songLength()));
+    scrollTicks = juce::jmax (0.0, tick - gridArea().getWidth() / pixelsPerTick / 2.0);
+    updateScrollBars();
+    repaint();
+}
+
+bool PlaylistComponent::runAction (const std::string& id)
+{
+    auto is = [&id] (const char* name) { return id == name; };
+
+    if (is ("playlist.zoomIn")) zoomAroundCentre (1.25);
+    else if (is ("playlist.zoomOut")) zoomAroundCentre (1.0 / 1.25);
+    else if (is ("playlist.zoom1")) zoomToBars (1);
+    else if (is ("playlist.zoom2")) zoomToBars (4);
+    else if (is ("playlist.zoom3")) zoomToBars (16);
+    else if (is ("playlist.zoomAll")) zoomAll();
+    else if (is ("playlist.zoomSelection")) zoomToSelection();
+    else if (is ("playlist.centrePlayhead")) centreOnPlayhead();
+    else if (is ("playlist.rippleDelete")) rippleDeleteSelection();
+    else if (is ("playlist.ripple")) setRipple (! ripple);
+    else
+        return false;
+
+    return true;
+}
+
 void PlaylistComponent::deleteSelection()
 {
     if (selection.empty())
@@ -1871,9 +2223,12 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
         return true;
     }
 
-    if (code == juce::KeyPress::deleteKey)
+    if (code == juce::KeyPress::deleteKey && ! mods.isShiftDown())
     {
-        deleteSelection();
+        if (ripple)
+            rippleDeleteSelection();
+        else
+            deleteSelection();
         return true;
     }
 
@@ -2112,14 +2467,13 @@ void PlaylistComponent::timerCallback()
 
 bool PlaylistComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return details.description.toString() == BrowserComponent::dragDescription;
+    return BrowserComponent::isBrowserDrag (details);
 }
 
 void PlaylistComponent::itemDropped (const SourceDetails& details)
 {
-    if (auto* tree = dynamic_cast<juce::FileTreeComponent*> (details.sourceComponent.get()))
-        if (tree->getSelectedFile().existsAsFile())
-            filesDropped ({ tree->getSelectedFile().getFullPathName() }, details.localPosition.x, details.localPosition.y);
+    if (const auto file = BrowserComponent::draggedFile (details); file.existsAsFile())
+        filesDropped ({ file.getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }
 // ---------------------------------------------------------------------------
 

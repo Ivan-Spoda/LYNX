@@ -62,6 +62,24 @@ public:
     void toggleMute (int channel);
     void solo (int channel);
 
+    // Workflow P2: step graph lanes, fills, rotation and organisation
+    void toggleGraphLanes();
+    bool areGraphLanesShown() const noexcept { return graphLanes; }
+    void setGraphLevelForSnapshot (int level) { graphLevel = level; graphLanes = true; updateSize(); repaint(); }
+    void rotateSelected (int steps);
+    void fillSelected (int every);
+    void showEuclideanFill (int channel);
+    std::unique_ptr<juce::Component> makeEuclideanPanel (int channel); // the window's content (also for --snapshot)
+    void sortChannels (ChannelSort by);
+    void selectUnused();
+
+    // Adds a channel at the end (routed to a free insert), selects it and, for plugins, opens its window.
+    int addChannel (ChannelDef channel, bool openEditor);
+
+    // Loads `file` into the selected sampler channel (Browser: Enter, Shift+Up/Down). Returns false when
+    // the selected channel cannot take a sample.
+    bool loadSampleIntoSelected (const juce::File& file);
+
     // Opens or closes the channel's editor (plugin window or settings window; built-in drums and audio
     // clips have none). `keepOthers`: don't close the previously opened editor.
     void toggleEditor (int channel, bool keepOthers);
@@ -77,7 +95,7 @@ public:
     static constexpr int stepWidth = 22;
 
 private:
-    enum class Area { none, mute, pan, volume, route, name, select, grid, addRow };
+    enum class Area { none, mute, pan, volume, route, name, select, grid, addRow, laneLevels, lane };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -88,6 +106,20 @@ private:
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }
     int gridLeft() const noexcept { return selectLeft() + selectWidth + 8; }
     juce::Rectangle<int> rowBounds (int row) const;
+    int rowY (int row) const;       // top of a row (rows below the graph lane shift down)
+    int rowAtY (int y) const;       // row under y (the lane counts as its channel's row)
+    int graphRow() const;           // the row the lane belongs to (the primary selection), -1 when hidden
+    juce::Rectangle<int> laneBounds() const;
+    juce::Rectangle<int> levelButtonBounds (int level) const;
+    void paintLane (juce::Graphics& g);
+    void setLaneValue (int step, float value);
+    void applyLane (const juce::MouseEvent& e);
+    float laneValueAt (int y) const;
+    bool graphLanes = false;
+    int graphLevel = 0; // notetools::Level
+    int laneDownStep = -1;
+    float laneDownValue = 0.0f;
+    static constexpr int laneHeight = 72;
     juce::Rectangle<int> stepBounds (int row, int step) const;
     bool cellHasNote (int channel, int step) const;
     void applyPaint (const juce::MouseEvent& e);

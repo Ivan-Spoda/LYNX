@@ -85,6 +85,8 @@ public:
     void frameMoved (Panel panel, juce::Rectangle<int> bounds);
     std::vector<juce::Rectangle<int>> otherPanelBounds (Panel panel) const;
     void detachedWindowMoved (Panel panel, juce::Rectangle<int> screenBounds);
+    // Screen bounds a detached window snaps to: the main window and the other detached panels.
+    std::vector<juce::Rectangle<int>> otherWindowScreenBounds (Panel panel) const;
 
     static constexpr int titleHeight = 28;
 

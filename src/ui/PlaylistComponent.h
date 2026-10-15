@@ -52,6 +52,7 @@ public:
     std::function<void()> onOpenPattern;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
@@ -62,6 +63,14 @@ public:
 
     // Editing shortcuts; the main window forwards keys when the Playlist is visible.
     bool handleKey (const juce::KeyPress& key);
+
+    // The key map's playlist.* actions (zoom presets, ripple editing). False for unknown ids.
+    bool runAction (const std::string& id);
+
+    // Ripple editing: resizing a clip's end moves the later clips on its track, deleting closes the gap.
+    bool isRippleOn() const noexcept { return ripple; }
+    void setRipple (bool on);
+    void rippleDeleteSelection();
 
     // dragging audio files creates audio clips (and a channel for each)
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -85,7 +94,7 @@ public:
     static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
-    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen };
+    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -163,6 +172,27 @@ private:
     static inline std::vector<Clip> clipboard;
     std::int64_t grabOffset = 0;
     double playheadTick = -1.0;
+
+    // workflow P2
+    bool ripple = false;
+    std::vector<Clip> rippleOriginals;   // the whole playlist when a ripple resize starts
+    double panStartTicks = 0.0;
+    int panStartY = 0;
+    std::vector<Clip> timeMoveOriginals; // Shift+drag on the ruler: the playlist when it started
+    std::int64_t timeMoveFrom = 0, timeMoveTo = 0, timeMoveAnchor = 0;
+    bool timeMoveCopy = false;
+    juce::uint32 lastClipEraseTime = 0;  // double right-click on a clip: mute instead of delete
+    juce::Point<int> lastClipErasePos;
+    // inline automation editing: points of automation clips are dragged, added on the curve, deleted by right-click
+    int autoClip = -1, autoPoint = -1;
+    juce::Rectangle<float> automationBody (const Clip& clip) const;
+    int automationPointAt (int clip, juce::Point<int> p) const;
+    bool isOnAutomationCurve (int clip, juce::Point<int> p) const;
+    void zoomAroundCentre (double factor);
+    void zoomToBars (int bars);
+    void zoomToSelection();
+    void zoomAll();
+    void centreOnPlayhead();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaylistComponent)
 };
