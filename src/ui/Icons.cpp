@@ -44,6 +44,26 @@ Shape make (Icon icon)
     auto& st = s.stroke;
     auto& fi = s.fill;
 
+    // a page with a folded corner (file icons)
+    auto page = [&st] {
+        juce::Path p;
+        polyline (p, { { 6.0f, 3.5f }, { 13.5f, 3.5f }, { 18.0f, 8.0f }, { 18.0f, 20.5f }, { 6.0f, 20.5f } }, true);
+        st.addPath (p.createPathWithRoundedCorners (1.5f));
+        polyline (st, { { 13.5f, 3.5f }, { 13.5f, 8.0f }, { 18.0f, 8.0f } });
+    };
+
+    // a speaker cone (mute and playback tools)
+    auto speaker = [&st] {
+        juce::Path p;
+        polyline (p, { { 3.5f, 9.5f }, { 7.0f, 9.5f }, { 11.5f, 5.5f }, { 11.5f, 18.5f }, { 7.0f, 14.5f }, { 3.5f, 14.5f } }, true);
+        st.addPath (p.createPathWithRoundedCorners (1.2f));
+    };
+
+    // a window outline with a title band (view icons)
+    auto window = [&st] {
+        roundRect (st, 3.5f, 4.5f, 17.0f, 15.0f, 2.0f);
+    };
+
     switch (icon)
     {
         case Icon::none:
@@ -53,274 +73,392 @@ Shape make (Icon icon)
         case Icon::play:
         {
             juce::Path tri;
-            tri.addTriangle (7.5f, 5.0f, 7.5f, 19.0f, 19.0f, 12.0f);
-            fi = tri.createPathWithRoundedCorners (1.6f);
+            tri.addTriangle (7.0f, 4.5f, 7.0f, 19.5f, 19.5f, 12.0f);
+            fi = tri.createPathWithRoundedCorners (2.0f);
             break;
         }
         case Icon::pause:
-            fi.addRoundedRectangle (6.5f, 5.0f, 4.0f, 14.0f, 1.2f);
-            fi.addRoundedRectangle (13.5f, 5.0f, 4.0f, 14.0f, 1.2f);
+            fi.addRoundedRectangle (6.0f, 5.0f, 4.5f, 14.0f, 1.25f);
+            fi.addRoundedRectangle (13.5f, 5.0f, 4.5f, 14.0f, 1.25f);
             break;
         case Icon::stop:
-            fi.addRoundedRectangle (6.0f, 6.0f, 12.0f, 12.0f, 2.0f);
+            fi.addRoundedRectangle (5.5f, 5.5f, 13.0f, 13.0f, 2.25f);
             break;
         case Icon::record:
-            fi.addEllipse (6.0f, 6.0f, 12.0f, 12.0f);
+            fi.addEllipse (5.0f, 5.0f, 14.0f, 14.0f);
             break;
 
         // --- small glyphs ---
         case Icon::chevronDown:
-            polyline (st, { { 7.0f, 10.0f }, { 12.0f, 15.0f }, { 17.0f, 10.0f } });
+            polyline (st, { { 7.0f, 9.5f }, { 12.0f, 14.5f }, { 17.0f, 9.5f } });
             break;
         case Icon::more:
-            for (float x : { 6.0f, 12.0f, 18.0f })
-                fi.addEllipse (x - 1.6f, 10.4f, 3.2f, 3.2f);
+            for (float x : { 5.5f, 12.0f, 18.5f })
+                fi.addEllipse (x - 1.75f, 10.25f, 3.5f, 3.5f);
             break;
         case Icon::plus:
-            line (st, 12.0f, 6.0f, 12.0f, 18.0f);
-            line (st, 6.0f, 12.0f, 18.0f, 12.0f);
+            line (st, 12.0f, 5.0f, 12.0f, 19.0f);
+            line (st, 5.0f, 12.0f, 19.0f, 12.0f);
             break;
         case Icon::check:
-            polyline (st, { { 6.0f, 12.5f }, { 10.0f, 16.5f }, { 18.0f, 8.0f } });
+            polyline (st, { { 5.0f, 12.5f }, { 9.5f, 17.0f }, { 19.0f, 7.0f } });
             break;
         case Icon::close:
-            line (st, 7.0f, 7.0f, 17.0f, 17.0f);
-            line (st, 17.0f, 7.0f, 7.0f, 17.0f);
+            line (st, 6.5f, 6.5f, 17.5f, 17.5f);
+            line (st, 17.5f, 6.5f, 6.5f, 17.5f);
             break;
         case Icon::minimise:
-            line (st, 7.0f, 12.5f, 17.0f, 12.5f);
+            line (st, 6.0f, 12.0f, 18.0f, 12.0f);
             break;
         case Icon::maximise:
-            roundRect (st, 7.0f, 7.0f, 10.0f, 10.0f, 1.5f);
+            roundRect (st, 5.5f, 5.5f, 13.0f, 13.0f, 2.0f);
+            line (st, 5.5f, 9.0f, 18.5f, 9.0f);
+            break;
+        case Icon::restore: // two stacked windows
+            roundRect (st, 4.5f, 8.5f, 11.0f, 11.0f, 1.75f);
+            polyline (st, { { 8.5f, 4.5f }, { 17.5f, 4.5f }, { 19.5f, 6.5f }, { 19.5f, 15.5f } });
+            break;
+        case Icon::panelMenu: // three bars of decreasing length: "this window's options"
+            line (st, 5.0f, 7.0f, 19.0f, 7.0f);
+            line (st, 5.0f, 12.0f, 16.0f, 12.0f);
+            line (st, 5.0f, 17.0f, 13.0f, 17.0f);
             break;
 
         // --- modes ---
-        case Icon::pattern: // a 2x2 step block, one lit
-            roundRect (st, 5.0f, 5.0f, 6.0f, 6.0f, 1.2f);
-            roundRect (st, 13.0f, 13.0f, 6.0f, 6.0f, 1.2f);
-            roundRect (st, 5.0f, 13.0f, 6.0f, 6.0f, 1.2f);
-            fi.addRoundedRectangle (13.0f, 5.0f, 6.0f, 6.0f, 1.2f);
+        case Icon::pattern: // a 2x2 block of steps, one lit
+            roundRect (st, 4.0f, 4.0f, 6.5f, 6.5f, 1.5f);
+            roundRect (st, 4.0f, 13.5f, 6.5f, 6.5f, 1.5f);
+            roundRect (st, 13.5f, 13.5f, 6.5f, 6.5f, 1.5f);
+            fi.addRoundedRectangle (12.75f, 3.25f, 8.0f, 8.0f, 2.0f);
             break;
-        case Icon::song: // arrangement lanes
-            line (st, 4.5f, 7.0f, 13.0f, 7.0f);
-            line (st, 9.0f, 12.0f, 19.5f, 12.0f);
-            line (st, 4.5f, 17.0f, 16.0f, 17.0f);
+        case Icon::song: // clips staggered along three lanes
+            fi.addRoundedRectangle (3.5f, 4.5f, 9.0f, 4.0f, 1.25f);
+            fi.addRoundedRectangle (9.0f, 10.0f, 11.5f, 4.0f, 1.25f);
+            fi.addRoundedRectangle (5.5f, 15.5f, 8.0f, 4.0f, 1.25f);
             break;
         case Icon::metronome:
         {
             juce::Path body;
-            body.startNewSubPath (9.5f, 4.5f);
-            body.lineTo (14.5f, 4.5f);
-            body.lineTo (18.5f, 19.5f);
-            body.lineTo (5.5f, 19.5f);
-            body.closeSubPath();
-            st.addPath (body.createPathWithRoundedCorners (1.5f));
-            line (st, 12.0f, 16.0f, 17.5f, 7.0f);
-            line (st, 7.0f, 15.5f, 17.0f, 15.5f);
+            polyline (body, { { 9.0f, 3.5f }, { 15.0f, 3.5f }, { 19.0f, 20.5f }, { 5.0f, 20.5f } }, true);
+            st.addPath (body.createPathWithRoundedCorners (2.0f));
+            line (st, 12.0f, 16.5f, 17.5f, 6.0f);
+            line (st, 7.0f, 16.5f, 17.0f, 16.5f);
+            fi.addEllipse (14.0f, 8.0f, 3.5f, 3.5f);
             break;
         }
 
         // --- file ---
         case Icon::newFile:
-        case Icon::file:
-        {
-            juce::Path page;
-            polyline (page, { { 6.0f, 3.5f }, { 13.5f, 3.5f }, { 18.0f, 8.0f }, { 18.0f, 20.5f }, { 6.0f, 20.5f } }, true);
-            st.addPath (page.createPathWithRoundedCorners (1.5f));
-            polyline (st, { { 13.5f, 3.5f }, { 13.5f, 8.0f }, { 18.0f, 8.0f } });
-            if (icon == Icon::newFile)
-            {
-                line (st, 12.0f, 11.0f, 12.0f, 17.0f);
-                line (st, 9.0f, 14.0f, 15.0f, 14.0f);
-            }
+            page();
+            line (st, 12.0f, 11.0f, 12.0f, 17.0f);
+            line (st, 9.0f, 14.0f, 15.0f, 14.0f);
             break;
-        }
-        case Icon::open:
+        case Icon::file:
+            page();
+            break;
         case Icon::folder:
         {
             juce::Path f;
-            polyline (f, { { 3.5f, 6.0f }, { 9.0f, 6.0f }, { 11.0f, 8.0f }, { 20.5f, 8.0f }, { 20.5f, 18.5f }, { 3.5f, 18.5f } }, true);
-            st.addPath (f.createPathWithRoundedCorners (1.5f));
-            if (icon == Icon::open)
-                line (st, 3.5f, 11.5f, 20.5f, 11.5f);
+            polyline (f, { { 3.5f, 5.5f }, { 9.0f, 5.5f }, { 11.0f, 7.5f }, { 20.5f, 7.5f }, { 20.5f, 18.5f }, { 3.5f, 18.5f } }, true);
+            st.addPath (f.createPathWithRoundedCorners (1.75f));
             break;
         }
-        case Icon::save:
+        case Icon::open: // a folder with its front flap tipped open
+        {
+            juce::Path back;
+            polyline (back, { { 4.0f, 18.5f }, { 3.5f, 5.5f }, { 9.0f, 5.5f }, { 11.0f, 7.5f }, { 18.0f, 7.5f }, { 18.0f, 10.5f } });
+            st.addPath (back.createPathWithRoundedCorners (1.5f));
+            juce::Path flap;
+            polyline (flap, { { 4.0f, 18.5f }, { 7.0f, 10.5f }, { 21.0f, 10.5f }, { 18.0f, 18.5f } }, true);
+            st.addPath (flap.createPathWithRoundedCorners (1.5f));
+            break;
+        }
+        case Icon::save: // a disk
         {
             juce::Path body;
-            polyline (body, { { 4.5f, 4.5f }, { 16.0f, 4.5f }, { 19.5f, 8.0f }, { 19.5f, 19.5f }, { 4.5f, 19.5f } }, true);
-            st.addPath (body.createPathWithRoundedCorners (1.5f));
-            polyline (st, { { 8.0f, 4.5f }, { 8.0f, 9.0f }, { 15.0f, 9.0f }, { 15.0f, 4.5f } });
-            roundRect (st, 8.0f, 13.5f, 8.0f, 6.0f, 1.0f);
+            polyline (body, { { 4.0f, 4.0f }, { 16.5f, 4.0f }, { 20.0f, 7.5f }, { 20.0f, 20.0f }, { 4.0f, 20.0f } }, true);
+            st.addPath (body.createPathWithRoundedCorners (2.0f));
+            polyline (st, { { 8.0f, 4.0f }, { 8.0f, 8.5f }, { 15.0f, 8.5f }, { 15.0f, 4.0f } });
+            roundRect (st, 7.5f, 13.0f, 9.0f, 7.0f, 1.0f);
             break;
         }
-        case Icon::exportAudio: // waveform leaving a box
-            polyline (st, { { 12.0f, 3.5f }, { 12.0f, 14.0f } });
-            polyline (st, { { 8.0f, 7.5f }, { 12.0f, 3.5f }, { 16.0f, 7.5f } });
-            polyline (st, { { 4.5f, 13.0f }, { 4.5f, 19.5f }, { 19.5f, 19.5f }, { 19.5f, 13.0f } });
+        case Icon::exportAudio: // a waveform leaving a tray
+            polyline (st, { { 3.5f, 14.0f }, { 3.5f, 19.5f }, { 20.5f, 19.5f }, { 20.5f, 14.0f } });
+            line (st, 12.0f, 15.5f, 12.0f, 4.0f);
+            polyline (st, { { 8.0f, 8.0f }, { 12.0f, 4.0f }, { 16.0f, 8.0f } });
             break;
         case Icon::settings: // three sliders
-            line (st, 5.0f, 7.0f, 19.0f, 7.0f);
-            line (st, 5.0f, 12.0f, 19.0f, 12.0f);
-            line (st, 5.0f, 17.0f, 19.0f, 17.0f);
-            fi.addEllipse (7.0f, 4.8f, 4.4f, 4.4f);
-            fi.addEllipse (13.6f, 9.8f, 4.4f, 4.4f);
-            fi.addEllipse (9.0f, 14.8f, 4.4f, 4.4f);
+            line (st, 4.0f, 7.0f, 20.0f, 7.0f);
+            line (st, 4.0f, 12.0f, 20.0f, 12.0f);
+            line (st, 4.0f, 17.0f, 20.0f, 17.0f);
+            fi.addEllipse (6.5f, 4.5f, 5.0f, 5.0f);
+            fi.addEllipse (13.0f, 9.5f, 5.0f, 5.0f);
+            fi.addEllipse (8.5f, 14.5f, 5.0f, 5.0f);
             break;
         case Icon::help:
-            st.addCentredArc (12.0f, 9.5f, 3.5f, 3.5f, 0.0f, -pi * 0.5f, pi * 0.75f, true);
-            st.lineTo (12.0f, 14.5f);
-            fi.addEllipse (10.9f, 17.0f, 2.2f, 2.2f);
+            st.addEllipse (3.5f, 3.5f, 17.0f, 17.0f);
+            st.startNewSubPath (9.5f, 10.0f);
+            st.addCentredArc (12.0f, 10.0f, 2.5f, 2.5f, 0.0f, -pi * 0.5f, pi * 0.7f, false);
+            st.lineTo (12.0f, 13.5f);
+            fi.addEllipse (10.9f, 15.6f, 2.2f, 2.2f);
             break;
         case Icon::undo:
         case Icon::redo:
         {
             juce::Path p;
-            p.startNewSubPath (6.0f, 10.0f);
-            p.lineTo (14.0f, 10.0f);
-            p.addCentredArc (14.0f, 14.0f, 4.0f, 4.0f, 0.0f, 0.0f, pi, false);
-            p.lineTo (9.0f, 18.0f);
-            polyline (p, { { 9.5f, 6.5f }, { 6.0f, 10.0f }, { 9.5f, 13.5f } });
+            p.startNewSubPath (19.0f, 18.5f);
+            p.cubicTo (19.0f, 12.0f, 15.0f, 9.0f, 5.5f, 9.0f);
+            polyline (p, { { 9.5f, 5.0f }, { 5.5f, 9.0f }, { 9.5f, 13.0f } });
             if (icon == Icon::redo)
                 p.applyTransform (juce::AffineTransform::scale (-1.0f, 1.0f, 12.0f, 12.0f));
             st.addPath (p);
             break;
         }
 
-        // --- views ---
-        case Icon::channelRack: // rows of steps
+        // --- views (the window buttons) ---
+        case Icon::playlist: // clips on lanes inside a window
+            window();
+            fi.addRoundedRectangle (6.0f, 7.5f, 6.5f, 2.5f, 0.75f);
+            fi.addRoundedRectangle (10.5f, 11.0f, 7.5f, 2.5f, 0.75f);
+            fi.addRoundedRectangle (6.0f, 14.5f, 4.5f, 2.5f, 0.75f);
+            fi.addRoundedRectangle (12.5f, 14.5f, 5.5f, 2.5f, 0.75f);
+            break;
+        case Icon::channelRack: // three channels: a name pad and a row of steps each
             for (int r = 0; r < 3; ++r)
             {
-                const auto y = 5.5f + (float) r * 5.0f;
-                fi.addRoundedRectangle (4.0f, y, 4.0f, 3.0f, 0.8f);
+                const auto y = 4.5f + (float) r * 5.75f;
+                roundRect (st, 3.5f, y, 6.5f, 3.5f, 1.0f);
                 for (int c = 0; c < 3; ++c)
                 {
-                    juce::Path cell;
-                    cell.addRoundedRectangle (10.0f + (float) c * 3.6f, y, 2.6f, 3.0f, 0.6f);
+                    const auto x = 12.5f + (float) c * 3.0f;
                     if ((r + c) % 2 == 0)
-                        fi.addPath (cell);
+                        fi.addRoundedRectangle (x - 0.25f, y - 0.25f, 2.5f, 4.0f, 0.6f);
                     else
-                        st.addPath (cell);
+                        fi.addRoundedRectangle (x + 0.5f, y + 1.25f, 1.0f, 1.0f, 0.3f);
                 }
             }
             break;
-        case Icon::pianoRoll: // keys + notes
-            roundRect (st, 4.0f, 4.5f, 16.0f, 15.0f, 1.5f);
-            line (st, 8.5f, 4.5f, 8.5f, 19.5f);
-            fi.addRoundedRectangle (10.5f, 7.0f, 4.0f, 2.4f, 0.8f);
-            fi.addRoundedRectangle (13.0f, 11.0f, 5.0f, 2.4f, 0.8f);
-            fi.addRoundedRectangle (11.0f, 15.0f, 3.5f, 2.4f, 0.8f);
-            break;
-        case Icon::playlist: // clips on lanes
-            fi.addRoundedRectangle (4.0f, 5.0f, 9.0f, 3.5f, 1.0f);
-            fi.addRoundedRectangle (9.0f, 10.3f, 11.0f, 3.5f, 1.0f);
-            fi.addRoundedRectangle (4.0f, 15.6f, 6.0f, 3.5f, 1.0f);
-            fi.addRoundedRectangle (12.0f, 15.6f, 6.0f, 3.5f, 1.0f);
+        case Icon::pianoRoll: // a keyboard edge and notes
+            window();
+            line (st, 8.0f, 4.5f, 8.0f, 19.5f);
+            line (st, 3.5f, 9.5f, 6.0f, 9.5f);
+            line (st, 3.5f, 14.5f, 6.0f, 14.5f);
+            fi.addRoundedRectangle (10.0f, 7.0f, 4.5f, 2.5f, 0.75f);
+            fi.addRoundedRectangle (13.0f, 10.75f, 5.5f, 2.5f, 0.75f);
+            fi.addRoundedRectangle (10.5f, 14.5f, 4.0f, 2.5f, 0.75f);
             break;
         case Icon::mixer: // three faders
             for (int i = 0; i < 3; ++i)
-            {
-                const auto x = 6.5f + (float) i * 5.5f;
-                line (st, x, 4.5f, x, 19.5f);
-            }
-            fi.addRoundedRectangle (4.5f, 12.0f, 4.0f, 3.0f, 0.8f);
-            fi.addRoundedRectangle (10.0f, 7.0f, 4.0f, 3.0f, 0.8f);
-            fi.addRoundedRectangle (15.5f, 14.5f, 4.0f, 3.0f, 0.8f);
+                line (st, 6.0f + (float) i * 6.0f, 4.0f, 6.0f + (float) i * 6.0f, 20.0f);
+            fi.addRoundedRectangle (3.5f, 12.0f, 5.0f, 3.5f, 1.0f);
+            fi.addRoundedRectangle (9.5f, 6.5f, 5.0f, 3.5f, 1.0f);
+            fi.addRoundedRectangle (15.5f, 14.5f, 5.0f, 3.5f, 1.0f);
             break;
-        case Icon::browser: // sidebar
-            roundRect (st, 4.0f, 4.5f, 16.0f, 15.0f, 1.5f);
-            line (st, 9.5f, 4.5f, 9.5f, 19.5f);
-            line (st, 12.5f, 9.0f, 17.0f, 9.0f);
-            line (st, 12.5f, 12.5f, 17.0f, 12.5f);
-            line (st, 12.5f, 16.0f, 15.0f, 16.0f);
+        case Icon::browser: // a tree: a folder and two items under it
+            roundRect (st, 3.5f, 4.0f, 6.0f, 5.0f, 1.25f);
+            polyline (st, { { 6.5f, 9.0f }, { 6.5f, 17.5f }, { 10.0f, 17.5f } });
+            line (st, 6.5f, 12.5f, 10.0f, 12.5f);
+            line (st, 12.5f, 6.5f, 20.5f, 6.5f);
+            line (st, 13.0f, 12.5f, 20.5f, 12.5f);
+            line (st, 13.0f, 17.5f, 18.0f, 17.5f);
             break;
+        case Icon::pluginPicker: // a plug
+        {
+            line (st, 9.0f, 3.5f, 9.0f, 7.5f);
+            line (st, 15.0f, 3.5f, 15.0f, 7.5f);
+            juce::Path body;
+            polyline (body, { { 5.5f, 7.5f }, { 18.5f, 7.5f }, { 18.5f, 11.0f }, { 14.5f, 16.0f }, { 9.5f, 16.0f }, { 5.5f, 11.0f } }, true);
+            st.addPath (body.createPathWithRoundedCorners (1.75f));
+            line (st, 12.0f, 16.0f, 12.0f, 20.5f);
+            break;
+        }
 
         // --- content ---
-        case Icon::audioFile:
-            for (int i = 0; i < 5; ++i)
+        case Icon::audioFile: // a short waveform
+        {
+            const float heights[] = { 5.0f, 11.0f, 16.0f, 8.0f, 12.0f, 4.0f };
+            for (int i = 0; i < 6; ++i)
             {
-                const float heights[] = { 5.0f, 11.0f, 15.0f, 9.0f, 4.0f };
-                const auto x = 6.0f + (float) i * 3.0f;
+                const auto x = 4.5f + (float) i * 3.0f;
                 line (st, x, 12.0f - heights[i] / 2.0f, x, 12.0f + heights[i] / 2.0f);
             }
             break;
+        }
         case Icon::plugin: // a module with a jack
-            roundRect (st, 5.0f, 6.5f, 14.0f, 11.0f, 2.0f);
-            line (st, 9.0f, 3.5f, 9.0f, 6.5f);
-            line (st, 15.0f, 3.5f, 15.0f, 6.5f);
-            fi.addEllipse (10.0f, 10.0f, 4.0f, 4.0f);
+            roundRect (st, 4.0f, 6.5f, 16.0f, 12.0f, 2.0f);
+            line (st, 8.5f, 3.5f, 8.5f, 6.5f);
+            line (st, 15.5f, 3.5f, 15.5f, 6.5f);
+            st.addEllipse (9.5f, 10.0f, 5.0f, 5.0f);
             break;
         case Icon::preset: // a knob
-            st.addCentredArc (12.0f, 12.0f, 7.0f, 7.0f, 0.0f, -pi * 0.75f, pi * 0.75f, true);
+            st.addCentredArc (12.0f, 12.0f, 8.0f, 8.0f, 0.0f, -pi * 0.75f, pi * 0.75f, true);
             line (st, 12.0f, 12.0f, 15.5f, 8.5f);
             break;
-        case Icon::project: // the LYNX "spark": a diamond
+        case Icon::project: // a diamond with a core
         {
             juce::Path d;
-            polyline (d, { { 12.0f, 3.5f }, { 19.0f, 12.0f }, { 12.0f, 20.5f }, { 5.0f, 12.0f } }, true);
+            polyline (d, { { 12.0f, 3.0f }, { 20.0f, 12.0f }, { 12.0f, 21.0f }, { 4.0f, 12.0f } }, true);
             st.addPath (d.createPathWithRoundedCorners (2.0f));
-            fi.addEllipse (10.0f, 10.0f, 4.0f, 4.0f);
+            fi.addEllipse (9.75f, 9.75f, 4.5f, 4.5f);
             break;
         }
 
-        // --- tools ---
+        // --- edit tools ---
         case Icon::draw: // pencil
         {
             juce::Path p;
-            polyline (p, { { 15.5f, 4.5f }, { 19.5f, 8.5f }, { 9.0f, 19.0f }, { 4.5f, 19.5f }, { 5.0f, 15.0f } }, true);
-            st.addPath (p.createPathWithRoundedCorners (1.0f));
-            line (st, 13.0f, 7.0f, 17.0f, 11.0f);
+            polyline (p, { { 15.5f, 4.0f }, { 20.0f, 8.5f }, { 9.0f, 19.5f }, { 4.0f, 20.0f }, { 4.5f, 15.0f } }, true);
+            st.addPath (p.createPathWithRoundedCorners (1.25f));
+            line (st, 13.0f, 6.5f, 17.5f, 11.0f);
             break;
         }
-        case Icon::erase:
+        case Icon::brush: // a round brush: handle, ferrule and a filled tip
+        {
+            line (st, 20.0f, 4.0f, 13.5f, 10.5f);
+            juce::Path ferrule;
+            polyline (ferrule, { { 11.5f, 9.5f }, { 14.5f, 12.5f }, { 12.5f, 14.5f }, { 9.5f, 11.5f } }, true);
+            st.addPath (ferrule.createPathWithRoundedCorners (0.75f));
+            juce::Path tip;
+            tip.startNewSubPath (9.0f, 12.5f);
+            tip.quadraticTo (4.0f, 13.0f, 3.5f, 20.5f);
+            tip.quadraticTo (11.0f, 20.0f, 11.5f, 15.0f);
+            tip.closeSubPath();
+            fi.addPath (tip);
+            break;
+        }
+        case Icon::erase: // an eraser on a line
         {
             juce::Path p;
-            polyline (p, { { 13.0f, 4.5f }, { 19.5f, 11.0f }, { 11.5f, 19.0f }, { 7.5f, 19.0f }, { 4.5f, 16.0f } }, true);
-            st.addPath (p.createPathWithRoundedCorners (1.0f));
-            line (st, 9.0f, 9.0f, 15.0f, 15.0f);
-            line (st, 11.5f, 19.0f, 19.5f, 19.0f);
+            polyline (p, { { 13.0f, 4.0f }, { 20.0f, 11.0f }, { 12.0f, 19.0f }, { 7.5f, 19.0f }, { 4.0f, 15.5f } }, true);
+            st.addPath (p.createPathWithRoundedCorners (1.25f));
+            line (st, 8.5f, 8.5f, 15.5f, 15.5f);
+            line (st, 12.0f, 19.0f, 20.5f, 19.0f);
             break;
         }
-        case Icon::select:
+        case Icon::mute: // a speaker with a cross
+            speaker();
+            line (st, 15.0f, 9.0f, 20.5f, 15.0f);
+            line (st, 20.5f, 9.0f, 15.0f, 15.0f);
+            break;
+        case Icon::listen: // a speaker with two waves (playback tool)
+            speaker();
+            st.addCentredArc (12.0f, 12.0f, 3.5f, 3.5f, 0.0f, pi * 0.25f, pi * 0.75f, true);
+            st.addCentredArc (12.0f, 12.0f, 7.5f, 7.5f, 0.0f, pi * 0.22f, pi * 0.78f, true);
+            break;
+        case Icon::knife: // a blade with a handle, cutting down to the left
         {
-            const float dash[] = { 2.5f, 2.0f };
-            juce::Path box;
-            box.addRectangle (4.5f, 4.5f, 15.0f, 15.0f);
-            juce::PathStrokeType (1.0f).createDashedStroke (fi, box, dash, 2);
+            juce::Path blade;
+            polyline (blade, { { 4.0f, 20.0f }, { 13.5f, 8.0f }, { 17.0f, 11.5f } }, true);
+            st.addPath (blade.createPathWithRoundedCorners (1.25f));
+            line (st, 15.5f, 9.5f, 20.0f, 5.0f);
+            break;
+        }
+        case Icon::select: // the four corners of a selection box
+        {
+            const float a = 4.0f, b = 20.0f, l = 4.5f;
+            polyline (st, { { a, a + l }, { a, a }, { a + l, a } });
+            polyline (st, { { b - l, a }, { b, a }, { b, a + l } });
+            polyline (st, { { b, b - l }, { b, b }, { b - l, b } });
+            polyline (st, { { a + l, b }, { a, b }, { a, b - l } });
+            fi.addRoundedRectangle (9.5f, 9.5f, 5.0f, 5.0f, 1.0f);
             break;
         }
         case Icon::slice:
         case Icon::scissors:
-            st.addEllipse (4.5f, 13.5f, 5.0f, 5.0f);
-            st.addEllipse (14.5f, 13.5f, 5.0f, 5.0f);
-            line (st, 8.5f, 14.5f, 17.0f, 4.5f);
-            line (st, 15.5f, 14.5f, 7.0f, 4.5f);
+            st.addEllipse (3.5f, 14.0f, 6.0f, 6.0f);
+            st.addEllipse (14.5f, 14.0f, 6.0f, 6.0f);
+            line (st, 8.5f, 15.0f, 17.5f, 3.5f);
+            line (st, 15.5f, 15.0f, 6.5f, 3.5f);
             break;
-        case Icon::mute: // speaker with a cross
-        {
-            juce::Path sp;
-            polyline (sp, { { 4.5f, 9.5f }, { 8.0f, 9.5f }, { 12.0f, 5.5f }, { 12.0f, 18.5f }, { 8.0f, 14.5f }, { 4.5f, 14.5f } }, true);
-            st.addPath (sp.createPathWithRoundedCorners (1.0f));
-            line (st, 15.5f, 9.5f, 20.0f, 14.5f);
-            line (st, 20.0f, 9.5f, 15.5f, 14.5f);
+        case Icon::zoom: // a magnifier with a plus
+            st.addEllipse (3.5f, 3.5f, 13.0f, 13.0f);
+            line (st, 14.5f, 14.5f, 20.5f, 20.5f);
+            line (st, 10.0f, 7.0f, 10.0f, 13.0f);
+            line (st, 7.0f, 10.0f, 13.0f, 10.0f);
             break;
-        }
+        case Icon::slip: // a fixed frame with its content sliding inside
+            roundRect (st, 3.5f, 5.5f, 17.0f, 13.0f, 2.0f);
+            polyline (st, { { 9.0f, 9.5f }, { 6.5f, 12.0f }, { 9.0f, 14.5f } });
+            polyline (st, { { 15.0f, 9.5f }, { 17.5f, 12.0f }, { 15.0f, 14.5f } });
+            line (st, 7.0f, 12.0f, 17.0f, 12.0f);
+            break;
+        case Icon::ghost: // two overlapping notes, the back one hollow
+            roundRect (st, 3.5f, 5.5f, 12.0f, 5.5f, 1.5f);
+            fi.addRoundedRectangle (8.5f, 13.0f, 12.0f, 5.5f, 1.5f);
+            break;
         case Icon::link:
-            st.addRoundedRectangle (3.5f, 9.0f, 10.0f, 6.0f, 3.0f);
-            st.addRoundedRectangle (10.5f, 9.0f, 10.0f, 6.0f, 3.0f);
+            roundRect (st, 3.0f, 8.5f, 11.0f, 7.0f, 3.5f);
+            roundRect (st, 10.0f, 8.5f, 11.0f, 7.0f, 3.5f);
             break;
-        case Icon::magnet:
+        case Icon::magnet: // snap
         {
             juce::Path m;
-            m.startNewSubPath (6.0f, 5.0f);
-            m.lineTo (6.0f, 12.0f);
-            m.addCentredArc (12.0f, 12.0f, 6.0f, 6.0f, 0.0f, -pi * 0.5f, pi * 0.5f, false);
-            m.lineTo (18.0f, 5.0f);
+            m.startNewSubPath (5.5f, 4.0f);
+            m.lineTo (5.5f, 12.0f);
+            m.addCentredArc (12.0f, 12.0f, 6.5f, 6.5f, 0.0f, pi * 1.5f, pi * 0.5f, false);
+            m.lineTo (18.5f, 4.0f);
             st.addPath (m);
-            line (st, 6.0f, 8.0f, 9.5f, 8.0f);
-            line (st, 14.5f, 8.0f, 18.0f, 8.0f);
+            line (st, 3.5f, 8.0f, 7.5f, 8.0f);
+            line (st, 16.5f, 8.0f, 20.5f, 8.0f);
             break;
         }
+
+        // --- workspace and control contract ---
+        case Icon::detach: // a window with an arrow leaving its corner
+            polyline (st, { { 10.5f, 4.5f }, { 6.0f, 4.5f }, { 4.5f, 6.0f }, { 4.5f, 18.0f }, { 6.0f, 19.5f }, { 18.0f, 19.5f }, { 19.5f, 18.0f }, { 19.5f, 13.5f } });
+            line (st, 12.0f, 12.0f, 19.5f, 4.5f);
+            polyline (st, { { 14.0f, 4.5f }, { 19.5f, 4.5f }, { 19.5f, 10.0f } });
+            break;
+        case Icon::dock: // an arrow going into a window's corner
+            polyline (st, { { 10.5f, 4.5f }, { 6.0f, 4.5f }, { 4.5f, 6.0f }, { 4.5f, 18.0f }, { 6.0f, 19.5f }, { 18.0f, 19.5f }, { 19.5f, 18.0f }, { 19.5f, 13.5f } });
+            line (st, 19.5f, 4.5f, 12.0f, 12.0f);
+            polyline (st, { { 12.0f, 6.5f }, { 12.0f, 12.0f }, { 17.5f, 12.0f } });
+            break;
+        case Icon::keyboard: // a small piano: outline, white-key gaps, two black keys
+            roundRect (st, 3.0f, 6.0f, 18.0f, 12.0f, 2.0f);
+            line (st, 9.0f, 13.0f, 9.0f, 18.0f);
+            line (st, 15.0f, 13.0f, 15.0f, 18.0f);
+            fi.addRoundedRectangle (7.25f, 6.0f, 3.5f, 7.0f, 0.75f);
+            fi.addRoundedRectangle (13.25f, 6.0f, 3.5f, 7.0f, 0.75f);
+            break;
+        case Icon::automate: // a curve through two points
+        {
+            juce::Path c;
+            c.startNewSubPath (4.0f, 17.0f);
+            c.cubicTo (9.0f, 17.0f, 10.0f, 7.0f, 15.0f, 7.0f);
+            c.lineTo (20.5f, 7.0f);
+            st.addPath (c);
+            fi.addEllipse (2.0f, 15.0f, 4.0f, 4.0f);
+            fi.addEllipse (13.0f, 5.0f, 4.0f, 4.0f);
+            break;
+        }
+        case Icon::rightClick: // a mouse with the right button lit
+        {
+            roundRect (st, 6.5f, 3.5f, 11.0f, 17.0f, 5.5f);
+            line (st, 6.5f, 10.5f, 17.5f, 10.5f);
+            line (st, 12.0f, 3.5f, 12.0f, 10.5f);
+            juce::Path b;
+            b.startNewSubPath (12.0f, 3.5f);
+            b.lineTo (12.0f, 10.5f);
+            b.lineTo (17.5f, 10.5f);
+            b.lineTo (17.5f, 9.0f);
+            b.quadraticTo (17.5f, 3.5f, 12.0f, 3.5f);
+            b.closeSubPath();
+            fi.addPath (b);
+            break;
+        }
+        case Icon::tap: // a dot with two rings
+            fi.addEllipse (9.5f, 9.5f, 5.0f, 5.0f);
+            st.addCentredArc (12.0f, 12.0f, 5.5f, 5.5f, 0.0f, -pi * 0.35f, pi * 0.35f, true);
+            st.addCentredArc (12.0f, 12.0f, 8.5f, 8.5f, 0.0f, -pi * 0.3f, pi * 0.3f, true);
+            break;
+        case Icon::mic: // recording options: a microphone
+            roundRect (st, 9.0f, 3.0f, 6.0f, 11.0f, 3.0f);
+            st.startNewSubPath (18.5f, 11.0f);
+            st.addCentredArc (12.0f, 11.0f, 6.5f, 6.0f, 0.0f, pi * 0.5f, pi * 1.5f, false);
+            line (st, 12.0f, 17.0f, 12.0f, 20.5f);
+            line (st, 8.5f, 20.5f, 15.5f, 20.5f);
+            break;
     }
 
     return s;
@@ -354,7 +492,7 @@ void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colo
 
     if (! shape.stroke.isEmpty())
         g.strokePath (shape.stroke,
-                      juce::PathStrokeType (juce::jlimit (1.2f, 2.4f, 1.7f * scale), juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
+                      juce::PathStrokeType (juce::jlimit (1.2f, 2.6f, 1.75f * scale), juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
                       transform);
 }
 } // namespace icons
@@ -387,12 +525,39 @@ void IconButton::setPrimary (bool b) { primary = b; repaint(); }
 void IconButton::setOnColour (juce::Colour c) { onColour = c; repaint(); }
 void IconButton::setIconColourWhenOn (juce::Colour c) { iconOnColour = c; repaint(); }
 void IconButton::setFlat (bool b) { flat = b; repaint(); }
+void IconButton::setIconColour (juce::Colour c) { iconColour = c; repaint(); }
 
 void IconButton::setCorners (bool left, bool right)
 {
     roundLeft = left;
     roundRight = right;
     repaint();
+}
+
+void IconButton::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onRightClick != nullptr)
+        return; // handled on mouse up, without pressing the button
+
+    juce::Button::mouseDown (e);
+}
+
+void IconButton::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onRightClick != nullptr)
+    {
+        if (getLocalBounds().contains (e.getPosition()))
+            onRightClick();
+        return;
+    }
+
+    juce::Button::mouseUp (e);
+}
+
+void IconButton::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (onDoubleClick != nullptr && ! e.mods.isPopupMenu())
+        onDoubleClick();
 }
 
 int IconButton::getIdealWidth (int height) const
@@ -433,7 +598,9 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
         g.fillPath (p);
     }
 
-    auto fg = (on || primary) ? iconOnColour : (highlighted ? colour::textPrimary : colour::textSecondary.brighter (0.25f));
+    auto fg = (on || primary) ? iconOnColour
+                              : (! iconColour.isTransparent() ? (highlighted ? iconColour.brighter (0.2f) : iconColour)
+                                                              : (highlighted ? colour::textPrimary : colour::textSecondary.brighter (0.25f)));
     if (! enabled)
         fg = colour::textDisabled;
 

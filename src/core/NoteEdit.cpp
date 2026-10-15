@@ -1,6 +1,11 @@
 #include "core/NoteEdit.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <map>
+#include <set>
+#include <tuple>
 
 namespace lynx::noteedit
 {
@@ -100,6 +105,20 @@ void quantize (Pattern& pattern, const std::vector<int>& indices, std::int64_t g
         }
 }
 
+void quantizeFull (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid)
+{
+    grid = std::max<std::int64_t> (1, grid);
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+        {
+            auto& n = pattern.notes[(std::size_t) i];
+            const auto end = (n.start + n.length + grid / 2) / grid * grid;
+            n.start = (n.start + grid / 2) / grid * grid;
+            n.length = std::max (grid, end - n.start);
+        }
+}
+
 void move (Pattern& pattern, const std::vector<int>& indices, std::int64_t& deltaTicks, int& deltaKeys)
 {
     std::int64_t minStart = INT64_MAX;
@@ -131,5 +150,382 @@ void move (Pattern& pattern, const std::vector<int>& indices, std::int64_t& delt
             n.start += deltaTicks;
             n.key += deltaKeys;
         }
+}
+
+// --- quick note operations ------------------------------------------------------------
+
+int split (Pattern& pattern, int index, std::int64_t tick)
+{
+    if (! valid (pattern, index))
+        return -1;
+
+    auto& n = pattern.notes[(std::size_t) index];
+
+    if (tick <= n.start || tick >= n.start + n.length)
+        return -1;
+
+    auto tail = n;
+    tail.start = tick;
+    tail.length = n.start + n.length - tick;
+    tail.slide = false; // the tail continues the note; it does not glide again
+    tail.porta = false;
+    n.length = tick - n.start;
+    pattern.notes.push_back (tail);
+    return (int) pattern.notes.size() - 1;
+}
+
+std::vector<int> chop (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid)
+{
+    grid = std::max<std::int64_t> (1, grid);
+    std::vector<int> pieces;
+
+    for (auto i : indices)
+    {
+        if (! valid (pattern, i))
+            continue;
+
+        pieces.push_back (i);
+        auto current = i;
+        const auto start = pattern.notes[(std::size_t) i].start;
+        const auto end = start + pattern.notes[(std::size_t) i].length;
+
+        for (auto t = (start / grid + 1) * grid; t < end; t += grid)
+        {
+            current = split (pattern, current, t);
+
+            if (current < 0)
+                break;
+
+            pieces.push_back (current);
+        }
+    }
+
+    return pieces;
+}
+
+int join (Pattern& pattern, const std::vector<int>& indices)
+{
+    std::vector<int> order;
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+            order.push_back (i);
+
+    std::sort (order.begin(), order.end());
+    order.erase (std::unique (order.begin(), order.end()), order.end());
+    std::sort (order.begin(), order.end(), [&pattern] (int a, int b) {
+        const auto& x = pattern.notes[(std::size_t) a];
+        const auto& y = pattern.notes[(std::size_t) b];
+        return std::tie (x.channel, x.key, x.start) < std::tie (y.channel, y.key, y.start);
+    });
+
+    std::vector<int> doomed;
+    int keeper = -1;
+
+    for (auto i : order)
+    {
+        auto& n = pattern.notes[(std::size_t) i];
+
+        if (keeper >= 0)
+        {
+            auto& k = pattern.notes[(std::size_t) keeper];
+
+            if (k.channel == n.channel && k.key == n.key && n.start <= k.start + k.length)
+            {
+                k.length = std::max (k.start + k.length, n.start + n.length) - k.start;
+                doomed.push_back (i);
+                continue;
+            }
+        }
+
+        keeper = i;
+    }
+
+    remove (pattern, doomed);
+    return (int) doomed.size();
+}
+
+void legato (Pattern& pattern, const std::vector<int>& indices)
+{
+    std::map<int, std::set<std::int64_t>> starts; // per channel
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+            starts[pattern.notes[(std::size_t) i].channel].insert (pattern.notes[(std::size_t) i].start);
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+        {
+            auto& n = pattern.notes[(std::size_t) i];
+            const auto& s = starts[n.channel];
+
+            if (const auto next = s.upper_bound (n.start); next != s.end())
+                n.length = *next - n.start;
+        }
+}
+
+void shrinkToGrid (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid)
+{
+    grid = std::max<std::int64_t> (1, grid);
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+            pattern.notes[(std::size_t) i].length = grid;
+}
+
+void rotate (Pattern& pattern, const std::vector<int>& indices, std::int64_t grid, std::int64_t bar, int steps)
+{
+    grid = std::max<std::int64_t> (1, grid);
+    bar = std::max<std::int64_t> (1, bar);
+    std::int64_t first = INT64_MAX, last = -1;
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+        {
+            first = std::min (first, pattern.notes[(std::size_t) i].start);
+            last = std::max (last, pattern.notes[(std::size_t) i].start);
+        }
+
+    if (last < 0)
+        return;
+
+    const auto from = first / bar * bar;
+    const auto span = (last / bar + 1) * bar - from;
+
+    for (auto i : indices)
+        if (valid (pattern, i))
+        {
+            auto& n = pattern.notes[(std::size_t) i];
+            const auto shifted = (n.start - from + (std::int64_t) steps * grid) % span;
+            n.start = from + (shifted < 0 ? shifted + span : shifted);
+        }
+}
+
+// --- grid -------------------------------------------------------------------------------
+
+std::int64_t snapDown (double tick, std::int64_t step)
+{
+    if (step <= 1)
+        return (std::int64_t) std::floor (tick);
+
+    return (std::int64_t) std::floor (tick / (double) step) * step;
+}
+
+std::int64_t snapNearest (double tick, const std::vector<std::int64_t>& candidates, double maxDistance, std::int64_t fallbackStep)
+{
+    auto best = -1.0;
+    std::int64_t bestTick = 0;
+
+    for (auto c : candidates)
+    {
+        const auto d = std::abs ((double) c - tick);
+
+        if (d <= maxDistance && (best < 0.0 || d < best))
+        {
+            best = d;
+            bestTick = c;
+        }
+    }
+
+    return best >= 0.0 ? bestTick : snapDown (tick, fallbackStep);
+}
+
+std::int64_t screenStep (double pixelsPerTick, std::int64_t bar, double minPixels)
+{
+    for (const std::int64_t step : { (std::int64_t) ticksPerStep / 4, (std::int64_t) ticksPerStep / 2, (std::int64_t) ticksPerStep, (std::int64_t) ppq })
+        if (step * pixelsPerTick >= minPixels && step < bar)
+            return step;
+
+    auto step = std::max<std::int64_t> (1, bar);
+
+    while (step * pixelsPerTick < minPixels && step < bar * 1024)
+        step *= 2;
+
+    return step;
+}
+
+std::string formatTime (std::int64_t ticks, int beatsPerBar, bool isLength)
+{
+    const auto bar = (std::int64_t) ppq * std::max (1, beatsPerBar);
+    ticks = std::max<std::int64_t> (0, ticks);
+    const auto base = isLength ? 0 : 1;
+    char text[64];
+    std::snprintf (text, sizeof (text), "%lld:%lld:%lld", (long long) (ticks / bar + base), (long long) (ticks % bar / ticksPerStep + base),
+                   (long long) (ticks % ticksPerStep));
+    return text;
+}
+
+bool parseTime (const std::string& text, int beatsPerBar, std::int64_t& ticks, bool isLength)
+{
+    long long parts[3] = { 0, 0, 0 };
+    int count = 0;
+    std::string field;
+
+    for (std::size_t i = 0; i <= text.size(); ++i)
+    {
+        const auto c = i < text.size() ? text[i] : ':';
+
+        if (c == ':')
+        {
+            if (field.empty() || count >= 3)
+                return false;
+
+            parts[count++] = std::stoll (field);
+            field.clear();
+        }
+        else if (c >= '0' && c <= '9')
+        {
+            if (field.size() > 9)
+                return false;
+            field += c;
+        }
+        else if (c != ' ')
+            return false;
+    }
+
+    const auto base = isLength ? 0 : 1;
+    const auto stepsPerBar = (long long) std::max (1, beatsPerBar) * stepsPerBeat;
+
+    if (count == 0 || parts[0] < base || (count >= 2 && (parts[1] < base || parts[1] - base >= stepsPerBar))
+        || (count == 3 && parts[2] >= ticksPerStep))
+        return false;
+
+    const auto bar = (std::int64_t) ppq * std::max (1, beatsPerBar);
+    ticks = (parts[0] - base) * bar + (count >= 2 ? (parts[1] - base) * ticksPerStep : 0) + (count == 3 ? parts[2] : 0);
+    return true;
+}
+
+// --- Playlist clips -----------------------------------------------------------------------
+
+namespace
+{
+void clampFades (Clip& c)
+{
+    c.fadeIn = std::clamp<std::int64_t> (c.fadeIn, 0, c.length);
+    c.fadeOut = std::clamp<std::int64_t> (c.fadeOut, 0, c.length - c.fadeIn);
+}
+} // namespace
+
+void trimStart (Clip& clip, std::int64_t newStart, std::int64_t minLength)
+{
+    minLength = std::max<std::int64_t> (1, std::min (minLength, clip.length));
+    auto delta = newStart - clip.start;
+    delta = std::max (delta, -clip.offset);
+    delta = std::max (delta, -clip.start);
+    delta = std::min (delta, clip.length - minLength);
+    clip.start += delta;
+    clip.offset += delta;
+    clip.length -= delta;
+    clampFades (clip);
+}
+
+void slip (Clip& clip, std::int64_t delta)
+{
+    clip.offset = std::max<std::int64_t> (0, clip.offset - delta);
+}
+
+void insertTime (std::vector<Clip>& clips, std::vector<Marker>& markers, std::int64_t at, std::int64_t length)
+{
+    if (length <= 0)
+        return;
+
+    for (auto& c : clips)
+        if (c.start >= at)
+            c.start += length;
+
+    for (auto& m : markers)
+        if (m.tick >= at)
+            m.tick += length;
+}
+
+void deleteTime (std::vector<Clip>& clips, std::vector<Marker>& markers, std::int64_t from, std::int64_t to)
+{
+    const auto length = to - from;
+
+    if (length <= 0)
+        return;
+
+    std::vector<Clip> out;
+    out.reserve (clips.size() + 4);
+
+    for (auto c : clips)
+    {
+        const auto end = c.end();
+
+        if (end <= from)
+            out.push_back (c);
+        else if (c.start >= to)
+        {
+            c.start -= length;
+            out.push_back (c);
+        }
+        else if (c.start >= from && end <= to)
+            continue; // entirely inside: deleted
+        else
+        {
+            if (c.start < from) // head stays
+            {
+                auto head = c;
+                head.length = from - c.start;
+                clampFades (head);
+                out.push_back (head);
+            }
+
+            if (end > to) // tail moves to `from`
+            {
+                auto tail = c;
+                tail.offset = c.offset + (to - c.start);
+                tail.length = end - to;
+                tail.start = from;
+                clampFades (tail);
+                out.push_back (tail);
+            }
+        }
+    }
+
+    clips = std::move (out);
+    markers.erase (std::remove_if (markers.begin(), markers.end(), [&] (const Marker& m) { return m.tick >= from && m.tick < to; }),
+                   markers.end());
+
+    for (auto& m : markers)
+        if (m.tick >= to)
+            m.tick -= length;
+}
+
+std::vector<int> clipsInTime (const std::vector<Clip>& clips, std::int64_t from, std::int64_t to)
+{
+    std::vector<int> out;
+
+    for (int i = 0; i < (int) clips.size(); ++i)
+        if (clips[(std::size_t) i].start < to && clips[(std::size_t) i].end() > from)
+            out.push_back (i);
+
+    return out;
+}
+
+std::vector<int> repeatTime (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::vector<int> sources)
+{
+    const auto length = to - from;
+
+    if (length <= 0)
+        return {};
+
+    if (sources.empty())
+        for (int i = 0; i < (int) clips.size(); ++i)
+            if (clips[(std::size_t) i].start >= from && clips[(std::size_t) i].start < to)
+                sources.push_back (i);
+
+    std::vector<int> added;
+
+    for (auto i : sources)
+        if (i >= 0 && i < (int) clips.size())
+        {
+            auto c = clips[(std::size_t) i];
+            c.start += length;
+            added.push_back ((int) clips.size());
+            clips.push_back (c);
+        }
+
+    return added;
 }
 } // namespace lynx::noteedit

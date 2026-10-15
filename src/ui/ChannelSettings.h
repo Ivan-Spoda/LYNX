@@ -9,6 +9,11 @@ namespace lynx
 void openChannelSettings (AudioEngine& engine, int channel);
 void closeChannelSettings();
 
+// Channel button toggle (Channel Rack): which kinds have a settings window, and whether it is open.
+bool hasChannelSettings (InstrumentKind kind) noexcept;
+bool isChannelSettingsOpen (int channel);
+void closeChannelSettings (int channel);
+
 // Channel modulation window (cutoff/pitch envelopes and LFOs), for the synth or the sampler.
 void openChannelModulation (AudioEngine& engine, int channel);
 

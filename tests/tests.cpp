@@ -46,6 +46,11 @@
 #include "core/Song.h"
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
+#include "core/KeyMap.h"
+#include "core/RackOps.h"
+#include "core/ValueMath.h"
+#include "core/Workspace.h"
+#include "core/StartupSound.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
 
@@ -3248,6 +3253,136 @@ TEST (note_edit_selection_operations)
     CHECK (q.notes.size() == before - 2);
 }
 
+TEST (note_edit_quick_operations)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+
+    // split: only strictly inside; the tail is appended and does not slide again
+    lynx::Pattern p;
+    p.notes = { { 0, 4 * step, 0, 60 } };
+    p.notes[0].slide = true;
+    CHECK (ne::split (p, 0, 0) == -1 && ne::split (p, 0, 4 * step) == -1);
+    CHECK (ne::split (p, 0, step) == 1 && p.notes[0].length == step && p.notes[1].start == step && p.notes[1].length == 3 * step
+           && ! p.notes[1].slide);
+
+    // chop to grid: a 2.5-step note from half a step becomes 3 pieces cut on the step lines
+    lynx::Pattern c;
+    c.notes = { { step / 2, step * 5 / 2, 0, 60 }, { 0, step, 1, 50 } };
+    const auto pieces = ne::chop (c, { 0, 1 }, step);
+    CHECK (pieces.size() == 4 && c.notes.size() == 4);
+    CHECK (c.notes[0].length == step / 2 && c.notes[2].start == step && c.notes[2].length == step && c.notes[3].start == 2 * step
+           && c.notes[3].length == step);
+
+    // join: touching and overlapping notes of the same key and channel merge; others stay
+    lynx::Pattern j;
+    j.notes = { { 0, step, 0, 60 }, { step, step, 0, 60 }, { step * 3 / 2, step * 2, 0, 60 }, { 5 * step, step, 0, 60 },
+                { step, step, 0, 62 }, { step, step, 1, 60 } };
+    CHECK (ne::join (j, { 0, 1, 2, 3, 4, 5 }) == 2 && j.notes.size() == 4);
+    CHECK (j.notes[0].start == 0 && j.notes[0].length == step * 7 / 2);
+
+    // legato: each note reaches the next start (a chord ends together); the last keeps its length
+    lynx::Pattern l;
+    l.notes = { { 0, 10, 0, 60 }, { 0, 10, 0, 64 }, { step, 10, 0, 62 }, { 3 * step, 10, 0, 65 }, { step, 10, 1, 40 } };
+    ne::legato (l, { 0, 1, 2, 3, 4 });
+    CHECK (l.notes[0].length == step && l.notes[1].length == step && l.notes[2].length == 2 * step && l.notes[3].length == 10
+           && l.notes[4].length == 10);
+
+    // shrink to grid and full quantise (start and end)
+    ne::shrinkToGrid (l, { 3 }, step / 2);
+    CHECK (l.notes[3].length == step / 2);
+    lynx::Pattern q;
+    q.notes = { { 10, step - 30, 0, 60 }, { step + 100, 20, 0, 60 } };
+    ne::quantizeFull (q, { 0, 1 }, step);
+    CHECK (q.notes[0].start == 0 && q.notes[0].length == step && q.notes[1].start == step && q.notes[1].length == step);
+
+    // rotate inside the bar, wrapping
+    lynx::Pattern r;
+    r.notes = { { 0, step, 0, 60 }, { bar - step, step, 0, 62 } };
+    ne::rotate (r, { 0, 1 }, step, bar, 1);
+    CHECK (r.notes[0].start == step && r.notes[1].start == 0);
+    ne::rotate (r, { 0, 1 }, step, bar, -2);
+    CHECK (r.notes[0].start == bar - step && r.notes[1].start == bar - 2 * step);
+    r.notes.push_back ({ bar + step, step, 0, 64 }); // alone in the second bar: wraps inside that bar
+    ne::rotate (r, { 2 }, step, bar, -2);
+    CHECK (r.notes[2].start == 2 * bar - step);
+}
+
+TEST (note_edit_grid_and_time_text)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t step = lynx::ticksPerStep, bar = lynx::ppq * 4;
+    CHECK (ne::snapDown (250.0, step) == step && ne::snapDown (-1.0, step) == -step && ne::snapDown (17.9, 1) == 17);
+    CHECK (ne::snapNearest (1000.0, { 400, 1100, 980 }, 50.0, step) == 980);
+    CHECK (ne::snapNearest (1000.0, { 400 }, 50.0, step) == 960); // too far: falls back to the grid
+    // screen grid: 24 px per step shows steps; zoomed out it climbs to beats, bars and bar multiples
+    CHECK (ne::screenStep (24.0 / step, bar) == step);
+    CHECK (ne::screenStep (96.0 / bar, bar) == lynx::ppq);
+    CHECK (ne::screenStep (8.0 / bar, bar) == 2 * bar);
+    CHECK (ne::screenStep (200.0 / step, bar) == step / 4);
+
+    CHECK (ne::formatTime (0, 4) == "1:1:0" && ne::formatTime (bar + 5 * step + 7, 4) == "2:6:7");
+    CHECK (ne::formatTime (step * 2, 4, true) == "0:2:0");
+    std::int64_t t = 0;
+    CHECK (ne::parseTime ("2:6:7", 4, t) && t == bar + 5 * step + 7);
+    CHECK (ne::parseTime ("3", 4, t) && t == 2 * bar);
+    CHECK (ne::parseTime ("0:2:0", 4, t, true) && t == 2 * step);
+    CHECK (! ne::parseTime ("0:1:0", 4, t) && ! ne::parseTime ("1:17:0", 4, t) && ! ne::parseTime ("1:1:240", 4, t)
+           && ! ne::parseTime ("a", 4, t) && ! ne::parseTime ("", 4, t));
+    CHECK (ne::parseTime ("1:12:0", 3, t) && ! ne::parseTime ("1:13:0", 3, t)); // 3/4: 12 steps per bar
+}
+
+TEST (playlist_clip_edges_and_time_selection)
+{
+    namespace ne = lynx::noteedit;
+    const std::int64_t beat = lynx::ppq;
+
+    // left-edge trim: content stays in place, cannot reveal what is before the content's start
+    lynx::Clip c { 0, 0, 4 * beat, 4 * beat, beat };
+    ne::trimStart (c, 5 * beat, beat);
+    CHECK (c.start == 5 * beat && c.offset == 2 * beat && c.length == 3 * beat);
+    ne::trimStart (c, 0, beat);
+    CHECK (c.start == 3 * beat && c.offset == 0 && c.length == 5 * beat);
+    ne::trimStart (c, 100 * beat, beat);
+    CHECK (c.length == beat && c.end() == 8 * beat);
+
+    // slip moves the content, not the clip
+    lynx::Clip s { 0, 0, 0, 2 * beat, beat };
+    ne::slip (s, beat / 2);
+    CHECK (s.offset == beat / 2 && s.start == 0 && s.length == 2 * beat);
+    ne::slip (s, beat);
+    CHECK (s.offset == 0);
+    ne::slip (s, -3 * beat);
+    CHECK (s.offset == 3 * beat);
+
+    // insert / delete time across all tracks, markers included
+    std::vector<lynx::Clip> clips { { 0, 0, 0, 2 * beat, 0 }, { 0, 1, 4 * beat, 2 * beat, 0 }, { 0, 2, beat, 6 * beat, 0 } };
+    std::vector<lynx::Marker> markers { { 5 * beat, "A" }, { beat / 2, "B" } };
+    ne::insertTime (clips, markers, 2 * beat, 4 * beat);
+    CHECK (clips[0].start == 0 && clips[1].start == 8 * beat && clips[2].start == beat && markers[0].tick == 9 * beat
+           && markers[1].tick == beat / 2);
+
+    std::vector<lynx::Clip> d { { 0, 0, 0, 2 * beat, 0 },             // before: kept
+                                { 0, 1, 3 * beat, beat, 0 },          // inside: deleted
+                                { 0, 2, beat, 6 * beat, 0 },          // spans the cut: head + tail
+                                { 0, 3, 3 * beat, 4 * beat, 0 },      // tail outside: trimmed and moved
+                                { 0, 4, 8 * beat, beat, 0 } };        // after: moved left
+    std::vector<lynx::Marker> dm { { 3 * beat, "in" }, { 9 * beat, "after" } };
+    ne::deleteTime (d, dm, 2 * beat, 5 * beat);
+    CHECK (d.size() == 5);
+    CHECK (d[1].track == 2 && d[1].start == beat && d[1].length == beat);
+    CHECK (d[2].track == 2 && d[2].start == 2 * beat && d[2].offset == 4 * beat && d[2].length == 2 * beat);
+    CHECK (d[3].track == 3 && d[3].start == 2 * beat && d[3].offset == 2 * beat && d[3].length == 2 * beat);
+    CHECK (d[4].start == 5 * beat && dm.size() == 1 && dm[0].tick == 6 * beat);
+
+    // time selection: overlapping clips; Ctrl+B repeats what starts inside it after itself
+    std::vector<lynx::Clip> r { { 0, 0, 0, beat, 0 }, { 0, 1, beat, 2 * beat, 0 }, { 0, 0, 4 * beat, beat, 0 } };
+    CHECK ((ne::clipsInTime (r, beat / 2, 2 * beat) == std::vector<int> { 0, 1 }));
+    const auto added = ne::repeatTime (r, 0, 4 * beat, {});
+    CHECK (added.size() == 2 && r[3].start == 4 * beat && r[4].start == 5 * beat && r[4].track == 1);
+    CHECK (ne::repeatTime (r, 0, 2 * beat, { 2 }).size() == 1 && r.back().start == 6 * beat);
+}
+
 TEST (recorder_builds_notes_in_pattern_and_song_mode)
 {
     auto song = lynx::Song::makeDefault();
@@ -4709,6 +4844,288 @@ TEST (translations_embedded_table_is_up_to_date)
     CHECK (std::memcmp (text.data(), lynx::i18n::data::ptBR, std::min (text.size(), sizeof (lynx::i18n::data::ptBR))) == 0);
 }
 
+// --- workflow shell: pattern/channel operations, key map, workspace layout, control math -------------
+
+TEST (workflow_pattern_navigation_and_insert)
+{
+    auto song = lynx::Song::makeDefault();
+    song.patterns.resize (3);
+    song.patterns[1].name = "B";
+    song.patterns[2].name = "C";
+    song.patterns[2].notes.push_back ({});
+    song.currentPattern = 0;
+    CHECK (lynx::stepPattern (song, 1) == 1 && lynx::stepPattern (song, -1) == 0 && lynx::stepPattern (song, 10) == 2);
+    // pattern 0 has the default notes, 1 is empty, 2 has a note
+    CHECK (! lynx::isPatternEmpty (song.patterns[0]) && lynx::isPatternEmpty (song.patterns[1]));
+    CHECK (lynx::findNextEmptyPattern (song, 0) == 1 && lynx::findNextEmptyPattern (song, 1) == -1);
+    CHECK (lynx::gotoNextEmptyPattern (song) == 1 && song.currentPattern == 1);
+    song.patterns[1].notes.push_back ({});
+    const auto before = song.patterns.size();
+    CHECK (lynx::gotoNextEmptyPattern (song) == (int) before && song.patterns.size() == before + 1);
+    CHECK (song.patterns.back().name == "Pattern 1" || song.patterns.back().name.rfind ("Pattern ", 0) == 0);
+
+    // insert keeps Playlist clips on their patterns
+    lynx::Clip clip;
+    clip.pattern = 2;
+    song.playlist = { clip };
+    song.arrangements.push_back ({ "Other", { clip }, 0, 0, {} });
+    CHECK (lynx::insertPattern (song, 1, "New") == 1 && song.currentPattern == 1);
+    CHECK (song.patterns[1].name == "New" && song.patterns[1].notes.empty() && song.patterns[3].name == "C");
+    CHECK (song.playlist[0].pattern == 3 && song.arrangements[1].clips[0].pattern == 3);
+}
+
+TEST (workflow_split_pattern_by_channel)
+{
+    auto song = lynx::Song::makeDefault();
+    song.patterns.resize (1);
+    auto& p = song.patterns[0];
+    p.name = "Beat";
+    p.notes.clear();
+    for (int i = 0; i < 4; ++i)
+        p.notes.push_back ({ (std::int64_t) i * lynx::ticksPerStep, lynx::ticksPerStep, i % 2 == 0 ? 0 : 2, 60 });
+    song.channels[2].colour = 0xff112233;
+    lynx::Clip clip;
+    clip.pattern = 0;
+    song.playlist = { clip };
+    const auto created = lynx::splitPatternByChannel (song, 0);
+    CHECK (created == 2 && song.patterns.size() == 3);
+    CHECK (song.patterns[0].notes.size() == 4); // the original is unchanged
+    CHECK (song.patterns[1].name == "Beat - " + song.channels[0].name && song.patterns[1].notes.size() == 2);
+    CHECK (song.patterns[2].colour == 0xff112233u && song.patterns[2].notes.size() == 2 && song.patterns[2].notes[0].channel == 2);
+    CHECK (song.playlist[0].pattern == 0);
+    CHECK (lynx::splitPatternByChannel (song, 99) == 0);
+}
+
+TEST (workflow_channel_selection)
+{
+    lynx::ChannelSelection s;
+    s.selectOnly (2);
+    s.toggle (5);
+    s.toggle (0);
+    CHECK ((s.rows == std::vector<int> { 0, 2, 5 }) && s.contains (5) && ! s.contains (3));
+    s.toggle (2);
+    CHECK ((s.rows == std::vector<int> { 0, 5 }));
+    s.selectOnly (3);
+    s.extendTo (6);
+    CHECK ((s.rows == std::vector<int> { 3, 4, 5, 6 }));
+    s.extendTo (1);
+    CHECK ((s.rows == std::vector<int> { 1, 2, 3 }));
+    s.selectOnly (4);
+    s.toggle (4); // the last one stays
+    CHECK ((s.rows == std::vector<int> { 4 }));
+    s.selectAll (3);
+    CHECK ((s.rows == std::vector<int> { 0, 1, 2 }));
+    s.rows = { 7, 9 };
+    s.clamp (5);
+    CHECK (s.rows.size() == 1 && s.rows[0] < 5);
+}
+
+TEST (workflow_move_clone_insert_channels)
+{
+    auto song = lynx::Song::makeDefault();
+    const auto names = [&] {
+        std::vector<std::string> n;
+        for (const auto& c : song.channels)
+            n.push_back (c.name);
+        return n;
+    };
+    const auto original = names();
+    const auto count = (int) song.channels.size();
+    CHECK (count >= 4);
+
+    // references that must follow their channel
+    song.patterns[0].notes.push_back ({ 0, 240, 1, 64 });
+    lynx::Automation a;
+    a.target = { lynx::AutomationTargetKind::channelVolume, 1 };
+    song.automations.push_back (a);
+    song.midiLinks.push_back ({ 7, -1, { lynx::AutomationTargetKind::channelPan, 3 } });
+    lynx::Clip audio;
+    audio.kind = lynx::ClipKind::audio;
+    audio.channel = 3;
+    song.playlist.push_back (audio);
+
+    std::vector<int> selection { 1, 3 };
+    CHECK (lynx::moveChannels (song, selection, -1));
+    CHECK ((selection == std::vector<int> { 0, 2 }));
+    CHECK (song.channels[0].name == original[1] && song.channels[1].name == original[0] && song.channels[2].name == original[3]
+           && song.channels[3].name == original[2]);
+    CHECK (song.automations[0].target.index == 0 && song.midiLinks[0].target.index == 2 && song.playlist.back().channel == 2);
+    CHECK (std::any_of (song.patterns[0].notes.begin(), song.patterns[0].notes.end(),
+                        [] (const lynx::Note& n) { return n.channel == 0 && n.key == 64; }));
+    CHECK (! lynx::moveChannels (song, selection, -1)); // the block is at the top
+    CHECK (lynx::moveChannels (song, selection, 1) && (selection == std::vector<int> { 1, 3 }) && names() == original);
+
+    // clone: settings, not notes, right below, with a new name
+    song.channels[1].volume = 0.33f;
+    const auto notesBefore = song.patterns[0].notes.size();
+    const auto clone = lynx::cloneChannel (song, 1);
+    CHECK (clone == 2 && (int) song.channels.size() == count + 1);
+    CHECK (song.channels[2].name == original[1] + " #2" && song.channels[2].volume == 0.33f);
+    CHECK (song.patterns[0].notes.size() == notesBefore);
+    CHECK (song.channels[3].name == original[2] && song.automations[0].target.index == 1);
+    CHECK (lynx::cloneChannel (song, 1) == 2 && song.channels[2].name == original[1] + " #3");
+
+    // remove several
+    CHECK (lynx::removeChannels (song, { 2, 3, 2 }) == 2 && (int) song.channels.size() == count);
+    CHECK (names() == original);
+}
+
+TEST (workflow_send_channels_to_free_inserts)
+{
+    auto song = lynx::Song::makeDefault();
+    for (auto& c : song.channels)
+        c.mixerTrack = 0;
+    song.mixer[1].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::delay)); // not free: has effects
+    song.channels[0].mixerTrack = 2;                                                   // not free: used
+    song.setRoute (5, 3, true);                                                        // 3 is not free: receives a send
+    CHECK (! lynx::isInsertFree (song, 1) && ! lynx::isInsertFree (song, 2) && ! lynx::isInsertFree (song, 3) && lynx::isInsertFree (song, 4));
+    song.channels[1].colour = 0xff445566;
+    const auto tracks = lynx::sendChannelsToFreeInserts (song, { 1, 2 });
+    CHECK ((tracks == std::vector<int> { 4, 5 }) || (tracks == std::vector<int> { 4, 6 }));
+    CHECK (song.channels[1].mixerTrack == 4 && song.mixer[4].name == song.channels[1].name && song.mixer[4].colour == 0xff445566u);
+    CHECK (song.mixer[(std::size_t) tracks[1]].name == song.channels[2].name);
+
+    // with no free insert left, a new one is added at the end
+    auto full = lynx::Song::makeDefault();
+    full.mixer = lynx::Song::defaultMixer (1);
+    full.channels[0].mixerTrack = 1;
+    const auto added = lynx::sendChannelsToFreeInserts (full, { 1 });
+    CHECK (added.size() == 1 && added[0] == 2 && full.mixer.size() == 3 && full.channels[1].mixerTrack == 2);
+}
+
+TEST (workflow_palette_random_colour)
+{
+    const auto& palette = lynx::lynxPalette();
+    for (std::uint32_t seed = 0; seed < 50; ++seed)
+    {
+        const auto current = palette[seed % palette.size()];
+        const auto c = lynx::randomPaletteColour (current, seed);
+        CHECK (c != current && std::find (palette.begin(), palette.end(), c) != palette.end());
+    }
+}
+
+TEST (workflow_key_map)
+{
+    using namespace lynx::keys;
+    KeyMap map;
+    const auto global = Context::global, rack = Context::channelRack;
+    CHECK (map.find ({ space, none }, global, true) == "transport.playStop");
+    CHECK (map.find ({ space, ctrl }, global, true) == "transport.pause");
+    CHECK (map.find ({ f6, none }, global, true) == "panel.channelRack");
+    CHECK (map.find ({ f8, alt }, global, false) == "panel.browser");
+    CHECK (map.find ({ insert, ctrl | shift }, global, false) == "pattern.insert");
+    CHECK (map.find ({ numpadPlus, none }, rack, true) == "pattern.next");
+    // panel context: only while focused
+    CHECK (map.find ({ 'L', ctrl }, rack, true) == "rack.sendToInserts");
+    CHECK (map.find ({ 'L', ctrl }, global, true).empty());
+    CHECK (map.find ({ up, alt }, rack, false) == "rack.moveUp");
+    // typing piano: note keys play, other plain keys only for whilePiano actions; chords always work
+    CHECK (KeyMap::playsNote ({ 'Z', none }, true) && ! KeyMap::playsNote ({ 'Z', none }, false) && ! KeyMap::playsNote ({ 'Z', ctrl }, true));
+    CHECK (map.find ({ 'L', none }, global, true) == "transport.toggleMode");
+    CHECK (map.find ({ '1', none }, rack, false) == "rack.mute1" && map.find ({ '0', none }, rack, false) == "rack.mute10");
+    CHECK (map.find ({ '1', none }, rack, true).empty()); // a plain digit is not a shortcut while the piano is on
+    CHECK (map.find ({ '2', ctrl }, rack, true) == "rack.solo2");
+    CHECK (typingPianoNote ('Z') == 60 && typingPianoNote ('q') == 72 && typingPianoNote ('P') == 88 && typingPianoNote ('L') == -1);
+    CHECK (map.conflicts().empty());
+
+    // chord text
+    CHECK (toString ({ f4, ctrl | shift }) == "Ctrl+Shift+F4" && toString ({ numpadMinus, none }) == "Numpad -");
+    CHECK (parseChord ("Shift+Ctrl+Ins") == (Chord { insert, ctrl | shift }));
+    CHECK (parseChord ("alt+up") == (Chord { up, alt }) && parseChord ("k") == (Chord { 'K', none }));
+    CHECK (parseChord ("Numpad +") == (Chord { numpadPlus, none }) && ! parseChord ("F13") && ! parseChord ("Ctrl+"));
+    for (const auto& a : actions())
+        for (const auto& c : a.defaults)
+            CHECK (parseChord (toString (c)) == c);
+
+    // JSON overrides
+    std::vector<std::string> errors;
+    CHECK (map.loadJson (R"({ "pattern.next": "Ctrl+Right", "rack.clone": ["Alt+D", "Ctrl+D"], "help.shortcuts": "", "nope": "F1", "file.open": "Hyper+Q" })", &errors));
+    CHECK (errors.size() == 2);
+    CHECK (map.find ({ right, ctrl }, global, false) == "pattern.next" && map.find ({ numpadPlus, none }, global, false).empty());
+    CHECK (map.find ({ 'D', ctrl }, rack, false) == "rack.clone" && map.find ({ f1, none }, global, false).empty());
+    map.setChords ("pattern.previous", { { right, ctrl } });
+    CHECK (map.conflicts().size() == 1);
+    KeyMap reloaded;
+    CHECK (reloaded.loadJson (map.toJson()) && reloaded.chordsFor ("rack.clone") == map.chordsFor ("rack.clone"));
+    CHECK (! map.loadJson ("[1, 2]") && ! map.loadJson ("{\"a\": }"));
+    map.resetToDefaults();
+    CHECK (map.find ({ numpadPlus, none }, global, false) == "pattern.next");
+}
+
+TEST (workflow_workspace_layout)
+{
+    using namespace lynx::workspace;
+    auto l = Layout::makeDefault (1280, 620);
+    // every visible panel is inside the desktop; the default shows Browser, Playlist and Channel Rack
+    for (const auto& p : l.panels)
+        CHECK (p.bounds.x >= 0 && p.bounds.y >= 0 && p.bounds.right() <= 1280 && p.bounds.bottom() <= 620 && p.bounds.w >= minWidth);
+    CHECK (l[Panel::browser].visible && l[Panel::playlist].visible && l[Panel::channelRack].visible);
+    CHECK (! l[Panel::pianoRoll].visible && ! l[Panel::mixer].visible);
+    CHECK (l[Panel::playlist].bounds.x == l[Panel::browser].bounds.right() && l[Panel::playlist].bounds.right() == 1280);
+    CHECK (l.isFrontmost (Panel::channelRack) && l.focused == Panel::channelRack);
+
+    // toggle: show+focus, focus, hide
+    CHECK (l.toggle (Panel::mixer) && l.focused == Panel::mixer && l.isFrontmost (Panel::mixer));
+    CHECK (l.toggle (Panel::channelRack) && l.focused == Panel::channelRack && l.isFrontmost (Panel::channelRack));
+    CHECK (! l.toggle (Panel::channelRack) && ! l[Panel::channelRack].visible && l.focused == Panel::mixer);
+    l.toggleMaximised (Panel::playlist);
+    CHECK (l[Panel::playlist].maximised && l.focused == Panel::playlist);
+
+    // save and load at another size: positions scale
+    l[Panel::mixer].detached = true;
+    l[Panel::mixer].windowBounds = { 100, 50, 900, 500 };
+    const auto text = l.serialise();
+    const auto big = Layout::parse (text, 2560, 1240);
+    CHECK (big.has_value());
+    if (big)
+    {
+        CHECK ((*big)[Panel::playlist].maximised && (*big)[Panel::mixer].detached && (*big)[Panel::mixer].windowBounds.w == 900);
+        CHECK (std::abs ((*big)[Panel::playlist].bounds.x - 2 * l[Panel::playlist].bounds.x) <= 1);
+        CHECK (big->order == l.order && big->focused == l.focused);
+    }
+    CHECK (! Layout::parse ("garbage", 100, 100) && ! Layout::parse ("lynx-layout 1\npanel nowhere 1 0 0 0 0 1 1 0 0 0 0\n", 100, 100));
+
+    // resize keeps panels inside and edges glued to the border
+    l.resize (1000, 500);
+    CHECK (l[Panel::playlist].bounds.right() == 1000 && l[Panel::browser].bounds.bottom() == 500);
+    for (const auto& p : l.panels)
+        CHECK (p.bounds.right() <= 1000 && p.bounds.bottom() <= 500);
+
+    // off-screen panels come back
+    l[Panel::pianoRoll].bounds = { 5000, -300, 400, 300 };
+    CHECK (l.bringBackOffscreen() == 1 && l[Panel::pianoRoll].bounds.x + 400 <= 1000 && l[Panel::pianoRoll].bounds.y == 0);
+
+    // snapping: to the desktop, to another panel, and resizing one edge
+    CHECK ((snap ({ 5, 6, 200, 100 }, {}, 1000, 500) == Rect { 0, 0, 200, 100 }));
+    CHECK ((snap ({ 304, 50, 200, 100 }, { { 0, 0, 300, 400 } }, 1000, 500) == Rect { 300, 50, 200, 100 }));
+    CHECK ((snap ({ 304, 50, 200, 100 }, { { 0, 0, 300, 400 } }, 1000, 500, 2) == Rect { 304, 50, 200, 100 })); // out of range
+    CHECK ((snap ({ 100, 100, 195, 100 }, { { 300, 0, 300, 400 } }, 1000, 500, 8, right) == Rect { 100, 100, 200, 100 }));
+    CHECK ((snap ({ 100, 100, 195, 100 }, { { 300, 1000, 300, 400 } }, 2000, 2000, 8, right) == Rect { 100, 100, 195, 100 })); // not facing
+}
+
+TEST (workflow_control_math)
+{
+    using namespace lynx::controls;
+    CHECK (std::abs (dragValue (0.5, 75, 0, 1, 150, false) - 1.0) < 1e-9);
+    CHECK (std::abs (dragValue (0.5, 75, 0, 1, 150, true) - 0.55) < 1e-9);
+    CHECK (dragValue (0.5, -1000, -1, 1, 150, false) == -1.0);
+    CHECK (std::abs (wheelValue (0.5, 1, 0, 1, false) - 0.52) < 1e-9 && std::abs (wheelValue (0.5, -1, 0, 1, true) - 0.498) < 1e-9);
+    CHECK (wheelValue (3, 1, 0, 10, true, 1) == 4.0); // integer controls move at least one step
+    CHECK (std::abs (snapToInterval (0.234, 0, 0.1) - 0.2) < 1e-9);
+
+    CHECK (tempoDrag (130.0, 8, false, false) == 132.0 && tempoDrag (130.0, -3, false, false) == 130.0);
+    CHECK (std::abs (tempoDrag (130.0, 25, true, false) - 130.25) < 1e-9);
+    CHECK (std::abs (tempoDrag (130.0, 8, false, true) - 130.2) < 1e-9);
+    CHECK (tempoDrag (520.0, 400, false, false) == lynx::maxTempo && halfTempo (15.0) == lynx::minTempo && doubleTempo (130.0) == 260.0);
+
+    TapTempo tap;
+    CHECK (! tap.tap (1000.0));
+    CHECK (tap.tap (1500.0) == 120.0);
+    CHECK (tap.tap (2000.0) == 120.0 && tap.count() == 3);
+    CHECK (std::abs (*tap.tap (2400.0) - 128.57) < 0.01); // average of 500, 500, 400 ms
+    CHECK (! tap.tap (9000.0) && tap.count() == 1); // a long pause starts over
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)
@@ -6018,8 +6435,10 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
     static const int mode1[] = { 0, 2, 4, 5, 12, 13, 14, 15, 17, 18, 23, 24, 27, 28, 29, 30, 33, 36, 38, 39, 40, 41, 42 };
     for (int k = 0; k < 43; ++k)
     {
+        static const int mode2[] = { 2, 14, 23, 28, 30, 38, 39, 41, 42 }; // ×2 around 0.5: 1.0 is neutral
         const bool centred = std::find (std::begin (mode1), std::end (mode1), k) != std::end (mode1);
-        const double neutral = centred ? 0.5 : 1.0;
+        const bool doubled = std::find (std::begin (mode2), std::end (mode2), k) != std::end (mode2);
+        const double neutral = centred && ! doubled ? 0.5 : 1.0;
         i32 (3);
         i32 (1065353216), i32 (1065353216), i32 (1065353216);
         if (k == 1) // volume envelope: attack, decay to the sustain point, release
@@ -6109,8 +6528,8 @@ TEST (harmor_engine)
         // Mersenne Twister seeded like LYNX's)
         auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
         const std::tuple<int, float, float> golden[] {
-            { 0, 0.0f, 0.0f }, { 100, 0.08034249f, 0.07985926f }, { 1000, 0.01197212f, 0.02992321f }, { 3000, -0.00065450f, 0.04010218f },
-            { 6000, 0.14123290f, 0.03816114f }, { 7000, 0.06512973f, -0.02774833f }, { 8191, 0.02622915f, -0.00915109f } };
+            { 0, 0.0f, 0.0f }, { 100, 0.00947693f, 0.04249846f }, { 1000, 0.08140575f, -0.03251422f }, { 3000, 0.05928446f, -0.00247572f },
+            { 6000, 0.02997839f, 0.14549091f }, { 7000, -0.01121871f, 0.04197952f }, { 8191, 0.00314545f, 0.03857505f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
         // after the release the volume envelope ends, the record declicks and the instrument goes idle
@@ -6348,6 +6767,49 @@ TEST (ogun_engine)
         for (const auto& [i, gl, gr] : golden4)
             CHECK (std::abs (ref4[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref4[2 * (std::size_t) i + 1] - gr) < 2e-6f);
     }
+    // feature variants of the same state against the reference model (energy per side over 8192 samples, three
+    // samples; C1 released at 6144): qualities, richness, unison, the filter types, ALT DECAY, 1/√h, Seed 2 Random,
+    // infinite decay, logarithmic axis, velocity → position, other rates. Goldens from ogmodel.py (REA round 37).
+    {
+        struct Sample { int at; float l, r; };
+        struct Variant { const char* name; std::vector<std::pair<int, int>> params; int rate; double el, er; Sample s[3]; };
+        const Variant variants[] {
+        { "q1", { { 54, 1 } }, 44100, 11.0970402, 6.87820714, { { 1500, 0.0240363069f, -0.0148524037f }, { 4000, 0.0873190612f, -0.000715861097f }, { 7000, -0.0378603041f, -0.00338819111f } } },
+        { "q2", { { 54, 2 } }, 44100, 11.2405446, 6.68045082, { { 1500, 0.0448660068f, -0.00560745923f }, { 4000, -0.0122657465f, 0.0104285963f }, { 7000, -0.0216034129f, -0.0134632047f } } },
+        { "q3", { { 54, 3 } }, 44100, 11.3200608, 6.86196449, { { 1500, -0.0031537537f, -0.0242648814f }, { 4000, 0.0426301025f, 0.0364697985f }, { 7000, 0.00843803957f, 0.0302239582f } } },
+        { "rich16_q0", { { 52, 16 }, { 54, 0 } }, 44100, 26.7616786, 19.2591256, { { 1500, 0.0728010684f, -0.0116148153f }, { 4000, 0.0797849894f, 0.0765359923f }, { 7000, -0.00811834447f, -0.0104534971f } } },
+        { "uni9", { { 12, 9 }, { 15, 20 }, { 16, 0 }, { 14, 16 } }, 44100, 61.7485898, 36.6693432, { { 1500, 0.0531249829f, -0.0374071151f }, { 4000, 0.165054232f, -0.0192129575f }, { 7000, -0.0373774841f, -0.00196591392f } } },
+        { "lp1", { { 50, 1 }, { 49, 0 } }, 44100, 7.81941168, 4.72659869, { { 1500, 0.0377117358f, -0.0157920271f }, { 4000, 0.0747607499f, 0.00154248625f }, { 7000, -0.0510631353f, 0.00884498842f } } },
+        { "bp3flat", { { 50, 3 }, { 49, 1 }, { 51, 1 } }, 44100, 2.19181431, 1.29483907, { { 1500, 0.0291239917f, -0.00288665155f }, { 4000, -0.0084345676f, -0.00400509313f }, { 7000, -0.00592403999f, 0.00150578981f } } },
+        { "bs2", { { 50, 2 }, { 49, 2 } }, 44100, 32.8440514, 25.7202184, { { 1500, 0.0730303749f, -0.0496222489f }, { 4000, 0.0696200803f, 0.0595823973f }, { 7000, -0.0482789353f, 0.0764200836f } } },
+        { "hp3", { { 50, 3 }, { 49, 3 } }, 44100, 8.623214, 7.95253188, { { 1500, -0.0325722694f, 0.00703159999f }, { 4000, 0.0183976218f, -0.0372007042f }, { 7000, -0.0126833525f, -0.00160143059f } } },
+        { "alt", { { 62, 257 } }, 44100, 17.2485711, 9.99223979, { { 1500, -0.0319156498f, -0.0186850764f }, { 4000, -0.0769012421f, -0.0375530645f }, { 7000, 0.0310976505f, 0.0445244014f } } },
+        { "isqrt", { { 62, 65792 } }, 44100, 45.7309307, 27.1224593, { { 1500, -0.04376591f, -0.00845711026f }, { 4000, 0.0351300463f, -0.129557073f }, { 7000, 0.0096148327f, 0.00123740174f } } },
+        { "seed2rnd", { { 11, 0 } }, 44100, 16.8228819, 11.5433061, { { 1500, -0.0117614279f, -0.026497297f }, { 4000, 0.00265733898f, -0.07069581f }, { 7000, 0.00576663949f, 0.0565217957f } } },
+        { "decinf", { { 6, 10000 } }, 44100, 19.1879226, 11.0487311, { { 1500, -0.0324105881f, -0.0190765262f }, { 4000, -0.0809780285f, -0.0395730771f }, { 7000, 0.034197174f, 0.048585102f } } },
+        { "logx", { { 57, 16777216 } }, 44100, 12.3064326, 7.31519289, { { 1500, -0.0438990779f, 0.0096983267f }, { 4000, -0.0175748877f, 0.0313935578f }, { 7000, 0.0639200211f, 0.024419222f } } },
+        { "velpos", { { 56, 66304 } }, 44100, 4.9966925, 3.16540662, { { 1500, 0.0083851777f, -0.0165472236f }, { 4000, 0.0630451962f, 0.0156494901f }, { 7000, -0.0293043777f, -0.00182877108f } } },
+        { "fs48", {  }, 48000, 10.8813888, 6.53592373, { { 1500, -0.0485184453f, -0.0319588967f }, { 4000, 0.0230421089f, -0.0286604818f }, { 7000, -0.0117630213f, -0.017459048f } } },
+        { "fs96", {  }, 96000, 11.0189683, 6.39821883, { { 1500, -0.0267860368f, -0.0227564126f }, { 4000, 0.0238709711f, -0.0100849615f }, { 7000, -0.0034619756f, 0.0451687202f } } },
+        };
+        for (const auto& v : variants)
+        {
+            auto st = blob;
+            for (const auto& [i, x] : v.params)
+                CHECK (lynx::ogunSetParam (st, i, x));
+            const auto y = lynx::ogun::renderReference (st, { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6144 },
+                                                              { 2048, 67, 0.625, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1 } }, (double) v.rate, 8192);
+            double el = 0.0, er = 0.0, peak = 0.0;
+            for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+                el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+            bool ok = y.size() == 2 * 8192 && std::abs (el - v.el) <= 1e-5 * v.el && std::abs (er - v.er) <= 1e-5 * v.er;
+            for (const auto& smp : v.s)
+                ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+            if (! ok)
+                std::printf ("  Ogun variant %s differs from the model: energy %.9g %.9g (model %.9g %.9g)\n", v.name, el, er, v.el, v.er);
+            CHECK (ok);
+        }
+    }
 }
 
 // our own Maximus v7 state (layout REA_rodada8 §1.1): 7 globals, 4 × 13 band parameters, 8 envelopes (dx, y, tension, type)
@@ -6382,6 +6844,101 @@ static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, 
         i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
     }
     return d;
+}
+
+TEST (ogun_demo_channels)
+{
+    // every Ogun channel of FL's demo projects (with its plugin effects) against the round-37 reference model, which is
+    // within −60 dB of FL's DLL on all of them: three notes (C5 1.0 0–20000, G5 0.6 8000–26000, G4 0.95 16000–30000),
+    // 39 690 samples at 44.1 kHz, at the state's quality and at the export quality 4. Fingerprint: energy per side and
+    // four samples (the engine matches the model within float rounding, −125 dB or better on the whole signal).
+    if (realFlpDir.empty())
+        return;
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; int ordinal; std::size_t stateSize; bool export4; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Demo songs/Astes - Bien Duro.flp", 0, 64728, false, 710.708198, 710.708198, { { 5000, 0.133627325f, 0.133627325f }, { 12000, -0.143534407f, -0.143534407f }, { 25000, 0.079226315f, 0.079226315f }, { 35000, -0.0128487358f, -0.0128487358f } } }, // 3.3.1 Metal Drums: Drum
+        { "Demo songs/Astes - Bien Duro.flp", 0, 64728, true, 794.506558, 794.506558, { { 5000, -0.0112881307f, -0.0112881307f }, { 12000, -0.068779245f, -0.068779245f }, { 25000, -0.0289028231f, -0.0289028231f }, { 35000, -0.0161623377f, -0.0161623377f } } }, // 3.3.1 Metal Drums: Drum
+        { "Demo songs/Astes - Bien Duro.flp", 1, 4261, false, 297.957631, 297.957631, { { 5000, -0.000330464332f, -0.000330464332f }, { 12000, -0.00156057056f, -0.00156057056f }, { 25000, -9.24126434e-05f, -9.24126434e-05f }, { 35000, 0.0f, 0.0f } } }, // 3.3.1 Metal Drums: Click
+        { "Demo songs/Astes - Bien Duro.flp", 1, 4261, true, 189.545711, 189.545711, { { 5000, 0.00102557975f, 0.00102557975f }, { 12000, -0.00522088073f, -0.00522088073f }, { 25000, 5.81103013e-05f, 5.81103013e-05f }, { 35000, 0.0f, 0.0f } } }, // 3.3.1 Metal Drums: Click
+        { "Demo songs/Astes - Bien Duro.flp", 2, 133836, false, 125.683557, 125.683557, { { 5000, 0.0176561493f, 0.0176561493f }, { 12000, 0.019205872f, 0.019205872f }, { 25000, 0.0046372693f, 0.0046372693f }, { 35000, -0.00165430119f, -0.00165430119f } } }, // 3.3.2 Tibetan
+        { "Demo songs/Astes - Bien Duro.flp", 2, 133836, true, 105.621798, 105.621798, { { 5000, 0.00897848886f, 0.00897848886f }, { 12000, -0.0171215143f, -0.0171215143f }, { 25000, -0.00821319036f, -0.00821319036f }, { 35000, -0.00245537539f, -0.00245537539f } } }, // 3.3.2 Tibetan
+        { "Demo songs/Astes - Bien Duro.flp", 3, 97085, false, 2066.75611, 2066.75611, { { 5000, -0.101155393f, -0.101155393f }, { 12000, 0.355391592f, 0.355391592f }, { 25000, 0.00365939317f, 0.00365939317f }, { 35000, -0.0191957876f, -0.0191957876f } } }, // 3.3.3 Chase
+        { "Demo songs/Astes - Bien Duro.flp", 3, 97085, true, 1667.28674, 1667.28674, { { 5000, -0.236701503f, -0.236701503f }, { 12000, -0.126374632f, -0.126374632f }, { 25000, 0.0533663221f, 0.0533663221f }, { 35000, -0.0100225089f, -0.0100225089f } } }, // 3.3.3 Chase
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", 0, 819, false, 551.263856, 371.038684, { { 5000, 0.0253486633f, 0.160556272f }, { 12000, 0.194370747f, -0.0359776132f }, { 25000, -0.00528950989f, 0.01478827f }, { 35000, 0.110768802f, -0.0237054806f } } }, // Bellish 11
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", 0, 819, true, 547.662092, 381.048456, { { 5000, 0.0401367024f, 0.0261611789f }, { 12000, -0.157383129f, -0.0282031279f }, { 25000, -0.000249146833f, 0.0388034321f }, { 35000, -0.105665907f, 0.0320193283f } } }, // Bellish 11
+        { "Demo songs/LollieVox & Lezina J - I'll Be Your Madonna.flp", 0, 105571, false, 833.288142, 909.880193, { { 5000, 0.0276863724f, 0.214677185f }, { 12000, 0.00827352796f, 0.141611829f }, { 25000, -0.160458148f, 0.0101522766f }, { 35000, -0.0157076102f, 0.00129696913f } } }, // High Chords
+        { "Demo songs/LollieVox & Lezina J - I'll Be Your Madonna.flp", 0, 105571, true, 928.749154, 967.940976, { { 5000, -0.0623336285f, -0.0959333256f }, { 12000, 0.0601816922f, -0.0748261437f }, { 25000, -0.0872222036f, -0.101655915f }, { 35000, -0.002591094f, 0.0107459351f } } }, // High Chords
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 0, 813, false, 21576.8988, 21576.8988, { { 5000, 0.00724618789f, 0.00724618789f }, { 12000, 0.0337664448f, 0.0337664448f }, { 25000, -1.44279329e-05f, -1.44279329e-05f }, { 35000, 0.0f, 0.0f } } }, // Kick
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 0, 813, true, 17857.5027, 17857.5027, { { 5000, -0.0114536202f, -0.0114536202f }, { 12000, -0.00848954543f, -0.00848954543f }, { 25000, 1.20320046e-05f, 1.20320046e-05f }, { 35000, 0.0f, 0.0f } } }, // Kick
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 1, 789, false, 172.127165, 170.39981, { { 5000, -0.00470701791f, -0.000373305753f }, { 12000, 0.0417476855f, 0.0339940563f }, { 25000, 0.0204325765f, 0.0191226583f }, { 35000, -0.000425090868f, -0.000144533216f } } }, // Clap
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 1, 789, true, 163.557022, 149.810459, { { 5000, 0.00246403809f, 0.0228729937f }, { 12000, 0.0378073864f, 0.0445459485f }, { 25000, -0.0242712852f, -0.0313444398f }, { 35000, -0.00112735468f, -0.00138637482f } } }, // Clap
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 2, 635, false, 125.48103, 127.519836, { { 5000, -0.00389297446f, 0.00181007839f }, { 12000, -0.0543250106f, -0.0736973509f }, { 25000, -0.00448145531f, 0.000426211918f }, { 35000, 5.35470353e-05f, 4.34564136e-05f } } }, // High Hat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 2, 635, true, 245.916518, 254.34816, { { 5000, 0.00147765165f, 0.00267027458f }, { 12000, 0.0883170143f, 0.173417449f }, { 25000, -0.00118842872f, 0.000863731664f }, { 35000, -0.000298409053f, -9.04561821e-05f } } }, // High Hat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 3, 45647, false, 271.486026, 271.486026, { { 5000, -4.96093298e-06f, -4.96093298e-06f }, { 12000, 0.000292191253f, 0.000292191253f }, { 25000, -8.18665136e-10f, -8.18665136e-10f }, { 35000, 0.0f, 0.0f } } }, // HiHat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 3, 45647, true, 167.753037, 167.753037, { { 5000, 2.2048649e-05f, 2.2048649e-05f }, { 12000, -1.77328075e-05f, -1.77328075e-05f }, { 25000, -3.00809999e-09f, -3.00809999e-09f }, { 35000, 0.0f, 0.0f } } }, // HiHat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 4, 887, false, 6005.75168, 6293.90961, { { 5000, -0.19636783f, -0.0313744769f }, { 12000, 0.178472087f, 0.601032794f }, { 25000, -0.351912051f, -0.0497151017f }, { 35000, -0.182245821f, -0.181938142f } } }, // Snare
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 4, 887, true, 6151.47444, 6049.47136, { { 5000, -0.102814399f, 0.0690701902f }, { 12000, 0.0902677849f, 0.114889771f }, { 25000, -0.173990116f, 0.140671447f }, { 35000, 0.0744562522f, 0.0291433111f } } }, // Snare
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 5, 705, false, 6511.3723, 5580.42134, { { 5000, 0.478397369f, 0.536334693f }, { 12000, -0.312448859f, -0.301919997f }, { 25000, 0.260874003f, -0.0129742175f }, { 35000, 0.0223956257f, 0.033103168f } } }, // Swebass 1
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 5, 705, true, 6415.0768, 5859.44881, { { 5000, 0.0342692807f, 0.00727743423f }, { 12000, -0.0324966274f, 0.125386745f }, { 25000, -0.0785191655f, -0.25017795f }, { 35000, -0.0524680056f, -0.0384391509f } } }, // Swebass 1
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 6, 708, false, 2487.6041, 2190.17262, { { 5000, -0.0770967156f, -0.00940297544f }, { 12000, 0.329836905f, 0.183736563f }, { 25000, 0.0137981772f, -0.0334252715f }, { 35000, 0.0132095823f, 0.0277119074f } } }, // Swebass 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 6, 708, true, 2519.26975, 2230.77243, { { 5000, -0.204216316f, -0.16732122f }, { 12000, 0.0762225091f, 0.0964485779f }, { 25000, -0.0833523944f, -0.132980049f }, { 35000, -0.015998248f, 0.0112942485f } } }, // Swebass 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 7, 109827, false, 1326.11782, 1397.71125, { { 5000, 0.0306534693f, 0.026510708f }, { 12000, -0.139238164f, -0.104713492f }, { 25000, 0.106734768f, 0.0295313746f }, { 35000, 0.258899271f, 0.260215104f } } }, // Midnight Lady
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 7, 109827, true, 1252.058, 1287.83169, { { 5000, -0.0980920121f, -0.108575724f }, { 12000, 0.131130368f, 0.176118359f }, { 25000, 0.0581845529f, 0.174699515f }, { 35000, -0.17453593f, 0.0978319347f } } }, // Midnight Lady
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 8, 34816, false, 10793.0192, 11904.6549, { { 5000, 0.36459741f, -0.0714551434f }, { 12000, 0.565215111f, -0.205066338f }, { 25000, -0.652977228f, -0.432422459f }, { 35000, -0.284279644f, -0.122116163f } } }, // Supersaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 8, 34816, true, 10132.5107, 11590.7617, { { 5000, 0.192168862f, 0.0883051828f }, { 12000, -0.590734482f, 0.512839496f }, { 25000, 0.682625771f, 0.287306368f }, { 35000, -0.00662239315f, 0.700808227f } } }, // Supersaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 9, 94266, false, 826.69243, 1157.08939, { { 5000, 0.0348474756f, -0.168766886f }, { 12000, -0.0719366521f, 0.288826376f }, { 25000, 0.181558818f, 0.0424098521f }, { 35000, -0.321783781f, -0.0548994206f } } }, // Airguitar 3
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 9, 94266, true, 830.517691, 772.62552, { { 5000, -0.208309069f, 0.152180359f }, { 12000, -0.264171928f, 0.163982511f }, { 25000, 0.0313629843f, -0.187507361f }, { 35000, 0.133838147f, 0.0704783946f } } }, // Airguitar 3
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 10, 1004, false, 12678.7464, 11831.2032, { { 5000, 0.192205578f, 0.613839507f }, { 12000, 0.269521117f, -0.585603476f }, { 25000, 0.0944993123f, 0.0806781948f }, { 35000, -0.16715017f, 0.412193805f } } }, // Trumpet
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 10, 1004, true, 12261.8266, 9962.482, { { 5000, 0.422391087f, -0.251674503f }, { 12000, -0.46900028f, -0.57652849f }, { 25000, -0.535878778f, 0.115671799f }, { 35000, -0.545713186f, 0.0383624472f } } }, // Trumpet
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 11, 30605, false, 1358.26232, 1520.29691, { { 5000, -0.0350573957f, 0.0372484438f }, { 12000, 0.0963054374f, -0.130206674f }, { 25000, 0.0404771306f, -0.270439237f }, { 35000, -0.0870027244f, 0.0245792065f } } }, // Silverswirll
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 11, 30605, true, 964.637209, 1040.25756, { { 5000, 0.111636952f, -0.00114471605f }, { 12000, 0.0483313873f, 0.0637735277f }, { 25000, -0.152803347f, 0.101604536f }, { 35000, 0.0288163591f, 0.0194431469f } } }, // Silverswirll
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 12, 34708, false, 21463.1948, 22013.1021, { { 5000, -0.00810255855f, -0.0122786947f }, { 12000, -0.163549975f, -0.203571558f }, { 25000, 0.419101298f, -1.1141516f }, { 35000, 0.498232335f, -0.394363374f } } }, // Padsaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 12, 34708, true, 22903.9209, 21556.3509, { { 5000, -0.00977799948f, -0.0114432834f }, { 12000, -0.0759382695f, 0.077038914f }, { 25000, -0.556497335f, -1.22787583f }, { 35000, -1.31076968f, -1.73392022f } } }, // Padsaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 13, 6395, false, 3516.18148, 3565.45486, { { 5000, -0.0564712696f, -0.262329876f }, { 12000, 0.113444217f, 0.168150783f }, { 25000, -0.45024398f, -0.694699228f }, { 35000, 0.151807249f, -0.00405737339f } } }, // Turbular Bells 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 13, 6395, true, 3571.34372, 3626.15163, { { 5000, -0.0878480822f, -0.275067806f }, { 12000, 0.230907321f, 0.28320539f }, { 25000, -0.470044613f, -0.701287091f }, { 35000, 0.195627496f, 0.0175700653f } } }, // Turbular Bells 2
+    };
+    std::map<std::string, std::vector<std::vector<std::uint8_t>>> states;
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        if (! states.contains (g.file))
+        {
+            std::ifstream in (std::filesystem::path (realFlpDir) / "Demo projects" / g.file, std::ios::binary);
+            const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+            auto& list = states[g.file];
+            if (! bytes.empty())
+                for (const auto& c : flp::parseProject (bytes).channels)
+                    if (c.pluginName == "Ogun")
+                        list.push_back (c.pluginState);
+        }
+        const auto& list = states[g.file];
+        if (list.empty())
+            continue; // not this installation
+        CHECK ((int) list.size() > g.ordinal);
+        if ((int) list.size() <= g.ordinal)
+            continue;
+        const auto& st = list[(std::size_t) g.ordinal];
+        CHECK (st.size() == g.stateSize);
+        lynx::ogun::RefOptions opt;
+        opt.quality = g.export4 ? 4 : -1;
+        const auto y = lynx::ogun::renderReference (st, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20000 },
+                                                          { 8000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 26000 },
+                                                          { 16000, 55, 0.95, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30000 } }, 44100.0, 39690, opt);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 2e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 2e-5 * peak;
+        if (! ok)
+            std::printf ("  Ogun %s #%d (q%s) differs from the model: energy %.9g %.9g (model %.9g %.9g)\n", g.file, g.ordinal,
+                         g.export4 ? "4" : "-state", el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Ogun: %d demo renders checked against the reference model\n", checked);
+    CHECK (checked == (int) std::size (goldens));
 }
 
 TEST (harmless_rack)
@@ -6496,8 +7053,8 @@ TEST (harmless_rack)
         const auto found = lynx::hlfx::maximusStateFromFst (fst);
         CHECK (found && *found == st);
         auto rms = st;
-        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master: not decoded
-        CHECK (lynx::hlfx::makeMaximusPreset (rms) == nullptr);
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada38: Harmor's preset 2)
+        CHECK (lynx::hlfx::makeMaximusPreset (rms) != nullptr);
     }
 }
 
@@ -6753,6 +7310,72 @@ TEST (sytrus_instrument)
     CHECK (tail.back() == 0.0f);
 }
 
+TEST (harmor_effects_rack)
+{
+    // REA_rodada38: the rack runs in the state's unit order and the records' FX send joins it at unit 4 — with the FX
+    // amount at 1000 every record output bypasses a reverb placed before unit 4 (EXEC: −600 dB vs the rack off)
+    auto blob = harmorTestState (false);
+    auto set = [&] (std::vector<std::uint8_t>& st, int part, int index, std::int32_t v) {
+        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, index), &v, 4);
+    };
+    set (blob, 0, 10, 1000); // all to the FX send
+    auto render = [] (const std::vector<std::uint8_t>& st) {
+        return lynx::harmor::renderReference (st, { { 0, 60, 0.8, 1.0, 0.0, 6000 } }, 44100.0, 12000);
+    };
+    const auto dry = render (blob);
+    auto rev = blob;
+    set (rev, -1, 22, 1); // reverb on: room 50, diffusion 100, decay 2^3·0.1 s, high cut / damping off, wet 0.8
+    set (rev, -1, 24, 1050), set (rev, -1, 26, 50), set (rev, -1, 27, 100), set (rev, -1, 28, 300), set (rev, -1, 29, 1050);
+    set (rev, -1, 30, 2), set (rev, -1, 31, 800);
+    const auto bypassed = render (rev);
+    double eb = 0.0, db = 0.0;
+    for (std::size_t i = 0; i < dry.size(); ++i)
+        eb += (double) (bypassed[i] - dry[i]) * (bypassed[i] - dry[i]), db += (double) dry[i] * dry[i];
+    CHECK (eb < 1e-12 * db && db > 1e-3); // (float rounding of the rack's buffers only)
+    auto after = rev;
+    const std::int32_t order[6] { 0, 1, 2, 4, 3, 5 }; // the join before the reverb
+    for (int k = 0; k < 6; ++k)
+        set (after, -1, 53 + k, order[k]);
+    const auto wet = render (after);
+    double e = 0.0, d = 0.0;
+    bool finite = true;
+    for (std::size_t i = 0; i < wet.size(); ++i)
+        e += (double) (wet[i] - dry[i]) * (wet[i] - dry[i]), d += (double) dry[i] * dry[i], finite = finite && std::isfinite (wet[i]);
+    CHECK (finite && e > 1e-4 * d && d > 1e-3);
+    // a distortion (type 6) and a delay on the dry path change the sound, stay finite, and the instrument ends quiet
+    auto dist = harmorTestState (false);
+    {
+        const auto at = lynx::harmorParamOffset (dist, -1, 0) + 0xd4 + 0x18 + 48; // global misc +48: distortion type
+        const std::int32_t six = 6;
+        std::memcpy (dist.data() + at, &six, 4);
+    }
+    set (dist, -1, 17, 600), set (dist, -1, 19, 1000), set (dist, -1, 21, 1100);
+    set (dist, -1, 39, 1), set (dist, -1, 40, 2), set (dist, -1, 41, 400), set (dist, -1, 42, 96), set (dist, -1, 44, 800);
+    set (dist, -1, 47, 1050);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::harmor;
+    c.pluginState = dist;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::harmor);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (44100 * 4), r (l.size());
+    inst->noteOn (60, 0.8f);
+    double energy = 0.0;
+    for (int s = 0; s < (int) l.size(); s += 512)
+    {
+        if (s == 8192)
+            inst->noteOff (60);
+        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+    }
+    for (std::size_t i = 0; i < l.size(); ++i)
+        finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
+    CHECK (finite && energy > 1.0);
+    std::vector<float> tail (44100 * 6), tailR (tail.size());
+    for (int s = 0; s < (int) tail.size(); s += 512)
+        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+    CHECK (inst->idle());
+}
+
 TEST (harmless_engine)
 {
     // REA_rodada32: state parsing, the additive engine against our reference model (hlmodel.py), host levels, voice end
@@ -6832,4 +7455,32 @@ TEST (harmless_engine)
     for (int i = 0; i < 2048; ++i)
         el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
     CHECK (el < 1e-10 * er && er > 1.0);
+}
+
+TEST (startup_sound)
+{
+    // the splash's sound: the right length, finite, at its peak level, quiet before the whoosh swells,
+    // a landing "pop" at impactTime and a chime ringing after it
+    using namespace lynx::startup;
+    const auto sound = makeSound (48000.0);
+    CHECK (sound.left.size() == (std::size_t) (soundLength * 48000.0) && sound.right.size() == sound.left.size());
+    float peak = 0.0f;
+    bool finite = true;
+    for (std::size_t i = 0; i < sound.left.size(); ++i)
+    {
+        finite = finite && std::isfinite (sound.left[i]) && std::isfinite (sound.right[i]);
+        peak = std::max ({ peak, std::abs (sound.left[i]), std::abs (sound.right[i]) });
+    }
+    CHECK (finite && std::abs (peak - peakLevel) < 1.0e-4f);
+    auto rms = [&sound] (double from, double to) {
+        double e = 0.0;
+        const auto a = (std::size_t) (from * 48000.0), b = (std::size_t) (to * 48000.0);
+        for (auto i = a; i < b; ++i)
+            e += (double) sound.left[i] * sound.left[i];
+        return std::sqrt (e / (double) (b - a));
+    };
+    CHECK (rms (0.0, 0.05) < 0.2 * rms (impactTime - 0.05, impactTime));  // the whoosh swells
+    CHECK (rms (impactTime, impactTime + 0.05) > rms (impactTime - 0.05, impactTime)); // the landing
+    CHECK (rms (0.8, 1.0) > 0.005 && rms (soundLength - 0.02, soundLength) < rms (0.8, 1.0)); // chime rings, tail fades
+    CHECK (makeSound (48000.0).left == sound.left); // the same sound on every start
 }

@@ -608,7 +608,7 @@ float Song::automationValueAt (int index, double tick) const
     std::vector<const Clip*> clips;
 
     for (const auto& c : playlist)
-        if (c.kind == ClipKind::automation && c.automation == index && c.length > 0 && ! isTrackMuted (c.track))
+        if (c.kind == ClipKind::automation && c.automation == index && c.length > 0 && ! c.muted && ! isTrackMuted (c.track))
             clips.push_back (&c);
 
     if (clips.empty())

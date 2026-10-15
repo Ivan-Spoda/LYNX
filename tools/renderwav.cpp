@@ -75,6 +75,10 @@ int main (int argc, char** argv)
     lynx::FlpImportOptions options;
     options.roots = { flRoot, flRoot + "/Data", "" };
     options.fileExists = [&] (const std::string& p) { return std::filesystem::exists (toLocal (p)); };
+    options.readFile = [&] (const std::string& p) { // (the rack compressors' presets of Harmless/Harmor)
+        std::ifstream f (toLocal (p), std::ios::binary);
+        return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+    };
 
     try
     {

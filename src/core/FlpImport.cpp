@@ -873,6 +873,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::harmor;
                     def.pluginState = c.pluginState;
                     adoptedFromPlugin = true;
+                    // rack compressor: Harmor's own preset System\Compression\<n>.fst from the user's installation
+                    // (REA_rodada38); its Maximus state goes into modelParams (size, bytes…)
+                    const auto compType = harmorCompressorType (c.pluginState);
+                    if (compType > 0)
+                    {
+                        const auto path = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Harmor\\System\\Compression\\"
+                                                             + std::to_string (compType) + ".fst",
+                                                         options.roots);
+                        std::optional<std::vector<std::uint8_t>> state;
+                        if (! path.empty() && options.readFile && (! options.fileExists || options.fileExists (path)))
+                            state = hlfx::maximusStateFromFst (options.readFile (path));
+                        if (state && hlfx::makeMaximusPreset (*state) != nullptr)
+                        {
+                            def.modelParams.clear();
+                            def.modelParams.push_back ((float) state->size());
+                            for (const auto byte : *state)
+                                def.modelParams.push_back ((float) byte);
+                        }
+                        else if (options.report != nullptr)
+                            ++options.report->droppedEffects["Harmor compressor (preset not found)"];
+                    }
                 }
                 else if (synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
                     adopt();
@@ -1022,9 +1043,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
-            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin)
-                     || ((plugin == "ogun" || plugin == "autogun") && def.instrument != InstrumentKind::ogun && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
+            else if (def.instrument == InstrumentKind::sakura || def.instrument == InstrumentKind::drumpad
+                     || def.instrument == InstrumentKind::boobass || def.instrument == InstrumentKind::drumsynth
+                     || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
+                     || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::ogun)
+                ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
+            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
+                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
@@ -1032,8 +1057,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::drumsynth)
                      || (plugin == "harmless" && def.instrument == InstrumentKind::harmless)
-                     || (plugin == "harmor" && def.instrument == InstrumentKind::harmor)
-                     || ((plugin == "ogun" || plugin == "autogun") && def.instrument == InstrumentKind::ogun))
+                     || (plugin == "harmor" && def.instrument == InstrumentKind::harmor))
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)

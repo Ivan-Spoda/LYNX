@@ -4,9 +4,9 @@
 // docs/analise/REA_rodada31.md §7.5, REA_rodada36 §1 and REA_rodada37 §1.18): mono input, +10⁻³⁰ anti-denormal,
 // one-pole high cut, first-order all-pass low cut, four input diffusers, predelay line, a two-half "figure-eight" tank
 // (feedback line × decay, colour shelf, + predelay output, damping one-pole, all-pass, delay × decay, all-pass,
-// delay) and 7 output taps per channel, all in float32. The plugins that host it (Harmless, Ogun) compute the
-// coefficients themselves (each with its own parameter laws) and fill the fields below; the per-sample routine is the
-// shared one. (Sytrus keeps its own double-precision copy in SytrusEngine.cpp.)
+// delay) and 7 output taps per channel, all in float32. The plugins that host it (the Harmless and Harmor racks,
+// Ogun) compute the coefficients themselves (each with its own parameter laws) and fill the fields below; the
+// per-sample routine is the shared one. (Sytrus keeps its own double-precision copy in SytrusEngine.cpp.)
 
 #include <array>
 #include <vector>

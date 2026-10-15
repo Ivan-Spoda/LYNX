@@ -1330,6 +1330,38 @@ void closeChannelSettings()
     windows().clear();
 }
 
+bool hasChannelSettings (InstrumentKind kind) noexcept
+{
+    switch (kind)
+    {
+        case InstrumentKind::synth:
+        case InstrumentKind::sampler:
+        case InstrumentKind::controller:
+        case InstrumentKind::sakura:
+        case InstrumentKind::drumpad:
+        case InstrumentKind::boobass:
+        case InstrumentKind::drumsynth:
+        case InstrumentKind::harmless:
+        case InstrumentKind::harmor:
+        case InstrumentKind::ogun:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isChannelSettingsOpen (int channel)
+{
+    return std::any_of (windows().begin(), windows().end(), [channel] (auto& w) { return w->getChannel() == channel && ! w->isModulation(); });
+}
+
+void closeChannelSettings (int channel)
+{
+    auto& open = windows();
+    open.erase (std::remove_if (open.begin(), open.end(), [channel] (auto& w) { return w->getChannel() == channel && ! w->isModulation(); }),
+                open.end());
+}
+
 std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel)
 {
     return std::make_unique<ModulationPanel> (engine, channel);

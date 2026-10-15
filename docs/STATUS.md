@@ -62,10 +62,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   of the DLL on 135 of 139 demo channels); Sytrus on its engine (REA round 31: the whole instance from the raw plugin
   state — operators, FM/RM matrix, articulators, unison, portamento, filters, effects chain; FL's render settings when
   exporting, its live ones when playing); Harmor on its additive engine (REA round 34: both parts, 520-partial bank,
-  module chain, articulators; within −150 dB of the reference model on 88 of the 89 demo channels it runs, 85 of 99
-  demo channels within −60 dB of FL's DLL); Ogun on its inverse-FFT engine (REA round 37: the whole voice, articulators
-  and plugin effects from the raw state; within float rounding of the reference model — which is within −60 dB of
-  FL's DLL on 20 of 20 demo channels — on all 20 demo channels and ~70 synthetic cases); GMS, Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  module chain, articulators, and its effects rack from REA round 38; within −150 dB of the reference model on 88 of
+  the 89 demo channels it runs, 82 of 99 demo channels within −60 dB of FL's DLL with the whole rack on); Ogun on its
+  inverse-FFT engine (REA round 37: the whole voice, articulators and plugin effects from the raw state; within float
+  rounding of the reference model — which is within −60 dB of FL's DLL on 20 of 20 demo channels — on all 20 demo
+  channels and ~70 synthetic cases); GMS, Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -107,6 +108,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
   along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
   Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
+  **Effects rack** (REA round 38, `hlfx::HarmorRack` in `core/HarmlessFx.cpp`, plugged into `harmor::FxHook`): the six
+  units in the state's order — distortion (types 1–10 and the quantiser, 2×/4×/8× half-band oversampling by precision,
+  bias/drive/dry/wet ramps, 4th-order post low-pass, DC stage), the shared library's chorus, delay (modes, feedback ramp
+  from 0.5, stereo offset, pan law, in-path or in-loop high/low cut) and reverb (the shared Reverb_x64 DSP with Harmor's
+  low/high cut, predelay, room, diffusion, decay, damping, colour, wet ramp), the records' FX send joining at unit 4,
+  and the Maximus compressor with Harmor's own preset read from the user's installation (globals 49–52 → mix and the
+  three pre gains; the RMS detector of preset 2 decoded); the activity counter (30/530 ms + the chorus ring). Against
+  the DLL with its rack on: per unit median −78 dB (distortion −77.6, chorus −78.2, delay −79.9, reverb −79.6,
+  compressor −78.3), level 0.00 dB on every channel whose voice is modelled.
 - **Sytrus:** its own engine (`core/SytrusEngine.cpp`, REA round 31) driven by the plugin's saved state: 16 384-point
   operator tables with linear read-out and the 4-lane block reader, noise (shared LCG), plucked mode (IPP's uniform
   generator), band limiting (4 096 live / 16 384 export), CENTER/DECLICK, GLOBAL phase; the FM/RM matrix in FL's
@@ -152,9 +162,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   `core/PlateReverb.h`, shared with Harmless's rack), and the 2:1 polyphase decimator of qualities 2–4. Level law
   `(3^(P0/128) − 1)/2`·Final.Vol through Ogun's own pan matrix (channel volume/pan applied once). LYNX plays the
   state's quality and exports at quality 4, as FL does when it renders. Against the round-37 reference model (own
-  read start, same Seed-2 counter): bit-identical or within −125 dB on all 20 demo channels (44.1 and 48 kHz, every
-  effect on, and at the export quality 4) and on ~70 synthetic cases (qualities 0–4, LFO shapes, polyphony, host
-  values). The old spectral-oscillator conversion remains for unreadable states, Autogun (another state layout), and
+  read start, same Seed-2 counter): bit-identical or within −125 dB (float rounding) on all 20 demo channels (44.1 and
+  48 kHz, every effect on, and at the export quality 4) and on 55 synthetic cases (qualities 0–4, richness, unison,
+  filter types, ALT DECAY, 1/√h, patterns, velocity options, portamento, host pan/volume/pitch/Mod X-Y, 48/96 kHz); the
+  model itself is within −60 dB of FL's DLL on 20 of 20 demo channels. The core tests check the engine against model
+  fingerprints: the 20 demo channels at the state's quality and at quality 4 (`ogun_demo_channels`) and 17 feature
+  variants of a state written from scratch (`ogun_engine`). The old spectral-oscillator conversion remains for unreadable states, Autogun (another state layout), and
   the synth's "FL presets" button.
   CPU: one inverse FFT of N per voice and frame (split re/im radix-2 passes, cache-blocked, AVX when available), the
   quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
@@ -200,10 +213,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   channels), the Noise resonance (type 109) is skipped, the blur variant of misc +0x46 runs as the normal blur (its one
   demo channel still lands at −85 dB), phaser/harmonizer mask curves, timbre blend modes ≠ 0 and non-neutral global
   envelope scales are ignored, filter shapes 8/10–13/15/16 and unknown resonance/phaser types switch that stage off,
-  clip modes > 4 switch the clip off, the harmonic-randomness module is absent (never active in FL's data) and the
-  effects rack (distortion/compressor/chorus/delay/reverb) is off — a hook (`harmor::FxHook`) takes the dry output
-  before the master volume, where FL runs it (round 36 found Harmless's rack shared with Harmor; Harmor's own
-  parameter mapping is not decoded). FL seeds its Mersenne Twister from the clock, LYNX with a fixed value per
+  clip modes > 4 switch the clip off, the harmonic-randomness module is absent (never active in FL's data). In the
+  rack, the distortion's shapers are exact functions where FL uses IPP's 11-bit `Tanh/Exp/Ln/Sqrt/Cbrt` at precision 0
+  (−55…−72 dB against the DLL there, −82…−123 dB at precision 2; a full-drive type 6 also amplifies the voice
+  residual by ~10 dB), and the compressor stays off when its preset file is not found (import report). FL seeds its Mersenne Twister from the clock, LYNX with a fixed value per
   instance: random unison, free/spectral phases and random maps are deterministic and differ from any FL render by
   design. Tempo-synced envelope/LFO rates, the phaser rate and the portamento time follow the song tempo (the
   reference was measured at 120 BPM). The polyphony limit is LYNX's (a pool of six notes' worth of records, 16–96;
@@ -312,6 +325,6 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Autogun's engine (state layout differs from Ogun's; DLL not run), Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
-  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes, Noise resonance and
-  effects rack.
+- Autogun's engine (state layout differs from Ogun's; DLL not run), Vocodex's internal carrier synth (needs LYNX's
+  exact Sytrus) and its Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes and
+  Noise resonance.

@@ -618,6 +618,15 @@ overrides used only by the verification.)
    only after the C++ port matches `ogmodel.py` on the 20 demo channels (states as saved, 44.1 and 48 kHz) to about
    −60 dB with the model's own j₀ and Seed-2 counter fed in.
 
+**Port status (LYNX, `core/Ogun.cpp`, `InstrumentKind::ogun`).** Done: the C++ engine against `ogmodel.py` with the
+same events (`tools/ogunrender` drives it like `Plugin.run`) is bit-identical or within −125 dB (float rounding) on
+the 20 demo channels as saved (every effect on; at the state's quality and at quality 4; 44.1 and 48 kHz) and on the
+55 synthetic cases of `bat_synth.py` plus quality 2/3, chorus-only and 96 kHz variants; worst −125.0 dB (Padsaw at
+quality 4). The core tests keep this as model fingerprints (energy per side + samples): `ogun_demo_channels` (40 demo
+renders) and `ogun_engine` (17 feature variants of a state written from scratch, plus sample goldens at its quality 0
+and at quality 4). The FLP import plays every readable Ogun state (23/23 in the corpus) on it; Autogun stays on the
+spectral-oscillator conversion.
+
 ---
 
 ## Evidence index

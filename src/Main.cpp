@@ -13,10 +13,13 @@
 #include "engine/Text.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
+#include "ui/Dialogs.h"
+#include "core/RackOps.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/Splash.h"
 #include "ui/Theme.h"
 #include "ui/WindowOwner.h"
 
@@ -298,19 +301,79 @@ public:
         }
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
-        engine = std::make_unique<lynx::AudioEngine>();
-        crashEngine = engine.get();
-        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
-        lynx::setMainWindowForOwnership (mainWindow.get());
-
+        startupOptions = lynx::StartupOptions::load();
         // Double-clicking a .lynx/.flp opens LYNX with the file as an argument.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
-            mainWindow->openFile (juce::File (args[0].unquoted()));
+            fileToOpen = juce::File (args[0].unquoted());
+
+        if (! startupOptions.splash)
+        {
+            startEngine();
+            createMainWindow();
+            mainWindow->reveal();
+            openStartupFile();
+            return;
+        }
+
+        // the splash first, so it is on screen while the audio device opens; the main window is built
+        // once the pepper has landed (the scene is still for a moment then) and shown when the splash ends
+        splash = std::make_unique<lynx::SplashScreen>();
+        splash->showOnDesktop();
+
+        juce::Timer::callAfterDelay (40, [this] {
+            startEngine();
+
+            if (splash == nullptr) // quit meanwhile
+                return;
+
+            splash->setStatus (lynx::tr ("Loading the workspace..."));
+            splash->startClock();
+
+            juce::Timer::callAfterDelay (1050, [this] {
+                if (splash == nullptr || engine == nullptr)
+                    return;
+
+                createMainWindow();
+                const auto wait = juce::jmax (0.0, lynx::SplashScreen::minimumDuration - splash->getElapsed());
+
+                juce::Timer::callAfterDelay ((int) (wait * 1000.0), [this] {
+                    if (splash == nullptr || mainWindow == nullptr)
+                        return;
+
+                    mainWindow->reveal();
+                    splash->toFront (false);
+                    splash->finish ([this] { splash = nullptr; });
+                    openStartupFile();
+                });
+            });
+        });
+    }
+
+    void startEngine()
+    {
+        engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+
+        if (startupOptions.sound)
+            engine->previewSample (lynx::makeStartupSample());
+    }
+
+    void createMainWindow()
+    {
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
+        lynx::setMainWindowForOwnership (mainWindow.get());
+    }
+
+    void openStartupFile()
+    {
+        if (fileToOpen != juce::File() && mainWindow != nullptr)
+            mainWindow->openFile (fileToOpen);
     }
 
     void shutdown() override
     {
         lynx::shutdownPluginSandboxWorker();
+        splash = nullptr;
         mainWindow = nullptr; // the UI goes before the engine
         crashEngine = nullptr;
         engine = nullptr;
@@ -1129,7 +1192,7 @@ private:
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         {
             lynx::AudioEngine offline (false);
-            lynx::MainComponent ui (offline);
+            lynx::MainComponent ui (offline, false); // default layout and keys, nothing saved
             // LYNX_SNAPSHOT_SIZE=WxH (default 1280x720)
             const auto size = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_SIZE", "1280x720"), "x", "");
             ui.setSize (juce::jlimit (800, 3840, size[0].getIntValue()), juce::jlimit (450, 2160, size[1].getIntValue()));
@@ -1140,12 +1203,28 @@ private:
             offline.dispatchPendingMessages(); // change notifications are asynchronous
 
             ui.waitForBrowserForSnapshot();
+
+            // the workspace desktop: the default layout, then with the Piano Roll and Mixer floating too
+            // (and a sample hint in the status strip, as when hovering a knob)
+            ui.showDesktopForSnapshot (false);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-desktop.png");
+            ui.showDesktopForSnapshot (true);
+            ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
+            saveSnapshot (ui, prefix + "-desktop-all.png");
+
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            // the Playlist with a time selection over bars 2-3 (it selects the clips it touches) and the Knife tool
+            ui.getPlaylistForSnapshot().setTimeSelectionForSnapshot (1, 3);
+            ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::knife);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-playlist-timesel.png");
+            ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::pencil);
             ui.selectTabForSnapshot (3);
             // LYNX_SNAPSHOT_TRACK=n: shows the effects of that mixer track
             if (const auto track = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_TRACK", {}); track.isNotEmpty())
@@ -1177,6 +1256,9 @@ private:
             };
 
             saveWindow (lynx::makeExportPanel (offline), "-export.png");
+            saveSplashFrames (prefix);
+            saveIconSheet (prefix + "-icons.png", 1.0f);
+            saveIconSheet (prefix + "-icons-150.png", 1.5f);
             saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
             saveMenus (ui, prefix + "-menus.png");
 
@@ -1186,6 +1268,7 @@ private:
             };
             saveAlert (ui.makeConfirmDiscardWindow(), "-confirm.png");
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
+            saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
 
             if (! offline.getSong().automations.empty())
             {
@@ -1243,6 +1326,12 @@ private:
                 if (bestTrack >= 0)
                     saveWindow (lynx::makeParametricEqEditor (offline, bestTrack, bestSlot), "-peq.png");
             }
+
+            // Note inspector for the Piano Roll's notes (its selection, or all of the channel's notes)
+            if (auto inspector = ui.getPianoRollForSnapshot().makeNoteInspectorForSnapshot())
+                saveWindow (std::move (inspector), "-noteinspector.png");
+            if (auto inspector = ui.getPianoRollForSnapshot().makeNoteInspectorForSnapshot (true))
+                saveWindow (std::move (inspector), "-noteinspector-one.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
@@ -1343,6 +1432,78 @@ private:
             png.writeImageToStream (image, *out);
     }
 
+    static void writePng (const juce::Image& image, const juce::String& path)
+    {
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (image, *out);
+    }
+
+    // the splash screen: one settled frame, and a strip of frames through its animation
+    static void saveSplashFrames (const juce::String& prefix)
+    {
+        lynx::SplashScreen splash;
+        splash.setStatus (lynx::tr ("Loading the workspace..."));
+        splash.setTimeForSnapshot (1.6);
+        writePng (splash.createComponentSnapshot (splash.getLocalBounds()), prefix + "-splash.png");
+
+        const double times[] = { 0.10, 0.22, 0.29, 0.40, 0.58, 0.75, 1.00, 1.30 };
+        const auto w = lynx::SplashScreen::width / 2, h = lynx::SplashScreen::height / 2;
+        juce::Image strip (juce::Image::ARGB, 4 * (w + 8) + 8, 2 * (h + 8) + 8, true);
+        {
+            juce::Graphics g (strip);
+            g.fillAll (lynx::theme::colour::bg1);
+
+            for (int i = 0; i < 8; ++i)
+            {
+                splash.setTimeForSnapshot (times[i]);
+                const auto frame = splash.createComponentSnapshot (splash.getLocalBounds());
+                g.drawImage (frame, 8 + (i % 4) * (w + 8), 8 + (i / 4) * (h + 8), w, h, 0, 0, frame.getWidth(), frame.getHeight());
+            }
+        }
+        writePng (strip, prefix + "-splash-frames.png");
+    }
+
+    // every icon at 16, 20 and 24 px (at `scale`, e.g. 1.5 for a 150% display), in the toolbar's
+    // colours: at rest, hovered and switched on
+    static void saveIconSheet (const juce::String& path, float scale)
+    {
+        const int sizes[] = { 16, 20, 24 };
+        const int cell = 34, columns = 3 * 3, labelWidth = 110;
+        const auto w = labelWidth + columns * cell + 16, h = lynx::iconCount * cell + 16;
+        juce::Image image (juce::Image::ARGB, juce::roundToInt ((float) w * scale), juce::roundToInt ((float) h * scale), true);
+        {
+        juce::Graphics g (image); // (drawing is flushed when it goes out of scope)
+        g.addTransform (juce::AffineTransform::scale (scale));
+        g.fillAll (lynx::theme::colour::bg3);
+        g.setFont (lynx::theme::font (lynx::theme::type::small));
+
+        for (int i = 1; i < lynx::iconCount; ++i)
+        {
+            const auto y = 8 + (i - 1) * cell;
+            g.setColour (lynx::theme::colour::textDisabled);
+            g.drawText (juce::String (i), 8, y, labelWidth - 8, cell, juce::Justification::centredLeft);
+
+            for (int v = 0; v < 3; ++v)
+                for (int s = 0; s < 3; ++s)
+                {
+                    const juce::Rectangle<float> box ((float) (labelWidth + (v * 3 + s) * cell), (float) y, (float) cell, (float) cell);
+                    const auto bg = v == 2 ? lynx::theme::colour::accent : v == 1 ? lynx::theme::colour::bg5 : lynx::theme::colour::bg3;
+                    g.setColour (bg);
+                    g.fillRoundedRectangle (box.reduced (2.0f), 4.0f);
+                    const auto fg = v == 2 ? lynx::theme::colour::onAccent : v == 1 ? lynx::theme::colour::textPrimary
+                                                                                   : lynx::theme::colour::textSecondary.brighter (0.25f);
+                    lynx::icons::draw (g, (lynx::Icon) i, box.withSizeKeepingCentre ((float) sizes[s], (float) sizes[s]), fg);
+                }
+        }
+        }
+
+        writePng (image, path);
+    }
+
     static void saveSnapshot (juce::Component& c, const juce::String& path)
     {
         const juce::File file (path);
@@ -1373,8 +1534,14 @@ private:
             }
 
             centreWithSize (getWidth(), getHeight());
+        }
+
+        // Shows the window (built hidden while the splash screen is up).
+        void reveal()
+        {
             setVisible (true);
             lynx::applyWindowChrome (*this);
+            toFront (true);
             content->grabKeyboardFocus();
         }
 
@@ -1392,6 +1559,9 @@ private:
     lynx::theme::LookAndFeel lookAndFeel;
     std::unique_ptr<lynx::AudioEngine> engine;
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<lynx::SplashScreen> splash;
+    lynx::StartupOptions startupOptions;
+    juce::File fileToOpen;
 };
 
 START_JUCE_APPLICATION (LynxApplication)

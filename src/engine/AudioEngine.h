@@ -62,10 +62,15 @@ public:
 
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
+    // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
+    void previewSample (std::shared_ptr<const SampleData> sample);
 
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
     void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
+
+    // All notes off on every channel (double-click on Stop). UI thread.
+    void panic();
 
     // Note recording (MIDI and PC keyboard) into the current pattern while playing. UI thread.
     void setRecording (bool shouldRecord);
@@ -105,7 +110,12 @@ public:
 
     // Channel selected in the Channel Rack (target of the Piano Roll and keyboard). UI thread.
     int getSelectedChannel() const noexcept { return selectedChannel; }
-    void setSelectedChannel (int channel);
+    void setSelectedChannel (int channel); // selects only this channel
+
+    // Multi-selection in the Channel Rack (sorted). The selected channels all receive live MIDI input;
+    // `primary` (one of them) is the Piano Roll / keyboard target above.
+    const std::vector<int>& getSelectedChannels() const noexcept { return selectedChannels; }
+    void setChannelSelection (std::vector<int> channels, int primary);
 
     // Imports a .flp, locating the FL installation to find the samples.
     // Returns false and fills `error` on failure.
@@ -196,6 +206,10 @@ private:
     bool takeHasUndoStep = false;
     double lastPlayingTick = 0.0;
     std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
+    static constexpr int maxLiveChannels = 16;       // other selected channels that also get MIDI input
+    std::array<std::atomic<int>, maxLiveChannels> extraLiveChannels {};
+    std::atomic<int> extraLiveCount { 0 };
+    void publishSelection();
     std::atomic<double> blockTimeMs { 0.0 };         // when positionTicks was last updated
     std::array<std::atomic<float>, scopeSize> scope {}; // ring buffer of the output (written by audio)
     std::atomic<int> scopeWrite { 0 };
@@ -222,6 +236,7 @@ private:
 
     Song song;
     int selectedChannel = 0;
+    std::vector<int> selectedChannels { 0 };
     bool modified = false;
     std::unique_ptr<StreamPrefetcher> prefetcher; // only with an audio device (playing live)
 

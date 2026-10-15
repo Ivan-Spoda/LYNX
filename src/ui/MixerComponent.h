@@ -6,12 +6,13 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
+#include "ui/ValueControl.h"
 
 namespace lynx
 {
 // FL-style mixer: one vertical strip per track (Master first).
-//  - fader: drag vertically; double-click resets to 0 dB
-//  - pan: drag the knob; double-click centers
+//  - fader and pan: the shared control contract (ui/ValueControl.h): drag (Ctrl: fine), wheel,
+//    Alt/middle-click or double-click resets, right-click: type value / reset / automation
 //  - green LED = mute (click), "S" = solo
 //  - clicking a strip selects it; right-click opens the menu (rename, route the selected
 //    channel to this track); "+" at the end adds an insert
@@ -19,6 +20,7 @@ namespace lynx
 //  - send button (arrow) at the bottom: toggles the send from the selected track to this one;
 //    dragging vertically changes the send level
 class MixerStrips final : public juce::Component,
+                          public ui::HintSource,
                           private juce::ChangeListener,
                           private juce::Timer
 {
@@ -31,6 +33,8 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
 
     void updateSize();
     void setVisibleHeight (int height);
@@ -59,6 +63,9 @@ private:
     juce::Rectangle<int> routeArea (int track) const;
     void showMenu (int track);
     void showTrackEq (int track);
+    ui::ValueSpec specFor (Part part, int track) const;
+    void setValue (Part part, int track, double value);
+    double valueOf (Part part, int track) const;
 
     AudioEngine& engine;
     int selected = 0;
@@ -67,6 +74,7 @@ private:
     Part dragPart = Part::none;
     int dragTrack = -1;
     float dragStartValue = 0.0f;
+    ui::ValueDrag drag;
 
     std::vector<float> levels; // displayed level per track*2, with smooth falloff
 
@@ -78,6 +86,7 @@ private:
 //  - slot LED: on/off (bypass); right-click: replace, move, delete
 //  - knob to the right of the slot: dry/wet (drag; double-click resets to 100%)
 class EffectsPanel final : public juce::Component,
+                           public ui::HintSource,
                            private juce::ChangeListener
 {
 public:
@@ -96,9 +105,15 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    ui::ValueSpec specFor (int param, int slot) const; // param = mixParam: the slot's dry/wet
+    double valueOf (int param, int slot) const;
+    void setValue (int param, int slot, double value);
+    int mixKnobAt (juce::Point<int> p) const; // slot whose dry/wet knob is at p, or -1
     juce::Rectangle<int> slotBounds (int slot) const;
     juce::Rectangle<int> mixBounds (int slot) const; // dry/wet knob on the slot's row
     static constexpr int mixParam = -2;
@@ -120,6 +135,7 @@ private:
     int selectedSlot = -1;
     int dragParam = -1;
     float dragStart = 0.0f;
+    ui::ValueDrag drag;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectsPanel)
 };
