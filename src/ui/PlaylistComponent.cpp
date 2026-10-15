@@ -9,6 +9,7 @@
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
+#include "ui/WaveformView.h"
 
 namespace lynx
 {
@@ -94,6 +95,7 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
 
     engine.addChangeListener (this);
     EditorGlobals::get().addChangeListener (this);
+    ui::WaveformCache::getInstance()->addChangeListener (this); // a waveform became ready, or the settings changed
     startTimerHz (30);
 }
 
@@ -195,6 +197,8 @@ PlaylistComponent::~PlaylistComponent()
 {
     EditorGlobals::get().removeChangeListener (this);
     engine.removeChangeListener (this);
+    if (auto* cache = ui::WaveformCache::getInstanceWithoutCreating())
+        cache->removeChangeListener (this);
 }
 
 juce::Colour PlaylistComponent::patternColour (const Song& song, int pattern)
@@ -637,39 +641,6 @@ void PlaylistComponent::paint (juce::Graphics& g)
     g.fillRect (headerWidth - 1, toolbarHeight, 1, getHeight() - toolbarHeight);
 }
 
-const std::vector<float>* PlaylistComponent::waveformFor (const std::string& path)
-{
-    if (auto it = waveforms.find (path); it != waveforms.end())
-        return it->second.empty() ? nullptr : &it->second;
-
-    auto& peaks = waveforms[path]; // empty = could not be read (don't retry)
-
-    if (auto data = engine.getSampleLibrary().load (juce::String::fromUTF8 (path.c_str())))
-    {
-        const auto frames = data->frames();
-        peaks.assign ((frames + waveformBucket - 1) / waveformBucket, 0.0f);
-
-        for (std::size_t i = 0; i < frames; ++i)
-        {
-            auto v = std::abs (data->leftData()[i]);
-            if (data->isStereo())
-                v = std::max (v, std::abs (data->rightData()[i]));
-            auto& peak = peaks[i / waveformBucket];
-            peak = std::max (peak, v);
-        }
-
-        waveformRates[path] = data->sampleRate;
-
-        // normalize by the file's peak: quiet audio is still readable on screen
-        const auto loudest = *std::max_element (peaks.begin(), peaks.end());
-        if (loudest > 0.0f)
-            for (auto& p : peaks)
-                p /= loudest;
-    }
-
-    return peaks.empty() ? nullptr : &peaks;
-}
-
 void PlaylistComponent::paintOverChildren (juce::Graphics& g)
 {
     if (! ripple)
@@ -695,7 +666,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
 
     const auto& channel = song.channels[(std::size_t) c.channel];
     const auto colour = theme::colour::audioClip;
-    paintClipFrame (g, r, colour, juce::String::fromUTF8 (channel.name.c_str()));
+    const auto frameBody = paintClipFrame (g, r, colour, juce::String::fromUTF8 (channel.name.c_str()));
     paintClipOutline (g, r, colour, false, false);
 
     // fades: ramps and handles at the top corners
@@ -716,38 +687,19 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         }
     }
 
-    const auto* peaks = waveformFor (channel.samplePath);
+    // waveform (ui/WaveformView): analysed in the background, drawn at any zoom with its band colours
+    const auto path = juce::String::fromUTF8 (channel.samplePath.c_str());
+    const auto summary = ui::WaveformCache::getInstance()->find (path, [this, path] { return engine.getSampleLibrary().load (path); });
 
-    if (peaks == nullptr)
+    if (summary == nullptr)
         return;
 
-    // waveform: each pixel column shows the peak of the audio segment it covers
-    const auto body = r.withTrimmedTop (14.0f).reduced (1.0f, 1.0f);
-    const auto rate = waveformRates[channel.samplePath];
-    const auto secondsPerTick = 60.0 / (song.bpm * ppq);
-    const auto centreY = body.getCentreY();
-    const auto halfHeight = body.getHeight() / 2.0f;
-    const auto clip = g.getClipBounds().toFloat();
-    g.setColour (colour.brighter (0.2f));
-
-    for (auto x = std::max (body.getX(), clip.getX()); x < std::min (body.getRight(), clip.getRight()); x += 1.0f)
-    {
-        const auto tickInClip = (double) c.offset + (xToTick ((int) x) - (double) c.start);
-        const auto tickNext = tickInClip + 1.0 / pixelsPerTick;
-        auto from = (std::size_t) std::max (0.0, tickInClip * secondsPerTick * rate / waveformBucket);
-        auto to = (std::size_t) std::max (0.0, tickNext * secondsPerTick * rate / waveformBucket);
-
-        if (from >= peaks->size())
-            break;
-
-        to = std::min (std::max (to, from + 1), peaks->size());
-        float peak = 0.0f;
-        for (auto i = from; i < to; ++i)
-            peak = std::max (peak, (*peaks)[i]);
-
-        const auto h = std::min (1.0f, peak) * halfHeight;
-        g.drawVerticalLine ((int) x, centreY - h, centreY + h);
-    }
+    const auto body = frameBody.reduced (1.0f, 1.0f);
+    const auto framesPerTick = 60.0 / (song.bpm * ppq) * summary->sampleRate;
+    // r's left edge is the clip start, i.e. tick `offset` of the audio
+    const auto startFrame = ((double) c.offset + (double) (body.getX() - r.getX()) / pixelsPerTick) * framesPerTick;
+    ui::paintWaveform (g, body, *summary, startFrame, framesPerTick / pixelsPerTick,
+                       ui::currentWaveStyle (colour.brighter (0.35f), ui::normalisingGain (*summary)));
 }
 
 void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
@@ -989,6 +941,16 @@ void PlaylistComponent::setTimeSelectionForSnapshot (int fromBar, int toBar)
 {
     const auto bar = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
     setTimeSelection (fromBar * bar, toBar * bar);
+}
+
+void PlaylistComponent::setViewForSnapshot (double pixelsPerBar, int firstBar, int firstTrack)
+{
+    const auto bar = (double) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+    pixelsPerTick = pixelsPerBar / bar;
+    scrollTicks = firstBar * bar;
+    scrollY = juce::jmax (0, firstTrack) * trackHeight;
+    updateScrollBars();
+    repaint();
 }
 
 ui::Hint PlaylistComponent::hoverForSnapshot()
@@ -2859,8 +2821,14 @@ void PlaylistComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
     repaint();
 }
 
-void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == ui::WaveformCache::getInstanceWithoutCreating())
+    {
+        repaint();
+        return;
+    }
+
     // the clip list changed externally (undo, pattern removal...): the selection no longer applies
     const auto count = engine.getSong().playlist.size();
 

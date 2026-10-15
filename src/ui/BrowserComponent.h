@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
+#include "ui/WaveformView.h"
 
 namespace lynx
 {
@@ -34,6 +35,8 @@ public:
     void step (int delta, bool load);
     void loadSelected();
     juce::File getSelectedFile() const;
+    // the preview strip under the list: the waveform of the audio file being auditioned (empty file: hidden)
+    void showPreview (const juce::File& file);
 
     // Drags from the Browser (tree or search results): is it one, and which file it carries.
     static bool isBrowserDrag (const juce::DragAndDropTarget::SourceDetails& details);
@@ -78,6 +81,7 @@ private:
     juce::WildcardFileFilter filter { "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff;*.mid;*.midi;*.lynx;*.flp;*.fst", "*", "files" };
     juce::DirectoryContentsList list { &filter, thread };
     juce::FileTreeComponent tree { list };
+    ui::WaveformDisplay preview;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrowserComponent)
 };

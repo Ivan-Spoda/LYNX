@@ -142,7 +142,10 @@ public:
     void selectedRowsChanged (int row) override
     {
         if (juce::isPositiveAndBelow (row, files.size()) && isAudio (files[row]))
+        {
             browser.engine.previewFile (files[row]);
+            browser.showPreview (files[row]);
+        }
     }
 
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override
@@ -197,6 +200,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     tree.setColour (juce::TreeView::backgroundColourId, theme::colour::bg2);
     tree.setWantsKeyboardFocus (false);
     addAndMakeVisible (tree);
+    addChildComponent (preview);
+    preview.setTooltip (tr ("The previewed sample: warm colours = bass, cool colours = treble"));
 
     thread.startThread (juce::Thread::Priority::low);
 
@@ -313,8 +318,24 @@ void BrowserComponent::resized()
     area.removeFromTop (4);
     searchBox.setBounds (area.removeFromTop (24));
     area.removeFromTop (4);
+    if (preview.isVisible())
+    {
+        preview.setBounds (area.removeFromBottom (64));
+        area.removeFromBottom (4);
+    }
     tree.setBounds (area);
     results->setBounds (area);
+}
+
+void BrowserComponent::showPreview (const juce::File& file)
+{
+    const auto show = file != juce::File() && isAudio (file);
+    preview.setFile (show ? file.getFullPathName() : juce::String());
+    if (show != preview.isVisible())
+    {
+        preview.setVisible (show);
+        resized();
+    }
 }
 
 void BrowserComponent::paint (juce::Graphics& g)
@@ -327,7 +348,10 @@ void BrowserComponent::selectionChanged()
     const auto file = tree.getSelectedFile();
 
     if (isAudio (file))
+    {
         engine.previewFile (file);
+        showPreview (file);
+    }
 }
 
 void BrowserComponent::fileDoubleClicked (const juce::File& file)
