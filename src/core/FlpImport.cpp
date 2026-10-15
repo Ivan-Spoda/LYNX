@@ -18,6 +18,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/Reeverb2.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -1403,6 +1404,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
                  || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor)
+                 || (plugin == "Fruity Delay 2" && fx.kind != EffectKind::fruityDelay2)
+                 || (plugin == "Fruity Delay 3" && fx.kind != EffectKind::fruityDelay3)
                  || (plugin == "Fruity Stereo Shaper" && fx.kind != EffectKind::stereoShaper)
                  || (plugin == "Fruity Stereo Enhancer" && fx.kind != EffectKind::stereoEnhancer)
                  || (plugin == "Transient Processor" && fx.kind != EffectKind::transientProcessor)
@@ -1779,6 +1782,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && (fx.kind == EffectKind::reeverb2 || fx.kind == EffectKind::reeverb1))
+                {
+                    // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
+                    if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)

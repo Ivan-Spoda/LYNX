@@ -2,11 +2,13 @@
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
+#include "core/Reeverb2.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 
 #include "core/Biquad.h"
@@ -2156,6 +2158,39 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                     { "Oversampling", 0.0f }, { "HQ", 0.0f }, { "Smooth", 0.0f },
                                                                     { "Center", 0.0f }, { "Unipolar", 0.0f } } };
     static const EffectInfo softClipperInfo { "Fruity Soft Clipper", { { "Threshold", 99.0f / 126.0f }, { "Post", 128.0f / 160.0f } } };
+    // FL's controls as (raw − min) / range (core/Reeverb2.h); defaults = FL's
+    static const EffectInfo reeverb2Info = [] {
+        EffectInfo info { "Reeverb 2", { { "Low cut", 0 }, { "High cut", 0 }, { "Predelay", 0 }, { "Room size", 0 }, { "Diffusion", 0 },
+                                         { "Decay", 0 }, { "High damping", 0 }, { "Bass mult.", 0 }, { "Crossover", 0 }, { "Stereo sep.", 0 },
+                                         { "Dry", 0 }, { "Early ref.", 0 }, { "Wet", 0 }, { "Mod speed", 0 }, { "Mod depth", 0 },
+                                         { "Tempo predelay", 0 }, { "Mid/side input", 0 } } };
+        EffectParams p {};
+        reeverb2::toParams (reeverb2::Settings {}, p);
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+            info.params[i].defaultValue = p[i];
+        return info;
+    }();
+    // FL's controls as raw / max (core/Reeverb2.h); defaults = the plugin's own (1250, 10800, 0, 26000, 65536, 20, 4700,
+    // 10800, 65536, 13120)
+    static const EffectInfo reeverb1Info { "Reeverb", { { "Low cut", 1250.0f / 65536 }, { "High cut", 10800.0f / 65536 }, { "Predelay", 0.0f },
+                                                        { "Room size", 26000.0f / 65536 }, { "Diffusion", 1.0f }, { "Color", 0.5f },
+                                                        { "Decay", 4700.0f / 65536 }, { "High damping", 10800.0f / 65536 }, { "Dry", 1.0f },
+                                                        { "Wet", 13120.0f / 65536 } } };
+    // FL's raw controls normalised over their ranges (core/FruityDelay.h); defaults = FL's "Default" presets
+    static const EffectInfo fruityDelay2Info = [] {
+        EffectInfo info { "Fruity Delay 2", {} };
+        for (int i = 0; i < fldelay::delay2Controls; ++i)
+            info.params.push_back ({ fldelay::delay2ParamName (i), (float) (fldelay::delay2Default[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay2Max[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i]) });
+        return info;
+    }();
+    static const EffectInfo fruityDelay3Info = [] {
+        EffectInfo info { "Fruity Delay 3", {} };
+        for (int i = 0; i < fldelay::delay3Controls; ++i)
+            info.params.push_back ({ fldelay::delay3ParamName (i), (float) (fldelay::delay3Default[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay3Max[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i]) });
+        return info;
+    }();
     // FL's controls over their ranges (core/StereoFx.h); defaults = a new FL instance
     static const EffectInfo stereoShaperInfo { "Stereo Shaper", { { "R > L", 0.5f }, { "Left", 0.75f }, { "Right", 0.75f }, { "L > R", 0.5f },
                                                                  { "Delay", 0.5f }, { "Phase", 0.5f }, { "Effects post", 0.0f },
@@ -2266,6 +2301,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityCompressor: return fruityCompressorInfo;
         case EffectKind::fruityWaveShaper: return waveShaperInfo;
         case EffectKind::fruitySoftClipper: return softClipperInfo;
+        case EffectKind::reeverb2: return reeverb2Info;
+        case EffectKind::reeverb1: return reeverb1Info;
+        case EffectKind::fruityDelay2: return fruityDelay2Info;
+        case EffectKind::fruityDelay3: return fruityDelay3Info;
         case EffectKind::stereoShaper: return stereoShaperInfo;
         case EffectKind::stereoEnhancer: return stereoEnhancerInfo;
         case EffectKind::transientProcessor: return transientProcessorInfo;
@@ -2485,6 +2524,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * squeezeMax[(std::size_t) std::clamp (param, 0, 11)]));
             return text;
 
+        case EffectKind::reeverb2: return reeverb2ParamText (param, v);
+        case EffectKind::reeverb1: return reeverb1ParamText (param, v);
+
         case EffectKind::vintagePhaser:
             switch (param)
             {
@@ -2557,6 +2599,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::spreader:
             return stereofx::spreaderParamText (param, v);
+
+        case EffectKind::fruityDelay2:
+            return fldelay::delay2ParamText (param, v);
+
+        case EffectKind::fruityDelay3:
+            return fldelay::delay3ParamText (param, v, bpm);
 
         case EffectKind::plugin:
         case EffectKind::parallel:
@@ -2631,6 +2679,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityCompressor: return fldyn::makeCompressor();
         case EffectKind::fruityWaveShaper: return flshape::makeWaveShaper ({}); // FL's default curve; use makeEffect (slot)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
+        case EffectKind::reeverb2: return makeReeverb2();
+        case EffectKind::reeverb1: return makeReeverb1();
+        case EffectKind::fruityDelay2: return fldelay::makeDelay2();
+        case EffectKind::fruityDelay3: return fldelay::makeDelay3();
         case EffectKind::stereoShaper: return stereofx::makeStereoShaper();
         case EffectKind::stereoEnhancer: return stereofx::makeStereoEnhancer();
         case EffectKind::transientProcessor: return stereofx::makeTransientProcessor();
