@@ -12,6 +12,9 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#ifdef LP_DEBUG
+#include <cstdio>
+#endif
 
 #include "core/Inflate.h"
 #include "core/Instruments.h"
@@ -910,17 +913,17 @@ struct LfoWave
         if (u > p7)
             return 1.0f;
         if (u < p6)
-            v = 1.0f - F ((double) u * (double) s0);
+            v = 1.0f - (float) u * s0;
         else if (u < p5)
             return -1.0f;
         else
-            v = F ((double) (u32) (u - p5) * (double) s1) - 1.0f;
+            v = (float) (u32) (u - p5) * s1 - 1.0f;
         if (! uni)
         {
             const auto r = F (curveK (std::abs ((double) v)));
             return std::signbit (v) ? -r : r;
         }
-        const auto x = F (((double) v + 1.0) * 0.5);
+        const float x = (v + 1.0f) * 0.5f;
         return F (curveK ((double) x) * 2.0 - 1.0);
     }
 };
@@ -997,7 +1000,7 @@ void addGained (const float* src, float* dst, int n, float g, float inc) noexcep
             dst[i] = src[i] + dst[i];
     else
         for (int i = 0; i < 2 * n; ++i)
-            dst[i] = src[i] * g + dst[i];
+            dst[i] = std::fma (src[i], g, dst[i]); // FL's IPP library (AVX2 path): fused multiply-add
 }
 
 // the plugin's block ramp of a control: start = previous target, per-sample increment limited to maxStep
@@ -1171,7 +1174,65 @@ void biquadDesign (Stage& s, int code, double A, double alpha, double sn, double
     }
 }
 
-float powf32 (float x, float e) noexcept { return (float) std::pow ((double) x, (double) e); }
+// the plugin runtime's math (Delphi): powers through exp(y·ln x) unless y is an integer, sinh and tanh from exp
+double intPower (double x, long long n) noexcept
+{
+    double r = 1.0, b = x;
+    auto k = n < 0 ? -n : n;
+    while (k > 0)
+    {
+        if (k & 1)
+            r = r * b;
+        b = b * b;
+        k >>= 1;
+    }
+    return n < 0 ? 1.0 / r : r;
+}
+double powD (double x, double y) noexcept
+{
+    if (y == 0.0)
+        return 1.0;
+    if (x == 0.0 && y > 0.0)
+        return 0.0;
+    if (std::trunc (y) == y && std::abs (y) <= 2147483647.0)
+        return intPower (x, (long long) y);
+    return std::exp (y * std::log (x));
+}
+float powf32 (float x, float y) noexcept
+{
+    if (y == 0.0f)
+        return 1.0f;
+    if (x == 0.0f && y > 0.0f)
+        return 0.0f;
+    if (std::trunc (y) == y)
+        return (float) intPower ((double) x, (long long) rnd ((double) y));
+    return (float) std::exp ((double) y * std::log ((double) x));
+}
+double sinhD (double x) noexcept
+{
+    if (std::abs (x) <= 1e-12)
+        return 0.0;
+    return (std::exp (x) - std::exp (-x)) / 2.0;
+}
+double tanhD (double x) noexcept
+{
+    const bool neg = x < 0.0;
+    const double a = neg ? -x : x;
+    double r = 1.0;
+    if (a <= 23.0)
+    {
+        if (a < 1.81458605194507e-05)
+            r = a - a * a * a * 0.3333333333333333;
+        else if (0.34657359027997264 <= a)
+            r = 1.0 - 2.0 / (std::exp (a * 2.0) + 1.0);
+        else
+        {
+            const double e = std::expm1 (a * 2.0);
+            r = e / (e + 2.0);
+        }
+    }
+    return neg ? -r : r;
+}
 
 // ---------------------------------------------------------------------------------------- articulator runtime
 struct ArtRt
@@ -1469,6 +1530,32 @@ struct Engine::Impl
         }
     }
 
+    void lfoSetup (int ui, int ai)
+    {
+        auto& ar = u[(std::size_t) ui].art[(std::size_t) ai];
+        const auto& sa = s.u[(std::size_t) ui].art[(std::size_t) ai];
+        ar.wave.build (sa.lfoKnobs[1], sa.lfoKnobs[2], sa.lfoKnobs[3], (sa.lfo.flags & 4) != 0);
+        timeScales();
+    }
+
+    // a new pattern number: every articulator switches to that envelope, repositioned (envelopes only)
+    void selectPattern()
+    {
+        for (int i = 0; i < 8; ++i)
+            for (int a = 0; a < 8; ++a)
+            {
+                auto& ar = u[(std::size_t) i].art[(std::size_t) a];
+                ar.env.build (s.u[(std::size_t) i].art[(std::size_t) a].pat[(std::size_t) (s.g[5] - 1)], ar.mode * 0.5, false);
+                ar.envOn = ar.env.on != 0;
+            }
+        timeScales();
+        const bool keep = playing;
+        if (! s.syncPatterns)
+            playing = false;
+        resync (false);
+        playing = keep;
+    }
+
     void follSetup()
     {
         follMode = 0;
@@ -1569,8 +1656,8 @@ struct Engine::Impl
         if (full)
             counter = 0;
         double pos = 0.0;
-        if (playing)
-            pos = songBeats * 60.0 / (double) bpm * (double) fsInt;
+        if (playing) // FL's host time in ticks (PPQ 96) → samples: t·fs·240 / (BPM·PPQ·4), the divisor in floats
+            pos = (songBeats * 96.0 * (double) fsInt * 240.0) / (double) (bpm * 96.0f * 4.0f);
         pos = ((pos - (double) tickN) + (double) counter) / (double) tickN;
         activeArts.clear();
         for (auto& un : u)
@@ -1609,6 +1696,9 @@ struct Engine::Impl
         if (follMode > 0)
         {
             mapIdx[2] = (int) std::clamp<long long> (rnd ((double) (follPeak * 1024.0f)), 0, 1024);
+#ifdef LP_DEBUG
+            std::fprintf (stderr, "tick ief %d %.9g\n", mapIdx[2], (double) follPeak);
+#endif
             follPeak = 0.0f;
         }
         for (auto* a : activeArts)
@@ -1631,18 +1721,27 @@ struct Engine::Impl
         }
     }
 
+    // x87: the follower stays in extended precision within the block (its float copy is what is stored)
     void follower (const float* x, int n)
     {
+        const X87Mode mode (false);
+        ld env = follEnv;
+        const ld lvl = follLevel, att = follCoef[0], rel = follCoef[1];
         for (int i = 0; i < n; ++i)
         {
             const float m = std::max (std::abs (x[2 * i]), std::abs (x[2 * i + 1]));
-            const float v = m * follLevel;
-            const float c = v <= follEnv ? follCoef[1] : follCoef[0];
-            follEnv = (follEnv - v) * c + v;
-            if ((u32) bitsOf (follEnv) < (u32) bitsOf (kTiny))
-                follEnv = 0.0f;
-            follPeak = std::max (follPeak, follEnv);
+            const ld v = (ld) m * lvl;
+            const ld c = v > env ? att : rel;
+            env = v + (env - v) * c;
+            float st = (float) env;
+            if ((u32) bitsOf (st) < (u32) bitsOf (kTiny))
+            {
+                st = 0.0f;
+                env = 0.0L;
+            }
+            follPeak = std::max (follPeak, st);
         }
+        follEnv = (float) env;
     }
 
     // ---------------------------------------------------------------------------------------- coefficients
@@ -1771,7 +1870,7 @@ struct Engine::Impl
                 }
                 A = (double) un.gain[0];
                 if (un.n > 0)
-                    A = std::pow (A, (double) un.qExp);
+                    A = powD (A, (double) un.qExp);
                 gA = std::sqrt (A);
                 par = std::sqrt ((A + 1.0 / A) * (1.0 / Sl - 1.0) + 2.0);
             }
@@ -1787,7 +1886,7 @@ struct Engine::Impl
                 }
                 A = (double) un.gain[0];
                 if (un.n > 0)
-                    A = std::pow (A, (double) un.qExp);
+                    A = powD (A, (double) un.qExp);
                 par = bw;
             }
             for (int i = un.n; i >= 0; --i)
@@ -1800,7 +1899,7 @@ struct Engine::Impl
                     biquadDesign (stg, stg.code, 0.0, sn * par, sn, cs);
                 else if (t == 4 || t == 5)
                 {
-                    const double a = std::sinh ((par * (double) un.bwMode * w) / sn);
+                    const double a = sinhD ((par * (double) un.bwMode * w) / sn);
                     biquadDesign (stg, stg.code, 0.0, sn * a, sn, cs);
                 }
                 else if (t == 8 || t == 10)
@@ -1831,7 +1930,7 @@ struct Engine::Impl
                     R = r * R;
             }
             if (un.n > 0)
-                R = std::pow (R + 1.0, (double) un.qExp) - 1.0;
+                R = powD (R + 1.0, (double) un.qExp) - 1.0;
             const double kk = kd * 0.5;
             for (int i = un.n; i >= 0; --i)
             {
@@ -1847,7 +1946,7 @@ struct Engine::Impl
                 {
                     stg.drive = g7 * 2.0;
                     stg.coef = stg.coef * inv;
-                    stg.gain = F (std::tanh (inv * 4.0));
+                    stg.gain = F (tanhD (inv * 4.0));
                     if (un.flat)
                         stg.q = stg.q * stg.gain;
                     stg.gain = F ((double) (1.0f / stg.gain) * 0.5 * (double) (1.0f - stg.q));
@@ -1987,14 +2086,21 @@ struct Engine::Impl
     void shaper (const UnitRt& un, const float* x, float* y, int m) const noexcept
     {
         const bool interp = render || s.wsInterp;
-        const X87Mode mode (interp);
         const auto* T = un.wsTab.data() + 1;
         const int N = un.wsN;
-        volatile float vwet = 1.0f, vpre = un.wsPre;
-        const ld bK = (ld) vwet * 3.0517578125e-05L;
+        // the scale factors are formed before the kernel switches the x87 rounding (nearest)
+        ld preN, bK, hN, pHN;
+        {
+            const X87Mode nearest (false);
+            volatile float vpre = un.wsPre;
+            preN = (ld) vpre * (ld) N;
+            bK = (ld) 1.0f * (ld) 3.0517578125e-05f;
+            hN = (ld) N * (ld) 0.5f;
+            pHN = (ld) vpre * (ld) N * (ld) 0.5f;
+        }
+        const X87Mode mode (interp);
         if (! un.wsUni)
         {
-            const ld preN = (ld) vpre * (ld) N;
             for (int k = 0; k < m; ++k)
             {
                 const ld X = x[k];
@@ -2029,7 +2135,6 @@ struct Engine::Impl
             }
             return;
         }
-        const ld hN = (ld) (float) ((float) N * 0.5f), pHN = (ld) vpre * (ld) N * 0.5L;
         for (int k = 0; k < m; ++k)
         {
             const ld X = x[k];
@@ -2284,6 +2389,9 @@ struct Engine::Impl
             follower (b, n);
 
         panLaw (un.pan + un.art[0].out * 2.0f, un.vol * un.art[1].out, un.pm);
+#ifdef LP_DEBUG
+        std::fprintf (stderr, "pan %d %.9g %.9g %.9g %.9g\n", un.index, (double) un.pm[0], (double) un.pm[1], (double) un.pm[2], (double) un.pm[3]);
+#endif
         if (firstTick)
             for (int k = 0; k < 4; ++k)
                 un.pr[(std::size_t) k].prev = un.pm[(std::size_t) k];
@@ -2428,7 +2536,49 @@ void Engine::jump (double songBeats) noexcept
     d->songBeats = songBeats;
     d->resync (true);
 }
-void Engine::setParam (int, int) noexcept {}
+void Engine::setParam (int k, int raw) noexcept
+{
+    auto& s = d->s;
+    if (k < 0 || k >= 0x167)
+        return;
+    if (k < 8)
+    {
+        if (k < 3)
+        {
+            s.g[(std::size_t) k] = raw;
+            d->globals();
+        }
+        else if (k < 5)
+        {
+            s.g[(std::size_t) k] = raw;
+            d->follCoefs();
+        }
+        else if (k == 5)
+        {
+            if (s.g[5] == raw)
+                return;
+            s.g[5] = std::clamp (raw, 1, 10);
+            d->selectPattern();
+        }
+        else if (k == 6)
+            s.modX = raw;
+        else
+            s.modY = raw;
+        return;
+    }
+    const int u = (k - 8) / 44, i = (k - 8) % 44;
+    const int own = u == 7 ? 11 : 12;
+    if (i < own)
+    {
+        s.u[(std::size_t) u].p[(std::size_t) i] = raw;
+        d->unitParams (u);
+        return;
+    }
+    const int a = (i - own) / 4, f = (i - own) % 4; // articulator LFO knob: speed, tension, skew, pulse width
+    auto& knobs = s.u[(std::size_t) u].art[(std::size_t) a].lfoKnobs;
+    knobs[(std::size_t) f] = raw;
+    d->lfoSetup (u, a);
+}
 void Engine::render (const float* in, float* out, int n) noexcept
 {
     if (n > 0)
@@ -2486,6 +2636,197 @@ int rawParam (const State& s, int k) noexcept
     return 0;
 }
 
-std::string paramText (int, float) { return {}; }
-std::optional<EffectSlot> slotFromFl (const std::vector<std::uint8_t>&) { return std::nullopt; }
+namespace
+{
+int rawFromValue (int k, float v) noexcept
+{
+    int lo, hi;
+    rawRange (k, lo, hi);
+    return lo + (int) std::lround (std::clamp ((double) v, 0.0, 1.0) * (hi - lo));
+}
+float valueFromRaw (int k, int raw) noexcept
+{
+    int lo, hi;
+    rawRange (k, lo, hi);
+    return (float) std::clamp ((double) (raw - lo) / (double) (hi - lo), 0.0, 1.0);
+}
+
+class PhilterEffect final : public Effect
+{
+public:
+    explicit PhilterEffect (const std::vector<std::uint8_t>& flState) : state (parse (flState))
+    {
+        if (state)
+        {
+            engine = std::make_unique<Engine> (state);
+            for (int i = 0; i < paramCount; ++i)
+                raw[(std::size_t) i] = rawParam (*state, flIndexOf (i));
+        }
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        sampleRate = (int) std::lround (sr);
+        if (! engine)
+            return;
+        render = offlineRendering();
+        engine->setRenderMode (render);
+        engine->setRate (sampleRate);
+        lastTicks = -1.0;
+        playing = false;
+    }
+
+    void reset() noexcept override
+    {
+        if (engine && playing)
+            engine->setPlaying (false, 0.0);
+        playing = false;
+        lastTicks = -1.0;
+    }
+
+    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
+
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        if (! engine || n <= 0)
+            return;
+        if (offlineRendering() != render)
+        {
+            render = ! render;
+            engine->setRenderMode (render);
+        }
+        for (int i = 0; i < paramCount; ++i)
+        {
+            const int k = flIndexOf (i);
+            const auto v = rawFromValue (k, p[(std::size_t) i]);
+            if (v != raw[(std::size_t) i])
+            {
+                raw[(std::size_t) i] = v;
+                engine->setParam (k, v);
+            }
+        }
+        if (bpm > 0.0 && bpm != lastBpm)
+        {
+            lastBpm = bpm;
+            engine->setTempo (bpm);
+        }
+        // LYNX's transport: a moving song position is FL's "playing"; a position that does not follow the previous
+        // block is a jump (FL re-syncs the envelopes and LFOs to the song position)
+        const double beats = songTicks / 960.0;
+        const bool moving = lastTicks >= 0.0 && songTicks != lastTicks;
+        if (lastTicks < 0.0 || moving)
+        {
+            if (! playing)
+            {
+                playing = true;
+                engine->setPlaying (true, beats);
+            }
+            else if (std::fabs (songTicks - expected) > 1.0)
+                engine->jump (beats);
+        }
+        else if (playing)
+        {
+            playing = false;
+            engine->setPlaying (false, beats);
+        }
+        lastTicks = songTicks;
+        expected = songTicks + (double) n * bpm / 60.0 * 960.0 / (double) sampleRate;
+        if ((int) io.size() < 2 * n)
+            io.resize ((std::size_t) (2 * n));
+        for (int i = 0; i < n; ++i)
+        {
+            io[(std::size_t) (2 * i)] = l[i];
+            io[(std::size_t) (2 * i + 1)] = r[i];
+        }
+        engine->render (io.data(), io.data(), n);
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] = io[(std::size_t) (2 * i)];
+            r[i] = io[(std::size_t) (2 * i + 1)];
+        }
+    }
+
+private:
+    std::shared_ptr<const State> state;
+    std::unique_ptr<Engine> engine;
+    std::array<int, paramCount> raw {};
+    std::vector<float> io;
+    int sampleRate = 44100;
+    bool render = false, playing = false;
+    double songTicks = 0.0, lastTicks = -1.0, expected = 0.0, lastBpm = -1.0;
+};
+
+const char* const kUnitFields[5] = { "cutoff", "resonance", "envelope amount", "pan", "volume" };
+} // namespace
+
+const EffectInfo& info()
+{
+    static const EffectInfo inf = [] {
+        static std::vector<std::string> names;
+        static const char* const globals[8] = { "Master level", "Master LFO", "Follower level", "Follower attack",
+                                                "Follower release", "Pattern", "Mod X", "Mod Y" };
+        for (int i = 0; i < paramCount; ++i)
+            names.push_back (i < 8 ? std::string (globals[i])
+                                   : "Unit " + std::to_string ((i - 8) / 5 + 1) + " " + kUnitFields[(i - 8) % 5]);
+        EffectInfo e { "Fruity Love Philter", {} };
+        static const int defaults[8] = { 128, 128, 128, 4096, 8192, 1, 512, 512 };
+        static const int unitDefaults[5] = { 128, 128, 128, 0, 128 };
+        for (int i = 0; i < paramCount; ++i)
+        {
+            const int k = flIndexOf (i);
+            const int def = i < 8 ? defaults[i] : unitDefaults[(i - 8) % 5];
+            e.params.push_back ({ names[(std::size_t) i].c_str(), valueFromRaw (k, def) });
+        }
+        return e;
+    }();
+    return inf;
+}
+
+std::string paramText (int param, float value01)
+{
+    const int k = flIndexOf (param);
+    const int v = rawFromValue (k, value01);
+    char t[64];
+    if (param < 8)
+    {
+        if (param == 0 || param == 2)
+            std::snprintf (t, sizeof t, "%.1f dB", 20.0 * std::log10 (std::max (1e-6, (double) curve11 (v))));
+        else if (param == 1)
+            std::snprintf (t, sizeof t, "%.0f%%", 100.0 * scurve11 (v));
+        else if (param == 3 || param == 4)
+            std::snprintf (t, sizeof t, "%.1f ms", 12.5 * (std::pow (81.0, v / 16384.0) - 1.0));
+        else if (param == 5)
+            std::snprintf (t, sizeof t, "pattern %d", v);
+        else
+            std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v / 1024.0);
+        return t;
+    }
+    switch ((param - 8) % 5)
+    {
+        case 3:
+            if (v == 0)
+                return "centred";
+            std::snprintf (t, sizeof t, "%.0f%% %s", std::abs (v) / 1.28, v < 0 ? "left" : "right");
+            return t;
+        case 4: std::snprintf (t, sizeof t, "%.1f dB", 20.0 * std::log10 (std::max (1e-6, (double) curve11 (v)))); return t;
+        default: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v / 256.0); return t;
+    }
+}
+
+std::optional<EffectSlot> slotFromFl (const std::vector<std::uint8_t>& flState)
+{
+    const auto s = parse (flState);
+    if (! s)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::lovePhilter);
+    slot.state = flState;
+    for (int i = 0; i < paramCount; ++i)
+    {
+        const int k = flIndexOf (i);
+        slot.params[(std::size_t) i] = valueFromRaw (k, rawParam (*s, k));
+    }
+    return slot;
+}
+
+std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<PhilterEffect> (slot.state); }
 } // namespace lynx::philter

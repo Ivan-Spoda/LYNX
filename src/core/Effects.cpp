@@ -14,6 +14,8 @@
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
+#include "core/FruityVocoderFx.h"
 
 #include "core/Biquad.h"
 
@@ -2390,6 +2392,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::lovePhilter: return philter::info();
+        case EffectKind::fruityVocoder: return flvocoder::info();
     }
     return eq;
 }
@@ -2713,6 +2717,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::fruityDelay3:
             return fldelay::delay3ParamText (param, v, bpm);
 
+        case EffectKind::lovePhilter:
+            return philter::paramText (param, v);
+
+        case EffectKind::fruityVocoder:
+            return flvocoder::paramText (param, v);
+
         case EffectKind::grossBeat:
         {
             const auto raw = grossbeat::rawFromParam (param, v);
@@ -2774,6 +2784,10 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::grossBeat)
         return grossbeat::make (slot.state);
+    if (slot.kind == EffectKind::lovePhilter)
+        return philter::make (slot);
+    if (slot.kind == EffectKind::fruityVocoder)
+        return flvocoder::make (slot);
     return makeEffect (slot.kind);
 }
 
@@ -2825,6 +2839,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::lovePhilter: return philter::make (EffectSlot {}); // without a state: passes the signal
+        case EffectKind::fruityVocoder: return flvocoder::make (EffectSlot {}); // without a state: passes the signal
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

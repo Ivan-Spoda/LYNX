@@ -11,6 +11,8 @@
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
+#include "core/FruityVocoderFx.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1091,10 +1093,17 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
             return exact;
+    if (pluginName == "Fruity Love Philter") // FL's own engine (REA_rodada66); lovePhilterEffects' conversion otherwise
+        if (auto exact = philter::slotFromFl (state))
+            return exact;
     if (pluginName == "Effector")
         return effector (state, bpm);
-    if (pluginName == "Fruity Vocoder")
+    if (pluginName == "Fruity Vocoder") // FL's own engine (REA_rodada66 §6); the generic vocoder otherwise
+    {
+        if (auto exact = flvocoder::slotFromFl (state))
+            return exact;
         return fruityVocoder (state, nullptr);
+    }
     if (pluginName == "Vocodex")
         if (auto v = vocodexEffect (state))
             return v->slot;

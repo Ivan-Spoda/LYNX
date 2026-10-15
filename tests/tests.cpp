@@ -54,6 +54,8 @@
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
+#include "core/FruityVocoderFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -8375,6 +8377,179 @@ TEST (reeverb2_engine)
     CHECK (lynx::reeverb1FromFl (std::vector<std::uint8_t> (44, 0)).has_value());
     CHECK (! lynx::reeverb1FromFl (std::vector<std::uint8_t> (40, 0)).has_value());
     CHECK (lynx::reeverb1ParamText (5, 0.0f) == "Brighter" && lynx::reeverb1ParamText (0, 0.0f) == "off");
+}
+
+// ---- Fruity Love Philter (REA_rodada66) ---------------------------------------------------------------------------------
+
+TEST (love_philter_engine)
+{
+    // goldens: Fruity Love Philter_x64.dll on our own synthetic states (44.1 kHz, blocks of 512, 120 BPM, live mode),
+    // bit-identical on the test machine (denormals flushed, as the plugin runs and as LYNX renders)
+    lynx::ScopedFlushDenormals ftz;
+    auto hex = [] (const char* h) {
+        std::vector<std::uint8_t> v;
+        for (std::size_t i = 0; h[i] != 0 && h[i + 1] != 0; i += 2)
+            v.push_back ((std::uint8_t) std::stoi (std::string (h + i, 2), nullptr, 16));
+        return v;
+    };
+    constexpr int N = 8192;
+    std::vector<float> inL (N), inR (N);
+    std::uint32_t seed = 12345;
+    for (int i = 0; i < N; ++i)
+    {
+        seed = (seed * 1103515245u + 12345u) & 0x7fffffffu;
+        const auto nz = (float) ((double) seed / 2147483648.0 - 0.5);
+        const auto tri = (float) ((i % 200) - 100) / 100.0f;
+        const float g = i < 4000 ? 1.0f : 0.0f;
+        inL[(std::size_t) i] = 0.5f * tri * g + (i >= 100 && i < 300 ? nz * 0.6f : 0.0f);
+        inR[(std::size_t) i] = 0.25f * tri * g;
+    }
+    struct Golden
+    {
+        int i;
+        float l, r;
+    };
+    auto run = [&] (const std::vector<std::uint8_t>& state, const std::vector<Golden>& gold) {
+        const auto slot = lynx::effectFromFl ("Fruity Love Philter", state, 120.0);
+        CHECK (slot.has_value() && slot->kind == lynx::EffectKind::lovePhilter);
+        if (! slot || slot->kind != lynx::EffectKind::lovePhilter)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < N; s += 512)
+        {
+            fx->setSongPosition (s * 2.0 * 960.0 / 44100.0);
+            fx->process (l.data() + s, r.data() + s, 512, slot->params, 120.0);
+        }
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    // SVF triple with Low/Band/High, a song-locked volume pattern with tension, a cutoff LFO; Lime HP fed by NEXT, panned
+    run (hex (
+             "03000c00789cedda316ed44018c5f1cfd90b5050234a0e81702a1a6e4045c11d68e7005c00c40928e96810254590380225e552538471ec"
+             "d97c314c841e0259cfff91463bf66e7e3b9ac42fdf582e1151961e776abf1f314ce3b3a5d7f6e4fb8bf1b2b6693c5cf56118e6b79ed5fe"
+             "b2f6b7b53fadfd41ed8f1379378d9fd77e88a50d57c3c3f597dcd28ee3fcfaadbe9e8fcb24e272d56238fd4019a73e2c5f3074c1ebf732"
+             "745a8ee51507670bce99e89cbff9e5076eb9f8be8e378f9b7df3fcfae2dbba37afcb9c0b391b0eb16ec795ff657cfd6a6aefc7cf17178f"
+             "f2f9f6f9fafe8769342c7dfabe58e65e62db7f5338fb74fe4f96acafa5e3f8bbf3eb6b75eb1e75068eb3d3b241b95ef2ffc0d67ebc8bb8"
+             "b792b65e2ffc9bfa636a64068e9fc3de44f77a7b93adfc6e7170fec661afa17b64038eb34336e81ed980e3ec900dba4736e0383b6483ee"
+             "957aee61ed9fe27a4d63194ffd63fdccf44cc7f972fef42408cf6ce0e06c30a7b6711f93fba238387fee50c3e81e75038eb343dda07b64"
+             "038eb34336e81e7b0a1c67873d85ee910d38ce0ed9a07b64038eb34336e81ed980e3ec900dba57625ec3d65bcbc7799cd6b83f95ded478"
+             "d60267c70ef745758f1a06c7d9a186d13dea061c6787ba41f7c8061c67876cd03df61438ce0e7b0add231b709c1db241f7c8061c67876c"
+             "d03db201c7d9211b74afc4bc86adb7968ff338ad717f2abda9f1ac05ce8e1dee8bea1e350c8eb3430da37bd40d38ce0e7583ee910d38ce"
+             "0ed9a07bec29709c1df614ba4736e0383b6483ee910d38ce0ed9a07b64038eb34336e85e89790d5b6f2d1fe7715ae3fe547a53e3590b9c"
+             "1d3bdc17d53d6a181c67871a46f7a81b709c1dea06dd231b709c1db241f7d853e0383bec29748f6cc07176c806dd231b709c1db241f7c8"
+             "061c67876cd0bd12f31ab6de5a3ecee3b4c6fda9f4a6c6b316383b76b82faa7bd43038ce0e358cee5137e0383bd40dba4736e0383b6483"
+             "eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07b25e6356cbdb57c9cc7698dfb53e94d8d672d7076ec70"
+             "5f54f7a861709c1d6a18dda36ec07176a81b748f6cc07176c806dd634f81e3ecb0a7d03db201c7d9211b748f6cc07176c806dd231b709c"
+             "1db241f74acc6bd87a6bf9388fd31af7a7d29b1acf5ae0ecd8e1bea8ee51c3e0383bd430ba47dd80e3ec5037e81ed980e3ec900dbac79e"
+             "02c7d9614fa17b64038eb34336e81ed980e3ec900dba4736e0383b6483eec54ff7970e90"),
+         { { 777, 0.710252046585083f, 0.19971221685409546f }, { 1555, 0.2758101224899292f, 0.07770585268735886f }, { 2222, -0.5605983734130859f, -0.14688193798065186f }, { 3333, -0.33108609914779663f, -0.07413796335458755f }, { 3999, 0.3015991151332855f, 0.07990600168704987f }, { 4100, 0.09223534911870956f, 0.021577393636107445f } });
+    // Mango alternate triple with drive, waveshaper, Mod X/Y maps (smoothed), follower map on the volume; ×4 oversampling
+    run (hex (
+             "03000c00789cedda4d8ed33018c671a788151b8ec0013803993dd7e00e6c7d0a24100bae81c40590e00e5d82c46238c1e0c879db7752b9"
+             "8b470c1f4ffe963c759af6371e4b79e675945a4aa96b2f4f5b7f56cad45e3e1d4a79be0c5a7bf9f3f57cd7da326e6fb7f3d3b49e5abef6"
+             "a1f537adbf2ae7968f4f7c6b8f5b7fb20ca6e951fb19fd7a3bceefde2eedfbf2fa22bfdf5f6fe7fce9bb4d2bd3e9549d973eadbf742adb"
+             "7686e25c86f2df51d7cfe0e0fc6de7203a37ef2fbe70ba200f17678ef3fde3b08f572fbe7fddebebd273816cc07173fe4c36dc0eaebdeb"
+             "ff981fcabb2c28cedfeb85c4c70befeb97a5fd580b8dcfcbfba773dbdf433d81e3ec3c7466a46bec9e1d457e7e777bedfd1ff5c4d2c806"
+             "1c3f87bd86eeb1d7c07176f6b8d7f85d1ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07bb5f4358c1e2d1fe7715ae3f1544653"
+             "fbd65e6fe650b65349363985e3e7705f54f7a861709c1d6a18dda36ec07176a81b748f6cc07176c806dd634f81e3ecb0a7d03db201c7d9"
+             "211b748f6cc07176c806dd231b709c1db241f76ae96b183d5a3ecee3b4c6e3a98ca6c6b316383b76b82faa7bd43038ce0e358cee5137e0"
+             "383bd40dba4736e0383b6483eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07bb5f4358c1e2d1fe7715a"
+             "e3f1544653e3590b9c1d3bdc17d53d6a181c67871a46f7a81b709c1dea06dd231b709c1db241f7d853e0383bec29748f6cc07176c806dd"
+             "231b709c1db241f7c8061c67876cd0bd5afa1a468f968ff338adf1782aa3a9f1ac05ce8e1dee8bea1e350c8eb3430da37bd40d38ce0e75"
+             "83ee910d38ce0ed9a07bec29709c1df614ba4736e0383b6483ee910d38ce0ed9a07b64038eb34336e85e2d7d0da347cbc7799cd6783c95"
+             "d1d478d60267c70ef745758f1a06c7d9a186d13dea061c6787ba41f7c8061c67876cd03df61438ce0e7b0add231b709c1db241f7c8061c"
+             "67876cd03db201c7d9211b74af96be86d1a3e5e33c4e6b3c9eca686a3c6b81b36387fba2ba470d83e3ec50c3e81e75038eb343dda07b64"
+             "038eb34336e81e7b0a1c67873d85ee910d38ce0ed9a07b64038eb34336e81ed980e3ec900dba574b5fc3e8d1f2711ea7351e4f6534359e"
+             "b5c0d9b1c37d51dda386c17176a861748fba01c7d9a16ed03db201c7d9211b748f3d058eb3c39e42f7c8061c67876cd03db201c7d9211b"
+             "748f6cc07176c806dd2bbf0040771f82"),
+         { { 777, 0.30564039945602417f, 0.28222185373306274f }, { 1555, 0.262472540140152f, 0.23502512276172638f }, { 2222, 0.3336450159549713f, -0.030735457316040993f }, { 3333, 0.23046477138996124f, 0.20232810080051422f }, { 3999, 0.3282865881919861f, 0.300540566444397f }, { 4100, -1.5846843837152846e-07f, 2.583440448233887e-07f } });
+    // band-pass alternate dual with FLAT, low shelf, all-pass with a pan LFO and inverted input, CENTER, no oversampling
+    run (hex (
+             "03000c00789ceddd418ad44018c5f12f3303baf404e2d243083d7b6fe0dab55b5dd64106bc8427f024aea497ed09da8a95225ff75883bc"
+             "01092fff82a22b19fb97a2248faf62184b4494a5c7abdadf444cf3f866e9b5bdfff5f970ae2d9636cdad0de7af7da9fd6327623d5ffe32"
+             "be5b7afdfe6dfdb85d2ff2443b1ddae7b17edecfe33f173f5fb598d6ab1fe63e2d179886e0fab30c5dcf1d07670bce8de8dc3f3cfac213"
+             "37df8fc3e571b72fcf5fdf7c5bf7dabab45c201b70dc9cff930da7c1bd7712efe56d78d40d38ce0e7583ee910d38ce0ed9a07bec29709c"
+             "1df614ba4736e0383b6483ee910d38ce0ed9a07b64038eb34336e85e89b686bdf7968ff338adf1782aa3a9f1ae05ce8e1d9e8bea1e350c"
+             "8eb3430da37bd40d38ce0e7583ee910d38ce0ed9a07bec29709c1df614ba4736e0383b6483ee910d38ce0ed9a07b64038eb34336e85ea9"
+             "e73ed4feaef64fe9cf95a5bf8ef67b2fca727ebeeecb79c0efb5c0c1d9604e6de33926cf457170fedda186d13dea061c6787ba41f7c806"
+             "1c67876cd03df61438ce0e7b0add231b709c1db241f7c8061c67876cd03db201c7d9211b74afd473df6aff19eb9ac6322e69fc706eff05"
+             "c9bc8e2fda603c95d1d478d70267c74ecfa9c737cc7170ef1e2ffce9cafffeb5fdec6db477a222785ebab5bf731c9ce738d436ba473d81"
+             "e3ecf0efacba4736e0383b6483eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07b25da1af6de5b3ecee3"
+             "b4c6e3a98ca6c63b18383b76782eaa7bd43038ce0e358cee5137e0383bd40dba4736e0383b6483eeb1a7c07176d853e81ed980e3ec900d"
+             "ba4736e0383b6483ee910d38ce0ed9a07b25da1af6de5b3ecee3b4c6e3a98ca6c6bb16383b76782eaa7bd43038ce0e358cee5137e0383b"
+             "d40dba4736e0383b6483eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07b25da1af6de5b3ecee3b4c6e3"
+             "a98ca6c6bb16383b76782eaa7bd43038ce0e358cee5137e0383bd40dba4736e0383b6483eeb1a7c07176d853e81ed980e3ec900dba4736"
+             "e0383b6483ee910d38ce0ed9a07b25da1af6de5b3ecee3b4c6e3a98ca6c6bb16383b76782eaa7bd43038ce0e358cee5137e0383bd40dba"
+             "4736e0383b6483eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07bf11b286e0820"),
+         { { 777, 0.5369307994842529f, 0.483487993478775f }, { 1555, -0.17133042216300964f, -0.10717462003231049f }, { 2222, 0.8671267032623291f, 0.6469616889953613f }, { 3333, -0.6548674702644348f, -0.5142713189125061f }, { 3999, 1.4368892908096313f, 1.1726332902908325f }, { 4100, 1.1042776107788086f, 0.8842349648475647f } });
+
+    // the slot exposes FL's controls; FL indices map both ways; unreadable states keep the old conversion
+    CHECK (lynx::philter::flIndexOf (6) == 6 && lynx::philter::flIndexOf (8) == 9 && lynx::philter::flIndexOf (8 + 5 * 7 + 4) == 8 + 44 * 7 + 9);
+    for (int i = 0; i < lynx::philter::paramCount; ++i)
+        CHECK (lynx::philter::paramOfFlIndex (lynx::philter::flIndexOf (i)) == i);
+    CHECK (lynx::philter::paramOfFlIndex (8 + 3) == -1 && lynx::philter::paramOfFlIndex (8 + 12) == -1);
+    CHECK (lynx::philter::parse ({ 3, 0, 12, 0, 1, 2, 3, 4 }) == nullptr);
+    CHECK (lynx::effectInfo (lynx::EffectKind::lovePhilter).params.size() == (std::size_t) lynx::philter::paramCount);
+    CHECK (lynx::philter::paramText (5, 0.0f) == "pattern 1" && lynx::philter::paramText (8 + 3, 0.5f) == "centred");
+}
+
+TEST (fruity_vocoder_engine)
+{
+    // goldens: Fruity Vocoder_x64.dll on our own states (44.1 kHz, blocks of 512): left = modulator, right = carrier
+    lynx::ScopedFlushDenormals ftz;
+    auto hex = [] (const char* h) {
+        std::vector<std::uint8_t> v;
+        for (std::size_t i = 0; h[i] != 0 && h[i + 1] != 0; i += 2)
+            v.push_back ((std::uint8_t) std::stoi (std::string (h + i, 2), nullptr, 16));
+        return v;
+    };
+    constexpr int N = 8192;
+    std::vector<float> inL (N), inR (N);
+    std::uint32_t seed = 12345;
+    for (int i = 0; i < N; ++i)
+    {
+        seed = (seed * 1103515245u + 12345u) & 0x7fffffffu;
+        const auto nz = (float) ((double) seed / 2147483648.0 - 0.5);
+        const auto tri = (float) ((i % 200) - 100) / 100.0f;
+        const float g = i < 4000 ? 1.0f : 0.0f;
+        inL[(std::size_t) i] = 0.5f * tri * g + (i >= 100 && i < 300 ? nz * 0.6f : 0.0f);
+        inR[(std::size_t) i] = 0.25f * tri * g;
+    }
+    struct Golden
+    {
+        int i;
+        float v;
+    };
+    auto run = [&] (const std::vector<std::uint8_t>& state, const std::vector<Golden>& gold) {
+        const auto slot = lynx::effectFromFl ("Fruity Vocoder", state, 120.0);
+        CHECK (slot.has_value() && slot->kind == lynx::EffectKind::fruityVocoder);
+        if (! slot || slot->kind != lynx::EffectKind::fruityVocoder)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < N; s += 512)
+            fx->process (l.data() + s, r.data() + s, 512, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.v && r[(std::size_t) g.i] == g.v);
+    };
+    // 32 bands, order 3, inverted carrier bank with a formant shift, fast attack
+    run (hex (
+             "02000000200000000300000002000000000000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000"
+             "803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f00"
+             "00803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803fb80b000050c30000640000000100000044fdffff"
+             "78000000050000002c010000000000008c0000003c000000a0000000"),
+         { { 777, 0.47870129346847534f }, { 1555, 0.2731437087059021f }, { 2222, -0.41599133610725403f }, { 3333, 0.083399198949337f }, { 3999, 0.7295553088188171f }, { 4100, 0.0871216207742691f } });
+    // 8 bands, swapped inputs, per-band levels, modulator level 0
+    run (hex (
+             "02000000080000000200000002000000010000003f9a99193f3333333fcdcc4c3f6666663f0000803fcdcc8c3f9a99993f1027000060ea"
+             "00001e000000000000002c010000500000000f0000003c00000000000000000000001400000080000000"),
+         { { 777, 0.07233863323926926f }, { 1555, 0.1183714047074318f }, { 2222, -0.6131120920181274f }, { 3333, 0.18050849437713623f }, { 3999, 0.056527279317379f }, { 4100, 0.05711518973112106f } });
+    CHECK (! lynx::flvocoder::parse ({ 1, 0, 0, 0 }).has_value());
+    CHECK (lynx::effectInfo (lynx::EffectKind::fruityVocoder).params.size() == (std::size_t) lynx::flvocoder::paramCount);
+    CHECK (lynx::flvocoder::paramText (4, 0.5f) == "+0 cents" && lynx::flvocoder::paramText (8, 1.0f) == "on");
 }
 
 // ---- Fruity WaveShaper / Fruity Soft Clipper (REA_rodada51) ------------------------------------------------------------
