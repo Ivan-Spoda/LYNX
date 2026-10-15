@@ -36,6 +36,7 @@ add_library(lynx_core STATIC
     src/core/DrumSynthLive.cpp
     src/core/Harmless.cpp
     src/core/Harmor.cpp
+    src/core/Ogun.cpp
     src/core/HarmlessFx.cpp
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp

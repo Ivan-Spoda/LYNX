@@ -12,7 +12,6 @@
 ## Work in progress (pushed as `wip/*` branches — unverified, may not build)
 | Branch | What | Source of truth | State when stopped |
 |---|---|---|---|
-| `wip/ogun` | Port Ogun's exact engine (`InstrumentKind::ogun`) | `docs/analise/REA_rodada37.md`, model `rea-work/r37/py/ogmodel.py` | engine ported, was running the C++-vs-model battery |
 | `wip/gms-morphine` | Port GMS and Morphine engines | `REA_rodada39.md`, models `rea-work/r39/py/gmsmodel.py`, `mormodel.py` | just started (first file) |
 
 Not started: REA round 41 (MiniSynth, DX10, Fruit Kick, BassDrum, then PoiZone/Toxic/Kepler full engines).

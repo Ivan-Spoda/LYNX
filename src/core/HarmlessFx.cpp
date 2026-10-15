@@ -1,4 +1,5 @@
 #include "core/HarmlessFx.h"
+#include "core/PlateReverb.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1542,22 +1543,10 @@ struct Rack::Delay
 
 // the shared Reverb_x64.dll (REA_rodada31 §7.5) with the library wrapper's fields: lowcut Hz (0 off), highcut and
 // damping in hundreds of Hz (0 off), predelay samples, room, diffusion, decay in samples, colour
-struct ReverbUnit
+struct ReverbUnit : PlateReverb
 {
-    std::array<std::vector<float>, 12> buf;
-    std::array<int, 12> L {}, P {};
-    std::array<int, 7> tl {}, tr {};
-    std::vector<float> pre;
-    int pp = 0;
-    float cHc = 1, cLc = 0, cDamp = 1, cIn = 0, c1 = 0, c2 = 0, g = 0, c48 = 0, c44 = 0;
-    float s10 = 0, s14 = 0, s18 = 0, s3c = 0, s40 = 0, s4c = 0, s50 = 0, s54 = 0, s58 = 0;
-
     ReverbUnit (float lowcut, float highcut, int preS, int room, int diffusion, float decaySamples, float damping, int colourIndex, double fs)
     {
-        static constexpr int lines[12] { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
-        static constexpr int tapsL[7] { 266, 2974, 1913, 2496, 1690, 187, 1566 };
-        static constexpr int tapsR[7] { 353, 3627, 1728, 3173, 1811, 335, 621 };
-        static constexpr double colour[5] { 0.2, 0.6, 1.0, 1.5, 3.0 };
         const auto rate = (long long) fs;
         const auto decay = (double) decaySamples;
         const auto f17 = (double) f32 (1.0 / (double) rate), half = (double) f32 ((double) rate * 0.5);
@@ -1577,10 +1566,7 @@ struct ReverbUnit
         auto muldiv = [] (long long a, long long b, long long c) { return (int) ((a * b) / c); };
         const auto sc = muldiv (rate, room + 15, 115);
         for (int i = 0; i < 12; ++i)
-        {
             L[(std::size_t) i] = std::max (1, muldiv (lines[i], sc, 20000));
-            buf[(std::size_t) i].assign ((std::size_t) L[(std::size_t) i], 0.0f);
-        }
         for (int i = 0; i < 7; ++i)
             tl[(std::size_t) i] = muldiv (tapsL[i], sc, 20000), tr[(std::size_t) i] = muldiv (tapsR[i], sc, 20000);
         const auto dv = (double) f32 (diffusion * 0.01), f13 = (double) f32 (f17 * 0.5);
@@ -1591,85 +1577,13 @@ struct ReverbUnit
         }
         const auto ssum = (double) (L[5] + L[7] + L[9] + L[11]);
         g = f32 (std::pow (std::exp (std::log (0.001) * ssum / decay), 0.25));
-        auto r2 = (double) f32 ((double) f32 (std::pow (std::exp (std::log (0.001) * ssum / (double) f32 (decay * colour[std::clamp (colourIndex, 0, 4)])), 0.25)) / (double) g);
+        auto r2 = (double) f32 ((double) f32 (std::pow (std::exp (std::log (0.001) * ssum / (double) f32 (decay * colourFactor[std::clamp (colourIndex, 0, 4)])), 0.25)) / (double) g);
         c48 = f32 ((r2 - 1.0) * 0.5);
         if (r2 > 1.0)
             r2 = 1.0;
         const auto t = (double) f32 (std::tan (500.0 * pi * f17));
         c44 = f32 ((t - r2) / (t + r2));
-        pre.assign ((std::size_t) std::max (1, preS), 0.0f);
-    }
-
-    float ap (int i, float v, float c) noexcept
-    {
-        auto& p = P[(std::size_t) i];
-        auto& b = buf[(std::size_t) i];
-        const auto w = b[(std::size_t) p] - c * v;
-        b[(std::size_t) p] = c * w + v;
-        p = p > 0 ? p - 1 : L[(std::size_t) i] - 1;
-        return w;
-    }
-
-    float dl (int i, float v) noexcept
-    {
-        auto& p = P[(std::size_t) i];
-        auto& b = buf[(std::size_t) i];
-        const auto r = b[(std::size_t) p];
-        b[(std::size_t) p] = v;
-        p = p > 0 ? p - 1 : L[(std::size_t) i] - 1;
-        return r;
-    }
-
-    float tap (int i, int off) const noexcept
-    {
-        const auto k = off + P[(std::size_t) i];
-        return buf[(std::size_t) i][(std::size_t) (k >= L[(std::size_t) i] ? k - L[(std::size_t) i] : k)];
-    }
-
-    void process (const float* x, float* outL, float* outR, int n) noexcept
-    {
-        const auto t1 = 1.0f - g;
-        const auto w74 = t1 * 0.6f + g, w6c = t1 * 0.25f + g, w78 = t1 * 0.7f + g, w68 = t1 * 0.2f + g, w70 = t1 * 0.5f + g;
-        for (int i = 0; i < n; ++i)
-        {
-            auto a = ((x[i] + 1.0e-30f) - s10) * cHc + s10;
-            s10 = a;
-            const auto h = (a - s14) * cLc + s18;
-            s18 = a, s14 = h;
-            if (cLc != 0.0f)
-                a = (a - h) * 0.5f + 1.0e-30f;
-            for (int k = 0; k < 4; ++k)
-                a = ap (k, a, cIn);
-            const auto z = pre[(std::size_t) pp];
-            pre[(std::size_t) pp] = a;
-            pp = pp > 0 ? pp - 1 : (int) pre.size() - 1;
-            // half 1
-            auto u = buf[11][(std::size_t) P[11]] * g;
-            auto f = (u - s50) * c44 + s4c;
-            s4c = u, s50 = f;
-            auto v = (((f + u) * c48 + u + z) - s3c) * cDamp + s3c;
-            s3c = v;
-            auto w = ap (4, v, c1);
-            auto r = dl (5, w) * g;
-            auto w2 = ap (6, r, c2);
-            buf[7][(std::size_t) P[7]] = w2;
-            P[7] = P[7] > 0 ? P[7] - 1 : L[7] - 1;
-            // half 2
-            u = buf[7][(std::size_t) P[7]] * g;
-            f = (u - s58) * c44 + s54;
-            s54 = u, s58 = f;
-            v = (((f + u) * c48 + u + z) - s40) * cDamp + s40;
-            s40 = v;
-            w = ap (8, v, c1);
-            r = dl (9, w) * g;
-            w2 = ap (10, r, c2);
-            buf[11][(std::size_t) P[11]] = w2;
-            P[11] = P[11] > 0 ? P[11] - 1 : L[11] - 1;
-            outL[i] = (((tap (9, tl[0]) - w6c * tap (9, tl[1])) - w78 * tap (10, tl[2])) - w68 * tap (11, tl[3]))
-                      + w74 * tap (5, tl[4]) + tap (6, tl[5]) + w70 * tap (7, tl[6]);
-            outR[i] = ((((w6c * tap (5, tr[1]) + tap (5, tr[0])) - w78 * tap (6, tr[2])) - w68 * tap (7, tr[3]))
-                       - w74 * tap (9, tr[4])) + tap (10, tr[5]) + w70 * tap (11, tr[6]);
-        }
+        allocate (std::max (1, preS));
     }
 };
 

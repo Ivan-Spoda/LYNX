@@ -4,6 +4,7 @@
 #include "core/Harmless.h"
 #include "core/SytrusEngine.h"
 #include "core/Harmor.h"
+#include "core/Ogun.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -198,6 +199,7 @@ private:
             case InstrumentKind::harmless:
             case InstrumentKind::sytrus:
             case InstrumentKind::harmor:
+            case InstrumentKind::ogun:
                 break;
         }
 
@@ -1998,6 +2000,9 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 
     if (kind == InstrumentKind::harmor)
         return makeHarmorInstrument();
+
+    if (kind == InstrumentKind::ogun)
+        return makeOgunInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }
