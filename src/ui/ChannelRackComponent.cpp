@@ -8,6 +8,7 @@
 
 #include "engine/Text.h"
 #include "ui/Dialogs.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/BrowserComponent.h"
 
@@ -440,7 +441,9 @@ void ChannelRackComponent::showTip (Area area, int row, bool transient)
     if (row < 0 || row >= (int) engine.getSong().channels.size())
         return;
 
-    const auto text = specFor (area, row).text (valueOf (area, row));
+    const auto spec = specFor (area, row);
+    const auto text = spec.text (valueOf (area, row));
+    ui::postHint (ui::valueHint (spec, valueOf (area, row), ui::valueGestures()));
 
     if (transient)
         ui::flashValueTip (*this, controlBounds (area, row), text);
@@ -1251,8 +1254,13 @@ void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
         const auto v = laneValueAt (e.y);
         const auto bipolar = notetools::levelIsBipolar ((notetools::Level) graphLevel);
         const auto shown = juce::roundToInt ((bipolar ? v * 2.0f - 1.0f : v) * 100.0f);
-        ui::showValueTip (*this, controlBounds (Area::lane, graphRow()),
-                          tr (notetools::levelName ((notetools::Level) graphLevel)) + ": " + (bipolar && shown > 0 ? "+" : "") + juce::String (shown) + "%");
+        const auto valueText = (bipolar && shown > 0 ? "+" : "") + juce::String (shown) + "%";
+        const auto levelText = tr (notetools::levelName ((notetools::Level) graphLevel));
+        ui::showValueTip (*this, controlBounds (Area::lane, graphRow()), levelText + ": " + valueText);
+        ui::Hint live;
+        live.text = channelName (engine.getSong(), graphRow()) + " - " + levelText;
+        live.value = valueText;
+        ui::postHint (live);
         repaint (laneBounds());
         return;
     }
@@ -1317,6 +1325,7 @@ void ChannelRackComponent::mouseUp (const juce::MouseEvent& e)
     selectDownRow = -1;
     selectDragBase.clear();
     ui::hideValueTip();
+    ui::clearPostedHint();
     auditionRow = -1;
     paintMode = PaintMode::none;
     laneDownStep = -1;
@@ -1391,7 +1400,7 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
         const auto shownRow = active ? knobRow : row;
         h = ui::valueHint (specFor (shownArea, shownRow), valueOf (shownArea, shownRow),
                            shownArea == Area::route ? tr ("[LMB] drag or [Wheel] routes  [2xLMB] show in the Mixer  [RMB] next free insert")
-                                                    : tr ("drag (Ctrl: fine), wheel, Alt+click resets"));
+                                                    : ui::valueGestures());
         return h;
     }
 

@@ -10,6 +10,7 @@
 #include "engine/Text.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
@@ -259,6 +260,7 @@ void MixerStrips::showTip (Part part, int t, bool transient)
 
     const auto spec = specFor (part, t);
     const auto text = spec.text (valueOf (part, t));
+    ui::postHint (ui::valueHint (spec, valueOf (part, t), ui::valueGestures()));
 
     if (transient)
         ui::flashValueTip (*this, tipArea (part, t), text);
@@ -1042,7 +1044,7 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
 
     const auto part = active ? dragPart : partAt (t, p);
     const auto name = juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
-    const auto gesture = tr ("drag (Ctrl: fine), wheel, Alt+click resets");
+    const auto gesture = ui::valueGestures();
 
     // the channels that play into this insert (FL shows them by the insert; LYNX in the hint)
     auto feeds = [&song, t, tracks = (int) song.mixer.size()] {
@@ -1098,6 +1100,7 @@ void MixerStrips::mouseUp (const juce::MouseEvent&)
     dragTrack = -1;
     drag.end();
     ui::hideValueTip();
+    ui::clearPostedHint();
 }
 
 void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
@@ -1957,7 +1960,7 @@ void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
 
 ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
 {
-    const auto gesture = tr ("drag (Ctrl: fine), wheel, Alt+click resets");
+    const auto gesture = ui::valueGestures();
 
     if (dragParam == mixParam || (dragParam >= 0 && drag.isActive()))
         return ui::valueHint (specFor (dragParam, dragParam == mixParam ? juce::jmax (0, selectedSlot) : selectedSlot),
@@ -2036,6 +2039,7 @@ void EffectsPanel::showTip (int param, int slot, bool transient)
 
     const auto area = param == mixParam ? mixBounds (slot) : knobBounds (param).withHeight (juce::jlimit (30, 44, knobBounds (param).getHeight() - 30));
     const auto text = specFor (param, slot).text (valueOf (param, slot));
+    ui::postHint (ui::valueHint (specFor (param, slot), valueOf (param, slot), ui::valueGestures()));
 
     if (transient)
         ui::flashValueTip (*this, area, text);
@@ -2101,6 +2105,7 @@ void EffectsPanel::mouseUp (const juce::MouseEvent&)
     dragParam = -1;
     drag.end();
     ui::hideValueTip();
+    ui::clearPostedHint();
 }
 
 void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
