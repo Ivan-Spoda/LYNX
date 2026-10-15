@@ -755,7 +755,7 @@ events) **[model]**:
 
 | Engine | Cases | C++ vs model |
 |---|---|---|
-| GMS | 10 demo/render-test channels × {voice, full chain} at 44.1 kHz, full chain at 48 kHz (4 channels), 33 synthetic cases (all of `gsyn.py` + song-position lock, all ten effect slots, flanger/panner/trancer/LP with song position) | bit-identical (difference 0) |
+| GMS | 10 demo/render-test channels × {voice, full chain} at 44.1 kHz and full chain at 48 kHz, 33 synthetic cases (all of `gsyn.py` + song-position lock, all ten effect slots, flanger/panner/trancer/LP with song position) | bit-identical (difference 0) |
 | Morphine | 7 demo channels × {voice 44.1 kHz, full 44.1 kHz, full 48 kHz}, 22 synthetic cases (all of `mor_t_syn.py` and `mor_t_noise.py`), host block 100 | bit-identical (difference 0) |
 
 `tests/tests.cpp` (`gms_engine`, `morphine_engine`) checks states written from scratch against golden samples of the
