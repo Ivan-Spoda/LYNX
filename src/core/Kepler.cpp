@@ -60,10 +60,13 @@ struct NearestMode
 };
 #endif
 
-// pow evaluated in extended precision, then rounded to double (the DLL's library is close to this; single-ulp
-// differences remain, §6.2)
+// pow: the render's powers of two (pitch, cutoff) with exp2, the parameter laws in extended precision rounded to double.
+// The DLL's library differs from both by single ulps on some values (§6.2; exp2 and the extended pow give identical
+// renders in the tests, exp2 at a fraction of the cost)
 double powD (double a, double b) noexcept
 {
+    if (a == 2.0)
+        return std::exp2 (b);
     return (double) std::pow ((long double) a, (long double) b);
 }
 

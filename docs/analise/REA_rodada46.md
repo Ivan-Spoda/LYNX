@@ -346,11 +346,10 @@ both channels, in dB relative to the DLL's peak.
 ### 6.2 Remaining differences
 
 - **pow inside the render.** The pitch (`pow`, double) and cutoff (`powf`) come from the DLL's statically linked
-  library running in the "toward zero" mode. The port evaluates `pow` in extended precision and rounds to double (a plain
-  double `pow` gave more mismatches; truncating the extended value toward zero changes no output sample of the tests).
-  Its result still differs from the DLL's by one ulp on some samples (EXEC: e.g. the 814th increment of demo 0, where the
-  DLL's value is one ulp above the truncated exact 2^x checked with 106-bit arithmetic), so single-ulp differences remain
-  (−125 … −135 dB on the signal).
+  library running in the "toward zero" mode. The port uses `exp2` for these powers of two (an extended-precision `pow`,
+  rounded or truncated, gives renders identical to `exp2` in the tests; a one-ulp change of a double increment changes
+  no output sample). The cutoff still differs from the DLL's by one ulp on some samples (EXEC: first at sample 380 of
+  demo 0), so single-ulp differences remain (−125 … −135 dB on the signal).
 - **Self-oscillating patches.** With Resonance = 1 the ladder rings on its own and amplifies these ulp-level
   differences: one single one-ulp change of one voice's cutoff on one sample (our engine against itself) grows to
   −60.6 dB in "Kromatone" and −94.4 dB in "Terminaline" (both Resonance 1), while it stays at −132 … −143 dB in
