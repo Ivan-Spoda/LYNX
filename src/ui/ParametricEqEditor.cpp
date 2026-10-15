@@ -1,5 +1,6 @@
 #include "ui/WindowOwner.h"
 #include "ui/ParametricEqEditor.h"
+#include "core/ParametricEqFl.h"
 
 #include <map>
 
@@ -142,10 +143,14 @@ public:
             if (hasGain (t))
                 text << "   " << juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::param (selected, 2), p[(std::size_t) peq::param (selected, 2)], 120.0).c_str());
 
-            if (t == peq::BandType::lowCut || t == peq::BandType::highCut)
-                text << "   " << juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::slopeParam + selected, p[(std::size_t) (peq::slopeParam + selected)], 120.0).c_str());
+            // FL's modes (imported Parametric EQ 2): bandwidth and FL's order for every band type
+            if (peq::flLaw (p))
+                text << "   " << juce::String::fromUTF8 (peq::widthText (p, selected).c_str()) << "   "
+                     << juce::String::fromUTF8 (peq::orderText (p, selected).c_str());
+            else if (t == peq::BandType::lowCut || t == peq::BandType::highCut)
+                text << "   " << juce::String::fromUTF8 (peq::orderText (p, selected).c_str());
             else
-                text << "   " << juce::String::fromUTF8 (formatEffectParam (EffectKind::parametricEq, peq::param (selected, 3), p[(std::size_t) peq::param (selected, 3)], 120.0).c_str());
+                text << "   " << juce::String::fromUTF8 (peq::widthText (p, selected).c_str());
 
             g.setColour (bandColour (selected));
             g.drawText (text, footer.removeFromTop (20), juce::Justification::centredLeft);
@@ -252,7 +257,9 @@ public:
 
         selected = b;
         const auto q = s->params[(std::size_t) peq::param (b, 3)];
-        setParams ({ { peq::param (b, 3), juce::jlimit (0.0f, 1.0f, q + wheel.deltaY * 0.15f) } });
+        // wheel up = narrower; FL's width grows the other way
+        const auto step = peq::flLaw (s->params) ? -wheel.deltaY * 0.15f : wheel.deltaY * 0.15f;
+        setParams ({ { peq::param (b, 3), juce::jlimit (0.0f, 1.0f, q + step) } });
     }
 
 private:
@@ -312,7 +319,20 @@ private:
                 setParams ({ { peq::param (band, 0), peq::typeValue ((peq::BandType) t) } });
             });
 
-        if (currentType == peq::BandType::lowCut || currentType == peq::BandType::highCut)
+        if (peq::flLaw (s->params) && ! (peqfl::lawOf (s->params) == peqfl::Law::peq1))
+        {
+            // FL's Parametric EQ 2 orders (Steep 8 … 2 … Gentle 8) apply to every band type
+            menu.addSeparator();
+            auto p = s->params;
+            for (int order = 0; order < 7; ++order)
+            {
+                p[(std::size_t) (peq::slopeParam + band)] = (float) order / 6.0f;
+                const auto current = (int) std::lround (s->params[(std::size_t) (peq::slopeParam + band)] * 6.0f) == order;
+                menu.addItem (juce::String::fromUTF8 (peq::orderText (p, band).c_str()), true, current,
+                              [this, band, order] { setParams ({ { peq::slopeParam + band, (float) order / 6.0f } }); });
+            }
+        }
+        else if (! peq::flLaw (s->params) && (currentType == peq::BandType::lowCut || currentType == peq::BandType::highCut))
         {
             menu.addSeparator();
             for (int stages = 1; stages <= 4; ++stages)
