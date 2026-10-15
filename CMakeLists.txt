@@ -86,6 +86,10 @@ target_sources(lynx_core PRIVATE
     src/core/History.cpp
     src/core/SearchQuery.cpp)
 
+# spectral waveforms: band analysis and multi-resolution peak cache
+target_sources(lynx_core PRIVATE
+    src/core/WaveAnalysis.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
@@ -167,6 +171,10 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/HintBar.cpp
         src/ui/Toolbar.cpp)
+
+    # spectral waveforms: background analysis cache and drawing
+    target_sources(LYNX PRIVATE
+        src/ui/WaveformView.cpp)
 
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE

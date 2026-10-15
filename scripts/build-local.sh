@@ -24,6 +24,8 @@ CORE="$CORE src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp sr
 CORE="$CORE src/core/StartupSound.cpp"
 # FL's 3x Osc engine (REA round 47)
 CORE="$CORE src/core/ThreeOsc.cpp"
+# spectral waveforms (band analysis, multi-resolution peak cache)
+CORE="$CORE src/core/WaveAnalysis.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

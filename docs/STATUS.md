@@ -35,6 +35,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   reorder, link selected channels (Ctrl+L / Ctrl+Shift+L / Alt+L), "sidechain only" sends, per-insert record
   arm, effect slots dragged to reorder, all-effects switch, A/B compare per slot, effect presets dropped from the
   Browser.
+- **Spectral waveforms:** audio clips, the Sampler settings and the Browser preview draw a detailed waveform
+  (RMS body + peak outline, smooth at any zoom) coloured by frequency content: warm = bass, lime = mids, cool =
+  treble. Analysed in the background and cached on disk; Options → Waveforms switches to the classic one-colour
+  look and to stereo lanes.
 - **Browser:** search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
   selected channel, user folders.
 - **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
