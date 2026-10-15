@@ -67,7 +67,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
   Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
+  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
@@ -338,6 +339,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   cutoff LFO, limit/saturate distortion, rate/bit reduction, colour, stereo spread, the three delay models and "off".
   Bit-identical to the installation's DLLs on every installation state (60 + 85) at two tempos, at 48 kHz (one
   Delay 3 state at −151 dB) and on 110 random Delay 3 states incl. tempo changes; LYNX starts them settled.
+- **Stereo Shaper, Stereo Enhancer, Transient Processor, Spreader:** FL's exact engines (`core/StereoFx`, REA round
+  54) — Shaper: (3^x − 1)/2 matrix law, delay, all-pass dephasing, pre/post order, the In/Out difference for Patcher
+  buses; Enhancer: pan/volume/separation matrix, phase-offset delay, inversion; Transient Processor: its split,
+  detector, smoothing every 8 samples, saturator and 1.5 s silence bypass; Spreader: the Faust-built engine of
+  `Shared/ildsp_x64.dll` (TPT split, crossfading width delay, 15 kHz filters, mono bass). Bit-identical to the DLLs
+  on every distinct installation state (104 / 30 / 57 / 25) at 44.1, 48, 96 and 22.05 kHz.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -439,6 +446,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   others −136…−145 dB; map segments with tension ≠ 0 are read as straight lines (no demo uses them).
 - Maximus: 4 of the 100 demo states use the v15 linear-phase band split (Frequency Splitter's engine) or Master Mid
   mode is set — those keep the approximation (REA round 40 §8).
+- Stereo Enhancer: a delay set before a sample-rate change keeps its old length in FL; LYNX uses the current rate (FL's
+  load order not confirmed; identical at 44.1 kHz). Stereo Shaper / Enhancer ramp their gains per host call; LYNX
+  splits blocks at 512 frames (FL's block size for them not confirmed). Spreader: FL's engine diverges to NaN at
+  rates where its 15 kHz section passes Nyquist (22.05 kHz); LYNX outputs 0 there (REA round 54 §6–7).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
