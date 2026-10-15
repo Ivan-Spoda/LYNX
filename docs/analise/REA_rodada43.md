@@ -135,8 +135,7 @@ Times: `ticks(v) = 0` for v < 101, else `Round((double)(float)(1001^((float)(v/6
 advances **once per tick**: the host's per-tick callback sets a flag, and the next Gen_Render steps every voice (a new
 voice also steps once on its first block). Volume factor `= y_vol·(lfo_vol·amount + 1)` (≥ 0); pan `= 2·lfo_pan·amount`.
 Pitch/cutoff/resonance targets are computed but have no audible effect: Fruit Kick reads Final.Pitch only at the
-trigger, and the filter stays bypassed while cutoff/resonance are neutral. The channel filter itself (types 0–7) was
-**not decoded in this round**; round 42 (DX10) decoded the same framework's filter (§1.10).
+trigger. The channel filter (types 0–7) is the one round 42 decoded for DX10 (§1.10): reused, not decoded again.
 
 ### 1.7 Verification **[EXEC + model]**
 
@@ -156,7 +155,7 @@ instrument's start.
 ### 1.9 Not exact / not confirmed
 
 - The end fade's IPP 11-bit cosine (≤ −83 dB during 10 ms after a note-off).
-- The channel filter (no state uses it); the global-LFO flag 0x20 (per-voice phase here).
+- Global LFOs (flag 0x20) advance per tick callback; song-position jumps are not modelled.
 - FL's tick grid follows the song position and the host's block split; LYNX ticks from the instrument start.
 - Which waveshaper variant FL uses live vs when exporting (flag `0x16baff0`): **not confirmed**.
 - The snapshot of a version-1 state vs the channel's own records when they disagree (Africa's Calling): the plugin
@@ -165,7 +164,12 @@ instrument's start.
 ### 1.10 Relation to round 42 (DX10)
 
 DX10's state carries the same 364-byte block and DX10's DLL embeds the same voice framework, decoded completely in
-round 42 (`src/core/Dx10.{h,cpp}`, including the filter). Once both are in `main`, the processor can be shared.
+round 42. After DX10 reached `main`, its processor (articulators, filter, x87 pan law, ramps) moved into
+`src/core/FlVoiceProcessor.h`, used by both instruments; the importer builds Fruit Kick's snapshot with DX10's
+`dx10Snapshot`. Checked against Fruit Kick's DLL with ticks every 230 samples: all 8 filter types (with cutoff
+envelope + LFO and resonance LFO, `st/filt_t*.bin`) and the LFO/envelope states are bit-exact outside the end fade
+(`py/fkexec_cpp.py`, C++ against EXEC). The shared x87 pan law (DX10's argument reduction above π/4) also fixed a
+2.8e−21 difference of our Python model at positive pans.
 
 ---
 
@@ -271,7 +275,7 @@ the state and the BassDrum folder (`samplePath`); `sounddata` and the noise samp
 
 ## 3. Open questions
 
-- Fruit Kick: the channel filter; FL's tick timing; the end fade's IPP cosine; waveshaper variant when playing live.
+- Fruit Kick: FL's tick timing; the end fade's IPP cosine; waveshaper variant when playing live.
 - BassDrum: FL's max-polyphony event at channel creation (mono vs 64 voices); 24/32-bit integer noise samples (no factory
   sample uses them).
 - BooBass (bonus): not examined this round.

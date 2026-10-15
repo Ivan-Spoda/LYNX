@@ -42,6 +42,7 @@ add_library(lynx_core STATIC
     src/core/BassDrum.cpp
     src/core/Ogun.cpp
     src/core/MiniSynth.cpp
+    src/core/Dx10.cpp
     src/core/HarmlessFx.cpp
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp

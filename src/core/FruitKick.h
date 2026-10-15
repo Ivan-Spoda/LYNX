@@ -8,9 +8,10 @@
 // multiplicative pitch fall from Max freq (+ half the note offset) down to the Min freq floor and an amplitude that
 // starts at 1.5 and falls by a per-sample factor until it is below 0.0002; Distortion runs FL's host waveshaper (curve
 // set 0, curve 10, interpolated). Around it, FL's plugin voice framework: five channel-envelope/LFO targets stepped
-// once per sequencer tick (pan LFO, volume envelope × LFO; cutoff/resonance/pitch have no effect on this plugin), the
-// sin/cos pan law on (Final.Pan, Final.Vol), level ramps of at most 0.001 per sample, and a 10 ms raised-cosine fade
-// when a note is released without a volume envelope (or when the volume envelope ends).
+// once per sequencer tick (pan, volume, cutoff, resonance; the pitch target never reaches this plugin), the channel
+// filter, the sin/cos pan law on (Final.Pan, Final.Vol), level ramps of at most 0.001 per sample, and a 10 ms
+// raised-cosine fade when a note is released without a volume envelope (or when the volume envelope ends). That
+// processor is the one DX10 carries too (core/FlVoiceProcessor.h, REA_rodada42 §3).
 //
 // The channel keeps the plugin's raw saved state (record 0xD5) in ChannelDef::pluginState. Version-1 states carry the
 // envelope/filter snapshot the plugin uses; for version-0 states the importer appends the channel's own 0xDA/0xDB
@@ -19,8 +20,7 @@
 // Host side as FL's: link velocity on, so Final.Vol = Init.Vol × channel volume with Init.Vol = (11^(1.28·v) − 1)/10;
 // Final.Pan = note pan + channel pan; Final.Pitch = 100·(key − 60) + channel pitch + note cents. LYNX's channel gains
 // are turned back into those values and applied once, inside the engine. Ticks run at 96 PPQ of the song tempo from
-// the instrument's start (FL's tick grid follows the song position: not reproduced); the channel filter of the
-// framework is not modelled (every known state has it neutral).
+// the instrument's start (FL's tick grid follows the song position: not reproduced).
 
 #include <cstdint>
 #include <memory>

@@ -2,6 +2,7 @@
 // plugin's operation order; doubles where the plugin computes in double; long double for FL's x87 pan law.
 
 #include "core/FruitKick.h"
+#include "core/FlVoiceProcessor.h"
 
 #include <algorithm>
 #include <array>
@@ -114,223 +115,6 @@ struct Params
     }
 };
 
-// ---- the plugin voice framework's channel envelopes (FUN_0071fd90 / FUN_0071f840) ----
-struct Tension
-{
-    float a = 0.0f, c = 0.0f, k = 0.0f;
-};
-
-Tension tension (int t)
-{
-    if (t == 0)
-        return {};
-    const float sg = t > 0 ? 1.0f : -1.0f;
-    const auto m = (float) std::fabs ((double) ((float) t * 0.0078125f));
-    Tension r;
-    r.a = sg * (float) (std::exp ((double) m * std::log (6347.0)) - 1.0) * 0.1f;
-    r.c = (float) (1.0 / std::fabs ((double) r.a));
-    r.k = (float) std::log (std::fabs ((double) r.a) + 1.0);
-    return r;
-}
-
-float curve (float x, const Tension& t)
-{
-    if (t.a == 0.0f && ! std::signbit (t.a))
-        return x;
-    if (t.a > 0.0f)
-        return (float) (1.0 - (std::exp ((1.0 - (double) x) * (double) t.k) - 1.0) * (double) t.c);
-    return (float) ((std::exp ((double) x * (double) t.k) - 1.0) * (double) t.c);
-}
-
-float inverse (float y, const Tension& t)
-{
-    if (t.a == 0.0f && ! std::signbit (t.a))
-        return y;
-    if (t.a > 0.0f)
-        return (float) (1.0 - std::log ((1.0 - (double) y) * std::fabs ((double) t.a) + 1.0) / (double) t.k);
-    return (float) (std::log ((double) y * std::fabs ((double) t.a) + 1.0) / (double) t.k);
-}
-
-struct Record
-{
-    std::array<int, 17> raw {};
-    int flags = 0, enabled = 0, delay = 0, hold = 0, ldelay = 0;
-    float ainc = 1.0f, dinc = -1.0f, rinc = -1.0f, sus = 0.0f, lfade = 1.0f, lamt = 0.0f;
-    std::uint32_t linc = 0;
-    Tension ten[3];
-    const float* shape = nullptr;
-
-    void init (const std::array<int, 17>& r, int ppq, double tempo)
-    {
-        raw = r;
-        flags = r[0];
-        enabled = r[1];
-        const double e0 = ((double) (ppq >> 2) / 48.0 * 24576.0) / 1000.0;
-        auto ticks = [] (int v, double e) -> int {
-            if (v < 101)
-                return 0;
-            return (int) rint64 ((double) (float) (std::exp ((double) (float) (v * 1.52587890625e-05) * std::log (1001.0)) - 1.0) * e);
-        };
-        double e = (flags & 1) != 0 ? e0 : e0 * tempo / 120.0;
-        delay = ticks (r[2], e);
-        ainc = (float) (1.0 / (ticks (r[3], e) + 1));
-        sus = (float) r[6] * 0.0078125f;
-        hold = ticks (r[4], e);
-        dinc = (float) (-1.0 / (ticks (r[5], e) + 1));
-        rinc = (float) (-1.0 / (ticks (r[7], e) + 1));
-        for (int i = 0; i < 3; ++i)
-            ten[i] = tension (r[(std::size_t) (14 + i)]);
-        e = (flags & 2) != 0 ? e0 : e0 * tempo / 120.0;
-        ldelay = ticks (r[9], e);
-        lfade = (float) (1.0 / (ticks (r[10], e) + 1));
-        const auto period = std::max (ticks (r[12], e), 3);
-        linc = (std::uint32_t) (4294967296ULL / (std::uint64_t) period);
-        lamt = (float) r[11] * 0.0078125f;
-        const auto& t = tables();
-        const int s = std::clamp (r[13], 0, 2);
-        shape = s == 0 ? t.sine.data() : s == 1 ? t.tri.data() : t.square.data();
-    }
-};
-
-struct EnvState
-{
-    int cnt = 0, stage = 1, ldel = 0;
-    float x = 0.0f, y = 0.0f, fade = 0.0f, lfo = 0.0f;
-    std::uint32_t ph = 0;
-
-    void start (const Record& r)
-    {
-        cnt = 0;
-        if (r.delay < 1 || r.enabled == 0)
-        {
-            stage = 1;
-            x = 0.0f;
-            if (((r.flags & 4) != 0 && r.enabled == 0) || (r.enabled != 0 && r.raw[3] == 100))
-            {
-                x = 1.0f;
-                stage = r.hold < 1 ? 3 : 2;
-            }
-        }
-        else
-        {
-            stage = 0;
-            x = 0.0f;
-        }
-        y = x;
-        ldel = r.ldelay;
-        ph = 0;
-        fade = 0.0f;
-        lfo = 0.0f;
-    }
-
-    void step (const Record& r)
-    {
-        if (r.enabled != 0)
-        {
-            switch (stage)
-            {
-                case 2:
-                    if (r.hold <= ++cnt)
-                        stage = 3;
-                    break;
-                case 0:
-                    if (r.delay <= ++cnt)
-                        stage = 1;
-                    break;
-                case 1:
-                    x = x + r.ainc;
-                    if (1.0f <= x)
-                    {
-                        x = 1.0f;
-                        if (r.hold < 1)
-                            stage = 3;
-                        else
-                            cnt = 0, stage = 2;
-                    }
-                    y = curve (x, r.ten[0]);
-                    break;
-                case 3:
-                    x = x + r.dinc;
-                    y = curve (x, r.ten[1]);
-                    if (y <= r.sus)
-                    {
-                        y = r.sus;
-                        x = inverse (y, r.ten[1]);
-                        cnt = 0;
-                        stage = 4;
-                    }
-                    break;
-                case 6:
-                    x = x + r.rinc;
-                    y = curve (x, r.ten[2]);
-                    break;
-                default:
-                    break;
-            }
-            if (stage > 2 && y < 5.96046448e-08f)
-            {
-                y = 0.0f;
-                stage = 9;
-            }
-        }
-        if (ldel == 0)
-        {
-            ph += r.linc; // (the global-LFO flag 0x20 is not modelled)
-            lfo = r.shape[ph >> 18];
-            if (fade != 1.0f)
-            {
-                fade = fade + r.lfade;
-                if (1.0f < fade)
-                    fade = 1.0f;
-                lfo = lfo * fade;
-            }
-        }
-        else
-            --ldel;
-    }
-
-    void release (const Record& r)
-    {
-        if (stage < 7)
-        {
-            x = inverse (y, r.ten[2]);
-            cnt = 0;
-            stage = 6;
-        }
-    }
-};
-
-// FL's x87 sin/cos pan law (law A): L = vol·cos((1 + pan)·π/4), R = vol·sin(…), in extended precision
-void panLaw (float pan, float vol, float& l, float& r)
-{
-    pan = std::clamp (pan, -1.0f, 1.0f);
-    const long double a = (1.0L + (long double) pan) * (long double) 0.78539816339744828;
-    l = (float) (std::cos (a) * (long double) vol);
-    r = (float) (std::sin (a) * (long double) vol);
-}
-
-// FUN_005fa150: per-sample step towards a new level, at most 0.001 per sample (the reached target is returned)
-float rampStep (float& target, float prev, int n)
-{
-    float step = target - prev;
-    std::uint32_t bits;
-    std::memcpy (&bits, &step, 4);
-    if (bits == 0)
-        return 0.0f;
-    step = step / (float) n;
-    if (std::fabs (step) > 0.001f)
-    {
-        step = std::copysign (0.001f, step);
-        target = prev + step * (float) n;
-        if (std::fabs (target) < 5.96046448e-08f)
-        {
-            target = 0.0f;
-            step = -prev / (float) n;
-        }
-    }
-    return step;
-}
-
 struct Voice
 {
     std::uint32_t phase = 0;
@@ -338,11 +122,9 @@ struct Voice
     int key = 60;
     double initVol = 1.0, notePan = 0.0;
     float fvol = 1.0f, fpan = 0.0f;
-    float L = -1.0f, R = -1.0f, volf = 1.0f, panf = 0.0f;
-    int first = 2, fadepos = -1;
     bool released = false; // the framework's "released" flag (+0x174)
     int id = 0;
-    EnvState env[5];
+    flvp::Proc pr;         // the plugin voice processor shared with DX10 (core/FlVoiceProcessor.h)
 };
 
 class Engine
@@ -361,18 +143,9 @@ public:
         for (long i = 0; i < n; ++i)
             fade[(std::size_t) i] = ((float) std::cos ((double) ((float) (i + 1) * c)) + 1.0f) * 0.5f;
         // envelope snapshot (version 1, ≥ 364 B) or the framework's defaults
-        std::array<std::array<int, 17>, 5> recs {};
+        const auto defaults = flvp::defaultSnapshot();
         const bool snap = i32At (state, 0) == 1 && state.size() >= 32 + 364;
-        for (int k = 0; k < 5; ++k)
-            for (int j = 0; j < 17; ++j)
-            {
-                static const int def[17] = { 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0 };
-                recs[(std::size_t) k][(std::size_t) j] = snap ? i32At (state, 32 + 68 * (std::size_t) k + 4 * (std::size_t) j) : def[j];
-            }
-        if (! snap)
-            recs[1][0] |= 4, recs[1][16] = -101;
-        for (int k = 0; k < 5; ++k)
-            rec[k].init (recs[(std::size_t) k], ppq, tempo);
+        S.build (snap ? state.data() + 32 : defaults.data(), ppq, tempo);
         voices.reserve (maxVoices);
         return true;
     }
@@ -409,9 +182,7 @@ public:
         v.amp = 1.5f;
         v.fvol = fvol;
         v.fpan = fpan;
-        for (int k = 0; k < 5; ++k)
-            v.env[k].start (rec[k]);
-        v.first = 1 < v.env[1].stage ? 2 : 1;
+        v.pr.init (S);
         voices.push_back (v);
         return &voices.back();
     }
@@ -420,8 +191,8 @@ public:
     {
         v.released = true;
         for (int k = 1; k < 5; ++k)
-            v.env[k].release (rec[k]);
-        if (rec[1].enabled == 0)
+            v.pr.arts[(std::size_t) k].release (S.recs[(std::size_t) k]);
+        if (S.recs[1].enabled == 0)
             startFade (v);
     }
 
@@ -455,70 +226,68 @@ public:
         for (std::size_t vi = 0; vi < voices.size();)
         {
             auto& v = voices[vi];
-            if (tick || v.first > 0)
-            {
-                for (int k = 0; k < 5; ++k)
-                    v.env[k].step (rec[k]);
-                v.panf = (v.env[0].lfo * rec[0].lamt) * 2.0f;
-                v.volf = v.env[1].y * ((v.env[1].lfo * rec[1].lamt) + 1.0f);
-                if (v.volf < 0.0f)
-                    v.volf = 0.0f;
-                if (v.env[1].stage == 9)
-                    startFade (v);
-            }
+            auto& pr = v.pr;
+            if (tick || pr.first > 0)
+                pr.control (S); // (the pitch target does not reach Fruit Kick: it reads Final.Pitch only at the trigger)
             const bool finished = renderVoice (v, mono, n);
-            int k = 0;
-            if (v.fadepos >= 0)
+            for (int j = 0; j < n; ++j)
+                bufA[2 * (std::size_t) j] = bufA[2 * (std::size_t) j + 1] = mono[j];
+            float tL, tR;
+            flvp::panLaw (v.fpan + pr.pan, v.fvol * pr.vol, tL, tR);
+            if (! pr.gainsSet)
+                pr.gL = pr.gR = 0.0f, pr.gainsSet = true;
+            if (pr.first > 1)
+                pr.gL = tL, pr.gR = tR; // the first block starts at the target
+            float* x = bufA.data();
+            if (flvp::filter (S, pr, bufA.data(), bufB.data(), n, tL, tR))
+                x = bufB.data();
+            if (pr.endPos >= 0) // end fade (FUN_0071e740, mode 3): the table, then silence
             {
                 const int N = (int) fade.size();
-                k = v.fadepos < N ? std::min (n, N - v.fadepos) : 0;
-                for (int i = 0; i < k; ++i)
-                    mono[i] = mono[i] * fade[(std::size_t) (v.fadepos + i)];
-                for (int i = k; i < n; ++i)
-                    mono[i] = 0.0f;
-                v.fadepos += n;
+                const int k = std::min (std::max (N - pr.endPos, 0), n);
+                for (int j = 0; j < k; ++j)
+                {
+                    const auto t = fade[(std::size_t) (pr.endPos + j)];
+                    x[2 * j] = x[2 * j] * t;
+                    x[2 * j + 1] = x[2 * j + 1] * t;
+                }
+                std::fill (x + 2 * k, x + 2 * n, 0.0f);
+                pr.endPos += n;
             }
-            float tl, tr;
-            panLaw (v.fpan + v.panf, v.fvol * v.volf, tl, tr);
-            if (v.L == -1.0f)
-                v.L = 0.0f;
-            if (v.R == -1.0f)
-                v.R = 0.0f;
-            if (v.first > 1)
-                v.L = tl, v.R = tr;
-            v.first = 0;
-            const float dl = rampStep (tl, v.L, n), dr = rampStep (tr, v.R, n);
+            const float dl = flvp::rampStep (tL, pr.gL, n), dr = flvp::rampStep (tR, pr.gR, n);
             if (dl == 0.0f && dr == 0.0f)
             {
-                for (int i = 0; i < n; ++i)
+                for (int j = 0; j < n; ++j)
                 {
-                    l[i] = l[i] + mono[i] * tl;
-                    r[i] = r[i] + mono[i] * tr;
+                    l[j] = x[2 * j] * tL + l[j];
+                    r[j] = x[2 * j + 1] * tR + r[j];
                 }
             }
             else
             {
                 // FL's SSE mixer: gains (L, R, L + dL, R + dR) stepped by 2·d every two frames, then a per-frame tail
                 const int m8 = n / 8 * 8;
-                float g0 = v.L, g1 = v.R, g2 = v.L + dl, g3 = v.R + dr;
+                float g0 = pr.gL, g1 = pr.gR, g2 = pr.gL + dl, g3 = pr.gR + dr;
                 const float d2l = dl + dl, d2r = dr + dr;
                 for (int j = 0; j < m8; j += 2)
                 {
-                    l[j] = l[j] + mono[j] * g0;
-                    r[j] = r[j] + mono[j] * g1;
-                    l[j + 1] = l[j + 1] + mono[j + 1] * g2;
-                    r[j + 1] = r[j + 1] + mono[j + 1] * g3;
+                    l[j] = x[2 * j] * g0 + l[j];
+                    r[j] = x[2 * j + 1] * g1 + r[j];
+                    l[j + 1] = x[2 * j + 2] * g2 + l[j + 1];
+                    r[j + 1] = x[2 * j + 3] * g3 + r[j + 1];
                     g0 = g0 + d2l, g1 = g1 + d2r, g2 = g2 + d2l, g3 = g3 + d2r;
                 }
                 for (int j = m8; j < n; ++j)
                 {
-                    l[j] = l[j] + mono[j] * g0;
-                    r[j] = r[j] + mono[j] * g1;
+                    l[j] = x[2 * j] * g0 + l[j];
+                    r[j] = x[2 * j + 1] * g1 + r[j];
                     g0 = g0 + dl, g1 = g1 + dr;
                 }
             }
-            v.L = tl, v.R = tr;
-            if (finished || v.fadepos >= (int) fade.size())
+            pr.gL = tL, pr.gR = tR;
+            pr.first = 0;
+            // finished voices leave the plugin's list in order (Delphi TList.Delete)
+            if (finished || pr.endPos >= (int) fade.size())
                 voices.erase (voices.begin() + (std::ptrdiff_t) vi);
             else
                 ++vi;
@@ -527,18 +296,27 @@ public:
     }
 
     Params P;
-    Record rec[5];
+    flvp::Settings S;
+    std::vector<float> bufA = std::vector<float> (2 * maxBlock), bufB = std::vector<float> (2 * maxBlock);
     std::vector<float> fade;
     std::vector<Voice> voices;
     bool tick = false;
+    // the host's per-tick callback (slot 14): the next block steps the articulators; global LFO phases advance now
+    void onTick()
+    {
+        tick = true;
+        for (auto& r : S.recs)
+            if ((r.flags & 0x20) != 0)
+                r.globalPhase += r.lfoInc;
+    }
     int maxPoly = 0, nextId = 0;
 
 private:
     void startFade (Voice& v)
     {
         v.released = true;
-        if (v.fadepos < 0)
-            v.fadepos = 0;
+        if (v.pr.endPos < 0)
+            v.pr.endPos = 0;
     }
 
     bool renderVoice (Voice& v, float* buf, int n)
@@ -685,7 +463,7 @@ public:
             int m = std::min (Engine::hostBlock, n - done);
             if (tickIn <= 0.0)
             {
-                engine->tick = true;
+                engine->onTick();
                 tickIn += perTick;
             }
             const auto untilTick = (int) std::ceil (tickIn);
@@ -775,26 +553,9 @@ std::vector<std::uint8_t> fruitKickWithChannelEnvelope (const std::vector<std::u
 
 std::vector<std::string> fruitKickFallbacks (const std::vector<std::uint8_t>& state)
 {
-    std::vector<std::string> r;
     if (! fruitKickStateUsable (state))
         return { "unreadable state" };
-    if (i32At (state, 0) == 1 && state.size() >= 32 + 364)
-    {
-        const auto cut = i32At (state, 32 + 0x15c), res = i32At (state, 32 + 0x160), type = i32At (state, 32 + 0x168);
-        bool filterEnv = false, global = false;
-        for (int k = 0; k < 5; ++k)
-        {
-            const auto flags = i32At (state, 32 + 68 * (std::size_t) k);
-            global = global || (flags & 0x20) != 0;
-            if ((k == 2 || k == 3) && (i32At (state, 32 + 68 * (std::size_t) k + 4) != 0 || i32At (state, 32 + 68 * (std::size_t) k + 44) != 0))
-                filterEnv = true;
-        }
-        if (cut != 256 || res != 0 || type != 0 || filterEnv)
-            r.push_back ("channel filter (not modelled)");
-        if (global)
-            r.push_back ("global LFO phase (per-voice here)");
-    }
-    return r;
+    return {};
 }
 
 int fruitKickParam (const std::vector<std::uint8_t>& state, int index)
@@ -846,7 +607,7 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
         }
         for (auto tk : ticks)
             if (tk == t)
-                e.tick = true;
+                e.onTick();
         auto m = std::min (block, length - t);
         for (auto ev : evs)
             if (t < ev && ev < t + m)

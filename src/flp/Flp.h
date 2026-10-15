@@ -115,7 +115,9 @@ struct Channel
         int amount = 0; // target: ±128 (cutoff/resonance/volume), ±64 (pan), ±2400 cents (pitch)
         // LFO (REA_rodada6 §2): flags 0x02 = tempo-synced, 0x20 = global
         int lfoDelay = 100, lfoAttack = 20000, lfoAmount = 0, lfoSpeed = 32950, lfoShape = 0;
-        std::vector<std::uint8_t> raw; // the record as stored (≤ 68 B; plugins built on FL's voice framework read it whole)
+        // the record as FL wrote it (first 68 bytes; rawSize = how many were present), for engines that read it whole
+        std::array<std::uint8_t, 68> raw {};
+        int rawSize = 0;
     };
     std::array<Envelope, 5> envelopes {};
     int envelopeCount = 0;
