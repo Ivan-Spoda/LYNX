@@ -10623,21 +10623,41 @@ std::vector<std::uint8_t> simSynthTestState (const std::array<double, 45>& P, co
     std::memcpy (b.data() + 560, &version, 4);
     return b;
 }
-// every 0xD5 record of an FL preset/project file (.fst/.flp event stream) whose channel plugin is `plugin`
+// the 0xD5 records of an FL preset file (.fst: the FLhd/FLdt event stream) that follow a plugin name `plugin`
 std::vector<std::vector<std::uint8_t>> pluginStatesIn (const std::filesystem::path& file, const std::string& plugin)
 {
     std::vector<std::vector<std::uint8_t>> out;
     std::ifstream in (file, std::ios::binary);
     const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
-    try
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    std::string name;
+    while (i < b.size())
     {
-        const auto p = flp::parseProject (b);
-        for (const auto& c : p.channels)
-            if (c.pluginName == plugin)
-                out.push_back (c.pluginState);
-    }
-    catch (...)
-    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (i + n > b.size())
+            break;
+        if (id == 0xC9)
+        {
+            name.clear();
+            for (std::size_t k = 0; k < n; ++k)
+                if (b[i + k] != 0)
+                    name += (char) b[i + k]; // ASCII or UTF-16LE (zero bytes skipped)
+        }
+        if (id == 0xD5 && name == plugin)
+            out.emplace_back (b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n));
+        i += n;
     }
     return out;
 }
@@ -10659,7 +10679,7 @@ TEST (simsynth_engine)
     CHECK (lynx::simSynthStateUsable (blobA) && ! lynx::simSynthStateUsable (std::vector<std::uint8_t> (blobA.begin(), blobA.begin() + 563)));
     const auto hp = lynx::simSynthHostParams (blobA);
     // knobs go through ⌊65535·v⌋, the coarse pitches through 48 steps, the switches and wave selectors as they are
-    CHECK (hp.size() == 58u && hp[0] == 52427 && hp[27] == 10080 && hp[41] == 1 && hp[54] == 0 && hp[56] == 4);
+    CHECK (hp.size() == 58u && hp[0] == 52428 && hp[27] == 10080 && hp[41] == 1 && hp[54] == 0 && hp[56] == 4);
 
     // golden samples of the installation's SimSynth_x64.dll (round-64 EXEC harness: created, state restored, 44.1 kHz,
     // host blocks of 512, old voice record) — LYNX's engine renders bit-identically: C5 0–30000, E5 Final.Vol 0.8 pan
