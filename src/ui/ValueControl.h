@@ -77,6 +77,16 @@ void addValueItems (juce::PopupMenu& menu, juce::Component& target, AudioEngine*
 // "Type value" dialog (asynchronous).
 void typeValue (juce::Component& target, const ValueSpec& spec, double current, std::function<void (double)> set);
 
+// --- value read-out --------------------------------------------------------------------------------
+// A small floating label with the value, shown next to the control while it is dragged (FL shows the
+// value in the hint bar; LYNX also shows it at the control so the eye can stay there).
+//   showValueTip: during a drag (stays until hideValueTip, normally on mouse up);
+//   flashValueTip: after a wheel step or a reset click (fades out on its own).
+// `control` is the control's area in `over`'s coordinates; the tip sits above it.
+void showValueTip (juce::Component& over, juce::Rectangle<int> control, const juce::String& text);
+void flashValueTip (juce::Component& over, juce::Rectangle<int> control, const juce::String& text);
+void hideValueTip();
+
 // --- hints -----------------------------------------------------------------------------------------
 
 struct Hint

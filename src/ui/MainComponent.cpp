@@ -267,6 +267,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
     // the workspace panels
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
+    rack.onOpenMixerInsert = [this] (int insert) { // double-click on a channel's route box
+        showPanel (Panel::mixer);
+        mixer.selectTrack (insert);
+    };
     rackViewport.setViewedComponent (&rack, false);
     rackViewport.setScrollBarsShown (true, true);
     workspace.setContent (Panel::playlist, playlistArea, "Playlist", Icon::playlist);
