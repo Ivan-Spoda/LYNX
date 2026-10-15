@@ -5,6 +5,7 @@
 #include "core/ValueMath.h"
 #include "ui/AutomationUi.h"
 #include "ui/I18n.h"
+#include "ui/Theme.h"
 #include "ui/WindowOwner.h"
 
 namespace lynx::ui
@@ -260,6 +261,115 @@ void typeValue (juce::Component& target, const ValueSpec& spec, double current, 
     keepAboveMainWindow (*window);
 }
 
+// --- value read-out ------------------------------------------------------------------------------
+
+namespace
+{
+class ValueTip final : public juce::Component,
+                       private juce::Timer
+{
+public:
+    ValueTip()
+    {
+        setInterceptsMouseClicks (false, false);
+        setAlwaysOnTop (true);
+        setOpaque (false);
+    }
+
+    void show (juce::Component& over, juce::Rectangle<int> control, const juce::String& newText, bool transient)
+    {
+        auto* top = over.getTopLevelComponent();
+
+        if (top == nullptr || ! over.isShowing())
+            return;
+
+        if (getParentComponent() != top)
+            top->addChildComponent (this);
+
+        text = newText;
+        const auto f = juce::Font (theme::font (theme::type::small, true));
+        const auto width = juce::GlyphArrangement::getStringWidthInt (f, text) + 16;
+        const auto r = top->getLocalArea (&over, control);
+        auto b = juce::Rectangle<int> (width, 20).withCentre ({ r.getCentreX(), r.getY() - 13 });
+
+        if (b.getY() < 2) // no room above: below the control
+            b.setY (r.getBottom() + 3);
+
+        setBounds (b.constrainedWithin (top->getLocalBounds().reduced (2)));
+        toFront (false);
+        setVisible (true);
+        repaint();
+
+        if (transient)
+            startTimer (900);
+        else
+            stopTimer();
+    }
+
+    void hide()
+    {
+        stopTimer();
+        setVisible (false);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme;
+        const auto r = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (r.translated (0.0f, 1.0f), radius::sm);
+        g.setColour (colour::bg3);
+        g.fillRoundedRectangle (r, radius::sm);
+        g.setColour (colour::borderStrong);
+        g.drawRoundedRectangle (r, radius::sm, 1.0f);
+        g.setColour (colour::textPrimary);
+        g.setFont (font (type::small, true));
+        g.drawText (text, getLocalBounds(), juce::Justification::centred, false);
+    }
+
+private:
+    void timerCallback() override { hide(); }
+
+    juce::String text;
+};
+
+// Owns the tip; deleted by JUCE before the message loop goes away.
+struct ValueTipHolder final : juce::DeletedAtShutdown
+{
+    ValueTip tip;
+    static ValueTipHolder*& instance()
+    {
+        static ValueTipHolder* holder = nullptr;
+        return holder;
+    }
+    ~ValueTipHolder() override { instance() = nullptr; }
+};
+
+ValueTip& valueTip()
+{
+    auto*& holder = ValueTipHolder::instance();
+    if (holder == nullptr)
+        holder = new ValueTipHolder();
+    return holder->tip;
+}
+} // namespace
+
+void showValueTip (juce::Component& over, juce::Rectangle<int> control, const juce::String& text)
+{
+    valueTip().show (over, control, text, false);
+}
+
+void flashValueTip (juce::Component& over, juce::Rectangle<int> control, const juce::String& text)
+{
+    valueTip().show (over, control, text, true);
+}
+
+void hideValueTip()
+{
+    if (auto* holder = ValueTipHolder::instance())
+        holder->tip.hide();
+}
+
 // --- hints -------------------------------------------------------------------------------------
 
 void setHint (juce::Component& c, const juce::String& text, bool hasMenu, bool automatable)
@@ -359,6 +469,12 @@ void configure (juce::Slider& s)
     s.setPopupMenuEnabled (false);
 }
 
+// sliders that show no value of their own get the floating read-out
+bool wantsValueTip (juce::Slider& s)
+{
+    return s.getTextBoxPosition() == juce::Slider::NoTextBox;
+}
+
 void setFine (juce::Slider& s, bool fine)
 {
     const auto base = (int) s.getProperties().getWithDefault (sensitivityProperty, 250);
@@ -400,13 +516,21 @@ struct SliderContract final : juce::MouseListener
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (auto* s = sliderOf (e.eventComponent); takesContract (s))
+        {
             setFine (*s, e.mods.isCtrlDown());
+            if (wantsValueTip (*s) && ! e.mods.isPopupMenu())
+                showValueTip (*s, s->getLocalBounds(), s->getTextFromValue (s->getValue()));
+        }
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
         if (auto* s = sliderOf (e.eventComponent); takesContract (s))
+        {
             setFine (*s, false);
+            if (wantsValueTip (*s))
+                hideValueTip();
+        }
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
@@ -417,7 +541,11 @@ struct SliderContract final : juce::MouseListener
             return;
 
         if (const auto v = wheelValue (s->getValue(), e, wheel, sliderSpec (*s)))
+        {
             s->setValue (*v, juce::sendNotificationSync);
+            if (wantsValueTip (*s))
+                flashValueTip (*s, s->getLocalBounds(), s->getTextFromValue (s->getValue()));
+        }
     }
 };
 

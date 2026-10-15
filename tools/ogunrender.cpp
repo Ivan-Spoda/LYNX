@@ -1,6 +1,7 @@
 // Renders an Ogun state with LYNX's engine exactly like our round-37 reference model drives it (verification harness,
 // REA_rodada37 §1.21): ogunrender <state.bin> <out.f32> <length> <rate> [q=N] [tempo=X] [blk=N] [counter=N] [maxpoly=N]
 // [kills=0|1] [note=start,key,vel,fvol,fpan,pofs,fcut,fres,relvel,off ...] [j0=s0,s1,...]
+// Autogun (REA_rodada57): [autogun=1] [sg=<path of the installation's Autogun\Data\SG.dat>]
 // Output: interleaved stereo float32. Prints the render time and the fallbacks the state relies on.
 
 #include <chrono>
@@ -43,6 +44,13 @@ int main (int argc, char** argv)
             opt.counter = std::atoi (val().c_str());
         else if (a.rfind ("maxpoly=", 0) == 0)
             opt.maxPolyphony = std::atoi (val().c_str());
+        else if (a.rfind ("autogun=", 0) == 0)
+            opt.autogun = std::atoi (val().c_str()) != 0;
+        else if (a.rfind ("sg=", 0) == 0)
+        {
+            std::ifstream sg (val(), std::ios::binary);
+            opt.sgState.assign ((std::istreambuf_iterator<char> (sg)), std::istreambuf_iterator<char>());
+        }
         else if (a.rfind ("kills=", 0) == 0)
             opt.hostKills = std::atoi (val().c_str()) != 0;
         else if (a.rfind ("j0=", 0) == 0)
@@ -77,7 +85,7 @@ int main (int argc, char** argv)
     std::ofstream o (argv[2], std::ios::binary);
     o.write ((const char*) out.data(), (std::streamsize) (out.size() * sizeof (float)));
     std::printf ("render_ms=%.1f\n", ms);
-    for (const auto& s : lynx::ogunFallbacks (state))
+    for (const auto& s : lynx::ogunFallbacks (state, opt.autogun))
         std::printf ("fallback: %s\n", s.c_str());
     return 0;
 }

@@ -13,7 +13,9 @@
 #include "ui/PianoRollComponent.h"
 #include "ui/MixerComponent.h"
 #include "ui/PlaylistComponent.h"
+#include "ui/HintBar.h"
 #include "ui/Splash.h"
+#include "ui/Toolbar.h"
 #include "ui/ValueControl.h"
 #include "ui/Workspace.h"
 
@@ -62,7 +64,13 @@ public:
         addRecordOptions (menu);
         return menu;
     }
-    void setHintForSnapshot (const ui::Hint& hint) { hintBar.setHint (hint); }
+    void setHintForSnapshot (const ui::Hint& hint, bool live = false)
+    {
+        hintsFrozen = true; // the timer would replace it with the hint under the (off-screen) mouse
+        hintBar.setHint (hint, live);
+    }
+    juce::Rectangle<int> getToolbarBoundsForSnapshot() const { return { 0, 0, getWidth(), toolbarHeight }; }
+    void setMetersForSnapshot (double cpu, std::int64_t memory, int polyphony) { perfMeter.setValues (cpu, memory, polyphony); }
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
     std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
@@ -146,8 +154,10 @@ private:
     juce::MenuBarComponent menuBar { this };
     juce::RecentlyOpenedFilesList recent;
     // The main toolbar is two rows high, laid out the way FL Studio arranges its panels (docs/WORKFLOW_FL.md,
-    // "Layout"): the menu with the hint bar under it, transport, recording options, global snap and pattern
-    // selector, window and file shortcuts, and the output monitor on the right.
+    // section 5.1): the menu with the hint bar under it, transport (with the time display and the song
+    // position slider), master volume and pitch, recording options, global snap and pattern selector, window
+    // and file shortcuts, then CPU / memory / polyphony and the output monitor on the right. Panels drop
+    // out by priority when the window is narrow; the hint bar takes the room that is left.
     static constexpr int rowHeight = 28;
     static constexpr int toolbarHeight = 2 * rowHeight + 10;
     void newProject();
@@ -179,6 +189,9 @@ private:
     IconButton countInButton { "countIn", Icon::countIn };
     IconButton waitInputButton { "waitInput", Icon::waitInput };
     void refreshRecordOptionButtons();
+    void showRecordMenu();
+    void setControlHints(); // the hint bar text of every toolbar control (markup, see ui/HintBar.h)
+    juce::String keyMarkup (const char* actionId) const; // "[Ctrl][S]" for the action's first key ("" when unbound)
 
     // tempo: a number dragged by its digits (whole BPM or decimals), with tap tempo in its menu
     class TempoDisplay final : public juce::Component,
@@ -220,37 +233,22 @@ private:
     IconButton pluginPickerButton { "pluginPicker", Icon::pluginPicker };
     GlobalGridBox gridBox; // global grid of the editors (see ui/EditorTools.h)
     std::vector<int> dividers; // x positions of the toolbar panel separators
-    juce::Rectangle<int> snapIconArea, positionArea, tempoArea;
+    juce::Rectangle<int> snapLabelArea, patternLabelArea, titleArea;
     void showLanguageChoice (const juce::String& id);
-    juce::Label positionLabel;
 
-    // output oscilloscope in the bar
-    class Scope final : public juce::Component
-    {
-    public:
-        explicit Scope (AudioEngine& e) : engine (e) { setInterceptsMouseClicks (false, false); }
-        void update();
-        void paint (juce::Graphics& g) override;
+    // the time display with the song position slider under it, master volume and pitch, meters
+    toolbar::TimeDisplay timeDisplay { engine };
+    toolbar::SongPositionBar songPosition { engine };
+    toolbar::MasterKnob masterVolume { engine, toolbar::MasterKnob::Kind::volume };
+    toolbar::MasterKnob masterPitch { engine, toolbar::MasterKnob::Kind::pitch };
+    toolbar::PerformanceMeter perfMeter;
+    toolbar::OutputMonitor output { engine };
+    int meterTicks = 0;
 
-    private:
-        AudioEngine& engine;
-        std::array<float, 1024> samples {};
-    };
-    Scope scope { engine };
-    juce::Label cpuLabel;
-
-    // hint strip: what the control under the mouse does, its live value, and markers for
+    // hint bar: what the control under the mouse does, its live value, and markers for
     // "can be automated" and "has a right-click menu"
-    class HintBar final : public juce::Component
-    {
-    public:
-        void setHint (const ui::Hint& hint);
-        void paint (juce::Graphics& g) override;
-
-    private:
-        ui::Hint current;
-    };
-    HintBar hintBar;
+    ui::HintBar hintBar;
+    bool hintsFrozen = false; // --snapshot: keep the hint that was set
     juce::String idleHint() const;
 
     ChannelRackComponent rack;

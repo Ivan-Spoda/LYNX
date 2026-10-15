@@ -6,6 +6,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/MeterBallistics.h"
 #include "engine/AudioEngine.h"
 #include "ui/ValueControl.h"
 
@@ -14,15 +15,19 @@ namespace lynx
 // The built-in effects offered in the slot menus and the quick-add palette, in menu order.
 const std::vector<EffectKind>& addableEffects();
 
-// FL-style mixer: one vertical strip per track (Master first).
-//  - fader and pan: the shared control contract (ui/ValueControl.h): drag (Ctrl: fine), wheel,
-//    Alt/middle-click or double-click resets, right-click: type value / reset / automation
-//  - green LED = mute (click), "S" = solo
+// FL-style mixer: one compact vertical strip per track (Master first).
+//  - header: record arm, number, name (once), effect count; drag it sideways to reorder inserts
+//  - pan, stereo separation and fader: the shared control contract (ui/ValueControl.h): drag
+//    (Ctrl: fine), wheel, Alt/middle-click or double-click resets, right-click: type value / reset /
+//    automation; the value shows next to the mouse while dragging
+//  - green LED = mute (click), "S" = solo; stereo peak meters with peak hold and a clip latch
+//    (click the meter to clear it)
 //  - clicking a strip selects it; right-click opens the menu (rename, route the selected
-//    channel to this track); "+" at the end adds an insert
-//  - below each strip are the channels routed into it
-//  - send button (arrow) at the bottom: toggles the send from the selected track to this one;
-//    dragging vertically changes the send level
+//    inserts to this track); "+" at the end adds an insert
+//  - routing lane at the bottom: with an insert selected, every other strip shows a send switch
+//    (click toggles the send from the selected insert; right-click: send only / sidechain), a send
+//    level knob when the send is on, and wires show where the selected insert goes (red) and what
+//    feeds it (blue)
 class MixerStrips final : public juce::Component,
                           public ui::HintSource,
                           private juce::ChangeListener,
@@ -55,11 +60,14 @@ public:
     void linkSelectedChannels (bool startingHere); // Ctrl+L / Ctrl+Shift+L
     void selectLinkedChannels();             // Alt+L
 
-    static constexpr int stripWidth = 70;
-    static constexpr int masterWidth = 86;
+    static constexpr int stripWidth = 60;
+    static constexpr int masterWidth = 76;
+
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
 
 private:
-    enum class Part { none, pan, fader, mute, solo, route, body, add, arm };
+    enum class Part { none, pan, stereo, fader, meter, mute, solo, route, send, header, body, add, arm };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -74,6 +82,20 @@ private:
     juce::Rectangle<int> soloArea (int track) const;
     juce::Rectangle<int> routeArea (int track) const;
     juce::Rectangle<int> armArea (int track) const;
+    juce::Rectangle<int> stereoArea (int track) const;
+    juce::Rectangle<int> meterArea (int track) const;
+    juce::Rectangle<int> sendArea (int track) const;   // send level knob (routing lane)
+    juce::Rectangle<int> headerArea (int track) const;
+    juce::Rectangle<int> faderRail (int track) const;  // the fader without the meters
+    int laneTop() const noexcept;
+    void paintRouting (juce::Graphics& g);
+    void showTip (Part part, int track, bool transient);
+    juce::Rectangle<int> tipArea (Part part, int track) const;
+    void setHover (Part part, int track);
+    Part hoverPart = Part::none;
+    int hoverTrack = -1;
+    int headerDragTrack = -1;   // dragging a header sideways reorders the inserts
+    bool headerDragged = false;
     void showSendMenu (int track);
     void soloExclusive (int track);
     std::vector<int> selection { 0 };
@@ -94,7 +116,7 @@ private:
     float dragStartValue = 0.0f;
     ui::ValueDrag drag;
 
-    std::vector<float> levels; // displayed level per track*2, with smooth falloff
+    std::vector<meters::PeakHold> levels; // per track*2: bar, peak hold and clip latch
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerStrips)
 };
@@ -135,10 +157,15 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
     ui::Hint hintAt (juce::Point<int> position) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void showTip (int param, int slot, bool transient);
+    int hoverSlot = -1, hoverParam = -1;  // hover feedback: the slot row, the knob (mixParam = a slot's dry/wet)
+    bool hoverLed = false;
     ui::ValueSpec specFor (int param, int slot) const; // param = mixParam: the slot's dry/wet
     double valueOf (int param, int slot) const;
     void setValue (int param, int slot, double value);
@@ -183,7 +210,7 @@ public:
 
     // Selects the first track that has effects (used by --snapshot mode).
     void selectFirstTrackWithEffects();
-    void selectTrack (int track) { strips.selectTrack (track); }
+    void selectTrack (int track); // also scrolls the strip into view
     void selectSlot (int slot) { effects.selectSlot (slot); }
 
     // The key map's mixer.* actions.

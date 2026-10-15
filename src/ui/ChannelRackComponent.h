@@ -15,10 +15,14 @@ namespace lynx
 //  - steps: left click turns on (drag paints), right click erases
 //  - name (channel button): click opens/closes the channel's editor (plugin window or settings),
 //    closing the previously opened one unless Alt is held (or "keep editors open" is on);
-//    Ctrl+click auditions; double click opens the Piano Roll; right click opens the channel menu
+//    Ctrl+click auditions; double click opens the Piano Roll; right click opens the channel menu;
+//    dragging it up/down reorders the selected channels
 //  - selector: click selects one row, Ctrl+click or right click toggles, Shift+click selects a range,
-//    double click selects all. The selection receives MIDI input and is what the keys act on
-//  - knobs, route box: the shared control contract (ui/ValueControl.h)
+//    double click selects all; left-drag selects a range, right-drag adds the rows it crosses.
+//    The selection receives MIDI input and is what the keys act on
+//  - knobs, route box: the shared control contract (ui/ValueControl.h), with a value read-out while
+//    dragging; double-click on the route box opens the Mixer at that insert
+//  - everything under the mouse is highlighted and described in the hint bar
 //  - dropping an audio file onto a row turns the channel into a sampler
 class ChannelRackComponent final : public juce::Component,
                                    public juce::FileDragAndDropTarget,
@@ -32,6 +36,7 @@ public:
     ~ChannelRackComponent() override;
 
     std::function<void()> onOpenPianoRoll;
+    std::function<void (int)> onOpenMixerInsert; // double-click on a route box: show the Mixer at that insert
 
     // Settings > "Keep channel editors open": opening an editor never closes the previous one.
     static bool keepEditorsOpen;
@@ -41,6 +46,8 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     ui::Hint hintAt (juce::Point<int> position) override;
@@ -61,6 +68,7 @@ public:
     void sendSelectedToInserts();
     void toggleMute (int channel);
     void solo (int channel);
+    void setSwingMixOfSelected (int channel); // "Swing mix..." (type a value for the selected channels)
 
     // Workflow P2: step graph lanes, fills, rotation and organisation
     void toggleGraphLanes();
@@ -139,6 +147,21 @@ private:
     // selection
     void selectRows (std::vector<int> rows, int primary);
     void clickSelector (int row, const juce::ModifierKeys& mods);
+    int selectDownRow = -1;          // a drag over the selector column: where it started
+    bool selectDragAdds = false;     // right-drag: add the crossed rows to the selection
+    std::vector<int> selectDragBase; // the selection before a right-drag
+
+    // channel button: a click opens the editor on release; dragging reorders the selection
+    int nameDownRow = -1;
+    bool nameDragged = false, nameDownAlt = false;
+    float nameDragY = 0.0f;
+
+    // hover feedback
+    void setHover (Area area, int row, int step);
+    juce::Rectangle<int> controlBounds (Area area, int row) const; // knob / route box under the mouse (value tip)
+    void showTip (Area area, int row, bool transient);
+    Area hoverArea = Area::none;
+    int hoverRow = -1, hoverStep = -1;
 
     // the control contract for the row's knobs and route box
     ui::ValueSpec specFor (Area area, int row) const;

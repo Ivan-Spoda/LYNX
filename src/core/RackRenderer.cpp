@@ -663,7 +663,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         {
             if (! c.muted)
             {
-                instrument.setNextNoteExpression (e.pan, e.cents, e.porta);
+                instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
@@ -673,7 +673,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         }
         else if (e.type == NoteEvent::Type::slide)
         {
-            instrument.slideTo (e.key, e.cents, e.slideSamples);
+            instrument.slideTo (e.key, e.cents + state.song.masterPitch, e.slideSamples);
         }
         else if (e.type == NoteEvent::Type::choke)
         {
@@ -776,7 +776,8 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         const auto isPlugin = slots[i].kind == EffectKind::plugin;
         const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
 
-        if (key < smartDisable.size())
+        // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
+        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat)
         {
             auto& sd = smartDisable[key];
 

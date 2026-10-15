@@ -1211,8 +1211,42 @@ private:
             // the workspace desktop: the default layout, then with the Piano Roll and Mixer floating too
             // (and a sample hint in the status strip, as when hovering a knob)
             ui.showDesktopForSnapshot (false);
+            ui.setMetersForSnapshot (0.23, (std::int64_t) 412 << 20, 6);
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-desktop.png");
+
+            // the start-up desktop and the toolbar at the usual window sizes: the untouched default layout
+            // follows the window (default rects, not scaled ones); panels drop from the toolbar by priority
+            {
+                const auto size = ui.getBounds();
+                for (const auto& [w, h] : std::vector<std::pair<int, int>> { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 } })
+                {
+                    ui.setSize (w, h);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-desktop-" + juce::String (w) + ".png");
+                    saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + juce::String (w) + ".png");
+                }
+                ui.setBounds (size);
+                offline.dispatchPendingMessages();
+            }
+
+            // the hint bar: a value control while it is dragged (live value), a gesture line with mouse and key
+            // glyphs, and a text too long for one line (two lines)
+            {
+                const auto toolbar = ui.getToolbarBoundsForSnapshot().withWidth (juce::jmin (ui.getWidth(), 900));
+                const lynx::ui::Hint hints[] = {
+                    { lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "-3.2 dB", true, true },
+                    { lynx::tr ("Piano Roll: [LMB] add a note, drag to move  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"), {}, false, false },
+                    { lynx::tr ("Global snap: the grid of the Piano Roll and Playlist (when they follow it) and the quantise of recorded notes  "
+                                "[LMB] choose  [Wheel] step  [RMB] length of new notes  [Backspace] snap on/off  [Alt] while dragging: no snap"), {}, false, true },
+                };
+                for (int i = 0; i < 3; ++i)
+                {
+                    ui.setHintForSnapshot (hints[i], i == 0);
+                    saveArea (ui, toolbar, prefix + "-hint-" + juce::String (i + 1) + ".png");
+                }
+            }
+
             ui.showDesktopForSnapshot (true);
             ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
             saveSnapshot (ui, prefix + "-desktop-all.png");
@@ -1221,8 +1255,14 @@ private:
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
+            // the editors' mouse feel: the hovered note / clip edge (grip, outline) and its hint in the hint bar
+            ui.setHintForSnapshot (ui.getPianoRollForSnapshot().hoverForSnapshot());
+            saveSnapshot (ui, prefix + "-pianoroll-hover.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            ui.setHintForSnapshot (ui.getPlaylistForSnapshot().hoverForSnapshot());
+            saveSnapshot (ui, prefix + "-playlist-hover.png");
+            ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
             // the Playlist with a time selection over bars 2-3 (it selects the clips it touches) and the Knife tool
             ui.getPlaylistForSnapshot().setTimeSelectionForSnapshot (1, 3);
             ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::knife);
@@ -1385,6 +1425,27 @@ private:
                 saveSnapshot (ui, prefix + "-mixer-multi.png");
                 offline.setInsertArmed (3, false);
                 ui.getMixerForSnapshot().getStripsForSnapshot().setSelection ({}, 0);
+            }
+
+            // the Mixer's routing lane: an insert with sends selected (send knobs and wires)
+            if (offline.getSong().mixer.size() > 6)
+            {
+                int source = -1;
+                for (int t = 1; t < (int) offline.getSong().mixer.size() && source < 0; ++t)
+                    if (! offline.getSong().mixer[(std::size_t) t].sends.empty())
+                        source = t;
+                const auto temporary = source < 0;
+                if (temporary) // the demo has no sends: add two for the picture
+                {
+                    source = 1;
+                    offline.editSong ([] (lynx::Song& s) { s.setRoute (1, 5, true, 0.6f); s.setRoute (1, 6, true, 0.3f); s.setRoute (4, 1, true, 0.8f); });
+                }
+                ui.getMixerForSnapshot().selectTrack (source);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-mixer-sends.png");
+                if (temporary)
+                    offline.editSong ([] (lynx::Song& s) { s.setRoute (1, 5, false); s.setRoute (1, 6, false); s.setRoute (4, 1, false); });
+                ui.getMixerForSnapshot().selectTrack (0);
             }
 
             // the Playlist with ripple editing on
@@ -1586,6 +1647,16 @@ private:
         }
 
         writePng (image, path);
+    }
+
+    // a part of a component (e.g. the main toolbar)
+    static void saveArea (juce::Component& c, juce::Rectangle<int> area, const juce::String& path)
+    {
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (c.createComponentSnapshot (area), *out);
     }
 
     static void saveSnapshot (juce::Component& c, const juce::String& path)

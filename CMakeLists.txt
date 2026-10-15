@@ -44,6 +44,7 @@ add_library(lynx_core STATIC
     src/core/MiniSynth.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
+    src/core/TransistorBass.cpp
     src/core/PoiZone.cpp
     src/core/Toxic.cpp
     src/core/ToxicFx.cpp
@@ -53,6 +54,7 @@ add_library(lynx_core STATIC
     src/core/Reeverb2.cpp
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
+    src/core/GrossBeat.cpp
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
@@ -60,6 +62,7 @@ add_library(lynx_core STATIC
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
     src/core/ChorusFx.cpp
+    src/core/FruityBasicFx.cpp
     src/core/FruityDelayBank.cpp
     src/core/FruityMultiband.cpp
     src/core/FlPatcher.cpp
@@ -158,6 +161,11 @@ if(LYNX_BUILD_APP)
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp
         src/ui/Splash.cpp)
+
+    # main window chrome: hint bar and toolbar widgets
+    target_sources(LYNX PRIVATE
+        src/ui/HintBar.cpp
+        src/ui/Toolbar.cpp)
 
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE

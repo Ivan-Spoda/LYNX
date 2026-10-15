@@ -53,7 +53,9 @@ enum class InstrumentKind : std::uint8_t
     fruitkick,  // FL's Fruit Kick (REA_rodada43 §1): raw saved state (with its envelope snapshot) in pluginState
     bassdrum,   // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
     toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
-    threeosc    // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
+    threeosc,   // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
+    autogun,    // FL's Autogun (REA_rodada57 §1): Ogun's engine on the raw saved state (pluginState), SG.dat path in samplePath
+    transistorbass // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -311,6 +313,10 @@ enum class EffectKind : std::uint8_t
     fruityChorus, // FL's Fruity Chorus, exact (REA_rodada59 §1, core/ChorusFx.h): controls / range
     hyperChorus,  // FL's Hyper Chorus, exact (REA_rodada59 §2, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
     vintageChorus, // FL's Vintage Chorus, exact (REA_rodada59 §3, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
+    fruityPanOMatic, // FL's Fruity PanOMatic, exact (REA_rodada58, core/FruityBasicFx.h): pan, volume, LFO; controls / range
+    fruityBalance,   // FL's Fruity Balance, exact (REA_rodada58, core/FruityBasicFx.h): balance, volume; controls / range
+    fruityBloodOverdrive, // FL's Fruity Blood Overdrive, exact (REA_rodada58, core/FruityBasicFx.h): 6 controls / range
+    grossBeat,    // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
     fruityDelayBank, // FL's Fruity Delay Bank, exact (REA_rodada56, core/FruityDelayBank.h): FL's state in EffectSlot::state, params = its 4 global controls / 128
     fruityMultiband  // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
 };
@@ -571,6 +577,7 @@ struct Song
     double bpm = 130.0;
     int beatsPerBar = 4;
     float swing = 0.0f; // 0..1: delays off-beat sixteenth notes (like the swing of FL's Channel Rack)
+    float masterPitch = 0.0f; // cents, -1200..1200: shifts every note of the built-in instruments (the toolbar's master pitch)
     std::vector<ChannelDef> channels;
     std::vector<Pattern> patterns;
     int currentPattern = 0;
