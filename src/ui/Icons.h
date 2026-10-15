@@ -23,10 +23,11 @@ enum class Icon
     panelMenu, pluginPicker, mic, // window options menu, plugin picker, recording options
     countIn, waitInput, // recording: count-in and wait for input
     mouseLeft, mouseMiddle, mouseWheel, // hint bar gestures (with rightClick)
-    tuningFork // master pitch
+    tuningFork, // master pitch
+    drumBrush   // Piano Roll: the drum paint tool
 };
 
-constexpr int iconCount = (int) Icon::tuningFork + 1;
+constexpr int iconCount = (int) Icon::drumBrush + 1;
 
 namespace icons
 {

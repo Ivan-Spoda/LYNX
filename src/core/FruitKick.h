@@ -7,7 +7,8 @@
 // Voice: the host's 16384-point sine table read with a 32-bit phase (start phase = Click << 24), a per-sample
 // multiplicative pitch fall from Max freq (+ half the note offset) down to the Min freq floor and an amplitude that
 // starts at 1.5 and falls by a per-sample factor until it is below 0.0002; Distortion runs FL's host waveshaper (curve
-// set 0, curve 10, interpolated). Around it, FL's plugin voice framework: five channel-envelope/LFO targets stepped
+// set 0, curve 10; FL's x87 routines: interpolating while LYNX exports, the live one otherwise — REA_rodada55 §2.3).
+// Around it, FL's plugin voice framework: five channel-envelope/LFO targets stepped
 // once per sequencer tick (pan, volume, cutoff, resonance; the pitch target never reaches this plugin), the channel
 // filter, the sin/cos pan law on (Final.Pan, Final.Vol), level ramps of at most 0.001 per sample, and a 10 ms
 // raised-cosine fade when a note is released without a volume envelope (or when the volume envelope ends). That
