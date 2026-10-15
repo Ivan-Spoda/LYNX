@@ -14,6 +14,8 @@
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/FruityDelayBank.h"
+#include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
 
 #include "core/Biquad.h"
@@ -2277,6 +2279,15 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo grossBeatInfo { "Gross Beat", { { "Time slot", 0.0f }, { "Volume slot", 0.0f }, { "Time mix", 1.0f },
                                                             { "Volume mix", 1.0f }, { "Attack", 0.1765f }, { "Release", 0.5f },
                                                             { "Tension", 0.5f }, { "Hold", 0.0f } } };
+    // FL's state travels in EffectSlot::state; the four global controls are the editable parameters (raw / 128)
+    static const EffectInfo fruityDelayBankInfo { "Fruity Delay Bank", { { "Dry", 1.0f }, { "Output", 1.0f }, { "Input", 1.0f }, { "Feedback", 1.0f } } };
+    // FL's raw controls normalised over their ranges (core/FruityMultiband.h); defaults = a new FL instance
+    static const EffectInfo fruityMultibandInfo = [] {
+        EffectInfo info { "Fruity Multiband Compressor", {} };
+        for (int i = 0; i < flmb::controls; ++i)
+            info.params.push_back ({ flmb::paramName (i), flmb::normalised (flmb::controlDefault[(std::size_t) i], flmb::controlMin[(std::size_t) i], flmb::controlMax[(std::size_t) i]) });
+        return info;
+    }();
     // FL's controls over their ranges (core/FlangusFastDist.h); defaults = a new FL instance
     static const EffectInfo fastDistInfo { "Fruity Fast Dist", { { "Pre amp", 0.5f }, { "Threshold", 1.0f }, { "Type", 0.0f },
                                                                  { "Mix", 1.0f }, { "Post gain", 1.0f } } };
@@ -2400,6 +2411,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
+        case EffectKind::fruityMultiband: return fruityMultibandInfo;
         case EffectKind::fruityFastDist: return fastDistInfo;
         case EffectKind::fruityFlangus: return flangusInfo;
         case EffectKind::fruityFlanger: return flangerInfo;
@@ -2719,6 +2732,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::spreader:
             return stereofx::spreaderParamText (param, v);
+        case EffectKind::fruityDelayBank:
+            return fldbank::globalText (param, v);
+
+        case EffectKind::fruityMultiband:
+            return flmb::paramText (param, v);
 
         case EffectKind::fruityPanOMatic:
             return flbasic::panOMaticParamText (param, v);
@@ -2796,6 +2814,10 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::grossBeat)
         return grossbeat::make (slot.state);
+    if (slot.kind == EffectKind::fruityDelayBank)
+        return fldbank::make (slot.state);
+    if (slot.kind == EffectKind::fruityMultiband)
+        return slot.state.empty() ? flmb::make() : flmb::make (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2847,6 +2869,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
+        case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();

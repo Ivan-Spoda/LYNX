@@ -168,6 +168,8 @@ const char* effectId (EffectKind k)
         case EffectKind::hyperChorus: return "hyperChorus";
         case EffectKind::vintageChorus: return "vintageChorus";
         case EffectKind::grossBeat: return "grossBeat";
+        case EffectKind::fruityDelayBank: return "fruityDelayBank";
+        case EffectKind::fruityMultiband: return "fruityMultiband";
         case EffectKind::fruityFastDist: return "fruityFastDist";
         case EffectKind::fruityFlangus: return "fruityFlangus";
         case EffectKind::fruityFlanger: return "fruityFlanger";
@@ -315,6 +317,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper, EffectKind::reeverb2, EffectKind::reeverb1, EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                     EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader,
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat,
+                    EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
+                    EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
                     EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger })
         if (id == effectId (k))
             return k;
