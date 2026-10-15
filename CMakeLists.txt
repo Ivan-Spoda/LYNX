@@ -54,6 +54,9 @@ add_library(lynx_core STATIC
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
     src/core/Reeverb2.cpp
+    src/core/LuxeVerb.cpp
+    src/core/IldspMath.cpp
+    src/core/ConvolverFx.cpp
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp
@@ -62,6 +65,8 @@ add_library(lynx_core STATIC
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
+    src/core/EquoFx.cpp
+    src/core/PitchShifterFl.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp

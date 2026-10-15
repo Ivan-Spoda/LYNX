@@ -1,8 +1,12 @@
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
+#include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/EquoFx.h"
+#include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -939,6 +943,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Vocodex" && data)
         if (auto v = vocodexEffect (state, data))
             return v->slot;
+    if (pluginName == "Fruity Convolver" && data) // impulse response file of the installation (REA_rodada60)
+        if (auto exact = convolverFromFl (state, data))
+            return exact;
     if (pluginName == "Soundgoodizer" && data)
         if (const auto path = soundgoodizerPresetPath (state); ! path.empty())
             if (auto exact = soundgoodizerExact (state, data (path)))
@@ -1154,6 +1161,21 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Fruity Love Philter") // FL's own engine (REA_rodada66); lovePhilterEffects' conversion otherwise
         if (auto exact = philter::slotFromFl (state))
             return exact;
+    if (pluginName == "Pitch Shifter") // the exact engines (REA_rodada61); LYNX's generic pitch shifter otherwise
+        if (psfl::State ps; psfl::parsePitchShifter (state.data(), state.size(), ps))
+        {
+            auto slot = makeEffectSlot (EffectKind::flPitchShifter);
+            psfl::toParams (ps, slot.params);
+            return slot;
+        }
+    if (pluginName == "EQUO") // the exact engine (REA_rodada61); a flat parametric EQ otherwise
+        if (const auto s = equofx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::equo);
+            slot.state = state;
+            equofx::toParams (*s, slot.params);
+            return slot;
+        }
     if (pluginName == "Effector")
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder") // FL's own engine (REA_rodada66 §6); the generic vocoder otherwise
@@ -1169,6 +1191,12 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return vintagePhaserFromFl (state);
     if (pluginName == "Fruity Reeverb 2") // the exact effect (REA_rodada49); the Freeverb mapping below otherwise
         if (auto exact = reeverb2FromFl (state))
+            return exact;
+    if (pluginName == "LuxeVerb") // the exact effect (REA_rodada60); the generic reverb mapping below otherwise
+        if (auto exact = luxeVerbFromFl (state))
+            return exact;
+    if (pluginName == "Fruity Convolver") // the exact effect with an embedded impulse response (REA_rodada60)
+        if (auto exact = convolverFromFl (state))
             return exact;
     if (pluginName == "Fruity Reeverb") // the first version, exact (REA_rodada49 §6)
         if (auto exact = reeverb1FromFl (state))
@@ -1341,6 +1369,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
         case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
+        case EffectKind::luxeVerb: return { "LuxeVerb" };
+        case EffectKind::convolver: return { "Fruity Convolver" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelay2: return { "Fruity Delay 2" };
         case EffectKind::fruityDelay3: return { "Fruity Delay 3" };
@@ -1351,6 +1381,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::spreader: return { "Spreader" };
         case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
         case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
+        case EffectKind::equo: return { "EQUO" };
+        case EffectKind::flPitchShifter: return { "Pitch Shifter" };
         default: return {};
     }
 }
@@ -1370,6 +1402,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
+    if (is ("EQUO") && k >= 0 && k < 5)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact choruses take FL's controls over their ranges
     if (chorusControls (pluginName) > k && k >= 0)
@@ -1446,6 +1481,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return std::nullopt;
     }
 
+    if (is ("Pitch Shifter") && k >= 0 && k < 13) // the exact effect takes FL's 13 knobs over their ranges (REA_rodada61)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Pitch Shifter"))
     {
         if (k == 0) // pitch: −12..+12 st (in cents) -> our ±24 st
