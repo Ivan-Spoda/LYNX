@@ -48,6 +48,7 @@
 #include "core/FruityShapers.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
+#include "core/ChorusFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -793,6 +794,7 @@ TEST (flp_real_files)
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
+    int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -1040,6 +1042,7 @@ TEST (flp_real_files)
                         vocodexSlots += slot.plugin == "Vocodex";
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
+                        chorusSlots += lynx::chorusControls (slot.plugin) > 0 && slot.state.size() >= 4 ? 1 : 0;
                     }
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
@@ -1058,6 +1061,7 @@ TEST (flp_real_files)
                         clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
                         delay2Exact += fx.kind == lynx::EffectKind::fruityDelay2;
                         delay3Exact += fx.kind == lynx::EffectKind::fruityDelay3;
+                        chorusExact += fx.kind == lynx::EffectKind::fruityChorus || fx.kind == lynx::EffectKind::hyperChorus || fx.kind == lynx::EffectKind::vintageChorus ? 1 : 0;
                     }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
@@ -1720,6 +1724,8 @@ TEST (flp_real_files)
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     CHECK (delay2Exact == delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
+    std::printf ("  Chorus family: %d of %d slots on the exact engines\n", chorusExact, chorusSlots);
+    CHECK (chorusExact >= chorusSlots && chorusSlots >= 47); // REA_rodada59
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -9408,6 +9414,160 @@ TEST (bassdrum_engine)
 #include "WorkflowP2Tests.inc"
 // Editor mouse grammar (Piano Roll / Playlist)
 #include "EditorGestureTests.inc"
+
+TEST (chorus_family_engines)
+{
+    // REA_rodada59: goldens from the installation's DLLs (44.1 kHz, blocks of 512) on this signal
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0) * 0.5f;
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0) * 0.5f;
+    }
+    struct Gold { int i; float l, r; };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto run = [&] (const char* plugin, const std::vector<std::uint8_t>& st, lynx::EffectKind kind, std::initializer_list<Gold> gold) {
+        const auto slot = lynx::effectFromFl (plugin, st, 120.0);
+        CHECK (slot && slot->kind == kind);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 3072, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
+    };
+    auto ints = [] (std::initializer_list<int> v) {
+        std::vector<std::uint8_t> b;
+        for (int x : v)
+            for (int k = 0; k < 4; ++k)
+                b.push_back ((std::uint8_t) ((unsigned) x >> (8 * k)));
+        return b;
+    };
+
+    // Fruity Chorus (start phases 0, which FL draws at random)
+    run ("Fruity Chorus", ints ({ 1, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.0f, -0.3850000202655792f }, { 1000, -0.6181581020355225f, 0.2707735002040863f }, { 2047, -0.01424609124660492f, 0.24228274822235107f },
+           { 3000, -1.1650776863098145f, -0.1809898018836975f }, { 4095, -0.012790083885192871f, 0.060571759939193726f } });
+    run ("Fruity Chorus", ints ({ 1, 700, 4000, 900, 4000, 3000, 2000, 400, 700, 1000, 30, 4999, 0 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.0f, -0.3850000202655792f }, { 1000, -0.5833333134651184f, 0.36345374584198f }, { 2047, -0.0336097776889801f, -0.3360772430896759f },
+           { 3000, -0.40196430683135986f, -0.5073210597038269f }, { 4095, -0.1176539734005928f, 0.444706529378891f } });
+    run ("Fruity Chorus", ints ({ 1, 36, 469, 1004, 2832, 293, 3500, 0, 428, 0, 0, 3887, 1024 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.2975943684577942f, 0.3747217655181885f }, { 1000, -0.39463338255882263f, 0.18099871277809143f }, { 2047, 0.3894335627555847f, 0.35111793875694275f },
+           { 3000, -0.1450725942850113f, 0.2847272455692291f }, { 4095, 0.33678582310676575f, -0.13365517556667328f } });
+    {
+        const auto slot = lynx::effectFromFl ("Fruity Chorus", ints ({ 1, 36, 469, 1004, 2832, 293, 3500, 0, 428, 0, 0, 3887, 1024 }), 120.0);
+        CHECK (slot && lynx::fruitychorusfx::fromParams (slot->params.data())[2] == 1004);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityChorus, 11, 1.0f, 120.0) == "on");
+        CHECK (lynx::effectParamFromFl ("Fruity Chorus", 11).has_value() && ! lynx::effectParamFromFl ("Fruity Chorus", 12).has_value());
+    }
+    // a state FL does not read (version 2) or too short keeps the generic chorus
+    CHECK (! lynx::effectFromFl ("Fruity Chorus", ints ({ 2, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), 120.0).has_value()
+           || lynx::effectFromFl ("Fruity Chorus", ints ({ 2, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), 120.0)->kind != lynx::EffectKind::fruityChorus);
+    CHECK (! lynx::effectFromFl ("Fruity Chorus", { 1, 0, 0, 0 }, 120.0).has_value()
+           || lynx::effectFromFl ("Fruity Chorus", { 1, 0, 0, 0 }, 120.0)->kind != lynx::EffectKind::fruityChorus);
+
+    // Hyper Chorus engine in FL's load sequence (defaults, then the state: the parameters glide), instance k's phases
+    auto hyper = [&] (std::initializer_list<int> raws, int instance, std::initializer_list<Gold> gold) {
+        namespace hc = lynx::hyperchorusfx;
+        hc::Engine e (instance);
+        const std::vector<int> r (raws);
+        auto val = [] (int i, int raw) { return (float) std::clamp ((double) (raw - hc::rawMin[(std::size_t) i]) * (1.0 / (double) (hc::rawMax[(std::size_t) i] - hc::rawMin[(std::size_t) i])), 0.0, 1.0); };
+        for (int i = 0; i < hc::params; ++i)
+            e.setParam (i, val (i, hc::defaults[(std::size_t) i]));
+        for (int i = 0; i < hc::params; ++i)
+            e.setParam (i, val (i, r[(std::size_t) i]));
+        e.setRate (44100.0);
+        std::vector<float> io (8192);
+        for (int n = 0; n < 4096; ++n)
+            io[2 * (std::size_t) n] = inL[(std::size_t) n], io[2 * (std::size_t) n + 1] = inR[(std::size_t) n];
+        for (int s = 0; s < 4096; s += 512)
+            e.render (io.data() + 2 * s, io.data() + 2 * s, 512);
+        for (const auto& g : gold)
+            CHECK (close (io[2 * (std::size_t) g.i], g.l) && close (io[2 * (std::size_t) g.i + 1], g.r));
+    };
+    hyper ({ 562, 919, 499, 505, 709, 716, 1, 19247, 10900, 191, 1000 }, 0,
+           { { 100, 0.0f, -0.4115639328956604f }, { 1000, -0.658551037311554f, 0.28647756576538086f }, { 2047, 0.24743860960006714f, -0.5088979005813599f },
+             { 3000, -0.5171564221382141f, -0.3630276620388031f }, { 4095, 0.08128821104764938f, 0.18811003863811493f } });
+    hyper ({ 1000, 555, 0, 400, 300, 300, 0, 22000, 120, 368, 750 }, 2,
+           { { 100, 0.0f, -0.398922324180603f }, { 1000, -1.1528236865997314f, 0.2839684784412384f }, { 2047, 0.5115746855735779f, -0.3330395221710205f },
+             { 3000, -0.6094785928726196f, 0.17040175199508667f }, { 4095, -0.11666109412908554f, 0.21931695938110352f } });
+    CHECK (lynx::hyperchorusfx::randState (1) == 1u * 214013u + 2531011u);
+    {
+        // the import: controls as parameters; a song's Hyper Chorus slots are numbered in mixer order
+        const auto st = ints ({ 2, 1000, 555, 0, 400, 300, 300, 0, 22000, 120, 368, 750, 0 });
+        const auto slot = lynx::effectFromFl ("Hyper Chorus", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::hyperChorus && lynx::hyperchorusfx::fromParams (slot->params.data())[9] == 368);
+        lynx::Song song;
+        song.mixer.resize (3);
+        song.mixer[1].effects = { *slot, *slot };
+        song.mixer[2].effects = { *slot };
+        lynx::numberChorusInstances (song);
+        CHECK (lynx::hyperchorusfx::instanceOf (song.mixer[2].effects[0].state) == 2);
+        auto fx = lynx::makeEffect (song.mixer[2].effects[0]);
+        fx->prepare (48000.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+        bool finite = true, wet = false;
+        for (int n = 0; n < 4096; ++n)
+        {
+            finite = finite && std::isfinite (l[(std::size_t) n]) && std::isfinite (r[(std::size_t) n]);
+            wet = wet || l[(std::size_t) n] != inL[(std::size_t) n];
+        }
+        CHECK (finite && wet);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::hyperChorus, 8, 0.0f, 120.0) == "off");
+        CHECK (! lynx::effectFromFl ("Hyper Chorus", ints ({ 3, 1000, 555, 0, 400, 300, 300, 0, 22000, 120, 368, 750, 0 }), 120.0).has_value()
+               || lynx::effectFromFl ("Hyper Chorus", ints ({ 3, 1000, 555, 0, 400, 300, 300, 0, 22000, 120, 368, 750, 0 }), 120.0)->kind != lynx::EffectKind::hyperChorus);
+    }
+
+    // Vintage Chorus engine as FL drives it (created, sample rate, each control), fresh instance (its smoothed values
+    // start from the engine's initial ones)
+    auto vintage = [&] (std::initializer_list<int> raws, std::initializer_list<Gold> gold) {
+        namespace vc = lynx::vintagechorusfx;
+        vc::Engine e;
+        e.setRate (44100.0);
+        int i = 0;
+        for (int raw : raws)
+        {
+            e.setParam (i, (float) std::clamp ((double) (raw - vc::rawMin[(std::size_t) i]) * (1.0 / (double) (vc::rawMax[(std::size_t) i] - vc::rawMin[(std::size_t) i])), 0.0, 1.0));
+            ++i;
+        }
+        std::vector<float> io (8192);
+        for (int n = 0; n < 4096; ++n)
+            io[2 * (std::size_t) n] = inL[(std::size_t) n], io[2 * (std::size_t) n + 1] = inR[(std::size_t) n];
+        for (int s = 0; s < 4096; s += 512)
+            e.render (io.data() + 2 * s, io.data() + 2 * s, 512);
+        for (const auto& g : gold)
+            CHECK (close (io[2 * (std::size_t) g.i], g.l) && close (io[2 * (std::size_t) g.i + 1], g.r));
+    };
+    vintage ({ 2, 0, 211046, 1, 2411, 960, 1985, 5121, 0, 1, 4420, 6000, 273, 0, 0, 0, 0 },
+             { { 100, 0.0f, -0.05606573447585106f }, { 1000, -0.3413679003715515f, 0.20469821989536285f }, { 2047, 0.1487489938735962f, -0.28199973702430725f },
+               { 3000, -0.31699514389038086f, -0.43230289220809937f }, { 4095, 0.1255197525024414f, 0.0810704305768013f } });
+    vintage ({ 2, 0, 80, 0, 0, 60, 3000, 3000, 0, 0, 0, 3000, 0, 3000, 0, 0, 0 }, // hiss
+             { { 100, -1.2527654007499223e-06f, -0.053655341267585754f }, { 1000, -0.44306400418281555f, 0.25606146454811096f }, { 2047, 0.23425261676311493f, -0.21375307440757751f },
+               { 3000, -0.5793180465698242f, -0.13371579349040985f }, { 4095, 0.05595953390002251f, 0.11362095922231674f } });
+    vintage ({ 0, 1, 49152, 0, 3000, 60, 3000, 3000, 0, 0, 0, 3000, 0, 0, 0, 0, 0 }, // Chorus 1 + 2
+             { { 100, 0.0f, -0.05365874245762825f }, { 1000, -0.5095958113670349f, 0.2809423506259918f }, { 2047, 0.17256303131580353f, -0.3563305139541626f },
+               { 3000, -0.471851646900177f, -0.30123069882392883f }, { 4095, 0.0959278866648674f, 0.13436323404312134f } });
+    {
+        const auto st = ints ({ 1, 2, 0, 211046, 1, 2411, 960, 1985, 5121, 0, 1, 4420, 6000, 273, 0, 0, 0, 0 });
+        const auto slot = lynx::effectFromFl ("Vintage Chorus", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::vintageChorus && lynx::vintagechorusfx::fromParams (slot->params.data())[2] == 211046);
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+        bool finite = true;
+        for (int n = 0; n < 4096; ++n)
+            finite = finite && std::isfinite (l[(std::size_t) n]) && std::isfinite (r[(std::size_t) n]);
+        CHECK (finite && l[3000] != inL[3000]);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vintageChorus, 0, 0.0f, 120.0) == "Chorus 1");
+        CHECK (! lynx::effectFromFl ("Vintage Chorus", ints ({ 2, 2, 0, 211046, 1, 2411, 960, 1985, 5121, 0, 1, 4420, 6000, 273, 0, 0, 0, 0 }), 120.0).has_value()
+               || lynx::effectFromFl ("Vintage Chorus", ints ({ 2, 2, 0, 211046, 1, 2411, 960, 1985, 5121, 0, 1, 4420, 6000, 273, 0, 0, 0, 0 }), 120.0)->kind != lynx::EffectKind::vintageChorus);
+    }
+}
 
 TEST (fruity_delay_engines)
 {
