@@ -172,6 +172,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Maximus and Soundgoodizer:** FL's exact Maximus engine as a mixer effect (`core/MaximusFx`, REA round 40) —
+  RMS detector, saturation A/B, state versions 3–15, solo, legacy linear-phase FIR split, x87-precision smoothers;
+  Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
+  at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
+  bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -217,8 +222,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Harmless: the rack compressor needs the user's FL installation (its four presets are read from it; otherwise it
   stays off and the import report says so); the chorus/delay use the x87 kernels FL picks on the test machine (another
   CPU may make FL round the chorus delay instead of truncating it — not confirmed); a fresh delay starts its feedback
-  ramp at the stored value (FL's host call order not observed); Maximus features unused by the presets (RMS detector,
-  saturation B, other curve segment types, linear-phase mode) are not decoded; the editor's quality
+  ramp at the stored value (FL's host call order not observed); Maximus's Master Mid mode, its v14+ linear-phase split and curve
+  segment types other than 0/7 are not decoded (REA round 40); the editor's quality
   (0/1) is used for playback and export alike (FL renders with quality 2; LYNX's engine does not tell instruments
   when it renders offline); FL seeds its random draws from the clock, LYNX from a fixed seed (spectral-random
   phases, Noise resonance and the LFO "voice random" are deterministic and differ from any FL render by design);
@@ -248,13 +253,12 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
-- Vocodex: the Soundgoodizer stage (SG > 0, all demo instances) is LYNX's Soundgoodizer approximation (preset A,
-  amount = SG, then the presets' −0.2 dB master limiter) on the engine's output — FL hosts its own Soundgoodizer
-  with `Data/SG.dat`, not decoded yet (on the "Vocodex demo" inputs FL's SG_x64.dll with SG.dat peaks at −0.39 dBFS
-  and sits ≈1.7 dB above the approximation, median of 100 ms windows); the
-  internal Sytrus carrier (CarIn = "---", Ookay and NewStuff) is not available, so that Vocodex passes its
-  modulator unchanged (`vocodex::makeInternalCarrier` is the hook for it); map segments with tension ≠ 0 are read
-  as straight lines (no demo uses them).
+- Vocodex: the Soundgoodizer stage (FL's engine with `Data/SG.dat`) and the internal Sytrus carrier (Ookay,
+  NewStuff) need the user's FL installation at import (otherwise the old approximation / modulator pass-through and
+  the import report says so); with the internal carrier the match is −112 dB (LYNX's Sytrus on that preset), the
+  others −136…−145 dB; map segments with tension ≠ 0 are read as straight lines (no demo uses them).
+- Maximus: 4 of the 100 demo states use the v15 linear-phase band split (Frequency Splitter's engine) or Master Mid
+  mode is set — those keep the approximation (REA round 40 §8).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
@@ -297,5 +301,5 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
-  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes and Noise resonance.
+- Ogun's per-partial release and ALT DECAY, Maximus's Master Mid mode and linear-phase split, Harmor's image
+  synthesis, arpeggio envelopes and Noise resonance.
