@@ -3,6 +3,7 @@
 #include "core/FlEffects.h"
 #include "core/MixerOps.h"
 #include "ui/AutomationUi.h"
+#include "ui/BrowserComponent.h"
 #include "ui/ExportDialog.h"
 
 #include "core/Effects.h"
@@ -1662,6 +1663,64 @@ void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
     });
 }
 
+bool EffectsPanel::isInterestedInDragSource (const SourceDetails& details)
+{
+    return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("fst");
+}
+
+void EffectsPanel::itemDropped (const SourceDetails& details)
+{
+    dropPreset (BrowserComponent::draggedFile (details), details.localPosition);
+}
+
+bool EffectsPanel::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    return files.size() == 1 && juce::File (files[0]).hasFileExtension ("fst");
+}
+
+void EffectsPanel::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    if (! files.isEmpty())
+        dropPreset (juce::File (files[0]), { x, y });
+}
+
+bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position)
+{
+    juce::MemoryBlock data;
+
+    if (slots() == nullptr || ! file.loadFileAsData (data))
+        return false;
+
+    const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+    const auto fx = effectFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), engine.getSong().bpm);
+
+    if (! fx)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
+                                                tr ("LYNX can't build an effect from this preset."));
+        return false;
+    }
+
+    auto target = -1;
+    for (int i = 0; i < (int) slots()->size(); ++i)
+        if (slotBounds (i).contains (position))
+            target = i;
+
+    if (target < 0 && (int) slots()->size() >= maxEffectSlots)
+        return false;
+
+    engine.editSong ([t = track, target, fx = *fx] (Song& song) {
+        auto& effects = song.mixer[(std::size_t) t].effects;
+        if (target >= 0 && target < (int) effects.size())
+            effects[(std::size_t) target] = fx;
+        else
+            effects.push_back (fx);
+    });
+    selectedSlot = target >= 0 ? target : (int) slots()->size() - 1;
+    repaint();
+    return true;
+}
+
 juce::Rectangle<int> EffectsPanel::fxSwitchBounds() const
 {
     return { getWidth() - 58, 6, 48, panelHeader - 12 };
@@ -1832,6 +1891,27 @@ void EffectsPanel::showSlotMenu (int slot)
     {
         sideMenu (tr ("Modulator from"), false);
         sideMenu (tr ("Carrier from"), true);
+    }
+    {
+        // A/B compare: keep a copy of the settings, then swap between it and the current ones
+        const auto key = std::make_pair (track, slot);
+        const auto hasSpare = spare.count (key) > 0 && spare[key].kind == (*slots())[(std::size_t) slot].kind;
+        juce::PopupMenu ab;
+        ab.addItem (tr ("Store the current settings as B"), [this, key, slot] {
+            spare[key] = (*slots())[(std::size_t) slot];
+        });
+        ab.addItem (tr ("Swap with B"), hasSpare, false, [this, key, slot] {
+            const auto stored = spare[key];
+            spare[key] = (*slots())[(std::size_t) slot];
+            engine.editSong ([t = track, slot, stored] (Song& song) {
+                auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) slot];
+                const auto enabled = target.enabled;
+                target = stored;
+                target.enabled = enabled;
+            });
+        });
+        ab.addItem (tr ("Forget B"), hasSpare, false, [this, key] { spare.erase (key); });
+        menu.addSubMenu (hasSpare ? tr ("A/B compare (B stored)") : tr ("A/B compare"), ab);
     }
     menu.addItem (tr ("Move up"), slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });

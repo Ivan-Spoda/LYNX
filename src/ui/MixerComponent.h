@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -104,9 +105,19 @@ private:
 //  - knob to the right of the slot: dry/wet (drag; double-click resets to 100%)
 class EffectsPanel final : public juce::Component,
                            public ui::HintSource,
+                           public juce::DragAndDropTarget,
+                           public juce::FileDragAndDropTarget,
                            private juce::ChangeListener
 {
 public:
+    // Effect presets (.fst) dragged from the Browser or Explorer: dropped on a slot they replace it,
+    // anywhere else they go into the first free slot.
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    bool dropPreset (const juce::File& file, juce::Point<int> position);
+
     explicit EffectsPanel (AudioEngine& engine);
     ~EffectsPanel() override;
 
@@ -151,6 +162,8 @@ private:
     void toggleAllWindows();
     int slotAt (juce::Point<int> p) const;
     int dragSlot = -1, dropSlot = -1; // dragging a slot to reorder it
+    // A/B compare: a spare state per (insert, slot), swapped with the live one on request (not saved)
+    std::map<std::pair<int, int>, EffectSlot> spare;
 
     AudioEngine& engine;
     int track = 0;
