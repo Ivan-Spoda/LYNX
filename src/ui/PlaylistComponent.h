@@ -9,6 +9,7 @@
 
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
+#include "ui/Theme.h"
 
 namespace lynx
 {
@@ -30,6 +31,7 @@ namespace lynx
 //  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V, Ctrl+B (repeats the
 //    time selection when there is one), Ctrl+Ins / Ctrl+Del insert / remove the time selection, Esc
 class PlaylistComponent final : public juce::Component,
+                                public SharesTitleBar,
                                 public juce::FileDragAndDropTarget,
                                 public juce::DragAndDropTarget,
                                 private juce::ChangeListener,
@@ -59,6 +61,7 @@ public:
     void paint (juce::Graphics& g) override;
     void paintOverChildren (juce::Graphics& g) override;
     void resized() override;
+    void setTitleBarInsets (int left, int right) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
@@ -156,6 +159,7 @@ private:
     juce::ComboBox arrangementBox;
     juce::ComboBox snapBox; // "Follow global grid" or this editor's own grid
     ToolStrip tools { true };
+    int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
 
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px per 4-beat bar
     double scrollTicks = 0.0;
@@ -239,7 +243,8 @@ private:
 };
 
 // The Playlist tab: the Picker on the left and the Playlist (does not own them).
-class PlaylistArea final : public juce::Component
+class PlaylistArea final : public juce::Component,
+                           public SharesTitleBar
 {
 public:
     PlaylistArea (PatternPicker& p, PlaylistComponent& l) : picker (p), playlist (l)
@@ -248,15 +253,33 @@ public:
         addAndMakeVisible (playlist);
     }
 
+    // the toolbar row runs across the whole window (as the title bar); the picker starts under it
+    void setTitleBarInsets (int left, int right) override
+    {
+        titleLeft = left;
+        playlist.setTitleBarInsets (juce::jmax (0, left - PatternPicker::width), right);
+        resized();
+    }
+
     void resized() override
     {
         auto area = getLocalBounds();
-        picker.setBounds (area.removeFromLeft (PatternPicker::width));
+        auto column = area.removeFromLeft (PatternPicker::width);
+        picker.setBounds (titleLeft > 0 ? column.withTrimmedTop (PlaylistComponent::toolbarHeight) : column);
         playlist.setBounds (area);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::bg3); // the toolbar band above the picker
+        g.fillRect (0, 0, PatternPicker::width, PlaylistComponent::toolbarHeight);
+        g.setColour (theme::colour::border);
+        g.fillRect (0, PlaylistComponent::toolbarHeight - 1, PatternPicker::width, 1);
     }
 
 private:
     PatternPicker& picker;
     PlaylistComponent& playlist;
+    int titleLeft = 0;
 };
 } // namespace lynx

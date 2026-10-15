@@ -864,6 +864,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::harmor;
                     def.pluginState = c.pluginState;
                     adoptedFromPlugin = true;
+                    // rack compressor: Harmor's own preset System\Compression\<n>.fst from the user's installation
+                    // (REA_rodada38); its Maximus state goes into modelParams (size, bytes…)
+                    const auto compType = harmorCompressorType (c.pluginState);
+                    if (compType > 0)
+                    {
+                        const auto path = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Harmor\\System\\Compression\\"
+                                                             + std::to_string (compType) + ".fst",
+                                                         options.roots);
+                        std::optional<std::vector<std::uint8_t>> state;
+                        if (! path.empty() && options.readFile && (! options.fileExists || options.fileExists (path)))
+                            state = hlfx::maximusStateFromFst (options.readFile (path));
+                        if (state && hlfx::makeMaximusPreset (*state) != nullptr)
+                        {
+                            def.modelParams.clear();
+                            def.modelParams.push_back ((float) state->size());
+                            for (const auto byte : *state)
+                                def.modelParams.push_back ((float) byte);
+                        }
+                        else if (options.report != nullptr)
+                            ++options.report->droppedEffects["Harmor compressor (preset not found)"];
+                    }
                 }
                 else if (synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
                     adopt();

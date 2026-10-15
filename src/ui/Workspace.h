@@ -34,6 +34,8 @@ public:
     void setContent (Panel panel, juce::Component& content, const juce::String& title, Icon icon);
     void setTitle (Panel panel, const juce::String& title);
     void setTitleTooltip (Panel panel, const juce::String& tooltip);
+    // A control shown in the title bar after the title (not owned), e.g. the Channel Rack's swing knob.
+    void setTitleAccessory (Panel panel, juce::Component* accessory, int width);
 
     // F-key behaviour (see Layout::toggle). Returns true if the panel is visible afterwards.
     bool toggle (Panel panel);
@@ -67,7 +69,9 @@ public:
     std::function<bool (const juce::KeyPress&)> onKeyInDetachedWindow;
     std::function<void (Panel, const juce::MouseEvent&, const juce::MouseWheelDetails&)> onTitleWheel;
     std::function<void (Panel, const juce::MouseEvent&)> onTitleRightClick;
-    std::function<void()> onDefaultLayout; // after the default layout was (re)built: fit panels to their content
+    std::function<void()> onDefaultLayout;
+    // Adds the panel's own items to its options menu (the button at the left of its title bar).
+    std::function<void (Panel, juce::PopupMenu&)> onPanelMenu; // after the default layout was (re)built: fit panels to their content
 
     // Resizes a floating panel's content area to `contentWidth` x `contentHeight` (0 = keep that side),
     // keeping its top-left corner and staying inside the desktop. Ignored while maximized or detached.

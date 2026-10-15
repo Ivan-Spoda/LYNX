@@ -107,10 +107,6 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 {
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
-    logo.setImage (logoImage(), juce::RectanglePlacement::centred);
-    logo.setTooltip ("LYNX " JUCE_APPLICATION_VERSION_STRING);
-    addAndMakeVisible (logo);
-
     if (persistent)
     {
         loadUiSettings();
@@ -125,6 +121,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     saveButton.onClick = [this] { save (false); };
     exportButton.setTooltip (tr ("Export audio: WAV, FLAC or OGG") + " (Ctrl+R)");
     exportButton.onClick = [this] { exportAudio(); };
+    auto withKey = [this] (const juce::String& text, const char* id) {
+        const auto key = shortcutText (id).trim();
+        return key.isEmpty() ? text : text + " (" + key + ")";
+    };
+    undoButton.setTooltip (withKey (tr ("Undo"), "edit.undo"));
+    undoButton.onClick = [this] { engine.undo(); };
+    redoButton.setTooltip (withKey (tr ("Redo"), "edit.redo"));
+    redoButton.onClick = [this] { engine.redo(); };
+    pluginPickerButton.setTooltip (withKey (tr ("Plugin picker: add an instrument or plugin as a new channel"), "panel.quickAdd"));
+    pluginPickerButton.onClick = [this] { showQuickAdd(); };
 
     // transport: Play toggles play / stop-and-back; Stop returns to the start; double-click Stop = all notes off
     playButton.setTooltip (tr ("Play; pressed again, stops and goes back to where it started") + " (Space; Ctrl+Space pauses)");
@@ -133,8 +139,9 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     stopButton.onClick = [this] { stopAndRewind(); };
     stopButton.onDoubleClick = [this] { engine.panic(); };
     recordButton.setOnColour (theme::colour::record);
+    recordButton.setIconColour (theme::colour::record.withMultipliedSaturation (0.8f));
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
-    recordMenuButton.setTooltip (tr ("What to record"));
+    recordMenuButton.setTooltip (tr ("Recording options: what to record"));
     recordMenuButton.onClick = [this] {
         juce::PopupMenu menu;
         menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
@@ -150,25 +157,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
         });
-        menu.addSubMenu (tr ("Recording"), makeRecordOptionsMenu());
-        {
-            juce::PopupMenu editIn;
-            const char* choices[] = { TR_NOOP ("Piano Roll when it has piano-roll notes, else Channel Rack"), TR_NOOP ("Channel Rack"), TR_NOOP ("Piano Roll") };
-            for (int i = 0; i < 3; ++i)
-                editIn.addItem (tr (choices[i]), true, PlaylistComponent::editPatternsIn == i, [this, i] {
-                    PlaylistComponent::editPatternsIn = i;
-                    saveUiSettings();
-                });
-            menu.addSubMenu (tr ("Double-click on a pattern clip opens"), editIn);
-        }
+        menu.addSeparator();
+        addRecordOptions (menu);
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
     };
 
     // Pattern / Song: a two-segment switch (L toggles); right-click shows the matching panel
+    // as in FL, a two-line switch in front of the transport buttons: pattern on top, song below
     patternModeButton.setText (tr ("Pattern"));
     songModeButton.setText (tr ("Song"));
-    patternModeButton.setCorners (true, false);
-    songModeButton.setCorners (false, true);
     for (auto* b : { &patternModeButton, &songModeButton })
     {
         b->setOnColour (theme::colour::bg6);
@@ -197,8 +194,14 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     typingPianoButton.setIconColourWhenOn (theme::colour::accent);
     typingPianoButton.onClick = [this] { setTypingPiano (! typingPiano); };
 
-    settingsButton.setTooltip (tr ("Audio settings"));
-    settingsButton.onClick = [this] { showAudioSettings(); };
+    // count-in and wait-for-input switches next to the metronome, as in FL's recording panel
+    for (auto* b : { &countInButton, &waitInputButton })
+    {
+        b->setOnColour (theme::colour::bg6);
+        b->setIconColourWhenOn (theme::colour::accent);
+    }
+    countInButton.onClick = [this] { runAction ("record.countIn"); };
+    waitInputButton.onClick = [this] { runAction ("record.waitForInput"); };
 
     for (int i = 0; i < workspace::panelCount; ++i)
     {
@@ -245,16 +248,14 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     swingSlider.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     swingSlider.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("0123456789.").getDoubleValue() / 100.0; };
     swingSlider.onValueChange = [this] { engine.editSong ([v = (float) swingSlider.getValue()] (Song& s) { s.swing = v; }); };
-    swingSlider.setTooltip (tr ("Swing"));
-    swingLabel.setText (tr ("Swing"), juce::dontSendNotification);
-    swingLabel.setFont (theme::font (theme::type::caption, true));
-    swingLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
-    swingLabel.setJustificationType (juce::Justification::centredRight);
+    swingSlider.setTooltip (tr ("Swing of the Channel Rack (all channels)"));
+    swingSlider.setMouseClickGrabsKeyboardFocus (false);
+    swingSlider.setWantsKeyboardFocus (false);
 
     patternMenuButton.setTooltip (tr ("Pattern: rename, color, clone, insert, split, length, delete"));
     patternMenuButton.onClick = [this] { showPatternMenu(); };
 
-    positionLabel.setFont (theme::monoFont (17.0f));
+    positionLabel.setFont (theme::monoFont (19.0f));
     positionLabel.setJustificationType (juce::Justification::centred);
     positionLabel.setColour (juce::Label::textColourId, theme::colour::textPrimary);
     positionLabel.setTooltip (tr ("Position: bar : beat : step"));
@@ -274,6 +275,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     workspace.setContent (Panel::mixer, mixer, "Mixer", Icon::mixer);
     workspace.setContent (Panel::browser, browser, "Browser", Icon::browser);
     workspace.setTitleTooltip (Panel::channelRack, tr ("Shift+wheel here changes the pattern"));
+    workspace.setTitleAccessory (Panel::channelRack, &swingSlider, 26); // FL keeps the global swing in the rack's title bar
+    workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) {
+        if (panel == Panel::channelRack)
+            menu.addSubMenu (tr ("Pattern"), makePatternMenu());
+        else if (panel == Panel::playlist)
+            menu.addItem (tr ("Maximize or restore the Playlist") + shortcutText ("panel.maximisePlaylist"), [this] {
+                workspace.toggleMaximised (Panel::playlist);
+                refreshPanelButtons();
+            });
+    };
     workspace.onFocusChanged = [this] (Panel) { refreshPanelButtons(); };
     workspace.onKeyInDetachedWindow = [this] (const juce::KeyPress& key) { return keyPressed (key); };
     workspace.onTitleWheel = [this] (Panel panel, const juce::MouseEvent& ev, const juce::MouseWheelDetails& wheel) {
@@ -305,9 +316,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     recent.restoreFromString (PluginHost::settingsFolder().getChildFile ("recentes.txt").loadFileAsString());
     addAndMakeVisible (menuBar);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
-                                                             &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &tempoDisplay, &patternBox, &newPatternButton,
-                                                             &patternMenuButton, &swingLabel, &swingSlider, &settingsButton, &positionLabel, &cpuLabel, &hintBar, &workspace, &scope })
+    for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
+                                                             &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
+                                                             &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &positionLabel,
+                                                             &cpuLabel, &hintBar, &workspace, &scope })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
@@ -320,17 +332,20 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         b.setWantsKeyboardFocus (false);
     }
 
-    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &playButton, &stopButton, &recordButton, &recordMenuButton,
-                                                             &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &newPatternButton, &patternMenuButton, &settingsButton })
+    for (auto* b : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
+                                                             &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
+                                                             &newPatternButton, &patternMenuButton, &pluginPickerButton })
         b->setWantsKeyboardFocus (false);
 
-    for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &recordMenuButton, &newPatternButton, &patternMenuButton, &settingsButton })
+    for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton, &patternMenuButton,
+                     &pluginPickerButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton })
         b->setFlat (true);
 
     ui::installSliderContract();
     addAndMakeVisible (gridBox); // global grid (editors)
     engine.addChangeListener (this);
     setTypingPiano (typingPiano);
+    refreshRecordOptionButtons();
     refreshToolbar();
     refreshPanelButtons();
 
@@ -360,134 +375,195 @@ void MainComponent::paint (juce::Graphics& g)
     using namespace theme;
     g.fillAll (colour::bg1);
 
-    // toolbar
-    const auto bar = juce::Rectangle<int> (0, menuHeight, getWidth(), toolbarHeight);
+    // the toolbar: one band, its panels separated by hairlines
+    const auto bar = juce::Rectangle<int> (0, 0, getWidth(), toolbarHeight);
     g.setColour (colour::bg3);
     g.fillRect (bar);
     g.setColour (colour::border);
     g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 1));
 
     for (auto x : dividers)
-        g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
+        g.fillRect (x, bar.getY() + 8, 1, bar.getHeight() - 16);
 
-    // transport position: an inset display
-    if (! positionLabel.getBounds().isEmpty())
+    // the hint bar sits in an inset well under the menu
+    if (! hintBar.getBounds().isEmpty())
     {
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (positionLabel.getBounds().toFloat(), radius::md);
+        g.setColour (colour::bg1);
+        g.fillRoundedRectangle (hintBar.getBounds().expanded (2, 0).toFloat(), radius::md);
     }
 
-    // status bar
-    const auto status = getLocalBounds().removeFromBottom (statusHeight);
-    g.setColour (colour::bg1);
-    g.fillRect (status);
-    g.setColour (colour::border);
-    g.fillRect (status.withHeight (1));
+    // tempo and song position: inset displays
+    for (auto area : { tempoArea, positionArea })
+        if (! area.isEmpty())
+        {
+            g.setColour (colour::bg0);
+            g.fillRoundedRectangle (area.toFloat(), radius::md);
+        }
+
+    if (! positionArea.isEmpty())
+    {
+        g.setColour (colour::textDisabled);
+        g.setFont (font (type::caption));
+        g.drawText (tr ("BAR : BEAT : STEP"), positionArea.withTrimmedTop (positionArea.getHeight() - 15).withTrimmedBottom (2),
+                    juce::Justification::centred);
+    }
+
+    if (! snapIconArea.isEmpty())
+        icons::draw (g, Icon::magnet, snapIconArea.toFloat().withSizeKeepingCentre (16.0f, 16.0f), colour::textSecondary);
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds();
-    menuBar.setBounds (area.removeFromTop (menuHeight));
-    auto toolbar = area.removeFromTop (toolbarHeight).reduced (10, 9);
     dividers.clear();
-    const auto h = toolbar.getHeight(); // 32
+    const auto bar = juce::Rectangle<int> (0, 0, getWidth(), toolbarHeight);
+    auto toolbar = bar.reduced (8, 4);
+    const auto row1 = toolbar.getY(), row2 = toolbar.getY() + rowHeight + 2, h = rowHeight;
+    const auto big = toolbar.getHeight() - 8; // transport buttons and displays: both rows
 
-    // the settings button is pinned to the right; groups that don't fit in a narrow window are hidden
-    settingsButton.setBounds (toolbar.removeFromRight (h));
-    toolbar.removeFromRight (8);
+    // panel widths
+    auto& lf = getLookAndFeel();
+    int menuWidth = 0;
+    for (const auto& name : getMenuBarNames())
+        menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
 
-    auto place = [&toolbar] (juce::Component& c, int width, int gapAfter = 2) {
-        const auto fits = width <= toolbar.getWidth();
-        c.setVisible (fits);
-        c.setBounds (fits ? toolbar.removeFromLeft (width) : juce::Rectangle<int>());
-        toolbar.removeFromLeft (juce::jmin (gapAfter, toolbar.getWidth()));
-    };
+    const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
+    const auto transportWidth = modeWidth + 8 + 3 * (big + 4) + 4 + 96 + 6 + 116;
+    const auto recordWidth = 3 * h + 4;
+    const auto snapWidth = 20 + 4 + 172;
+    const auto shortcutsWidth = 6 * h;
+    const auto monitorWidth = 150;
+    const auto gap = 17; // a divider and the space around it
+
+    // what fits: the menu/hint column shrinks first, then panels drop from the right
+    auto left = juce::jlimit (230, 360, menuWidth + 8);
+    const auto room = toolbar.getWidth();
+    auto needed = left + gap + transportWidth;
+    const auto showRecord = needed + gap + recordWidth <= room;
+    needed += showRecord ? gap + recordWidth : 0;
+    const auto showSnap = needed + gap + snapWidth <= room;
+    needed += showSnap ? gap + snapWidth : 0;
+    const auto showShortcuts = needed + gap + shortcutsWidth <= room;
+    needed += showShortcuts ? gap + shortcutsWidth : 0;
+    const auto showMonitor = needed + gap + monitorWidth <= room;
+    needed += showMonitor ? gap + monitorWidth : 0;
+    if (needed > room)
+        left = juce::jmax (160, left - (needed - room));
+
+    auto take = [&toolbar] (int width) { return toolbar.removeFromLeft (juce::jmin (width, toolbar.getWidth())); };
     auto divide = [&] {
-        if (toolbar.getWidth() < 15 + h)
-            return;
-        toolbar.removeFromLeft (7);
+        take (8);
         dividers.push_back (toolbar.getX());
-        toolbar.removeFromLeft (8);
+        take (9);
+    };
+    auto hide = [] (std::initializer_list<juce::Component*> components) {
+        for (auto* c : components)
+        {
+            c->setVisible (false);
+            c->setBounds ({});
+        }
+    };
+    auto put = [] (juce::Component& c, juce::Rectangle<int> r) {
+        c.setVisible (true);
+        c.setBounds (r);
     };
 
-    // below ~1440 px the file buttons (also in the File menu and on Ctrl+N/O/S/R) and the panel icons
-    // (F5..F9, View menu) give their room to the editors' grid and the pattern group
-    const auto wide = getWidth() >= 1440;
-    place (logo, h, 6);
-    divide();
-    place (newButton, wide ? h : 100000, wide ? 2 : 0);
-    place (openButton, wide ? h : 100000, wide ? 2 : 0);
-    place (saveButton, wide ? h : 100000, wide ? 2 : 0);
-    place (exportButton, wide ? h : 100000, 0);
-    if (wide)
-        divide();
-    place (playButton, h + 6);
-    place (stopButton, h + 6);
-    place (recordButton, h + 6, 0);
-    place (recordMenuButton, 18, 0);
-    divide();
-    place (patternModeButton, patternModeButton.getIdealWidth (h), 1);
-    place (songModeButton, songModeButton.getIdealWidth (h), 0);
-    divide();
-    place (metronomeButton, h, 2);
-    place (typingPianoButton, h, 8);
-    place (tempoDisplay, 112, 0);
-    const auto showPattern = toolbar.getWidth() >= 15 + 150 + 2 + 2 * h; // the pattern group shows whole or not at all
-    if (showPattern)
-        divide();
-    place (patternBox, showPattern ? 150 : 100000, 2);
-    place (newPatternButton, showPattern ? h : 100000, 0);
-    place (patternMenuButton, showPattern ? h : 100000, 0);
-
-    const auto swingWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (theme::font (theme::type::caption, true)), swingLabel.getText())) + 4;
-    const auto showSwing = toolbar.getWidth() >= 15 + swingWidth + 4 + h;
-    if (showSwing)
-        divide();
-    place (swingLabel, showSwing ? swingWidth : 100000, 4);
-    place (swingSlider, showSwing ? h : 100000, 0);
-
-    // global grid of the Piano Roll and Playlist (shown whole or not at all)
-    const auto showGrid = toolbar.getWidth() >= 15 + 130 + 132; // before the scope, which yields its room
-    if (showGrid)
-        divide();
-    place (gridBox, showGrid ? 130 : 100000, 0);
-
-    // panel shortcuts (F5..F9), pinned next to the settings button when there is room
+    // 1. menu over the hint bar
     {
-        const auto panelsWidth = workspace::panelCount * (h - 4) + 15;
-        const auto showPanels = wide && toolbar.getWidth() >= panelsWidth + 132;
-        auto right = showPanels ? toolbar.removeFromRight (panelsWidth) : juce::Rectangle<int>();
-
-        if (showPanels)
-        {
-            right.removeFromRight (7);
-            dividers.push_back (right.getRight() + 3);
-        }
-
-        for (auto panel : panelOrder)
-        {
-            auto& b = panelButtons[(std::size_t) panel];
-            b.setVisible (showPanels);
-            b.setBounds (showPanels ? right.removeFromLeft (h - 4) : juce::Rectangle<int>());
-        }
+        auto column = take (left);
+        put (menuBar, column.withY (row1).withHeight (h));
+        put (hintBar, column.withY (row2).withHeight (h).reduced (4, 1));
     }
 
-    toolbar.removeFromLeft (juce::jmin (8, toolbar.getWidth()));
+    // 2. transport: Pattern/Song switch, play, stop, record, tempo, song position
+    divide();
+    {
+        auto panel = take (transportWidth);
+        auto mode = panel.removeFromLeft (modeWidth);
+        put (patternModeButton, mode.withY (row1).withHeight (h).reduced (0, 1));
+        put (songModeButton, mode.withY (row2).withHeight (h).reduced (0, 1));
+        panel.removeFromLeft (8);
+        const auto y = panel.getCentreY() - big / 2;
 
-    if (toolbar.getWidth() > 210)
-        scope.setBounds (toolbar.removeFromRight (juce::jmin (180, toolbar.getWidth() - 132)));
+        for (auto* b : { &playButton, &stopButton, &recordButton })
+        {
+            put (*b, juce::Rectangle<int> (panel.getX(), y, big, big));
+            panel.removeFromLeft (big + 4);
+        }
+
+        panel.removeFromLeft (4);
+        tempoArea = panel.removeFromLeft (96).withY (y).withHeight (big);
+        put (tempoDisplay, tempoArea);
+        panel.removeFromLeft (6);
+        positionArea = panel.removeFromLeft (116).withY (y).withHeight (big);
+        put (positionLabel, positionArea.withTrimmedBottom (13).withTrimmedTop (2));
+    }
+
+    // 3. recording options: metronome, count-in and wait for input over "what to record" and typing piano
+    if (showRecord)
+    {
+        divide();
+        auto panel = take (recordWidth);
+        put (metronomeButton, juce::Rectangle<int> (panel.getX(), row1, h, h));
+        put (countInButton, juce::Rectangle<int> (panel.getX() + h + 2, row1, h, h));
+        put (waitInputButton, juce::Rectangle<int> (panel.getX() + 2 * (h + 2), row1, h, h));
+        put (recordMenuButton, juce::Rectangle<int> (panel.getX(), row2, h, h));
+        put (typingPianoButton, juce::Rectangle<int> (panel.getX() + h + 2, row2, h, h));
+    }
     else
-        scope.setBounds ({});
+        hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton });
 
-    toolbar.removeFromRight (juce::jmin (8, toolbar.getWidth()));
-    positionLabel.setBounds (toolbar.getWidth() >= 110 ? toolbar.removeFromRight (juce::jmin (toolbar.getWidth(), 124)) : juce::Rectangle<int>());
+    // 4. global snap over the pattern selector
+    if (showSnap)
+    {
+        divide();
+        auto panel = take (snapWidth);
+        snapIconArea = juce::Rectangle<int> (panel.getX(), row1, 20, h);
+        put (gridBox, juce::Rectangle<int> (panel.getX() + 24, row1, snapWidth - 24, h).reduced (0, 1));
+        auto second = juce::Rectangle<int> (panel.getX(), row2, snapWidth, h);
+        put (patternMenuButton, second.removeFromRight (h));
+        put (newPatternButton, second.removeFromRight (h));
+        second.removeFromRight (2);
+        put (patternBox, second.reduced (0, 1));
+    }
+    else
+    {
+        snapIconArea = {};
+        hide ({ &gridBox, &patternBox, &newPatternButton, &patternMenuButton });
+    }
 
-    auto status = area.removeFromBottom (statusHeight).reduced (10, 0);
-    cpuLabel.setBounds (status.removeFromRight (90));
-    hintBar.setBounds (status);
+    // 5. shortcuts: the windows over the file actions
+    if (showShortcuts)
+    {
+        divide();
+        auto panel = take (shortcutsWidth);
+        auto first = panel.withY (row1).withHeight (h);
+        for (auto p : { Panel::playlist, Panel::channelRack, Panel::pianoRoll, Panel::mixer, Panel::browser })
+            put (panelButtons[(std::size_t) p], first.removeFromLeft (h));
+        put (pluginPickerButton, first.removeFromLeft (h));
 
-    workspace.setBounds (area);
+        auto second = panel.withY (row2).withHeight (h);
+        for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton })
+            put (*b, second.removeFromLeft (h));
+    }
+    else
+    {
+        for (auto& b : panelButtons)
+            hide ({ &b });
+        hide ({ &pluginPickerButton, &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton });
+    }
+
+    // 6. output monitor, on the right
+    if (showMonitor)
+    {
+        auto panel = bar.reduced (8, 4).removeFromRight (monitorWidth);
+        dividers.push_back (panel.getX() - 9);
+        put (scope, panel.withY (row1).withHeight (h));
+        put (cpuLabel, panel.withY (row2).withHeight (h));
+    }
+    else
+        hide ({ &scope, &cpuLabel });
+
+    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight));
 }
 
 // --- keys --------------------------------------------------------------------------------------
@@ -590,12 +666,14 @@ bool MainComponent::runAction (const std::string& id)
         auto o = engine.getRecordOptions();
         o.countInBars = o.countInBars > 0 ? 0 : 1;
         engine.setRecordOptions (o);
+        refreshRecordOptionButtons();
     }
     else if (is ("record.waitForInput"))
     {
         auto o = engine.getRecordOptions();
         o.waitForInput = ! o.waitForInput;
         engine.setRecordOptions (o);
+        refreshRecordOptionButtons();
     }
     else if (is ("rack.graphEditor")) rack.toggleGraphLanes();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
@@ -729,6 +807,8 @@ void MainComponent::loadUiSettings()
         else if (key == "editPatternsIn")
             PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
     }
+
+    startup = StartupOptions::load();
 }
 
 void MainComponent::saveUiSettings()
@@ -738,7 +818,8 @@ void MainComponent::saveUiSettings()
 
     uiSettingsFile().replaceWithText ("typingPiano=" + juce::String (typingPiano ? 1 : 0) + "\nkeepEditorsOpen="
                                       + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\neditPatternsIn="
-                                      + juce::String (PlaylistComponent::editPatternsIn) + "\n");
+                                      + juce::String (PlaylistComponent::editPatternsIn) + "\nsplash=" + juce::String (startup.splash ? 1 : 0)
+                                      + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -994,16 +1075,16 @@ void MainComponent::updateRecordQuantise()
     }
 }
 
-juce::PopupMenu MainComponent::makeRecordOptionsMenu()
+void MainComponent::addRecordOptions (juce::PopupMenu& menu)
 {
     const auto o = engine.getRecordOptions();
     auto set = [this] (std::function<void (AudioEngine::RecordOptions&)> change) {
         auto options = engine.getRecordOptions();
         change (options);
         engine.setRecordOptions (options);
+        refreshRecordOptionButtons();
     };
 
-    juce::PopupMenu menu;
     juce::PopupMenu countIn;
     countIn.addItem (tr ("Off"), true, o.countInBars == 0, [set] { set ([] (AudioEngine::RecordOptions& r) { r.countInBars = 0; }); });
     for (int bars : { 1, 2, 4 })
@@ -1024,7 +1105,22 @@ juce::PopupMenu MainComponent::makeRecordOptionsMenu()
     });
     menu.addItem (tr ("Song mode: place a pattern clip where recording starts"), true, o.placeSongClip,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.placeSongClip = ! r.placeSongClip; }); });
-    return menu;
+}
+
+void MainComponent::refreshRecordOptionButtons()
+{
+    auto withKey = [this] (const juce::String& text, const char* id) {
+        const auto key = shortcutText (id).trim();
+        return key.isEmpty() ? text : text + " (" + key + ")";
+    };
+    const auto o = engine.getRecordOptions();
+    countInButton.setToggleState (o.countInBars > 0, juce::dontSendNotification);
+    countInButton.setTooltip (withKey (o.countInBars > 0 ? tr ("Count-in before recording: {0} bar(s)", { juce::String (o.countInBars) })
+                                                         : tr ("Count-in before recording: off"),
+                                       "record.countIn"));
+    waitInputButton.setToggleState (o.waitForInput, juce::dontSendNotification);
+    waitInputButton.setTooltip (withKey (o.waitForInput ? tr ("Recording waits for the first note: on") : tr ("Recording waits for the first note: off"),
+                                         "record.waitForInput"));
 }
 
 void MainComponent::clonePatternNow()
@@ -1228,7 +1324,7 @@ void MainComponent::TempoDisplay::paint (juce::Graphics& g)
     const auto whole = juce::String ((int) std::floor (bpm + 1e-9));
     const auto fraction = juce::String (bpm - std::floor (bpm + 1e-9), 3).fromFirstOccurrenceOf (".", false, false).paddedRight ('0', 3).substring (0, 3);
 
-    const juce::Font big (monoFont (19.0f)), small (monoFont (12.0f)), caption (font (type::caption, true));
+    const juce::Font big (monoFont (22.0f)), small (monoFont (13.0f)), caption (font (type::caption, true));
     const auto wholeWidth = juce::GlyphArrangement::getStringWidth (big, whole);
     const auto fracWidth = juce::GlyphArrangement::getStringWidth (small, "." + fraction);
     const auto unitWidth = juce::GlyphArrangement::getStringWidth (caption, "BPM");
@@ -1868,12 +1964,34 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, engine.getTransport().metronome.load(), [this] {
             metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
         });
-        menu.addSubMenu (tr ("Recording"), makeRecordOptionsMenu());
+        {
+            juce::PopupMenu recording;
+            addRecordOptions (recording);
+            menu.addSubMenu (tr ("Recording"), recording);
+        }
+        {
+            juce::PopupMenu editIn;
+            const char* choices[] = { TR_NOOP ("Piano Roll when it has piano-roll notes, else Channel Rack"), TR_NOOP ("Channel Rack"), TR_NOOP ("Piano Roll") };
+            for (int i = 0; i < 3; ++i)
+                editIn.addItem (tr (choices[i]), true, PlaylistComponent::editPatternsIn == i, [this, i] {
+                    PlaylistComponent::editPatternsIn = i;
+                    saveUiSettings();
+                });
+            menu.addSubMenu (tr ("Double-click on a pattern clip opens"), editIn);
+        }
         menu.addItem (tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), true,
                       ChannelRackComponent::keepEditorsOpen, [this] {
                           ChannelRackComponent::keepEditorsOpen = ! ChannelRackComponent::keepEditorsOpen;
                           saveUiSettings();
                       });
+        menu.addItem (tr ("Show the splash screen at startup"), true, startup.splash, [this] {
+            startup.splash = ! startup.splash;
+            saveUiSettings();
+        });
+        menu.addItem (tr ("Play the startup sound"), true, startup.sound, [this] {
+            startup.sound = ! startup.sound;
+            saveUiSettings();
+        });
         menu.addSeparator();
         menu.addItem (tr ("Edit keyboard shortcuts (keys.json)..."), [this] { editKeyMap(); });
         menu.addItem (tr ("Reload keyboard shortcuts"), [this] { loadKeyMap(); });

@@ -292,10 +292,20 @@ void PlaylistComponent::updateScrollBars()
     scrollY = (int) vBar.getCurrentRangeStart();
 }
 
+void PlaylistComponent::setTitleBarInsets (int left, int right)
+{
+    if (left != titleInsetLeft || right != titleInsetRight)
+    {
+        titleInsetLeft = left;
+        titleInsetRight = right;
+        resized();
+    }
+}
+
 void PlaylistComponent::resized()
 {
     const auto h = toolbarHeight - 6;
-    arrangementBox.setBounds (4, 3, juce::jmin (150, getWidth() / 5), h);
+    arrangementBox.setBounds (4 + titleInsetLeft, 3, juce::jmin (150, getWidth() / 5), h);
     tools.setBounds (arrangementBox.getRight() + 8, 3, tools.getIdealWidth (h), h);
     snapBox.setBounds (tools.getRight() + 8, 3, 128, h);
     hBar.setBounds (headerWidth, getHeight() - scrollBarSize, getWidth() - headerWidth - scrollBarSize, scrollBarSize);

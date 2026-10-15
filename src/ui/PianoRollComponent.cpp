@@ -297,10 +297,20 @@ void PianoRollComponent::updateScrollBars()
     scrollY = (int) vBar.getCurrentRangeStart();
 }
 
+void PianoRollComponent::setTitleBarInsets (int left, int right)
+{
+    if (left != titleInsetLeft || right != titleInsetRight)
+    {
+        titleInsetLeft = left;
+        titleInsetRight = right;
+        resized();
+    }
+}
+
 void PianoRollComponent::resized()
 {
     const auto h = toolbarHeight - 6;
-    auto bar = juce::Rectangle<int> (4, 3, getWidth() - 8, h);
+    auto bar = juce::Rectangle<int> (4 + titleInsetLeft, 3, juce::jmax (0, getWidth() - 8 - titleInsetLeft - titleInsetRight), h);
 
     // groups that don't fit in a narrow window are hidden (the tools and the grid always show)
     auto place = [&bar] (juce::Component& c, int width, bool optional = false) {

@@ -49,7 +49,8 @@ target_include_directories(lynx_core PUBLIC src)
 target_sources(lynx_core PRIVATE
     src/core/KeyMap.cpp
     src/core/Workspace.cpp
-    src/core/RackOps.cpp)
+    src/core/RackOps.cpp
+    src/core/StartupSound.cpp)
 
 # workflow P2 (note tools, mixer operations, history labels, browser search)
 target_sources(lynx_core PRIVATE
@@ -131,7 +132,8 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/Workspace.cpp
         src/ui/ValueControl.cpp
-        src/ui/Dialogs.cpp)
+        src/ui/Dialogs.cpp
+        src/ui/Splash.cpp)
 
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE

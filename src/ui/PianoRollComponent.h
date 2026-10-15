@@ -23,6 +23,7 @@ namespace lynx
 //    Shift+Q quantise starts, Ctrl+U chop, Ctrl+G join, Ctrl+L legato, Shift+D shrink to grid,
 //    Ctrl+Shift+Left/Right rotate, Ctrl+M mute, Ctrl+P porta, Esc, arrows (Shift = octave/bar)
 class PianoRollComponent final : public juce::Component,
+                                 public SharesTitleBar,
                                  private juce::ChangeListener,
                                  private juce::Timer,
                                  private juce::ScrollBar::Listener
@@ -33,6 +34,7 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void setTitleBarInsets (int left, int right) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
@@ -142,6 +144,7 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     ToolStrip tools { false };
+    int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
     ChannelBox channelBox;
     juce::ComboBox snapBox;           // "Follow global grid" or this editor's own grid
     IconButton ghostButton { "ghosts", Icon::ghost };

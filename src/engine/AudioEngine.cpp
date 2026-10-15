@@ -343,6 +343,12 @@ int AudioEngine::snapInputKey (int key) const noexcept
     return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
 }
 
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample)
+{
+    if (preview != nullptr)
+        preview->play (std::move (sample));
+}
+
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
     if (record) // played notes (the PC keyboard) follow the scale snap; previews don't

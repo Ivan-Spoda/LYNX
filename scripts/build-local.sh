@@ -20,6 +20,8 @@ mkdir -p build-local build-local/wavpack
 CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp"
 # workflow P2 (note tools, mixer operations, history labels, browser search)
 CORE="$CORE src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp"
+# start-up sound (procedural)
+CORE="$CORE src/core/StartupSound.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in
@@ -40,6 +42,6 @@ $CXX $FLAGS src/flp/Flp.cpp tools/flpdump.cpp -o build-local/flpdump 2> >(grep -
 $CXX $FLAGS $CORE $WAVPACK tools/renderwav.cpp -o build-local/renderwav 2> >(grep -v 'glibc version' >&2)
 $CXX $FLAGS $CORE $WAVPACK tools/comparewav.cpp -o build-local/comparewav 2> >(grep -v 'glibc version' >&2)
 $CXX $FLAGS $CORE $WAVPACK tools/vocodexrender.cpp -o build-local/vocodexrender 2> >(grep -v 'glibc version' >&2)
-$CXX $FLAGS src/core/Harmor.cpp tools/harmorrender.cpp -o build-local/harmorrender 2> >(grep -v 'glibc version' >&2)
+$CXX $FLAGS src/core/Harmor.cpp src/core/HarmlessFx.cpp tools/harmorrender.cpp -o build-local/harmorrender 2> >(grep -v 'glibc version' >&2)
 
 ./build-local/lynx_tests "$@"

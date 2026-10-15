@@ -760,9 +760,10 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
   own icon set. Do not reproduce FL's:
   - colour scheme or skins;
   - step-button, LED, knob or fader art;
-  - window title-bar style or toolbar panel arrangement;
-  - splash, mascot or logo.
-  The workspace (P1-1) must not mimic FL's window frames.
+  - window title-bar *art* (the arrangement of its parts, see section 5, is followed);
+  - splash, mascot or logo (LYNX's splash uses its own pepper and its own synthesised sound).
+  Since October 2026 the *arrangement* of the toolbar panels and window title bars follows FL's (section 5,
+  the user's decision); everything is still drawn by LYNX.
 - **Names.** Generic terms are fine: Channel Rack, Step sequencer, Piano Roll, Playlist, Mixer, Browser,
   pattern, clip, automation clip, ghost notes, make unique, quantise, strum, arpeggiate, chop. Avoid
   Image-Line's product or brand-specific names in LYNX's UI:
@@ -785,6 +786,118 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
   project.
 - **Trademarks.** "FL Studio" and "Image-Line" are mentioned only to describe compatibility, e.g. ".flp import".
   This study is internal design documentation.
+
+## 5. Layout
+
+How FL Studio arranges its main window, and how LYNX follows that structure. Read in October 2026 from the
+manual pages below (paraphrased). Items marked **[unverified]** come from general knowledge of the program or
+from third-party pages, not from an Image-Line page; they are worth checking against a fresh FL install.
+LYNX copies only the *arrangement*: where things are, in which order, and how windows behave. All drawing,
+colours, icons and fonts stay LYNX's own (dark theme, red accent, `ui/Icons.cpp`).
+
+### 5.1 Main toolbar
+- The toolbar is a set of panels. The manual lists: the menu bar, the title/hint panel (project name above, hint
+  bar below), the transport (Pattern/Song switch, play, stop, record, tempo), song position, the window
+  controls, monitor volume and master pitch, global snap, the "add" panel, multilink, the time display, the
+  pattern selector, the output scope/meter, CPU/memory/polyphony, the chord panel and the online panel.
+  The manual lists them by topic and does not give their order on screen. [DOC][tb]
+- Its shortcut icons open the Playlist, Channel Rack, Piano Roll, Mixer, Browser and plugin picker, and also
+  cover the metronome and recording options, undo and save. Icons can be added or removed. [DOC][tb]
+- Right-click on an empty part of the toolbar, then "Edit", to reorder or hide panels and save presets.
+  Ctrl+F11 hides the whole toolbar. [DOC][tb] [DOC][view]
+- **Hint bar position.** It is the lower line of the title/hint panel, under the menu at the top left. It is not a
+  status bar at the bottom of the window. An optional extended hint panel can sit at the lower left. [DOC][tb]
+  [DOC][view]
+- **Global snap.** The toolbar has one snap selector. It sets the snap for the Piano Roll, the Playlist and the
+  event editor (each editor set to "Main" follows it) and the quantise for recorded notes. [DOC][tb-snap]
+
+**LYNX** (`ui/MainComponent.cpp`, `resized()`): one band, two rows high, panels left to right:
+1. the menu, with the **hint bar under it** (the bottom status strip is gone);
+2. the transport: a two-line Pattern/Song switch, play, stop, record, tempo and the song position;
+3. the recording options: metronome, typing keyboard as piano, and "what to record";
+4. global snap, with the pattern selector under it;
+5. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker), with the file
+   actions under them (new, open, save, export, undo, redo);
+6. the output scope with the CPU load under it, on the right.
+
+When the window is narrow, the panels drop from the right in this order: monitor, shortcuts, snap/pattern,
+recording. Everything they hold is also in the menus or on keys. The LYNX logo is no longer drawn inside the
+window; it stays the window and taskbar icon.
+
+### 5.2 Editor tools live in each editor's own toolbar
+- **Playlist.** Its toolbar runs along the top of the Playlist window. Left to right: the Playlist menu, the snap
+  selector, the tools, then play/pause. The tools are Draw (P), Paint (B), Delete (D), Mute (T), Slip (S),
+  Slice (C), Select (E), Zoom (Shift+Z) and Playback (Y). The title bar also holds the arrangement selector.
+  [DOC][pl]
+- **Piano Roll.** Same idea. Its toolbar carries the menu, snap, snap to scale and chord stamp, then the tools:
+  Draw, Paint, paint-drum, Delete, Mute, Interpolate, Slice, Select, Zoom and Play, then the ghost-note toggle.
+  The target channel selector is in its title bar. [DOC][pr]
+- **No main-toolbar option for tools.** No manual page describes a way to put the editing tools in the main
+  toolbar. The main toolbar only has the *global snap* panel (5.1) and shortcut icons that do not include the
+  tools. [DOC][tb]
+- In FL, each editor's toolbar is part of its window's title bar. The window menu is at the left (it is small
+  and easy to miss), then the title or selectors, then the tools. [DOC][iface] Minimise, maximise/restore and
+  close are on the right **[unverified]**.
+
+**LYNX**: the tools stay in each editor (`ui/EditorTools.h` `ToolStrip`). The Playlist and Piano Roll now
+*share* their window's title row (`SharesTitleBar`): the frame keeps the window menu and title on the left and
+the window buttons on the right, and the editor lays its toolbar out between them. The Playlist's pattern picker
+starts under that row.
+
+### 5.3 Windows: placement, maximise, detach
+- The Playlist, Channel Rack, Piano Roll, Mixer and Browser are windows on one desktop. They can be moved,
+  resized, overlapped, maximised and detached. They snap to each other while dragged, and Alt stops the snapping.
+  [DOC][iface] [DOC][main]
+- Keys: F5 Playlist, F6 Channel Rack, F7 Piano Roll, F9 Mixer, F8 plugin picker, Alt+F8 Browser. F12 closes
+  all windows. [DOC][view] [DOC][iface]
+- The View menu can realign windows to the fresh-install layout and bring off-screen windows back. It has layout
+  presets (Desktop, Alternate, Tablet...) and can save a custom layout. [DOC][view]
+- **Maximise.** Windows have a maximise/restore button. Right-clicking the toolbar's Playlist icon shows the
+  Playlist maximised. [DOC][iface] [DOC][tb] What a maximised window fills is not documented. As far as we know
+  it fills the area under the toolbar and keeps its own title bar and toolbar **[unverified]**.
+- **Detached.** "Detached" in a window's top-left menu frees it from the desktop, e.g. for a second monitor.
+  [DOC][iface] [DOC][cr] [DOC][pl]
+- **Mixer.** The manual describes no special docked or bottom-panel mode for the Mixer window. Its "dock to
+  left/middle/right" options are about *tracks inside* the Mixer. [DOC][mx] A user asked on the forum for
+  bottom-docking as a feature, so it does not exist (https://forum.image-line.com/viewtopic.php?p=1816065). The
+  Mixer is an ordinary window like the others: floating, resizable, maximisable and detachable, and closed in a
+  fresh project **[unverified]**.
+- **Fresh-install layout** (not documented): the Browser on the left, the Playlist filling the rest, the
+  Channel Rack floating over it, and the Piano Roll and Mixer closed **[unverified]**. A third-party tutorial
+  confirms the Browser on the left (https://beatkitchen.io/guides/fl-studio/01-welcome-the-fl-studio-workflow/).
+- The Channel Rack's title bar has its options menu, the channel filter and the global swing knob.
+  Shift+wheel on it changes the pattern. [DOC][cr] [DOC][cr-swing]
+
+**LYNX** (`core/Workspace.cpp` `makeDefault`, `ui/Workspace.cpp`):
+- The default layout has the Browser on the left at full height, the Playlist filling the rest, and the
+  Channel Rack floating.
+- The Piano Roll and the Mixer open as floating windows. The Mixer is a wide window over the lower two thirds
+  of the Playlist. Like every panel, it is maximised by double-clicking its title, with its title-bar button, or
+  by right-clicking its toolbar icon. It is detached from the window menu.
+- **Title bars.** Left: the window menu (this panel's own items, then Detached, Maximized and Close) and the
+  title. Right: maximise/restore and close, plus "dock back" while detached. The Channel Rack's swing knob moved
+  from the main toolbar into its title bar, as in FL.
+
+### 5.4 Browser
+- The Browser is on the left by default. Its header can be dragged to dock it left or right, and it can be
+  detached or set to auto-hide. [DOC][br]
+- Its default tabs are All, Current project, Plugin database, Online content and Starred. Its tree holds folders
+  such as Channel presets, Projects, Current project and Plugin database. Search and filters are at the bottom by
+  default. [DOC][br]
+
+**LYNX**: the Browser stays docked on the left. A tabbed tree like FL's is left for later (P2).
+
+### 5.5 Start-up splash
+- FL shows a splash with its version while it starts. A General setting turns it off. [DOC][envgen]
+
+**LYNX** (`ui/Splash.*`, `core/StartupSound.*`):
+- A splash of its own: the user's pepper drops onto a dark card and bounces, then "LYNX" and the version slide
+  in while the audio engine and the workspace load. It lasts about 2 s.
+- A short start-up sound is synthesised in code: a whoosh, a landing "pop" timed to the first bounce, and a
+  plucked chime.
+- Both can be turned off in Options. They never appear in the command-line modes.
+
+[main]: https://www.image-line.com/support/flstudio_online_manual/html/main_windows.htm
 
 ---
 
