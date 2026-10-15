@@ -44,6 +44,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::ogun: return "Ogun";
         case InstrumentKind::minisynth: return "MiniSynth";
         case InstrumentKind::dx10: return "Fruity DX10";
+        case InstrumentKind::threeosc: return "3x Osc";
     }
     return "?";
 }

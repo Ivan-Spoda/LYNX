@@ -13,6 +13,7 @@
 #include "core/Morphine.h"
 #include "core/Ogun.h"
 #include "core/Dx10.h"
+#include "core/ThreeOsc.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -483,6 +484,7 @@ public:
         ogun = def.instrument == InstrumentKind::ogun;
         miniSynth = def.instrument == InstrumentKind::minisynth;
         dx10 = def.instrument == InstrumentKind::dx10;
+        threeOsc = def.instrument == InstrumentKind::threeosc;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -651,7 +653,34 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        if (dx10)
+        // 3x Osc: the 21 parameters of the saved state, then invert ×3, AM and HQ (REA_rodada47 §1.1)
+        static const char* const threeOscNames[] = {
+            "Osc 1 pan", "Osc 1 shape", "Osc 1 coarse", "Osc 1 fine", "Osc 1 phase", "Osc 1 detune", "Osc 2 mix", "Osc 2 pan",
+            "Osc 2 shape", "Osc 2 coarse", "Osc 2 fine", "Osc 2 phase", "Osc 2 detune", "Osc 3 mix", "Osc 3 pan", "Osc 3 shape",
+            "Osc 3 coarse", "Osc 3 fine", "Osc 3 phase", "Osc 3 detune", "Phase rand", "Invert 1", "Invert 2", "Invert 3",
+            "Osc 3 AM", "HQ" };
+        auto addThreeOsc = [&] (int index) {
+            const auto value = threeOscParam (def.pluginState, index);
+            if (! value)
+                return;
+            const auto [low, high] = threeOscParamRange (index);
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (low, high, 1.0);
+            knob->setValue (*value, juce::dontSendNotification);
+            knob->setName (threeOscNames[index]);
+            knob->onValueChange = [this, index, s = knob.get()] {
+                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
+                    threeOscSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (threeOsc)
+            for (int i = 0; i < threeOscParamCount(); ++i)
+                addThreeOsc (i);
+        else if (dx10)
             for (const auto& k : dx10Knobs)
                 addDx10 (k);
         else if (gms)
@@ -684,7 +713,7 @@ public:
         else
             for (const auto& [index, name] : drumpadKnobs)
                 add (index, name);
-        setSize (720, dx10 ? 500 : 384);
+        setSize (720, dx10 || threeOsc ? 500 : 384);
     }
 
     void paint (juce::Graphics& g) override
@@ -702,6 +731,7 @@ public:
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
                     : miniSynth ? tr ("MiniSynth — FL's engine with its effects (wave tables read from your FL installation)")
                     : dx10 ? tr ("Fruity DX10 — FL's FM engine")
+                    : threeOsc ? tr ("3x Osc — FL's engine (custom wave from the channel's sample)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -721,7 +751,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, threeOsc = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1354,7 +1384,7 @@ public:
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::threeosc)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1437,6 +1467,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::ogun:
         case InstrumentKind::minisynth:
         case InstrumentKind::dx10:
+        case InstrumentKind::threeosc:
             return true;
         default:
             return false;
@@ -1471,7 +1502,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::threeosc)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

@@ -54,17 +54,17 @@ void panLaw (float pan, float vol, float& gl, float& gr) noexcept
     gr = (float) (s * (ld) vol);
 }
 
-// FUN_005fac70: per-sample step towards the target, limited to 0.001; a limited ramp that would end below 2^-24 ends
+// FUN_005fac70: per-sample step towards the target, limited to `limit`; a limited ramp that would end below 2^-24 ends
 // at 0
-float rampStep (float& target, float prev, int n) noexcept
+float rampStep (float& target, float prev, int n, float limit) noexcept
 {
     auto step = target - prev;
     if (step != 0.0f)
     {
         step = step / (float) n;
-        if (std::fabs (step) > 0.001f)
+        if (std::fabs (step) > limit)
         {
-            step = std::copysign (0.001f, step);
+            step = std::copysign (limit, step);
             target = prev + step * (float) n;
             if ((bitsOf (target) & 0x7fffffff) < 864026624)
             {
@@ -208,7 +208,7 @@ const float ln601f = (float) std::log (601.0), inv600f = 1.0f / 600.0f; // 0x79e
 const float ln51f = (float) std::log (51.0), ln51r = (float) (std::log (51.0) * 80.0 / 128.0); // 0x800624, 0x800628
 
 // FUN_00720cb0: the fast LP's coefficient and feedback
-void coefFast (float x, float y, float& c, float& q) noexcept
+void coefFast (float x, float y, float& c, float& q, float r) noexcept
 {
     if (! (0.0f < x))
         c = 0.0f;
@@ -216,7 +216,7 @@ void coefFast (float x, float y, float& c, float& q) noexcept
         c = 1.0f;
     else
     {
-        c = (float) ((std::exp ((double) (x * ln601f)) - 1.0) * (double) inv600f) * 1.0f;
+        c = (float) ((std::exp ((double) (x * ln601f)) - 1.0) * (double) inv600f) * r;
         if (! (1.0f > c))
             c = 1.0f;
     }
@@ -232,10 +232,10 @@ void coefFast (float x, float y, float& c, float& q) noexcept
 }
 
 // FUN_00720b10 + FUN_007204b0: 12 dB biquads (kinds 1 LP, 2 BP, 3 HP, 4 band stop) → coefficients b0 b1 b2 a1 a2
-void coefBiquad (int kind, float x, float y, float& fc, float& fq, float* b) noexcept
+void coefBiquad (int kind, float x, float y, float& fc, float& fq, float* b, float r) noexcept
 {
-    fc = (float) (((std::exp ((double) (x * ln51f)) - 1.0) * (double) 0.0596f + 0.02) * 1.0);
-    const auto lo = (float) (1.0 * 0.02);
+    fc = (float) (((std::exp ((double) (x * ln51f)) - 1.0) * (double) 0.0596f + 0.02) * (double) r);
+    const auto lo = (float) ((double) r * 0.02);
     if (lo > fc)
         fc = lo;
     else if (fc > 3.0f)
@@ -266,13 +266,13 @@ void coefBiquad (int kind, float x, float y, float& fc, float& fq, float* b) noe
 }
 
 // FUN_00720de0: state-variable filter frequency and damping
-void coefSvf (float x, float y, float& c, float& q) noexcept
+void coefSvf (float x, float y, float& c, float& q, float r) noexcept
 {
     if (! (0.0f < x))
         c = 0.0f;
     else
     {
-        c = ((float) (std::exp ((double) x * std::log (26.0)) - 1.0) * 0.04f) * 1.0f;
+        c = ((float) (std::exp ((double) x * std::log (26.0)) - 1.0) * 0.04f) * r;
         if (! (1.0f > c))
             c = 1.0f;
     }
@@ -369,20 +369,20 @@ bool filter (const Settings& S, Proc& pr, const float* x, float* y, int n, float
     const auto cy = ((float) S.modY * 0.00390625f + 0.0f) + pr.res;
     if (pr.kind == 0)
     {
-        coefFast (cx, cy, pr.fc, pr.fq);
+        coefFast (cx, cy, pr.fc, pr.fq, S.rateRatio);
         if (bitsOf (pr.fc) != 0x3f800000 || bitsOf (pr.fq) != 0)
             pr.active = true;
     }
     else if (pr.kind >= 1 && pr.kind <= 4)
-        coefBiquad (pr.kind, cx, cy, pr.fc, pr.fq, pr.b);
+        coefBiquad (pr.kind, cx, cy, pr.fc, pr.fq, pr.b, S.rateRatio);
     else if (pr.kind == 6)
-        coefSvf (cx, cy, pr.fc, pr.fq);
+        coefSvf (cx, cy, pr.fc, pr.fq, S.rateRatio);
     if (! pr.active)
         return false;
     if (pr.kind == 0)
     {
         const auto start = pr.first > 0 ? pr.fc : old;
-        const auto step = rampStep (pr.fc, start, n);
+        const auto step = rampStep (pr.fc, start, n, S.rampLimit);
         renderFast (pr.fst, pr.fq, x, y, n, start, step);
     }
     else if (pr.kind >= 1 && pr.kind <= 4)
@@ -693,7 +693,7 @@ bool mixVoice (const Settings& S, Proc& pr, float* x, float* scratch, int n, flo
         if (pr.endPos >= L)
             ended = true;
     }
-    const auto sL = rampStep (tL, pr.gL, n), sR = rampStep (tR, pr.gR, n);
+    const auto sL = rampStep (tL, pr.gL, n, S.rampLimit), sR = rampStep (tR, pr.gR, n, S.rampLimit);
     if (sL == 0.0f && sR == 0.0f)
     {
         for (int j = 0; j < n; ++j)

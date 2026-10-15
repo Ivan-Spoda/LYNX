@@ -39,8 +39,8 @@ const std::array<float, 16384>& sineTable() noexcept;
 // FUN_005fad20 and FL's host ComputeLRVol law A (FLEngine 0x6a3990) compute the same
 void panLaw (float pan, float vol, float& gl, float& gr) noexcept;
 
-// FUN_005fac70: per-sample gain step towards the target, limited to 0.001
-float rampStep (float& target, float prev, int n) noexcept;
+// FUN_005fac70: per-sample gain step towards the target, limited to `limit` per sample
+float rampStep (float& target, float prev, int n, float limit = 0.001f) noexcept;
 
 // FUN_005f9760 (SSE path): ramped mix of an interleaved stereo block into l/r
 void mixRamp (const float* x, float* l, float* r, int n, float gL, float gR, float sL, float sR) noexcept;
@@ -77,6 +77,12 @@ struct Settings
     std::array<Rec, 5> recs {};
     std::int32_t modX = 256, modY = 0, type = 0;
     bool hasGlobal = false;
+    // gain/cutoff ramp limit per sample: 0.001, or float(float(44100/fs)·0.001) when the plugin hands the library its rate
+    // (FUN_005f8470; 3x Osc does, DX10 does not)
+    float rampLimit = 0.001f;
+    // the library's rate ratio float(44100/fs) (0x77e6f4, set by FUN_005f8470 like the ramp limit; 1 when never set, as in
+    // DX10): the filter coefficients scale with it
+    float rateRatio = 1.0f;
 
     void build (const std::uint8_t* s, int ppq, double tempo) noexcept;
     // ProcessEvent 0 / SetTimeSig: new tick counts, global LFO phases kept (FUN_00722d80)

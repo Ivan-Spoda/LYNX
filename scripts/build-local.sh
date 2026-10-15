@@ -23,7 +23,7 @@ CORE="$CORE src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp sr
 # start-up sound (procedural)
 CORE="$CORE src/core/StartupSound.cpp"
 # Image-Line's plugin voice processor (DX10, 3x Osc) and FL's 3x Osc engine
-CORE="$CORE src/core/FlVoiceProcessor.cpp"
+CORE="$CORE src/core/FlVoiceProcessor.cpp src/core/ThreeOsc.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in
@@ -50,5 +50,6 @@ $CXX $FLAGS src/core/Morphine.cpp tools/morphinerender.cpp -o build-local/morphi
 $CXX $FLAGS $CORE $WAVPACK tools/ogunrender.cpp -o build-local/ogunrender 2> >(grep -v 'glibc version' >&2)
 $CXX $FLAGS src/core/MiniSynth.cpp tools/minisynthrender.cpp -o build-local/minisynthrender 2> >(grep -v 'glibc version' >&2)
 $CXX $FLAGS src/core/Dx10.cpp src/core/FlVoiceProcessor.cpp tools/dx10render.cpp -o build-local/dx10render 2> >(grep -v 'glibc version' >&2)
+$CXX $FLAGS src/core/ThreeOsc.cpp src/core/FlVoiceProcessor.cpp tools/threeoscrender.cpp -o build-local/threeoscrender 2> >(grep -v 'glibc version' >&2)
 
 ./build-local/lynx_tests "$@"
