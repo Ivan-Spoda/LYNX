@@ -49,6 +49,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::fruitkick: return "Fruit Kick";
         case InstrumentKind::bassdrum: return "BassDrum";
         case InstrumentKind::toxic: return "Toxic Biohazard";
+        case InstrumentKind::threeosc: return "3x Osc";
     }
     return "?";
 }

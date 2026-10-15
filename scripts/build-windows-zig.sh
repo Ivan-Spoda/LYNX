@@ -90,6 +90,8 @@ APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/ToolWindow.cpp src/ui/HistoryPan
 APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 # main window chrome: hint bar and toolbar widgets
 APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
+# FL's 3x Osc engine (REA round 47)
+APP_SOURCES+=(src/core/ThreeOsc.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

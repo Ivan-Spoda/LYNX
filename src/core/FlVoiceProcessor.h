@@ -3,8 +3,10 @@
 // Image-Line's plugin voice processor as FL's own Delphi generators carry it (REA_rodada42 §3, REA_rodada43 §1.4–1.6):
 // the five channel articulators of the 364-byte settings snapshot (pan, volume, cutoff, resonance, pitch: envelopes with
 // tensions and LFOs, stepped once per sequencer tick), the channel filter (fast LP, 12 dB LP/BP/HP/BS, 24 dB LP, SVF LP
-// ×1/×2, Mod X/Y), FL's x87 pan law and the gain ramps. Shared by Fruity DX10 (core/Dx10.cpp) and Fruit Kick
-// (core/FruitKick.cpp); a 1:1 port of the round-42 reference model (r42/py/dxproc.py), checked against both DLLs.
+// ×1/×2, Mod X/Y), FL's x87 pan law and the gain ramps. Shared by Fruity DX10 (core/Dx10.cpp), Fruit Kick
+// (core/FruitKick.cpp) and 3x Osc (core/ThreeOsc.cpp, REA_rodada47 §2.3/§3: the release path, the library's rate ratio
+// and ramp limit, the end fade and the mix — mixVoice); a 1:1 port of the round-42/47 reference models
+// (r42/py/dxproc.py, r47/py/osc3model.py), checked against the three DLLs.
 // The float/double operation order is the plugins': includers keep FP contraction off.
 
 #include <algorithm>
@@ -72,17 +74,17 @@ inline void panLaw (float pan, float vol, float& gl, float& gr) noexcept
     gr = (float) (s * (ld) vol);
 }
 
-// FUN_005fac70: per-sample step towards the target, limited to 0.001; a limited ramp that would end below 2^-24 ends
-// at 0
-inline float rampStep (float& target, float prev, int n) noexcept
+// FUN_005fac70: per-sample step towards the target, limited to `limit` (0.001, or the rate-scaled limit of
+// Settings::rampLimit); a limited ramp that would end below 2^-24 ends at 0
+inline float rampStep (float& target, float prev, int n, float limit = 0.001f) noexcept
 {
     auto step = target - prev;
     if (step != 0.0f)
     {
         step = step / (float) n;
-        if (std::fabs (step) > 0.001f)
+        if (std::fabs (step) > limit)
         {
-            step = std::copysign (0.001f, step);
+            step = std::copysign (limit, step);
             target = prev + step * (float) n;
             if ((bitsOf (target) & 0x7fffffff) < 864026624)
             {
@@ -237,6 +239,37 @@ struct Settings
     std::array<Rec, 5> recs {};
     std::int32_t modX = 256, modY = 0, type = 0;
     bool hasGlobal = false;
+    // The library's rate ratio float(44100/fs) (0x77e6f4) and ramp limit float(ratio·0.001) (0x77e6f8), set when the
+    // plugin hands the library its rate (FUN_005f8470: 3x Osc does, DX10 and Fruit Kick do not — 1 and 0.001 then); the
+    // filter coefficients scale with the ratio (REA_rodada47 §2.3). build() leaves them alone.
+    float rateRatio = 1.0f, rampLimit = 0.001f;
+
+    void setRate (double fs) noexcept
+    {
+        rateRatio = (float) (44100.0 / fs);
+        rampLimit = (float) ((double) rateRatio * 0.001);
+    }
+
+    // ProcessEvent 0 / SetTimeSig: new tick counts, the global LFO phases kept (FUN_00722d80)
+    void retime (const std::uint8_t* s, int ppq, double tempo) noexcept
+    {
+        const auto keep = hasGlobal;
+        std::array<std::uint32_t, 5> phases {};
+        for (int k = 0; k < 5; ++k)
+            phases[(std::size_t) k] = recs[(std::size_t) k].globalPhase;
+        build (s, ppq, tempo);
+        if (keep)
+            for (int k = 0; k < 5; ++k)
+                recs[(std::size_t) k].globalPhase = phases[(std::size_t) k];
+    }
+
+    // NewTick: the global LFOs advance (once the processor has listed them)
+    void advanceGlobal() noexcept
+    {
+        for (auto& r : recs)
+            if ((r.flags & 0x20) != 0)
+                r.globalPhase += r.lfoInc;
+    }
 
     void build (const std::uint8_t* s, int ppq, double tempo) noexcept
     {
@@ -376,7 +409,7 @@ inline const float ln601f = (float) std::log (601.0), inv600f = 1.0f / 600.0f; /
 inline const float ln51f = (float) std::log (51.0), ln51r = (float) (std::log (51.0) * 80.0 / 128.0); // 0x800624, 0x800628
 
 // FUN_00720cb0: the fast LP's coefficient and feedback
-inline void coefFast (float x, float y, float& c, float& q) noexcept
+inline void coefFast (float x, float y, float& c, float& q, float r = 1.0f) noexcept
 {
     if (! (0.0f < x))
         c = 0.0f;
@@ -384,7 +417,7 @@ inline void coefFast (float x, float y, float& c, float& q) noexcept
         c = 1.0f;
     else
     {
-        c = (float) ((std::exp ((double) (x * ln601f)) - 1.0) * (double) inv600f) * 1.0f;
+        c = (float) ((std::exp ((double) (x * ln601f)) - 1.0) * (double) inv600f) * r;
         if (! (1.0f > c))
             c = 1.0f;
     }
@@ -400,10 +433,10 @@ inline void coefFast (float x, float y, float& c, float& q) noexcept
 }
 
 // FUN_00720b10 + FUN_007204b0: 12 dB biquads (kinds 1 LP, 2 BP, 3 HP, 4 band stop) → coefficients b0 b1 b2 a1 a2
-inline void coefBiquad (int kind, float x, float y, float& fc, float& fq, float* b) noexcept
+inline void coefBiquad (int kind, float x, float y, float& fc, float& fq, float* b, float r = 1.0f) noexcept
 {
-    fc = (float) (((std::exp ((double) (x * ln51f)) - 1.0) * (double) 0.0596f + 0.02) * 1.0);
-    const auto lo = (float) (1.0 * 0.02);
+    fc = (float) (((std::exp ((double) (x * ln51f)) - 1.0) * (double) 0.0596f + 0.02) * (double) r);
+    const auto lo = (float) ((double) r * 0.02);
     if (lo > fc)
         fc = lo;
     else if (fc > 3.0f)
@@ -434,13 +467,13 @@ inline void coefBiquad (int kind, float x, float y, float& fc, float& fq, float*
 }
 
 // FUN_00720de0: state-variable filter frequency and damping
-inline void coefSvf (float x, float y, float& c, float& q) noexcept
+inline void coefSvf (float x, float y, float& c, float& q, float r = 1.0f) noexcept
 {
     if (! (0.0f < x))
         c = 0.0f;
     else
     {
-        c = ((float) (std::exp ((double) x * std::log (26.0)) - 1.0) * 0.04f) * 1.0f;
+        c = ((float) (std::exp ((double) x * std::log (26.0)) - 1.0) * 0.04f) * r;
         if (! (1.0f > c))
             c = 1.0f;
     }
@@ -534,7 +567,7 @@ struct Proc
 {
     std::array<Art, 5> arts {};
     int first = 2; // +0x170: 2 = the volume articulator starts above "attack" (gains start at their target)
-    bool gainsSet = false;
+    bool gainsSet = false, released = false;
     float gL = 0, gR = 0;
     float pan = 0, vol = 1, cut = 0, res = 0, pitch = 0;
     int kind = 0, stage2 = 0;
@@ -550,7 +583,7 @@ struct Proc
         for (int k = 0; k < 5; ++k)
             arts[(std::size_t) k].init (S.recs[(std::size_t) k]);
         first = arts[1].state > 1 ? 2 : 1;
-        gainsSet = false;
+        gainsSet = false, released = false;
         gL = gR = 0.0f;
         pan = cut = res = pitch = 0.0f, vol = 1.0f;
         const auto t = S.type >= 0 && S.type < 8 ? S.type : 0;
@@ -581,6 +614,25 @@ struct Proc
         if (A[1].state == 9 && endPos < 0)
             endPos = 0;
     }
+
+    // FUN_0072c0d0: released, end fade started (3x Osc's voice stealing)
+    void kill() noexcept
+    {
+        released = true;
+        if (endPos < 0)
+            endPos = 0;
+    }
+
+    // FUN_0072c050 (3x Osc's Voice_Release): the volume, cutoff, resonance and pitch articulators go to their release
+    // stage; with the volume envelope off the end fade starts at once (REA_rodada47 §3.1)
+    void release (const Settings& S) noexcept
+    {
+        released = true;
+        for (int k = 1; k < 5; ++k)
+            arts[(std::size_t) k].release (S.recs[(std::size_t) k]);
+        if (S.recs[1].enabled == 0)
+            kill();
+    }
 };
 
 // FUN_00722450: the channel filter on x (interleaved stereo), result in y; may scale the target gains
@@ -591,20 +643,20 @@ inline bool filter (const Settings& S, Proc& pr, const float* x, float* y, int n
     const auto cy = ((float) S.modY * 0.00390625f + 0.0f) + pr.res;
     if (pr.kind == 0)
     {
-        coefFast (cx, cy, pr.fc, pr.fq);
+        coefFast (cx, cy, pr.fc, pr.fq, S.rateRatio);
         if (bitsOf (pr.fc) != 0x3f800000 || bitsOf (pr.fq) != 0)
             pr.active = true;
     }
     else if (pr.kind >= 1 && pr.kind <= 4)
-        coefBiquad (pr.kind, cx, cy, pr.fc, pr.fq, pr.b);
+        coefBiquad (pr.kind, cx, cy, pr.fc, pr.fq, pr.b, S.rateRatio);
     else if (pr.kind == 6)
-        coefSvf (cx, cy, pr.fc, pr.fq);
+        coefSvf (cx, cy, pr.fc, pr.fq, S.rateRatio);
     if (! pr.active)
         return false;
     if (pr.kind == 0)
     {
         const auto start = pr.first > 0 ? pr.fc : old;
-        const auto step = rampStep (pr.fc, start, n);
+        const auto step = rampStep (pr.fc, start, n, S.rampLimit);
         renderFast (pr.fst, pr.fq, x, y, n, start, step);
     }
     else if (pr.kind >= 1 && pr.kind <= 4)
@@ -626,5 +678,90 @@ inline bool filter (const Settings& S, Proc& pr, const float* x, float* y, int n
     else
         return false;
     return true;
+}
+
+// ------------------------------------------------------------------------------------------------------- 3x Osc's mix
+
+// FUN_005f9760 (SSE path): lanes [L0, R0, L1, R1] start at g and g + s, +2s per pair of frames, single frames +s
+inline void mixRamp (const float* x, float* l, float* r, int n, float gL, float gR, float sL, float sR) noexcept
+{
+    float a0 = gL + 0.0f, a1 = gR + 0.0f, a2 = gL + sL, a3 = gR + sR;
+    const float s2L = sL + sL, s2R = sR + sR;
+    const int full = (n >> 3) << 3;
+    for (int i = 0; i < full; i += 2)
+    {
+        l[i] = x[2 * i] * a0 + l[i];
+        r[i] = x[2 * i + 1] * a1 + r[i];
+        l[i + 1] = x[2 * i + 2] * a2 + l[i + 1];
+        r[i + 1] = x[2 * i + 3] * a3 + r[i + 1];
+        a0 = a0 + s2L, a1 = a1 + s2R, a2 = a2 + s2L, a3 = a3 + s2R;
+    }
+    for (int i = full; i < n; ++i)
+    {
+        l[i] = x[2 * i] * a0 + l[i];
+        r[i] = x[2 * i + 1] * a1 + r[i];
+        a0 = a0 + sL, a1 = a1 + sR;
+    }
+}
+
+// The end-fade table (FUN_0071e060 mode 3, 10 ms): 0.5·(1 + cos((i + 1)·π/442)), built while the plugin's rate object
+// still holds 44 100 Hz, so 441 entries at every rate (REA_rodada42 §3.8); FL computes it with IPP's cosine, LYNX exactly
+inline const std::array<float, 441>& endTable() noexcept
+{
+    static const auto table = [] {
+        std::array<float, 441> t {};
+        const auto k = (float) (1.0 / 442.0 * 3.141592653589793);
+        for (int i = 0; i < 441; ++i)
+            t[(std::size_t) i] = ((float) std::cos ((double) (((float) i + 1.0f) * k)) + 1.0f) * 0.5f;
+        return t;
+    }();
+    return table;
+}
+
+// FUN_00722290 and what follows the plugin's Voice_Render (3x Osc): pan-law gains from Final.Vol/Final.Pan and the
+// articulators, the channel filter (into `scratch`), the end fade, the ramped mix added into l/r. x and scratch are
+// interleaved stereo blocks of n frames. Returns true when the end fade has finished (the voice is done).
+inline bool mixVoice (const Settings& S, Proc& pr, float* x, float* scratch, int n, float finalVol, float finalPan, float* l, float* r) noexcept
+{
+    float tL, tR;
+    panLaw (finalPan + pr.pan, finalVol * pr.vol, tL, tR);
+    if (! pr.gainsSet)
+        pr.gL = pr.gR = 0.0f, pr.gainsSet = true;
+    if (pr.first > 1)
+        pr.gL = tL, pr.gR = tR; // the first block starts at the target
+    float* w = x;
+    if (filter (S, pr, x, scratch, n, tL, tR))
+        w = scratch;
+    bool ended = false;
+    if (pr.endPos >= 0) // end fade (FUN_0071e8b0, mode 3): the table, then silence
+    {
+        const auto& tab = endTable();
+        const auto L = (int) tab.size();
+        const auto k = std::min (std::max (L - pr.endPos, 0), n);
+        for (int j = 0; j < k; ++j)
+        {
+            const auto t = tab[(std::size_t) (pr.endPos + j)];
+            w[2 * j] = w[2 * j] * t;
+            w[2 * j + 1] = w[2 * j + 1] * t;
+        }
+        std::fill (w + 2 * k, w + 2 * n, 0.0f);
+        pr.endPos += n;
+        if (pr.endPos >= L)
+            ended = true;
+    }
+    const auto sL = rampStep (tL, pr.gL, n, S.rampLimit), sR = rampStep (tR, pr.gR, n, S.rampLimit);
+    if (sL == 0.0f && sR == 0.0f)
+    {
+        for (int j = 0; j < n; ++j)
+        {
+            l[j] = w[2 * j] * tL + l[j];
+            r[j] = w[2 * j + 1] * tR + r[j];
+        }
+    }
+    else
+        mixRamp (w, l, r, n, pr.gL, pr.gR, sL, sR);
+    pr.gL = tL, pr.gR = tR;
+    pr.first = 0;
+    return ended;
 }
 } // namespace lynx::flvp
