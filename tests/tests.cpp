@@ -43,6 +43,8 @@
 #include "core/ThreeOsc.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/Reeverb2.h"
+#include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/LiveEventQueue.h"
@@ -1076,6 +1078,13 @@ TEST (flp_real_files)
                         ++reverbs;
                         reverbsDryless += fx.params[4] < 0.01f;
                         reverbsLowCut += fx.params[5] > 0.0f;
+                    }
+                    if (fx.kind == lynx::EffectKind::reeverb2) // FL's exact Reeverb 2 (REA_rodada49): FL's own controls
+                    {
+                        const auto r2 = lynx::reeverb2::fromParams (fx.params);
+                        ++reverbs;
+                        reverbsDryless += r2.p[10] == 0;
+                        reverbsLowCut += r2.p[0] >= 20;
                     }
                 }
 
@@ -7691,6 +7700,101 @@ TEST (maximus_engine)
     const auto [raw, files] = lynx::vocodex::splitInstallData (joined);
     CHECK (raw == flState && files.sgDat == st2 && files.carrierState == data.carrierState);
     CHECK (lynx::vocodex::splitInstallData (flState).first == flState);
+}
+
+// ---- Fruity Reeverb 2 (REA_rodada49) --------------------------------------------------------------------------------
+// Goldens: the installation's Fruity Reeverb 2_x64.dll (unmodified, rate set before the state, flushed, blocks of 512)
+// on our own states and input; LYNX's engine is bit-identical to it.
+TEST (reeverb2_engine)
+{
+    auto hex = [] (const char* h) {
+        std::vector<std::uint8_t> v;
+        for (std::size_t i = 0; h[i] != 0 && h[i + 1] != 0; i += 2)
+            v.push_back ((std::uint8_t) std::stoi (std::string (h + i, 2), nullptr, 16));
+        return v;
+    };
+    constexpr int N = 8192;
+    std::vector<float> inL (N), inR (N);
+    std::uint32_t seed = 12345;
+    for (int i = 0; i < N; ++i)
+    {
+        seed = (seed * 1103515245u + 12345u) & 0x7fffffffu;
+        const auto nz = (float) ((double) seed / 2147483648.0 - 0.5);
+        const auto tri = (float) ((i % 200) - 100) / 100.0f;
+        const float g = i < 4000 ? 1.0f : 0.0f;
+        inL[(std::size_t) i] = 0.5f * tri * g + (i >= 100 && i < 300 ? nz * 0.6f : 0.0f);
+        inR[(std::size_t) i] = 0.25f * tri * g;
+    }
+    struct Golden
+    {
+        int i;
+        float l, r;
+    };
+    auto run = [&] (const std::vector<std::uint8_t>& state, double bpm, const std::vector<Golden>& gold) {
+        const auto slot = lynx::reeverb2FromFl (state);
+        CHECK (slot.has_value() && slot->kind == lynx::EffectKind::reeverb2);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        fx->reset();
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < N; s += 512)
+            fx->process (l.data() + s, r.data() + s, 512, slot->params, bpm);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    // modulation, early reflections, negative separation, filters, predelay
+    run (hex ("112700004b000000780000001e0000004600000055000000190000003c0000009600000090010000e2ffffff6e000000640000008c00000084030000b00400000000"),
+         120.0, { { 777, 0.263778746f, 0.131889373f }, { 1555, 0.187972173f, 0.0587911084f }, { 3333, 0.10398978f, 0.0566705838f },
+                  { 5000, 0.087177977f, -0.0197417438f }, { 8191, 0.0769432634f, -0.282023013f } });
+    // Mid/Side input, tempo-synced predelay (27 ticks at 128 BPM), positive separation
+    run (hex ("112700004b000000280000001b00000032000000640000000f0000002800000064000000f401000028000000800000000000000040000000ac020000000000000101"),
+         128.0, { { 777, 0.38499999f, 0.192499995f }, { 1555, 0.275000006f, 0.137500003f }, { 3333, 0.164420277f, 0.0826604739f },
+                  { 5000, -0.00861243438f, -0.00140450173f }, { 8191, -0.00873835851f, 0.00888271444f } });
+    // version 10000 (no modulation controls), everything off or at its extreme, dry 0
+    run (hex ("1027000013000000dd000000000000006400000000000000c8000000dd00000014000000d00700004000000000000000a0000000a00000000000"),
+         120.0, { { 777, 0.0f, 0.0f }, { 1555, 0.0f, 0.0f }, { 3333, 0.0632086769f, 0.0632086769f }, { 5000, -0.108072646f, -0.108072646f },
+                  { 8191, 0.144686908f, 0.144686908f } });
+
+    // the parameters map back to FL's integers; unsupported states fall back to the approximation
+    lynx::reeverb2::Settings s;
+    s.p = { 3000, 5, 384, 1, 0, 200, 221, 20, 2000, -64, 160, 0, 160, 2048, 1 };
+    s.tempoPredelay = true;
+    lynx::EffectParams p {};
+    lynx::reeverb2::toParams (s, p);
+    CHECK (lynx::reeverb2::fromParams (p) == s);
+    CHECK (! lynx::reeverb2FromFl ({ 0x11, 0x27, 0, 0, 1, 0 }).has_value());
+    CHECK (! lynx::reeverb2FromFl ({ 0x12, 0x27, 0, 0 }).has_value());
+    const auto approx = lynx::effectFromFl ("Fruity Reeverb 2", { 0x11, 0x27, 0, 0 }, 120.0);
+    CHECK (! approx || approx->kind != lynx::EffectKind::reeverb2);
+    CHECK (lynx::reeverb2ParamText (0, 0.0f) == "off" && lynx::reeverb2ParamText (5, 1.0f) == "20.0 s");
+
+    // Fruity Reeverb (the first version): Fruity Reeverb_x64.dll goldens on our own states (denormals flushed, as the
+    // plugin runs and as LYNX renders)
+    lynx::ScopedFlushDenormals ftz;
+    auto run1 = [&] (const std::vector<std::uint8_t>& state, const std::vector<Golden>& gold) {
+        const auto slot = lynx::reeverb1FromFl (state);
+        CHECK (slot.has_value() && slot->kind == lynx::EffectKind::reeverb1);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < N; s += 512)
+            fx->process (l.data() + s, r.data() + s, 512, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    run1 (hex ("01000000204e0000204e000025000000409c000050c300000a00000030750000a861000050c3000060ea0000"),
+          { { 777, 0.293731689f, 0.146865845f }, { 1555, 0.20980835f, 0.104904175f }, { 3333, 0.0998796821f, 0.0754205957f },
+            { 5000, -0.0994476378f, 0.0116700521f }, { 8191, -0.141061321f, 0.0601170398f } });
+    run1 (hex ("0100000000000000000001000000000000000100000001002800000000000100000001000000000000000100"),
+          { { 777, -0.016678432f, -4.58686594e-31f }, { 1555, 0.0221031085f, 0.0230635051f }, { 3333, 0.0875115693f, 0.1695389f },
+            { 5000, -0.111421227f, -0.295867324f }, { 8191, 0.503498077f, 0.190456569f } });
+    CHECK (lynx::reeverb1FromFl (std::vector<std::uint8_t> (44, 0)).has_value());
+    CHECK (! lynx::reeverb1FromFl (std::vector<std::uint8_t> (40, 0)).has_value());
+    CHECK (lynx::reeverb1ParamText (5, 0.0f) == "Brighter" && lynx::reeverb1ParamText (0, 0.0f) == "off");
 }
 
 // ---- Fruity WaveShaper / Fruity Soft Clipper (REA_rodada51) ------------------------------------------------------------
