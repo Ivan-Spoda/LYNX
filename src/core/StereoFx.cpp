@@ -1161,8 +1161,13 @@ public:
         {
             const auto m = std::min (flBlock, n - done);
             engine.compute (left + done, right + done, outL, outR, m);
-            std::copy (outL, outL + m, left + done);
-            std::copy (outR, outR + m, right + done);
+            // FL's engine diverges where its fixed 15 kHz section passes Nyquist (22.05 kHz): keep NaN/inf out of
+            // the mixer (REA_rodada54 §5.2)
+            for (int i = 0; i < m; ++i)
+            {
+                left[done + i] = std::isfinite (outL[i]) ? outL[i] : 0.0f;
+                right[done + i] = std::isfinite (outR[i]) ? outR[i] : 0.0f;
+            }
             done += m;
         }
     }

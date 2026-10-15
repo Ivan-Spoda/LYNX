@@ -1316,6 +1316,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+        else if ((plugin == "Fruity Stereo Shaper" && fx.kind != EffectKind::stereoShaper)
+                 || (plugin == "Fruity Stereo Enhancer" && fx.kind != EffectKind::stereoEnhancer)
+                 || (plugin == "Transient Processor" && fx.kind != EffectKind::transientProcessor)
+                 || (plugin == "Spreader" && fx.kind != EffectKind::spreader))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)
