@@ -95,8 +95,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   shape and noise read from the user's own engine DLL; the default patch bit-exact against FL's DLL, the 4 demo channels
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
-  coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Autogun, Fruit Kick, Toxic
-  Biohazard and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
+  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice
+  processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
+  CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
+  round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
+  built-in waves read from the user's FL installation); Autogun on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -213,10 +217,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   the C runtime's sin/pow). Not reproducible by design: the random generator is process-global in FL (LYNX: one per
   instance, started like a fresh plugin). FL's max-polyphony value at channel creation is not confirmed (LYNX: 0 → 99
   voices). Without `oscdata.dat` the importer keeps the internal-synth approximation.
-- **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
-  key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
-  saturation, LP/BP/HP outputs); FL's filter envelope (time law `max(50x⁴, 0.00101)` s, exponential stages chosen
-  per 128-sample block, within 1.6·10⁻⁸ of the DLL at 44.1/48/96 kHz, REA round 33).
+- **Toxic Biohazard:** its own instrument (`core/Toxic.cpp` + `core/ToxicFx.cpp`, REA round 45): FL's wrapper
+  (velocity from Init.Vol, per-note level/pitch tables, engine chunks of 64), poly/mono voices with the 4 glide modes and
+  stealing, six operators × up to 8 unison lanes on band-limited tables built from the 128-harmonic spectra (wave 0 from the
+  state, waves 2…32 read from the user's `Toxic Biohazard_x64.dll`, SHA-256 checked), the FM matrix (operator i → j, one-sample
+  delay), operator envelopes and Catmull-Rom level ramps, LFOs, the modulation slots (velocity/LFO sources), FL's ladder with
+  its filter envelope, the master envelope, the output rack (distortion + DC blocker, two slots of delay/chorus/reverb/
+  flanger/phaser/lo-fi, 8-band EQ, sleep logic, the DLL's CRT `powf/sinf/cosf/expf/tanf`) and the master gain —
+  bit-identical to `r45/py/toxmodel.py`, which is bit-identical to FL's DLL on the 3 demo channels (voice and full chain,
+  44.1/48/96 kHz) and 35 variants (features, rates, block sizes). The 2-operator conversion stays for states that need the DLL when it is not found.
 - **Kepler:** its own instrument (`core/Kepler.cpp`, REA round 46; the channel keeps the raw state and the path of the
   user's `engine_x64.dll`, whose LFO-shape and noise tables are read at run time, SHA-256 checked): FL's wrapper
   (velocity from Init.Vol, same-key release, pan/pitch/X/Y expressions from the Final levels), 8 always-running voices
@@ -227,7 +236,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   order and rounding mode (toward zero in the render). Checked against FL's DLL (`kepler_engine`: the default patch
   bit-exact; `kepler_demo_channels`: the 4 demo channels). The synth conversion (`synthFromKepler`) stays the fallback
   (Kepler Exo / "Kepler-2" states, gate/noise/×4 bytes, DLL missing).
-  **BassDrum:** Peak `1 + 100x³·s⁴`.
+  **BassDrum** (fallback when the engine can't run): Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
   FinalLevels tables, chunks of ≤ 512 samples, voice kill), the 99-voice engine with the MIDI matrix, 512
@@ -334,9 +343,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   volume); a cut voice fades over 256 samples (FL's host ramp is not confirmed).
 - BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
   36 are clamped (FL reads outside its table there).
-- Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
-  the filter envelope moves the cutoff on LYNX's 16-sample control tick (FL: every sample, quantised to 9/65535 oct);
-  the re-trigger fade of a reused voice is left out.
+- Toxic Biohazard (REA round 45 §7): the step sequencer is ignored (off in every demo state); MIDI CC/aftertouch/bend
+  sources of the modulation slots are 0 (LYNX sends none); the free-running operators' phase generator is process-global
+  in FL (shared by every instance), LYNX starts one per instance like a fresh FL process, so random phases differ from a
+  given FL render by design; FL's max-polyphony event value and its rate-before-state order at channel creation are taken
+  from the GMS findings (inference).
 - Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
   on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
   self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
