@@ -1427,6 +1427,27 @@ private:
                 ui.getMixerForSnapshot().getStripsForSnapshot().setSelection ({}, 0);
             }
 
+            // the Mixer's routing lane: an insert with sends selected (send knobs and wires)
+            if (offline.getSong().mixer.size() > 6)
+            {
+                int source = -1;
+                for (int t = 1; t < (int) offline.getSong().mixer.size() && source < 0; ++t)
+                    if (! offline.getSong().mixer[(std::size_t) t].sends.empty())
+                        source = t;
+                const auto temporary = source < 0;
+                if (temporary) // the demo has no sends: add two for the picture
+                {
+                    source = 1;
+                    offline.editSong ([] (lynx::Song& s) { s.setRoute (1, 5, true, 0.6f); s.setRoute (1, 6, true, 0.3f); s.setRoute (4, 1, true, 0.8f); });
+                }
+                ui.getMixerForSnapshot().selectTrack (source);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-mixer-sends.png");
+                if (temporary)
+                    offline.editSong ([] (lynx::Song& s) { s.setRoute (1, 5, false); s.setRoute (1, 6, false); s.setRoute (4, 1, false); });
+                ui.getMixerForSnapshot().selectTrack (0);
+            }
+
             // the Playlist with ripple editing on
             ui.selectTabForSnapshot (2);
             ui.getPlaylistForSnapshot().setRipple (true);
