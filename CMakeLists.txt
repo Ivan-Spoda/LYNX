@@ -54,6 +54,7 @@ add_library(lynx_core STATIC
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp
     src/core/FruityDynamics.cpp
+    src/core/FruityShapers.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
