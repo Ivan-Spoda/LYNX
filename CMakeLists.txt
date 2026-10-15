@@ -120,7 +120,9 @@ if(LYNX_BUILD_APP)
 
     juce_add_gui_app(LYNX
         PRODUCT_NAME "LYNX"
-        COMPANY_NAME "Kauan")
+        COMPANY_NAME "Ka1-S"
+        COMPANY_COPYRIGHT "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
+        DESCRIPTION "LYNX digital audio workstation")
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
