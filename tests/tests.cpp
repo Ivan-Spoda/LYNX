@@ -31,6 +31,7 @@
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
+#include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/Morphine.h"
@@ -41,6 +42,8 @@
 #include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 #include "core/FlangusFastDist.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -778,12 +781,14 @@ TEST (flp_real_files)
     int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
     int kepler = 0, keplerUsable = 0, keplerKind = 0, keplerSounding = 0;
+    int toxic = 0, toxicUsable = 0, toxicKind = 0, toxicSounding = 0, toxicGoldens = 0; // REA_rodada45
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
+    int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
@@ -964,6 +969,39 @@ TEST (flp_real_files)
                         ++poizoneGoldens;
                     }
                 }
+                // Toxic Biohazard (REA_rodada45): every demo state plays on the exact engine with the waves read from the
+                // installation's DLL and sounds; the "Bombs Away" channel matches golden samples of our round-45 model
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Toxic Biohazard")
+                        ++toxic, toxicUsable += lynx::toxicStateUsable (c.pluginState) ? 1 : 0;
+                for (const auto& c : full.channels)
+                {
+                    if (c.instrument != lynx::InstrumentKind::toxic)
+                        continue;
+                    ++toxicKind;
+                    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+                    const auto golden = file.find ("Bombs Away") != std::string::npos;
+                    const auto y = lynx::toxic::renderReference (
+                        c.pluginState,
+                        { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                          { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 }, { 60000, 48, iv (127), 1.0, 0.0, 0.0, 70000 } },
+                        44100.0, golden ? 88200 : 22050, c.samplePath, 512, 140.0);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    toxicSounding += e > 1e-6 ? 1 : 0;
+                    if (golden && ! y.empty())
+                    {
+                        // our model (r45/py/toxmodel.py, which equals the DLL bit for bit), state as saved, tempo 140, 44.1 kHz
+                        CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.0832500924945) < 1e-6);
+                        static const struct { int i; float l, r; } at[] = { { 2000, -0.0501383618f, -0.100676455f }, { 15000, -0.0949445963f, -0.0714591742f }, { 30000, -0.0305469204f, 0.037349131f }, { 50000, 0.0255811438f, -0.0238218959f }, { 65000, -0.111861639f, -0.113630719f }, { 80000, 0.0163135566f, 0.0199630354f } };
+                        for (const auto& g : at)
+                            CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+                        ++toxicGoldens;
+                    }
+                }
                 for (const auto& c : full.channels)
                 {
                     if (c.instrument == lynx::InstrumentKind::harmless && c.modelParams.size() >= (std::size_t) lynx::harmlessParamCount
@@ -995,6 +1033,8 @@ TEST (flp_real_files)
                         maximusSlots += slot.plugin == "Maximus";
                         sgzSlots += slot.plugin == "Soundgoodizer";
                         vocodexSlots += slot.plugin == "Vocodex";
+                        shaperSlots += slot.plugin == "Fruity WaveShaper";
+                        clipperSlots += slot.plugin == "Fruity Soft Clipper";
                         fastDistSlots += slot.plugin == "Fruity Fast Dist";
                         flangusSlots += slot.plugin == "Fruity Flangus";
                         flangerSlots += slot.plugin == "Fruity Flanger";
@@ -1014,6 +1054,9 @@ TEST (flp_real_files)
                         flangerExact += fx.kind == lynx::EffectKind::fruityFlanger;
                         if (fx.kind == lynx::EffectKind::vocodex)
                             vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
+                        if (fx.kind == lynx::EffectKind::fruityWaveShaper)
+                            shaperExact += lynx::flshape::parseWaveShaper (fx.state).has_value() ? 1 : 0;
+                        clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
                     }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
@@ -1645,6 +1688,9 @@ TEST (flp_real_files)
     std::printf ("  PoiZone: %d channels, %d usable, %d imported as PoiZone (%d sounding), %d demo golden\n", poizone, poizoneUsable, poizoneKind,
                  poizoneSounding, poizoneGoldens);
     CHECK (poizoneUsable == poizone && poizone >= 2 && poizoneKind == poizone && poizoneSounding == poizoneKind && poizoneGoldens == 1);
+    std::printf ("  Toxic Biohazard: %d channels, %d usable, %d imported as Toxic (%d sounding), %d golden\n", toxic, toxicUsable, toxicKind,
+                 toxicSounding, toxicGoldens);
+    CHECK (toxicUsable == toxic && toxic >= 3 && toxicKind == toxic && toxicSounding == toxicKind && toxicGoldens == 1);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
@@ -1659,6 +1705,10 @@ TEST (flp_real_files)
     // option; the other Data folders add states with options not decoded
     CHECK (maximusSlots - maximusExact <= 16 && maximusExact >= 97 && sgzExact == sgzSlots && sgzSlots > 90);
     CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
+    std::printf ("  Fruity WaveShaper: %d of %d slots on the exact engine; Fruity Soft Clipper: %d of %d\n", shaperExact, shaperSlots,
+                 clipperExact, clipperSlots);
+    // (Patcher graphs add WaveShaper nodes of their own to the imported mixer)
+    CHECK (shaperExact >= shaperSlots && shaperSlots >= 70 && clipperExact >= clipperSlots && clipperSlots >= 25); // REA_rodada51
     std::printf ("  Fruity Fast Dist: %d of %d slots on the exact engine; Fruity Flangus: %d of %d; Fruity Flanger: %d of %d\n", fastDistExact,
                  fastDistSlots, flangusExact, flangusSlots, flangerExact, flangerSlots);
     CHECK (fastDistExact >= fastDistSlots && fastDistSlots >= 30 && flangusExact >= flangusSlots && flangusSlots >= 30
@@ -7428,6 +7478,113 @@ TEST (harmless_rack)
     }
 }
 
+TEST (fruity_dynamics_engines)
+{
+    // REA_rodada48: Fruity Limiter / Fruity Compressor, states of our own against the installation's DLLs
+    // (goldens = the DLL's output for the same input, EXEC; blocks of 512 at 44.1 kHz)
+    std::vector<float> inL (4096), inR (4096), side (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+        side[(std::size_t) i] = (float) (0.9 * std::sin (2.0 * 3.141592653589793 * 55.0 * i / 44100.0));
+    }
+    auto put = [] (std::vector<std::uint8_t>& b, std::int32_t v) {
+        std::uint8_t q[4];
+        std::memcpy (q, &v, 4);
+        b.insert (b.end(), q, q + 4);
+    };
+    auto limiterState = [&] (std::array<int, 18> p, int k = 0, int exact = 0) {
+        std::vector<std::uint8_t> b;
+        put (b, 7);
+        for (auto v : p)
+            put (b, v);
+        b.resize (0xA4, 0);
+        put (b, k);
+        b.push_back ((std::uint8_t) exact);
+        return b;
+    };
+    auto compressorState = [&] (int version, std::array<int, 6> p, int flags, int k = 0) {
+        std::vector<std::uint8_t> b;
+        put (b, version);
+        for (auto v : p)
+            put (b, v);
+        put (b, flags);
+        if (version > 2)
+            put (b, k);
+        return b;
+    };
+    struct Out { std::vector<float> l, r; int latency = 0; };
+    auto run = [&] (const lynx::EffectSlot& slot, bool sidechain) {
+        auto fx = lynx::makeEffect (slot);
+        fx->prepare (44100.0);
+        Out o { inL, inR };
+        for (int s = 0; s < 4096; s += 512)
+        {
+            if (sidechain)
+                fx->setSidechain (side.data() + s, side.data() + s);
+            fx->process (o.l.data() + s, o.r.data() + s, 512, slot.params, 120.0);
+        }
+        o.latency = fx->latencySamples();
+        return o;
+    };
+    auto check = [] (const Out& out, const std::vector<std::tuple<int, float, float>>& golden) {
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (out.l[(std::size_t) i] - gl) < 2e-6f && std::abs (out.r[(std::size_t) i] - gr) < 2e-6f);
+    };
+    auto limiter = [] (const std::vector<std::uint8_t>& st) {
+        auto slot = lynx::effectFromFl ("Fruity Limiter", st);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruityLimiter);
+        return *slot;
+    };
+    // look-ahead limiter: +4 dB gain into a −2.5 dB ceiling, 2 ms attack (88 samples of latency); bit-identical
+    const auto a = run (limiter (limiterState ({ 1300, 1000, 800, 1115, 3, 5000, 3, 2882, 1000, 0, 0, 0, 6666, 1, 650, 1000, 0, 4187 })), false);
+    CHECK (a.latency == 88);
+    check (a, { { 100, 0.0176312141f, 0.621841073f }, { 1000, 0.401142687f, -0.442239583f }, { 2047, -0.19392401f, 0.499310732f },
+                { 3000, 0.22835508f, -0.267458469f }, { 4095, -0.089728713f, -0.107289009f } });
+    // compressor section with a positive knee, 2 compressor curve stages and soft saturation (port within −143 dB)
+    check (run (limiter (limiterState ({ 1000, 900, 1000, 0, 3, 5000, 3, 2882, 400, 600, 400, 1115, 6666, 2, 650, 1000, 0, 4187 })), false),
+           { { 100, -0.00208989787f, 0.0100310864f }, { 1000, -0.0545219742f, -0.0651496574f }, { 2047, 0.177322432f, -0.230846375f },
+             { 3000, -0.159136176f, -0.183688983f }, { 4095, -0.300143838f, 0.299418598f } });
+    // sidechained compressor (side input 1) with a negative knee, noise gate and the exact-ceiling option
+    check (run (limiter (limiterState ({ 1000, 1000, 1000, 0, 3, 3000, 5, 2882, 300, 1000, -500, 500, 5000, 1, 1000, 0, 250, 4187 }, 1, 1)), true),
+           { { 100, -0.00186592329f, 0.00895605329f }, { 1000, -0.0375732854f, -0.0448972471f }, { 2047, 0.124697573f, -0.162336946f },
+             { 3000, -0.111069582f, -0.128206298f }, { 4095, -0.218446419f, 0.21791859f } });
+
+    auto compressor = [] (const std::vector<std::uint8_t>& st) {
+        auto slot = lynx::effectFromFl ("Fruity Compressor", st);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruityCompressor);
+        return *slot;
+    };
+    // Vintage type, look-ahead flag, side input 1: bit-identical
+    const auto ca = run (compressor (compressorState (3, { -200, 40, 30, 50, 300, 2 }, 1, 1)), true);
+    CHECK (ca.latency == 64);
+    check (ca, { { 100, 0.0795554966f, -0.230549783f }, { 1000, 0.483903229f, 0.0241768137f }, { 2047, -0.596430957f, -0.441769004f },
+                 { 3000, 0.597724319f, -0.18129006f }, { 4095, 0.607042372f, 0.435067475f } });
+    // Soft/R, version 2 without the flag (the output is still 64 frames late, but not reported): bit-identical
+    const auto cb = run (compressor (compressorState (2, { -150, 80, 0, 150, 100, 7 }, 0)), false);
+    CHECK (cb.latency == 0);
+    check (cb, { { 100, 0.0813739002f, -0.235819489f }, { 1000, 0.264188439f, 0.0131994039f }, { 2047, -0.260424435f, -0.192893147f },
+                 { 3000, 0.251500547f, -0.0762802213f }, { 4095, 0.252972007f, 0.181305125f } });
+
+    // the slot's parameters carry FL's raw controls exactly (and survive the 4-decimal project file)
+    const auto st = limiterState ({ 1261, 995, 1303, 1115, 3, 5000, 3, 2882, 264, 244, -590, 1115, 6666, 1, 650, 1000, 0, 4187 }, 1);
+    const auto parsed = lynx::fldyn::parseLimiter (st);
+    CHECK (parsed && parsed->sidechain == 1 && ! parsed->exactCeiling);
+    const auto slot = limiter (st);
+    for (int i = 0; i < lynx::fldyn::limiterControls; ++i)
+    {
+        const auto rounded = std::round (slot.params[(std::size_t) i] * 10000.0f) / 10000.0f;
+        CHECK (lynx::fldyn::raw (rounded, lynx::fldyn::limiterMin[(std::size_t) i], lynx::fldyn::limiterMax[(std::size_t) i]) == parsed->p[(std::size_t) i]);
+    }
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityLimiter, 3, slot.params[3], 120.0) == "2.0 ms");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityCompressor, 5, 2.0f / 7.0f, 120.0) == "Vintage");
+    // unreadable states keep the old approximation
+    CHECK (lynx::effectFromFl ("Fruity Limiter", { 7, 0, 0, 0 }).has_value() == false
+           || lynx::effectFromFl ("Fruity Limiter", { 7, 0, 0, 0 })->kind != lynx::EffectKind::fruityLimiter);
+    CHECK (! lynx::fldyn::parseCompressor ({ 4, 0, 0, 0 }));
+}
+
 TEST (maximus_engine)
 {
     // REA_rodada40: the engine on its own (MaximusProcessor), states of our own against the installation's DLLs
@@ -7526,6 +7683,140 @@ TEST (maximus_engine)
     const auto [raw, files] = lynx::vocodex::splitInstallData (joined);
     CHECK (raw == flState && files.sgDat == st2 && files.carrierState == data.carrierState);
     CHECK (lynx::vocodex::splitInstallData (flState).first == flState);
+}
+
+// ---- Fruity WaveShaper / Fruity Soft Clipper (REA_rodada51) ------------------------------------------------------------
+// States written here from our own values (no FL preset data); goldens from the installation's DLLs (EXEC, blocks of 512)
+namespace
+{
+std::vector<std::uint8_t> waveShaperTestState (int pre, int mix, int post, bool uni, bool center, int os, bool hq, bool smooth)
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&b] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f64 = [&b] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    auto f32 = [&b] (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    i32 (0x40003);
+    i32 (pre), i32 (mix), i32 (post);
+    b.push_back (uni ? 1 : 0), b.push_back (center ? 1 : 0);
+    i32 (os);
+    const struct { double dt, y; float t; int mode; } pts[] = { { 0.0, 0.1, 0.0f, 0 }, { 0.3, 0.8, 0.4f, 0 }, { 0.25, 0.35, 0.0f, 10 },
+                                                                 { 0.25, 0.9, -0.3f, 3 }, { 0.2, 1.0, 0.5f, 9 } };
+    i32 (3), i32 (3), i32 (5);
+    for (const auto& p : pts)
+    {
+        f64 (p.dt), f64 (p.y), f32 (p.t);
+        b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+    }
+    i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
+    i32 (1);
+    b.push_back (hq ? 1 : 0), b.push_back (smooth ? 1 : 0);
+    return b;
+}
+} // namespace
+
+TEST (fruity_waveshaper_and_soft_clipper)
+{
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+
+    // Soft Clipper: bit-exact against Fruity Soft Clipper_x64.dll
+    auto clip = [&] (int thr, int post, std::initializer_list<Gold> gold) {
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 512)
+        {
+            lynx::flshape::softClip (l.data() + s, 512, thr, post);
+            lynx::flshape::softClip (r.data() + s, 512, thr, post);
+        }
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    clip (100, 128, { { 100, 0.0f, -0.949052989f }, { 1000, -0.99617976f, 0.872887492f }, { 2047, 0.649999976f, -0.944175363f },
+                      { 3000, -0.99617976f, -0.699999988f }, { 4095, 0.25f, 0.600000024f } });
+    clip (1, 150, { { 100, 0.0f, -1.04588532f }, { 1000, -1.27003884f, 0.930835366f }, { 2047, 0.750244498f, -1.03539562f },
+                    { 3000, -1.27003884f, -0.790091455f }, { 4095, 0.347655922f, 0.708338201f } });
+    clip (64, 140, { { 100, 0.0f, -1.08492827f }, { 1000, -1.21535313f, 0.990323186f }, { 2047, 0.804165959f, -1.0770781f },
+                     { 3000, -1.21535313f, -0.849189103f }, { 4095, 0.319320858f, 0.754407823f } });
+    {
+        const std::vector<std::uint8_t> st { 64, 0, 0, 0, 140, 0, 0, 0 };
+        const auto slot = lynx::effectFromFl ("Fruity Soft Clipper", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruitySoftClipper);
+        if (slot)
+        {
+            const auto s = lynx::flshape::softClipperFromParams (slot->params.data());
+            CHECK (s.threshold == 64 && s.post == 140);
+            auto fx = lynx::makeEffect (*slot);
+            fx->prepare (44100.0);
+            std::vector<float> l (inL), r (inR);
+            fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+            CHECK (l[3000] == -1.21535313f && r[4095] == 0.754407823f);
+        }
+    }
+
+    // WaveShaper: tables (bipolar / unipolar) and the engine on three of our states, live and as FL renders
+    const auto stA = waveShaperTestState (150, 100, 120, false, true, 1, true, true);  // CENTER, ×2, HQ, smooth
+    const auto stB = waveShaperTestState (100, 128, 128, true, false, 0, false, false); // unipolar
+    const auto stC = waveShaperTestState (192, 90, 100, false, false, 2, false, false); // ×4
+    const auto pA = lynx::flshape::parseWaveShaper (stA);
+    CHECK (pA && pA->points.size() == 5 && pA->pre == 150 && pA->center && pA->hq && pA->smooth && pA->oversampling == 1);
+    if (pA)
+    {
+        const auto T = lynx::flshape::shaperTable (pA->points, false);
+        CHECK (T.size() == 16386 && T[1] == 3277 && T[1001] == 18824 && T[5001] == 26195 && T[9001] == 11469 && T[12001] == 24614
+               && T[16384] == 32767 && T[0] == T[1]);
+        const auto U = lynx::flshape::shaperTable (pA->points, true);
+        CHECK (U.size() == 32770 && U[1] == -26214 && U[1001] == -6408 && U[5001] == 17073 && U[9001] == 19551 && U[12001] == 14549);
+    }
+    auto shape = [&] (const std::vector<std::uint8_t>& st, bool render, std::initializer_list<Gold> gold) {
+        const auto s = lynx::flshape::parseWaveShaper (st);
+        CHECK (s.has_value());
+        if (! s)
+            return;
+        lynx::flshape::WaveShaperEngine e;
+        e.setCurve (s->points);
+        e.prepare (44100.0);
+        e.setControls (s->pre, s->mix, s->post, s->oversampling, s->hq, s->smooth, s->center, s->unipolar, render);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        for (const auto& g : gold)
+            CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
+    };
+    shape (stA, false, { { 100, 0.59108448f, 0.469315082f }, { 1000, 0.284353405f, 1.02621937f }, { 2047, -0.533613563f, 0.117038473f },
+                         { 3000, 0.22673659f, -1.13572407f }, { 4095, -0.267153352f, 0.822866499f } });
+    shape (stA, true, { { 100, 0.794869065f, -0.127601087f }, { 1000, -0.00841622613f, 0.900729597f }, { 2047, 0.450603426f, -0.325943232f },
+                        { 3000, -0.0530530401f, -0.32303831f }, { 4095, 1.0959363f, 0.946009099f } });
+    shape (stB, false, { { 100, -0.206451416f, 0.502471924f }, { 1000, -0.799987793f, 0.761169434f }, { 2047, 0.411743164f, 0.514160156f },
+                         { 3000, -0.799987793f, 0.596221924f }, { 4095, -0.157653809f, 0.334106445f } });
+    shape (stB, true, { { 100, -0.206390381f, 0.502493739f }, { 1000, -0.799987793f, 0.761169434f }, { 2047, 0.411743164f, 0.514144361f },
+                        { 3000, -0.799987793f, 0.596221924f }, { 4095, -0.157653809f, 0.334106445f } });
+    shape (stC, false, { { 100, 0.317797363f, 0.0483714938f }, { 1000, -0.445489585f, -0.533142388f }, { 2047, 0.634525597f, 0.942175806f },
+                         { 3000, -0.445489585f, 0.514707327f }, { 4095, 0.200391173f, -0.937523127f } });
+    shape (stC, true, { { 100, 0.61165309f, -0.0993360579f }, { 1000, 0.0375693105f, 0.667849183f }, { 2047, 0.353716731f, -0.223758236f },
+                        { 3000, 0.0375693105f, -0.223787636f }, { 4095, 0.843308687f, 0.688474894f } });
+
+    // the mixer effect from the FL import: controls as parameters, the curve in the slot's state; host blocks of any size
+    const auto slot = lynx::effectFromFl ("Fruity WaveShaper", stC, 120.0);
+    CHECK (slot && slot->kind == lynx::EffectKind::fruityWaveShaper && slot->state == stC);
+    if (slot)
+    {
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 1024, slot->params, 120.0);
+        fx->process (l.data() + 2048, r.data() + 2048, 2048, slot->params, 120.0);
+        CHECK (close (l[1000], -0.445489585f) && close (r[2047], 0.942175806f) && close (l[4095], 0.200391173f));
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityWaveShaper, 3, slot->params[3], 120.0) == "x4");
+    }
+    // an unreadable state keeps the old approximation
+    CHECK (lynx::effectFromFl ("Fruity WaveShaper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
+    CHECK (lynx::effectFromFl ("Fruity Soft Clipper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
@@ -8346,6 +8637,95 @@ TEST (gms_engine)
         inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
     }
     const auto ref = lynx::gms::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0, 8192, "");
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
+}
+
+// A Toxic Biohazard state written from scratch (REA_rodada45; r45/py/mktest.py builds the same bytes): our own drawn
+// spectra on operators 1 and 3 (wave 0) and the sine on operator 2, so no wave of the installation is needed
+std::vector<std::uint8_t> toxicTestState()
+{
+    auto s = lynx::toxicDefaultState();
+    static const std::pair<int, double> set[] = {
+        { 0, 0.62 }, { 1, 0.3 }, { 3, 0.05 }, { 4, 0.6 }, { 5, 0.7 }, { 6, 0.4 }, { 7, 0.3 }, { 8, 0.4 }, { 9, 0.8 }, { 10, 0.2 },
+        { 13, 0.45 }, { 15, 0.45 }, { 16, 0.55 }, { 17, 0.5 }, { 19, 0.1 }, { 20, 0.5 }, { 21, 0.4 }, { 22, 0.4 }, { 23, 0.8 },
+        { 24, 0.6 }, { 25, 1 }, { 26, 1 }, { 27, 1 }, { 32, 0.5606 }, { 33, 0.4394 }, { 38, 0.53 }, { 49, 0 }, { 55, 0.25 },
+        { 62, 0.5 }, { 75, 0.08 }, { 81, 0.5 }, { 87, 0.3 }, { 104, 0.8 }, { 105, 0.6 }, { 110, 0.35 }, { 115, 0.22 },
+        { 127, 0.18 }, { 147, 0.7 }, { 227, 1 }, { 229, 0.65 }, { 233, 0.4 }, { 236, 1 }, { 237, 1 }, { 252, 0.5 }, { 254, 0.3 },
+        { 256, 0.4 }, { 267, 0.4 }, { 269, 0.5 }, { 277, 0.3 }, { 300, 1 }, { 301, 8 }, { 302, 2 }, { 303, 0 }, { 305, 3 },
+        { 306, 0 }, { 307, 1 }, { 308, 0 }, { 314, 1 }, { 315, 0 }, { 316, 1 }, { 324, 106 }, { 332, 0.7 } };
+    for (const auto& [index, value] : set)
+    {
+        const auto v = (float) value;
+        std::memcpy (s.data() + lynx::toxicParamOffset (s, index), &v, 4);
+    }
+    auto spectrum = [&] (int slot, int h, float amp, float phase) {
+        const auto at = 12 + 0x40 + 1024 * (std::size_t) slot + 4 * (std::size_t) h;
+        std::memcpy (s.data() + at, &amp, 4);
+        std::memcpy (s.data() + at + 512, &phase, 4);
+    };
+    for (int h = 0; h < 24; ++h)
+        spectrum (0, h, (float) (1.0 / (h + 1)), 0.0f);
+    for (int k = 0; k < 16; ++k)
+        spectrum (2, 2 * k, (float) (1.0 / (2 * k + 1)), 0.25f);
+    return s;
+}
+
+TEST (toxic_engine)
+{
+    const auto blob = toxicTestState();
+    dumpIfAsked ("LYNX_DUMP_TOXIC", blob);
+    CHECK (blob.size() == 10050u && lynx::toxicStateUsable (blob) && ! lynx::toxicNeedsDll (blob));
+    CHECK (lynx::toxicParamOffset (blob, 15) == 12 + 0x40 + 8192 + 4 * 15 && lynx::toxicParamOffset (blob, 340) < 0);
+    CHECK (! lynx::toxicDllUsable ("") && ! lynx::toxicDllUsable ("/nonexistent/Toxic Biohazard_x64.dll"));
+    auto broken = blob;
+    broken[8] = 'X';
+    CHECK (! lynx::toxicStateUsable (broken));
+    CHECK (! lynx::toxicStateUsable (std::vector<std::uint8_t> (blob.begin(), blob.begin() + 5000)));
+    auto needs = blob;
+    const auto w = 15.0f; // a built-in wave of the installation: without the DLL the engine refuses the state
+    std::memcpy (needs.data() + lynx::toxicParamOffset (needs, 307), &w, 4);
+    CHECK (lynx::toxicNeedsDll (needs) && lynx::toxic::renderReference (needs, { { 0, 60 } }, 44100.0, 64, "").empty());
+
+    // golden samples of our round-45 model (toxmodel.run, which equals the DLL bit for bit on this state), effects on,
+    // tempo 140, 44.1 kHz, host blocks of 512: C5 vel 100 0–30000, E5 vel 80 11025–40000, G5 vel 110 22050–52000
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    const std::vector<lynx::toxic::RefNote> notes = { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 },
+                                                      { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                      { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 } };
+    const auto y = lynx::toxic::renderReference (blob, notes, 44100.0, 66150, "", 512, 140.0);
+    CHECK (y.size() == 2 * 66150u);
+    static const struct { int i; float l, r; } golden[] = { { 100, 0.264782101f, 0.189374551f }, { 5000, -0.605827034f, 0.43244195f }, { 15000, -0.343959779f, -0.111227378f }, { 25000, 0.0127612427f, -0.354315311f }, { 35000, -0.353289753f, -0.307500422f }, { 45000, -0.260735184f, 0.202133358f }, { 55000, -0.0751226544f, -0.0776180848f }, { 66000, -0.0294751395f, 0.00692501338f } };
+    for (const auto& g : golden)
+        CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.307227390984) < 1e-6);
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → law A), velocity → Init.Vol
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::toxic;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::toxic);
+    inst->configure (c, 140.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::toxic::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } },
+                                                   44100.0, 8192, "", 512, 140.0);
     double diff = 0.0, energy = 0.0;
     for (int i = 0; i < 8192; ++i)
     {

@@ -51,7 +51,8 @@ enum class InstrumentKind : std::uint8_t
     kepler,     // FL's Kepler engine (REA_rodada46): raw saved state in pluginState, the user's engine DLL in samplePath
     poizone,    // FL's PoiZone engine (REA_rodada44): the plugin's raw saved state in ChannelDef::pluginState
     fruitkick,  // FL's Fruit Kick (REA_rodada43 §1): raw saved state (with its envelope snapshot) in pluginState
-    bassdrum    // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
+    bassdrum,   // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
+    toxic       // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -294,6 +295,10 @@ enum class EffectKind : std::uint8_t
     vintagePhaser, // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
     vocodex,      // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
     maximus,      // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
+    fruityLimiter,   // FL's Fruity Limiter, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
+    fruityCompressor, // FL's Fruity Compressor, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
+    fruityWaveShaper, // FL's Fruity WaveShaper, exact (REA_rodada51, core/FruityShapers.h): curve in EffectSlot::state, controls / range
+    fruitySoftClipper, // FL's Fruity Soft Clipper, exact (REA_rodada51, core/FruityShapers.h): threshold, post / range
     fruityFastDist, // FL's Fruity Fast Dist, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     fruityFlanger   // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range

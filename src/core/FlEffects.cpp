@@ -2,6 +2,8 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 #include "core/FlangusFastDist.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
@@ -925,8 +927,57 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     return effectFromFl (pluginName, state, bpm);
 }
 
+std::optional<EffectSlot> fruityDynamicsExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity Limiter / Fruity Compressor engines from the saved controls (REA_rodada48); the approximations
+    // of REA_rodada7 remain for states that cannot be read
+    std::string lower = pluginName;
+    std::transform (lower.begin(), lower.end(), lower.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+    if (lower == "fruity limiter")
+        if (const auto s = fldyn::parseLimiter (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityLimiter);
+            fldyn::limiterToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (lower == "fruity compressor")
+        if (const auto s = fldyn::parseCompressor (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityCompressor);
+            fldyn::compressorToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
+std::optional<EffectSlot> fruityShaperExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity WaveShaper / Fruity Soft Clipper engines from the saved state (REA_rodada51); the distortion
+    // approximations of REA_rodada8 remain for states that cannot be read
+    if (pluginName == "Fruity WaveShaper")
+        if (const auto s = flshape::parseWaveShaper (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityWaveShaper);
+            flshape::waveShaperToParams (*s, slot.params.data());
+            slot.state = state; // the curve
+            return slot;
+        }
+    if (pluginName == "Fruity Soft Clipper")
+        if (const auto s = flshape::parseSoftClipper (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruitySoftClipper);
+            flshape::softClipperToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    if (auto exact = fruityDynamicsExact (pluginName, state))
+        return exact;
+    if (auto exact = fruityShaperExact (pluginName, state))
+        return exact;
     // FL's own Fast Dist / Flangus engines from the saved controls (REA_rodada55); the approximations of REA_rodada8
     // remain for states that cannot be read
     if (pluginName == "Fruity Fast Dist")
@@ -1108,6 +1159,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
     switch (kind)
     {
         case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
+        case EffectKind::fruityLimiter: return { "Fruity Limiter" };
+        case EffectKind::fruityCompressor: return { "Fruity Compressor" };
+        case EffectKind::fruityWaveShaper: return { "Fruity WaveShaper" };
+        case EffectKind::fruitySoftClipper: return { "Fruity Soft Clipper" };
         case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
         case EffectKind::fruityFlangus: return { "Fruity Flangus" };
         case EffectKind::fruityFlanger: return { "Fruity Flanger" };
@@ -1123,6 +1178,14 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 {
     auto is = [&] (const char* n) { return pluginName == n; };
 
+    // the exact Fruity Limiter / Compressor take FL's controls as they are (value over the control's range)
+    if (is ("Fruity Limiter") && k >= 0 && k < fldyn::limiterControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    if (is ("Fruity Compressor") && k >= 0 && k < fldyn::compressorControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact WaveShaper (pre, mix, post) and Soft Clipper (threshold, post) take FL's controls over their ranges
+    if ((is ("Fruity WaveShaper") && k >= 0 && k < 3) || (is ("Fruity Soft Clipper") && k >= 0 && k < 2))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Fast Dist / Flangus / Flanger take FL's controls over their ranges
     if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdistfx::params) || (is ("Fruity Flangus") && k >= 0 && k < flangusfx::params)
         || (is ("Fruity Flanger") && k >= 0 && k < flangerfx::params))
