@@ -896,14 +896,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if (name == "fruity dx10" || name == "dx10")
             {
-                // FL's FM engine from the raw state (REA_rodada42) while the channel's envelopes/LFOs/filter (kept by
-                // the plugin's voice processor) are neutral; otherwise the 3-oscillator FM approximation
-                const auto v2 = c.pluginState.size() >= 96 + 364 && c.pluginState[0] == 2;
-                const auto snapshot = v2 ? std::vector<std::uint8_t> (c.pluginState.begin() + 96, c.pluginState.begin() + 96 + 364) : dx10Snapshot (c);
-                if (dx10StateUsable (c.pluginState) && dx10SnapshotNeutral (snapshot))
+                // FL's FM engine from the raw state (REA_rodada42), with the channel settings its voice processor
+                // keeps (a version-2 state's own snapshot, else the channel's 0xDA/0xDB records) and the project's PPQ
+                // for the envelope ticks; the 3-oscillator FM approximation stays as a fallback
+                if (auto st = dx10StateWithSnapshot (c.pluginState, dx10Snapshot (c)); ! st.empty())
                 {
                     def.instrument = InstrumentKind::dx10;
-                    def.pluginState = c.pluginState;
+                    def.pluginState = std::move (st);
+                    def.modelParams = { (float) (project.header.ppq > 0 ? project.header.ppq : 96) };
                     adoptedFromPlugin = true;
                 }
                 else if (synthFromDX10 (c.pluginState, fromPlugin))

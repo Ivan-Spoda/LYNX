@@ -86,8 +86,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
   models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
   9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
-  installation); Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in
-  synth; Sakura and Drumpad on physical models rebuilt from their
+  installation); Fruity DX10 on its engine with the channel processor it keeps (REA round 42: bit-identical to the
+  reference model, which is bit-identical to FL's DLL on all 64 distinct installation states and on the 12 project
+  channels with their channel envelopes/filter); Kepler, Autogun, MiniSynth, Fruit Kick, Toxic Biohazard, PoiZone and
+  BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -213,6 +215,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   instance), so noise, dither and the random start phases of fresh voices differ from any given FL render (LYNX starts
   one generator per instance like a freshly created plugin). FL's max-polyphony value at channel creation is not
   confirmed (LYNX uses 0 → 99 voices). Without the wave files the importer keeps the 3-oscillator approximation.
+- **Fruity DX10:** its own instrument (`core/Dx10.cpp`, REA round 42): the voice (two parallel sine modulators on
+  the host's sine table with Init → Sustain → release level glides, the Waveform shaper, Mod Thru, the 1.2/peak
+  normalised amplitude envelope, the plugin-wide vibrato, voice stealing, re-tuning on Final.Pitch changes) and the
+  plugin voice processor DX10 keeps: the channel's five INS articulators stepped per sequencer tick (never released,
+  as in FL), the eight filter types on the x87 path, FL's x87 pan law with its gain ramps and the 441-sample end fade —
+  bit-identical to our round-42 reference model (`r42/py/dxmodel.py` + `dxproc.py`), which matches the DLL bit for
+  bit on 64/64 states, 12/12 project channels with their settings and the synthetic batteries. Version-1 states take
+  the channel's 0xDA/0xDB records as their settings (FL's host hands them to the plugin: inference); the project's
+  PPQ sets the tick rate.
 - **Morphine:** its own instrument (`core/Morphine.cpp`, REA round 39 §2): the whole Mor0 state tree, 32 voices
   (poly/stealing, mono legato with return to the nearest held key, 4 glide modes), control blocks of int(0.0029·fs),
   Eg1–4 with loops and the 12-slot matrix (incl. the Eg-amount destinations), master ADSR, 4 generators (keyboard
@@ -303,6 +314,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
   demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
   (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
+- Fruity DX10 (REA round 42 §4–5): the end-fade table uses the exact cosine (FL: IPP's 11-bit cosine; −129 dB worst
+  case); FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
+  sequencer ticks are inferences (LYNX ticks on the song's PPQ grid while playing, free-running otherwise); global
+  LFOs ignore song-position jumps; notes have no Mod X/Y; the filters are bit-exact only where long double is the x87
+  format.
 - Sytrus: chaotic FM patches (two-way FM loops, strong self-feedback) cannot be sample-exact — FL builds sine tables
   with IPP's tone generator (≈1 ulp from an exact sine) and the chaos amplifies it (statistically equivalent);
   random maps use a fixed per-instance seed (FL's is clock-seeded, so they are not reproducible in FL either); the
