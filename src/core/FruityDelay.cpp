@@ -91,15 +91,26 @@ Ramp ramp (float& cur, float target, float maxStep, int n) noexcept
 }
 } // namespace
 
-Delay2Engine::Delay2Engine (const Delay2State& s, double sampleRate, double bpm, int maxBlock)
+Delay2Engine::Delay2Engine (const Delay2State& s, double sampleRate, double bpm, int maxBlock, bool settled)
+    : rate (sampleRate), block (maxBlock)
+{
+    fbCur = (float) s.v[3] * 0.0078125f;
+    tmp.resize ((std::size_t) maxBlock * 2);
+    set (s, bpm);
+    if (settled)
+        for (int k = 0; k < 4; ++k)
+            gCur[k] = gTarget[k];
+}
+
+void Delay2Engine::set (const Delay2State& s, double bpm)
 {
     const auto& p = s.v;
-    const auto ratio = 44100.0 / sampleRate;
+    const auto ratio = 44100.0 / rate;
     step = (float) (0.001 * ratio);
     const auto pan = (float) p[0] * 0.0078125f;
     const auto vol = flVolume (p[1]);
     dry = flVolume (p[2]);
-    fbTarget = fbCur = (float) p[3] * 0.0078125f;
+    fbTarget = (float) p[3] * 0.0078125f;
     if (pan >= 0.0f)
     {
         auto g0 = 1.0f - pan;
@@ -124,15 +135,20 @@ Delay2Engine::Delay2Engine (const Delay2State& s, double sampleRate, double bpm,
     const auto c = (float) ((double) (float) (std::exp ((double) ((float) p[7] * 0.0078125f) * std::log (21.0)) - 1.0) * 0.05 * ratio);
     coef = c < 1.0f ? c : 1.0f;
     const auto off = (float) ((double) (float) (std::exp ((double) ((float) std::abs (p[5]) * 0.001953125f) * std::log (1001.0)) - 1.0) * 50.0);
-    const auto offSamples = roundEven ((double) ((off * (float) sampleRate) / 100000.0f));
-    const auto delay = std::max (1, roundEven ((double) (p[4] * (int) sampleRate) * 0.3125 / (double) (float) bpm));
-    offL = p[5] <= 0 ? offSamples : 0;
-    offR = p[5] <= 0 ? 0 : offSamples;
-    frames = delay + maxBlock + offSamples;
+    const auto offSamples = roundEven ((double) ((off * (float) rate) / 100000.0f));
+    const auto delay = std::max (1, roundEven ((double) (p[4] * (int) rate) * 0.3125 / (double) (float) bpm));
+    const auto sign = p[5] <= 0 ? 0 : 1;
+    if (! line.empty() && delay == delaySamples && offSamples == offsetSamples && sign == offsetSign)
+        return;
+    delaySamples = delay;
+    offsetSamples = offSamples;
+    offsetSign = sign;
+    offL = sign == 0 ? offSamples : 0;
+    offR = sign == 0 ? 0 : offSamples;
+    frames = delay + block + offSamples;
     line.assign ((std::size_t) frames * 2, 0.0f);
     readPos = 0;
     writePos = delay;
-    tmp.resize ((std::size_t) maxBlock * 2);
 }
 
 void Delay2Engine::process (float* left, float* right, int n) noexcept
@@ -260,8 +276,50 @@ float tableAt (const float* t, float x) noexcept
     return (1.0f - fr) * t[i] + fr * t[i + 1];
 }
 
-// the engine's float sine (its library rounds a double-precision result; see §3.9)
-float sineF (float x) noexcept { return (float) std::sin ((double) x); }
+// The engine's float sine, as its runtime library computes it on a CPU with FMA (REA_rodada52 §3.9): the argument in
+// double, reduced by multiples of π/2 (two-part constant, fused steps), then the degree-9 sine or degree-10 cosine
+// polynomial evaluated with fused multiply-adds, the quadrant's sign applied and the result rounded to float.
+float sineF (float x) noexcept
+{
+    const auto xd = (double) x;
+    const auto ax = std::fabs (xd);
+    const auto sinPoly = [] (double r) noexcept
+    {
+        const auto r2 = r * r;
+        auto p = std::fma (r2, 2.7557319223985893e-06, -0.0001984126984126984);
+        p = std::fma (p, r2, 0.008333333333333333);
+        p = std::fma (p, r2, -0.16666666666666666);
+        return std::fma (p, r * r2, r);
+    };
+    if (ax <= 0.78539816339744828) // π/4
+    {
+        if (ax >= 0.0078125)
+            return (float) sinPoly (xd);
+        if (ax >= 0.0001220703125)
+            return (float) std::fma (-(xd * xd * xd), 0.16666666666666666, xd);
+        return x;
+    }
+    const auto n = (int) std::fma (ax, 0.6366197723675814, 0.5);
+    const auto fn = (double) n;
+    const auto r = std::fma (-fn, 1.5707963267341256, ax) - fn * 6.077100506506192e-11;
+    double y;
+    if ((n & 1) != 0)
+    {
+        const auto r2 = r * r;
+        const auto a = std::fma (r2, -0.5, 1.0);
+        auto b = std::fma (r2, -2.755731922398589e-07, 2.4801587301587298e-05);
+        b = std::fma (b, r2, -0.0013888888888888887);
+        b = std::fma (b, r2, 0.041666666666666664);
+        y = std::fma (b, r2 * r2, a);
+    }
+    else
+        y = sinPoly (r);
+    if ((n & 3) >= 2)
+        y = -y;
+    if (std::signbit (x))
+        y = -y;
+    return (float) y;
+}
 float tanF (float x) noexcept { return (float) std::tan ((double) x); }
 float powF (float b, float e) noexcept { return (float) std::pow ((double) b, (double) e); }
 float sqrtF (float x) noexcept { return std::sqrt (x); }
@@ -1011,6 +1069,7 @@ constexpr float engineDefaults[delay3Controls] { 1.0f, 0, 0, 0, 0.5f, 0.95f, 0, 
 
 Delay3Engine::Delay3Engine (double sampleRate) : d (std::make_unique<Dsp>())
 {
+    smooth.reserve (delay3Controls);
     for (int i = 0; i < delay3Controls; ++i)
         applyNow (i, engineDefaults[i]);
     d->clear();
@@ -1147,13 +1206,12 @@ public:
         for (int i = 0; i < delay2Controls; ++i)
             s.v[(std::size_t) i] = rawOf (params[(std::size_t) i], delay2Min[(std::size_t) i], delay2Max[(std::size_t) i]);
         bpm = bpm > 0.0 ? bpm : 120.0;
-        if (engine == nullptr || s.v != current.v || bpm != tempo)
-        {
-            // FL rebuilds the line on a time change; LYNX also restarts on any other change (rare: automation)
-            current = s;
-            tempo = bpm;
-            engine = std::make_unique<Delay2Engine> (s, rate, bpm, block);
-        }
+        if (engine == nullptr)
+            engine = std::make_unique<Delay2Engine> (s, rate, bpm, block, true);
+        else if (s.v != current.v || bpm != tempo)
+            engine->set (s, bpm);
+        current = s;
+        tempo = bpm;
         for (int done = 0; done < n;)
         {
             const auto len = std::min (block, n - done);
@@ -1172,20 +1230,20 @@ private:
 class Delay3Effect final : public Effect
 {
 public:
+    // the engine (its lines: 4 × 4 MB at 44.1 kHz, as FL allocates them) is built here, off the audio thread
     void prepare (double sampleRate) noexcept override
     {
         rate = sampleRate;
-        engine.reset();
+        engine = std::make_unique<Delay3Engine> (rate);
+        fresh = true;
     }
-    void reset() noexcept override { engine.reset(); }
+    void reset() noexcept override { prepare (rate); }
 
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override
     {
-        bpm = bpm > 0.0 ? bpm : 120.0;
-        const bool fresh = engine == nullptr;
-        if (fresh)
-            engine = std::make_unique<Delay3Engine> (rate);
-        engine->setTempo (bpm);
+        if (engine == nullptr)
+            prepare (rate);
+        engine->setTempo (bpm > 0.0 ? bpm : 120.0);
         for (int i = 0; i < delay3Controls; ++i)
         {
             const auto raw = rawOf (params[(std::size_t) i], delay3Min[(std::size_t) i], delay3Max[(std::size_t) i]);
@@ -1197,11 +1255,13 @@ public:
         }
         if (fresh)
             engine->settle();
+        fresh = false;
         engine->process (left, right, n);
     }
 
 private:
     double rate = 44100.0;
+    bool fresh = true;
     std::array<int, delay3Controls> current {};
     std::unique_ptr<Delay3Engine> engine;
 };

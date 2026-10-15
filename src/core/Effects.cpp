@@ -5,6 +5,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDelay.h"
 
 #include "core/Biquad.h"
 
@@ -2133,6 +2134,21 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's raw controls normalised over their ranges (core/FruityDelay.h); defaults = FL's "Default" presets
+    static const EffectInfo fruityDelay2Info = [] {
+        EffectInfo info { "Fruity Delay 2", {} };
+        for (int i = 0; i < fldelay::delay2Controls; ++i)
+            info.params.push_back ({ fldelay::delay2ParamName (i), (float) (fldelay::delay2Default[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay2Max[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i]) });
+        return info;
+    }();
+    static const EffectInfo fruityDelay3Info = [] {
+        EffectInfo info { "Fruity Delay 3", {} };
+        for (int i = 0; i < fldelay::delay3Controls; ++i)
+            info.params.push_back ({ fldelay::delay3ParamName (i), (float) (fldelay::delay3Default[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay3Max[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i]) });
+        return info;
+    }();
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2228,6 +2244,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::fruityDelay2: return fruityDelay2Info;
+        case EffectKind::fruityDelay3: return fruityDelay3Info;
     }
     return eq;
 }
@@ -2494,6 +2512,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
+        case EffectKind::fruityDelay2:
+            return fldelay::delay2ParamText (param, v);
+
+        case EffectKind::fruityDelay3:
+            return fldelay::delay3ParamText (param, v, bpm);
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -2561,6 +2585,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::fruityDelay2: return fldelay::makeDelay2();
+        case EffectKind::fruityDelay3: return fldelay::makeDelay3();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

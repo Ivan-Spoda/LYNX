@@ -35,11 +35,17 @@ std::optional<Delay2State> parseDelay2 (const std::vector<std::uint8_t>& state);
 class Delay2Engine
 {
 public:
-    // maxBlock: the longest block process() will be given (it sizes the delay line like FL's host block)
-    Delay2Engine (const Delay2State& s, double sampleRate, double bpm, int maxBlock = 512);
+    // maxBlock: the longest block process() will be given (it sizes the delay line like FL's host block).
+    // A new instance fades its input in (FL's gain ramps start at 0); `settled` starts at the targets instead.
+    Delay2Engine (const Delay2State& s, double sampleRate, double bpm, int maxBlock = 512, bool settled = false);
+    // New controls / tempo: gains, feedback, cutoff and mode change in place (ramped like FL); a new delay length
+    // or stereo offset rebuilds the line (FL resizes it; its content after a resize is not confirmed: cleared here)
+    void set (const Delay2State& s, double bpm);
     void process (float* left, float* right, int n) noexcept; // in place, n <= maxBlock
 
 private:
+    double rate = 44100.0;
+    int block = 512, delaySamples = 0, offsetSamples = 0, offsetSign = 0;
     std::vector<float> line; // interleaved L/R
     int frames = 0, readPos = 0, writePos = 0, offL = 0, offR = 0;
     int mode = 0;
