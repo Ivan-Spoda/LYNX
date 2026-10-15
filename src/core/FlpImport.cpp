@@ -6,6 +6,7 @@
 #include "core/BassDrum.h"
 #include "core/FruitKick.h"
 #include "core/Harmor.h"
+#include "core/MiniSynth.h"
 #include "core/Ogun.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
@@ -442,6 +443,11 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             if (synthFromOgun (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::minisynth)
+        {
+            // ... and of a MiniSynth patch (the internal-synth conversion)
+            SynthSettings synth;
+            if (synthFromMiniSynth (project.channels.front().pluginState, song.bpm, synth))
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::fruitkick)
         {
             // ... and of Fruit Kick / BassDrum patches (their sine + pitch-sweep conversions)
@@ -908,8 +914,22 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromFruitKick (c.pluginState, fromPlugin))
                     adopt();
             }
-            else if (name == "minisynth" && synthFromMiniSynth (c.pluginState, song.bpm, fromPlugin))
-                adopt();
+            else if (name == "minisynth")
+            {
+                // FL's MiniSynth engine from the raw state (REA_rodada41) with its wave tables built at run time from the
+                // installation's oscdata.dat; the internal-synth conversion stays as the fallback (state unreadable or
+                // file not found)
+                const auto oscdata = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Minisynth\\oscdata.dat", options.roots);
+                if (miniSynthStateUsable (c.pluginState) && ! oscdata.empty() && options.fileExists && options.fileExists (oscdata))
+                {
+                    def.instrument = InstrumentKind::minisynth;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = oscdata;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromMiniSynth (c.pluginState, song.bpm, fromPlugin))
+                    adopt();
+            }
             else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
                 adopt();
             else if (name == "sytrus")
@@ -1166,11 +1186,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
                      || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::gms
                      || def.instrument == InstrumentKind::morphine
-                     || def.instrument == InstrumentKind::ogun
+                     || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth
                      || def.instrument == InstrumentKind::fruitkick
                      || def.instrument == InstrumentKind::bassdrum)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
-            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
+            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)

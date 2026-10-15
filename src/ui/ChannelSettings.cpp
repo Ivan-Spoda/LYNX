@@ -9,6 +9,7 @@
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
 #include "core/Gms.h"
+#include "core/MiniSynth.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
 #include "core/BassDrum.h"
@@ -481,6 +482,7 @@ public:
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
         ogun = def.instrument == InstrumentKind::ogun;
+        miniSynth = def.instrument == InstrumentKind::minisynth;
         fruitkick = def.instrument == InstrumentKind::fruitkick;
         bassdrum = def.instrument == InstrumentKind::bassdrum;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
@@ -579,11 +581,17 @@ public:
             { 0, "Output" }, { 6, "Base" }, { 7, "Peak" }, { 8, "Slide" }, { 2, "Duration" }, { 5, "Attack" }, { 4, "Drive" },
             { 3, "Butt" }, { 15, "Click level" }, { 14, "Click freq" }, { 13, "Click cut" }, { 21, "Noise mix" }, { 22, "Noise filter" },
             { 20, "Noise pitch" }, { 19, "Noise start" }, { 1, "Sampling" } };
-        auto offsetOf = [] (bool isGms, bool isBassDrum, const std::vector<std::uint8_t>& st, int index) {
-            return isGms ? gmsParamOffset (st, index) : isBassDrum ? bassDrumParamOffset (st, index) : morphineParamOffset (st, index);
+        // MiniSynth: its 43 floats 0…1 inside the saved state (REA_rodada41 §1.2)
+        static const FloatKnob miniSynthKnobs[] = {
+            { 5, "Osc kind" }, { 6, "Osc mod" }, { 7, "Noise" }, { 1, "Transpose" }, { 8, "Cutoff" }, { 9, "Resonance" },
+            { 16, "Filter env" }, { 21, "Attack" }, { 22, "Decay" }, { 23, "Sustain" }, { 24, "Release" }, { 20, "LFO amount" },
+            { 19, "LFO rate" }, { 2, "Slide time" } };
+        auto paramOffset = [this] (const std::vector<std::uint8_t>& st, int index) {
+            return gms ? gmsParamOffset (st, index) : miniSynth ? miniSynthParamOffset (st, index)
+                   : bassdrum ? bassDrumParamOffset (st, index) : morphineParamOffset (st, index);
         };
         auto addFloat = [&] (const FloatKnob& k) {
-            const auto at = offsetOf (gms, bassdrum, def.pluginState, k.index);
+            const auto at = paramOffset (def.pluginState, k.index);
             if (at < 0)
                 return;
             float value = 0.0f;
@@ -593,10 +601,10 @@ public:
             knob->setRange (0.0, 1.0, 0.001);
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
-            knob->onValueChange = [this, k, isGms = gms, isBassDrum = bassdrum, offsetOf, s = knob.get()] {
-                engine.editSong ([c = channel, k, isGms, isBassDrum, offsetOf, v = (float) s->getValue()] (Song& song) {
+            knob->onValueChange = [this, k, paramOffset, s = knob.get()] {
+                engine.editSong ([c = channel, k, paramOffset, v = (float) s->getValue()] (Song& song) {
                     auto& st = song.channels[(std::size_t) c].pluginState;
-                    if (const auto o = offsetOf (isGms, isBassDrum, st, k.index); o >= 0)
+                    if (const auto o = paramOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
             };
@@ -656,6 +664,9 @@ public:
         else if (morphine)
             for (const auto& k : morphineKnobs)
                 addFloat (k);
+        else if (miniSynth)
+            for (const auto& k : miniSynthKnobs)
+                addFloat (k);
         else if (ogun)
             for (const auto& k : ogunKnobs)
                 addOgun (k);
@@ -693,6 +704,7 @@ public:
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
+                    : miniSynth ? tr ("MiniSynth — FL's engine with its effects (wave tables read from your FL installation)")
                     : fruitkick ? tr ("Fruit Kick — FL's engine (channel envelopes stepped per tick)")
                     : bassdrum ? tr ("BassDrum — FL's engine (table and noise samples read from your FL installation)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
@@ -714,7 +726,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false,
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false,
          fruitkick = false, bassdrum = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
@@ -1347,7 +1359,8 @@ public:
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
+                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1428,6 +1441,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::gms:
         case InstrumentKind::morphine:
         case InstrumentKind::ogun:
+        case InstrumentKind::minisynth:
         case InstrumentKind::fruitkick:
         case InstrumentKind::bassdrum:
             return true;
@@ -1463,7 +1477,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
+                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

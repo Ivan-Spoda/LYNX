@@ -125,8 +125,9 @@ int main (int argc, char** argv)
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
-        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "audio clip", "plugin", "controller", "sakura", "drumpad", "boobass", "drumsynth", "harmless", "sytrus", "harmor", "gms", "morphine", "ogun", "fruit kick", "bassdrum" };
-        std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), kinds[(int) song.channels[i].instrument]);
+        static const char* kinds[] = { "kick", "snare", "hat", "clap", "synth", "sampler", "audio clip", "plugin", "controller", "sakura", "drumpad", "boobass", "drumsynth", "harmless", "sytrus", "harmor", "gms", "morphine", "ogun", "minisynth", "fruit kick", "bassdrum" };
+        const auto k = (std::size_t) song.channels[i].instrument;
+        std::printf ("  %2zu %-28s -> %s\n", i, song.channels[i].name.c_str(), k < std::size (kinds) ? kinds[k] : "?");
     }
 
     // like the app's export: instruments with FL render-quality settings use them (LYNX_LIVE=1: the live ones)
