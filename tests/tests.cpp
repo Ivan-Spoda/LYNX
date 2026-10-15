@@ -3120,17 +3120,18 @@ TEST (fl_parametric_eq2_state_maps_to_bands)
     CHECK (slot.has_value() && slot->kind == lynx::EffectKind::parametricEq);
     const auto& p = slot->params;
     CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (0, 0)]) == lynx::peq::BandType::lowCut);
-    CHECK (lynx::peq::slopeStages (p[(std::size_t) lynx::peq::slopeParam]) == 4);
+    CHECK (lynx::peq::flLaw (p) && lynx::peqfl::fromParams (p).order[0] == -3); // FL's own order (REA_rodada50)
     CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (3, 0)]) == lynx::peq::BandType::peak);
     CHECK (lynx::peq::type (p[(std::size_t) lynx::peq::param (1, 0)]) == lynx::peq::BandType::off);
     CHECK (std::abs (lynx::peq::responseDb (p, 48000.0, 1000.0) - 3.0) < 0.3);   // +6 from the peak −3 from the output
     CHECK (lynx::peq::responseDb (p, 48000.0, 30.0) < -40.0);                     // 48 dB/oct below 100 Hz
     CHECK (std::abs (lynx::peq::responseDb (p, 48000.0, 8000.0) + 3.0) < 0.3);
 
-    // a band muted by the mask doesn't sound
+    // a band muted by the mask doesn't sound (FL's mask travels with the slot, REA_rodada50)
     put (0x13E, 0x7F & ~(1 << 3));
     const auto muted = lynx::effectFromFl ("Fruity Parametric EQ 2", blob);
-    CHECK (lynx::peq::type (muted->params[(std::size_t) lynx::peq::param (3, 0)]) == lynx::peq::BandType::off);
+    CHECK ((lynx::peqfl::fromParams (muted->params).mask & (1u << 3)) == 0);
+    CHECK (std::abs (lynx::peq::responseDb (muted->params, 48000.0, 1000.0) + 3.0) < 0.3);
 }
 
 TEST (reverb_low_cut_and_predelay)

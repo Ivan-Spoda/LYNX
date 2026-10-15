@@ -6,6 +6,13 @@
 #include <complex>
 #include <cstring>
 
+// bit-exactness needs every product and sum rounded on its own (no fused multiply-add)
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off")
+#endif
+
 // Exact Fruity Parametric EQ 2 / Fruity Parametric EQ engines (docs/analise/REA_rodada50.md). Every float/double
 // rounding below is deliberate: it follows the order of operations observed in the plugins (§2–§3).
 
@@ -24,7 +31,7 @@ constexpr float flushBelow = 5.9604644775390625e-08f; // 2^-24
 // FL's UI type → internal design type (§2.2)
 constexpr int internalType[8] = { 0, 1, 2, 4, 3, 6, 7, 8 };
 
-// Per-stage tables of the "steep" orders, row = |order| (§2.4)
+// Per-stage tables of the "steep" orders, row = |order| (§2.2)
 constexpr float steepCutQ[4][4] = { { 1, 1, 1, 1 }, { 1.98340166f, 0.749214649f, 1, 1 }, { 2.64303994f, 1.08151865f, 0.694244742f, 1 },
                                     { 3.57645154f, 1.14173281f, 1.04471076f, 0.655118585f } };
 constexpr float steepShelfS[4][4] = { { 1, 1, 1, 1 }, { 2.63044715f, 0.615644455f, 1, 1 }, { 5.16122818f, 1.10927105f, 0.509867311f, 1 },
@@ -75,7 +82,7 @@ float powerF (float base, float e)
     return (float) std::exp ((double) e * std::log ((double) base));
 }
 
-// Biquad design from (A, alpha, sin ω, cos ω), per internal type (§2.5)
+// Biquad design from (A, alpha, sin ω, cos ω), per internal type (§2.3)
 void designStage (Stage& st, int type, double A, double alpha, double sn, double cs)
 {
     st.type = type;
@@ -476,7 +483,7 @@ void designAlternative (Stage& st, int type, double freqHz, double q, double gai
     }
 }
 
-// Parametric EQ 2 band design (§2.3–§2.4)
+// Parametric EQ 2 band design (§2.1–§2.2)
 void designPeq2 (const Settings& s, int b, double rate, Band& band)
 {
     const int ui = s.type[(std::size_t) b];
@@ -514,7 +521,7 @@ void designPeq2 (const Settings& s, int b, double rate, Band& band)
     for (int k = 0; k <= n; ++k)
     {
         double A = 0.0, alpha = 0.0, sn = 0.0, cs = 0.0;
-        // what the plugin hands to the alternative design: frequency, Q and gain of the stage (§4.2)
+        // what the plugin hands to the alternative design: frequency, Q and gain of the stage (§4.1)
         double altFreq = (double) freq, altQ = 0.0, altGain = 0.0;
         if (t == 2 || t == 3)
         {
@@ -638,7 +645,7 @@ void runStage (Stage& st, float* io, int n) noexcept
         io[2 * i + 1] = (float) yr;
     }
     const double out[8] = { x1l, x1r, x2l, x2r, y1l, y1r, y2l, y2r };
-    // end of call: state values below 2^-24 in magnitude are cleared (§2.6)
+    // end of call: state values below 2^-24 in magnitude are cleared (§2.4)
     for (int k = 0; k < 8; ++k)
         st.s[k] = std::abs (out[k]) < (double) flushBelow ? 0.0 : out[k];
 }

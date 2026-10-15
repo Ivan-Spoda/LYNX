@@ -4,6 +4,13 @@
 #include <cmath>
 #include <cstring>
 
+// bit-exactness needs every product and sum rounded on its own (no fused multiply-add)
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off")
+#endif
+
 // Parametric EQ 2 linear-phase mode (docs/analise/REA_rodada50.md §5). The float/double roundings of the magnitude
 // table follow the plugin; the FFT convolution is computed here in double precision (the plugin's single-precision
 // FFT rounding is not reproduced, §5.6).
