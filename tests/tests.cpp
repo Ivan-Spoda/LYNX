@@ -29,6 +29,7 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/Gms.h"
+#include "core/MiniSynth.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/Morphine.h"
@@ -414,6 +415,13 @@ TEST (plugin_state_decoders_survive_garbage)
         }
         if (lynx::synthFromMiniSynth (blob, 120.0, synth))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (synth.decay) && std::isfinite (synth.attack));
+        if (lynx::miniSynthStateUsable (blob)) // the exact engine's parser and a short render with silent tables
+        {
+            const auto params = lynx::miniSynthParams (blob);
+            CHECK (params.size() == 43u && std::all_of (params.begin(), params.end(), [] (float v) { return v >= 0.0f && v <= 1.0f; }));
+            const auto y = lynx::minisynth::renderReference (blob, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 64 } }, 44100.0, 128, "");
+            CHECK (y.size() == 256u && std::all_of (y.begin(), y.end(), [] (float v) { return std::isfinite (v); }));
+        }
 
         lynx::ForeignPlugin foreign;
         lynx::parseFlWrapper (blob, foreign);
@@ -759,6 +767,7 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -854,6 +863,42 @@ TEST (flp_real_files)
                         for (const auto& g : isGms ? std::vector (std::begin (gmsAt), std::end (gmsAt)) : std::vector (std::begin (morAt), std::end (morAt)))
                             CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-5f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-5f);
                         ++demoGoldens;
+                    }
+                }
+                // MiniSynth (REA_rodada41): every state plays on the exact engine (tables from the installation's
+                // oscdata.dat) and sounds; two demo channels match golden samples of our round-41 model (bit-identical to
+                // renders of the installation's DLL for these states)
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "MiniSynth")
+                        ++miniSynth, miniSynthUsable += lynx::miniSynthStateUsable (c.pluginState) ? 1 : 0;
+                for (const auto& c : full.channels)
+                {
+                    if (c.instrument != lynx::InstrumentKind::minisynth)
+                        continue;
+                    ++miniSynthKind;
+                    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+                    const auto exo = file.find ("Exoplanet") != std::string::npos;
+                    const auto golden = exo && (c.name == "Main Lead 1" || c.name == "Riser");
+                    const auto y = lynx::minisynth::renderReference (c.pluginState,
+                                                                     { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                                       { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 }, { 60000, 48, iv (127), 1.0, 0.0, 0.0, 70000 } },
+                                                                     44100.0, golden ? 88200 : 22050, c.samplePath);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    miniSynthSounding += e > 1e-6 ? 1 : 0;
+                    if (golden && ! y.empty())
+                    {
+                        // our model, same events, tempo 120, state as saved, 44.1 kHz, host blocks of 512, L = R = Final.Vol
+                        const auto lead = c.name == "Main Lead 1";
+                        CHECK (std::abs (std::sqrt (e / (double) y.size()) - (lead ? 0.177495801753 : 0.19006567413)) < 1e-9);
+                        static const struct { int i; float v; } leadAt[] = { { 2000, -0.113459975f }, { 15000, -0.00234968495f }, { 30000, 0.13985157f }, { 50000, -0.267063439f }, { 65000, -0.244418889f }, { 80000, -0.0162940286f } },
+                                                                riserAt[] = { { 2000, -0.0603227727f }, { 15000, 0.112200871f }, { 30000, 0.0453962795f }, { 50000, 0.234380022f }, { 65000, -0.164545432f }, { 80000, -0.000485120923f } };
+                        for (const auto& g : lead ? std::vector (std::begin (leadAt), std::end (leadAt)) : std::vector (std::begin (riserAt), std::end (riserAt)))
+                            CHECK (y[2 * (std::size_t) g.i] == g.v && y[2 * (std::size_t) g.i + 1] == g.v);
+                        ++miniSynthGoldens;
                     }
                 }
                 for (const auto& c : full.channels)
@@ -1506,6 +1551,9 @@ TEST (flp_real_files)
     std::printf ("  GMS: %d channels, %d usable, %d imported as GMS (%d sounding); Morphine: %d channels, %d usable, %d imported (%d sounding); %d demo goldens\n",
                  gms, gmsUsable, gmsKind, gmsSounding, morphine, morphineUsable, morphineKind, morphineSounding, demoGoldens);
     CHECK (gmsUsable == gms && gms >= 9 && gmsKind == gms && gmsSounding == gmsKind);
+    std::printf ("  MiniSynth channels: %d, %d usable, %d on the exact engine, %d sounding, %d golden\n", miniSynth, miniSynthUsable, miniSynthKind,
+                 miniSynthSounding, miniSynthGoldens);
+    CHECK (miniSynthUsable == miniSynth && miniSynth >= 12 && miniSynthKind == miniSynth && miniSynthSounding == miniSynthKind && miniSynthGoldens == 2);
     CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
@@ -7967,6 +8015,129 @@ TEST (morphine_engine)
         energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
     }
     CHECK (diff == 0.0 && energy > 1e-3);
+}
+namespace
+{
+// A MiniSynth state written from scratch (REA_rodada41 §1.1 layout: "SSLF" + the .flms preset)
+std::vector<std::uint8_t> miniSynthTestState (const std::array<float, 43>& P)
+{
+    const std::string name = "LYNX test";
+    Bytes body;
+    body.raw ("\x99" "FLS\r\n\x1a\n", 8);
+    body.raw ("HEAD", 4);
+    body.i32 (6 + 2 * (std::int32_t) name.size());
+    const std::uint16_t head[3] = { 1, 1, (std::uint16_t) name.size() };
+    body.raw (reinterpret_cast<const char*> (head), 6);
+    for (char ch : name)
+        body.raw (&ch, 1), body.zeros (1);
+    body.raw ("DATA", 4);
+    body.i32 (176);
+    body.raw ("0rev", 4);
+    for (auto v : P)
+        body.f32 (v);
+    Bytes s;
+    s.raw ("SSLF", 4);
+    s.i32 ((std::int32_t) body.b.size());
+    s.bytes (body.b);
+    return s.b;
+}
+std::array<float, 43> miniSynthDefaults()
+{
+    return { 0.375f, 0.5f, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0.5f, 0, 0, 0.25f, 0.5f, 0, 1, 1, 0.07f, 0, 0, 0, 0, 0.7f, 0.5f, 1,
+             0.5f, 0, 0.25f, 0.5f, 0.5f, 0, 0.11222222f, 0.4f, 0.1f, 1, 0.5f };
+}
+// a synthetic oscdata.dat (amplitudes 0.3/k, phases −π/2 + 0.001·(k − 1)): the test does not need an FL installation
+std::string miniSynthTestOscdata()
+{
+    const auto path = (std::filesystem::temp_directory_path() / "lynx_test_oscdata.dat").string();
+    std::vector<float> d (2048);
+    for (int h = 0; h < 1024; ++h)
+        d[(std::size_t) h] = (float) (0.3 / (h + 1)), d[1024 + (std::size_t) h] = (float) (-1.5707963267948966 + 0.001 * h);
+    std::ofstream out (path, std::ios::binary);
+    out.write (reinterpret_cast<const char*> (d.data()), 8192);
+    return path;
+}
+} // namespace
+
+TEST (minisynth_engine)
+{
+    auto A = miniSynthDefaults(), B = miniSynthDefaults();
+    // A: poly, SQR+SQR, noise, filter env/velocity/keytracking, LFO → cutoff, distortion + decimator, delay, chorus, phaser
+    const std::pair<int, float> a[] = { { 5, 0.45f }, { 6, 0.6f }, { 7, 0.4f }, { 8, 0.45f }, { 9, 0.6f }, { 10, 0.5f }, { 11, 0.7f },
+                                        { 12, 0.1f }, { 13, 0.4f }, { 14, 0.3f }, { 15, 0.5f }, { 16, 0.8f }, { 17, 0.6f }, { 18, 0.1f },
+                                        { 19, 0.5f }, { 20, 0.85f }, { 21, 0.05f }, { 22, 0.5f }, { 23, 0.6f }, { 24, 0.4f }, { 25, 1 },
+                                        { 26, 0.3f }, { 27, 0.1f }, { 28, 1 }, { 29, 0.4f }, { 30, 0.5f }, { 31, 0.6f }, { 32, 0.6f },
+                                        { 33, 1 }, { 34, 0.4f }, { 35, 0.6f }, { 36, 0.5f }, { 37, 1 }, { 38, 0.3f }, { 39, 0.6f },
+                                        { 40, 0.5f }, { 41, 0.7f }, { 42, 0.4f } };
+    // B: lead (legato glide), BELL, LFO → pitch
+    const std::pair<int, float> b[] = { { 0, 1 }, { 2, 0.4f }, { 5, 0.7f }, { 6, 0.3f }, { 7, 0.1f }, { 8, 0.6f }, { 9, 0.3f }, { 16, 0.7f },
+                                        { 17, 0.1f }, { 18, 0.5f }, { 19, 0.6f }, { 20, 0.7f }, { 22, 0.6f }, { 23, 0.5f }, { 24, 0.3f } };
+    for (const auto& [i, v] : a)
+        A[(std::size_t) i] = v;
+    for (const auto& [i, v] : b)
+        B[(std::size_t) i] = v;
+    const auto blobA = miniSynthTestState (A), blobB = miniSynthTestState (B);
+    dumpIfAsked ("LYNX_DUMP_MINISYNTH", blobA);
+    CHECK (lynx::miniSynthStateUsable (blobA) && lynx::miniSynthParams (blobA).size() == 43u && lynx::miniSynthParams (blobA)[26] == 0.3f);
+    CHECK (lynx::miniSynthParamOffset (blobA, 9) == 8 + 8 + 8 + 6 + 18 + 12 + 4 * 9 && lynx::miniSynthParamOffset (blobA, 43) < 0);
+    CHECK (! lynx::miniSynthStateUsable (std::vector<std::uint8_t> (blobA.begin(), blobA.begin() + 20)));
+    auto shortData = blobA;
+    shortData.resize (shortData.size() - 4 * 40); // only 3 parameters present: the rest keeps the defaults
+    CHECK (lynx::miniSynthParams (shortData)[20] == 0.5f && lynx::miniSynthParams (shortData)[1] == 0.5f);
+
+    // golden samples of our round-41 model (msmodel.Plugin on the same synthetic oscdata, 44.1 kHz, host blocks of 512,
+    // L = R = Final.Vol): C5 vel 100 0–30000, E5 vel 80 11025–40000, G5 vel 110 22050–52000 (Init.Vol law A)
+    const auto osc = miniSynthTestOscdata();
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    const std::vector<lynx::minisynth::RefNote> notes = { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 },
+                                                          { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                          { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 } };
+    struct Golden { int i; float l, r; };
+    static const Golden goldenA[] = { { 100, 0.183149248f, -0.226551995f }, { 5000, -0.00842505973f, 0.254078597f }, { 15000, -0.180335894f, 0.0890596062f }, { 25000, 0.465151846f, 0.396314442f }, { 35000, 0.272939265f, 0.18288976f }, { 45000, -0.127651259f, -0.34875524f }, { 55000, -0.153043061f, -0.248885199f }, { 66000, -0.0197723396f, -0.0807986259f } };
+    static const Golden goldenB[] = { { 100, 0.175394624f, 0.175394624f }, { 5000, 0.0503161065f, 0.0503161065f }, { 15000, 0.0470628254f, 0.0470628254f }, { 25000, 0.0486912318f, 0.0486912318f }, { 35000, 0.021853026f, 0.021853026f }, { 45000, 0.0362072662f, 0.0362072662f }, { 55000, -0.000109080342f, -0.000109080342f }, { 66000, 0.0f, 0.0f } };
+    for (int which = 0; which < 2; ++which)
+    {
+        const auto y = lynx::minisynth::renderReference (which == 0 ? blobA : blobB, notes, 44100.0, 66150, osc);
+        CHECK (y.size() == 2 * 66150u);
+        if (y.size() != 2 * 66150u)
+            continue;
+        for (const auto& g : which == 0 ? std::vector (std::begin (goldenA), std::end (goldenA)) : std::vector (std::begin (goldenB), std::end (goldenB)))
+            CHECK (y[2 * (std::size_t) g.i] == g.l && y[2 * (std::size_t) g.i + 1] == g.r);
+        double e = 0.0;
+        for (auto v : y)
+            e += (double) v * v;
+        CHECK (std::abs (std::sqrt (e / (double) y.size()) - (which == 0 ? 0.315552434392 : 0.03926116287)) < 1e-9);
+    }
+    // missing oscdata.dat: silent tables, still finite
+    const auto silent = lynx::minisynth::renderReference (blobB, notes, 44100.0, 4096, "");
+    CHECK (silent.size() == 2 * 4096u && std::all_of (silent.begin(), silent.end(), [] (float v) { return std::isfinite (v) && std::abs (v) < 1.0f; }));
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → law A), velocity → Init.Vol
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::minisynth;
+    c.pluginState = blobA;
+    c.samplePath = osc;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::minisynth);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int k = 0; k < 16; ++k)
+    {
+        if (k == 0)
+            inst->noteOn (60, 0.78125f);
+        if (k == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * k, r.data() + 512 * k, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::minisynth::renderReference (blobA, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } },
+                                                       44100.0, 8192, osc, 512, 120.0, 0, -1.0, true);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3 && ! inst->idle());
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"
