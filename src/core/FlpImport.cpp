@@ -1498,7 +1498,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Spreader" && fx.kind != EffectKind::spreader))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
-                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
+                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
+                 || (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
+                 || (plugin == "Fruity Multiband Compressor" && fx.kind != EffectKind::fruityMultiband))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
