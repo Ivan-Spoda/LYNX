@@ -1149,7 +1149,7 @@ double ms4 (double lo, double span, float x) { return (lo + span * std::pow ((do
 bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
     float p[74];
-    if (! sslfFloats (state, "4reV", 12, p, 74))
+    if (! sslfFloats (state, "4reV", 12, p, 74) && ! sslfFloats (state, "3reV", 12, p, 74)) // "Ver3": same layout (REA_rodada44 §1.3)
         return false;
 
     SynthSettings s;
@@ -1235,9 +1235,10 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
         std::memcpy (&p[294], state.data() + 0x204C + 294 * 4, sizeof (float) * 7);
     const auto filterMode = std::isfinite (p[300]) ? std::clamp ((int) p[300], 0, 3) : 0;
 
-    // carrier = enabled operator with the highest "Mix" (REA_rodada17 §9) + the enabled modulator with the largest
-    // matrix cell into it (REA_rodada18 §8: target operator t receives from source j the cell 109 + 6j + t,
-    // phase deviation = 2·cell·output cycles). Filter (REA_rodada19 §4): mode p300 (0 off, 1 LP, 2 BP,
+    // Fallback when the exact engine (core/Toxic.cpp, REA_rodada45) can't play the state. Carrier = enabled operator
+    // with the highest "Mix" (REA_rodada17 §9) + the enabled modulator with the largest matrix cell into it (phase
+    // deviation = 2·cell·output cycles; REA_rodada45 §3.6 corrects round 18's direction: "Om Fm c", parameter
+    // 109 + 6c + m, is operator m modulating operator c). Filter (REA_rodada19 §4): mode p300 (0 off, 1 LP, 2 BP,
     // 3 HP), cutoff 2^(9u + 5) Hz at note 60, key-track 0.09·KT octave per semitone, envelope ±9·EGAmt octaves
     // with EGAmt = sign(2x − 1)(2x − 1)². The filter is FL's 4-pole ladder (REA_rodada26 §2: table, resonance
     // scale R(u), input saturation), with the resonance p16 as is.
@@ -1258,12 +1259,12 @@ bool synthFromToxic (const std::vector<std::uint8_t>& state, SynthSettings& synt
 
     int modulator = -1;
     for (int j = 0; j < 6; ++j)
-        if (j != carrier && p[25 + j] >= 0.5f && p[109 + 6 * j + carrier] > 0.005f
-            && (modulator < 0 || p[109 + 6 * j + carrier] > p[109 + 6 * modulator + carrier]))
+        if (j != carrier && p[25 + j] >= 0.5f && p[109 + 6 * carrier + j] > 0.005f
+            && (modulator < 0 || p[109 + 6 * carrier + j] > p[109 + 6 * carrier + modulator]))
             modulator = j;
     if (modulator >= 0)
     {
-        const auto cell = std::floor (100.0f * p[109 + 6 * modulator + carrier]) * 0.01f;
+        const auto cell = std::floor (100.0f * p[109 + 6 * carrier + modulator]) * 0.01f;
         s.osc[2] = SynthOscillator { Waveform::sine, 0, 0.0f, 1.0f };
         setPitch (s.osc[2], steps (p[31 + modulator]) + steps (p[37 + modulator]) * 0.01 + (double) (int) (48.0f * p[2] - 24.0f));
         s.fm = 2.0f * cell * cell;
