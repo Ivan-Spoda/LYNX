@@ -5,6 +5,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FlangusFastDist.h"
 
 #include "core/Biquad.h"
 
@@ -2133,6 +2134,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's controls over their ranges (core/FlangusFastDist.h); defaults = a new FL instance
+    static const EffectInfo fastDistInfo { "Fruity Fast Dist", { { "Pre amp", 0.5f }, { "Threshold", 1.0f }, { "Type", 0.0f },
+                                                                 { "Mix", 1.0f }, { "Post gain", 1.0f } } };
+    static const EffectInfo flangusInfo { "Fruity Flangus", { { "Order", 3.0f / 8.0f }, { "Depth", 0.5f }, { "Speed", 0.75f },
+                                                              { "Delay", 8.0f / 128.0f }, { "Spread", 1.0f }, { "Cross", 96.0f / 256.0f },
+                                                              { "Dry", 224.0f / 256.0f }, { "Wet", 224.0f / 256.0f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2228,6 +2235,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::fruityFastDist: return fastDistInfo;
+        case EffectKind::fruityFlangus: return flangusInfo;
     }
     return eq;
 }
@@ -2485,6 +2494,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
+        case EffectKind::fruityFastDist:
+            return fastdist::paramText (param, v);
+
+        case EffectKind::fruityFlangus:
+            return flangus::paramText (param, v);
+
         case EffectKind::crossover:
             if (param == 0 || param == 3)
                 return v > 0.5f ? "on" : "off";
@@ -2562,6 +2577,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
+        case EffectKind::fruityFastDist: return fastdist::make();
+        case EffectKind::fruityFlangus: return flangus::make();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

@@ -1375,6 +1375,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+        else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
+                 || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)

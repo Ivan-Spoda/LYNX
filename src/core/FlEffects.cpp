@@ -2,6 +2,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FlangusFastDist.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -926,6 +927,22 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    // FL's own Fast Dist / Flangus engines from the saved controls (REA_rodada55); the approximations of REA_rodada8
+    // remain for states that cannot be read
+    if (pluginName == "Fruity Fast Dist")
+        if (const auto s = fastdist::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFastDist);
+            fastdist::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Flangus")
+        if (const auto s = flangus::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFlangus);
+            flangus::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
@@ -1084,6 +1101,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
     switch (kind)
     {
         case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
+        case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
+        case EffectKind::fruityFlangus: return { "Fruity Flangus" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb: return { "Fruity Reeverb 2" };
@@ -1095,6 +1114,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int k)
 {
     auto is = [&] (const char* n) { return pluginName == n; };
+
+    // the exact Fast Dist / Flangus take FL's controls over their ranges
+    if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdist::params) || (is ("Fruity Flangus") && k >= 0 && k < flangus::params))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
     {
