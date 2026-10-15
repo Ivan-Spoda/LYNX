@@ -50,6 +50,19 @@ struct X87Mode
 };
 #endif
 
+// long double → integer in the current x87 rounding mode (what the plugins' fist/fistp do), without the control-word
+// round trip a C++ conversion makes; |v| < 2^63
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+inline long long x87Int (long double v) noexcept
+{
+    long long r;
+    asm ("fistpll %0" : "=m"(r) : "t"(v) : "st");
+    return r;
+}
+#else
+inline long long x87Int (long double v) noexcept { return (long long) std::nearbyint (v); }
+#endif
+
 inline float F (double v) noexcept { return (float) v; }
 inline std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept
 {
@@ -438,7 +451,7 @@ constexpr ld kTwo31 = 2147483648.0L;
         {
             const ld X = x[k];
             const ld v = X * preN;
-            const long long i = std::abs (v) >= kTwo31 ? -2147483648LL : (long long) std::nearbyint (v);
+            const long long i = std::abs (v) >= kTwo31 ? -2147483648LL : x87Int (v);
             const long long ai = std::min<long long> (i < 0 ? -i : i, a.N);
             const ld t = i < 0 ? -(ld) T[ai] : (ld) T[ai];
             y[k] = (float) (X * A + t * bK);
@@ -450,7 +463,7 @@ constexpr ld kTwo31 = 2147483648.0L;
     {
         const ld X = x[k];
         const ld v = X * pHN + hN;
-        long long i = std::abs (v) >= kTwo31 ? -2147483648LL : (long long) std::nearbyint (v);
+        long long i = std::abs (v) >= kTwo31 ? -2147483648LL : x87Int (v);
         i = std::clamp<long long> (i, 0, a.N);
         y[k] = (float) (X * A + (ld) T[i] * bK);
     }
@@ -475,9 +488,8 @@ constexpr ld kTwo31 = 2147483648.0L;
                 t = 0.0L;
             else
             {
-                const ld it = std::trunc (v);
-                const ld fr = v - it;
-                const auto i = (long long) it;
+                const auto i = x87Int (v); // toward zero in this mode
+                const ld fr = v - (ld) i;
                 if (i >= 0)
                 {
                     const auto j = std::min<long long> (i, a.N);
@@ -509,9 +521,8 @@ constexpr ld kTwo31 = 2147483648.0L;
         }
         else
         {
-            const ld it = std::trunc (v);
-            fr = v - it;
-            i = (long long) it;
+            i = x87Int (v);
+            fr = v - (ld) i;
         }
         i = std::clamp<long long> (i, -1, a.N);
         const ld t0 = T[i], t1 = T[i + 1];
