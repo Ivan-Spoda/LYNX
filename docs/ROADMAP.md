@@ -77,7 +77,8 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs, cutoff/resonance modulation in every unit (rounds 16–20)
 - [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20)
 - [x] Sidechain links (round 22)
-- [x] Vocodex as the vocoder with two side inputs (round 20); internal carrier synth still missing
+- [x] Vocodex as the vocoder with two side inputs (round 20); exact engine (round 35), SG stage and internal Sytrus carrier (round 40)
+- [x] Maximus and Soundgoodizer on FL's exact Maximus engine (rounds 36, 40)
 - [x] Ogun's FFT spectral engine: initial spectrum and per-partial decay (round 24) on an evolving spectrum
 - [x] Ogun on its exact engine from the plugin state: inverse-FFT timbre, articulators, filter, EQ/chorus/delay/reverb,
   qualities 0–4 (round 37; Autogun still on the synth approximation)

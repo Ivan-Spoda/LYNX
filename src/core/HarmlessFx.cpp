@@ -24,11 +24,10 @@ const double ln001 = std::log (0.01);
 
 inline float f32 (double x) noexcept { return (float) x; }
 inline double rint (double x) noexcept { return std::nearbyint (x); } // round half to even (cvtsd2si)
-inline float flush (double v) noexcept
-{
-    const auto f = (float) v;
-    return std::fabs (f) < flushLevel ? 0.0f : f;
-}
+// FUN_00627cc0 (x87): a double state below 2^-24 in magnitude becomes 0; the others are kept as they are (the
+// decompiler shows a float conversion that the instructions do not do: fldl / fcmovb / fstpl, REA_rodada40 §2.4)
+inline double flushState (double v) noexcept { return std::fabs (v) < (double) flushLevel ? 0.0 : v; }
+
 
 // (11^x − 1)/10, exactly 1 at x = 1 (ln 11 as the float of the plugin's run-time global)
 float g11 (float x) noexcept
@@ -193,12 +192,20 @@ struct MaximusPreset
         double end = 0.0, peak = 1.0;
         std::vector<float> sat;   // soft-saturation table (mode A), 65 538 entries; empty = none
         float satOut = 0.0f, satIn = 0.0f;
+        int satB = 0;             // 1: saturation mode B (REA_rodada40 §2.2) with threshold satT and range satR
+        float satT = 0.0f, satR = 1.0f, satK = 1.0f;
+        int mode = 3;             // effective mode (solo applied, FUN_008417e0)
+        bool rms = false;         // envelope mode RMS (REA_rodada40 §2.1)
         float pre = 1.0f, post = 1.0f, g20 = 1.0f;
         std::array<float, 4> matrix { 1.0f, 1.0f, 0.0f, 0.0f };
     };
     std::array<Band, 4> band {};
     bool valid = false;
+    bool legacyFir = false; // "Linear-phase filters (legacy mode)": windowed-sinc FIR band split (FUN_0083c200)
+    MaximusBuild build = MaximusBuild::shared;
 };
+
+
 
 namespace
 {
@@ -249,8 +256,41 @@ std::vector<Point> readCurve (const std::vector<std::uint8_t>& d, std::size_t& p
 }
 
 // FUN_00845b50
-void buildGainTable (Curve& curve, float scale, MaximusPreset::Band& b)
+void buildGainTable (Curve& curve, float scale, MaximusPreset::Band& b, bool soundgoodizer)
 {
+    if (soundgoodizer)
+    {
+        // Soundgoodizer_x64.dll's older build (FUN_0083b050, REA_rodada40 §3.2): the saturated output snaps to the
+        // double 0.975 (not the float), the stored end value is the last output before the snap and the peak is
+        // divided by the float 0.975
+        curve.start();
+        b.gain.assign (32770, 0.0f);
+        const auto dv9 = 0.5 / std::log (3.0), dv10 = std::log (3.0) * 2.0, half = 0.48750001192092896;
+        double prev = 0.0, out = 0.0, mx = 0.0, last = 0.0;
+        int lastOk = 0;
+        for (int i = 0; i < 32769; ++i)
+        {
+            const auto lv = (double) std::max (i, 1);
+            const auto c = std::log (lv * 0.0001220703125 * 2.0 + 1.0) * dv9;
+            const auto y = curve.step (c - prev);
+            prev = c;
+            out = (std::exp (y * dv10) - 1.0) * half;
+            auto idx = i;
+            auto keep = out;
+            if (std::fabs (out - 0.975) < 5.960464477539063e-08)
+                out = 0.975, idx = lastOk, keep = last;
+            mx = std::max (mx, out);
+            b.gain[(std::size_t) i] = f32 (out / (lv * 0.0001220703125));
+            lastOk = idx;
+            last = keep;
+        }
+        b.gain[(std::size_t) lastOk + 1] = b.gain[(std::size_t) lastOk];
+        b.gain.resize ((std::size_t) lastOk + 2);
+        b.size = lastOk;
+        b.end = last;
+        b.peak = mx / 0.9750000238418579;
+        return;
+    }
     curve.start();
     b.gain.assign (32770, 0.0f);
     const auto dv9 = 0.5 / std::log (3.0), dv10 = std::log (3.0) * 2.0, dv14 = (double) scale * 0.5;
@@ -278,7 +318,7 @@ void buildGainTable (Curve& curve, float scale, MaximusPreset::Band& b)
 }
 
 // FUN_00841380, mode A (threshold < 0)
-void buildSaturation (int thr, float ceil, double top, MaximusPreset::Band& b)
+void buildSaturation (int thr, float ceil, double top, MaximusPreset::Band& b, bool soundgoodizer)
 {
     const auto p = (double) f32 ((float) (20.0f - f32 ((float) std::log ((double) f32 (f32 (thr * -0.1) + 1.0f)) / std::log (101.0)) * 19.0f));
     const auto ip = 1.0 / p;
@@ -290,12 +330,19 @@ void buildSaturation (int thr, float ceil, double top, MaximusPreset::Band& b)
     for (int i = 0; i <= 65536; ++i)
     {
         auto v = std::pow (std::atan (std::pow (i * d, p)), ip) * norm;
+        if (soundgoodizer)
+        {
+            // FUN_00837d90: a 16-bit table, round(v·32767) clamped to ±32767, read back ×ceiling/32768
+            const auto q = std::clamp (std::nearbyint (v * 32767.0), -32767.0, 32767.0);
+            b.sat[(std::size_t) i] = (float) q;
+            continue;
+        }
         if (v < 5.960464477539063e-08)
             v = 0.0;
         b.sat[(std::size_t) i] = (float) v;
     }
     b.sat[65537] = b.sat[65536];
-    b.satOut = ceil;
+    b.satOut = soundgoodizer ? f32 ((double) ceil * 3.0517578125e-05) : ceil;
     b.satIn = f32 (1.0 / top);
 }
 } // namespace
@@ -341,23 +388,47 @@ std::optional<std::vector<std::uint8_t>> maximusStateFromFst (const std::vector<
 
 std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::uint8_t>& d)
 {
+    return makeMaximusPreset (d, MaximusBuild::shared);
+}
+
+std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::uint8_t>& d, MaximusBuild build)
+{
+    const auto sgz = build == MaximusBuild::soundgoodizer;
+    if (sgz && (std::uint32_t) i32At (d, 0) > 13)
+        return nullptr; // that build's loader stops after the fixed block (no v14+ options)
     if (d.size() < 0x1fe + 12)
         return nullptr;
     auto m = std::make_shared<MaximusPreset>();
+    m->build = build;
     const auto header = (std::uint32_t) i32At (d, 0);
     const auto version = header > 0xFFFFu ? (int) (header >> 16) : (int) header;
-    if (version < 7)
-        return nullptr; // older layouts are not used by Harmless's presets
+    if (version < 3)
+        return nullptr; // the pre-v3 piecewise layout is not used by any preset or demo state
+    // fixed block read raw into the object (FUN_0083ef50): 0x1FA bytes for v ≥ 7, 0x1F9 (v6), 0x1F5 (v5), 0x1F1 (v4),
+    // 0x1EE (v3); the bytes the block does not reach keep the plugin's reset values (0)
+    const std::size_t block = version >= 7 ? 0x1fa : version == 6 ? 0x1f9 : version == 5 ? 0x1f5 : version == 4 ? 0x1f1 : 0x1ee;
+    if (d.size() < 4 + block)
+        return nullptr;
+    auto byteAt = [&] (std::size_t at) { return at < 4 + block ? (int) d[at] : 0; };
     for (int i = 0; i < 59; ++i)
         m->p[(std::size_t) i] = i32At (d, 4 + 4 * (std::size_t) i);
-    m->oversampling = i32At (d, 0x1f4);
+    m->oversampling = byteAt (0x1f4) | (byteAt (0x1f5) << 8) | (byteAt (0x1f6) << 16) | (byteAt (0x1f7) << 24);
     if (m->oversampling < 0 || m->oversampling > 1)
-        return nullptr; // only ×1 and ×2 are used by Harmless's presets
-    std::size_t pos = 0x1fe;
+        return nullptr; // only ×1 and ×2 are used by the presets and the demo projects
+    // menu options read with the block: "Master Mid mode" (+0x324) is not decoded for rendering; the legacy
+    // linear-phase FIR crossover (+0x325) and solo (+0x317) of the editor's band (+0x308) are (REA_rodada40 §2.5)
+    if (byteAt (0x1fc) != 0)
+        return nullptr;
+    m->legacyFir = byteAt (0x1fd) != 0;
+    const auto solo = byteAt (0x1ef) != 0;
+    const auto soloBand = i32At (d, 0x1e0);
+    std::size_t pos = 4 + block;
     if (version >= 14)
     {
         if ((d[pos + 8] & 0x40) != 0)
             m->scale = 1.0f;
+        if ((d[pos + 8] & 0x01) != 0)
+            return nullptr; // linear-phase band split through Frequency Splitter's engine_x64.dll: not decoded
         pos += 9 + 20;
     }
     if (version >= 15)
@@ -389,16 +460,31 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
         Curve curve (env[(std::size_t) (2 * b)]);
         if (! curve.supported())
             return nullptr;
-        buildGainTable (curve, m->scale, B);
+        buildGainTable (curve, m->scale, B, sgz);
         B.g20 = (B.pre * B.post) * B.gain[0];
+        // effective mode (FUN_008417e0): with solo on and another band selected, the master is at least
+        // "compression off" and the other bands are muted
+        B.mode = mode;
+        if (solo && soloBand != 3 && b != soloBand)
+            B.mode = std::max (B.mode, b == 3 ? 1 : 2);
+        B.rms = q (19) != 0;
         const auto thr = q (11);
-        if (thr > 0)
-            return nullptr; // saturation mode B: not decoded (not used by Harmless's or Harmor's presets)
         if (thr < 0)
         {
             const auto top0 = (q (19) == 0 && mode < 1) ? B.peak : 4.0;
             const auto ceil = l7 (q (12));
-            buildSaturation (thr, ceil, std::max (top0 * (double) B.post, (double) ceil), B);
+            buildSaturation (thr, ceil, std::max (top0 * (double) B.post, (double) ceil), B, sgz);
+        }
+        else if (thr > 0)
+        {
+            // mode B (FUN_00841380 → FUN_00629fd0): threshold t = (1 − thr/1000)·ceiling, range = ceiling − t
+            const auto ceil = l7 (q (12));
+            B.satB = 1;
+            B.satT = f32 ((double) (1.0f - (float) thr * 0.001f) * (double) ceil);
+            B.satR = ceil - B.satT;
+            if (B.satR <= 0.0f)
+                B.satR = 1.5258789e-05f;
+            B.satK = 1.0f / B.satR;
         }
     }
     m->valid = true;
@@ -408,7 +494,7 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
 namespace
 {
 // FUN_00624580 (types 1 low-pass, 4 high-pass, 5 all-pass) + FUN_00624e90 (stereo direct form I in double, the
-// states rounded to float at the end of every block)
+// states flushed below 2^-24 at the end of every block, kept in double)
 struct Biquad
 {
     int type = 1;
@@ -446,7 +532,8 @@ struct Biquad
             lx2 = lx1, lx1 = xl, ly2 = ly1, ly1 = yl;
             rx2 = rx1, rx1 = xr, ry2 = ry1, ry1 = yr;
         }
-        s = { flush (lx1), flush (lx2), flush (ly1), flush (ly2), flush (rx1), flush (rx2), flush (ry1), flush (ry2) };
+        s = { flushState (lx1), flushState (lx2), flushState (ly1), flushState (ly2),
+              flushState (rx1), flushState (rx2), flushState (ry1), flushState (ry2) };
     }
 };
 
@@ -478,7 +565,7 @@ struct Halfband
     {
         for (int c = 0; c < 2; ++c)
             for (int k : { 0, 1, 2, 6, 7, 8 })
-                s[(std::size_t) (12 * c + k)] = flush (s[(std::size_t) (12 * c + k)]);
+                s[(std::size_t) (12 * c + k)] = flushState (s[(std::size_t) (12 * c + k)]);
     }
 
     void up (const float* inL, const float* inR, float* outL, float* outR, int n) noexcept
@@ -518,25 +605,39 @@ struct Halfband
     }
 };
 
-// FUN_00605410: one-pole on a control signal, c0 while the input is ≥ the state, c1 otherwise
+// FUN_00605410 (x87): one-pole on a control signal, c0 while the input is ≥ the state, c1 otherwise. The state stays
+// on the x87 stack (64-bit mantissa) through the block, the coefficients are doubles and only the output samples are
+// rounded to float; between blocks the state is kept as a double, 0 below 2^-24 (REA_rodada40 §2.4). long double is
+// the 80-bit x87 format on the x86-64 GCC/Clang/MinGW targets LYNX is built for.
 struct Smoother
 {
-    float c0 = 0.0f, c1 = 0.0f, s = 0.0f;
+    double c0 = 0.0, c1 = 0.0, s = 0.0;
 
     void run (float* x, int n) noexcept
     {
-        auto st = s;
+        long double st = s;
         if (c0 == c1)
-            for (int i = 0; i < n; ++i)
-                st = (st - x[i]) * c0 + x[i], x[i] = st;
-        else
+        {
+            const long double c = c0;
             for (int i = 0; i < n; ++i)
             {
-                const auto c = st <= x[i] ? c0 : c1;
-                st = x[i] + c * (st - x[i]);
-                x[i] = st;
+                const long double v = x[i];
+                st = (st - v) * c + v;
+                x[i] = (float) st;
             }
-        s = std::fabs (st) > flushLevel ? st : 0.0f;
+        }
+        else
+        {
+            const long double k0 = c0, k1 = c1;
+            for (int i = 0; i < n; ++i)
+            {
+                const long double v = x[i];
+                const auto c = v >= st ? k0 : k1;
+                st = (st - v) * c + v;
+                x[i] = (float) st;
+            }
+        }
+        s = std::fabs ((double) st) > (double) flushLevel ? (double) st : 0.0;
     }
 };
 
@@ -611,9 +712,9 @@ struct PeakWindow
     }
 };
 
-// the RMS detector (envelope mode 1; SG class at 0x780020, process FUN_00780b90 + FUN_00780ab0/FUN_00780a60,
-// REA_rodada38 §R): L² + R² summed over the last W samples (a float running sum kept as a double between blocks),
-// scaled by 1/(2W) (the sum kept in x87 extended precision), clamped below at 0 (ippsThreshold_LT) and square-rooted (ippsSqrt)
+// the RMS detector (envelope mode 1; SG class at 0x780020, process FUN_00780b90 with the window kernel FUN_00780a60;
+// REA_rodada38, REA_rodada40 §2.1): L² + R² summed over the last W samples in an x87 running sum (kept as a double
+// between blocks), scaled by 1/(2W), clamped below at 0 (ippsThreshold_LT_32f_I) and square-rooted (ippsSqrt_32f_I)
 struct RmsWindow
 {
     int W = 1, idx = 0;
@@ -657,6 +758,17 @@ struct RmsWindow
     }
 };
 
+// saturation mode B (FUN_0062a090, x87): above the threshold t, |y| = t + range·(1 − e^((t − |x|)/range)), sign kept
+inline float saturateB (float x, float t, float range, float k) noexcept
+{
+    const auto a = std::fabs (x);
+    if (! (a > t))
+        return x;
+    const auto e = std::exp ((long double) ((long double) t - (long double) a) * (long double) k);
+    const auto y = (float) ((1.0L - e) * (long double) range + (long double) t);
+    return std::signbit (x) ? -y : y;
+}
+
 // FUN_0077f350: L-frame delay (swap ring)
 struct FrameDelay
 {
@@ -693,6 +805,131 @@ struct FrameDelay
 };
 } // namespace
 
+namespace
+{
+// the legacy linear-phase band split (REA_rodada40 §2.5): FUN_0083c0d0 (windowed sinc), FUN_0062ac70 type 0 (4-term
+// Blackman-Harris), FUN_0083c070 (spectral inversion), FUN_0083c200 (placement in the N-tap buffer), taps converted to
+// float and run by ippsFIR_32f per channel (FUN_0083bce0)
+std::vector<double> sincLowpass (int L, double fc)
+{
+    std::vector<double> h ((std::size_t) L);
+    const auto w = fc * 6.283185307179586;
+    for (int i = 0; i < L; ++i)
+    {
+        if (i == (L - 1) / 2)
+            h[(std::size_t) i] = fc * 2.0;
+        else
+        {
+            const auto d = (double) ((float) i - (float) (L - 1) * 0.5f);
+            h[(std::size_t) i] = std::sin (w * d) / (d * 3.141592653589793);
+        }
+    }
+    const auto a = 6.283185307179586 / (double) (L - 1);
+    for (int i = 0; i < L; ++i)
+    {
+        const auto c1 = std::cos (a * (double) i), c2 = std::cos (a * 2.0 * (double) i), c3 = std::cos (a * 3.0 * (double) i);
+        h[(std::size_t) i] *= ((0.35875 - c1 * 0.48829) + c2 * 0.14128) - c3 * 0.01168;
+    }
+    return h;
+}
+
+void invert (std::vector<double>& h)
+{
+    for (auto& v : h)
+        v *= -1.0;
+    h[(h.size() - 1) / 2] += 1.0;
+}
+
+// kind 0 low-pass (f1, L1), 3 high-pass (f1, L1), 1 band-pass (f1, L1 / f2, L2); placed in the middle of N taps
+std::vector<float> legacyTaps (int N, int kind, double f1, int L1, double f2, int L2)
+{
+    std::vector<double> buf ((std::size_t) N, 0.0);
+    f1 = std::min (f1, 0.5), f2 = std::min (f2, 0.5);
+    L1 |= 1, L2 |= 1;
+    auto place = [&] (std::vector<double>& to, const std::vector<double>& h) {
+        const auto at = (N - (int) h.size()) / 2;
+        for (std::size_t i = 0; i < h.size(); ++i)
+            to[(std::size_t) at + i] = h[i];
+    };
+    if (kind == 0)
+        place (buf, sincLowpass (L1, f1));
+    else if (kind == 3)
+    {
+        auto h = sincLowpass (L1, f1);
+        invert (h);
+        place (buf, h);
+    }
+    else
+    {
+        std::vector<double> hi ((std::size_t) N, 0.0);
+        place (buf, sincLowpass (L1, f1));
+        auto h = sincLowpass (L2, f2);
+        invert (h);
+        place (hi, h);
+        for (int i = 0; i < N; ++i)
+            buf[(std::size_t) i] += hi[(std::size_t) i];
+        if (kind == 1)
+            invert (buf);
+    }
+    std::vector<float> taps ((std::size_t) N);
+    for (int i = 0; i < N; ++i)
+        taps[(std::size_t) i] = (float) buf[(std::size_t) i];
+    return taps;
+}
+
+struct Fir
+{
+    std::vector<float> taps, rev;           // rev: the taps in time order of the history (oldest first)
+    std::array<std::vector<float>, 2> hist; // the last N − 1 inputs, then the block
+
+    void reset() noexcept
+    {
+        for (auto& h : hist)
+            std::fill (h.begin(), h.end(), 0.0f);
+    }
+
+    void prepare (std::vector<float> t, int maxFrames)
+    {
+        taps = std::move (t);
+        rev.assign (taps.rbegin(), taps.rend());
+        for (auto& h : hist)
+            h.assign (taps.size() - 1 + (std::size_t) maxFrames, 0.0f);
+    }
+
+    void process (const float* inL, const float* inR, float* outL, float* outR, int n) noexcept
+    {
+        const auto N = (int) taps.size();
+        const float* in[2] { inL, inR };
+        float* out[2] { outL, outR };
+        for (int c = 0; c < 2; ++c)
+        {
+            auto& h = hist[(std::size_t) c];
+            std::copy (in[c], in[c] + n, h.begin() + (N - 1));
+            // double accumulation in four interleaved partial sums (IPP's own summation order is not known; the
+            // difference stays far below the float output's rounding)
+            const float* rt = rev.data();
+            for (int i = 0; i < n; ++i)
+            {
+                const float* x = h.data() + i;
+                double a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0;
+                int k = 0;
+                for (; k + 4 <= N; k += 4)
+                {
+                    a0 += (double) rt[k] * (double) x[k];
+                    a1 += (double) rt[k + 1] * (double) x[k + 1];
+                    a2 += (double) rt[k + 2] * (double) x[k + 2];
+                    a3 += (double) rt[k + 3] * (double) x[k + 3];
+                }
+                for (; k < N; ++k)
+                    a0 += (double) rt[k] * (double) x[k];
+                out[c][i] = (float) ((a0 + a1) + (a2 + a3));
+            }
+            std::copy (h.begin() + n, h.begin() + n + (N - 1), h.begin());
+        }
+    }
+};
+} // namespace
+
 class Maximus
 {
 public:
@@ -709,7 +946,7 @@ public:
         mixOn = mix != 1.0f;
         std::array<int, 4> mode {};
         for (int b = 0; b < 4; ++b)
-            mode[(std::size_t) b] = p[(std::size_t) (7 + 13 * b)];
+            mode[(std::size_t) b] = P.band[(std::size_t) b].mode;
         const auto anyComp = mode[0] < 1 || mode[1] < 1 || mode[2] < 1;
         int latency = 0;
         for (int b = 0; b < 4; ++b)
@@ -731,20 +968,22 @@ public:
             const auto rel2N = q (14) == 0 ? attN : (tms (q (14)) * 2.0 * 0.001 * fs * k * 2.0) / std::sqrt ((double) na);
             const auto sus = (int) rint (tms (q (18)) * 2.0 * 0.001 * fs);
             B.det.setLength (std::max (std::max (L, 1), sus * k));
-            B.rms = q (19) != 0;
+            B.rms = P.band[(std::size_t) b].rms;
             if (B.rms)
                 B.rmsDet.setLength (std::max (std::max (L, 1), sus * k));
-            B.att.assign ((std::size_t) na, Smoother { f32 (coefFor (rel2N)), f32 (coefFor (attN)), 0.0f });
+            B.att.assign ((std::size_t) na, Smoother { coefFor (rel2N), coefFor (attN), 0.0 });
             const auto R = tms (q (16)) * 2.0 * 0.001 * fs * k;
             B.rel.clear();
             if (R > 0.0)
             {
                 const auto nr = std::max (1, q (17));
-                B.rel.assign ((std::size_t) nr, Smoother { 0.0f, f32 (coefFor ((R * 2.0) / std::sqrt ((double) nr))), 0.0f });
+                B.rel.assign ((std::size_t) nr, Smoother { 0.0, coefFor ((R * 2.0) / std::sqrt ((double) nr)), 0.0 });
             }
             B.delay.setLength (L);
         }
+        const auto latencyBands = latency;
         latency = latency / K + band[3].L;
+        reportedLatency = latency;
         tailLength = latency + (int) rint (fs * 1.5);
 
         // crossover (FUN_00844e10)
@@ -772,9 +1011,12 @@ public:
         };
         for (auto& s : stages)
             s.clear();
-        const auto n0 = sL + (sH > 0 ? 1 : 0) + 1;
+        // the low band's all-pass at the high crossover (phase match with a 24 dB high split) is absent from the
+        // older build in Soundgoodizer_x64.dll (FUN_0083a4a0: sL + 1 low-pass stages only)
+        const auto allPass = sH > 0 && P.build == MaximusBuild::shared;
+        const auto n0 = sL + (allPass ? 1 : 0) + 1;
         for (int i = 0; i < n0; ++i)
-            stages[0].push_back (i == n0 - 1 && sH > 0 ? stage (5, fH, 0) : stage (1, fL, sL));
+            stages[0].push_back (i == n0 - 1 && allPass ? stage (5, fH, 0) : stage (1, fL, sL));
         for (int i = 0; i <= sL; ++i)
             stages[1].push_back (stage (4, fL, sL));
         for (int i = 0; i <= sH; ++i)
@@ -782,6 +1024,35 @@ public:
         for (int i = 0; i <= sH; ++i)
             stages[2].push_back (stage (4, fH, sH));
         inPlaceStages = std::min (sL + 1, (int) stages[1].size() - 1);
+        firOn = P.legacyFir;
+        if (firOn)
+        {
+            // FUN_00840bb0: N = round(0.004·band rate) | 1 (≥ 5); FUN_00844e10: per split round(K·c·(slope + 1)/f) | 1
+            // (≥ 5, ≤ N) with c = 27 500 (the high split of Soundgoodizer_x64.dll's build: 110 000)
+            auto N = (int) rint (rateB * 0.004) | 1;
+            N = std::max (N, 5);
+            auto len = [&] (double c, int slope, float f) {
+                const auto v = (double) K * c * (double) (slope + 1) / (double) f;
+                auto L = (int) rint (v);
+                L = (L | 1) < 6 ? 5 : (L | 1);
+                return std::min (L, N);
+            };
+            const auto Ll = len (27500.0, sL, fL);
+            const auto Lh = len (P.build == MaximusBuild::soundgoodizer ? 110000.0 : 27500.0, sH, fH);
+            const auto nl = (double) (float) (fL / (float) rateB), nh = (double) (float) (fH / (float) rateB);
+            fir[0].prepare (legacyTaps (N, 0, nl, Ll, 0.0, 0), maxFrames);
+            if (sL < 0)
+                fir[1].prepare (sH >= 0 ? legacyTaps (N, 0, nh, Lh, 0.0, 0) : std::vector<float> ((std::size_t) N, 0.0f), maxFrames);
+            else if (sH < 0)
+                fir[1].prepare (legacyTaps (N, 3, nl, Ll, 0.0, 0), maxFrames);
+            else
+                fir[1].prepare (legacyTaps (N, 1, nl, Ll, nh, Lh), maxFrames);
+            fir[2].prepare (legacyTaps (N, 3, nh, Lh, 0.0, 0), maxFrames);
+            band[0].g18 = band[2].g18 = 1.0f;
+            firLatency = (N - 1) / 2;
+            reportedLatency = (latencyBands + firLatency) / K + band[3].L;
+            tailLength = reportedLatency + (int) rint (fs * 1.5);
+        }
 
         // low cut: four high-pass stages at 0.8·f (FUN_00840b40, FUN_0083a5c0)
         lowCut.clear();
@@ -819,6 +1090,8 @@ public:
                 q.reset();
         for (auto& q : lowCut)
             q.reset();
+        for (auto& f : fir)
+            f.reset();
         for (auto& h : up)
             h.reset();
         for (auto& h : down)
@@ -872,6 +1145,8 @@ public:
             float* yr = br.data();
             if (st.empty())
                 std::copy (XL, XL + nb, yl), std::copy (XR, XR + nb, yr);
+            else if (firOn) // the legacy linear-phase split: every band from the input (FUN_0083bce0)
+                fir[(std::size_t) b].process (XL, XR, yl, yr, nb);
             else if (b == 1 && b != first)
             {
                 const float* sl = XL;
@@ -900,7 +1175,15 @@ public:
             processBand (b, yl, yr, nb);
             if (B.mode < 2)
             {
-                if (! haveSum)
+                if (! haveSum && b == 2)
+                {
+                    // the high band is the first one on: its buffer is the sum buffer, and the final add (ippsAdd_32f
+                    // of the band and the sum) doubles it (FUN_00843a40)
+                    for (int i = 0; i < nb; ++i)
+                        sl[(std::size_t) i] = yl[i] + yl[i], sr[(std::size_t) i] = yr[i] + yr[i];
+                    haveSum = true;
+                }
+                else if (! haveSum)
                     std::copy (yl, yl + nb, sl.data()), std::copy (yr, yr + nb, sr.data()), haveSum = true;
                 else
                     for (int i = 0; i < nb; ++i)
@@ -1009,6 +1292,9 @@ private:
             for (int i = 0; i < n; ++i)
                 xl[i] = sat (xl[i]), xr[i] = sat (xr[i]);
         }
+        else if (S.satB != 0 && B.mode < 2)
+            for (int i = 0; i < n; ++i)
+                xl[i] = saturateB (xl[i], S.satT, S.satR, S.satK), xr[i] = saturateB (xr[i], S.satT, S.satR, S.satK);
         if (b == 3)
         {
             if (B.mode == 2)
@@ -1032,9 +1318,16 @@ private:
         }
     }
 
+public:
+    // FUN_00840a00: the latency the plugin reports to the host (PDC), max(L0…2)/K + L3
+    int latency() const noexcept { return reportedLatency; }
+
+private:
     std::shared_ptr<const MaximusPreset> pr;
     double fs = 44100.0;
-    int K = 1, first = 0, inPlaceStages = 0, tailLength = 0, counter = 0;
+    int K = 1, first = 0, inPlaceStages = 0, tailLength = 0, counter = 0, reportedLatency = 0, firLatency = 0;
+    bool firOn = false;
+    std::array<Fir, 3> fir {};
     float mix = 1.0f;
     bool mixOn = false;
     std::array<BandState, 4> band {};
@@ -2086,4 +2379,46 @@ void HarmorRack::process (float* left, float* right, const float* fxL, const flo
 }
 void HarmorRack::advance (int n) noexcept { d->advance (n); }
 bool HarmorRack::quiet() const noexcept { return ! d->on || d->quietFor >= d->quietNeeded; }
+} // namespace lynx::hlfx
+
+namespace lynx::hlfx
+{
+// =================================================================================================================
+// The engine on its own (mixer Maximus, Soundgoodizer, Vocodex's SG stage; REA_rodada40)
+// =================================================================================================================
+
+MaximusProcessor::MaximusProcessor() = default;
+MaximusProcessor::~MaximusProcessor() = default;
+
+void MaximusProcessor::prepare (std::shared_ptr<const MaximusPreset> preset, double sampleRate, int mixParameter)
+{
+    if (preset == nullptr)
+    {
+        engine.reset();
+        return;
+    }
+    engine = std::make_unique<Maximus>();
+    engine->prepare (std::move (preset), sampleRate, mixParameter);
+}
+
+void MaximusProcessor::process (float* left, float* right, int n) noexcept
+{
+    if (engine == nullptr)
+        return;
+    for (int done = 0; done < n; done += Rack::maxBlock)
+    {
+        const auto len = std::min (Rack::maxBlock, n - done);
+        engine->process (left + done, right + done, len);
+    }
+}
+
+void MaximusProcessor::reset() noexcept
+{
+    if (engine != nullptr)
+        engine->reset();
+}
+
+int MaximusProcessor::latencySamples() const noexcept { return engine != nullptr ? engine->latency() : 0; }
+
+int maximusMixParameter (const MaximusPreset& preset) noexcept { return preset.p[5]; }
 } // namespace lynx::hlfx

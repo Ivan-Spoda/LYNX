@@ -1,6 +1,8 @@
 #include "core/FlEffects.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
+#include "core/MaximusFx.h"
+#include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
 #include <algorithm>
@@ -814,6 +816,38 @@ std::vector<EffectSlot> soundgoodizerApproximation (int preset, int amount)
     return chain;
 }
 
+std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& d, const FlDataReader& data)
+{
+    auto out = vocodexEffect (d);
+    if (! out || ! data)
+        return out;
+    const auto state = vocodex::parseState (d);
+    vocodex::InstallData files;
+    const std::string folder = "Plugins\\Fruity\\Effects\\Vocodex\\";
+    if (state->params[vocodex::sg] > 0)
+    {
+        files.sgDat = data (folder + "Data\\SG.dat");
+        if (hlfx::makeMaximusPreset (files.sgDat) == nullptr)
+            files.sgDat.clear();
+    }
+    if (state->internalCarrier() && ! state->tone.empty())
+    {
+        // FUN_008506a0: Synthesizer\Data\Presets\<tone>.FST (the files ship as .fst)
+        auto fst = data (folder + "Synthesizer\\Data\\Presets\\" + state->tone + ".fst");
+        if (fst.empty())
+            fst = data (folder + "Synthesizer\\Data\\Presets\\" + state->tone + ".FST");
+        if (auto st = hlfx::maximusStateFromFst (fst); st && sytrus::stateUsable (*st))
+            files.carrierState = std::move (*st);
+    }
+    out->slot.state = vocodex::appendInstallData (d, files);
+    out->notes.clear();
+    if (state->internalCarrier() && vocodex::makeInternalCarrier (*state, files.carrierState) == nullptr)
+        out->notes.push_back ("Vocodex: internal carrier synth not available (modulator only)");
+    if (state->params[vocodex::sg] > 0 && files.sgDat.empty())
+        out->notes.push_back ("Vocodex: Soundgoodizer stage approximated (SG.dat not found)");
+    return out;
+}
+
 std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& d)
 {
     // the exact engine keeps FL's raw state (REA_rodada35); ModIn/CarIn index the track's inputs list
@@ -828,7 +862,7 @@ std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>&
     if (state->internalCarrier() && vocodex::makeInternalCarrier (*state) == nullptr)
         out.notes.push_back ("Vocodex: internal carrier synth not available (modulator only)");
     if (state->params[vocodex::sg] > 0)
-        out.notes.push_back ("Vocodex: Soundgoodizer stage approximated");
+        out.notes.push_back ("Vocodex: Soundgoodizer stage approximated (SG.dat not found)");
     return out;
 }
 
@@ -840,8 +874,61 @@ std::optional<EffectSlot> fruityLimiterCompressor (const std::vector<std::uint8_
     return slot;
 }
 
+std::optional<EffectSlot> maximusExact (const std::vector<std::uint8_t>& state)
+{
+    maximusfx::Blob blob;
+    blob.state = state;
+    if (maximusfx::presetOf (blob) == nullptr)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::maximus);
+    slot.state = maximusfx::pack (blob);
+    return slot;
+}
+
+std::optional<EffectSlot> soundgoodizerExact (const std::vector<std::uint8_t>& state, const std::vector<std::uint8_t>& presetFile)
+{
+    // FUN_00836ac0 (Soundgoodizer_x64.dll): the preset file is loaded through the plugin's own Maximus copy, then
+    // parameter 5 (band mix) is set to Amount (REA_rodada40 §3.1)
+    const auto sg = maximusfx::parseSoundgoodizer (state);
+    if (! sg)
+        return std::nullopt;
+    maximusfx::Blob blob;
+    blob.build = hlfx::MaximusBuild::soundgoodizer;
+    blob.mix = sg->amount;
+    blob.state = presetFile;
+    if (maximusfx::presetOf (blob) == nullptr)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::maximus);
+    slot.state = maximusfx::pack (blob);
+    return slot;
+}
+
+std::string soundgoodizerPresetPath (const std::vector<std::uint8_t>& state)
+{
+    const auto sg = maximusfx::parseSoundgoodizer (state);
+    if (! sg)
+        return {};
+    return std::string ("Plugins\\Fruity\\Effects\\Soundgoodizer\\Data\\Presets\\") + maximusfx::soundgoodizerPresetFile (sg->preset);
+}
+
+std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm,
+                                        const FlDataReader& data)
+{
+    if (pluginName == "Vocodex" && data)
+        if (auto v = vocodexEffect (state, data))
+            return v->slot;
+    if (pluginName == "Soundgoodizer" && data)
+        if (const auto path = soundgoodizerPresetPath (state); ! path.empty())
+            if (auto exact = soundgoodizerExact (state, data (path)))
+                return exact;
+    return effectFromFl (pluginName, state, bpm);
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
+        if (auto exact = maximusExact (state))
+            return exact;
     if (pluginName == "Effector")
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder")

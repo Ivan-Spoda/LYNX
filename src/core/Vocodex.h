@@ -5,8 +5,11 @@
 // state (EffectSlot::state) and builds the whole engine from it: band layout and per-band maps, 64-bit band-pass
 // filter banks with 2× / octave-level multirate, PEAK/RMS followers, gate, saturation, smoother, unison, carrier
 // noise, consonant/carrier contour, pass-through and the gain ramps. Draft re-blocks into 16-frame chunks (16 samples
-// of latency, reported to PDC). The Soundgoodizer stage (SG > 0) is LYNX's Soundgoodizer approximation
-// (compressor + the presets' −0.2 dB master limiter, whose look-ahead adds to the latency).
+// of latency, reported to PDC). The Soundgoodizer stage (SG > 0) is FL's Maximus engine (core/HarmlessFx) loaded with
+// the installation's Vocodex/Data/SG.dat, band mix = SG (REA_rodada40 §4); the internal carrier is LYNX's Sytrus engine
+// playing the installation's Synthesizer preset. Both files are read at import from the user's FL installation and
+// travel with the slot (InstallData); without them the stage falls back to the Soundgoodizer approximation and the
+// internal carrier is unavailable.
 
 #include <array>
 #include <cstdint>
@@ -16,6 +19,7 @@
 #include <vector>
 
 #include "core/Effects.h"
+#include "core/HarmlessFx.h"
 
 namespace lynx::vocodex
 {
@@ -85,9 +89,22 @@ public:
     virtual void render (float* out, int n) noexcept = 0;
 };
 
-// The internal carrier synth (a Sytrus with the preset `<tone>.fst` and the state's notes held at volume 0.5,
-// REA_rodada35 §8). LYNX has no instrument for it yet: returns nullptr, and the effect then passes the modulator.
+// The internal carrier synth (a Sytrus with the preset `<tone>.fst` and the state's notes held, REA_rodada35 §8 and
+// REA_rodada40 §5): without the preset's Sytrus state it cannot be built (nullptr; the effect then passes the
+// modulator).
 std::unique_ptr<Carrier> makeInternalCarrier (const State& state);
+std::unique_ptr<Carrier> makeInternalCarrier (const State& state, const std::vector<std::uint8_t>& sytrusState);
+
+// Data files of the user's FL installation that Vocodex loads at run time, appended by LYNX after FL's state in
+// EffectSlot::state (our own trailer: records, then their byte count and the tag "LXVXDATA")
+struct InstallData
+{
+    std::vector<std::uint8_t> sgDat;        // Plugins/Fruity/Effects/Vocodex/Data/SG.dat (a Maximus state)
+    std::vector<std::uint8_t> carrierState; // the Sytrus state of Synthesizer/Data/Presets/<tone>.fst
+};
+std::vector<std::uint8_t> appendInstallData (std::vector<std::uint8_t> flState, const InstallData& data);
+// FL's state alone and the appended data (empty when there is none)
+std::pair<std::vector<std::uint8_t>, InstallData> splitInstallData (const std::vector<std::uint8_t>& slotState);
 
 std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& state);
 } // namespace lynx::vocodex

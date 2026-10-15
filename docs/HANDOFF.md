@@ -13,7 +13,6 @@
 | Branch | What | Source of truth | State when stopped |
 |---|---|---|---|
 | `wip/gms-morphine` | Port GMS and Morphine engines | `REA_rodada39.md`, models `rea-work/r39/py/gmsmodel.py`, `mormodel.py` | just started (first file) |
-| `wip/maximus` | Exact Maximus + Soundgoodizer, Vocodex SG stage and internal Sytrus carrier (REA round 40 doc) | `REA_rodada8.md`, `REA_rodada35/36/38.md`, `rea-work/r38/` (harness/models of this round) | code + tests in progress; doc `REA_rodada40.md` not written yet |
 | `wip/wf-p2` | Workflow P2 items (step lanes, mixer gestures, slot drag, browser search, palette, undo history, recording options, note tools, scale…) | `docs/WORKFLOW_FL.md` P2 list | 7 commits; must `git merge main` (FL layout landed) and place buttons per the new layout |
 
 Not started: REA round 41 (MiniSynth, DX10, Fruit Kick, BassDrum, then PoiZone/Toxic/Kepler full engines).
