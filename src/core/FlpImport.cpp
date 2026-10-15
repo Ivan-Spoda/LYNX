@@ -5,6 +5,7 @@
 #include "core/Morphine.h"
 #include "core/Harmor.h"
 #include "core/Ogun.h"
+#include "core/PoiZone.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -438,6 +439,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             SynthSettings synth;
             float gain = 1.0f;
             if (synthFromOgun (project.channels.front().pluginState, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::poizone)
+        {
+            // ... and of a PoiZone patch (the 2-oscillator conversion)
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromPoiZone (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
@@ -974,8 +983,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromBooBass (c.pluginState, fromPlugin))
                     adopt();
             }
-            else if (name == "poizone" && synthFromPoiZone (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "poizone")
+            {
+                // FL's PoiZone engine from the raw state (REA_rodada44); the 2-oscillator conversion stays as the
+                // fallback for states the engine can't read
+                if (poizoneStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::poizone;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromPoiZone (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "bassdrum" && synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
@@ -1099,7 +1119,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
                      || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::gms
                      || def.instrument == InstrumentKind::morphine
-                     || def.instrument == InstrumentKind::ogun)
+                     || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::poizone)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

@@ -86,8 +86,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
   models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
   9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
-  installation); Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in
-  synth; Sakura and Drumpad on physical models rebuilt from their
+  installation); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw
+  state; bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's
+  low/high-cut coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Kepler, Autogun,
+  MiniSynth, DX10, Fruit Kick, Toxic Biohazard and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -213,6 +215,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   instance), so noise, dither and the random start phases of fresh voices differ from any given FL render (LYNX starts
   one generator per instance like a freshly created plugin). FL's max-polyphony value at channel creation is not
   confirmed (LYNX uses 0 → 99 voices). Without the wave files the importer keeps the 3-oscillator approximation.
+- **PoiZone:** its own instrument (`core/PoiZone.cpp`, REA round 44; the channel keeps the plugin's raw state): FL's
+  wrapper (velocity from Init.Vol, per-note FinalLevels tables, chunks of 64 samples), the 1 024-voice list (poly with
+  stealing, mono legato with return to the nearest held key, 4 glide modes, unison 1–16 with detune/pan, octaver, analog
+  drift), per-chunk envelopes/LFO/control values, the 8×-oversampled voices (saw/pulse phases, sync, ring, noise, soft
+  clip, 4-stage filter LP/BP/HP, DC blocker; one voice or four SSE lanes with their own operation order and the reversed
+  write-back of the oscillator levels), the decimator, the 16-step gate, the arpeggiator (4 modes, 1–4 octaves), the
+  12 kHz shelves, the 3-line chorus and the stereo tape delay — bit-identical to `rea-work/r44/py/pzmodel.py`, which is
+  bit-identical to FL's DLL on the render test, 384 of 385 presets with the delay off (one `powf` near-tie: −68 dB) and 10
+  synthetic cases at 44.1/48 kHz. With the delay on, its low/high-cut coefficients use correctly rounded sin/cos where
+  FL's CRT uses a low-accuracy vector sincosf (318 presets: median −79 dB, worst −48 dB; demo channel −72 dB). Not
+  reproducible by design: PoiZone's three random generators are process-global in FL (LYNX starts one set per
+  instance), so noise, drift, start phases, random LFO and random arpeggios differ from any given FL render; FL's
+  max-polyphony value and its state/rate order at creation are not confirmed (LYNX: 64 voices, 1 when the channel is
+  mono; state then rate).
 - **Morphine:** its own instrument (`core/Morphine.cpp`, REA round 39 §2): the whole Mor0 state tree, 32 voices
   (poly/stealing, mono legato with return to the nearest held key, 4 glide modes), control blocks of int(0.0029·fs),
   Eg1–4 with loops and the 12-slot matrix (incl. the Eg-amount destinations), master ADSR, 4 generators (keyboard
