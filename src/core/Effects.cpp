@@ -2277,6 +2277,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
         case EffectKind::fruityChorus: return fruitychorusfx::info();
+        case EffectKind::hyperChorus: return hyperchorusfx::info();
+        case EffectKind::vintageChorus: return vintagechorusfx::info();
     }
     return eq;
 }
@@ -2495,6 +2497,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::reeverb2: return reeverb2ParamText (param, v);
         case EffectKind::reeverb1: return reeverb1ParamText (param, v);
         case EffectKind::fruityChorus: return fruitychorusfx::paramText (param, v);
+        case EffectKind::hyperChorus: return hyperchorusfx::paramText (param, v);
+        case EffectKind::vintageChorus: return vintagechorusfx::paramText (param, v);
 
         case EffectKind::vintagePhaser:
             switch (param)
@@ -2595,6 +2599,10 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return maximusfx::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
+    if (slot.kind == EffectKind::hyperChorus)
+        return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
+    if (slot.kind == EffectKind::vintageChorus)
+        return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     return makeEffect (slot.kind);
 }
 
@@ -2634,6 +2642,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::fruityChorus: return fruitychorusfx::make();
+        case EffectKind::hyperChorus: return hyperchorusfx::make();
+        case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

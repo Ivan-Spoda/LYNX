@@ -10,10 +10,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
 #include <xmmintrin.h>
 #define LYNX_CHORUS_MXCSR 1
+#if defined(__GNUC__) || defined(__clang__)
+#include <immintrin.h>
+#endif
 #endif
 
 #if defined(__clang__)
@@ -837,6 +841,16 @@ private:
 } // namespace
 
 std::unique_ptr<Effect> make (int instance) { return std::make_unique<HyperChorusEffect> (instance); }
+int instanceOf (const std::vector<std::uint8_t>& slotState) noexcept
+{
+    return slotState.size() == 4 ? std::clamp ((int) i32At (slotState, 0), 0, 1 << 20) : 0;
+}
+std::vector<std::uint8_t> instanceState (int instance)
+{
+    std::vector<std::uint8_t> b (4);
+    std::memcpy (b.data(), &instance, 4);
+    return b;
+}
 const EffectInfo& info()
 {
     static const EffectInfo i = [] {
@@ -849,12 +863,593 @@ const EffectInfo& info()
 }
 } // namespace hyperchorusfx
 
+// ================================================================================================ Vintage Chorus (§3)
+namespace vintagechorusfx
+{
+namespace
+{
+// fused multiply-add: the engine's library runs its FMA variant on processors that have FMA (§3.7)
+#if defined(LYNX_CHORUS_MXCSR) && (defined(__GNUC__) || defined(__clang__))
+__attribute__ ((target ("fma"))) double fmaHw (double a, double b, double c) noexcept
+{
+    return _mm_cvtsd_f64 (_mm_fmadd_sd (_mm_set_sd (a), _mm_set_sd (b), _mm_set_sd (c)));
+}
+bool hasFma() noexcept
+{
+    static const bool f = __builtin_cpu_supports ("fma");
+    return f;
+}
+inline double fmaD (double a, double b, double c) noexcept { return hasFma() ? fmaHw (a, b, c) : std::fma (a, b, c); }
+#else
+inline double fmaD (double a, double b, double c) noexcept { return std::fma (a, b, c); }
+#endif
+
+// the library's sinf for |x| < 2^24 (§3.7): double evaluation, odd/even polynomials after a reduction by π/2
+float libSinf (float xf) noexcept
+{
+    const double x = xf, ax = std::fabs (x);
+    if (! (ax > 0.7853981633974483))
+    {
+        if (ax < 0.0078125)
+        {
+            if (ax < 0.0001220703125)
+                return xf;
+            const double x3 = (x * x) * x;
+            return (float) fmaD (-x3, 0.16666666666666666, x);
+        }
+        const double x2 = x * x;
+        double p = fmaD (x2, 2.7557319223985893e-06, -0.0001984126984126984);
+        p = fmaD (p, x2, 0.008333333333333333);
+        p = fmaD (p, x2, -0.16666666666666666);
+        return (float) fmaD (p, x * x2, x);
+    }
+    const int n = (int) fmaD (ax, 0.6366197723675814, 0.5);
+    const double nd = n;
+    const double r = fmaD (-nd, 1.5707963267341256, ax) - nd * 6.077100506506192e-11;
+    const double r2 = r * r;
+    double y;
+    if (n & 1)
+    {
+        const double c = fmaD (r2, -0.5, 1.0);
+        double p = fmaD (r2, -2.755731922398589e-07, 2.4801587301587298e-05);
+        p = fmaD (p, r2, -0.0013888888888888887);
+        p = fmaD (p, r2, 0.041666666666666664);
+        y = fmaD (p, r2 * r2, c);
+    }
+    else
+    {
+        double p = fmaD (r2, 2.7557319223985893e-06, -0.0001984126984126984);
+        p = fmaD (p, r2, 0.008333333333333333);
+        p = fmaD (p, r2, -0.16666666666666666);
+        y = fmaD (p, r * r2, r);
+    }
+    const bool negate = ((n & 3) >= 2) != std::signbit (x);
+    return (float) (negate ? -y : y);
+}
+
+constexpr float pif = 3.14159274f;
+inline float hexF (std::uint32_t u) noexcept
+{
+    float f;
+    std::memcpy (&f, &u, 4);
+    return f;
+}
+constexpr int lineSize = 32768, lineMask = lineSize - 1;
+
+struct Biquad5
+{
+    float c[5] {}; // feed-forward x, x1, x2; feedback y1, y2 (already negated)
+    float x1[2] {}, x2[2] {}, y1[2] {}, y2[2] {};
+    float run (int ch, float x) noexcept
+    {
+        const float y = (((c[1] * x1[ch] + c[0] * x) + c[2] * x2[ch]) + c[3] * y1[ch]) + c[4] * y2[ch];
+        x2[ch] = x1[ch], x1[ch] = x, y2[ch] = y1[ch], y1[ch] = y;
+        return y;
+    }
+    void clear() noexcept
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            x1[ch] = x2[ch] = y1[ch] = y2[ch] = 0.0f;
+    }
+};
+struct OnePole
+{
+    float b0 = 0.0f, b1 = 0.0f, a1 = 0.0f, piOverFs = 0.0f;
+    float x1[2] {}, y1[2] {};
+    float run (int ch, float x) noexcept
+    {
+        const float y = (b1 * x1[ch] + b0 * x) + a1 * y1[ch];
+        x1[ch] = x, y1[ch] = y;
+        return y;
+    }
+    void highPass (float f) noexcept
+    {
+        const auto t = (float) std::tan ((double) (f * piOverFs));
+        b0 = 1.0f / (t + 1.0f);
+        b1 = -b0;
+        a1 = -(t - 1.0f) / (t + 1.0f);
+    }
+    void lowPass (float f) noexcept
+    {
+        const auto t = (float) std::tan ((double) (piOverFs * f));
+        b0 = b1 = t / (t + 1.0f);
+        a1 = -(t - 1.0f) / (t + 1.0f);
+    }
+    void clear() noexcept { x1[0] = x1[1] = y1[0] = y1[1] = 0.0f; }
+};
+} // namespace
+
+struct Engine::Impl
+{
+    float value[params] { 0.0f, 0.0f, 0.5f, 0.0f, 0.5f, 0.1f, 0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f };
+    int mode = 5;
+    double fs = 44100.0;
+    // the chorus core
+    bool mono = false, sync = false, started = false, gate = false;
+    float startPhase = 0.0f, inc = 0.0f, phase = 0.0f, phaseDiff = 0.5f, d1 = 0.0f, d2 = 0.0f, dd = 0.0f;
+    double period = 0.0, lastPpq = -1.0;
+    int wave = 0;
+    std::vector<float> line[2] { std::vector<float> (lineSize, 0.0f), std::vector<float> (lineSize, 0.0f) };
+    int w[2] {};
+    OnePole pre, post;
+    Biquad5 bq1, bq2, noiseF;
+    float fb = 0.0f, out[2] {};
+    std::uint32_t seed[2] {};
+    float hiss = 0.0f, fsF = 44100.0f, invFs = 0.0f, k = 0.0f;
+    int noiseCount = 16;
+    float gateThr = 0.0025f, gateGain = 1.0f, gateDecay = 0.0f;
+    int gateHold = 440, gateCount = 440;
+    float gainT = 1.0f, polarity = 1.0f, mixT = 0.5f, mixS = 0.0f, gainS = 0.0f, gainS2 = 0.0f, dl = 0.01f, dr = 0.01f;
+    float noiseC[2][5] {};
+
+    explicit Impl (int instance)
+    {
+        const auto g = (std::uint32_t) (333784u + 0xb66adu * (std::uint32_t) std::max (0, instance));
+        seed[0] = g, seed[1] = g + 0x1099eu;
+        gateDecay = (float) std::pow (0.1, 0.00015117157373598967);
+        rateSetup (44100.0);
+        for (int pass = 0; pass < 2; ++pass)
+            for (int i = 0; i < params; ++i)
+                set (i, value[i]);
+    }
+    void rateSetup (double rate) noexcept
+    {
+        k = (float) (1.0 - std::pow (0.09999999999999998, 1.0 / (rate * 0.05)));
+        noiseCount = 16;
+        fsF = (float) rate;
+        invFs = 1.0f / fsF;
+        pre.piOverFs = (float) (1.0 / (double) fsF) * pif;
+        post.piOverFs = pre.piOverFs;
+        pre.highPass (50.0f);
+        post.lowPass (7000.0f);
+        const auto om = (double) (43982.2969f / fsF);
+        const auto S = (float) std::sin (om) / 1.41400003f, C = (float) std::cos (om);
+        const float inv = 1.0f / (S + 1.0f), h = ((1.0f - C) * 0.5f) * inv;
+        bq1.c[0] = h, bq1.c[1] = (1.0f - C) * inv, bq1.c[2] = h, bq1.c[3] = -(C * -2.0f) * inv, bq1.c[4] = -(1.0f - S) * inv;
+        std::copy (std::begin (bq1.c), std::end (bq1.c), bq2.c);
+    }
+    void setRate (double rate) noexcept
+    {
+        fs = (double) (float) rate;
+        rateSetup (fs);
+        for (int i = 0; i < params; ++i)
+            set (i, value[i]);
+    }
+    void wetHighPass (float f) noexcept { pre.highPass (f); }
+    void set (int i, float x) noexcept
+    {
+        value[i] = x;
+        switch (i)
+        {
+            case 0:
+            case 1:
+            {
+                mode = (int) ((value[0] * 3.0f) * 0.999899983f);
+                if (mode == 0 || mode == 1)
+                {
+                    if (0.5f <= value[1])
+                    {
+                        inc = 8.0f / fsF, wave = 1, phaseDiff = hexF (0x3cea61dau);
+                        d1 = hexF (0x3b3ac711u), d2 = hexF (0x3b5cdb38u), dd = hexF (0x3a08509cu);
+                    }
+                    else
+                    {
+                        inc = (mode == 0 ? 0.4f : 0.6f) / fsF, wave = 0, phaseDiff = 0.5f;
+                        d1 = hexF (0x3a8d8ec9u), d2 = hexF (0x3bab606bu), dd = hexF (0x3b87fcb9u);
+                    }
+                    mixT = 0.5f, polarity = 1.0f, fb = 0.0f;
+                    wetHighPass (0.5f);
+                    sync = false, started = false;
+                }
+                else if (mode == 2)
+                    for (int j = 2; j < params; ++j)
+                        set (j, value[j]);
+                break;
+            }
+            case 2:
+            case 15:
+                if (mode == 2)
+                {
+                    const float v = value[2];
+                    started = false;
+                    sync = 0.5f <= value[15];
+                    inc = ((v * v) * 10.0f) / fsF;
+                    const double e = std::pow (2.0, (double) ((1.0f - v) * 7.0f));
+                    const auto t = (float) ((e - 1.0) * 1.0078740119934082);
+                    period = ((double) (int) (((t * 48.0f) * 6143.0f) / 6144.0f + 1.10000002f) / 48.0) * 0.25;
+                    if (sync)
+                        started = false;
+                }
+                break;
+            case 3:
+                if (mode == 2)
+                    wave = 0.5f <= x ? 1 : 0;
+                break;
+            case 4:
+                if (mode == 2)
+                    phaseDiff = x;
+                break;
+            case 5:
+                if (mode == 2)
+                {
+                    d1 = (x * 9.80000019f + 0.200000003f) * 0.00100000005f;
+                    dd = d2 - d1;
+                }
+                break;
+            case 6:
+                if (mode == 2)
+                {
+                    d2 = (x * 9.80000019f + 0.200000003f) * 0.00100000005f;
+                    dd = d2 - d1;
+                }
+                break;
+            case 7:
+                if (mode == 2)
+                    mixT = x;
+                break;
+            case 8: mono = 0.5f <= x; break;
+            case 9:
+                if (mode == 2)
+                    polarity = x < 0.5f ? 1.0f : -1.0f;
+                break;
+            case 10:
+                if (mode == 2)
+                    fb = x * 0.629999995f;
+                break;
+            case 11:
+                if (mode == 2)
+                    wetHighPass ((x * x) * 160.0f + 10.0f);
+                break;
+            case 12: gainT = (float) std::pow (10.0, (double) ((x * 12.0f) / 20.0f)); break;
+            case 13:
+                if (x == 0.0f)
+                    hiss = 0.0f, gateThr = 0.0f;
+                else
+                {
+                    hiss = (float) std::pow (10.0, (double) ((x * 50.0f - 90.0f) / 20.0f)) * 0.200000003f;
+                    gateThr = hiss * 8.0f;
+                }
+                break;
+            case 14: gate = 0.5f <= x; break;
+            case 16: startPhase = x; break;
+            default: break;
+        }
+    }
+    static float tri (float p) noexcept
+    {
+        if (p < 0.25f)
+            return (p + p) + 0.5f;
+        if (p < 0.75f)
+            return (1.5f - p) - p;
+        return (p - 0.75f) + (p - 0.75f);
+    }
+    float tap (int ch, float delay) const noexcept
+    {
+        const float* s = line[ch].data();
+        const float pos = delay * fsF;
+        const int n = (int) pos, u = w[ch] - n;
+        const float y0 = s[u & lineMask], y1 = s[(u - 1) & lineMask], y2 = s[(u - 2) & lineMask], y3 = s[(u - 3) & lineMask];
+        const float f = pos - (float) n;
+        const float c = (y2 - y0) * 0.5f, A = y1 - y2, B = A + c, D = (y3 - y1) * 0.5f + (B + A);
+        return ((((D * f) - (D + B)) * f) + c) * f + y1;
+    }
+    void sample (float& L, float& R, double tempo, double ppq) noexcept
+    {
+        if (mono)
+        {
+            const float v = (L + R) * 0.5f;
+            L = R = v;
+        }
+        if (lastPpq < 0.0 && 0.0 <= ppq)
+            started = true;
+        lastPpq = ppq;
+        if (sync)
+        {
+            if (started && 0.0 <= ppq)
+            {
+                const float f = (float) (ppq / period) + startPhase;
+                phase = f - (float) (int) f;
+            }
+            inc = (float) ((tempo / 60.0) / period) * invFs;
+        }
+        const float p = phase, pr = (p + phaseDiff) - (float) (int) (p + phaseDiff);
+        float lfoL, lfoR;
+        if (wave == 1)
+        {
+            lfoL = libSinf (p * 6.28318548f) * 0.5f + 0.5f;
+            lfoR = libSinf (pr * 6.28318548f) * 0.5f + 0.5f;
+        }
+        else
+            lfoL = tri (p), lfoR = tri (pr);
+        dl = ((dd * lfoL + d1) - dl) * k + dl;
+        dr = ((dd * lfoR + d1) - dr) * k + dr;
+        const float xL = fb * out[0] + L, xR = fb * out[1] + R;
+        phase = (p + inc) - (float) (int) (p + inc);
+        float yL = pre.run (0, xL), yR = pre.run (1, xR);
+        yL = bq2.run (0, bq1.run (0, yL));
+        yR = bq2.run (1, bq1.run (1, yR));
+        line[0][(std::size_t) w[0]] = yL;
+        w[0] = (w[0] + 1) & lineMask;
+        float oL = tap (0, dl);
+        line[1][(std::size_t) w[1]] = yR;
+        w[1] = (w[1] + 1) & lineMask;
+        out[0] = oL;
+        float oR = tap (1, dr);
+        out[1] = oR;
+        if (hiss > 0.0f)
+        {
+            ++noiseCount;
+            seed[0] = seed[0] * 0x0BB38435u + 0x3619636Bu;
+            seed[1] = seed[1] * 0x0BB38435u + 0x3619636Bu;
+            const float nL = (float) (std::int32_t) seed[0] * 4.65661287e-10f, nR = (float) (std::int32_t) seed[1] * 4.65661287e-10f;
+            if (noiseCount >= 16)
+            {
+                noiseCount = 0;
+                const auto om = (double) (40840.7070f / fsF);
+                const float S2 = (float) std::sin (om) + (float) std::sin (om), c2 = (float) std::cos (om) * -2.0f;
+                const float g[2] { (lfoL + lfoL) + 1.0f, (lfoR + lfoR) + 1.0f };
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const float q = S2 / g[ch], pp = S2 * g[ch], inv = 1.0f / (q + 1.0f);
+                    noiseC[ch][0] = (pp + 1.0f) * inv;
+                    noiseC[ch][1] = c2 * inv;
+                    noiseC[ch][2] = (1.0f - pp) * inv;
+                    noiseC[ch][3] = -c2 * inv;
+                    noiseC[ch][4] = -(1.0f - q) * inv;
+                }
+            }
+            float nf[2];
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                std::copy (std::begin (noiseC[ch]), std::end (noiseC[ch]), noiseF.c);
+                nf[ch] = noiseF.run (ch, ch == 0 ? nL : nR);
+            }
+            oL = oL + hiss * nf[0];
+            oR = oR + hiss * nf[1];
+        }
+        const float pL = post.run (0, oL), pR = post.run (1, oR);
+        const float m = (mixT - mixS) * k + mixS;
+        mixS = m;
+        const float dryArg = 1.0f - m;
+        const float g = (gainT - gainS) * k + gainS;
+        gainS = g;
+        gainS2 = (gainT - gainS2) * k + gainS2;
+        const float dry = std::sqrt (dryArg), wet = std::sqrt (m);
+        float sL = ((pL * wet) * polarity) + L * dry, sR = ((pR * wet) * polarity) + R * dry;
+        if (gate)
+        {
+            int cnt;
+            if (std::fabs (sL) >= gateThr || std::fabs (sR) >= gateThr)
+            {
+                cnt = gateHold;
+                gateCount = cnt;
+                gateGain = 1.0f;
+            }
+            else
+                cnt = gateCount;
+            if (cnt > 0)
+                gateCount = cnt - 1;
+            else
+                gateGain = gateGain * gateDecay;
+            sL = gateGain * sL, sR = gateGain * sR;
+        }
+        L = sL * g;
+        R = sR * g;
+    }
+    void settle() noexcept
+    {
+        for (auto& l : line)
+            std::fill (l.begin(), l.end(), 0.0f);
+        w[0] = w[1] = 0;
+        pre.clear(), post.clear(), bq1.clear(), bq2.clear(), noiseF.clear();
+        out[0] = out[1] = 0.0f;
+        mixS = mixT, gainS = gainS2 = gainT;
+        const float p = phase, pr = (p + phaseDiff) - (float) (int) (p + phaseDiff);
+        dl = dd * (wave == 1 ? libSinf (p * 6.28318548f) * 0.5f + 0.5f : tri (p)) + d1;
+        dr = dd * (wave == 1 ? libSinf (pr * 6.28318548f) * 0.5f + 0.5f : tri (pr)) + d1;
+        gateGain = 1.0f, gateCount = gateHold;
+    }
+};
+
+Engine::Engine (int instance) : d (std::make_unique<Impl> (instance)) {}
+Engine::~Engine() = default;
+void Engine::setRate (double sampleRate) noexcept { d->setRate (sampleRate); }
+void Engine::setParam (int index, float value) noexcept
+{
+    if (index >= 0 && index < params)
+        d->set (index, value);
+}
+float Engine::param (int index) const noexcept { return d->value[index]; }
+void Engine::settle() noexcept { d->settle(); }
+void Engine::render (const float* in, float* out, int n, double tempo, double ppq, bool playing) noexcept
+{
+    CsrMode mode (0x8040u);
+    const double step = playing ? tempo / 60.0 / (double) d->fsF : 0.0;
+    double pos = playing ? ppq : -1.0;
+    for (int i = 0; i < n; ++i)
+    {
+        float L = in[2 * i], R = in[2 * i + 1];
+        d->sample (L, R, tempo, pos);
+        out[2 * i] = L, out[2 * i + 1] = R;
+        pos += step;
+    }
+}
+
+std::optional<State> parse (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 4 + 4 * params || i32At (state, 0) >= 2)
+        return std::nullopt;
+    State s {};
+    for (int i = 0; i < params; ++i)
+        s[(std::size_t) i] = i32At (state, 4 + 4 * (std::size_t) i);
+    return s;
+}
+void toParams (const State& s, float* p) noexcept
+{
+    for (int i = 0; i < params; ++i)
+        p[i] = norm (s[(std::size_t) i], rawMin[(std::size_t) i], rawMax[(std::size_t) i]);
+}
+State fromParams (const float* p) noexcept
+{
+    State s {};
+    for (int i = 0; i < params; ++i)
+        s[(std::size_t) i] = rawFrom (p[i], rawMin[(std::size_t) i], rawMax[(std::size_t) i]);
+    return s;
+}
+const char* paramName (int param) noexcept
+{
+    static const char* names[params] { "Mode",      "Link Chorus 1&2", "LFO speed",   "LFO wave",   "LFO L/R phase", "Delay time 1",
+                                       "Delay time 2", "Wet/dry mix",   "Mono input",  "Wet polarity", "Feedback",     "Wet HP freq",
+                                       "Gain",      "Hiss",            "Noise gate",  "LFO sync",   "LFO start phase" };
+    return param >= 0 && param < params ? names[param] : "";
+}
+std::string paramText (int param, float value01)
+{
+    char text[40];
+    const int p = std::clamp (param, 0, params - 1);
+    const int raw = rawFrom (value01, rawMin[(std::size_t) p], rawMax[(std::size_t) p]);
+    const double x = (double) (raw - rawMin[(std::size_t) p]) / (rawMax[(std::size_t) p] - rawMin[(std::size_t) p]);
+    switch (p)
+    {
+        case 0:
+        {
+            static const char* modes[3] { "Chorus 1", "Chorus 2", "custom" };
+            return modes[std::clamp ((int) (x * 3.0 * 0.9999), 0, 2)];
+        }
+        case 1:
+        case 8:
+        case 14:
+        case 15: return x >= 0.5 ? "on" : "off";
+        case 2: std::snprintf (text, sizeof (text), "%.2f Hz", x * x * 10.0); return text;
+        case 3: return x >= 0.5 ? "sine" : "triangle";
+        case 5:
+        case 6: std::snprintf (text, sizeof (text), "%.2f ms", x * 9.8 + 0.2); return text;
+        case 7: std::snprintf (text, sizeof (text), "%.0f%% wet", x * 100.0); return text;
+        case 9: return x >= 0.5 ? "inverted" : "normal";
+        case 11: std::snprintf (text, sizeof (text), "%.0f Hz", x * x * 160.0 + 10.0); return text;
+        case 12: std::snprintf (text, sizeof (text), "%.1f dB", x * 12.0); return text;
+        case 13:
+            if (x == 0.0)
+                return "off";
+            std::snprintf (text, sizeof (text), "%.1f dB", x * 50.0 - 90.0);
+            return text;
+        default: std::snprintf (text, sizeof (text), "%.2f", x); return text;
+    }
+}
+
+namespace
+{
+class VintageChorusEffect final : public Effect
+{
+public:
+    explicit VintageChorusEffect (int instance) : engine (instance) {}
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = sampleRate;
+        engine.setRate (sampleRate);
+        engine.settle();
+    }
+    void reset() noexcept override { engine.settle(); }
+    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
+    void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override
+    {
+        const auto s = fromParams (params.data());
+        bool changed = false;
+        for (int i = 0; i < vintagechorusfx::params; ++i)
+        {
+            const float v = flValue (s[(std::size_t) i], rawMin[(std::size_t) i], rawMax[(std::size_t) i]);
+            if (v != engine.param (i) || ! started)
+                engine.setParam (i, v), changed = true;
+        }
+        if (! started && changed)
+            engine.settle();
+        started = true;
+        const double beats = songTicks / (double) lynx::ppq;
+        for (int o = 0; o < n; o += 512)
+        {
+            const int m = std::min (512, n - o);
+            for (int i = 0; i < m; ++i)
+            {
+                buf[2 * (std::size_t) i] = left[o + i];
+                buf[2 * (std::size_t) i + 1] = right[o + i];
+            }
+            engine.render (buf.data(), buf.data(), m, bpm, beats + (double) o * bpm / 60.0 / rate, songTicks >= 0.0);
+            for (int i = 0; i < m; ++i)
+            {
+                left[o + i] = buf[2 * (std::size_t) i];
+                right[o + i] = buf[2 * (std::size_t) i + 1];
+            }
+        }
+    }
+
+private:
+    Engine engine;
+    bool started = false;
+    double songTicks = -1.0, rate = 44100.0;
+    std::array<float, 1024> buf {};
+};
+} // namespace
+
+std::unique_ptr<Effect> make (int instance) { return std::make_unique<VintageChorusEffect> (instance); }
+const EffectInfo& info()
+{
+    static const EffectInfo i = [] {
+        EffectInfo e { "Vintage Chorus", {} };
+        for (int k = 0; k < params; ++k)
+            e.params.push_back ({ paramName (k), norm (defaults[(std::size_t) k], rawMin[(std::size_t) k], rawMax[(std::size_t) k]) });
+        return e;
+    }();
+    return i;
+}
+} // namespace vintagechorusfx
+
 // ============================================================================================================ FL import
 int chorusControls (const std::string& pluginName) noexcept
 {
     if (pluginName == "Fruity Chorus")
         return fruitychorusfx::params;
+    if (pluginName == "Hyper Chorus")
+        return hyperchorusfx::params;
+    if (pluginName == "Vintage Chorus")
+        return vintagechorusfx::params;
     return 0;
+}
+void numberChorusInstances (Song& song)
+{
+    int next = 0, nextVintage = 0;
+    std::function<void (std::vector<EffectSlot>&)> walk = [&] (std::vector<EffectSlot>& chain) {
+        for (auto& fx : chain)
+        {
+            if (fx.kind == EffectKind::hyperChorus)
+                fx.state = hyperchorusfx::instanceState (next++);
+            if (fx.kind == EffectKind::vintageChorus)
+                fx.state = hyperchorusfx::instanceState (nextVintage++);
+            for (auto& b : fx.branches)
+                walk (b.chain);
+        }
+    };
+    for (auto& t : song.mixer)
+        walk (t.effects);
 }
 std::optional<EffectSlot> chorusFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state)
 {
@@ -863,6 +1458,20 @@ std::optional<EffectSlot> chorusFromFl (const std::string& pluginName, const std
         {
             auto slot = makeEffectSlot (EffectKind::fruityChorus);
             fruitychorusfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Hyper Chorus")
+        if (const auto s = hyperchorusfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::hyperChorus);
+            hyperchorusfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Vintage Chorus")
+        if (const auto s = vintagechorusfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::vintageChorus);
+            vintagechorusfx::toParams (*s, slot.params.data());
             return slot;
         }
     return std::nullopt;

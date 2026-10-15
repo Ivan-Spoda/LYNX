@@ -1150,6 +1150,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityWaveShaper: return { "Fruity WaveShaper" };
         case EffectKind::fruitySoftClipper: return { "Fruity Soft Clipper" };
         case EffectKind::fruityChorus: return { "Fruity Chorus" };
+        case EffectKind::hyperChorus: return { "Hyper Chorus" };
+        case EffectKind::vintageChorus: return { "Vintage Chorus" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

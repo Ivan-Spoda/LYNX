@@ -2113,6 +2113,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)
         splitDrumChannel (song, it->first, it->second);
 
+    numberChorusInstances (song); // the random LFO phases FL gives each Hyper Chorus instance (REA_rodada59 §2.6)
     return song;
 }
 } // namespace lynx
