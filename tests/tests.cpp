@@ -10039,3 +10039,4 @@ TEST (fruity_delay_engines)
         CHECK (echoAt (*slot2, 140.0) == 14175);
     }
 }
+#include "UiRackMixerTests.inc"

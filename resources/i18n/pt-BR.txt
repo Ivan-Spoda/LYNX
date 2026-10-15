@@ -603,11 +603,11 @@ countries: br
 "Insert {0}" = "Insert {0}"
 "Next free insert" = "Próximo insert livre"
 "Send the selected channels to free inserts" = "Mandar os canais selecionados para inserts livres"
-"drag or wheel to route, double-click: next free insert" = "arraste ou roda para rotear, duplo clique: próximo insert livre"
+"[LMB] drag or [Wheel] routes  [2xLMB] show in the Mixer  [RMB] next free insert" = "[LMB] arrastar ou [Wheel] roteia  [2xLMB] mostrar no Mixer  [RMB] próximo insert livre"
 "Click: mute.  Ctrl+click or right-click: solo" = "Clique: silenciar.  Ctrl+clique ou botão direito: solo"
-"Click: open/close the editor (Alt keeps others open).  Ctrl+click: audition.  Double-click: Piano Roll" = "Clique: abre/fecha o editor (Alt mantém os outros abertos).  Ctrl+clique: ouvir.  Duplo clique: Piano Roll"
-"Select (Ctrl: add/remove, Shift: range, double-click: all).  Alt+Up/Down moves the selection" = "Selecionar (Ctrl: incluir/tirar, Shift: intervalo, duplo clique: todos).  Alt+Cima/Baixo move a seleção"
-"Steps: click turns on and drags to paint, right-click erases" = "Steps: clique liga e arrastar pinta, botão direito apaga"
+"[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] abre/fecha o editor  [Alt]+[LMB] mantém os outros abertos  [Ctrl]+[LMB] ouvir  [2xLMB] Piano Roll  [LMB] arrastar para cima/baixo reordena  [RMB] menu do canal"
+"Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection" = "Selecionar: [LMB] um  [Ctrl]+[LMB] ou [RMB] incluir/tirar  [Shift]+[LMB] intervalo  [LMB] arrastar: intervalo  [RMB] arrastar inclui  [2xLMB] todos  [Alt]+[Up]/[Down] move a seleção"
+"Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases" = "Steps: [LMB] arrastar desenha (começando num step aceso apaga)  [RMB] arrastar apaga"
 "Add a channel (or drop audio files on the rack)" = "Adicionar um canal (ou solte arquivos de áudio no rack)"
 "Channel settings..." = "Configurações do canal..."
 "Rename and color..." = "Renomear e colorir..."
@@ -940,6 +940,7 @@ countries: br
 "Recording waits for the first note: off" = "Gravação espera a primeira nota: desligada"
 "Snap notes to the scale: new and moved notes, and incoming MIDI, land on the chosen scale" = "Encaixar as notas na escala: notas novas e movidas, e o MIDI que chega, caem na escala escolhida"
 
+<<<<<<< HEAD
 # --- Editors: mouse hints (Piano Roll, Playlist, automation editor; [LMB] etc. are hint-bar glyphs)
 "Clip end: [LMB] drag resizes" = "Fim do clipe: [LMB] arrastar redimensiona"
 "Clip start: [LMB] drag trims, the content stays in place" = "Início do clipe: [LMB] arrastar apara, o conteúdo fica no lugar"
@@ -978,6 +979,19 @@ countries: br
 "[Shift][LMB] drags a copy of the clip (selection)" = "[Shift][LMB] arrasta uma cópia do clipe (seleção)"
 "[Shift][LMB] drags a copy of the note (selection)" = "[Shift][LMB] arrasta uma cópia da nota (seleção)"
 "{0} lane: [LMB] drag draws  [RMB] drag draws a line  [Shift][LMB] one value  [Alt][LMB] reset  [Alt][Wheel] over a note: adjust" = "Faixa de {0}: [LMB] arrastar desenha  [RMB] arrastar desenha uma linha  [Shift][LMB] um só valor  [Alt][LMB] restaura  [Alt][Wheel] sobre uma nota: ajusta"
+=======
+# --- UI-C: Channel Rack and Mixer polish (value read-out, hover, routing lane)
+"Swing mix" = "Mix do swing"
+"Swing mix ({0})..." = "Mix do swing ({0})..."
+"Show this insert in the Mixer" = "Mostrar este insert no Mixer"
+"Normal width" = "Largura normal"
+"{0}% wider" = "{0}% mais largo"
+"{0}% narrower" = "{0}% mais estreito"
+"Send level" = "Nível do envio"
+"Channels: {0}" = "Canais: {0}"
+"Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "Medidor de pico (esquerdo/direito) com retenção de pico  [LMB] apaga a luz de clip"
+"[LMB] selects  [Ctrl]+[LMB] adds  [Shift]+[LMB] range  [LMB] drag sideways reorders  [RMB] insert menu" = "[LMB] seleciona  [Ctrl]+[LMB] inclui  [Shift]+[LMB] intervalo  [LMB] arrastar para o lado reordena  [RMB] menu do insert"
+>>>>>>> origin/wip/ui-rack-mixer
 # --- Main window chrome: toolbar, hint bar (markup tokens in [ ] stay as they are)
 "Master pitch" = "Afinação master"
 "[LMB] drag  [Ctrl] fine  [Wheel] step  [Alt][LMB] reset  [2xLMB] type  [RMB] menu" = "[LMB] arrastar  [Ctrl] fino  [Wheel] passo  [Alt][LMB] zerar  [2xLMB] digitar  [RMB] menu"
