@@ -8,6 +8,8 @@
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/FruityDelay.h"
+#include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 
 #include "core/Biquad.h"
@@ -2175,6 +2177,32 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         { "Room size", 26000.0f / 65536 }, { "Diffusion", 1.0f }, { "Color", 0.5f },
                                                         { "Decay", 4700.0f / 65536 }, { "High damping", 10800.0f / 65536 }, { "Dry", 1.0f },
                                                         { "Wet", 13120.0f / 65536 } } };
+    // FL's raw controls normalised over their ranges (core/FruityDelay.h); defaults = FL's "Default" presets
+    static const EffectInfo fruityDelay2Info = [] {
+        EffectInfo info { "Fruity Delay 2", {} };
+        for (int i = 0; i < fldelay::delay2Controls; ++i)
+            info.params.push_back ({ fldelay::delay2ParamName (i), (float) (fldelay::delay2Default[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay2Max[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i]) });
+        return info;
+    }();
+    static const EffectInfo fruityDelay3Info = [] {
+        EffectInfo info { "Fruity Delay 3", {} };
+        for (int i = 0; i < fldelay::delay3Controls; ++i)
+            info.params.push_back ({ fldelay::delay3ParamName (i), (float) (fldelay::delay3Default[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay3Max[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i]) });
+        return info;
+    }();
+    // FL's controls over their ranges (core/StereoFx.h); defaults = a new FL instance
+    static const EffectInfo stereoShaperInfo { "Stereo Shaper", { { "R > L", 0.5f }, { "Left", 0.75f }, { "Right", 0.75f }, { "L > R", 0.5f },
+                                                                 { "Delay", 0.5f }, { "Phase", 0.5f }, { "Effects post", 0.0f },
+                                                                 { "Difference", 0.0f } } };
+    static const EffectInfo stereoEnhancerInfo { "Stereo Enhancer", { { "Pan", 0.5f }, { "Volume", 0.8f }, { "Separation", 0.5f },
+                                                                     { "Phase offset", 0.5f }, { "Effects post", 1.0f }, { "Invert", 0.0f } } };
+    static const EffectInfo transientProcessorInfo { "Transient Processor", { { "Attack", 0.5f }, { "Drive", 0.0f }, { "Release", 0.5f },
+                                                                             { "Gain", 0.5f }, { "Attack shape", 0.5f }, { "Release shape", 0.5f },
+                                                                             { "Split freq.", 0.5f }, { "Split balance", 0.5f }, { "On", 1.0f } } };
+    static const EffectInfo spreaderInfo { "Spreader", { { "Width", 0.5f }, { "Separation", 0.5f }, { "Low bypass", 9990.0f / 999000.0f },
+                                                         { "Mono bass", 0.0f }, { "Enable", 1.0f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2276,6 +2304,12 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruitySoftClipper: return softClipperInfo;
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
+        case EffectKind::fruityDelay2: return fruityDelay2Info;
+        case EffectKind::fruityDelay3: return fruityDelay3Info;
+        case EffectKind::stereoShaper: return stereoShaperInfo;
+        case EffectKind::stereoEnhancer: return stereoEnhancerInfo;
+        case EffectKind::transientProcessor: return transientProcessorInfo;
+        case EffectKind::spreader: return spreaderInfo;
         case EffectKind::fruityChorus: return fruitychorusfx::info();
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
@@ -2561,6 +2595,23 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::fruitySoftClipper:
             return flshape::softClipperParamText (param, v);
+        case EffectKind::stereoShaper:
+            return stereofx::stereoShaperParamText (param, v);
+
+        case EffectKind::stereoEnhancer:
+            return stereofx::stereoEnhancerParamText (param, v);
+
+        case EffectKind::transientProcessor:
+            return stereofx::transientProcessorParamText (param, v);
+
+        case EffectKind::spreader:
+            return stereofx::spreaderParamText (param, v);
+
+        case EffectKind::fruityDelay2:
+            return fldelay::delay2ParamText (param, v);
+
+        case EffectKind::fruityDelay3:
+            return fldelay::delay3ParamText (param, v, bpm);
 
         case EffectKind::plugin:
         case EffectKind::parallel:
@@ -2641,6 +2692,12 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
+        case EffectKind::fruityDelay2: return fldelay::makeDelay2();
+        case EffectKind::fruityDelay3: return fldelay::makeDelay3();
+        case EffectKind::stereoShaper: return stereofx::makeStereoShaper();
+        case EffectKind::stereoEnhancer: return stereofx::makeStereoEnhancer();
+        case EffectKind::transientProcessor: return stereofx::makeTransientProcessor();
+        case EffectKind::spreader: return stereofx::makeSpreader();
         case EffectKind::fruityChorus: return fruitychorusfx::make();
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
