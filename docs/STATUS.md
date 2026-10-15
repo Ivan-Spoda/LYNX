@@ -66,7 +66,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2,
-  Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, Gross Beat, Effector,
+  Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
@@ -294,6 +294,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
   at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
   bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
+- **Fast Dist, Flangus, Flanger:** FL's exact engines as mixer effects (`core/FlangusFastDist`, REA round 55), with
+  FL's controls as editable parameters. Fast Dist runs FL's host waveshaper (the 20 FLEngine curves rebuilt from their
+  formula; FL's live routine for playback, its file-render routine for exports); Flangus its x87 voice set-up and
+  parabolic-LFO voices with FL's gain ramps; the Flanger its fixed-point LFO and damped-feedback lines. Bit-identical
+  to the DLLs on every demo state (31 / 18 / 3), synthetic edge states and automation, Linux and Windows builds.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -387,6 +392,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   others −136…−145 dB; map segments with tension ≠ 0 are read as straight lines (no demo uses them).
 - Maximus: 4 of the 100 demo states use the v15 linear-phase band split (Frequency Splitter's engine) or Master Mid
   mode is set — those keep the approximation (REA round 40 §8).
+- Fast Dist / Flangus / Flanger (REA round 55 §6): that FL's live/file-render switch of the host waveshaper follows
+  its `.wav` render and that FL's start-up installs the x87 host routines are inferences; whether FL flushes Flangus
+  or sends the Flanger's "enabled" notification before playback is not observed (LYNX starts both that way).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
