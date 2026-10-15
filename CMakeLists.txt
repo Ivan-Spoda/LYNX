@@ -91,6 +91,7 @@ if(LYNX_BUILD_APP)
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
+        src/platform/FileTypes.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
         src/engine/Metronome.cpp

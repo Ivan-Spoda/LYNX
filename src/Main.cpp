@@ -11,6 +11,7 @@
 #include "engine/ProjectFile.h"
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
+#include "platform/FileTypes.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
@@ -302,6 +303,7 @@ public:
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         startupOptions = lynx::StartupOptions::load();
+        lynx::registerFileTypes();
         // Double-clicking a .lynx/.flp opens LYNX with the file as an argument.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
             fileToOpen = juce::File (args[0].unquoted());
