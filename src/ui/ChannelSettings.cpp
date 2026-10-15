@@ -20,6 +20,7 @@
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
 #include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -500,6 +501,7 @@ public:
         threeOsc = def.instrument == InstrumentKind::threeosc;
         plucked = def.instrument == InstrumentKind::plucked;
         beepMap = def.instrument == InstrumentKind::beepmap;
+        sawer = def.instrument == InstrumentKind::sawer;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -803,12 +805,41 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
+        // Sawer: 0…1 floats of the saved state (REA_rodada65 §3.3)
+        static const FloatKnob sawerKnobs[] = {
+            { 0, "Level" }, { 27, "Cutoff" }, { 28, "Resonance" }, { 36, "EGF amount" }, { 2, "Attack" }, { 3, "Decay" },
+            { 4, "Sustain" }, { 5, "Release" }, { 19, "Sub level" }, { 18, "Sub harmonic" }, { 26, "Noise" }, { 14, "Unison" },
+            { 15, "Uni detune" }, { 45, "LFO amount" } };
+        auto addSawer = [&] (const FloatKnob& k) {
+            const auto at = sawerParamOffset (def.pluginState, k.index);
+            if (at < 0)
+                return;
+            float value = 0.0f;
+            std::memcpy (&value, def.pluginState.data() + at, 4);
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (0.0, 1.0, 0.001);
+            knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, k, s = knob.get()] {
+                engine.editSong ([c = channel, k, v = (float) s->getValue()] (Song& song) {
+                    auto& st = song.channels[(std::size_t) c].pluginState;
+                    if (const auto o = sawerParamOffset (st, k.index); o >= 0)
+                        std::memcpy (st.data() + o, &v, 4);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
         if (plucked)
             for (const auto& k : pluckedKnobs)
                 addPlucked (k);
         else if (beepMap)
             for (const auto& k : beepMapKnobs)
                 addBeepMap (k);
+        else if (sawer)
+            for (const auto& k : sawerKnobs)
+                addSawer (k);
         else if (threeOsc)
             for (int i = 0; i < threeOscParamCount(); ++i)
                 addThreeOsc (i);
@@ -893,6 +924,7 @@ public:
                     : threeOsc ? tr ("3x Osc — FL's engine (custom wave from the channel's sample)")
                     : plucked ? tr ("Plucked! — FL's plucked-string engine")
                     : beepMap ? tr ("BeepMap — FL's engine (plays the bitmap saved with the channel)")
+                    : sawer ? tr ("Sawer — FL's engine with its effects (oscillator cycle read from your FL installation)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -913,7 +945,7 @@ private:
     AudioEngine& engine;
     int channel;
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
-         fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, plucked = false, beepMap = false, wavesFound = false;
+         fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, plucked = false, beepMap = false, sawer = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1550,7 +1582,7 @@ public:
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass || kind == InstrumentKind::plucked
-                 || kind == InstrumentKind::beepmap)
+                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1643,6 +1675,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::transistorbass:
         case InstrumentKind::plucked:
         case InstrumentKind::beepmap:
+        case InstrumentKind::sawer:
             return true;
         default:
             return false;
@@ -1681,7 +1714,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass || kind == InstrumentKind::plucked
-                 || kind == InstrumentKind::beepmap)
+                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

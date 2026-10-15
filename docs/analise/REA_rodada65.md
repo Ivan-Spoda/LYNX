@@ -221,4 +221,154 @@ a note-off).
 
 ## 3. Sawer
 
-(In progress.)
+Sawer is two modules: `Sawer_x64.dll` (Delphi) only forwards every TFruityPlug call to `engine_x64.dll` (C++/MSVC,
+RTTI `CPluginWrapper`, `CSynthesizer`) **[DECOMP; EXEC: the same output through either module]**. Function matching
+(round 47's `fpair.py`) against PoiZone's engine (round 44): 1398 of the engine's 1676 functions are identical, among
+them the FL wrapper, the note/voice framework (poly, mono, glide, unison, voice stealing), the arpeggiator, the master
+gain, the chorus, the delay and the CRT. Our port `src/core/Sawer.cpp` therefore starts from `core/PoiZone.cpp` and
+replaces what differs. Paths of the evidence: `sw/fn/<address>.c` (decompilation per function), `sw/asm/` (assembly).
+
+### 3.1 State **[DECOMP `FUN_180034660` (save), `FUN_180034770` (load); DATA: 423 states]**
+
+Record 0xD5 = `"SSLF"` + u32 size + tag `"1rwS"` (`"DrwS"` in demo saves) + 96 float32 parameters `P[0…95]` + the
+modulation block + the preset name. All 423 preset/database/render-test states have that layout. LYNX reads only the
+96 parameters (`sawerStateUsable`, `sawerParam`, `sawerParamOffset`); restoring sets every parameter through the same
+path as the knobs (§3.3).
+
+### 3.2 Framework **[DECOMP function matching; EXEC]**
+
+As PoiZone (REA_rodada44 §1): FL's per-note tables (Final.Vol/Pan → host left/right gains, Final.Pitch → per-key
+offset), MIDI velocity from Init.Vol (`ln(10·iv + 1)·0.328458726·127`, truncated), the voice list rebuilt every
+process call (`FUN_180034a40`: sounding voices within the polyphony, then the other sounding ones, then the free ones,
+padded with a silent voice to a multiple of four), master gain ramp 0.005 per sample. Sawer has **24 voices**
+(`FUN_180023140`).
+
+### 3.3 Parameters **[DECOMP `FUN_180037910` (set parameter), `FUN_180031eb0` (defaults), `FUN_180031ff0`, `FUN_180031fc0`; EXEC]**
+
+Every parameter below index 73 first goes through the modulation matrix (six slots: amount `P[78+s]` → `±(2v−1)²`,
+destination `P[84+s]`, source `P[90+s]`; source 1 = the last note's velocity) and is clamped to 0…1. Laws (v = the
+modulated value; `T(v) = max(50·v⁵, 0.00101)` s; `sel(v, lo, hi)` = truncation of `(hi−lo)·v + lo`, clamped):
+
+| P | Meaning | Law |
+|---|---|---|
+| 0 | level | `10^(2.4·v − 0.9)` (float `powf`) |
+| 1 | pan | v |
+| 2, 3, 4, 5 | amp attack, decay, sustain, release | `T(v)`, `T(v)`, v, `0.35·T(v) + 0.02` |
+| 6, 7 | transpose, fine | `sel(v, −24, 24) − 12` semitones; `2v − 1` |
+| 8 | mono | v ≠ 0 (all notes off on change) |
+| 9, 10, 11 | glide mode bits, glide time | as PoiZone; time `max(v³, 0.0001)` |
+| 12, 13 | octaver, unison retrigger | v ≠ 0 |
+| 14, 15, 16 | unison voices, detune, pan | `{1, 2, 4, 8}[sel(v, 0, 3)]`; `v/2` (pitch shift `−P15/4` when P14 ≥ 0.25); v |
+| 17 | sub phase | v |
+| 18 | sub harmonic | `{1/4, 1/3, 1/2, 2/3, 1, 3/2, 2, 3, 4}[trunc(8v)]` |
+| 19, 20 | sub level, sub detune | `v²`, `v²` |
+| 21, 22, 23 | sub retrigger, invert, pulse form | v ≠ 0 |
+| 24, 25 | sync frequency, sync on | `4v`; v ≠ 0 |
+| 26 | noise | v (per voice `0.7·clamp(v + LFO)²`) |
+| 27, 28, 29, 30 | cutoff, resonance, key tracking, velocity tracking | v (§3.4.4) |
+| 31 | filter output | `sel(v, 0, 3)`: low, band, high, notch (target weight 1, notch 0.6, others 10⁻⁶) |
+| 32…36 | filter EG attack, decay, sustain, release, amount | `T(v)`, `T(v)`, `v²`, `T(v)`, v |
+| 37 | EG destination | `sel(v, 0, 3)`: cutoff, sync, sub phase, pitch |
+| 38…46 | LFO shape, speed, sync, attack, release, retrigger, invert, amount, destination | `sel(v,0,3)`; `v³·10` Hz (synced: division table `{1,2,3,4,8,12,16,32,64,128}[sel(v,0,9)]`); v≠0; `20v³ + 0.01` s; `20v³ + 0.01` s; v≠0; v≠0; v; `trunc(6v)` clamped 0…6 (cutoff, sync, sub phase, pitch, noise, volume, pan) |
+| 47…50 | chorus on, depth, rate, wet | PoiZone's chorus |
+| 51…56 | phaser on, centre, rate, depth, feedback, mix | §3.9.2 |
+| 57…64 | delay on (resets it), time L, time R, feedback, modulation, HPF, LPF, wet | PoiZone's delay |
+| 65…69 | reverb on (reset when turned on), size, decay, damping, wet | §3.9.4 |
+| 70, 71, 72 | arpeggiator on, mode, range | PoiZone's arpeggiator: `trunc(3v + 0.0003)` clamped |
+| 74 | arp division (raw) | `{0.5, 1, 2, 3, 4, 8, 16}[trunc(v)]` |
+| 75 | polyphony (raw) | `trunc(4(v + 1))`, 24 when < 1 or > 24 |
+| 76 | pitch-bend range (raw) | `trunc(v)` semitones |
+
+The constructor sets P75 = 5 and then every parameter to its default (`FUN_180031eb0`), then FL's first rate set
+follows (§3.5).
+
+### 3.4 Voice **[DECOMP `FUN_1800305d0` (control), `FUN_180024e10`, `FUN_180024dd0`, `FUN_180024eb0`, `FUN_180024d10`, `FUN_180030ea0`, `FUN_180030ff0`, `FUN_180031070`; EXEC]**
+
+1. **Control chunk.** The host block is cut into chunks of `2 − trunc(−0.001·fs)` samples (46 at 44.1 kHz); before
+   each chunk every listed voice runs its control step: glide, the drift (a new random target `±0.01` semitone every
+   1025 steps, smoothed by 10⁻⁴ per step), LFO depth with its attack/release, the pan gains (unison spread × host
+   gains × ½), noise level, sub phase offset, the three phase increments (24-bit accumulators, `min(f/(6·fs), 0.49)`).
+2. **Pitch.** `transpose + fine + unison shift + glide position + unison spread + host key offset + octaver (odd
+   unison voices +12) + drift + bend·range`; frequency `220·2^((pitch − 57)/12)` (double).
+3. **Oscillators.** The main saw reads `data.saw` (8192 floats) at `phase >> 11`; the sub reads the same cycle (or the
+   pulse form `saw[k] − saw[k + 4096]`) at `(phase₂ + offset) >> 11` with frequency `harmonic·f + 3·subDetune`; with
+   sync on a third accumulator at `f·2^(−sync)` resets the other two when it wraps. The sum is multiplied by
+   `1 + 0.06·u` and shifted by `−0.35`, noise `u·level` added (u = one draw per 6-sample step, −0.5…0.5).
+4. **Cutoff.** `c = 2^(9.3·cutoff + 5 + (pitch − 36)·keytrack/12 + (8·vel − 4)·veltrack + 2·LFO·amount² + drift)`,
+   coefficient `c·6/(3·6·fs)`, smoothed by `176.4/fs` per step; filter EG multiplies it by `1 + 320·amt⁴·env`; the
+   result is clamped to `121026/fs/6`. Resonance `3.99·v` (clamp constant 3.98999977f).
+5. **Envelopes.** Exponential segments toward a target with coefficient `8.82/(time·fs)` (attack target 5·vel with
+   time ×39.441975, then sustain·vel); release target 0; the voice is cleared 0.1 s after the amp release time —
+   **twice** (the reset routine draws three random start phases each time).
+6. **Filter (6× oversampled).** Four one-pole stages with a soft clip `y/(1 + 5·max(y,0)⁴)` on the last one, run
+   three times per sample: with feedback of the previous sample's half-sum, with the average of the first pass and
+   the previous output, then on the input minus the averaged feedback. Outputs: low = y, band = s2, high = y − s3,
+   notch = x − y, mixed with the smoothed weights.
+7. **One voice or four at a time.** Groups of four listed voices run the SSE routine (`FUN_180035160`); a single
+   remaining voice runs the scalar one (`FUN_180036710`). They are not numerically the same and LYNX keeps both: the
+   scalar one subtracts 0.35 in double and uses `176.400009f/float(fs)`, the four-lane one subtracts `0.35f`, uses
+   `float(176.40000837855/fs)` and mixes the outputs with the weights of the **previous** step.
+8. **Random numbers.** One process-global generator (`x·0x0bb38435 + 0x3619636b`, start 2545672) feeds drift, noise,
+   FM and LFO S&H; the voice reset steps it with `x·0x77a73631 + 0xf6ff3a94`. A fresh instance has been through one
+   rate set (EXEC: 144 reset draws before the first note).
+
+### 3.5 Rate set **[DECOMP `FUN_180023140`, `FUN_180031130`, `FUN_180037480`; EXEC]**
+
+All notes off, every voice gets the rate and is reset twice, glide position 48; master gain snapped; chunk length;
+maximum cutoff; the 6:1 decimator (one biquad per channel run at the oversampled rate, `w = 16755.16/fs`,
+`b0 = (1−cos w)/(sin w/8 + 2)`, `a1 = −16·cos w/(sin w + 8)`, `a2 = (8 − sin w)/(sin w + 8)`, flushed below 10⁻⁹);
+DC guard; chorus, phaser, delay, reverb buffers and their reset.
+
+### 3.6 Global LFO **[DECOMP `FUN_180034ba0` (process; the LFO step is inline at its start)]**
+
+Once per process call: triangle, saw, square or S&H (a new value from the generator at every wrap) from a double
+phase; increment `speed/fs`, or synced `tempo·(1/15)/division/fs`; invert flips the sign.
+
+### 3.7 DC guard **[DECOMP `FUN_18001a8e0`, `FUN_18001a9e0`, `FUN_18005adc0`]**
+
+A 2nd-order high-pass at 4 Hz, Q 1, coefficients from the CRT's vector `sincosf`; **one** state shared by the left and
+right samples in turn (as in the code). Values below 10⁻⁹ are flushed.
+
+### 3.8 Modulation matrix **[DECOMP `FUN_180037910`]**
+
+See §3.3. Sources 2 (aftertouch), 3 (pitch bend) and ≥ 4 (controllers) are **not fed by LYNX** (0).
+
+### 3.9 Effects **[DECOMP `FUN_180030300`, `FUN_180026e20`, `FUN_18002a9c0`, `FUN_18005d430`; EXEC]**
+
+Order: chorus, phaser, delay, reverb (when on). When more than `2·fs` output samples in a row stay below 10⁻⁵ the
+four effects are reset and skipped until sound returns.
+
+1. **Chorus, delay**: PoiZone's (REA_rodada44), instruction for instruction.
+2. **Phaser**: six first-order all-passes per channel, coefficient swept between 50 Hz and 20 kHz by a cosine LFO
+   (`rate²·44100/fs·0.0005` rad per sample), depth `depth³/2`, feedback `0.98·fb^(1/3)` from the last stage, wet added
+   to the dry signal; centre and mix smoothed, the input faded in after a reset. The LFO uses the CRT's `cosf`
+   (`FUN_18005d430`, FMA path on this machine): argument reduction with π/2 split in two parts and degree-8/9 Taylor
+   polynomials in double. LYNX reproduces that path (`cosfCrt`); the plain `std::cos` left −131…−222 dB residuals that
+   the delay feedback could raise to −79 dB.
+3. **Reverb**: Transistor Bass's plate (REA_rodada57 §2.9) with 18 controls and no predelay feedback; the integer laws
+   computed as `v·a + b` and floored; mapping P66 → size `0.6·v³`, P67 → decay `v³`, P68 → damping `|1 − v|`,
+   P69 → wet `0.999·v + 0.001` (× 0.3); the rate set sets control 5 to 1.
+
+### 3.10 Verification **[EXEC + model; `py/swcpp.py`, `py/bat_sw.py`, `py/iso_fx.py`, `py/gold_sw.py`]**
+
+LYNX's C++ engine (`cpp/swref.cpp`) against the DLL, every preset/database/render-test state (423), three notes with
+releases, 1 s at 44.1 kHz, blocks of 512:
+
+- effects off (P47/51/57/65 = 0): **bit-identical in all 423**;
+- as saved: 260/423 bit-identical; all 163 others have the reverb on and differ by −137…−155 dB. The reverb's coefficient
+  computations use float `expf`, `logf`, `powf`, `tanf`; LYNX computes them through the double functions. Which call
+  leaves the residual is **not confirmed** (an emulation of the CRT `powf` from BassDrum did not change it).
+- the three test fingerprints (Default, "FG Velocity Slapper" at 48 kHz/256 with arpeggiator, phaser and delay, and
+  Default with our own settings: unison 4, sub pulse, sync, band-pass, noise, resonance, chorus) are bit-identical.
+
+### 3.11 LYNX port **[model]**
+
+`InstrumentKind::sawer`, `src/core/Sawer.{h,cpp}`. The importer maps "Sawer" with a usable state when the user's
+`%FLStudioFactoryData%\Plugins\Fruity\Generators\Sawer\data.saw` exists (its path goes to `ChannelDef::samplePath`; the
+file is read at run time and never bundled); otherwise the channel stays unsupported as before. Channel settings show
+14 knobs (level, cutoff, resonance, filter EG amount, amp ADSR, sub level/harmonic, noise, unison voices/detune, LFO
+amount) that write the saved floats. The instrument is idle once no voice sounds, the arpeggiator is stopped and the
+effects are off or past the engine's own 2-second silence gate. Not modelled: the process-global generator (LYNX:
+per instrument, started as a freshly loaded DLL), aftertouch/pitch-bend/controller modulation sources, FL's host ramp
+law (as round 29), the reverb's CRT rounding residual. Core test `sawer_engine` (installation presets and `data.saw`
+read at run time, DLL fingerprints at 1e-7, the instrument against the reference render, idle after the release).

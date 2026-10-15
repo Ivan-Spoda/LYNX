@@ -9,6 +9,7 @@
 #include "core/MiniSynth.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -227,6 +228,7 @@ private:
             case InstrumentKind::transistorbass:
             case InstrumentKind::plucked:
             case InstrumentKind::beepmap:
+            case InstrumentKind::sawer:
                 break;
         }
 
@@ -2059,6 +2061,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)
         return makeBeepMapInstrument();
+    if (kind == InstrumentKind::sawer)
+        return makeSawerInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

@@ -36,6 +36,7 @@
 #include "core/MiniSynth.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -7743,6 +7744,131 @@ TEST (beepmap_engine)
     inst->noteOn (60, 1.0f);
     for (int b = 0; b < 200 && ! inst->idle(); ++b)
         inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+    CHECK (inst->idle());
+}
+
+// ---- Sawer (REA_rodada65 §3): installation presets and data.saw read at run time, fingerprints of engine_x64.dll ----
+namespace
+{
+std::vector<std::uint8_t> sawerPresetState (const char* rel)
+{
+    if (realFlpDir.empty())
+        return {};
+    std::ifstream in (std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "Sawer" / rel, std::ios::binary);
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    while (i < b.size())
+    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (id == 0xD5 && i + n <= b.size())
+            return { b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n) };
+        i += n;
+    }
+    return {};
+}
+} // namespace
+
+TEST (sawer_engine)
+{
+    // a synthetic header: "SSLF" + size + "1rwS" + 96 floats
+    std::vector<std::uint8_t> synth (12 + 4 * 96, 0);
+    std::memcpy (synth.data(), "SSLF", 4);
+    const std::uint32_t size = 4 + 4 * 96;
+    std::memcpy (synth.data() + 4, &size, 4);
+    std::memcpy (synth.data() + 8, "1rwS", 4);
+    const float p27 = 0.75f;
+    std::memcpy (synth.data() + 12 + 4 * 27, &p27, 4);
+    CHECK (lynx::sawerStateUsable (synth));
+    CHECK (lynx::sawerParam (synth, 27) == 0.75f && lynx::sawerParamOffset (synth, 27) == 12 + 4 * 27);
+    CHECK (! lynx::sawerParam (synth, 96) && lynx::sawerParamOffset (synth, -1) < 0);
+    auto broken = synth;
+    broken[8] = 'X';
+    CHECK (! lynx::sawerStateUsable (broken));
+    CHECK (! lynx::sawerStateUsable (std::vector<std::uint8_t> (synth.begin(), synth.end() - 4)));
+
+    const auto dflt = sawerPresetState ("Default.fst");
+    const auto slap = sawerPresetState ("Arpeggios/FG Velocity Slapper.fst");
+    const auto tablePath = realFlpDir.empty() ? std::string() : (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Sawer" / "data.saw").string();
+    const auto table = tablePath.empty() ? std::vector<float> {} : lynx::sawerReadTable (tablePath);
+    if (dflt.empty() || slap.empty() || table.size() != 8192u)
+    {
+        std::printf ("  (sawer_engine: FL Studio installation not found, DLL fingerprints skipped)\n");
+        return;
+    }
+    CHECK (lynx::sawerStateUsable (dflt) && lynx::sawerStateUsable (slap));
+
+    // DLL fingerprints (py/gold_sw.py: the EXEC harness, L = R = Final.Vol); "syn" = Default with our own settings
+    // (unison 4, sub pulse at 0.6, sync, band-pass, noise, resonance, chorus)
+    auto setP = [] (std::vector<std::uint8_t> s, int k, float v) { std::memcpy (s.data() + 12 + 4 * k, &v, 4); return s; };
+    auto syn = dflt;
+    for (const auto& kv : { std::pair { 14, 1.0f }, { 23, 1.0f }, { 25, 1.0f }, { 24, 0.5f }, { 31, 0.4f }, { 47, 1.0f }, { 19, 0.6f },
+                            { 26, 0.3f }, { 28, 0.7f }, { 45, 0.5f }, { 46, 0.0f } })
+        syn = setP (syn, kv.first, kv.second);
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    using N = lynx::sawer::RefNote;
+    struct Sample { int at; float l, r; };
+    struct Golden { const std::vector<std::uint8_t>* state; std::vector<N> notes; double fs; int block; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { &dflt, { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 }, { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 } },
+          44100, 512, 1172.343107, 1169.673445,
+          { { 1000, 0.0349505879f, 0.0349650607f }, { 10000, -0.0326882228f, -0.0326587185f }, { 30000, 0.139422998f, 0.139268339f }, { 60000, -1.01108653e-05f, -1.01210762e-05f } } },
+        { &slap, { { 0, 57, iv (90), 1.0, 0.0, 0.0, 40000 }, { 500, 64, iv (70), 1.0, 0.0, 0.0, 40000 } }, 48000, 256, 62.85129835, 62.26892467,
+          { { 1000, 0.00919434987f, 0.0769683793f }, { 10000, 0.0363935083f, 0.0227626693f }, { 30000, -0.00462511741f, -0.0105419969f }, { 60000, -0.00727002183f, -0.00159690797f } } },
+        { &syn, { { 0, 48, iv (100), 1.0, 0.0, 0.0, 20000 }, { 5000, 55, iv (60), 1.0, 0.0, 25.0, 30000 } }, 44100, 1000, 579.5093366, 593.7384022,
+          { { 1000, -0.162745371f, -0.172861978f }, { 10000, 0.0468756184f, 0.112415045f }, { 30000, -0.123887017f, -0.132816017f }, { 60000, 0.0f, 0.0f } } },
+    };
+    for (const auto& g : goldens)
+    {
+        const auto y = lynx::sawer::renderReference (*g.state, table, g.notes, g.fs, 66150, g.block);
+        CHECK (y.size() == 2 * 66150u);
+        if (y.size() != 2 * 66150u)
+            continue;
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i < 66150; ++i)
+            el += (double) y[2 * i] * y[2 * i], er += (double) y[2 * i + 1] * y[2 * i + 1];
+        CHECK (std::abs (el - g.el) < 1e-5 * g.el && std::abs (er - g.er) < 1e-5 * g.er);
+        for (const auto& s : g.s)
+            CHECK (std::abs (y[2 * (std::size_t) s.at] - s.l) < 1e-7f && std::abs (y[2 * (std::size_t) s.at + 1] - s.r) < 1e-7f);
+    }
+
+    // the instrument: the same engine behind LYNX's channel gains (centre → law A), velocity → Init.Vol; it goes idle
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sawer;
+    c.pluginState = dflt;
+    c.samplePath = tablePath;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::sawer);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (512 * 40, 0.0f), r (512 * 40, 0.0f);
+    for (int b = 0; b < 40; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::sawer::renderReference (dflt, table, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0,
+                                                   8192, 512, 120.0, 0, true);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
     CHECK (inst->idle());
 }
 

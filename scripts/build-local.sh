@@ -25,7 +25,7 @@ CORE="$CORE src/core/StartupSound.cpp"
 # FL's 3x Osc engine (REA round 47)
 CORE="$CORE src/core/ThreeOsc.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
-CORE="$CORE src/core/Plucked.cpp src/core/BeepMap.cpp"
+CORE="$CORE src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

@@ -10,6 +10,7 @@
 #include "core/MiniSynth.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
@@ -1171,6 +1172,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "sawer")
+            {
+                // FL's engine from the raw state (REA_rodada65 §3) with its oscillator cycle read at run time from the
+                // user's Sawer\data.saw; there was no conversion before (state or file not usable: unsupported)
+                const auto saw = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Sawer\\data.saw", options.roots);
+                if (sawerStateUsable (c.pluginState) && ! saw.empty() && options.fileExists && options.fileExists (saw))
+                {
+                    def.instrument = InstrumentKind::sawer;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = saw;
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "kepler")
             {
                 // FL's engine from the raw state (REA_rodada46) with its LFO-shape and noise tables read at run time from the
@@ -1379,7 +1393,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
                      || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
-                     || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap)
+                     || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
+                     || def.instrument == InstrumentKind::sawer)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

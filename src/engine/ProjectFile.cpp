@@ -99,6 +99,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::transistorbass: return "transistorbass";
         case InstrumentKind::plucked: return "plucked";
         case InstrumentKind::beepmap: return "beepmap";
+        case InstrumentKind::sawer: return "sawer";
     }
     return "synth";
 }
@@ -111,7 +112,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::drumsynth, InstrumentKind::harmless, InstrumentKind::sytrus, InstrumentKind::harmor,
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
-                    InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass, InstrumentKind::plucked, InstrumentKind::beepmap })
+                    InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer })
         if (id == instrumentId (k))
             return k;
 
