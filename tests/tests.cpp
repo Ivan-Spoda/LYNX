@@ -8181,7 +8181,7 @@ TEST (fruity_parametric_eq_exact)
                == (v1 ? "12 dB/oct" : "Steep 8"));
         CHECK (lynx::peq::widthText (slot->params, 0).rfind ("BW ", 0) == 0);
         const auto lowCutDb = lynx::peq::responseDb (slot->params, 44100.0, 25.0), midDb = lynx::peq::responseDb (slot->params, 44100.0, 1000.0);
-        CHECK (lowCutDb < midDb - 20.0);
+        CHECK (lowCutDb < midDb - 5.0); // high pass below ~100 Hz (Steep 8 in the EQ 2 state, 12 dB/oct in v1)
     }
     // a native LYNX EQ is untouched by the FL law
     CHECK (! lynx::peq::flLaw (lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params));
