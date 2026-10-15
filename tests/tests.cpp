@@ -29,6 +29,7 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/Gms.h"
+#include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/Morphine.h"
@@ -759,6 +760,7 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int toxic = 0, toxicUsable = 0, toxicKind = 0, toxicSounding = 0, toxicGoldens = 0; // REA_rodada45
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -854,6 +856,39 @@ TEST (flp_real_files)
                         for (const auto& g : isGms ? std::vector (std::begin (gmsAt), std::end (gmsAt)) : std::vector (std::begin (morAt), std::end (morAt)))
                             CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-5f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-5f);
                         ++demoGoldens;
+                    }
+                }
+                // Toxic Biohazard (REA_rodada45): every demo state plays on the exact engine with the waves read from the
+                // installation's DLL and sounds; the "Bombs Away" channel matches golden samples of our round-45 model
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Toxic Biohazard")
+                        ++toxic, toxicUsable += lynx::toxicStateUsable (c.pluginState) ? 1 : 0;
+                for (const auto& c : full.channels)
+                {
+                    if (c.instrument != lynx::InstrumentKind::toxic)
+                        continue;
+                    ++toxicKind;
+                    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+                    const auto golden = file.find ("Bombs Away") != std::string::npos;
+                    const auto y = lynx::toxic::renderReference (
+                        c.pluginState,
+                        { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                          { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 }, { 60000, 48, iv (127), 1.0, 0.0, 0.0, 70000 } },
+                        44100.0, golden ? 88200 : 22050, c.samplePath, 512, 140.0);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    toxicSounding += e > 1e-6 ? 1 : 0;
+                    if (golden && ! y.empty())
+                    {
+                        // our model (r45/py/toxmodel.py, which equals the DLL bit for bit), state as saved, tempo 140, 44.1 kHz
+                        CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.0832500924945) < 1e-6);
+                        static const struct { int i; float l, r; } at[] = { { 2000, -0.0501383618f, -0.100676455f }, { 15000, -0.0949445963f, -0.0714591742f }, { 30000, -0.0305469204f, 0.037349131f }, { 50000, 0.0255811438f, -0.0238218959f }, { 65000, -0.111861639f, -0.113630719f }, { 80000, 0.0163135566f, 0.0199630354f } };
+                        for (const auto& g : at)
+                            CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+                        ++toxicGoldens;
                     }
                 }
                 for (const auto& c : full.channels)
@@ -1507,6 +1542,9 @@ TEST (flp_real_files)
                  gms, gmsUsable, gmsKind, gmsSounding, morphine, morphineUsable, morphineKind, morphineSounding, demoGoldens);
     CHECK (gmsUsable == gms && gms >= 9 && gmsKind == gms && gmsSounding == gmsKind);
     CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
+    std::printf ("  Toxic Biohazard: %d channels, %d usable, %d imported as Toxic (%d sounding), %d golden\n", toxic, toxicUsable, toxicKind,
+                 toxicSounding, toxicGoldens);
+    CHECK (toxicUsable == toxic && toxic >= 3 && toxicKind == toxic && toxicSounding == toxicKind && toxicGoldens == 1);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
@@ -7903,6 +7941,95 @@ TEST (gms_engine)
         inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
     }
     const auto ref = lynx::gms::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0, 8192, "");
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
+}
+
+// A Toxic Biohazard state written from scratch (REA_rodada45; r45/py/mktest.py builds the same bytes): our own drawn
+// spectra on operators 1 and 3 (wave 0) and the sine on operator 2, so no wave of the installation is needed
+std::vector<std::uint8_t> toxicTestState()
+{
+    auto s = lynx::toxicDefaultState();
+    static const std::pair<int, double> set[] = {
+        { 0, 0.62 }, { 1, 0.3 }, { 3, 0.05 }, { 4, 0.6 }, { 5, 0.7 }, { 6, 0.4 }, { 7, 0.3 }, { 8, 0.4 }, { 9, 0.8 }, { 10, 0.2 },
+        { 13, 0.45 }, { 15, 0.45 }, { 16, 0.55 }, { 17, 0.5 }, { 19, 0.1 }, { 20, 0.5 }, { 21, 0.4 }, { 22, 0.4 }, { 23, 0.8 },
+        { 24, 0.6 }, { 25, 1 }, { 26, 1 }, { 27, 1 }, { 32, 0.5606 }, { 33, 0.4394 }, { 38, 0.53 }, { 49, 0 }, { 55, 0.25 },
+        { 62, 0.5 }, { 75, 0.08 }, { 81, 0.5 }, { 87, 0.3 }, { 104, 0.8 }, { 105, 0.6 }, { 110, 0.35 }, { 115, 0.22 },
+        { 127, 0.18 }, { 147, 0.7 }, { 227, 1 }, { 229, 0.65 }, { 233, 0.4 }, { 236, 1 }, { 237, 1 }, { 252, 0.5 }, { 254, 0.3 },
+        { 256, 0.4 }, { 267, 0.4 }, { 269, 0.5 }, { 277, 0.3 }, { 300, 1 }, { 301, 8 }, { 302, 2 }, { 303, 0 }, { 305, 3 },
+        { 306, 0 }, { 307, 1 }, { 308, 0 }, { 314, 1 }, { 315, 0 }, { 316, 1 }, { 324, 106 }, { 332, 0.7 } };
+    for (const auto& [index, value] : set)
+    {
+        const auto v = (float) value;
+        std::memcpy (s.data() + lynx::toxicParamOffset (s, index), &v, 4);
+    }
+    auto spectrum = [&] (int slot, int h, float amp, float phase) {
+        const auto at = 12 + 0x40 + 1024 * (std::size_t) slot + 4 * (std::size_t) h;
+        std::memcpy (s.data() + at, &amp, 4);
+        std::memcpy (s.data() + at + 512, &phase, 4);
+    };
+    for (int h = 0; h < 24; ++h)
+        spectrum (0, h, (float) (1.0 / (h + 1)), 0.0f);
+    for (int k = 0; k < 16; ++k)
+        spectrum (2, 2 * k, (float) (1.0 / (2 * k + 1)), 0.25f);
+    return s;
+}
+
+TEST (toxic_engine)
+{
+    const auto blob = toxicTestState();
+    dumpIfAsked ("LYNX_DUMP_TOXIC", blob);
+    CHECK (blob.size() == 10050u && lynx::toxicStateUsable (blob) && ! lynx::toxicNeedsDll (blob));
+    CHECK (lynx::toxicParamOffset (blob, 15) == 12 + 0x40 + 8192 + 4 * 15 && lynx::toxicParamOffset (blob, 340) < 0);
+    CHECK (! lynx::toxicDllUsable ("") && ! lynx::toxicDllUsable ("/nonexistent/Toxic Biohazard_x64.dll"));
+    auto broken = blob;
+    broken[8] = 'X';
+    CHECK (! lynx::toxicStateUsable (broken));
+    CHECK (! lynx::toxicStateUsable (std::vector<std::uint8_t> (blob.begin(), blob.begin() + 5000)));
+    auto needs = blob;
+    const auto w = 15.0f; // a built-in wave of the installation: without the DLL the engine refuses the state
+    std::memcpy (needs.data() + lynx::toxicParamOffset (needs, 307), &w, 4);
+    CHECK (lynx::toxicNeedsDll (needs) && lynx::toxic::renderReference (needs, { { 0, 60 } }, 44100.0, 64, "").empty());
+
+    // golden samples of our round-45 model (toxmodel.run, which equals the DLL bit for bit on this state), effects on,
+    // tempo 140, 44.1 kHz, host blocks of 512: C5 vel 100 0–30000, E5 vel 80 11025–40000, G5 vel 110 22050–52000
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    const std::vector<lynx::toxic::RefNote> notes = { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 },
+                                                      { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                      { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 } };
+    const auto y = lynx::toxic::renderReference (blob, notes, 44100.0, 66150, "", 512, 140.0);
+    CHECK (y.size() == 2 * 66150u);
+    static const struct { int i; float l, r; } golden[] = { { 100, 0.264782101f, 0.189374551f }, { 5000, -0.605827034f, 0.43244195f }, { 15000, -0.343959779f, -0.111227378f }, { 25000, 0.0127612427f, -0.354315311f }, { 35000, -0.353289753f, -0.307500422f }, { 45000, -0.260735184f, 0.202133358f }, { 55000, -0.0751226544f, -0.0776180848f }, { 66000, -0.0294751395f, 0.00692501338f } };
+    for (const auto& g : golden)
+        CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.307227390984) < 1e-6);
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → law A), velocity → Init.Vol
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::toxic;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::toxic);
+    inst->configure (c, 140.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::toxic::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } },
+                                                   44100.0, 8192, "", 512, 140.0);
     double diff = 0.0, energy = 0.0;
     for (int i = 0; i < 8192; ++i)
     {
