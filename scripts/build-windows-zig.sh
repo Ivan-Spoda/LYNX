@@ -12,6 +12,10 @@ OUT="${OUT:-build-win}"
 JOBS="${JOBS:-$(nproc)}"
 TARGET=x86_64-windows-gnu
 
+# Single version source: project(LYNX VERSION x.y.z) in CMakeLists.txt
+VERSION="$(sed -n 's/^project(LYNX VERSION \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' CMakeLists.txt)"
+[[ -n "$VERSION" ]] || { echo "could not read the version from CMakeLists.txt" >&2; exit 1; }
+
 mkdir -p "$OUT/juce" "$OUT/app" "$OUT/shim"
 
 # MinGW headers are lowercase; JUCE includes some with capitals (on Windows it does not matter).
@@ -31,7 +35,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_ASIO 1'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
-    echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.3"'
+    echo "#define JUCE_APPLICATION_VERSION_STRING \"$VERSION\""
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
 } > "$OUT/JuceConfig.h.new"
 # only replace the file if it changed, so the module cache is not invalidated
@@ -75,7 +79,7 @@ APP_SOURCES=(src/Main.cpp
              src/engine/SampleLibrary.cpp src/engine/WavPackFormat.cpp src/engine/ProjectFile.cpp src/engine/PluginHost.cpp src/engine/PluginSandbox.cpp src/engine/Exporter.cpp src/engine/StreamPrefetcher.cpp src/engine/ClapFormat.cpp src/engine/MidiFileIo.cpp src/engine/PreviewPlayer.cpp
              src/ui/MainComponent.cpp src/ui/ChannelRackComponent.cpp src/ui/PianoRollComponent.cpp src/ui/PlaylistComponent.cpp src/ui/MixerComponent.cpp src/ui/PluginWindow.cpp src/ui/WindowOwner.cpp src/ui/ParametricEqEditor.cpp src/ui/ExportDialog.cpp src/ui/AutomationUi.cpp src/ui/ChannelSettings.cpp src/ui/BrowserComponent.cpp src/ui/Theme.cpp src/ui/Icons.cpp src/ui/I18n.cpp src/ui/EditorTools.cpp
              src/core/Song.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp
-             src/core/FlpImport.cpp src/core/Effects.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/core/Arpeggiator.cpp src/core/SynthPresets.cpp src/core/Slicer.cpp src/core/Templates.cpp src/core/FlWrapper.cpp src/core/FlEffects.cpp src/core/Effector.cpp src/core/VintagePhaser.cpp src/core/Reeverb2.cpp src/core/Vocodex.cpp src/core/MaximusFx.cpp src/core/ParametricEqFl.cpp src/core/ParametricEqLinear.cpp src/core/FruityBasicFx.cpp src/core/TransistorBass.cpp src/core/GrossBeat.cpp src/core/FruityDelayBank.cpp src/core/FruityMultiband.cpp src/core/FlangusFastDist.cpp src/core/EquoFx.cpp src/core/PitchShifterFl.cpp src/core/FrequencySplitter.cpp src/core/FruityFilters.cpp src/core/StereoFx.cpp src/core/FruityDelay.cpp src/core/FruityShapers.cpp src/core/ChorusFx.cpp src/core/FruityDynamics.cpp src/core/FlSamplers.cpp src/core/FlSynths.cpp src/core/FlSytrus.cpp src/core/FlGenerators.cpp src/core/PhysicalModels.cpp src/core/DrumSynthLive.cpp src/core/SytrusEngine.cpp src/core/Harmless.cpp src/core/HarmlessFx.cpp src/core/Harmor.cpp src/core/Gms.cpp src/core/Morphine.cpp src/core/Ogun.cpp src/core/Toxic.cpp src/core/ToxicFx.cpp src/core/FruitKick.cpp src/core/BassDrum.cpp src/core/MiniSynth.cpp src/core/Dx10.cpp src/core/Kepler.cpp src/core/PoiZone.cpp src/core/FlPatcher.cpp src/core/Inflate.cpp src/core/WavPack.cpp src/flp/Flp.cpp
+             src/core/FlpImport.cpp src/core/Effects.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/core/Arpeggiator.cpp src/core/SynthPresets.cpp src/core/Slicer.cpp src/core/Templates.cpp src/core/FlWrapper.cpp src/core/FlEffects.cpp src/core/Effector.cpp src/core/VintagePhaser.cpp src/core/Reeverb2.cpp src/core/LuxeVerb.cpp src/core/IldspMath.cpp src/core/ConvolverFx.cpp src/core/EquoFx.cpp src/core/PitchShifterFl.cpp src/core/SimSynth.cpp src/core/Wasp.cpp src/core/FruityFilters.cpp src/core/FrequencySplitter.cpp src/core/FlangusFastDist.cpp src/core/FruityDelayBank.cpp src/core/FruityMultiband.cpp src/core/Vocodex.cpp src/core/MaximusFx.cpp src/core/ParametricEqFl.cpp src/core/ParametricEqLinear.cpp src/core/FruityBasicFx.cpp src/core/TransistorBass.cpp src/core/GrossBeat.cpp src/core/StereoFx.cpp src/core/FruityDelay.cpp src/core/FruityShapers.cpp src/core/ChorusFx.cpp src/core/FruityDynamics.cpp src/core/FlSamplers.cpp src/core/FlSynths.cpp src/core/FlSytrus.cpp src/core/FlGenerators.cpp src/core/PhysicalModels.cpp src/core/DrumSynthLive.cpp src/core/SytrusEngine.cpp src/core/Harmless.cpp src/core/HarmlessFx.cpp src/core/Harmor.cpp src/core/Gms.cpp src/core/Morphine.cpp src/core/Ogun.cpp src/core/Toxic.cpp src/core/ToxicFx.cpp src/core/FruitKick.cpp src/core/BassDrum.cpp src/core/MiniSynth.cpp src/core/Dx10.cpp src/core/Kepler.cpp src/core/PoiZone.cpp src/core/FlPatcher.cpp src/core/Inflate.cpp src/core/WavPack.cpp src/flp/Flp.cpp
              src/platform/MingwFixes.cpp)
 
 # workflow shell: core (key map, workspace layout, rack operations) and UI (workspace desktop, control contract)
@@ -109,8 +113,17 @@ printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     src={}; obj="$OUT/app/$(echo "$src" | tr / _).o"
     $ZIG c++ $COMMON_STR -Wall -Wextra -c "$src" -o "$obj"'
 
-echo "Resources (manifest)..."
-( cd resources && "$ZIG" rc /fo "../$OUT/LYNX.res" LYNX.rc )
+echo "Resources (manifest, icons, version $VERSION)..."
+OUT_ABS="$(cd "$OUT" && pwd)"
+IFS=. read -r VMAJ VMIN VPAT <<< "$VERSION"
+{
+    echo '#pragma once'
+    echo "#define LYNX_VERSION_MAJOR $VMAJ"
+    echo "#define LYNX_VERSION_MINOR $VMIN"
+    echo "#define LYNX_VERSION_PATCH $VPAT"
+    echo "#define LYNX_VERSION_STR \"$VERSION\""
+} > "$OUT/lynx_version.h"
+( cd resources && "$ZIG" rc /i "$OUT_ABS" /fo "$OUT_ABS/LYNX.res" LYNX.rc )
 
 echo "Linking..."
 "$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT/LYNX.res" \

@@ -97,6 +97,8 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::threeosc: return "threeosc";
         case InstrumentKind::autogun: return "autogun";
         case InstrumentKind::transistorbass: return "transistorbass";
+        case InstrumentKind::simsynth: return "simsynth";
+        case InstrumentKind::wasp: return "wasp";
     }
     return "synth";
 }
@@ -109,7 +111,8 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::drumsynth, InstrumentKind::harmless, InstrumentKind::sytrus, InstrumentKind::harmor,
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
-                    InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass })
+                    InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
+                    InstrumentKind::simsynth, InstrumentKind::wasp })
         if (id == instrumentId (k))
             return k;
 
@@ -173,6 +176,8 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFastDist: return "fruityFastDist";
         case EffectKind::fruityFlangus: return "fruityFlangus";
         case EffectKind::fruityFlanger: return "fruityFlanger";
+        case EffectKind::luxeVerb: return "luxeVerb";
+        case EffectKind::convolver: return "convolver";
         case EffectKind::equo: return "equo";
         case EffectKind::flPitchShifter: return "flPitchShifter";
         case EffectKind::frequencySplitter: return "frequencySplitter";
@@ -325,7 +330,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat,
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
                     EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
-                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger,
+                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
                     EffectKind::equo, EffectKind::flPitchShifter,
                     EffectKind::frequencySplitter,
                     EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter })

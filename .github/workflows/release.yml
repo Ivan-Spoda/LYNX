@@ -1,0 +1,203 @@
+# Release build of LYNX for Windows.
+#
+# Every published LYNX.exe comes from this workflow, built from the tagged source on GitHub-hosted
+# runners, so anyone can trace a binary back to the commit and the run that produced it
+# (a requirement of the SignPath Foundation code signing program; see docs/CODE_SIGNING.md).
+#
+#   build    (ubuntu)   cross-compiles LYNX.exe with Zig 0.14.1 + JUCE 8.0.4 (scripts/build-windows-zig.sh)
+#   sign     (ubuntu)   SignPath signing request; skipped until the repository variable SIGNPATH_ENABLED is 'true'
+#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip and SHA256SUMS,
+#                       and on a tag push attaches them to the GitHub release
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: 0.14.1
+  ZIG_SHA256: 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+  JUCE_VERSION: 8.0.4
+  JUCE_SHA256: 0effe9823a6fd8a4f98e5c08be7d308350e417b2d15dcf34011e778fefbbf005
+
+jobs:
+  build:
+    name: Build LYNX.exe
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      label: ${{ steps.version.outputs.label }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 'Version (single source is CMakeLists.txt)'
+        id: version
+        shell: bash
+        run: |
+          version="$(sed -n 's/^project(LYNX VERSION \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' CMakeLists.txt)"
+          [[ -n "$version" ]] || { echo "::error::no version in CMakeLists.txt"; exit 1; }
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            [[ "$tag" == "$version" || "$tag" == "$version"-* ]] || { echo "::error::tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+            label="$tag"
+          else
+            label="$version-${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "LYNX $version (package label $label)"
+
+      # Only the downloaded toolchain is cached (checksums verified on download); the app is always built from scratch.
+      - name: Cache toolchain
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: ~/opt
+          key: toolchain-zig${{ env.ZIG_VERSION }}-juce${{ env.JUCE_VERSION }}-${{ env.ZIG_SHA256 }}-${{ env.JUCE_SHA256 }}
+
+      - name: Download Zig and JUCE
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p ~/opt && cd ~/opt
+          curl -fsSL -o zig.tar.xz "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+          echo "$ZIG_SHA256  zig.tar.xz" | sha256sum -c -
+          tar xf zig.tar.xz && rm zig.tar.xz
+          curl -fsSL -o juce.tar.gz "https://github.com/juce-framework/JUCE/archive/refs/tags/$JUCE_VERSION.tar.gz"
+          echo "$JUCE_SHA256  juce.tar.gz" | sha256sum -c -
+          tar xzf juce.tar.gz && mv "JUCE-$JUCE_VERSION" "juce-$JUCE_VERSION" && rm juce.tar.gz
+
+      - name: Build (Zig cross compile)
+        shell: bash
+        run: |
+          ZIG="$HOME/opt/zig-x86_64-linux-$ZIG_VERSION/zig" JUCE_DIR="$HOME/opt/juce-$JUCE_VERSION" OUT=build-win \
+            ./scripts/build-windows-zig.sh 2>&1 | grep -v '^1 warning generated\.$'
+          sha256sum build-win/LYNX.exe
+
+      - name: Upload unsigned LYNX.exe
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-unsigned
+          path: build-win/LYNX.exe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------------------------
+  # SignPath code signing: PLACEHOLDER, disabled until the SignPath Foundation approves LYNX.
+  # To enable (docs/CODE_SIGNING.md):
+  #   repository secret    SIGNPATH_API_TOKEN        API token of the SignPath CI user (submitter role)
+  #   repository variable  SIGNPATH_ORGANIZATION_ID  organization id shown in the SignPath web app
+  #   repository variable  SIGNPATH_PROJECT_SLUG     project slug (default: LYNX)
+  #   repository variable  SIGNPATH_POLICY_SLUG      signing policy slug (default: release-signing)
+  #   repository variable  SIGNPATH_ENABLED          'true' to switch this job on
+  # ---------------------------------------------------------------------------------------------
+  sign:
+    name: Sign (SignPath)
+    needs: build
+    if: vars.SIGNPATH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    permissions:
+      actions: read     # SignPath reads the job details and downloads the unsigned artifact
+      contents: read
+    steps:
+      - name: Submit signing request
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'LYNX' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 10800   # a release request waits up to 3 h for manual approval
+          output-artifact-directory: signed
+
+      - name: Upload signed LYNX.exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-signed
+          path: signed/LYNX.exe
+          if-no-files-found: error
+
+  package:
+    name: Self-test and package
+    needs: [build, sign]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    runs-on: windows-latest
+    permissions:
+      contents: write   # attach the files to the release on a tag push
+    env:
+      LABEL: ${{ needs.build.outputs.label }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download LYNX.exe
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.sign.result == 'success' && 'LYNX-signed' || 'LYNX-unsigned' }}
+          path: bin
+
+      - name: Check version resource and signature
+        shell: pwsh
+        run: |
+          $exe = Get-Item bin\LYNX.exe
+          $v = $exe.VersionInfo
+          $v | Format-List ProductName, CompanyName, FileVersion, ProductVersion, LegalCopyright
+          if ($v.ProductName -ne 'LYNX' -or $v.ProductVersion -ne $env:VERSION) { throw "version resource mismatch" }
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          "Authenticode: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ('${{ needs.sign.result }}' -eq 'success' -and $sig.Status -ne 'Valid') { throw "signed build is not validly signed" }
+
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process bin\LYNX.exe -ArgumentList '--selftest', "$PWD\selftest.txt", "$PWD\selftest-demo.lynx" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path selftest.txt -Pattern '^result=OK' -Quiet)) { throw "self-test failed (exit $($p.ExitCode))" }
+
+      - name: Portable package
+        shell: pwsh
+        run: |
+          $name = "LYNX-$env:LABEL-windows-x64"
+          New-Item -ItemType Directory -Force "pkg\$name" | Out-Null
+          $p = Start-Process bin\LYNX.exe -ArgumentList '--showcase', "$PWD\pkg\$name\Demo.lynx" -Wait -PassThru
+          if (-not (Test-Path "pkg\$name\Demo.lynx")) { throw "showcase did not write Demo.lynx (exit $($p.ExitCode))" }
+          Copy-Item bin\LYNX.exe, LICENSE, THIRD_PARTY.md, PRIVACY.md "pkg\$name\"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "pkg\$name" -DestinationPath "dist\$name.zip"
+          Copy-Item bin\LYNX.exe dist\
+          Push-Location dist
+          Get-ChildItem -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+          Pop-Location
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-${{ env.LABEL }}-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Attach to the GitHub release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --draft --prerelease --title "LYNX ${tag#v}" \
+              --notes "Built from \`$GITHUB_SHA\` by [this workflow run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+          fi
+          gh release upload "$tag" dist/* --clobber
