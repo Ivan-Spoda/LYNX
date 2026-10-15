@@ -92,6 +92,8 @@ APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
 # FL's 3x Osc engine (REA round 47)
 APP_SOURCES+=(src/core/ThreeOsc.cpp)
+# onboarding: FL Studio integration (plugin database, sample relocation), background scan, setup wizard
+APP_SOURCES+=(src/core/FlPluginDb.cpp src/engine/FlStudio.cpp src/ui/SetupWizard.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

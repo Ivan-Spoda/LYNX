@@ -46,6 +46,8 @@ public:
 
     // Third-party plugins from the last imported .flp that were not found among the scanned ones.
     const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
+    // "plugin → file (how it was found)" for the plugins of the last imported .flp
+    const juce::StringArray& getMatchedPlugins() const noexcept { return matchedPlugins; }
     // What the last imported .flp converted, approximated or left out.
     const FlpImportReport& getImportReport() const noexcept { return importReport; }
 
@@ -272,7 +274,7 @@ private:
     int takeLatency = 0;                           // input + output, in samples
     MeterBank meters;
     PluginHost plugins;
-    juce::StringArray missingPlugins;
+    juce::StringArray missingPlugins, matchedPlugins;
     FlpImportReport importReport;
     RenderStats lastRenderStats;
     class ChannelRackProcessor* rackProcessor = nullptr; // graph node (owner: the graph)

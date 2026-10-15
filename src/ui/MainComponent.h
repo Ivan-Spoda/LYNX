@@ -40,6 +40,7 @@ public:
 
     // Opens .lynx or .flp (also used by the command line).
     void openFile (const juce::File& file);
+    void showSetupWizard(); // first run, or Options > Setup wizard
 
     // Asks "save changes?" if there are any; `then` runs unless the user cancels.
     void confirmDiscard (std::function<void()> then);
@@ -94,6 +95,9 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void showAudioSettings();
     void showImportReport();
+    void importFlp (const juce::File& file);
+    void openLynxProject (const juce::File& file);
+    int scansSeen = 0; // background plugin scans already announced in the hint bar
     void showHelp();
 
     // transport

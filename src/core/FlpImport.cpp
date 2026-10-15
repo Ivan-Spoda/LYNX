@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/FlPluginDb.h"
 #include "core/GrossBeat.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
@@ -569,6 +570,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     std::vector<std::pair<int, std::vector<DrumPad>>> drumKits; // FPC channels to split at the end
     std::optional<std::string> drumSynthDll; // the user's DrumSynth Live engine DLL, once checked ("" = not usable)
 
+    // a sample on this PC: where the project says, else re-rooted from another PC's folders or next to the project
+    auto locateSample = [&] (const std::string& flPath) {
+        const auto found = locateFlSample (flPath, options.roots, options.projectFolder, options.fileExists);
+        if (! found.empty() && found != resolveFlPath (flPath, options.roots) && options.report != nullptr)
+            ++options.report->relocatedSamples;
+        return found;
+    };
+
     for (const auto& c : project.channels)
     {
         // automation clips become Song::automations (further below), not channels
@@ -596,9 +605,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if ((c.type == flp::ChannelType::sampler || isAudioClip) && ! c.samplePath.empty() && options.fileExists)
         {
-            const auto path = resolveFlPath (c.samplePath, options.roots);
+            const auto path = locateSample (c.samplePath);
 
-            if (! path.empty() && options.fileExists (path))
+            if (! path.empty())
             {
                 def.instrument = isAudioClip ? InstrumentKind::audioClip : InstrumentKind::sampler;
                 def.samplePath = path;
@@ -723,10 +732,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         // until then (or if not found) the channel stays on the internal synth
         // FL generators with samples (REA_rodada9): DirectWave becomes a multi-sample sampler; FPC is
         // split into one channel per pad at the end of the import (notes go to the pad by key)
-        auto existing = [&] (std::string path) {
-            const auto resolved = resolveFlPath (path, options.roots);
-            return ! resolved.empty() && options.fileExists && options.fileExists (resolved) ? resolved : std::string();
-        };
+        auto existing = [&] (std::string path) { return locateSample (path); };
 
         if (c.pluginName == "DirectWave")
             if (auto program = directWaveProgram (c.pluginState))
