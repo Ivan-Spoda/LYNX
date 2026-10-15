@@ -409,7 +409,7 @@ ui::Hint MasterKnob::hintAt (juce::Point<int>)
 void PerformanceMeter::setValues (double cpu01, std::int64_t memoryBytes, int polyphony)
 {
     cpu = cpu01;
-    cpuSmoothed = cpuSmoothed * 0.8 + cpu01 * 0.2;
+    cpuSmoothed = cpuSmoothed <= 0.0 ? cpu01 : cpuSmoothed * 0.8 + cpu01 * 0.2;
     memory = memoryBytes;
     voices = polyphony;
     peakVoices = juce::jmax (peakVoices, polyphony);

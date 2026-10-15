@@ -401,7 +401,7 @@ void MainComponent::resized()
         menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
-    constexpr int tempoWidth = 94, timeWidth = 116, captionWidth = 58, gridWidth = 168;
+    constexpr int tempoWidth = 90, timeWidth = 110, captionWidth = 54, gridWidth = 152;
 
     enum Section { transport, master, record, snap, shortcuts, meters, monitor, sectionCount };
     struct Info
@@ -411,7 +411,7 @@ void MainComponent::resized()
     };
     std::array<Info, sectionCount> sections { {
         { modeWidth + 8 + 3 * (bigWidth + 4) + 4 + tempoWidth + 6 + timeWidth, 100 },
-        { 100, 80 },
+        { 92, 80 },
         { 3 * h + 4, 60 },
         { captionWidth + gridWidth, 90 },
         { 6 * h, 70 },
@@ -420,7 +420,7 @@ void MainComponent::resized()
     } };
 
     const auto room = toolbar.getWidth();
-    const auto minHint = juce::jmax (menuWidth + 8, 300), maxHint = 620;
+    const auto minHint = juce::jmax (menuWidth + 8, 360), maxHint = 620; // room for most hints on one line
     auto used = [&sections] {
         int total = 0;
         for (const auto& s : sections)
