@@ -34,6 +34,8 @@
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
+#include "core/SimSynth.h"
+#include "core/Wasp.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -48,6 +50,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
 #include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -11223,5 +11226,190 @@ TEST (fruity_delay_engines)
     }
 }
 #include "UiRackMixerTests.inc"
+
+// --- REA round 64: SimSynth (exact engine) and Wasp / Wasp XT (FL 2026's silent placeholder) ---------------------
+namespace
+{
+// a SimSynth state written from scratch (REA_rodada64 §1.1 layout: 45 doubles, 19 unused ints, 19 switches, 12 unused
+// ints, version)
+std::vector<std::uint8_t> simSynthTestState (const std::array<double, 45>& P, const std::array<int, 19>& S, int version = 14)
+{
+    std::vector<std::uint8_t> b (564, 0);
+    std::memcpy (b.data(), P.data(), 360);
+    std::memcpy (b.data() + 360 + 76, S.data(), 76);
+    std::memcpy (b.data() + 560, &version, 4);
+    return b;
+}
+// the 0xD5 records of an FL preset file (.fst: the FLhd/FLdt event stream) that follow a plugin name `plugin`
+std::vector<std::vector<std::uint8_t>> pluginStatesIn (const std::filesystem::path& file, const std::string& plugin)
+{
+    std::vector<std::vector<std::uint8_t>> out;
+    std::ifstream in (file, std::ios::binary);
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    std::string name;
+    while (i < b.size())
+    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (i + n > b.size())
+            break;
+        if (id == 0xC9)
+        {
+            name.clear();
+            for (std::size_t k = 0; k < n; ++k)
+                if (b[i + k] != 0)
+                    name += (char) b[i + k]; // ASCII or UTF-16LE (zero bytes skipped)
+        }
+        if (id == 0xD5 && name == plugin)
+            out.emplace_back (b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n));
+        i += n;
+    }
+    return out;
+}
+} // namespace
+
+TEST (simsynth_engine)
+{
+    // A: pulse + octave layer, half-cosine with unison and two octave layers, sine/sine⁴ mix, square LFO → pitch with
+    //    delay, filter envelope, LP/BP mix, chorus. B (version 7): triangle ring-modulated by filtered noise, sample &
+    //    hold LFO → cutoff, retrigger, own filter envelope, chorus off
+    const std::array<double, 45> A = { 0.3, 0.5, 0.55, 0.8, 0.6, 0.5, 0.2, 0.5, 0.75, 0.45, 0.6, 0.5, 0.5, 0.1, 0.7, 0.25, 0.5, 0.5, 0.5, 0.7, 0.3, 0.3, 0.8,
+                                       0.5, 0.2, 0.0, 0.35, 0.55, 0.8, 0.6, 0.4, 0.0, 0.3, 0.2, 0.0, 0.2, 0.5, 0.6, 0.4, 0.7, 1.0, 0.3, 0.4, 0.5, 0.3 };
+    const std::array<int, 19> SA = { 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1 };
+    const std::array<double, 45> B = { 0.5, 0.5, 0.5, 0.9, 0.5, 0.5, 0.0, 0.5, 0.6, 0.5, 0.5, 0.5, 0.5, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0, 0.6,
+                                       0.5, 0.4, 0.0, 0.5, 0.8, 0.6, 0.85, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.3, 0.2, 0.5, 0.6, 1.0, 0.0, 0.5, 0.0, 0.0 };
+    const std::array<int, 19> SB = { 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0 };
+    const auto blobA = simSynthTestState (A, SA), blobB = simSynthTestState (B, SB, 7);
+    dumpIfAsked ("LYNX_DUMP_SIMSYNTH", blobA);
+    CHECK (lynx::simSynthStateUsable (blobA) && ! lynx::simSynthStateUsable (std::vector<std::uint8_t> (blobA.begin(), blobA.begin() + 563)));
+    const auto hp = lynx::simSynthHostParams (blobA);
+    // knobs go through ⌊65535·v⌋, the coarse pitches through 48 steps, the switches and wave selectors as they are
+    CHECK (hp.size() == 58u && hp[0] == 52428 && hp[27] == 10080 && hp[41] == 1 && hp[54] == 0 && hp[56] == 4);
+
+    // golden samples of the installation's SimSynth_x64.dll (round-64 EXEC harness: created, state restored, 44.1 kHz,
+    // host blocks of 512, old voice record) — LYNX's engine renders bit-identically: C5 0–30000, E5 Final.Vol 0.8 pan
+    // 16 11025–40000, G5 pan −20 +25 cents 22050–52000
+    const std::vector<lynx::simsynth::RefNote> notes = { { 0, 60, 1.0f, 0, 0, 0.0f, 0.0f, 30000 },
+                                                         { 11025, 64, 0.8f, 16, 0, 0.0f, 0.0f, 40000 },
+                                                         { 22050, 67, 1.0f, -20, 25, 0.0f, 0.0f, 52000 } };
+    struct Golden { int i; float l, r; };
+    static const Golden goldenA[] = { { 100, 0.0f, 0.000322219421f }, { 5000, -0.110216402f, -0.194837824f }, { 15000, 0.517085433f, -0.551030278f }, { 25000, -0.443528295f, 0.226643473f }, { 35000, -0.708713174f, -0.291932464f }, { 45000, -0.0335822627f, -0.00557783246f }, { 55000, 0.0926972628f, 0.076306425f }, { 66000, 0.0415042415f, -0.0125555545f } };
+    static const Golden goldenB[] = { { 100, 0.00706971437f, 0.00706971437f }, { 5000, -0.0311671626f, -0.0311671626f }, { 15000, 0.508298159f, 0.964286387f }, { 25000, -3.07005596f, -1.8650744f }, { 35000, -0.23775965f, -0.14130348f }, { 45000, -0.00415330986f, -0.00409662398f }, { 55000, 0.00124766713f, -0.00180800457f }, { 66000, 0.0196316559f, 0.0166722424f } };
+    for (int which = 0; which < 2; ++which)
+    {
+        std::vector<std::int64_t> counters;
+        const auto y = lynx::simsynth::renderReference (which == 0 ? blobA : blobB, notes, 44100.0, 66150, 512, &counters);
+        CHECK (y.size() == 2 * 66150u);
+        if (y.size() != 2 * 66150u)
+            continue;
+        // the random-table index after creation / state / rate set equals the DLL's (276 / 696 / 756 and 276 / 492 / 528)
+        CHECK (counters.size() == 4u && counters[2] == 276 && counters[3] == (which == 0 ? 696 : 492) && counters[0] == (which == 0 ? 756 : 528));
+        for (const auto& g : which == 0 ? std::vector (std::begin (goldenA), std::end (goldenA)) : std::vector (std::begin (goldenB), std::end (goldenB)))
+            CHECK (y[2 * (std::size_t) g.i] == g.l && y[2 * (std::size_t) g.i + 1] == g.r);
+        double e = 0.0;
+        for (auto v : y)
+            e += (double) v * v;
+        CHECK (std::abs (std::sqrt (e / (double) y.size()) - (which == 0 ? 0.290665331870 : 0.992116840643)) < 1e-9);
+    }
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → Final.Vol 1, Final.Pan 0)
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::simsynth;
+    c.pluginState = blobA;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::simsynth);
+    inst->prepare (44100.0);
+    inst->configure (c, 120.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int k = 0; k < 16; ++k)
+    {
+        if (k == 0)
+            inst->noteOn (60, 0.8f);
+        if (k == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * k, r.data() + 512 * k, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::simsynth::renderReference (blobA, { { 0, 60, 1.0f, 0, 0, 0.0f, 0.0f, 5120 } }, 44100.0, 8192);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
+
+    // the installation's SimSynth presets (when the FL data folder is given): every state usable and sounding
+    if (! realFlpDir.empty())
+    {
+        const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "SimSynth";
+        int presets = 0, usable = 0, sounding = 0;
+        if (std::filesystem::exists (folder))
+            for (const auto& entry : std::filesystem::directory_iterator (folder))
+                for (const auto& st : pluginStatesIn (entry.path(), "SimSynth"))
+                {
+                    ++presets;
+                    if (! lynx::simSynthStateUsable (st))
+                        continue;
+                    ++usable;
+                    const auto y = lynx::simsynth::renderReference (st, { { 0, 48, 1.0f, 0, 0, 0.0f, 0.0f, 11025 } }, 44100.0, 22050);
+                    double e = 0.0;
+                    bool finite = true;
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    sounding += e > 1e-9 ? 1 : 0;
+                }
+        std::printf ("  SimSynth presets: %d, %d usable, %d sounding\n", presets, usable, sounding);
+        CHECK (presets == 0 || (usable == presets && presets >= 70 && sounding >= presets - 2));
+    }
+}
+
+TEST (wasp_is_a_silent_placeholder)
+{
+    // FL 2026's Wasp / Wasp XT DLL keeps the state and plays nothing: so does LYNX (REA_rodada64 §5)
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::wasp);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 1024, 1.0f, 1.0f);
+    CHECK (inst->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+
+    // import: a SimSynth channel plays on the exact engine, Wasp and Wasp XT channels become the silent placeholder with
+    // their state kept
+    std::vector<std::uint8_t> ss (564, 0), wasp (169, 1);
+    const int version = 14;
+    std::memcpy (ss.data() + 560, &version, 4);
+    FlpBuilder b;
+    b.ascii (0xC7, "25.2.5.5319");
+    int index = 0;
+    for (const auto& [name, state] : { std::pair<std::u16string, std::vector<std::uint8_t>> { u"SimSynth", ss }, { u"Wasp", wasp }, { u"Wasp XT", wasp } })
+    {
+        b.u8 (0x40); b.u16 ((std::uint16_t) index++);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, name);
+        b.data (0xD5, state);
+    }
+    const auto song = lynx::importFlp (flp::parseProject (b.bytes));
+    CHECK (song.channels.size() == 3u);
+    if (song.channels.size() == 3u)
+    {
+        CHECK (song.channels[0].instrument == lynx::InstrumentKind::simsynth && song.channels[0].pluginState == ss);
+        CHECK (song.channels[1].instrument == lynx::InstrumentKind::wasp && song.channels[1].pluginState == wasp);
+        CHECK (song.channels[2].instrument == lynx::InstrumentKind::wasp);
+    }
+}
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
+#include "LuxeVerbTests.inc"
+#include "ConvolverTests.inc"

@@ -55,7 +55,9 @@ enum class InstrumentKind : std::uint8_t
     toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
     threeosc,   // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
     autogun,    // FL's Autogun (REA_rodada57 §1): Ogun's engine on the raw saved state (pluginState), SG.dat path in samplePath
-    transistorbass // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    transistorbass, // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    simsynth,   // FL's SimSynth engine (REA_rodada64 §1–4): the plugin's raw saved state (564 bytes) in ChannelDef::pluginState
+    wasp        // FL 2026's Wasp / Wasp XT (REA_rodada64 §5): a 64-bit placeholder that keeps its state and makes no sound
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -322,12 +324,14 @@ enum class EffectKind : std::uint8_t
     fruityFastDist, // FL's Fruity Fast Dist, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     fruityFlanger,  // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    luxeVerb,     // FL's LuxeVerb, exact (REA_rodada60, core/LuxeVerb.h): FL's 49 controls (raw − min) / range + 4 sync switches
+    convolver,    // FL's Fruity Convolver, exact (REA_rodada60, core/ConvolverFx.h): FL's 4 controls as (raw − min) / range; impulse response, knobs and envelopes in EffectSlot::state
     equo,         // FL's EQUO, exact (REA_rodada61, core/EquoFx.h): FL's state in EffectSlot::state, knobs (raw − min) / range
     flPitchShifter, // FL's Pitch Shifter, exact (REA_rodada61, core/PitchShifterFl.h): FL's 13 knobs (raw − min) / range + 3 options
     frequencySplitter // FL's Frequency Splitter, exact (REA_rodada62, core/FrequencySplitter.h): 26 engine values + output bands
 };
 
-constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
+constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
 constexpr int maxEffectSlots = 10; // as in FL
 using EffectParams = std::array<float, maxEffectParams>;
 
