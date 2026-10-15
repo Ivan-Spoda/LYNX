@@ -17,12 +17,14 @@
 //          1 = HQ "alternative design" (REA_rodada50 §4)
 //   [38]   linear phase (Parametric EQ 2 option; REA_rodada50 §4)
 //   [39]   band enable mask / 127 (each band's mute button)
+//   [40]   Parametric EQ 2, linear phase: FFT quality / 7;  [41] cross-fade time index / 3
 //   [40+b] Parametric EQ (v1): FL's raw frequency / 65536 (its own 10 Hz…16 kHz law), used while [4b+1] still equals
 //          the LYNX value of that frequency (i.e. until the band is moved in the editor)
 //   [47]   Parametric EQ (v1): FL's raw main level / 256 (used while [28] still matches it)
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -30,10 +32,16 @@
 
 namespace lynx::peqfl
 {
+class LinearPhase;
+}
+
+namespace lynx::peqfl
+{
 enum class Law { lynx = 0, peq2 = 1, peq1 = 2 };
 enum class Processing { plain = 0, hq = 1, hqExternal = 2, hqAlternative = 3 };
 
 constexpr int lawParam = 36, processingParam = 37, linearParam = 38, maskParam = 39, v1FreqParam = 40, v1MainParam = 47;
+constexpr int linearQualityParam = 40, linearFadeParam = 41; // Parametric EQ 2 law only
 
 // FL's controls as integers (the plugin's own saved values)
 struct Settings
@@ -43,6 +51,7 @@ struct Settings
     int main = 0;                                                     // PEQ2 −1800…1800; PEQ1 raw (128 = 0 dB)
     Processing processing = Processing::plain;
     bool linearPhase = false;
+    int linearQuality = 2, linearFade = 0; // linear phase: FFT size 512·2^quality, cross-fade time index (§5)
     std::uint32_t mask = 0x7F;
 };
 
@@ -74,18 +83,26 @@ struct Band
 // Designs band b (coefficients only; the stage states are left as they are) for the given processing rate
 void designBand (const Settings& s, int b, double rate, Band& band);
 
+// The plugin's main-level stage, interleaved stereo in place: a change glides over the block by at most maxStep per
+// frame (FL's float ramp); snap = start at the target (first block after a reset)
+void mainLevel (float* io, int n, float target, float& now, float maxStep, bool snap) noexcept;
+
 // Magnitude response of the whole EQ in dB at frequency hz, as the engine runs it at the host rate sr
 double responseDb (const Settings& s, double sr, double hz);
 
 class Engine
 {
 public:
+    Engine();
+    ~Engine();
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
     // new settings; states are kept unless a band's type or order changed (as FL does)
     void set (const Settings& s) noexcept;
     // stereo, in place; any n (split into FL-sized blocks of 512 frames)
     void process (float* left, float* right, int n) noexcept;
+    // delay the plugin reports to its host (the external resampler's FIR)
+    int latencySamples() const noexcept;
 
 private:
     void block (float* io, int n) noexcept; // interleaved, n ≤ 512
@@ -97,9 +114,13 @@ private:
     double sampleRate = 44100.0;
     int silenceFrames = 8820;         // FL: rate / 5
     int silenceCount = (int) 0xC0000001;
-    float mainGain = 1.0f;
+    float mainGain = 1.0f, gainNow = 1.0f;
+    bool gainSnap = true;
+    std::unique_ptr<LinearPhase> linear; // linear-phase mode (core/ParametricEqLinear.h)
     std::array<Band, 7> bands {};
     double up[24] {}, down[24] {};    // half-band states (×2 oversampling)
+    float ring[2][256] {};            // external decimator's input history per channel (§2.9)
+    int ringIndex[2] {};
     std::vector<float> buffer, wide;
 };
 } // namespace lynx::peqfl

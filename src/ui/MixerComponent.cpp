@@ -1340,7 +1340,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.drawFittedText (juce::String::fromUTF8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14,
                           juce::Justification::centred, 1, 0.8f);
         g.setColour (colour::textPrimary);
-        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm).c_str()), r.getX(), r.getY() + knobHeight + 16,
+        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm, slot.params).c_str()), r.getX(), r.getY() + knobHeight + 16,
                     r.getWidth(), 14, juce::Justification::centred);
     }
 }
@@ -1483,7 +1483,7 @@ ui::ValueSpec EffectsPanel::specFor (int param, int slot) const
 
     spec.name = trackName + " - " + utf8 (info.name) + " - " + utf8 (info.params[(std::size_t) param].name);
     spec.defaultValue = info.params[(std::size_t) param].defaultValue;
-    spec.toText = [kind = fx.kind, param, bpm = song.bpm] (double v) { return utf8 (formatEffectParam (kind, param, (float) v, bpm).c_str()); };
+    spec.toText = [kind = fx.kind, param, bpm = song.bpm, context = fx.params] (double v) { return utf8 (formatEffectParam (kind, param, (float) v, bpm, context).c_str()); };
     spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
     spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
     return spec;

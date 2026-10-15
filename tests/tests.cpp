@@ -44,6 +44,7 @@
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/ParametricEqFl.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -788,6 +789,7 @@ TEST (flp_real_files)
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
+    int flPeqSlots = 0, flPeqExact = 0;                                        // REA_rodada50
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -1032,6 +1034,7 @@ TEST (flp_real_files)
                         sgzSlots += slot.plugin == "Soundgoodizer";
                         vocodexSlots += slot.plugin == "Vocodex";
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
+                        flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
                     }
                 for (const auto& t : full.mixer)
@@ -1049,6 +1052,7 @@ TEST (flp_real_files)
                         if (fx.kind == lynx::EffectKind::fruityWaveShaper)
                             shaperExact += lynx::flshape::parseWaveShaper (fx.state).has_value() ? 1 : 0;
                         clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
+                        flPeqExact += fx.kind == lynx::EffectKind::parametricEq && lynx::peq::flLaw (fx.params);
                     }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
@@ -1701,6 +1705,8 @@ TEST (flp_real_files)
                  clipperExact, clipperSlots);
     // (Patcher graphs add WaveShaper nodes of their own to the imported mixer)
     CHECK (shaperExact >= shaperSlots && shaperSlots >= 70 && clipperExact >= clipperSlots && clipperSlots >= 25); // REA_rodada51
+    std::printf ("  Fruity Parametric EQ 2 / Parametric EQ: %d of %d slots on the exact engine\n", flPeqExact, flPeqSlots);
+    CHECK (flPeqExact >= flPeqSlots && flPeqSlots >= 1100); // REA_rodada50
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -7805,6 +7811,166 @@ TEST (fruity_waveshaper_and_soft_clipper)
     // an unreadable state keeps the old approximation
     CHECK (lynx::effectFromFl ("Fruity WaveShaper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
     CHECK (lynx::effectFromFl ("Fruity Soft Clipper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
+}
+
+// ---- Fruity Parametric EQ 2 / Fruity Parametric EQ (REA_rodada50) -----------------------------------------------------
+// States written here from our own values (no FL preset data); goldens from the installation's DLLs (EXEC, blocks of 512)
+namespace
+{
+struct PeqTestBand { int type, freq, width, gain, order; };
+std::vector<std::uint8_t> peq2TestState (const PeqTestBand (&bands)[7], int main, int uiFlags, int options, int mask)
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&b] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    i32 (8);
+    for (int copy = 0; copy < 2; ++copy)
+    {
+        for (const auto& x : bands) i32 (x.gain);
+        for (const auto& x : bands) i32 (x.freq);
+        for (const auto& x : bands) i32 (x.width);
+        for (const auto& x : bands) i32 (x.type);
+        for (const auto& x : bands) i32 (x.order);
+        i32 (main);
+    }
+    i32 (uiFlags), i32 (0), b.push_back (0), i32 (2), i32 (0), i32 (2), i32 (0);
+    b.push_back ((std::uint8_t) options);
+    i32 (mask), i32 (1), i32 (0);
+    for (int v : { 3, 1, 2, 2, 2 }) i32 (v);
+    i32 (0);
+    return b;
+}
+std::vector<std::uint8_t> peq1TestState (const PeqTestBand (&bands)[7], int main)
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&b] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    for (const auto& x : bands) i32 (x.gain);
+    for (const auto& x : bands) i32 (x.freq);
+    for (const auto& x : bands) i32 (x.width);
+    for (const auto& x : bands) i32 (x.type);
+    i32 (main);
+    return b;
+}
+} // namespace
+
+TEST (fruity_parametric_eq_exact)
+{
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
+    // high pass Steep 8, low shelf, steep peaking, a 0 dB peaking (0.2 s countdown), notch Gentle 4, high shelf Gentle 8,
+    // low pass Gentle 6
+    const PeqTestBand bands[7] = { { 3, 8000, 30000, 0, -3 }, { 5, 15000, 40124, 600, 0 }, { 6, 30000, 20000, -900, -2 },
+                                   { 6, 35000, 25412, 0, 0 }, { 4, 40000, 10000, 0, 1 },  { 7, 50000, 30000, 450, 3 },
+                                   { 1, 60000, 45000, 0, 2 } };
+    const PeqTestBand bands1[7] = { { 3, 6000, 20000, 0, 0 }, { 5, 15000, 30000, 600, 0 }, { 6, 30000, 20000, -900, 0 },
+                                    { 6, 35000, 25000, 0, 0 }, { 4, 40000, 10000, 0, 0 },  { 7, 50000, 30000, 450, 0 },
+                                    { 1, 60000, 45000, 0, 0 } };
+    auto run = [&] (const std::optional<lynx::peqfl::Settings>& s, std::initializer_list<Gold> gold) {
+        CHECK (s.has_value());
+        if (! s)
+            return;
+        lynx::peqfl::Engine e;
+        e.set (*s);
+        e.prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    const auto plain = peq2TestState (bands, 300, 0, 0x60, 0x7F);
+    const auto hq = peq2TestState (bands, 300, 1, 0x60, 0x7F);
+    const auto ext = peq2TestState (bands, 300, 1, 0x62, 0x7F);
+    run (lynx::peqfl::parsePeq2 (plain), { { 100, 0.1340574324131012f, -0.3040016293525696f }, { 1000, 0.28402701020240784f, -0.23813000321388245f },
+                                          { 2047, -0.9301530122756958f, 0.13881002366542816f }, { 3000, 0.2846762537956238f, 0.48893973231315613f },
+                                          { 4095, -0.8481860756874084f, -0.2641225755214691f } });
+    run (lynx::peqfl::parsePeq2 (hq), { { 100, 0.19229719042778015f, 0.29938483238220215f }, { 1000, 0.12543821334838867f, -0.055617764592170715f },
+                                       { 2047, 1.0342068672180176f, 0.10901166498661041f }, { 3000, 0.12598788738250732f, -0.12920552492141724f },
+                                       { 4095, 0.1619236022233963f, -0.23385579884052277f } });
+    run (lynx::peqfl::parsePeq2 (ext), { { 100, 1.2178642749786377f, -0.21160493791103363f }, { 1000, -0.8292768001556396f, -0.23916664719581604f },
+                                        { 2047, -0.7030635476112366f, -0.1978478729724884f }, { 3000, -0.8299900889396667f, 0.9836107492446899f },
+                                        { 4095, 0.06754066050052643f, -0.34364908933639526f } });
+    run (lynx::peqfl::parsePeq2 (peq2TestState (bands, -250, 1, 0x60, 0x5B)), // bands 3 and 6 muted
+         { { 100, -0.02959616854786873f, 0.227821946144104f }, { 1000, 0.053224340081214905f, 0.06922465562820435f },
+           { 2047, 0.3365536034107208f, -0.05899651721119881f }, { 3000, 0.053670305758714676f, -0.07452142238616943f },
+           { 4095, -0.04406970739364624f, -0.12635089457035065f } });
+    run (lynx::peqfl::parsePeq1 (peq1TestState (bands1, 150)),
+         { { 100, -0.6533108353614807f, -1.6903921365737915f }, { 1000, -4.313726902008057f, 5.973916053771973f },
+           { 2047, 1.0222549438476562f, 4.427900314331055f }, { 3000, -4.310323238372803f, 7.825916767120361f },
+           { 4095, 8.344571113586426f, -0.49086111783981323f } });
+
+    // "alternative design" (Frequency Splitter's matched biquads), bit-exact
+    run (lynx::peqfl::parsePeq2 (peq2TestState (bands, 300, 3, 0x60, 0x7F)),
+         { { 100, -0.790181577205658f, -0.08691816031932831f }, { 1000, 0.4960691034793854f, -0.24172282218933105f },
+           { 2047, -0.42601829767227173f, 0.027932533994317055f }, { 3000, 0.49674150347709656f, 1.0799059867858887f },
+           { 4095, -0.35040369629859924f, -0.28149813413619995f } });
+    // linear phase (plain and HQ response): FFT convolution, 1536-sample latency, 0.1 s fade-in; FL's IPP FFT rounding
+    // is not replicated, so within 1e-6 of the DLL
+    for (const bool hq : { false, true })
+    {
+        const auto s = lynx::peqfl::parsePeq2 (peq2TestState (bands, hq ? -200 : 300, hq ? 1 : 0, 0x61, 0x7F));
+        CHECK (s && s->linearPhase);
+        if (! s)
+            continue;
+        std::vector<float> l (12288), r (12288);
+        for (int n = 0; n < 12288; ++n)
+        {
+            l[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+            r[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+        }
+        lynx::peqfl::Engine e;
+        e.set (*s);
+        e.prepare (44100.0);
+        CHECK (e.latencySamples() == 1536);
+        for (int i = 0; i < 12288; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        const std::initializer_list<Gold> gold = hq ? std::initializer_list<Gold> {
+            { 2000, 0.08618364483118057f, 0.11248858273029327f }, { 5000, 0.18998730182647705f, 0.428600937128067f },
+            { 8191, -0.1412065178155899f, -0.002996620489284396f }, { 10000, 0.18998737633228302f, -0.012570115737617016f },
+            { 12287, 0.40586185455322266f, -0.014698396436870098f } } : std::initializer_list<Gold> {
+            { 2000, 0.18538671731948853f, 0.206522598862648f }, { 5000, 0.4086928963661194f, 0.8167467713356018f },
+            { 8191, -0.3218550980091095f, -0.06812914460897446f }, { 10000, 0.40869277715682983f, -0.08537150919437408f },
+            { 12287, 0.775394082069397f, -0.08931504935026169f } };
+        for (const auto& g : gold)
+            CHECK (std::abs (l[(std::size_t) g.i] - g.l) < 1.0e-6f && std::abs (r[(std::size_t) g.i] - g.r) < 1.0e-6f);
+    }
+
+    // the mixer effect from the FL import: FL's values in the slot's parameters (exact round trip), any host block size
+    for (const auto* name : { "Fruity Parametric EQ 2", "Fruity Parametric EQ" })
+    {
+        const bool v1 = std::string (name) == "Fruity Parametric EQ";
+        const auto st = v1 ? peq1TestState (bands1, 150) : ext;
+        const auto slot = lynx::effectFromFl (name, st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::parametricEq && lynx::peq::flLaw (slot->params));
+        if (! slot)
+            continue;
+        const auto back = lynx::peqfl::fromParams (slot->params);
+        const auto orig = v1 ? lynx::peqfl::parsePeq1 (st) : lynx::peqfl::parsePeq2 (st);
+        CHECK (back.freq == orig->freq && back.gain == orig->gain && back.width == orig->width && back.type == orig->type
+               && back.order == orig->order && back.main == orig->main && back.processing == orig->processing && back.mask == orig->mask);
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        CHECK (fx->latencySamples() == (v1 ? 0 : 44));
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1000, slot->params, 120.0);
+        fx->process (l.data() + 1000, r.data() + 1000, 3096, slot->params, 120.0);
+        if (v1)
+            CHECK (l[3000] == -4.310323238372803f && r[4095] == -0.49086111783981323f);
+        else
+            CHECK (l[1000] == -0.8292768001556396f && r[3000] == 0.9836107492446899f && l[4095] == 0.06754066050052643f);
+        // editor texts and graph
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::parametricEq, lynx::peq::slopeParam, slot->params[lynx::peq::slopeParam], 120.0, slot->params)
+               == (v1 ? "12 dB/oct" : "Steep 8"));
+        CHECK (lynx::peq::widthText (slot->params, 0).rfind ("BW ", 0) == 0);
+        const auto lowCutDb = lynx::peq::responseDb (slot->params, 44100.0, 25.0), midDb = lynx::peq::responseDb (slot->params, 44100.0, 1000.0);
+        CHECK (lowCutDb < midDb - 20.0);
+    }
+    // a native LYNX EQ is untouched by the FL law
+    CHECK (! lynx::peq::flLaw (lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params));
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------

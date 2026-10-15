@@ -2,6 +2,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/SytrusEngine.h"
@@ -61,6 +62,14 @@ double qFromOctaves (double octaves)
 
 bool parametricEq2 (const std::vector<std::uint8_t>& d, EffectSlot& slot)
 {
+    // FL's own engine (REA_rodada50): the slot keeps FL's values and runs the exact Parametric EQ 2
+    if (const auto exact = peqfl::parsePeq2 (d))
+    {
+        peqfl::toParams (*exact, slot.params);
+        return true;
+    }
+
+    // older approximation (REA_rodada7 §1), for states too short to be FL's
     if (d.size() < 4 + 36 * 4)
         return false;
 
@@ -1050,6 +1059,11 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
 
     if (is ("Fruity Parametric EQ 2"))
         parametricEq2 (state, slot);
+    else if (is ("Fruity Parametric EQ"))
+    {
+        if (const auto exact = peqfl::parsePeq1 (state)) // REA_rodada50 §3
+            peqfl::toParams (*exact, slot.params);
+    }
     else if (is ("Fruity Limiter"))
         limiter (state, slot);
     else if (is ("Fruity Reeverb 2"))
@@ -1166,6 +1180,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
             return FlParamMap { peq::param (k, 2), [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
         if (k >= 7 && k < 14) // frequency: 20 Hz · 1000^v
             return FlParamMap { peq::param (k - 7, 1), [] (float v) { return peq::hzValue (20.0 * std::pow (1000.0, (double) v)); } };
+        if (k >= 14 && k < 21) // bandwidth: the imported slot keeps FL's own width (core/ParametricEqFl.h)
+            return FlParamMap { peq::param (k - 14, 3), [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
         if (k == 35)
             return FlParamMap { peq::outputParam, [] (float v) { return peq::gainValue (36.0 * v - 18.0); } };
         return std::nullopt;
