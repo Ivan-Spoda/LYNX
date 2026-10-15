@@ -80,7 +80,8 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
     snapBox.setMouseClickGrabsKeyboardFocus (false);
     snapBox.onChange = [this] { repaint(); };
     addAndMakeVisible (snapBox);
-    tools.onChange = [this] (EditTool) { setMouseCursor (juce::MouseCursor::NormalCursor); };
+    tools.onChange = [this] (EditTool) { updateCursor (juce::ModifierKeys::currentModifiers); };
+    setOpaque (true); // paints every pixel: nothing behind it is redrawn while scrolling
     addAndMakeVisible (tools);
 
     arrangementBox.setTooltip (tr ("Arrangement (as in FL, a project can have several)"));
@@ -335,7 +336,10 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (y > grid.getBottom() || y + trackHeight < grid.getY())
                 continue;
 
-            g.setColour (t % 2 == 0 ? colour::bg2 : colour::bg2.interpolatedWith (colour::bg1, 0.5f));
+            auto lane = t % 2 == 0 ? colour::bg2 : colour::bg2.interpolatedWith (colour::bg1, 0.5f);
+            if (t == hover.track && drag == Drag::none)
+                lane = lane.interpolatedWith (colour::textPrimary, 0.025f); // the track under the mouse
+            g.setColour (lane);
             g.fillRect (grid.getX(), y, grid.getWidth(), trackHeight);
             g.setColour (colour::bg0);
             g.drawHorizontalLine (y + trackHeight - 1, (float) grid.getX(), (float) grid.getRight());
@@ -462,6 +466,29 @@ void PlaylistComponent::paint (juce::Graphics& g)
             paintClipOutline (g, r, base, selected, current);
         }
 
+        // the clip under the mouse: outline, the grip of the edge it is on, its menu button
+        if (hover.clip >= 0 && hover.clip < (int) song.playlist.size() && drag == Drag::none)
+        {
+            const auto r = clipBounds (hover.clip).toFloat();
+            g.setColour (colour::textPrimary.withAlpha (isSelected (hover.clip) ? 0.0f : 0.55f));
+            g.drawRoundedRectangle (r.reduced (0.5f), radius::sm, 1.2f);
+
+            if (hover.target == gesture::Target::leftEdge || hover.target == gesture::Target::rightEdge)
+            {
+                const auto x = hover.target == gesture::Target::rightEdge ? r.getRight() - 4.0f : r.getX() + 1.0f;
+                g.setColour (colour::textPrimary);
+                g.fillRoundedRectangle (x, r.getY() + clipTitleHeight + 3.0f, 3.0f, juce::jmax (4.0f, r.getHeight() - clipTitleHeight - 6.0f), 1.5f);
+            }
+
+            if (const auto button = clipMenuButton (hover.clip); ! button.isEmpty())
+            {
+                const auto b = button.toFloat();
+                g.setColour (hover.target == gesture::Target::clipMenu ? colour::bg0.withAlpha (0.75f) : colour::bg0.withAlpha (0.45f));
+                g.fillRoundedRectangle (b, 2.0f);
+                icons::draw (g, Icon::chevronDown, b.reduced (1.0f), colour::textPrimary);
+            }
+        }
+
         if (! rubberBand.isEmpty())
         {
             g.setColour (colour::selectionFill);
@@ -578,10 +605,19 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
             const auto muted = song.isTrackMuted (t);
             const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
-            g.setColour (muted ? colour::bg2 : colour::bg3);
+            const auto hovered = hover.header && hover.track == t;
+            auto plate = muted ? colour::bg2 : colour::bg3;
+            if (hovered)
+                plate = plate.interpolatedWith (colour::bg5, 0.6f);
+            g.setColour (plate);
             g.fillRoundedRectangle (juce::Rectangle<float> (2.0f, (float) y + 1.0f, (float) headerWidth - 4.0f, (float) trackHeight - 3.0f), radius::sm);
             g.setColour (muteLed (muted));
             g.fillEllipse (7.0f, (float) y + trackHeight / 2.0f - 4.0f, 8.0f, 8.0f);
+            if (hovered && hover.led) // the LED is a button: ring it
+            {
+                g.setColour (colour::textPrimary.withAlpha (0.7f));
+                g.drawEllipse (5.0f, (float) y + trackHeight / 2.0f - 6.0f, 12.0f, 12.0f, 1.0f);
+            }
             g.setColour (muted ? colour::textDisabled : (custom ? colour::textPrimary : colour::textSecondary));
             g.drawFittedText (custom ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
                                      : tr ("Track {0}", { juce::String (t + 1) }),
@@ -857,14 +893,14 @@ int PlaylistComponent::clipAt (int x, int y, bool& onRightEdge, bool& onLeftEdge
         if (c.track != track)
             continue;
 
-        const auto x0 = tickToX ((double) c.start);
-        const auto x1 = tickToX ((double) c.end());
+        // the left edge only on clips wide enough to still be grabbed in the middle
+        gesture::EdgeRules rules;
+        rules.minimumForLeft = 24.0;
 
-        if (x >= x0 && x < juce::jmax (x1, x0 + 4.0))
+        if (const auto zone = gesture::zoneAt (x, tickToX ((double) c.start), tickToX ((double) c.end()), rules); zone != gesture::Zone::outside)
         {
-            onRightEdge = x >= x1 - 6.0;
-            // the left edge only on clips wide enough to still be grabbed in the middle
-            onLeftEdge = ! onRightEdge && x <= x0 + 6.0 && x1 - x0 >= 24.0;
+            onRightEdge = zone == gesture::Zone::rightEdge;
+            onLeftEdge = zone == gesture::Zone::leftEdge;
             return i;
         }
     }
@@ -954,28 +990,49 @@ void PlaylistComponent::setTimeSelectionForSnapshot (int fromBar, int toBar)
     setTimeSelection (fromBar * bar, toBar * bar);
 }
 
+ui::Hint PlaylistComponent::hoverForSnapshot()
+{
+    const auto& playlist = engine.getSong().playlist;
+    const auto grid = gridArea();
+
+    for (int i = 0; i < (int) playlist.size(); ++i)
+        if (const auto r = clipBounds (i); grid.contains (r.getTopLeft()) && r.getWidth() >= 40 && playlist[(std::size_t) i].kind == ClipKind::pattern)
+        {
+            const auto at = juce::Point<int> (r.getRight() - 2, r.getCentreY() + 4);
+            updateHover (at, {});
+            return hintAt (at);
+        }
+
+    return {};
+}
+
 void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 {
     downMods = e.mods;
     startedOnEmpty = erasedSomething = holdExpired = false;
+    hover = {};
+    gliding = false;
 
     if (e.mods.isMiddleButtonDown() && e.x >= headerWidth) // middle-drag pans, in every tool
     {
         drag = Drag::pan;
         panStartTicks = scrollTicks;
         panStartY = scrollY;
-        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        setMouseCursor (editorCursor (gesture::Cursor::pan));
         return;
     }
 
-    // track header: LED mutes; right click renames
+    // track header: the LED mutes (Ctrl+click or right-click on it: solo); right-click elsewhere: track menu
     if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
         const auto track = yToTrack (e.y);
+        const auto onLed = e.x < 20;
 
-        if (e.mods.isPopupMenu())
+        if (onLed && (e.mods.isPopupMenu() || e.mods.isCtrlDown()))
+            engine.editSong ([track, count = numTracks()] (Song& s) { noteedit::soloTrack (s, track, count); });
+        else if (e.mods.isPopupMenu())
             showTrackMenu (track);
-        else if (e.x < 20)
+        else if (onLed)
             engine.editSong ([track] (Song& s) {
                 if ((int) s.playlistTracks.size() <= track)
                     s.playlistTracks.resize ((std::size_t) track + 1);
@@ -1031,6 +1088,33 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     bool rightEdge = false, leftEdge = false;
     const auto hit = clipAt (e.x, e.y, rightEdge, leftEdge);
     const auto tool = tools.getTool();
+
+    // Ctrl+right-click on empty space: zoom to show everything; again: back to the previous view
+    if (e.mods.isRightButtonDown() && e.mods.isCtrlDown() && hit < 0)
+    {
+        if (zoomBeforeAll > 0.0)
+        {
+            pixelsPerTick = zoomBeforeAll;
+            scrollTicks = scrollBeforeAll;
+            zoomBeforeAll = 0.0;
+            updateScrollBars();
+            repaint();
+        }
+        else
+        {
+            zoomBeforeAll = pixelsPerTick;
+            scrollBeforeAll = scrollTicks;
+            zoomAll();
+        }
+        return;
+    }
+
+    // the menu button in a clip's title strip
+    if (hit >= 0 && e.mods.isLeftButtonDown() && ! e.mods.isCtrlDown() && clipMenuButton (hit).contains (e.getPosition()))
+    {
+        showClipMenu (hit);
+        return;
+    }
 
     if (e.mods.isRightButtonDown())
     {
@@ -1626,9 +1710,6 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
     if (drag == Drag::listen)
         engine.stop();
 
-    if (drag == Drag::pan)
-        setMouseCursor (juce::MouseCursor::NormalCursor);
-
     if (drag == Drag::move || drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::paint || drag == Drag::timeMove)
         sortClips();
 
@@ -1643,6 +1724,8 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
     touchedClips.clear();
     rubberBand = {};
     knownClipCount = engine.getSong().playlist.size();
+    hover = {};
+    updateHover (e.getPosition(), e.mods); // the cursor of what is under the mouse now
     repaint();
 }
 
@@ -2355,32 +2438,178 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
 
 void PlaylistComponent::mouseMove (const juce::MouseEvent& e)
 {
+    updateHover (e.getPosition(), e.mods);
+}
+
+void PlaylistComponent::mouseExit (const juce::MouseEvent&)
+{
+    lastMouse = { -1, -1 };
+
+    if (! (hover == Hover {}))
+    {
+        hover = {};
+        repaint();
+    }
+}
+
+void PlaylistComponent::modifierKeysChanged (const juce::ModifierKeys& mods)
+{
+    if (drag == Drag::none && lastMouse.x >= 0)
+        updateCursor (mods);
+}
+
+juce::Rectangle<int> PlaylistComponent::clipBounds (int index) const
+{
+    const auto& c = engine.getSong().playlist[(std::size_t) index];
+    const auto x0 = (float) tickToX ((double) c.start), x1 = (float) tickToX ((double) c.end());
+    return juce::Rectangle<float> (x0, (float) trackToY (c.track) + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f)
+        .getSmallestIntegerContainer();
+}
+
+juce::Rectangle<int> PlaylistComponent::clipMenuButton (int index) const
+{
+    const auto r = clipBounds (index);
+
+    if (r.getWidth() < 40)
+        return {};
+
+    return { r.getX() + 2, r.getY() + 1, 13, (int) clipTitleHeight - 2 };
+}
+
+PlaylistComponent::Hover PlaylistComponent::hoverAt (juce::Point<int> p) const
+{
+    Hover h;
+
+    if (p.x < headerWidth && p.y >= headerHeight && p.y < gridArea().getBottom())
+    {
+        h.header = true;
+        h.track = yToTrack (p.y);
+        h.led = p.x < 20;
+        return h;
+    }
+
+    if (! gridArea().contains (p))
+        return h;
+
+    h.track = yToTrack (p.y);
     bool rightEdge = false, leftEdge = false;
-    const auto inGrid = gridArea().contains (e.getPosition());
-    const auto hit = inGrid ? clipAt (e.x, e.y, rightEdge, leftEdge) : -1;
-    const auto tool = tools.getTool();
+    h.clip = clipAt (p.x, p.y, rightEdge, leftEdge);
 
-    if (inGrid && ! e.mods.isCtrlDown() && tool != EditTool::pencil && tool != EditTool::brush)
+    if (h.clip < 0)
+        return h;
+
+    const auto& c = engine.getSong().playlist[(std::size_t) h.clip];
+    h.target = rightEdge ? gesture::Target::rightEdge : leftEdge ? gesture::Target::leftEdge : gesture::Target::item;
+
+    if (clipMenuButton (h.clip).contains (p))
+        h.target = gesture::Target::clipMenu;
+    else if (fadeHandleAt (h.clip, p) != 0)
+        h.target = gesture::Target::fadeHandle;
+    else if (c.kind == ClipKind::automation && automationPointAt (h.clip, p) >= 0)
+        h.target = gesture::Target::autoPoint;
+    else if (c.kind == ClipKind::automation && isOnAutomationCurve (h.clip, p))
+        h.target = gesture::Target::autoCurve;
+
+    return h;
+}
+
+void PlaylistComponent::updateHover (juce::Point<int> p, juce::ModifierKeys mods)
+{
+    lastMouse = p;
+    const auto h = hoverAt (p);
+
+    if (! (h == hover))
     {
-        setMouseCursor (tool == EditTool::knife || tool == EditTool::zoom ? juce::MouseCursor::CrosshairCursor
-                        : tool == EditTool::slip                          ? (hit >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor)
-                        : tool == EditTool::lasso                         ? juce::MouseCursor::NormalCursor
-                                                                          : juce::MouseCursor::PointingHandCursor);
-        return;
+        // repaint the old and new track rows (header and lane)
+        for (auto t : { hover.track, h.track })
+            if (t >= 0)
+                repaint (0, trackToY (t) - 1, getWidth(), trackHeight + 2);
+        hover = h;
     }
 
-    if (hit >= 0 && fadeHandleAt (hit, e.getPosition()) != 0)
+    if (drag == Drag::none)
+        updateCursor (mods);
+}
+
+void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
+{
+    const auto p = lastMouse;
+    auto cursor = gesture::Cursor::normal;
+
+    if (hover.header)
+        cursor = hover.led ? gesture::Cursor::point : gesture::Cursor::normal;
+    else if (gridArea().contains (p))
     {
-        setMouseCursor (juce::MouseCursor::UpDownLeftRightResizeCursor);
-        return;
+        const gesture::Mods m { mods.isShiftDown(), mods.isCtrlDown(), mods.isAltDown() };
+        const auto tool = tools.getTool();
+        cursor = gesture::cursorFor (gesture::leftAction (tool, hover.target, m, true), tool);
+    }
+    else if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= headerWidth)
+        cursor = mods.isCtrlDown() ? gesture::Cursor::select : gesture::Cursor::point;
+
+    setMouseCursor (editorCursor (cursor));
+}
+
+ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
+{
+    ui::Hint hint;
+    const auto mods = juce::ModifierKeys::currentModifiers;
+    const auto& song = engine.getSong();
+    const auto h = hoverAt (p);
+    auto trackName = [&song] (int t) {
+        return t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty()
+                   ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
+                   : tr ("Track {0}", { juce::String (t + 1) });
+    };
+
+    if (h.header)
+    {
+        hint.text = h.led ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
+                          : tr ("Track: [RMB] menu  [2xLMB] rename  [Shift][Wheel] move up / down");
+        hint.value = trackName (h.track);
+        hint.hasMenu = ! h.led;
+        return hint;
     }
 
-    setMouseCursor (hit >= 0 ? (rightEdge || leftEdge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::DraggingHandCursor)
-                             : juce::MouseCursor::NormalCursor);
+    if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= headerWidth)
+    {
+        hint.text = tr ("Ruler: [LMB] song position  [Ctrl][LMB] drag: time selection (loop)  [Shift][LMB] drag in it: move  [2xLMB] clear  [RMB] markers");
+        hint.hasMenu = true;
+        return hint;
+    }
+
+    if (! gridArea().contains (p))
+        return hint;
+
+    const gesture::Mods m { mods.isShiftDown(), mods.isCtrlDown(), mods.isAltDown() };
+    hint.text = actionHint (gesture::leftAction (tools.getTool(), h.target, m, true), true);
+
+    if (h.clip >= 0)
+    {
+        const auto& c = song.playlist[(std::size_t) h.clip];
+        hint.hasMenu = true;
+        if (c.kind == ClipKind::pattern && c.pattern >= 0 && c.pattern < (int) song.patterns.size())
+            hint.value = juce::String::fromUTF8 (song.patterns[(std::size_t) c.pattern].name.c_str());
+        else if (c.kind == ClipKind::audio && c.channel >= 0 && c.channel < (int) song.channels.size())
+            hint.value = juce::String::fromUTF8 (song.channels[(std::size_t) c.channel].name.c_str());
+        else if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < (int) song.automations.size())
+            hint.value = juce::String::fromUTF8 (song.automations[(std::size_t) c.automation].name.c_str());
+    }
+    else
+        hint.value = trackName (h.track);
+
+    return hint;
 }
 
 void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // double-click a track name: rename it
+    if (e.x >= 20 && e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom() && e.mods.isLeftButtonDown())
+    {
+        renameTrack (yToTrack (e.y));
+        return;
+    }
+
     bool edge = false;
     const auto hit = gridArea().contains (e.getPosition()) ? clipAt (e.x, e.y, edge) : -1;
 
@@ -2460,21 +2689,101 @@ void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int
     }
 }
 
+void PlaylistComponent::glideBy (double ticks, double pixels)
+{
+    if (! gliding)
+    {
+        glideX.jumpTo (scrollTicks);
+        glideY.jumpTo (scrollY);
+        gliding = true;
+    }
+
+    const auto grid = gridArea();
+    glideX.target = juce::jlimit (0.0, juce::jmax (0.0, hBar.getMaximumRangeLimit() - grid.getWidth() / pixelsPerTick), glideX.target + ticks);
+    glideY.target = juce::jlimit (0.0, juce::jmax (0.0, (double) numTracks() * trackHeight - grid.getHeight()), glideY.target + pixels);
+    glideFrame();
+}
+
+void PlaylistComponent::glideFrame()
+{
+    if (! gliding)
+        return;
+
+    // someone else moved the view (scroll bar, zoom, pan, playback follow): the glide gives way
+    if (std::abs (scrollTicks - glideX.current) > 1e-6 || std::abs ((double) scrollY - std::round (glideY.current)) > 0.5)
+    {
+        gliding = false;
+        return;
+    }
+
+    scrollTicks = glideX.step (0.45, 0.5 / pixelsPerTick);
+    scrollY = (int) std::round (glideY.step (0.45, 1.0));
+    glideY.current = scrollY;
+    updateScrollBars();
+    glideX.current = scrollTicks;
+    gliding = glideX.isMoving() || glideY.isMoving();
+    repaint();
+}
+
 void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (e.mods.isCtrlDown())
-    {
-        const auto anchor = xToTick (e.x);
-        pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), pixelsPerTick * (wheel.deltaY > 0 ? 1.2 : 1.0 / 1.2));
-        scrollTicks = juce::jmax (0.0, anchor - (e.x - headerWidth) / pixelsPerTick);
-    }
-    else if (e.mods.isShiftDown())
-        scrollTicks = juce::jmax (0.0, scrollTicks - wheel.deltaY * 300.0 / pixelsPerTick);
-    else
-        scrollY = juce::jmax (0, scrollY - (int) (wheel.deltaY * 200.0f));
+    const auto ctrl = e.mods.isCtrlDown(), alt = e.mods.isAltDown(), shift = e.mods.isShiftDown();
 
-    updateScrollBars();
-    repaint();
+    // Shift+wheel over a track header: moves the track up / down
+    if (shift && ! ctrl && e.x < headerWidth && e.y >= headerHeight && wheel.deltaY != 0.0f)
+    {
+        const auto track = yToTrack (e.y);
+        const auto other = track + (wheel.deltaY > 0 ? -1 : 1);
+
+        if (other >= 0 && other < numTracks())
+        {
+            setSelection ({});
+            engine.editSong ([track, other] (Song& s) { noteedit::swapTracks (s, track, other); });
+            // the mouse follows the track, so the next wheel step moves it further
+            juce::Desktop::setMousePosition (localPointToGlobal (juce::Point<int> (e.x, e.y + (other - track) * trackHeight)));
+        }
+        return;
+    }
+
+    if (shift && alt) // nudge the selected clips by the grid
+    {
+        if (wheel.deltaY != 0.0f && ! selection.empty())
+        {
+            const auto now = juce::Time::getMillisecondCounter();
+            const auto newBurst = now - lastWheelEdit > 700; // one undo step per burst
+            lastWheelEdit = now;
+            const auto ticks = (wheel.deltaY > 0 ? 1 : -1) * gridTicks();
+            engine.editSong ([this, ticks] (Song& s) {
+                auto delta = ticks;
+                for (auto i : selection)
+                    delta = juce::jmax (delta, -s.playlist[(std::size_t) i].start);
+                for (auto i : selection)
+                    s.playlist[(std::size_t) i].start += delta;
+            }, newBurst);
+            sortClips();
+        }
+        return;
+    }
+
+    if (ctrl)
+    {
+        gliding = false;
+        const auto anchorPixels = (double) juce::jmax (0, e.x - headerWidth);
+        const auto zoomed = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), pixelsPerTick * gesture::wheelZoomFactor (wheel.deltaY, wheel.isSmooth));
+        scrollTicks = gesture::zoomAnchored (scrollTicks, pixelsPerTick, zoomed, anchorPixels);
+        pixelsPerTick = zoomed;
+        zoomBeforeAll = 0.0;
+        updateScrollBars();
+        repaint();
+        return;
+    }
+
+    // plain wheel: up/down (Shift: left/right); a horizontal wheel or trackpad swipe scrolls sideways
+    if (shift)
+        glideBy (gesture::wheelScrollPixels (wheel.deltaY, wheel.isSmooth, 120.0) / pixelsPerTick, 0.0);
+    else
+        glideBy (gesture::wheelScrollPixels (wheel.deltaX, wheel.isSmooth, 80.0) / pixelsPerTick,
+                 gesture::wheelScrollPixels (wheel.deltaY, wheel.isSmooth, 2.0 * trackHeight));
 }
 
 void PlaylistComponent::scrollBarMoved (juce::ScrollBar* bar, double start)

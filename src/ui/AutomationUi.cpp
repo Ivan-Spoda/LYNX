@@ -5,8 +5,11 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "core/EditorGestures.h"
+#include "ui/EditorTools.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
+#include "ui/ValueControl.h"
 
 namespace lynx
 {
@@ -33,8 +36,10 @@ juce::AudioPluginInstance* pluginFor (AudioEngine& engine, const AutomationTarge
 // Point editor: time horizontal (bars), value vertical.
 //  - click on empty space creates a point; drag moves; right-click deletes
 //  - Alt+drag over a segment changes the curve (tension)
-//  - Ctrl+wheel zooms; wheel scrolls
+//  - Ctrl+wheel zooms at the mouse; wheel scrolls; middle-drag pans
+//  - the cursor and the hint bar show what a click would do
 class AutomationEditor final : public juce::Component,
+                               public ui::HintSource,
                                private juce::ChangeListener,
                                private juce::Timer
 {
@@ -138,10 +143,6 @@ public:
             g.drawVerticalLine ((int) tickToX (playhead), (float) area.getY(), (float) area.getBottom());
         }
 
-        g.setColour (colour::textSecondary);
-        g.setFont (font (type::caption));
-        g.drawText (tr ("Click: new point · drag: move (then Shift: time locked, Ctrl: value locked) · right-click: point menu · Alt+drag: curve · Ctrl+wheel: zoom"),
-                    area.getX(), getHeight() - 18, area.getWidth(), 16, juce::Justification::centredLeft);
 
         if (hoverPoint >= 0 && hoverPoint < (int) points.size())
         {
@@ -164,6 +165,48 @@ public:
             hoverPoint = hit;
             repaint();
         }
+
+        updateCursor (e.mods);
+    }
+
+    void modifierKeysChanged (const juce::ModifierKeys& mods) override
+    {
+        if (dragPoint < 0 && tensionPoint < 0 && ! panning)
+            updateCursor (mods);
+    }
+
+    void updateCursor (juce::ModifierKeys mods)
+    {
+        using C = gesture::Cursor;
+        const auto inPlot = plotArea().contains (getMouseXYRelative());
+
+        if (inPlot && mods.isAltDown())
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor); // drag up / down bends the segment
+        else
+            setMouseCursor (editorCursor (! inPlot ? C::normal : hoverPoint >= 0 ? C::move : C::draw));
+    }
+
+    ui::Hint hintAt (juce::Point<int> position) override
+    {
+        ui::Hint hint;
+
+        if (! plotArea().contains (position))
+            return hint;
+
+        const auto* a = current();
+        const auto point = pointAt (position.toFloat());
+        hint.hasMenu = true;
+
+        if (juce::ModifierKeys::currentModifiers.isAltDown())
+            hint.text = tr ("[Alt][LMB] drag up / down bends this segment");
+        else if (point >= 0)
+            hint.text = tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [RMB] menu");
+        else
+            hint.text = tr ("[LMB] new point  [Shift][RMB] point on the curve  [Alt][LMB] bend  [Ctrl][Wheel] zoom  [MMB] scroll");
+
+        if (a != nullptr)
+            hint.value = valueText (point >= 0 ? a->points[(std::size_t) point].value : yToValue (position.y));
+        return hint;
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -176,6 +219,14 @@ public:
         const auto hit = pointAt (e.position);
 
         downMods = e.mods;
+
+        if (e.mods.isMiddleButtonDown()) // middle-drag scrolls
+        {
+            panning = true;
+            panStart = scroll;
+            setMouseCursor (editorCursor (gesture::Cursor::pan));
+            return;
+        }
 
         if (e.mods.isPopupMenu())
         {
@@ -239,6 +290,13 @@ public:
         if (a == nullptr)
             return;
 
+        if (panning)
+        {
+            scroll = juce::jmax (0.0, panStart - e.getDistanceFromDragStartX() / pixelsPerTick);
+            repaint();
+            return;
+        }
+
         if (tensionPoint >= 0 && tensionPoint < (int) a->points.size())
         {
             const auto tension = juce::jlimit (-1.0f, 1.0f, tensionStart + (float) e.getDistanceFromDragStartY() / 100.0f);
@@ -269,9 +327,11 @@ public:
         });
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
         dragPoint = tensionPoint = -1;
+        panning = false;
+        updateCursor (e.mods);
         repaint();
     }
 
@@ -280,8 +340,10 @@ public:
         if (e.mods.isCtrlDown())
         {
             const auto anchor = xToTick (e.x);
-            pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 600.0 / (4 * ppq), pixelsPerTick * (wheel.deltaY > 0 ? 1.2 : 1.0 / 1.2));
-            scroll = juce::jmax (0.0, anchor - (e.x - plotArea().getX()) / pixelsPerTick);
+            juce::ignoreUnused (anchor);
+            const auto zoomed = juce::jlimit (4.0 / (4 * ppq), 600.0 / (4 * ppq), pixelsPerTick * gesture::wheelZoomFactor (wheel.deltaY, wheel.isSmooth));
+            scroll = gesture::zoomAnchored (scroll, pixelsPerTick, zoomed, (double) juce::jmax (0, e.x - plotArea().getX()));
+            pixelsPerTick = zoomed;
         }
         else
             scroll = juce::jmax (0.0, scroll - (wheel.deltaY + wheel.deltaX) * 300.0 / pixelsPerTick);
@@ -410,7 +472,7 @@ private:
         });
     }
 
-    juce::Rectangle<int> plotArea() const { return getLocalBounds().withTrimmedTop (18).withTrimmedBottom (20).reduced (8, 4); }
+    juce::Rectangle<int> plotArea() const { return getLocalBounds().withTrimmedTop (18).withTrimmedBottom (4).reduced (8, 4); }
     double tickToX (double tick) const { return plotArea().getX() + (tick - scroll) * pixelsPerTick; }
     double xToTick (int x) const { return juce::jmax (0.0, (x - plotArea().getX()) / pixelsPerTick + scroll); }
     float valueToY (float v) const { return (float) plotArea().getBottom() - v * (float) plotArea().getHeight(); }
@@ -482,6 +544,8 @@ private:
     double pixelsPerTick = 120.0 / (4 * ppq);
     double scroll = 0.0;
     int dragPoint = -1, hoverPoint = -1, tensionPoint = -1;
+    bool panning = false;
+    double panStart = 0.0;
     float tensionStart = 0.0f;
     double playhead = -1.0;
 };

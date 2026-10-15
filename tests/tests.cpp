@@ -9406,6 +9406,8 @@ TEST (bassdrum_engine)
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"
+// Editor mouse grammar (Piano Roll / Playlist)
+#include "EditorGestureTests.inc"
 
 TEST (fruity_delay_engines)
 {

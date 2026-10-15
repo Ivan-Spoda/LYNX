@@ -10,6 +10,7 @@
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
 #include "ui/Theme.h"
+#include "ui/ValueControl.h"
 
 namespace lynx
 {
@@ -25,15 +26,20 @@ namespace lynx
 //  - ruler: click sets the playback position (Song mode); Ctrl+drag makes a time selection (it loops and
 //    selects the clips it touches); a double click clears it
 //  - dragging an audio file into the Playlist creates an audio clip
-//  - wheel scrolls, Shift+wheel horizontal, Ctrl+wheel zoom
-//  - right click on a clip's name strip opens its menu (split, make unique, etc.)
-//  - track header: LED mutes the track; right click renames
+//  - wheel scrolls (smoothly), Shift+wheel horizontal, Ctrl+wheel zooms at the mouse, Shift+Alt+wheel
+//    nudges the selection; Ctrl+right-click on empty space zooms to everything and back
+//  - the clip under the mouse is outlined, its edges show grips and its title strip a menu button; the
+//    cursor and the hint bar tell what a click would do (core/EditorGestures.h)
+//  - right click on a clip's name strip (or its menu button) opens its menu (split, make unique, etc.)
+//  - track header: LED mutes the track (Ctrl+click or right-click on it: solo); right click elsewhere opens
+//    the track menu; double click renames; Shift+wheel moves the track up / down
 //  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V, Ctrl+B (repeats the
 //    time selection when there is one), Ctrl+Ins / Ctrl+Del insert / remove the time selection, Esc
 class PlaylistComponent final : public juce::Component,
                                 public SharesTitleBar,
                                 public juce::FileDragAndDropTarget,
                                 public juce::DragAndDropTarget,
+                                public ui::HintSource,
                                 private juce::ChangeListener,
                                 private juce::Timer,
                                 private juce::ScrollBar::Listener
@@ -66,6 +72,9 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    void modifierKeysChanged (const juce::ModifierKeys& mods) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
@@ -91,6 +100,8 @@ public:
     // For snapshots: the tool in use and a time selection over [fromBar, toBar).
     void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }
     void setTimeSelectionForSnapshot (int fromBar, int toBar);
+    // hovers the right edge of the first clip in view (grip, outline, menu button); returns its hint
+    ui::Hint hoverForSnapshot();
 
     static constexpr int headerWidth = 96;
     static constexpr int toolbarHeight = 28;
@@ -198,6 +209,34 @@ private:
     juce::Rectangle<float> automationBody (const Clip& clip) const;
     int automationPointAt (int clip, juce::Point<int> p) const;
     bool isOnAutomationCurve (int clip, juce::Point<int> p) const;
+    // hover: what a click would hit (drives the cursor, the highlight and the hint)
+    struct Hover
+    {
+        int clip = -1, track = -1;
+        gesture::Target target = gesture::Target::empty;
+        bool header = false, led = false;
+        bool operator== (const Hover& o) const
+        {
+            return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led;
+        }
+    };
+    Hover hover;
+    juce::Point<int> lastMouse { -1, -1 };
+    Hover hoverAt (juce::Point<int> p) const;
+    void updateHover (juce::Point<int> p, juce::ModifierKeys mods);
+    void updateCursor (juce::ModifierKeys mods);
+    juce::Rectangle<int> clipBounds (int clip) const;
+    juce::Rectangle<int> clipMenuButton (int clip) const; // the menu button in a clip's title strip (empty if too narrow)
+    juce::uint32 lastWheelEdit = 0;
+    double zoomBeforeAll = 0.0, scrollBeforeAll = 0.0; // Ctrl+right-click: zoom to everything and back
+
+    // smooth wheel scrolling
+    gesture::Glide glideX, glideY;
+    bool gliding = false;
+    void glideBy (double ticks, double pixels);
+    void glideFrame();
+    juce::VBlankAttachment vblank { this, [this] { glideFrame(); } };
+
     void zoomAroundCentre (double factor);
     void zoomToBars (int bars);
     void zoomToSelection();
