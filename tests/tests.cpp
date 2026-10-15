@@ -44,6 +44,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -788,6 +789,7 @@ TEST (flp_real_files)
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
+    int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -1031,6 +1033,8 @@ TEST (flp_real_files)
                         maximusSlots += slot.plugin == "Maximus";
                         sgzSlots += slot.plugin == "Soundgoodizer";
                         vocodexSlots += slot.plugin == "Vocodex";
+                        shaperSlots += slot.plugin == "Fruity WaveShaper";
+                        clipperSlots += slot.plugin == "Fruity Soft Clipper";
                     }
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
@@ -1044,6 +1048,9 @@ TEST (flp_real_files)
                         }
                         if (fx.kind == lynx::EffectKind::vocodex)
                             vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
+                        if (fx.kind == lynx::EffectKind::fruityWaveShaper)
+                            shaperExact += lynx::flshape::parseWaveShaper (fx.state).has_value() ? 1 : 0;
+                        clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
                     }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
@@ -1707,6 +1714,10 @@ TEST (flp_real_files)
     // option; the other Data folders add states with options not decoded
     CHECK (maximusSlots - maximusExact <= 16 && maximusExact >= 97 && sgzExact == sgzSlots && sgzSlots > 90);
     CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
+    std::printf ("  Fruity WaveShaper: %d of %d slots on the exact engine; Fruity Soft Clipper: %d of %d\n", shaperExact, shaperSlots,
+                 clipperExact, clipperSlots);
+    // (Patcher graphs add WaveShaper nodes of their own to the imported mixer)
+    CHECK (shaperExact >= shaperSlots && shaperSlots >= 70 && clipperExact >= clipperSlots && clipperSlots >= 25); // REA_rodada51
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -7680,6 +7691,140 @@ TEST (maximus_engine)
     const auto [raw, files] = lynx::vocodex::splitInstallData (joined);
     CHECK (raw == flState && files.sgDat == st2 && files.carrierState == data.carrierState);
     CHECK (lynx::vocodex::splitInstallData (flState).first == flState);
+}
+
+// ---- Fruity WaveShaper / Fruity Soft Clipper (REA_rodada51) ------------------------------------------------------------
+// States written here from our own values (no FL preset data); goldens from the installation's DLLs (EXEC, blocks of 512)
+namespace
+{
+std::vector<std::uint8_t> waveShaperTestState (int pre, int mix, int post, bool uni, bool center, int os, bool hq, bool smooth)
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&b] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f64 = [&b] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    auto f32 = [&b] (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    i32 (0x40003);
+    i32 (pre), i32 (mix), i32 (post);
+    b.push_back (uni ? 1 : 0), b.push_back (center ? 1 : 0);
+    i32 (os);
+    const struct { double dt, y; float t; int mode; } pts[] = { { 0.0, 0.1, 0.0f, 0 }, { 0.3, 0.8, 0.4f, 0 }, { 0.25, 0.35, 0.0f, 10 },
+                                                                 { 0.25, 0.9, -0.3f, 3 }, { 0.2, 1.0, 0.5f, 9 } };
+    i32 (3), i32 (3), i32 (5);
+    for (const auto& p : pts)
+    {
+        f64 (p.dt), f64 (p.y), f32 (p.t);
+        b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+    }
+    i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
+    i32 (1);
+    b.push_back (hq ? 1 : 0), b.push_back (smooth ? 1 : 0);
+    return b;
+}
+} // namespace
+
+TEST (fruity_waveshaper_and_soft_clipper)
+{
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+
+    // Soft Clipper: bit-exact against Fruity Soft Clipper_x64.dll
+    auto clip = [&] (int thr, int post, std::initializer_list<Gold> gold) {
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 512)
+        {
+            lynx::flshape::softClip (l.data() + s, 512, thr, post);
+            lynx::flshape::softClip (r.data() + s, 512, thr, post);
+        }
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    clip (100, 128, { { 100, 0.0f, -0.949052989f }, { 1000, -0.99617976f, 0.872887492f }, { 2047, 0.649999976f, -0.944175363f },
+                      { 3000, -0.99617976f, -0.699999988f }, { 4095, 0.25f, 0.600000024f } });
+    clip (1, 150, { { 100, 0.0f, -1.04588532f }, { 1000, -1.27003884f, 0.930835366f }, { 2047, 0.750244498f, -1.03539562f },
+                    { 3000, -1.27003884f, -0.790091455f }, { 4095, 0.347655922f, 0.708338201f } });
+    clip (64, 140, { { 100, 0.0f, -1.08492827f }, { 1000, -1.21535313f, 0.990323186f }, { 2047, 0.804165959f, -1.0770781f },
+                     { 3000, -1.21535313f, -0.849189103f }, { 4095, 0.319320858f, 0.754407823f } });
+    {
+        const std::vector<std::uint8_t> st { 64, 0, 0, 0, 140, 0, 0, 0 };
+        const auto slot = lynx::effectFromFl ("Fruity Soft Clipper", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruitySoftClipper);
+        if (slot)
+        {
+            const auto s = lynx::flshape::softClipperFromParams (slot->params.data());
+            CHECK (s.threshold == 64 && s.post == 140);
+            auto fx = lynx::makeEffect (*slot);
+            fx->prepare (44100.0);
+            std::vector<float> l (inL), r (inR);
+            fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+            CHECK (l[3000] == -1.21535313f && r[4095] == 0.754407823f);
+        }
+    }
+
+    // WaveShaper: tables (bipolar / unipolar) and the engine on three of our states, live and as FL renders
+    const auto stA = waveShaperTestState (150, 100, 120, false, true, 1, true, true);  // CENTER, ×2, HQ, smooth
+    const auto stB = waveShaperTestState (100, 128, 128, true, false, 0, false, false); // unipolar
+    const auto stC = waveShaperTestState (192, 90, 100, false, false, 2, false, false); // ×4
+    const auto pA = lynx::flshape::parseWaveShaper (stA);
+    CHECK (pA && pA->points.size() == 5 && pA->pre == 150 && pA->center && pA->hq && pA->smooth && pA->oversampling == 1);
+    if (pA)
+    {
+        const auto T = lynx::flshape::shaperTable (pA->points, false);
+        CHECK (T.size() == 16386 && T[1] == 3277 && T[1001] == 18824 && T[5001] == 26195 && T[9001] == 11469 && T[12001] == 24614
+               && T[16384] == 32767 && T[0] == T[1]);
+        const auto U = lynx::flshape::shaperTable (pA->points, true);
+        CHECK (U.size() == 32770 && U[1] == -26214 && U[1001] == -6408 && U[5001] == 17073 && U[9001] == 19551 && U[12001] == 14549);
+    }
+    auto shape = [&] (const std::vector<std::uint8_t>& st, bool render, std::initializer_list<Gold> gold) {
+        const auto s = lynx::flshape::parseWaveShaper (st);
+        CHECK (s.has_value());
+        if (! s)
+            return;
+        lynx::flshape::WaveShaperEngine e;
+        e.setCurve (s->points);
+        e.prepare (44100.0);
+        e.setControls (s->pre, s->mix, s->post, s->oversampling, s->hq, s->smooth, s->center, s->unipolar, render);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        for (const auto& g : gold)
+            CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
+    };
+    shape (stA, false, { { 100, 0.59108448f, 0.469315082f }, { 1000, 0.284353405f, 1.02621937f }, { 2047, -0.533613563f, 0.117038473f },
+                         { 3000, 0.22673659f, -1.13572407f }, { 4095, -0.267153352f, 0.822866499f } });
+    shape (stA, true, { { 100, 0.794869065f, -0.127601087f }, { 1000, -0.00841622613f, 0.900729597f }, { 2047, 0.450603426f, -0.325943232f },
+                        { 3000, -0.0530530401f, -0.32303831f }, { 4095, 1.0959363f, 0.946009099f } });
+    shape (stB, false, { { 100, -0.206451416f, 0.502471924f }, { 1000, -0.799987793f, 0.761169434f }, { 2047, 0.411743164f, 0.514160156f },
+                         { 3000, -0.799987793f, 0.596221924f }, { 4095, -0.157653809f, 0.334106445f } });
+    shape (stB, true, { { 100, -0.206390381f, 0.502493739f }, { 1000, -0.799987793f, 0.761169434f }, { 2047, 0.411743164f, 0.514144361f },
+                        { 3000, -0.799987793f, 0.596221924f }, { 4095, -0.157653809f, 0.334106445f } });
+    shape (stC, false, { { 100, 0.317797363f, 0.0483714938f }, { 1000, -0.445489585f, -0.533142388f }, { 2047, 0.634525597f, 0.942175806f },
+                         { 3000, -0.445489585f, 0.514707327f }, { 4095, 0.200391173f, -0.937523127f } });
+    shape (stC, true, { { 100, 0.61165309f, -0.0993360579f }, { 1000, 0.0375693105f, 0.667849183f }, { 2047, 0.353716731f, -0.223758236f },
+                        { 3000, 0.0375693105f, -0.223787636f }, { 4095, 0.843308687f, 0.688474894f } });
+
+    // the mixer effect from the FL import: controls as parameters, the curve in the slot's state; host blocks of any size
+    const auto slot = lynx::effectFromFl ("Fruity WaveShaper", stC, 120.0);
+    CHECK (slot && slot->kind == lynx::EffectKind::fruityWaveShaper && slot->state == stC);
+    if (slot)
+    {
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 1024, slot->params, 120.0);
+        fx->process (l.data() + 2048, r.data() + 2048, 2048, slot->params, 120.0);
+        CHECK (close (l[1000], -0.445489585f) && close (r[2047], 0.942175806f) && close (l[4095], 0.200391173f));
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityWaveShaper, 3, slot->params[3], 120.0) == "x4");
+    }
+    // an unreadable state keeps the old approximation
+    CHECK (lynx::effectFromFl ("Fruity WaveShaper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
+    CHECK (lynx::effectFromFl ("Fruity Soft Clipper", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -948,9 +949,33 @@ std::optional<EffectSlot> fruityDynamicsExact (const std::string& pluginName, co
     return std::nullopt;
 }
 
+std::optional<EffectSlot> fruityShaperExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity WaveShaper / Fruity Soft Clipper engines from the saved state (REA_rodada51); the distortion
+    // approximations of REA_rodada8 remain for states that cannot be read
+    if (pluginName == "Fruity WaveShaper")
+        if (const auto s = flshape::parseWaveShaper (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityWaveShaper);
+            flshape::waveShaperToParams (*s, slot.params.data());
+            slot.state = state; // the curve
+            return slot;
+        }
+    if (pluginName == "Fruity Soft Clipper")
+        if (const auto s = flshape::parseSoftClipper (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruitySoftClipper);
+            flshape::softClipperToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (auto exact = fruityDynamicsExact (pluginName, state))
+        return exact;
+    if (auto exact = fruityShaperExact (pluginName, state))
         return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
@@ -1112,6 +1137,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
         case EffectKind::fruityLimiter: return { "Fruity Limiter" };
         case EffectKind::fruityCompressor: return { "Fruity Compressor" };
+        case EffectKind::fruityWaveShaper: return { "Fruity WaveShaper" };
+        case EffectKind::fruitySoftClipper: return { "Fruity Soft Clipper" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb: return { "Fruity Reeverb 2" };
@@ -1128,6 +1155,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if (is ("Fruity Limiter") && k >= 0 && k < fldyn::limiterControls)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Fruity Compressor") && k >= 0 && k < fldyn::compressorControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact WaveShaper (pre, mix, post) and Soft Clipper (threshold, post) take FL's controls over their ranges
+    if ((is ("Fruity WaveShaper") && k >= 0 && k < 3) || (is ("Fruity Soft Clipper") && k >= 0 && k < 2))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
