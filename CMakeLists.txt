@@ -47,6 +47,7 @@ add_library(lynx_core STATIC
     src/core/VintagePhaser.cpp
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
+    src/core/FruityShapers.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)

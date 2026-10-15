@@ -1,0 +1,1003 @@
+#include "core/FruityShapers.h"
+
+// Fruity WaveShaper and Fruity Soft Clipper, exact engines (docs/analise/REA_rodada51.md). Clean-room: written from
+// the behaviour, formulas and data layouts described there; nothing of Image-Line's code or data is copied.
+//
+// Arithmetic follows the plugins operation by operation: float/double steps in their order with one rounding each
+// (no contraction), and the x87 kernels in 80-bit long double under the control word the plugins use (round to
+// nearest, or toward zero in the interpolating WaveShaper kernels).
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+#include "core/Instruments.h"
+
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#pragma STDC FENV_ACCESS ON
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off", "rounding-math")
+#endif
+
+namespace lynx::flshape
+{
+namespace
+{
+using ld = long double;
+
+// ------------------------------------------------------------------------------------------- x87 control word (§1.3)
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+struct X87Mode
+{
+    unsigned short saved = 0;
+    explicit X87Mode (bool truncate) noexcept
+    {
+        asm volatile ("fnstcw %0" : "=m"(saved) : : "memory");
+        unsigned short cw = (unsigned short) ((saved & ~0x0F00u) | 0x0300u | (truncate ? 0x0C00u : 0u));
+        asm volatile ("fldcw %0" : : "m"(cw) : "memory");
+    }
+    ~X87Mode() { asm volatile ("fldcw %0" : : "m"(saved) : "memory"); }
+    X87Mode (const X87Mode&) = delete;
+    X87Mode& operator= (const X87Mode&) = delete;
+};
+#else
+struct X87Mode
+{
+    explicit X87Mode (bool) noexcept {}
+};
+#endif
+
+inline float F (double v) noexcept { return (float) v; }
+inline std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept
+{
+    std::int32_t v = 0;
+    std::memcpy (&v, d.data() + o, 4);
+    return v;
+}
+inline double f64At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept
+{
+    double v = 0;
+    std::memcpy (&v, d.data() + o, 8);
+    return v;
+}
+inline float f32At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept
+{
+    float v = 0;
+    std::memcpy (&v, d.data() + o, 4);
+    return v;
+}
+int rawFrom (float v, int lo, int hi) noexcept
+{
+    return lo + (int) std::lround (std::clamp ((double) v, 0.0, 1.0) * (hi - lo));
+}
+float norm (int raw, int lo, int hi) noexcept { return (float) std::clamp ((double) (raw - lo) / (hi - lo), 0.0, 1.0); }
+
+// FL's level law L11: (11^x − 1)/10 with 1 kept exact (both plugins' post gains, §1.1 / §2.1)
+float postGain (int raw) noexcept
+{
+    const float n = (float) raw * 0.0078125f;
+    if (n == 1.0f)
+        return 1.0f;
+    return F ((std::exp ((double) (n * 2.39789534f)) - 1.0) * (double) 0.1f);
+}
+
+// ----------------------------------------------------------------------------------------------- map evaluator (§2.4)
+constexpr double kEps = 5.960464477539063e-08; // float 2^-24 (as a double)
+
+struct Pt
+{
+    float dt = 0, y = 0, t = 0;
+    int mode = 0, sign = 0;
+    float k = 0, ilk = 0, L = 0; // modes 0/1: curvature; other modes reuse p4…p6
+    float p4 = 0, p5 = 0, p6 = 0;
+};
+
+int stepCount (const Pt& p) noexcept
+{
+    if (p.mode < 3 || p.mode > 6)
+        return -1;
+    const auto a = F (1.0 - std::abs ((double) p.t) * 0.6);
+    auto n = (int) std::nearbyint ((double) F (std::exp ((double) a * std::log (1000001.0)) - 1.0) * 0.001);
+    if (p.mode == 3 && p.t >= 0.0f)
+        ++n;
+    return n;
+}
+
+void prepareSmooth (std::vector<Pt>& pts, int i) noexcept
+{
+    auto& p = pts[(std::size_t) i];
+    const int n = (int) pts.size();
+    const double h = (double) p.dt > kEps ? (double) p.dt : kEps;
+    const double y1 = p.y;
+    const int j = i - 1;
+    const double y0 = j >= 0 ? (double) pts[(std::size_t) j].y : y1;
+    double rp = 1.0, ypp = y0;
+    if (j >= 0 && pts[(std::size_t) j].mode == 10)
+    {
+        rp = (double) pts[(std::size_t) j].dt / h;
+        if (i - 2 >= 0)
+            ypp = pts[(std::size_t) (i - 2)].y;
+    }
+    double rn = 1.0, yn = y1;
+    if (i + 1 < n && pts[(std::size_t) (i + 1)].mode == 10)
+    {
+        rn = (double) pts[(std::size_t) (i + 1)].dt / h;
+        yn = pts[(std::size_t) (i + 1)].y;
+    }
+    const double d = y1 - y0;
+    if (std::abs (d) < kEps)
+    {
+        p.sign = 2;
+        return;
+    }
+    const double a = (ypp - y0) / d, b = (yn - y0) / d;
+    rp = rp > kEps ? rp : kEps;
+    rn = rn > kEps ? rn : kEps;
+    const double sr = (b - 1.0) / rn, s = 1.0 / 1.0, sl = -a / rp;
+    if (! (F (sr) * F (s) > 0.0f))
+        p.p4 = 0.0f;
+    else
+    {
+        const float w1 = F (rn) * 2.0f + F (1.0), w2 = F (rn) + F (1.0) * 2.0f;
+        p.p4 = (F (sr) * F (s) * (w1 + w2)) / (w1 * F (sr) + w2 * F (s));
+    }
+    if (! (F (s) * F (sl) > 0.0f))
+        p.p5 = 0.0f;
+    else
+    {
+        const float w1 = F (1.0) * 2.0f + F (rp), w2 = F (1.0) + F (rp) * 2.0f;
+        p.p5 = (F (s) * F (sl) * (w1 + w2)) / (w1 * F (s) + w2 * F (sl));
+    }
+    p.p6 = F (1.0 - std::abs ((double) p.t));
+}
+
+std::vector<Pt> preparePoints (const std::vector<WsPoint>& in)
+{
+    std::vector<Pt> pts;
+    for (const auto& q : in)
+    {
+        Pt p;
+        p.dt = q.dt;
+        p.y = q.y;
+        p.t = q.tension;
+        p.mode = q.mode;
+        pts.push_back (p);
+    }
+    for (int i = 0; i < (int) pts.size(); ++i)
+    {
+        auto& p = pts[(std::size_t) i];
+        if (p.dt < 0.0f)
+            p.dt = 0.0f;
+        const float t = p.t;
+        p.sign = t == 0.0f ? 0 : (t > 0.0f ? 1 : -1);
+        if (i == 0)
+            continue;
+        const int m = p.mode;
+        if (m == 0 || m == 1)
+        {
+            const auto e1 = F (std::exp ((double) std::abs (t) * std::log (1000001.0)) - 1.0);
+            const float sg = t > 0.0f ? 1.0f : (t < 0.0f ? -1.0f : 0.0f);
+            p.k = e1 * sg;
+            if (p.k != 0.0f)
+            {
+                p.ilk = F (1.0 / std::abs ((double) p.k));
+                p.L = F (std::log (std::abs ((double) p.k) + 1.0));
+            }
+        }
+        else if (m == 3)
+        {
+            const int sg = t < 0.0f ? -1 : 1;
+            const int c = stepCount (p);
+            p.p6 = (float) sg * 0.5f;
+            p.p4 = (float) (c + 1);
+            p.p5 = 1.0f / (p.p4 - (float) sg);
+        }
+        else if (m == 4)
+        {
+            p.p4 = (float) (stepCount (p) + 1);
+            p.p5 = 1.0f / p.p4;
+        }
+        else if (m == 5)
+        {
+            const int sg = t < 0.0f ? -1 : 1;
+            p.p6 = (float) sg * 0.5f;
+            p.p4 = (float) ((stepCount (p) + 1) * 2);
+            p.p5 = 6.2831855f;
+        }
+        else if (m == 6)
+        {
+            const int c = stepCount (p);
+            p.p4 = F ((double) c + 0.5);
+            p.p5 = 6.2831855f;
+            if (c == 0 && p.sign > 0)
+                p.sign = 2;
+        }
+        else if (m == 7 || m == 8)
+            p.p4 = t;
+        else if (m == 9)
+            p.p4 = F (std::abs ((double) t));
+        else if (m == 10)
+            prepareSmooth (pts, i);
+        else if (m == 11 || m == 12)
+        {
+            auto d = std::abs ((double) t) * 0.9;
+            if (d <= 1.52587890625e-05)
+                d = 1.52587890625e-05;
+            const auto u = 1.0 - d;
+            p.p4 = F (1.0 - u * u * u);
+            p.p5 = (1.0f - p.p4) / p.p4;
+            p.p6 = p.p5;
+            if (p.sign > 0)
+            {
+                p.p5 = -p.p5;
+                p.p6 = p.p5 - 1.0f;
+            }
+            if (m == 12)
+            {
+                p.p5 = F ((double) p.p5 * 0.5);
+                p.p6 = F ((double) p.p6 * 0.5);
+            }
+        }
+        // linear when flat: modes 0, 1, 7, 8, 9, 11, 12 with no tension
+        if (m < 16 && ((0x1b83u >> m) & 1u) != 0 && t == 0.0f)
+            p.sign = 2;
+    }
+    return pts;
+}
+
+double curveK (const Pt& p, double x) noexcept
+{
+    if (p.k == 0.0f)
+        return x;
+    if (p.k > 0.0f)
+        return 1.0 - (std::exp ((1.0 - x) * (double) p.L) - 1.0) * (double) p.ilk;
+    return (std::exp (x * (double) p.L) - 1.0) * (double) p.ilk;
+}
+
+// the shape of the segment ending at p, at phase ph (0…1)
+float shape (const Pt& p, double ph) noexcept
+{
+    if (p.sign == 2)
+        return F (ph);
+    const double p4 = p.p4, p5 = p.p5, p6 = p.p6;
+    switch (p.mode)
+    {
+        case 0: return F (curveK (p, ph));
+        case 1:
+            if (ph < 0.5)
+                return F (curveK (p, ph * 2.0) * 0.5);
+            return F (1.0 - curveK (p, (1.0 - ph) * 2.0) * 0.5);
+        case 3: return (float) (int) std::nearbyint (ph * p4 - p6) * p.p5;
+        case 4:
+        {
+            const auto v = ph * p4 - 0.5;
+            const auto i2 = std::nearbyint (v - 0.5);
+            auto d = (v - i2) * 2.0 - 1.0;
+            if (p.sign < 0)
+            {
+                const auto z = 1.0 - std::abs (d);
+                d = (1.0 - z * z * z) * (std::signbit (d) ? -1.0 : 1.0);
+            }
+            else
+                d = d * d * d;
+            return F ((i2 + d * 0.5 + 1.0) * p5);
+        }
+        case 5: return (float) (((long long) std::nearbyint (ph * p4 - p6)) & 1);
+        case 6:
+        {
+            if (p.sign < 0)
+                return F ((std::sin ((ph * p4 + 0.75) * p5) + 1.0) * 0.5);
+            const auto v = ph * p4 - 0.5;
+            const auto i2 = std::nearbyint (v - 0.5);
+            return F (std::abs ((v - i2) * 2.0 - 1.0));
+        }
+        case 7:
+        {
+            const auto d = p.sign > 0 ? 1.0 - ph : ph;
+            const auto d3 = d * d * d;
+            return F (ph - (d3 * d3 - d) * p4);
+        }
+        case 8:
+        {
+            if (ph < 0.5)
+            {
+                const auto x = ph * 2.0;
+                const auto d = p.sign > 0 ? 1.0 - x : x;
+                const auto d3 = d * d * d;
+                return F ((x - (d3 * d3 - d) * p4) * 0.5);
+            }
+            const auto x = (1.0 - ph) * 2.0;
+            const auto d = p.sign > 0 ? 1.0 - x : x;
+            const auto d3 = d * d * d;
+            return F (1.0 - (x - (d3 * d3 - d) * p4) * 0.5);
+        }
+        case 9:
+        {
+            const auto hp = (double) 1.5707963705062866;
+            const auto d = p.sign > 0 ? std::sin (ph * hp) : 1.0 - std::cos (ph * hp);
+            return F (ph - (ph - d) * p4);
+        }
+        case 10:
+        {
+            const auto x2 = ph * ph, x1 = ph - 1.0;
+            return F (ph + ((((x2 * 3.0 - x2 * 2.0 * ph) + x2 * x1 * p4) + ph * x1 * x1 * p5) - ph) * p6);
+        }
+        case 11:
+            if (p.sign < 1)
+                return F (p5 / (1.0 - p4 * ph) - p6);
+            return F (p5 / (1.0 - p4 * (1.0 - ph)) - p6);
+        case 12:
+            if (ph < 0.5)
+            {
+                if (p.sign < 1)
+                    return F (p5 / (1.0 - p4 * ph * 2.0) - p6);
+                return F (p5 / (1.0 - p4 * (1.0 - ph * 2.0)) - p6);
+            }
+            else
+            {
+                const auto x = (1.0 - ph) * 2.0;
+                if (p.sign < 1)
+                    return F ((1.0 - p5 / (1.0 - p4 * x)) + p6);
+                return F ((1.0 - p5 / (1.0 - p4 * (1.0 - x))) + p6);
+            }
+        default: return 0.0f; // 2 (hold) and unknown modes
+    }
+}
+
+const std::vector<WsPoint>& defaultCurve()
+{
+    static const std::vector<WsPoint> c { { 0.0f, 0.0f, 0.0f, 0 }, { 1.0f, 1.0f, 0.0f, 0 } };
+    return c;
+}
+
+// --------------------------------------------------------------------------------------------- oversampling (§2.6)
+// polyphase IIR half-band: two chains of three first-order all-passes (y = x[n−1] + (x − y[n−1])·a), in double
+constexpr double kA[3] = { 0.1473771136010466, 0.48246854276970014, 0.8830050257693731 };
+constexpr double kB[3] = { 0.039151597734460045, 0.3026468483284934, 0.6746159185469639 };
+
+struct HalfBand
+{
+    // per channel: outputs A1 A2 A3 B1 B2 B3, then the previous inputs of each all-pass
+    double s[12] {};
+    void clear() noexcept { std::fill (std::begin (s), std::end (s), 0.0); }
+    void flush() noexcept
+    {
+        for (int i = 0; i < 6; ++i)
+            if (std::abs (s[i]) < kEps)
+                s[i] = 0.0;
+    }
+    void up (const float* x, float* y, int m) noexcept
+    {
+        for (int n = 0; n < m; ++n)
+        {
+            const double v = x[n];
+            const double a1 = s[6] + (v - s[0]) * kA[0];
+            s[6] = v, s[0] = a1;
+            const double b1 = s[9] + (v - s[3]) * kB[0];
+            s[9] = v, s[3] = b1;
+            const double a2 = s[7] + (s[0] - s[1]) * kA[1];
+            s[7] = s[0], s[1] = a2;
+            const double b2 = s[10] + (s[3] - s[4]) * kB[1];
+            s[10] = s[3], s[4] = b2;
+            const double a3 = s[8] + (s[1] - s[2]) * kA[2];
+            s[2] = a3;
+            const double b3 = s[11] + (s[4] - s[5]) * kB[2];
+            s[5] = b3;
+            s[8] = s[1], s[11] = s[4];
+            y[2 * n] = (float) b3;
+            y[2 * n + 1] = (float) a3;
+        }
+        flush();
+    }
+    void down (const float* x, float* y, int m) noexcept
+    {
+        for (int n = 0; n < m; ++n)
+        {
+            const double e = x[2 * n], o = x[2 * n + 1];
+            const double a1 = s[6] + (e - s[0]) * kA[0];
+            s[6] = e, s[0] = a1;
+            const double b1 = s[9] + (o - s[3]) * kB[0];
+            s[9] = o, s[3] = b1;
+            const double a2 = s[7] + (s[0] - s[1]) * kA[1];
+            s[7] = s[0], s[1] = a2;
+            const double b2 = s[10] + (s[3] - s[4]) * kB[1];
+            s[10] = s[3], s[4] = b2;
+            const double a3 = s[8] + (s[1] - s[2]) * kA[2];
+            s[8] = s[1], s[2] = a3;
+            const double b3 = s[11] + (s[4] - s[5]) * kB[2];
+            s[11] = s[4], s[5] = b3;
+            y[n] = (float) ((b3 + a3) * 0.5);
+        }
+        flush();
+    }
+};
+
+// ------------------------------------------------------------------------------------------------- kernels (§2.5)
+struct KernelArgs
+{
+    const std::int16_t* T = nullptr; // entry k at T[k + 1]
+    int N = 0;
+    float dry = 0, wet = 0, pre = 0;
+    bool unipolar = false;
+};
+
+constexpr ld kTwo31 = 2147483648.0L;
+
+[[gnu::noinline]] void kernelNearest (const float* x, float* y, int m, const KernelArgs& a) noexcept
+{
+    const X87Mode mode (false);
+    const auto* T = a.T + 1;
+    const ld A = a.dry, bK = (ld) a.wet * 3.0517578125e-05L;
+    if (! a.unipolar)
+    {
+        const ld preN = (ld) a.pre * (ld) a.N;
+        for (int k = 0; k < m; ++k)
+        {
+            const ld X = x[k];
+            const ld v = X * preN;
+            const long long i = std::abs (v) >= kTwo31 ? -2147483648LL : (long long) std::nearbyint (v);
+            const long long ai = std::min<long long> (i < 0 ? -i : i, a.N);
+            const ld t = i < 0 ? -(ld) T[ai] : (ld) T[ai];
+            y[k] = (float) (X * A + t * bK);
+        }
+        return;
+    }
+    const ld hN = (ld) a.N * 0.5L, pHN = (ld) a.pre * (ld) a.N * 0.5L;
+    for (int k = 0; k < m; ++k)
+    {
+        const ld X = x[k];
+        const ld v = X * pHN + hN;
+        long long i = std::abs (v) >= kTwo31 ? -2147483648LL : (long long) std::nearbyint (v);
+        i = std::clamp<long long> (i, 0, a.N);
+        y[k] = (float) (X * A + (ld) T[i] * bK);
+    }
+}
+
+// the interpolating kernels run with the x87 rounding set toward zero: every product, sum and the float store
+[[gnu::noinline]] void kernelInterp (const float* x, float* y, int m, const KernelArgs& a) noexcept
+{
+    const X87Mode mode (true);
+    const auto* T = a.T + 1;
+    volatile float vdry = a.dry, vwet = a.wet, vpre = a.pre; // computed after the mode change
+    const ld A = vdry, bK = (ld) vwet * 3.0517578125e-05L;
+    if (! a.unipolar)
+    {
+        const ld preN = (ld) vpre * (ld) a.N;
+        for (int k = 0; k < m; ++k)
+        {
+            const ld X = x[k];
+            const ld v = X * preN;
+            ld t;
+            if (std::abs (v) >= kTwo31)
+                t = 0.0L;
+            else
+            {
+                const ld it = std::trunc (v);
+                const ld fr = v - it;
+                const auto i = (long long) it;
+                if (i >= 0)
+                {
+                    const auto j = std::min<long long> (i, a.N);
+                    const ld t0 = T[j], t1 = T[j + 1];
+                    t = t0 + (t1 - t0) * fr;
+                }
+                else
+                {
+                    const auto j = std::min<long long> (-i, a.N);
+                    const ld t0 = T[j], t1 = T[j + 1];
+                    t = -(t0 - (t1 - t0) * fr);
+                }
+            }
+            y[k] = (float) (X * A + t * bK);
+        }
+        return;
+    }
+    const ld hN = (ld) a.N * 0.5L, pHN = (ld) vpre * (ld) a.N * 0.5L;
+    for (int k = 0; k < m; ++k)
+    {
+        const ld X = x[k];
+        const ld v = X * pHN + hN;
+        long long i;
+        ld fr;
+        if (std::abs (v) >= kTwo31)
+        {
+            i = -2147483648LL;
+            fr = v - (ld) i;
+        }
+        else
+        {
+            const ld it = std::trunc (v);
+            fr = v - it;
+            i = (long long) it;
+        }
+        i = std::clamp<long long> (i, -1, a.N);
+        const ld t0 = T[i], t1 = T[i + 1];
+        y[k] = (float) (X * A + (t0 + (t1 - t0) * fr) * bK);
+    }
+}
+} // namespace
+
+// ================================================================================================== Soft Clipper
+std::optional<SoftClipperState> parseSoftClipper (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 8)
+        return std::nullopt;
+    return SoftClipperState { i32At (state, 0), i32At (state, 4) };
+}
+
+void softClipperToParams (const SoftClipperState& s, float* params) noexcept
+{
+    params[0] = norm (s.threshold, 1, 127);
+    params[1] = norm (s.post, 0, 160);
+}
+
+SoftClipperState softClipperFromParams (const float* params) noexcept
+{
+    return { rawFrom (params[0], 1, 127), rawFrom (params[1], 0, 160) };
+}
+
+void softClip (float* x, int n, int threshold, int post) noexcept
+{
+    // threshold t = v/128 (ceiling 1); range 1 − t (2^-16 when ≤ 0); its inverse — all floats (§1.1)
+    const float t = (float) threshold * 0.0078125f;
+    float r = 1.0f - t;
+    if (r <= 0.0f)
+        r = 1.52587890625e-05f;
+    const float inv = 1.0f / r;
+    std::int32_t tb = 0;
+    std::memcpy (&tb, &t, 4);
+    {
+        const X87Mode mode (false);
+        for (int k = 0; k < n; ++k)
+        {
+            std::uint32_t xb = 0;
+            std::memcpy (&xb, x + k, 4);
+            const auto ab = (std::int32_t) (xb & 0x7fffffffu);
+            if (ab <= tb) // compared as integers (|x| > t for every |x| when t < 0)
+                continue;
+            float a = 0;
+            std::memcpy (&a, &ab, 4);
+            const ld e = ((ld) t - (ld) a) * (ld) inv;
+            const auto yv = (float) ((1.0L - std::exp (e)) * (ld) r + (ld) t);
+            std::uint32_t yb = 0;
+            std::memcpy (&yb, &yv, 4);
+            yb |= xb & 0x80000000u;
+            std::memcpy (x + k, &yb, 4);
+        }
+    }
+    const float g = postGain (post);
+    if (g != 1.0f)
+        for (int k = 0; k < n; ++k)
+            x[k] = x[k] * g;
+}
+
+const char* softClipperParamName (int param) noexcept
+{
+    static const char* names[softClipperParams] = { "Threshold", "Post" };
+    return param >= 0 && param < softClipperParams ? names[param] : "";
+}
+
+std::string softClipperParamText (int param, float value01)
+{
+    char text[32];
+    if (param == 0)
+    {
+        const auto v = rawFrom (value01, 1, 127);
+        std::snprintf (text, sizeof (text), "%.1f dB", 20.0 * std::log10 (v / 128.0));
+    }
+    else
+    {
+        const auto g = postGain (rawFrom (value01, 0, 160));
+        if (g <= 0.0f)
+            return "-inf dB";
+        std::snprintf (text, sizeof (text), "%+.1f dB", 20.0 * std::log10 ((double) g));
+    }
+    return text;
+}
+
+namespace
+{
+class SoftClipperEffect final : public Effect
+{
+public:
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+    void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto s = softClipperFromParams (params.data());
+        softClip (left, n, s.threshold, s.post);
+        softClip (right, n, s.threshold, s.post);
+    }
+};
+} // namespace
+
+std::unique_ptr<Effect> makeSoftClipper() { return std::make_unique<SoftClipperEffect>(); }
+
+// ==================================================================================================== WaveShaper
+std::optional<WaveShaperState> parseWaveShaper (const std::vector<std::uint8_t>& d)
+{
+    // version (low word 3; high word = layout 2…4), pre / mix / post, unipolar, CENTER, oversampling, the map
+    // (kind, version 3, points of 24 bytes, 20-byte header), then the options of later layouts (§2.2)
+    if (d.size() < 34)
+        return std::nullopt;
+    auto v = (std::uint32_t) i32At (d, 0);
+    if ((std::int32_t) v > 0x40003)
+        return std::nullopt;
+    if (v > 0xffff)
+        v >>= 16;
+    WaveShaperState s;
+    s.version = (int) v;
+    s.pre = i32At (d, 4);
+    s.mix = i32At (d, 8);
+    s.post = i32At (d, 12);
+    s.unipolar = d[16] != 0;
+    s.center = d[17] != 0;
+    s.oversampling = i32At (d, 18);
+    std::size_t o = 22;
+    const auto mapVersion = i32At (d, o + 4);
+    const auto n = i32At (d, o + 8);
+    o += 12;
+    if (mapVersion != 3 || n < 0 || n > 100000 || d.size() < o + 24 * (std::size_t) n + 20)
+        return std::nullopt;
+    float prev = 0.0f;
+    for (int i = 0; i < n; ++i, o += 24)
+    {
+        WsPoint p;
+        p.dt = (float) f64At (d, o);
+        p.y = (float) f64At (d, o + 8);
+        if (std::isnan (p.y))
+            p.y = prev;
+        prev = p.y;
+        p.tension = f32At (d, o + 16);
+        p.mode = d[o + 20];
+        s.points.push_back (p);
+    }
+    o += 20;
+    if (v > 1 && d.size() >= o + 4)
+        o += 4; // step-editing flag (editor only)
+    if (v > 2 && d.size() > o)
+        s.hq = d[o++] != 0;
+    if (v > 3 && d.size() > o)
+        s.smooth = d[o++] != 0;
+
+    // the map spans exactly 1: a point at 0 is added if the first starts later; every Δt is scaled by 1/total
+    auto& pts = s.points;
+    if (! pts.empty() && pts[0].dt > 0.0f)
+        pts.insert (pts.begin(), WsPoint { 0.0f, pts[0].y, 0.0f, 0 });
+    double total = 0.0;
+    for (const auto& p : pts)
+        total += (double) p.dt;
+    if (total > 0.0)
+    {
+        const double f = 1.0 / total;
+        if (f != 1.0)
+            for (auto& p : pts)
+                p.dt = (float) ((double) p.dt * f);
+    }
+    else
+        pts.push_back (WsPoint { 1.0f, pts.empty() ? 0.0f : pts.back().y, 0.0f, 0 });
+    return s;
+}
+
+void waveShaperToParams (const WaveShaperState& s, float* params) noexcept
+{
+    params[0] = norm (s.pre, 64, 192);
+    params[1] = norm (s.mix, 0, 128);
+    params[2] = norm (s.post, 0, 128);
+    params[3] = norm (s.oversampling, 0, 4);
+    params[4] = s.hq ? 1.0f : 0.0f;
+    params[5] = s.smooth ? 1.0f : 0.0f;
+    params[6] = s.center ? 1.0f : 0.0f;
+    params[7] = s.unipolar ? 1.0f : 0.0f;
+}
+
+const char* waveShaperParamName (int param) noexcept
+{
+    static const char* names[waveShaperParams] = { "Pre amp", "Mix", "Post gain", "Oversampling", "HQ", "Smooth", "Center", "Unipolar" };
+    return param >= 0 && param < waveShaperParams ? names[param] : "";
+}
+
+std::string waveShaperParamText (int param, float v)
+{
+    char text[32];
+    switch (param)
+    {
+        case 0:
+        {
+            const float s0 = (float) rawFrom (v, 64, 192) * 0.0078125f;
+            const auto g = (std::exp ((double) s0 * std::log (4.0)) - 1.0) / 3.0;
+            std::snprintf (text, sizeof (text), "%+.1f dB", 20.0 * std::log10 (g));
+            return text;
+        }
+        case 1: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (rawFrom (v, 0, 128) * 100.0 / 128.0)); return text;
+        case 2:
+        {
+            const auto g = postGain (rawFrom (v, 0, 128));
+            if (g <= 0.0f)
+                return "-inf dB";
+            std::snprintf (text, sizeof (text), "%+.1f dB", 20.0 * std::log10 ((double) g));
+            return text;
+        }
+        case 3:
+        {
+            const auto k = rawFrom (v, 0, 4);
+            if (k == 0)
+                return "Off";
+            std::snprintf (text, sizeof (text), "x%d", 1 << k);
+            return text;
+        }
+        default: return v >= 0.5f ? "On" : "Off";
+    }
+}
+
+std::vector<std::int16_t> shaperTable (const std::vector<WsPoint>& points, bool unipolar)
+{
+    // the map read by FL's incremental evaluator in steps of 1/N, each value × (32767 or 65535) rounded (§2.3)
+    auto pts = preparePoints (points.empty() ? defaultCurve() : points);
+    const int n = (int) pts.size();
+    const double off = unipolar ? 0.5 : 0.0;
+    auto level = [&] (int i) { return (double) pts[(std::size_t) i].y - off; };
+    const int N = (unipolar ? 2 : 1) * 0x4000 - 1;
+    const double sc = (double) ((unipolar ? 2 : 1) * 0x8000 - 1);
+    const double dx = 1.0 / N;
+    std::vector<std::int16_t> T ((std::size_t) N + 3, 0);
+
+    int idx = 0;
+    double rate, ph;
+    if (pts[0].dt == 0.0f)
+        rate = 1.0, ph = 1.0;
+    else
+        rate = 1.0 / (double) pts[0].dt, ph = 0.0;
+    float start = F (level (0)), delta = 0.0f, val = start;
+    for (int i = 0; i <= N; ++i)
+    {
+        const auto r = std::nearbyint ((double) val * sc);
+        T[(std::size_t) i + 1] = (std::int16_t) std::clamp (r, -32768.0, 32767.0);
+        ph += dx * rate;
+        while (ph >= 1.0)
+        {
+            const int old = idx;
+            ph = rate == 0.0 ? dx : (ph - 1.0) / rate;
+            start = F (level (idx));
+            if (idx < n - 1)
+                ++idx;
+            delta = F (level (idx) - (double) start);
+            if (old == idx)
+                ph = 0.0, rate = 0.0;
+            else
+            {
+                const double dt = pts[(std::size_t) idx].dt;
+                if (dt <= 0.0)
+                    rate = 1.0, ph += 1.0;
+                else
+                    rate = 1.0 / dt, ph *= rate;
+            }
+        }
+        val = start + shape (pts[(std::size_t) idx], ph) * delta;
+    }
+    T[0] = T[1];
+    T[(std::size_t) N + 2] = T[(std::size_t) N + 1];
+    return T;
+}
+
+// ----------------------------------------------------------------------------------------------------- engine
+struct WaveShaperEngine::Impl
+{
+    static constexpr int maxBlock = 512, maxOrder = 4;
+    std::vector<std::int16_t> tables[2]; // bipolar, unipolar
+    double rate = 44100.0;
+    float smoothC = 0.0f, dcA = 0.0f, dcB = 0.96f;
+    // controls
+    int pre = -1, mix = -1, post = -1, order = 0;
+    bool hq = false, smooth = false, center = false, unipolar = false, render = false;
+    float dry = 0.0f, wet = 1.0f, preGain = 1.0f;
+    float sm[3] {}; // smoothed pre, wet, dry (start at 0, as in FL)
+    int stages = -1;
+    HalfBand up[maxOrder][2], down[maxOrder][2];
+    double dc[2][2] {}; // per channel: position, velocity
+    std::vector<float> a[2], b[2];
+
+    Impl()
+    {
+        for (int c = 0; c < 2; ++c)
+        {
+            a[c].assign ((std::size_t) maxBlock << maxOrder, 0.0f);
+            b[c].assign ((std::size_t) maxBlock << maxOrder, 0.0f);
+        }
+    }
+
+    void computeGains() noexcept
+    {
+        const float k = 0.0078125f;
+        const float s0 = (float) pre * k;
+        preGain = F (std::exp ((double) s0 * std::log (4.0)) - 1.0) / 3.0f;
+        const float g = postGain (post);
+        const float m = (float) mix * k;
+        wet = m * g;
+        dry = ((g - wet) * preGain) * g;
+    }
+
+    void resetStages() noexcept
+    {
+        for (auto& s : up)
+            for (auto& h : s)
+                h.clear();
+        for (auto& s : down)
+            for (auto& h : s)
+                h.clear();
+    }
+
+    void dcBlock (float* x, int m, int c) noexcept
+    {
+        // CENTER: a two-pole tracker subtracted from the signal, x87 state kept in long double within the block
+        const X87Mode mode (false);
+        ld pos = dc[c][0], vel = dc[c][1];
+        const ld A = dcA, B = dcB;
+        for (int k = 0; k < m; ++k)
+        {
+            const ld X = x[k];
+            vel = vel + (X - pos) * A;
+            pos = pos + vel;
+            vel = vel * B;
+            x[k] = (float) (X - pos);
+        }
+        auto fl = [] (ld v) { return std::abs (v) <= (ld) kEps ? 0.0 : (double) v; };
+        dc[c][0] = fl (pos);
+        dc[c][1] = fl (vel);
+    }
+
+    void block (float* L, float* R, int n) noexcept
+    {
+        const int k = order > 0 ? (render ? 4 : order) : 0;
+        if (k != stages)
+        {
+            resetStages();
+            stages = k;
+        }
+        float* io[2] = { L, R };
+        float* buf[2] = { L, R };
+        int m = n;
+        for (int c = 0; c < 2 && k > 0; ++c)
+        {
+            const float* src = io[c];
+            int len = n;
+            float* dst = nullptr;
+            for (int s = k - 1; s >= 0; --s)
+            {
+                dst = ((k - 1 - s) & 1) == 0 ? a[c].data() : b[c].data();
+                up[s][c].up (src, dst, len);
+                src = dst;
+                len *= 2;
+            }
+            buf[c] = dst;
+            m = len;
+        }
+        KernelArgs args;
+        args.unipolar = unipolar;
+        const auto& T = tables[unipolar ? 1 : 0];
+        args.T = T.data();
+        args.N = (int) T.size() - 3;
+        const bool interp = render || hq;
+        auto run = [&] (const float* x, float* y, int len) {
+            if (interp)
+                kernelInterp (x, y, len, args);
+            else
+                kernelNearest (x, y, len, args);
+        };
+        if (! smooth)
+        {
+            args.dry = dry, args.wet = wet, args.pre = preGain;
+            for (int c = 0; c < 2; ++c)
+                run (buf[c], buf[c], m);
+        }
+        else
+            for (int i = 0; i < m; ++i)
+            {
+                sm[0] = sm[0] + (preGain - sm[0]) * smoothC;
+                sm[1] = sm[1] + (wet - sm[1]) * smoothC;
+                sm[2] = sm[2] + (dry - sm[2]) * smoothC;
+                args.pre = sm[0], args.wet = sm[1], args.dry = sm[2];
+                run (buf[0] + i, buf[0] + i, 1);
+                run (buf[1] + i, buf[1] + i, 1);
+            }
+        for (int c = 0; c < 2 && k > 0; ++c)
+        {
+            const float* src = buf[c];
+            int len = m;
+            for (int s = k - 1; s >= 0; --s)
+            {
+                float* dst = s == 0 ? io[c] : (src == a[c].data() ? b[c].data() : a[c].data());
+                len /= 2;
+                down[s][c].down (src, dst, len);
+                src = dst;
+            }
+        }
+        if (center)
+        {
+            dcBlock (L, n, 0);
+            dcBlock (R, n, 1);
+        }
+    }
+};
+
+WaveShaperEngine::WaveShaperEngine() : d (std::make_unique<Impl>())
+{
+    setCurve ({});
+    prepare (44100.0);
+}
+WaveShaperEngine::~WaveShaperEngine() = default;
+
+void WaveShaperEngine::setCurve (const std::vector<WsPoint>& points)
+{
+    d->tables[0] = shaperTable (points, false);
+    d->tables[1] = shaperTable (points, true);
+}
+
+void WaveShaperEngine::prepare (double sampleRate) noexcept
+{
+    d->rate = sampleRate > 0 ? sampleRate : 44100.0;
+    // parameter glide: 1 − 0.1^(1/(fs·0.005)); CENTER: 2.2835e-5·44100/fs and 0.96 (§2.7, §2.8)
+    const double den = (double) ((float) d->rate * 0.005f);
+    d->smoothC = F (1.0 - std::exp ((1.0 / den) * std::log (0.1)));
+    d->dcA = F (44100.0 / d->rate * 2.2835e-05);
+    d->dcB = 0.96f;
+    reset();
+}
+
+void WaveShaperEngine::reset() noexcept
+{
+    d->resetStages();
+    d->stages = -1;
+    for (auto& c : d->dc)
+        c[0] = c[1] = 0.0;
+}
+
+void WaveShaperEngine::setControls (int pre, int mix, int post, int oversampling, bool hq, bool smooth, bool center,
+                                    bool unipolar, bool renderMode) noexcept
+{
+    if (pre != d->pre || mix != d->mix || post != d->post)
+    {
+        d->pre = pre, d->mix = mix, d->post = post;
+        d->computeGains();
+    }
+    d->order = std::clamp (oversampling, 0, Impl::maxOrder);
+    d->hq = hq, d->smooth = smooth, d->center = center, d->unipolar = unipolar, d->render = renderMode;
+}
+
+void WaveShaperEngine::process (float* left, float* right, int n) noexcept
+{
+    for (int i = 0; i < n; i += Impl::maxBlock)
+        d->block (left + i, right + i, std::min (Impl::maxBlock, n - i));
+}
+
+namespace
+{
+class WaveShaperEffect final : public Effect
+{
+public:
+    explicit WaveShaperEffect (const std::vector<WsPoint>& points) { engine.setCurve (points); }
+    void prepare (double sampleRate) noexcept override { engine.prepare (sampleRate); }
+    void reset() noexcept override { engine.reset(); }
+    void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
+    {
+        engine.setControls (rawFrom (p[0], 64, 192), rawFrom (p[1], 0, 128), rawFrom (p[2], 0, 128), rawFrom (p[3], 0, 4),
+                            p[4] >= 0.5f, p[5] >= 0.5f, p[6] >= 0.5f, p[7] >= 0.5f, offlineRendering());
+        engine.process (left, right, n);
+    }
+
+private:
+    WaveShaperEngine engine;
+};
+} // namespace
+
+std::unique_ptr<Effect> makeWaveShaper (const std::vector<std::uint8_t>& flState)
+{
+    std::vector<WsPoint> points;
+    if (const auto s = parseWaveShaper (flState))
+        points = s->points;
+    return std::make_unique<WaveShaperEffect> (points);
+}
+} // namespace lynx::flshape
