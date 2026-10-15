@@ -159,8 +159,10 @@ skipped (its coefficients are still kept up to date).
 ### 2.5 Main level **[DECOMP `FUN_006ef6f0`, `FUN_005e4310`, `FUN_005f22e0`]**
 
 `gain = float(exp(float(v·0.01f·0.115129255f)))`, applied first, to the input: copy when it is exactly 1, zeros
-when 0, else a float multiply. A change glides linearly with at most `(44100/rate)·0.001` per sample (host rate);
-the first block after a load or reset starts at the target (no glide).
+when 0, else a float multiply. A change glides linearly over the block with at most `float((44100/rate)·0.001)` per
+frame (rate = the processing rate, ×2 with HQ); the per-frame gains are built by repeated float additions (even and odd
+frames on separate running sums, groups of eight frames, the remainder one by one), and an end value below 2⁻²⁴ is set
+to 0. The first block after a load or a silence reset starts at the target (no glide) **[DECOMP `FUN_005f1090` + EXEC]**.
 
 ### 2.6 Rate **[DECOMP `FUN_005f2430`]**
 
@@ -316,8 +318,9 @@ table of the old rate until the next parameter change (observed); LYNX always us
 
 ## 6. What LYNX does with it
 
-- **`core/ParametricEqFl`** (new): `peqfl::Engine` reproduces §2–§5 on stereo blocks (host blocks split into FL's
+- **`core/ParametricEqFl`** (new): `peqfl::Engine` reproduces §2–§4 on stereo blocks (host blocks split into FL's
   512-frame blocks, interleaved internally); `parsePeq2` / `parsePeq1` read the saved states.
+  **`core/ParametricEqLinear`** (new): the linear-phase FIR of §5 (`peqfl::LinearPhase`), used by the engine.
 - **No new effect kind:** an imported slot stays `EffectKind::parametricEq`, so LYNX's EQ editor keeps working. The
   slot's parameters carry FL's own values (layout in `core/ParametricEqFl.h`): type, frequency (the same 20 Hz…20 kHz
   law LYNX's EQ uses), gain, width, order (Steep 8…Gentle 8), main level, plus an "FL law" marker, the processing
@@ -328,30 +331,47 @@ table of the old rate until the next parameter change (observed); LYNX always us
   offers FL's seven orders for every type; the response curve is computed from FL's coefficients at the rate the
   engine runs.
 - Automation imported from FL: band gain, frequency, width and main level map onto the same parameters.
-- Latency (PDC): 44 samples for the Frequency Splitter resampler mode, plus §5.
+- Latency (PDC): 44 samples for the Frequency Splitter resampler mode, 3N/4 (1536 at 44.1 kHz) in linear phase.
+- Main level: FL's glide on changes (§2.5) in every Parametric EQ 2 mode; v1 applies its level directly.
 - Fallback: a state too short to be FL's keeps the old cookbook mapping of round 7.
 
 ---
 
 ## 7. Verification **[EXEC]**
 
-| Check | Cases | Result |
+LYNX's C++ engine (`cpp/peqcmp`, the same sources as the app, built with zig c++ and with g++) against the DLL on
+**every** saved state of the installation (`t_out.py`; plus `--via`: through the slot parameters):
+
+| Mode (states) | Music, 44.1 kHz, blocks of 512 | Noise, 48 kHz, blocks of 300 (1 state in 4) |
 |---|---|---|
-| Band coefficients, model vs DLL (`t_coef.py`) | 46 states, 317 stages | 294 bit-identical, rest ≤ 3·10⁻¹⁵ relative |
-| LYNX engine vs DLL, music signal (`t_out.py`) | plain states | (pending full run) |
-| | HQ ×2 | (pending) |
-| | HQ through Frequency Splitter's resampler | (pending) |
-| | Parametric EQ v1, all 9 states | 7 bit-identical, worst −170.2 dB |
-| Same, through the slot parameters (`--via`) | sampled states of every mode | identical to the direct path |
-| Unit tests (`tests/tests.cpp` `fruity_parametric_eq_exact`) | our own states: plain, HQ, external resampler, mask, v1; FL import → mixer effect | bit-identical goldens |
+| plain (274) | 259 bit-identical, worst −184.1 dB | 59 of 60 bit-identical, worst −200.6 dB |
+| HQ ×2 (591) | 434 bit-identical, worst −166.0 dB | 127 of 153, worst −174.0 dB |
+| HQ through Frequency Splitter's resampler (204) | 154 bit-identical, worst −169.9 dB | 35 of 50, worst −179.0 dB |
+| alternative design (61) | 58 bit-identical, worst −187.1 dB | 19 of 19 bit-identical |
+| linear phase (8: plain 1, HQ 3, external 1, alternative 3) | −126.9…−134.1 dB | −132.0…−134.6 dB (rate set before the state load, see §5.4) |
+| Parametric EQ v1 (9) | 7 bit-identical, worst −170.2 dB | 7 bit-identical, worst −177.0 dB |
 
-The residual (states that are not bit-identical) comes from the last-bit differences of sin/cos between FL's run-time
-library and the C library (§2.3); LYNX does not replicate the run-time library's polynomials.
+- Through the slot parameters (`--via`, 1 state in 10): identical to the direct path in every mode.
+- Coefficients alone (`t_coef.py`, model vs the DLL's memory after the load, 46 states / 317 stages): 294
+  bit-identical, the rest within 3·10⁻¹⁵ relative.
+- Alternative design alone: 21 000 random `dispatch` calls (§4.2) and 42 synthetic single-band states (all seven
+  codes, random frequency/width/order/gain) bit-identical.
+- Linear phase: every magnitude table bit-identical; mid-stream changes of band gain/frequency/type and of the main
+  level at 44.1/512, 48/300 and 44.1/333 within −127.0…−133.6 dB; FFT sizes 1024 (32 kHz), 2048, 4096 (88.2 kHz).
+- Unit tests (`tests/tests.cpp` `fruity_parametric_eq_exact`): our own states (no FL data) — plain, HQ, external
+  resampler, enable mask, alternative design and v1 bit-identical to DLL goldens, linear phase (plain and HQ) within
+  10⁻⁶; FL import → mixer effect with host blocks of any size, latency, parameter texts, response graph. The
+  real-files test counts every Parametric EQ 2 / Parametric EQ mixer slot of the installation on the FL law.
 
----
+The residual of the IIR modes comes from last-bit differences of sin/cos between FL's run-time library and the C
+library (§2.3): one ulp in a coefficient, a few float roundings later in the output. The linear-phase residual is the
+engine's single-precision FFT (§5.4).
 
 ## 8. Open items
 
 - The parameter smoother option (`0x15E` > 0) is not implemented (no state uses it).
+- Linear phase: the IPP FFT rounding (−127…−135 dB residual); the stale table after a host-rate change (§5.4);
+  quality values other than 2 and fade indices other than 0 follow the decoded tables but no state uses them.
+- Alternative design: engine code 0xB (never produced by the EQ) and the plugin without `engine_x64.dll`.
 - The mixer track EQ (round 6) shares v1's laws (§3.2); LYNX's track EQ was not switched to this engine because the
   float rounding of FLEngine's derived values was not checked by EXEC.
