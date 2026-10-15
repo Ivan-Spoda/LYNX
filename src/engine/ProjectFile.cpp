@@ -168,6 +168,14 @@ const char* effectId (EffectKind k)
         case EffectKind::hyperChorus: return "hyperChorus";
         case EffectKind::vintageChorus: return "vintageChorus";
         case EffectKind::grossBeat: return "grossBeat";
+        case EffectKind::fruityDelayBank: return "fruityDelayBank";
+        case EffectKind::fruityMultiband: return "fruityMultiband";
+        case EffectKind::fruityFastDist: return "fruityFastDist";
+        case EffectKind::fruityFlangus: return "fruityFlangus";
+        case EffectKind::fruityFlanger: return "fruityFlanger";
+        case EffectKind::equo: return "equo";
+        case EffectKind::flPitchShifter: return "flPitchShifter";
+        case EffectKind::frequencySplitter: return "frequencySplitter";
         case EffectKind::fruityFastLP: return "fruityFastLP";
         case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
         case EffectKind::fruityFilter: return "fruityFilter";
@@ -315,6 +323,11 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper, EffectKind::reeverb2, EffectKind::reeverb1, EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                     EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader,
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat,
+                    EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
+                    EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
+                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger,
+                    EffectKind::equo, EffectKind::flPitchShifter,
+                    EffectKind::frequencySplitter,
                     EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter })
         if (id == effectId (k))
             return k;
@@ -689,6 +702,16 @@ juce::String toJson (const Song& song)
 
         if (! tracks.isEmpty())
             root->setProperty ("playlistTracks", tracks);
+
+        // row heights in a separate list, so older versions still read the names and mutes
+        juce::Array<juce::var> heights;
+
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (song.playlistTracks[i].height > 0)
+                heights.add (juce::Array<juce::var> { (int) i, song.playlistTracks[i].height });
+
+        if (! heights.isEmpty())
+            root->setProperty ("playlistTrackHeights", heights);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -1086,6 +1109,18 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     song.playlistTracks.resize (index + 1);
 
                 song.playlistTracks[index] = { t[1].toString().toStdString(), (bool) t[2] };
+            }
+
+    if (auto* heights = root["playlistTrackHeights"].getArray())
+        for (const auto& t : *heights)
+            if (t.isArray() && t.size() == 2 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                song.playlistTracks[index].height = juce::jlimit (0, 400, (int) t[1]);
             }
 
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())

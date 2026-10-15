@@ -1471,10 +1471,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Stereo Shaper" && fx.kind != EffectKind::stereoShaper)
                  || (plugin == "Fruity Stereo Enhancer" && fx.kind != EffectKind::stereoEnhancer)
                  || (plugin == "Transient Processor" && fx.kind != EffectKind::transientProcessor)
-                 || (plugin == "Spreader" && fx.kind != EffectKind::spreader))
+                 || (plugin == "Spreader" && fx.kind != EffectKind::spreader)
+                 || (plugin == "EQUO" && fx.kind != EffectKind::equo)
+                 || (plugin == "Pitch Shifter" && fx.kind != EffectKind::flPitchShifter)
+                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
-                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
+                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
+                 || (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
+                 || (plugin == "Fruity Multiband Compressor" && fx.kind != EffectKind::fruityMultiband))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
@@ -1485,6 +1490,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Filter" && fx.kind != EffectKind::fruityFilter))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
+                 || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
+                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
