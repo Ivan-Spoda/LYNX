@@ -2,6 +2,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
 #include "core/FruityDelay.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
@@ -925,6 +926,29 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     return effectFromFl (pluginName, state, bpm);
 }
 
+std::optional<EffectSlot> fruityDynamicsExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity Limiter / Fruity Compressor engines from the saved controls (REA_rodada48); the approximations
+    // of REA_rodada7 remain for states that cannot be read
+    std::string lower = pluginName;
+    std::transform (lower.begin(), lower.end(), lower.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+    if (lower == "fruity limiter")
+        if (const auto s = fldyn::parseLimiter (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityLimiter);
+            fldyn::limiterToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (lower == "fruity compressor")
+        if (const auto s = fldyn::parseCompressor (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityCompressor);
+            fldyn::compressorToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> fruityDelayExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
 {
     // FL's own Fruity Delay 2 / Delay 3 engines from the saved controls (REA_rodada52); the approximations of
@@ -951,6 +975,8 @@ std::optional<EffectSlot> fruityDelayExact (const std::string& pluginName, const
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (auto exact = fruityDelayExact (pluginName, state))
+        return exact;
+    if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
@@ -1110,6 +1136,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
     switch (kind)
     {
         case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
+        case EffectKind::fruityLimiter: return { "Fruity Limiter" };
+        case EffectKind::fruityCompressor: return { "Fruity Compressor" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb: return { "Fruity Reeverb 2" };
@@ -1124,7 +1152,12 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
 {
     auto is = [&] (const char* n) { return pluginName == n; };
 
-    // the exact Fruity Delay 2 / 3 take FL's controls as they are (value over the control's range)
+    // the exact Fruity Limiter / Compressor take FL's controls as they are (value over the control's range)
+    if (is ("Fruity Limiter") && k >= 0 && k < fldyn::limiterControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    if (is ("Fruity Compressor") && k >= 0 && k < fldyn::compressorControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Fruity Delay 2 / 3 likewise
     if (is ("Fruity Delay 2") && k >= 0 && k < fldelay::delay2Controls)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Fruity Delay 3") && k >= 0 && k < fldelay::delay3Controls)

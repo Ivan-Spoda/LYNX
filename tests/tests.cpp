@@ -42,6 +42,7 @@
 #include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
 #include "core/FruityDelay.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -7461,6 +7462,113 @@ TEST (harmless_rack)
         masterMid[0x1fc] = 1; // "Master Mid mode": not decoded
         CHECK (lynx::hlfx::makeMaximusPreset (masterMid) == nullptr);
     }
+}
+
+TEST (fruity_dynamics_engines)
+{
+    // REA_rodada48: Fruity Limiter / Fruity Compressor, states of our own against the installation's DLLs
+    // (goldens = the DLL's output for the same input, EXEC; blocks of 512 at 44.1 kHz)
+    std::vector<float> inL (4096), inR (4096), side (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+        side[(std::size_t) i] = (float) (0.9 * std::sin (2.0 * 3.141592653589793 * 55.0 * i / 44100.0));
+    }
+    auto put = [] (std::vector<std::uint8_t>& b, std::int32_t v) {
+        std::uint8_t q[4];
+        std::memcpy (q, &v, 4);
+        b.insert (b.end(), q, q + 4);
+    };
+    auto limiterState = [&] (std::array<int, 18> p, int k = 0, int exact = 0) {
+        std::vector<std::uint8_t> b;
+        put (b, 7);
+        for (auto v : p)
+            put (b, v);
+        b.resize (0xA4, 0);
+        put (b, k);
+        b.push_back ((std::uint8_t) exact);
+        return b;
+    };
+    auto compressorState = [&] (int version, std::array<int, 6> p, int flags, int k = 0) {
+        std::vector<std::uint8_t> b;
+        put (b, version);
+        for (auto v : p)
+            put (b, v);
+        put (b, flags);
+        if (version > 2)
+            put (b, k);
+        return b;
+    };
+    struct Out { std::vector<float> l, r; int latency = 0; };
+    auto run = [&] (const lynx::EffectSlot& slot, bool sidechain) {
+        auto fx = lynx::makeEffect (slot);
+        fx->prepare (44100.0);
+        Out o { inL, inR };
+        for (int s = 0; s < 4096; s += 512)
+        {
+            if (sidechain)
+                fx->setSidechain (side.data() + s, side.data() + s);
+            fx->process (o.l.data() + s, o.r.data() + s, 512, slot.params, 120.0);
+        }
+        o.latency = fx->latencySamples();
+        return o;
+    };
+    auto check = [] (const Out& out, const std::vector<std::tuple<int, float, float>>& golden) {
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (out.l[(std::size_t) i] - gl) < 2e-6f && std::abs (out.r[(std::size_t) i] - gr) < 2e-6f);
+    };
+    auto limiter = [] (const std::vector<std::uint8_t>& st) {
+        auto slot = lynx::effectFromFl ("Fruity Limiter", st);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruityLimiter);
+        return *slot;
+    };
+    // look-ahead limiter: +4 dB gain into a −2.5 dB ceiling, 2 ms attack (88 samples of latency); bit-identical
+    const auto a = run (limiter (limiterState ({ 1300, 1000, 800, 1115, 3, 5000, 3, 2882, 1000, 0, 0, 0, 6666, 1, 650, 1000, 0, 4187 })), false);
+    CHECK (a.latency == 88);
+    check (a, { { 100, 0.0176312141f, 0.621841073f }, { 1000, 0.401142687f, -0.442239583f }, { 2047, -0.19392401f, 0.499310732f },
+                { 3000, 0.22835508f, -0.267458469f }, { 4095, -0.089728713f, -0.107289009f } });
+    // compressor section with a positive knee, 2 compressor curve stages and soft saturation (port within −143 dB)
+    check (run (limiter (limiterState ({ 1000, 900, 1000, 0, 3, 5000, 3, 2882, 400, 600, 400, 1115, 6666, 2, 650, 1000, 0, 4187 })), false),
+           { { 100, -0.00208989787f, 0.0100310864f }, { 1000, -0.0545219742f, -0.0651496574f }, { 2047, 0.177322432f, -0.230846375f },
+             { 3000, -0.159136176f, -0.183688983f }, { 4095, -0.300143838f, 0.299418598f } });
+    // sidechained compressor (side input 1) with a negative knee, noise gate and the exact-ceiling option
+    check (run (limiter (limiterState ({ 1000, 1000, 1000, 0, 3, 3000, 5, 2882, 300, 1000, -500, 500, 5000, 1, 1000, 0, 250, 4187 }, 1, 1)), true),
+           { { 100, -0.00186592329f, 0.00895605329f }, { 1000, -0.0375732854f, -0.0448972471f }, { 2047, 0.124697573f, -0.162336946f },
+             { 3000, -0.111069582f, -0.128206298f }, { 4095, -0.218446419f, 0.21791859f } });
+
+    auto compressor = [] (const std::vector<std::uint8_t>& st) {
+        auto slot = lynx::effectFromFl ("Fruity Compressor", st);
+        CHECK (slot && slot->kind == lynx::EffectKind::fruityCompressor);
+        return *slot;
+    };
+    // Vintage type, look-ahead flag, side input 1: bit-identical
+    const auto ca = run (compressor (compressorState (3, { -200, 40, 30, 50, 300, 2 }, 1, 1)), true);
+    CHECK (ca.latency == 64);
+    check (ca, { { 100, 0.0795554966f, -0.230549783f }, { 1000, 0.483903229f, 0.0241768137f }, { 2047, -0.596430957f, -0.441769004f },
+                 { 3000, 0.597724319f, -0.18129006f }, { 4095, 0.607042372f, 0.435067475f } });
+    // Soft/R, version 2 without the flag (the output is still 64 frames late, but not reported): bit-identical
+    const auto cb = run (compressor (compressorState (2, { -150, 80, 0, 150, 100, 7 }, 0)), false);
+    CHECK (cb.latency == 0);
+    check (cb, { { 100, 0.0813739002f, -0.235819489f }, { 1000, 0.264188439f, 0.0131994039f }, { 2047, -0.260424435f, -0.192893147f },
+                 { 3000, 0.251500547f, -0.0762802213f }, { 4095, 0.252972007f, 0.181305125f } });
+
+    // the slot's parameters carry FL's raw controls exactly (and survive the 4-decimal project file)
+    const auto st = limiterState ({ 1261, 995, 1303, 1115, 3, 5000, 3, 2882, 264, 244, -590, 1115, 6666, 1, 650, 1000, 0, 4187 }, 1);
+    const auto parsed = lynx::fldyn::parseLimiter (st);
+    CHECK (parsed && parsed->sidechain == 1 && ! parsed->exactCeiling);
+    const auto slot = limiter (st);
+    for (int i = 0; i < lynx::fldyn::limiterControls; ++i)
+    {
+        const auto rounded = std::round (slot.params[(std::size_t) i] * 10000.0f) / 10000.0f;
+        CHECK (lynx::fldyn::raw (rounded, lynx::fldyn::limiterMin[(std::size_t) i], lynx::fldyn::limiterMax[(std::size_t) i]) == parsed->p[(std::size_t) i]);
+    }
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityLimiter, 3, slot.params[3], 120.0) == "2.0 ms");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityCompressor, 5, 2.0f / 7.0f, 120.0) == "Vintage");
+    // unreadable states keep the old approximation
+    CHECK (lynx::effectFromFl ("Fruity Limiter", { 7, 0, 0, 0 }).has_value() == false
+           || lynx::effectFromFl ("Fruity Limiter", { 7, 0, 0, 0 })->kind != lynx::EffectKind::fruityLimiter);
+    CHECK (! lynx::fldyn::parseCompressor ({ 4, 0, 0, 0 }));
 }
 
 TEST (maximus_engine)
