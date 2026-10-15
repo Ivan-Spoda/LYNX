@@ -60,7 +60,7 @@ jobs:
       # Only the downloaded toolchain is cached (checksums verified on download); the app is always built from scratch.
       - name: Cache toolchain
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/opt
           key: toolchain-zig${{ env.ZIG_VERSION }}-juce${{ env.JUCE_VERSION }}-${{ env.ZIG_SHA256 }}-${{ env.JUCE_SHA256 }}
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload unsigned LYNX.exe
         id: upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LYNX-unsigned
           path: build-win/LYNX.exe
@@ -120,7 +120,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Upload signed LYNX.exe
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LYNX-signed
           path: signed/LYNX.exe
@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download LYNX.exe
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.sign.result == 'success' && 'LYNX-signed' || 'LYNX-unsigned' }}
           path: bin
@@ -180,7 +180,7 @@ jobs:
           Pop-Location
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LYNX-${{ env.LABEL }}-windows-x64
           path: dist/*
