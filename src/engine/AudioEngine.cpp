@@ -259,6 +259,12 @@ void AudioEngine::previewFile (const juce::File& file)
         preview->play (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
 }
 
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample)
+{
+    if (preview != nullptr)
+        preview->play (std::move (sample));
+}
+
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
     NoteEvent e;

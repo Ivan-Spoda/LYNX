@@ -49,7 +49,8 @@ target_include_directories(lynx_core PUBLIC src)
 target_sources(lynx_core PRIVATE
     src/core/KeyMap.cpp
     src/core/Workspace.cpp
-    src/core/RackOps.cpp)
+    src/core/RackOps.cpp
+    src/core/StartupSound.cpp)
 
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
@@ -124,7 +125,8 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/Workspace.cpp
         src/ui/ValueControl.cpp
-        src/ui/Dialogs.cpp)
+        src/ui/Dialogs.cpp
+        src/ui/Splash.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 
