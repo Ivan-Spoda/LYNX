@@ -10798,3 +10798,4 @@ TEST (fruity_delay_engines)
     }
 }
 #include "UiRackMixerTests.inc"
+#include "UiPolish2Tests.inc"

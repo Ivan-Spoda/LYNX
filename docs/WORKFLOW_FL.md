@@ -530,7 +530,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| B1 | Partial | Selecting an audio file previews it (`ui/BrowserComponent.cpp:136-142`) |
+| B1 | **Done** | A click on an audio file previews it (again on every click); the **preview strip** under the tree shows its waveform, length, rate and the playback position, and can be clicked (hear again) or dragged like the file. The tree is LYNX's own (`BrowserComponent::FileTree`): one click opens / closes a folder, hover highlight, per-type icons, the playing file in red, Left/Right close / open folders, right-click folder menu (collapse all, show in the file manager, add folder), and every row explains itself in the hint bar [DOC][br-use] |
 | B2 | **Done** | Browser focused: Up/Down step and preview; **Shift+Up/Down step and load each file into the selected channel** (sampler or built-in drum); also through the search results |
 | B3 | **Done** | **Enter loads the selected file into the selected channel** (or opens it like a double-click when the channel can't take it); double-click still makes a new channel |
 | B4 | Partial | Rack and Playlist accept drops (tree and search results); dropping onto a rack row replaces that channel's sample; **effect presets (.fst) drop on the effects panel**. No instrument-on-insert drop |
@@ -913,7 +913,9 @@ action and when Ctrl/Shift/Alt are pressed or released. Wheel scrolling glides; 
   such as Channel presets, Projects, Current project and Plugin database. Search and filters are at the bottom by
   default. [DOC][br]
 
-**LYNX**: the Browser stays docked on the left. A tabbed tree like FL's is left for later (P2).
+**LYNX**: the Browser stays docked on the left. Its tree is drawn by LYNX (one-click folders, hover, type icons, the
+sample being previewed in red) with a waveform preview strip at the bottom (UI-D). A tabbed tree like FL's is
+left for later (P2).
 
 ### 5.5 Start-up splash
 - FL shows a splash with its version while it starts. A General setting turns it off. [DOC][envgen]

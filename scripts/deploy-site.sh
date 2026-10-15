@@ -14,3 +14,5 @@ H=(-H "X-Auth: $AK" -H "X-Auth-Rest: $RK" -H 'Tus-Resumable: 1.0.0')
 curl -sf -o /dev/null -X POST "$URL/lynx-site.zip?override=true" "${H[@]}" -H "Upload-Length: $SIZE" -H 'Upload-Offset: 0'
 curl -sf -o /dev/null -X PATCH "$URL/lynx-site.zip?override=true" "${H[@]}" -H 'Upload-Offset: 0' -H 'Content-Type: application/offset+octet-stream' --data-binary @"$ZIP"
 curl -sf -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"archive_path":"lynx-site.zip"}' $B/api/hosting/v1/accounts/$USER_/websites/$DOMAIN/deploy; echo
+# the CDN keeps assets for 30 days: purge it so the new files show up at once
+curl -sf -X DELETE -H "Authorization: Bearer $T" "$B/api/hosting/v1/accounts/$USER_/websites/$DOMAIN/cache/clear"; echo
