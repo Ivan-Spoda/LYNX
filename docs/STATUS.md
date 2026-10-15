@@ -86,10 +86,16 @@ exports the 30 demo projects shipped with FL Studio 2026.
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
   models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
   9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
-  installation); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw
+  installation); MiniSynth on its engine (REA round 41: wrapper, 99 voices, the ten oscillator kinds on the 1024
+  tables built from the user's `oscdata.dat`, the exact matrix filter, envelopes, LFO and its four effects; bit-identical
+  to FL's DLL on 11 of the 12 states of FL's projects and 47 of its 91 presets, the rest within −107…−147 dB); Fruity
+  DX10 on its engine with the channel processor it keeps (REA round 42: bit-identical to the reference model, which is
+  bit-identical to FL's DLL on all 64 distinct installation states and on the 12 project channels with their channel
+  envelopes/filter); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw
   state; bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's
   low/high-cut coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Kepler, Autogun,
-  MiniSynth, DX10, Fruit Kick, Toxic Biohazard and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  Fruit Kick, Toxic Biohazard and BassDrum on the built-in synth; Sakura and
+  Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -195,7 +201,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
   "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
   approximation: 4.9 s), the other demos with Ogun channels within ±6 s of before.
-- **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
+- **MiniSynth:** its own instrument (`core/MiniSynth.cpp`, REA round 41): FL's wrapper (velocity from Init.Vol,
+  per-note FinalLevels tables, engine calls of ≤ 512 samples in 32-sample blocks, voice kill), POLY/MONO/LEAD voice
+  allocation with glide from the last note, the ten oscillator kinds as phased/detuned table saws with dithered reads on
+  1024 band-limited tables built at run time from the user's `Minisynth\oscdata.dat`, noise, drift, the 4-pole filter
+  integrated exactly per sample (4096 sub-steps by 12 matrix squarings) with its saturating first stage and DC blocker,
+  both envelopes, the engine LFO (song-locked while the transport plays) and the effects (distortion + decimator, tempo
+  delay, 6-stage phaser, chorus) — bit-identical to `rea-work/r41/py/msmodel.py` on all 12 installation states and 91
+  presets, and bit-identical to FL's DLL on 11/12 and 47/91 (the others within −107…−147 dB: last-bit differences of
+  the C runtime's sin/pow). Not reproducible by design: the random generator is process-global in FL (LYNX: one per
+  instance, started like a fresh plugin). FL's max-polyphony value at channel creation is not confirmed (LYNX: 0 → 99
+  voices). Without `oscdata.dat` the importer keeps the internal-synth approximation.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
   key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
   saturation, LP/BP/HP outputs); FL's filter envelope (time law `max(50x⁴, 0.00101)` s, exponential stages chosen
@@ -215,6 +231,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   instance), so noise, dither and the random start phases of fresh voices differ from any given FL render (LYNX starts
   one generator per instance like a freshly created plugin). FL's max-polyphony value at channel creation is not
   confirmed (LYNX uses 0 → 99 voices). Without the wave files the importer keeps the 3-oscillator approximation.
+- **Fruity DX10:** its own instrument (`core/Dx10.cpp`, REA round 42): the voice (two parallel sine modulators on
+  the host's sine table with Init → Sustain → release level glides, the Waveform shaper, Mod Thru, the 1.2/peak
+  normalised amplitude envelope, the plugin-wide vibrato, voice stealing, re-tuning on Final.Pitch changes) and the
+  plugin voice processor DX10 keeps: the channel's five INS articulators stepped per sequencer tick (never released,
+  as in FL), the eight filter types on the x87 path, FL's x87 pan law with its gain ramps and the 441-sample end fade —
+  bit-identical to our round-42 reference model (`r42/py/dxmodel.py` + `dxproc.py`), which matches the DLL bit for
+  bit on 64/64 states, 12/12 project channels with their settings and the synthetic batteries. Version-1 states take
+  the channel's 0xDA/0xDB records as their settings (FL's host hands them to the plugin: inference); the project's
+  PPQ sets the tick rate.
 - **PoiZone:** its own instrument (`core/PoiZone.cpp`, REA round 44; the channel keeps the plugin's raw state): FL's
   wrapper (velocity from Init.Vol, per-note FinalLevels tables, chunks of 64 samples), the 1 024-voice list (poly with
   stealing, mono legato with return to the nearest held key, 4 glide modes, unison 1–16 with detune/pan, octaver, analog
@@ -319,6 +344,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
   demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
   (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
+- Fruity DX10 (REA round 42 §4–5): the end-fade table uses the exact cosine (FL: IPP's 11-bit cosine; −129 dB worst
+  case); FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
+  sequencer ticks are inferences (LYNX ticks on the song's PPQ grid while playing, free-running otherwise); global
+  LFOs ignore song-position jumps; notes have no Mod X/Y; the filters are bit-exact only where long double is the x87
+  format.
 - Sytrus: chaotic FM patches (two-way FM loops, strong self-feedback) cannot be sample-exact — FL builds sine tables
   with IPP's tone generator (≈1 ulp from an exact sine) and the chaos amplifies it (statistically equivalent);
   random maps use a fixed per-instance seed (FL's is clock-seeded, so they are not reproducible in FL either); the

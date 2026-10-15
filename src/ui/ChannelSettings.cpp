@@ -9,8 +9,10 @@
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
 #include "core/Gms.h"
+#include "core/MiniSynth.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
+#include "core/Dx10.h"
 #include "core/PoiZone.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
@@ -480,6 +482,8 @@ public:
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
         ogun = def.instrument == InstrumentKind::ogun;
+        miniSynth = def.instrument == InstrumentKind::minisynth;
+        dx10 = def.instrument == InstrumentKind::dx10;
         poizone = def.instrument == InstrumentKind::poizone;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
@@ -572,13 +576,20 @@ public:
         static const FloatKnob morphineKnobs[] = {
             { 0, "Master" }, { 9, "Attack" }, { 10, "Decay" }, { 11, "Sustain" }, { 12, "Release" }, { 1, "Glide" }, { 4, "Vel curve" },
             { 7, "Overdrive" }, { 14, "Chorus mix" }, { 21, "Delay mix" }, { 25, "Reverb mix" }, { 36, "Noise mix" } };
+        // MiniSynth: its 43 floats 0…1 inside the saved state (REA_rodada41 §1.2)
+        static const FloatKnob miniSynthKnobs[] = {
+            { 5, "Osc kind" }, { 6, "Osc mod" }, { 7, "Noise" }, { 1, "Transpose" }, { 8, "Cutoff" }, { 9, "Resonance" },
+            { 16, "Filter env" }, { 21, "Attack" }, { 22, "Decay" }, { 23, "Sustain" }, { 24, "Release" }, { 20, "LFO amount" },
+            { 19, "LFO rate" }, { 2, "Slide time" } };
         // PoiZone: the plugin's own floats P[i] inside the saved state (REA_rodada44 §1.3)
         static const FloatKnob poizoneKnobs[] = {
             { 15, "Gain" }, { 8, "Osc balance" }, { 9, "Noise" }, { 18, "Cutoff" }, { 19, "Resonance" }, { 10, "EG amount" },
             { 22, "Attack" }, { 23, "Decay" }, { 24, "Sustain" }, { 25, "Release" }, { 26, "LFO amount" }, { 28, "LFO rate" },
             { 46, "Glide" }, { 38, "Delay wet" }, { 42, "Chorus wet" }, { 47, "Gate mix" } };
-        auto paramOffset = [&] (const std::vector<std::uint8_t>& st, int index) {
-            return gms ? gmsParamOffset (st, index) : poizone ? poizoneParamOffset (st, index) : morphineParamOffset (st, index);
+        auto paramOffset = [this] (const std::vector<std::uint8_t>& st, int index) {
+            return gms ? gmsParamOffset (st, index)
+                       : miniSynth ? miniSynthParamOffset (st, index)
+                       : poizone ? poizoneParamOffset (st, index) : morphineParamOffset (st, index);
         };
         auto addFloat = [&] (const FloatKnob& k) {
             const auto at = paramOffset (def.pluginState, k.index);
@@ -591,11 +602,10 @@ public:
             knob->setRange (0.0, 1.0, 0.001);
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
-            knob->onValueChange = [this, k, isGms = gms, isPoiZone = poizone, s = knob.get()] {
-                engine.editSong ([c = channel, k, isGms, isPoiZone, v = (float) s->getValue()] (Song& song) {
+            knob->onValueChange = [this, k, paramOffset, s = knob.get()] {
+                engine.editSong ([c = channel, k, paramOffset, v = (float) s->getValue()] (Song& song) {
                     auto& st = song.channels[(std::size_t) c].pluginState;
-                    const auto o = isGms ? gmsParamOffset (st, k.index) : isPoiZone ? poizoneParamOffset (st, k.index) : morphineParamOffset (st, k.index);
-                    if (o >= 0)
+                    if (const auto o = paramOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
             };
@@ -625,7 +635,35 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        if (gms)
+        // Fruity DX10: the 22 raw FL integers of the saved state (REA_rodada42 §1.2)
+        static const Ranged dx10Knobs[] = {
+            { 0, "Attack", 0, 65536 }, { 1, "Decay", 0, 65536 }, { 2, "Release", 0, 65536 }, { 21, "Coarse", -3, 3 },
+            { 11, "Waveform", 0, 65536 }, { 10, "Vibrato", 0, 65536 }, { 13, "LFO rate", 0, 65536 },
+            { 3, "Mod 1 coarse", 0, 65536 }, { 4, "Mod 1 fine", 0, 65536 }, { 5, "Mod 1 init", 0, 65536 }, { 6, "Mod 1 time", 0, 65536 },
+            { 7, "Mod 1 sustain", 0, 65536 }, { 8, "Mod 1 release", 0, 65536 }, { 9, "Mod 1 velocity", 0, 65536 },
+            { 14, "Mod 2 coarse", 0, 65536 }, { 15, "Mod 2 fine", 0, 65536 }, { 16, "Mod 2 init", 0, 65536 }, { 17, "Mod 2 time", 0, 65536 },
+            { 18, "Mod 2 sustain", 0, 65536 }, { 19, "Mod 2 release", 0, 65536 }, { 20, "Mod 2 velocity", 0, 65536 }, { 12, "Mod thru", 0, 65536 } };
+        auto addDx10 = [&] (const Ranged& k) {
+            const auto value = dx10Param (def.pluginState, k.index);
+            if (! value)
+                return;
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (k.low, k.high, 1.0);
+            knob->setValue (*value, juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, index = k.index, s = knob.get()] {
+                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
+                    dx10SetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (dx10)
+            for (const auto& k : dx10Knobs)
+                addDx10 (k);
+        else if (gms)
             for (const auto& k : gmsKnobs)
                 addFloat (k);
         else if (morphine)
@@ -633,6 +671,9 @@ public:
                 addFloat (k);
         else if (poizone)
             for (const auto& k : poizoneKnobs)
+                addFloat (k);
+        else if (miniSynth)
+            for (const auto& k : miniSynthKnobs)
                 addFloat (k);
         else if (ogun)
             for (const auto& k : ogunKnobs)
@@ -655,7 +696,7 @@ public:
         else
             for (const auto& [index, name] : drumpadKnobs)
                 add (index, name);
-        setSize (720, 384);
+        setSize (720, dx10 ? 500 : 384);
     }
 
     void paint (juce::Graphics& g) override
@@ -672,6 +713,8 @@ public:
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
                     : poizone ? tr ("PoiZone — FL's engine with its gate, chorus, delay and arpeggiator (new settings restart the voices)")
+                    : miniSynth ? tr ("MiniSynth — FL's engine with its effects (wave tables read from your FL installation)")
+                    : dx10 ? tr ("Fruity DX10 — FL's FM engine")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -691,7 +734,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, poizone = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, poizone = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1323,7 +1366,8 @@ public:
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::poizone)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::poizone)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1404,6 +1448,8 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::gms:
         case InstrumentKind::morphine:
         case InstrumentKind::ogun:
+        case InstrumentKind::minisynth:
+        case InstrumentKind::dx10:
         case InstrumentKind::poizone:
             return true;
         default:
@@ -1438,7 +1484,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::poizone)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::poizone)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
