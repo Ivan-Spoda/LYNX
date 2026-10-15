@@ -8,6 +8,7 @@
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
+#include "ui/WaveformView.h"
 
 namespace lynx
 {
@@ -559,10 +560,19 @@ private:
 
 class BrowserComponent::PreviewStrip final : public juce::Component,
                                              public ui::HintSource,
-                                             private juce::Timer
+                                             private juce::Timer,
+                                             private juce::ChangeListener
 {
 public:
-    explicit PreviewStrip (BrowserComponent& b) : browser (b) {}
+    explicit PreviewStrip (BrowserComponent& b) : browser (b) { ui::WaveformCache::getInstance()->addChangeListener (this); }
+
+    ~PreviewStrip() override
+    {
+        if (auto* cache = ui::WaveformCache::getInstanceWithoutCreating())
+            cache->removeChangeListener (this);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); } // the spectral waveform is ready
 
     void show (const juce::File& f, bool playing)
     {
@@ -647,6 +657,22 @@ public:
         const auto mid = wave.getCentreY();
         const auto progress = position();
         const auto playedX = wave.getX() + wave.getWidth() * (float) progress;
+
+        // the detailed, frequency-coloured waveform (ui/WaveformView) once analysed; the quick peaks until then
+        const auto path = file.getFullPathName();
+        if (const auto summary = ui::WaveformCache::getInstance()->find (path, [this, path] { return browser.engine.getSampleLibrary().load (path); }))
+        {
+            ui::paintWaveform (g, wave, *summary, 0.0, (double) summary->frames / juce::jmax (1.0f, wave.getWidth()),
+                               ui::currentWaveStyle (textSecondary, ui::normalisingGain (*summary)));
+            if (progress > 0.0)
+            {
+                g.setColour (accent.withAlpha (0.22f)); // the part already heard
+                g.fillRect (juce::Rectangle<float>::leftTopRightBottom (wave.getX(), wave.getY(), playedX, wave.getBottom()));
+                g.setColour (textPrimary);
+                g.fillRect (playedX, wave.getY(), 1.0f, wave.getHeight());
+            }
+            return;
+        }
 
         for (int x = 0; x < (int) wave.getWidth(); ++x)
         {
@@ -900,6 +926,11 @@ void BrowserComponent::resized()
 void BrowserComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::colour::bg2);
+}
+
+void BrowserComponent::showPreviewForSnapshot (const juce::File& file)
+{
+    strip->show (file, false);
 }
 
 void BrowserComponent::fileSelected (const juce::File& file, bool preview)

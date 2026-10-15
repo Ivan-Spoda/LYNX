@@ -178,7 +178,9 @@ A report lists what was converted, what is approximated and what was left out. F
 
 Grab the `.zip` from the [latest release](https://github.com/Ka1-S/LYNX/releases/latest), extract it and run `LYNX.exe`
 (Windows 10/11, 64-bit; no installer). The zip includes a demo project (`Demo.lynx`). The executable is not code-signed
-yet, so SmartScreen may warn on first launch (*More info* → *Run anyway*).
+yet, so SmartScreen may warn on first launch (*More info* → *Run anyway*); see [Code signing policy](#code-signing-policy).
+Release files are built from the tagged source by GitHub Actions ([`release.yml`](.github/workflows/release.yml)) and
+listed with their SHA-256 in `SHA256SUMS.txt`.
 
 ## Command line
 
@@ -267,6 +269,8 @@ docs/         architecture, status, roadmap and the behavioural analysis of FL S
 | [`docs/STATUS.md`](docs/STATUS.md) | what works, what is approximated and what is missing |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | project phases |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how the engine and the UI are organised |
+| [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) | how releases are built and code-signed (SignPath) |
+| [`PRIVACY.md`](PRIVACY.md) | privacy policy: LYNX makes no network connections of its own |
 | [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) | a script for listening to and poking at what the automated tests don't cover |
 | [`docs/analise/`](docs/analise) | FL Studio's behaviour, documented round by round (clean-room) |
 
@@ -280,6 +284,22 @@ LYNX is an independent implementation. FL Studio was studied only to understand 
 FL Studio is a registered trademark of Image-Line Software. LYNX is not affiliated with Image-Line. VST is a registered trademark of Steinberg Media Technologies GmbH.
 
 Built with [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap), the [WavPack](https://www.wavpack.com) decoder and the Steinberg ASIO SDK — their licences are listed in [`THIRD_PARTY.md`](THIRD_PARTY.md).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). *(Pending approval: until the application is accepted, release
+binaries are not signed.)*
+
+- Release binaries are built only from this repository by GitHub Actions
+  ([`.github/workflows/release.yml`](.github/workflows/release.yml)); nothing built on a personal machine is signed.
+- Every signing request is approved manually for each release.
+- Team roles:
+  - Committers and reviewers ("Authors" and "Reviewers"): [Ka1-S](https://github.com/Ka1-S)
+  - Approvers: [Ka1-S](https://github.com/Ka1-S)
+
+**Privacy:** This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. See [`PRIVACY.md`](PRIVACY.md).
 
 ## License
 

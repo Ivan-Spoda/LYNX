@@ -1,0 +1,119 @@
+#pragma once
+
+// Detailed, frequency-coloured waveforms (Playlist audio clips, the Sampler editor, the Browser preview).
+//
+//  - WaveformCache: one core/WaveAnalysis Summary per audio file, built on a background thread (never the
+//    audio or UI thread), kept in memory and on disk (%APPDATA%\LYNX\wavecache, keyed by path + size + date).
+//    It broadcasts a change when a waveform becomes ready, so views just repaint.
+//  - paintWaveform(): draws any frame range of a Summary straight into a pixel buffer (one image per call,
+//    physical-pixel resolution, anti-aliased peak and RMS edges), so many clips still scroll smoothly.
+//  - WaveformDisplay: a small component that shows a whole file (Sampler editor, Browser preview strip).
+//
+// Settings (Options > Waveforms): spectral colours (default) or the classic one-colour waveform; stereo
+// (left and right in two lanes) or merged.
+
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "core/Instruments.h"
+#include "core/WaveAnalysis.h"
+
+namespace lynx::ui
+{
+class WaveformCache final : public juce::ChangeBroadcaster,
+                            private juce::DeletedAtShutdown
+{
+public:
+    WaveformCache();
+    ~WaveformCache() override;
+
+    JUCE_DECLARE_SINGLETON_SINGLETHREADED_INLINE (WaveformCache, true)
+
+    using Source = std::function<std::shared_ptr<const SampleData>()>;
+
+    // UI thread. The waveform of `path`, or nullptr while it is being analysed (or could not be read).
+    // The first call starts the analysis: with the audio from `source` when given (already decoded by the
+    // engine, so nothing is decoded twice), otherwise the file is decoded on the worker thread.
+    std::shared_ptr<const wave::Summary> find (const juce::String& path, const Source& source = {});
+    bool isPending (const juce::String& path) const;
+    bool hasFailed (const juce::String& path) const;
+
+    // --snapshot / tests: waits until every queued analysis is done.
+    bool waitUntilIdle (int timeoutMs);
+
+    // the settings changed: every view repaints
+    void settingsChanged() { sendChangeMessage(); }
+
+    static juce::File diskFolder();
+
+    // paintWaveform()'s pixel buffer (message thread only)
+    juce::Image& scratchImage() noexcept { return scratch; }
+
+    // Options > Waveforms (kept in the UI settings)
+    static inline bool spectral = true;
+    static inline bool stereo = false;
+
+private:
+    class Job;
+    void finished (const juce::String& path, std::shared_ptr<const wave::Summary> summary);
+
+    mutable std::mutex lock;
+    std::map<juce::String, std::shared_ptr<const wave::Summary>> ready;
+    std::map<juce::String, bool> state; // true = pending, false = failed
+    std::atomic<bool> cancel { false };
+    juce::AudioFormatManager formats;
+    juce::Image scratch;
+    juce::ThreadPool pool { juce::ThreadPoolOptions {}.withThreadName ("LYNX waveforms").withNumberOfThreads (2) };
+};
+
+struct WaveStyle
+{
+    juce::Colour classic { 0xff7fa8d6 }; // colour of the classic waveform
+    bool spectral = true;
+    bool stereo = false;
+    float gain = 1.0f; // display gain (normalisation)
+};
+
+// Draws the summary into `body`: pixel column x shows frames [startFrame + x * framesPerPixel, + framesPerPixel)
+// (a negative framesPerPixel draws backwards, for reversed samples). Only the part inside g's clip is drawn.
+void paintWaveform (juce::Graphics& g, juce::Rectangle<float> body, const wave::Summary& summary, double startFrame,
+                    double framesPerPixel, const WaveStyle& style);
+
+// Style from the current settings.
+WaveStyle currentWaveStyle (juce::Colour classic, float gain = 1.0f);
+
+// Display gain that makes the file's peak fill the height (at most +24 dB, so silence stays silent).
+float normalisingGain (const wave::Summary& summary);
+
+// A whole audio file: waveform, optional region (start/end fractions) and a caption.
+class WaveformDisplay final : public juce::Component,
+                              public juce::SettableTooltipClient,
+                              private juce::ChangeListener
+{
+public:
+    WaveformDisplay();
+    ~WaveformDisplay() override;
+
+    void setFile (const juce::String& path, WaveformCache::Source source = {});
+    const juce::String& getFile() const noexcept { return path; }
+    void setRegion (float start, float end);
+    void setReversed (bool reversed);
+    void setCaption (const juce::String& text); // drawn top-left (empty: file name and length)
+    void setEmptyText (const juce::String& text);
+
+    void paint (juce::Graphics& g) override;
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+
+    juce::String path, caption, emptyText;
+    WaveformCache::Source source;
+    float regionStart = 0.0f, regionEnd = 1.0f;
+    bool reversed = false;
+};
+} // namespace lynx::ui

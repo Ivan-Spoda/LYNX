@@ -42,6 +42,8 @@ add_library(lynx_core STATIC
     src/core/BassDrum.cpp
     src/core/Ogun.cpp
     src/core/MiniSynth.cpp
+    src/core/SimSynth.cpp
+    src/core/Wasp.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp
@@ -89,6 +91,10 @@ target_sources(lynx_core PRIVATE
     src/core/History.cpp
     src/core/SearchQuery.cpp)
 
+# spectral waveforms: band analysis and multi-resolution peak cache
+target_sources(lynx_core PRIVATE
+    src/core/WaveAnalysis.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
@@ -124,7 +130,9 @@ if(LYNX_BUILD_APP)
 
     juce_add_gui_app(LYNX
         PRODUCT_NAME "LYNX"
-        COMPANY_NAME "Kauan")
+        COMPANY_NAME "Ka1-S"
+        COMPANY_COPYRIGHT "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
+        DESCRIPTION "LYNX digital audio workstation")
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
@@ -170,6 +178,10 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/HintBar.cpp
         src/ui/Toolbar.cpp)
+
+    # spectral waveforms: background analysis cache and drawing
+    target_sources(LYNX PRIVATE
+        src/ui/WaveformView.cpp)
 
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE
