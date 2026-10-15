@@ -1001,7 +1001,10 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
                                       EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect,
-                                      EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityDelayBank, EffectKind::fruityMultiband };
+                                      EffectKind::fruityLimiter, EffectKind::fruityCompressor,
+                                      EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
+                                      EffectKind::reeverb2, EffectKind::reeverb1,
+                                      EffectKind::fruityDelayBank, EffectKind::fruityMultiband };
 } // namespace
 
 const std::vector<EffectKind>& addableEffects()

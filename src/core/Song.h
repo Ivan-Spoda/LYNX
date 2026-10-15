@@ -297,6 +297,10 @@ enum class EffectKind : std::uint8_t
     maximus,      // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
     fruityLimiter,   // FL's Fruity Limiter, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
     fruityCompressor, // FL's Fruity Compressor, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
+    fruityWaveShaper, // FL's Fruity WaveShaper, exact (REA_rodada51, core/FruityShapers.h): curve in EffectSlot::state, controls / range
+    fruitySoftClipper, // FL's Fruity Soft Clipper, exact (REA_rodada51, core/FruityShapers.h): threshold, post / range
+    reeverb2,     // FL's Fruity Reeverb 2, exact (REA_rodada49, core/Reeverb2.h): FL's 15 controls + 2 options, (raw − min) / range
+    reeverb1,     // FL's Fruity Reeverb (first version), exact (REA_rodada49 §6, core/Reeverb2.h): FL's 10 controls, raw / max
     fruityDelayBank, // FL's Fruity Delay Bank, exact (REA_rodada56, core/FruityDelayBank.h): FL's state in EffectSlot::state, params = its 4 global controls / 128
     fruityMultiband  // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
 };

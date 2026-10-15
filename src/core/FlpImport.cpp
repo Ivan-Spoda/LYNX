@@ -18,6 +18,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/Reeverb2.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -1404,7 +1405,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
                  || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
-        else if ((plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
+        else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
+                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
+                 || (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
                  || (plugin == "Fruity Multiband Compressor" && fx.kind != EffectKind::fruityMultiband))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
@@ -1775,6 +1778,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && (fx.kind == EffectKind::reeverb2 || fx.kind == EffectKind::reeverb1))
+                {
+                    // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
+                    if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)

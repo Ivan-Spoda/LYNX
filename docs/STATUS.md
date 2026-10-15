@@ -65,8 +65,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
-  their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2,
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, Gross Beat, Effector,
+  their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
@@ -321,6 +321,21 @@ accordingly. Highlights of what is **confirmed and applied**:
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
   at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
   bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
+- **Fruity Reeverb 2:** FL's exact engine (`core/Reeverb2`, REA round 49) — the "full" process of FL's shared plate
+  reverb (input filters and diffusers, early-reflection line, predelay, figure-of-eight tank with a sine-modulated
+  delay in each half, bass multiplier/crossover shelf, damping), FL's level laws, separation matrix, Mid/Side input,
+  tempo-synced predelay and per-block gain ramps; FL's 15 controls stay editable. Bit-identical to the installation's
+  DLL on all 293 distinct installation states (44.1/48/96/22.05 kHz, blocks 64–4096) and on synthetic states and
+  automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
+  (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
+  states and synthetic/automation cases.
+- **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
+  51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
+  evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),
+  polyphase IIR half-band oversampling ×2…×16, per-sample smoothing, CENTER DC removal; exports use FL's rendering
+  behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
+  and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
+  (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -361,6 +376,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   in FL (shared by every instance), LYNX starts one per instance like a fresh FL process, so random phases differ from a
   given FL render by design; FL's max-polyphony event value and its rate-before-state order at channel creation are taken
   from the GMS findings (inference).
+- Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
+  sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
 - Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
   on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
   self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
