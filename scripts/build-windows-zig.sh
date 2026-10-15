@@ -80,6 +80,8 @@ APP_SOURCES=(src/Main.cpp
 
 # workflow shell: core (key map, workspace layout, rack operations) and UI (workspace desktop, control contract)
 APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
+# start-up: splash screen and its procedurally synthesised sound
+APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

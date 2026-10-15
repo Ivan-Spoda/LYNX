@@ -62,13 +62,17 @@ Layout Layout::makeDefault (int width, int height)
     const auto gap = 16;
     const auto rackWidth = std::min (w - browserWidth - 2 * gap, 720);
     const auto rackHeight = std::min (h - 2 * gap, std::max (240, h * 55 / 100));
-    l[Panel::channelRack] = state ({ browserWidth + gap, gap, rackWidth, rackHeight }, true);
+    // the Channel Rack floats below the Playlist's toolbar row, so the Playlist's tools stay in view
+    const auto rackTop = std::min (40, h / 10);
+    l[Panel::channelRack] = state ({ browserWidth + gap, rackTop, rackWidth, std::min (rackHeight, h - rackTop - gap) }, true);
 
-    // floating pop-ups over the Playlist: the Piano Roll in the upper part, the Mixer along the bottom
-    l[Panel::pianoRoll] = state ({ browserWidth + 2 * gap, 2 * gap, w - browserWidth - 4 * gap, std::max (minHeight, h * 52 / 100) }, false);
+    // floating windows over the Playlist, as FL opens them (docs/WORKFLOW_FL.md, "Layout"): the Piano Roll
+    // large in the upper part, the Mixer as a full-width window over the lower two thirds (both can be
+    // maximised to fill the desktop, or detached)
+    l[Panel::pianoRoll] = state ({ browserWidth + 2 * gap, 2 * gap, w - browserWidth - 4 * gap, std::max (minHeight, h * 58 / 100) }, false);
 
-    const auto mixerTop = h * 40 / 100;
-    l[Panel::mixer] = state ({ browserWidth, mixerTop, w - browserWidth, h - mixerTop }, false);
+    const auto mixerTop = h * 30 / 100;
+    l[Panel::mixer] = state ({ browserWidth + gap / 2, mixerTop, w - browserWidth - gap, h - mixerTop - gap / 2 }, false);
 
     for (auto& p : l.panels)
         p.bounds = clampInto (p.bounds, w, h);

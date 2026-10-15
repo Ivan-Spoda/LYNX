@@ -62,6 +62,8 @@ public:
 
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
+    // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
+    void previewSample (std::shared_ptr<const SampleData> sample);
 
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).

@@ -49,6 +49,7 @@
 #include "core/RackOps.h"
 #include "core/ValueMath.h"
 #include "core/Workspace.h"
+#include "core/StartupSound.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
 
@@ -7081,4 +7082,32 @@ TEST (harmless_engine)
     for (int i = 0; i < 2048; ++i)
         el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
     CHECK (el < 1e-10 * er && er > 1.0);
+}
+
+TEST (startup_sound)
+{
+    // the splash's sound: the right length, finite, at its peak level, quiet before the whoosh swells,
+    // a landing "pop" at impactTime and a chime ringing after it
+    using namespace lynx::startup;
+    const auto sound = makeSound (48000.0);
+    CHECK (sound.left.size() == (std::size_t) (soundLength * 48000.0) && sound.right.size() == sound.left.size());
+    float peak = 0.0f;
+    bool finite = true;
+    for (std::size_t i = 0; i < sound.left.size(); ++i)
+    {
+        finite = finite && std::isfinite (sound.left[i]) && std::isfinite (sound.right[i]);
+        peak = std::max ({ peak, std::abs (sound.left[i]), std::abs (sound.right[i]) });
+    }
+    CHECK (finite && std::abs (peak - peakLevel) < 1.0e-4f);
+    auto rms = [&sound] (double from, double to) {
+        double e = 0.0;
+        const auto a = (std::size_t) (from * 48000.0), b = (std::size_t) (to * 48000.0);
+        for (auto i = a; i < b; ++i)
+            e += (double) sound.left[i] * sound.left[i];
+        return std::sqrt (e / (double) (b - a));
+    };
+    CHECK (rms (0.0, 0.05) < 0.2 * rms (impactTime - 0.05, impactTime));  // the whoosh swells
+    CHECK (rms (impactTime, impactTime + 0.05) > rms (impactTime - 0.05, impactTime)); // the landing
+    CHECK (rms (0.8, 1.0) > 0.005 && rms (soundLength - 0.02, soundLength) < rms (0.8, 1.0)); // chime rings, tail fades
+    CHECK (makeSound (48000.0).left == sound.left); // the same sound on every start
 }
