@@ -180,6 +180,8 @@ ChangeLabel describeChange (const Song& before, const Song& after)
         return label (TR_NOOP ("Tempo"));
     if (before.swing != after.swing)
         return label (TR_NOOP ("Swing"));
+    if (before.masterPitch != after.masterPitch)
+        return label (TR_NOOP ("Master pitch"));
     if (before.loopStart != after.loopStart || before.loopEnd != after.loopEnd)
         return label (TR_NOOP ("Time selection"));
     if (before.markers() != after.markers())
