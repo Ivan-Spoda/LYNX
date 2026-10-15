@@ -270,7 +270,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   delay in each half, bass multiplier/crossover shelf, damping), FL's level laws, separation matrix, Mid/Side input,
   tempo-synced predelay and per-block gain ramps; FL's 15 controls stay editable. Bit-identical to the installation's
   DLL on all 293 distinct installation states (44.1/48/96/22.05 kHz, blocks 64–4096) and on synthetic states and
-  automation of every control; the Freeverb mapping remains only as a fallback for unreadable states.
+  automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
+  (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
+  states and synthetic/automation cases.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
