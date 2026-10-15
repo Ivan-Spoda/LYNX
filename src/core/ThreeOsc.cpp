@@ -401,9 +401,7 @@ public:
         rate = (float) (c5Phase / (double) fs);
         std::memcpy (snap.data(), snapshot, snap.size());
         timing (ppq, tempo);
-        // FUN_005f8470 (Dispatcher 4): the library's rate ratio and ramp limit
-        S.rateRatio = (float) (44100.0 / (double) fs);
-        S.rampLimit = (float) ((double) S.rateRatio * 0.001);
+        S.setRate ((double) fs); // FUN_005f8470 (Dispatcher 4): the library's rate ratio and ramp limit
         update();
     }
 

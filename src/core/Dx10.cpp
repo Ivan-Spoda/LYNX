@@ -1,4 +1,5 @@
 #include "core/Dx10.h"
+#include "core/FlVoiceProcessor.h"
 
 #include <algorithm>
 #include <array>
@@ -8,8 +9,6 @@
 #include <cstring>
 #include <optional>
 #include <vector>
-
-#include "core/FlVoiceProcessor.h"
 
 // 1:1 port of our round-42 reference model (r42/py/dxmodel.py + dxproc.py). The model emulates the DLL's float32 arithmetic with
 // numpy float32 scalars and uses Python floats (doubles) where the DLL computes in double; this file keeps those types
@@ -25,8 +24,8 @@ namespace lynx
 {
 namespace
 {
+using namespace flvp;
 constexpr int paramCount = 22;
-constexpr int snapshotSize = flvp::snapshotSize;
 constexpr int maxVoices = 256; // voice records per instance (FL: unlimited; the oldest is cut beyond this)
 constexpr int stateWithSnapshot = 4 + 0x5c + snapshotSize; // the plugin applies a snapshot when ≥ 364 bytes follow the 92
 
@@ -36,15 +35,6 @@ std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t at) noexcept
     std::memcpy (&v, d.data() + at, 4);
     return (std::int32_t) v;
 }
-
-using flvp::bitsOf;
-using flvp::defaultSnapshot;
-using flvp::panLaw;
-using flvp::Proc;
-using flvp::rampStep;
-using flvp::roundEven;
-using flvp::Settings;
-using flvp::sineTable;
 
 
 struct Params
@@ -96,10 +86,28 @@ public:
         std::memcpy (snap.data(), snapshot, snap.size());
         timing (ppq, tempo);
         update();
+        // end-fade table (FUN_0071e060, mode 3, 10 ms): 0.5·(1 + cos((i + 1)·π/(L + 1))), built by the constructor while
+        // the plugin's rate object still holds 44 100 Hz, so L = 441 at every rate (EXEC); FL computes the cosine with
+        // IPP's ippsCos_32f_A11, LYNX exactly
+        const auto L = roundEven (10.0 * 0.001 * 44100.0);
+        endTable.resize ((std::size_t) L);
+        const auto k = (float) (1.0 / (double) (L + 1) * 3.141592653589793);
+        for (std::int64_t i = 0; i < L; ++i)
+            endTable[(std::size_t) i] = ((float) std::cos ((double) (((float) i + 1.0f) * k)) + 1.0f) * 0.5f;
     }
 
     // ProcessEvent 0 (tempo) / SetTimeSig (PPQ): the articulators' tick counts (FUN_00722d80)
-    void timing (int ppq, double tempo) noexcept { S.retime (snap.data(), ppq, tempo); }
+    void timing (int ppq, double tempo) noexcept
+    {
+        const auto keep = S.hasGlobal;
+        std::array<std::uint32_t, 5> phases {};
+        for (int k = 0; k < 5; ++k)
+            phases[(std::size_t) k] = S.recs[(std::size_t) k].globalPhase;
+        S.build (snap.data(), ppq, tempo);
+        if (keep)
+            for (int k = 0; k < 5; ++k)
+                S.recs[(std::size_t) k].globalPhase = phases[(std::size_t) k];
+    }
 
     // FUN_00735760
     void update() noexcept
@@ -297,8 +305,11 @@ public:
     {
         tickPending = true;
         if (listed)
-            S.advanceGlobal();
+            for (auto& r : S.recs)
+                if ((r.flags & 0x20) != 0)
+                    r.globalPhase += r.lfoInc;
     }
+
 
     // Gen_Render (FUN_00736a10): voices through the processor, mixed into l/r (overwrites)
     void render (float* l, float* r, int n) noexcept
@@ -323,13 +334,71 @@ public:
             voiceRender (v, mono.data(), n);
             for (int j = 0; j < n; ++j)
                 bufA[2 * (std::size_t) j] = bufA[2 * (std::size_t) j + 1] = mono[(std::size_t) j];
-            if (flvp::mixVoice (S, pr, bufA.data(), bufB.data(), n, v.fvol, v.fpan, l, r))
-                v.ended = true;
+            float tL, tR;
+            panLaw (v.fpan + pr.pan, v.fvol * pr.vol, tL, tR);
+            if (! pr.gainsSet)
+                pr.gL = pr.gR = 0.0f, pr.gainsSet = true;
+            if (pr.first > 1)
+                pr.gL = tL, pr.gR = tR; // the first block starts at the target
+            const float* x = bufA.data();
+            if (flvp::filter (S, pr, bufA.data(), bufB.data(), n, tL, tR))
+                x = bufB.data();
+            if (pr.endPos >= 0) // end fade (FUN_0071e8b0, mode 3): the table, then silence
+            {
+                auto* w = const_cast<float*> (x);
+                const auto L = (int) endTable.size();
+                const auto k = std::min (std::max (L - pr.endPos, 0), n);
+                for (int j = 0; j < k; ++j)
+                {
+                    const auto t = endTable[(std::size_t) (pr.endPos + j)];
+                    w[2 * j] = w[2 * j] * t;
+                    w[2 * j + 1] = w[2 * j + 1] * t;
+                }
+                std::fill (w + 2 * k, w + 2 * n, 0.0f);
+                pr.endPos += n;
+                if (pr.endPos >= L)
+                    v.ended = true;
+            }
+            const auto sL = rampStep (tL, pr.gL, n), sR = rampStep (tR, pr.gR, n);
+            if (sL == 0.0f && sR == 0.0f)
+            {
+                for (int j = 0; j < n; ++j)
+                {
+                    l[j] = x[2 * j] * tL + l[j];
+                    r[j] = x[2 * j + 1] * tR + r[j];
+                }
+            }
+            else
+                mixRamp (x, l, r, n, pr.gL, pr.gR, sL, sR);
+            pr.gL = tL, pr.gR = tR;
+            pr.first = 0;
         }
         // the plugin asks the host to kill finished voices, last to first; the host's kill removes them at once
         for (int i = count - 1; i >= 0; --i)
             if (voices[(std::size_t) order[(std::size_t) i]].ended)
                 removeAt (i);
+    }
+
+    // FUN_005f9760 (SSE path): lanes [L0, R0, L1, R1] start at g and g + s, +2s per pair of frames, single frames +s
+    static void mixRamp (const float* x, float* l, float* r, int n, float gL, float gR, float sL, float sR) noexcept
+    {
+        float a0 = gL + 0.0f, a1 = gR + 0.0f, a2 = gL + sL, a3 = gR + sR;
+        const float s2L = sL + sL, s2R = sR + sR;
+        const int full = (n >> 3) << 3;
+        for (int i = 0; i < full; i += 2)
+        {
+            l[i] = x[2 * i] * a0 + l[i];
+            r[i] = x[2 * i + 1] * a1 + r[i];
+            l[i + 1] = x[2 * i + 2] * a2 + l[i + 1];
+            r[i + 1] = x[2 * i + 3] * a3 + r[i + 1];
+            a0 = a0 + s2L, a1 = a1 + s2R, a2 = a2 + s2L, a3 = a3 + s2R;
+        }
+        for (int i = full; i < n; ++i)
+        {
+            l[i] = x[2 * i] * a0 + l[i];
+            r[i] = x[2 * i + 1] * a1 + r[i];
+            a0 = a0 + sL, a1 = a1 + sR;
+        }
     }
 
     // unordered list: the last voice takes the removed one's place (FUN_005ea710)
@@ -382,7 +451,7 @@ public:
     std::array<int, maxVoices> order {};
     int count = 0;
     std::uint64_t serials = 0;
-    std::vector<float> mono, bufA, bufB;
+    std::vector<float> mono, bufA, bufB, endTable;
 };
 
 const std::uint8_t* snapshotOf (const std::vector<std::uint8_t>& state, const std::array<std::uint8_t, snapshotSize>& fallback) noexcept
@@ -412,7 +481,24 @@ bool dx10ProcessorNeutral (const std::vector<std::uint8_t>& state)
     if (! dx10StateUsable (state))
         return false;
     static const auto defaults = defaultSnapshot();
-    return flvp::snapshotNeutral (snapshotOf (state, defaults));
+    const auto* s = snapshotOf (state, defaults);
+    auto at = [&] (int k, int i) {
+        std::int32_t v;
+        std::memcpy (&v, s + 0x44 * k + 4 * i, 4);
+        return v;
+    };
+    for (int k = 0; k < 5; ++k)
+    {
+        if (at (k, 11) != 0) // LFO amount
+            return false;
+        if (k == 1 ? ! (at (k, 1) == 0 && (at (k, 0) & 4) != 0) : (k != 0 && at (k, 1) != 0 && at (k, 8) != 0))
+            return false;
+    }
+    std::int32_t modX, modY, type;
+    std::memcpy (&modX, s + 0x15c, 4);
+    std::memcpy (&modY, s + 0x160, 4);
+    std::memcpy (&type, s + 0x168, 4);
+    return type == 0 && modX >= 256 && modY <= 0;
 }
 
 std::optional<int> dx10Param (const std::vector<std::uint8_t>& state, int index)

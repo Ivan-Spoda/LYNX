@@ -46,6 +46,8 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::dx10: return "Fruity DX10";
         case InstrumentKind::kepler: return "Kepler";
         case InstrumentKind::poizone: return "PoiZone";
+        case InstrumentKind::fruitkick: return "Fruit Kick";
+        case InstrumentKind::bassdrum: return "BassDrum";
         case InstrumentKind::threeosc: return "3x Osc";
     }
     return "?";

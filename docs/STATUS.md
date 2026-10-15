@@ -99,8 +99,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   shape and noise read from the user's own engine DLL; the default patch bit-exact against FL's DLL, the 4 demo channels
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
-  coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Autogun, Fruit Kick, Toxic
-  Biohazard and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
+  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice
+  processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
+  CRT powf/sincosf, its table and noise samples read from the user's installation); Autogun and Toxic Biohazard on the
+  built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -231,7 +234,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   order and rounding mode (toward zero in the render). Checked against FL's DLL (`kepler_engine`: the default patch
   bit-exact; `kepler_demo_channels`: the 4 demo channels). The synth conversion (`synthFromKepler`) stays the fallback
   (Kepler Exo / "Kepler-2" states, gate/noise/×4 bytes, DLL missing).
-  **BassDrum:** Peak `1 + 100x³·s⁴`.
+  **BassDrum** (fallback when the engine can't run): Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
   FinalLevels tables, chunks of ≤ 512 samples, voice kill), the 99-voice engine with the MIDI matrix, 512
@@ -268,7 +271,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   max-polyphony value and its state/rate order at creation are not confirmed (LYNX: 64 voices, 1 when the channel is
   mono; state then rate).
 - **3x Osc:** its own instrument (`core/ThreeOsc.cpp`, REA round 47) on the plugin voice processor shared with DX10
-  (`core/FlVoiceProcessor.cpp`): the host's six wave tables recomputed from FLEngine's formulas (sine, triangle, square,
+  (`core/FlVoiceProcessor.h`): the host's six wave tables recomputed from FLEngine's formulas (sine, triangle, square,
   saw, the exponential "rounded" shape, MT19937 noise), 32-bit phases with the DLL's pitch law, the right channel's
   detune and phase offset, Delphi-Random start phases and noise steps, the mix/invert/AM levels split by FL's host pan
   law, the DLL's x87 mixers (64-bit precision), the custom wave (the channel's sample, resampled to 16384 points), the

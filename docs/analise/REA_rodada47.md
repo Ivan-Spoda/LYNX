@@ -47,8 +47,8 @@
   `ffind.py`) **[DECOMP]**: e.g. block start `FUN_0072b350` (DX10 `FUN_00721d10`), per-voice render `FUN_0072b450`
   (`FUN_00721dc0`), mix out `FUN_0072b510` (`FUN_00721e80`), control `FUN_0072bec0` (`FUN_00722830`), gains/filter
   `FUN_0072b920` (`FUN_00722290`), filter `FUN_0072bae0` (`FUN_00722450`), snapshot `FUN_0072c250/2e0/390`
-  (`FUN_00722bc0/c50/d00`). New this round (code DX10 carries but never runs): release `FUN_0072c050`, articulator
-  release `FUN_0072a6e0` (= DX10 `FUN_007201e0`), kill/fade start `FUN_0072c0d0`, released flag `FUN_0072b440`, and
+  (`FUN_00722bc0/c50/d00`). New this round (code DX10 carries but never runs; round 43 met the articulator release in
+  Fruit Kick): release `FUN_0072c050`, articulator release `FUN_0072a6e0` (= DX10 `FUN_007201e0`), kill/fade start `FUN_0072c0d0`, released flag `FUN_0072b440`, and
   the library's rate setter `FUN_005f8470`.
 - **Tools:** Ghidra 12.1.4 headless (JDK 21, `MAXMEM=4G`): projects `/tmp/r47gh` (3x Osc, full analysis), `/tmp/r47fl`
   (FLEngine, no auto-analysis, our script `DecAt.java` decompiles single functions), `/tmp/r47eng` (engine_x64);
@@ -279,10 +279,11 @@ voices whose volume articulator is in release (state 6) — not modelled (LYNX a
 
 ---
 
-## 5. LYNX port (`src/core/ThreeOsc.{h,cpp}`, `src/core/FlVoiceProcessor.{h,cpp}`, InstrumentKind `threeosc`)
+## 5. LYNX port (`src/core/ThreeOsc.{h,cpp}`, `src/core/FlVoiceProcessor.h`, InstrumentKind `threeosc`)
 
-- The processor of round 42 moved out of `Dx10.cpp` into `FlVoiceProcessor` (DX10's checks stay bit-identical:
-  256 neutral + 23 processor jobs), gaining the release path (§3), the library's rate ratio and ramp limit (§2.3).
+- The processor of round 42, shared since round 43 (Fruit Kick) in `FlVoiceProcessor.h`, gains the release path (§3),
+  the library's rate ratio and ramp limit (§2.3, defaults 1 and 0.001 keep DX10 and Fruit Kick unchanged) and the
+  end fade + mix (`mixVoice`); DX10's checks stay bit-identical (256 neutral + 23 processor jobs).
 - The importer normalises every state version to version 14 with the channel's 0xDA/0xDB records as the snapshot
   (when the channel has them), `modelParams[0]` = the project's PPQ, `samplePath` = the channel's sample when it exists
   (custom wave). The 3x Osc preset menu keeps the built-in-synth conversion.
