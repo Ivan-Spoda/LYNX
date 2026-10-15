@@ -337,6 +337,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
   and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
   (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
+- **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
+  FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
+  normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
+  synced (1/192 beat) and unsynced time laws (cubic 1 ms…1 s), time smoothing glides or keep-pitch crossfades, LFO
+  modulation (the engine's FMA sine), diffusion all-passes, 10 Hz feedback high-pass, state-variable filter with
+  cutoff LFO, limit/saturate distortion, rate/bit reduction, colour, stereo spread, the three delay models and "off".
+  Bit-identical to the installation's DLLs on every installation state (60 + 85) at two tempos, at 48 kHz (one
+  Delay 3 state at −151 dB) and on 110 random Delay 3 states incl. tempo changes; LYNX starts them settled.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
