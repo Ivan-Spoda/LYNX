@@ -677,14 +677,15 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         paintClipFrame (g, r, colour, name);
     else
     {
-        g.setColour (colour.interpolatedWith (theme::colour::bg1, 0.62f));
+        // a darker body than other clips: the waveform's colours carry the information
+        g.setColour (colour.interpolatedWith (theme::colour::bg0, 0.8f));
         g.fillRoundedRectangle (r, theme::radius::sm);
         const auto body = r.reduced (1.0f, 1.0f);
         const auto framesPerTick = 60.0 / (song.bpm * ppq) * summary->sampleRate;
         // r's left edge is the clip start, i.e. tick `offset` of the audio
         const auto startFrame = ((double) c.offset + (double) (body.getX() - r.getX()) / pixelsPerTick) * framesPerTick;
         ui::paintWaveform (g, body, *summary, startFrame, framesPerTick / pixelsPerTick,
-                           ui::currentWaveStyle (colour.brighter (0.35f), ui::normalisingGain (*summary)));
+                           ui::currentWaveStyle (colour.brighter (0.9f), ui::normalisingGain (*summary)));
 
         const auto title = r.withHeight (juce::jmin (clipTitleHeight, r.getHeight()));
         juce::Path band;
