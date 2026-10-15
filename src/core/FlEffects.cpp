@@ -6,6 +6,8 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityDelay.h"
+#include "core/StereoFx.h"
+#include "core/ChorusFx.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -996,6 +998,40 @@ std::optional<EffectSlot> fruityDelayExact (const std::string& pluginName, const
     return std::nullopt;
 }
 
+std::optional<EffectSlot> stereoFxExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own engines from the saved state (REA_rodada54); the earlier approximations remain for unreadable states
+    if (pluginName == "Fruity Stereo Shaper")
+        if (const auto s = stereofx::parseStereoShaper (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::stereoShaper);
+            stereofx::stereoShaperToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Stereo Enhancer")
+        if (const auto s = stereofx::parseStereoEnhancer (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::stereoEnhancer);
+            stereofx::stereoEnhancerToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Transient Processor")
+        if (const auto s = stereofx::parseTransientProcessor (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::transientProcessor);
+            stereofx::transientProcessorToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Spreader")
+        if (const auto s = stereofx::parseSpreader (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::spreader);
+            stereofx::spreaderToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (auto exact = fruityDelayExact (pluginName, state))
@@ -1003,6 +1039,10 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
     if (auto exact = fruityShaperExact (pluginName, state))
+        return exact;
+    if (auto exact = stereoFxExact (pluginName, state))
+        return exact;
+    if (auto exact = chorusFromFl (pluginName, state)) // REA_rodada59; the generic chorus remains for unreadable states
         return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
@@ -1172,6 +1212,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityCompressor: return { "Fruity Compressor" };
         case EffectKind::fruityWaveShaper: return { "Fruity WaveShaper" };
         case EffectKind::fruitySoftClipper: return { "Fruity Soft Clipper" };
+        case EffectKind::fruityChorus: return { "Fruity Chorus" };
+        case EffectKind::hyperChorus: return { "Hyper Chorus" };
+        case EffectKind::vintageChorus: return { "Vintage Chorus" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
@@ -1179,7 +1222,11 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelay2: return { "Fruity Delay 2" };
         case EffectKind::fruityDelay3: return { "Fruity Delay 3" };
-        case EffectKind::utility: return { "Fruity Stereo Shaper" };
+        case EffectKind::utility:
+        case EffectKind::stereoShaper: return { "Fruity Stereo Shaper" };
+        case EffectKind::stereoEnhancer: return { "Fruity Stereo Enhancer" };
+        case EffectKind::transientProcessor: return { "Transient Processor" };
+        case EffectKind::spreader: return { "Spreader" };
         default: return {};
     }
 }
@@ -1195,10 +1242,20 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     // the exact WaveShaper (pre, mix, post) and Soft Clipper (threshold, post) take FL's controls over their ranges
     if ((is ("Fruity WaveShaper") && k >= 0 && k < 3) || (is ("Fruity Soft Clipper") && k >= 0 && k < 2))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact choruses take FL's controls over their ranges
+    if (chorusControls (pluginName) > k && k >= 0)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Fruity Delay 2 / 3 likewise (every control)
     if (is ("Fruity Delay 2") && k >= 0 && k < fldelay::delay2Controls)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Fruity Delay 3") && k >= 0 && k < fldelay::delay3Controls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Stereo Shaper takes FL's controls over their ranges; FL's parameter 7 (effects order) is our 6
+    if (is ("Fruity Stereo Shaper") && ((k >= 0 && k < 6) || k == 7))
+        return FlParamMap { k == 7 ? 6 : k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Stereo Enhancer and Transient Processor take every FL control over its range
+    if ((is ("Fruity Stereo Enhancer") && k >= 0 && k < 6) || (is ("Transient Processor") && k >= 0 && k < 9)
+        || (is ("Spreader") && k >= 0 && k < 5))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
@@ -1848,6 +1905,18 @@ PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vecto
     {
         if (d.size() < 4 + 8 * 4)
             return head;
+        if (const auto s = stereofx::parseStereoShaper (d))
+        {
+            // the exact engine (REA_rodada54): bus 0 = its output, the parameter-6 bus = input − output
+            if (bus != 0 && bus != s->send)
+                return head;
+            auto exact = makeEffectSlot (EffectKind::stereoShaper);
+            stereofx::stereoShaperToParams (*s, exact.params.data());
+            exact.params[7] = bus != 0 ? 1.0f : 0.0f;
+            head.valid = true;
+            head.slot = exact;
+            return head;
+        }
         auto param = [&] (int i) { return i32At (d, 4 + 4 * (std::size_t) i); };
         auto slot = makeEffectSlot (EffectKind::utility);
         if (bus == 0)
