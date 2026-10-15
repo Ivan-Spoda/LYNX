@@ -5,25 +5,32 @@
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
 #include "ui/NoteToolDialogs.h"
+#include "ui/ValueControl.h"
 
 namespace lynx
 {
 // Piano Roll for the selected channel in the current pattern.
-//  - a tool strip (Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen); with the Pencil:
-//    left click on empty space creates a note (default length, or the last used one) and drags it,
-//    dragging the body moves, the right edge resizes (the left edge too, when enabled)
+//  - a tool strip (Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen; the wheel over it switches);
+//    with the Pencil: left click on empty space creates a note (default length, or the last used one)
+//    and drags it, dragging the body moves, either edge resizes (the left edge can be turned off)
+//  - the cursor, the hover highlight and the hint bar show what a click would do (core/EditorGestures.h)
 //  - every tool: right click deletes (dragging deletes several; press and hold on empty grid = Knife),
 //    Ctrl+drag selects (Ctrl+click adds/removes), Alt ignores the grid; Shift+drag on a note drags a copy
 //  - while moving: Shift pressed after the click keeps the pitch, Ctrl keeps the time
 //  - double click on a note opens the Note inspector (applies to the selection)
 //  - channel selector, previous/next channel keys and ghost notes of the other channels (Alt+V);
 //    double right-click a ghost note to switch to its channel
-//  - the bottom lane edits velocity, pan or fine pitch (combo in its corner)
+//  - the bottom lane edits velocity, pan or fine pitch (combo in its corner): drag draws, right-drag a
+//    line, Shift+drag one value, Alt+click resets; Alt+wheel over a note changes it (Ctrl+Alt: fine)
+//  - wheel scrolls (smoothly), Shift+wheel horizontal, Ctrl+wheel zooms at the mouse, Ctrl+Alt+wheel
+//    zooms vertically, Shift+Alt+wheel nudges the selection; middle-drag pans (on the keyboard: zooms)
+//  - keyboard: click previews, Ctrl+click selects the key's notes; ruler: Ctrl+drag selects a time range
 //  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V/B, Ctrl+Q quantise,
 //    Shift+Q quantise starts, Ctrl+U chop, Ctrl+G join, Ctrl+L legato, Shift+D shrink to grid,
 //    Ctrl+Shift+Left/Right rotate, Ctrl+M mute, Ctrl+P porta, Esc, arrows (Shift = octave/bar)
 class PianoRollComponent final : public juce::Component,
                                  public SharesTitleBar,
+                                 public ui::HintSource,
                                  private juce::ChangeListener,
                                  private juce::Timer,
                                  private juce::ScrollBar::Listener
@@ -39,6 +46,9 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    void modifierKeysChanged (const juce::ModifierKeys& mods) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
@@ -67,8 +77,10 @@ public:
     std::unique_ptr<juce::Component> makeNoteInspectorForSnapshot (bool singleNote = false);
     std::vector<int> noteIndicesForSnapshot() const { return selectionOrAll(); }
     std::int64_t gridForSnapshot() const { return gridTicks(); }
+    // zooms in (taller rows, wider steps) and hovers the right edge of the first note; returns its hint
+    ui::Hint hoverForSnapshot();
 
-    static constexpr int keyboardWidth = 64;
+    static constexpr int keyboardWidth = 72;
     static constexpr int toolbarHeight = 28;
     static constexpr int timelineHeight = 22;
     static constexpr int headerHeight = toolbarHeight + timelineHeight;
@@ -77,7 +89,8 @@ public:
     static constexpr int scrollBarSize = 12;
 
 private:
-    enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, paint, muting, knife, zoomRange, listen, pan };
+    enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, velocityLine, velocitySet, paint, muting, knife,
+                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect };
 
     // Channel selector: the wheel steps through the channels with notes (Ctrl+wheel: all channels).
     class ChannelBox final : public juce::ComboBox
@@ -127,7 +140,7 @@ private:
     std::vector<int> selectionOrAll() const;         // selection, or all of the channel's notes if empty
     void setSelection (std::vector<int> indices);
     void sortNotes();                                // sorts while keeping the selection (no undo step)
-    void editNotes (const std::function<void (Pattern&)>& edit);
+    void editNotes (const std::function<void (Pattern&)>& edit, bool undoable = true);
     void applyVelocity (int fromX, int toX, int y);
     float laneValue (const Note& n) const;          // 0..1 of the chosen property
     void setLaneValue (Note& n, float value) const; // inverse
@@ -172,7 +185,34 @@ private:
     juce::PopupMenu toolsMenu();
     std::unique_ptr<juce::FileChooser> chooser;
     juce::PopupMenu midiMenu();
-    juce::Label hintLabel;
+
+    // hover: what a click would hit (drives the cursor, the highlight and the hint)
+    struct Hover
+    {
+        int note = -1, ghost = -1, key = -1;
+        gesture::Zone zone = gesture::Zone::outside;
+        bool operator== (const Hover& o) const { return note == o.note && ghost == o.ghost && key == o.key && zone == o.zone; }
+    };
+    Hover hover;
+    juce::Point<int> lastMouse { -1, -1 };
+    Hover hoverAt (juce::Point<int> p) const;
+    gesture::Target targetAt (const Hover& h) const;
+    void updateHover (juce::Point<int> p, juce::ModifierKeys mods);
+    void updateCursor (juce::ModifierKeys mods);
+    void applyLaneValue (int x, float value, int fromX); // sets the lane value of the notes between fromX and x
+    void wheelNoteProperty (int note, float deltaY, bool fine);
+    void postDragHint (const juce::MouseEvent& e); // what the gesture in progress does (hint bar)
+    juce::uint32 lastWheelEdit = 0;    // wheel edits within a burst are one undo step
+    std::vector<Note> laneOriginals;   // right-drag line / Shift+drag: the pattern's notes when it started
+    float laneSetValue = 0.0f;
+    int keyZoomKey = 60, keyZoomStartRow = 14;
+
+    // smooth wheel scrolling
+    gesture::Glide glideX, glideY;
+    bool gliding = false;
+    void glideBy (double ticks, double pixels);
+    void glideFrame();
+    juce::VBlankAttachment vblank { this, [this] { glideFrame(); } };
 
     double pixelsPerTick = 24.0 / ticksPerStep; // 24 px per step
     double scrollTicks = 0.0;
@@ -191,7 +231,7 @@ private:
     std::vector<int> selectionBefore; // selection at the start of a Shift+rectangle
     juce::ModifierKeys downMods;      // modifiers at the click (locks start when Shift/Ctrl are pressed later)
     bool showGhosts = true;
-    bool resizeFromLeft = false;      // opt-in: the left edge of a note resizes it
+    bool resizeFromLeft = true;       // the left edge of a note resizes it (Ctrl+Alt+Home turns it off)
     bool startedOnEmpty = false, erasedSomething = false, holdExpired = false;
     juce::uint32 createdAt = 0;       // when the last click created a note (a double click there is not an edit)
     std::int64_t nextPaintTick = 0, paintLength = 0;

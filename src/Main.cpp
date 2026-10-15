@@ -1255,8 +1255,14 @@ private:
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
+            // the editors' mouse feel: the hovered note / clip edge (grip, outline) and its hint in the hint bar
+            ui.setHintForSnapshot (ui.getPianoRollForSnapshot().hoverForSnapshot());
+            saveSnapshot (ui, prefix + "-pianoroll-hover.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            ui.setHintForSnapshot (ui.getPlaylistForSnapshot().hoverForSnapshot());
+            saveSnapshot (ui, prefix + "-playlist-hover.png");
+            ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
             // the Playlist with a time selection over bars 2-3 (it selects the clips it touches) and the Knife tool
             ui.getPlaylistForSnapshot().setTimeSelectionForSnapshot (1, 3);
             ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::knife);
