@@ -178,6 +178,14 @@ int main (int argc, char** argv)
 
     std::printf ("render: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count());
 
+    // LYNX_RAW=path: also write the un-normalized float samples (L block then R block), for bit-exact comparisons
+    if (const char* raw = std::getenv ("LYNX_RAW"); raw != nullptr)
+    {
+        std::ofstream r (raw, std::ios::binary);
+        r.write ((const char*) left.data(), (std::streamsize) (left.size() * sizeof (float)));
+        r.write ((const char*) right.data(), (std::streamsize) (right.size() * sizeof (float)));
+    }
+
     // normalize the peak to -1 dBFS
     float peak = 0.0f;
     for (std::size_t i = 0; i < totalSamples; ++i)

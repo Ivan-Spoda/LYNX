@@ -321,97 +321,152 @@ struct Engine::Impl
         const float smooth = 1.0f - std::pow (0.01f, f32 (1.0 / ((double) fsF * 0.1)));
         const int erMask = erSize - 1;
 
+        // The loop runs on local copies of the state, positions, coefficients and buffer pointers: the float
+        // members could otherwise alias the float lines being written and be re-read on every access. Same operations,
+        // same order; the state is written back after the block.
+        std::array<int, 12> p = P;
+        const std::array<int, 12> len = L;
+        std::array<float*, 12> ln {};
+        for (int k = 0; k < 12; ++k)
+            ln[(std::size_t) k] = line[(std::size_t) k].data();
+        float* const erBuf = er.data();
+        float* const preBuf = pre.data();
+        const int preLast = (int) pre.size() - 1, erLast = erSize - 1;
+        int erPos = erP, prePos = preP;
+        float* const md[2] = { mod[0].data(), mod[1].data() };
+        int mw[2] = { modW[0], modW[1] };
+        const auto tL = tl, tR = tr;
+        const auto eL = erL, eR = erR;
+        const auto ewL = erWL, ewR = erWR;
+        const float kHc = cHc, kLc = cLc, kIn = cIn, kT1 = cT1, kT2 = cT2, kG = g, k44 = c44, k48 = c48, kDamp = cDamp;
+        float phase = lfoPhase, amount = modAmount, hc = sHc, lcH = sLcH, lcX = sLcX;
+        float a1 = lfA1, a2 = lfA2, b1 = lfB1, b2 = lfB2, dA = dampA, dB = dampB;
+
+        auto allPassAt = [&] (int k, float in, float c) {
+            float* const b = ln[(std::size_t) k];
+            int& q = p[(std::size_t) k];
+            const float y = b[q] - c * in;
+            b[q] = c * y + in;
+            if (--q < 0)
+                q = len[(std::size_t) k] - 1;
+            return y;
+        };
+        auto tapAt = [&] (int k, int off) {
+            int j = off + p[(std::size_t) k];
+            if (j >= len[(std::size_t) k])
+                j -= len[(std::size_t) k];
+            return ln[(std::size_t) k][j];
+        };
+        auto modReadAt = [&] (int k, float dly) {
+            const float* const b = md[k];
+            const int j = mw[k] - (int) dly;
+            const float fr = dly - (float) (int) dly;
+            return (1.0f - fr) * b[(j - 1) & (modSize - 1)] + fr * b[(j - 2) & (modSize - 1)];
+        };
+        auto modWriteAt = [&] (int k, float v) {
+            md[k][mw[k]] = v;
+            mw[k] = (mw[k] + 1) & (modSize - 1);
+        };
+
         for (int i = 0; i < n; ++i)
         {
             // modulation: sine LFO on the phase before its advance, smoothed depth
-            const float ph = lfoPhase;
+            const float ph = phase;
             float nx = ph + inc;
             nx = nx - (float) (int) nx;
-            lfoPhase = nx;
-            const float s = (float) std::sin ((double) ph * 6.283185307179586);
-            const float diff = target - modAmount;
-            modAmount = std::abs ((double) diff) < 0.01 ? target : diff * smooth + modAmount + 1.0e-30f;
-            const float dly = modAmount * ((s + 1.0f) * 0.5f);
+            phase = nx;
+            const float diff = target - amount;
+            amount = std::abs ((double) diff) < 0.01 ? target : diff * smooth + amount + 1.0e-30f;
+            // with no modulation depth the product is a zero of the amount's sign for any s in [−1, 1]: the sine is
+            // only computed when it can change the delay
+            const float s = amount != 0.0f ? (float) std::sin ((double) ph * 6.283185307179586) : 0.0f;
+            const float dly = amount * ((s + 1.0f) * 0.5f);
 
             // input: high cut one-pole, low cut through a first-order all-pass
-            float a = ((x[i] + 1.0e-30f) - sHc) * cHc + sHc;
-            sHc = a;
-            const float hh = (a - sLcH) * cLc + sLcX;
-            sLcX = a;
-            sLcH = hh;
-            if (cLc != 0.0f)
+            float a = ((x[i] + 1.0e-30f) - hc) * kHc + hc;
+            hc = a;
+            const float hh = (a - lcH) * kLc + lcX;
+            lcX = a;
+            lcH = hh;
+            if (kLc != 0.0f)
                 a = (a - hh) * 0.5f + 1.0e-30f;
 
             if (erOut != nullptr)
             {
-                auto e = [&] (int off) { return er[(std::size_t) ((off + erP) & erMask)]; };
-                erOut[2 * i] = ((((((e (erL[0]) * erWL[0] + e (erL[1]) * erWL[1]) - e (erL[2]) * erWL[2]) + e (erL[3]) * erWL[3])
-                                  + e (erL[4]) * erWL[4])
-                                 + e (erL[5]) * erWL[5])
-                                + e (erL[6]) * erWL[6]);
-                erOut[2 * i + 1] = ((((((e (erR[0]) * erWR[0] - e (erR[1]) * erWR[1]) + e (erR[2]) * erWR[2]) + e (erR[3]) * erWR[3])
-                                      - e (erR[4]) * erWR[4])
-                                     + e (erR[5]) * erWR[5])
-                                    + e (erR[6]) * erWR[6])
-                                   - e (erR[7]) * erWR[7];
+                auto e = [&] (int off) { return erBuf[(off + erPos) & erMask]; };
+                erOut[2 * i] = ((((((e (eL[0]) * ewL[0] + e (eL[1]) * ewL[1]) - e (eL[2]) * ewL[2]) + e (eL[3]) * ewL[3])
+                                  + e (eL[4]) * ewL[4])
+                                 + e (eL[5]) * ewL[5])
+                                + e (eL[6]) * ewL[6]);
+                erOut[2 * i + 1] = ((((((e (eR[0]) * ewR[0] - e (eR[1]) * ewR[1]) + e (eR[2]) * ewR[2]) + e (eR[3]) * ewR[3])
+                                      - e (eR[4]) * ewR[4])
+                                     + e (eR[5]) * ewR[5])
+                                    + e (eR[6]) * ewR[6])
+                                   - e (eR[7]) * ewR[7];
             }
 
             // input diffusion; the early-reflection line takes the first diffuser's output
-            const float y0 = allPass (line[0], P[0], L[0], a, cIn);
-            const float y1 = allPass (line[1], P[1], L[1], y0, cIn);
-            er[(std::size_t) erP] = y0;
-            if (--erP < 0)
-                erP = erSize - 1;
-            const float y2 = allPass (line[2], P[2], L[2], y1, cIn);
-            const float y3 = allPass (line[3], P[3], L[3], y2, cIn);
-            float z = pre[(std::size_t) preP];
-            pre[(std::size_t) preP] = y3;
-            if (--preP < 0)
-                preP = (int) pre.size() - 1;
+            const float y0 = allPassAt (0, a, kIn);
+            const float y1 = allPassAt (1, y0, kIn);
+            erBuf[erPos] = y0;
+            if (--erPos < 0)
+                erPos = erLast;
+            const float y2 = allPassAt (2, y1, kIn);
+            const float y3 = allPassAt (3, y2, kIn);
+            float z = preBuf[prePos];
+            preBuf[prePos] = y3;
+            if (--prePos < 0)
+                prePos = preLast;
             z = z + 1.0e-20f;
 
             // tank, half A
-            float u = line[11][(std::size_t) P[11]] * g;
-            float f = (u - lfA2) * c44 + lfA1;
-            lfA1 = u, lfA2 = f;
-            float v = ((((f + u) * c48 + u) + z) - dampA) * cDamp + dampA;
-            dampA = v;
-            modWrite (0, v);
-            float w = allPass (line[4], P[4], L[4], modRead (0, dly), cT1);
-            float r = line[5][(std::size_t) P[5]];
-            line[5][(std::size_t) P[5]] = w;
-            if (--P[5] < 0)
-                P[5] = L[5] - 1;
-            w = allPass (line[6], P[6], L[6], r * g, cT2);
-            line[7][(std::size_t) P[7]] = w;
-            if (--P[7] < 0)
-                P[7] = L[7] - 1;
+            float u = ln[11][p[11]] * kG;
+            float f = (u - a2) * k44 + a1;
+            a1 = u, a2 = f;
+            float v = ((((f + u) * k48 + u) + z) - dA) * kDamp + dA;
+            dA = v;
+            modWriteAt (0, v);
+            float w = allPassAt (4, modReadAt (0, dly), kT1);
+            float r = ln[5][p[5]];
+            ln[5][p[5]] = w;
+            if (--p[5] < 0)
+                p[5] = len[5] - 1;
+            w = allPassAt (6, r * kG, kT2);
+            ln[7][p[7]] = w;
+            if (--p[7] < 0)
+                p[7] = len[7] - 1;
 
             // tank, half B
-            u = line[7][(std::size_t) P[7]] * g;
-            f = (u - lfB2) * c44 + lfB1;
-            lfB1 = u, lfB2 = f;
-            v = ((((f + u) * c48 + u) + z) - dampB) * cDamp + dampB;
-            dampB = v;
-            modWrite (1, v);
-            w = allPass (line[8], P[8], L[8], modRead (1, dly), cT1);
-            r = line[9][(std::size_t) P[9]];
-            line[9][(std::size_t) P[9]] = w;
-            if (--P[9] < 0)
-                P[9] = L[9] - 1;
-            w = allPass (line[10], P[10], L[10], r * g, cT2);
-            line[11][(std::size_t) P[11]] = w;
-            if (--P[11] < 0)
-                P[11] = L[11] - 1;
+            u = ln[7][p[7]] * kG;
+            f = (u - b2) * k44 + b1;
+            b1 = u, b2 = f;
+            v = ((((f + u) * k48 + u) + z) - dB) * kDamp + dB;
+            dB = v;
+            modWriteAt (1, v);
+            w = allPassAt (8, modReadAt (1, dly), kT1);
+            r = ln[9][p[9]];
+            ln[9][p[9]] = w;
+            if (--p[9] < 0)
+                p[9] = len[9] - 1;
+            w = allPassAt (10, r * kG, kT2);
+            ln[11][p[11]] = w;
+            if (--p[11] < 0)
+                p[11] = len[11] - 1;
 
-            wetOut[2 * i] = ((((tap (9, tl[0]) - w25 * tap (9, tl[1])) - w70 * tap (10, tl[2])) - w20 * tap (11, tl[3]))
-                             + w60 * tap (5, tl[4]) + tap (6, tl[5]))
-                            + w50 * tap (7, tl[6]);
-            wetOut[2 * i + 1] = (((((w25 * tap (5, tr[1]) + tap (5, tr[0])) - w70 * tap (6, tr[2])) - w20 * tap (7, tr[3]))
-                                  - w60 * tap (9, tr[4]))
-                                 + tap (10, tr[5]))
-                                + w50 * tap (11, tr[6]);
+            wetOut[2 * i] = ((((tapAt (9, tL[0]) - w25 * tapAt (9, tL[1])) - w70 * tapAt (10, tL[2])) - w20 * tapAt (11, tL[3]))
+                             + w60 * tapAt (5, tL[4]) + tapAt (6, tL[5]))
+                            + w50 * tapAt (7, tL[6]);
+            wetOut[2 * i + 1] = (((((w25 * tapAt (5, tR[1]) + tapAt (5, tR[0])) - w70 * tapAt (6, tR[2])) - w20 * tapAt (7, tR[3]))
+                                  - w60 * tapAt (9, tR[4]))
+                                 + tapAt (10, tR[5]))
+                                + w50 * tapAt (11, tR[6]);
         }
+
+        P = p;
+        erP = erPos, preP = prePos;
+        modW = { mw[0], mw[1] };
+        lfoPhase = phase, modAmount = amount, sHc = hc, sLcH = lcH, sLcX = lcX;
+        lfA1 = a1, lfA2 = a2, lfB1 = b1, lfB2 = b2, dampA = dA, dampB = dB;
     }
 
     // FUN_006d4e10: the wrapper hands the controls to the reverb (a predelay change re-allocates and clears it)
