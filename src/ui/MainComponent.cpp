@@ -403,9 +403,9 @@ void MainComponent::resized()
     auto toolbar = bar.reduced (8, 4);
     const auto row1 = toolbar.getY(), row2 = toolbar.getY() + rowHeight + 2, h = rowHeight;
     const auto big = toolbar.getHeight() - 8;                 // transport buttons: both rows
-    const auto bigWidth = juce::roundToInt (h * 1.5f);
+    const auto bigWidth = h > 32 ? 46 : 42;
     constexpr int gap = 17;                                   // a divider and the space around it
-    const auto grow = h - toolbarlayout::rowHeight (toolbarlayout::IconSize::small); // wider panels for bigger rows
+    const auto grow = h - toolbarlayout::rowHeight (toolbarlayout::IconSize::medium); // wider panels for bigger rows
 
     // panel widths
     auto& lf = getLookAndFeel();
@@ -414,20 +414,20 @@ void MainComponent::resized()
         menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
-    const int tempoWidth = 88 + grow * 2, timeWidth = 108 + grow * 3, captionWidth = 54, gridWidth = 148 + grow * 2;
+    const int tempoWidth = 90 + grow, timeWidth = 110 + grow, captionWidth = 50, gridWidth = 148;
 
     std::array<int, toolbarlayout::groupCount> widths {};
     widths[(std::size_t) Group::transport] = modeWidth + 8 + 3 * (bigWidth + 4) + 4 + tempoWidth + 6 + timeWidth;
-    widths[(std::size_t) Group::master] = 90 + grow * 2;
+    widths[(std::size_t) Group::master] = 92;
     widths[(std::size_t) Group::record] = 3 * h + 4;
     widths[(std::size_t) Group::snap] = captionWidth + gridWidth;
     widths[(std::size_t) Group::windows] = 3 * h + 4;
     widths[(std::size_t) Group::file] = 3 * h + 4;
-    widths[(std::size_t) Group::meters] = 118 + grow * 2;
-    widths[(std::size_t) Group::output] = 116 + grow * 3;
+    widths[(std::size_t) Group::meters] = 118;
+    widths[(std::size_t) Group::output] = 116 + grow * 2;
 
     const auto room = toolbar.getWidth();
-    const auto minHint = juce::jmax (menuWidth + 8, 360), maxHint = 620; // room for most hints on one line
+    const auto minHint = juce::jmax (menuWidth + 8, 320), maxHint = 620; // room for most hints on two lines
     const auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
     int used = 0;
     for (int i = 0; i < toolbarlayout::groupCount; ++i)
@@ -686,7 +686,7 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
 juce::Rectangle<int> MainComponent::getToolStripAreaForSnapshot (bool playlistStrip)
 {
     auto& editor = playlistStrip ? (juce::Component&) playlist : (juce::Component&) pianoRoll;
-    if (! editor.isShowing())
+    if (! editor.isVisible() || editor.getParentComponent() == nullptr || ! isParentOf (&editor))
         return {};
     const auto area = getLocalArea (&editor, editor.getLocalBounds());
     return area.withHeight (40).withWidth (juce::jmin (area.getWidth(), 900)).getIntersection (getLocalBounds());
