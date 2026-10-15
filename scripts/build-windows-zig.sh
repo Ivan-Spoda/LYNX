@@ -82,6 +82,8 @@ APP_SOURCES=(src/Main.cpp
 APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
 APP_SOURCES+=(src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
+# workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
+APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

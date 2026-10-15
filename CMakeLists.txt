@@ -133,6 +133,13 @@ if(LYNX_BUILD_APP)
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp)
 
+    # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
+    target_sources(LYNX PRIVATE
+        src/ui/NoteToolDialogs.cpp
+        src/ui/ToolWindow.cpp
+        src/ui/HistoryPanel.cpp
+        src/ui/QuickAddPalette.cpp)
+
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 
     target_compile_definitions(LYNX PRIVATE

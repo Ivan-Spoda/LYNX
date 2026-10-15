@@ -54,6 +54,10 @@ public:
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
     std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
     PianoRollComponent& getPianoRollForSnapshot() { return pianoRoll; }
+    ChannelRackComponent& getRackForSnapshot() { return rack; }
+    BrowserComponent& getBrowserForSnapshot() { return browser; }
+    MixerComponent& getMixerForSnapshot() { return mixer; }
+    std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
@@ -101,6 +105,15 @@ private:
     void nextEmptyPattern();
     void insertPatternHere();
     void splitPatternByChannelNow();
+    void clonePatternNow();
+    void movePatternNow (int delta);
+
+    // workflow P2 windows and menus
+    void showQuickAdd();
+    void showHistory();
+    juce::PopupMenu makeRecordOptionsMenu();
+    void updateRecordQuantise(); // record quantise follows the global grid
+    bool recordQuantiseOn = true;
     void showRenamePattern (int index);
 
     // user settings (UI options)

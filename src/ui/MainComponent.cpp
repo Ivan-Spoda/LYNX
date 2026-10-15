@@ -1,4 +1,8 @@
 #include "ui/MainComponent.h"
+
+#include "ui/HistoryPanel.h"
+#include "ui/QuickAddPalette.h"
+#include "ui/ToolWindow.h"
 #include "ui/WindowOwner.h"
 
 #include "engine/PluginSandbox.h"
@@ -102,6 +106,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
       browser (e)
 {
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
+    browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
     logo.setImage (logoImage(), juce::RectanglePlacement::centred);
     logo.setTooltip ("LYNX " JUCE_APPLICATION_VERSION_STRING);
     addAndMakeVisible (logo);
@@ -145,6 +150,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
         });
+        menu.addSubMenu (tr ("Recording"), makeRecordOptionsMenu());
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
     };
 
@@ -542,6 +548,46 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("pattern.nextEmpty")) nextEmptyPattern();
     else if (is ("pattern.rename")) showRenamePattern (engine.getSong().currentPattern);
     else if (is ("pattern.insert")) insertPatternHere();
+    else if (is ("pattern.clone")) clonePatternNow();
+    else if (is ("pattern.moveUp")) movePatternNow (-1);
+    else if (is ("pattern.moveDown")) movePatternNow (1);
+    else if (id.rfind ("pattern.select", 0) == 0) selectPattern (std::stoi (id.substr (14)) - 1);
+    else if (is ("panel.quickAdd")) showQuickAdd();
+    else if (is ("edit.history")) showHistory();
+    else if (is ("browser.search"))
+    {
+        showPanel (Panel::browser);
+        browser.focusSearch();
+    }
+    else if (is ("transport.record")) engine.setRecording (! engine.isRecording());
+    else if (is ("transport.metronome"))
+    {
+        engine.getTransport().metronome.store (! engine.getTransport().metronome.load());
+        refreshModeButton();
+    }
+    else if (is ("record.countIn"))
+    {
+        auto o = engine.getRecordOptions();
+        o.countInBars = o.countInBars > 0 ? 0 : 1;
+        engine.setRecordOptions (o);
+    }
+    else if (is ("record.waitForInput"))
+    {
+        auto o = engine.getRecordOptions();
+        o.waitForInput = ! o.waitForInput;
+        engine.setRecordOptions (o);
+    }
+    else if (is ("rack.graphEditor")) rack.toggleGraphLanes();
+    else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
+    else if (is ("rack.rotateRight")) rack.rotateSelected (1);
+    else if (is ("browser.previous")) browser.step (-1, false);
+    else if (is ("browser.next")) browser.step (1, false);
+    else if (is ("browser.swapPrevious")) browser.step (-1, true);
+    else if (is ("browser.swapNext")) browser.step (1, true);
+    else if (is ("browser.load")) browser.loadSelected();
+    else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
+    else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
+    else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
     else if (is ("file.new")) newProject();
     else if (is ("file.open")) chooseFileToOpen();
     else if (is ("file.save")) save (false);
@@ -678,6 +724,12 @@ void MainComponent::playStop()
 {
     auto& transport = engine.getTransport();
 
+    if (engine.isWaitingForInput() || engine.isCountingIn()) // pressed again: cancel
+    {
+        engine.stop();
+        return;
+    }
+
     if (transport.playing.load())
     {
         engine.stop();
@@ -686,18 +738,18 @@ void MainComponent::playStop()
     else
     {
         playStartTicks = transport.positionTicks.load();
-        engine.play();
+        engine.startPlayback();
     }
 }
 
 void MainComponent::playPause()
 {
-    if (engine.getTransport().playing.load())
+    if (engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn())
         engine.stop();
     else
     {
         playStartTicks = engine.getTransport().positionTicks.load();
-        engine.play();
+        engine.startPlayback();
     }
 }
 
@@ -856,6 +908,112 @@ void MainComponent::insertPatternHere()
     engine.editSong ([] (Song& s) { insertPattern (s, s.currentPattern, newPatternName (s)); });
 }
 
+// --- quick-add palette and history -------------------------------------------------------------
+
+void MainComponent::showQuickAdd()
+{
+    QuickAddTargets targets;
+    targets.effectsFirst = workspace.getFocused() == Panel::mixer;
+    targets.addInstrument = [this] (ChannelDef c) {
+        rack.addChannel (std::move (c), true);
+        showPanel (Panel::channelRack);
+    };
+    targets.addEffect = [this] (EffectSlot slot) {
+        if (! mixer.addEffectToSelected (std::move (slot)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Quick-add palette"),
+                                                    tr ("The selected insert has no free effect slot."));
+        else
+            showPanel (Panel::mixer);
+    };
+    openToolWindow (makeQuickAddPalette (engine, std::move (targets)), tr ("Quick-add palette"), "quickadd");
+}
+
+std::unique_ptr<juce::Component> MainComponent::makeQuickAddForSnapshot()
+{
+    QuickAddTargets targets;
+    targets.addInstrument = [] (ChannelDef) {};
+    targets.addEffect = [] (EffectSlot) {};
+    return makeQuickAddPalette (engine, std::move (targets));
+}
+
+void MainComponent::showHistory()
+{
+    if (auto* open = findToolWindow ("history"))
+    {
+        open->toFront (true);
+        return;
+    }
+
+    openToolWindow (makeHistoryPanel (engine), tr ("Undo history"), "history");
+}
+
+// --- recording options ---------------------------------------------------------------------------
+
+void MainComponent::updateRecordQuantise()
+{
+    // the global grid sets the record quantise; "none" and the zoom-dependent grids record as played
+    std::int64_t ticks = 0;
+
+    if (recordQuantiseOn)
+    {
+        const auto& option = grid::options()[(std::size_t) juce::jlimit (0, (int) grid::options().size() - 1, EditorGlobals::get().getGridOption())];
+        if (option.kind == grid::Kind::ticks)
+            ticks = option.ticks;
+        else if (option.kind == grid::Kind::bar)
+            ticks = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+    }
+
+    if (engine.getRecordOptions().quantise != ticks)
+    {
+        auto o = engine.getRecordOptions();
+        o.quantise = ticks;
+        engine.setRecordOptions (o);
+    }
+}
+
+juce::PopupMenu MainComponent::makeRecordOptionsMenu()
+{
+    const auto o = engine.getRecordOptions();
+    auto set = [this] (std::function<void (AudioEngine::RecordOptions&)> change) {
+        auto options = engine.getRecordOptions();
+        change (options);
+        engine.setRecordOptions (options);
+    };
+
+    juce::PopupMenu menu;
+    juce::PopupMenu countIn;
+    countIn.addItem (tr ("Off"), true, o.countInBars == 0, [set] { set ([] (AudioEngine::RecordOptions& r) { r.countInBars = 0; }); });
+    for (int bars : { 1, 2, 4 })
+        countIn.addItem (bars == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (bars) }), true, o.countInBars == bars,
+                         [set, bars] { set ([bars] (AudioEngine::RecordOptions& r) { r.countInBars = bars; }); });
+    menu.addSubMenu (tr ("Count-in") + shortcutText ("record.countIn"), countIn);
+    menu.addItem (tr ("Wait for the first note to start") + shortcutText ("record.waitForInput"), true, o.waitForInput,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.waitForInput = ! r.waitForInput; }); });
+    menu.addSeparator();
+    menu.addItem (tr ("Overdub: add to the pattern"), true, o.mode == RecordMode::overdub,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.mode = RecordMode::overdub; }); });
+    menu.addItem (tr ("Replace: a recorded channel's old notes are cleared"), true, o.mode == RecordMode::replace,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.mode = RecordMode::replace; }); });
+    menu.addSeparator();
+    menu.addItem (tr ("Quantise recorded notes to the global grid"), true, recordQuantiseOn, [this] {
+        recordQuantiseOn = ! recordQuantiseOn;
+        updateRecordQuantise();
+    });
+    menu.addItem (tr ("Song mode: place a pattern clip where recording starts"), true, o.placeSongClip,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.placeSongClip = ! r.placeSongClip; }); });
+    return menu;
+}
+
+void MainComponent::clonePatternNow()
+{
+    engine.editSong ([] (Song& s) { clonePattern (s, s.currentPattern); });
+}
+
+void MainComponent::movePatternNow (int delta)
+{
+    engine.editSong ([delta] (Song& s) { movePattern (s, s.currentPattern, delta); });
+}
+
 void MainComponent::splitPatternByChannelNow()
 {
     int created = 0;
@@ -944,22 +1102,9 @@ juce::PopupMenu MainComponent::makePatternMenu()
     menu.addSubMenu (tr ("Color"), colours);
     menu.addSubMenu (tr ("Length"), lengths);
     menu.addItem (tr ("Insert an empty pattern before this one") + shortcutText ("pattern.insert"), [this] { insertPatternHere(); });
-    menu.addItem (tr ("Clone"), [this, index] {
-        engine.editSong ([index] (Song& s) {
-            auto copy = s.patterns[(std::size_t) index];
-            copy.name += " (copy)";
-            s.patterns.insert (s.patterns.begin() + index + 1, std::move (copy));
-
-            // clips pointing to patterns after the new one shift by one position
-            s.forEachClipList ([index] (std::vector<Clip>& clips) {
-                for (auto& c : clips)
-                    if (c.kind == ClipKind::pattern && c.pattern > index)
-                        ++c.pattern;
-            });
-
-            s.currentPattern = index + 1;
-        });
-    });
+    menu.addItem (tr ("Clone") + shortcutText ("pattern.clone"), [this] { clonePatternNow(); });
+    menu.addItem (tr ("Move up") + shortcutText ("pattern.moveUp"), index > 0, false, [this] { movePatternNow (-1); });
+    menu.addItem (tr ("Move down") + shortcutText ("pattern.moveDown"), index + 1 < (int) song.patterns.size(), false, [this] { movePatternNow (1); });
     menu.addItem (tr ("Split by channel (one new pattern per channel)"), ! pattern.notes.empty(), false, [this] { splitPatternByChannelNow(); });
     juce::PopupMenu signatures;
 
@@ -1311,6 +1456,7 @@ void MainComponent::Scope::paint (juce::Graphics& g)
 void MainComponent::timerCallback()
 {
     scope.update();
+    updateRecordQuantise();
 
     if (engine.isModified() != lastModified)
     {
@@ -1626,6 +1772,13 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { engine.undo(); });
         menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { engine.redo(); });
+        menu.addItem (tr ("Undo history...") + shortcutText ("edit.history"), [this] { showHistory(); });
+        menu.addSeparator();
+        menu.addItem (tr ("Quick-add palette...") + shortcutText ("panel.quickAdd"), [this] { showQuickAdd(); });
+        menu.addItem (tr ("Search the Browser") + shortcutText ("browser.search"), [this] {
+            showPanel (Panel::browser);
+            browser.focusSearch();
+        });
     }
     else if (index == 2)
     {
@@ -1681,9 +1834,10 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
         });
-        menu.addItem (tr ("Metronome"), true, engine.getTransport().metronome.load(), [this] {
+        menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, engine.getTransport().metronome.load(), [this] {
             metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
         });
+        menu.addSubMenu (tr ("Recording"), makeRecordOptionsMenu());
         menu.addItem (tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), true,
                       ChannelRackComponent::keepEditorsOpen, [this] {
                           ChannelRackComponent::keepEditorsOpen = ! ChannelRackComponent::keepEditorsOpen;

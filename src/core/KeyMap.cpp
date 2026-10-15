@@ -128,7 +128,14 @@ std::vector<Action> makeActions()
         { "playlist.zoomSelection", TR_NOOP ("Zoom to the selection"), Context::playlist, { chord ('5', shift) }, true },
         { "playlist.centrePlayhead", TR_NOOP ("Centre the view on the playhead"), Context::playlist, { chord ('0', shift) }, true },
         { "playlist.rippleDelete", TR_NOOP ("Delete the selected clips and close the gaps"), Context::playlist, { chord (del, shift) } },
-        { "playlist.rippleTool", TR_NOOP ("Ripple tool"), Context::playlist, { chord ('S', shift) } },
+        { "playlist.ripple", TR_NOOP ("Ripple editing on/off"), Context::playlist, { chord ('S', shift) } },
+
+        // Browser (focused)
+        { "browser.previous", TR_NOOP ("Previous file (preview)"), Context::browser, { chord (up) } },
+        { "browser.next", TR_NOOP ("Next file (preview)"), Context::browser, { chord (down) } },
+        { "browser.swapPrevious", TR_NOOP ("Previous file into the selected channel"), Context::browser, { chord (up, shift) } },
+        { "browser.swapNext", TR_NOOP ("Next file into the selected channel"), Context::browser, { chord (down, shift) } },
+        { "browser.load", TR_NOOP ("Load the file into the selected channel"), Context::browser, { chord (enter) } },
 
         // Mixer (focused)
         { "mixer.moveLeft", TR_NOOP ("Move the selected inserts left"), Context::mixer, { chord (left, alt) } },
