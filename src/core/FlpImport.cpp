@@ -1375,6 +1375,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+        else if (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
+            ++options.report->droppedEffects["Fruity Delay Bank (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)

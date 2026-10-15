@@ -2,6 +2,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDelayBank.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -924,8 +925,24 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     return effectFromFl (pluginName, state, bpm);
 }
 
+std::optional<EffectSlot> fruityDelayBankExact (const std::vector<std::uint8_t>& state)
+{
+    // FL's own Delay Bank engine from the saved state (REA_rodada56); the generic delay remains for unreadable states
+    const auto s = fldbank::parse (state);
+    if (! s)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::fruityDelayBank);
+    slot.state = fldbank::serialise (*s);
+    for (int i = 0; i < fldbank::globalControls; ++i)
+        slot.params[(std::size_t) i] = (float) std::clamp (s->p[(std::size_t) i], 0, 128) / 128.0f;
+    return slot;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    if (pluginName == "Fruity Delay Bank")
+        if (auto exact = fruityDelayBankExact (state))
+            return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
@@ -1088,6 +1105,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb: return { "Fruity Reeverb 2" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
+        case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
         case EffectKind::utility: return { "Fruity Stereo Shaper" };
         default: return {};
     }
@@ -1095,6 +1113,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
 std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int k)
 {
     auto is = [&] (const char* n) { return pluginName == n; };
+
+    // the exact Delay Bank: its four global controls (0…128) are the slot's parameters
+    if (is ("Fruity Delay Bank") && k >= 0 && k < fldbank::globalControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
     {
