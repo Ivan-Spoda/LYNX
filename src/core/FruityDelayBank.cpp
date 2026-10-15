@@ -313,9 +313,9 @@ void designSection (Section& q, int kernel, double g, double a, double s, double
         const auto d = 1.0 / (g + 1.0 + t + e);
         q.a1 = d * ((g - 1.0) + (g + 1.0) * c) * -2.0;
         q.a2 = d * ((g + 1.0 + t) - e);
-        q.b1 = d * g * 2.0 * ((g - 1.0) - (g + 1.0) * c);
-        q.b0 = d * g * (((g + 1.0) - t) + e);
-        q.b2 = d * g * (((g + 1.0) - t) - e);
+        q.b1 = d * ((g * 2.0) * ((g - 1.0) - (g + 1.0) * c));
+        q.b0 = d * (g * (((g + 1.0) - t) + e));
+        q.b2 = d * (g * (((g + 1.0) - t) - e));
     }
     else if (kernel == 7)
     {
@@ -333,9 +333,9 @@ void designSection (Section& q, int kernel, double g, double a, double s, double
         const auto d = 1.0 / (((g + 1.0) - t) + e);
         q.a1 = d * ((g - 1.0) - (g + 1.0) * c) * 2.0;
         q.a2 = d * (((g + 1.0) - t) - e);
-        q.b1 = d * g * -2.0 * ((g - 1.0) + (g + 1.0) * c);
-        q.b0 = d * g * (g + 1.0 + t + e);
-        q.b2 = d * g * ((g + 1.0 + t) - e);
+        q.b1 = d * ((g * -2.0) * ((g - 1.0) + (g + 1.0) * c));
+        q.b0 = d * (g * (((g + 1.0) + t) + e));
+        q.b2 = d * (g * (((g + 1.0) + t) - e));
     }
 }
 
@@ -580,7 +580,7 @@ std::optional<State> parse (const std::vector<std::uint8_t>& d)
         {
             if (k.filterType[f] < 0 || k.filterType[f] > 7)
                 k.filterType[f] = 0;
-            k.filterOrder[f] = std::clamp (k.filterOrder[f], 0, 7);
+            k.filterOrder[f] = std::clamp (k.filterOrder[f], 0, 2); // the plugin has room for three sections
         }
         k.mode = std::clamp (k.mode, 0, 3);
         if (s.version < 16) // version 15 times were in units of 1/384 s (or 1/192 beat)
@@ -760,7 +760,12 @@ struct Engine::Impl
             return;
         }
         bk.period = (double) (bk.time / (float) bk.opt.steps);
-        const int len = std::max (roundEven (bk.period), 1);
+        const int len = roundEven (bk.period);
+        if (len < 1) // FL allocates no table (and applies no pattern) when a step rounds to 0 samples
+        {
+            bk.table.clear();
+            return;
+        }
         bk.table = patternTable (len, (float) bk.opt.amount * k128);
     }
 
