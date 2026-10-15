@@ -60,6 +60,7 @@ add_library(lynx_core STATIC
     src/core/ChorusFx.cpp
     src/core/FlangusFastDist.cpp
     src/core/FlPatcher.cpp
+    src/core/ThreeOsc.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
