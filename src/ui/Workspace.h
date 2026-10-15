@@ -100,6 +100,10 @@ private:
 
     workspace::Layout layout;
     bool layoutReady = false, persistent = false;
+    // The layout is still LYNX's default (no panel moved or resized by hand, nothing detached or loaded):
+    // when the window changes size it takes the default rects for the new size instead of scaling them,
+    // so a window that opens small and is then maximised gets a sensible desktop.
+    bool pristine = false;
     juce::String pendingState;
     std::array<std::unique_ptr<PanelFrame>, workspace::panelCount> frames;
     std::array<std::unique_ptr<DetachedPanelWindow>, workspace::panelCount> windows;

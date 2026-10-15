@@ -201,6 +201,7 @@ private:
     void updateCursor (juce::ModifierKeys mods);
     void applyLaneValue (int x, float value, int fromX); // sets the lane value of the notes between fromX and x
     void wheelNoteProperty (int note, float deltaY, bool fine);
+    void postDragHint (const juce::MouseEvent& e); // what the gesture in progress does (hint bar)
     juce::uint32 lastWheelEdit = 0;    // wheel edits within a burst are one undo step
     std::vector<Note> laneOriginals;   // right-drag line / Shift+drag: the pattern's notes when it started
     float laneSetValue = 0.0f;

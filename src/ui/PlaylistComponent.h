@@ -226,6 +226,7 @@ private:
     void updateHover (juce::Point<int> p, juce::ModifierKeys mods);
     void updateCursor (juce::ModifierKeys mods);
     juce::Rectangle<int> clipBounds (int clip) const;
+    void postDragHint (); // what the gesture in progress does (hint bar)
     juce::Rectangle<int> clipMenuButton (int clip) const; // the menu button in a clip's title strip (empty if too narrow)
     juce::uint32 lastWheelEdit = 0;
     double zoomBeforeAll = 0.0, scrollBeforeAll = 0.0; // Ctrl+right-click: zoom to everything and back

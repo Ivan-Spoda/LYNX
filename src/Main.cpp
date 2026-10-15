@@ -1211,8 +1211,42 @@ private:
             // the workspace desktop: the default layout, then with the Piano Roll and Mixer floating too
             // (and a sample hint in the status strip, as when hovering a knob)
             ui.showDesktopForSnapshot (false);
+            ui.setMetersForSnapshot (0.23, (std::int64_t) 412 << 20, 6);
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-desktop.png");
+
+            // the start-up desktop and the toolbar at the usual window sizes: the untouched default layout
+            // follows the window (default rects, not scaled ones); panels drop from the toolbar by priority
+            {
+                const auto size = ui.getBounds();
+                for (const auto& [w, h] : std::vector<std::pair<int, int>> { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 } })
+                {
+                    ui.setSize (w, h);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-desktop-" + juce::String (w) + ".png");
+                    saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + juce::String (w) + ".png");
+                }
+                ui.setBounds (size);
+                offline.dispatchPendingMessages();
+            }
+
+            // the hint bar: a value control while it is dragged (live value), a gesture line with mouse and key
+            // glyphs, and a text too long for one line (two lines)
+            {
+                const auto toolbar = ui.getToolbarBoundsForSnapshot().withWidth (juce::jmin (ui.getWidth(), 900));
+                const lynx::ui::Hint hints[] = {
+                    { lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "-3.2 dB", true, true },
+                    { lynx::tr ("Piano Roll: [LMB] add a note, drag to move  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"), {}, false, false },
+                    { lynx::tr ("Global snap: the grid of the Piano Roll and Playlist (when they follow it) and the quantise of recorded notes  "
+                                "[LMB] choose  [Wheel] step  [RMB] length of new notes  [Backspace] snap on/off  [Alt] while dragging: no snap"), {}, false, true },
+                };
+                for (int i = 0; i < 3; ++i)
+                {
+                    ui.setHintForSnapshot (hints[i], i == 0);
+                    saveArea (ui, toolbar, prefix + "-hint-" + juce::String (i + 1) + ".png");
+                }
+            }
+
             ui.showDesktopForSnapshot (true);
             ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
             saveSnapshot (ui, prefix + "-desktop-all.png");
@@ -1592,6 +1626,16 @@ private:
         }
 
         writePng (image, path);
+    }
+
+    // a part of a component (e.g. the main toolbar)
+    static void saveArea (juce::Component& c, juce::Rectangle<int> area, const juce::String& path)
+    {
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (c.createComponentSnapshot (area), *out);
     }
 
     static void saveSnapshot (juce::Component& c, const juce::String& path)

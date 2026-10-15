@@ -6,6 +6,7 @@
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 
@@ -1380,6 +1381,12 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 {
     const auto snapOn = ! e.mods.isAltDown();
+    // after the step below, the hint bar says what the gesture is doing
+    const struct PostAfter
+    {
+        PlaylistComponent& list;
+        ~PostAfter() { list.postDragHint(); }
+    } postAfter { *this };
 
     switch (drag)
     {
@@ -1680,8 +1687,63 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
+void PlaylistComponent::postDragHint()
+{
+    const auto& song = engine.getSong();
+    const auto count = juce::String ((int) juce::jmax<std::size_t> (1, dragIndices.size()));
+    auto position = [&song] (std::int64_t tick) {
+        const auto bar = song.barAt (juce::jmax<std::int64_t> (0, tick));
+        const auto beat = (tick - bar.tick) / ppq + 1;
+        return juce::String (bar.number) + ":" + juce::String (beat);
+    };
+    const auto clip = dragClip >= 0 && dragClip < (int) song.playlist.size() ? &song.playlist[(std::size_t) dragClip] : nullptr;
+    ui::Hint hint;
+
+    switch (drag)
+    {
+        case Drag::move:
+            if (clip == nullptr)
+                return;
+            hint.text = tr ("Moving {0} clip(s)  [Alt] no snap", { count });
+            hint.value = position (clip->start) + "  " + tr ("Track {0}", { juce::String (clip->track + 1) });
+            break;
+        case Drag::resize:
+        case Drag::trimLeft:
+            if (clip == nullptr)
+                return;
+            hint.text = tr ("Resizing {0} clip(s)  [Alt] no snap", { count });
+            hint.value = position (drag == Drag::resize ? clip->end() : clip->start);
+            break;
+        case Drag::slip: hint.text = tr ("Sliding the content inside the clip  [Alt] no snap"); break;
+        case Drag::fadeIn:
+        case Drag::fadeOut: hint.text = tr ("Setting the fade  [Alt] no snap"); break;
+        case Drag::autoPoint: hint.text = tr ("Moving the point: then [Shift] keeps time  [Ctrl] keeps value"); break;
+        case Drag::select:
+            hint.text = tr ("Selecting  [Shift] adds to the selection");
+            hint.value = tr ("{0} selected", { juce::String ((int) selection.size()) });
+            break;
+        case Drag::loop:
+            hint.text = tr ("Time selection");
+            hint.value = position (song.loopStart) + " - " + position (song.loopEnd);
+            break;
+        case Drag::erase: hint.text = tr ("Deleting what the mouse crosses"); break;
+        case Drag::muting: hint.text = tr ("Muting / unmuting what the mouse crosses"); break;
+        case Drag::knife: hint.text = tr ("Cutting along the line  [Alt] no snap"); break;
+        case Drag::paint: hint.text = tr ("Painting clips  [Alt] no snap"); break;
+        case Drag::timeMove: hint.text = tr ("Moving the time selection with its clips"); break;
+        case Drag::seek:
+        case Drag::listen:
+        case Drag::pan:
+        case Drag::zoomRange:
+        case Drag::none: return;
+    }
+
+    ui::postHint (hint);
+}
+
 void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
 {
+    ui::clearPostedHint();
     if (drag == Drag::knife)
         cutWithKnife (knifeFrom, knifeTo, ! e.mods.isAltDown());
 

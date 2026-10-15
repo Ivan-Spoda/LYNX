@@ -4,6 +4,7 @@
 #include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
 #include "engine/Text.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 
@@ -1239,6 +1240,13 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
 {
     const auto snapOn = ! e.mods.isAltDown();
+    // after the step below, the hint bar says what the gesture is doing
+    const struct PostAfter
+    {
+        PianoRollComponent& roll;
+        const juce::MouseEvent& event;
+        ~PostAfter() { roll.postDragHint (event); }
+    } postAfter { *this, e };
 
     switch (drag)
     {
@@ -1511,8 +1519,72 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
+void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
+{
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto count = juce::String ((int) juce::jmax<std::size_t> (1, dragIndices.size()));
+    auto steps = [] (std::int64_t ticks) {
+        const auto value = (double) ticks / ticksPerStep;
+        return (value > 0 ? "+" : "") + juce::String (value, std::abs (value - std::round (value)) < 1e-9 ? 0 : 2);
+    };
+    ui::Hint hint;
+
+    switch (drag)
+    {
+        case Drag::move:
+        {
+            const auto at = (std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragNote) - dragIndices.begin());
+            if (dragNote < 0 || dragNote >= (int) notes.size() || at >= dragOriginals.size())
+                return;
+            const auto& now = notes[(std::size_t) dragNote];
+            const auto& was = dragOriginals[at];
+            hint.text = tr ("Moving {0} note(s): then [Shift] keeps the pitch  [Ctrl] keeps the time  [Alt] no snap", { count });
+            hint.value = keyName (now.key) + "  " + juce::String (now.key - was.key >= 0 ? "+" : "") + juce::String (now.key - was.key) + " st  "
+                         + steps (now.start - was.start) + " " + tr ("steps");
+            break;
+        }
+        case Drag::resize:
+        case Drag::resizeLeft:
+            if (dragNote < 0 || dragNote >= (int) notes.size())
+                return;
+            hint.text = tr ("Resizing {0} note(s)  [Alt] no snap", { count });
+            hint.value = juce::String ((double) notes[(std::size_t) dragNote].length / ticksPerStep, 2) + " " + tr ("steps");
+            break;
+        case Drag::velocity:
+        case Drag::velocitySet:
+        case Drag::velocityLine:
+        {
+            const auto lane = velocityArea();
+            const auto value = drag == Drag::velocitySet ? laneSetValue
+                                                         : juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - e.y) / (float) (lane.getHeight() - 8));
+            hint.text = tr ("Setting {0}", { laneBox.getText() });
+            hint.value = juce::String (juce::roundToInt (value * 100.0f)) + "%";
+            break;
+        }
+        case Drag::select:
+        case Drag::keySelect:
+        case Drag::rulerSelect:
+            hint.text = tr ("Selecting  [Shift] adds to the selection");
+            hint.value = tr ("{0} selected", { juce::String ((int) selection.size()) });
+            break;
+        case Drag::erase: hint.text = tr ("Deleting what the mouse crosses"); break;
+        case Drag::muting: hint.text = tr ("Muting / unmuting what the mouse crosses"); break;
+        case Drag::knife: hint.text = tr ("Cutting along the line  [Alt] no snap"); break;
+        case Drag::paint: hint.text = tr ("Painting notes  [Alt] no snap"); break;
+        case Drag::keyZoom: hint.text = tr ("Key height"); hint.value = juce::String (rowHeight) + " px"; break;
+        case Drag::pan:
+        case Drag::keyboard:
+        case Drag::listen:
+        case Drag::zoomRange:
+        case Drag::none: return;
+    }
+
+    ui::postHint (hint);
+}
+
 void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
 {
+    ui::clearPostedHint();
     if (drag == Drag::knife)
         cutWithKnife (knifeFrom, knifeTo, ! e.mods.isAltDown());
 

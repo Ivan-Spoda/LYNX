@@ -37,6 +37,9 @@ struct PanelState
 
 // Smallest panel size the UI allows when resizing.
 constexpr int minWidth = 220, minHeight = 120;
+// Default layout: room left for the Playlist's pattern picker and track names, and the smallest heights the
+// Mixer and a Piano Roll tiled above it are given.
+constexpr int playlistHeaderWidth = 260, mixerMinHeight = 400, pianoRollMinHeight = 300;
 
 struct Layout
 {
@@ -48,10 +51,13 @@ struct Layout
     PanelState& operator[] (Panel p) noexcept { return panels[(std::size_t) p]; }
     const PanelState& operator[] (Panel p) const noexcept { return panels[(std::size_t) p]; }
 
-    // LYNX's default arrangement for a desktop of this size: Browser on the left, the Playlist filling
-    // the rest, the Channel Rack floating over the Playlist; Piano Roll and Mixer hidden with sensible
-    // rects for when they are first shown.
+    // LYNX's default arrangement for a desktop of this size (FL's fresh-install desktop): Browser on the left,
+    // the Playlist filling the rest as the background, the Channel Rack floating over the Playlist; Piano Roll
+    // and Mixer hidden with sensible rects for when they are first shown (Mixer at the bottom, Piano Roll above).
     static Layout makeDefault (int width, int height);
+    // The desktop changed size while the layout is still the untouched default: take the default rects for
+    // the new size (instead of scaling), keeping what is shown, maximised, the order and the focus.
+    void relayoutDefault (int newWidth, int newHeight);
 
     void bringToFront (Panel p);
     bool isFrontmost (Panel p) const; // topmost visible, attached panel
