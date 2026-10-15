@@ -25,6 +25,7 @@
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
+#include "ui/WaveformView.h"
 
 namespace lynx
 {
@@ -1003,9 +1004,13 @@ public:
             b->onClick = [this] { apply(); };
         }
 
+        wave.setEmptyText (tr ("No sample loaded"));
+        wave.setTooltip (tr ("The sample: colours show where it is bass-heavy (warm) or bright (cool); outside Start/End is dimmed"));
+        addAndMakeVisible (wave);
+
         refresh();
         engine.addChangeListener (this);
-        setSize (420, 576);
+        setSize (420, 676);
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -1013,6 +1018,8 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (12);
+        wave.setBounds (area.removeFromTop (92));
+        area.removeFromTop (8);
         auto place = [] (juce::Rectangle<int> row, std::initializer_list<std::pair<juce::Slider*, juce::Label*>> items) {
             const auto w = row.getWidth() / 3;
 
@@ -1099,6 +1106,11 @@ private:
             porta.setToggleState (c->sampler.porta, juce::dontSendNotification);
             updating = false;
 
+            const auto path = juce::String::fromUTF8 ((c->samplePath.empty() && ! c->zones.empty() ? c->zones.front().path : c->samplePath).c_str());
+            wave.setFile (path, [&e = engine, path] { return e.getSampleLibrary().load (path); });
+            wave.setRegion (c->sampler.regionStart, c->sampler.regionEnd);
+            wave.setReversed (c->sampler.reverse);
+
             if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
                 w->setName (tr ("Sampler settings - {0}", { juce::String::fromUTF8 (c->name.c_str()) })
                             + (c->zones.empty() ? juce::String() : tr (" (multi-sample: {0} zones)", { juce::String ((int) c->zones.size()) })));
@@ -1156,6 +1168,7 @@ private:
     juce::ToggleButton reverse, cut, keepPitch, porta;
     juce::ComboBox filterType;
     juce::TextButton modulationButton;
+    ui::WaveformDisplay wave;
 };
 
 // Built-in synth page: 3 oscillators, envelope and filter.

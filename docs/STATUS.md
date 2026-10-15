@@ -35,6 +35,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   reorder, link selected channels (Ctrl+L / Ctrl+Shift+L / Alt+L), "sidechain only" sends, per-insert record
   arm, effect slots dragged to reorder, all-effects switch, A/B compare per slot, effect presets dropped from the
   Browser.
+- **Spectral waveforms:** audio clips, the Sampler settings and the Browser preview draw a detailed waveform
+  (RMS body + peak outline, smooth at any zoom) coloured by frequency content: warm = bass, lime = mids, cool =
+  treble. Analysed in the background and cached on disk; Options → Waveforms switches to the classic one-colour
+  look and to stereo lanes.
 - **Browser:** search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
   selected channel, user folders.
 - **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
@@ -66,7 +70,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
@@ -101,8 +105,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
   coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
-  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice
-  processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
+  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper (its x87 live / file-render
+  routines since REA round 55, checked against FLEngine's own) and DX10's shared voice processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
   built-in waves read from the user's FL installation); Autogun on Ogun's engine in its Autogun variant (REA round 57:
@@ -394,6 +398,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   detector, smoothing every 8 samples, saturator and 1.5 s silence bypass; Spreader: the Faust-built engine of
   `Shared/ildsp_x64.dll` (TPT split, crossfading width delay, 15 kHz filters, mono bass). Bit-identical to the DLLs
   on every distinct installation state (104 / 30 / 57 / 25) at 44.1, 48, 96 and 22.05 kHz.
+- **Fast Dist, Flangus, Flanger:** FL's exact engines as mixer effects (`core/FlangusFastDist`, REA round 55), with
+  FL's controls as editable parameters. Fast Dist runs FL's host waveshaper (the 20 FLEngine curves rebuilt from their
+  formula; FL's live routine for playback, its file-render routine for exports); Flangus its x87 voice set-up and
+  parabolic-LFO voices with FL's gain ramps; the Flanger its fixed-point LFO and damped-feedback lines. Bit-identical
+  to the DLLs on every demo state (31 / 18 / 3), synthetic edge states and automation, Linux and Windows builds.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -540,6 +549,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   load order not confirmed; identical at 44.1 kHz). Stereo Shaper / Enhancer ramp their gains per host call; LYNX
   splits blocks at 512 frames (FL's block size for them not confirmed). Spreader: FL's engine diverges to NaN at
   rates where its 15 kHz section passes Nyquist (22.05 kHz); LYNX outputs 0 there (REA round 54 §6–7).
+- Fast Dist / Flangus / Flanger (REA round 55 §6): that FL's live/file-render switch of the host waveshaper follows
+  its `.wav` render and that FL's start-up installs the x87 host routines are inferences; whether FL flushes Flangus
+  or sends the Flanger's "enabled" notification before playback is not observed (LYNX starts both that way).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
