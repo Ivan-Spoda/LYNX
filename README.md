@@ -12,6 +12,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 </p>
 
 <p align="center">
+  <a href="https://lynx-share.com"><strong>Website</strong></a> ·
   <a href="https://github.com/Ka1-S/LYNX/releases/latest"><strong>Download</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#opens-fl-studio-projects">FL projects</a> ·
