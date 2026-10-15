@@ -18,6 +18,8 @@ CORE="src/flp/Flp.cpp src/core/Song.cpp src/core/NoteEdit.cpp src/core/Recorder.
 mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
 CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp"
+# start-up sound (procedural)
+CORE="$CORE src/core/StartupSound.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in
