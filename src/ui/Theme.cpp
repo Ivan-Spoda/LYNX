@@ -414,11 +414,9 @@ void LookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rec
     g.drawFittedText (caps (sectionName), area.reduced (14, 0).withTrimmedTop (4), juce::Justification::centredLeft, 1);
 }
 
-void LookAndFeel::drawMenuBarBackground (juce::Graphics& g, int width, int height, bool, juce::MenuBarComponent&)
+void LookAndFeel::drawMenuBarBackground (juce::Graphics&, int, int, bool, juce::MenuBarComponent&)
 {
-    g.fillAll (bg1);
-    g.setColour (border);
-    g.fillRect (0, height - 1, width, 1);
+    // transparent: the menu sits inside the main toolbar, which paints the band behind it
 }
 
 juce::Font LookAndFeel::getMenuBarFont (juce::MenuBarComponent&, int, const juce::String&)
@@ -428,7 +426,7 @@ juce::Font LookAndFeel::getMenuBarFont (juce::MenuBarComponent&, int, const juce
 
 int LookAndFeel::getMenuBarItemWidth (juce::MenuBarComponent& bar, int itemIndex, const juce::String& itemText)
 {
-    return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getMenuBarFont (bar, itemIndex, itemText), itemText)) + 22;
+    return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getMenuBarFont (bar, itemIndex, itemText), itemText)) + 16;
 }
 
 void LookAndFeel::drawMenuBarItem (juce::Graphics& g, int width, int height, int itemIndex, const juce::String& itemText, bool isMouseOverItem,

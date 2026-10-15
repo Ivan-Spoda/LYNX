@@ -13,6 +13,7 @@
 #include "ui/PianoRollComponent.h"
 #include "ui/MixerComponent.h"
 #include "ui/PlaylistComponent.h"
+#include "ui/Splash.h"
 #include "ui/ValueControl.h"
 #include "ui/Workspace.h"
 
@@ -108,6 +109,7 @@ private:
     void loadUiSettings();
     void saveUiSettings();
     bool persistent = true;
+    StartupOptions startup; // splash screen and start-up sound (read by Main.cpp before this window exists)
 
     // menu bar
     juce::StringArray getMenuBarNames() override;
@@ -117,9 +119,11 @@ private:
     juce::PopupMenu makePatternMenu();
     juce::MenuBarComponent menuBar { this };
     juce::RecentlyOpenedFilesList recent;
-    static constexpr int menuHeight = 26;
-    static constexpr int toolbarHeight = 50;
-    static constexpr int statusHeight = 26;
+    // The main toolbar is two rows high, laid out the way FL Studio arranges its panels (docs/WORKFLOW_FL.md,
+    // "Layout"): the menu with the hint bar under it, transport, recording options, global snap and pattern
+    // selector, window and file shortcuts, and the output monitor on the right.
+    static constexpr int rowHeight = 28;
+    static constexpr int toolbarHeight = 2 * rowHeight + 10;
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();
@@ -137,13 +141,12 @@ private:
 
     AudioEngine& engine;
 
-    juce::ImageComponent logo; // the LYNX icon in the corner of the bar
     IconButton newButton { "new", Icon::newFile }, openButton { "open", Icon::open }, saveButton { "save", Icon::save },
-        exportButton { "export", Icon::exportAudio };
+        exportButton { "export", Icon::exportAudio }, undoButton { "undo", Icon::undo }, redoButton { "redo", Icon::redo };
     IconButton playButton { "play", Icon::play };
     IconButton stopButton { "stop", Icon::stop };
     IconButton recordButton { "record", Icon::record };
-    IconButton recordMenuButton { "recordMenu", Icon::chevronDown };
+    IconButton recordMenuButton { "recordMenu", Icon::mic };
     IconButton patternModeButton { "patternMode", Icon::pattern }, songModeButton { "songMode", Icon::song };
     IconButton metronomeButton { "metronome", Icon::metronome };
     IconButton typingPianoButton { "typingPiano", Icon::keyboard };
@@ -178,17 +181,17 @@ private:
     juce::ComboBox patternBox;
     IconButton newPatternButton { "newPattern", Icon::plus };
     IconButton patternMenuButton { "patternMenu", Icon::more };
-    juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
-    juce::Label swingLabel;
-    IconButton settingsButton { "settings", Icon::settings };
+    juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox }; // in the Channel Rack's title bar
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },
                                                                  IconButton { "pianoRollPanel", Icon::pianoRoll },
                                                                  IconButton { "mixerPanel", Icon::mixer },
                                                                  IconButton { "browserPanel", Icon::browser } };
+    IconButton pluginPickerButton { "pluginPicker", Icon::pluginPicker };
     GlobalGridBox gridBox; // global grid of the editors (see ui/EditorTools.h)
-    std::vector<int> dividers; // x positions of the toolbar group separators
+    std::vector<int> dividers; // x positions of the toolbar panel separators
+    juce::Rectangle<int> snapIconArea, positionArea, tempoArea;
     void showLanguageChoice (const juce::String& id);
     juce::Label positionLabel;
 

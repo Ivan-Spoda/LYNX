@@ -13,6 +13,18 @@
 
 namespace lynx
 {
+// --- shared title bar ---------------------------------------------------------------------
+// The Playlist and Piano Roll carry their toolbar in their window's title bar, as FL Studio's editors do
+// (docs/WORKFLOW_FL.md, "Layout"): the workspace frame lays the editor over its title row and keeps
+// `left` px for its menu button and title and `right` px for its window buttons; the editor lays out
+// its toolbar between them.
+class SharesTitleBar
+{
+public:
+    virtual ~SharesTitleBar() = default;
+    virtual void setTitleBarInsets (int left, int right) = 0;
+};
+
 // --- edit tools ------------------------------------------------------------------------
 // Rules shared by every tool: right-click deletes, Alt bypasses the grid, Ctrl selects
 // (Ctrl+drag draws a selection box). Right-press-and-hold on empty grid gives a temporary Knife.
