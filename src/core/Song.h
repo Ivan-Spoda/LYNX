@@ -540,6 +540,7 @@ struct PlaylistTrack
 {
     std::string name;  // empty = "Track N"
     bool muted = false; // clips on this track don't play
+    int height = 0;     // Playlist row height in px (0 = the default)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.

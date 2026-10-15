@@ -10983,3 +10983,4 @@ TEST (wasp_is_a_silent_placeholder)
         CHECK (song.channels[2].instrument == lynx::InstrumentKind::wasp);
     }
 }
+#include "UiPolish2Tests.inc"
