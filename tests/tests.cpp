@@ -9776,6 +9776,8 @@ TEST (bassdrum_engine)
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"
+// Editor mouse grammar (Piano Roll / Playlist)
+#include "EditorGestureTests.inc"
 
 TEST (chorus_family_engines)
 {
@@ -9930,6 +9932,7 @@ TEST (chorus_family_engines)
                || lynx::effectFromFl ("Vintage Chorus", ints ({ 2, 2, 0, 211046, 1, 2411, 960, 1985, 5121, 0, 1, 4420, 6000, 273, 0, 0, 0, 0 }), 120.0)->kind != lynx::EffectKind::vintageChorus);
     }
 }
+#include "UiChromeTests.inc"
 
 TEST (fruity_delay_engines)
 {

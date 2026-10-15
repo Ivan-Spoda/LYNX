@@ -21,10 +21,12 @@ enum class Icon
     detach, dock, restore, keyboard, automate, rightClick, tap,
     brush, knife, zoom, listen, slip, ghost, // editor tools (Piano Roll / Playlist)
     panelMenu, pluginPicker, mic, // window options menu, plugin picker, recording options
-    countIn, waitInput // recording: count-in and wait for input
+    countIn, waitInput, // recording: count-in and wait for input
+    mouseLeft, mouseMiddle, mouseWheel, // hint bar gestures (with rightClick)
+    tuningFork // master pitch
 };
 
-constexpr int iconCount = (int) Icon::waitInput + 1;
+constexpr int iconCount = (int) Icon::tuningFork + 1;
 
 namespace icons
 {
@@ -42,7 +44,10 @@ void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colo
 
 // A flat button that shows an icon, optionally followed by text. Uses the theme colours:
 // neutral at rest, red accent when toggled on (or when `primary`).
-class IconButton : public juce::Button
+//
+// Hover and press states fade in and out (about 120 ms) instead of switching at once.
+class IconButton : public juce::Button,
+                   private juce::Timer
 {
 public:
     IconButton (const juce::String& name, Icon icon, const juce::String& text = {});
@@ -66,8 +71,11 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+    void buttonStateChanged() override;
 
 private:
+    void timerCallback() override;
+    float hover = 0.0f; // 0 = at rest, 1 = under the mouse (animated)
     Icon icon;
     juce::String text;
     bool primary = false, flat = false, roundLeft = true, roundRight = true;

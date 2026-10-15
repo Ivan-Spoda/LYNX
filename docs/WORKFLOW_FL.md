@@ -388,12 +388,13 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | G9 | Yes | Global grid combo in the main toolbar (`ui/EditorTools.h` `GlobalGridBox`, `EditorGlobals`); each editor's grid combo starts on "Follow global grid". Backspace in the Piano Roll / Playlist toggles it with "No snap". Alt bypass: Yes. **Record quantise follows it** (fixed fractions and bars; none/screen/nearest record as played; Options → Recording turns it off) |
 | G10 | Yes | Right-click the global grid → "Default note length" (or "Last clicked note", the default) |
 | G11 | **Done** | Numpad +/− next/previous, **numpad 1–9 select patterns 1–9**, F4 next empty pattern (then the naming dialog), F2 rename + colour dialog (F2 inside it = random palette colour), Ctrl+Shift+Ins insert before the current one, **Alt+C clone** (the rack keeps Alt+C for channels while it has focus), **Shift+Ctrl+Up/Down move**, "Split by channel" in the pattern menu and the **Patterns** menu (`core/RackOps.cpp`). Keys checked on [DOC][pat-menu] and [DOC][sc]. Del is not bound (it deletes notes/clips in the editors); Delete pattern stays in the menu |
-| G12 | **Done** | Hint strip in the status bar: describes the control under the mouse (`ui::HintSource`, hint property or tooltip), shows its live value while it is dragged, and marks "can be automated" and "has a right-click menu" with LYNX icons. MIDI learn prompt kept |
+| G12 | **Done** | **Hint bar** under the menu, as wide as the toolbar allows (360–620 px; one line, or two smaller lines for long hints): describes the control under the mouse (`ui::HintSource`, hint property or tooltip), shows its **value live while it is dragged** (the pressed control stays the source for the whole drag, its value in an accent pill), and marks "can be automated" and "has a right-click menu" with LYNX icons. Hint texts use a small markup drawn as **mouse-button and key glyphs** (`core/HintMarkup.h`: `[LMB] [2xLMB] [RMB] [MMB] [Wheel]`, any other `[Key]` as a key cap). Panels can **post a live hint** for a gesture in progress (`ui::postHint`, `ui/HintBar.h`). Every main-toolbar control has a markup hint. MIDI learn prompt kept. [DOC][tb] |
 | G13 | **Done** (LYNX variant) | Snapshot undo with 100 steps, one step per mouse gesture; Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. **Undo history panel** (Ctrl+H, Edit menu; `ui/HistoryPanel.*`): steps named after what changed (`core/History.h` compares the snapshots), newest at the bottom, a click jumps there (`AudioEngine::jumpToHistory`). No undo-level or knob-tweak settings |
 | G14 | Partial | Ctrl+N new, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+R export, recent-files menu (`MainComponent.cpp:250-358, 833-957`). No save-new-version |
 | G15 | Partial | 4 built-in templates in "New from template" (`core/Templates.cpp:57`); no user templates |
 | G16 | **Done** | Ctrl+T and a toolbar toggle (off by default, so the editors' letter tools work; the manual does not state a default); saved in the user settings and passed to `EditorGlobals::typingPiano`. Every binding lives in `core/KeyMap` (remappable via `%APPDATA%\LYNX\keys.json`, Options → Edit keyboard shortcuts). While the piano is on its keys win; other plain printable keys only work for actions marked `whilePiano` (L); chords, F-keys and Space/Enter/arrows always work |
-| G17 | **Done** | Toolbar icons for the five panels (click toggles, right-click shows the panel maximised) |
+| G17 | **Done** | Toolbar icons for the five panels (click toggles, right-click shows the panel maximised); undo/redo icons: right-click opens the undo history |
+| G19 | **Done** (LYNX variant) | Toolbar meters and master controls ([DOC][tb], `ui/Toolbar.*`): **song position** slider under the time display (click/drag seeks, snapped to steps, Alt free; wheel = one bar; Playlist in Song mode, the pattern in Pattern mode); **time display** switches bar:beat:step / min:sec:cs on click; **master volume** = the Master insert's fader (automatable, so it also affects renders, unlike FL's monitor volume); **master pitch** ±1200 cents saved with the project (`Song::masterPitch`, applied to the built-in instruments' notes in `RackRenderer`; semitone steps, Shift free; plugins are not retuned); **CPU / RAM / polyphony** (polyphony = notes sounding in the song plus held PC keys, `core/SongStats.h`; voices still releasing are not counted); **output** oscilloscope with a peak meter that turns red after clipping |
 | G18 | No | No "last tweaked" |
 
 **Controls**
@@ -436,18 +437,18 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| R1 | Yes | Tool strip: Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen (`ui/EditorTools.h`, `ui/PianoRollComponent.cpp`). Letter keys P/B/D/T/C/E/Z/Y work while the typing piano is off (`EditorGlobals::typingPiano`, wired by P1-14). No right-click+wheel tool switching; no drum-paint mode |
+| R1 | Yes | Tool strip: Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen (`ui/EditorTools.h`, `ui/PianoRollComponent.cpp`). Letter keys P/B/D/T/C/E/Z/Y work while the typing piano is off (`EditorGlobals::typingPiano`, wired by P1-14). **The wheel over the strip steps through the tools** (LYNX's take on right-click-hold + wheel). **Each tool and target has its own cursor** (pencil, brush, eraser, knife, zoom, speaker icons; four-way move, copy, left-right resize, crosshair select) decided by the same rules as the click (`core/EditorGestures.h` `leftAction`/`cursorFor`, unit-tested), and it follows Ctrl/Shift/Alt without moving the mouse. No drum-paint mode |
 | R2 | Yes | Pencil keeps the old gestures; right-click/right-drag deletes in every tool; right-press-and-hold on empty grid then drag = temporary Knife |
 | R3 | Yes | Brush lays notes (or the chord stamp) at the default length while dragging right; Shift = monophonic (replaces overlapping notes of the channel) |
 | R4 | Yes | The resized length becomes the next default (`:938-954`) |
-| R5 | Partial | Right-edge resize, Alt = free; opt-in left-edge resize (… menu or Ctrl+Alt+Home). No stretch handle |
-| R6 | Partial | Ctrl+drag box; Shift+drag adds; Ctrl+click toggles one note. No ruler/keyboard range selection |
+| R5 | Partial | **Both edges resize by default** (LYNX choice; FL makes the left edge an option — Ctrl+Alt+Home / … menu turns it off here). Edge zones scale with the note (a quarter of its width, at most 6 px; no left edge under 16 px) so short notes stay movable; the hovered edge shows a grip. Alt = free. No stretch handle |
+| R6 | **Done** (most) | Ctrl+drag box; Shift+drag adds; Ctrl+click toggles one note; **Ctrl+drag on the ruler selects a time range, Ctrl+click/drag on the keyboard selects a key / key range** (Shift adds) |
 | R7 | Yes | After the click, pressing Shift locks the pitch (time only) and Ctrl locks the time (pitch only); Shift held at the click still drags a copy |
 | R8 | Partial | Shift+drag on a note drags a copy (`:785-805`) |
 | R9 | Yes | Double-click a note → Note inspector call-out (velocity, pan, release, fine pitch, Mod X/Y, slide, porta; time and length for one note) applied to the selection with Apply / Revert, one undo step. Release and Mod X/Y are stored but not yet used by the instruments; no colour group |
-| R10 | Partial | Lane with velocity / pan / fine pitch (`:141-148, 639-687`). No release/Mod X/Y lanes, no controller automation lane, no "turn into automation clip" |
+| R10 | Partial | Lane with velocity / pan / fine pitch: drag draws, **right-drag draws a straight line** (as the rack graph lane, C4), **Shift+drag sets every crossed note to the press value, Alt+click resets, Alt+wheel over a note (grid or lane) changes it, Ctrl+Alt+wheel in fine steps** (the selection when the note is selected; a wheel burst is one undo step); the hovered stem is lit. No release/Mod X/Y lanes, no controller automation lane, no "turn into automation clip" |
 | R11 | Partial | Follow global / none / Screen grid (zoom-dependent) / Nearest note (edges of notes and visible ghosts) / step and beat fractions / bar. No Line-vs-Cell distinction, no markers |
-| R12 | Partial | Ghost notes of the pattern's other channels, toggle button and Alt+V; double right-click a ghost switches to its channel. No hollow ghosts from overlapping Playlist clips (needs "opened from clip" context), no editable ghosts |
+| R12 | Partial | Ghost notes of the pattern's other channels, toggle button and Alt+V; double right-click a ghost switches to its channel (the hovered ghost lights up and the hint names its channel). No hollow ghosts from overlapping Playlist clips (needs "opened from clip" context), no editable ghosts |
 | R13 | Yes | Channel selector in the roll's toolbar (● = has notes in this pattern); wheel steps through channels with notes, Ctrl+wheel through all; G/K previous/next channel and H/J previous/next with notes (typing piano off) |
 | R14 | **Done** | Scale highlight combo (12 roots × 8 scales, list in `core/NoteTools`); **… menu → Snap notes to the scale**: drawn, painted and moved notes and the chord stamp land on the scale, and so do incoming MIDI and PC-keyboard notes (`AudioEngine::setInputScale`); "Move the notes onto the scale" fixes existing notes |
 | R15 | Partial | Chord stamp combo of 11 shapes; follows scale snap. No "only one" or inversion modes |
@@ -459,8 +460,8 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | R21 | Partial | Ctrl+M toggles mute on the selection; no note grouping |
 | R22 | Yes | One undo step each, on the selection or all notes (`core/NoteEdit.cpp`): Ctrl+U chop to grid, Ctrl+G join touching notes, Ctrl+L legato, Shift+D shrink to grid, Shift+Q quantise starts, Ctrl+Q (and Ctrl+Alt+Q) quantise starts and lengths; also in the roll's … menu |
 | R23 | Partial (first set) | **Arpeggiate (Alt+A), Strum (Alt+S), Flip (Alt+Y), Randomise (Alt+R), Scale levels (Alt+X), Limit (Alt+K)** in `ui/NoteToolDialogs.*` (maths in `core/NoteTools.cpp`, unit-tested): live preview on the pattern, Accept = one undo step, Cancel/close restores. Not done: chop, quantise, articulate, flam, period slicing, LFO, melody/chord generators (dialogs) |
-| R24 | **Done** (most) | Wheel / Shift+wheel scroll, Ctrl+wheel horizontal zoom, **Ctrl+Alt+wheel vertical zoom, PageUp/PageDown, Shift+1/2/3 (1, 4, 16 bars), Shift+4 all, Shift+5 selection, Shift+0 centre on the playhead, middle-drag pans**. No middle-drag zoom on the keyboard |
-| R25 | Yes | Keyboard click auditions; clicking/moving a note also auditions (a LYNX choice, R26) |
+| R24 | **Done** | Wheel / Shift+wheel scroll (**smooth: glides at the display rate; trackpad deltas scroll proportionally; a horizontal wheel scrolls sideways**), Ctrl+wheel horizontal zoom **anchored at the mouse**, **Ctrl+Alt+wheel vertical zoom, Shift+Alt+wheel nudges the selection by the grid, PageUp/PageDown, Shift+1/2/3 (1, 4, 16 bars), Shift+4 all, Shift+5 selection, Shift+0 centre on the playhead, middle-drag pans, middle-drag on the keyboard zooms vertically around the clicked key**. The editors paint opaque (no flicker of what is behind) |
+| R25 | Yes | Keyboard click auditions (drag glides over the keys); clicking/moving a note also auditions (a LYNX choice, R26). The keyboard is wider (72 px), labels every C with its octave in a font that follows the row height, names every white key when rows are ≥ 16 px, tints scale keys and lights the hovered key and its grid row; notes show their name whenever it fits |
 | R27 | No | Markers exist only on the Playlist ruler |
 | R28 | Yes | MIDI menu import/export (`:1163-1209`) |
 | R29 | No | — |
@@ -470,22 +471,22 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | ID | LYNX | Where / note |
 |---|---|---|
 | P1 | Yes | Tool strip with Pencil, Brush, Eraser, Mute, Knife, Lasso, Zoom, Listen, Slip; keys P/B/D/T/C/E/Z/Y/S while the typing piano is off. **Ripple is a mode** (Shift+S, ruler menu), not a tool: resizing a clip's end moves the later clips on its track, Delete closes the gaps |
-| P2 | **Done** | Right-click deletes in every tool (right-drag many, hold on empty = Knife), **double right-click mutes the clip** (the first click's delete is undone), **middle-drag pans**, Ctrl selects, Shift copies, Alt no snap. Right-click on the name strip still opens the clip menu |
+| P2 | **Done** | Right-click deletes in every tool (right-drag many, hold on empty = Knife), **double right-click mutes the clip** (the first click's delete is undone), **middle-drag pans**, Ctrl selects, Shift copies, Alt no snap. Right-click on the name strip still opens the clip menu. **The hovered clip is outlined, its edge under the mouse shows a grip, its title strip shows a menu button (FL's clip menu icon, [DOC][pl]); the cursor shows the action (move, copy, resize, slip, fade, automation point)** |
 | P3 | Partial | Picker panel selects the source; click on empty space places it (`:844-882, 1604-1739`). No source menu, no hover preview |
 | P4 | Partial | Picker lists patterns / audio / automation (`:1604-1739`); no right-click actions |
 | P5 | Partial | Fade handles fixed. Left-edge trim moves start and offset together; Shift on an edge trims; Slip tool or Alt+Shift+drag slips the content. **Ripple resize** (ripple mode). No stretch |
 | P6 | Partial | Drag, group move, Shift+drag copy, Ctrl+box. No Shift+arrow moves |
-| P7 | No | — |
+| P7 | Yes | Shift+Alt+wheel nudges the selected clips by the grid (one undo step per burst); the Shift+wheel variant is not offered (Shift+wheel scrolls) |
 | P8 | Partial | Split, **mute/unmute, chop to grid**, make unique, select all of this pattern, open in rack, **open in Piano Roll**, delete. Missing: per-clip colour and name (no model field yet) |
 | P9 | Partial | Clip volume, normalise, remove fades. No clip automation, crossfades, reverse |
 | P10 | **Done** | Double-click a pattern clip opens the **Piano Roll when the pattern has piano-roll notes, else the Channel Rack** (`hasPianoRollNotes`); Options → "Double-click on a pattern clip opens" sets it; **Alt+double-click opens the other one**; automation clips open their editor |
-| P11 | Partial | LED mutes; **right-click menu: rename, mute, solo, insert above/below, move up/down, delete** (`noteedit::insertTrack/removeTrack/swapTracks/soloTrack`). Missing: colour, height, grouping |
-| P12 | Partial | Track mute; solo through the track menu (mutes the others) |
+| P11 | Partial | LED mutes; **right-click menu: rename, mute, solo, insert above/below, move up/down, delete** (`noteedit::insertTrack/removeTrack/swapTracks/soloTrack`); **double-click the name renames; the hovered header and LED light up**. Missing: colour, height, grouping |
+| P12 | Partial | Track mute; **Ctrl+click or right-click on the LED solos** (again: all play), also in the track menu; **Shift+wheel over a header moves the track up/down** (the mouse follows it). No grouping |
 | P13 | **Done** | Click/drag on the ruler seeks; Ctrl+drag makes the time selection (= the loop), which selects the clips it touches; double-click or Ctrl+click clears it. **Shift+drag inside it moves the selection with its contents, Ctrl+Shift+drag copies** (clips are cut at its edges; `noteedit::moveTimeRange`). No "outside the selection" tint |
 | P14 | Partial | Ctrl+Ins inserts and Ctrl+Del removes the time selection's length across all tracks (clips cut at the edges, markers move) (`core/NoteEdit.cpp` `insertTime`/`deleteTime`). No slice-and-insert, no Insert-key slice |
 | P15 | Yes | Ctrl+B with a time selection repeats it after itself (selected clips starting inside it, or all that do) and moves the selection on; without one, duplicates by the span rounded to bars |
 | P16 | Partial | Ruler menu: add/rename/remove marker, time-signature change, remove loop (`:1049-1089`). No marker actions, no jumps |
-| P17 | **Done** (most) | Ctrl+wheel zoom, **PageUp/PageDown, Shift+1/2/3, Shift+4 all, Shift+5 selection (or the time selection), Shift+0 centre**, also in the ruler menu. No vertical zoom |
+| P17 | **Done** (most) | Ctrl+wheel zoom anchored at the mouse, smooth wheel scrolling, **Ctrl+right-click on empty space zooms to everything and back**, **PageUp/PageDown, Shift+1/2/3, Shift+4 all, Shift+5 selection (or the time selection), Shift+0 centre**, also in the ruler menu. No vertical zoom |
 | P18 | No | — |
 | P19 | No | — |
 | P20 | Yes | Arrangement combo: new, clone, rename, remove (`:54-135`); no merge |
@@ -814,20 +815,24 @@ colours, icons and fonts stay LYNX's own (dark theme, red accent, `ui/Icons.cpp`
 - **Global snap.** The toolbar has one snap selector. It sets the snap for the Piano Roll, the Playlist and the
   event editor (each editor set to "Main" follows it) and the quantise for recorded notes. [DOC][tb-snap]
 
-**LYNX** (`ui/MainComponent.cpp`, `resized()`): one band, two rows high, panels left to right:
-1. the menu, with the **hint bar under it** (the bottom status strip is gone);
-2. the transport: a two-line Pattern/Song switch, play, stop, record, tempo and the song position;
-3. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
+**LYNX** (`ui/MainComponent.cpp`, `resized()`; widgets in `ui/Toolbar.*`, the hint bar in `ui/HintBar.*`): one
+band, two rows high, panels left to right:
+1. the menu, with the project name beside it (FL's title/hint panel) and the **hint bar under it**; this column
+   takes the room the other panels leave (360–620 px), so hints are shown in full;
+2. the transport: a two-line Pattern/Song switch, play, stop, record, the tempo, and the time display with the
+   **song position slider** under both;
+3. **master volume over master pitch** (small knobs named MASTER and PITCH, value beside them);
+4. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
    as piano;
-4. global snap, with the pattern selector under it;
-5. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
-   palette, F8), with the file
-   actions under them (new, open, save, export, undo, redo);
-6. the output scope with the CPU load under it, on the right.
+5. global snap over the pattern selector, each with a caption (SNAP, PATTERN); the wheel steps both;
+6. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
+   palette, F8), with the file actions under them (new, open, save, export, undo, redo);
+7. on the right, after any spare room: **CPU / RAM / polyphony**, then the **output** oscilloscope and peak meter.
 
-When the window is narrow, the panels drop from the right in this order: monitor, shortcuts, snap/pattern,
-recording. Everything they hold is also in the menus or on keys. The LYNX logo is no longer drawn inside the
-window; it stays the window and taskbar icon.
+When the window is narrow, panels drop by priority (the first to go: meters, output, recording options,
+shortcuts, master, snap/pattern); the transport always stays. Everything they hold is also in the menus or on
+keys. Every control has a hint with its mouse gestures and keys. Toolbar icon buttons fade their hover state in
+and out (`IconButton`). The LYNX logo is not drawn inside the window; it stays the window and taskbar icon.
 
 ### 5.2 Editor tools live in each editor's own toolbar
 - **Playlist.** Its toolbar runs along the top of the Playlist window. Left to right: the Playlist menu, the snap
@@ -848,6 +853,17 @@ window; it stays the window and taskbar icon.
 *share* their window's title row (`SharesTitleBar`): the frame keeps the window menu and title on the left and
 the window buttons on the right, and the editor lays its toolbar out between them. The Playlist's pattern picker
 starts under that row.
+The title row carries only controls: the line of keyboard shortcuts that used to sit after the Piano Roll's tools
+is gone. Instead both editors (and the automation editor) are `ui::HintSource`s: the hint bar describes, in the
+hint markup ([LMB], [RMB], [Ctrl]...), what a press does on the note, clip, edge, handle, ruler, keyboard, lane or
+track header under the mouse, with the tool and the modifiers held, plus the note name/velocity or clip name as
+the value. The shortcuts stay in the … menu next to each operation. [DOC][pr] [DOC][pl]
+
+**Mouse feel (both editors).** One rule set (`core/EditorGestures.h`, unit-tested) decides, for a tool, a target
+and the modifiers, what a left press does; the editors use it for the hit zones, the cursor, the hover highlight
+and the hint, so they always agree with the click. Hover shows the item under the mouse (brighter note / outlined
+clip, the grip of the edge that would resize, the clip menu button, the key and grid row); the cursor changes per
+action and when Ctrl/Shift/Alt are pressed or released. Wheel scrolling glides; zoom stays anchored at the mouse.
 
 ### 5.3 Windows: placement, maximise, detach
 - The Playlist, Channel Rack, Piano Roll, Mixer and Browser are windows on one desktop. They can be moved,
@@ -874,8 +890,15 @@ starts under that row.
   Shift+wheel on it changes the pattern. [DOC][cr] [DOC][cr-swing]
 
 **LYNX** (`core/Workspace.cpp` `makeDefault`, `ui/Workspace.cpp`):
-- The default layout has the Browser on the left at full height, the Playlist filling the rest, and the
-  Channel Rack floating.
+- The default (start-up) layout has the Browser on the left at full height, the Playlist filling the rest as
+  the background, and the Channel Rack floating, sized to its rows, to the right of the Playlist's pattern
+  picker and track names (so the arrangement stays readable). The Piano Roll and the Mixer are hidden until
+  called (F7, F9) but have their places: the Mixer along the bottom (at least 400 px high), the Piano Roll
+  above it, tiled when the desktop is tall enough (≥ 300 px left for the roll), overlapping otherwise.
+- While nobody has moved, resized, detached or loaded anything, the layout is "pristine": when the window
+  changes size (the window opens small and is maximised, or the user resizes it) the panels take the default
+  rects for the new size instead of being scaled, so 1280×720 and 2560×1440 both start with sensible sizes
+  (`Layout::relayoutDefault`). Once a panel is touched, its place is remembered and scales with the window.
 - The Piano Roll and the Mixer open as floating windows. The Mixer is a wide window over the lower two thirds
   of the Playlist. Like every panel, it is maximised by double-clicking its title, with its title-bar button, or
   by right-clicking its toolbar icon. It is detached from the window menu.

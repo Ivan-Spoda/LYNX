@@ -157,6 +157,11 @@ if(LYNX_BUILD_APP)
         src/ui/Dialogs.cpp
         src/ui/Splash.cpp)
 
+    # main window chrome: hint bar and toolbar widgets
+    target_sources(LYNX PRIVATE
+        src/ui/HintBar.cpp
+        src/ui/Toolbar.cpp)
+
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE
         src/ui/NoteToolDialogs.cpp

@@ -96,6 +96,118 @@ void ToolStrip::resized()
         buttons[i]->setBounds ((int) i * size, 0, size, size);
 }
 
+void ToolStrip::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    if (wheel.deltaY == 0.0f || tools.empty())
+        return;
+
+    const auto at = (int) (std::find (tools.begin(), tools.end(), tool) - tools.begin());
+    const auto next = juce::jlimit (0, (int) tools.size() - 1, at + (wheel.deltaY < 0.0f ? 1 : -1));
+    setTool (tools[(std::size_t) next]);
+}
+
+// --- cursors ---------------------------------------------------------------------------
+
+namespace
+{
+// A tool icon as a cursor: drawn at 2x, light strokes with a dark outline so it reads on the dark grid
+// and on bright notes alike. `hot` is the hotspot on the icon's 24-unit grid.
+juce::MouseCursor iconCursor (Icon icon, juce::Point<float> hot)
+{
+    constexpr int size = 24, scale = 2;
+    juce::Image image (juce::Image::ARGB, size * scale, size * scale, true);
+    {
+        juce::Graphics g (image);
+        g.addTransform (juce::AffineTransform::scale ((float) scale));
+        const auto area = juce::Rectangle<float> (0.0f, 0.0f, (float) size, (float) size);
+
+        for (auto [dx, dy] : { std::pair { -1.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, -1.0f }, { 0.0f, 1.0f },
+                               { -0.7f, -0.7f }, { 0.7f, 0.7f }, { -0.7f, 0.7f }, { 0.7f, -0.7f } })
+            icons::draw (g, icon, area.translated (dx, dy), theme::colour::bg0);
+
+        icons::draw (g, icon, area, theme::colour::textPrimary);
+    }
+
+    return juce::MouseCursor (juce::ScaledImage (image, (double) scale), hot.roundToInt());
+}
+} // namespace
+
+juce::MouseCursor editorCursor (gesture::Cursor cursor)
+{
+    using C = gesture::Cursor;
+    // icons are drawn with a margin (fitted into the 24x24 box), so the hotspots are the icon's tips
+    static const auto pencil = iconCursor (Icon::draw, { 4.0f, 20.0f });
+    static const auto brush = iconCursor (Icon::brush, { 4.0f, 20.0f });
+    static const auto eraser = iconCursor (Icon::erase, { 6.0f, 18.0f });
+    static const auto mute = iconCursor (Icon::mute, { 12.0f, 12.0f });
+    static const auto knife = iconCursor (Icon::knife, { 4.0f, 20.0f });
+    static const auto zoom = iconCursor (Icon::zoom, { 10.0f, 10.0f });
+    static const auto listen = iconCursor (Icon::listen, { 12.0f, 12.0f });
+    static const auto slip = iconCursor (Icon::slip, { 12.0f, 12.0f });
+
+    switch (cursor)
+    {
+        case C::draw: return pencil;
+        case C::paint: return brush;
+        case C::erase: return eraser;
+        case C::mute: return mute;
+        case C::slice: return knife;
+        case C::zoom: return zoom;
+        case C::listen: return listen;
+        case C::slip: return slip;
+        case C::move: return juce::MouseCursor::UpDownLeftRightResizeCursor;
+        case C::copy: return juce::MouseCursor::CopyingCursor;
+        case C::resizeH: return juce::MouseCursor::LeftRightResizeCursor;
+        case C::select: return juce::MouseCursor::CrosshairCursor;
+        case C::point: return juce::MouseCursor::PointingHandCursor;
+        case C::pan: return juce::MouseCursor::DraggingHandCursor;
+        case C::normal: break;
+    }
+
+    return juce::MouseCursor::NormalCursor;
+}
+
+juce::String actionHint (gesture::Action action, bool playlist)
+{
+    using A = gesture::Action;
+    const auto common = tr ("[RMB] delete  [Ctrl][LMB] select  [Alt] no snap");
+
+    switch (action)
+    {
+        case A::create:
+            return (playlist ? tr ("[LMB] place the Picker's clip, drag to position it")
+                             : tr ("[LMB] add a note, drag to position it"))
+                   + "  " + common;
+        case A::paint:
+            return (playlist ? tr ("[LMB] drag paints clips end to end") : tr ("[LMB] drag paints a run of notes  [Shift] one at a time"))
+                   + "  " + common;
+        case A::move:
+            return (playlist ? tr ("Clip: [LMB] drag moves  [Shift][LMB] copies  [2xLMB] opens  [RMB] deletes")
+                             : tr ("Note: [LMB] drag moves  [Shift][LMB] copies  [2xLMB] properties  [RMB] deletes  [Alt][Wheel] velocity"));
+        case A::copyMove: return playlist ? tr ("[Shift][LMB] drags a copy of the clip (selection)") : tr ("[Shift][LMB] drags a copy of the note (selection)");
+        case A::resizeRight:
+            return (playlist ? tr ("Clip end: [LMB] drag resizes") : tr ("Note end: [LMB] drag resizes")) + "  " + tr ("[Alt] no snap");
+        case A::resizeLeft:
+            return (playlist ? tr ("Clip start: [LMB] drag trims, the content stays in place") : tr ("Note start: [LMB] drag resizes, the end stays"))
+                   + "  " + tr ("[Alt] no snap");
+        case A::slipContent: return tr ("[LMB] drag slides the clip's content inside it (the clip stays)");
+        case A::toggleSelect: return tr ("[Ctrl][LMB] adds to / removes from the selection");
+        case A::boxSelect: return tr ("[LMB] drag draws a selection box  [Shift] adds");
+        case A::erase: return tr ("[LMB] click or drag deletes");
+        case A::toggleMute: return tr ("[LMB] click or drag mutes / unmutes");
+        case A::slice: return tr ("[LMB] drag a line to cut across, a click cuts here") + "  " + tr ("[Alt] no snap");
+        case A::zoomRange: return tr ("[LMB] drag a range to zoom into it, a click zooms out");
+        case A::listen: return playlist ? tr ("[LMB] click or drag plays from here") : tr ("[LMB] click or drag plays the notes under the cursor");
+        case A::fade: return tr ("Fade: [LMB] drag sets its length");
+        case A::movePoint: return tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [RMB] deletes");
+        case A::addPoint: return tr ("Curve: [LMB] adds a point");
+        case A::openMenu: return tr ("[LMB] clip menu");
+        case A::none: break;
+    }
+
+    return {};
+}
+
 // --- grid --------------------------------------------------------------------------------
 
 namespace grid
