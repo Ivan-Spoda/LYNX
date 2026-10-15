@@ -110,7 +110,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   installation; within −127 dB of FL's DLL on the 4 fixed-spectrum template states, 9/9 states usable); Transistor Bass
   on its engine (REA round 57: V1 legacy and both V2 cutoff ranges, 303 Pulse with the recorded cycles read from the
   user's engine DLL, distortion, delay, reverb and the 16-step sequencer; 55/128 factory programs bit-exact, worst
-  −108.6 dB vs FL's DLL); Sakura and Drumpad on physical models rebuilt from their
+  −108.6 dB vs FL's DLL); Plucked! on its Karplus-Strong engine (REA round 65 §1: bit-identical to FL's DLL for the
+  same random seed); BeepMap on its image-synthesis engine with 3x Osc's voice processor (REA round 65 §2: the bitmap
+  read from the plugin state; the 9 preset/render-test states bit-identical, synthetic batteries identical outside the
+  processor's end fades); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -475,6 +478,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   automation smoothing, MIDI CC/pitch-bend, the "MIDI channel 13" sequence transpose (no note channel in LYNX) and the
   order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
   as an output gain (the plugin does not read Final.Vol).
+- Plucked! (REA round 65 §1): FL's random seed (process-global, from the clock) differs per run — LYNX starts every
+  instrument at Delphi's default seed; FL's host gain-ramp law on level changes is not decoded (linear in LYNX); a
+  channel sample as the string's exciter is not modelled. BeepMap (REA round 65 §2): bitmaps taller than "Max height"
+  are scaled with LYNX's nearest-row pick (FL's image scaler not decoded; no installation state needs it); only
+  uncompressed 24/32-bit BMP data are read; the processor's end-fade table uses the exact cosine (FL: IPP's, ≤ −95 dB).
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
