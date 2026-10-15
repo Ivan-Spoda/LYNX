@@ -6,6 +6,7 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/Ogun.h"
+#include "core/Dx10.h"
 #include "core/Toxic.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
@@ -280,6 +281,31 @@ void synthFilterFromChannel (int modX, int modY, int type, float& cutoffHz, floa
     cutoffHz = (float) std::clamp (channelFilterHz (type, x), 20.0, 20000.0);
 }
 
+// The 364-byte channel-settings snapshot Fruity DX10 keeps (REA_rodada42 §3): the five 0xDA records (pan, volume,
+// cutoff, resonance, pitch; 68 bytes each) followed by Mod X at 0x15c, Mod Y at 0x160 and the filter type at 0x168. A
+// version-2 state carries its own (after the 22 parameters); for a version-1 state FL's host hands the plugin the
+// channel's records (the plugin asks for them when it has no snapshot — inference from the request, not observed).
+// Missing records take the plugin's defaults (neutral; the volume record with flag 4 and release tension −101).
+std::vector<std::uint8_t> dx10Snapshot (const flp::Channel& c)
+{
+    std::vector<std::uint8_t> s (364, 0);
+    auto put = [&] (std::size_t at, std::int32_t v) { std::memcpy (s.data() + at, &v, 4); };
+    for (int k = 0; k < 5; ++k)
+    {
+        const auto& e = c.envelopes[(std::size_t) k];
+        const auto base = (std::size_t) (0x44 * k);
+        const std::int32_t defaults[17] = { k == 1 ? 4 : 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, k == 1 ? -101 : 0 };
+        for (int i = 0; i < 17; ++i)
+            put (base + 4 * (std::size_t) i, defaults[i]);
+        if (e.present)
+            std::memcpy (s.data() + base, e.raw.data(), (std::size_t) std::min (e.rawSize, 0x44));
+    }
+    put (0x15c, c.hasLevels ? c.modX : 256);
+    put (0x160, c.hasLevels ? c.modY : 0);
+    put (0x168, c.hasLevels ? c.filterType : 0);
+    return s;
+}
+
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads)
 {
     if (channel < 0 || channel >= (int) song.channels.size() || pads.empty())
@@ -440,6 +466,13 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             SynthSettings synth;
             float gain = 1.0f;
             if (synthFromHarmor (project.channels.front().pluginState, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::dx10)
+        {
+            // ... and of a Fruity DX10 patch (the 3-oscillator FM conversion)
+            SynthSettings synth;
+            if (synthFromDX10 (project.channels.front().pluginState, synth))
                 return synth;
         }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::ogun)
@@ -892,8 +925,21 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromMiniSynth (c.pluginState, song.bpm, fromPlugin))
                     adopt();
             }
-            else if ((name == "fruity dx10" || name == "dx10") && synthFromDX10 (c.pluginState, fromPlugin))
-                adopt();
+            else if (name == "fruity dx10" || name == "dx10")
+            {
+                // FL's FM engine from the raw state (REA_rodada42), with the channel settings its voice processor
+                // keeps (a version-2 state's own snapshot, else the channel's 0xDA/0xDB records) and the project's PPQ
+                // for the envelope ticks; the 3-oscillator FM approximation stays as a fallback
+                if (auto st = dx10StateWithSnapshot (c.pluginState, dx10Snapshot (c)); ! st.empty())
+                {
+                    def.instrument = InstrumentKind::dx10;
+                    def.pluginState = std::move (st);
+                    def.modelParams = { (float) (project.header.ppq > 0 ? project.header.ppq : 96) };
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromDX10 (c.pluginState, fromPlugin))
+                    adopt();
+            }
             else if (name == "sytrus")
             {
                 // FL's Sytrus engine from the raw state (REA_rodada31); the 3-oscillator conversion stays as a fallback
@@ -1147,7 +1193,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
                      || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::gms
                      || def.instrument == InstrumentKind::morphine
-                     || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth || def.instrument == InstrumentKind::toxic)
+                     || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth
+                     || def.instrument == InstrumentKind::dx10 || def.instrument == InstrumentKind::toxic)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

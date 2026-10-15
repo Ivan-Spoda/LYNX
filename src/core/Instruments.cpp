@@ -8,6 +8,7 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/Ogun.h"
+#include "core/Dx10.h"
 #include "core/Toxic.h"
 #include "core/PhysicalModels.h"
 
@@ -207,6 +208,7 @@ private:
             case InstrumentKind::morphine:
             case InstrumentKind::ogun:
             case InstrumentKind::minisynth:
+            case InstrumentKind::dx10:
             case InstrumentKind::toxic:
                 break;
         }
@@ -2018,6 +2020,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeOgunInstrument();
     if (kind == InstrumentKind::minisynth)
         return makeMiniSynthInstrument();
+    if (kind == InstrumentKind::dx10)
+        return makeDx10Instrument();
     if (kind == InstrumentKind::toxic)
         return makeToxicInstrument();
 
