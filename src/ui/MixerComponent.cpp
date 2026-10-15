@@ -1000,7 +1000,10 @@ constexpr int slotHeight = 24;
 const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
-                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect };
+                                      EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect,
+                                      EffectKind::fruityLimiter, EffectKind::fruityCompressor,
+                                      EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
+                                      EffectKind::reeverb2, EffectKind::reeverb1 };
 } // namespace
 
 const std::vector<EffectKind>& addableEffects()
@@ -1885,7 +1888,7 @@ void EffectsPanel::showSlotMenu (int slot)
                               [assign, t] { assign (t); });
         menu.addSubMenu (title, side);
     };
-    if (kind == EffectKind::compressor)
+    if (kind == EffectKind::compressor || kind == EffectKind::fruityLimiter || kind == EffectKind::fruityCompressor)
         sideMenu (tr ("Sidechain from"), false);
     if (kind == EffectKind::vocoder || kind == EffectKind::vocodex)
     {

@@ -6,6 +6,8 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
+#include "core/FruityShapers.h"
 
 #include "core/Biquad.h"
 
@@ -2134,6 +2136,26 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's raw controls normalised over their ranges (core/FruityDynamics.h); defaults = a new FL instance
+    static const EffectInfo fruityLimiterInfo = [] {
+        EffectInfo info { "Fruity Limiter", {} };
+        for (int i = 0; i < fldyn::limiterControls; ++i)
+            info.params.push_back ({ fldyn::limiterParamName (i), fldyn::normalised (fldyn::limiterDefault[(std::size_t) i], fldyn::limiterMin[(std::size_t) i], fldyn::limiterMax[(std::size_t) i]) });
+        info.params.push_back ({ fldyn::limiterParamName (fldyn::limiterControls), 0.0f });
+        return info;
+    }();
+    static const EffectInfo fruityCompressorInfo = [] {
+        EffectInfo info { "Fruity Compressor", {} };
+        for (int i = 0; i < fldyn::compressorControls; ++i)
+            info.params.push_back ({ fldyn::compressorParamName (i), fldyn::normalised (fldyn::compressorDefault[(std::size_t) i], fldyn::compressorMin[(std::size_t) i], fldyn::compressorMax[(std::size_t) i]) });
+        info.params.push_back ({ fldyn::compressorParamName (fldyn::compressorControls), 1.0f });
+        return info;
+    }();
+    // FL's controls over their ranges (core/FruityShapers.h); defaults = a new FL instance; the curve is in EffectSlot::state
+    static const EffectInfo waveShaperInfo { "Fruity WaveShaper", { { "Pre amp", 0.5f }, { "Mix", 1.0f }, { "Post gain", 1.0f },
+                                                                    { "Oversampling", 0.0f }, { "HQ", 0.0f }, { "Smooth", 0.0f },
+                                                                    { "Center", 0.0f }, { "Unipolar", 0.0f } } };
+    static const EffectInfo softClipperInfo { "Fruity Soft Clipper", { { "Threshold", 99.0f / 126.0f }, { "Post", 128.0f / 160.0f } } };
     // FL's controls as (raw − min) / range (core/Reeverb2.h); defaults = FL's
     static const EffectInfo reeverb2Info = [] {
         EffectInfo info { "Reeverb 2", { { "Low cut", 0 }, { "High cut", 0 }, { "Predelay", 0 }, { "Room size", 0 }, { "Diffusion", 0 },
@@ -2247,6 +2269,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::fruityLimiter: return fruityLimiterInfo;
+        case EffectKind::fruityCompressor: return fruityCompressorInfo;
+        case EffectKind::fruityWaveShaper: return waveShaperInfo;
+        case EffectKind::fruitySoftClipper: return softClipperInfo;
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
     }
@@ -2518,6 +2544,17 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
+        case EffectKind::fruityLimiter:
+            return fldyn::limiterParamText (param, v);
+
+        case EffectKind::fruityCompressor:
+            return fldyn::compressorParamText (param, v);
+        case EffectKind::fruityWaveShaper:
+            return flshape::waveShaperParamText (param, v);
+
+        case EffectKind::fruitySoftClipper:
+            return flshape::softClipperParamText (param, v);
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -2553,6 +2590,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::fruityWaveShaper)
+        return flshape::makeWaveShaper (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2585,6 +2624,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::fruityLimiter: return fldyn::makeLimiter();
+        case EffectKind::fruityCompressor: return fldyn::makeCompressor();
+        case EffectKind::fruityWaveShaper: return flshape::makeWaveShaper ({}); // FL's default curve; use makeEffect (slot)
+        case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
