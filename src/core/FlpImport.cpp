@@ -23,6 +23,8 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
+#include "core/ConvolverFx.h"
 #include "core/ChorusFx.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
@@ -1714,6 +1716,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 ++options.report->converted["Fruity Limiter (sidechain)"];
                         }
                 }
+                else if (slot.plugin == "LuxeVerb" && fx.kind == EffectKind::luxeVerb && slot.state.size() >= 8)
+                {
+                    // the state's second i32 is the sidechain input the envelope can follow (REA_rodada60 §3.1)
+                    std::int32_t k = 0;
+                    std::memcpy (&k, slot.state.data() + 4, 4);
+                    if (k > 0)
+                        fx.sidechain = sidechainSource (insert.index, k);
+                }
                 else if (slot.plugin == "Vocodex")
                 {
                     // ModIn/CarIn index the same inputs list as the sidechains (REA_rodada22 §1)
@@ -1878,6 +1888,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::luxeVerb)
+                {
+                    // the exact LuxeVerb keeps FL's 49 controls as (raw − min) / range: FL's normalised value as is
+                    if (target.param < 0 || target.param >= luxeVerbControlCount)
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::convolver)
+                {
+                    // the exact Convolver keeps FL's 4 automatable controls as (raw − min) / range
+                    if (target.param < 0 || target.param >= convolverParamCount)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && (fx.kind == EffectKind::reeverb2 || fx.kind == EffectKind::reeverb1))

@@ -1,5 +1,7 @@
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
+#include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
@@ -939,6 +941,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Vocodex" && data)
         if (auto v = vocodexEffect (state, data))
             return v->slot;
+    if (pluginName == "Fruity Convolver" && data) // impulse response file of the installation (REA_rodada60)
+        if (auto exact = convolverFromFl (state, data))
+            return exact;
     if (pluginName == "Soundgoodizer" && data)
         if (const auto path = soundgoodizerPresetPath (state); ! path.empty())
             if (auto exact = soundgoodizerExact (state, data (path)))
@@ -1178,6 +1183,12 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Fruity Reeverb 2") // the exact effect (REA_rodada49); the Freeverb mapping below otherwise
         if (auto exact = reeverb2FromFl (state))
             return exact;
+    if (pluginName == "LuxeVerb") // the exact effect (REA_rodada60); the generic reverb mapping below otherwise
+        if (auto exact = luxeVerbFromFl (state))
+            return exact;
+    if (pluginName == "Fruity Convolver") // the exact effect with an embedded impulse response (REA_rodada60)
+        if (auto exact = convolverFromFl (state))
+            return exact;
     if (pluginName == "Fruity Reeverb") // the first version, exact (REA_rodada49 §6)
         if (auto exact = reeverb1FromFl (state))
             return exact;
@@ -1349,6 +1360,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
         case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
+        case EffectKind::luxeVerb: return { "LuxeVerb" };
+        case EffectKind::convolver: return { "Fruity Convolver" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelay2: return { "Fruity Delay 2" };
         case EffectKind::fruityDelay3: return { "Fruity Delay 3" };
