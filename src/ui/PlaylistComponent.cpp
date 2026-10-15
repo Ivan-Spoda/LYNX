@@ -1,5 +1,7 @@
 #include "ui/PlaylistComponent.h"
 
+#include "core/EditorPolish.h"
+
 #include "core/RackOps.h"
 
 #include "core/NoteEdit.h"
@@ -92,6 +94,7 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
     arrangementBox.onChange = [this] { arrangementChosen(); };
     addAndMakeVisible (arrangementBox);
     refreshArrangementBox();
+    refreshTrackLayout();
 
     engine.addChangeListener (this);
     EditorGlobals::get().addChangeListener (this);
@@ -219,8 +222,80 @@ juce::Rectangle<int> PlaylistComponent::gridArea() const
 
 double PlaylistComponent::tickToX (double tick) const { return headerWidth + (tick - scrollTicks) * pixelsPerTick; }
 double PlaylistComponent::xToTick (int x) const { return (x - headerWidth) / pixelsPerTick + scrollTicks; }
-int PlaylistComponent::trackToY (int track) const { return headerHeight + track * trackHeight - scrollY; }
-int PlaylistComponent::yToTrack (int y) const { return juce::jlimit (0, numTracks() - 1, (y - headerHeight + scrollY) / trackHeight); }
+int PlaylistComponent::heightOf (int track) const
+{
+    const auto& tracks = engine.getSong().playlistTracks;
+    const auto h = track >= 0 && track < (int) tracks.size() ? tracks[(std::size_t) track].height : 0;
+    return h > 0 ? polish::clampTrackHeight (h) : trackHeight;
+}
+
+void PlaylistComponent::refreshTrackLayout()
+{
+    const auto count = numTracks();
+    trackTops.assign ((std::size_t) count + 1, 0);
+
+    for (int t = 0; t < count; ++t)
+        trackTops[(std::size_t) t + 1] = trackTops[(std::size_t) t] + heightOf (t);
+}
+
+int PlaylistComponent::tracksHeight() const
+{
+    return trackTops.empty() ? numTracks() * trackHeight : trackTops.back();
+}
+
+int PlaylistComponent::trackToY (int track) const
+{
+    // past the cached rows (the list grew during a drag): default heights
+    const auto last = (int) trackTops.size() - 1;
+    const auto top = trackTops.empty() ? track * trackHeight
+                     : track <= last   ? trackTops[(std::size_t) juce::jmax (0, track)]
+                                       : trackTops.back() + (track - last) * trackHeight;
+    return headerHeight + top - scrollY;
+}
+
+int PlaylistComponent::yToTrack (int y) const
+{
+    const auto offset = y - headerHeight + scrollY;
+
+    if (trackTops.size() < 2)
+        return juce::jlimit (0, numTracks() - 1, offset / trackHeight);
+
+    const auto it = std::upper_bound (trackTops.begin(), trackTops.end(), offset);
+    const auto index = (int) (it - trackTops.begin()) - 1;
+    return juce::jlimit (0, numTracks() - 1, index);
+}
+
+int PlaylistComponent::dividerAt (juce::Point<int> p) const
+{
+    // the bottom edge of a track header (4 px band) resizes that track
+    if (p.x >= headerWidth || p.y < headerHeight || p.y >= gridArea().getBottom())
+        return -1;
+
+    const auto track = yToTrack (p.y);
+
+    for (auto t : { track - 1, track })
+        if (t >= 0 && std::abs (p.y - (trackToY (t) + heightOf (t))) <= 3)
+            return t;
+
+    return -1;
+}
+
+void PlaylistComponent::setTrackHeights (std::vector<int> tracks, int height)
+{
+    engine.editSong ([tracks, height] (Song& s) {
+        for (auto t : tracks)
+        {
+            if (t < 0)
+                continue;
+            if ((int) s.playlistTracks.size() <= t)
+                s.playlistTracks.resize ((std::size_t) t + 1);
+            s.playlistTracks[(std::size_t) t].height = height == trackHeight ? 0 : polish::clampTrackHeight (height);
+        }
+    });
+    refreshTrackLayout();
+    updateScrollBars();
+    repaint();
+}
 
 int PlaylistComponent::numTracks() const
 {
@@ -292,7 +367,7 @@ void PlaylistComponent::updateScrollBars()
 
     hBar.setRangeLimits (0.0, total, juce::dontSendNotification);
     hBar.setCurrentRange (scrollTicks, grid.getWidth() / pixelsPerTick, juce::dontSendNotification);
-    vBar.setRangeLimits (0.0, (double) numTracks() * trackHeight, juce::dontSendNotification);
+    vBar.setRangeLimits (0.0, (double) tracksHeight(), juce::dontSendNotification);
     vBar.setCurrentRange (scrollY, grid.getHeight(), juce::dontSendNotification);
     scrollTicks = hBar.getCurrentRangeStart();
     scrollY = (int) vBar.getCurrentRangeStart();
@@ -321,6 +396,9 @@ void PlaylistComponent::resized()
 
 void PlaylistComponent::paint (juce::Graphics& g)
 {
+    if (trackTops.size() != (std::size_t) numTracks() + 1) // the track list grew or shrank since the last change message
+        refreshTrackLayout();
+
     const auto& song = engine.getSong();
     const auto grid = gridArea();
     const auto bar = (std::int64_t) ppq * song.beatsPerBar;
@@ -337,6 +415,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
         for (int t = 0; t < tracks; ++t)
         {
             const auto y = trackToY (t);
+            const auto trackHeight = heightOf (t);
 
             if (y > grid.getBottom() || y + trackHeight < grid.getY())
                 continue;
@@ -403,6 +482,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             const auto x0 = (float) tickToX ((double) c.start);
             const auto x1 = (float) tickToX ((double) c.end());
             const auto y = (float) trackToY (c.track);
+            const auto trackHeight = heightOf (c.track);
 
             if (x1 < grid.getX() || x0 > grid.getRight() || y > grid.getBottom() || y + trackHeight < grid.getY())
                 continue;
@@ -604,6 +684,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
         for (int t = 0; t < tracks; ++t)
         {
             const auto y = trackToY (t);
+            const auto trackHeight = heightOf (t);
 
             if (y > headers.getBottom() || y + trackHeight < headers.getY())
                 continue;
@@ -626,7 +707,14 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.setColour (muted ? colour::textDisabled : (custom ? colour::textPrimary : colour::textSecondary));
             g.drawFittedText (custom ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
                                      : tr ("Track {0}", { juce::String (t + 1) }),
-                              20, y, headerWidth - 24, trackHeight, juce::Justification::centredLeft, 2, 0.8f);
+                              20, y, headerWidth - 24, trackHeight, juce::Justification::centredLeft, trackHeight >= 30 ? 2 : 1, 0.8f);
+
+            // the divider under the header: lit while hovered or dragged (drag resizes the track)
+            if (hover.divider == t || (drag == Drag::trackResize && (resizeTrack == t || resizeAll)))
+            {
+                g.setColour (colour::accent);
+                g.fillRoundedRectangle (juce::Rectangle<float> (6.0f, (float) (y + trackHeight) - 2.0f, (float) headerWidth - 12.0f, 3.0f), 1.5f);
+            }
         }
     }
 
@@ -775,8 +863,8 @@ juce::Rectangle<float> PlaylistComponent::automationBody (const Clip& c) const
 {
     const auto x0 = (float) tickToX ((double) c.start), x1 = (float) tickToX ((double) c.end());
     const auto y = (float) trackToY (c.track);
-    const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f);
-    return r.withTrimmedTop (14.0f).reduced (1.0f, 2.0f);
+    const auto r = juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) heightOf (c.track) - 3.0f);
+    return r.withTrimmedTop (juce::jmin (14.0f, r.getHeight() * 0.4f)).reduced (1.0f, 2.0f);
 }
 
 int PlaylistComponent::automationPointAt (int clip, juce::Point<int> pos) const
@@ -1004,6 +1092,17 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // track header divider: drag resizes the track above it (Shift: every track)
+    if (const auto divider = dividerAt (e.getPosition()); divider >= 0 && e.mods.isLeftButtonDown())
+    {
+        drag = Drag::trackResize;
+        resizeTrack = divider;
+        resizeAll = e.mods.isShiftDown();
+        resizeStartHeight = heightOf (divider);
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        return;
+    }
+
     // track header: the LED mutes (Ctrl+click or right-click on it: solo); right-click elsewhere: track menu
     if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
@@ -1061,6 +1160,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
         drag = Drag::seek;
         seekTo (e.x);
+        EditorGlobals::get().seekMark = (std::int64_t) juce::jmax (0.0, (double) snap (xToTick (e.x), true));
         return;
     }
 
@@ -1095,6 +1195,13 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     if (hit >= 0 && e.mods.isLeftButtonDown() && ! e.mods.isCtrlDown() && clipMenuButton (hit).contains (e.getPosition()))
     {
         showClipMenu (hit);
+        return;
+    }
+
+    // Alt+right-click on a clip: hear it while the button is held
+    if (e.mods.isRightButtonDown() && e.mods.isAltDown() && hit >= 0)
+    {
+        startPreview (hit, e.x);
         return;
     }
 
@@ -1234,6 +1341,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
         case EditTool::pencil:
         case EditTool::brush:
+        case EditTool::drumPaint:
         case EditTool::lasso:
             break;
     }
@@ -1297,13 +1405,23 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         for (auto i : sources)
             copies.push_back (engine.getSong().playlist[(std::size_t) i]);
 
+        // Shift+V held: the copies get their own pattern / automation (FL's "make unique" while cloning)
+        const auto unique = juce::KeyPress::isKeyCurrentlyDown ('V') || juce::KeyPress::isKeyCurrentlyDown ('v');
+
         engine.editSong ([&] (Song& s) {
             for (const auto& c : copies)
             {
                 added.push_back ((int) s.playlist.size());
                 s.playlist.push_back (c);
             }
+
+            if (unique)
+                polish::makeClipsUnique (s, added);
         });
+
+        if (unique)
+            for (std::size_t j = 0; j < added.size(); ++j)
+                copies[j] = engine.getSong().playlist[(std::size_t) added[j]];
         setSelection (added);
         dragIndices = added;
         dragOriginals = copies;
@@ -1361,6 +1479,26 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
 void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 {
+    if (drag == Drag::trackResize)
+    {
+        const auto height = polish::clampTrackHeight (resizeStartHeight + e.getDistanceFromDragStartY());
+        std::vector<int> tracks;
+        if (resizeAll)
+            for (int t = 0; t < numTracks(); ++t)
+                tracks.push_back (t);
+        else
+            tracks.push_back (resizeTrack);
+
+        if (heightOf (resizeTrack) != height)
+            setTrackHeights (tracks, height);
+
+        ui::postHint ({ resizeAll ? tr ("Resizing every track") : tr ("Resizing the track"), juce::String (height) + " px", false, false });
+        return;
+    }
+
+    if (drag == Drag::preview)
+        return;
+
     const auto snapOn = ! e.mods.isAltDown();
     // after the step below, the hint bar says what the gesture is doing
     const struct PostAfter
@@ -1372,6 +1510,8 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
     switch (drag)
     {
         case Drag::none:
+        case Drag::trackResize:
+        case Drag::preview:
             return;
 
         case Drag::pan:
@@ -1716,6 +1856,8 @@ void PlaylistComponent::postDragHint()
         case Drag::listen:
         case Drag::pan:
         case Drag::zoomRange:
+        case Drag::trackResize:
+        case Drag::preview:
         case Drag::none: return;
     }
 
@@ -1752,6 +1894,11 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
 
     if (drag == Drag::listen)
         engine.stop();
+
+    if (drag == Drag::preview)
+        stopPreview();
+
+    resizeTrack = -1;
 
     if (drag == Drag::move || drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::paint || drag == Drag::timeMove)
         sortClips();
@@ -1792,6 +1939,7 @@ void PlaylistComponent::cutWithKnife (juce::Point<int> from, juce::Point<int> to
         for (int i = 0; i < (int) playlist.size(); ++i)
         {
             const auto& c = playlist[(std::size_t) i];
+            const auto trackHeight = heightOf (c.track);
             const auto rowY = trackToY (c.track) + trackHeight / 2;
 
             if (rowY < top - trackHeight / 2 || rowY > bottom + trackHeight / 2)
@@ -1893,6 +2041,33 @@ void PlaylistComponent::showTrackMenu (int track)
     });
     menu.addItem (tr ("Move up"), track > 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track - 1); }); });
     menu.addItem (tr ("Move down"), [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track + 1); }); });
+    menu.addSeparator();
+    {
+        // row heights (P18); dragging the divider under a header does the same
+        struct Size
+        {
+            const char* name;
+            int height;
+        };
+        static const Size sizes[] = { { TR_NOOP ("Small"), 24 }, { TR_NOOP ("Normal"), trackHeight }, { TR_NOOP ("Large"), 60 }, { TR_NOOP ("Huge"), 100 } };
+        juce::PopupMenu one, all;
+        const auto current = heightOf (track);
+
+        for (const auto& size : sizes)
+        {
+            one.addItem (tr (size.name) + " (" + juce::String (size.height) + " px)", true, current == size.height,
+                         [this, track, h = size.height] { setTrackHeights ({ track }, h); });
+            all.addItem (tr (size.name) + " (" + juce::String (size.height) + " px)", [this, count, h = size.height] {
+                std::vector<int> tracks;
+                for (int t = 0; t < count; ++t)
+                    tracks.push_back (t);
+                setTrackHeights (tracks, h);
+            });
+        }
+
+        menu.addSubMenu (tr ("Track height"), one);
+        menu.addSubMenu (tr ("Height of every track"), all);
+    }
     menu.addSeparator();
     menu.addItem (tr ("Delete the track and its clips"), [this, track] {
         setSelection ({});
@@ -2043,30 +2218,8 @@ void PlaylistComponent::showClipMenu (int index)
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
         // like FL's "Make unique": the chosen clips switch to using a copy of the pattern
-        menu.addItem (tr ("Make unique"), [this, targets] {
-            engine.editSong ([targets] (Song& s) {
-                std::map<int, int> copies; // original pattern -> copy
-
-                for (auto i : targets)
-                {
-                    auto& c = s.playlist[(std::size_t) i];
-
-                    if (c.kind != ClipKind::pattern)
-                        continue;
-
-                    if (! copies.count (c.pattern))
-                    {
-                        auto copy = s.patterns[(std::size_t) c.pattern];
-                        copy.name += " #2";
-                        s.patterns.push_back (std::move (copy));
-                        copies[c.pattern] = (int) s.patterns.size() - 1;
-                    }
-
-                    c.pattern = copies[c.pattern];
-                }
-
-                s.currentPattern = copies.empty() ? s.currentPattern : copies.begin()->second;
-            });
+        menu.addItem (tr ("Make unique") + "\tShift+V+drag", [this, targets] {
+            engine.editSong ([targets] (Song& s) { polish::makeClipsUnique (s, targets); });
         });
         menu.addItem (tr ("Select all of this pattern"), [this, p = clip.pattern] {
             std::vector<int> same;
@@ -2188,6 +2341,61 @@ void PlaylistComponent::showClipMenu (int index)
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
+void PlaylistComponent::startPreview (int clip, int x)
+{
+    const auto& song = engine.getSong();
+
+    if (clip < 0 || clip >= (int) song.playlist.size())
+        return;
+
+    const auto c = song.playlist[(std::size_t) clip];
+    previewPositionBefore = engine.getTransport().positionTicks.load();
+    previewPatternBefore = -1;
+    previewRestoreSong = false;
+    drag = Drag::preview;
+    const auto at = juce::jlimit ((double) c.start, (double) c.end(), xToTick (x));
+
+    if (c.kind == ClipKind::pattern && c.pattern >= 0 && c.pattern < (int) song.patterns.size())
+    {
+        // a pattern clip plays its pattern alone, from the clicked point
+        const auto length = (double) juce::jmax<std::int64_t> (1, song.patterns[(std::size_t) c.pattern].effectiveLength (song.beatsPerBar));
+        previewRestoreSong = song.mode == PlayMode::song;
+        previewPatternBefore = song.currentPattern;
+        engine.editSong ([p = c.pattern] (Song& s) {
+            s.mode = PlayMode::pattern;
+            s.currentPattern = p;
+        }, false);
+        engine.seek (std::fmod (at - (double) c.start + (double) c.offset, length));
+    }
+    else
+    {
+        if (song.mode != PlayMode::song)
+            engine.editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
+        engine.seek (at);
+    }
+
+    engine.play();
+    setMouseCursor (editorCursor (gesture::Cursor::listen));
+    ui::postHint ({ tr ("Previewing the clip: release the mouse to stop"), {}, false, false }, 60000);
+}
+
+void PlaylistComponent::stopPreview()
+{
+    engine.stop();
+
+    if (previewPatternBefore >= 0)
+        engine.editSong ([this] (Song& s) {
+            if (previewPatternBefore < (int) s.patterns.size())
+                s.currentPattern = previewPatternBefore;
+            if (previewRestoreSong)
+                s.mode = PlayMode::song;
+        }, false);
+
+    engine.seek (previewPositionBefore);
+    previewPatternBefore = -1;
+    ui::clearPostedHint();
+}
+
 void PlaylistComponent::setRipple (bool on)
 {
     ripple = on;
@@ -2247,7 +2455,7 @@ void PlaylistComponent::zoomToSelection()
         }
 
     zoomToTicks ((double) from, (double) to);
-    scrollY = juce::jmax (0, top * trackHeight);
+    scrollY = juce::jmax (0, trackToY (top) - headerHeight + scrollY);
     updateScrollBars();
     repaint();
 }
@@ -2470,7 +2678,7 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
     // single letters: only while the typing piano is off (otherwise they play notes)
     if (! cmd && ! mods.isAltDown() && ! mods.isShiftDown() && ! EditorGlobals::get().typingPiano)
         for (const auto& t : editTools())
-            if (letter == t.key)
+            if (letter == t.key && t.tool != EditTool::drumPaint)
             {
                 tools.setTool (t.tool);
                 return true;
@@ -2505,7 +2713,7 @@ juce::Rectangle<int> PlaylistComponent::clipBounds (int index) const
 {
     const auto& c = engine.getSong().playlist[(std::size_t) index];
     const auto x0 = (float) tickToX ((double) c.start), x1 = (float) tickToX ((double) c.end());
-    return juce::Rectangle<float> (x0, (float) trackToY (c.track) + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) trackHeight - 3.0f)
+    return juce::Rectangle<float> (x0, (float) trackToY (c.track) + 1.0f, juce::jmax (3.0f, x1 - x0 - 1.0f), (float) heightOf (c.track) - 3.0f)
         .getSmallestIntegerContainer();
 }
 
@@ -2527,7 +2735,8 @@ PlaylistComponent::Hover PlaylistComponent::hoverAt (juce::Point<int> p) const
     {
         h.header = true;
         h.track = yToTrack (p.y);
-        h.led = p.x < 20;
+        h.divider = dividerAt (p);
+        h.led = h.divider < 0 && p.x < 20;
         return h;
     }
 
@@ -2566,7 +2775,7 @@ void PlaylistComponent::updateHover (juce::Point<int> p, juce::ModifierKeys mods
         // repaint the old and new track rows (header and lane)
         for (auto t : { hover.track, h.track })
             if (t >= 0)
-                repaint (0, trackToY (t) - 1, getWidth(), trackHeight + 2);
+                repaint (0, trackToY (t) - 4, getWidth(), heightOf (t) + 8);
         hover = h;
     }
 
@@ -2579,6 +2788,11 @@ void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
     const auto p = lastMouse;
     auto cursor = gesture::Cursor::normal;
 
+    if (hover.header && hover.divider >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        return;
+    }
     if (hover.header)
         cursor = hover.led ? gesture::Cursor::point : gesture::Cursor::normal;
     else if (gridArea().contains (p))
@@ -2605,6 +2819,13 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
                    : tr ("Track {0}", { juce::String (t + 1) });
     };
 
+    if (h.header && h.divider >= 0)
+    {
+        hint.text = tr ("Track divider: [LMB] drag resizes this track  [Shift][LMB] drag: all tracks  [2xLMB] default height");
+        hint.value = juce::String (heightOf (h.divider)) + " px";
+        return hint;
+    }
+
     if (h.header)
     {
         hint.text = h.led ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
@@ -2629,6 +2850,8 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (h.clip >= 0)
     {
+        if (h.target == gesture::Target::item && ! m.ctrl)
+            hint.text << "  " << tr ("[Shift][V] + drag: a unique copy  [Alt][RMB] hold: hear it");
         const auto& c = song.playlist[(std::size_t) h.clip];
         hint.hasMenu = true;
         if (c.kind == ClipKind::pattern && c.pattern >= 0 && c.pattern < (int) song.patterns.size())
@@ -2646,6 +2869,13 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
 void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // double-click a track divider: back to the default height
+    if (const auto divider = dividerAt (e.getPosition()); divider >= 0)
+    {
+        setTrackHeights ({ divider }, trackHeight);
+        return;
+    }
+
     // double-click a track name: rename it
     if (e.x >= 20 && e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom() && e.mods.isLeftButtonDown())
     {
@@ -2743,7 +2973,7 @@ void PlaylistComponent::glideBy (double ticks, double pixels)
 
     const auto grid = gridArea();
     glideX.target = juce::jlimit (0.0, juce::jmax (0.0, hBar.getMaximumRangeLimit() - grid.getWidth() / pixelsPerTick), glideX.target + ticks);
-    glideY.target = juce::jlimit (0.0, juce::jmax (0.0, (double) numTracks() * trackHeight - grid.getHeight()), glideY.target + pixels);
+    glideY.target = juce::jlimit (0.0, juce::jmax (0.0, (double) tracksHeight() - grid.getHeight()), glideY.target + pixels);
     glideFrame();
 }
 
@@ -2783,7 +3013,8 @@ void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::M
             setSelection ({});
             engine.editSong ([track, other] (Song& s) { noteedit::swapTracks (s, track, other); });
             // the mouse follows the track, so the next wheel step moves it further
-            juce::Desktop::setMousePosition (localPointToGlobal (juce::Point<int> (e.x, e.y + (other - track) * trackHeight)));
+            refreshTrackLayout();
+            juce::Desktop::setMousePosition (localPointToGlobal (juce::Point<int> (e.x, trackToY (other) + heightOf (other) / 2)));
         }
         return;
     }
@@ -2864,6 +3095,7 @@ void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     }
 
     refreshArrangementBox();
+    refreshTrackLayout();
     updateScrollBars();
     repaint();
 }

@@ -1462,6 +1462,9 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-search.png");
             ui.getBrowserForSnapshot().setSearchForSnapshot ({});
+            ui.getBrowserForSnapshot().selectFirstSampleForSnapshot(); // the tree with a sample selected and its waveform
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-browser-tree.png");
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });
@@ -1508,6 +1511,11 @@ private:
                     clip.offset = bar;
                     clip.length = 2 * bar;
                     s.playlist.push_back (clip);
+                    // taller rows for the audio (tracks can be resized: P18)
+                    if ((int) s.playlistTracks.size() < firstTrack + 2)
+                        s.playlistTracks.resize ((std::size_t) firstTrack + 2);
+                    s.playlistTracks[(std::size_t) firstTrack].height = 80;
+                    s.playlistTracks[(std::size_t) firstTrack + 1].height = 60;
                 });
                 offline.dispatchPendingMessages();
                 auto& cache = *lynx::ui::WaveformCache::getInstance();
@@ -1536,9 +1544,8 @@ private:
                 saveWindow (lynx::makeChannelSettingsPanel (offline, samplerChannel), "-sampler-wave.png");
 
                 ui.showDesktopForSnapshot (false);
-                ui.getBrowserForSnapshot().showPreview (wav);
+                ui.getBrowserForSnapshot().showPreviewForSnapshot (wav);
                 saveSnapshot (ui, prefix + "-browser-preview.png");
-                ui.getBrowserForSnapshot().showPreview ({});
             }
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
