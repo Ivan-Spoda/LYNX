@@ -9776,6 +9776,7 @@ TEST (bassdrum_engine)
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"
+#include "UiChromeTests.inc"
 
 TEST (chorus_family_engines)
 {

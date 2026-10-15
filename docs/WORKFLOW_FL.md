@@ -388,12 +388,13 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | G9 | Yes | Global grid combo in the main toolbar (`ui/EditorTools.h` `GlobalGridBox`, `EditorGlobals`); each editor's grid combo starts on "Follow global grid". Backspace in the Piano Roll / Playlist toggles it with "No snap". Alt bypass: Yes. **Record quantise follows it** (fixed fractions and bars; none/screen/nearest record as played; Options → Recording turns it off) |
 | G10 | Yes | Right-click the global grid → "Default note length" (or "Last clicked note", the default) |
 | G11 | **Done** | Numpad +/− next/previous, **numpad 1–9 select patterns 1–9**, F4 next empty pattern (then the naming dialog), F2 rename + colour dialog (F2 inside it = random palette colour), Ctrl+Shift+Ins insert before the current one, **Alt+C clone** (the rack keeps Alt+C for channels while it has focus), **Shift+Ctrl+Up/Down move**, "Split by channel" in the pattern menu and the **Patterns** menu (`core/RackOps.cpp`). Keys checked on [DOC][pat-menu] and [DOC][sc]. Del is not bound (it deletes notes/clips in the editors); Delete pattern stays in the menu |
-| G12 | **Done** | Hint strip in the status bar: describes the control under the mouse (`ui::HintSource`, hint property or tooltip), shows its live value while it is dragged, and marks "can be automated" and "has a right-click menu" with LYNX icons. MIDI learn prompt kept |
+| G12 | **Done** | **Hint bar** under the menu, as wide as the toolbar allows (360–620 px; one line, or two smaller lines for long hints): describes the control under the mouse (`ui::HintSource`, hint property or tooltip), shows its **value live while it is dragged** (the pressed control stays the source for the whole drag, its value in an accent pill), and marks "can be automated" and "has a right-click menu" with LYNX icons. Hint texts use a small markup drawn as **mouse-button and key glyphs** (`core/HintMarkup.h`: `[LMB] [2xLMB] [RMB] [MMB] [Wheel]`, any other `[Key]` as a key cap). Panels can **post a live hint** for a gesture in progress (`ui::postHint`, `ui/HintBar.h`). Every main-toolbar control has a markup hint. MIDI learn prompt kept. [DOC][tb] |
 | G13 | **Done** (LYNX variant) | Snapshot undo with 100 steps, one step per mouse gesture; Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. **Undo history panel** (Ctrl+H, Edit menu; `ui/HistoryPanel.*`): steps named after what changed (`core/History.h` compares the snapshots), newest at the bottom, a click jumps there (`AudioEngine::jumpToHistory`). No undo-level or knob-tweak settings |
 | G14 | Partial | Ctrl+N new, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+R export, recent-files menu (`MainComponent.cpp:250-358, 833-957`). No save-new-version |
 | G15 | Partial | 4 built-in templates in "New from template" (`core/Templates.cpp:57`); no user templates |
 | G16 | **Done** | Ctrl+T and a toolbar toggle (off by default, so the editors' letter tools work; the manual does not state a default); saved in the user settings and passed to `EditorGlobals::typingPiano`. Every binding lives in `core/KeyMap` (remappable via `%APPDATA%\LYNX\keys.json`, Options → Edit keyboard shortcuts). While the piano is on its keys win; other plain printable keys only work for actions marked `whilePiano` (L); chords, F-keys and Space/Enter/arrows always work |
-| G17 | **Done** | Toolbar icons for the five panels (click toggles, right-click shows the panel maximised) |
+| G17 | **Done** | Toolbar icons for the five panels (click toggles, right-click shows the panel maximised); undo/redo icons: right-click opens the undo history |
+| G19 | **Done** (LYNX variant) | Toolbar meters and master controls ([DOC][tb], `ui/Toolbar.*`): **song position** slider under the time display (click/drag seeks, snapped to steps, Alt free; wheel = one bar; Playlist in Song mode, the pattern in Pattern mode); **time display** switches bar:beat:step / min:sec:cs on click; **master volume** = the Master insert's fader (automatable, so it also affects renders, unlike FL's monitor volume); **master pitch** ±1200 cents saved with the project (`Song::masterPitch`, applied to the built-in instruments' notes in `RackRenderer`; semitone steps, Shift free; plugins are not retuned); **CPU / RAM / polyphony** (polyphony = notes sounding in the song plus held PC keys, `core/SongStats.h`; voices still releasing are not counted); **output** oscilloscope with a peak meter that turns red after clipping |
 | G18 | No | No "last tweaked" |
 
 **Controls**
@@ -814,20 +815,24 @@ colours, icons and fonts stay LYNX's own (dark theme, red accent, `ui/Icons.cpp`
 - **Global snap.** The toolbar has one snap selector. It sets the snap for the Piano Roll, the Playlist and the
   event editor (each editor set to "Main" follows it) and the quantise for recorded notes. [DOC][tb-snap]
 
-**LYNX** (`ui/MainComponent.cpp`, `resized()`): one band, two rows high, panels left to right:
-1. the menu, with the **hint bar under it** (the bottom status strip is gone);
-2. the transport: a two-line Pattern/Song switch, play, stop, record, tempo and the song position;
-3. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
+**LYNX** (`ui/MainComponent.cpp`, `resized()`; widgets in `ui/Toolbar.*`, the hint bar in `ui/HintBar.*`): one
+band, two rows high, panels left to right:
+1. the menu, with the project name beside it (FL's title/hint panel) and the **hint bar under it**; this column
+   takes the room the other panels leave (360–620 px), so hints are shown in full;
+2. the transport: a two-line Pattern/Song switch, play, stop, record, the tempo, and the time display with the
+   **song position slider** under both;
+3. **master volume over master pitch** (small knobs named MASTER and PITCH, value beside them);
+4. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
    as piano;
-4. global snap, with the pattern selector under it;
-5. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
-   palette, F8), with the file
-   actions under them (new, open, save, export, undo, redo);
-6. the output scope with the CPU load under it, on the right.
+5. global snap over the pattern selector, each with a caption (SNAP, PATTERN); the wheel steps both;
+6. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
+   palette, F8), with the file actions under them (new, open, save, export, undo, redo);
+7. on the right, after any spare room: **CPU / RAM / polyphony**, then the **output** oscilloscope and peak meter.
 
-When the window is narrow, the panels drop from the right in this order: monitor, shortcuts, snap/pattern,
-recording. Everything they hold is also in the menus or on keys. The LYNX logo is no longer drawn inside the
-window; it stays the window and taskbar icon.
+When the window is narrow, panels drop by priority (the first to go: meters, output, recording options,
+shortcuts, master, snap/pattern); the transport always stays. Everything they hold is also in the menus or on
+keys. Every control has a hint with its mouse gestures and keys. Toolbar icon buttons fade their hover state in
+and out (`IconButton`). The LYNX logo is not drawn inside the window; it stays the window and taskbar icon.
 
 ### 5.2 Editor tools live in each editor's own toolbar
 - **Playlist.** Its toolbar runs along the top of the Playlist window. Left to right: the Playlist menu, the snap
@@ -874,8 +879,15 @@ starts under that row.
   Shift+wheel on it changes the pattern. [DOC][cr] [DOC][cr-swing]
 
 **LYNX** (`core/Workspace.cpp` `makeDefault`, `ui/Workspace.cpp`):
-- The default layout has the Browser on the left at full height, the Playlist filling the rest, and the
-  Channel Rack floating.
+- The default (start-up) layout has the Browser on the left at full height, the Playlist filling the rest as
+  the background, and the Channel Rack floating, sized to its rows, to the right of the Playlist's pattern
+  picker and track names (so the arrangement stays readable). The Piano Roll and the Mixer are hidden until
+  called (F7, F9) but have their places: the Mixer along the bottom (at least 400 px high), the Piano Roll
+  above it, tiled when the desktop is tall enough (≥ 300 px left for the roll), overlapping otherwise.
+- While nobody has moved, resized, detached or loaded anything, the layout is "pristine": when the window
+  changes size (the window opens small and is maximised, or the user resizes it) the panels take the default
+  rects for the new size instead of being scaled, so 1280×720 and 2560×1440 both start with sensible sizes
+  (`Layout::relayoutDefault`). Once a panel is touched, its place is remembered and scales with the window.
 - The Piano Roll and the Mixer open as floating windows. The Mixer is a wide window over the lower two thirds
   of the Playlist. Like every panel, it is maximised by double-clicking its title, with its title-bar button, or
   by right-clicking its toolbar icon. It is detached from the window menu.

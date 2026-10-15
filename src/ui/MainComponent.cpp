@@ -23,6 +23,9 @@
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 
+#include "core/HintMarkup.h"
+#include "core/SongStats.h"
+
 namespace lynx
 {
 namespace
@@ -127,8 +130,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     };
     undoButton.setTooltip (withKey (tr ("Undo"), "edit.undo"));
     undoButton.onClick = [this] { engine.undo(); };
+    undoButton.onRightClick = [this] { showHistory(); };
     redoButton.setTooltip (withKey (tr ("Redo"), "edit.redo"));
     redoButton.onClick = [this] { engine.redo(); };
+    redoButton.onRightClick = [this] { showHistory(); };
     pluginPickerButton.setTooltip (withKey (tr ("Plugin picker: add an instrument or plugin as a new channel"), "panel.quickAdd"));
     pluginPickerButton.onClick = [this] { showQuickAdd(); };
 
@@ -142,25 +147,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     recordButton.setIconColour (theme::colour::record.withMultipliedSaturation (0.8f));
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
     recordMenuButton.setTooltip (tr ("Recording options: what to record"));
-    recordMenuButton.onClick = [this] {
-        juce::PopupMenu menu;
-        menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
-        menu.addItem (tr ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
-            engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
-
-            if (engine.getLastRecordingError().isNotEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio input"),
-                                                        engine.getLastRecordingError());
-        });
-        menu.addSeparator();
-        menu.addItem (tr ("Open recordings folder"), [] {
-            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
-            juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
-        });
-        menu.addSeparator();
-        addRecordOptions (menu);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
-    };
+    recordMenuButton.onClick = [this] { showRecordMenu(); };
+    recordButton.onRightClick = [this] { showRecordMenu(); };
 
     // Pattern / Song: a two-segment switch (L toggles); right-click shows the matching panel
     // as in FL, a two-line switch in front of the transport buttons: pattern on top, song below
@@ -223,6 +211,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     }
 
     patternBox.setTooltip (tr ("Current pattern (Numpad +/-: next/previous, F4: next empty, F2: rename)"));
+    patternBox.setScrollWheelEnabled (true);
+    gridBox.setScrollWheelEnabled (true);
     patternBox.onChange = [this]
     {
         const auto index = patternBox.getSelectedItemIndex();
@@ -255,15 +245,6 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     patternMenuButton.setTooltip (tr ("Pattern: rename, color, clone, insert, split, length, delete"));
     patternMenuButton.onClick = [this] { showPatternMenu(); };
 
-    positionLabel.setFont (theme::monoFont (19.0f));
-    positionLabel.setJustificationType (juce::Justification::centred);
-    positionLabel.setColour (juce::Label::textColourId, theme::colour::textPrimary);
-    positionLabel.setTooltip (tr ("Position: bar : beat : step"));
-    positionLabel.setText ("1 : 1 : 1", juce::dontSendNotification);
-    cpuLabel.setJustificationType (juce::Justification::centredRight);
-    cpuLabel.setFont (theme::font (theme::type::small));
-    cpuLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
-    cpuLabel.setTooltip (tr ("Audio processing load"));
 
     // the workspace panels
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
@@ -300,8 +281,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         openPianoRoll();
     };
     picker.onOpenPattern = [this] { showPanel (Panel::channelRack); };
-    ui::setHint (pianoRoll, tr ("Piano Roll: click adds a note, drag moves, right-click deletes, Ctrl+drag selects"));
-    ui::setHint (playlist, tr ("Playlist: click paints the current pattern, right-click deletes, Ctrl+drag selects"));
+    ui::setHint (pianoRoll, tr ("Piano Roll: [LMB] add a note, drag to move  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"));
+    ui::setHint (playlist, tr ("Playlist: [LMB] paint the current pattern  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"));
 
     // recent files (stored in %APPDATA%\LYNX)
     recent.setMaxNumberOfItems (12);
@@ -310,8 +291,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
                                                              &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
-                                                             &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &positionLabel,
-                                                             &cpuLabel, &hintBar, &workspace, &scope })
+                                                             &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &timeDisplay,
+                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &workspace })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
@@ -341,6 +322,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     refreshToolbar();
     refreshPanelButtons();
 
+    setControlHints();
     fittedChannelCount = (int) engine.getSong().channels.size();
     hintBar.setHint ({ idleHint(), {}, false, false });
     setWantsKeyboardFocus (true);
@@ -381,27 +363,25 @@ void MainComponent::paint (juce::Graphics& g)
     if (! hintBar.getBounds().isEmpty())
     {
         g.setColour (colour::bg1);
-        g.fillRoundedRectangle (hintBar.getBounds().expanded (2, 0).toFloat(), radius::md);
+        g.fillRoundedRectangle (hintBar.getBounds().toFloat(), radius::md);
     }
 
-    // tempo and song position: inset displays
-    for (auto area : { tempoArea, positionArea })
-        if (! area.isEmpty())
-        {
-            g.setColour (colour::bg0);
-            g.fillRoundedRectangle (area.toFloat(), radius::md);
-        }
-
-    if (! positionArea.isEmpty())
+    // the project name, beside the menus (FL's title/hint panel: the title above the hint bar)
+    if (! titleArea.isEmpty())
     {
-        g.setColour (colour::textDisabled);
-        g.setFont (font (type::caption));
-        g.drawText (tr ("BAR : BEAT : STEP"), positionArea.withTrimmedTop (positionArea.getHeight() - 15).withTrimmedBottom (2),
-                    juce::Justification::centred);
+        const auto name = projectName.isNotEmpty() ? projectName : tr ("Untitled");
+        g.setFont (font (type::small, true));
+        g.setColour (colour::textSecondary);
+        g.drawFittedText ((engine.isModified() ? juce::String ("* ") : juce::String()) + name, titleArea, juce::Justification::centredRight, 1, 0.8f);
     }
 
-    if (! snapIconArea.isEmpty())
-        icons::draw (g, Icon::magnet, snapIconArea.toFloat().withSizeKeepingCentre (16.0f, 16.0f), colour::textSecondary);
+    // captions that name the snap and pattern selectors
+    g.setFont (font (type::caption - 1.0f, true));
+    g.setColour (colour::textDisabled);
+    if (! snapLabelArea.isEmpty())
+        g.drawText (tr ("SNAP"), snapLabelArea, juce::Justification::centredLeft, true);
+    if (! patternLabelArea.isEmpty())
+        g.drawText (tr ("PATTERN"), patternLabelArea, juce::Justification::centredLeft, true);
 }
 
 void MainComponent::resized()
@@ -410,7 +390,9 @@ void MainComponent::resized()
     const auto bar = juce::Rectangle<int> (0, 0, getWidth(), toolbarHeight);
     auto toolbar = bar.reduced (8, 4);
     const auto row1 = toolbar.getY(), row2 = toolbar.getY() + rowHeight + 2, h = rowHeight;
-    const auto big = toolbar.getHeight() - 8; // transport buttons and displays: both rows
+    const auto big = toolbar.getHeight() - 8; // transport buttons: both rows
+    const auto bigWidth = 44;
+    constexpr int gap = 17;                    // a divider and the space around it
 
     // panel widths
     auto& lf = getLookAndFeel();
@@ -419,27 +401,46 @@ void MainComponent::resized()
         menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
-    const auto transportWidth = modeWidth + 8 + 3 * (big + 4) + 4 + 96 + 6 + 116;
-    const auto recordWidth = 3 * h + 4;
-    const auto snapWidth = 20 + 4 + 172;
-    const auto shortcutsWidth = 6 * h;
-    const auto monitorWidth = 150;
-    const auto gap = 17; // a divider and the space around it
+    constexpr int tempoWidth = 90, timeWidth = 110, captionWidth = 54, gridWidth = 152;
 
-    // what fits: the menu/hint column shrinks first, then panels drop from the right
-    auto left = juce::jlimit (230, 360, menuWidth + 8);
+    enum Section { transport, master, record, snap, shortcuts, meters, monitor, sectionCount };
+    struct Info
+    {
+        int width, priority; // the lowest priority drops first when the window is narrow
+        bool shown = true;
+    };
+    std::array<Info, sectionCount> sections { {
+        { modeWidth + 8 + 3 * (bigWidth + 4) + 4 + tempoWidth + 6 + timeWidth, 100 },
+        { 92, 80 },
+        { 3 * h + 4, 60 },
+        { captionWidth + gridWidth, 90 },
+        { 6 * h, 70 },
+        { 118, 55 },
+        { 116, 50 },
+    } };
+
     const auto room = toolbar.getWidth();
-    auto needed = left + gap + transportWidth;
-    const auto showRecord = needed + gap + recordWidth <= room;
-    needed += showRecord ? gap + recordWidth : 0;
-    const auto showSnap = needed + gap + snapWidth <= room;
-    needed += showSnap ? gap + snapWidth : 0;
-    const auto showShortcuts = needed + gap + shortcutsWidth <= room;
-    needed += showShortcuts ? gap + shortcutsWidth : 0;
-    const auto showMonitor = needed + gap + monitorWidth <= room;
-    needed += showMonitor ? gap + monitorWidth : 0;
-    if (needed > room)
-        left = juce::jmax (160, left - (needed - room));
+    const auto minHint = juce::jmax (menuWidth + 8, 360), maxHint = 620; // room for most hints on one line
+    auto used = [&sections] {
+        int total = 0;
+        for (const auto& s : sections)
+            total += s.shown ? s.width + gap : 0;
+        return total;
+    };
+
+    while (used() + minHint > room)
+    {
+        Info* lowest = nullptr;
+        for (auto& s : sections)
+            if (s.shown && s.priority < 100 && (lowest == nullptr || s.priority < lowest->priority))
+                lowest = &s;
+        if (lowest == nullptr)
+            break;
+        lowest->shown = false;
+    }
+
+    const auto hintWidth = juce::jlimit (juce::jmin (minHint, juce::jmax (160, room - used())), maxHint, room - used());
+    const auto spare = juce::jmax (0, room - used() - hintWidth); // goes before the meters, which sit on the right
 
     auto take = [&toolbar] (int width) { return toolbar.removeFromLeft (juce::jmin (width, toolbar.getWidth())); };
     auto divide = [&] {
@@ -459,17 +460,21 @@ void MainComponent::resized()
         c.setBounds (r);
     };
 
-    // 1. menu over the hint bar
+    // 1. the menu (and the project name beside it) over the hint bar
     {
-        auto column = take (left);
-        put (menuBar, column.withY (row1).withHeight (h));
-        put (hintBar, column.withY (row2).withHeight (h).reduced (4, 1));
+        auto column = take (hintWidth);
+        const auto menu = column.withY (row1).withHeight (h).removeFromLeft (juce::jmin (menuWidth + 8, column.getWidth()));
+        put (menuBar, menu);
+        titleArea = column.withY (row1).withHeight (h).withTrimmedLeft (menu.getWidth() + 12).withTrimmedRight (4);
+        if (titleArea.getWidth() < 60)
+            titleArea = {};
+        put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
     }
 
-    // 2. transport: Pattern/Song switch, play, stop, record, tempo, song position
+    // 2. transport: Pattern/Song switch, play, stop, record, tempo, time display with the song position under it
     divide();
     {
-        auto panel = take (transportWidth);
+        auto panel = take (sections[transport].width);
         auto mode = panel.removeFromLeft (modeWidth);
         put (patternModeButton, mode.withY (row1).withHeight (h).reduced (0, 1));
         put (songModeButton, mode.withY (row2).withHeight (h).reduced (0, 1));
@@ -478,23 +483,34 @@ void MainComponent::resized()
 
         for (auto* b : { &playButton, &stopButton, &recordButton })
         {
-            put (*b, juce::Rectangle<int> (panel.getX(), y, big, big));
-            panel.removeFromLeft (big + 4);
+            put (*b, juce::Rectangle<int> (panel.getX(), y, bigWidth, big));
+            panel.removeFromLeft (bigWidth + 4);
         }
 
         panel.removeFromLeft (4);
-        tempoArea = panel.removeFromLeft (96).withY (y).withHeight (big);
-        put (tempoDisplay, tempoArea);
-        panel.removeFromLeft (6);
-        positionArea = panel.removeFromLeft (116).withY (y).withHeight (big);
-        put (positionLabel, positionArea.withTrimmedBottom (13).withTrimmedTop (2));
+        const auto displays = panel.withY (y).withHeight (big);
+        const auto displayHeight = big - 12;
+        put (tempoDisplay, displays.withWidth (tempoWidth).withHeight (displayHeight));
+        put (timeDisplay, displays.withTrimmedLeft (tempoWidth + 6).withWidth (timeWidth).withHeight (displayHeight));
+        put (songPosition, displays.withTop (displays.getY() + displayHeight + 1).withWidth (tempoWidth + 6 + timeWidth));
     }
 
-    // 3. recording options: metronome, count-in and wait for input over "what to record" and typing piano
-    if (showRecord)
+    // 3. master volume over master pitch
+    if (sections[master].shown)
     {
         divide();
-        auto panel = take (recordWidth);
+        auto panel = take (sections[master].width);
+        put (masterVolume, panel.withY (row1).withHeight (h).reduced (0, 1));
+        put (masterPitch, panel.withY (row2).withHeight (h).reduced (0, 1));
+    }
+    else
+        hide ({ &masterVolume, &masterPitch });
+
+    // 4. recording options: metronome, count-in and wait for input over "what to record" and typing piano
+    if (sections[record].shown)
+    {
+        divide();
+        auto panel = take (sections[record].width);
         put (metronomeButton, juce::Rectangle<int> (panel.getX(), row1, h, h));
         put (countInButton, juce::Rectangle<int> (panel.getX() + h + 2, row1, h, h));
         put (waitInputButton, juce::Rectangle<int> (panel.getX() + 2 * (h + 2), row1, h, h));
@@ -504,14 +520,16 @@ void MainComponent::resized()
     else
         hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton });
 
-    // 4. global snap over the pattern selector
-    if (showSnap)
+    // 5. global snap over the pattern selector, each with its name
+    if (sections[snap].shown)
     {
         divide();
-        auto panel = take (snapWidth);
-        snapIconArea = juce::Rectangle<int> (panel.getX(), row1, 20, h);
-        put (gridBox, juce::Rectangle<int> (panel.getX() + 24, row1, snapWidth - 24, h).reduced (0, 1));
-        auto second = juce::Rectangle<int> (panel.getX(), row2, snapWidth, h);
+        auto panel = take (sections[snap].width);
+        auto first = juce::Rectangle<int> (panel.getX(), row1, panel.getWidth(), h);
+        snapLabelArea = first.removeFromLeft (captionWidth);
+        put (gridBox, first.reduced (0, 1));
+        auto second = juce::Rectangle<int> (panel.getX(), row2, panel.getWidth(), h);
+        patternLabelArea = second.removeFromLeft (captionWidth);
         put (patternMenuButton, second.removeFromRight (h));
         put (newPatternButton, second.removeFromRight (h));
         second.removeFromRight (2);
@@ -519,15 +537,15 @@ void MainComponent::resized()
     }
     else
     {
-        snapIconArea = {};
+        snapLabelArea = patternLabelArea = {};
         hide ({ &gridBox, &patternBox, &newPatternButton, &patternMenuButton });
     }
 
-    // 5. shortcuts: the windows over the file actions
-    if (showShortcuts)
+    // 6. shortcuts: the windows over the file actions
+    if (sections[shortcuts].shown)
     {
         divide();
-        auto panel = take (shortcutsWidth);
+        auto panel = take (sections[shortcuts].width);
         auto first = panel.withY (row1).withHeight (h);
         for (auto p : { Panel::playlist, Panel::channelRack, Panel::pianoRoll, Panel::mixer, Panel::browser })
             put (panelButtons[(std::size_t) p], first.removeFromLeft (h));
@@ -544,16 +562,18 @@ void MainComponent::resized()
         hide ({ &pluginPickerButton, &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton });
     }
 
-    // 6. output monitor, on the right
-    if (showMonitor)
+    // 7. on the right: CPU / memory / polyphony, then the output monitor
+    take (spare);
+    for (auto [section, component] : { std::pair<Section, juce::Component*> { meters, &perfMeter }, { monitor, &output } })
     {
-        auto panel = bar.reduced (8, 4).removeFromRight (monitorWidth);
-        dividers.push_back (panel.getX() - 9);
-        put (scope, panel.withY (row1).withHeight (h));
-        put (cpuLabel, panel.withY (row2).withHeight (h));
+        if (sections[section].shown)
+        {
+            divide();
+            put (*component, take (sections[section].width).withY (row1).withHeight (2 * h + 2));
+        }
+        else
+            hide ({ component });
     }
-    else
-        hide ({ &scope, &cpuLabel });
 
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight));
 }
@@ -1180,6 +1200,27 @@ void MainComponent::addRecordOptions (juce::PopupMenu& menu)
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.placeSongClip = ! r.placeSongClip; }); });
 }
 
+void MainComponent::showRecordMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
+    menu.addItem (tr ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
+        engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
+
+        if (engine.getLastRecordingError().isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio input"), engine.getLastRecordingError());
+    });
+    menu.addSeparator();
+    menu.addItem (tr ("Open recordings folder"), [] {
+        juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
+        juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
+    });
+    menu.addSeparator();
+    addRecordOptions (menu);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (recordMenuButton.isVisible() ? (juce::Component*) &recordMenuButton
+                                                                                                      : (juce::Component*) &recordButton));
+}
+
 void MainComponent::refreshRecordOptionButtons()
 {
     auto withKey = [this] (const juce::String& text, const char* id) {
@@ -1470,8 +1511,8 @@ void MainComponent::TempoDisplay::mouseWheelMove (const juce::MouseEvent& e, con
 ui::Hint MainComponent::TempoDisplay::hintAt (juce::Point<int> p)
 {
     return ui::valueHint (spec(), engine.getSong().bpm,
-                          isOnDecimals (p.x) ? tr ("drag the decimals for fine changes, wheel, double-click to type")
-                                             : tr ("drag the whole number for BPM (Ctrl: fine), wheel, double-click to type"));
+                          isOnDecimals (p.x) ? tr ("[LMB] drag the decimals for fine changes  [Wheel] 0.01  [2xLMB] type  [RMB] tap tempo, half, double")
+                                             : tr ("[LMB] drag the whole number  [Ctrl] fine  [Wheel] 1 BPM  [2xLMB] type  [RMB] tap tempo, half, double"));
 }
 
 void MainComponent::TempoDisplay::showMenu()
@@ -1559,101 +1600,95 @@ void MainComponent::TempoDisplay::showTap()
     raw->grabKeyboardFocus();
 }
 
-// --- hint strip ----------------------------------------------------------------------------------
-
-void MainComponent::HintBar::setHint (const ui::Hint& hint)
-{
-    if (hint.text != current.text || hint.value != current.value || hint.automatable != current.automatable || hint.hasMenu != current.hasMenu)
-    {
-        current = hint;
-        repaint();
-    }
-}
-
-void MainComponent::HintBar::paint (juce::Graphics& g)
-{
-    using namespace theme;
-    auto r = getLocalBounds();
-
-    // capability markers (dim when not applicable, so the text does not jump)
-    if (current.automatable || current.hasMenu)
-    {
-        icons::draw (g, Icon::automate, r.removeFromLeft (18).toFloat().withSizeKeepingCentre (14.0f, 14.0f),
-                     current.automatable ? colour::automation : colour::textDisabled.withAlpha (0.35f));
-        r.removeFromLeft (2);
-        icons::draw (g, Icon::rightClick, r.removeFromLeft (18).toFloat().withSizeKeepingCentre (14.0f, 14.0f),
-                     current.hasMenu ? colour::textSecondary : colour::textDisabled.withAlpha (0.35f));
-        r.removeFromLeft (8);
-    }
-
-    if (current.value.isNotEmpty())
-    {
-        const juce::Font valueFont (font (type::small, true));
-        const auto w = juce::jmin (r.getWidth() / 3, juce::roundToInt (juce::GlyphArrangement::getStringWidth (valueFont, current.value)) + 16);
-        auto valueArea = r.removeFromRight (w).reduced (0, 4);
-        g.setColour (colour::bg3);
-        g.fillRoundedRectangle (valueArea.toFloat(), radius::sm);
-        g.setColour (colour::textPrimary);
-        g.setFont (valueFont);
-        g.drawFittedText (current.value, valueArea, juce::Justification::centred, 1, 0.8f);
-        r.removeFromRight (8);
-    }
-
-    g.setColour (colour::textSecondary);
-    g.setFont (font (type::small));
-    g.drawFittedText (current.text, r, juce::Justification::centredLeft, 1, 0.9f);
-}
+// --- hint bar ------------------------------------------------------------------------------------
 
 juce::String MainComponent::idleHint() const
 {
     if (engine.isWaitingForInput())
-        return tr ("Recording: waiting for the first note (Space cancels)");
+        return tr ("Recording: waiting for the first note ([Space] cancels)");
 
     if (engine.isCountingIn())
         return tr ("Recording: count-in...");
 
-    return tr ("F1 shortcuts   F5-F9 panels   Space play/stop   Ctrl+T typing piano ({0})", { typingPiano ? tr ("on") : tr ("off") });
+    return tr ("Point at anything to see what it does here.  [F1] shortcuts  [F5]-[F9] windows  [Space] play/stop  "
+               "[Ctrl][T] typing piano: {0}", { typingPiano ? tr ("on") : tr ("off") });
 }
 
-void MainComponent::Scope::update()
+juce::String MainComponent::keyMarkup (const char* actionId) const
 {
-    if (! isShowing() || getWidth() <= 0)
-        return;
+    const auto& chords = keyMap.chordsFor (actionId);
 
-    engine.copyScope (samples.data(), (int) samples.size());
-    repaint();
-}
+    if (chords.empty())
+        return {};
 
-void MainComponent::Scope::paint (juce::Graphics& g)
-{
-    const auto area = getLocalBounds().toFloat();
-    g.setColour (theme::colour::bg0);
-    g.fillRoundedRectangle (area, theme::radius::md);
-    g.setColour (theme::colour::border);
-    g.drawHorizontalLine ((int) area.getCentreY(), area.getX() + 4.0f, area.getRight() - 4.0f);
+    // "Ctrl+Shift+S" -> "[Ctrl][Shift][S]"; a key name that is not markup stays as text
+    const auto text = juce::String (keys::toString (chords.front()));
+    juce::String out;
 
-    juce::Path wave;
-    const auto mid = area.getCentreY();
-    const auto half = area.getHeight() * 0.45f;
-
-    for (int x = 0; x < (int) area.getWidth(); ++x)
+    for (const auto& part : juce::StringArray::fromTokens (text, "+", ""))
     {
-        const auto index = (std::size_t) (x * (int) samples.size() / juce::jmax (1, (int) area.getWidth()));
-        const auto y = mid - juce::jlimit (-1.0f, 1.0f, samples[index]) * half;
-
-        if (x == 0)
-            wave.startNewSubPath (area.getX(), y);
-        else
-            wave.lineTo (area.getX() + (float) x, y);
+        if (! hintmarkup::isToken (part.toStdString()))
+            return "(" + text + ")";
+        out << "[" << part << "]";
     }
 
-    g.setColour (theme::colour::accent.withAlpha (0.9f));
-    g.strokePath (wave, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    return out;
+}
+
+void MainComponent::setControlHints()
+{
+    auto with = [this] (const juce::String& text, const char* actionId) {
+        const auto key = keyMarkup (actionId);
+        return key.isEmpty() ? text : text + "  " + key;
+    };
+
+    ui::setHint (newButton, with (tr ("New project"), "file.new"));
+    ui::setHint (openButton, with (tr ("Open a project (.lynx, FL Studio .flp, MIDI)"), "file.open"));
+    ui::setHint (saveButton, with (tr ("Save the project"), "file.save") + "  " + tr ("save as:") + " " + keyMarkup ("file.saveAs"));
+    ui::setHint (exportButton, with (tr ("Export audio: WAV, FLAC or OGG"), "file.export"));
+    ui::setHint (undoButton, with (tr ("Undo the last edit"), "edit.undo") + "  " + tr ("[RMB] undo history"), true);
+    ui::setHint (redoButton, with (tr ("Redo"), "edit.redo") + "  " + tr ("[RMB] undo history"), true);
+    ui::setHint (pluginPickerButton, with (tr ("Plugin picker: add an instrument or an effect by name"), "panel.quickAdd"));
+
+    ui::setHint (playButton, with (tr ("Play: [LMB] play; again: stop and go back to where it started"), "transport.playStop")
+                                 + "  " + keyMarkup ("transport.pause") + " " + tr ("pause"));
+    ui::setHint (stopButton, tr ("Stop: [LMB] stop and go back to the start  [2xLMB] all notes off (panic)"));
+    ui::setHint (recordButton, with (tr ("Record: [LMB] arm, then play to record notes (and audio, when armed)  [RMB] what to record"), "transport.record"),
+                 true);
+    ui::setHint (recordMenuButton, tr ("What to record: notes, input audio, count-in, overdub or replace, quantise  [LMB] menu"), true);
+    ui::setHint (patternModeButton, with (tr ("Pattern mode: plays the current pattern in a loop  [RMB] show the Channel Rack"), "transport.toggleMode"));
+    ui::setHint (songModeButton, with (tr ("Song mode: plays the Playlist arrangement  [RMB] show the Playlist"), "transport.toggleMode"));
+    ui::setHint (metronomeButton, with (tr ("Metronome: clicks on every beat while playing"), "transport.metronome"));
+    ui::setHint (countInButton, with (tr ("Count-in: one bar of clicks before recording starts (the menu has more lengths)"), "record.countIn"));
+    ui::setHint (waitInputButton, with (tr ("Wait for input: recording starts with the first note you play"), "record.waitForInput"));
+    ui::setHint (typingPianoButton, with (tr ("Typing keyboard as a piano: Z..M and Q..P play the selected channels; letter shortcuts pause"),
+                                          "view.typingPiano"));
+    ui::setHint (gridBox, tr ("Global snap: the grid of the Piano Roll and Playlist (when they follow it) and the quantise of recorded notes  "
+                              "[LMB] choose  [Wheel] step  [RMB] length of new notes  [Backspace] snap on/off  [Alt] while dragging: no snap"),
+                 true);
+    ui::setHint (patternBox, tr ("Current pattern: what the Channel Rack and Piano Roll edit and Pattern mode plays  [LMB] choose  [Wheel] step  "
+                                 "[F4] next empty  [F2] rename"));
+    ui::setHint (newPatternButton, tr ("New pattern: an empty pattern after the last one"));
+    ui::setHint (patternMenuButton, tr ("Pattern menu: rename, color, length, clone, insert, split by channel, delete"), true);
+
+    const char* panelHelp[] = { TR_NOOP ("the arrangement: clips of patterns, audio and automation on tracks"),
+                                TR_NOOP ("the instruments and their step sequencer"),
+                                TR_NOOP ("the notes of the selected channel in the current pattern"),
+                                TR_NOOP ("inserts, effects and routing"),
+                                TR_NOOP ("samples, presets, plugins and projects to drag in") };
+    for (int i = 0; i < workspace::panelCount; ++i)
+        ui::setHint (panelButtons[(std::size_t) i],
+                     with (panelName ((Panel) i) + ": " + tr (panelHelp[i]) + "  " + tr ("[LMB] show, focus or hide  [RMB] maximized"),
+                           panelAction ((Panel) i)));
 }
 
 void MainComponent::timerCallback()
 {
-    scope.update();
+    output.update();
+    timeDisplay.update();
+    songPosition.update();
+    masterVolume.update();
+    masterPitch.update();
     updateRecordQuantise();
 
     if (engine.isModified() != lastModified)
@@ -1672,59 +1707,61 @@ void MainComponent::timerCallback()
     }
 
     auto& transport = engine.getTransport();
-    const auto& song = engine.getSong();
-    const auto loop = song.mode == PlayMode::song ? song.songLength()
-                                                   : song.patterns[(std::size_t) song.currentPattern].effectiveLength (song.beatsPerBar);
-    const auto ticks = std::fmod (transport.positionTicks.load(), (double) juce::jmax<std::int64_t> (1, loop));
-    const auto beats = ticks / ppq;
-    int bar = 0, beat = 0;
-
-    if (song.mode == PlayMode::song) // in song mode the Playlist ruler applies (with time signature changes)
-    {
-        const auto current = song.barAt ((std::int64_t) ticks);
-        bar = current.number;
-        beat = (int) ((ticks - (double) current.tick) / ppq) + 1;
-    }
-    else
-    {
-        const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load());
-        bar = (int) (beats / beatsPerBar) + 1;
-        beat = (int) std::fmod (beats, (double) beatsPerBar) + 1;
-    }
-
-    const auto step = (int) (std::fmod (beats, 1.0) * stepsPerBeat) + 1;
-
-    positionLabel.setText (juce::String::formatted ("%d : %d : %d", bar, beat, step), juce::dontSendNotification);
 
     if (! heldKeys.empty()) // keys released while a detached panel window had the focus
         keyStateChanged (false);
 
-    // hint strip: the control under the mouse (live while it is dragged); MIDI learn has priority
+    // hint bar: a gesture's own posted hint, else the control under the mouse (while it is dragged, the
+    // control that was pressed, at the point it was pressed, so its value updates live); MIDI learn and
+    // recording states first
+    if (! hintsFrozen)
     {
         ui::Hint hint;
+        bool live = false;
 
         if (engine.isLearningMidi())
             hint.text = tr ("Move a knob/fader on the MIDI controller to link it to the parameter...");
         else if (engine.isWaitingForInput() || engine.isCountingIn())
             hint.text = idleHint();
+        else if (auto posted = ui::postedHint())
+        {
+            hint = *posted;
+            live = true;
+        }
         else if (isShowing())
         {
             const auto source = juce::Desktop::getInstance().getMainMouseSource();
 
             if (auto* under = source.getComponentUnderMouse())
-                hint = ui::hintFor (under, under->getLocalPoint (nullptr, source.getScreenPosition()).roundToInt());
+            {
+                live = source.isDragging();
+                const auto at = live ? source.getLastMouseDownPosition() : source.getScreenPosition();
+                hint = ui::hintFor (under, under->getLocalPoint (nullptr, at).roundToInt());
+            }
         }
 
         if (hint.isEmpty())
+        {
             hint.text = idleHint();
+            live = false;
+        }
 
-        hintBar.setHint (hint);
+        hintBar.setHint (hint, live && hint.value.isNotEmpty());
     }
 
     const auto playing = transport.playing.load();
     playButton.setToggleState (playing, juce::dontSendNotification);
-    cpuLabel.setText ("CPU " + juce::String (engine.getDeviceManager().getCpuUsage() * 100.0, 1) + "%",
-                      juce::dontSendNotification);
+
+    // CPU / memory / polyphony, a few times a second
+    if (++meterTicks >= 8 && perfMeter.isVisible() && ! hintsFrozen)
+    {
+        meterTicks = 0;
+        int held = 0;
+        for (const auto& [code, channels] : heldKeys)
+            held += (int) channels.size();
+        const auto notes = playing ? songstats::soundingNotes (engine.getSong(), transport.positionTicks.load()) : 0;
+        perfMeter.setValues (engine.getDeviceManager().getCpuUsage(), toolbar::PerformanceMeter::processMemoryBytes(), notes + held);
+    }
 
     // If a dialog stole focus, give it back so the PC keyboard keeps playing (unless a detached panel has it).
     if (! hasKeyboardFocus (true) && isShowing() && juce::Process::isForegroundProcess()
@@ -1734,6 +1771,8 @@ void MainComponent::timerCallback()
 
 void MainComponent::updateTitle()
 {
+    repaint (titleArea); // the project name in the toolbar
+
     if (auto* window = getTopLevelComponent())
         window->setName ((engine.isModified() ? "* " : "")
                          + (projectName.isNotEmpty() ? "LYNX - " + projectName : juce::String ("LYNX")) + importedSuffix);
@@ -2067,7 +2106,10 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         });
         menu.addSeparator();
         menu.addItem (tr ("Edit keyboard shortcuts (keys.json)..."), [this] { editKeyMap(); });
-        menu.addItem (tr ("Reload keyboard shortcuts"), [this] { loadKeyMap(); });
+        menu.addItem (tr ("Reload keyboard shortcuts"), [this] {
+            loadKeyMap();
+            setControlHints();
+        });
         menu.addSeparator();
 
         juce::PopupMenu languages;
