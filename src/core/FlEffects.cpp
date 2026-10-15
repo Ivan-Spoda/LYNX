@@ -1,4 +1,5 @@
 #include "core/FlEffects.h"
+#include "core/Reeverb2.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
@@ -138,7 +139,7 @@ bool limiter (const std::vector<std::uint8_t>& d, EffectSlot& slot, bool forceCo
 
 // --- Fruity Reeverb 2 (§3) --------------------------------------------------------------------
 
-bool reeverb2 (const std::vector<std::uint8_t>& d, EffectSlot& slot, double bpm)
+bool reeverb2Approx (const std::vector<std::uint8_t>& d, EffectSlot& slot, double bpm)
 {
     const auto version = i32At (d, 0);
     const auto count = version == 10001 ? 15 : version == 10000 ? 13 : 0;
@@ -938,6 +939,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             return v->slot;
     if (pluginName == "Vintage Phaser") // the exact effect (REA_rodada29 §3)
         return vintagePhaserFromFl (state);
+    if (pluginName == "Fruity Reeverb 2") // the exact effect (REA_rodada49); the Freeverb mapping below otherwise
+        if (auto exact = reeverb2FromFl (state))
+            return exact;
     if (pluginName == "Pitcher")
     {
         // "SSLF" + u32 + "1RTP" + 33 f32 (raw parameters 0…32) + 12 B note mask + f32 (REA_rodada19 §6)
@@ -1002,7 +1006,7 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     else if (is ("Fruity Limiter"))
         limiter (state, slot);
     else if (is ("Fruity Reeverb 2"))
-        reeverb2 (state, slot, bpm);
+        reeverb2Approx (state, slot, bpm);
     else if (is ("Fruity Delay 2"))
         delay2 (state, slot);
     else if (is ("Fruity Delay 3"))
@@ -1086,7 +1090,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::parametricEq: return { "Fruity Parametric EQ 2" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
-        case EffectKind::reverb: return { "Fruity Reeverb 2" };
+        case EffectKind::reverb:
+        case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::utility: return { "Fruity Stereo Shaper" };
         default: return {};

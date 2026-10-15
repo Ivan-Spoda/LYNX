@@ -1634,6 +1634,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     else
                         target.kind = AutomationTargetKind::none;
                 }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::reeverb2)
+                {
+                    // the exact Reeverb 2 keeps FL's controls as (raw − min) / range: FL's normalised value as is
+                    if (target.param < 0 || target.param >= 15)
+                        target.kind = AutomationTargetKind::none;
+                }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
                 {
                     if (const auto mapped = effectParamFromFl (found->second.second, target.param))

@@ -2,6 +2,7 @@
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
+#include "core/Reeverb2.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
@@ -2133,6 +2134,18 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's controls as (raw − min) / range (core/Reeverb2.h); defaults = FL's
+    static const EffectInfo reeverb2Info = [] {
+        EffectInfo info { "Reeverb 2", { { "Low cut", 0 }, { "High cut", 0 }, { "Predelay", 0 }, { "Room size", 0 }, { "Diffusion", 0 },
+                                         { "Decay", 0 }, { "High damping", 0 }, { "Bass mult.", 0 }, { "Crossover", 0 }, { "Stereo sep.", 0 },
+                                         { "Dry", 0 }, { "Early ref.", 0 }, { "Wet", 0 }, { "Mod speed", 0 }, { "Mod depth", 0 },
+                                         { "Tempo predelay", 0 }, { "Mid/side input", 0 } } };
+        EffectParams p {};
+        reeverb2::toParams (reeverb2::Settings {}, p);
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+            info.params[i].defaultValue = p[i];
+        return info;
+    }();
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2228,6 +2241,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::reeverb2: return reeverb2Info;
     }
     return eq;
 }
@@ -2443,6 +2457,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * squeezeMax[(std::size_t) std::clamp (param, 0, 11)]));
             return text;
 
+        case EffectKind::reeverb2: return reeverb2ParamText (param, v);
+
         case EffectKind::vintagePhaser:
             switch (param)
             {
@@ -2561,6 +2577,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
