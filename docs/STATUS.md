@@ -65,7 +65,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
-  their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
+  their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
@@ -345,6 +345,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
   (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
   states and synthetic/automation cases.
+- **Fruity Parametric EQ 2 and Fruity Parametric EQ:** FL's exact engines inside LYNX's parametric EQ
+  (`core/ParametricEqFl`, `core/ParametricEqLinear`, REA round 50), so the EQ editor keeps working with FL's own values
+  (width, Steep/Gentle orders, enable mask, HQ options): band design with the gentle/steep stage tables, double-precision
+  DF-I biquads with FL's state clean-up, ×2 polyphase half-band HQ, the Frequency Splitter resampler HQ (zero-stuffing +
+  176-tap FIR, 44-sample latency), the "alternative" magnitude-matched design, linear phase (FFT FIR from the sampled
+  response, cross-fades, 3N/4 latency), main-level glide and silence gate; v1's own laws (one biquad per band). On all
+  1 138 + 9 installation states: the IIR modes and v1 bit-identical on 912 of 1 139 and within −166 dB on all,
+  linear phase within −127 dB (IPP FFT rounding).
 - **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
   51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
   evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),

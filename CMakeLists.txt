@@ -54,6 +54,8 @@ add_library(lynx_core STATIC
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/FruityDynamics.cpp
+    src/core/ParametricEqFl.cpp
+    src/core/ParametricEqLinear.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
