@@ -16,6 +16,7 @@
 #include <xmmintrin.h>
 #define LYNX_CHORUS_MXCSR 1
 #if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
 #include <immintrin.h>
 #endif
 #endif
@@ -67,6 +68,15 @@ inline float flValue (int raw, int lo, int hi) noexcept
     return (float) std::clamp (v, 0.0, 1.0);
 }
 inline int truncI (double v) noexcept { return (int) (long long) v; }
+// float square root as one SSE instruction, rounded in the current mode (a library sqrtf may not be)
+inline float sqrtF (float v) noexcept
+{
+#ifdef LYNX_CHORUS_MXCSR
+    return _mm_cvtss_f32 (_mm_sqrt_ss (_mm_set_ss (v)));
+#else
+    return std::sqrt (v);
+#endif
+}
 } // namespace
 
 // ================================================================================================= Fruity Chorus (§1)
@@ -520,11 +530,11 @@ struct Core
         }
         float* L = line.data();
         for (int l = 0; l < 4; ++l)
-            L[(std::size_t) l * 65536 + w] = ((std::sqrt (1.0f - m[l]) * voiceGain) * inL) + fb[l] * o[(std::size_t) l];
+            L[(std::size_t) l * 65536 + w] = ((sqrtF (1.0f - m[l]) * voiceGain) * inL) + fb[l] * o[(std::size_t) l];
         for (int l = 0; l < 4; ++l)
             o[(std::size_t) l] = tap (L + (std::size_t) l * 65536, dl[l]);
         for (int l = 0; l < 4; ++l)
-            L[(std::size_t) (4 + l) * 65536 + w] = ((std::sqrt (m[l]) * voiceGain) * inR) + o[(std::size_t) (4 + l)] * fb[l];
+            L[(std::size_t) (4 + l) * 65536 + w] = ((sqrtF (m[l]) * voiceGain) * inR) + o[(std::size_t) (4 + l)] * fb[l];
         for (int l = 0; l < 4; ++l)
             o[(std::size_t) (4 + l)] = tap (L + (std::size_t) (4 + l) * 65536, dr[l]);
         ++w;
@@ -628,8 +638,8 @@ struct Engine::Impl
                 }
                 else
                     g = ((x + x) * (x + x)) * 0.5f;
-                wet = std::sqrt (g);
-                dry = std::sqrt (1.0f - g);
+                wet = sqrtF (g);
+                dry = sqrtF (1.0f - g);
                 break;
             }
             default:
@@ -876,7 +886,16 @@ __attribute__ ((target ("fma"))) double fmaHw (double a, double b, double c) noe
 }
 bool hasFma() noexcept
 {
-    static const bool f = __builtin_cpu_supports ("fma");
+    static const bool f = [] {
+        unsigned a = 0, b = 0, c = 0, d = 0;
+        if (! __get_cpuid (1, &a, &b, &c, &d))
+            return false;
+        if ((c & (1u << 12)) == 0 || (c & (1u << 27)) == 0 || (c & (1u << 28)) == 0) // FMA, OSXSAVE, AVX
+            return false;
+        unsigned lo = 0, hi = 0;
+        asm volatile ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+        return (lo & 6u) == 6u; // the OS saves the vector state
+    }();
     return f;
 }
 inline double fmaD (double a, double b, double c) noexcept { return hasFma() ? fmaHw (a, b, c) : std::fma (a, b, c); }
@@ -1234,7 +1253,7 @@ struct Engine::Impl
         const float g = (gainT - gainS) * k + gainS;
         gainS = g;
         gainS2 = (gainT - gainS2) * k + gainS2;
-        const float dry = std::sqrt (dryArg), wet = std::sqrt (m);
+        const float dry = sqrtF (dryArg), wet = sqrtF (m);
         float sL = ((pL * wet) * polarity) + L * dry, sR = ((pR * wet) * polarity) + R * dry;
         if (gate)
         {
