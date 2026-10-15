@@ -176,6 +176,14 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFastDist: return "fruityFastDist";
         case EffectKind::fruityFlangus: return "fruityFlangus";
         case EffectKind::fruityFlanger: return "fruityFlanger";
+        case EffectKind::luxeVerb: return "luxeVerb";
+        case EffectKind::convolver: return "convolver";
+        case EffectKind::equo: return "equo";
+        case EffectKind::flPitchShifter: return "flPitchShifter";
+        case EffectKind::frequencySplitter: return "frequencySplitter";
+        case EffectKind::fruityFastLP: return "fruityFastLP";
+        case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
+        case EffectKind::fruityFilter: return "fruityFilter";
     }
     return "eq";
 }
@@ -322,7 +330,10 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat,
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
                     EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
-                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger })
+                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
+                    EffectKind::equo, EffectKind::flPitchShifter,
+                    EffectKind::frequencySplitter,
+                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter })
         if (id == effectId (k))
             return k;
 

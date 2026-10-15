@@ -69,10 +69,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
-  their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
@@ -345,7 +345,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
-- **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Frequency Splitter:** FL's own engine (`core/FrequencySplitter`, REA round 62) from the saved state, editable as
+  LYNX parameters: IIR crossovers for every slope (6–96 dB/oct, incl. the 18 dB/oct all-pass structure), the 3-band
+  phase compensation, gain smoothing, mutes/solos and the FFT linear-phase mode (3N/4 latency to PDC); mixer slots use
+  the summed output, Patcher buses the bands sent to them. IIR mode bit-identical to the DLL on all 25 IIR
+  installation states (summed output and every band send, 44.1/48 kHz, automation); FFT mode within −113…−155 dB on
+  its 6 states (the engine's single-precision IPP FFT is not replicated).
 - **Maximus and Soundgoodizer:** FL's exact Maximus engine as a mixer effect (`core/MaximusFx`, REA round 40) —
   RMS detector, saturation A/B, state versions 3–15, solo, legacy linear-phase FIR split, x87-precision smoothers;
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
@@ -359,6 +364,19 @@ accordingly. Highlights of what is **confirmed and applied**:
   automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
   (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
   states and synthetic/automation cases.
+- **LuxeVerb:** FL's exact engine (`core/LuxeVerb`, REA round 60) — the shimmer-reverb engine of FL's shared DSP
+  library: envelope follower (→ wet or → decay, sidechain), input filters, gliding predelay and all-pass diffuser,
+  16-line modulated delay network with rotation matrix and per-line damping, freeze/sustain, granular pitch shifters
+  in the feedback path or as two feed-forward voices, limiter, output peak, width and dry/wet, with the library's own
+  float routines and rounding. FL's 49 controls and 4 sync switches stay editable. Bit-identical to the installation's
+  DLLs on all 23 installation states (44.1/48 kHz), on 60 random states over 22.05–192 kHz and with automation of
+  every control; the generic reverb mapping remains only as a fallback for unreadable states.
+- **Fruity Convolver:** FL's impulse-response pipeline and convolution (`core/ConvolverFx`, REA round 60) — the
+  embedded WAV or the installation's impulse file (WAV/WavPack, read at import and kept in the imported project),
+  normalisation, volume envelope, blend (self-convolution), speed (sinc resampling), flat EQ level, trimming, predelay,
+  zero-latency partitioned convolution, FL's dry/wet/separation matrices, gain ramps and silence gate; the 4 controls
+  stay editable. Within −127…−152 dB of the DLL on its 13 decodable installation states at the impulse response's own
+  rate (−95…−117 dB where a 48 kHz file is resampled to 44.1 kHz); states with a shaped EQ curve keep the approximation.
 - **Fruity Parametric EQ 2 and Fruity Parametric EQ:** FL's exact engines inside LYNX's parametric EQ
   (`core/ParametricEqFl`, `core/ParametricEqLinear`, REA round 50), so the EQ editor keeps working with FL's own values
   (width, Steep/Gentle orders, enable mask, HQ options): band design with the gentle/steep stage tables, double-precision
@@ -367,6 +385,18 @@ accordingly. Highlights of what is **confirmed and applied**:
   response, cross-fades, 3N/4 latency), main-level glide and silence gate; v1's own laws (one biquad per band). On all
   1 138 + 9 installation states: the IIR modes and v1 bit-identical on 912 of 1 139 and within −166 dB on all,
   linear phase within −127 dB (IPP FFT rounding).
+- **EQUO:** FL's exact engine (`core/EquoFx`, REA round 61) — 31 third-octave band passes with FL's design, the eight
+  banks plus master bank, band shift / mix / morph laws, per-band volume, pan and add mode with FL's float gain ramps,
+  the doubled top bands, ×2^n half-band oversampling, FL's render-mode quirk (bands designed for 2× the rate), silence
+  gate, output volume and the per-tick motion smoother; knobs and options stay editable. Bit-identical to the DLL on all
+  10 installation states (44.1/48 kHz, render flag) and on synthetic states, other rates, NewTick and knob changes. The
+  send output to another track is not routed.
+- **Pitch Shifter:** FL's exact engines (`core/PitchShifterFl`, REA round 61) — both live in `Shared/ildsp_x64.dll`: the
+  "FFT" mode is a pitch-synchronous overlap-add shifter with an FFT pitch detector (formant shift/correction, absolute
+  pitch modes, latency to PDC), plus the granular shifter, the delay modes and the run-time tanhf/expf. Bit-identical to
+  the DLL on all 15 installation states and 70 random states (rates, blocks, signals, every option) and on automation;
+  FL's 13 knobs stay editable. The granular engine's random sequence is shared by all instances in FL (one global) —
+  LYNX gives each instance its own.
 - **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
   51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
   evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),
@@ -382,6 +412,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   are editable LYNX parameters and take FL's automation. Bit-identical to the three DLLs on every installation state
   (54 PanOMatic, 10 Balance, 19 Blood Overdrive) plus synthetic states, at 22.05/44.1/48/96 kHz, several block sizes,
   four signals and control changes during playback.
+- **Fruity Fast LP, Fruity Free Filter and Fruity Filter:** FL's exact engines as mixer effects
+  (`core/FruityFilters`, REA round 63) from the saved controls, editable/automatable as LYNX parameters. Fast LP: its
+  two-state resonant low-pass in x87 precision with the per-call cutoff glide; Free Filter: the seven RBJ-style types
+  designed at a fixed 44.1 kHz, x87 direct form I, CENTER DC remover; Fruity Filter: the Chamberlin SVF (×2 cascade),
+  per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
+  Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
+  render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -464,6 +501,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the GMS findings (inference).
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
+- Fruity Fast LP / Free Filter / Filter (REA round 63 §7): FL's render-call size for mixer effects is not confirmed
+  (LYNX uses calls of at most 512 frames; the glides and end-of-call guards are per call). Low Lifter and Emphasis keep
+  their approximations (parametric EQ without the harmonics generator; limiter) — not ported yet.
 - Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
   calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
   2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
