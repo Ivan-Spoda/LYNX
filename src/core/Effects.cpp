@@ -5,6 +5,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/GrossBeat.h"
 
 #include "core/Biquad.h"
 
@@ -2133,6 +2134,10 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's eight Gross Beat parameters (core/GrossBeat.h); the slots' envelopes travel in EffectSlot::state
+    static const EffectInfo grossBeatInfo { "Gross Beat", { { "Time slot", 0.0f }, { "Volume slot", 0.0f }, { "Time mix", 1.0f },
+                                                            { "Volume mix", 1.0f }, { "Attack", 0.1765f }, { "Release", 0.5f },
+                                                            { "Tension", 0.5f }, { "Hold", 0.0f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2228,6 +2233,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::grossBeat: return grossBeatInfo;
     }
     return eq;
 }
@@ -2494,6 +2500,22 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
+        case EffectKind::grossBeat:
+        {
+            const auto raw = grossbeat::rawFromParam (param, v);
+            if (param < 2)
+                std::snprintf (text, sizeof (text), "slot %d", raw + 1);
+            else if (param == 2 || param == 3)
+                std::snprintf (text, sizeof (text), "%.0f%%", raw / 2.56);
+            else if (param == 4 || param == 5) // 0…500 ms attack, 0…1000 ms release (REA_rodada14 §2.2)
+                std::snprintf (text, sizeof (text), "%.1f ms", (std::pow (501.0, raw / 10000.0) - 1.0) * (param == 5 ? 2.0 : 1.0));
+            else if (param == 6)
+                std::snprintf (text, sizeof (text), "%.0f%%", raw / 2.56);
+            else
+                return raw != 0 ? "on" : "off";
+            return text;
+        }
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -2529,6 +2551,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::grossBeat)
+        return grossbeat::make (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2561,6 +2585,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

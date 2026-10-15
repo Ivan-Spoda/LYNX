@@ -675,7 +675,7 @@ struct Engine::Impl
     // buffer (ring of stereo frames with 16 guard frames on each side) and the reader
     static constexpr int guard = 16;
     std::vector<float> ring; // 2 * (L + 2 guard)
-    std::uint32_t L = 0, write = 0;
+    std::uint32_t L = 0, write = 0, dirty = 0; // dirty: frames written since the buffer was last cleared
     struct Reader
     {
         std::uint32_t base = 0;
@@ -789,8 +789,12 @@ struct Engine::Impl
         const auto d = (double) ((float) (fs * 240) / 10.0f);
         const auto size = (std::int64_t) roundEven (d * 2.0 + d) + 16;
         L = (std::uint32_t) (size + 32 + 8192);
-        ring.assign ((std::size_t) (L + 2 * guard) * 2, 0.0f);
+        if (ring.size() != (std::size_t) (L + 2 * guard) * 2)
+            ring.assign ((std::size_t) (L + 2 * guard) * 2, 0.0f);
+        else
+            std::fill (ring.begin(), ring.end(), 0.0f);
         write = (std::uint32_t) (size + 16);
+        dirty = 0;
         const auto cap = (std::size_t) maxBlock + 8;
         for (auto* v : { &pos, &frac, &posCopy, &cutoffs, &ccs })
             v->assign (cap, 0.0);
@@ -935,7 +939,7 @@ struct Engine::Impl
             return;
         enabled = true;
         dcS[0] = dcS[1] = dcV[0] = dcV[1] = 0.0L;
-        std::fill (ring.begin(), ring.end(), 0.0f);
+        clearRing();
         delayBuf.fill (0.0f);
         resetPending = true;
         prevPos = 0.0;
@@ -951,7 +955,7 @@ struct Engine::Impl
         if (! enabled)
             return;
         enabled = false;
-        std::fill (ring.begin(), ring.end(), 0.0f);
+        clearRing();
         fadeLeft = 0;
         holdMask &= 1;
         holdTime = intMax;
@@ -985,6 +989,25 @@ struct Engine::Impl
     // ---- buffer --------------------------------------------------------------------------------------------------
     float* frame (std::uint32_t i) noexcept { return ring.data() + 2 * ((std::size_t) i + guard); }
 
+    // the plugin zeroes the whole buffer; only the part written since the last clear can be non-zero
+    void clearRing() noexcept
+    {
+        if (ring.empty())
+            return;
+        if (dirty >= L)
+            std::fill (ring.begin(), ring.end(), 0.0f);
+        else if (dirty > 0)
+        {
+            const auto first = (write + L - dirty) % L;
+            const auto tail = std::min (dirty, L - first);
+            std::fill (frame (first), frame (first) + 2 * (std::size_t) tail, 0.0f);
+            std::fill (frame (0), frame (0) + 2 * (std::size_t) (dirty - tail), 0.0f);
+            std::fill (ring.begin(), ring.begin() + 2 * guard, 0.0f);
+            std::fill (ring.end() - 2 * guard, ring.end(), 0.0f);
+        }
+        dirty = 0;
+    }
+
     void writeRing (const float* l, const float* r, int n) noexcept
     {
         for (int i = 0; i < n; ++i)
@@ -994,6 +1017,7 @@ struct Engine::Impl
             if (++write >= L)
                 write = 0;
         }
+        dirty = std::min (L, dirty + (std::uint32_t) n);
         // guard frames: the first frames repeated after the end, the last ones before the start
         std::memcpy (frame (L), frame (0), sizeof (float) * 2 * guard);
         std::memcpy (ring.data(), frame (L - guard), sizeof (float) * 2 * guard);

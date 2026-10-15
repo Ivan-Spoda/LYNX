@@ -38,6 +38,7 @@
 #include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/GrossBeat.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -533,6 +534,125 @@ TEST (pitch_shift_moves_frequency_keeps_length)
     CHECK (std::abs (crossingsAfter (0.5f) - 220.0) < 8.0);           // 0 st
     CHECK (std::abs (crossingsAfter (0.5f + 12.0f / 48.0f) - 440.0) < 25.0); // +12 st
     CHECK (std::abs (crossingsAfter (0.5f - 12.0f / 48.0f) - 110.0) < 12.0); // −12 st
+}
+
+// A Gross Beat state in FL's layout (REA_rodada53 §1), built here: version 8, parameters, options, 72 slots with a name,
+// sync bytes and a map envelope (kind 3, version 3, points: Δx in beats, level, tension, curve type)
+namespace
+{
+struct GbPoint
+{
+    double dx, y;
+    std::uint8_t type;
+};
+std::vector<std::uint8_t> grossBeatState (const std::array<int, 9>& params, const std::array<std::uint8_t, 9>& options,
+                                          const std::map<int, std::vector<GbPoint>>& slots)
+{
+    std::vector<std::uint8_t> b;
+    auto put = [&b] (const void* p, std::size_t n) { b.insert (b.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    auto i32 = [&put] (std::int32_t v) { put (&v, 4); };
+    i32 (0x00080003);
+    for (auto v : params)
+        i32 (v);
+    put (options.data(), options.size());
+    for (int k = 0; k < 72; ++k)
+    {
+        b.push_back (0); // empty name
+        i32 (0), i32 (5), i32 (0); // trigger sync off, position sync 4 beats, no hold
+        b.push_back (0), b.push_back (0), b.push_back (0);
+        const auto it = slots.find (k);
+        const std::vector<GbPoint> flat { { 0.0, 1.0, 0 }, { 4.0, 1.0, 0 } };
+        const auto& pts = it != slots.end() ? it->second : flat;
+        i32 (3), i32 (3), i32 ((std::int32_t) pts.size());
+        for (const auto& p : pts)
+        {
+            put (&p.dx, 8), put (&p.y, 8);
+            const float tension = 0.0f;
+            put (&tension, 4);
+            b.push_back (p.type), b.push_back (0), b.push_back (0), b.push_back (2);
+        }
+        i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
+    }
+    return b;
+}
+
+std::vector<float> renderGrossBeat (const lynx::EffectSlot& slot, const std::vector<float>& in, double rate, double bpm)
+{
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (rate);
+    auto l = in, r = in;
+    const auto tps = bpm / 60.0 * lynx::ppq / rate;
+    for (std::size_t done = 0; done < l.size(); done += 512)
+    {
+        const auto n = (int) std::min<std::size_t> (512, l.size() - done);
+        fx->setSongPosition ((double) done * tps);
+        fx->process (l.data() + done, r.data() + done, n, slot.params, bpm);
+    }
+    return l;
+}
+} // namespace
+
+TEST (gross_beat_state_container_and_parameters)
+{
+    const auto state = grossBeatState ({ 3, 40, 128, 256, 1765, 5000, -77, 0, 0x10000 }, { 0, 0, 0, 0, 0, 0, 0, 1, 1 }, {});
+    const auto parsed = lynx::grossbeat::parseState (state.data(), state.size());
+    CHECK (parsed.has_value());
+    CHECK (parsed && parsed->version == 8 && parsed->params[6] == -77 && parsed->slots[0].flat && parsed->slots[71].flat);
+    const auto slot = lynx::grossbeat::slotFromFl (state, 960);
+    CHECK (slot && slot->kind == lynx::EffectKind::grossBeat);
+    std::vector<std::uint8_t> fl;
+    int ppq = 0;
+    CHECK (slot && lynx::grossbeat::unpack (slot->state, fl, ppq) && fl == state && ppq == 960);
+    // every raw FL value survives the 0..1 parameter
+    const int lo[8] { 0, 0, 0, 0, 0, 0, -256, 0 }, hi[8] { 35, 35, 256, 256, 10000, 10000, 256, 1 };
+    bool roundTrip = true;
+    for (int i = 0; i < 8; ++i)
+        for (int raw = lo[i]; raw <= hi[i]; ++raw)
+            roundTrip = roundTrip && lynx::grossbeat::rawFromParam (i, lynx::grossbeat::paramFromRaw (i, raw)) == raw;
+    CHECK (roundTrip);
+    CHECK (slot && slot->params[1] == lynx::grossbeat::paramFromRaw (1, 35)); // the volume slot 40 is clamped to 35
+    CHECK (! lynx::grossbeat::parseState (state.data(), 100).has_value());
+}
+
+TEST (gross_beat_volume_slot_gates_the_bar)
+{
+    // volume slot 1: open for two beats, closed for two (hold segments); no smoothing; dry path 15 samples late
+    const std::vector<GbPoint> gate { { 0.0, 1.0, 0 }, { 2.0, 1.0, 2 }, { 0.0, 0.0, 0 }, { 2.0, 0.0, 2 } };
+    const auto state = grossBeatState ({ 0, 1, 256, 256, 0, 0, 0, 0, 0x10000 }, { 0, 0, 0, 0, 0, 0, 0, 1, 1 }, { { 37, gate } });
+    const auto slot = lynx::grossbeat::slotFromFl (state);
+    CHECK (slot.has_value());
+    if (! slot)
+        return;
+    const auto out = renderGrossBeat (*slot, std::vector<float> (200000, 1.0f), 48000.0, 120.0); // a beat = 24000 samples
+    CHECK (out[14] == 0.0f && out[15] == 1.0f);
+    CHECK (out[30000] == 1.0f && out[47990] == 1.0f);
+    CHECK (out[48010] == 0.0f && out[95990] == 0.0f);
+    CHECK (out[96010] == 1.0f && out[150000] == 0.0f);
+}
+
+TEST (gross_beat_time_slot_reads_the_past_bar)
+{
+    // time slot 1 at level 0.5: the buffer is read one bar back (two bars = level 0), plus the 15-sample latency
+    const std::vector<GbPoint> half { { 0.0, 0.5, 0 }, { 4.0, 0.5, 2 } };
+    const auto state = grossBeatState ({ 1, 0, 256, 256, 0, 0, 0, 0, 0x10000 }, { 0, 0, 0, 0, 0, 0, 0, 1, 1 }, { { 1, half } });
+    const auto slot = lynx::grossbeat::slotFromFl (state);
+    CHECK (slot.has_value());
+    if (! slot)
+        return;
+    std::vector<float> in (150000, 0.0f);
+    in[1000] = 1.0f;
+    const auto out = renderGrossBeat (*slot, in, 48000.0, 120.0); // a bar = 96000 samples
+    std::size_t peak = 0;
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (std::abs (out[i]) > std::abs (out[peak]))
+            peak = i;
+    CHECK (peak == 1000 + 96000 + 15);
+    CHECK (std::abs (out[peak] - 1.0f) < 1e-6f);
+    float elsewhere = 0.0f;
+    for (std::size_t i = 0; i < out.size(); ++i)
+        if (i + 20 < peak || i > peak + 20)
+            elsewhere = std::max (elsewhere, std::abs (out[i]));
+    CHECK (elsewhere == 0.0f);
 }
 
 TEST (volume_gate_follows_bar_position)
@@ -1329,10 +1449,11 @@ TEST (flp_real_files)
                         for (const auto& slot : insert.slots)
                             if (slot.plugin == "Gross Beat")
                             {
+                                // FL's own engine (REA_rodada53): every demo state is read
                                 const auto fx = lynx::effectFromFl (slot.plugin, slot.state);
-                                CHECK (fx && fx->kind == lynx::EffectKind::volumeGate);
+                                CHECK (fx && fx->kind == lynx::EffectKind::grossBeat);
                                 ++gates;
-                                if (fx && std::any_of (fx->params.begin(), fx->params.begin() + 32, [] (float v) { return v < 0.99f; }))
+                                if (fx && fx->kind == lynx::EffectKind::grossBeat && lynx::grossbeat::slotNames (fx->state, true).size() == 36)
                                     ++shaped;
                             }
                             else if (slot.plugin == "Fruity Love Philter")
@@ -1400,7 +1521,8 @@ TEST (flp_real_files)
                 }
                 catch (const flp::Error&) {}
             }
-        std::printf ("  Gross Beat: %d slots, %d with gate; Effector: %d converted; Love Philter: %d, %d read\n", gates, shaped, effectors,
+        CHECK (gates >= 30 && shaped == gates);
+        std::printf ("  Gross Beat: %d slots, %d read exactly; Effector: %d converted; Love Philter: %d, %d read\n", gates, shaped, effectors,
                      lovePhilters, lovePhiltersRead);
         CHECK (lovePhiltersRead == lovePhilters && lovePhiltersConverted == lovePhilters);
         std::printf ("  Vocodex: %d converted, %d with side inputs\n", vocodexes, vocodexSides);
