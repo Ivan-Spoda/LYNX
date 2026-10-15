@@ -8712,7 +8712,15 @@ TEST (equo_exact)
         std::vector<float> l (inL), r (inR);
         fx->process (l.data(), r.data(), 700, slot->params, 0.0);
         fx->process (l.data() + 700, r.data() + 700, 3396, slot->params, 0.0);
-        CHECK (l[1000] == -0.908149242f && r[3000] == -0.0602950938f);
+        // the engine glides its bands per processing call, as FL does per host buffer: compare with the engine run on
+        // the same 700 + 3396 split (sample 1000 differs from the single-call golden), and with the golden once settled
+        lynx::equofx::Engine ref;
+        ref.prepare (44100.0, false);
+        ref.set (*lynx::equofx::parse (plain));
+        std::vector<float> rl (inL), rr (inR);
+        ref.process (rl.data(), rr.data(), 700);
+        ref.process (rl.data() + 700, rr.data() + 700, 3396);
+        CHECK (l == rl && rr == r && r[3000] == -0.0602950938f);
         CHECK (lynx::formatEffectParam (lynx::EffectKind::equo, 4, slot->params[4], 120.0, slot->params).find ("dB") != std::string::npos);
     }
     CHECK (! lynx::equofx::parse (std::vector<std::uint8_t> (100, 0)).has_value());
