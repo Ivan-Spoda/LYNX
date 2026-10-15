@@ -11,6 +11,8 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/PoiZone.h"
+#include "core/BassDrum.h"
+#include "core/FruitKick.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -212,6 +214,8 @@ private:
             case InstrumentKind::dx10:
             case InstrumentKind::kepler:
             case InstrumentKind::poizone:
+            case InstrumentKind::fruitkick:
+            case InstrumentKind::bassdrum:
                 break;
         }
 
@@ -2028,6 +2032,10 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeKeplerInstrument();
     if (kind == InstrumentKind::poizone)
         return makePoiZoneInstrument();
+    if (kind == InstrumentKind::fruitkick)
+        return makeFruitKickInstrument();
+    if (kind == InstrumentKind::bassdrum)
+        return makeBassDrumInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

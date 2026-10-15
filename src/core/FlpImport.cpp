@@ -3,6 +3,8 @@
 #include "core/Gms.h"
 #include "core/Harmless.h"
 #include "core/Morphine.h"
+#include "core/BassDrum.h"
+#include "core/FruitKick.h"
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/Ogun.h"
@@ -499,6 +501,20 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             if (synthFromMiniSynth (project.channels.front().pluginState, song.bpm, synth))
                 return synth;
         }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::fruitkick)
+        {
+            // ... and of Fruit Kick / BassDrum patches (their sine + pitch-sweep conversions)
+            SynthSettings synth;
+            if (synthFromFruitKick (project.channels.front().pluginState, synth))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::bassdrum)
+        {
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromBassDrum (project.channels.front().pluginState, synth, gain))
+                return synth;
+        }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
             return std::nullopt;
 
@@ -916,8 +932,32 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
                     adopt();
             }
-            else if (name == "fruit kick" && synthFromFruitKick (c.pluginState, fromPlugin))
-                adopt();
+            else if (name == "fruit kick")
+            {
+                // FL's Fruit Kick engine with its voice framework (REA_rodada43 §1). A version-0 state has no envelope
+                // snapshot of its own: FL hands the plugin the channel's envelope/filter records, so they are appended
+                // to it. The sine + pitch-envelope conversion stays as the fallback for unreadable states.
+                if (fruitKickStateUsable (c.pluginState))
+                {
+                    // the same 364-byte channel snapshot as DX10's (REA_rodada42 §3): five 68-byte records + Mod X/Y + type
+                    const auto snap = dx10Snapshot (c);
+                    std::vector<std::vector<std::uint8_t>> records;
+                    for (int k = 0; k < 5; ++k)
+                        records.emplace_back (snap.begin() + 68 * k, snap.begin() + 68 * (k + 1));
+                    std::int32_t cut = 256, res = 0, type = 0;
+                    std::memcpy (&cut, snap.data() + 0x15c, 4);
+                    std::memcpy (&res, snap.data() + 0x160, 4);
+                    std::memcpy (&type, snap.data() + 0x168, 4);
+                    def.instrument = InstrumentKind::fruitkick;
+                    def.pluginState = fruitKickWithChannelEnvelope (c.pluginState, records, cut, res, type);
+                    adoptedFromPlugin = true;
+                    if (options.report != nullptr)
+                        for (const auto& f : fruitKickFallbacks (def.pluginState))
+                            ++options.report->droppedEffects["Fruit Kick: " + f];
+                }
+                else if (synthFromFruitKick (c.pluginState, fromPlugin))
+                    adopt();
+            }
             else if (name == "minisynth")
             {
                 // FL's MiniSynth engine from the raw state (REA_rodada41) with its wave tables built at run time from the
@@ -1086,8 +1126,26 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromPoiZone (c.pluginState, fromPlugin, pluginGain))
                     adopt();
             }
-            else if (name == "bassdrum" && synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "bassdrum")
+            {
+                // FL's BassDrum engine (REA_rodada43 §2) reading its oscillator table and noise sample at run time from
+                // the user's BassDrum folder; the sine + sweep conversion stays as the fallback (state unreadable or
+                // folder not found)
+                const auto folder = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\BassDrum", options.roots);
+                const auto tableFound = ! folder.empty() && options.fileExists && options.fileExists (folder + "\\sounddata");
+                if (bassDrumStateUsable (c.pluginState) && tableFound)
+                {
+                    def.instrument = InstrumentKind::bassdrum;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = folder;
+                    adoptedFromPlugin = true;
+                    if (const auto noise = bassDrumNoiseName (c.pluginState); ! noise.empty() && options.report != nullptr
+                        && ! options.fileExists (folder + "\\Noise Samples\\" + noise))
+                        ++options.report->droppedEffects["BassDrum noise sample (not found)"];
+                }
+                else if (synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "morphine")
@@ -1211,9 +1269,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::morphine
                      || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth
                      || def.instrument == InstrumentKind::dx10
-                     || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone)
+                     || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
+                     || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
-            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
+            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
