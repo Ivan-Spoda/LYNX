@@ -72,7 +72,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
@@ -380,6 +380,18 @@ accordingly. Highlights of what is **confirmed and applied**:
   response, cross-fades, 3N/4 latency), main-level glide and silence gate; v1's own laws (one biquad per band). On all
   1 138 + 9 installation states: the IIR modes and v1 bit-identical on 912 of 1 139 and within −166 dB on all,
   linear phase within −127 dB (IPP FFT rounding).
+- **EQUO:** FL's exact engine (`core/EquoFx`, REA round 61) — 31 third-octave band passes with FL's design, the eight
+  banks plus master bank, band shift / mix / morph laws, per-band volume, pan and add mode with FL's float gain ramps,
+  the doubled top bands, ×2^n half-band oversampling, FL's render-mode quirk (bands designed for 2× the rate), silence
+  gate, output volume and the per-tick motion smoother; knobs and options stay editable. Bit-identical to the DLL on all
+  10 installation states (44.1/48 kHz, render flag) and on synthetic states, other rates, NewTick and knob changes. The
+  send output to another track is not routed.
+- **Pitch Shifter:** FL's exact engines (`core/PitchShifterFl`, REA round 61) — both live in `Shared/ildsp_x64.dll`: the
+  "FFT" mode is a pitch-synchronous overlap-add shifter with an FFT pitch detector (formant shift/correction, absolute
+  pitch modes, latency to PDC), plus the granular shifter, the delay modes and the run-time tanhf/expf. Bit-identical to
+  the DLL on all 15 installation states and 70 random states (rates, blocks, signals, every option) and on automation;
+  FL's 13 knobs stay editable. The granular engine's random sequence is shared by all instances in FL (one global) —
+  LYNX gives each instance its own.
 - **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
   51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
   evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),

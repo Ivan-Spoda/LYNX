@@ -63,6 +63,8 @@ add_library(lynx_core STATIC
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
+    src/core/EquoFx.cpp
+    src/core/PitchShifterFl.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
