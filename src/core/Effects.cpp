@@ -8,6 +8,7 @@
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/FruityDelay.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 
@@ -2176,6 +2177,21 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         { "Room size", 26000.0f / 65536 }, { "Diffusion", 1.0f }, { "Color", 0.5f },
                                                         { "Decay", 4700.0f / 65536 }, { "High damping", 10800.0f / 65536 }, { "Dry", 1.0f },
                                                         { "Wet", 13120.0f / 65536 } } };
+    // FL's raw controls normalised over their ranges (core/FruityDelay.h); defaults = FL's "Default" presets
+    static const EffectInfo fruityDelay2Info = [] {
+        EffectInfo info { "Fruity Delay 2", {} };
+        for (int i = 0; i < fldelay::delay2Controls; ++i)
+            info.params.push_back ({ fldelay::delay2ParamName (i), (float) (fldelay::delay2Default[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay2Max[(std::size_t) i] - fldelay::delay2Min[(std::size_t) i]) });
+        return info;
+    }();
+    static const EffectInfo fruityDelay3Info = [] {
+        EffectInfo info { "Fruity Delay 3", {} };
+        for (int i = 0; i < fldelay::delay3Controls; ++i)
+            info.params.push_back ({ fldelay::delay3ParamName (i), (float) (fldelay::delay3Default[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i])
+                                                                      / (float) (fldelay::delay3Max[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i]) });
+        return info;
+    }();
     // FL's state travels in EffectSlot::state; the four global controls are the editable parameters (raw / 128)
     static const EffectInfo fruityDelayBankInfo { "Fruity Delay Bank", { { "Dry", 1.0f }, { "Output", 1.0f }, { "Input", 1.0f }, { "Feedback", 1.0f } } };
     // FL's raw controls normalised over their ranges (core/FruityMultiband.h); defaults = a new FL instance
@@ -2286,6 +2302,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruitySoftClipper: return softClipperInfo;
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
+        case EffectKind::fruityDelay2: return fruityDelay2Info;
+        case EffectKind::fruityDelay3: return fruityDelay3Info;
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
         case EffectKind::fruityMultiband: return fruityMultibandInfo;
     }
@@ -2573,6 +2591,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::fruityMultiband:
             return flmb::paramText (param, v);
 
+        case EffectKind::fruityDelay2:
+            return fldelay::delay2ParamText (param, v);
+
+        case EffectKind::fruityDelay3:
+            return fldelay::delay3ParamText (param, v, bpm);
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -2652,6 +2676,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
+        case EffectKind::fruityDelay2: return fldelay::makeDelay2();
+        case EffectKind::fruityDelay3: return fldelay::makeDelay3();
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();

@@ -55,6 +55,7 @@ add_library(lynx_core STATIC
     src/core/MaximusFx.cpp
     src/core/FruityDynamics.cpp
     src/core/FruityShapers.cpp
+    src/core/FruityDelay.cpp
     src/core/FruityDelayBank.cpp
     src/core/FruityMultiband.cpp
     src/core/FlPatcher.cpp

@@ -1403,7 +1403,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if (plugin == "Soundgoodizer")
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
-                 || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor))
+                 || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor)
+                 || (plugin == "Fruity Delay 2" && fx.kind != EffectKind::fruityDelay2)
+                 || (plugin == "Fruity Delay 3" && fx.kind != EffectKind::fruityDelay3))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
