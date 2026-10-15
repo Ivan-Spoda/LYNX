@@ -52,7 +52,8 @@ enum class InstrumentKind : std::uint8_t
     poizone,    // FL's PoiZone engine (REA_rodada44): the plugin's raw saved state in ChannelDef::pluginState
     fruitkick,  // FL's Fruit Kick (REA_rodada43 §1): raw saved state (with its envelope snapshot) in pluginState
     bassdrum,   // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
-    toxic       // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
+    toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
+    threeosc    // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
