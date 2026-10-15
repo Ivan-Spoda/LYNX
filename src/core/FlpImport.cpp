@@ -1404,8 +1404,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
                  || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
-        else if (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
-            ++options.report->droppedEffects["Fruity Delay Bank (state not readable: approximated)"];
+        else if ((plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
+                 || (plugin == "Fruity Multiband Compressor" && fx.kind != EffectKind::fruityMultiband))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)

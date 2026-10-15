@@ -47,4 +47,7 @@ const char* paramName (int index) noexcept;
 std::string paramText (int index, float value);
 
 std::unique_ptr<Effect> make();
+// The same, with FL's raw state kept in the slot (EffectSlot::state): parameters still at their imported value keep
+// FL's exact integer controls even after the project file has rounded them to 4 decimals
+std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& flState);
 } // namespace lynx::flmb

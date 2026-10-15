@@ -21,6 +21,7 @@
 #include "core/Effects.h"
 #include "core/Effector.h"
 #include "core/FruityDelayBank.h"
+#include "core/FruityMultiband.h"
 #include "core/Denormals.h"
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
@@ -7550,6 +7551,99 @@ TEST (fruity_delay_bank_engine)
     std::vector<float> l (1024, 0.5f), r (1024, -0.25f);
     fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
     CHECK (std::isfinite (l[1023]) && std::isfinite (r[1023]));
+}
+
+TEST (fruity_multiband_engine)
+{
+    // REA_rodada56: Fruity Multiband Compressor, states of our own against the installation's DLL
+    // (goldens = the DLL's output for the same input, EXEC; blocks of 512 at 44.1 kHz; all three bit-identical)
+    std::vector<float> inL (4096), inR (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0)
+                                        + 0.5 * std::sin (2.0 * 3.141592653589793 * 90.0 * i / 44100.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0)
+                                        + 0.4 * std::sin (2.0 * 3.141592653589793 * 7000.0 * i / 44100.0));
+    }
+    auto multiband = [] (std::array<int, 28> c) {
+        std::vector<std::uint8_t> b;
+        auto put = [&b] (std::int32_t v) {
+            std::uint8_t q[4];
+            std::memcpy (q, &v, 4);
+            b.insert (b.end(), q, q + 4);
+        };
+        put (0);
+        for (auto v : c)
+            put (v);
+        put (0);  // UI words of the state (not used by the engine)
+        put (50);
+        return b;
+    };
+    struct Out { std::vector<float> l, r; int latency = 0; };
+    auto run = [&] (const std::vector<std::uint8_t>& st) {
+        const auto s = lynx::flmb::parse (st);
+        CHECK (s.has_value());
+        lynx::EffectParams p {};
+        lynx::flmb::toParams (*s, p.data());
+        auto fx = lynx::flmb::make();
+        fx->prepare (44100.0);
+        Out o { inL, inR };
+        for (int s0 = 0; s0 < 4096; s0 += 512)
+            fx->process (o.l.data() + s0, o.r.data() + s0, 512, p, 120.0);
+        o.latency = fx->latencySamples();
+        return o;
+    };
+    auto check = [] (const Out& out, const std::vector<std::tuple<int, float, float>>& golden) {
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (out.l[(std::size_t) i] - gl) < 2e-6f && std::abs (out.r[(std::size_t) i] - gr) < 2e-6f);
+    };
+    // IIR crossovers, limiter on, high band compressing, mid bypassed, low compressing, +2 dB output
+    const auto oa = run (multiband ({ 42598, 1, 0, 0, 15604, 25782, 53524, 32768, 11, 298, 51118, 2, 14994, 5037, 24736, 55755, 26870, 221, 1090, 49807, 0, 5037, 21845, 47074, 32768, 550, 1090, 40632 }));
+    CHECK (oa.latency == 0);
+    check (oa,
+           { { 100, 0.3061366081237793f, 0.14554384350776672f }, { 1000, 0.4117552638053894f, 0.3191826045513153f }, { 2047, -0.46868836879730225f, -0.5676097869873047f }, { 3000, 0.24988797307014465f, -0.42287692427635193f }, { 4095, -0.022194014862179756f, 0.8433372378349304f } });
+    // linear phase (FIR, 52 frames of latency), overlapping mid transitions, low band off, limiter off
+    const auto ob = run (multiband ({ 32768, 0, 1, 0, 12000, 21845, 40000, 50000, 300, 5000, 30000, 0, 4000, 3600, 30000, 45875, 60000, 50, 500, 52429, 1, 6500, 21845, 45875, 32768, 100, 1000, 52429 }));
+    CHECK (ob.latency == 52);
+    check (ob,
+           { { 100, 0.0176423080265522f, -0.22197140753269196f }, { 1000, -0.002046747598797083f, 0.021436547860503197f }, { 2047, -0.010928931646049023f, -0.08079832047224045f }, { 3000, 0.027733327820897102f, -0.026119394227862358f }, { 4095, 0.07469408959150314f, -0.08492052555084229f } });
+    // linear phase, hard compression everywhere, limiter on, mid crossovers crossed (the FIR mid band is silent)
+    const auto oc = run (multiband ({ 50000, 1, 1, 0, 17000, 30000, 30000, 65536, 1, 100, 0, 0, 3000, 9000, 30000, 20000, 65536, 1, 100, 65536, 0, 6500, 30000, 25000, 65536, 1, 100, 10000 }));
+    CHECK (oc.latency == 52);
+    check (oc,
+           { { 100, 0.028349297121167183f, -0.02347063086926937f }, { 1000, -0.00018560001626610756f, 0.0079029630869627f }, { 2047, -0.00953709613531828f, -0.00774149876087904f }, { 3000, 0.019576910883188248f, 0.006520440336316824f }, { 4095, 0.03874344751238823f, -0.000356332486262545f } });
+
+    // the slot's parameters carry FL's raw controls exactly; after the project file's 4-decimal rounding the
+    // effect built with FL's state still uses the exact controls
+    const auto st = multiband ({ 42598, 1, 1, 0, 15604, 25782, 53524, 32768, 11, 298, 51118, 0, 14994, 5037, 24736, 55755, 26870, 221,
+                                 1090, 49807, 0, 5037, 21845, 47074, 32768, 550, 1090, 40632 });
+    const auto parsed = lynx::flmb::parse (st);
+    CHECK (parsed && parsed->c[4] == 15604);
+    lynx::EffectParams p {};
+    lynx::flmb::toParams (*parsed, p.data());
+    for (int i = 0; i < lynx::flmb::controls; ++i)
+        CHECK (lynx::flmb::raw (p[(std::size_t) i], lynx::flmb::controlMin[(std::size_t) i], lynx::flmb::controlMax[(std::size_t) i]) == parsed->c[(std::size_t) i]);
+    lynx::EffectParams rounded = p;
+    for (auto& v : rounded)
+        v = std::round (v * 10000.0f) / 10000.0f;
+    std::vector<float> l1 (inL), r1 (inR), l2 (inL), r2 (inR);
+    auto exact = lynx::flmb::make();
+    auto fromState = lynx::flmb::make (st);
+    exact->prepare (44100.0);
+    fromState->prepare (44100.0);
+    for (int s0 = 0; s0 < 4096; s0 += 512)
+    {
+        exact->process (l1.data() + s0, r1.data() + s0, 512, p, 120.0);
+        fromState->process (l2.data() + s0, r2.data() + s0, 512, rounded, 120.0);
+    }
+    CHECK (l1 == l2 && r1 == r2);
+    CHECK (lynx::flmb::paramText (4, p[4]) == "6302 Hz");
+    CHECK (lynx::flmb::paramText (3, 0.5f) == "off");
+    // the FL import builds the exact effect with FL's state kept
+    const auto slot = lynx::effectFromFl ("Fruity Multiband Compressor", st);
+    CHECK (slot && slot->kind == lynx::EffectKind::fruityMultiband && slot->state == st && slot->params[4] == p[4]);
+    // unknown versions are rejected
+    CHECK (! lynx::flmb::parse ({ 1, 0, 0, 0 }));
 }
 
 TEST (fruity_dynamics_engines)

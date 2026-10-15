@@ -11,9 +11,10 @@
 // throughout, one operation at a time; matching FL sample for sample needs the same operation order (no contraction
 // into fused multiply-adds), FL's float sine/cosine (its runtime library's FMA path, reproduced below) and FL's
 // float power function (see powF).
-#pragma GCC optimize ("fp-contract=off")
 #if defined(__clang__)
  #pragma STDC FP_CONTRACT OFF
+#else
+ #pragma GCC optimize ("fp-contract=off")
 #endif
 
 namespace lynx::flmb
@@ -906,6 +907,8 @@ private:
 class MultibandEffect final : public Effect
 {
 public:
+    explicit MultibandEffect (std::optional<State> fl) : imported (std::move (fl)) {}
+
     void prepare (double r) noexcept override
     {
         sampleRate = std::max (1, (int) std::lround (r));
@@ -921,7 +924,7 @@ public:
             return;
         std::array<int, controls> c {};
         for (int i = 0; i < controls; ++i)
-            c[(std::size_t) i] = raw (p[(std::size_t) i], controlMin[(std::size_t) i], controlMax[(std::size_t) i]);
+            c[(std::size_t) i] = control (i, p[(std::size_t) i]);
         if (! configured)
         {
             engine.setup (c, sampleRate);
@@ -936,7 +939,21 @@ public:
     int latencySamples() const noexcept override { return configured && engine.linearPhase() ? linearPhaseLatency : 0; }
 
 private:
+    // a parameter still at its imported value (within the project file's 4-decimal rounding) keeps FL's exact control
+    int control (int i, float v) const noexcept
+    {
+        const auto mn = controlMin[(std::size_t) i], mx = controlMax[(std::size_t) i];
+        if (imported)
+        {
+            const auto fl = imported->c[(std::size_t) i];
+            if (std::fabs (normalised (fl, mn, mx) - v) <= 0.00006f)
+                return fl;
+        }
+        return raw (v, mn, mx);
+    }
+
     Engine engine;
+    std::optional<State> imported;
     int sampleRate = 44100;
     bool prepared = false, configured = false;
 };
@@ -1021,5 +1038,6 @@ std::string paramText (int i, float value)
     return t;
 }
 
-std::unique_ptr<Effect> make() { return std::make_unique<MultibandEffect>(); }
+std::unique_ptr<Effect> make() { return std::make_unique<MultibandEffect> (std::nullopt); }
+std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& flState) { return std::make_unique<MultibandEffect> (parse (flState)); }
 } // namespace lynx::flmb

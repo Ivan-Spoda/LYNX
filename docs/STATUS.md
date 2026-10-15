@@ -66,7 +66,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2,
-  Delay 2/3, Delay Bank, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
@@ -304,6 +304,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   the stepped raised-cosine gain pattern, solo, FL's gain ramps, and the optional 2× half-band oversampling.
   Bit-identical to the DLL on all 52 unique installation states at two tempos/rates/block sizes, on control and
   tempo changes during playback, and on 72 random states.
+- **Fruity Multiband Compressor:** FL's exact engine (its `comp_eng_x64.dll`) as a mixer effect (`core/FruityMultiband`,
+  REA round 56), editable with FL's 28 controls: three bands split from the input on their own by 4th-order IIR
+  crossovers or, in linear-phase mode, 105-tap Kaiser-windowed FIR filters (52 frames of latency reported to PDC), a
+  peak compressor with knee and release curve and a gain per band (compress / off / bypass), output gain and the soft
+  output limiter, the engine's silence rule, and its runtime's `sinf`/`cosf`/`powf` results. Bit-identical to the DLL
+  on all 55 unique installation states (two rates/block sizes, silence gaps), 60 random states and control changes.
 - **Pitcher:** FL's DSP (REA round 30, bit-exact against the reference model): integer-lag AMDF detector,
   nearest-allowed-note correction with FL's laws (speed, Fine, A reference, the note mask stored in the state, Key
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender

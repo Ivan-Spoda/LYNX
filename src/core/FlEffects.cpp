@@ -4,6 +4,7 @@
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityDelayBank.h"
+#include "core/FruityMultiband.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -962,12 +963,28 @@ std::optional<EffectSlot> fruityDelayBankExact (const std::vector<std::uint8_t>&
     return slot;
 }
 
+std::optional<EffectSlot> fruityMultibandExact (const std::vector<std::uint8_t>& state)
+{
+    // FL's own Multiband Compressor engine (REA_rodada56); the single-band approximation remains for unreadable states.
+    // The slot keeps FL's state too, so that the exact integer controls survive the project file's rounding.
+    const auto s = flmb::parse (state);
+    if (! s)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::fruityMultiband);
+    flmb::toParams (*s, slot.params.data());
+    slot.state = state;
+    return slot;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
     if (pluginName == "Fruity Delay Bank")
         if (auto exact = fruityDelayBankExact (state))
+            return exact;
+    if (pluginName == "Fruity Multiband Compressor")
+        if (auto exact = fruityMultibandExact (state))
             return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
@@ -1134,6 +1151,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::reverb: return { "Fruity Reeverb 2" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
+        case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
         case EffectKind::utility: return { "Fruity Stereo Shaper" };
         default: return {};
     }
@@ -1149,6 +1167,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Delay Bank: its four global controls (0…128) are the slot's parameters
     if (is ("Fruity Delay Bank") && k >= 0 && k < fldbank::globalControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    if (is ("Fruity Multiband Compressor") && k >= 0 && k < flmb::controls) // FL's controls as they are (value over range)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
