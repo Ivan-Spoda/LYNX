@@ -432,6 +432,57 @@ struct Curve
         }
     }
 
+    // curve mode 10 ("smooth"): slopes from the neighbouring points (the same envelope library as Fruity
+    // WaveShaper's maps, REA_rodada51 §2.4)
+    void prepareSmooth (int i) noexcept
+    {
+        constexpr double kEps = 5.960464477539063e-08;
+        auto& p = pts[(std::size_t) i];
+        const int n = (int) pts.size();
+        const double h = (double) p.dt > kEps ? (double) p.dt : kEps;
+        const double y1 = p.y;
+        const int j = i - 1;
+        const double y0 = j >= 0 ? (double) pts[(std::size_t) j].y : y1;
+        double rp = 1.0, ypp = y0;
+        if (j >= 0 && pts[(std::size_t) j].mode == 10)
+        {
+            rp = (double) pts[(std::size_t) j].dt / h;
+            if (i - 2 >= 0)
+                ypp = pts[(std::size_t) (i - 2)].y;
+        }
+        double rn = 1.0, yn = y1;
+        if (i + 1 < n && pts[(std::size_t) (i + 1)].mode == 10)
+        {
+            rn = (double) pts[(std::size_t) (i + 1)].dt / h;
+            yn = pts[(std::size_t) (i + 1)].y;
+        }
+        const double d = y1 - y0;
+        if (std::abs (d) < kEps)
+        {
+            p.sign = 2;
+            return;
+        }
+        const double a = (ypp - y0) / d, b = (yn - y0) / d;
+        rp = rp > kEps ? rp : kEps;
+        rn = rn > kEps ? rn : kEps;
+        const double sr = (b - 1.0) / rn, sl = -a / rp;
+        if (! (F (sr) * 1.0f > 0.0f))
+            p.p4 = 0.0f;
+        else
+        {
+            const float w1 = F (rn) * 2.0f + 1.0f, w2 = F (rn) + 2.0f;
+            p.p4 = (F (sr) * 1.0f * (w1 + w2)) / (w1 * F (sr) + w2 * 1.0f);
+        }
+        if (! (1.0f * F (sl) > 0.0f))
+            p.p5 = 0.0f;
+        else
+        {
+            const float w1 = 2.0f + F (rp), w2 = 1.0f + F (rp) * 2.0f;
+            p.p5 = (1.0f * F (sl) * (w1 + w2)) / (w1 * 1.0f + w2 * F (sl));
+        }
+        p.p6 = F (1.0 - std::abs ((double) p.t));
+    }
+
     double time (int i) const noexcept
     {
         double s = 0.0;
@@ -512,6 +563,8 @@ struct Curve
                 p.p4 = t;
             else if (m == 9)
                 p.p4 = F (std::abs ((double) t));
+            else if (m == 10)
+                prepareSmooth (i);
             else if (m == 11 || m == 12)
             {
                 auto dd = std::abs ((double) t) * 0.9;
@@ -653,6 +706,11 @@ struct Curve
                 const auto dd = p.sign > 0 ? delphi::sin (ph * hp) : 1.0 - delphi::cos (ph * hp);
                 return F (ph - (ph - dd) * p4);
             }
+            case 10:
+            {
+                const auto x2 = ph * ph, x1 = ph - 1.0;
+                return F (ph + ((((x2 * 3.0 - x2 * 2.0 * ph) + x2 * x1 * p4) + ph * x1 * x1 * p5) - ph) * p6);
+            }
             case 11:
                 if (p.sign < 1)
                     return F (p5 / (1.0 - p4 * ph) - p6);
@@ -671,7 +729,7 @@ struct Curve
                         return F ((1.0 - p5 / (1.0 - p4 * x)) + p6);
                     return F ((1.0 - p5 / (1.0 - p4 * (1.0 - x))) + p6);
                 }
-            default: return 0.0f; // 2 (hold); 10 (smooth) is not used by the plugin's envelopes in the data
+            default: return 0.0f; // 2 (hold) and unknown modes
         }
     }
 
