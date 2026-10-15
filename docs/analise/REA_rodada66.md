@@ -143,7 +143,7 @@ tick **[DECOMP]**. Whether FL sends a flush when an export starts is **not confi
   reduced into the loop (`Trunc` of the loop count) and one evaluation step of that length.
 - LFO positioning: start, the envelope positioned as above, phase = start phase + the fifth LFO integer +
   `Round(pos·inc)` (the unfrozen increment).
-- **EXEC:** 12 states × song positions 0, 7.3 and 33 beats × live/export: bit-identical.
+- **EXEC:** 20 states × song positions 0, 7.3 and 33 beats × live/export: bit-identical.
 - Pattern change (global 5): every articulator points at the new pattern's envelope; envelopes (not LFOs) are
   repositioned, at the song position if *Sync pattern changes* (state byte `+0x15E`) is on.
 
@@ -299,9 +299,9 @@ ranges (overflow, subnormals, trigonometric arguments ≥ 4194304) fall back to 
 | Static filters: every type × mode 0–5 × FLAT, L/B/H gains, drive | 144 | all bit-identical |
 | Band-pass sweep (cut 0…256 × res 0…256, export mode) | 153 | all bit-identical |
 | Envelope curve modes 0–12, tensions 0 / 0.4 / −0.6 | 15 | all bit-identical |
-| Automation (6 sets) | 10 states × 2 modes | all bit-identical |
-| Transport (song position 0 / 7.3 / 33 beats) | 12 states × 2 modes | all bit-identical |
-| Rates / blocks / tempo (48 k/300/133, 96 k/1000/export/87, 22.05 k/77/160, 44.1 k/512/export/140) | 86 states × 4 | see `out/t14.txt` (run after the final build) |
+| Automation (6 sets) | 20 states × 2 modes | all 240 bit-identical |
+| Transport (song position 0 / 7.3 / 33 beats) | 20 states × 2 modes | all 120 bit-identical |
+| Rates / blocks / tempo (48 k/300/133, 96 k/1000/export/87, 22.05 k/77/160, 44.1 k/512/export/140) | 86 states × 4 | all 344 bit-identical |
 | Fruity Vocoder LYNX C++ vs DLL | 3 installation + 6 synthetic states × 44.1/48/96 kHz; 2 automation sets; 192 kHz | all bit-identical (Linux and Windows builds) |
 | Delphi runtime math | §7 | all bit-identical |
 | Unit tests `love_philter_engine`, `fruity_vocoder_engine` | goldens of 3 + 2 synthetic states, index maps, fallbacks | bit-identical on the test machine |
