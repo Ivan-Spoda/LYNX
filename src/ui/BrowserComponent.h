@@ -11,8 +11,7 @@ namespace lynx
 //  - a click on a folder opens / closes it; a click on an audio file previews it (the strip at the bottom
 //    shows its waveform and the playback position); double-click: new sampler channel with it
 //  - drag a file onto the Channel Rack (new channel, or onto a row: replaces its sample), the Playlist (audio
-//    clip where it is dropped), the Piano Roll (into the channel being edited; MIDI files: their notes)
-//    or a mixer insert (effect presets); the targets show where it will land
+//    clip where it is dropped) or a mixer insert (effect presets)
 //  - double-click a .lynx/.flp/.mid: opens it (onOpenProject)
 //  - search box (Ctrl+F): searches the current folder and below (core/SearchQuery syntax); Esc clears
 //  - keys while the Browser has focus: Up/Down step and preview, Shift+Up/Down step and load each file

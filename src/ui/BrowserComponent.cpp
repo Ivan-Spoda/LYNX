@@ -20,7 +20,7 @@ bool isAudio (const juce::File& f)
 
 bool isListed (const juce::File& f)
 {
-    return f.hasFileExtension ("wav;flac;ogg;mp3;aif;aiff;mid;midi;lynx;flp;fst");
+    return f.hasFileExtension ("wav;flac;ogg;mp3;aif;aiff;wv;mid;midi;lynx;flp;fst");
 }
 
 constexpr int maxResults = 500;
@@ -74,10 +74,10 @@ juce::String rowHint (const juce::File& f, bool folder, bool expanded)
     if (folder)
         return (expanded ? tr ("Folder: [LMB] close") : tr ("Folder: [LMB] open")) + "  " + tr ("[RMB] menu (collapse all, show in the file manager)");
     if (isAudio (f))
-        return tr ("Sample: [LMB] preview  [2xLMB] new channel  drag to the Channel Rack, Playlist or Piano Roll  [Enter] into the selected channel  "
+        return tr ("Sample: [LMB] preview  [2xLMB] new channel  drag to the Channel Rack or the Playlist  [Enter] into the selected channel  "
                    "[Shift][Up] / [Shift][Down] swap through the files");
     if (f.hasFileExtension ("mid;midi"))
-        return tr ("MIDI file: [2xLMB] open  drag onto the Piano Roll: its notes go into the channel being edited");
+        return tr ("MIDI file: [2xLMB] open it as a project");
     if (f.hasFileExtension ("lynx;flp"))
         return tr ("Project: [2xLMB] open it");
     if (f.hasFileExtension ("fst"))

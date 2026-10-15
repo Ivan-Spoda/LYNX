@@ -703,6 +703,8 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("browser.swapPrevious")) browser.step (-1, true);
     else if (is ("browser.swapNext")) browser.step (1, true);
     else if (is ("browser.load")) browser.loadSelected();
+    else if (is ("browser.closeFolder")) browser.openFolder (false);
+    else if (is ("browser.openFolder")) browser.openFolder (true);
     else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
     else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
     else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
