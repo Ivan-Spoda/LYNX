@@ -301,6 +301,8 @@ enum class EffectKind : std::uint8_t
     fruitySoftClipper, // FL's Fruity Soft Clipper, exact (REA_rodada51, core/FruityShapers.h): threshold, post / range
     reeverb2,     // FL's Fruity Reeverb 2, exact (REA_rodada49, core/Reeverb2.h): FL's 15 controls + 2 options, (raw − min) / range
     reeverb1,     // FL's Fruity Reeverb (first version), exact (REA_rodada49 §6, core/Reeverb2.h): FL's 10 controls, raw / max
+    fruityDelay2, // FL's Fruity Delay 2, exact (REA_rodada52, core/FruityDelay.h): FL's 8 raw controls / range
+    fruityDelay3, // FL's Fruity Delay 3, exact (REA_rodada52, core/FruityDelay.h): FL's 26 raw controls / range
     grossBeat     // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
 };
 
