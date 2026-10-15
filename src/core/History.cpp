@@ -195,6 +195,10 @@ ChangeLabel describeChange (const Song& before, const Song& after)
         if (before.playlistTracks[i].name != after.playlistTracks[i].name || before.playlistTracks[i].muted != after.playlistTracks[i].muted)
             return label (TR_NOOP ("Playlist tracks"));
 
+    for (std::size_t i = 0; i < after.playlistTracks.size(); ++i)
+        if (before.playlistTracks[i].height != after.playlistTracks[i].height)
+            return label (TR_NOOP ("Track height"));
+
     if (before.mode != after.mode)
         return label (TR_NOOP ("Pattern / song mode"));
     if (before.currentPattern != after.currentPattern)

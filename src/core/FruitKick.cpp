@@ -3,6 +3,7 @@
 
 #include "core/FruitKick.h"
 #include "core/FlVoiceProcessor.h"
+#include "core/FlangusFastDist.h"
 
 #include <algorithm>
 #include <array>
@@ -34,11 +35,10 @@ std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t o)
 
 long rint64 (double x) { return std::lrint (x); } // cvtsd2si: round half to even
 
-// ---- tables: FL's host sine (WaveTables[0]), the plugin's LFO triangle/square, the host waveshaper curve ----
+// ---- tables: FL's host sine (WaveTables[0]), the plugin's LFO triangle/square ----
 struct Tables
 {
     std::array<float, 16384> sine {}, tri {}, square {};
-    std::array<float, 8193> shaper {}; // curve set 0, curve 10, elements 0…8192 (8192 repeats 8191)
 
     Tables()
     {
@@ -50,19 +50,6 @@ struct Tables
             tri[(std::size_t) ((i + 0x3000) & 0x3fff)] = (float) (1.0 - (double) ((i - 0x2000) * 4) / 16384.0);
         for (int i = 0; i < 16384; ++i)
             square[(std::size_t) i] = i < 0x2000 ? 1.0f : -1.0f;
-        // FLEngine's table builder (REA_rodada43 §1.4): x = k/8191 → dB, compressed above −25 dB, +14.4 dB below −14.4 dB
-        const double x8 = 0.1, x9 = 9 * 1.6, x10 = std::log (10.0) * 0.05, c20 = 20.0 / std::log (10.0);
-        for (int k = 0; k < 8192; ++k)
-        {
-            const double x = k / 8191.0;
-            double d = x != 0.0 ? std::log (x) * c20 : -10000.0;
-            if (d >= -25.0)
-                d = (d + 25.0) * x8 + -25.0;
-            if (! (-x9 < d))
-                d += x9;
-            shaper[(std::size_t) k] = (float) (std::int16_t) rint64 (std::exp (d * x10) * 32767.0);
-        }
-        shaper[8192] = shaper[8191];
     }
 };
 
@@ -340,35 +327,9 @@ private:
         const float lo = 0.0002f;
         std::memcpy (&ab, &amp, 4);
         std::memcpy (&lim, &lo, 4);
-        if (P.p[5] > 0)
-        {
-            // FL's host waveshaper (interpolated variant, curve set 0 / curve 10, drive 0.1)
-            const auto& T = t.shaper;
-            const int N = 0x1fff;
-            const float k = 0.1f * (float) N, w = P.wet * 3.05175781e-05f;
-            for (int i = 0; i < n; ++i)
-            {
-                const float x = buf[i];
-                const float tt = x * k;
-                int j = (int) (double) tt;
-                const float fr = tt - (float) j;
-                const float d = x * P.dry;
-                float y;
-                if (j < 0)
-                {
-                    j = std::min (-j, N);
-                    const float a = T[(std::size_t) j], b = T[(std::size_t) j + 1];
-                    y = -(a - (b - a) * fr);
-                }
-                else
-                {
-                    j = std::min (j, N);
-                    const float a = T[(std::size_t) j], b = T[(std::size_t) j + 1];
-                    y = a + (b - a) * fr;
-                }
-                buf[i] = d + y * w;
-            }
-        }
+        if (P.p[5] > 0) // FL's host waveshaper: curve set 0, curve 10, drive 0.1 (REA_rodada55 §2.3: FL's x87 routines, the
+                        // interpolating one while FL renders a file, the live one otherwise)
+            fastdistfx::hostShaper (buf, n, 0, 10, P.dry, P.wet, 0.1f, offlineRendering());
         return ab < lim;
     }
 };

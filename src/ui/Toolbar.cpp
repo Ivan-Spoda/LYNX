@@ -1,5 +1,7 @@
 #include "ui/Toolbar.h"
 
+#include <juce_dsp/juce_dsp.h>
+
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
@@ -506,7 +508,78 @@ void OutputMonitor::update()
     else if (clipFrames > 0)
         --clipFrames;
 
+    // long view: the level scrolls from right to left
+    std::rotate (history.begin(), history.begin() + 1, history.end());
+    history.back() = now;
+
+    if (mode == spectrum)
+    {
+        // Hann-windowed FFT of the last 1024 samples, folded into log-spaced bands (20 Hz..20 kHz)
+        static juce::dsp::FFT fft (10);
+        std::array<float, 2048> data {};
+        for (std::size_t i = 0; i < samples.size(); ++i)
+            data[i] = samples[i] * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (samples.size() - 1)));
+        fft.performFrequencyOnlyForwardTransform (data.data(), true);
+
+        const auto rate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
+        for (std::size_t b = 0; b < bands.size(); ++b)
+        {
+            const auto f0 = 20.0 * std::pow (1000.0, (double) b / (double) bands.size());
+            const auto f1 = 20.0 * std::pow (1000.0, (double) (b + 1) / (double) bands.size());
+            auto i0 = (int) (f0 / rate * 1024.0), i1 = juce::jmax (i0 + 1, (int) (f1 / rate * 1024.0));
+            i0 = juce::jlimit (1, 511, i0);
+            i1 = juce::jlimit (i0 + 1, 512, i1);
+            float m = 0.0f;
+            for (auto i = i0; i < i1; ++i)
+                m = juce::jmax (m, data[(std::size_t) i]);
+            const auto db = juce::Decibels::gainToDecibels (m / 256.0f, -72.0f);
+            const auto level = juce::jlimit (0.0f, 1.0f, (db + 72.0f) / 72.0f);
+            bands[b] = juce::jmax (level, bands[b] * 0.85f); // fast up, smooth fall
+        }
+    }
+
     repaint();
+}
+
+juce::String OutputMonitor::modeName (int m)
+{
+    switch (m)
+    {
+        case longView: return tr ("Long view (level over time)");
+        case spectrum: return tr ("Spectrum (low frequencies on the left)");
+        default: return tr ("Oscilloscope (waveform)");
+    }
+}
+
+void OutputMonitor::setMode (int newMode)
+{
+    mode = juce::jlimit (0, modeCount - 1, newMode);
+    bands.fill (0.0f);
+    repaint();
+    if (onModeChanged)
+        onModeChanged();
+}
+
+void OutputMonitor::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader (tr ("Output display"));
+        for (int m = 0; m < modeCount; ++m)
+            menu.addItem (modeName (m), true, mode == m, [this, m] { setMode (m); });
+        menu.addSeparator();
+        menu.addItem (tr ("Reset the peak hold and clip light"), [this] {
+            held = 0.0f;
+            clipFrames = holdFrames = 0;
+            repaint();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        return;
+    }
+
+    if (e.mods.isLeftButtonDown())
+        setMode ((mode + 1) % modeCount);
 }
 
 void OutputMonitor::paint (juce::Graphics& g)
@@ -536,8 +609,37 @@ void OutputMonitor::paint (juce::Graphics& g)
         g.fillRoundedRectangle (meter.withHeight (4.0f), 1.0f);
     }
 
-    // oscilloscope
     auto scope = area.reduced (4.0f, 3.0f);
+    const auto lineColour = (clipFrames > 0 ? colour::meterClip : colour::accent).withAlpha (0.9f);
+
+    if (mode == longView) // the level of the last seconds, newest on the right, mirrored around the centre
+    {
+        g.setColour (colour::border);
+        g.drawHorizontalLine ((int) scope.getCentreY(), scope.getX(), scope.getRight());
+        const auto columns = juce::jmax (1, (int) scope.getWidth());
+        g.setColour (lineColour.withAlpha (0.75f));
+        for (int x = 0; x < columns; ++x)
+        {
+            const auto index = (std::size_t) (x * (int) history.size() / columns);
+            const auto h = juce::jmax (0.5f, level (history[index]) * scope.getHeight() * 0.5f);
+            g.fillRect (scope.getX() + (float) x, scope.getCentreY() - h, 1.0f, h * 2.0f);
+        }
+        return;
+    }
+
+    if (mode == spectrum) // bars per log-spaced band
+    {
+        const auto w = scope.getWidth() / (float) bands.size();
+        g.setColour (lineColour.withAlpha (0.8f));
+        for (std::size_t b = 0; b < bands.size(); ++b)
+        {
+            const auto h = bands[b] * scope.getHeight();
+            g.fillRect (scope.getX() + (float) b * w, scope.getBottom() - h, juce::jmax (1.0f, w - 0.5f), h);
+        }
+        return;
+    }
+
+    // oscilloscope
     g.setColour (colour::border);
     g.drawHorizontalLine ((int) scope.getCentreY(), scope.getX(), scope.getRight());
     juce::Path wave;
@@ -556,14 +658,16 @@ void OutputMonitor::paint (juce::Graphics& g)
             wave.lineTo (scope.getX() + (float) x, y);
     }
 
-    g.setColour ((clipFrames > 0 ? colour::meterClip : colour::accent).withAlpha (0.9f));
+    g.setColour (lineColour);
     g.strokePath (wave, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 ui::Hint OutputMonitor::hintAt (juce::Point<int>)
 {
     ui::Hint h;
-    h.text = tr ("Output: the waveform and peak level of what you hear (the meter's top turns red when it clipped)");
+    h.text = tr ("Output: {0} and the peak level of what you hear (the meter's top turns red when it clipped)  [LMB] next display  [RMB] display menu",
+                 { modeName (mode).toLowerCase() });
+    h.hasMenu = true;
     h.value = held <= 1.0e-5f ? juce::String ("-inf dB") : juce::String (juce::Decibels::gainToDecibels (held), 1) + " dB";
     return h;
 }

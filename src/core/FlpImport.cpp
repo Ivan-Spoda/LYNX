@@ -1486,6 +1486,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
+                 || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
+                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)
