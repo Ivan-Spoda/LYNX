@@ -149,4 +149,18 @@ void rippleResize (std::vector<Clip>& clips, int index, std::int64_t newLength);
 // edges are cut there first, so only the part inside moves. Returns the indices of the moved clips (or
 // of the copies). The start never goes below 0.
 std::vector<int> moveTimeRange (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::int64_t delta, bool copy);
+
+// --- Playlist tracks and clips (docs/WORKFLOW_FL.md P2: clip and track menus) ------------------
+
+// Cuts clip `index` at every multiple of `grid` (song time) inside it. Returns the indices of all pieces.
+std::vector<int> chopClip (std::vector<Clip>& clips, int index, std::int64_t grid);
+
+// Inserts an empty track at `track` (the clips there and below move down); every arrangement follows.
+void insertTrack (Song& song, int track);
+// Removes track `track` and its clips (the tracks below move up), in every arrangement.
+void removeTrack (Song& song, int track);
+// Swaps two tracks (their clips and headers), in every arrangement.
+void swapTracks (Song& song, int a, int b);
+// Solo: `track` plays alone (every other track muted); on the only unmuted track it unmutes all.
+void soloTrack (Song& song, int track, int trackCount);
 } // namespace lynx::noteedit

@@ -279,6 +279,13 @@ void rotateSteps (Pattern& pattern, int channel, int delta, int steps)
     pattern.sortNotes();
 }
 
+bool hasPianoRollNotes (const Pattern& pattern) noexcept
+{
+    return std::any_of (pattern.notes.begin(), pattern.notes.end(), [] (const Note& n) {
+        return n.start % ticksPerStep != 0 || n.key != 60 || n.length > ticksPerStep;
+    });
+}
+
 std::vector<int> notesInStep (const Pattern& pattern, int channel, int step)
 {
     const auto from = (std::int64_t) step * ticksPerStep;

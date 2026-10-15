@@ -502,3 +502,43 @@ TEST (p2_key_map_bindings)
     CHECK (map.find ({ 'I', ctrl }, Context::global, false) == "record.waitForInput");
     CHECK (toString ({ numpad7, none }) == "Numpad 7" && (parseChord ("Numpad 7") == Chord { numpad7, none }));
 }
+
+TEST (p2_playlist_tracks_and_chop)
+{
+    auto song = lynx::Song::makeDefault();
+    song.playlist.clear();
+    lynx::Clip a, b, c;
+    a.track = 0; a.length = 100;
+    b.track = 1; b.length = 100;
+    c.track = 2; c.length = 100;
+    song.playlist = { a, b, c };
+    song.playlistTracks.resize (2);
+    song.playlistTracks[1].name = "B";
+
+    lynx::noteedit::insertTrack (song, 1);
+    CHECK (song.playlist[0].track == 0 && song.playlist[1].track == 2 && song.playlist[2].track == 3);
+    CHECK (song.playlistTracks[2].name == "B" && song.playlistTracks[1].name.empty());
+
+    lynx::noteedit::swapTracks (song, 2, 3);
+    CHECK (song.playlist[1].track == 3 && song.playlist[2].track == 2 && song.playlistTracks[3].name == "B");
+
+    lynx::noteedit::removeTrack (song, 2);
+    CHECK (song.playlist.size() == 2 && song.playlist[1].track == 2 && song.playlistTracks[2].name == "B");
+
+    lynx::noteedit::soloTrack (song, 1, 4);
+    CHECK (! song.playlistTracks[1].muted && song.playlistTracks[0].muted && song.playlistTracks[3].muted);
+    lynx::noteedit::soloTrack (song, 1, 4); // again: everything plays
+    CHECK (! song.playlistTracks[0].muted && ! song.playlistTracks[3].muted);
+
+    std::vector<lynx::Clip> clips (1);
+    clips[0].start = 100;
+    clips[0].length = 1000;
+    const auto pieces = lynx::noteedit::chopClip (clips, 0, 480);
+    CHECK (pieces.size() == 3 && clips[0].length == 380 && clips[1].start == 480 && clips[1].length == 480 && clips[2].start == 960
+           && clips[2].length == 140 && clips[2].offset == 860);
+
+    lynx::Pattern steps, roll;
+    steps.notes = { p2test::note (0, 60), p2test::note (480, 60) };
+    roll.notes = { p2test::note (0, 64) };
+    CHECK (! lynx::hasPianoRollNotes (steps) && lynx::hasPianoRollNotes (roll));
+}

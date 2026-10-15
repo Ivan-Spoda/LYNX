@@ -50,6 +50,11 @@ public:
     ~PlaylistComponent() override;
 
     std::function<void()> onOpenPattern;
+    std::function<void()> onOpenPianoRoll;
+
+    // Double-click on a pattern clip opens it in: 0 = the Piano Roll when it has piano-roll notes, else the
+    // Channel Rack; 1 = always the Channel Rack; 2 = always the Piano Roll. Alt+double-click opens the other one.
+    static inline int editPatternsIn = 0;
 
     void paint (juce::Graphics& g) override;
     void paintOverChildren (juce::Graphics& g) override;
@@ -144,6 +149,7 @@ private:
     void arrangementChosen();
     void renameArrangement();
     void renameTrack (int track);
+    void showTrackMenu (int track);
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };

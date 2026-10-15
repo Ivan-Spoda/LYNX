@@ -611,4 +611,92 @@ std::vector<int> moveTimeRange (std::vector<Clip>& clips, std::int64_t from, std
 
     return moved;
 }
+
+std::vector<int> chopClip (std::vector<Clip>& clips, int index, std::int64_t grid)
+{
+    if (index < 0 || index >= (int) clips.size() || grid <= 0)
+        return {};
+
+    std::vector<int> pieces { index };
+    auto current = index;
+
+    for (auto cut = (clips[(std::size_t) index].start / grid + 1) * grid; cut < clips[(std::size_t) current].end(); cut += grid)
+    {
+        auto rest = splitClip (clips[(std::size_t) current], cut);
+        clampFades (clips[(std::size_t) current]);
+        clampFades (rest);
+        clips.push_back (rest);
+        current = (int) clips.size() - 1;
+        pieces.push_back (current);
+    }
+
+    return pieces;
+}
+
+namespace
+{
+std::vector<PlaylistTrack>& headers (Song& song, int atLeast)
+{
+    if ((int) song.playlistTracks.size() < atLeast)
+        song.playlistTracks.resize ((std::size_t) atLeast);
+    return song.playlistTracks;
+}
+} // namespace
+
+void insertTrack (Song& song, int track)
+{
+    track = std::max (0, track);
+    song.forEachClipList ([track] (std::vector<Clip>& clips) {
+        for (auto& c : clips)
+            if (c.track >= track)
+                ++c.track;
+    });
+
+    auto& h = headers (song, track);
+    h.insert (h.begin() + track, PlaylistTrack {});
+}
+
+void removeTrack (Song& song, int track)
+{
+    if (track < 0)
+        return;
+
+    song.forEachClipList ([track] (std::vector<Clip>& clips) {
+        clips.erase (std::remove_if (clips.begin(), clips.end(), [track] (const Clip& c) { return c.track == track; }), clips.end());
+        for (auto& c : clips)
+            if (c.track > track)
+                --c.track;
+    });
+
+    if (track < (int) song.playlistTracks.size())
+        song.playlistTracks.erase (song.playlistTracks.begin() + track);
+}
+
+void swapTracks (Song& song, int a, int b)
+{
+    if (a < 0 || b < 0 || a == b)
+        return;
+
+    song.forEachClipList ([a, b] (std::vector<Clip>& clips) {
+        for (auto& c : clips)
+            c.track = c.track == a ? b : c.track == b ? a : c.track;
+    });
+
+    auto& h = headers (song, std::max (a, b) + 1);
+    std::swap (h[(std::size_t) a], h[(std::size_t) b]);
+}
+
+void soloTrack (Song& song, int track, int trackCount)
+{
+    trackCount = std::max (trackCount, track + 1);
+    auto& h = headers (song, trackCount);
+    bool alone = ! h[(std::size_t) track].muted;
+
+    for (int t = 0; t < trackCount && alone; ++t)
+        if (t != track && ! h[(std::size_t) t].muted)
+            alone = false;
+
+    for (int t = 0; t < (int) h.size(); ++t)
+        h[(std::size_t) t].muted = alone ? false : t != track;
+}
 } // namespace lynx::noteedit

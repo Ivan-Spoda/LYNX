@@ -1,5 +1,7 @@
 #include "ui/PlaylistComponent.h"
 
+#include "core/RackOps.h"
+
 #include "core/NoteEdit.h"
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
@@ -962,7 +964,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         const auto track = yToTrack (e.y);
 
         if (e.mods.isPopupMenu())
-            renameTrack (track);
+            showTrackMenu (track);
         else if (e.x < 20)
             engine.editSong ([track] (Song& s) {
                 if ((int) s.playlistTracks.size() <= track)
@@ -1726,6 +1728,43 @@ void PlaylistComponent::deleteTimeSelection()
     sortClips();
 }
 
+void PlaylistComponent::showTrackMenu (int track)
+{
+    const auto& song = engine.getSong();
+    const auto muted = song.isTrackMuted (track);
+    const auto count = numTracks();
+    juce::PopupMenu menu;
+    menu.addSectionHeader (track < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) track].name.empty()
+                               ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) track].name.c_str())
+                               : tr ("Track {0}", { juce::String (track + 1) }));
+    menu.addItem (tr ("Rename..."), [this, track] { renameTrack (track); });
+    menu.addItem (muted ? tr ("Unmute") : tr ("Mute"), [this, track] {
+        engine.editSong ([track] (Song& s) {
+            if ((int) s.playlistTracks.size() <= track)
+                s.playlistTracks.resize ((std::size_t) track + 1);
+            s.playlistTracks[(std::size_t) track].muted = ! s.playlistTracks[(std::size_t) track].muted;
+        });
+    });
+    menu.addItem (tr ("Solo (mute the other tracks)"), [this, track, count] { engine.editSong ([track, count] (Song& s) { noteedit::soloTrack (s, track, count); }); });
+    menu.addSeparator();
+    menu.addItem (tr ("Insert a track above"), [this, track] {
+        setSelection ({});
+        engine.editSong ([track] (Song& s) { noteedit::insertTrack (s, track); });
+    });
+    menu.addItem (tr ("Insert a track below"), [this, track] {
+        setSelection ({});
+        engine.editSong ([track] (Song& s) { noteedit::insertTrack (s, track + 1); });
+    });
+    menu.addItem (tr ("Move up"), track > 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track - 1); }); });
+    menu.addItem (tr ("Move down"), [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track + 1); }); });
+    menu.addSeparator();
+    menu.addItem (tr ("Delete the track and its clips"), [this, track] {
+        setSelection ({});
+        engine.editSong ([track] (Song& s) { noteedit::removeTrack (s, track); });
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
 void PlaylistComponent::renameTrack (int track)
 {
     const auto& tracks = engine.getSong().playlistTracks;
@@ -1848,6 +1887,22 @@ void PlaylistComponent::showClipMenu (int index)
             sortClips();
         });
 
+    menu.addItem (clip.muted ? tr ("Unmute") : tr ("Mute"), [this, targets, m = ! clip.muted] {
+        engine.editSong ([targets, m] (Song& s) {
+            for (auto i : targets)
+                if (i < (int) s.playlist.size())
+                    s.playlist[(std::size_t) i].muted = m;
+        });
+    });
+    menu.addItem (tr ("Chop to grid"), [this, targets, grid = gridTicks()] {
+        setSelection ({});
+        engine.editSong ([targets, grid] (Song& s) {
+            for (auto i : targets)
+                noteedit::chopClip (s.playlist, i, grid);
+        });
+        sortClips();
+    });
+
     if (clip.kind == ClipKind::pattern)
     {
         menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
@@ -1890,6 +1945,10 @@ void PlaylistComponent::showClipMenu (int index)
         menu.addItem (tr ("Open in Channel Rack"), [this] {
             if (onOpenPattern)
                 onOpenPattern();
+        });
+        menu.addItem (tr ("Open in Piano Roll"), [this] {
+            if (onOpenPianoRoll)
+                onOpenPianoRoll();
         });
     }
 
@@ -2322,8 +2381,19 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
 
     if (clip.kind == ClipKind::automation)
         openAutomationEditor (engine, clip.automation);
-    else if (clip.kind == ClipKind::pattern && onOpenPattern)
-        onOpenPattern();
+    else if (clip.kind == ClipKind::pattern)
+    {
+        auto pianoRoll = editPatternsIn == 2
+                         || (editPatternsIn == 0 && clip.pattern < (int) engine.getSong().patterns.size()
+                             && hasPianoRollNotes (engine.getSong().patterns[(std::size_t) clip.pattern]));
+        if (e.mods.isAltDown())
+            pianoRoll = ! pianoRoll;
+
+        if (pianoRoll && onOpenPianoRoll)
+            onOpenPianoRoll();
+        else if (! pianoRoll && onOpenPattern)
+            onOpenPattern();
+    }
 }
 
 bool PlaylistComponent::isInterestedInFileDrag (const juce::StringArray& files)

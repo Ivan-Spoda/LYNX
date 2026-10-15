@@ -74,6 +74,12 @@ void closeToolWindowOf (juce::Component& content)
         window->closeSoon();
 }
 
+void closeAllToolWindows()
+{
+    while (! ToolWindow::all().isEmpty())
+        delete ToolWindow::all().getLast();
+}
+
 juce::DocumentWindow* findToolWindow (const juce::String& key)
 {
     for (auto* w : ToolWindow::all())

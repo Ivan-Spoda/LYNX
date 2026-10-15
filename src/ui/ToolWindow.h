@@ -14,6 +14,9 @@ juce::DocumentWindow* openToolWindow (std::unique_ptr<juce::Component> content, 
 // Closes the tool window that holds `content` (from inside it, e.g. an Accept button).
 void closeToolWindowOf (juce::Component& content);
 
+// Deletes every tool window now (the main window is closing).
+void closeAllToolWindows();
+
 // The open tool window with this key, or nullptr.
 juce::DocumentWindow* findToolWindow (const juce::String& key);
 } // namespace lynx

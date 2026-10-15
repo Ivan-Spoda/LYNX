@@ -72,6 +72,10 @@ void setStepRhythm (Pattern& pattern, int channel, const std::vector<bool>& rhyt
 // Moves every note of `channel` by `delta` steps, wrapping inside the first `steps` steps.
 void rotateSteps (Pattern& pattern, int channel, int delta, int steps);
 
+// True when the pattern has notes the step sequencer can't show as steps (off the step grid, another key
+// or a held length): the Playlist then opens it in the Piano Roll.
+bool hasPianoRollNotes (const Pattern& pattern) noexcept;
+
 // Indices of the channel's notes that start inside step `step` (the cell the rack draws).
 std::vector<int> notesInStep (const Pattern& pattern, int channel, int step);
 

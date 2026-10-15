@@ -151,6 +151,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
             juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
         });
         menu.addSubMenu (tr ("Recording"), makeRecordOptionsMenu());
+        {
+            juce::PopupMenu editIn;
+            const char* choices[] = { TR_NOOP ("Piano Roll when it has piano-roll notes, else Channel Rack"), TR_NOOP ("Channel Rack"), TR_NOOP ("Piano Roll") };
+            for (int i = 0; i < 3; ++i)
+                editIn.addItem (tr (choices[i]), true, PlaylistComponent::editPatternsIn == i, [this, i] {
+                    PlaylistComponent::editPatternsIn = i;
+                    saveUiSettings();
+                });
+            menu.addSubMenu (tr ("Double-click on a pattern clip opens"), editIn);
+        }
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton));
     };
 
@@ -277,6 +287,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     workspace.onDefaultLayout = [this] { fitChannelRack (true); };
     workspace.setPersistent (persistent);
     playlist.onOpenPattern = [this] { showPanel (Panel::channelRack); };
+    playlist.onOpenPianoRoll = [this] {
+        // edit a channel that plays in this pattern
+        const auto& song = engine.getSong();
+        const auto& notes = song.patterns[(std::size_t) song.currentPattern].notes;
+        const auto channel = engine.getSelectedChannel();
+        if (! notes.empty() && std::none_of (notes.begin(), notes.end(), [channel] (const Note& n) { return n.channel == channel; }))
+            engine.setSelectedChannel (notes.front().channel);
+        openPianoRoll();
+    };
     picker.onOpenPattern = [this] { showPanel (Panel::channelRack); };
     ui::setHint (pianoRoll, tr ("Piano Roll: click adds a note, drag moves, right-click deletes, Ctrl+drag selects"));
     ui::setHint (playlist, tr ("Playlist: click paints the current pattern, right-click deletes, Ctrl+drag selects"));
@@ -331,6 +350,7 @@ MainComponent::~MainComponent()
     ParametricEqWindows::closeAll();
     closeAutomationEditors();
     closeChannelSettings();
+    closeAllToolWindows(); // note tools, history, quick-add (they edit the song)
     engine.removeChangeListener (this);
     stopTimer();
 }
@@ -706,6 +726,8 @@ void MainComponent::loadUiSettings()
             typingPiano = on;
         else if (key == "keepEditorsOpen")
             ChannelRackComponent::keepEditorsOpen = on;
+        else if (key == "editPatternsIn")
+            PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
     }
 }
 
@@ -715,7 +737,8 @@ void MainComponent::saveUiSettings()
         return;
 
     uiSettingsFile().replaceWithText ("typingPiano=" + juce::String (typingPiano ? 1 : 0) + "\nkeepEditorsOpen="
-                                      + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\n");
+                                      + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\neditPatternsIn="
+                                      + juce::String (PlaylistComponent::editPatternsIn) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
