@@ -318,7 +318,9 @@ enum class EffectKind : std::uint8_t
     fruityPanOMatic, // FL's Fruity PanOMatic, exact (REA_rodada58, core/FruityBasicFx.h): pan, volume, LFO; controls / range
     fruityBalance,   // FL's Fruity Balance, exact (REA_rodada58, core/FruityBasicFx.h): balance, volume; controls / range
     fruityBloodOverdrive, // FL's Fruity Blood Overdrive, exact (REA_rodada58, core/FruityBasicFx.h): 6 controls / range
-    grossBeat     // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
+    grossBeat,    // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
+    fruityDelayBank, // FL's Fruity Delay Bank, exact (REA_rodada56, core/FruityDelayBank.h): FL's state in EffectSlot::state, params = its 4 global controls / 128
+    fruityMultiband  // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
