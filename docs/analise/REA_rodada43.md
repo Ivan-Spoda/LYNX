@@ -255,11 +255,16 @@ carries the earlier voices' left gains. LYNX reproduces it.
 ### 2.9 Verification **[EXEC + model]**
 
 `py/bdbat.py`: 57 states (5 project channels, 52 presets) × 4 scenarios (single notes at keys 48/60/72 with offsets,
-velocities, pans, note-offs; 4 overlapping notes) with the noise samples, at 44.1 and 48 kHz: see §2.10 for the counts.
+velocities, pans, note-offs; 4 overlapping notes) with the noise samples and FL's max-polyphony event (value 0), at 44.1
+and 48 kHz: **228/228 bit-exact at each rate**, with the model's own CRT powf port (no value taken from the DLL).
+Before the powf port, Bassdrum 01 diverged at −66 dB (one last bit of `powf(2, 0.325)`); before the reassociated
+products (§2.2) and the mixing quirk (§2.7), at −1.6 dB.
 
 ### 2.10 LYNX port **[model]**
 
-`src/core/BassDrum.{h,cpp}`, `InstrumentKind::bassdrum`: bit-identical to `bdmodel.py` (`py/bdcpp.py`). The channel keeps
+`src/core/BassDrum.{h,cpp}`, `InstrumentKind::bassdrum`: bit-identical to `bdmodel.py` on 228/228 cases (`py/bdcpp.py`:
+57 states × 2 scenarios × 44.1/48 kHz), hence to FL's DLL on the battery above (on Linux; the Windows build's libm `pow`,
+`log`, `exp` may differ in rare last bits). The channel keeps
 the state and the BassDrum folder (`samplePath`); `sounddata` and the noise sample are read at run time.
 
 ---

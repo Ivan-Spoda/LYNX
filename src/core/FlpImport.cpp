@@ -448,6 +448,8 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             // ... and of a MiniSynth patch (the internal-synth conversion)
             SynthSettings synth;
             if (synthFromMiniSynth (project.channels.front().pluginState, song.bpm, synth))
+                return synth;
+        }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::fruitkick)
         {
             // ... and of Fruit Kick / BassDrum patches (their sine + pitch-sweep conversions)
