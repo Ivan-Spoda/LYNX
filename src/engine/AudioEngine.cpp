@@ -10,6 +10,7 @@
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/Metronome.h"
+#include "core/NoteTools.h"
 #include "engine/PreviewPlayer.h"
 #include "flp/Flp.h"
 
@@ -237,7 +238,78 @@ float AudioEngine::renderOffline (const RenderOptions& options)
 }
 
 void AudioEngine::play() noexcept { transport.playing.store (true); }
-void AudioEngine::stop() noexcept { transport.playing.store (false); }
+
+void AudioEngine::stop() noexcept
+{
+    waitingForInput.store (false);
+    transport.countIn.store (0.0);
+    transport.playing.store (false);
+}
+
+void AudioEngine::setRecordOptions (const RecordOptions& options)
+{
+    recordOptions = options;
+    recordOptions.countInBars = juce::jlimit (0, 4, options.countInBars);
+    sendChangeMessage();
+}
+
+void AudioEngine::startPlayback()
+{
+    if (! transport.recording.load())
+    {
+        play();
+        return;
+    }
+
+    if (recordOptions.waitForInput)
+    {
+        waitingForInput.store (true);
+        sendChangeMessage();
+        return;
+    }
+
+    if (recordOptions.countInBars > 0)
+    {
+        const auto at = (std::int64_t) transport.positionTicks.load();
+        transport.countIn.store ((double) countInLength (song, recordOptions.countInBars, at));
+        sendChangeMessage();
+        return;
+    }
+
+    play();
+}
+
+void AudioEngine::startOnInput() noexcept
+{
+    if (waitingForInput.exchange (false))
+        transport.playing.store (true);
+}
+
+void AudioEngine::setInsertArmed (int track, bool armed)
+{
+    const auto it = std::find (armedInserts.begin(), armedInserts.end(), track);
+    const auto wasArmed = it != armedInserts.end();
+
+    if (armed == wasArmed || track <= 0)
+        return;
+
+    if (armed)
+        armedInserts.push_back (track);
+    else
+        armedInserts.erase (it);
+
+    if (armed && ! audioArmed)
+        setAudioRecordingArmed (true);
+    else if (! armed && armedInserts.empty() && audioArmed)
+        setAudioRecordingArmed (false);
+
+    sendChangeMessage();
+}
+
+bool AudioEngine::isInsertArmed (int track) const noexcept
+{
+    return std::find (armedInserts.begin(), armedInserts.end(), track) != armedInserts.end();
+}
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
 void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
 
@@ -259,8 +331,27 @@ void AudioEngine::previewFile (const juce::File& file)
         preview->play (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
 }
 
+void AudioEngine::setInputScale (int scale, int root) noexcept
+{
+    inputScaleRoot.store (root);
+    inputScale.store (scale);
+}
+
+int AudioEngine::snapInputKey (int key) const noexcept
+{
+    const auto scale = inputScale.load();
+    return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
+}
+
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
+    if (record) // played notes (the PC keyboard) follow the scale snap; previews don't
+    {
+        key = snapInputKey (key);
+        if (on)
+            startOnInput();
+    }
+
     NoteEvent e;
     e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
     e.channel = channel;
@@ -393,13 +484,14 @@ void AudioEngine::finishAudioTake()
 
     const auto path = takeFile.getFullPathName().toStdString();
     const auto name = takeFile.getFileNameWithoutExtension().toStdString();
+    const auto armedTrack = armedInserts.empty() ? 0 : armedInserts.front(); // the take plays through the armed insert
 
     editSong ([=] (Song& s) {
         ChannelDef c;
         c.name = name;
         c.instrument = InstrumentKind::audioClip;
         c.samplePath = path;
-        c.mixerTrack = s.nextFreeInsert();
+        c.mixerTrack = armedTrack > 0 && armedTrack < (int) s.mixer.size() ? armedTrack : s.nextFreeInsert();
         s.channels.push_back (c);
 
         int track = 0;
@@ -430,9 +522,13 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
         return;
 
     const auto on = m.isNoteOn();
+
+    if (on)
+        startOnInput();
+
     NoteEvent e;
     e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
-    e.key = m.getNoteNumber();
+    e.key = snapInputKey (m.getNoteNumber());
     e.velocity = on ? m.getFloatVelocity() : 0.0f;
     const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
 
@@ -519,6 +615,8 @@ void AudioEngine::updateRecording()
         const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
         recorder.begin (pattern.effectiveLength (song.beatsPerBar));
         takeHasUndoStep = false;
+        takeClearedChannels.clear();
+        takeStartPosition = lastPlayingTick;
     };
 
     if (active)
@@ -550,11 +648,15 @@ void AudioEngine::updateRecording()
     if (notes.empty())
         return;
 
-    // the whole take is a single undo step
-    editSong ([&notes] (Song& s) {
-        auto& p = s.patterns[(std::size_t) s.currentPattern];
-        p.notes.insert (p.notes.end(), notes.begin(), notes.end());
-        p.sortNotes();
+    // the whole take is a single undo step: overdub or replace, quantised to the record grid; in song mode a
+    // clip of the pattern is placed where recording started if none plays there
+    const auto options = recordOptions;
+    const auto placeClipAt = (std::int64_t) takeStartPosition;
+    editSong ([&] (Song& s) {
+        commitTake (s.patterns[(std::size_t) s.currentPattern], notes, options.mode, options.quantise, takeClearedChannels);
+
+        if (options.placeSongClip && s.mode == PlayMode::song && ! takeHasUndoStep)
+            placePatternClipAt (s, s.currentPattern, placeClipAt);
     }, ! takeHasUndoStep);
     takeHasUndoStep = true;
 }
@@ -626,6 +728,53 @@ void AudioEngine::redo()
     undoStack.push_back (std::move (song));
     song = std::move (redoStack.back());
     redoStack.pop_back();
+    modified = true;
+    lastUndoPress = {};
+    publishSong();
+}
+
+namespace
+{
+const Song& historyState (const std::deque<Song>& undo, const Song& current, const std::deque<Song>& redo, int index)
+{
+    if (index < (int) undo.size())
+        return undo[(std::size_t) index];
+    if (index == (int) undo.size())
+        return current;
+    return redo[redo.size() - 1 - (std::size_t) (index - (int) undo.size() - 1)];
+}
+} // namespace
+
+ChangeLabel AudioEngine::getHistoryLabel (int index) const
+{
+    if (index <= 0 || index >= getHistorySize())
+        return { TR_NOOP ("Start"), {} };
+
+    return describeChange (historyState (undoStack, song, redoStack, index - 1), historyState (undoStack, song, redoStack, index));
+}
+
+void AudioEngine::jumpToHistory (int index)
+{
+    index = juce::jlimit (0, getHistorySize() - 1, index);
+
+    if (index == getHistoryPosition())
+        return;
+
+    // move through the stacks, then publish once
+    while (getHistoryPosition() > index && ! undoStack.empty())
+    {
+        redoStack.push_back (std::move (song));
+        song = std::move (undoStack.back());
+        undoStack.pop_back();
+    }
+
+    while (getHistoryPosition() < index && ! redoStack.empty())
+    {
+        undoStack.push_back (std::move (song));
+        song = std::move (redoStack.back());
+        redoStack.pop_back();
+    }
+
     modified = true;
     lastUndoPress = {};
     publishSong();
@@ -931,6 +1080,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     std::array<float*, 64> outputs {};
     numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());
     numOutputChannels = juce::jmin (numOutputChannels, (int) outputs.size());
+
+    // count-in: the metronome counts the pre-roll down, then playback starts
+    if (const auto countIn = transport.countIn.load (std::memory_order_relaxed); countIn > 0.0 && ! transport.playing.load (std::memory_order_relaxed))
+    {
+        const auto left = countIn - numSamples * transport.ticksPerSample();
+        transport.countIn.store (juce::jmax (0.0, left), std::memory_order_relaxed);
+
+        if (left <= 0.0)
+            transport.playing.store (true, std::memory_order_relaxed);
+    }
 
     for (int done = 0; done < numSamples;)
     {
