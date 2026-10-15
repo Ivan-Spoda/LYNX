@@ -5,6 +5,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/StereoFx.h"
 
 #include "core/Biquad.h"
 
@@ -2133,6 +2134,17 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's controls over their ranges (core/StereoFx.h); defaults = a new FL instance
+    static const EffectInfo stereoShaperInfo { "Stereo Shaper", { { "R > L", 0.5f }, { "Left", 0.75f }, { "Right", 0.75f }, { "L > R", 0.5f },
+                                                                 { "Delay", 0.5f }, { "Phase", 0.5f }, { "Effects post", 0.0f },
+                                                                 { "Difference", 0.0f } } };
+    static const EffectInfo stereoEnhancerInfo { "Stereo Enhancer", { { "Pan", 0.5f }, { "Volume", 0.8f }, { "Separation", 0.5f },
+                                                                     { "Phase offset", 0.5f }, { "Effects post", 1.0f }, { "Invert", 0.0f } } };
+    static const EffectInfo transientProcessorInfo { "Transient Processor", { { "Attack", 0.5f }, { "Drive", 0.0f }, { "Release", 0.5f },
+                                                                             { "Gain", 0.5f }, { "Attack shape", 0.5f }, { "Release shape", 0.5f },
+                                                                             { "Split freq.", 0.5f }, { "Split balance", 0.5f }, { "On", 1.0f } } };
+    static const EffectInfo spreaderInfo { "Spreader", { { "Width", 0.5f }, { "Separation", 0.5f }, { "Low bypass", 9990.0f / 999000.0f },
+                                                         { "Mono bass", 0.0f }, { "Enable", 1.0f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2228,6 +2240,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::stereoShaper: return stereoShaperInfo;
+        case EffectKind::stereoEnhancer: return stereoEnhancerInfo;
+        case EffectKind::transientProcessor: return transientProcessorInfo;
+        case EffectKind::spreader: return spreaderInfo;
     }
     return eq;
 }
@@ -2494,6 +2510,18 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
+        case EffectKind::stereoShaper:
+            return stereofx::stereoShaperParamText (param, v);
+
+        case EffectKind::stereoEnhancer:
+            return stereofx::stereoEnhancerParamText (param, v);
+
+        case EffectKind::transientProcessor:
+            return stereofx::transientProcessorParamText (param, v);
+
+        case EffectKind::spreader:
+            return stereofx::spreaderParamText (param, v);
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -2561,6 +2589,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::stereoShaper: return stereofx::makeStereoShaper();
+        case EffectKind::stereoEnhancer: return stereofx::makeStereoEnhancer();
+        case EffectKind::transientProcessor: return stereofx::makeTransientProcessor();
+        case EffectKind::spreader: return stereofx::makeSpreader();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

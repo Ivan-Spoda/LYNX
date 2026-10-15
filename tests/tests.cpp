@@ -39,6 +39,7 @@
 #include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/StereoFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -601,10 +602,10 @@ TEST (patcher_branch_heads_follow_rea)
     CHECK (high.valid && std::abs (high.gain - std::pow (10.0f, -6.0f / 20.0f)) < 1e-4f);
     CHECK (! lynx::patcherBranchHead ("Frequency Splitter", split, 7).valid);
 
-    // Stereo Shaper with identity matrix: the difference (destination 4) is zero
+    // Stereo Shaper: the difference destination (4) is the exact engine with its difference output (REA_rodada54)
     const auto shaper = words ({ 3, 0, 12800, 12800, 0, 0, 0, 4, 0 });
     const auto diff = lynx::patcherBranchHead ("Fruity Stereo Shaper", shaper, 4);
-    CHECK (diff.valid && diff.slot && std::abs (diff.slot->params[2] - 0.5f) < 1e-6f && std::abs (diff.slot->params[5] - 0.5f) < 1e-6f);
+    CHECK (diff.valid && diff.slot && diff.slot->kind == lynx::EffectKind::stereoShaper && diff.slot->params[7] == 1.0f);
     CHECK (! lynx::patcherBranchHead ("Fruity Stereo Shaper", shaper, 2).valid);
 }
 
@@ -3113,16 +3114,22 @@ TEST (utility_effect_and_fl_stereo_tools)
     CHECK (std::abs (runEffectOnSine (lynx::EffectKind::utility, [] (auto&) {}, 440.0, 0.5f) - 0.5f) < 0.001f);
     CHECK (runEffectOnSine (lynx::EffectKind::utility, [] (auto& s) { s.params[1] = 1.0f; }, 440.0, 0.5f) < 0.001f);
 
-    // Stereo Shaper in "mono": each output = 0.5 L + 0.5 R
+    // Stereo Shaper at half the knob range (6400): each gain = (3^0.5 − 1)/2 (FL's knob law, REA_rodada54 §2.2)
     std::vector<std::uint8_t> blob (36, 0);
     auto put = [&] (std::size_t off, std::int32_t v) { std::memcpy (blob.data() + off, &v, 4); };
     put (4, 6400); put (8, 6400); put (12, 6400); put (16, 6400);
     const auto slot = lynx::effectFromFl ("Fruity Stereo Shaper", blob);
-    CHECK (slot && slot->kind == lynx::EffectKind::utility);
-    auto fx = lynx::makeEffect (lynx::EffectKind::utility);
+    CHECK (slot && slot->kind == lynx::EffectKind::stereoShaper);
+    auto shaperFx = lynx::makeEffect (*slot);
+    shaperFx->prepare (44100.0);
+    float zl = 0.0f, zr = 0.0f;
+    shaperFx->process (&zl, &zr, 0, slot->params, 120.0); // takes the controls
+    shaperFx->reset(); // FL's Flush: the gains jump to their targets
     float l = 1.0f, r = 0.0f;
-    fx->process (&l, &r, 1, slot->params, 120.0);
-    CHECK (std::abs (l - 0.5f) < 1e-4f && std::abs (r - 0.5f) < 1e-4f);
+    shaperFx->process (&l, &r, 1, slot->params, 120.0);
+    const auto half = (float) ((std::sqrt (3.0) - 1.0) / 2.0);
+    CHECK (std::abs (l - half) < 1e-4f && std::abs (r - half) < 1e-4f);
+    auto fx = lynx::makeEffect (lynx::EffectKind::utility);
 
     // Balance: volume 256 = 0 dB, pan −128 = fully left
     std::vector<std::uint8_t> bal (8, 0);
@@ -7412,6 +7419,99 @@ TEST (harmless_rack)
         masterMid[0x1fc] = 1; // "Master Mid mode": not decoded
         CHECK (lynx::hlfx::makeMaximusPreset (masterMid) == nullptr);
     }
+}
+
+// REA_rodada54: input of the stereo-effect goldens (the installation DLLs' output for the same input, EXEC)
+static std::pair<std::vector<float>, std::vector<float>> stereoFxInput()
+{
+    std::vector<float> l (4096), r (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        l[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        r[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+    }
+    return { l, r };
+}
+
+static std::vector<std::uint8_t> i32State (std::initializer_list<int> words)
+{
+    std::vector<std::uint8_t> d;
+    for (const auto w : words)
+        for (int b = 0; b < 4; ++b)
+            d.push_back ((std::uint8_t) ((std::uint32_t) w >> (8 * b)));
+    return d;
+}
+
+static void checkStereoFx (lynx::EffectSlot slot, const std::vector<std::tuple<int, float, float>>& golden)
+{
+    auto [l, r] = stereoFxInput();
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (44100.0);
+    for (int s = 0; s < 4096; s += 512)
+        fx->process (l.data() + s, r.data() + s, 512, slot.params, 120.0);
+    for (const auto& [i, gl, gr] : golden)
+        CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
+}
+
+TEST (stereo_shaper_engine)
+{
+    // Fruity Stereo Shaper (REA_rodada54 §2): matrix with cross terms, delay on R, all-pass on L, effects post / pre
+    auto slot = lynx::effectFromFl ("Fruity Stereo Shaper", i32State ({ 0, -3050, 12800, 9000, 2000, 1408, -2496, 0, 1 }));
+    CHECK (slot && slot->kind == lynx::EffectKind::stereoShaper);
+    if (slot)
+        checkStereoFx (*slot, { { 100, 0.0438031591f, 0.0f }, { 1000, 1.11109531f, -0.781641483f }, { 2047, -0.73191303f, 0.483852893f },
+                                { 3000, 0.950346172f, -0.769737065f }, { 4095, 0.251555145f, 0.153306276f } });
+    slot = lynx::effectFromFl ("Fruity Stereo Shaper", i32State ({ 0, 0, 12800, 12800, 0, -2656, 2184, 0, 0 }));
+    CHECK (slot.has_value());
+    if (slot)
+        checkStereoFx (*slot, { { 100, 0.0f, -0.104282036f }, { 1000, 0.0f, 1.08441091f }, { 2047, 0.463494211f, -0.93754214f },
+                                { 3000, -1.49942112f, 0.820726812f }, { 4095, -1.31784308f, -0.057449434f } });
+    // controls round-trip through the slot parameters; the Patcher's difference bus is the same engine flagged
+    const auto st = lynx::stereofx::parseStereoShaper (i32State ({ 0, -3050, 12800, 9000, 2000, 1408, -2496, 2, 1 }));
+    CHECK (st.has_value());
+    if (st)
+    {
+        lynx::EffectParams p {};
+        lynx::stereofx::stereoShaperToParams (*st, p.data());
+        const auto back = lynx::stereofx::stereoShaperFromParams (p.data());
+        CHECK (back.rightToLeft == -3050 && back.left == 12800 && back.right == 9000 && back.leftToRight == 2000 && back.delay == 1408
+               && back.phase == -2496 && back.post == 1);
+        const auto head = lynx::patcherBranchHead ("Fruity Stereo Shaper", i32State ({ 0, -3050, 12800, 9000, 2000, 1408, -2496, 2, 1 }), 2);
+        CHECK (head.valid && head.slot && head.slot->kind == lynx::EffectKind::stereoShaper && head.slot->params[7] == 1.0f);
+    }
+    CHECK (! lynx::stereofx::parseStereoShaper ({ 1, 2, 3 }));
+}
+
+TEST (stereo_enhancer_transient_spreader_engines)
+{
+    // REA_rodada54 §3–5: own states against the installation's DLLs (goldens = the DLL's output, EXEC)
+    auto se = lynx::effectFromFl ("Fruity Stereo Enhancer", i32State ({ -18, 300, -54, -148, 1, 1 }));
+    CHECK (se && se->kind == lynx::EffectKind::stereoEnhancer);
+    if (se)
+        checkStereoFx (*se, { { 100, 0.0f, 0.00309863733f }, { 1000, 0.0101111531f, -0.110266283f }, { 2047, -0.688752949f, -1.93998075f },
+                              { 3000, -0.283846498f, -0.739818454f }, { 4095, 0.191147864f, 2.70425582f } });
+    auto tpState = i32State ({ 1, 138, 116, 64, 90, 2, 0, 70, 100, 1 });
+    tpState.push_back (5);
+    for (const auto w : i32State ({ 0, 50 }))
+        tpState.push_back (w);
+    auto tp = lynx::effectFromFl ("Transient Processor", tpState);
+    CHECK (tp && tp->kind == lynx::EffectKind::transientProcessor);
+    if (tp)
+        checkStereoFx (*tp, { { 100, 0.0568947345f, 0.124077775f }, { 1000, -0.326598823f, -0.193128616f }, { 2047, 0.612462878f, -0.0517415144f },
+                              { 3000, -0.535302937f, -0.446303189f }, { 4095, -0.634670973f, 0.316044629f } });
+    auto spState = i32State ({ 0x10003, 7861, 3215, 106000, 1, 1, 0 });
+    spState.push_back (1);
+    spState.push_back (1);
+    auto sp = lynx::effectFromFl ("Spreader", spState);
+    CHECK (sp && sp->kind == lynx::EffectKind::spreader);
+    if (sp)
+        checkStereoFx (*sp, { { 100, 0.11841587f, -0.0958916694f }, { 1000, 1.40852344f, 0.087452054f }, { 2047, 1.07267976f, -2.02493715f },
+                              { 3000, -0.781082511f, 0.811192274f }, { 4095, -1.80673707f, 0.89967829f } });
+    // unknown layouts keep the earlier fallback; FL automation maps one to one
+    CHECK (! lynx::stereofx::parseSpreader (i32State ({ 0x10001, 1, 2, 3, 4, 5 })));
+    CHECK (! lynx::stereofx::parseTransientProcessor (i32State ({ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9 })));
+    const auto map = lynx::effectParamFromFl ("Transient Processor", 6);
+    CHECK (map && map->param == 6 && map->convert (0.25f) == 0.25f);
 }
 
 TEST (maximus_engine)

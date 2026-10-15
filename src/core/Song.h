@@ -291,7 +291,11 @@ enum class EffectKind : std::uint8_t
     squeeze,      // FL's Fruity Squeeze, exact (REA_rodada29 §2): quantiser, periodic gate, filter; raw values / max
     vintagePhaser, // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
     vocodex,      // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
-    maximus       // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
+    maximus,      // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
+    stereoShaper, // FL's Fruity Stereo Shaper, exact (REA_rodada54, core/StereoFx.h): FL's 8 controls / range + difference flag
+    stereoEnhancer, // FL's Fruity Stereo Enhancer, exact (REA_rodada54, core/StereoFx.h): FL's 6 controls / range
+    transientProcessor, // FL's Transient Processor, exact (REA_rodada54, core/StereoFx.h): FL's 9 controls / range
+    spreader      // FL's Spreader, exact (REA_rodada54, core/StereoFx.h): FL's 5 controls / range
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
