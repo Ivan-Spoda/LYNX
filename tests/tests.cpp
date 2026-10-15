@@ -36,6 +36,7 @@
 #include "core/Morphine.h"
 #include "core/Ogun.h"
 #include "core/Dx10.h"
+#include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/LiveEventQueue.h"
@@ -773,6 +774,7 @@ TEST (flp_real_files)
     int poizone = 0, poizoneUsable = 0, poizoneKind = 0, poizoneSounding = 0, poizoneGoldens = 0;
     int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
+    int kepler = 0, keplerUsable = 0, keplerKind = 0, keplerSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -833,6 +835,26 @@ TEST (flp_real_files)
                     if (c.pluginName == "Morphine")
                         ++morphine, morphineUsable += lynx::morphineStateUsable (c.pluginState) ? 1 : 0;
                 }
+                // Kepler: every state in the demos plays on the exact engine (REA_rodada46) when the engine DLL is installed
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Kepler")
+                    {
+                        ++kepler;
+                        keplerUsable += lynx::keplerStateUsable (c.pluginState) ? 1 : 0;
+                    }
+                for (const auto& c : full.channels)
+                    if (c.instrument == lynx::InstrumentKind::kepler)
+                    {
+                        ++keplerKind;
+                        const auto y = lynx::kepler::renderReference (c.pluginState, c.samplePath, { { 0, 60, 1.0, 0.0, 0.0, 6000 }, { 2000, 67, 0.6, 0.0, 0.0, 8000 } },
+                                                                      44100.0, 11025);
+                        double e = 0.0;
+                        bool finite = ! y.empty();
+                        for (auto v : y)
+                            finite = finite && std::isfinite (v), e += (double) v * v;
+                        CHECK (finite);
+                        keplerSounding += e > 1e-6 ? 1 : 0;
+                    }
                 const auto file = entry.path().filename().string();
                 for (const auto& c : full.channels)
                 {
@@ -1617,6 +1639,8 @@ TEST (flp_real_files)
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
     CHECK (dx10Usable == dx10 && dx10 >= 12 && dx10Kind == dx10 && dx10Sounding == dx10Kind);
+    std::printf ("  Kepler: %d channels, %d states usable by the engine, %d imported as Kepler (%d sounding)\n", kepler, keplerUsable, keplerKind, keplerSounding);
+    CHECK (keplerUsable == kepler && kepler >= 4 && keplerSounding == keplerKind && (keplerKind == 0 || keplerKind == kepler));
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
     std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
@@ -7037,6 +7061,140 @@ static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, 
         i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
     }
     return d;
+}
+
+// A "Kepler-1" state written from scratch (REA_rodada46 §1.1 layout, version 2): the default panel values
+std::vector<std::uint8_t> keplerTestState()
+{
+    const float panel[34] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0.5f, 0.5f, 0, 0, 0, 0.5f, 0.5f };
+    std::vector<std::uint8_t> st;
+    auto u32 = [&] (std::uint32_t v) { for (int i = 0; i < 4; ++i) st.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto f32 = [&] (float f) { std::uint32_t v; std::memcpy (&v, &f, 4); u32 (v); };
+    u32 (0), u32 (0), u32 (0), u32 (9);
+    for (char c : std::string ("Kepler-1"))
+        st.push_back ((std::uint8_t) c);
+    st.push_back (0);
+    u32 (2), u32 (34);
+    for (auto f : panel)
+        f32 (f);
+    st.push_back (0);
+    f32 (1.0f), f32 (0.5f);
+    const auto size = (std::uint32_t) st.size() - 12;
+    std::memcpy (st.data() + 4, &size, 4);
+    return st;
+}
+
+std::string keplerDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Kepler" / "engine_x64.dll").string();
+}
+
+TEST (kepler_engine)
+{
+    const auto st = keplerTestState();
+    CHECK (st.size() == 178 && lynx::keplerStateUsable (st));
+    CHECK (lynx::keplerPanelOffset (st, 19) == 0x21 + 4 * 19 && lynx::keplerPanelOffset (st, 34) == -1);
+    auto broken = st;
+    broken[17] = 'X'; // not "Kepler-1"
+    CHECK (! lynx::keplerStateUsable (broken) && lynx::keplerPanelOffset (broken, 0) == -1);
+    auto v3 = st;
+    v3[0x19] = 3; // version 3 needs the gate / noise / oversampling bytes
+    CHECK (! lynx::keplerStateUsable (v3));
+    const auto dll = keplerDll();
+    if (dll.empty() || ! lynx::keplerDllUsable (dll))
+        return; // no FL installation (the engine needs the user's own DLL tables)
+    // against FL's engine DLL (EXEC, REA_rodada46 §6): three notes, 44.1 kHz, host blocks of 512 — bit-exact
+    const std::vector<lynx::kepler::RefNote> notes { { 0, 60, 1.0, 0.0, 0.0, 20000 }, { 8000, 67, 0.6, 0.0, 0.0, 26000 }, { 16000, 55, 0.95, 0.0, 0.0, 30000 } };
+    const auto y = lynx::kepler::renderReference (st, dll, notes, 44100.0, 39690);
+    CHECK (y.size() == 2 * 39690);
+    if (y.size() != 2 * 39690)
+        return;
+    double el = 0.0, er = 0.0;
+    for (std::size_t i = 0; i < y.size(); i += 2)
+        el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+    std::printf ("  Kepler default patch: energy %.9g %.9g (FL's DLL 250.641268)\n", el, er);
+    CHECK (std::abs (el - 250.641268) < 1e-6 && std::abs (er - 250.641268) < 1e-6);
+    const std::tuple<int, float, float> golden[] { { 5000, 0.0467273332f, 0.0467273332f }, { 12000, -0.119412214f, -0.119412214f },
+                                                   { 25000, 0.0855825394f, 0.0855825394f }, { 35000, -3.34166579e-08f, -3.34166579e-08f } };
+    for (const auto& [i, l, r] : golden)
+        CHECK (y[2 * (std::size_t) i] == l && y[2 * (std::size_t) i + 1] == r);
+
+    // the instrument: FL's wrapper velocity, channel volume as an output gain, idle after the release
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::kepler;
+    c.pluginState = st;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::kepler);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (60, 0.8f);
+    double e = 0.0;
+    bool finite = true;
+    for (int b = 0; b < 8; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+        for (int i = 0; i < 4096; ++i)
+            finite = finite && std::isfinite (l[(std::size_t) i]) && std::isfinite (r[(std::size_t) i]), e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        if (b == 3)
+            inst->noteOff (60);
+    }
+    CHECK (finite && e > 1.0);
+    for (int b = 0; b < 40; ++b)
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    CHECK (inst->idle());
+}
+
+TEST (kepler_demo_channels)
+{
+    // every Kepler channel of FL's demo projects on LYNX's engine against FL's engine DLL (EXEC fingerprints, REA_rodada46 §6;
+    // the engine differs from the DLL by −127 dB or less on these, from the DLL library's pow rounding)
+    const auto dll = keplerDll();
+    if (dll.empty() || ! lynx::keplerDllUsable (dll))
+        return;
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; const char* channel; std::size_t stateSize; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", "Pads - Kepler", 181, 2595.34411, 1181.70052, { { 5000, 0.258449465f, 0.284368932f }, { 12000, -0.0648983642f, 0.312173635f }, { 25000, -0.271028787f, 0.103852645f }, { 35000, -0.00873807631f, -0.00636588456f } } },
+        { "Demo songs/Purps On The Beat Feat Luclover - Stroll Up.flp", "Kepler", 189, 2.77173241, 1.36643586, { { 5000, 0.00653714081f, 0.00885556825f }, { 12000, 0.0316556357f, 0.0255686305f }, { 25000, -0.00359999924f, -0.0027268643f }, { 35000, 3.38630743e-05f, 3.35237855e-05f } } },
+        { "Demo songs/Sid De La Cruz - Secret Agent Rendezvous.flp", "AceBass", 181, 491.893665, 813.858274, { { 5000, 0.00933594909f, 0.0551614426f }, { 12000, 0.11930909f, -0.387893438f }, { 25000, -0.0520403236f, -0.131727993f }, { 35000, 2.78028492e-05f, 2.75182774e-05f } } },
+        { "Demo songs/Sid De La Cruz - Secret Agent Rendezvous.flp", "Badious", 181, 19.0406926, 20.1997196, { { 5000, 0.00332317385f, 0.00785329007f }, { 12000, 0.0234184917f, -0.0034834384f }, { 25000, -0.0167671479f, -0.0142839653f }, { 35000, -0.0352748372f, -0.00481338287f } } },
+    };
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / "Demo projects" / g.file, std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        if (bytes.empty())
+            continue;
+        const flp::Channel* ch = nullptr;
+        const auto project = flp::parseProject (bytes);
+        for (const auto& c : project.channels)
+            if (c.pluginName == "Kepler" && c.name == g.channel)
+                ch = &c;
+        CHECK (ch != nullptr);
+        if (ch == nullptr)
+            continue;
+        CHECK (ch->pluginState.size() == g.stateSize && lynx::keplerStateUsable (ch->pluginState));
+        const auto y = lynx::kepler::renderReference (ch->pluginState, dll, { { 0, 60, 1.0, 0.0, 0.0, 20000 }, { 8000, 67, 0.6, 0.0, 0.0, 26000 },
+                                                                              { 16000, 55, 0.95, 0.0, 0.0, 30000 } }, 44100.0, 39690);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+        if (! ok)
+            std::printf ("  Kepler %s / %s differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.file, g.channel, el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Kepler: %d demo channels checked against FL's engine DLL\n", checked);
+    CHECK (checked == (int) std::size (goldens));
 }
 
 TEST (ogun_demo_channels)
