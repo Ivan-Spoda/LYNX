@@ -341,7 +341,7 @@ both channels, in dB relative to the DLL's peak.
 | 4 demo channels, 30 s, 30 notes | −126.4 … −131.4 dB (no drift) |
 | demo 0/2 at 22.05/48/96 kHz | −124.2 … −132.7 dB |
 | synthetic: Hold, LFO retrig phase, LFO trig + LFOs Trigger, arp down 4 oct, arp synced at 90/125/140 BPM, slow envelopes + all oscillators + chorus I+II, same-key retrigger | −125.4 … −132.6 dB |
-| 277 presets + 6 demo/test states, 4 notes, 2 s | 273 of 283 within −99 dB (median −130.6 dB); the 10 others all have **Resonance = 1** (self-oscillating ladder; 22 presets have it, the other 12 stay within −99 dB): the ulp-level differences of §6.2 grow to −79 … −1 dB while the self-oscillation rings, then fall back to about −130 dB |
+| 277 presets + 6 demo/test states, 4 notes, 2 s | 8 bit-exact, 273 of 283 within −99 dB (median −130.6 dB); the 10 others all have **Resonance = 1** (self-oscillating ladder; 22 presets have it, the other 12 stay within −99 dB): the ulp-level differences of §6.2 grow to −79 … −1 dB while the self-oscillation rings, then fall back to about −130 dB |
 
 ### 6.2 Remaining differences
 
@@ -376,6 +376,8 @@ Implemented in this round (`src/core/Kepler.{h,cpp}`, `InstrumentKind::kepler`):
   `kepler_demo_channels` (4 demo channels against DLL fingerprints), import counts in the demo scan; the channel
   settings panel edits 15 panel floats inside the state (the voices restart).
 
+Cost: one instance renders 10 s of a 3-note chord at 44.1 kHz in about 0.8 s on the analysis machine (8 voices at 2×
+always running; the `FENV_ACCESS` semantics needed for the rounding mode cost little once the powers of two use `exp2`).
 The engine is built off the audio thread (on configure / sample-rate change) and swapped in; a channel counts as idle
 after a quarter of a second of silence (every voice's amplitude 0), so the chorus and filters ring out.
 Differences by design: LYNX skips idle channels, so the free-running oscillators/LFO pause between notes (FL's run
