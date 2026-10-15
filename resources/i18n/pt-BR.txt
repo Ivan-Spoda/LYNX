@@ -702,3 +702,21 @@ countries: br
 "Docks back with the button on the right" = "Volta para a janela principal com o botão à direita"
 "Drag to move (Alt: no snapping), double-click to maximize" = "Arraste para mover (Alt: sem encaixe), duplo clique maximiza"
 "F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 Browser   F9 Mixer" = "F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 Browser   F9 Mixer"
+
+# --- Start-up: splash screen and sound
+"Starting the audio engine..." = "Iniciando o motor de áudio..."
+"Loading the workspace..." = "Carregando a área de trabalho..."
+"Digital audio workstation" = "Estação de trabalho de áudio digital"
+"Version {0}" = "Versão {0}"
+"Show the splash screen at startup" = "Mostrar a tela de abertura ao iniciar"
+"Play the startup sound" = "Tocar o som de abertura"
+
+# --- Layout: main toolbar and window title bars
+"Plugin picker: add an instrument or plugin as a new channel" = "Seletor de plugins: adiciona um instrumento ou plugin como novo canal"
+"Recording options: what to record" = "Opções de gravação: o que gravar"
+"Swing of the Channel Rack (all channels)" = "Swing do Channel Rack (todos os canais)"
+"BAR : BEAT : STEP" = "COMP : TEMPO : STEP"
+"Window options: detach, maximize, close and this panel's own settings" = "Opções da janela: destacar, maximizar, fechar e os ajustes deste painel"
+"Detached (own window)" = "Destacada (janela própria)"
+"Maximized" = "Maximizada"
+"Close" = "Fechar"

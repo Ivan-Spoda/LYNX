@@ -68,6 +68,9 @@ public:
 
     void updateSize();
 
+    // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
+    void showAddChannelMenu (int insertAt = -1);
+
     static constexpr int rowHeight = 30;
     static constexpr int muteWidth = 26;
     static constexpr int knobWidth = 28;
@@ -92,7 +95,6 @@ private:
     bool cellHasNote (int channel, int step) const;
     void applyPaint (const juce::MouseEvent& e);
     void showChannelMenu (int channel);
-    void showAddChannelMenu (int insertAt = -1);
     void addInstrumentItems (juce::PopupMenu& menu, int insertAt);
     void chooseSample (int channel); // channel < 0 = new channel
     void assignSample (int channel, const juce::File& file);
