@@ -50,12 +50,15 @@ add_library(lynx_core STATIC
     src/core/HarmlessFx.cpp
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
+    src/core/Reeverb2.cpp
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
     src/core/FruityShapers.cpp
+    src/core/FruityDelay.cpp
+    src/core/StereoFx.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)

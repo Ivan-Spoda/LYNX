@@ -65,9 +65,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
-  their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2,
+  their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
   Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
+  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
+  Spreader, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
@@ -307,6 +308,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
   at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
   bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
+- **Fruity Reeverb 2:** FL's exact engine (`core/Reeverb2`, REA round 49) — the "full" process of FL's shared plate
+  reverb (input filters and diffusers, early-reflection line, predelay, figure-of-eight tank with a sine-modulated
+  delay in each half, bass multiplier/crossover shelf, damping), FL's level laws, separation matrix, Mid/Side input,
+  tempo-synced predelay and per-block gain ramps; FL's 15 controls stay editable. Bit-identical to the installation's
+  DLL on all 293 distinct installation states (44.1/48/96/22.05 kHz, blocks 64–4096) and on synthetic states and
+  automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
+  (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
+  states and synthetic/automation cases.
 - **Fruity WaveShaper and Fruity Soft Clipper:** FL's exact engines as mixer effects (`core/FruityShapers`, REA round
   51). WaveShaper: the curve from FL's saved map (load-time normalisation, all 13 segment modes, FL's incremental
   evaluator, 16-bit table), pre/mix/post laws, nearest and interpolated x87 kernels (the latter rounding toward zero),
@@ -314,6 +323,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
   and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
   (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
+- **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
+  FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
+  normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
+  synced (1/192 beat) and unsynced time laws (cubic 1 ms…1 s), time smoothing glides or keep-pitch crossfades, LFO
+  modulation (the engine's FMA sine), diffusion all-passes, 10 Hz feedback high-pass, state-variable filter with
+  cutoff LFO, limit/saturate distortion, rate/bit reduction, colour, stereo spread, the three delay models and "off".
+  Bit-identical to the installation's DLLs on every installation state (60 + 85) at two tempos, at 48 kHz (one
+  Delay 3 state at −151 dB) and on 110 random Delay 3 states incl. tempo changes; LYNX starts them settled.
+- **Stereo Shaper, Stereo Enhancer, Transient Processor, Spreader:** FL's exact engines (`core/StereoFx`, REA round
+  54) — Shaper: (3^x − 1)/2 matrix law, delay, all-pass dephasing, pre/post order, the In/Out difference for Patcher
+  buses; Enhancer: pan/volume/separation matrix, phase-offset delay, inversion; Transient Processor: its split,
+  detector, smoothing every 8 samples, saturator and 1.5 s silence bypass; Spreader: the Faust-built engine of
+  `Shared/ildsp_x64.dll` (TPT split, crossfading width delay, 15 kHz filters, mono bass). Bit-identical to the DLLs
+  on every distinct installation state (104 / 30 / 57 / 25) at 44.1, 48, 96 and 22.05 kHz.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -411,6 +434,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   others −136…−145 dB; map segments with tension ≠ 0 are read as straight lines (no demo uses them).
 - Maximus: 4 of the 100 demo states use the v15 linear-phase band split (Frequency Splitter's engine) or Master Mid
   mode is set — those keep the approximation (REA round 40 §8).
+- Stereo Enhancer: a delay set before a sample-rate change keeps its old length in FL; LYNX uses the current rate (FL's
+  load order not confirmed; identical at 44.1 kHz). Stereo Shaper / Enhancer ramp their gains per host call; LYNX
+  splits blocks at 512 frames (FL's block size for them not confirmed). Spreader: FL's engine diverges to NaN at
+  rates where its 15 kHz section passes Nyquist (22.05 kHz); LYNX outputs 0 there (REA round 54 §6–7).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)

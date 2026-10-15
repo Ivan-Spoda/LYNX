@@ -149,6 +149,14 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityCompressor: return "fruityCompressor";
         case EffectKind::fruityWaveShaper: return "fruityWaveShaper";
         case EffectKind::fruitySoftClipper: return "fruitySoftClipper";
+        case EffectKind::reeverb2: return "reeverb2";
+        case EffectKind::reeverb1: return "reeverb1";
+        case EffectKind::fruityDelay2: return "fruityDelay2";
+        case EffectKind::fruityDelay3: return "fruityDelay3";
+        case EffectKind::stereoShaper: return "stereoShaper";
+        case EffectKind::stereoEnhancer: return "stereoEnhancer";
+        case EffectKind::transientProcessor: return "transientProcessor";
+        case EffectKind::spreader: return "spreader";
     }
     return "eq";
 }
@@ -290,7 +298,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
 std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
-                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper })
+                    EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper, EffectKind::reeverb2, EffectKind::reeverb1, EffectKind::fruityDelay2, EffectKind::fruityDelay3,
+                    EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader })
         if (id == effectId (k))
             return k;
 
