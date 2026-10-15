@@ -1386,8 +1386,7 @@ public:
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1505,8 +1504,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
