@@ -73,6 +73,7 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Harmless, MiniSynth, DX10, Fruit Kick (rounds 10, 21, 24)
 - [x] Sytrus and Harmor with exact timbres on the harmonics oscillator (rounds 11, 18, 19, 23, 24)
 - [x] GMS, Ogun/Autogun, Sakura, DrumSynth Live (round 12), Kepler, Wave Traveller (round 13)
+- [x] GMS and Morphine on their exact engines, effects included (round 39)
 - [x] Gross Beat, Frequency Splitter, Effector (round 14); Effector rebuilt with all 12 algorithms (rounds 18–19)
 - [x] Controller links: Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface
 - [x] Patcher graphs of any shape (round 20)

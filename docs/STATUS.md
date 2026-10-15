@@ -83,8 +83,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   the 89 demo channels it runs, 82 of 99 demo channels within −60 dB of FL's DLL with the whole rack on); Ogun on its
   inverse-FFT engine (REA round 37: the whole voice, articulators and plugin effects from the raw state; within float
   rounding of the reference model — which is within −60 dB of FL's DLL on 20 of 20 demo channels — on all 20 demo
-  channels and 55 synthetic cases); GMS, Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
-  Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
+  models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
+  9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
+  installation); Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in
+  synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -199,7 +202,26 @@ accordingly. Highlights of what is **confirmed and applied**:
   Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
   **BassDrum:** Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
-- **Morphine:** average spectrum of the generators on the harmonics oscillator.
+- **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
+  FinalLevels tables, chunks of ≤ 512 samples, voice kill), the 99-voice engine with the MIDI matrix, 512
+  band-limited tables per wave built from `GMS\Synth Waves\<name>.wav` of the user's installation, dithered
+  oscillators with sync/FM/AM, unison, noise, slide, both LFOs (song-locked when synced and the transport plays), the
+  4-iteration ladder with its 65 536-entry table, the ten effect slots (distortion, crusher, flanger, phaser, LP, HP,
+  tape delay, plate reverb, panner, trancer) + 5-band output EQ and the master level/pan — bit-identical to
+  `rea-work/r39/py/gmsmodel.py` on the 10 demo/render-test channels (voice and full chain, 44.1/48 kHz) and 33
+  synthetic cases. Not reproducible by design: GMS's random generator is process-global in FL (shared by every
+  instance), so noise, dither and the random start phases of fresh voices differ from any given FL render (LYNX starts
+  one generator per instance like a freshly created plugin). FL's max-polyphony value at channel creation is not
+  confirmed (LYNX uses 0 → 99 voices). Without the wave files the importer keeps the 3-oscillator approximation.
+- **Morphine:** its own instrument (`core/Morphine.cpp`, REA round 39 §2): the whole Mor0 state tree, 32 voices
+  (poly/stealing, mono legato with return to the nearest held key, 4 glide modes), control blocks of int(0.0029·fs),
+  Eg1–4 with loops and the 12-slot matrix (incl. the Eg-amount destinations), master ADSR, 4 generators (keyboard
+  zones, frame player, PWM) through the morph line into the 128-partial coupled-form bank with its Catmull-Rom
+  envelope, the noise sample player (loop modes, filter) and the effects overdrive → chorus → delay → reverb → EQ —
+  bit-identical to `rea-work/r39/py/mormodel.py` on the 7 demo channels (voice and full, 44.1/48 kHz) and 22
+  synthetic cases. Not modelled (unused by FL's data): release loops, unison (hidden parameters). LYNX creates the
+  instance at its playing rate, so the rate-change quirks of REA round 39 §2.13 do not apply; FL's max-polyphony value
+  at creation is not confirmed (LYNX uses 0 → 32 voices). A missing noise sample leaves the noise silent (reported).
 - **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
   octaves), 7 (all-pass) and 11 (Mango); pattern envelopes on volume (rhythmic envelope effect, in beats, looped,
   song-locked, tension curves), pan LFO (auto-pan effect), cutoff and resonance envelope/LFO as live

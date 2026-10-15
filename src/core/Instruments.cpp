@@ -1,7 +1,9 @@
 #include "core/Instruments.h"
 #include "core/FlSynths.h"
 #include "core/DrumSynthLive.h"
+#include "core/Gms.h"
 #include "core/Harmless.h"
+#include "core/Morphine.h"
 #include "core/SytrusEngine.h"
 #include "core/Harmor.h"
 #include "core/Ogun.h"
@@ -199,6 +201,8 @@ private:
             case InstrumentKind::harmless:
             case InstrumentKind::sytrus:
             case InstrumentKind::harmor:
+            case InstrumentKind::gms:
+            case InstrumentKind::morphine:
             case InstrumentKind::ogun:
                 break;
         }
@@ -2001,6 +2005,11 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
     if (kind == InstrumentKind::harmor)
         return makeHarmorInstrument();
 
+    if (kind == InstrumentKind::gms)
+        return makeGmsInstrument();
+
+    if (kind == InstrumentKind::morphine)
+        return makeMorphineInstrument();
     if (kind == InstrumentKind::ogun)
         return makeOgunInstrument();
 

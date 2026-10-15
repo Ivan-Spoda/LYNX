@@ -4,15 +4,14 @@
 
 ## Merged and published in this period
 - Exact FL engines: Sytrus (REA 31), Harmless + its effects rack (REA 32/36), Harmor + its effects rack (REA 34/38),
-  Vocodex (REA 35), Effector Reverb, Toxic filter envelope, Kepler LFO sync (REA 33).
+  Vocodex (REA 35), Effector Reverb, Toxic filter envelope, Kepler LFO sync (REA 33); after the migration Ogun (REA 37),
+  Maximus/Soundgoodizer (REA 40), GMS and Morphine (REA 39, bit-identical to the reference models).
 - UI: dark theme with red accent, EN/pt-BR, FL-style floating-panel desktop (Playlist background, Channel Rack pop-up,
   F5–F9), editor tools in the editors' title bars, global snap, note/clip operations, FL-style main toolbar, new icon
   set, splash screen with a synthesized start-up sound (`docs/WORKFLOW_FL.md` has the study, gap tables and layout notes).
 
-## Work in progress (pushed as `wip/*` branches — unverified, may not build)
-| Branch | What | Source of truth | State when stopped |
-|---|---|---|---|
-| `wip/gms-morphine` | Port GMS and Morphine engines | `REA_rodada39.md`, models `rea-work/r39/py/gmsmodel.py`, `mormodel.py` | just started (first file) |
+## Work in progress
+None: every `wip/*` branch of the migration (Ogun, Maximus, Workflow P2, GMS/Morphine) has been merged into `main`.
 
 Not started: REA round 41 (MiniSynth, DX10, Fruit Kick, BassDrum, then PoiZone/Toxic/Kepler full engines).
 
