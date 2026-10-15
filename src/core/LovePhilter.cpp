@@ -2684,13 +2684,17 @@ float valueFromRaw (int k, int raw) noexcept
 class PhilterEffect final : public Effect
 {
 public:
-    explicit PhilterEffect (const std::vector<std::uint8_t>& flState) : state (parse (flState))
+    explicit PhilterEffect (const EffectSlot& slot) : state (parse (slot.state)), last (slot.params)
     {
-        if (state)
+        if (! state)
+            return;
+        engine = std::make_unique<Engine> (state);
+        // controls edited in LYNX since the import (the state keeps FL's original values)
+        for (int i = 0; i < paramCount; ++i)
         {
-            engine = std::make_unique<Engine> (state);
-            for (int i = 0; i < paramCount; ++i)
-                raw[(std::size_t) i] = rawParam (*state, flIndexOf (i));
+            const int k = flIndexOf (i);
+            if (slot.params[(std::size_t) i] != valueFromRaw (k, rawParam (*state, k)))
+                engine->setParam (k, rawFromValue (k, slot.params[(std::size_t) i]));
         }
     }
 
@@ -2725,16 +2729,15 @@ public:
             render = ! render;
             engine->setRenderMode (render);
         }
+        // a control moved in LYNX (or automated): FL's raw value from the slot parameter; untouched controls keep the
+        // state's own raw values
         for (int i = 0; i < paramCount; ++i)
-        {
-            const int k = flIndexOf (i);
-            const auto v = rawFromValue (k, p[(std::size_t) i]);
-            if (v != raw[(std::size_t) i])
+            if (p[(std::size_t) i] != last[(std::size_t) i])
             {
-                raw[(std::size_t) i] = v;
-                engine->setParam (k, v);
+                last[(std::size_t) i] = p[(std::size_t) i];
+                const int k = flIndexOf (i);
+                engine->setParam (k, rawFromValue (k, p[(std::size_t) i]));
             }
-        }
         if (bpm > 0.0 && bpm != lastBpm)
         {
             lastBpm = bpm;
@@ -2779,7 +2782,7 @@ public:
 private:
     std::shared_ptr<const State> state;
     std::unique_ptr<Engine> engine;
-    std::array<int, paramCount> raw {};
+    EffectParams last {};
     std::vector<float> io;
     int sampleRate = 44100;
     bool render = false, playing = false;
@@ -2858,5 +2861,5 @@ std::optional<EffectSlot> slotFromFl (const std::vector<std::uint8_t>& flState)
     return slot;
 }
 
-std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<PhilterEffect> (slot.state); }
+std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<PhilterEffect> (slot); }
 } // namespace lynx::philter

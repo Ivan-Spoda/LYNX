@@ -386,13 +386,16 @@ float valueFromRaw (int i, int raw) noexcept
 class VocoderEffect final : public Effect
 {
 public:
-    explicit VocoderEffect (const std::vector<std::uint8_t>& flState)
+    explicit VocoderEffect (const EffectSlot& slot) : last (slot.params)
     {
-        if (auto s = parse (flState))
-        {
-            engine = std::make_unique<Engine> (*s);
-            raw = s->p;
-        }
+        const auto s = parse (slot.state);
+        if (! s)
+            return;
+        engine = std::make_unique<Engine> (*s);
+        // controls edited in LYNX since the import (the state keeps FL's original values)
+        for (int i = 0; i < paramCount; ++i)
+            if (slot.params[(std::size_t) i] != valueFromRaw (i, s->p[(std::size_t) i]))
+                engine->setParam (i, rawFromValue (i, slot.params[(std::size_t) i]));
     }
     void prepare (double sr) noexcept override
     {
@@ -411,15 +414,14 @@ public:
     {
         if (! engine || n <= 0)
             return;
+        // a control moved in LYNX (or automated): FL's raw value from the slot parameter; untouched controls keep the
+        // state's own raw values (even outside the control's range, as FL keeps them)
         for (int i = 0; i < paramCount; ++i)
-        {
-            const auto v = rawFromValue (i, p[(std::size_t) i]);
-            if (v != raw[(std::size_t) i])
+            if (p[(std::size_t) i] != last[(std::size_t) i])
             {
-                raw[(std::size_t) i] = v;
-                engine->setParam (i, v);
+                last[(std::size_t) i] = p[(std::size_t) i];
+                engine->setParam (i, rawFromValue (i, p[(std::size_t) i]));
             }
-        }
         if ((int) io.size() < 2 * n)
             io.resize ((std::size_t) (2 * n));
         for (int i = 0; i < n; ++i)
@@ -431,7 +433,7 @@ public:
 
 private:
     std::unique_ptr<Engine> engine;
-    std::array<int, paramCount> raw {};
+    EffectParams last {};
     std::vector<float> io;
 };
 } // namespace
@@ -485,5 +487,5 @@ std::string paramText (int param, float value01)
     return t;
 }
 
-std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<VocoderEffect> (slot.state); }
+std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<VocoderEffect> (slot); }
 } // namespace lynx::flvocoder

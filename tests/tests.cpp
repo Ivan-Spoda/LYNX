@@ -8684,6 +8684,49 @@ TEST (love_philter_engine)
     CHECK (lynx::philter::parse ({ 3, 0, 12, 0, 1, 2, 3, 4 }) == nullptr);
     CHECK (lynx::effectInfo (lynx::EffectKind::lovePhilter).params.size() == (std::size_t) lynx::philter::paramCount);
     CHECK (lynx::philter::paramText (5, 0.0f) == "pattern 1" && lynx::philter::paramText (8 + 3, 0.5f) == "centred");
+
+    // a control edited in LYNX is applied when the effect is built from the slot (the state keeps FL's value)
+    {
+        const auto stateA = hex (
+             "03000c00789cedda316ed44018c5f1cfd90b5050234a0e81702a1a6e4045c11d68e7005c00c40928e96810254590380225e552538471ec"
+             "d97c314c841e0259cfff91463bf66e7e3b9ac42fdf582e1151961e776abf1f314ce3b3a5d7f6e4fb8bf1b2b6693c5cf56118e6b79ed5fe"
+             "b2f6b7b53fadfd41ed8f1379378d9fd77e88a50d57c3c3f597dcd28ee3fcfaadbe9e8fcb24e272d56238fd4019a73e2c5f3074c1ebf732"
+             "745a8ee51507670bce99e89cbff9e5076eb9f8be8e378f9b7df3fcfae2dbba37afcb9c0b391b0eb16ec795ff657cfd6a6aefc7cf17178f"
+             "f2f9f6f9fafe8769342c7dfabe58e65e62db7f5338fb74fe4f96acafa5e3f8bbf3eb6b75eb1e75068eb3d3b241b95ef2ffc0d67ebc8bb8"
+             "b792b65e2ffc9bfa636a64068e9fc3de44f77a7b93adfc6e7170fec661afa17b64038eb34336e81ed980e3ec900dba4736e0383b6483ee"
+             "957aee61ed9fe27a4d63194ffd63fdccf44cc7f972fef42408cf6ce0e06c30a7b6711f93fba238387fee50c3e81e75038eb343dda07b64"
+             "038eb34336e81e7b0a1c67873d85ee910d38ce0ed9a07b64038eb34336e81ed980e3ec900dba57625ec3d65bcbc7799cd6b83f95ded478"
+             "d60267c70ef745758f1a06c7d9a186d13dea061c6787ba41f7c8061c67876cd03df61438ce0e7b0add231b709c1db241f7c8061c67876c"
+             "d03db201c7d9211b74afc4bc86adb7968ff338ad717f2abda9f1ac05ce8e1dee8bea1e350c8eb3430da37bd40d38ce0e7583ee910d38ce"
+             "0ed9a07bec29709c1df614ba4736e0383b6483ee910d38ce0ed9a07b64038eb34336e85e89790d5b6f2d1fe7715ae3fe547a53e3590b9c"
+             "1d3bdc17d53d6a181c67871a46f7a81b709c1dea06dd231b709c1db241f7d853e0383bec29748f6cc07176c806dd231b709c1db241f7c8"
+             "061c67876cd0bd12f31ab6de5a3ecee3b4c6fda9f4a6c6b316383b76b82faa7bd43038ce0e358cee5137e0383bd40dba4736e0383b6483"
+             "eeb1a7c07176d853e81ed980e3ec900dba4736e0383b6483ee910d38ce0ed9a07b25e6356cbdb57c9cc7698dfb53e94d8d672d7076ec70"
+             "5f54f7a861709c1d6a18dda36ec07176a81b748f6cc07176c806dd634f81e3ecb0a7d03db201c7d9211b748f6cc07176c806dd231b709c"
+             "1db241f74acc6bd87a6bf9388fd31af7a7d29b1acf5ae0ecd8e1bea8ee51c3e0383bd430ba47dd80e3ec5037e81ed980e3ec900dbac79e"
+             "02c7d9614fa17b64038eb34336e81ed980e3ec900dba4736e0383b6483eec54ff7970e90");
+        auto slot = lynx::philter::slotFromFl (stateA);
+        CHECK (slot.has_value() && ! lynx::philter::slotFromFl (hex ("0300000078")).has_value());
+        if (slot)
+        {
+            auto render = [&] (const lynx::EffectSlot& sl) {
+                auto fx = lynx::makeEffect (sl);
+                fx->prepare (44100.0);
+                std::vector<float> l (inL), r (inR);
+                for (int s = 0; s < 4096; s += 512)
+                {
+                    fx->setSongPosition (s * 2.0 * 960.0 / 44100.0);
+                    fx->process (l.data() + s, r.data() + s, 512, sl.params, 120.0);
+                }
+                return l[3333];
+            };
+            const auto base = render (*slot);
+            auto edited = *slot;
+            edited.params[8] = 0.1f; // unit 1 cutoff
+            CHECK (base == 0.0f || base != render (edited));
+            CHECK (base == render (*slot));
+        }
+    }
 }
 
 TEST (fruity_vocoder_engine)
