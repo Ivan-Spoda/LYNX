@@ -9,6 +9,7 @@
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
 #include "core/Wasp.h"
+#include "core/Granulizer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -227,6 +228,7 @@ private:
             case InstrumentKind::transistorbass:
             case InstrumentKind::simsynth:
             case InstrumentKind::wasp:
+            case InstrumentKind::granulizer:
                 break;
         }
 
@@ -2059,6 +2061,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeSimSynthInstrument();
     if (kind == InstrumentKind::wasp)
         return makeWaspInstrument();
+    if (kind == InstrumentKind::granulizer)
+        return makeGranulizerInstrument (std::move (sample));
 
     return std::make_unique<DrumInstrument> (kind);
 }

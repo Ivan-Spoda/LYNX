@@ -57,7 +57,8 @@ enum class InstrumentKind : std::uint8_t
     autogun,    // FL's Autogun (REA_rodada57 §1): Ogun's engine on the raw saved state (pluginState), SG.dat path in samplePath
     transistorbass, // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
     simsynth,   // FL's SimSynth engine (REA_rodada64 §1–4): the plugin's raw saved state (564 bytes) in ChannelDef::pluginState
-    wasp        // FL 2026's Wasp / Wasp XT (REA_rodada64 §5): a 64-bit placeholder that keeps its state and makes no sound
+    wasp,       // FL 2026's Wasp / Wasp XT (REA_rodada64 §5): a 64-bit placeholder that keeps its state and makes no sound
+    granulizer  // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

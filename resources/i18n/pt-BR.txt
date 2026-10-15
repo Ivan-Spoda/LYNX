@@ -444,6 +444,7 @@ countries: br
 "MiniSynth — FL's engine with its effects (wave tables read from your FL installation)" = "MiniSynth — motor do FL com seus efeitos (tabelas de onda lidas da sua instalação do FL)"
 "SimSynth — FL's engine (new settings restart the voices)" = "SimSynth — motor do FL (novos ajustes reiniciam as vozes)"
 "Wasp — FL Studio 2026 has no 64-bit Wasp: the channel keeps its settings and stays silent, as in FL" = "Wasp — o FL Studio 2026 não tem Wasp de 64 bits: o canal guarda seus ajustes e fica em silêncio, como no FL"
+"Fruity Granulizer — FL's engine on the channel's sample" = "Fruity Granulizer — motor do FL sobre o sample do canal"
 "Fruity DX10 — FL's FM engine" = "Fruity DX10 — motor FM do FL"
 "Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)" = "Kepler — motor do FL (forma do LFO e ruído lidos da sua instalação do FL; novos ajustes reiniciam as vozes)"
 "PoiZone — FL's engine with its gate, chorus, delay and arpeggiator (new settings restart the voices)" = "PoiZone — motor do FL com seu gate, chorus, delay e arpejador (novos ajustes reiniciam as vozes)"
