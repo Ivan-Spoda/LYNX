@@ -8,10 +8,11 @@
 Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run well on any PC.</p>
 
 <p align="center">
-  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-0.1.2%20alpha-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Download LYNX for Windows"></a>
+  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-0.1.3%20alpha-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Download LYNX for Windows"></a>
 </p>
 
 <p align="center">
+  <a href="https://lynx-share.com"><strong>Website</strong></a> ·
   <a href="https://github.com/Ka1-S/LYNX/releases/latest"><strong>Download</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#opens-fl-studio-projects">FL projects</a> ·
