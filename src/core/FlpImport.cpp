@@ -11,6 +11,7 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/PoiZone.h"
+#include "core/Toxic.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -453,6 +454,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             float gain = 1.0f;
             const auto& st = project.channels.front().pluginState;
             if (song.channels.front().instrument == InstrumentKind::gms ? synthFromGms (st, song.bpm, synth, gain) : synthFromMorphine (st, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::toxic)
+        {
+            // ... and of a Toxic Biohazard patch (the 2-operator conversion)
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromToxic (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::harmor)
@@ -1146,8 +1155,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
                     adopt();
             }
-            else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "toxic biohazard")
+            {
+                // FL's engine from the raw state (REA_rodada45); its built-in waves 2…32 are spectra read at run time from the
+                // user's own Toxic Biohazard_x64.dll (SHA-256 checked). Without it (or for states the engine can't read) the
+                // 2-operator conversion stays
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Toxic Biohazard\\Toxic Biohazard_x64.dll",
+                                                options.roots);
+                const auto dllFound = ! dll.empty() && options.fileExists && options.fileExists (dll) && toxicDllUsable (dll);
+                if (toxicStateUsable (c.pluginState) && (dllFound || ! toxicNeedsDll (c.pluginState)))
+                {
+                    def.instrument = InstrumentKind::toxic;
+                    def.pluginState = c.pluginState;
+                    if (dllFound)
+                        def.samplePath = dll;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromToxic (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "morphine")
             {
                 // FL's Morphine engine from the raw state (REA_rodada39 §2); its noise sample is read at run time from
@@ -1270,7 +1296,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth
                      || def.instrument == InstrumentKind::dx10
                      || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
-                     || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum)
+                     || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
