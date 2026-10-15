@@ -1,6 +1,7 @@
 // Renders a Fruit Kick state with LYNX's engine exactly like our round-43 reference model drives it (verification
 // harness, REA_rodada43 §1.9): fruitkickrender <state.bin> <out.f32> <length> <rate> [blk=N] [tick=first,period]
-//   [tempo=X] [note=start,key,finalVol,finalPan,pitchCents,release ...]. Writes interleaved stereo float32.
+//   [tempo=X] [render] [note=start,key,finalVol,finalPan,pitchCents,release ...]. Writes interleaved stereo float32;
+//   `render` = as while LYNX exports (FL's file-render waveshaper routine, REA_rodada55 §2.3).
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -9,6 +10,12 @@
 #include <vector>
 
 #include "core/FruitKick.h"
+
+namespace lynx
+{
+static bool renderFlag = false;
+bool offlineRendering() noexcept { return renderFlag; } // this tool links the engine alone
+} // namespace lynx
 
 int main (int argc, char** argv)
 {
@@ -29,7 +36,9 @@ int main (int argc, char** argv)
     {
         const std::string a = argv[i];
         int first = 0, period = 0;
-        if (a.rfind ("blk=", 0) == 0)
+        if (a == "render")
+            lynx::renderFlag = true;
+        else if (a.rfind ("blk=", 0) == 0)
             blk = std::atoi (a.c_str() + 4);
         else if (a.rfind ("tempo=", 0) == 0)
             tempo = std::atof (a.c_str() + 6);

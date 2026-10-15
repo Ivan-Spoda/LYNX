@@ -37,6 +37,8 @@ public:
     // For snapshots: selects (and "previews" without sound) the first audio file under the first folder,
     // and puts the mouse over the row after it.
     void selectFirstSampleForSnapshot();
+    // --snapshot: shows this audio file in the preview strip (without playing it)
+    void showPreviewForSnapshot (const juce::File& file);
     // Up/Down (load = false) or Shift+Up/Down (load = true); Enter = loadSelected()
     void step (int delta, bool load);
     void loadSelected();
