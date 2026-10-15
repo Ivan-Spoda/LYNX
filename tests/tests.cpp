@@ -8552,10 +8552,6 @@ std::vector<std::uint8_t> peq1TestState (const PeqTestBand (&bands)[7], int main
 
 TEST (fruity_parametric_eq_exact)
 {
-TEST (fruity_panomatic_balance_blood_overdrive)
-{
-    // REA_rodada58: goldens from the installation's DLLs (EXEC) on our own states, 44.1 kHz, blocks of 512
-    const lynx::ScopedFlushDenormals ftz;
     std::vector<float> inL (4096), inR (4096);
     for (int n = 0; n < 4096; ++n)
     {
@@ -8673,6 +8669,19 @@ TEST (fruity_panomatic_balance_blood_overdrive)
     }
     // a native LYNX EQ is untouched by the FL law
     CHECK (! lynx::peq::flLaw (lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params));
+}
+
+TEST (fruity_panomatic_balance_blood_overdrive)
+{
+    // REA_rodada58: goldens from the installation's DLLs (EXEC) on our own states, 44.1 kHz, blocks of 512
+    const lynx::ScopedFlushDenormals ftz;
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
     auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
     auto check = [&] (const std::vector<float>& l, const std::vector<float>& r, std::initializer_list<Gold> gold) {
         for (const auto& g : gold)
