@@ -11,6 +11,7 @@
 // into fused multiply-adds, and the x87 extended precision of Delay 2's loops kept (long double; 80-bit on every x86
 // target LYNX is built for).
 #pragma GCC optimize ("fp-contract=off")
+#pragma STDC FP_CONTRACT OFF
 
 namespace lynx::fldelay
 {
