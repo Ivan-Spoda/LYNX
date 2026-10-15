@@ -1273,6 +1273,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
             ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+        else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
+                 || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)
@@ -1458,7 +1461,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     std::memcpy (&version, slot.state.data(), 4);
                     std::memcpy (&k, slot.state.data() + 0xA4, 4);
                     std::memcpy (&compThreshold, slot.state.data() + 4 + 8 * 4, 4);
-                    if (const auto source = sidechainSource (insert.index, k); version >= 6 && source >= 0 && compThreshold < 1000)
+                    const auto source = version >= 6 ? sidechainSource (insert.index, k) : -1;
+                    if (fx.kind == EffectKind::fruityLimiter)
+                    {
+                        // the exact engine: the side input feeds its compression detector (REA_rodada48)
+                        fx.sidechain = source;
+                        if (source >= 0 && compThreshold < 1000 && options.report != nullptr)
+                            ++options.report->converted["Fruity Limiter (sidechain)"];
+                    }
+                    else if (source >= 0 && compThreshold < 1000)
                         if (auto comp = fruityLimiterCompressor (slot.state))
                         {
                             const auto enabled = fx.enabled;
@@ -1481,7 +1492,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 ++options.report->droppedEffects[note];
                     }
                 }
-                else if (slot.plugin == "Fruity Compressor" && slot.state.size() >= 0x24 && fx.kind == EffectKind::compressor)
+                else if (slot.plugin == "Fruity Compressor" && slot.state.size() >= 0x24
+                         && (fx.kind == EffectKind::compressor || fx.kind == EffectKind::fruityCompressor))
                 {
                     std::int32_t version = 0, k = 0;
                     std::memcpy (&version, slot.state.data(), 4);
