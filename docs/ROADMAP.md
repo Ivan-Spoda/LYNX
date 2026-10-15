@@ -64,7 +64,7 @@ Ordered to get something usable as early as possible without ever breaking the a
 
 ## Phase 6: FL fidelity (with REA)
 - [x] Volume/fader curves, swing, envelopes, time-stretch, cut groups (round 3)
-- [x] 3x Osc → built-in synth (round 4); channel filter, envelopes, LFOs, AM, porta (round 6)
+- [x] 3x Osc → built-in synth (round 4); channel filter, envelopes, LFOs, AM, porta (round 6); exact engine with the HQ oscillators and the channel processor (round 47)
 - [x] FL native effects with their saved settings (rounds 7–8, 14–15, 18–20, 22)
 - [x] Third-party VST3/CLAP plugins in the Fruity Wrapper, with state (rounds 5, 22)
 - [x] VST3 parameter map (record 4: slot k → ParamID) for automation of wrapped plugins (checked with Surge XT via `--wrappertest`; no demo uses it)

@@ -71,7 +71,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   Spreader, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
-- Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
+- Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
+  phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
+  band-limited oscillators, and the plugin voice processor 3x Osc keeps, with its release path; bit-identical to FL's
+  DLL through our reference model on all 239 distinct non-HQ states of the installation at 44.1/48/96 kHz and on 43
+  processor cases; HQ within −137 dB), FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
   installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
@@ -280,6 +284,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   instance), so noise, drift, start phases, random LFO and random arpeggios differ from any given FL render; FL's
   max-polyphony value and its state/rate order at creation are not confirmed (LYNX: 64 voices, 1 when the channel is
   mono; state then rate).
+- **3x Osc:** its own instrument (`core/ThreeOsc.cpp`, REA round 47) on the plugin voice processor shared with DX10
+  (`core/FlVoiceProcessor.h`): the host's six wave tables recomputed from FLEngine's formulas (sine, triangle, square,
+  saw, the exponential "rounded" shape, MT19937 noise), 32-bit phases with the DLL's pitch law, the right channel's
+  detune and phase offset, Delphi-Random start phases and noise steps, the mix/invert/AM levels split by FL's host pan
+  law, the DLL's x87 mixers (64-bit precision), the custom wave (the channel's sample, resampled to 16384 points), the
+  HQ oscillators of `engine_x64.dll` (44 band-limited levels from an FFT, sinf sine, LCG noise), and the processor's
+  release path (envelopes released from their value, the 10 ms end fade when the volume envelope is off), its rate
+  ratio and ramp limit — bit-identical to our round-47 reference model (`r47/py/osc3model.py`) on 650 jobs (every state,
+  4 rates/block layouts, random notes), which matches the DLL bit for bit on 239/239 non-HQ states at 44.1/48/96 kHz,
+  43/43 processor cases and the custom wave. Every state version is normalised to version 14 with the channel's
+  0xDA/0xDB records as its settings.
 - **Morphine:** its own instrument (`core/Morphine.cpp`, REA round 39 §2): the whole Mor0 state tree, 32 voices
   (poly/stealing, mono legato with return to the nearest held key, 4 glide modes), control blocks of int(0.0029·fs),
   Eg1–4 with loops and the 12-slot matrix (incl. the Eg-amount destinations), master ADSR, 4 generators (keyboard
@@ -351,6 +366,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   L-R encoding. Bit-exact against the reference model (which is within −137 dB of FL's DLL) on all 77 comparison
   cases, the 10 demo instances included. Draft follows the stored button for playback and export alike (LYNX has
   no "HQ for all plugins" option): octave levels and 16-frame re-blocking, its 16 samples of latency reported to PDC.
+- **Fruity Chorus, Hyper Chorus, Vintage Chorus:** FL's own engines (`core/ChorusFx.cpp`, REA round 59) from the saved
+  controls, editable as LYNX parameters: Fruity Chorus's three table LFOs, crossover and 12-bit fixed-point taps;
+  Hyper Chorus's two 4-voice cores (movement panning, cubic taps, ArachnaChor), filters, high-pass cross-fade and
+  parameter smoother in the engine's round-toward-zero mode, with its math library's sine and powf re-created;
+  Vintage Chorus's BBD-style chain (filters, 32768-sample lines, hiss with LFO-moved filters, gate, mix/gain smoothing,
+  Chorus 1/2 presets, LFO sync) with its library's FMA `sinf`. Bit-identical to the DLLs on every installation state
+  (11 + 16 + 11) at 44.1/48/96 kHz, with automation, later instances and synthetic states, Linux and Windows builds.
+  FL's random start phases (Fruity Chorus: clock-seeded; Hyper Chorus: `rand()` per instance) — LYNX uses 0 and the
+  instance's place in the project respectively.
 - **Fruity Squeeze** and **Vintage Phaser:** FL's algorithms (REA round 29) — Squeeze within 5·10⁻⁹ of the reference model
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
@@ -419,6 +443,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   automation smoothing, MIDI CC/pitch-bend, the "MIDI channel 13" sequence transpose (no note channel in LYNX) and the
   order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
   as an output gain (the plugin does not read Final.Vol).
+- 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
+  double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
+  mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
+  is per instrument, FL's is drawn per session and shared by all 3x Osc channels; the end fade uses the exact cosine;
+  channel records win over a stale state snapshot (inference).
 - Fruity DX10 (REA round 42 §4–5): the end-fade table uses the exact cosine (FL: IPP's 11-bit cosine; −129 dB worst
   case); FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
   sequencer ticks are inferences (LYNX ticks on the song's PPQ grid while playing, free-running otherwise); global

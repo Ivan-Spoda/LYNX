@@ -452,6 +452,7 @@ countries: br
 "Fruit Kick — FL's engine (channel envelopes stepped per tick)" = "Fruit Kick — motor do FL (envelopes do canal avançam por tick)"
 "BassDrum — FL's engine (table and noise samples read from your FL installation)" = "BassDrum — motor do FL (tabela e amostras de ruído lidas da sua instalação do FL)"
 "Toxic Biohazard — FL's engine with its effects (waves read from your FL installation)" = "Toxic Biohazard — motor do FL com seus efeitos (ondas lidas da sua instalação do FL)"
+"3x Osc — FL's engine (custom wave from the channel's sample)" = "3x Osc — motor do FL (onda personalizada a partir do sample do canal)"
 "BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)" = "BooBass — motor do FL, som lido da sua instalação do FL (knobs: EQ de 3 bandas)"
 "Sakura — physical strings (FL's engine; new parameters apply to the next note)" = "Sakura — cordas físicas (motor do FL; novos parâmetros valem a partir da próxima nota)"
 "Drumpad — physical drum (FL's engine; new parameters apply to the next hit)" = "Drumpad — tambor físico (motor do FL; novos parâmetros valem a partir do próximo hit)"
