@@ -10,6 +10,7 @@
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
+#include "core/GrossBeat.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1086,6 +1087,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
+            return exact;
+    if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
+        if (auto exact = grossbeat::slotFromFl (state))
             return exact;
     if (pluginName == "Effector")
         return effector (state, bpm);

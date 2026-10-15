@@ -382,6 +382,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   L-R encoding. Bit-exact against the reference model (which is within −137 dB of FL's DLL) on all 77 comparison
   cases, the 10 demo instances included. Draft follows the stored button for playback and export alike (LYNX has
   no "HQ for all plugins" option): octave levels and 16-frame re-blocking, its 16 samples of latency reported to PDC.
+- **Gross Beat:** FL's own engine as a mixer effect (`core/GrossBeat`, REA round 53) built from the saved state, which
+  the `.lynx` project keeps: the 36 time-travel and 36 volume slots (FL's envelope player, every curve type but the
+  spline 10), slot selection with trigger/position sync, link and one-shot, the 2-bar time buffer read by FL's
+  8/16-tap windowed sinc (speed-dependent cutoff in HQ, jump declick, tempo-change crossfade, bar repeat/hold),
+  volume tension, attack/release followers with attack compensation, mixes and the DC option; the dry path keeps FL's
+  15-sample latency. The eight parameters stay editable/automatable in LYNX. Against Gross Beat_x64.dll: every one of
+  the installation's 41 states (30 demo slots, 2 template slots, 9 presets) bit-identical at 95 BPM/44.1 kHz and
+  174 BPM/48 kHz, 34 at 120 BPM (the rest −141…−153 dB, IPP's 50-bit sine at near-whole-sample read positions); slot
+  automation, tempo changes, hold, stop/start, song jumps, PPQ 96/960 and odd block sizes bit-identical.
 - **Fruity Chorus, Hyper Chorus, Vintage Chorus:** FL's own engines (`core/ChorusFx.cpp`, REA round 59) from the saved
   controls, editable as LYNX parameters: Fruity Chorus's three table LFOs, crossover and 12-bit fixed-point taps;
   Hyper Chorus's two 4-voice cores (movement panning, cubic taps, ArachnaChor), filters, high-pass cross-fade and
@@ -395,6 +404,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
 **Still approximated or left out** (no confirmation yet):
+- Gross Beat (REA round 53 §8): MIDI control of the slots (keys, key-held, MIDI trigger option) — LYNX effects get no
+  MIDI; the hidden parameter 8 (time offset, 65536 in every state) is ignored; curve type 10 (spline) runs as a line
+  (in no selected slot); FL's "playing" and position-jump messages are inferred from LYNX's transport.
 - Harmor (REA round 34 open items; `harmorFallbacks()` lists what a state uses): image/resynthesis data is ignored
   (the part plays its timbres; 8 demo channels carry images), arpeggio envelope points act as normal points (3 demo
   channels), the Noise resonance (type 109) is skipped, the blur variant of misc +0x46 runs as the normal blur (its one

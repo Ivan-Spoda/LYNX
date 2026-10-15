@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/GrossBeat.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -1452,9 +1453,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         return options.readFile (path);
     };
     // exact engines that fell back to their approximation (for the report)
-    auto noteFallback = [&options] (const std::string& plugin, const EffectSlot& fx) {
-        if (options.report == nullptr || fx.kind == EffectKind::maximus)
+    auto noteFallback = [&options, &project] (const std::string& plugin, EffectSlot& fx) {
+        if (fx.kind == EffectKind::grossBeat) // its song-position sync counts in the project's ticks (REA_rodada53)
+            grossbeat::setPpq (fx.state, project.header.ppq > 0 ? project.header.ppq : 96);
+        if (options.report == nullptr || fx.kind == EffectKind::maximus || fx.kind == EffectKind::grossBeat)
             return;
+        if (plugin == "Gross Beat")
+            ++options.report->droppedEffects["Gross Beat (state not read: volume gate only)"];
         if (plugin == "Maximus")
             ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
