@@ -63,19 +63,26 @@ constexpr float defaults[paramCount] = { 0.375f, 0.5f,  0.0f, 0.0f, 0.0f, 0.0f, 
 
 std::uint32_t rd32 (const std::uint8_t* p) noexcept { return (std::uint32_t) p[0] | (std::uint32_t) p[1] << 8 | (std::uint32_t) p[2] << 16 | (std::uint32_t) p[3] << 24; }
 
-// "SSLF" + u32 size, then the .flms body: signature 99 46 4C 53 0D 0A 1A 0A, "HEAD" + size (u16 1, u16 1, u16 L, L UTF-16
-// characters of the preset name), "DATA" + size, "0rev" + floats. The plugin sets parameter i while the DATA size minus
-// 4·(i + 1) is still above 3 (§1.1); a value is clamped to 0…1 (NaN is read as 0 here).
-std::optional<std::array<float, paramCount>> parseState (const std::vector<std::uint8_t>& d)
+// "SSLF" + u32 size, then the .flms body: signature (99 46 4C 53 0D 0A 1A 0A; one factory preset has "\x99FLM"),
+// "HEAD" + size (u16 1, u16 1, u16 L, L UTF-16 characters of the preset name), "DATA" + size, "0rev" + floats. Like the
+// plugin, only the name length and the DATA size are read (an optional 60-byte "CcnK…FPCh" header is skipped); parameter
+// i is set while the DATA size minus 4·(i + 1) is still above 3 (§1.1); a value is clamped to 0…1 (NaN is read as 0
+// here).
+std::optional<std::array<float, paramCount>> parseState (const std::vector<std::uint8_t>& d, std::size_t* floatsAt = nullptr)
 {
-    static const std::uint8_t sig[8] = { 0x99, 0x46, 0x4C, 0x53, 0x0D, 0x0A, 0x1A, 0x0A };
-    if (d.size() < 8 + 8 + 8 + 6 || std::memcmp (d.data(), "SSLF", 4) != 0 || std::memcmp (d.data() + 8, sig, 8) != 0
-        || std::memcmp (d.data() + 16, "HEAD", 4) != 0)
+    if (d.size() < 8 || std::memcmp (d.data(), "SSLF", 4) != 0)
         return std::nullopt;
-    const std::size_t nameLen = (std::size_t) (d[16 + 12] | d[16 + 13] << 8);
-    const std::size_t at = 16 + 14 + 2 * nameLen; // "DATA"
-    if (at + 12 > d.size() || std::memcmp (d.data() + at, "DATA", 4) != 0 || std::memcmp (d.data() + at + 8, "0rev", 4) != 0)
+    std::size_t body = 8;
+    if (d.size() > body + 60 && std::memcmp (d.data() + body, "CcnK", 4) == 0 && std::memcmp (d.data() + body + 8, "FPCh", 4) == 0)
+        body += 60;
+    if (d.size() < body + 0x16)
         return std::nullopt;
+    const std::size_t nameLen = (std::size_t) (d[body + 0x14] | d[body + 0x15] << 8);
+    const std::size_t at = body + 0x16 + 2 * nameLen; // "DATA"
+    if (at + 12 > d.size())
+        return std::nullopt;
+    if (floatsAt != nullptr)
+        *floatsAt = at + 12;
     auto size = (long long) (std::int32_t) rd32 (d.data() + at + 4);
     if (size < 4)
         return std::nullopt;
@@ -1297,6 +1304,14 @@ std::vector<float> miniSynthParams (const std::vector<std::uint8_t>& state)
     if (! p)
         return {};
     return std::vector<float> (p->begin(), p->end());
+}
+
+int miniSynthParamOffset (const std::vector<std::uint8_t>& state, int index)
+{
+    std::size_t at = 0;
+    if (index < 0 || index >= paramCount || ! parseState (state, &at) || at + 4 * (std::size_t) index + 4 > state.size())
+        return -1;
+    return (int) (at + 4 * (std::size_t) index);
 }
 
 std::unique_ptr<Instrument> makeMiniSynthInstrument() { return std::make_unique<MiniSynthInstrument>(); }

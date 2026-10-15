@@ -30,12 +30,15 @@
 
 namespace lynx
 {
-// true when the exact engine can read this MiniSynth state ("SSLF" + signature + HEAD + DATA "0rev" floats)
+// true when the exact engine can read this MiniSynth state ("SSLF" + the .flms preset: HEAD name, DATA "0rev" floats)
 bool miniSynthStateUsable (const std::vector<std::uint8_t>& state);
 
 // the 43 parameter values (0…1) of a state as the plugin applies them (missing ones keep their defaults); empty if the
 // state is unusable
 std::vector<float> miniSynthParams (const std::vector<std::uint8_t>& state);
+
+// byte offset of parameter i (0…42, float) inside the state, or −1 (used by the channel settings panel)
+int miniSynthParamOffset (const std::vector<std::uint8_t>& state, int index);
 
 std::unique_ptr<Instrument> makeMiniSynthInstrument();
 
