@@ -48,6 +48,7 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/ParametricEqFl.h"
+#include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
@@ -797,6 +798,7 @@ TEST (flp_real_files)
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     int flPeqSlots = 0, flPeqExact = 0;                                        // REA_rodada50
+    int basicSlots = 0, basicExact = 0; // REA_rodada58: PanOMatic, Balance, Blood Overdrive
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
@@ -1036,6 +1038,7 @@ TEST (flp_real_files)
                 fpcKits += hasFpc;
                 // Maximus / Soundgoodizer become the exact engine (REA_rodada40); Vocodex carries SG.dat (and its
                 // carrier's Sytrus preset) read from the installation
+                const int basicSlots0 = basicSlots, basicExact0 = basicExact;
                 for (const auto& insert : p.mixer)
                     for (const auto& slot : insert.slots)
                     {
@@ -1047,6 +1050,7 @@ TEST (flp_real_files)
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
+                        basicSlots += slot.plugin == "Fruity PanOMatic" || slot.plugin == "Fruity Balance" || slot.plugin == "Fruity Blood Overdrive";
                         chorusSlots += lynx::chorusControls (slot.plugin) > 0 && slot.state.size() >= 4 ? 1 : 0;
                     }
                 for (const auto& t : full.mixer)
@@ -1065,10 +1069,15 @@ TEST (flp_real_files)
                             shaperExact += lynx::flshape::parseWaveShaper (fx.state).has_value() ? 1 : 0;
                         clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
                         flPeqExact += fx.kind == lynx::EffectKind::parametricEq && lynx::peq::flLaw (fx.params);
+                        basicExact += fx.kind == lynx::EffectKind::fruityPanOMatic || fx.kind == lynx::EffectKind::fruityBalance
+                                      || fx.kind == lynx::EffectKind::fruityBloodOverdrive;
                         delay2Exact += fx.kind == lynx::EffectKind::fruityDelay2;
                         delay3Exact += fx.kind == lynx::EffectKind::fruityDelay3;
                         chorusExact += fx.kind == lynx::EffectKind::fruityChorus || fx.kind == lynx::EffectKind::hyperChorus || fx.kind == lynx::EffectKind::vintageChorus ? 1 : 0;
                     }
+                if (basicSlots - basicSlots0 != basicExact - basicExact0)
+                    std::printf ("  %s: %d PanOMatic/Balance/Blood Overdrive slots, %d exact effects\n", file.c_str(),
+                                 basicSlots - basicSlots0, basicExact - basicExact0);
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
                     {
@@ -1744,6 +1753,9 @@ TEST (flp_real_files)
     CHECK (shaperExact >= shaperSlots && shaperSlots >= 70 && clipperExact >= clipperSlots && clipperSlots >= 25); // REA_rodada51
     std::printf ("  Fruity Parametric EQ 2 / Parametric EQ: %d of %d slots on the exact engine\n", flPeqExact, flPeqSlots);
     CHECK (flPeqExact >= flPeqSlots && flPeqSlots >= 1100); // REA_rodada50
+    std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
+    // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
+    CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     CHECK (delay2Exact == delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
@@ -3240,9 +3252,15 @@ TEST (utility_effect_and_fl_stereo_tools)
     std::memcpy (bal.data(), &pan, 4);
     std::memcpy (bal.data() + 4, &vol, 4);
     const auto b = lynx::effectFromFl ("Fruity Balance", bal);
-    l = 0.5f; r = 0.5f;
-    fx->process (&l, &r, 1, b->params, 120.0);
-    CHECK (std::abs (l - 0.5f) < 1e-3f && std::abs (r) < 1e-4f);
+    CHECK (b && b->kind == lynx::EffectKind::fruityBalance); // FL's exact law (REA_rodada58 §2): fully left sums R into L
+    if (b)
+    {
+        auto balance = lynx::makeEffect (*b);
+        balance->prepare (44100.0);
+        l = 0.5f; r = 0.5f;
+        balance->process (&l, &r, 1, b->params, 120.0);
+        CHECK (std::abs (l - 0.70710678f) < 1e-6f && r == 0.0f);
+    }
 }
 
 TEST (effects_eq_compressor_behave)
@@ -8094,6 +8112,10 @@ std::vector<std::uint8_t> peq1TestState (const PeqTestBand (&bands)[7], int main
 
 TEST (fruity_parametric_eq_exact)
 {
+TEST (fruity_panomatic_balance_blood_overdrive)
+{
+    // REA_rodada58: goldens from the installation's DLLs (EXEC) on our own states, 44.1 kHz, blocks of 512
+    const lynx::ScopedFlushDenormals ftz;
     std::vector<float> inL (4096), inR (4096);
     for (int n = 0; n < 4096; ++n)
     {
@@ -8211,6 +8233,102 @@ TEST (fruity_parametric_eq_exact)
     }
     // a native LYNX EQ is untouched by the FL law
     CHECK (! lynx::peq::flLaw (lynx::makeEffectSlot (lynx::EffectKind::parametricEq).params));
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto check = [&] (const std::vector<float>& l, const std::vector<float>& r, std::initializer_list<Gold> gold) {
+        for (const auto& g : gold)
+            CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
+    };
+    auto st32 = [] (std::initializer_list<int> v) {
+        std::vector<std::uint8_t> b;
+        for (int x : v)
+            for (int k = 0; k < 4; ++k)
+                b.push_back ((std::uint8_t) ((unsigned) x >> (8 * k)));
+        return b;
+    };
+
+    // PanOMatic: the engine started as LYNX starts it (one silent frame, then FL's flush), and from silence (fade-in)
+    auto pom = [&] (lynx::flbasic::PanOMaticState s, bool prime, std::initializer_list<Gold> gold) {
+        lynx::flbasic::PanOMaticEngine e;
+        e.prepare (44100);
+        e.set (s);
+        if (prime)
+            e.prime();
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        check (l, r, gold);
+    };
+    pom ({ 40, 300, 2, 1, 128, 50000 }, true, { { 100, 0.0f, -1.44884729f }, { 1000, -1.78870034f, 0.778897762f }, { 2047, 0.697593153f, -1.26396084f },
+                                                { 3000, -1.78870034f, -1.32851648f }, { 4095, 0.268305063f, 0.851258814f } });
+    pom ({ 200, 180, 1, 2, 100, 30000 }, true, { { 100, 0.0f, -0.347919852f }, { 1000, -0.322590947f, 0.0788071603f }, { 2047, 0.126614109f, -0.26421836f },
+                                                 { 3000, -0.326532423f, -0.435213327f }, { 4095, 0.0493027233f, 0.226084977f } });
+    pom ({ 90, 256, 0, 1, 77, 40000 }, false, { { 100, -0.0292895138f, -0.110000029f }, { 1000, -1.31911683f, 0.666457176f }, { 2047, 0.477211952f, -0.864247262f },
+                                                { 3000, -1.59167564f, -0.591367304f }, { 4095, 0.268362761f, 0.537029684f } });
+
+    // Balance: flushed and from silence
+    auto bal = [&] (lynx::flbasic::BalanceState s, bool flush, std::initializer_list<Gold> gold) {
+        lynx::flbasic::BalanceEngine e;
+        e.prepare (44100);
+        e.set (s);
+        if (flush)
+            e.flush();
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        check (l, r, gold);
+    };
+    bal ({ 77, 100 }, true, { { 100, 0.0f, -0.136579692f }, { 1000, -0.0669578835f, -0.0282340273f }, { 2047, 0.0261135735f, -0.0795038193f },
+                              { 3000, -0.0669578835f, -0.226895392f }, { 4095, 0.0100436825f, 0.0954951793f } });
+    bal ({ -128, 320 }, false, { { 100, -0.28914085f, 0.0f }, { 1000, -1.03179514f, 0.0f }, { 2047, -0.578702569f, 0.0f },
+                                 { 3000, -3.18510628f, 0.0f }, { 4095, 1.14394665f, 0.0f } });
+
+    // Blood Overdrive: rate first, then the state (its smoothers settle for one second of samples)
+    auto od = [&] (std::array<int, 6> raw, std::initializer_list<Gold> gold) {
+        lynx::flbasic::BloodOverdriveEngine e;
+        e.start (44100, { raw });
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0; i < 4096; i += 512)
+            e.process (l.data() + i, r.data() + i, 512);
+        check (l, r, gold);
+    };
+    od ({ 3000, 7000, 5000, 1, 9000, 5000 }, { { 100, -0.0442250744f, 0.170355186f }, { 1000, 0.0470311977f, 0.0765217245f },
+                                               { 2047, 0.0261161141f, -0.0341798998f }, { 3000, 0.0470311977f, 0.0213619489f },
+                                               { 4095, 0.0402069278f, 0.0499244779f } });
+
+    // the mixer effects from the FL import: controls as parameters; host blocks of any size
+    auto viaImport = [&] (const char* plugin, const std::vector<std::uint8_t>& st, lynx::EffectKind kind, std::initializer_list<Gold> gold) {
+        const auto slot = lynx::effectFromFl (plugin, st, 120.0);
+        CHECK (slot && slot->kind == kind);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 1024, slot->params, 120.0);
+        fx->process (l.data() + 2048, r.data() + 2048, 2048, slot->params, 120.0);
+        check (l, r, gold);
+    };
+    viaImport ("Fruity PanOMatic", st32 ({ 40, 300, 2, 1, 128, 50000 }), lynx::EffectKind::fruityPanOMatic,
+               { { 1000, -1.78870034f, 0.778897762f }, { 4095, 0.268305063f, 0.851258814f } });
+    viaImport ("Fruity Balance", st32 ({ 0, 256 }), lynx::EffectKind::fruityBalance,
+               { { 100, 0.0f, -1.10000002f }, { 1000, -1.66666663f, 0.899999976f }, { 4095, 0.25f, 0.600000024f } });
+    viaImport ("Fruity Blood Overdrive", st32 ({ 3, 0, 5000, 2578, 1, 0, 2911, 0, 0 }), lynx::EffectKind::fruityBloodOverdrive,
+               { { 100, -0.122698173f, 0.0206716377f }, { 2047, 0.0128381588f, -0.0274834726f }, { 4095, -0.0899387598f, -0.121109024f } });
+    {
+        const auto slot = lynx::effectFromFl ("Fruity PanOMatic", st32 ({ 119, 256, 1, 2, 64, 27500 }), 120.0);
+        CHECK (slot && lynx::flbasic::panOMaticFromParams (slot->params.data()).pan == 119
+               && lynx::flbasic::panOMaticFromParams (slot->params.data()).target == 2);
+        if (slot)
+        {
+            CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPanOMatic, 2, slot->params[2], 120.0) == "Triangle");
+            CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPanOMatic, 1, slot->params[1], 120.0) == "+0.0 dB");
+        }
+    }
+    // unreadable states keep the old approximations
+    CHECK (lynx::effectFromFl ("Fruity PanOMatic", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::utility);
+    CHECK (lynx::effectFromFl ("Fruity Balance", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::utility);
+    CHECK (lynx::effectFromFl ("Fruity Blood Overdrive", { 1, 2, 3 }, 120.0)->kind == lynx::EffectKind::distortion);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------

@@ -60,6 +60,7 @@ add_library(lynx_core STATIC
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
     src/core/ChorusFx.cpp
+    src/core/FruityBasicFx.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Inflate.cpp

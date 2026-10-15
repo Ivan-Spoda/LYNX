@@ -310,7 +310,10 @@ enum class EffectKind : std::uint8_t
     spreader,     // FL's Spreader, exact (REA_rodada54, core/StereoFx.h): FL's 5 controls / range
     fruityChorus, // FL's Fruity Chorus, exact (REA_rodada59 §1, core/ChorusFx.h): controls / range
     hyperChorus,  // FL's Hyper Chorus, exact (REA_rodada59 §2, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
-    vintageChorus // FL's Vintage Chorus, exact (REA_rodada59 §3, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
+    vintageChorus, // FL's Vintage Chorus, exact (REA_rodada59 §3, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
+    fruityPanOMatic, // FL's Fruity PanOMatic, exact (REA_rodada58, core/FruityBasicFx.h): pan, volume, LFO; controls / range
+    fruityBalance,   // FL's Fruity Balance, exact (REA_rodada58, core/FruityBasicFx.h): balance, volume; controls / range
+    fruityBloodOverdrive // FL's Fruity Blood Overdrive, exact (REA_rodada58, core/FruityBasicFx.h): 6 controls / range
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them

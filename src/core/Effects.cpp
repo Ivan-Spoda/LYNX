@@ -9,6 +9,7 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
@@ -2220,6 +2221,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                     { "Oversampling", 0.0f }, { "HQ", 0.0f }, { "Smooth", 0.0f },
                                                                     { "Center", 0.0f }, { "Unipolar", 0.0f } } };
     static const EffectInfo softClipperInfo { "Fruity Soft Clipper", { { "Threshold", 99.0f / 126.0f }, { "Post", 128.0f / 160.0f } } };
+    // FL's controls over their ranges (core/FruityBasicFx.h); defaults = a new FL instance
+    static const EffectInfo panOMaticInfo { "Fruity PanOMatic", { { "Pan", 0.5f }, { "Volume", 0.8f }, { "LFO shape", 0.0f },
+                                                                  { "LFO target", 0.0f }, { "LFO amount", 0.5f }, { "LFO speed", 0.5f } } };
+    static const EffectInfo balanceInfo { "Fruity Balance", { { "Balance", 0.5f }, { "Volume", 0.8f } } };
+    static const EffectInfo bloodOverdriveInfo { "Fruity Blood Overdrive", { { "Pre band", 0.0f }, { "Color", 0.5f }, { "Pre amp", 0.0f },
+                                                                              { "x100", 0.0f }, { "Post filter", 0.0f }, { "Post gain", 1.0f } } };
     // FL's controls as (raw − min) / range (core/Reeverb2.h); defaults = FL's
     static const EffectInfo reeverb2Info = [] {
         EffectInfo info { "Reeverb 2", { { "Low cut", 0 }, { "High cut", 0 }, { "Predelay", 0 }, { "Room size", 0 }, { "Diffusion", 0 },
@@ -2363,6 +2370,9 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityCompressor: return fruityCompressorInfo;
         case EffectKind::fruityWaveShaper: return waveShaperInfo;
         case EffectKind::fruitySoftClipper: return softClipperInfo;
+        case EffectKind::fruityPanOMatic: return panOMaticInfo;
+        case EffectKind::fruityBalance: return balanceInfo;
+        case EffectKind::fruityBloodOverdrive: return bloodOverdriveInfo;
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
         case EffectKind::fruityDelay2: return fruityDelay2Info;
@@ -2682,6 +2692,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::spreader:
             return stereofx::spreaderParamText (param, v);
 
+        case EffectKind::fruityPanOMatic:
+            return flbasic::panOMaticParamText (param, v);
+
+        case EffectKind::fruityBalance:
+            return flbasic::balanceParamText (param, v);
+
+        case EffectKind::fruityBloodOverdrive:
+            return flbasic::bloodOverdriveParamText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2767,6 +2786,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityCompressor: return fldyn::makeCompressor();
         case EffectKind::fruityWaveShaper: return flshape::makeWaveShaper ({}); // FL's default curve; use makeEffect (slot)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
+        case EffectKind::fruityPanOMatic: return flbasic::makePanOMatic();
+        case EffectKind::fruityBalance: return flbasic::makeBalance();
+        case EffectKind::fruityBloodOverdrive: return flbasic::makeBloodOverdrive();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::fruityDelay2: return fldelay::makeDelay2();
