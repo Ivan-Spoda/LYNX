@@ -16,6 +16,8 @@
 #include "core/GrossBeat.h"
 #include "core/LovePhilter.h"
 #include "core/FruityVocoderFx.h"
+#include "core/FruityDelayBank.h"
+#include "core/FruityMultiband.h"
 
 #include "core/Biquad.h"
 
@@ -2278,6 +2280,15 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo grossBeatInfo { "Gross Beat", { { "Time slot", 0.0f }, { "Volume slot", 0.0f }, { "Time mix", 1.0f },
                                                             { "Volume mix", 1.0f }, { "Attack", 0.1765f }, { "Release", 0.5f },
                                                             { "Tension", 0.5f }, { "Hold", 0.0f } } };
+    // FL's state travels in EffectSlot::state; the four global controls are the editable parameters (raw / 128)
+    static const EffectInfo fruityDelayBankInfo { "Fruity Delay Bank", { { "Dry", 1.0f }, { "Output", 1.0f }, { "Input", 1.0f }, { "Feedback", 1.0f } } };
+    // FL's raw controls normalised over their ranges (core/FruityMultiband.h); defaults = a new FL instance
+    static const EffectInfo fruityMultibandInfo = [] {
+        EffectInfo info { "Fruity Multiband Compressor", {} };
+        for (int i = 0; i < flmb::controls; ++i)
+            info.params.push_back ({ flmb::paramName (i), flmb::normalised (flmb::controlDefault[(std::size_t) i], flmb::controlMin[(std::size_t) i], flmb::controlMax[(std::size_t) i]) });
+        return info;
+    }();
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2394,6 +2405,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::grossBeat: return grossBeatInfo;
         case EffectKind::lovePhilter: return philter::info();
         case EffectKind::fruityVocoder: return flvocoder::info();
+        case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
+        case EffectKind::fruityMultiband: return fruityMultibandInfo;
     }
     return eq;
 }
@@ -2701,6 +2714,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::spreader:
             return stereofx::spreaderParamText (param, v);
+        case EffectKind::fruityDelayBank:
+            return fldbank::globalText (param, v);
+
+        case EffectKind::fruityMultiband:
+            return flmb::paramText (param, v);
 
         case EffectKind::fruityPanOMatic:
             return flbasic::panOMaticParamText (param, v);
@@ -2788,6 +2806,10 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return philter::make (slot);
     if (slot.kind == EffectKind::fruityVocoder)
         return flvocoder::make (slot);
+    if (slot.kind == EffectKind::fruityDelayBank)
+        return fldbank::make (slot.state);
+    if (slot.kind == EffectKind::fruityMultiband)
+        return slot.state.empty() ? flmb::make() : flmb::make (slot.state);
     return makeEffect (slot.kind);
 }
 
@@ -2841,6 +2863,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::lovePhilter: return philter::make (EffectSlot {}); // without a state: passes the signal
         case EffectKind::fruityVocoder: return flvocoder::make (EffectSlot {}); // without a state: passes the signal
+        case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
+        case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
