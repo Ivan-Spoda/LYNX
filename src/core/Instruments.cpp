@@ -8,6 +8,7 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/Plucked.h"
+#include "core/BeepMap.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -225,6 +226,7 @@ private:
             case InstrumentKind::autogun:
             case InstrumentKind::transistorbass:
             case InstrumentKind::plucked:
+            case InstrumentKind::beepmap:
                 break;
         }
 
@@ -2055,6 +2057,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeTransistorBassInstrument();
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
+    if (kind == InstrumentKind::beepmap)
+        return makeBeepMapInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

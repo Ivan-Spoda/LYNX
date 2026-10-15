@@ -32,6 +32,7 @@
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
 #include "core/Plucked.h"
+#include "core/BeepMap.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -7591,6 +7592,153 @@ TEST (plucked_engine)
     inst->noteOn (60, 1.0f);
     inst->noteOff (60); // (no gate: the string rings on)
     for (int b = 0; b < 2000 && ! inst->idle(); ++b)
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+    CHECK (inst->idle());
+}
+
+// BeepMap (REA_rodada65 §2): the C++ engine against FL's DLL (EXEC: same notes, the DLL's RandSeed set before the first
+// note, the host killing voices when the plugin asks): a synthetic 9×6 bitmap with every Scale mode and switch, and two
+// of the installation's presets. LYNX renders these bit-identically to the DLL.
+std::vector<std::uint8_t> beepMapTestState (std::initializer_list<std::int32_t> settings)
+{
+    constexpr int W = 9, H = 6;
+    std::vector<std::uint8_t> img (54 + 4 * W * H, 0);
+    auto put = [&] (std::size_t at, std::uint32_t v, int bytes) { for (int i = 0; i < bytes; ++i) img[at + (std::size_t) i] = (std::uint8_t) (v >> (8 * i)); };
+    img[0] = 'B', img[1] = 'M';
+    put (2, (std::uint32_t) img.size(), 4), put (10, 54, 4), put (14, 40, 4), put (18, W, 4), put (22, H, 4), put (26, 1, 2), put (28, 32, 2);
+    put (34, 4 * W * H, 4);
+    for (int y = 0; y < H; ++y) // bottom-up rows
+        for (int x = 0; x < W; ++x)
+        {
+            const auto yy = H - 1 - y;
+            auto* px = img.data() + 54 + 4 * (y * W + x);
+            px[0] = (std::uint8_t) ((x * 91 + yy * 29) & 255), px[1] = (std::uint8_t) ((x * 13 + yy * 71) & 255);
+            px[2] = (std::uint8_t) ((x * 37 + yy * 11) & 255), px[3] = 255;
+        }
+    std::vector<std::uint8_t> st (4 + 60 + 4, 0);
+    std::size_t k = 0;
+    for (auto v : settings)
+        std::memcpy (st.data() + 4 + 4 * k++, &v, 4);
+    const auto len = (std::int32_t) img.size();
+    std::memcpy (st.data() + 64, &len, 4);
+    st.insert (st.end(), img.begin(), img.end());
+    return st;
+}
+
+// the 0xD5 state of one of the installation's BeepMap presets (empty without an installation)
+std::vector<std::uint8_t> beepMapPresetState (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    std::ifstream in (std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "BeepMap" / name, std::ios::binary);
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    while (i < b.size())
+    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (id == 0xD5 && i + n <= b.size())
+            return { b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n) };
+        i += n;
+    }
+    return {};
+}
+
+TEST (beepmap_engine)
+{
+    const auto synthA = beepMapTestState ({ 3000, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64 });
+    CHECK (lynx::beepMapStateUsable (synthA));
+    CHECK (lynx::beepMapParams (synthA)->at (1) == 200 && lynx::beepMapParamOffset (synthA, 2) == 12);
+    auto broken = synthA;
+    broken[0] = 2; // versions above 1 are refused
+    CHECK (! lynx::beepMapStateUsable (broken));
+    broken = synthA;
+    broken.resize (broken.size() - 20); // truncated bitmap
+    CHECK (! lynx::beepMapStateUsable (broken));
+
+    using N = lynx::beepmap::RefNote;
+    struct Sample { int at; float l, r; };
+    struct Golden { int set; double fs; int block; double el, er; Sample s[4]; };
+    std::vector<std::vector<std::uint8_t>> states {
+        synthA,
+        beepMapTestState ({ 5000, 600, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 64 }),
+        beepMapTestState ({ 8000, 100, 2, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 64 }),
+        beepMapTestState ({ 1000, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 64 }),
+        beepMapPresetState ("Default.fst"),
+        beepMapPresetState ("Voice.fst"),
+    };
+    const std::vector<std::vector<N>> sets {
+        { { 0, 60, 1.0, 0.0, 0.0, -1 } },
+        { { 0, 57, 0.8, 0.3, 25.0, -1 }, { 7000, 64, 0.6, -0.5, 0.0, -1 } },
+        { { 0, 48, 1.0, 0.0, 0.0, -1 }, { 300, 72, 0.5, 0.0, -40.0, -1 } },
+        { { 0, 67, 1.0, -0.2, 0.0, -1 } },
+        { { 0, 60, 1.0, 0.0, 0.0, -1 } },
+        { { 0, 55, 0.8, 0.0, 0.0, -1 }, { 20000, 62, 0.8, 0.4, 0.0, -1 } },
+    };
+    const Golden goldens[] {
+        { 0, 44100, 512, 70.02738, 69.0877973, { { 1000, 0.030967699363827705f, -0.218118816614151f }, { 10000, 0.0f, 0.0f }, { 30000, 0.0f, 0.0f }, { 60000, 0.0f, 0.0f } } },
+        { 1, 48000, 256, 2814.53446, 3514.46151, { { 1000, 0.02367428131401539f, 0.06526239961385727f }, { 10000, -0.06188536435365677f, 0.062191300094127655f }, { 30000, -0.153680220246315f, -0.27799028158187866f }, { 60000, 0.03855478763580322f, 0.1298033744096756f } } },
+        { 2, 44100, 1000, 6644.01869, 7606.70378, { { 1000, 0.06019101291894913f, 0.2049546241760254f }, { 10000, -0.852304220199585f, -0.13111725449562073f }, { 30000, 0.11700113117694855f, -0.6130681037902832f }, { 60000, -0.2660403549671173f, -0.09453065693378448f } } },
+        { 3, 96000, 512, 51.7332962, 28.9913476, { { 1000, -0.025792766362428665f, -0.07221365720033646f }, { 10000, 0.0f, 0.0f }, { 30000, 0.0f, 0.0f }, { 60000, 0.0f, 0.0f } } },
+        { 4, 44100, 512, 8142.09413, 5639.86691, { { 1000, 0.050016239285469055f, 0.05289545655250549f }, { 10000, -0.258514404296875f, -0.16095803678035736f }, { 30000, 0.765974223613739f, 0.477584570646286f }, { 60000, 0.040680620819330215f, 0.17371401190757751f } } },
+        { 5, 48000, 512, 2568.60856, 3975.24938, { { 1000, 0.07109857350587845f, 0.07109857350587845f }, { 10000, -0.057797715067863464f, -0.057797715067863464f }, { 30000, 0.08789601176977158f, 0.04657084494829178f }, { 60000, 0.08154996484518051f, 0.12709519267082214f } } },
+    };
+    for (const auto& g : goldens)
+    {
+        const auto& st = states[(std::size_t) g.set];
+        if (st.empty())
+            continue; // (no FL installation: the presets are skipped)
+        const auto length = (int) g.fs * 2;
+        const auto y = lynx::beepmap::renderReference (st, sets[(std::size_t) g.set], g.fs, length, g.block, 4321u + (std::uint32_t) g.set);
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-7 * g.el && std::abs (er - g.er) <= 1e-7 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-7f && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-7f;
+        if (! ok)
+            std::printf ("  BeepMap case %d differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.set, el, er, g.el, g.er);
+        CHECK (ok);
+    }
+
+    // the instrument: plays the image, ends after the last column, a note-off fades the voice out
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::beepmap;
+    c.pluginState = states[1];
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::beepmap);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024), r (1024);
+    inst->noteOn (60, 0.8f);
+    double e = 0.0;
+    for (int b = 0; b < 8; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+        for (int i = 0; i < 1024; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i] + (double) r[(std::size_t) i] * r[(std::size_t) i];
+    }
+    CHECK (e > 0.01 && ! inst->idle()); // (Loop on)
+    inst->noteOff (60);
+    for (int b = 0; b < 4; ++b)
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+    CHECK (inst->idle());
+    c.pluginState = synthA; // (no loop: 9 columns of 64·(e^(200/4096·ln 33) − 1)… samples, then the voice ends)
+    inst->configure (c, 120.0);
+    inst->noteOn (60, 1.0f);
+    for (int b = 0; b < 200 && ! inst->idle(); ++b)
         inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
     CHECK (inst->idle());
 }
