@@ -6,6 +6,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityDelay.h"
@@ -812,10 +813,24 @@ int bandStages (const EffectParams& p, int band, double sr, std::array<Biquad, 4
 class ParametricEq final : public Effect
 {
 public:
+    ParametricEq() = default;
+    // a slot imported from FL: its engine is set up at once, so the latency is known before the first block
+    explicit ParametricEq (const EffectParams& params)
+    {
+        if (peq::flLaw (params))
+        {
+            lastParams = params;
+            flMode = true;
+            fl.set (peqfl::fromParams (params));
+        }
+    }
+
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
-        lastParams.fill (-1.0f);
+        if (! flMode)
+            lastParams.fill (-1.0f);
+        fl.prepare (sr);
         reset();
     }
 
@@ -824,10 +839,27 @@ public:
         for (auto& band : stages)
             for (auto& s : band)
                 s.reset();
+        fl.reset();
     }
+
+    int latencySamples() const noexcept override { return flMode ? fl.latencySamples() : 0; }
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
+        if (peq::flLaw (params))
+        {
+            // FL's Parametric EQ 2 / Parametric EQ, exact (core/ParametricEqFl.h)
+            if (params != lastParams || ! flMode)
+            {
+                lastParams = params;
+                flMode = true;
+                fl.set (peqfl::fromParams (params));
+            }
+            fl.process (l, r, n);
+            return;
+        }
+        flMode = false;
+
         if (params != lastParams)
         {
             lastParams = params;
@@ -874,6 +906,8 @@ private:
     int active = 0;
     float output = 1.0f;
     EffectParams lastParams {};
+    peqfl::Engine fl;
+    bool flMode = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -2066,6 +2100,9 @@ const char* typeName (BandType t) noexcept
 
 double responseDb (const EffectParams& params, double sr, double f)
 {
+    if (flLaw (params))
+        return peqfl::responseDb (peqfl::fromParams (params), sr, f);
+
     // |H(e^jw)| of each stage, summed in dB
     const auto w = 2.0 * pi * std::clamp (f, 1.0, sr * 0.499) / sr;
     const std::complex<double> z1 = std::polar (1.0, -w), z2 = std::polar (1.0, -2.0 * w);
@@ -2085,6 +2122,30 @@ double responseDb (const EffectParams& params, double sr, double f)
     }
 
     return total;
+}
+bool flLaw (const EffectParams& params) noexcept { return peqfl::lawOf (params) != peqfl::Law::lynx; }
+
+std::string orderText (const EffectParams& params, int band)
+{
+    const auto v = params[(std::size_t) (slopeParam + band)];
+    if (! flLaw (params))
+        return std::to_string (12 * slopeStages (v)) + " dB/oct";
+    if (peqfl::lawOf (params) == peqfl::Law::peq1)
+        return "12 dB/oct";
+    // FL's order texts, −3…+3 (REA_rodada7 §1.4)
+    static constexpr const char* names[7] = { "Steep 8", "Steep 6", "Steep 4", "2", "Gentle 4", "Gentle 6", "Gentle 8" };
+    return names[std::clamp ((int) std::lround (v * 6.0f), 0, 6)];
+}
+
+std::string widthText (const EffectParams& params, int band)
+{
+    const auto v = params[(std::size_t) param (band, 3)];
+    char text[32];
+    if (flLaw (params))
+        std::snprintf (text, sizeof (text), "BW %.0f%%", (double) v * 100.0);
+    else
+        std::snprintf (text, sizeof (text), "Q %.2f", q (v));
+    return text;
 }
 } // namespace peq
 
@@ -2328,6 +2389,20 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerInfo;
     }
     return eq;
+}
+
+std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, const EffectParams& context)
+{
+    if (kind == EffectKind::parametricEq && peq::flLaw (context) && param >= 0 && param < peq::slopeParam + peq::bands)
+    {
+        auto p = context;
+        p[(std::size_t) param] = v;
+        if (param > peq::outputParam)
+            return peq::orderText (p, param - peq::slopeParam);
+        if (param < peq::outputParam && param % 4 == 3)
+            return peq::widthText (p, param / 4);
+    }
+    return formatEffectParam (kind, param, v, bpm);
 }
 
 std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
@@ -2672,6 +2747,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return maximusfx::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
+    if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
+        return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)
