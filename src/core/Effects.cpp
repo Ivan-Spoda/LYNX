@@ -18,6 +18,7 @@
 #include "core/FruityVocoderFx.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
+#include "core/FlangusFastDist.h"
 
 #include "core/Biquad.h"
 
@@ -2289,6 +2290,15 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params.push_back ({ flmb::paramName (i), flmb::normalised (flmb::controlDefault[(std::size_t) i], flmb::controlMin[(std::size_t) i], flmb::controlMax[(std::size_t) i]) });
         return info;
     }();
+    // FL's controls over their ranges (core/FlangusFastDist.h); defaults = a new FL instance
+    static const EffectInfo fastDistInfo { "Fruity Fast Dist", { { "Pre amp", 0.5f }, { "Threshold", 1.0f }, { "Type", 0.0f },
+                                                                 { "Mix", 1.0f }, { "Post gain", 1.0f } } };
+    static const EffectInfo flangusInfo { "Fruity Flangus", { { "Order", 3.0f / 8.0f }, { "Depth", 0.5f }, { "Speed", 0.75f },
+                                                              { "Delay", 8.0f / 128.0f }, { "Spread", 1.0f }, { "Cross", 96.0f / 256.0f },
+                                                              { "Dry", 224.0f / 256.0f }, { "Wet", 224.0f / 256.0f } } };
+    static const EffectInfo flangerInfo { "Fruity Flanger", { { "Delay", 0.0f }, { "Depth", 0.4f }, { "Rate", 0.4f }, { "Phase", 118.0f / 360.0f },
+                                                              { "Damp", 0.0f }, { "Shape", 0.0f }, { "Feed", 0.23f }, { "Invert feed", 0.0f },
+                                                              { "Invert wet", 1.0f }, { "Dry", 0.7f }, { "Wet", 0.6f }, { "Cross", 0.5f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2407,6 +2417,9 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityVocoder: return flvocoder::info();
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
         case EffectKind::fruityMultiband: return fruityMultibandInfo;
+        case EffectKind::fruityFastDist: return fastDistInfo;
+        case EffectKind::fruityFlangus: return flangusInfo;
+        case EffectKind::fruityFlanger: return flangerInfo;
     }
     return eq;
 }
@@ -2684,6 +2697,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;
 
+        case EffectKind::fruityFastDist:
+            return fastdistfx::paramText (param, v);
+
+        case EffectKind::fruityFlangus:
+            return flangusfx::paramText (param, v);
+
+        case EffectKind::fruityFlanger:
+            return flangerfx::paramText (param, v);
+
         case EffectKind::crossover:
             if (param == 0 || param == 3)
                 return v > 0.5f ? "on" : "off";
@@ -2866,6 +2888,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
+        case EffectKind::fruityFastDist: return fastdistfx::make();
+        case EffectKind::fruityFlangus: return flangusfx::make();
+        case EffectKind::fruityFlanger: return flangerfx::make();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

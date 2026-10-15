@@ -319,6 +319,9 @@ enum class EffectKind : std::uint8_t
     grossBeat,    // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
     fruityDelayBank, // FL's Fruity Delay Bank, exact (REA_rodada56, core/FruityDelayBank.h): FL's state in EffectSlot::state, params = its 4 global controls / 128
     fruityMultiband, // FL's Fruity Multiband Compressor, exact (REA_rodada56, core/FruityMultiband.h): FL's raw controls / range (+ FL's state)
+    fruityFastDist, // FL's Fruity Fast Dist, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlanger,  // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     lovePhilter,  // FL's Fruity Love Philter, exact (REA_rodada66, core/LovePhilter.h): FL's state in EffectSlot::state, 48 controls
     fruityVocoder // FL's Fruity Vocoder, exact (REA_rodada66 §6, core/FruityVocoderFx.h): FL's state in EffectSlot::state, 12 controls
 };
@@ -540,6 +543,7 @@ struct PlaylistTrack
 {
     std::string name;  // empty = "Track N"
     bool muted = false; // clips on this track don't play
+    int height = 0;     // Playlist row height in px (0 = the default)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.

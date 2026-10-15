@@ -15,6 +15,7 @@
 #include "core/FruityVocoderFx.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
+#include "core/FlangusFastDist.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1121,6 +1122,29 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Fruity Multiband Compressor")
         if (auto exact = fruityMultibandExact (state))
             return exact;
+    // FL's own Fast Dist / Flangus engines from the saved controls (REA_rodada55); the approximations of REA_rodada8
+    // remain for states that cannot be read
+    if (pluginName == "Fruity Fast Dist")
+        if (const auto s = fastdistfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFastDist);
+            fastdistfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Flangus")
+        if (const auto s = flangusfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFlangus);
+            flangusfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Flanger")
+        if (const auto s = flangerfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFlanger);
+            flangerfx::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
@@ -1310,6 +1334,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityPanOMatic: return { "Fruity PanOMatic" };
         case EffectKind::fruityBalance: return { "Fruity Balance" };
         case EffectKind::fruityBloodOverdrive: return { "Fruity Blood Overdrive" };
+        case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
+        case EffectKind::fruityFlangus: return { "Fruity Flangus" };
+        case EffectKind::fruityFlanger: return { "Fruity Flanger" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
@@ -1363,6 +1390,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if (is ("Fruity Delay Bank") && k >= 0 && k < fldbank::globalControls)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Fruity Multiband Compressor") && k >= 0 && k < flmb::controls) // FL's controls as they are (value over range)
+    // the exact Fast Dist / Flangus / Flanger take FL's controls over their ranges
+    if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdistfx::params) || (is ("Fruity Flangus") && k >= 0 && k < flangusfx::params)
+        || (is ("Fruity Flanger") && k >= 0 && k < flangerfx::params))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
