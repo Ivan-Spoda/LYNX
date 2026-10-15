@@ -49,7 +49,10 @@ enum class InstrumentKind : std::uint8_t
     minisynth,  // FL's MiniSynth engine (REA_rodada41): raw saved state in pluginState, path of oscdata.dat in samplePath
     dx10,       // FL's Fruity DX10 FM engine (REA_rodada42): the plugin's raw saved state in ChannelDef::pluginState
     kepler,     // FL's Kepler engine (REA_rodada46): raw saved state in pluginState, the user's engine DLL in samplePath
-    poizone     // FL's PoiZone engine (REA_rodada44): the plugin's raw saved state in ChannelDef::pluginState
+    poizone,    // FL's PoiZone engine (REA_rodada44): the plugin's raw saved state in ChannelDef::pluginState
+    fruitkick,  // FL's Fruit Kick (REA_rodada43 §1): raw saved state (with its envelope snapshot) in pluginState
+    bassdrum,   // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
+    toxic       // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -253,7 +256,7 @@ struct ChannelDef
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
     std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth / harmless: FL's raw state parameters
-    std::vector<std::uint8_t> pluginState; // instrument == sytrus / harmor / ogun: the FL plugin's saved state (record 0xD5), as FL wrote it
+    std::vector<std::uint8_t> pluginState; // instrument == sytrus / harmor / ogun / gms / morphine / fruitkick / bassdrum: the FL plugin's saved state (record 0xD5)
     SamplerSettings sampler; // used when instrument == sampler
     SynthSettings synth;     // used when instrument == synth
     float swingMix = 1.0f;   // how much of the global swing applies to this channel (0..1), as in FL
@@ -292,6 +295,8 @@ enum class EffectKind : std::uint8_t
     vintagePhaser, // FL's Vintage Phaser (REA_rodada29 §3, core/VintagePhaser.h): 36 normalised engine values
     vocodex,      // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
     maximus,      // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
+    fruityLimiter,   // FL's Fruity Limiter, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
+    fruityCompressor, // FL's Fruity Compressor, exact (REA_rodada48, core/FruityDynamics.h): FL's raw controls / range
     stereoShaper, // FL's Fruity Stereo Shaper, exact (REA_rodada54, core/StereoFx.h): FL's 8 controls / range + difference flag
     stereoEnhancer, // FL's Fruity Stereo Enhancer, exact (REA_rodada54, core/StereoFx.h): FL's 6 controls / range
     transientProcessor, // FL's Transient Processor, exact (REA_rodada54, core/StereoFx.h): FL's 9 controls / range
