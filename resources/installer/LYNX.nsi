@@ -3,8 +3,8 @@
 ; projects and offers LYNX in Explorer's "Open with" for .flp without taking over FL Studio's default.
 ; The uninstaller removes only what this installer added (settings in %APPDATA%\LYNX stay).
 ;
-; Defines passed by the script: VERSION (e.g. 0.1.3), STAGE (folder with LYNX.exe, LICENSE, THIRD_PARTY.md,
-; optional Demo.lynx), OUTFILE, ICON.
+; Defines passed by the script / release workflow: VERSION (e.g. 0.1.3), STAGE (folder with LYNX.exe, LICENSE,
+; THIRD_PARTY.md, optional PRIVACY.md and Demo.lynx), OUTFILE, ICON.
 
 Unicode true
 SetCompressor /SOLID lzma
@@ -92,6 +92,7 @@ Section "!$(SecApp)" SecMain
     File "${STAGE}\LYNX.exe"
     File "${STAGE}\LICENSE"
     File "${STAGE}\THIRD_PARTY.md"
+    File /nonfatal "${STAGE}\PRIVACY.md"
     File /nonfatal "${STAGE}\Demo.lynx"
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
@@ -147,6 +148,7 @@ Section "Uninstall"
     Delete "$INSTDIR\LYNX.pdb"
     Delete "$INSTDIR\LICENSE"
     Delete "$INSTDIR\THIRD_PARTY.md"
+    Delete "$INSTDIR\PRIVACY.md"
     Delete "$INSTDIR\Demo.lynx"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"

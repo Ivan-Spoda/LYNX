@@ -26,6 +26,7 @@
 #include "ui/PluginWindow.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
+#include "ui/WaveformView.h"
 
 #include "core/HintMarkup.h"
 #include "core/SongStats.h"
@@ -836,6 +837,10 @@ void MainComponent::loadUiSettings()
             typingPiano = on;
         else if (key == "keepEditorsOpen")
             ChannelRackComponent::keepEditorsOpen = on;
+        else if (key == "waveColours")
+            ui::WaveformCache::spectral = on;
+        else if (key == "waveStereo")
+            ui::WaveformCache::stereo = on;
         else if (key == "rememberSeek")
             EditorGlobals::get().rememberSeek = on;
         else if (key == "scopeMode")
@@ -857,6 +862,8 @@ void MainComponent::saveUiSettings()
                                       + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\neditPatternsIn="
                                       + juce::String (PlaylistComponent::editPatternsIn) + "\nsplash=" + juce::String (startup.splash ? 1 : 0)
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
+                                      + "\nwaveColours=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
+                                      + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode) + "\n");
 }
@@ -2188,6 +2195,27 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                     saveUiSettings();
                 });
             menu.addSubMenu (tr ("Double-click on a pattern clip opens"), editIn);
+        }
+        {
+            // waveforms of audio clips, the Sampler and the Browser preview (ui/WaveformView)
+            juce::PopupMenu waves;
+            waves.addItem (tr ("Spectral colours (warm = bass, cool = treble)"), true, ui::WaveformCache::spectral, [this] {
+                ui::WaveformCache::spectral = true;
+                saveUiSettings();
+                ui::WaveformCache::getInstance()->settingsChanged();
+            });
+            waves.addItem (tr ("Classic (one colour)"), true, ! ui::WaveformCache::spectral, [this] {
+                ui::WaveformCache::spectral = false;
+                saveUiSettings();
+                ui::WaveformCache::getInstance()->settingsChanged();
+            });
+            waves.addSeparator();
+            waves.addItem (tr ("Stereo (left and right channels apart)"), true, ui::WaveformCache::stereo, [this] {
+                ui::WaveformCache::stereo = ! ui::WaveformCache::stereo;
+                saveUiSettings();
+                ui::WaveformCache::getInstance()->settingsChanged();
+            });
+            menu.addSubMenu (tr ("Waveforms"), waves);
         }
         menu.addItem (tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), true,
                       ChannelRackComponent::keepEditorsOpen, [this] {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Packages a Windows build for release: the per-user installer (NSIS) and the portable zip.
+# Packages a Windows build locally: the per-user installer (NSIS) and the portable zip. Official releases are
+# packaged the same way by .github/workflows/release.yml (docs/RELEASE.md).
 #
 #   scripts/make-installer.sh [LYNX.exe] [Demo.lynx]
 #
@@ -27,6 +28,7 @@ rm -rf "$DIST/stage"
 mkdir -p "$STAGE"
 cp "$EXE" "$STAGE/LYNX.exe"
 cp LICENSE THIRD_PARTY.md "$STAGE/"
+[[ -f PRIVACY.md ]] && cp PRIVACY.md "$STAGE/"
 
 if [[ -n "$DEMO" ]]; then
     cp "$DEMO" "$STAGE/Demo.lynx"
