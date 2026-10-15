@@ -50,6 +50,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
 #include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -11136,3 +11137,5 @@ TEST (wasp_is_a_silent_placeholder)
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
+#include "LuxeVerbTests.inc"
+#include "ConvolverTests.inc"
