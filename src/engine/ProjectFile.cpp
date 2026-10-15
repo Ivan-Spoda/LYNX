@@ -430,6 +430,8 @@ juce::String toJson (const Song& song)
 
     if (song.swing > 0.0f)
         root->setProperty ("swing", juce::roundToInt (song.swing * 1000.0f) / 1000.0);
+    if (song.masterPitch != 0.0f)
+        root->setProperty ("masterPitch", (double) song.masterPitch);
     root->setProperty ("currentPattern", song.currentPattern);
 
     juce::Array<juce::var> channels;
@@ -801,6 +803,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.bpm = juce::jlimit (10.0, 999.0, (double) root.getProperty ("bpm", 130.0));
     song.beatsPerBar = juce::jlimit (1, 32, (int) root.getProperty ("beatsPerBar", 4));
     song.swing = juce::jlimit (0.0f, 1.0f, (float) (double) root.getProperty ("swing", 0.0));
+    song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
     song.currentPattern = (int) root.getProperty ("currentPattern", 0);
 
     if (auto* channels = root["channels"].getArray())

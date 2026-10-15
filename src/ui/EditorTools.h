@@ -8,6 +8,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/EditorGestures.h"
 #include "engine/AudioEngine.h"
 #include "ui/Icons.h"
 
@@ -28,18 +29,6 @@ public:
 // --- edit tools ------------------------------------------------------------------------
 // Rules shared by every tool: right-click deletes, Alt bypasses the grid, Ctrl selects
 // (Ctrl+drag draws a selection box). Right-press-and-hold on empty grid gives a temporary Knife.
-enum class EditTool
-{
-    pencil, // add, move and resize (the default gestures)
-    brush,  // drag lays a run of notes / clips (Shift: one note at a time in the Piano Roll)
-    eraser, // click or drag deletes
-    mute,   // click or drag mutes / unmutes
-    knife,  // drag a line to cut through notes / clips; a click cuts at the cursor
-    lasso,  // click selects, drag draws a selection box (Shift adds)
-    zoom,   // drag a range to zoom into it; a click zooms back out
-    listen, // click or drag to hear notes (Piano Roll) or play from there (Playlist)
-    slip    // Playlist only: drag inside a clip to move its content under it
-};
 
 struct EditToolInfo
 {
@@ -51,6 +40,15 @@ struct EditToolInfo
 };
 
 const std::vector<EditToolInfo>& editTools();
+
+// The mouse cursor of each editor gesture (core/EditorGestures.h): the system arrows for moving,
+// resizing and selecting, LYNX's own tool icons (outlined, so they read on any background) for
+// drawing, painting, erasing, muting, slicing, zooming, listening and slipping. Built once.
+juce::MouseCursor editorCursor (gesture::Cursor cursor);
+
+// Hint bar text for what a left press would do (`playlist` words it for clips instead of notes),
+// followed by the gestures that apply on top of it. The editors' HintSource uses it.
+juce::String actionHint (gesture::Action action, bool playlist);
 const EditToolInfo& editToolInfo (EditTool tool);
 
 // A row of radio icon buttons, one per tool.
@@ -66,6 +64,8 @@ public:
     std::function<void (EditTool)> onChange;
 
     void resized() override;
+    // the wheel over the strip steps through the tools
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
 private:
     EditTool tool = EditTool::pencil;

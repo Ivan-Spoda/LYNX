@@ -603,6 +603,7 @@ void Workspace::toggleMaximised (Panel panel)
 
 void Workspace::setDetached (Panel panel, bool detached)
 {
+    pristine = false;
     layout[panel].detached = detached;
 
     if (detached)
@@ -646,6 +647,10 @@ void Workspace::fitPanelContent (Panel panel, int contentWidth, int contentHeigh
     if (contentHeight > 0)
         r.h = contentHeight + titleHeight + edge;
 
+    // grows to the left (or up) rather than past the desktop's edge
+    r.x = juce::jlimit (0, juce::jmax (0, getWidth() - r.w), r.x);
+    r.y = juce::jlimit (0, juce::jmax (0, getHeight() - r.h), r.y);
+
     r.w = juce::jlimit (workspace::minWidth, juce::jmax (workspace::minWidth, getWidth() - r.x), r.w);
     r.h = juce::jlimit (workspace::minHeight, juce::jmax (workspace::minHeight, getHeight() - r.y), r.h);
     state.bounds = r;
@@ -666,6 +671,9 @@ void Workspace::setFocusedPanel (Panel panel)
 
 void Workspace::frameMoved (Panel panel, juce::Rectangle<int> bounds)
 {
+    if (! (layout[panel].bounds == toRect (bounds)))
+        pristine = false; // moved or resized by hand
+
     layout[panel].bounds = toRect (bounds);
 }
 
@@ -782,9 +790,20 @@ void Workspace::resized()
             }
 
         layoutReady = true;
+        pristine = ! restored;
         applyLayout();
 
         if (! restored && onDefaultLayout)
+            onDefaultLayout();
+        return;
+    }
+
+    if (pristine)
+    {
+        layout.relayoutDefault (getWidth(), getHeight());
+        applyLayout();
+
+        if (onDefaultLayout)
             onDefaultLayout();
         return;
     }
@@ -807,7 +826,7 @@ void Workspace::paint (juce::Graphics& g)
     {
         g.setColour (colour::textDisabled);
         g.setFont (font (type::body));
-        g.drawFittedText (tr ("F5 Playlist   F6 Channel Rack   F7 Piano Roll   F8 Browser   F9 Mixer"), getLocalBounds().reduced (20),
+        g.drawFittedText (tr ("F5 Playlist   F6 Channel Rack   F7 Piano Roll   F9 Mixer   Alt+F8 Browser"), getLocalBounds().reduced (20),
                           juce::Justification::centred, 2);
     }
 }
@@ -816,6 +835,7 @@ void Workspace::resetLayout()
 {
     layout = workspace::Layout::makeDefault (juce::jmax (1, getWidth()), juce::jmax (1, getHeight()));
     layoutReady = true;
+    pristine = true;
     applyLayout();
 
     if (onDefaultLayout)
@@ -851,6 +871,7 @@ bool Workspace::applyLayoutText (const juce::String& text)
         return false;
 
     layout = *parsed;
+    pristine = false;
     applyLayout();
     return true;
 }
