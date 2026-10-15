@@ -39,9 +39,11 @@
 
 namespace lynx
 {
-// true when the exact engine can play this Ogun state (version ≥ 14, every articulator and curve parsed). (Autogun's
-// states mostly use another layout; the importer keeps them on the synth approximation.)
+// true when the exact engine can play this Ogun state (version ≥ 14, every articulator and curve parsed)
 bool ogunStateUsable (const std::vector<std::uint8_t>& state);
+// the same for an Autogun state (Autogun_x64.dll: Ogun's layout plus a 4-byte seed after the comment from version 19 on;
+// REA_rodada57)
+bool autogunStateUsable (const std::vector<std::uint8_t>& state);
 
 // Raw integer parameter P[index] (0…63) of a state, or nullopt
 std::optional<int> ogunParam (const std::vector<std::uint8_t>& state, int index);
@@ -49,9 +51,12 @@ std::optional<int> ogunParam (const std::vector<std::uint8_t>& state, int index)
 bool ogunSetParam (std::vector<std::uint8_t>& state, int index, int value);
 
 // what this state uses that is not modelled exactly (empty: nothing), for reports
-std::vector<std::string> ogunFallbacks (const std::vector<std::uint8_t>& state);
+std::vector<std::string> ogunFallbacks (const std::vector<std::uint8_t>& state, bool autogun = false);
 
 std::unique_ptr<Instrument> makeOgunInstrument();
+// Autogun (REA_rodada57): Ogun's engine with the master level × 0.25 and the Magic Dust stage (FL's Soundgoodizer engine
+// with the preset Autogun\Data\SG.dat read at run time from ChannelDef::samplePath, band mix = parameter 63)
+std::unique_ptr<Instrument> makeAutogunInstrument();
 
 namespace ogun
 {
@@ -72,6 +77,8 @@ struct RefOptions
     int maxPolyphony = 0;      // ProcessEvent 1 (0 = unlimited)
     bool hostKills = false;    // false: like the EXEC harness / model default (finished voices stay listed)
     std::vector<int> j0Shift;  // per note (in note order): read-start shift (verification only; 0 = own choice)
+    bool autogun = false;      // the state is Autogun's (REA_rodada57)
+    std::vector<std::uint8_t> sgState; // Autogun: the bytes of Autogun\Data\SG.dat (empty: no Magic Dust stage)
 };
 
 // Renders `notes` from `state` like ogmodel.Plugin(...).run(length, events). Returns interleaved stereo float samples

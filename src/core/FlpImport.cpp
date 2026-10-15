@@ -10,6 +10,7 @@
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
+#include "core/TransistorBass.h"
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
@@ -492,7 +493,8 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             if (synthFromKepler (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
-        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::ogun)
+        if (! song.channels.empty()
+            && (song.channels.front().instrument == InstrumentKind::ogun || song.channels.front().instrument == InstrumentKind::autogun))
         {
             // ... and of an Ogun / Autogun patch (the spectral-oscillator conversion)
             SynthSettings synth;
@@ -1094,12 +1096,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
             else if (name == "ogun" || name == "autogun")
             {
-                // FL's inverse-FFT engine from the raw state (REA_rodada37); Autogun (its own state variant and DLL, not
-                // verified in round 37) and states the engine can't read keep the spectral-oscillator conversion
+                // FL's inverse-FFT engine from the raw state (REA_rodada37). Autogun (REA_rodada57) runs the same engine on
+                // its state variant, then its Magic Dust stage with the preset Autogun\Data\SG.dat of the user's FL
+                // installation (read at run time; without it the stage is skipped). States the engine can't read keep the
+                // spectral-oscillator conversion.
                 if (name == "ogun" && ogunStateUsable (c.pluginState))
                 {
                     def.instrument = InstrumentKind::ogun;
                     def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (name == "autogun" && autogunStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::autogun;
+                    def.pluginState = c.pluginState;
+                    const auto sg = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Autogun\\Data\\SG.dat", options.roots);
+                    if (! sg.empty() && (! options.fileExists || options.fileExists (sg)))
+                        def.samplePath = sg;
+                    else if (options.report != nullptr && ogunParam (c.pluginState, 63).value_or (0) > 0)
+                        ++options.report->droppedEffects["Autogun: Magic Dust (SG.dat not found)"];
                     adoptedFromPlugin = true;
                 }
                 else if (synthFromOgun (c.pluginState, fromPlugin, pluginGain))
@@ -1116,6 +1131,21 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
                 else if (synthFromSakura (c.pluginState, fromPlugin))
                     adopt();
+            }
+            else if (name == "transistor bass")
+            {
+                // FL's engine from the raw state (REA_rodada57 §2) with the "303 Pulse" oscillator cycles read at run time
+                // from the user's own engine DLL; there is no conversion to fall back to (state or DLL not usable: the
+                // channel stays unsupported)
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Transistor Bass\\engine_x64.dll", options.roots);
+                if (transistorBassStateUsable (c.pluginState) && ! dll.empty() && options.fileExists && options.fileExists (dll)
+                    && transistorBassDllUsable (dll))
+                {
+                    def.instrument = InstrumentKind::transistorbass;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = dll;
+                    adoptedFromPlugin = true;
+                }
             }
             else if (name == "kepler")
             {
@@ -1323,7 +1353,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::ogun || def.instrument == InstrumentKind::minisynth
                      || def.instrument == InstrumentKind::dx10
                      || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
-                     || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic)
+                     || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic
+                     || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

@@ -41,6 +41,7 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/ThreeOsc.h"
+#include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
@@ -784,6 +785,7 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int autogun = 0, autogunUsable = 0, autogunKind = 0, autogunWithSg = 0, autogunSounding = 0; // REA_rodada57
     int poizone = 0, poizoneUsable = 0, poizoneKind = 0, poizoneSounding = 0, poizoneGoldens = 0;
     int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
@@ -1200,6 +1202,39 @@ TEST (flp_real_files)
                     CHECK (finite);
                     ogunSounding += e > 1e-6 ? 1 : 0;
                 }
+
+            // Autogun (REA_rodada57): every state plays on Ogun's engine in its Autogun variant; with the installation, the
+            // Magic Dust stage gets Autogun\Data\SG.dat
+            {
+                bool any = false;
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Autogun")
+                        ++autogun, autogunUsable += lynx::autogunStateUsable (c.pluginState) ? 1 : 0, any = true;
+                if (any)
+                    for (const auto& c : lynx::importFlp (p, withFiles).channels)
+                        if (c.instrument == lynx::InstrumentKind::autogun)
+                        {
+                            ++autogunKind;
+                            lynx::ogun::RefOptions opt;
+                            opt.autogun = true;
+                            if (! c.samplePath.empty())
+                            {
+                                auto local = c.samplePath;
+                                std::replace (local.begin(), local.end(), '\\', '/');
+                                std::ifstream sg (local, std::ios::binary);
+                                opt.sgState.assign ((std::istreambuf_iterator<char> (sg)), std::istreambuf_iterator<char>());
+                                autogunWithSg += opt.sgState.size() == 1342 ? 1 : 0;
+                            }
+                            const auto y = lynx::ogun::renderReference (c.pluginState, { { 0, 48, 0.8, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6000 } },
+                                                                        44100.0, 11025, opt);
+                            double e = 0.0;
+                            bool finite = ! y.empty();
+                            for (auto v : y)
+                                finite = finite && std::isfinite (v), e += (double) v * v;
+                            CHECK (finite);
+                            autogunSounding += e > 1e-6 ? 1 : 0;
+                        }
+            }
 
             // Fruity DX10: every state plays on the exact engine when its channel processor is neutral (REA_rodada42)
             for (const auto& c : p.channels)
@@ -1735,6 +1770,9 @@ TEST (flp_real_files)
     CHECK (toxicUsable == toxic && toxic >= 3 && toxicKind == toxic && toxicSounding == toxicKind && toxicGoldens == 1);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
+    std::printf ("  Autogun: %d channels, %d states usable by the engine, %d imported as Autogun (%d with SG.dat, %d sounding)\n", autogun,
+                 autogunUsable, autogunKind, autogunWithSg, autogunSounding);
+    CHECK (autogunUsable == autogun && autogun >= 9 && autogunKind == autogun && autogunWithSg == autogun && autogunSounding == autogun);
     std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
     CHECK (dx10Usable == dx10 && dx10 >= 12 && dx10Kind == dx10 && dx10Sounding == dx10Kind);
     std::printf ("  Kepler: %d channels, %d states usable by the engine, %d imported as Kepler (%d sounding)\n", kepler, keplerUsable, keplerKind, keplerSounding);
@@ -7277,6 +7315,176 @@ TEST (kepler_engine)
     CHECK (inst->idle());
 }
 
+// REA round 57 §2: Transistor Bass
+// the plugin state (event 0xD5) of an FL preset file (.fst: the FLhd/FLdt event stream)
+std::vector<std::uint8_t> tbassPresetState (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    std::ifstream in (std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "Transistor Bass" / name, std::ios::binary);
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    while (i < b.size())
+    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (id == 0xD5 && i + n <= b.size())
+            return { b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n) };
+        i += n;
+    }
+    return {};
+}
+
+// the same state re-saved as engine-stream version 5 with an engine selector (REA_rodada57 §2.2)
+std::vector<std::uint8_t> tbassWithEngine (const std::vector<std::uint8_t>& s, std::int32_t engine)
+{
+    std::vector<std::uint8_t> out (s.begin(), s.begin() + 4);
+    auto put = [&] (const void* p, std::size_t n) { out.insert (out.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    for (std::size_t at = 4; at + 12 <= s.size();)
+    {
+        std::uint32_t id;
+        std::uint64_t n;
+        std::memcpy (&id, s.data() + at, 4);
+        std::memcpy (&n, s.data() + at + 4, 8);
+        std::vector<std::uint8_t> d (s.begin() + (std::ptrdiff_t) (at + 12), s.begin() + (std::ptrdiff_t) (at + 12 + n));
+        at += 12 + (std::size_t) n;
+        if (id == 2)
+        {
+            std::uint64_t m;
+            std::memcpy (&m, d.data() + 4, 8);
+            std::vector<std::uint8_t> e (d.begin() + 12, d.begin() + 12 + (std::ptrdiff_t) m);
+            std::int16_t v;
+            std::memcpy (&v, e.data(), 2);
+            if (v < 5)
+            {
+                v = 5;
+                std::memcpy (e.data(), &v, 2);
+                e.insert (e.end(), 4, 0);
+            }
+            std::memcpy (e.data() + e.size() - 4, &engine, 4);
+            m = e.size();
+            d.resize (12);
+            std::memcpy (d.data() + 4, &m, 8);
+            d.insert (d.end(), e.begin(), e.end());
+        }
+        const std::uint64_t size = d.size();
+        put (&id, 4);
+        put (&size, 8);
+        put (d.data(), d.size());
+    }
+    return out;
+}
+
+std::string tbassDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Transistor Bass" / "engine_x64.dll").string();
+}
+
+TEST (transistorbass_engine)
+{
+    const auto factory = tbassPresetState ("Factory programs.fst");
+    const auto seqOff = tbassPresetState ("Sequencer off.fst");
+    if (factory.empty() || seqOff.empty())
+        return; // no FL installation
+    CHECK (factory.size() == 197887 && seqOff.size() == 196051);
+    CHECK (lynx::transistorBassStateUsable (factory) && lynx::transistorBassStateUsable (seqOff));
+    CHECK (lynx::transistorBassStateUsable (tbassWithEngine (factory, 2)));
+    auto broken = factory;
+    broken[0] = 3; // the wrapper refuses versions above 2
+    CHECK (! lynx::transistorBassStateUsable (broken));
+    auto truncated = factory;
+    truncated.resize (truncated.size() - 1000);
+    CHECK (! lynx::transistorBassStateUsable (truncated));
+    const auto dll = tbassDll();
+    if (dll.empty() || ! lynx::transistorBassDllUsable (dll))
+        return;
+
+    // against FL's engine DLL (EXEC, REA_rodada57 §2.11): programs of the factory bank (sequencer, accents, slides,
+    // distortion, delay, reverb) on the three engines and the sequencer-off preset with legato and accent notes; host
+    // blocks of 512 at 44.1 kHz, tempo 125. LYNX differs from the DLL by −121 dB or less here (library pow rounding).
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* preset; int engine, key; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Factory", -1, 0, 84.1648489, 84.1648489, { { 5000, -2.72742806e-09f, -2.72742806e-09f }, { 20000, -0.0366424844f, -0.0366424844f }, { 47000, 2.15875261e-07f, 2.15875261e-07f }, { 80000, 0.0f, 0.0f } } },
+        { "Factory", -1, 3, 140.915804, 135.290403, { { 5000, 6.46460592e-07f, 6.46460592e-07f }, { 20000, 0.000612073636f, 0.00883315224f }, { 47000, 0.00334156211f, 0.0349708796f }, { 80000, -0.0180665664f, -0.00647424255f } } },
+        { "Factory", -1, 9, 74.6013145, 74.6013145, { { 5000, 1.17278e-06f, 1.17278e-06f }, { 20000, 4.45517001e-09f, 4.45517001e-09f }, { 47000, -0.00680137333f, -0.00680137333f }, { 80000, 9.70963379e-11f, 9.70963379e-11f } } },
+        { "Factory", -1, 21, 672.27801, 665.683557, { { 5000, 9.88614047e-05f, -0.00434152689f }, { 20000, 0.00984471664f, -0.00176824001f }, { 47000, -0.00745432731f, -0.00174837175f }, { 80000, 0.00471894164f, -0.00477111898f } } },
+        { "Factory", -1, 65, 534.422868, 543.176189, { { 5000, -0.00286525022f, -0.00691002142f }, { 20000, -0.0952312946f, -0.0940120071f }, { 47000, -0.109519325f, -0.115677707f }, { 80000, 0.0193505734f, 0.0466997996f } } },
+        { "Factory", 1, 65, 531.095944, 535.778912, { { 5000, 0.00939375907f, 0.000506323006f }, { 20000, 0.0880209357f, 0.0815288723f }, { 47000, 0.0840308368f, 0.0360141024f }, { 80000, -0.0445356891f, -0.058858037f } } },
+        { "Factory", 2, 65, 577.993833, 585.388538, { { 5000, -0.000922904757f, 0.0082119517f }, { 20000, 0.100198291f, 0.0890608132f }, { 47000, 0.0754022077f, 0.133105934f }, { 80000, -0.0728695691f, -0.0721700341f } } },
+        { "SeqOff", -1, 48, 27.8141841, 27.8141841, { { 5000, -0.0331321731f, -0.0331321731f }, { 20000, -0.016056465f, -0.016056465f }, { 47000, -0.0118189175f, -0.0118189175f }, { 80000, 0.0f, 0.0f } } },
+        { "SeqOff", 1, 48, 21.7931524, 21.7931524, { { 5000, 0.0268912539f, 0.0268912539f }, { 20000, 0.0150698861f, 0.0150698861f }, { 47000, 0.011147175f, 0.011147175f }, { 80000, -1.04869307e-23f, -1.04869307e-23f } } },
+        { "SeqOff", 2, 48, 61.3736312, 61.3736312, { { 5000, 0.0370108262f, 0.0370108262f }, { 20000, 0.0206214525f, 0.0206214525f }, { 47000, 0.0157183651f, 0.0157183651f }, { 80000, -1.3009924e-23f, -1.3009924e-23f } } },
+    };
+    constexpr int length = 88200;
+    for (const auto& g : goldens)
+    {
+        const bool factoryBank = std::string (g.preset) == "Factory";
+        auto st = factoryBank ? factory : seqOff;
+        if (g.engine >= 0)
+            st = tbassWithEngine (st, g.engine);
+        std::vector<lynx::tbass::RefNote> notes;
+        if (factoryBank)
+            notes.push_back ({ 0, g.key, 0.5, 0.0, 0.0, 0.0, 0.0, 70560 });
+        else
+        {
+            notes.push_back ({ 0, g.key, 0.5, 0.0, 0.0, 0.0, 0.0, 30000 });
+            notes.push_back ({ 20000, g.key + 7, 1.6, 0.0, 0.0, 0.0, 0.0, 50000 });
+            notes.push_back ({ 45000, g.key - 5, 0.3, 0.0, 0.0, 0.0, 0.0, 70560 });
+        }
+        const auto y = lynx::tbass::renderReference (st, dll, notes, 44100.0, length);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+        if (! ok)
+            std::printf ("  Transistor Bass %s engine %d key %d differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.preset, g.engine, g.key, el, er, g.el, g.er);
+        CHECK (ok);
+    }
+
+    // the instrument: FL's wrapper velocity, the channel volume as an output gain, the sequencer plays while the key is held
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::transistorbass;
+    c.pluginState = factory;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::transistorbass);
+    inst->configure (c, 128.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (65, 0.8f);
+    double e = 0.0;
+    bool finite = true;
+    for (int b = 0; b < 24; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+        for (int i = 0; i < 4096; ++i)
+            finite = finite && std::isfinite (l[(std::size_t) i]) && std::isfinite (r[(std::size_t) i]), e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        if (b == 20)
+            inst->noteOff (65);
+    }
+    CHECK (finite && e > 1.0 && ! inst->idle());
+    for (int b = 0; b < 400 && ! inst->idle(); ++b)
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    CHECK (inst->idle());
+}
+
 TEST (kepler_demo_channels)
 {
     // every Kepler channel of FL's demo projects on LYNX's engine against FL's engine DLL (EXEC fingerprints, REA_rodada46 §6;
@@ -7418,6 +7626,116 @@ TEST (ogun_demo_channels)
     }
     std::printf ("  Ogun: %d demo renders checked against the reference model\n", checked);
     CHECK (checked == (int) std::size (goldens));
+}
+
+TEST (autogun_template_channels)
+{
+    // REA_rodada57: every distinct Autogun state of the installation's projects (templates and the render test), with its
+    // effects and the Magic Dust stage (SG.dat from the installation), three notes (C5 1.0 0–20000, G5 0.6 8000–26000,
+    // G4 0.95 16000–30000), 39 690 samples at 44.1 kHz, at the state's quality and at the export quality 4. The template
+    // goldens are renders of the installation's Autogun_x64.dll (LYNX is within −127 dB of them); the render-test state
+    // uses Seed 2 "Random", so its golden is LYNX's own render with the counter at 0 (a fingerprint of the engine).
+    if (realFlpDir.empty())
+        return;
+    const auto sgPath = std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Autogun" / "Data" / "SG.dat";
+    std::ifstream sgIn (sgPath, std::ios::binary);
+    const std::vector<std::uint8_t> sgState ((std::istreambuf_iterator<char> (sgIn)), std::istreambuf_iterator<char>());
+    if (sgState.size() != 1342)
+        return; // not this installation
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; std::size_t stateSize; bool export4; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+{ "System/Render tests/Autogun.flp", 2403, false, 1898.57144, 1609.64764, { { 5000, 0.189644396f, 0.104252934f }, { 12000, 0.0354045518f, 0.002853852f }, { 25000, -0.212527201f, -0.364677101f }, { 35000, 0.00715163164f, -0.0779336989f } } }, // Autogun (LYNX engine, counter 0)
+        { "System/Render tests/Autogun.flp", 2403, true, 1883.83096, 1696.41005, { { 5000, -0.229550153f, -0.0656554326f }, { 12000, -0.243209839f, -0.191908702f }, { 25000, 0.174803019f, 0.125847161f }, { 35000, 0.0609342083f, 0.0861448273f } } }, // Autogun (LYNX engine, counter 0)
+        { "Templates/Advanced/Electronic/Breakbeat.flp", 43615, false, 1156.8126, 667.1251, { { 5000, -0.122245498f, -0.00968936551f }, { 12000, 0.088016659f, 0.0382440798f }, { 25000, -0.0438547991f, -0.0149139315f }, { 35000, -0.0162006877f, 0.0219070036f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Breakbeat.flp", 43615, true, 541.425656, 476.875716, { { 5000, 0.15942347f, 0.0947837308f }, { 12000, 0.172008425f, 0.197265282f }, { 25000, 0.0506084785f, 0.0015097193f }, { 35000, 0.0400503464f, 0.0195946041f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Chillout.flp", 171641, false, 1463.17228, 1370.65276, { { 5000, 0.158808231f, -0.128741398f }, { 12000, 0.208011121f, -0.153484732f }, { 25000, -0.184889361f, 0.0409393087f }, { 35000, 0.0255694874f, 0.0495453961f } } }, // Pad 5 (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Chillout.flp", 171641, true, 1412.70901, 1469.84358, { { 5000, -0.0218960885f, -0.0802078545f }, { 12000, -0.458583713f, 0.146813422f }, { 25000, -0.198403969f, 0.0604776815f }, { 35000, -0.097854577f, 0.0806856826f } } }, // Pad 5 (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/HipHop-Trap.flp", 9787, false, 2807.37714, 3754.76445, { { 5000, -0.0391585156f, 0.332697481f }, { 12000, -0.128277287f, -0.632223666f }, { 25000, 0.103559501f, 0.521154523f }, { 35000, 0.309904903f, 0.280873239f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/HipHop-Trap.flp", 9787, true, 3526.66329, 4199.20992, { { 5000, 0.256542385f, 0.0431160629f }, { 12000, -0.283133686f, -0.732375383f }, { 25000, -0.210154608f, -0.276185691f }, { 35000, -0.144943774f, -0.315269828f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Trap.flp", 9780, false, 2807.37714, 3754.76445, { { 5000, -0.0391585156f, 0.332697481f }, { 12000, -0.128277287f, -0.632223666f }, { 25000, 0.103559501f, 0.521154523f }, { 35000, 0.309904903f, 0.280873239f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Trap.flp", 9780, true, 3526.66329, 4199.20992, { { 5000, 0.256542385f, 0.0431160629f }, { 12000, -0.283133686f, -0.732375383f }, { 25000, -0.210154608f, -0.276185691f }, { 35000, -0.144943774f, -0.315269828f } } }, // Pad (Autogun_x64.dll)
+    };
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / g.file, std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        if (bytes.empty())
+            continue;
+        std::vector<std::uint8_t> st;
+        for (const auto& c : flp::parseProject (bytes).channels)
+            if (c.pluginName == "Autogun" && st.empty())
+                st = c.pluginState;
+        CHECK (st.size() == g.stateSize);
+        CHECK (lynx::autogunStateUsable (st));
+        lynx::ogun::RefOptions opt;
+        opt.autogun = true;
+        opt.sgState = sgState;
+        opt.quality = g.export4 ? 4 : -1;
+        const auto y = lynx::ogun::renderReference (st, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20000 },
+                                                          { 8000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 26000 },
+                                                          { 16000, 55, 0.95, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30000 } }, 44100.0, 39690, opt);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 2e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 2e-5 * peak;
+        if (! ok)
+            std::printf ("  Autogun %s (q%s) differs: energy %.9g %.9g (golden %.9g %.9g)\n", g.file, g.export4 ? "4" : "-state", el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Autogun: %d template/render-test renders checked (DLL goldens for the fixed-spectrum states)\n", checked);
+    CHECK (checked == (int) std::size (goldens));
+
+    // the instrument (SG.dat read from ChannelDef::samplePath) plays like the reference renderer, then goes idle
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / "Templates" / "Advanced" / "Electronic" / "Trap.flp", std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::autogun;
+        for (const auto& ch : flp::parseProject (bytes).channels)
+            if (ch.pluginName == "Autogun")
+                c.pluginState = ch.pluginState;
+        c.samplePath = sgPath.string();
+        lynx::ogun::RefOptions opt;
+        opt.autogun = true;
+        opt.sgState = sgState;
+        opt.tempo = 120.0; // the instrument is configured at 120 BPM
+        const auto ref = lynx::ogun::renderReference (c.pluginState, { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6144 } }, 44100.0, 16384, opt);
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::autogun);
+        inst->configure (c, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l (16384), r (16384);
+        for (int s = 0; s < 16384; s += 512)
+        {
+            if (s == 0)
+                inst->noteOn (60, 0.75f);
+            if (s == 6144)
+                inst->noteOff (60);
+            inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        }
+        double worst = 0.0, peak = 0.0;
+        for (int i = 0; i < 16384; ++i)
+            worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) }),
+            peak = std::max (peak, (double) std::abs (l[(std::size_t) i]));
+        if (worst != 0.0)
+            std::printf ("  Autogun instrument vs reference: worst %.3g (peak %.3g)\n", worst, peak);
+        CHECK (ref.size() == 2 * 16384 && peak > 0.01 && worst == 0.0);
+        std::vector<float> tail (44100), tailR (tail.size());
+        for (int k = 0; k < 40 && ! inst->idle(); ++k)
+            inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+
+    // the state variants: Ogun's parser rejects the version-19 Autogun layout, the comment length is one byte or 0xff + i32
+    std::ifstream rt (std::filesystem::path (realFlpDir) / "System" / "Render tests" / "Autogun.flp", std::ios::binary);
+    const std::vector<std::uint8_t> rtBytes ((std::istreambuf_iterator<char> (rt)), std::istreambuf_iterator<char>());
+    for (const auto& c : flp::parseProject (rtBytes).channels)
+        if (c.pluginName == "Autogun")
+            CHECK (lynx::autogunStateUsable (c.pluginState) && lynx::ogunParam (c.pluginState, 63) == 430);
 }
 
 TEST (harmless_rack)

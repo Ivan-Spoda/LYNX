@@ -105,7 +105,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
-  built-in waves read from the user's FL installation); Autogun on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  built-in waves read from the user's FL installation); Autogun on Ogun's engine in its Autogun variant (REA round 57:
+  master × 0.25 and the Magic Dust stage = FL's Soundgoodizer engine with `Autogun\Data\SG.dat` read from the user's
+  installation; within −127 dB of FL's DLL on the 4 fixed-spectrum template states, 9/9 states usable); Transistor Bass
+  on its engine (REA round 57: V1 legacy and both V2 cutoff ranges, 303 Pulse with the recorded cycles read from the
+  user's engine DLL, distortion, delay, reverb and the 16-step sequencer; 55/128 factory programs bit-exact, worst
+  −108.6 dB vs FL's DLL); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -206,7 +211,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   model itself is within −60 dB of FL's DLL on 20 of 20 demo channels. The core tests check the engine against model
   fingerprints: the 20 demo channels at the state's quality and at quality 4 (`ogun_demo_channels`) and 17 feature
   variants of a state written from scratch (`ogun_engine`). The old spectral-oscillator conversion remains for
-  unreadable states, Autogun (another state layout), and the synth's "FL presets" button.
+  unreadable states and the synth's "FL presets" button. Autogun (REA round 57) uses the same engine on its state variant
+  (a 4-byte seed after the comment from version 19 on; the comment length is one byte or 0xFF + i32, which also fixes
+  Ogun states with comments of 128+ characters), master × 0.25 and the Magic Dust stage (`autogun_template_channels`).
   CPU: one inverse FFT of N per voice and frame (split re/im radix-2 passes, cache-blocked, AVX when available), the
   quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
   "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
@@ -449,7 +456,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   the worst synthetic case vs the DLL); global LFOs/envelopes run per voice (none in FL's data); host answers 2/6 are 0,
   release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
   demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
-  (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
+  (LYNX's mono setting = 1). Autogun (REA round 57 §1): the same limits; FL's Seed-2 counter differs per run; the
+  Magic Dust stage is skipped when `SG.dat` is not found; automation of Magic Dust (FL updates only the stage's on/off,
+  not the hosted parameter) and a possible LFO-knob refresh difference on articulators 5–12 (no data uses it) are not
+  modelled. Transistor Bass (REA round 57 §2): the CRT's pow/powf last-bit differences (−108 dB worst); parameter
+  automation smoothing, MIDI CC/pitch-bend, the "MIDI channel 13" sequence transpose (no note channel in LYNX) and the
+  order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
+  as an output gain (the plugin does not read Final.Vol).
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
@@ -529,7 +542,7 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Autogun's engine (state layout differs from Ogun's; DLL not run), Maximus's Master Mid mode and linear-phase
+- Maximus's Master Mid mode and linear-phase
   split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
 - Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
   colour/height (need model fields), F2/F3 search stepping, instrument drops on mixer inserts, the automation
