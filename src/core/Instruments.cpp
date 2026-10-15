@@ -7,6 +7,8 @@
 #include "core/SytrusEngine.h"
 #include "core/Harmor.h"
 #include "core/Ogun.h"
+#include "core/BassDrum.h"
+#include "core/FruitKick.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -204,6 +206,8 @@ private:
             case InstrumentKind::gms:
             case InstrumentKind::morphine:
             case InstrumentKind::ogun:
+            case InstrumentKind::fruitkick:
+            case InstrumentKind::bassdrum:
                 break;
         }
 
@@ -2012,6 +2016,10 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeMorphineInstrument();
     if (kind == InstrumentKind::ogun)
         return makeOgunInstrument();
+    if (kind == InstrumentKind::fruitkick)
+        return makeFruitKickInstrument();
+    if (kind == InstrumentKind::bassdrum)
+        return makeBassDrumInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

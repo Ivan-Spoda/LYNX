@@ -11,6 +11,8 @@
 #include "core/Gms.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
+#include "core/BassDrum.h"
+#include "core/FruitKick.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -479,6 +481,8 @@ public:
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
         ogun = def.instrument == InstrumentKind::ogun;
+        fruitkick = def.instrument == InstrumentKind::fruitkick;
+        bassdrum = def.instrument == InstrumentKind::bassdrum;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -570,8 +574,16 @@ public:
         static const FloatKnob morphineKnobs[] = {
             { 0, "Master" }, { 9, "Attack" }, { 10, "Decay" }, { 11, "Sustain" }, { 12, "Release" }, { 1, "Glide" }, { 4, "Vel curve" },
             { 7, "Overdrive" }, { 14, "Chorus mix" }, { 21, "Delay mix" }, { 25, "Reverb mix" }, { 36, "Noise mix" } };
+        // BassDrum: its 23 floats 0…1 inside the saved state (REA_rodada15 §12.3 / rodada43 §2.2)
+        static const FloatKnob bassDrumKnobs[] = {
+            { 0, "Output" }, { 6, "Base" }, { 7, "Peak" }, { 8, "Slide" }, { 2, "Duration" }, { 5, "Attack" }, { 4, "Drive" },
+            { 3, "Butt" }, { 15, "Click level" }, { 14, "Click freq" }, { 13, "Click cut" }, { 21, "Noise mix" }, { 22, "Noise filter" },
+            { 20, "Noise pitch" }, { 19, "Noise start" }, { 1, "Sampling" } };
+        auto offsetOf = [] (bool isGms, bool isBassDrum, const std::vector<std::uint8_t>& st, int index) {
+            return isGms ? gmsParamOffset (st, index) : isBassDrum ? bassDrumParamOffset (st, index) : morphineParamOffset (st, index);
+        };
         auto addFloat = [&] (const FloatKnob& k) {
-            const auto at = gms ? gmsParamOffset (def.pluginState, k.index) : morphineParamOffset (def.pluginState, k.index);
+            const auto at = offsetOf (gms, bassdrum, def.pluginState, k.index);
             if (at < 0)
                 return;
             float value = 0.0f;
@@ -581,10 +593,10 @@ public:
             knob->setRange (0.0, 1.0, 0.001);
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
-            knob->onValueChange = [this, k, isGms = gms, s = knob.get()] {
-                engine.editSong ([c = channel, k, isGms, v = (float) s->getValue()] (Song& song) {
+            knob->onValueChange = [this, k, isGms = gms, isBassDrum = bassdrum, offsetOf, s = knob.get()] {
+                engine.editSong ([c = channel, k, isGms, isBassDrum, offsetOf, v = (float) s->getValue()] (Song& song) {
                     auto& st = song.channels[(std::size_t) c].pluginState;
-                    if (const auto o = isGms ? gmsParamOffset (st, k.index) : morphineParamOffset (st, k.index); o >= 0)
+                    if (const auto o = offsetOf (isGms, isBassDrum, st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
             };
@@ -614,9 +626,33 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
+        // Fruit Kick: its six integers (REA_rodada10 §4.2 ranges)
+        static const Ranged fruitKickKnobs[] = {
+            { 0, "Max freq", -2400, 3600 }, { 1, "Min freq", -1200, 1200 }, { 2, "Freq decay", 0, 256 }, { 3, "Amp decay", 0, 256 },
+            { 4, "Click", 0, 64 }, { 5, "Distortion", 0, 128 } };
+        auto addFruitKick = [&] (const Ranged& k) {
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (k.low, k.high, 1.0);
+            knob->setValue (fruitKickParam (def.pluginState, k.index), juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, index = k.index, s = knob.get()] {
+                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
+                    fruitKickSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
         if (gms)
             for (const auto& k : gmsKnobs)
                 addFloat (k);
+        else if (bassdrum)
+            for (const auto& k : bassDrumKnobs)
+                addFloat (k);
+        else if (fruitkick)
+            for (const auto& k : fruitKickKnobs)
+                addFruitKick (k);
         else if (morphine)
             for (const auto& k : morphineKnobs)
                 addFloat (k);
@@ -657,6 +693,8 @@ public:
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
+                    : fruitkick ? tr ("Fruit Kick — FL's engine (channel envelopes stepped per tick)")
+                    : bassdrum ? tr ("BassDrum — FL's engine (table and noise samples read from your FL installation)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -676,7 +714,8 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false,
+         fruitkick = false, bassdrum = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1308,7 +1347,7 @@ public:
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1389,6 +1428,8 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::gms:
         case InstrumentKind::morphine:
         case InstrumentKind::ogun:
+        case InstrumentKind::fruitkick:
+        case InstrumentKind::bassdrum:
             return true;
         default:
             return false;
@@ -1422,7 +1463,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
