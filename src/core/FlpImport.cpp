@@ -1404,6 +1404,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
                  || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
+                 || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)
