@@ -12,6 +12,10 @@ OUT="${OUT:-build-win}"
 JOBS="${JOBS:-$(nproc)}"
 TARGET=x86_64-windows-gnu
 
+# Single version source: project(LYNX VERSION x.y.z) in CMakeLists.txt
+VERSION="$(sed -n 's/^project(LYNX VERSION \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' CMakeLists.txt)"
+[[ -n "$VERSION" ]] || { echo "could not read the version from CMakeLists.txt" >&2; exit 1; }
+
 mkdir -p "$OUT/juce" "$OUT/app" "$OUT/shim"
 
 # MinGW headers are lowercase; JUCE includes some with capitals (on Windows it does not matter).
@@ -31,7 +35,7 @@ MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basic
     echo '#define JUCE_ASIO 1'
     echo '#define JUCE_USE_MP3AUDIOFORMAT 1'
     echo '#define JUCE_APPLICATION_NAME_STRING "LYNX"'
-    echo '#define JUCE_APPLICATION_VERSION_STRING "0.1.3"'
+    echo "#define JUCE_APPLICATION_VERSION_STRING \"$VERSION\""
     for m in "${MODULES[@]}"; do echo "#define JUCE_MODULE_AVAILABLE_$m 1"; done
 } > "$OUT/JuceConfig.h.new"
 # only replace the file if it changed, so the module cache is not invalidated
@@ -109,8 +113,17 @@ printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     src={}; obj="$OUT/app/$(echo "$src" | tr / _).o"
     $ZIG c++ $COMMON_STR -Wall -Wextra -c "$src" -o "$obj"'
 
-echo "Resources (manifest)..."
-( cd resources && "$ZIG" rc /fo "../$OUT/LYNX.res" LYNX.rc )
+echo "Resources (manifest, icons, version $VERSION)..."
+OUT_ABS="$(cd "$OUT" && pwd)"
+IFS=. read -r VMAJ VMIN VPAT <<< "$VERSION"
+{
+    echo '#pragma once'
+    echo "#define LYNX_VERSION_MAJOR $VMAJ"
+    echo "#define LYNX_VERSION_MINOR $VMIN"
+    echo "#define LYNX_VERSION_PATCH $VPAT"
+    echo "#define LYNX_VERSION_STR \"$VERSION\""
+} > "$OUT/lynx_version.h"
+( cd resources && "$ZIG" rc /i "$OUT_ABS" /fo "$OUT_ABS/LYNX.res" LYNX.rc )
 
 echo "Linking..."
 "$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT/LYNX.res" \
