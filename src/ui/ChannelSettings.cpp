@@ -14,6 +14,7 @@
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
+#include "core/PoiZone.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -485,6 +486,7 @@ public:
         miniSynth = def.instrument == InstrumentKind::minisynth;
         dx10 = def.instrument == InstrumentKind::dx10;
         kepler = def.instrument == InstrumentKind::kepler;
+        poizone = def.instrument == InstrumentKind::poizone;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -581,8 +583,15 @@ public:
             { 5, "Osc kind" }, { 6, "Osc mod" }, { 7, "Noise" }, { 1, "Transpose" }, { 8, "Cutoff" }, { 9, "Resonance" },
             { 16, "Filter env" }, { 21, "Attack" }, { 22, "Decay" }, { 23, "Sustain" }, { 24, "Release" }, { 20, "LFO amount" },
             { 19, "LFO rate" }, { 2, "Slide time" } };
+        // PoiZone: the plugin's own floats P[i] inside the saved state (REA_rodada44 §1.3)
+        static const FloatKnob poizoneKnobs[] = {
+            { 15, "Gain" }, { 8, "Osc balance" }, { 9, "Noise" }, { 18, "Cutoff" }, { 19, "Resonance" }, { 10, "EG amount" },
+            { 22, "Attack" }, { 23, "Decay" }, { 24, "Sustain" }, { 25, "Release" }, { 26, "LFO amount" }, { 28, "LFO rate" },
+            { 46, "Glide" }, { 38, "Delay wet" }, { 42, "Chorus wet" }, { 47, "Gate mix" } };
         auto paramOffset = [this] (const std::vector<std::uint8_t>& st, int index) {
-            return gms ? gmsParamOffset (st, index) : miniSynth ? miniSynthParamOffset (st, index) : morphineParamOffset (st, index);
+            return gms ? gmsParamOffset (st, index)
+                       : miniSynth ? miniSynthParamOffset (st, index)
+                       : poizone ? poizoneParamOffset (st, index) : morphineParamOffset (st, index);
         };
         auto addFloat = [&] (const FloatKnob& k) {
             const auto at = paramOffset (def.pluginState, k.index);
@@ -691,6 +700,9 @@ public:
         else if (morphine)
             for (const auto& k : morphineKnobs)
                 addFloat (k);
+        else if (poizone)
+            for (const auto& k : poizoneKnobs)
+                addFloat (k);
         else if (miniSynth)
             for (const auto& k : miniSynthKnobs)
                 addFloat (k);
@@ -731,6 +743,7 @@ public:
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
+                    : poizone ? tr ("PoiZone — FL's engine with its gate, chorus, delay and arpeggiator (new settings restart the voices)")
                     : miniSynth ? tr ("MiniSynth — FL's engine with its effects (wave tables read from your FL installation)")
                     : dx10 ? tr ("Fruity DX10 — FL's FM engine")
                     : kepler ? tr ("Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)")
@@ -753,7 +766,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, kepler = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, kepler = false, poizone = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1386,8 +1399,7 @@ public:
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1471,6 +1483,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::minisynth:
         case InstrumentKind::dx10:
         case InstrumentKind::kepler:
+        case InstrumentKind::poizone:
             return true;
         default:
             return false;
@@ -1505,8 +1518,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10)
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
