@@ -54,10 +54,11 @@ struct RefNote
 
 // Renders like gmsmodel.GmsPlugin.run: host blocks of `block` samples split at every event, chunks of ≤ 512,
 // host law A for the per-note levels, tempo `bpm`, max-polyphony event value `maxPoly` (0 → 99), songPos ≥ 0 = the
-// transport plays from that song position (beats). Waves are read from `wavesDir`. Interleaved stereo float samples
-// (2·length); empty if the state is unusable.
+// transport plays from that song position (beats); effects = false runs the voices only (the model's fx=False).
+// Waves are read from `wavesDir` (a missing wave plays silent tables, like the model). Interleaved stereo float
+// samples (2·length); empty if the state is unusable.
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
                                     int length, const std::string& wavesDir, int block = 512, double bpm = 140.0, int maxPoly = 0,
-                                    double songPos = -1.0);
+                                    double songPos = -1.0, bool effects = true);
 } // namespace gms
 } // namespace lynx

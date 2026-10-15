@@ -1,6 +1,8 @@
 #include "core/FlpImport.h"
 #include "core/DrumSynthLive.h"
+#include "core/Gms.h"
 #include "core/Harmless.h"
+#include "core/Morphine.h"
 #include "core/Harmor.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
@@ -410,6 +412,15 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             SynthSettings synth;
             float gain = 1.0f;
             if (synthFromHarmless (project.channels.front().pluginState, song.bpm, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && (song.channels.front().instrument == InstrumentKind::gms || song.channels.front().instrument == InstrumentKind::morphine))
+        {
+            // ... and of GMS / Morphine patches (their 3-oscillator / averaged-spectrum conversions)
+            SynthSettings synth;
+            float gain = 1.0f;
+            const auto& st = project.channels.front().pluginState;
+            if (song.channels.front().instrument == InstrumentKind::gms ? synthFromGms (st, song.bpm, synth, gain) : synthFromMorphine (st, synth, gain))
                 return synth;
         }
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::harmor)
@@ -889,8 +900,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
                     adopt();
             }
-            else if (name == "gms" && synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "gms")
+            {
+                // FL's GMS engine from the raw state (REA_rodada39 §1) with its oscillator waves read at run time from
+                // the user's installation; the 3-oscillator conversion stays as the fallback (state unreadable or waves
+                // not found)
+                const auto folder = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\GMS\\Synth Waves", options.roots);
+                const auto waves = gmsWaveNames (c.pluginState);
+                const auto wavesFound = ! waves.empty() && ! folder.empty() && options.fileExists
+                                        && std::all_of (waves.begin(), waves.end(), [&] (const std::string& w) {
+                                               return w.empty() || options.fileExists (folder + "\\" + w + ".wav");
+                                           });
+                if (gmsStateUsable (c.pluginState) && wavesFound)
+                {
+                    def.instrument = InstrumentKind::gms;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = folder;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
                 adopt();
             else if (name == "sakura")
@@ -930,8 +960,29 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 adopt();
             else if (name == "toxic biohazard" && synthFromToxic (c.pluginState, fromPlugin, pluginGain))
                 adopt();
-            else if (name == "morphine" && synthFromMorphine (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "morphine")
+            {
+                // FL's Morphine engine from the raw state (REA_rodada39 §2); its noise sample is read at run time from
+                // the user's installation (not found: the noise stays silent). The averaged-spectrum conversion stays as
+                // the fallback for states the engine can't read
+                if (morphineStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::morphine;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                    if (const auto noise = morphineNoiseName (c.pluginState); ! noise.empty())
+                    {
+                        const auto path = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Morphine\\Noise Samples\\" + noise,
+                                                         options.roots);
+                        if (! path.empty() && options.fileExists && options.fileExists (path))
+                            def.samplePath = path;
+                        else if (options.report != nullptr)
+                            ++options.report->droppedEffects["Morphine noise sample (not found)"];
+                    }
+                }
+                else if (synthFromMorphine (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "drumpad" && drumpadParams (c.pluginState))
             {
                 // the physical drum model (REA_rodada28 §2)
@@ -1026,7 +1077,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (def.instrument == InstrumentKind::sakura || def.instrument == InstrumentKind::drumpad
                      || def.instrument == InstrumentKind::boobass || def.instrument == InstrumentKind::drumsynth
                      || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
-                     || def.instrument == InstrumentKind::harmor)
+                     || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::gms
+                     || def.instrument == InstrumentKind::morphine)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

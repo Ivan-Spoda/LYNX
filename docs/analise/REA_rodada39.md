@@ -745,6 +745,23 @@ y = syn.run(n, [(0, 'on', dict(key=60, ivol=1.0, fvol=1.0, fpan=0.0, pofs=0.0)),
 6. Accept criterion: the C++ port against `mormodel.py` at ≤ −60 dB on the 7 demo states (44.1 and 48 kHz); then remove the
    Morphine line from STATUS.md.
 
+### 3.3 Port status (LYNX)
+
+Both engines are ported 1:1 (`src/core/Gms.cpp`, `src/core/Morphine.cpp`; `InstrumentKind::gms` / `morphine`; the
+importer keeps the raw 0xD5 state in `ChannelDef::pluginState` and the wave folder / noise sample path of the user's
+installation in `ChannelDef::samplePath`). Verification harness (our own, outside the repository: `rea-work/gmport/`,
+`rea-work/morport/`, driving `build-local/gmsrender` and `build-local/morphinerender` against the models with the same
+events) **[model]**:
+
+| Engine | Cases | C++ vs model |
+|---|---|---|
+| GMS | 10 demo/render-test channels × {voice, full chain} at 44.1 kHz, full chain at 48 kHz (4 channels), 33 synthetic cases (all of `gsyn.py` + song-position lock, all ten effect slots, flanger/panner/trancer/LP with song position) | bit-identical (difference 0) |
+| Morphine | 7 demo channels × {voice 44.1 kHz, full 44.1 kHz, full 48 kHz}, 22 synthetic cases (all of `mor_t_syn.py` and `mor_t_noise.py`), host block 100 | bit-identical (difference 0) |
+
+`tests/tests.cpp` (`gms_engine`, `morphine_engine`) checks states written from scratch against golden samples of the
+models and the instruments against the reference renderers; with FL's Data folder it also imports every demo channel
+on the exact engines and compares two demo channels (Song For You: GMS, SHINE: Morphine) with model goldens.
+
 ---
 
 ## Evidence index

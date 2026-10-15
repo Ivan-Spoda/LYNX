@@ -8,6 +8,8 @@
 #include "core/FlSynths.h"
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
+#include "core/Gms.h"
+#include "core/Morphine.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -473,6 +475,8 @@ public:
         drumsynth = def.instrument == InstrumentKind::drumsynth;
         harmless = def.instrument == InstrumentKind::harmless;
         harmor = def.instrument == InstrumentKind::harmor;
+        gms = def.instrument == InstrumentKind::gms;
+        morphine = def.instrument == InstrumentKind::morphine;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -555,7 +559,43 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        if (harmor)
+        // GMS / Morphine: the plugin's own 0…1 floats inside the saved state (GMS P[i], Morphine global A[i]; REA_rodada39)
+        struct FloatKnob { int index; const char* name; };
+        static const FloatKnob gmsKnobs[] = {
+            { 0, "Master" }, { 1, "Pan" }, { 8, "Level" }, { 4, "Attack" }, { 5, "Decay" }, { 6, "Sustain" }, { 7, "Release" },
+            { 12, "Cutoff" }, { 13, "Resonance" }, { 16, "Env1 amount" }, { 50, "Modulation" }, { 48, "Osc2 mix" }, { 49, "Osc3 mix" },
+            { 45, "Noise" }, { 41, "Unison" }, { 42, "Uni detune" }, { 43, "Stereo" }, { 10, "Slide time" } };
+        static const FloatKnob morphineKnobs[] = {
+            { 0, "Master" }, { 9, "Attack" }, { 10, "Decay" }, { 11, "Sustain" }, { 12, "Release" }, { 1, "Glide" }, { 4, "Vel curve" },
+            { 7, "Overdrive" }, { 14, "Chorus mix" }, { 21, "Delay mix" }, { 25, "Reverb mix" }, { 36, "Noise mix" } };
+        auto addFloat = [&] (const FloatKnob& k) {
+            const auto at = gms ? gmsParamOffset (def.pluginState, k.index) : morphineParamOffset (def.pluginState, k.index);
+            if (at < 0)
+                return;
+            float value = 0.0f;
+            std::memcpy (&value, def.pluginState.data() + at, 4);
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (0.0, 1.0, 0.001);
+            knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, k, isGms = gms, s = knob.get()] {
+                engine.editSong ([c = channel, k, isGms, v = (float) s->getValue()] (Song& song) {
+                    auto& st = song.channels[(std::size_t) c].pluginState;
+                    if (const auto o = isGms ? gmsParamOffset (st, k.index) : morphineParamOffset (st, k.index); o >= 0)
+                        std::memcpy (st.data() + o, &v, 4);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (gms)
+            for (const auto& k : gmsKnobs)
+                addFloat (k);
+        else if (morphine)
+            for (const auto& k : morphineKnobs)
+                addFloat (k);
+        else if (harmor)
             for (const auto& k : harmorKnobs)
                 addHarmor (k);
         else if (harmless)
@@ -586,6 +626,8 @@ public:
                                                   : tr (" (next hit; recorded waves not found: silent)"))
                     : harmless ? tr ("Harmless — FL's additive engine (chorus/delay/reverb/compressor rack off)")
                     : harmor ? tr ("Harmor — FL's additive engine (effects rack off; image synthesis not decoded)")
+                    : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
+                    : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -605,7 +647,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1235,7 +1277,8 @@ public:
             setContentOwned (new ControllerPanel (engine, channel), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
+                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1313,6 +1356,8 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::drumsynth:
         case InstrumentKind::harmless:
         case InstrumentKind::harmor:
+        case InstrumentKind::gms:
+        case InstrumentKind::morphine:
             return true;
         default:
             return false;
@@ -1344,7 +1389,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return std::make_unique<ControllerPanel> (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor)
+                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
+                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

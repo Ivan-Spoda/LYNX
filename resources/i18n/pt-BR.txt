@@ -440,6 +440,8 @@ countries: br
 " (next hit; recorded waves not found: silent)" = " (próximo hit; ondas gravadas não encontradas: mudo)"
 "Harmless — FL's additive engine (chorus/delay/reverb/compressor rack off)" = "Harmless — motor aditivo do FL (rack de chorus/delay/reverb/compressor desligado)"
 "Harmor — FL's additive engine (effects rack off; image synthesis not decoded)" = "Harmor — motor aditivo do FL (rack de efeitos desligado; síntese de imagem não decodificada)"
+"GMS — FL's engine (waves read from your FL installation)" = "GMS — motor do FL (ondas lidas da sua instalação do FL)"
+"Morphine — FL's additive engine (new settings restart the voices)" = "Morphine — motor aditivo do FL (novos ajustes reiniciam as vozes)"
 "BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)" = "BooBass — motor do FL, som lido da sua instalação do FL (knobs: EQ de 3 bandas)"
 "Sakura — physical strings (FL's engine; new parameters apply to the next note)" = "Sakura — cordas físicas (motor do FL; novos parâmetros valem a partir da próxima nota)"
 "Drumpad — physical drum (FL's engine; new parameters apply to the next hit)" = "Drumpad — tambor físico (motor do FL; novos parâmetros valem a partir do próximo hit)"

@@ -42,7 +42,9 @@ enum class InstrumentKind : std::uint8_t
     drumsynth,  // FL's Fruity DrumSynth Live (REA_rodada30 §1): 120 patches in modelParams, recorded waves from the user's DLL
     harmless,   // FL's Harmless additive engine (REA_rodada32): raw state in modelParams (layout in core/Harmless.h)
     sytrus,     // FL's Sytrus engine (REA_rodada31): the plugin's raw saved state in ChannelDef::pluginState
-    harmor      // FL's Harmor additive engine (REA_rodada34): the plugin's raw saved state in ChannelDef::pluginState
+    harmor,     // FL's Harmor additive engine (REA_rodada34): the plugin's raw saved state in ChannelDef::pluginState
+    gms,        // FL's GMS engine (REA_rodada39 §1): raw saved state in pluginState, wave folder in samplePath
+    morphine    // FL's Morphine engine (REA_rodada39 §2): raw saved state in pluginState, noise sample in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

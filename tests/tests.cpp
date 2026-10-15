@@ -28,8 +28,10 @@
 #include "core/Inflate.h"
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
+#include "core/Gms.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
+#include "core/Morphine.h"
 #include "core/HarmlessFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -386,6 +388,8 @@ TEST (plugin_state_decoders_survive_garbage)
         if (auto wave = lynx::waveTravellerSample (blob))
             CHECK (! wave->first.empty() && wave->second >= 0 && wave->second <= 127);
         lynx::synthFromBooBass (blob, synth);
+        lynx::gmsStateUsable (blob); // (the exact engines' parsers reject garbage without crashing)
+        lynx::morphineStateUsable (blob);
         if (lynx::synthFromPoiZone (blob, synth, harmlessGain) || lynx::synthFromBassDrum (blob, synth, harmlessGain) || lynx::synthFromToxic (blob, synth, harmlessGain)
             || lynx::synthFromMorphine (blob, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (harmlessGain));
@@ -751,6 +755,7 @@ TEST (flp_real_files)
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
+    int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -801,6 +806,52 @@ TEST (flp_real_files)
                 bool hasFpc = false;
                 for (const auto& c : p.channels)
                     hasFpc = hasFpc || c.pluginName == "FPC";
+                // GMS and Morphine (REA_rodada39): every state plays on the exact engine (GMS with its waves from the
+                // installation) and sounds; two demo channels match golden samples of our round-39 models
+                for (const auto& c : p.channels)
+                {
+                    if (c.pluginName == "GMS")
+                        ++gms, gmsUsable += lynx::gmsStateUsable (c.pluginState) ? 1 : 0;
+                    if (c.pluginName == "Morphine")
+                        ++morphine, morphineUsable += lynx::morphineStateUsable (c.pluginState) ? 1 : 0;
+                }
+                const auto file = entry.path().filename().string();
+                for (const auto& c : full.channels)
+                {
+                    const auto isGms = c.instrument == lynx::InstrumentKind::gms, isMorphine = c.instrument == lynx::InstrumentKind::morphine;
+                    if (! isGms && ! isMorphine)
+                        continue;
+                    (isGms ? gmsKind : morphineKind)++;
+                    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+                    const auto golden = (isGms && c.name == "GMS" && file.find ("Song For You") != std::string::npos)
+                                        || (isMorphine && c.name == "Morphine" && file.find ("SHINE") != std::string::npos);
+                    std::vector<float> y;
+                    if (isGms)
+                        y = lynx::gms::renderReference (c.pluginState,
+                                                        { { 0, 60, (float) iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, (float) iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                          { 22050, 67, (float) iv (110), 1.0, 0.0, 0.0, 52000 }, { 60000, 48, (float) iv (127), 1.0, 0.0, 0.0, 70000 } },
+                                                        44100.0, golden ? 88200 : 22050, c.samplePath);
+                    else
+                        y = lynx::morphine::renderReference (c.pluginState, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 30000 }, { 11025, 64, 0.5, 1.0, 0.0, 0.0, 50000 }, { 22050, 67, 2.0, 1.0, 0.0, 0.0, 70000 } },
+                                                             44100.0, golden ? 100000 : 22050, c.samplePath);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    (isGms ? gmsSounding : morphineSounding) += e > 1e-6 ? 1 : 0;
+                    if (golden && ! y.empty())
+                    {
+                        // our model, same events (GMS: tempo 140; Morphine: tempo 120), state as saved, 44.1 kHz
+                        const auto rms = std::sqrt (e / (double) y.size());
+                        CHECK (std::abs (rms - (isGms ? 0.213602668574 : 0.0673606448152)) < 1e-5);
+                        static const struct { int i; float l, r; } gmsAt[] = { { 2000, 0.0890912563f, 0.00406081323f }, { 15000, 0.395968914f, 0.213082865f }, { 30000, -0.33275044f, -0.530703545f }, { 50000, 0.277897179f, 0.482887864f }, { 65000, 0.266831428f, 0.366135627f }, { 80000, 0.00021339106f, 0.000807374308f } },
+                                                                 morAt[] = { { 2000, 0.0620051622f, 0.0791224241f }, { 15000, 0.000745030935f, 0.0800722092f }, { 30000, 0.102371402f, 0.0262862686f }, { 50000, 0.000215340013f, 0.0249186736f }, { 65000, -0.0414967388f, -0.0449344926f }, { 90000, -0.00397050008f, -0.00165477558f } };
+                        for (const auto& g : isGms ? std::vector (std::begin (gmsAt), std::end (gmsAt)) : std::vector (std::begin (morAt), std::end (morAt)))
+                            CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-5f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-5f);
+                        ++demoGoldens;
+                    }
+                }
                 for (const auto& c : full.channels)
                 {
                     if (c.instrument == lynx::InstrumentKind::harmless && c.modelParams.size() >= (std::size_t) lynx::harmlessParamCount
@@ -1405,6 +1456,10 @@ TEST (flp_real_files)
     CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
     std::printf ("  Harmor: %d channels, %d states usable by the engine, %d imported as Harmor (%d sounding)\n", harmor, harmorUsable, harmorKind, harmorSounding);
     CHECK (harmorUsable == harmor && harmor > 90 && harmorKind >= harmor && harmorSounding >= harmorKind * 9 / 10);
+    std::printf ("  GMS: %d channels, %d usable, %d imported as GMS (%d sounding); Morphine: %d channels, %d usable, %d imported (%d sounding); %d demo goldens\n",
+                 gms, gmsUsable, gmsKind, gmsSounding, morphine, morphineUsable, morphineKind, morphineSounding, demoGoldens);
+    CHECK (gmsUsable == gms && gms >= 9 && gmsKind == gms && gmsSounding == gmsKind);
+    CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
 
@@ -5106,8 +5161,11 @@ int main (int argc, char** argv)
     if (argc > 1)
         realFlpDir = argv[1];
 
+    const char* only = std::getenv ("LYNX_TEST"); // optional: run only the tests whose name contains this
     for (auto& [name, fn] : registry())
     {
+        if (only != nullptr && std::strstr (name, only) == nullptr)
+            continue;
         std::printf ("%s\n", name);
         fn();
     }
@@ -7110,4 +7168,298 @@ TEST (startup_sound)
     CHECK (rms (impactTime, impactTime + 0.05) > rms (impactTime - 0.05, impactTime)); // the landing
     CHECK (rms (0.8, 1.0) > 0.005 && rms (soundLength - 0.02, soundLength) < rms (0.8, 1.0)); // chime rings, tail fades
     CHECK (makeSound (48000.0).left == sound.left); // the same sound on every start
+}
+
+namespace
+{
+// little-endian byte writer for the state builders below
+struct Bytes
+{
+    std::vector<std::uint8_t> b;
+    void raw (const char* s, std::size_t n) { b.insert (b.end(), s, s + n); }
+    void i32 (std::int32_t v) { b.insert (b.end(), reinterpret_cast<const std::uint8_t*> (&v), reinterpret_cast<const std::uint8_t*> (&v) + 4); }
+    void f32 (float v) { b.insert (b.end(), reinterpret_cast<const std::uint8_t*> (&v), reinterpret_cast<const std::uint8_t*> (&v) + 4); }
+    void zeros (std::size_t n) { b.insert (b.end(), n, 0); }
+    void bytes (const std::vector<std::uint8_t>& o) { b.insert (b.end(), o.begin(), o.end()); }
+};
+
+// A GMS state written from scratch (REA_rodada12 §1.1 layout, "Syn4"): oscillator waves that don't exist (silent
+// tables, so the result does not depend on an FL installation), noise through the ladder with envelope and LFO,
+// unison, slide, distortion, delay, reverb and the output EQ.
+std::vector<std::uint8_t> gmsTestState()
+{
+    std::array<float, 212> P {};
+    for (int i : { 1, 2, 44, 55, 56, 57, 58, 59, 60, 207, 208, 209, 210, 211 })
+        P[(std::size_t) i] = 0.5f;
+    P[0] = 0.75f, P[4] = 0.1f, P[5] = 0.4f, P[6] = 0.6f, P[7] = 0.3f, P[8] = 0.8f;
+    P[10] = 0.2f, P[11] = 1.0f, P[12] = 0.45f, P[13] = 0.55f, P[16] = 0.6f, P[20] = 0.2f, P[22] = 0.5f;
+    P[28] = 0.5f, P[34] = 0.4f, P[41] = 0.2f, P[42] = 0.6f, P[43] = 0.5f, P[45] = 0.8f, P[199] = 1.0f, P[198] = 0.8f, P[200] = 1.0f;
+    P[147] = 1.0f, P[117] = 0.3f, P[127] = 0.6f;                  // distortion
+    P[153] = 1.0f, P[123] = 0.5f, P[133] = 0.4f, P[143] = 0.4f;   // delay (1/2 beat)
+    P[154] = 1.0f, P[124] = 0.6f, P[134] = 0.5f;                  // reverb
+    P[206] = 1.0f, P[207] = 0.7f, P[211] = 0.3f;                  // output EQ
+    Bytes preset;
+    preset.raw ("4nyS", 4);
+    for (const char* path : { "NoSuchDir\\NoWave A.wav", "NoSuchDir\\NoWave B.wav", "NoSuchDir\\NoWave C.wav", "", "", "", "" })
+    {
+        const auto n = std::strlen (path);
+        preset.raw (path, n);
+        preset.zeros (512 - n);
+    }
+    preset.i32 (0), preset.i32 (0), preset.i32 (0);
+    for (auto v : P)
+        preset.f32 (v);
+    preset.raw ("LYNX test", 9);
+    preset.zeros (512 - 9);
+    Bytes s;
+    s.raw ("SSLF", 4);
+    s.i32 ((std::int32_t) preset.b.size());
+    s.bytes (preset.b);
+    return s.b;
+}
+
+// A Morphine state written from scratch (REA_rodada16 §3 / REA_rodada39 §2.2 layout): generators A and B with a few
+// frames each (A loops, PWM on A), C and D silent, a morph line A→B, four envelopes (Eg1 → pitch and velocity →
+// amplitude through the matrix), the master ADSR and every plugin effect on.
+std::vector<std::uint8_t> morphineTestState()
+{
+    auto mbp = [] (int seed) {
+        Bytes b;
+        b.raw ("0PBM", 4);
+        for (int a = 0; a < 3; ++a)
+            for (int byte = 0; byte < 16; ++byte)
+            {
+                b.b.push_back (0xff);
+                for (int bit = 0; bit < 8; ++bit)
+                {
+                    const auto k = byte * 8 + bit;
+                    const float v = a == 0 ? std::cbrt (1.0f / (float) (k + 1 + seed * (k % 3))) * (k < 40 ? 1.0f : 0.2f)
+                                    : a == 1 ? 0.1f * (float) ((k * 7 + seed) % 11 - 5) / 5.0f
+                                             : 0.02f * (float) ((k * 5 + seed) % 7 - 3);
+                    b.f32 (v);
+                }
+            }
+        return b.b;
+    };
+    auto msp = [&] (int frames, int seed, int loopMode) {
+        Bytes b;
+        b.raw ("0PSM", 4);
+        b.i32 (frames);
+        for (int f = 0; f < frames; ++f)
+        {
+            const auto m = mbp (seed + f);
+            b.i32 (20 + 7 * f), b.f32 (1.0f - 0.2f * (float) f), b.i32 ((std::int32_t) m.size());
+            b.bytes (m);
+        }
+        b.i32 (0x424);
+        b.i32 (10), b.i32 (40), b.i32 (0), b.i32 (loopMode);
+        b.f32 (0.45f), b.f32 (0.6f), b.f32 (0.5f), b.i32 (0);
+        for (int k = 0; k < 128; ++k)
+            b.f32 (0.3f);
+        for (int k = 0; k < 128; ++k)
+            b.f32 (1.0f);
+        return b.b;
+    };
+    auto mvc = [&] (int frames, int seed, int pwmMode) {
+        Bytes z;
+        z.raw ("0HZM", 4);
+        z.i32 (1);
+        const auto s = msp (frames, seed, 1);
+        z.i32 (128), z.f32 (frames > 1 ? 0.9f : 0.0f), z.i32 ((std::int32_t) s.size());
+        z.bytes (s);
+        Bytes b;
+        b.raw ("0CVM", 4);
+        b.i32 ((std::int32_t) z.b.size());
+        b.bytes (z.b);
+        b.i32 (28), b.f32 (0.4f), b.i32 (pwmMode), b.f32 (0.3f), b.i32 (0), b.f32 (0.5f), b.f32 (0.6f);
+        return b.b;
+    };
+    Bytes p;
+    p.raw ("0roM", 4);
+    p.raw ("0RPM", 4);
+    for (const auto& g : { mvc (3, 1, 2), mvc (2, 7, 0), mvc (1, 3, 0), mvc (1, 5, 0) })
+    {
+        p.i32 ((std::int32_t) g.size());
+        p.bytes (g);
+    }
+    {
+        Bytes m;
+        m.raw ("0LMM", 4);
+        m.i32 (2), m.i32 (12);
+        m.f32 (0.0f), m.f32 (1.0f), m.i32 (60);
+        m.f32 (1.0f), m.f32 (1.0f), m.i32 (60);
+        m.i32 (0x54), m.i32 (0), m.i32 (0), m.i32 (0), m.i32 (0);
+        for (float v : { 1.0f, 0.8f, 0.0f, 0.0f, 0.5f, 0.4f, 0.5f, 0.5f })
+            m.f32 (v);
+        for (int k = 0; k < 4; ++k)
+            m.i32 (0);
+        m.f32 (0.5f), m.f32 (0.5f), m.f32 (0.5f), m.i32 (0);
+        p.i32 ((std::int32_t) m.b.size());
+        p.bytes (m.b);
+    }
+    {
+        Bytes d;
+        d.raw ("0DMM", 4);
+        d.i32 (4);
+        for (int e = 0; e < 4; ++e)
+        {
+            Bytes g;
+            g.raw ("0GEM", 4);
+            g.i32 (3), g.i32 (8);
+            g.f32 (0.0f), g.i32 (10), g.f32 (1.0f), g.i32 (40 + 10 * e), g.f32 (0.3f), g.i32 (50);
+            g.i32 (0x2c), g.i32 (0), g.i32 (0), g.i32 (0), g.f32 (0.5f), g.i32 (0), g.f32 (0.45f), g.i32 (0), g.f32 (0.5f), g.f32 (0.6f),
+                g.i32 (e == 0 ? 1 : 0);
+            d.i32 ((std::int32_t) g.b.size());
+            d.bytes (g.b);
+        }
+        d.i32 (0x94);
+        const int src[12] = { 5, 2 }, dst[12] = { 3, 1 };
+        const float amt[12] = { 0.56f, 0.7f };
+        for (int k = 0; k < 12; ++k)
+            d.i32 (src[k]);
+        for (int k = 0; k < 12; ++k)
+            d.i32 (dst[k]);
+        for (int k = 0; k < 12; ++k)
+            d.f32 (amt[k]);
+        p.i32 ((std::int32_t) d.b.size());
+        p.bytes (d.b);
+    }
+    {
+        const float A[40] = { 0.5f, 0.0f, 0.0f, -1.0f, 0.2f, 0.5f, 0.55f, 0.1f, 0.17f, 0.2f,  // master … velocity curve, ADSR A
+                              0.5f, 0.7f, 0.4f, 0.5f, 0.5f, 0.3f, 1.0f, 0.4f, 0.6f, 0.3f,     // D S R, chorus, delay …
+                              0.4f, 0.3f, 1.0f, 0.5f, 0.5f, 0.4f, 1.0f, 0.6f, 0.4f, 0.5f,     // … delay, reverb, EQ …
+                              0.5f, 0.5f, 0.55f, 0.5f, 0.45f, 1.0f, 0.0f, 0.5f, 1.0f, 0.0f }; // EQ on, noise (muted)
+        Bytes g;
+        g.i32 (0x5c4);
+        for (auto v : A)
+            g.f32 (v);
+        g.zeros (0x5c4 - g.b.size());
+        p.bytes (g.b);
+    }
+    Bytes s;
+    s.raw ("SSLF", 4);
+    s.i32 ((std::int32_t) p.b.size());
+    s.bytes (p.b);
+    return s.b;
+}
+
+void dumpIfAsked (const char* var, const std::vector<std::uint8_t>& blob)
+{
+    if (const char* path = std::getenv (var))
+    {
+        std::ofstream out (path, std::ios::binary);
+        out.write (reinterpret_cast<const char*> (blob.data()), (std::streamsize) blob.size());
+    }
+}
+} // namespace
+
+TEST (gms_engine)
+{
+    const auto blob = gmsTestState();
+    dumpIfAsked ("LYNX_DUMP_GMS", blob);
+    CHECK (lynx::gmsStateUsable (blob));
+    CHECK (lynx::gmsWaveNames (blob) == std::vector<std::string> ({ "NoWave A", "NoWave B", "NoWave C" }));
+    CHECK (lynx::gmsParamOffset (blob, 12) == 8 + 4 + 7 * 512 + 12 + 4 * 12 && lynx::gmsParamOffset (blob, 212) < 0);
+    auto broken = blob;
+    broken[8] = 'X';
+    CHECK (! lynx::gmsStateUsable (broken));
+    CHECK (! lynx::gmsStateUsable (std::vector<std::uint8_t> (blob.begin(), blob.begin() + 2000)));
+
+    // golden samples of our round-39 model (gmsmodel.GmsPlugin, waves missing → silent tables, tempo 140, 44.1 kHz,
+    // host blocks of 512): C5 vel 100 0–30000, E5 vel 80 11025–40000, G5 vel 110 22050–52000 (Init.Vol law A)
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    const std::vector<lynx::gms::RefNote> notes = { { 0, 60, (float) iv (100), 1.0, 0.0, 0.0, 30000 },
+                                                    { 11025, 64, (float) iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                    { 22050, 67, (float) iv (110), 1.0, 0.0, 0.0, 52000 } };
+    const auto y = lynx::gms::renderReference (blob, notes, 44100.0, 66150, "");
+    CHECK (y.size() == 2 * 66150u);
+    static const struct { int i; float l, r; } golden[] = { { 100, 0.0298744496f, 0.0198248848f }, { 5000, 0.0669416264f, 0.0666475743f }, { 15000, -0.005992427f, 0.013085857f }, { 25000, 0.0102018276f, 0.0130400788f }, { 35000, -0.0679694712f, -0.0050432696f }, { 45000, -0.0161557719f, 0.154340729f }, { 55000, -0.00719845621f, 0.0182181317f }, { 66000, 0.0389953516f, 0.0104107196f } };
+    for (const auto& g : golden)
+        CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.0790270452795) < 1e-6);
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → law A), velocity → Init.Vol
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::gms;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::gms);
+    inst->configure (c, 140.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::gms::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0, 8192, "");
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
+}
+
+TEST (morphine_engine)
+{
+    const auto blob = morphineTestState();
+    dumpIfAsked ("LYNX_DUMP_MORPHINE", blob);
+    CHECK (lynx::morphineStateUsable (blob));
+    CHECK (lynx::morphineNoiseName (blob).empty());
+    const auto at = lynx::morphineParamOffset (blob, 9);
+    CHECK (at > 0);
+    float a9 = 0.0f;
+    std::memcpy (&a9, blob.data() + at, 4);
+    CHECK (a9 == 0.2f && lynx::morphineParamOffset (blob, 40) < 0);
+    auto broken = blob;
+    broken[12] = 'X'; // the MPR0 tag
+    CHECK (! lynx::morphineStateUsable (broken));
+    CHECK (! lynx::morphineStateUsable (std::vector<std::uint8_t> (blob.begin(), blob.end() - 10)));
+
+    // golden samples of our round-39 model (mormodel.Synth, tempo 120, 44.1 kHz, host blocks of 512): keys 60/64/67,
+    // Init.Vol 1.0/0.5/2.0, note-offs at 30000/50000/70000
+    const std::vector<lynx::morphine::RefNote> notes = { { 0, 60, 1.0, 1.0, 0.0, 0.0, 30000 },
+                                                         { 11025, 64, 0.5, 1.0, 0.0, 0.0, 50000 },
+                                                         { 22050, 67, 2.0, 1.0, 0.0, 0.0, 70000 } };
+    const auto y = lynx::morphine::renderReference (blob, notes, 44100.0, 80000, "");
+    CHECK (y.size() == 2 * 80000u);
+    static const struct { int i; float l, r; } golden[] = { { 100, 0.00094500737f, 0.00085531926f }, { 5000, 0.0311509669f, -0.11552836f }, { 15000, 0.0843918771f, 0.0369227529f }, { 25000, 0.60864079f, 1.03062224f }, { 35000, -0.346013308f, 0.135865599f }, { 45000, -0.0373920798f, -0.13064307f }, { 60000, -0.138871655f, -0.163586512f }, { 75000, 0.0251323506f, -0.00735046482f } };
+    for (const auto& g : golden)
+        CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.18467099041) < 1e-6);
+
+    // the instrument: same engine behind LYNX's channel gains
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::morphine;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::morphine);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::morphine::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0, 8192, "");
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
 }
