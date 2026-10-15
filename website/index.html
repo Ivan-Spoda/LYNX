@@ -232,9 +232,14 @@ input[type=range]{accent-color:var(--red);width:130px}
 
 footer{border-top:1px solid var(--line);padding:40px 0;color:var(--dim);font-size:14px}
 footer .wrap{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
-footer .links2{margin-left:auto;display:flex;gap:18px}
+footer .links2{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px 18px}
 footer a:hover{color:var(--text)}
 .note{font-size:12px;color:var(--dim);margin-top:14px;max-width:none}
+.policy{margin-top:56px;padding-top:36px;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:28px;color:var(--muted);font-size:14px;line-height:1.65}
+.policy h3{color:var(--text);font-size:15px;margin:0 0 8px;font-weight:600}
+.policy p{margin:0 0 8px}.policy a{color:var(--text);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.policy a:hover{text-decoration-color:var(--red)}
+.policy .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--red2);border:1px solid rgba(229,56,59,.4);border-radius:6px;padding:1px 7px;margin-left:6px;vertical-align:1px}
 
 html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .hero h1 .w{opacity:1!important;transform:none!important;filter:none!important;animation:none!important;transition:none!important}
 @media (max-width:560px){.pill{font-size:11.5px;padding:5px 10px 5px 6px}.pill b{font-size:10px}.hero{padding-top:110px}.dl{padding:56px 20px}}
@@ -416,6 +421,21 @@ html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .her
       <div class="req" style="position:relative"><span>Windows 10 / 11 · 64-bit</span><span>ASIO · WASAPI</span><span>VST3 · CLAP</span><span data-i18n="dl.alpha">Alpha — expect rough edges</span></div>
     </div>
     <p class="note" data-i18n="legal">LYNX is an independent project, not affiliated with or endorsed by Image-Line. FL Studio is a trademark of Image-Line Software.</p>
+    <div class="policy" id="signing">
+      <div>
+        <h3><span data-i18n="sig.title">Code signing policy</span><span class="tag" data-i18n="sig.pending">pending approval</span></h3>
+        <p data-i18n="sig.p1">Free code signing provided by <a href="https://about.signpath.io">SignPath.io</a>, certificate by <a href="https://signpath.org">SignPath Foundation</a>.</p>
+        <p data-i18n="sig.p2">Release files are built from the public source by <a href="https://github.com/Ka1-S/LYNX/blob/main/.github/workflows/release.yml">GitHub Actions</a>, and every signing request is approved by hand.</p>
+      </div>
+      <div>
+        <h3 data-i18n="sig.team">Team roles</h3>
+        <p data-i18n="sig.roles">Authors, reviewers and approvers: <a href="https://github.com/Ka1-S">Ka1-S</a> (repository owner).</p>
+      </div>
+      <div>
+        <h3 data-i18n="sig.privacy">Privacy</h3>
+        <p data-i18n="sig.pp">This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Privacy policy</a></p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -423,7 +443,7 @@ html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .her
   <div class="wrap">
     <a href="#top" class="brand" style="font-size:16px"><img src="assets/img/logo.png?v=0.1.3" alt="" style="width:26px;height:26px">LYNX</a>
     <span>© 2026 · AGPL-3.0</span>
-    <div class="links2"><a href="https://github.com/Ka1-S/LYNX">GitHub</a><a href="https://github.com/Ka1-S/LYNX/releases">Releases</a><a href="https://github.com/Ka1-S/LYNX/issues">Issues</a></div>
+    <div class="links2"><a href="https://github.com/Ka1-S/LYNX">GitHub</a><a href="https://github.com/Ka1-S/LYNX/releases">Releases</a><a href="https://github.com/Ka1-S/LYNX/issues">Issues</a><a href="#signing" data-i18n="f.sign">Code signing &amp; privacy</a></div>
   </div>
 </footer>
 
@@ -459,7 +479,13 @@ const PT = {
  'gal.title':'Escura, limpa, focada.','g.ws':'O espaço de trabalho completo','g.synth':'Synth de 3 osciladores embutido','g.eq':'EQ paramétrico de 7 bandas','g.auto':'Clipes de automação','g.mix':'Mixer com sends e sidechain',
  'os.title':'Feito às claras.','os.lead':'C++20 e JUCE 8. Cada recurso vem com testes, e cada comportamento do FL Studio que reproduzimos é documentado. Dê uma estrela, abra uma issue, mande um pull request.','os.star':'Estrela no GitHub',
  'dl.title':'Comece a fazer música.','dl.lead':'Um .exe portátil. Sem instalador, sem conta, sem assinatura.','dl.exe':'Baixar LYNX.exe','dl.zip':'Pacote completo (.zip)','dl.all':'todas as versões e checksums','dl.alpha':'Alpha — pode ter arestas',
- 'legal':'LYNX é um projeto independente, sem afiliação ou endosso da Image-Line. FL Studio é marca registrada da Image-Line Software.'
+ 'legal':'LYNX é um projeto independente, sem afiliação ou endosso da Image-Line. FL Studio é marca registrada da Image-Line Software.',
+ 'sig.title':'Política de assinatura de código','sig.pending':'aguardando aprovação',
+ 'sig.p1':'Assinatura de código gratuita fornecida por <a href="https://about.signpath.io">SignPath.io</a>, certificado da <a href="https://signpath.org">SignPath Foundation</a>.',
+ 'sig.p2':'Os arquivos de cada versão são compilados a partir do código público pelo <a href="https://github.com/Ka1-S/LYNX/blob/main/.github/workflows/release.yml">GitHub Actions</a>, e cada pedido de assinatura é aprovado manualmente.',
+ 'sig.team':'Funções da equipe','sig.roles':'Autores, revisores e aprovadores: <a href="https://github.com/Ka1-S">Ka1-S</a> (dono do repositório).',
+ 'sig.privacy':'Privacidade','sig.pp':'Este programa não transfere nenhuma informação para outros sistemas em rede, a menos que isso seja solicitado especificamente pelo usuário ou pela pessoa que o instala ou opera. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Política de privacidade</a>',
+ 'f.sign':'Assinatura de código e privacidade'
 };
 const EN = {};
 $$('[data-i18n]').forEach(e => EN[e.dataset.i18n] = e.innerHTML);
