@@ -19,6 +19,22 @@ namespace lynx
 // `bpm` converts tempo-synced times (e.g. Reeverb 2 predelay) to milliseconds.
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm = 120.0);
 
+// A file of the user's FL installation by its path relative to %FLStudioFactoryData% (e.g.
+// "Plugins\\Fruity\\Effects\\Soundgoodizer\\Data\\Presets\\a.dat"); empty = not available
+using FlDataReader = std::function<std::vector<std::uint8_t> (const std::string& relativePath)>;
+// The same, with access to the installation's data files: Soundgoodizer becomes the exact engine with its preset
+// file (REA_rodada40 §3); without them (or with an unreadable file) the approximation is used.
+std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm,
+                                        const FlDataReader& data);
+
+// FL's Maximus as the exact engine (EffectKind::maximus) when its state is supported (REA_rodada36/38); nullopt =
+// a feature that is not decoded (the caller keeps the approximation)
+std::optional<EffectSlot> maximusExact (const std::vector<std::uint8_t>& state);
+// Soundgoodizer as the exact engine from its state and the preset file it names (a…d.dat, read by the caller)
+std::optional<EffectSlot> soundgoodizerExact (const std::vector<std::uint8_t>& state, const std::vector<std::uint8_t>& presetFile);
+// The installation path (relative to %FLStudioFactoryData%) of the preset file a Soundgoodizer state loads
+std::string soundgoodizerPresetPath (const std::vector<std::uint8_t>& state);
+
 // FL effect preset (.fst from Plugin presets\Effects): the built-in effect with the preset's settings.
 std::optional<EffectSlot> effectFromFlPreset (const std::vector<std::uint8_t>& fileBytes, double bpm = 120.0);
 
@@ -77,6 +93,9 @@ struct VocodexConversion
     std::vector<std::string> notes;
 };
 std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& state);
+// The same, with the installation's data files appended to the slot (SG.dat for the SG stage, the internal carrier's
+// Sytrus preset; REA_rodada40 §4–5)
+std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>& state, const FlDataReader& data);
 // LYNX's Soundgoodizer approximation (REA_rodada8; preset 0…3 = A…D, amount 0…1000): the compressor followed by
 // the presets' −0.2 dB master limiter
 std::vector<EffectSlot> soundgoodizerApproximation (int preset, int amount);

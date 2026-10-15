@@ -6,6 +6,8 @@
 #include <cstring>
 
 #include "core/FlEffects.h"
+#include "core/Instruments.h"
+#include "core/SytrusEngine.h"
 
 // The engine's rounding is part of its behaviour (the reference matches FL's DLL to the last bits): no fused
 // multiply-add contraction, whatever the target CPU.
@@ -1575,10 +1577,138 @@ void Engine::process (const float* own, const float* mod, const float* car, floa
 int Engine::latencySamples() const noexcept { return impl->draft ? fifoFrames : 0; }
 int Engine::maxBlock() const noexcept { return impl->maxBlock; }
 
+// --- install data (LYNX's trailer after FL's state) ------------------------------------------------------------------
+namespace
+{
+constexpr char dataTag[8] { 'L', 'X', 'V', 'X', 'D', 'A', 'T', 'A' };
+
+void putU32 (std::vector<std::uint8_t>& v, std::uint32_t x)
+{
+    for (int k = 0; k < 4; ++k)
+        v.push_back ((std::uint8_t) (x >> (8 * k)));
+}
+
+std::uint32_t getU32 (const std::uint8_t* p)
+{
+    return (std::uint32_t) p[0] | ((std::uint32_t) p[1] << 8) | ((std::uint32_t) p[2] << 16) | ((std::uint32_t) p[3] << 24);
+}
+} // namespace
+
+std::vector<std::uint8_t> appendInstallData (std::vector<std::uint8_t> flState, const InstallData& data)
+{
+    std::vector<std::uint8_t> body;
+    auto record = [&body] (std::uint32_t tag, const std::vector<std::uint8_t>& bytes) {
+        if (bytes.empty())
+            return;
+        putU32 (body, tag);
+        putU32 (body, (std::uint32_t) bytes.size());
+        body.insert (body.end(), bytes.begin(), bytes.end());
+    };
+    record (1, data.sgDat);
+    record (2, data.carrierState);
+    if (body.empty())
+        return flState;
+    flState.insert (flState.end(), body.begin(), body.end());
+    putU32 (flState, (std::uint32_t) body.size());
+    flState.insert (flState.end(), dataTag, dataTag + 8);
+    return flState;
+}
+
+std::pair<std::vector<std::uint8_t>, InstallData> splitInstallData (const std::vector<std::uint8_t>& slotState)
+{
+    InstallData data;
+    const auto n = slotState.size();
+    if (n < 12 || std::memcmp (slotState.data() + n - 8, dataTag, 8) != 0)
+        return { slotState, data };
+    const auto len = (std::size_t) getU32 (slotState.data() + n - 12);
+    if (len > n - 12)
+        return { slotState, data };
+    const auto begin = n - 12 - len;
+    for (auto at = begin; at + 8 <= n - 12;)
+    {
+        const auto tag = getU32 (slotState.data() + at);
+        const auto size = (std::size_t) getU32 (slotState.data() + at + 4);
+        at += 8;
+        if (size > n - 12 - at)
+            break;
+        std::vector<std::uint8_t> bytes (slotState.begin() + (std::ptrdiff_t) at, slotState.begin() + (std::ptrdiff_t) (at + size));
+        if (tag == 1)
+            data.sgDat = std::move (bytes);
+        else if (tag == 2)
+            data.carrierState = std::move (bytes);
+        at += size;
+    }
+    return { std::vector<std::uint8_t> (slotState.begin(), slotState.begin() + (std::ptrdiff_t) begin), data };
+}
+
 // --- internal carrier --------------------------------------------------------------------------------------------------
+namespace
+{
+// REA_rodada35 §8 + REA_rodada40 §5: Vocodex hosts its own Sytrus build and triggers one voice per latched key with
+// Init/Final levels pan 0, volume 0.5, Final.Pitch = 100·key − 6000 cents (= the key itself) and FCut/FRes 0; its host
+// answers the voice events 3 (velocity) 0.78125 and 5 (release) 1.0, colour 0 (FUN_0084c1c0). The keys stay held.
+class SytrusCarrier final : public Carrier
+{
+public:
+    SytrusCarrier (std::shared_ptr<const sytrus::Patch> p, std::vector<int> keys) : patch (std::move (p)), notes (std::move (keys)) {}
+
+    void prepare (double sampleRate) override
+    {
+        engine.prepare (sampleRate, offlineRendering(), block);
+        engine.setPatch (patch);
+        std::int64_t id = 0;
+        for (const auto key : notes)
+        {
+            sytrus::NoteParams note;
+            note.key = (float) key;
+            note.cents = 0.0f;
+            note.velocity = 0.78125f;
+            note.releaseVelocity = 1.0f;
+            note.pan = 0.0f;
+            note.id = ++id;
+            engine.noteOn (note);
+        }
+        left.assign ((std::size_t) block, 0.0f);
+        right.assign ((std::size_t) block, 0.0f);
+    }
+
+    void render (float* out, int n) noexcept override
+    {
+        for (int done = 0; done < n; done += block)
+        {
+            const auto len = std::min (block, n - done);
+            std::fill (left.begin(), left.begin() + len, 0.0f);
+            std::fill (right.begin(), right.begin() + len, 0.0f);
+            engine.render (left.data(), right.data(), len, 0.5f, 0.0f);
+            for (int k = 0; k < len; ++k)
+                out[2 * (done + k)] = left[(std::size_t) k], out[2 * (done + k) + 1] = right[(std::size_t) k];
+        }
+    }
+
+    void setTempo (double bpm) noexcept { engine.setTempo (bpm); }
+
+private:
+    static constexpr int block = 512;
+    std::shared_ptr<const sytrus::Patch> patch;
+    std::vector<int> notes;
+    sytrus::Engine engine;
+    std::vector<float> left, right;
+};
+} // namespace
+
 std::unique_ptr<Carrier> makeInternalCarrier (const State&)
 {
-    return nullptr; // no LYNX instrument plays the internal Sytrus carrier yet
+    return nullptr; // the Sytrus preset comes from the user's installation: see the overload below
+}
+
+std::unique_ptr<Carrier> makeInternalCarrier (const State& state, const std::vector<std::uint8_t>& sytrusState)
+{
+    if (sytrusState.empty() || state.notes.empty())
+        return nullptr;
+    auto patch = sytrus::parsePatch (sytrusState);
+    if (patch == nullptr)
+        return nullptr;
+    return std::make_unique<SytrusCarrier> (std::move (patch), state.notes);
 }
 
 // --- the effect --------------------------------------------------------------------------------------------------------
@@ -1589,16 +1719,23 @@ class VocodexEffect final : public Effect
 public:
     static constexpr int chunk = 2048;
 
-    explicit VocodexEffect (const std::vector<std::uint8_t>& raw)
-        : state (parseState (raw))
+    explicit VocodexEffect (const std::vector<std::uint8_t>& slotState)
     {
+        auto [raw, data] = splitInstallData (slotState);
+        state = parseState (raw);
         if (state && state->internalCarrier())
-            carrier = makeInternalCarrier (*state);
+            carrier = makeInternalCarrier (*state, data.carrierState);
         if (state && state->params[sg] > 0)
         {
-            sgSlots = soundgoodizerApproximation (0, state->params[sg]);
-            for (const auto& slot : sgSlots)
-                sgEffects.push_back (makeEffect (slot.kind));
+            // FL's SG stage: the shared Maximus build with Vocodex/Data/SG.dat and parameter 5 = SG (REA_rodada40 §4)
+            if (! data.sgDat.empty())
+                sgPreset = hlfx::makeMaximusPreset (data.sgDat);
+            if (sgPreset == nullptr)
+            {
+                sgSlots = soundgoodizerApproximation (0, state->params[sg]);
+                for (const auto& slot : sgSlots)
+                    sgEffects.push_back (makeEffect (slot.kind));
+            }
         }
         for (auto* v : { &ownBuf, &modBuf, &carBuf, &outBuf, &zeros })
             v->assign (2 * chunk, 0.0f);
@@ -1610,6 +1747,8 @@ public:
             engine.prepare (*state, sr, chunk, state->draft());
         if (carrier != nullptr)
             carrier->prepare (sr);
+        if (sgPreset != nullptr)
+            sgEngine.prepare (sgPreset, sr, state->params[sg]);
         for (auto& e : sgEffects)
             e->prepare (sr);
     }
@@ -1618,6 +1757,7 @@ public:
     {
         if (runsEngine())
             engine.flush();
+        sgEngine.reset();
         for (auto& e : sgEffects)
             e->reset();
     }
@@ -1626,9 +1766,9 @@ public:
     {
         if (! runsEngine())
             return 0;
-        auto latency = engine.latencySamples();
+        auto latency = engine.latencySamples() + sgEngine.latencySamples();
         for (const auto& e : sgEffects)
-            latency += e->latencySamples(); // the Soundgoodizer's limiter look-ahead
+            latency += e->latencySamples(); // the Soundgoodizer approximation's limiter look-ahead
         return latency;
     }
 
@@ -1650,6 +1790,8 @@ public:
         useSide = { false, false };
         if (! state)
             return;
+        if (auto* s = dynamic_cast<SytrusCarrier*> (carrier.get()))
+            s->setTempo (bpm);
 
         for (int done = 0; done < n; done += chunk)
         {
@@ -1706,8 +1848,11 @@ public:
                 L[k] = outBuf[(std::size_t) (2 * k)], R[k] = outBuf[(std::size_t) (2 * k + 1)];
         }
         if (runsEngine())
+        {
+            sgEngine.process (l, r, n); // FL's Eff_Render of the hosted SG.dll, in place on the output
             for (std::size_t i = 0; i < sgEffects.size(); ++i)
                 sgEffects[i]->process (l, r, n, sgSlots[i].params, bpm);
+        }
     }
 
 private:
@@ -1716,6 +1861,8 @@ private:
     std::optional<State> state;
     Engine engine;
     std::unique_ptr<Carrier> carrier;
+    std::shared_ptr<const hlfx::MaximusPreset> sgPreset;
+    hlfx::MaximusProcessor sgEngine;
     std::vector<EffectSlot> sgSlots;
     std::vector<std::unique_ptr<Effect>> sgEffects;
     std::vector<float> ownBuf, modBuf, carBuf, outBuf, zeros;
