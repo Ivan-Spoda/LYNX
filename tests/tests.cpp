@@ -40,6 +40,7 @@
 #include "core/FruitKick.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
+#include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
@@ -7247,6 +7248,176 @@ TEST (kepler_engine)
     CHECK (inst->idle());
 }
 
+// REA round 57 §2: Transistor Bass
+// the plugin state (event 0xD5) of an FL preset file (.fst: the FLhd/FLdt event stream)
+std::vector<std::uint8_t> tbassPresetState (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    std::ifstream in (std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "Transistor Bass" / name, std::ios::binary);
+    const std::vector<std::uint8_t> b ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    std::size_t i = 0;
+    while (i + 8 <= b.size() && std::memcmp (b.data() + i, "FLdt", 4) != 0)
+        ++i;
+    i += 8;
+    while (i < b.size())
+    {
+        const auto id = b[i++];
+        std::size_t n = id < 64 ? 1 : id < 128 ? 2 : id < 192 ? 4 : 0;
+        if (id >= 192)
+            for (int shift = 0; i < b.size(); shift += 7)
+            {
+                const auto c = b[i++];
+                n |= (std::size_t) (c & 0x7F) << shift;
+                if (c < 0x80)
+                    break;
+            }
+        if (id == 0xD5 && i + n <= b.size())
+            return { b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + n) };
+        i += n;
+    }
+    return {};
+}
+
+// the same state re-saved as engine-stream version 5 with an engine selector (REA_rodada57 §2.2)
+std::vector<std::uint8_t> tbassWithEngine (const std::vector<std::uint8_t>& s, std::int32_t engine)
+{
+    std::vector<std::uint8_t> out (s.begin(), s.begin() + 4);
+    auto put = [&] (const void* p, std::size_t n) { out.insert (out.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    for (std::size_t at = 4; at + 12 <= s.size();)
+    {
+        std::uint32_t id;
+        std::uint64_t n;
+        std::memcpy (&id, s.data() + at, 4);
+        std::memcpy (&n, s.data() + at + 4, 8);
+        std::vector<std::uint8_t> d (s.begin() + (std::ptrdiff_t) (at + 12), s.begin() + (std::ptrdiff_t) (at + 12 + n));
+        at += 12 + (std::size_t) n;
+        if (id == 2)
+        {
+            std::uint64_t m;
+            std::memcpy (&m, d.data() + 4, 8);
+            std::vector<std::uint8_t> e (d.begin() + 12, d.begin() + 12 + (std::ptrdiff_t) m);
+            std::int16_t v;
+            std::memcpy (&v, e.data(), 2);
+            if (v < 5)
+            {
+                v = 5;
+                std::memcpy (e.data(), &v, 2);
+                e.insert (e.end(), 4, 0);
+            }
+            std::memcpy (e.data() + e.size() - 4, &engine, 4);
+            m = e.size();
+            d.resize (12);
+            std::memcpy (d.data() + 4, &m, 8);
+            d.insert (d.end(), e.begin(), e.end());
+        }
+        const std::uint64_t size = d.size();
+        put (&id, 4);
+        put (&size, 8);
+        put (d.data(), d.size());
+    }
+    return out;
+}
+
+std::string tbassDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Transistor Bass" / "engine_x64.dll").string();
+}
+
+TEST (transistorbass_engine)
+{
+    const auto factory = tbassPresetState ("Factory programs.fst");
+    const auto seqOff = tbassPresetState ("Sequencer off.fst");
+    if (factory.empty() || seqOff.empty())
+        return; // no FL installation
+    CHECK (factory.size() == 197887 && seqOff.size() == 196051);
+    CHECK (lynx::transistorBassStateUsable (factory) && lynx::transistorBassStateUsable (seqOff));
+    CHECK (lynx::transistorBassStateUsable (tbassWithEngine (factory, 2)));
+    auto broken = factory;
+    broken[0] = 3; // the wrapper refuses versions above 2
+    CHECK (! lynx::transistorBassStateUsable (broken));
+    auto truncated = factory;
+    truncated.resize (truncated.size() - 1000);
+    CHECK (! lynx::transistorBassStateUsable (truncated));
+    const auto dll = tbassDll();
+    if (dll.empty() || ! lynx::transistorBassDllUsable (dll))
+        return;
+
+    // against FL's engine DLL (EXEC, REA_rodada57 §2.11): programs of the factory bank (sequencer, accents, slides,
+    // distortion, delay, reverb) on the three engines and the sequencer-off preset with legato and accent notes; host
+    // blocks of 512 at 44.1 kHz, tempo 125. LYNX differs from the DLL by −121 dB or less here (library pow rounding).
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* preset; int engine, key; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Factory", -1, 0, 84.1648489, 84.1648489, { { 5000, -2.72742806e-09f, -2.72742806e-09f }, { 20000, -0.0366424844f, -0.0366424844f }, { 47000, 2.15875261e-07f, 2.15875261e-07f }, { 80000, 0.0f, 0.0f } } },
+        { "Factory", -1, 3, 140.915804, 135.290403, { { 5000, 6.46460592e-07f, 6.46460592e-07f }, { 20000, 0.000612073636f, 0.00883315224f }, { 47000, 0.00334156211f, 0.0349708796f }, { 80000, -0.0180665664f, -0.00647424255f } } },
+        { "Factory", -1, 9, 74.6013145, 74.6013145, { { 5000, 1.17278e-06f, 1.17278e-06f }, { 20000, 4.45517001e-09f, 4.45517001e-09f }, { 47000, -0.00680137333f, -0.00680137333f }, { 80000, 9.70963379e-11f, 9.70963379e-11f } } },
+        { "Factory", -1, 21, 672.27801, 665.683557, { { 5000, 9.88614047e-05f, -0.00434152689f }, { 20000, 0.00984471664f, -0.00176824001f }, { 47000, -0.00745432731f, -0.00174837175f }, { 80000, 0.00471894164f, -0.00477111898f } } },
+        { "Factory", -1, 65, 534.422868, 543.176189, { { 5000, -0.00286525022f, -0.00691002142f }, { 20000, -0.0952312946f, -0.0940120071f }, { 47000, -0.109519325f, -0.115677707f }, { 80000, 0.0193505734f, 0.0466997996f } } },
+        { "Factory", 1, 65, 531.095944, 535.778912, { { 5000, 0.00939375907f, 0.000506323006f }, { 20000, 0.0880209357f, 0.0815288723f }, { 47000, 0.0840308368f, 0.0360141024f }, { 80000, -0.0445356891f, -0.058858037f } } },
+        { "Factory", 2, 65, 577.993833, 585.388538, { { 5000, -0.000922904757f, 0.0082119517f }, { 20000, 0.100198291f, 0.0890608132f }, { 47000, 0.0754022077f, 0.133105934f }, { 80000, -0.0728695691f, -0.0721700341f } } },
+        { "SeqOff", -1, 48, 27.8141841, 27.8141841, { { 5000, -0.0331321731f, -0.0331321731f }, { 20000, -0.016056465f, -0.016056465f }, { 47000, -0.0118189175f, -0.0118189175f }, { 80000, 0.0f, 0.0f } } },
+        { "SeqOff", 1, 48, 21.7931524, 21.7931524, { { 5000, 0.0268912539f, 0.0268912539f }, { 20000, 0.0150698861f, 0.0150698861f }, { 47000, 0.011147175f, 0.011147175f }, { 80000, -1.04869307e-23f, -1.04869307e-23f } } },
+        { "SeqOff", 2, 48, 61.3736312, 61.3736312, { { 5000, 0.0370108262f, 0.0370108262f }, { 20000, 0.0206214525f, 0.0206214525f }, { 47000, 0.0157183651f, 0.0157183651f }, { 80000, -1.3009924e-23f, -1.3009924e-23f } } },
+    };
+    constexpr int length = 88200;
+    for (const auto& g : goldens)
+    {
+        const bool factoryBank = std::string (g.preset) == "Factory";
+        auto st = factoryBank ? factory : seqOff;
+        if (g.engine >= 0)
+            st = tbassWithEngine (st, g.engine);
+        std::vector<lynx::tbass::RefNote> notes;
+        if (factoryBank)
+            notes.push_back ({ 0, g.key, 0.5, 0.0, 0.0, 0.0, 0.0, 70560 });
+        else
+        {
+            notes.push_back ({ 0, g.key, 0.5, 0.0, 0.0, 0.0, 0.0, 30000 });
+            notes.push_back ({ 20000, g.key + 7, 1.6, 0.0, 0.0, 0.0, 0.0, 50000 });
+            notes.push_back ({ 45000, g.key - 5, 0.3, 0.0, 0.0, 0.0, 0.0, 70560 });
+        }
+        const auto y = lynx::tbass::renderReference (st, dll, notes, 44100.0, length);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+        if (! ok)
+            std::printf ("  Transistor Bass %s engine %d key %d differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.preset, g.engine, g.key, el, er, g.el, g.er);
+        CHECK (ok);
+    }
+
+    // the instrument: FL's wrapper velocity, the channel volume as an output gain, the sequencer plays while the key is held
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::transistorbass;
+    c.pluginState = factory;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::transistorbass);
+    inst->configure (c, 128.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (65, 0.8f);
+    double e = 0.0;
+    bool finite = true;
+    for (int b = 0; b < 24; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+        for (int i = 0; i < 4096; ++i)
+            finite = finite && std::isfinite (l[(std::size_t) i]) && std::isfinite (r[(std::size_t) i]), e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        if (b == 20)
+            inst->noteOff (65);
+    }
+    CHECK (finite && e > 1.0 && ! inst->idle());
+    for (int b = 0; b < 400 && ! inst->idle(); ++b)
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    CHECK (inst->idle());
+}
+
 TEST (kepler_demo_channels)
 {
     // every Kepler channel of FL's demo projects on LYNX's engine against FL's engine DLL (EXEC fingerprints, REA_rodada46 §6;
@@ -7465,6 +7636,7 @@ TEST (autogun_template_channels)
         lynx::ogun::RefOptions opt;
         opt.autogun = true;
         opt.sgState = sgState;
+        opt.tempo = 120.0; // the instrument is configured at 120 BPM
         const auto ref = lynx::ogun::renderReference (c.pluginState, { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6144 } }, 44100.0, 16384, opt);
         auto inst = lynx::makeInstrument (lynx::InstrumentKind::autogun);
         inst->configure (c, 120.0);
@@ -7482,6 +7654,8 @@ TEST (autogun_template_channels)
         for (int i = 0; i < 16384; ++i)
             worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) }),
             peak = std::max (peak, (double) std::abs (l[(std::size_t) i]));
+        if (worst != 0.0)
+            std::printf ("  Autogun instrument vs reference: worst %.3g (peak %.3g)\n", worst, peak);
         CHECK (ref.size() == 2 * 16384 && peak > 0.01 && worst == 0.0);
         std::vector<float> tail (44100), tailR (tail.size());
         for (int k = 0; k < 40 && ! inst->idle(); ++k)

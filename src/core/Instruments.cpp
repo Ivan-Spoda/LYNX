@@ -8,6 +8,7 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/Ogun.h"
+#include "core/TransistorBass.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/PoiZone.h"
@@ -219,6 +220,7 @@ private:
             case InstrumentKind::bassdrum:
             case InstrumentKind::toxic:
             case InstrumentKind::autogun:
+            case InstrumentKind::transistorbass:
                 break;
         }
 
@@ -2043,6 +2045,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeToxicInstrument();
     if (kind == InstrumentKind::autogun)
         return makeAutogunInstrument();
+    if (kind == InstrumentKind::transistorbass)
+        return makeTransistorBassInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

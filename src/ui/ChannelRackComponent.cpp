@@ -50,6 +50,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::bassdrum: return "BassDrum";
         case InstrumentKind::toxic: return "Toxic Biohazard";
         case InstrumentKind::autogun: return "Autogun";
+        case InstrumentKind::transistorbass: return "Transistor Bass";
     }
     return "?";
 }

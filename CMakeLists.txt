@@ -44,6 +44,7 @@ add_library(lynx_core STATIC
     src/core/MiniSynth.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
+    src/core/TransistorBass.cpp
     src/core/PoiZone.cpp
     src/core/Toxic.cpp
     src/core/ToxicFx.cpp

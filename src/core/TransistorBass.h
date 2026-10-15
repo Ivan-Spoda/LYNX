@@ -3,13 +3,22 @@
 // FL Studio's Transistor Bass rebuilt from its engine (docs/analise/REA_rodada57.md; clean-room: behaviour, layouts and
 // formulas in our own words, checked against renders of the installation's own engine DLL). A TB-303-style monophonic
 // bass: band-limited saw/square oscillator (or the "303 Pulse" recorded oscillator cycles), 4-pole diode-ladder low-pass,
-// accent/decay envelopes, VCA, high-pass, all at 4× the host rate with two half-band decimators; then the Rat-style
-// distortion, the stereo delay and the plate reverb; the 128 programs (patch + 16-step sequence + transpose) and the
-// built-in step sequencer driven by host notes and tempo.
+// accent/decay envelopes, VCA and high-pass at 4× the host rate with two half-band decimators, the Rat-style distortion;
+// then the stereo delay and the plate reverb; the 128 programs (patch + 16-step sequence + transpose) with the step
+// sequencer driven by host notes and tempo. The three engines of the plugin's Edit menu: "V1 legacy" (state version < 5
+// or engine 0) and "V2" with the extended or the TB303 cutoff range (engines 1 and 2).
 //
-// Installation data read at run time from the user's own engine DLL (never shipped): the 57 recorded oscillator cycles of
-// the "303 Pulse" mode. The DLL must be the analysed build (SHA-256 checked); otherwise the importer reports the plugin as
-// unsupported.
+// Installation data read at run time from the user's own engine DLL (never shipped): the recorded oscillator cycles of
+// the "303 Pulse" mode (57 for V1, 55 for V2). The DLL must be the analysed build (SHA-256 checked); otherwise the
+// importer keeps the channel unsupported.
+//
+// Host interface as FL's wrapper: MIDI velocity from Init.Vol (127·ln(10·Init.Vol + 1)/ln 21), velocity ≥ 110 is an
+// accent, overlapping notes slide; per-note pan (√(1 − p), √p), pitch (cents) and X/Y (Final.FCut adds to the cutoff
+// control, 128/12 octaves per unit; Final.FRes adds to the resonance in V1); Final.Vol is not read. Differences from FL / not
+// modelled: the library's pow/powf/exp results are not bit-identical to the DLL's (single-ulp differences, −108 dB worst
+// case on the factory programs, median −131 dB); parameter automation (the plugin's 16-sample smoother), MIDI CC7
+// volume and pitch-bend events, the "MIDI channel 13" sequence transpose (no note channel in LYNX); the order of the
+// host's sample-rate call and the state load is FL's own (the reference follows the EXEC harness: state, then rate).
 
 #include <cstdint>
 #include <memory>
@@ -20,7 +29,7 @@
 
 namespace lynx
 {
-// true for a Transistor Bass state the engine can read (wrapper version 1, engine stream version 1…5)
+// true for a Transistor Bass state the engine can read (wrapper version 1–2, engine stream version 1…5)
 bool transistorBassStateUsable (const std::vector<std::uint8_t>& state);
 
 // true when `path` is the analysed build of Transistor Bass's engine_x64.dll

@@ -10,6 +10,7 @@
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
+#include "core/TransistorBass.h"
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
 #include "core/HarmlessFx.h"
@@ -1086,6 +1087,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     const auto sg = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Autogun\\Data\\SG.dat", options.roots);
                     if (! sg.empty() && (! options.fileExists || options.fileExists (sg)))
                         def.samplePath = sg;
+                    else if (options.report != nullptr && ogunParam (c.pluginState, 63).value_or (0) > 0)
+                        ++options.report->droppedEffects["Autogun: Magic Dust (SG.dat not found)"];
                     adoptedFromPlugin = true;
                 }
                 else if (synthFromOgun (c.pluginState, fromPlugin, pluginGain))
@@ -1102,6 +1105,21 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
                 else if (synthFromSakura (c.pluginState, fromPlugin))
                     adopt();
+            }
+            else if (name == "transistor bass")
+            {
+                // FL's engine from the raw state (REA_rodada57 §2) with the "303 Pulse" oscillator cycles read at run time
+                // from the user's own engine DLL; there is no conversion to fall back to (state or DLL not usable: the
+                // channel stays unsupported)
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Transistor Bass\\engine_x64.dll", options.roots);
+                if (transistorBassStateUsable (c.pluginState) && ! dll.empty() && options.fileExists && options.fileExists (dll)
+                    && transistorBassDllUsable (dll))
+                {
+                    def.instrument = InstrumentKind::transistorbass;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = dll;
+                    adoptedFromPlugin = true;
+                }
             }
             else if (name == "kepler")
             {
@@ -1310,7 +1328,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::dx10
                      || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
                      || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic
-                     || def.instrument == InstrumentKind::autogun)
+                     || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

@@ -32,7 +32,7 @@ namespace lynx
 {
 namespace
 {
-// The render flushes denormals (MXCSR | 0x8040) and keeps round-to-nearest (§2.1).
+// The render flushes denormals (MXCSR | 0x8040) and keeps round-to-nearest (§2.5).
 #ifdef LYNX_TBASS_MXCSR
 struct RenderMode
 {
@@ -58,7 +58,7 @@ float bitsF (std::uint32_t u) noexcept
     return f;
 }
 
-// ------------------------------------------------------------------------------------------------ installation data (§1.4)
+// ------------------------------------------------------------------------------------------------ installation data (§2.3)
 constexpr const char* engineSha256 = "4cc72470063a0a9f8f126102415cbb1ef2b91abb2995cd9fbdf2c8e676c6907f";
 
 struct Wave
@@ -69,7 +69,8 @@ struct Wave
 
 struct DllData
 {
-    std::vector<Wave> recorded; // the 57 "303 Pulse" cycles at 192 kHz, longest first
+    std::vector<Wave> recorded;  // engine V1's 57 "303 Pulse" cycles (192 kHz), longest first
+    std::vector<Wave> recorded2; // engine V2's 55 cycles (44.1 kHz), longest first
 };
 
 // 16-bit mono RIFF/WAVE → floats x/32768
@@ -151,41 +152,46 @@ std::shared_ptr<const DllData> loadDll (const std::string& path)
         return b.size();
     };
     auto t = std::make_shared<DllData>();
-    // recorded cycles: count, then [size][RIFF bytes] (§1.4); each: (x − 0.63)·6.3157892, mean removed, guard point
-    auto at = offset (0xFEAF0);
-    std::int32_t count = 0;
-    rd (at, count);
-    if (count != 57)
+    // recorded cycles: count, then [size][RIFF bytes] (§2.3); each: (x − 0.63)·6.3157892, mean removed, guard point
+    auto readSet = [&] (std::uint32_t rva, int expected, std::vector<Wave>& out) {
+        auto at = offset (rva);
+        std::int32_t count = 0;
+        rd (at, count);
+        if (count != expected)
+            return false;
+        at += 4;
+        for (int k = 0; k < count; ++k)
+        {
+            std::int32_t size = 0;
+            rd (at, size);
+            if (size <= 0 || at + 4 + (std::size_t) size > b.size())
+                return false;
+            Wave w;
+            if (! decodeWav (b.data() + at + 4, (std::size_t) size, w.data))
+                return false;
+            w.length = (int) w.data.size();
+            const auto scale = 6.315789222717285f; // float constant
+            for (auto& x : w.data)
+                x = (float) ((double) x - 0.63) * scale;
+            double sum = 0.0; // the mean is taken in double
+            for (int i = 0; i < w.length; ++i)
+                sum += (double) w.data[(std::size_t) i];
+            const auto mean = sum / (double) w.length;
+            for (int i = 0; i < w.length; ++i)
+                w.data[(std::size_t) i] = (float) ((double) w.data[(std::size_t) i] - mean);
+            w.data.push_back (w.data[0]);
+            out.push_back (std::move (w));
+            at += 4 + (std::size_t) size;
+        }
+        return true;
+    };
+    if (! readSet (0xFEAF0, 57, t->recorded) || ! readSet (0x15B2F0, 55, t->recorded2))
         return nullptr;
-    at += 4;
-    for (int k = 0; k < count; ++k)
-    {
-        std::int32_t size = 0;
-        rd (at, size);
-        if (size <= 0 || at + 4 + (std::size_t) size > b.size())
-            return nullptr;
-        Wave w;
-        if (! decodeWav (b.data() + at + 4, (std::size_t) size, w.data))
-            return nullptr;
-        w.length = (int) w.data.size();
-        const auto scale = 6.315789222717285f; // float constant
-        for (auto& x : w.data)
-            x = (float) ((double) x - 0.63) * scale;
-        float sum = 0.0f;
-        for (int i = 0; i < w.length; ++i)
-            sum += w.data[(std::size_t) i];
-        const auto n = (float) w.length;
-        for (int i = 0; i < w.length; ++i)
-            w.data[(std::size_t) i] -= sum / n;
-        w.data.push_back (w.data[0]);
-        t->recorded.push_back (std::move (w));
-        at += 4 + (std::size_t) size;
-    }
     cache[path] = t;
     return t;
 }
 
-// ----------------------------------------------------------------------------------- band-limited saw tables (§1.5)
+// ----------------------------------------------------------------------------------- band-limited saw tables (§2.4)
 // 48 tables: a 1024-point falling ramp resampled by 2^(−1/4) per level with a 64-tap windowed-sinc kernel (16 384
 // phases), each then upsampled ×16 with the same kernel; one guard point before, two after.
 struct SawTables
@@ -266,7 +272,7 @@ const SawTables& sawTables()
     return tables;
 }
 
-// ------------------------------------------------------------------------------------------------------- one-pole (§2.4)
+// ------------------------------------------------------------------------------------------------------- one-pole (§2.5)
 struct OnePole
 {
     float y = 0.0f, x1 = 0.0f, b0 = 0.0f, b1 = 0.0f, a1 = 0.0f;
@@ -357,7 +363,7 @@ struct Ladder
     }
 };
 
-// ------------------------------------------------------------------------------------------ half-band decimator (§2.7)
+// ------------------------------------------------------------------------------------------ half-band decimator (§2.5)
 struct HalfBand
 {
     struct Allpass { double a, x1 = 0, x2 = 0, y1 = 0, y2 = 0; };
@@ -393,7 +399,7 @@ struct HalfBand
     }
 };
 
-// ------------------------------------------------------------------------------------- Rat-style distortion (§2.8)
+// ------------------------------------------------------------------------------------- Rat-style distortion (§2.7)
 // five one-poles (7.2 Hz and 60 Hz high-passes, the "HP" high-pass, the drive low-pass, the "Tone" low-pass), the
 // drive gain, a slew limiter with ±4.5 clamp and tanh, the output gain; runs at the oversampled rate
 struct Distortion
@@ -503,7 +509,7 @@ struct Distortion
     }
 };
 
-// ------------------------------------------------------------------------------------------------ stereo delay (§3.4)
+// ------------------------------------------------------------------------------------------------ stereo delay (§2.8)
 // one line (2^18 points) read at a left and a right tap, each a crossfade of two tap times (time changes fade over
 // 0.3 s); the feedback runs through a 10 Hz high-pass, the send is added, then a 2×-iterated state-variable low-pass
 // ("Tone", 270…22 000 Hz), a soft clipper with level follower and a 65-point line before the write; outputs through 20 Hz
@@ -726,7 +732,7 @@ struct Delay
     }
 };
 
-// ------------------------------------------------------------------------------------------------ plate reverb (§3.5)
+// ------------------------------------------------------------------------------------------------ plate reverb (§2.9)
 // FL's plate (Dattorro-style figure-eight tank with the shared plate's line proportions and output taps) with an
 // early-reflection line (only its first tap pair is weighted), predelay with feedback, high/low cut, two-band decay and
 // damping, room scaling, wet smoothing and stereo width; float throughout, in the engine's order
@@ -1149,8 +1155,23 @@ struct Reverb
     }
 };
 
-// ------------------------------------------------------------------------------------------------ engine "V1" (§2)
-class Engine1
+// ------------------------------------------------------------------------------------------------ engine "V1" (§2.5)
+class Engine
+{
+public:
+    virtual ~Engine() = default;
+    virtual void setParam (int i, float v) noexcept = 0;
+    virtual float getParam (int i) const noexcept = 0;
+    virtual void setRate (double fs) noexcept = 0;
+    virtual void noteOn (int key, bool slide, bool accent) noexcept = 0;
+    virtual void noteOff() noexcept = 0;
+    virtual float tick() noexcept = 0;
+    virtual bool silent() const noexcept = 0;
+    float transpose = 0.0f, pitchExpr = 0.0f, cutExpr = 0.0f, resExpr = 0.0f;
+    double bend = 0.0;
+};
+
+class Engine1 final : public Engine
 {
 public:
     explicit Engine1 (std::shared_ptr<const DllData> d) : dll (std::move (d))
@@ -1161,8 +1182,8 @@ public:
         setRate (44100.0);
     }
 
-    // §2.2: one stored raw value per index; laws for the used indices
-    void setParam (int i, float v) noexcept
+    // §2.5: one stored raw value per index; laws for the used indices
+    void setParam (int i, float v) noexcept override
     {
         if (i >= 0 && i < 256)
             raw[(std::size_t) i] = v;
@@ -1171,9 +1192,9 @@ public:
             case 2: cutoff = powF (v, 1.5f) * 0.5799999833106995f + 0.10000000149011612f; return;
             case 5:
             {
-                const auto p = powF (v, 2.0f);
-                envMod = p * 0.5400000214576721f + 0.1599999964237213f;
-                envModInv = 1.0f - p * 0.3100000023841858f;
+                const auto sq = powF (v, 2.0f);
+                envMod = sq * 0.5400000214576721f + 0.1599999964237213f;
+                envModInv = 1.0f - sq * 0.3100000023841858f;
                 return;
             }
             case 6: p[6] = v; updateDecay (minDecay); return;
@@ -1217,9 +1238,9 @@ public:
                 return;
         }
     }
-    float getParam (int i) const noexcept { return i >= 0 && i < 256 ? raw[(std::size_t) i] : 0.0f; }
+    float getParam (int i) const noexcept override { return i >= 0 && i < 256 ? raw[(std::size_t) i] : 0.0f; }
 
-    void setRate (double fs) noexcept
+    void setRate (double fs) noexcept override
     {
         fsBase = fs;
         invFs = 1.0 / fs;
@@ -1235,7 +1256,7 @@ public:
         hp.coefficients ((float) std::tan ((double) (hp.freq * hp.piOverFs)));
         ladder.setRate (fsOs);
         dist.setRate (fsOs);
-        // saw-table selection (§1.5)
+        // saw-table selection (§2.4)
         const auto& st = sawTables();
         oscInvFs = 1.0 / fsOs;
         const auto x = fsOs * 0.9 / ((double) st.length[0] / 16.0) / 8.17579891564;
@@ -1246,7 +1267,7 @@ public:
         sustainCoef = powD (0.1, 1.0 / (fsOs * 1.0));
     }
 
-    void noteOn (int key, bool slide, bool acc) noexcept
+    void noteOn (int key, bool slide, bool acc) noexcept override
     {
         gate = true;
         key = std::clamp (key, 0, 127);
@@ -1259,12 +1280,9 @@ public:
         slideIndex = slide ? 1 : 0;
         target = noteTable[(std::size_t) key];
     }
-    void noteOff() noexcept { gate = false; }
+    void noteOff() noexcept override { gate = false; }
 
-    float transpose = 0.0f, pitchExpr = 0.0f, cutExpr = 0.0f, resExpr = 0.0f;
-    double bend = 0.0;
-
-    float tick() noexcept
+    float tick() noexcept override
     {
         const auto s = sinF (lfoPhase * 6.2831854820251465f);
         lfoPhase = lfoPhase + lfoInc;
@@ -1285,7 +1303,6 @@ public:
             xn = std::min (144.0, x);
         xn = xn / 144.0;
         const auto ec = powD (0.1, 1.0 / (fsBase * (accentOn ? minDecay : decay)));
-        envCoefLast = ec;
         env = ec * env;
         sustain = sustainCoef * sustain;
         const auto r = 1.0f - (1.0f - p[4]) * 0.5f;
@@ -1368,7 +1385,6 @@ public:
                 const auto f2 = (float) (pos2 - (double) k);
                 auto saw1 = (1.0f - f1) * oscTab[(std::size_t) i + 1];
                 saw1 = saw1 + f1 * oscTab[(std::size_t) i + 2];
-                sawLast = saw1;
                 auto saw2 = (1.0f - f2) * oscTab[(std::size_t) k + 1];
                 saw2 = saw2 + f2 * oscTab[(std::size_t) k + 2];
                 const auto wrap = (int) nextPh;
@@ -1378,7 +1394,7 @@ public:
                 o = o + saw1 * p[1];
             }
             auto y = ladder.tick (o);
-            // VCA (§2.6)
+            // VCA (§2.5)
             double v;
             if (gate)
             {
@@ -1425,7 +1441,7 @@ public:
         return 0.0f;
     }
 
-    bool silent() const noexcept { return ! gate && std::fabs (vca) < 1e-9; }
+    bool silent() const noexcept override { return ! gate && std::fabs (vca) < 1e-9; }
 
 private:
     void updateDecay (double minD) noexcept
@@ -1438,7 +1454,6 @@ private:
         const auto& st = sawTables();
         const auto x0 = (float) xn;
         const auto xd = (double) x0;
-        oscX = x0;
         const auto a = (float) (xd * 12.0);
         const auto pw2 = powF (2.0f, a);
         const auto t = (float) ((double) pw2 * 8.17579891564);
@@ -1473,7 +1488,7 @@ private:
     int oversampling = 4;
     double fsBase = 44100.0, invFs = 1.0 / 44100.0, fsOs = 176400.0, invFsOs = 1.0 / 176400.0;
     // envelope, accent
-    double minDecay = 0.185, decayMax = 2.16, decay = 0.185, env = 0.0, envCoefLast = 0.0, sustain = 0.0, sustainCoef = 0.0;
+    double minDecay = 0.185, decayMax = 2.16, decay = 0.185, env = 0.0, sustain = 0.0, sustainCoef = 0.0;
     double accentSmooth = 0.0;
     std::array<double, 2> accentCoef {};
     float accent = 0.0f, envMod = 0.0f, envModInv = 0.0f, cutoff = 0.0f, volume = 0.0f, pw = 0.5f, lfoAmount = 0.0f;
@@ -1485,7 +1500,7 @@ private:
     double pitch = 0.0, target = 0.0;
     // oscillators
     int pulseMode = 0, oscCycles = 0;
-    float pulseWidth = 0.5f, oscX = 0.0f, sawLast = 0.0f;
+    float pulseWidth = 0.5f;
     double oscPhase = 0.0, oscInc = 0.0, oscLen = 0.0, oscInvFs = 0.0, oscIndexOffset = 0.0;
     const float* oscTab = nullptr;
     double recPhase = 0.0, recInc = 0.0, recLen = 0.0, recFreq = 440.0, recInvFs = 0.0;
@@ -1500,7 +1515,527 @@ private:
     Distortion dist;
 };
 
-// ------------------------------------------------------------------------------------------------------ state (§1.2)
+// ------------------------------------------------------------------------------------------------ engine "V2" (§2.6)
+// the second engine: the same oscillators (its own recorded "303 Pulse" set), ladder, high-pass, distortion and
+// decimators, with a modelled accent circuit (two RC paths) driving the cutoff, three envelopes (VCA, accent, accent
+// release) and table-based cutoff / resonance / envelope-modulation laws ("TB303 range"; "extended" scales them
+// linearly)
+class Engine2 final : public Engine
+{
+public:
+    Engine2 (std::shared_ptr<const DllData> d, bool extended) : dll (std::move (d)), ext (extended)
+    {
+        for (int i = 0; i < 128; ++i)
+            noteTable[(std::size_t) i] = (double) i + 0.0;
+        selectRecorded (100);
+        env2.releaseTime = 0.2, env2.releaseTarget = 0.15, env2.decayTime = 0.007;
+        env3.releaseTime = 0.185, env3.releaseTarget = 0.1;
+        setRate (44100.0);
+    }
+
+    void setParam (int i, float v) noexcept override
+    {
+        if (i >= 0 && i < 256)
+            raw[(std::size_t) i] = v;
+        switch (i)
+        {
+            case 2:
+            {
+                if (ext)
+                    cutoff = v * 0.699999988079071f;
+                else if (1.0f <= v)
+                    cutoff = 0.6299999952316284f;
+                else
+                    cutoff = interp4 (cutTable, v);
+                return;
+            }
+            case 4:
+            {
+                static constexpr float t[6] = { 0.0f, 0.10300000011920929f, 0.38999998569488525f, 0.5910000205039978f, 1.0019999742507935f, 0.0f };
+                res = 1.0f <= v ? 1.0019999742507935f : interp4 (t, v);
+                return;
+            }
+            case 5:
+            {
+                static constexpr float t[6] = { 0.091796875f, 0.12800000607967377f, 0.169097900390625f, 0.2709999978542328f, 0.550000011920929f, 0.0f };
+                if (ext)
+                {
+                    auto x = v * 0.699999988079071f;
+                    envMod = x + 0.091796875f;
+                }
+                else
+                {
+                    const auto r = raw[5];
+                    envMod = 1.0f <= r ? 0.550000011920929f : interp4 (t, r);
+                }
+                return;
+            }
+            case 6:
+                p[6] = v;
+                decayCoef = powD (0.1, 1.0 / (decayTime (p[6]) * fsBase));
+                return;
+            case 8: volume = v * 0.25f * 3.0f; return;
+            case 9:
+                p[9] = v;
+                hp.highPass = 1;
+                hp.freq = v * 390.0f + 10.0f;
+                hpFreqParam = hp.freq;
+                hp.coefficients ((float) std::tan ((double) (hp.freq * hp.piOverFs)));
+                return;
+            case 10:
+            {
+                auto x = v - 0.5f;
+                x = x * 0.10000000149011612f;
+                minDecay = (double) (x + 0.1850000023841858f);
+                const auto q = p[6];
+                auto f = (float) (minDecay / (double) 0.1850000023841858f);
+                f = f * (1.0f - q);
+                f = f + q;
+                float t;
+                if (1.0f <= q)
+                    t = 2.2249999046325684f;
+                else
+                {
+                    auto y = q * 10.0f;
+                    const auto k = (int) y;
+                    y = y - (float) k;
+                    auto a = (1.0f - y) * decayTable[k];
+                    t = a + y * decayTable[k + 1];
+                }
+                t = t * f;
+                decayCoef = powD (0.1, 1.0 / ((double) t * fsBase));
+                accentDecayCoef = powD (0.1, 1.0 / (decayTime (0.0f) * fsBase));
+                return;
+            }
+            case 11: pw = v * 0.44999998807907104f + 0.5f; return;
+            case 12:
+                p[12] = v;
+                lfoInc = (float) ((double) (v * 9.899999618530273f + 0.10000000149011612f) * invFs);
+                return;
+            case 13: lfoAmount = v * 0.23999999463558197f; return;
+            case 0x1B: distOn = v >= 0.5f; return;
+            case 0x1C: p[0x1C] = v; dist.setHp (v); return;
+            case 0x1D: dist.setDrive (v * v); return;
+            case 0x1E: dist.setTone (v); return;
+            case 0x1F: dist.setVolume (v); return;
+            case 0x28: vcaSmoothCoef = 1.0 - powD (0.09999999999999998, 1.0 / ((smoothLaw() * 0.05 + 0.0001) * fsBase)); return;
+            case 0x29: pulse = 0.5f <= v; return;
+            default:
+                if (i >= 0 && i < 256)
+                    p[(std::size_t) i] = v;
+                return;
+        }
+    }
+    float getParam (int i) const noexcept override { return i >= 0 && i < 256 ? raw[(std::size_t) i] : 0.0f; }
+
+    void setRate (double fs) noexcept override
+    {
+        fsBase = fs;
+        fsOs = (double) oversampling * fs;
+        invFs = 1.0 / fs;
+        invFsOs = 1.0 / fsOs;
+        slideCoef[0] = 1.0 - powD (0.09999999999999998, 1.0 / (fs * glideTime[0]));
+        slideCoef[1] = 1.0 - powD (0.09999999999999998, 1.0 / (fs * glideTime[1]));
+        for (auto* e : { &env1, &env2, &env3 })
+        {
+            e->fs = fs;
+            e->attackInc = 1.0 / (fs * e->attackTime);
+            e->decayInc = 1.0 / (fs * e->decayTime);
+            e->releaseCoef = powD (e->releaseTarget, 1.0 / (fs * e->releaseTime));
+        }
+        vcaSmoothCoef = 1.0 - powD (0.09999999999999998, 1.0 / ((smoothLaw() * 0.05 + 0.0001) * fs));
+        hp.piOverFs = (float) (1.0 / fsOs) * 3.1415927410125732f;
+        hp.freq = hpFreqParam;
+        hp.highPass = 1;
+        hp.coefficients ((float) std::tan ((double) (hp.freq * hp.piOverFs)));
+        ladder.setRate (fsOs);
+        const auto& st = sawTables();
+        oscInvFs = 1.0 / fsOs;
+        const auto x = fsOs * 0.9 / ((double) st.length[0] / 16.0) / 8.17579891564;
+        oscIndexOffset = -std::log (x) / std::log (2.0) / 12.0;
+        recInvFs = 1.0 / fsOs;
+        circuit.fs = fs;
+        circuit.dirty = true;
+        decayCoef = accentDecayCoef = powD (0.1, 1.0 / (decayTime (0.0f) * fs));
+        vcaUp = 1.0 - powD (0.09999999999999998, 1.0 / (fs * 0.0003));
+        vcaDown = 1.0 - powD (0.09999999999999998, 1.0 / (fs * 0.01));
+        dist.setRate (fsOs);
+    }
+
+    void noteOn (int key, bool slide, bool acc) noexcept override
+    {
+        accentOn = acc;
+        gate = true;
+        key = std::clamp (key, 0, 127);
+        if (! slide)
+        {
+            env1.restart();
+            env = 1.0;
+            if (accentOn)
+            {
+                env2.restart();
+                env3.restart();
+            }
+        }
+        slideIndex = slide ? 1 : 0;
+        target = noteTable[(std::size_t) key];
+    }
+    void noteOff() noexcept override
+    {
+        gate = false;
+        env1.stage = 3;
+        env2.stage = 3;
+    }
+
+    float tick() noexcept override
+    {
+        const auto s = sinF (lfoPhase * 6.2831854820251465f);
+        lfoPhase = lfoPhase + lfoInc;
+        const auto t0 = (double) p[0] * 24.0;
+        lfoPhase = lfoPhase - (float) (int) lfoPhase;
+        pitch = (target - pitch) * slideCoef[(std::size_t) slideIndex] + pitch;
+        auto x = pitch + bend;
+        x = x - 64.0;
+        x = x + 24.0;
+        x = x + 4.0;
+        x = x + t0;
+        x = x + (double) pitchExpr;
+        x = x + (double) transpose;
+        double xn;
+        if (0.0 > x)
+            xn = 0.0;
+        else
+            xn = std::min (144.0, x);
+        xn = xn / 144.0;
+        double accIn = 0.0;
+        if (accentOn)
+        {
+            env = accentDecayCoef * env;
+            envCopy = env;
+            accIn = env * (double) raw[7];
+        }
+        else
+        {
+            env = decayCoef * env;
+            envCopy = env;
+        }
+        const auto drive = (float) ((double) (float) accIn * 10.0);
+        const auto c = circuit.tick ((double) raw[4], (double) raw[7], drive);
+        auto pwNow = s * lfoAmount + pw;
+        auto boost = (float) ((((double) c - 3.25) * 0.1) * 1.33);
+        if (0.0010000000474974513f > pwNow)
+            pwNow = bitsF (0x3a83126f);
+        else if (pwNow > 0.9990000128746033f)
+            pwNow = bitsF (0x3f7fbe77);
+        pulseWidth = pwNow;
+        if (pulse)
+        {
+            recFreq = (double) powF (2.0f, (float) (xn * 12.0)) * 8.17579891564;
+            recInc = recFreq * recInvFs;
+        }
+        oscSelect (xn);
+        const auto em = (float) ((double) envMod * (envCopy - 0.32499998807907104));
+        boost = boost * 0.75f;
+        auto cf = em + boost;
+        cf = cf + cutoff;
+        cf = cf + 0.10000000149011612f;
+        auto cd = (double) cf + (double) (p[3] - 0.5f) * xn;
+        cf = (float) cd + cutExpr;
+        const auto hz = powD (2.0, (double) cf * 128.0 * 0.08333333333333333) * 8.1757989156;
+        ladder.set ((float) hz, res, -1.0f);
+        const auto e1 = env1.tick();
+        auto e2 = env2.tick();
+        e2 = e2 * 3.0f;
+        e2 = e2 * raw[7];
+        auto e3 = env3.tick();
+        e3 = e3 * 1.75f;
+        e3 = e3 * raw[7];
+        auto g = std::min (1.0f, e3);
+        if (gate)
+            g = 0.0f;
+        const auto m = std::max (e1, e2);
+        const auto y = std::max (g, m);
+        const auto yd = (double) y;
+        const auto d = yd - vca1;
+        vca1 = d * (yd > vca1 ? vcaUp : vcaDown) + vca1;
+        vca2 = (vca1 - vca2) * vcaSmoothCoef + vca2;
+
+        std::array<float, 4> buf {};
+        for (int n = 0; n < oversampling; ++n)
+        {
+            float o;
+            const auto len = oscLen;
+            const auto ph = oscPhase;
+            const auto pos = len * ph;
+            if (pulse)
+            {
+                const auto nextPh = ph + oscInc;
+                const auto i = (int) pos;
+                const auto f1 = (float) (pos - (double) i);
+                const auto wrap = (int) nextPh;
+                oscPhase = nextPh - (double) wrap;
+                oscCycles += wrap;
+                auto saw = (1.0f - f1) * oscTab[(std::size_t) i + 1];
+                saw = saw + f1 * oscTab[(std::size_t) i + 2];
+                const auto rp = recPhase * recLen;
+                recPhase = recPhase + recInc;
+                const auto j = (int) rp;
+                const auto gg = (float) (rp - (double) j);
+                auto rec = gg * recTab[(std::size_t) j + 1];
+                rec = rec + (1.0f - gg) * recTab[(std::size_t) j];
+                const auto k = (int) recPhase;
+                recPhase = recPhase - (double) k;
+                if (k != 0)
+                    selectRecorded ((int) (44100.0 / recFreq));
+                o = (1.0f - p[1]) * rec;
+                o = o + p[1] * saw;
+            }
+            else
+            {
+                auto pos2 = (double) pulseWidth + ph;
+                const auto nextPh = ph + oscInc;
+                const auto i = (int) pos;
+                const auto j = (int) pos2;
+                pos2 = (pos2 - (double) j) * len;
+                const auto f1 = (float) (pos - (double) i);
+                const auto k = (int) pos2;
+                const auto f2 = (float) (pos2 - (double) k);
+                auto saw1 = (1.0f - f1) * oscTab[(std::size_t) i + 1];
+                saw1 = saw1 + f1 * oscTab[(std::size_t) i + 2];
+                auto saw2 = (1.0f - f2) * oscTab[(std::size_t) k + 1];
+                saw2 = saw2 + f2 * oscTab[(std::size_t) k + 2];
+                const auto wrap = (int) nextPh;
+                oscCycles += wrap;
+                oscPhase = nextPh - (double) wrap;
+                o = (saw1 - saw2) * (1.0f - p[1]);
+                o = o + saw1 * p[1];
+            }
+            const auto f = ladder.tick (-o);
+            const auto z = (float) ((double) f * vca2);
+            auto h = z * hp.b0;
+            h = h + hp.x1 * hp.b1;
+            h = h + hp.y * hp.a1;
+            hp.x1 = z;
+            hp.y = h;
+            auto out = h * volume;
+            if (distOn)
+                out = dist.tick (out);
+            buf[(std::size_t) n] = out;
+        }
+        if (oversampling == 1)
+            return buf[0];
+        if (oversampling == 2)
+        {
+            dec1.push ((double) buf[0]);
+            return (float) dec1.push ((double) buf[1]);
+        }
+        if (oversampling == 4)
+        {
+            dec1.push ((double) buf[0]);
+            const auto a = (float) dec1.push ((double) buf[1]);
+            dec1.push ((double) buf[2]);
+            const auto b = (float) dec1.push ((double) buf[3]);
+            dec2.push ((double) a);
+            return (float) dec2.push ((double) b);
+        }
+        return 0.0f;
+    }
+
+    bool silent() const noexcept override { return ! gate && std::fabs (vca2) < 1e-9 && std::fabs (vca1) < 1e-9; }
+
+private:
+    static constexpr float decayTable[12] = { 0.1850000023841858f, 0.20399999618530273f, 0.2329999953508377f, 0.3540000021457672f, 0.45500001311302185f, 0.5379999876022339f,
+                                              0.652999997138977f, 0.9409999847412109f, 1.4299999475479126f, 2.121999979019165f, 2.2249999046325684f, 0.0f };
+    static constexpr float cutTable[6] = { 0.3330000042915344f, 0.3709999918937683f, 0.44699999690055847f, 0.5329999923706055f, 0.6299999952316284f, 0.0f };
+
+    static float interp4 (const float* t, float v) noexcept
+    {
+        auto x = v * 4.0f;
+        const auto i = (int) x;
+        x = x - (float) i;
+        auto a = (1.0f - x) * t[i];
+        return a + x * t[i + 1];
+    }
+    double smoothLaw() const noexcept
+    {
+        const auto v = raw[0x28];
+        auto c = v * v;
+        c = c * v;
+        return (double) c;
+    }
+    // decay time law (seconds): the table at 10·x scaled by the minimum-decay ratio
+    double decayTime (float q) const noexcept
+    {
+        auto f = (float) (minDecay / (double) 0.1850000023841858f);
+        f = f * (1.0f - q);
+        f = f + q;
+        if (1.0f <= q)
+            return (double) (2.2249999046325684f * f);
+        auto y = q * 10.0f;
+        const auto k = (int) y;
+        y = y - (float) k;
+        auto a = (1.0f - y) * decayTable[k];
+        a = a + y * decayTable[k + 1];
+        return (double) (a * f);
+    }
+
+    struct Env
+    {
+        double attackTime = 0.00077, level = 0.5, attackInc = 0.0, phase = 0.0, decayTime = 0.01, decayPhase = 0.0, decayInc = 0.0;
+        double releaseTime = 3.2, releaseTarget = 0.1, out = 0.0, releaseCoef = 0.0, fs = 44100.0;
+        int stage = 2;
+        void restart() noexcept { phase = 0.0, decayPhase = 0.0, stage = 0; }
+        float tick() noexcept
+        {
+            if (stage == 0)
+            {
+                auto x = attackInc + phase;
+                phase = x;
+                if (x > 1.0)
+                {
+                    stage = 1;
+                    phase = 1.0;
+                    x = 1.0;
+                }
+                out = x * x * x * level;
+                return (float) out;
+            }
+            if (stage == 1)
+            {
+                auto y = decayInc + decayPhase;
+                decayPhase = y;
+                if (y > 1.0)
+                {
+                    stage = 2;
+                    decayPhase = 1.0;
+                    y = 1.0;
+                }
+                const auto f = (float) (1.0 - y);
+                auto c = f * f;
+                c = c * f;
+                out = (double) (1.0f - c) * (1.0 - level) + level;
+                return (float) out;
+            }
+            if (stage == 2)
+            {
+                out = releaseCoef * out;
+                return (float) out;
+            }
+            return 0.0f;
+        }
+    };
+
+    // the accent circuit: two RC paths whose time constants follow resonance and accent (§2.6)
+    struct Circuit
+    {
+        double ratio = 0.0, gUp = 0.0, gOut = 0.0, gDown = 0.0, cachedRes = 0.0, cachedAcc = 0.0, cA = 0.0, cB = 0.0, fs = 44100.0;
+        double out = 0.0, s1 = 3.25, s2 = 3.25;
+        bool dirty = true;
+        float tick (double r, double a, float drive) noexcept
+        {
+            if (dirty || r != cachedRes || a != cachedAcc)
+            {
+                dirty = false;
+                cachedRes = r;
+                cachedAcc = a;
+                const auto x1 = a * 50000.0;
+                const auto ra = (1.0 - a) * 50000.0;
+                const auto rr = (1.0 - r) * 50000.0;
+                const auto r5 = r * 50000.0;
+                auto par = ra * x1;
+                par = par / (ra + x1);
+                par = par + 47000.0;
+                par = par + r5;
+                auto t = 1.0 / par + 1e-05;
+                auto rtot = 1.0 / t + rr;
+                const auto rb = rr + 100000.0;
+                cA = 1.0 - powD (0.37, 1.0 / (rtot * 1e-06 * fs));
+                cB = 1.0 - powD (0.37, 1.0 / (rb * 1e-06 * fs));
+                par = par + 100000.0;
+                gUp = 100000.0 / par;
+                gOut = rr / rtot;
+                gDown = 100000.0 / rb;
+                ratio = gDown;
+            }
+            auto in = (double) drive * a;
+            in = in - 0.43;
+            const auto thr = (s2 - s1) * ratio + s1;
+            double o;
+            if (in > thr)
+            {
+                auto t = (in - s1) * gUp + s1;
+                s2 = (t - s2) * cA + s2;
+                o = (t - s2) * gOut + s2;
+            }
+            else
+            {
+                s2 = (s1 - s2) * cB + s2;
+                o = (s2 - s1) * gDown + s1;
+            }
+            out = o;
+            return (float) o;
+        }
+    };
+
+    void oscSelect (double xn) noexcept
+    {
+        const auto& st = sawTables();
+        const auto x0 = (float) xn;
+        const auto xd = (double) x0;
+        const auto a = (float) (xd * 12.0);
+        const auto pw2 = powF (2.0f, a);
+        const auto t = (float) ((double) pw2 * 8.17579891564);
+        const auto inc = (float) ((double) t * oscInvFs);
+        oscInc = (double) inc;
+        auto idx = (int) ((xd + oscIndexOffset) * (double) 48);
+        idx = idx < 0 ? 0 : std::min (idx, 47);
+        oscLen = (double) st.length[(std::size_t) idx];
+        oscTab = st.data[(std::size_t) idx].data();
+    }
+
+    void selectRecorded (int thr) noexcept
+    {
+        if (dll == nullptr || dll->recorded2.empty())
+            return;
+        int found = 0;
+        for (int i = (int) dll->recorded2.size() - 1; i >= 0; --i)
+            if (thr < dll->recorded2[(std::size_t) i].length)
+            {
+                found = i;
+                break;
+            }
+        recLen = (double) dll->recorded2[(std::size_t) found].length;
+        recTab = dll->recorded2[(std::size_t) found].data.data();
+    }
+
+    std::shared_ptr<const DllData> dll;
+    bool ext = true;
+    std::array<float, 256> raw {}, p {};
+    std::array<double, 128> noteTable {};
+    int oversampling = 4;
+    double fsBase = 44100.0, invFs = 1.0 / 44100.0, fsOs = 176400.0, invFsOs = 1.0 / 176400.0;
+    double minDecay = 0.185, decayCoef = 0.0, accentDecayCoef = 0.0, env = 0.0, envCopy = 0.0;
+    float cutoff = 0.0f, res = 0.0f, envMod = 0.0f, volume = 0.0f, pw = 0.5f, lfoAmount = 0.0f, lfoPhase = 0.0f, lfoInc = 0.0f;
+    bool gate = false, accentOn = false, distOn = false, pulse = false;
+    std::array<double, 2> glideTime { 0.0001, 0.05 }, slideCoef {};
+    int slideIndex = 0, oscCycles = 0;
+    double pitch = 0.0, target = 0.0;
+    float pulseWidth = 0.5f;
+    double oscPhase = 0.0, oscInc = 0.0, oscLen = 0.0, oscInvFs = 0.0, oscIndexOffset = 0.0;
+    const float* oscTab = nullptr;
+    double recPhase = 0.0, recInc = 0.0, recLen = 0.0, recFreq = 440.0, recInvFs = 0.0;
+    const float* recTab = nullptr;
+    double vca1 = 0.0, vca2 = 0.0, vcaUp = 0.0, vcaDown = 0.0, vcaSmoothCoef = 0.0;
+    Env env1, env2, env3;
+    Circuit circuit;
+    Ladder ladder;
+    OnePole hp;
+    float hpFreqParam = 200.0f;
+    HalfBand dec1, dec2;
+    Distortion dist;
+};
+
+// ------------------------------------------------------------------------------------------------------ state (§2.2)
 struct Step
 {
     bool slide = false, gate = false, accent = false;
@@ -1563,7 +2098,8 @@ State parseState (const std::vector<std::uint8_t>& s)
 {
     State st;
     Reader r { s, 0 };
-    if (r.get<std::uint32_t>() != 1)
+    const auto wrapperVersion = r.get<std::uint32_t>(); // the presets carry 1, FL 2026 saves 2; the wrapper refuses > 2
+    if (wrapperVersion < 1 || wrapperVersion > 2)
         return st;
     std::size_t engineAt = 0, engineEnd = 0;
     while (r.ok && r.at + 12 <= s.size())
@@ -1653,13 +2189,16 @@ State parseState (const std::vector<std::uint8_t>& s)
     return st;
 }
 
-// ------------------------------------------------------------------------------------------- the plugin (§1.3, §3)
+// ------------------------------------------------------------------------------------------- the plugin (§2.10)
 class Plugin
 {
 public:
     Plugin (const State& s, std::shared_ptr<const DllData> d, double fs) : st (s), dll (std::move (d))
     {
-        engine = std::make_unique<Engine1> (dll);
+        if (st.engine == 0)
+            engine = std::make_unique<Engine1> (dll);
+        else
+            engine = std::make_unique<Engine2> (dll, st.engine == 1);
         reverb.reset();
         program = st.program;
         seqMode = st.sequencerMode;
@@ -1680,7 +2219,7 @@ public:
     }
     void setTempo (double bpm) noexcept { hostTempo = bpm; }
 
-    // MyPlugin note-on (§3.1)
+    // MyPlugin note-on (§2.10)
     void noteOn (int channel, int key, int velocity) noexcept
     {
         if (channel == 12)
@@ -1776,7 +2315,7 @@ public:
             reverb.process (left, right, n);
     }
 
-    // delay times at the start of each block: first use sets both taps; later changes crossfade over 0.3 s (§3.4)
+    // delay times at the start of each block: first use sets both taps; later changes crossfade over 0.3 s (§2.8)
     void delayTimes (double tempo) noexcept
     {
         float t;
@@ -1822,7 +2361,7 @@ private:
             setParam (i, (double) patch[(std::size_t) i]);
     }
 
-    // MyPlugin parameter setter (§3.3)
+    // MyPlugin parameter setter (§2.10)
     void setParam (int i, double value) noexcept
     {
         const auto d = 0.0 <= value ? std::min (1.0, value) : 0.0;
@@ -1882,7 +2421,7 @@ private:
         playing = false;
     }
 
-    // ---- the arpeggiator / sequencer object (§3.2)
+    // ---- the arpeggiator / sequencer object (§2.10)
     struct Held { int note; float velocity; };
 
     void arpNoteOn (int note, float vel) noexcept
@@ -2016,7 +2555,7 @@ private:
 
     State st;
     std::shared_ptr<const DllData> dll;
-    std::unique_ptr<Engine1> engine;
+    std::unique_ptr<Engine> engine;
     std::array<float, 0x2A> params {};
     Delay delay;
     Reverb reverb;
@@ -2034,7 +2573,7 @@ private:
     double position = 0.0, gateLeft = 0.0;
 };
 
-// MIDI velocity as FL's wrapper derives it from Init.Vol (§3.1)
+// MIDI velocity as FL's wrapper derives it from Init.Vol (§2.10)
 int velocityFromInitVol (double initVol) noexcept
 {
     auto v = lnF ((float) initVol * 10.0f + 1.0f) / lnF (21.0f) * 127.0f;
@@ -2119,7 +2658,8 @@ public:
             noteOff (k);
     }
 
-    bool idle() const noexcept override { return plugin == nullptr || quiet >= (int) (rate.load() * 4.0); }
+    // idle once no key is held and the output (synth, delay and reverb tails) stayed below −140 dB for half a second
+    bool idle() const noexcept override { return plugin == nullptr || quiet >= (int) (rate.load() * 0.5); }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
@@ -2140,6 +2680,7 @@ public:
                 sent[(std::size_t) k] = true;
             }
         plugin->setTempo (tempo.load());
+        float peak = 0.0f;
         for (int done = 0; done < n;)
         {
             const auto m = std::min (n - done, (int) scratchL.size());
@@ -2149,10 +2690,14 @@ public:
             {
                 left[done + i] += scratchL[(std::size_t) i] * g;
                 right[done + i] += scratchR[(std::size_t) i] * g;
+                peak = std::max ({ peak, std::fabs (scratchL[(std::size_t) i]), std::fabs (scratchR[(std::size_t) i]) });
             }
             done += m;
         }
-        quiet = plugin->silent() ? std::min (quiet + n, 1 << 30) : 0;
+        bool held = false;
+        for (const auto k : sounding)
+            held = held || k;
+        quiet = ! held && peak < 1.0e-7f ? std::min (quiet + n, 1 << 30) : 0;
     }
 
 private:

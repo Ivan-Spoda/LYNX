@@ -486,6 +486,7 @@ public:
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
         autogun = def.instrument == InstrumentKind::autogun;
+        transistorBass = def.instrument == InstrumentKind::transistorbass;
         ogun = def.instrument == InstrumentKind::ogun || autogun; // Autogun: Ogun's parameter layout (REA_rodada57)
         miniSynth = def.instrument == InstrumentKind::minisynth;
         dx10 = def.instrument == InstrumentKind::dx10;
@@ -794,6 +795,7 @@ public:
                     : harmor ? tr ("Harmor — FL's additive engine (effects rack off; image synthesis not decoded)")
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
+                    : transistorBass ? tr ("Transistor Bass — FL's engine with its sequencer and effects (oscillator cycles read from your FL installation)")
                     : autogun ? tr ("Autogun — FL's engine with its effects and Magic Dust (SG.dat read from your FL installation)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
                     : poizone ? tr ("PoiZone — FL's engine with its gate, chorus, delay and arpeggiator (new settings restart the voices)")
@@ -822,7 +824,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
          fruitkick = false, bassdrum = false, toxic = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
@@ -1458,7 +1460,7 @@ public:
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
                  || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
-                 || kind == InstrumentKind::autogun)
+                 || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1547,6 +1549,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::bassdrum:
         case InstrumentKind::toxic:
         case InstrumentKind::autogun:
+        case InstrumentKind::transistorbass:
             return true;
         default:
             return false;
@@ -1583,7 +1586,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
                  || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
-                 || kind == InstrumentKind::autogun)
+                 || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

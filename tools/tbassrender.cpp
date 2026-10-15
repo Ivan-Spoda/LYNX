@@ -1,5 +1,5 @@
 // Renders a Transistor Bass state with LYNX's engine the way the REA round-57 EXEC harness drives FL's engine DLL
-// (verification, REA_rodada57 §2.10): tbassrender <state.bin> <engine_x64.dll> <out.f32> <length> <rate> [tempo=X] [blk=N]
+// (verification, REA_rodada57 §2.11): tbassrender <state.bin> <engine_x64.dll> <out.f32> <length> <rate> [tempo=X] [blk=N]
 // [note=start,key,initVol,finalPan,pitchCents,off[,fcut,fres,channel] ...]   (off = −1: held). Output: interleaved stereo
 // float32.
 

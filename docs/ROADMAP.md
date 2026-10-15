@@ -84,6 +84,8 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Maximus and Soundgoodizer on FL's exact Maximus engine (rounds 36, 40)
 - [x] Ogun's FFT spectral engine: initial spectrum and per-partial decay (round 24) on an evolving spectrum
 - [x] Ogun on its exact engine from the plugin state: inverse-FFT timbre, articulators, filter, EQ/chorus/delay/reverb,
-  qualities 0–4 (round 37; Autogun still on the synth approximation)
+  qualities 0–4 (round 37)
+- [x] Autogun on Ogun's exact engine with its Magic Dust (Soundgoodizer) stage, and Transistor Bass on its exact engine
+  with the sequencer and effects (round 57)
 - [x] Harmor resonance: types, mask and offset (round 25) as an SVF peak
 - [x] FLEX by preset name only (its packs are encrypted and never opened)
