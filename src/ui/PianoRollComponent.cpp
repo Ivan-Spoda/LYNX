@@ -1,5 +1,6 @@
 #include "ui/PianoRollComponent.h"
 
+#include "core/EditorPolish.h"
 #include "core/NoteEdit.h"
 #include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
@@ -101,7 +102,8 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     ghostButton.setOnColour (theme::colour::bg6);
     ghostButton.setIconColourWhenOn (theme::colour::textPrimary);
     ghostButton.setFlat (true);
-    ghostButton.setTooltip (tr ("Ghost notes: show the other channels' notes (Alt+V); double right-click one to edit its channel"));
+    ghostButton.setTooltip (tr ("Ghost notes: show the other channels' notes (Alt+V) and, outlined, this channel's notes in the clips "
+                                "playing at the same time; double right-click one to edit its channel; Ctrl+Alt+V makes them editable"));
     ghostButton.onClick = [this] {
         showGhosts = ghostButton.getToggleState();
         repaint();
@@ -457,6 +459,66 @@ void PianoRollComponent::sortNotes()
     setSelection (tracked);
 }
 
+juce::Rectangle<float> PianoRollComponent::stretchHandle() const
+{
+    // a tab on the right end of the selection, vertically centred on it (clamped into the grid)
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto channel = engine.getSelectedChannel();
+    std::int64_t start = 0, end = 0;
+    int top = -1, bottom = 128;
+    bool any = false;
+
+    for (auto i : selection)
+    {
+        if (i < 0 || i >= (int) notes.size() || notes[(std::size_t) i].channel != channel)
+            continue;
+        const auto& n = notes[(std::size_t) i];
+        start = any ? juce::jmin (start, n.start) : n.start;
+        end = any ? juce::jmax (end, n.start + n.length) : n.start + n.length;
+        top = juce::jmax (top, n.key);
+        bottom = juce::jmin (bottom, n.key);
+        any = true;
+    }
+
+    if (! any || end <= start)
+        return {};
+
+    const auto grid = gridArea().toFloat();
+    const auto x = (float) tickToX ((double) end);
+    const auto y0 = (float) keyToY (top), y1 = (float) (keyToY (bottom) + rowHeight);
+    const auto cy = juce::jlimit (grid.getY() + 10.0f, juce::jmax (grid.getY() + 10.0f, grid.getBottom() - 10.0f), (y0 + y1) * 0.5f);
+    const auto r = juce::Rectangle<float> (x + 2.0f, cy - 9.0f, 9.0f, 18.0f);
+    return grid.intersects (r) ? r : juce::Rectangle<float>();
+}
+
+void PianoRollComponent::drumPaintAt (juce::Point<int> p, bool snapOn)
+{
+    // one short hit per grid cell and key, on whatever key is under the mouse (FL's drum painting)
+    const auto cell = juce::jmax<std::int64_t> (1, snapOn ? gridTicks() : ticksPerStep);
+    const auto start = juce::jmax<std::int64_t> (0, snapOn ? snap (xToTick (p.x), true) : noteedit::snapDown (xToTick (p.x), cell));
+    const auto key = snapKey (yToKey (p.y));
+
+    if (start == lastDrumCell && key == lastDrumKey)
+        return;
+
+    lastDrumCell = start;
+    lastDrumKey = key;
+    const auto channel = engine.getSelectedChannel();
+
+    if (polish::hasNoteInCell (currentPattern (engine.getSong()), channel, key, start, cell))
+        return;
+
+    Note n;
+    n.start = start;
+    n.length = cell;
+    n.key = key;
+    n.channel = channel;
+    editNotes ([&n] (Pattern& pat) { noteedit::paste (pat, { n }, 0); });
+
+    if (key != previewKey)
+        previewOn (key, n.velocity);
+}
+
 // --- painting ------------------------------------------------------------------
 
 void PianoRollComponent::paint (juce::Graphics& g)
@@ -525,7 +587,22 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.setColour (bg0.withAlpha (0.55f));
         g.fillRect (juce::Rectangle<float> (endX, (float) grid.getY(), (float) grid.getRight() - endX, (float) grid.getHeight()));
 
-        // ghost notes: the other channels of this pattern, solid grey
+        // ghost notes (Alt+V). This channel's notes in the other clips that play at the same time in the
+        // Playlist: hollow outlines. The other channels of this pattern: solid grey (a bit brighter, with
+        // their channel colour on the edge, when Ctrl+Alt+V makes them editable)
+        if (showGhosts)
+        {
+            for (const auto& n : polish::clipGhostNotes (song, song.currentPattern, channel))
+            {
+                const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
+                                                       juce::jmax (4.0f, (float) (n.length * pixelsPerTick) - 1.0f), (float) rowHeight - 2);
+                if (r.getRight() < (float) grid.getX() || r.getX() > (float) grid.getRight())
+                    continue;
+                g.setColour (textPrimary.withAlpha (0.30f));
+                g.drawRoundedRectangle (r.reduced (0.5f), 2.0f, 1.0f);
+            }
+        }
+
         for (const auto& n : pattern.notes)
         {
             if (n.channel == channel || ! showGhosts)
@@ -534,10 +611,16 @@ void PianoRollComponent::paint (juce::Graphics& g)
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
                                                    (float) (n.length * pixelsPerTick), (float) rowHeight - 2);
             const auto hovered = &n - pattern.notes.data() == hover.ghost;
-            g.setColour (textPrimary.withAlpha (hovered ? 0.16f : 0.09f));
+            g.setColour (textPrimary.withAlpha (hovered ? 0.16f : editGhosts ? 0.12f : 0.09f));
             g.fillRoundedRectangle (r, 2.0f);
-            g.setColour (textPrimary.withAlpha (hovered ? 0.35f : 0.12f));
+            g.setColour (textPrimary.withAlpha (hovered ? 0.35f : editGhosts ? 0.22f : 0.12f));
             g.drawRoundedRectangle (r, 2.0f, 1.0f);
+
+            if (editGhosts && n.channel >= 0 && n.channel < (int) song.channels.size() && song.channels[(std::size_t) n.channel].colour != 0)
+            {
+                g.setColour (theme::tame (juce::Colour (song.channels[(std::size_t) n.channel].colour)).withAlpha (0.7f));
+                g.fillRect (r.withWidth (2.0f).reduced (0.0f, 1.0f));
+            }
         }
 
         for (int i = 0; i < (int) pattern.notes.size(); ++i)
@@ -586,6 +669,26 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 g.setColour (fill.getPerceivedBrightness() > 0.55f ? bg0.withAlpha (0.85f) : textPrimary.withAlpha (0.9f));
                 g.setFont (theme::font (gesture::labelHeight (rowHeight) - 1.0f));
                 g.drawText (keyName (n.key), r.reduced (n.slide || n.porta ? 11.0f : 4.0f, 0.0f), juce::Justification::centredLeft, true);
+            }
+        }
+
+        // the selection's stretch handle: a tab at its right end with two grips
+        if (const auto handle = stretchHandle(); ! handle.isEmpty() && (drag == Drag::none || drag == Drag::stretch))
+        {
+            const auto lit = hover.stretch || drag == Drag::stretch;
+            g.setColour (lit ? accentHover : accent.withAlpha (0.85f));
+            g.fillRoundedRectangle (handle, 3.0f);
+            g.setColour (onAccent.withAlpha (0.9f));
+            g.fillRect (handle.getCentreX() - 2.0f, handle.getY() + 5.0f, 1.0f, handle.getHeight() - 10.0f);
+            g.fillRect (handle.getCentreX() + 1.0f, handle.getY() + 5.0f, 1.0f, handle.getHeight() - 10.0f);
+
+            if (lit) // the stretched span, from the anchor to the handle
+            {
+                g.setColour (accent.withAlpha (0.5f));
+                const auto x0 = (float) tickToX ((double) (drag == Drag::stretch ? stretchAnchor : 0));
+                if (drag == Drag::stretch)
+                    g.drawVerticalLine ((int) x0, (float) grid.getY(), (float) grid.getBottom());
+                g.drawVerticalLine ((int) handle.getX() - 2, (float) grid.getY(), (float) grid.getBottom());
             }
         }
 
@@ -1050,13 +1153,53 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     if (! gridArea().contains (e.getPosition()))
         return;
 
+    // the selection's stretch handle: drag scales the selected notes in time from the selection's start
+    if (e.mods.isLeftButtonDown() && ! e.mods.isCtrlDown() && stretchHandle().expanded (2.0f).contains (e.position))
+    {
+        const auto& notes = currentPattern (engine.getSong()).notes;
+        dragIndices.clear();
+        dragOriginals.clear();
+
+        for (auto i : selection)
+            if (i >= 0 && i < (int) notes.size() && notes[(std::size_t) i].channel == engine.getSelectedChannel())
+            {
+                dragIndices.push_back (i);
+                dragOriginals.push_back (notes[(std::size_t) i]);
+            }
+
+        noteedit::span (dragOriginals, stretchAnchor, stretchEnd);
+        dragNote = dragIndices.empty() ? -1 : dragIndices.front();
+        drag = Drag::stretch;
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        return;
+    }
+
     bool rightEdge = false, leftEdge = false;
     const auto hit = noteAt (e.x, e.y, rightEdge, leftEdge);
     const auto tool = tools.getTool();
 
-    // every tool: right click deletes (double right-click on a ghost note switches to its channel)
+    // editable ghost notes (Ctrl+Alt+V): a left press on one switches to its channel and grabs the note there
+    if (hit < 0 && editGhosts && e.mods.isLeftButtonDown() && ! e.mods.isCtrlDown())
+        if (const auto ghost = ghostAt (e.x, e.y); ghost >= 0)
+        {
+            engine.setSelectedChannel (currentPattern (engine.getSong()).notes[(std::size_t) ghost].channel);
+            if (noteAt (e.x, e.y, rightEdge, leftEdge) >= 0) // now it is one of this channel's notes
+                mouseDown (e);
+            return;
+        }
+
+    // every tool: right click deletes (double right-click on a ghost note switches to its channel; with
+    // editable ghost notes a right-click deletes the ghost note itself)
     if (e.mods.isRightButtonDown())
     {
+        if (hit < 0 && editGhosts)
+            if (const auto ghost = ghostAt (e.x, e.y); ghost >= 0)
+            {
+                setSelection ({});
+                editNotes ([ghost] (Pattern& p) { noteedit::remove (p, { ghost }); });
+                return;
+            }
+
         if (hit < 0 && e.getNumberOfClicks() >= 2)
             if (const auto ghost = ghostAt (e.x, e.y); ghost >= 0)
             {
@@ -1091,7 +1234,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     }
 
     if ((hit < 0 && e.mods.isCtrlDown()) || tool == EditTool::lasso
-        || (hit < 0 && e.mods.isShiftDown() && tool != EditTool::brush))
+        || (hit < 0 && e.mods.isShiftDown() && tool != EditTool::brush && tool != EditTool::drumPaint))
     {
         drag = Drag::select;
         dragNote = hit; // a click without dragging selects this note (Lasso)
@@ -1143,6 +1286,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
         case EditTool::pencil:
         case EditTool::brush:
+        case EditTool::drumPaint:
         case EditTool::lasso:
         case EditTool::slip:
             break;
@@ -1195,6 +1339,15 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     // new note (or the chosen chord, with the clicked note as the root)
     setSelection ({});
     createdAt = juce::Time::getMillisecondCounter();
+
+    if (tool == EditTool::drumPaint)
+    {
+        drag = Drag::drumPaint;
+        lastDrumCell = -1;
+        lastDrumKey = -1;
+        drumPaintAt (e.getPosition(), snapOn);
+        return;
+    }
 
     if (tool == EditTool::brush)
     {
@@ -1425,6 +1578,30 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             listenAt (e.x);
             return;
 
+        case Drag::drumPaint:
+            drumPaintAt (e.getPosition(), snapOn);
+            return;
+
+        case Drag::stretch:
+        {
+            if (dragOriginals.empty() || stretchEnd <= stretchAnchor)
+                return;
+
+            // the new end of the selection: on the grid (the nearest line), or free with Alt
+            const auto minimum = snapOn ? juce::jmax<std::int64_t> (1, gridTicks()) : (std::int64_t) 10;
+            auto end = snapOn ? snap (xToTick (e.x) + (double) gridTicks() / 2.0, true) : (std::int64_t) xToTick (e.x);
+            end = juce::jmax (stretchAnchor + minimum, end);
+            const auto stretched = polish::stretchNotes (dragOriginals, stretchAnchor, stretchEnd, end);
+
+            editNotes ([this, &stretched] (Pattern& p) {
+                for (std::size_t j = 0; j < dragIndices.size() && j < stretched.size(); ++j)
+                    if ((std::size_t) dragIndices[j] < p.notes.size())
+                        p.notes[(std::size_t) dragIndices[j]] = stretched[j];
+            });
+            repaint();
+            return;
+        }
+
         case Drag::paint:
         {
             // lays notes to the right, one per default length, at the pitch under the mouse
@@ -1571,6 +1748,19 @@ void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
         case Drag::muting: hint.text = tr ("Muting / unmuting what the mouse crosses"); break;
         case Drag::knife: hint.text = tr ("Cutting along the line  [Alt] no snap"); break;
         case Drag::paint: hint.text = tr ("Painting notes  [Alt] no snap"); break;
+        case Drag::drumPaint: hint.text = tr ("Drum brush: one hit per grid cell, on the key under the mouse  [Alt] no snap"); break;
+        case Drag::stretch:
+        {
+            std::int64_t from = 0, to = 0;
+            std::vector<Note> now;
+            for (auto i : dragIndices)
+                if (i >= 0 && i < (int) notes.size())
+                    now.push_back (notes[(std::size_t) i]);
+            noteedit::span (now, from, to);
+            hint.text = tr ("Stretching {0} note(s) in time  [Alt] no snap", { count });
+            hint.value = "x" + juce::String ((double) (to - stretchAnchor) / (double) juce::jmax<std::int64_t> (1, stretchEnd - stretchAnchor), 2);
+            break;
+        }
         case Drag::keyZoom: hint.text = tr ("Key height"); hint.value = juce::String (rowHeight) + " px"; break;
         case Drag::pan:
         case Drag::keyboard:
@@ -1610,7 +1800,8 @@ void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
     if (drag == Drag::listen)
         stopListening();
 
-    if (drag == Drag::move || drag == Drag::resize || drag == Drag::resizeLeft || drag == Drag::paint)
+    if (drag == Drag::move || drag == Drag::resize || drag == Drag::resizeLeft || drag == Drag::paint || drag == Drag::drumPaint
+        || drag == Drag::stretch)
         sortNotes();
 
     previewOff();
@@ -1677,6 +1868,13 @@ PianoRollComponent::Hover PianoRollComponent::hoverAt (juce::Point<int> p) const
         return h;
 
     h.key = yToKey (p.y);
+
+    if (stretchHandle().expanded (2.0f).contains (p.toFloat()))
+    {
+        h.stretch = true;
+        return h;
+    }
+
     const auto& notes = currentPattern (engine.getSong()).notes;
     const auto channel = engine.getSelectedChannel();
     gesture::EdgeRules rules;
@@ -1745,6 +1943,10 @@ void PianoRollComponent::updateCursor (juce::ModifierKeys mods)
         cursor = mods.isCtrlDown() ? gesture::Cursor::select : gesture::Cursor::point;
     else if (velocityArea().contains (p))
         cursor = gesture::Cursor::draw;
+    else if (gridArea().contains (p) && hover.stretch && ! mods.isCtrlDown())
+        cursor = gesture::Cursor::resizeH;
+    else if (gridArea().contains (p) && editGhosts && hover.note < 0 && hover.ghost >= 0 && ! mods.isCtrlDown())
+        cursor = gesture::Cursor::move;
     else if (gridArea().contains (p))
     {
         const gesture::Mods m { mods.isShiftDown(), mods.isCtrlDown(), mods.isAltDown() };
@@ -1794,13 +1996,23 @@ ui::Hint PianoRollComponent::hintAt (juce::Point<int> p)
     if (! gridArea().contains (p))
         return hint;
 
+    if (h.stretch)
+    {
+        hint.text = tr ("Stretch handle: [LMB] drag stretches or squeezes the selected notes in time (from the selection's start)  [Alt] no snap");
+        hint.value = tr ("{0} selected", { juce::String ((int) selection.size()) });
+        return hint;
+    }
+
     if (h.note < 0 && h.ghost >= 0)
     {
         const auto ghostChannel = notes[(std::size_t) h.ghost].channel;
         const auto name = ghostChannel >= 0 && ghostChannel < (int) song.channels.size()
                               ? juce::String::fromUTF8 (song.channels[(std::size_t) ghostChannel].name.c_str())
                               : juce::String();
-        hint.text = tr ("Ghost note of {0}: double [RMB] edits that channel  [Alt][V] hides ghost notes", { name });
+        hint.text = editGhosts ? tr ("Ghost note of {0} (editable): [LMB] edit it (switches to {0})  [RMB] deletes it  [Ctrl][Alt][V] read-only ghosts",
+                                     { name })
+                               : tr ("Ghost note of {0}: double [RMB] edits that channel  [Alt][V] hides ghost notes  [Ctrl][Alt][V] makes them editable",
+                                     { name });
         hint.value = keyName (notes[(std::size_t) h.ghost].key);
         return hint;
     }
@@ -2078,6 +2290,14 @@ void PianoRollComponent::showMoreMenu()
     });
     menu.addSeparator();
     menu.addItem (tr ("Resize notes from the left edge too") + "\tCtrl+Alt+Home", true, resizeFromLeft, [this] { resizeFromLeft = ! resizeFromLeft; });
+    menu.addItem (tr ("Show ghost notes") + "\tAlt+V", true, showGhosts,
+                  [this] { ghostButton.setToggleState (! ghostButton.getToggleState(), juce::sendNotificationSync); });
+    menu.addItem (tr ("Ghost notes are editable") + "\tCtrl+Alt+V", true, editGhosts, [this] {
+        editGhosts = ! editGhosts;
+        if (editGhosts && ! showGhosts)
+            ghostButton.setToggleState (true, juce::sendNotificationSync);
+        repaint();
+    });
     menu.addSeparator();
     menu.addSubMenu ("MIDI", midiMenu());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton));
@@ -2412,6 +2632,15 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
     if (code == juce::KeyPress::escapeKey)
     {
         setSelection ({});
+        return true;
+    }
+
+    if (alt && cmd && letter == 'V') // editable ghost notes
+    {
+        editGhosts = ! editGhosts;
+        if (editGhosts && ! showGhosts)
+            ghostButton.setToggleState (true, juce::sendNotificationSync);
+        repaint();
         return true;
     }
 
