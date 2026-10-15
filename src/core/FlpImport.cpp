@@ -1408,6 +1408,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
+                 || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
+                 || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
     for (const auto& insert : project.mixer)

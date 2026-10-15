@@ -67,7 +67,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2, Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
   Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic, Pitch Shifter, Frequency Shifter,
+  Love Philter, Frequency Splitter, Stereo Shaper, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc, FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
@@ -322,6 +322,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
   and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
   (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
+- **Fruity PanOMatic, Fruity Balance and Fruity Blood Overdrive:** FL's exact engines as mixer effects
+  (`core/FruityBasicFx`, REA round 58). PanOMatic: pan/volume laws, its 2×2 pan matrix, the LFO on FL's host wave
+  tables (sine/triangle/square, free running in samples — tempo is never read) stepping once per render call, FL's gain
+  ramps; Balance: its sine/cosine balance law with the cross terms, FL's ramps; Blood Overdrive: the per-sample state-
+  variable filter, integrators, 65536-point sine shaper, smoothers and post filter, settled at load as FL does. Controls
+  are editable LYNX parameters and take FL's automation. Bit-identical to the three DLLs on every installation state
+  (54 PanOMatic, 10 Balance, 19 Blood Overdrive) plus synthetic states, at 22.05/44.1/48/96 kHz, several block sizes,
+  four signals and control changes during playback.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -364,6 +372,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the GMS findings (inference).
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
+- Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
+  calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
+  2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
+  editor-only state field is not identified.
 - Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
   on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
   self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
