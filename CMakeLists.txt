@@ -58,7 +58,9 @@ add_library(lynx_core STATIC
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
+    src/core/ChorusFx.cpp
     src/core/FlPatcher.cpp
+    src/core/ThreeOsc.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)

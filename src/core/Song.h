@@ -52,7 +52,8 @@ enum class InstrumentKind : std::uint8_t
     poizone,    // FL's PoiZone engine (REA_rodada44): the plugin's raw saved state in ChannelDef::pluginState
     fruitkick,  // FL's Fruit Kick (REA_rodada43 §1): raw saved state (with its envelope snapshot) in pluginState
     bassdrum,   // FL's BassDrum (REA_rodada43 §2): raw saved state in pluginState, the BassDrum folder in samplePath
-    toxic       // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
+    toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
+    threeosc    // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -307,6 +308,9 @@ enum class EffectKind : std::uint8_t
     stereoEnhancer, // FL's Fruity Stereo Enhancer, exact (REA_rodada54, core/StereoFx.h): FL's 6 controls / range
     transientProcessor, // FL's Transient Processor, exact (REA_rodada54, core/StereoFx.h): FL's 9 controls / range
     spreader,     // FL's Spreader, exact (REA_rodada54, core/StereoFx.h): FL's 5 controls / range
+    fruityChorus, // FL's Fruity Chorus, exact (REA_rodada59 §1, core/ChorusFx.h): controls / range
+    hyperChorus,  // FL's Hyper Chorus, exact (REA_rodada59 §2, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
+    vintageChorus, // FL's Vintage Chorus, exact (REA_rodada59 §3, core/ChorusFx.h): (raw − min) / range; instance in EffectSlot::state
     grossBeat     // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
 };
 

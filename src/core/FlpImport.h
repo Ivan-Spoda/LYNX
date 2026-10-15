@@ -43,6 +43,8 @@ struct FlpImportOptions
     std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
 
     FlpImportReport* report = nullptr; // optional
+
+    bool threeOscAsSynth = false; // 3x Osc → the built-in synth conversion instead of FL's engine (the synth's preset menu)
 };
 
 // Converts an FL Studio project to our model. Sampler channels whose
