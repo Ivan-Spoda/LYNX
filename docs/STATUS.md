@@ -349,6 +349,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   L-R encoding. Bit-exact against the reference model (which is within −137 dB of FL's DLL) on all 77 comparison
   cases, the 10 demo instances included. Draft follows the stored button for playback and export alike (LYNX has
   no "HQ for all plugins" option): octave levels and 16-frame re-blocking, its 16 samples of latency reported to PDC.
+- **Fruity Chorus, Hyper Chorus, Vintage Chorus:** FL's own engines (`core/ChorusFx.cpp`, REA round 59) from the saved
+  controls, editable as LYNX parameters: Fruity Chorus's three table LFOs, crossover and 12-bit fixed-point taps;
+  Hyper Chorus's two 4-voice cores (movement panning, cubic taps, ArachnaChor), filters, high-pass cross-fade and
+  parameter smoother in the engine's round-toward-zero mode, with its math library's sine and powf re-created;
+  Vintage Chorus's BBD-style chain (filters, 32768-sample lines, hiss with LFO-moved filters, gate, mix/gain smoothing,
+  Chorus 1/2 presets, LFO sync) with its library's FMA `sinf`. Bit-identical to the DLLs on every installation state
+  (11 + 16 + 11) at 44.1/48/96 kHz, with automation, later instances and synthetic states, Linux and Windows builds.
+  FL's random start phases (Fruity Chorus: clock-seeded; Hyper Chorus: `rand()` per instance) — LYNX uses 0 and the
+  instance's place in the project respectively.
 - **Fruity Squeeze** and **Vintage Phaser:** FL's algorithms (REA round 29) — Squeeze within 5·10⁻⁹ of the reference model
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 

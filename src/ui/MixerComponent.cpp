@@ -1006,7 +1006,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::reeverb2, EffectKind::reeverb1,
                                       EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                                       EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor,
-                                      EffectKind::spreader,
+                                      EffectKind::spreader, EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
                                       EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger };
 } // namespace
 

@@ -19,6 +19,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/ChorusFx.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -1414,6 +1415,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
                  || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
@@ -2120,6 +2123,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)
         splitDrumChannel (song, it->first, it->second);
 
+    numberChorusInstances (song); // the random LFO phases FL gives each Hyper Chorus instance (REA_rodada59 §2.6)
     return song;
 }
 } // namespace lynx
