@@ -7,6 +7,8 @@
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
+#include "core/EquoFx.h"
+#include "core/PitchShifterFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityDelay.h"
@@ -2200,6 +2202,23 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // EQUO: FL's knobs (raw − min) / range and options; the bands come from FL's state (core/EquoFx.h)
+    static const EffectInfo equoInfo { "EQUO", { { "Band shift", 0.5f }, { "Band mix", 1.0f }, { "Morph", 0.0f },
+                                                 { "Smoothness", 170.0f / 1024.0f }, { "Volume", 0.5f },
+                                                 { "Bandwidth", 70.0f / 420.0f }, { "Oversample", 0.0f }, { "Add mode", 0.0f },
+                                                 { "Send only", 0.0f } } };
+    // FL's Pitch Shifter: its 13 knobs (raw − min) / range, then engine, detector, tempo sync; defaults = a new FL instance
+    static const EffectInfo flPitchShifterInfo = [] {
+        EffectParams p {};
+        psfl::toParams (psfl::State {}, p);
+        EffectInfo info { "Pitch Shifter", {} };
+        const char* const names[psfl::numParams] = { "Pitch", "Formant", "Channel", "Mix", "Duration", "Density", "Jitter",
+                                                     "Random", "Delay", "Feedback", "Delay mode", "Formant correction",
+                                                     "Pitch mode", "Granular", "Accurate detector", "Tempo sync" };
+        for (int i = 0; i < psfl::numParams; ++i)
+            info.params.push_back ({ names[i], p[(std::size_t) i] });
+        return info;
+    }();
     // FL's raw controls normalised over their ranges (core/FruityDynamics.h); defaults = a new FL instance
     static const EffectInfo fruityLimiterInfo = [] {
         EffectInfo info { "Fruity Limiter", {} };
@@ -2374,6 +2393,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityChorus: return fruitychorusfx::info();
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
+        case EffectKind::equo: return equoInfo;
+        case EffectKind::flPitchShifter: return flPitchShifterInfo;
     }
     return eq;
 }
@@ -2682,6 +2703,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::spreader:
             return stereofx::spreaderParamText (param, v);
 
+        case EffectKind::equo:
+            return equofx::paramText (param, v);
+
+        case EffectKind::flPitchShifter:
+            return psfl::paramText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2723,6 +2750,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::equo)
+        return equofx::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
     if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
@@ -2778,6 +2807,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityChorus: return fruitychorusfx::make();
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
+        case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
+        case EffectKind::flPitchShifter: return psfl::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
