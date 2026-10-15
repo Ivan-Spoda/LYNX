@@ -217,6 +217,9 @@ ramps:
 | Fruity Reeverb (`t_v1.py`): the 7 demo states × 44.1/48/96 kHz, 7 synthetic states, automation of every control | 39 runs | all bit-identical (with FTZ or DAZ) |
 | Unit tests `reeverb2_engine` (`tests/tests.cpp`) | DLL goldens on 3 Reeverb 2 + 2 Fruity Reeverb own states through `makeEffect` | exact equality |
 
+**Cost** (`cpp/bench.cpp`, one core, 20 s of noise at 44.1 kHz, blocks of 512, other builds running): Reeverb 2 with
+modulation and early reflections 1.0 % of real time, Fruity Reeverb 0.6 %.
+
 ## 10. Open items
 
 - FL's host call order (rate before/after the state, flush before an export) — not confirmed (§5); LYNX assumes rate
