@@ -100,6 +100,8 @@ public:
     // For snapshots: the tool in use and a time selection over [fromBar, toBar).
     void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }
     void setTimeSelectionForSnapshot (int fromBar, int toBar);
+    // zoom (pixels per bar) and scroll (first bar, first track in view)
+    void setViewForSnapshot (double pixelsPerBar, int firstBar, int firstTrack);
     // hovers the right edge of the first clip in view (grip, outline, menu button); returns its hint
     ui::Hint hoverForSnapshot();
 
@@ -169,11 +171,6 @@ private:
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
     void paintAutomationClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
-    const std::vector<float>* waveformFor (const std::string& path);
-
-    static constexpr std::size_t waveformBucket = 256; // frames per waveform point
-    std::map<std::string, std::vector<float>> waveforms;
-    std::map<std::string, double> waveformRates;
 
     void refreshArrangementBox();
     void arrangementChosen();
