@@ -60,7 +60,11 @@ struct RefOptions
     int block = 512;     // host block (split at every event)
     double tempo = 120.0; // host tempo (VST time info)
     std::vector<int> peek; // engine fields (original byte offsets) printed after every block (verification only)
+    std::vector<std::array<int, 4>> midi; // extra MIDI events: sample, status, data 1, data 2
 };
+
+// the MIDI velocity the front-end sends for a voice's Init.Vol (TriggerVoice: Round(127·ln(10·v + 1)/ln 21.551182), ≤ 127)
+int midiVelocity (double initVol) noexcept;
 
 // Renders `notes` with the 29 parameter integers of a state (front-end order) and the DLL at `dll`. Raw engine output
 // (no host gains), interleaved stereo (2·length); empty if unusable.

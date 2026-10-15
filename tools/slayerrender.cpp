@@ -34,6 +34,12 @@ int main (int argc, char** argv)
             opt.block = std::atoi (a.c_str() + 4);
         else if (a.rfind ("tempo=", 0) == 0)
             opt.tempo = std::atof (a.c_str() + 6);
+        else if (a.rfind ("midi=", 0) == 0)
+        {
+            std::array<int, 4> m {};
+            if (std::sscanf (a.c_str() + 5, "%d,%d,%d,%d", &m[0], &m[1], &m[2], &m[3]) == 4)
+                opt.midi.push_back (m);
+        }
         else if (a.rfind ("peek=", 0) == 0)
             opt.peek.push_back ((int) std::strtol (a.c_str() + 5, nullptr, 16));
         else if (a.rfind ("note=", 0) == 0)

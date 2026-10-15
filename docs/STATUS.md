@@ -117,7 +117,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   −108.6 dB vs FL's DLL); SimSynth on its engine (REA round 64: the C++ engine behind the Delphi front-end, 12 voices
   with 3 table oscillators/noise, ring modulation, LFO, both envelopes, the 2-stage filter and the chorus, FL's old
   integer voice record; bit-identical to FL's DLL on all 76 installation states in every tested scenario); Wasp and
-  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Sakura and Drumpad on physical models rebuilt from their
+  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); FL Slayer on its
+  engine (REA round 68: the 32-bit reFX VST engine FL runs in its bridge — six waveguide strings at 44.1 kHz with the
+  recorded picks, chord/glide tables read from the user's `Slayer_Engine.dll`, the six play modes, 15 effects, four
+  amps, EQ and cabinet, under the engine's x87 truncating rounding; bit-identical to FL's DLL on all 64 presets in every
+  tested scenario and on 340 random parameter sets at 22.05–96 kHz); Fruity Dance as a silent channel (REA round 68: a
+  visual plugin); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -515,7 +520,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
   as an output gain (the plugin does not read Final.Vol). SimSynth (REA round 64 §5.2): the process-wide random index
   and chorus counter are per instance in LYNX (FL: shared by every SimSynth and every sample-rate change); FL's load
-  order and its rounding when it fills the old voice record are not confirmed; automation not wired.
+  order and its rounding when it fills the old voice record are not confirmed; automation not wired. FL Slayer (REA
+  round 68 §9): the phase of the engine's 5 ms control grid relative to the song (FL's engine runs since load, LYNX's
+  from the render with one primer sample: note starts can differ by up to 5 ms), the C runtime's rand seed per bridge
+  thread in FL (per engine in LYNX), MIDI pan/volume/pitch events and parameter automation (state edits restart the
+  engine) are not modelled; FL applying the channel volume/pan to the output is an inference from the plugin's flags.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

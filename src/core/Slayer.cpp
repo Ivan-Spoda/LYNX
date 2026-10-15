@@ -14,7 +14,11 @@
 #include "core/Sha256.h"
 
 // The engine switches the x87 rounding mode (§2.1): the compiler must not assume round-to-nearest.
+#if defined(__clang__)
 #pragma STDC FENV_ACCESS ON
+#elif defined(__GNUC__)
+#pragma GCC optimize ("rounding-math")
+#endif
 
 namespace lynx
 {
@@ -556,7 +560,8 @@ ld Engine::ampFilter (int base, float x, float a, float b, float clampA) noexcep
 
 // ------------------------------------------------------------------------------------------------ set-up (§2)
 Engine::Engine (std::shared_ptr<const DllData> d)
-    : data (std::move (d)), fbRing ((std::size_t) ringMask + 1), bufA (0x40000), bufB (0x40000), bufC (0x40000), bufD (0x40000), bufE (0x40000)
+    : data (std::move (d)), fbRing ((std::size_t) ringMask + 1), bufA (0x40000), bufB (0x40000), bufC (0x40000), bufD (0x40000), bufE (0x40000),
+      bufL (8192), bufR (8192)
 {
     X87Mode fpu (false);
     // the plugin's constructor: program 0's values (the front-end overwrites every parameter right after loading)
@@ -2304,6 +2309,147 @@ int keyFromPitch (float finalPitchPlus6000) noexcept
     const auto k = (long long) std::nearbyint ((double) f);
     return (int) std::clamp (k, 0ll, 127ll);
 }
+
+// ------------------------------------------------------------------------------------------------ LYNX instrument
+// FL Slayer as a LYNX instrument: the engine driven like the front-end drives it (§6). FL applies the channel's volume
+// and pan to the plugin's output (the plugin reads no per-voice levels), which LYNX does through render()'s gains.
+class SlayerInstrument final : public Instrument
+{
+public:
+    ~SlayerInstrument() override
+    {
+        delete incoming.exchange (nullptr);
+        delete retired.exchange (nullptr);
+    }
+
+    void prepare (double sr) noexcept override
+    {
+        delete retired.exchange (nullptr);
+        take();
+        if (sr == rate.load() && engine != nullptr)
+            return;
+        rate.store (sr);
+        delete incoming.exchange (build().release());
+        take();
+    }
+
+    void configure (const ChannelDef& channel, double bpm) noexcept override
+    {
+        delete retired.exchange (nullptr);
+        tempo.store (bpm > 0.0 ? bpm : 140.0);
+        channelCents.store (channel.sampler.pitch * 100.0f);
+        if (channel.pluginState == state && channel.samplePath == dllPath)
+            return;
+        state = channel.pluginState;
+        dllPath = channel.samplePath;
+        usable = parseState (state, params);
+        data = loadDll (dllPath);
+        delete incoming.exchange (build().release());
+    }
+
+    void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
+
+    void noteOn (int key, float velocity) noexcept override
+    {
+        take();
+        if (engine == nullptr)
+            return;
+        const auto k = std::clamp (key, 0, 127);
+        // FL: Init.Vol = (11^(1.28·velocity) − 1)/10 (the channel's default velocity curve), Final.Pitch in cents
+        const auto initVol = (std::pow (11.0, 1.28 * std::clamp ((double) velocity, 0.0, 1.0)) - 1.0) / 10.0;
+        const int v = velocityFromInitVol (initVol);
+        const int midiKey = keyFromPitch ((float) ((k - 60) * 100) + nextCents + channelCents.load() + 6000.0f);
+        nextCents = 0.0f;
+        if (sounding[(std::size_t) k] >= 0)
+            engine->midi (0x80, sounding[(std::size_t) k], soundingVel[(std::size_t) k]);
+        sounding[(std::size_t) k] = midiKey;
+        soundingVel[(std::size_t) k] = v;
+        engine->midi (0x90, midiKey, v);
+    }
+
+    void noteOff (int key) noexcept override
+    {
+        take();
+        const auto k = std::clamp (key, 0, 127);
+        if (engine == nullptr || sounding[(std::size_t) k] < 0)
+            return;
+        engine->midi (0x80, sounding[(std::size_t) k], soundingVel[(std::size_t) k]);
+        sounding[(std::size_t) k] = -1;
+    }
+
+    void allNotesOff() noexcept override
+    {
+        for (int k = 0; k < 128; ++k)
+            noteOff (k);
+    }
+
+    void render (float* left, float* right, int n, float gl, float gr) noexcept override
+    {
+        take();
+        if (engine == nullptr || n <= 0)
+            return;
+        engine->tempo = tempo.load();
+        for (int done = 0; done < n;)
+        {
+            const auto m = std::min (n - done, (int) scratchL.size());
+            std::fill (scratchL.begin(), scratchL.begin() + m, 0.0f);
+            std::fill (scratchR.begin(), scratchR.begin() + m, 0.0f);
+            engine->process (scratchL.data(), scratchR.data(), m);
+            for (int i = 0; i < m; ++i)
+            {
+                left[done + i] += scratchL[(std::size_t) i] * hostL * gl;
+                right[done + i] += scratchR[(std::size_t) i] * hostR * gr;
+            }
+            done += m;
+        }
+    }
+
+private:
+    std::unique_ptr<Engine> build() const
+    {
+        if (! usable || data == nullptr)
+            return nullptr;
+        auto e = std::make_unique<Engine> (data);
+        for (int i = 0; i < 28; ++i)
+            e->setParameter (i, (float) params[(std::size_t) i] / (float) paramMax[i]);
+        e->setSampleRate ((float) rate.load());
+        e->resume();
+        e->midi (0xe0, 0, 64);              // the front-end's centred pitch bend after loading
+        e->midi (0xb0, 1, params[28]);      // parameter 28 (mod wheel)
+        e->tempo = tempo.load();
+        float l = 0.0f, r = 0.0f;
+        e->process (&l, &r, 1);              // one sample in: the plugin has been running before the first note (§6.3)
+        return e;
+    }
+
+    void take() noexcept
+    {
+        if (retired.load() != nullptr)
+            return;
+        if (auto* s = incoming.exchange (nullptr))
+        {
+            retired.store (engine.release());
+            engine.reset (s);
+            sounding.fill (-1);
+        }
+    }
+
+    std::unique_ptr<Engine> engine;
+    std::atomic<Engine*> incoming { nullptr }, retired { nullptr };
+    std::array<int, 29> params {};
+    bool usable = false;
+    std::shared_ptr<const DllData> data;
+    std::atomic<double> rate { 44100.0 }, tempo { 140.0 };
+    std::atomic<float> channelCents { 0.0f };
+    std::vector<std::uint8_t> state;
+    std::string dllPath;
+    std::array<int, 128> sounding = [] { std::array<int, 128> a {}; a.fill (-1); return a; }();
+    std::array<int, 128> soundingVel {};
+    float nextCents = 0.0f;
+    // the front-end mixes the engine's output with the host's ComputeLRVol(pan 0, volume 1): cos(π/4) on both sides
+    const float hostL = 0.70710677f, hostR = 0.70710677f;
+    std::array<float, 512> scratchL {}, scratchR {};
+};
 } // namespace
 
 // ------------------------------------------------------------------------------------------------ public API
@@ -2325,8 +2471,12 @@ int slayerParamMax (int index) noexcept { return index >= 0 && index < 29 ? para
 
 bool slayerDllUsable (const std::string& path) { return loadDll (path) != nullptr; }
 
+std::unique_ptr<Instrument> makeSlayerInstrument() { return std::make_unique<SlayerInstrument>(); }
+
 namespace slayer
 {
+int midiVelocity (double initVol) noexcept { return velocityFromInitVol (initVol); }
+
 std::vector<float> renderReference (const std::vector<int>& params, const std::string& dll, const std::vector<RefNote>& notes,
                                     double sampleRate, int length, const RefOptions& options)
 {
@@ -2349,6 +2499,8 @@ std::vector<float> renderReference (const std::vector<int>& params, const std::s
         if (n.release >= 0 && n.release < length)
             ev.push_back ({ n.release, 0x80, n.key, n.velocity });
     }
+    for (const auto& m : options.midi)
+        ev.push_back ({ m[0], m[1], m[2], m[3] });
     std::stable_sort (ev.begin(), ev.end(), [] (const Ev& a, const Ev& b) { return a.at < b.at; });
     std::vector<float> out ((std::size_t) length * 2, 0.0f);
     std::vector<float> l ((std::size_t) options.block), r ((std::size_t) options.block);

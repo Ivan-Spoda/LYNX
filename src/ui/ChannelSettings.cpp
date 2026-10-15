@@ -20,6 +20,7 @@
 #include "core/FruitKick.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
+#include "core/Slayer.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -501,6 +502,8 @@ public:
         threeOsc = def.instrument == InstrumentKind::threeosc;
         simSynth = def.instrument == InstrumentKind::simsynth;
         wasp = def.instrument == InstrumentKind::wasp;
+        slayer = def.instrument == InstrumentKind::slayer;
+        fruityDance = def.instrument == InstrumentKind::fruitydance;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -666,6 +669,35 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
+        // FL Slayer: the 28 parameter integers of the saved state (REA_rodada68 §6.1), ranges of the plugin's controls
+        static const Ranged slayerKnobs[] = {
+            { 0, "Strings", 0, 6 }, { 1, "Coils", 0, 2 }, { 2, "Pickup", 0, 65535 }, { 3, "Tone", 0, 65535 }, { 4, "Slap", 0, 65535 },
+            { 5, "Fret", 0, 65535 }, { 6, "Harmonic", 0, 65535 }, { 7, "Damp", 0, 65535 }, { 8, "Vel volume", 0, 65535 },
+            { 9, "Vel damp", 0, 65535 }, { 12, "Amp type", 0, 3 }, { 13, "Drive", 0, 65535 }, { 14, "Presence", 0, 65535 },
+            { 15, "Feedback", 0, 65535 }, { 16, "EQ low", 0, 65535 }, { 17, "EQ mid", 0, 65535 }, { 18, "EQ high", 0, 65535 },
+            { 19, "Cabinet", 0, 3 }, { 20, "Effect", 0, 15 }, { 21, "FX par 1", 0, 65535 }, { 22, "FX par 2", 0, 65535 },
+            { 24, "Mode", 0, 5 }, { 25, "Timing", 0, 65535 }, { 26, "Latch", 0, 1 }, { 27, "Glissando", 0, 1 } };
+        auto addSlayer = [&] (const Ranged& k) {
+            const auto at = 4 + 4 * (std::size_t) k.index;
+            if (! slayerStateUsable (def.pluginState) || at + 4 > def.pluginState.size())
+                return;
+            std::int32_t value = 0;
+            std::memcpy (&value, def.pluginState.data() + at, 4);
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange ((double) k.low, (double) k.high, 1.0);
+            knob->setValue ((double) std::clamp ((int) value, (int) k.low, (int) k.high), juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, at, s = knob.get()] {
+                engine.editSong ([c = channel, at, v = (std::int32_t) s->getValue()] (Song& song) {
+                    auto& st = song.channels[(std::size_t) c].pluginState;
+                    if (slayerStateUsable (st) && at + 4 <= st.size())
+                        std::memcpy (st.data() + at, &v, 4);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
         // Ogun: raw FL integers P0…P63 inside the saved (zlib) state (REA_rodada37 §1.3)
         static const Ranged ogunKnobs[] = {
             { 0, "Master vol", 0, 256 }, { 5, "Pre-decay", 0, 1000 }, { 6, "Decay", 0, 10000 }, { 7, "Release", 0, 10000 },
@@ -813,8 +845,11 @@ public:
         else if (simSynth)
             for (const auto& k : simSynthKnobs)
                 addDouble (k);
-        else if (wasp)
+        else if (wasp || fruityDance)
             ;
+        else if (slayer)
+            for (const auto& k : slayerKnobs)
+                addSlayer (k);
         else if (toxic)
             for (const auto& k : toxicKnobs)
                 addFloat (k);
@@ -872,6 +907,8 @@ public:
                     : threeOsc ? tr ("3x Osc — FL's engine (custom wave from the channel's sample)")
                     : simSynth ? tr ("SimSynth — FL's engine (new settings restart the voices)")
                     : wasp ? tr ("Wasp — FL Studio 2026 has no 64-bit Wasp: the channel keeps its settings and stays silent, as in FL")
+                    : slayer ? tr ("FL Slayer — FL's engine with its effects, amp and cabinet (picks read from your FL installation; new settings restart the voices)")
+                    : fruityDance ? tr ("Fruity Dance — a visual plugin: it makes no sound, the channel keeps its settings")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -892,7 +929,7 @@ private:
     AudioEngine& engine;
     int channel;
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
-         fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, wavesFound = false;
+         fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, slayer = false, fruityDance = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1541,7 +1578,8 @@ public:
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
-                 || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp)
+                 || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp
+                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1634,6 +1672,8 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::transistorbass:
         case InstrumentKind::simsynth:
         case InstrumentKind::wasp:
+        case InstrumentKind::slayer:
+        case InstrumentKind::fruitydance:
             return true;
         default:
             return false;
@@ -1672,7 +1712,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
-                 || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp)
+                 || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp
+                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
