@@ -46,7 +46,8 @@ enum class InstrumentKind : std::uint8_t
     gms,        // FL's GMS engine (REA_rodada39 §1): raw saved state in pluginState, wave folder in samplePath
     morphine,   // FL's Morphine engine (REA_rodada39 §2): raw saved state in pluginState, noise sample in samplePath
     ogun,       // FL's Ogun inverse-FFT engine (REA_rodada37): the plugin's raw saved state in ChannelDef::pluginState
-    minisynth   // FL's MiniSynth engine (REA_rodada41): raw saved state in pluginState, path of oscdata.dat in samplePath
+    minisynth,  // FL's MiniSynth engine (REA_rodada41): raw saved state in pluginState, path of oscdata.dat in samplePath
+    dx10        // FL's Fruity DX10 FM engine (REA_rodada42): the plugin's raw saved state in ChannelDef::pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

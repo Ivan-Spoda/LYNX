@@ -43,6 +43,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::morphine: return "Morphine";
         case InstrumentKind::ogun: return "Ogun";
         case InstrumentKind::minisynth: return "MiniSynth";
+        case InstrumentKind::dx10: return "Fruity DX10";
     }
     return "?";
 }
