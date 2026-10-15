@@ -203,7 +203,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   its filter envelope, the master envelope, the output rack (distortion + DC blocker, two slots of delay/chorus/reverb/
   flanger/phaser/lo-fi, 8-band EQ, sleep logic, the DLL's CRT `powf/sinf/cosf/expf/tanf`) and the master gain —
   bit-identical to `r45/py/toxmodel.py`, which is bit-identical to FL's DLL on the 3 demo channels (voice and full chain,
-  44.1/48/96 kHz) and ~40 synthetic cases. The 2-operator conversion stays for states that need the DLL when it is not found.
+  44.1/48/96 kHz) and 35 variants (features, rates, block sizes). The 2-operator conversion stays for states that need the DLL when it is not found.
 - **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay, BPM sync (period n/192 beats, REA round 33);
   Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
   **BassDrum:** Peak `1 + 100x³·s⁴`.

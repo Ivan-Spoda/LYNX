@@ -856,6 +856,16 @@ public:
                 v.released = true, v.release();
     }
 
+    // a free-running LFO keeps moving while no voice plays (§1.3); when it modulates something the engine must keep
+    // running between notes so the next note starts at FL's phase
+    bool lfoRunning() const noexcept
+    {
+        const auto used = std::any_of (ops.begin(), ops.end(), [] (const Op& o) { return o.l1 != 0.0f || o.l2 != 0.0f; })
+                          || tg[kL1a] > 1.0000000116860974e-07 || l2p != 0.0
+                          || std::any_of (cctype.begin(), cctype.end(), [] (int t) { return t == 2 || t == 3; });
+        return used && (lfofree[0] || lfofree[1]);
+    }
+
     bool anyActive() const noexcept
     {
         return std::any_of (voices.begin(), voices.end(), [] (const Voice& v) { return v.note >= 0; });
@@ -1387,7 +1397,7 @@ public:
 
     bool idle() const noexcept
     {
-        if (eng.anyActive() || eng.fx.active())
+        if (eng.anyActive() || eng.fx.active() || eng.lfoRunning())
             return false;
         return std::none_of (std::begin (held), std::end (held), [] (const Held& h) { return h.on; });
     }

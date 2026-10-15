@@ -425,11 +425,18 @@ rate-change cases are not reachable through the public API).
 
 ## 6. Full chain **[EXEC + model]**
 
-| Case (full chain, effects as saved) | Result |
+Same notes and settings as §4, effects as saved in the state (`r45/out/bat2.log`).
+
+| Case (full chain) | Result |
 |---|---|
-| Saw, 44.1 kHz | bit-identical |
-| Saw #2, Bombs Away, 44.1 kHz; Saw #2 48 kHz; Bombs Away 48 kHz host block 1000; Saw with a 3 s tail; Saw #2 with chorus + phaser; Bombs with the flanger on + lo-fi + distortion 0.6 | see `r45/out/bat2.log` (filled in at the end of the battery: §8) |
-| The unit-test state, tempo 140 | bit-identical |
+| Saw, Saw #2, Bombs Away, 44.1 kHz | bit-identical ×3 |
+| Saw #2 48 kHz; Bombs Away 48 kHz, host blocks of 1000 | bit-identical ×2 |
+| Saw with a 3 s reverb/delay tail | bit-identical |
+| Saw #2 with chorus (slot 1) + phaser (slot 2); Bombs Away with the flanger switched on, lo-fi in slot 2 and distortion 0.6 | bit-identical ×2 |
+| The unit-test state (`mktest.py`), tempo 140 | bit-identical |
+
+**Result: the model reproduces FL's DLL bit for bit on all 3 demo channels (voice only and full chain, 44.1/48/96 kHz)
+and on every synthetic case run (41 battery renders + the unit-test state).**
 
 ---
 
@@ -467,7 +474,10 @@ rate-change cases are not reachable through the public API).
   `r45/py/mktest.py`) against golden samples of the model (which is bit-identical to the DLL on that state) and the
   instrument against the reference renderer; with FL's Data folder the import test plays the 3 demo channels on the exact
   engine (waves from the installation) and compares "Bombs Away" with model goldens.
-- **C++ vs model** (`r45/py/ccmp.py`): bit-identical on every battery case run (§4, §6).
+- **C++ vs model** (`r45/py/ccmp.py`, `r45/out/ccmp.log`): bit-identical on every battery case (§4, §6); the C++ engine
+  renders the 2-s Saw #2 case (48 lanes per voice) in ~0.15 s.
+- The engine keeps running between notes while a free-running LFO modulates something (FL's engine phase keeps moving,
+  §1.3); otherwise the channel goes idle once the voices ended and the rack fell asleep (§5.7).
 
 ---
 
