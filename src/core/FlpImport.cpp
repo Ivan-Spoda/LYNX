@@ -19,6 +19,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/ChorusFx.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -1407,6 +1408,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 

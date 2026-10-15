@@ -8,6 +8,7 @@
 #include "core/MaximusFx.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/ChorusFx.h"
 
 #include "core/Biquad.h"
 
@@ -2275,6 +2276,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruitySoftClipper: return softClipperInfo;
         case EffectKind::reeverb2: return reeverb2Info;
         case EffectKind::reeverb1: return reeverb1Info;
+        case EffectKind::fruityChorus: return fruitychorusfx::info();
     }
     return eq;
 }
@@ -2492,6 +2494,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::reeverb2: return reeverb2ParamText (param, v);
         case EffectKind::reeverb1: return reeverb1ParamText (param, v);
+        case EffectKind::fruityChorus: return fruitychorusfx::paramText (param, v);
 
         case EffectKind::vintagePhaser:
             switch (param)
@@ -2630,6 +2633,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::reeverb1: return makeReeverb1();
+        case EffectKind::fruityChorus: return fruitychorusfx::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

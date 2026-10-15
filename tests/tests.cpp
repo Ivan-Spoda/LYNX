@@ -46,6 +46,7 @@
 #include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/ChorusFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -790,6 +791,7 @@ TEST (flp_real_files)
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
+    int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -1035,6 +1037,7 @@ TEST (flp_real_files)
                         vocodexSlots += slot.plugin == "Vocodex";
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
+                        chorusSlots += lynx::chorusControls (slot.plugin) > 0 && slot.state.size() >= 4 ? 1 : 0;
                     }
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
@@ -1051,6 +1054,7 @@ TEST (flp_real_files)
                         if (fx.kind == lynx::EffectKind::fruityWaveShaper)
                             shaperExact += lynx::flshape::parseWaveShaper (fx.state).has_value() ? 1 : 0;
                         clipperExact += fx.kind == lynx::EffectKind::fruitySoftClipper;
+                        chorusExact += fx.kind == lynx::EffectKind::fruityChorus ? 1 : 0;
                     }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
@@ -1710,6 +1714,8 @@ TEST (flp_real_files)
                  clipperExact, clipperSlots);
     // (Patcher graphs add WaveShaper nodes of their own to the imported mixer)
     CHECK (shaperExact >= shaperSlots && shaperSlots >= 70 && clipperExact >= clipperSlots && clipperSlots >= 25); // REA_rodada51
+    std::printf ("  Chorus family: %d of %d slots on the exact engines\n", chorusExact, chorusSlots);
+    CHECK (chorusExact >= chorusSlots && chorusSlots >= 16); // REA_rodada59
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -9297,3 +9303,58 @@ TEST (bassdrum_engine)
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"
+
+TEST (chorus_family_engines)
+{
+    // REA_rodada59: goldens from the installation's DLLs (44.1 kHz, blocks of 512) on this signal
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0) * 0.5f;
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0) * 0.5f;
+    }
+    struct Gold { int i; float l, r; };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto run = [&] (const char* plugin, const std::vector<std::uint8_t>& st, lynx::EffectKind kind, std::initializer_list<Gold> gold) {
+        const auto slot = lynx::effectFromFl (plugin, st, 120.0);
+        CHECK (slot && slot->kind == kind);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 1024, slot->params, 120.0);
+        fx->process (l.data() + 1024, r.data() + 1024, 3072, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
+    };
+    auto ints = [] (std::initializer_list<int> v) {
+        std::vector<std::uint8_t> b;
+        for (int x : v)
+            for (int k = 0; k < 4; ++k)
+                b.push_back ((std::uint8_t) ((unsigned) x >> (8 * k)));
+        return b;
+    };
+
+    // Fruity Chorus (start phases 0, which FL draws at random)
+    run ("Fruity Chorus", ints ({ 1, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.0f, -0.3850000202655792f }, { 1000, -0.6181581020355225f, 0.2707735002040863f }, { 2047, -0.01424609124660492f, 0.24228274822235107f },
+           { 3000, -1.1650776863098145f, -0.1809898018836975f }, { 4095, -0.012790083885192871f, 0.060571759939193726f } });
+    run ("Fruity Chorus", ints ({ 1, 700, 4000, 900, 4000, 3000, 2000, 400, 700, 1000, 30, 4999, 0 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.0f, -0.3850000202655792f }, { 1000, -0.5833333134651184f, 0.36345374584198f }, { 2047, -0.0336097776889801f, -0.3360772430896759f },
+           { 3000, -0.40196430683135986f, -0.5073210597038269f }, { 4095, -0.1176539734005928f, 0.444706529378891f } });
+    run ("Fruity Chorus", ints ({ 1, 36, 469, 1004, 2832, 293, 3500, 0, 428, 0, 0, 3887, 1024 }), lynx::EffectKind::fruityChorus,
+         { { 100, 0.2975943684577942f, 0.3747217655181885f }, { 1000, -0.39463338255882263f, 0.18099871277809143f }, { 2047, 0.3894335627555847f, 0.35111793875694275f },
+           { 3000, -0.1450725942850113f, 0.2847272455692291f }, { 4095, 0.33678582310676575f, -0.13365517556667328f } });
+    {
+        const auto slot = lynx::effectFromFl ("Fruity Chorus", ints ({ 1, 36, 469, 1004, 2832, 293, 3500, 0, 428, 0, 0, 3887, 1024 }), 120.0);
+        CHECK (slot && lynx::fruitychorusfx::fromParams (slot->params.data())[2] == 1004);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityChorus, 11, 1.0f, 120.0) == "on");
+        CHECK (lynx::effectParamFromFl ("Fruity Chorus", 11).has_value() && ! lynx::effectParamFromFl ("Fruity Chorus", 12).has_value());
+    }
+    // a state FL does not read (version 2) or too short keeps the generic chorus
+    CHECK (! lynx::effectFromFl ("Fruity Chorus", ints ({ 2, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), 120.0).has_value()
+           || lynx::effectFromFl ("Fruity Chorus", ints ({ 2, 512, 2250, 341, 1500, 2500, 3500, 23, 0, 0, 0, 2500, 0 }), 120.0)->kind != lynx::EffectKind::fruityChorus);
+    CHECK (! lynx::effectFromFl ("Fruity Chorus", { 1, 0, 0, 0 }, 120.0).has_value()
+           || lynx::effectFromFl ("Fruity Chorus", { 1, 0, 0, 0 }, 120.0)->kind != lynx::EffectKind::fruityChorus);
+}
