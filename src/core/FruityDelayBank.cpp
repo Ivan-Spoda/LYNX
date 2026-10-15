@@ -61,13 +61,28 @@ float signedVolume (int raw) noexcept
 
 // ---- 2×2 gain matrices: c = {LL, RR, RL, LR}: outL = L·c0 + R·c2, outR = R·c1 + L·c3 -----------------------------
 
-// sin/cos pan law (x87): L = cos((1 + pan)·π/4)·v√2, R = sin(…)·v√2, in extended precision, stored as floats
+// sin/cos pan law (x87): L = cos((1 + pan)·π/4)·v√2, R = sin(…)·v√2, in extended precision, stored as floats. The
+// plugin uses the FPU's own fsincos under a 64-bit-precision control word; LYNX does the same where it can (the
+// library cosl/sinl differ from fsincos near π/2 by ~1e-20, i.e. only in the cross term of a hard pan)
 void panLaw (float pan, float vol, float& l, float& r) noexcept
 {
     const auto v = vol * 1.41421354f;
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+    unsigned short saved = 0, cw = 0;
+    asm volatile ("fnstcw %0" : "=m"(saved) : : "memory");
+    cw = (unsigned short) ((saved & ~0x0F00u) | 0x0300u); // 64-bit mantissa, round to nearest
+    asm volatile ("fldcw %0" : : "m"(cw) : "memory");
+    const long double t = (1.0L + (long double) pan) * (long double) 0.78539816339744828;
+    long double c, s;
+    asm ("fsincos" : "=t"(c), "=u"(s) : "0"(t));
+    l = (float) (c * (long double) v);
+    r = (float) (s * (long double) v);
+    asm volatile ("fldcw %0" : : "m"(saved) : "memory");
+#else
     const long double t = (1.0L + (long double) pan) * (long double) 0.78539816339744828;
     l = (float) (std::cos (t) * (long double) v);
     r = (float) (std::sin (t) * (long double) v);
+#endif
 }
 
 // input / output stage: pan then the cross-feed that keeps the panned-away channel
@@ -393,7 +408,9 @@ void designFilter (Filter& f, int cutoffRaw, int resRaw, int gainRaw, double rat
             const double bw = res <= 0.0 ? 0.01 : (res >= 1.0 ? 12.0 : law (res, std::log (101.0), 0.11989999562501907, 0.01));
             const auto w = omega (fr, 0.0001);
             const auto s = std::sin (w), c = std::cos (w);
-            const auto a = s * std::sinh ((bw * (double) f.f168 * w) / s);
+            // the plugin's run-time Sinh behaves as (e^x − e^−x)/2 (EXEC: matches on 99.7 % of arguments, libm sinh on 39 %)
+            const auto x = (bw * (double) f.f168 * w) / s;
+            const auto a = s * ((std::exp (x) - std::exp (-x)) * 0.5);
             for (auto& q2 : f.sec)
                 designSection (q2, f.kernel, 0.0, a, s, c);
             break;

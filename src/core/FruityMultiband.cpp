@@ -121,7 +121,7 @@ float cosineF (float x) noexcept
     return (float) y;
 }
 
-// The engine's float power, as its runtime library computes it on a CPU with FMA (REA_rodada56 §M.7): ln x from a
+// The engine's float power, as its runtime library computes it on a CPU with FMA (REA_rodada56 §2.6): ln x from a
 // 257-entry table of ln(1 + j/256) and a cubic correction, y·ln x in double, then e^t from a 64-entry table of
 // 2^(i/64) and a cubic, the exponent added to the bit pattern, rounded to float. The tables are the exact doubles
 // of those formulas. Bases within 1/16 of 1 take another route in the library (a series around 1) that is not

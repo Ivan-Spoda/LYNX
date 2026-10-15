@@ -303,7 +303,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   tempo-synced or free times with a stereo offset, feedback pan/level/cross with normal / swapped / ping-pong routing,
   the stepped raised-cosine gain pattern, solo, FL's gain ramps, and the optional 2× half-band oversampling.
   Bit-identical to the DLL on all 52 unique installation states at two tempos/rates/block sizes, on control and
-  tempo changes during playback, and on 72 random states.
+  tempo changes during playback, and on 96 random states.
 - **Fruity Multiband Compressor:** FL's exact engine (its `comp_eng_x64.dll`) as a mixer effect (`core/FruityMultiband`,
   REA round 56), editable with FL's 28 controls: three bands split from the input on their own by 4th-order IIR
   crossovers or, in linear-phase mode, 105-tap Kaiser-windowed FIR filters (52 frames of latency reported to PDC), a
