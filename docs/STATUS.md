@@ -91,10 +91,16 @@ exports the 30 demo projects shipped with FL Studio 2026.
   to FL's DLL on 11 of the 12 states of FL's projects and 47 of its 91 presets, the rest within −107…−147 dB); Fruity
   DX10 on its engine with the channel processor it keeps (REA round 42: bit-identical to the reference model, which is
   bit-identical to FL's DLL on all 64 distinct installation states and on the 12 project channels with their channel
-  envelopes/filter); Toxic Biohazard on its engine (REA round 45: bit-identical to FL's
-  DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the built-in waves read from the user's FL
-  installation); Kepler, Autogun, Fruit Kick, PoiZone and BassDrum on the built-in synth; Sakura and
-  Drumpad on physical models rebuilt from their
+  envelopes/filter); Kepler on its engine (REA round 46: the whole Kepler-1 engine with the DLL's rounding mode, LFO
+  shape and noise read from the user's own engine DLL; the default patch bit-exact against FL's DLL, the 4 demo channels
+  within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
+  bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
+  coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
+  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice
+  processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
+  CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
+  round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
+  built-in waves read from the user's FL installation); Autogun on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -220,9 +226,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   flanger/phaser/lo-fi, 8-band EQ, sleep logic, the DLL's CRT `powf/sinf/cosf/expf/tanf`) and the master gain —
   bit-identical to `r45/py/toxmodel.py`, which is bit-identical to FL's DLL on the 3 demo channels (voice and full chain,
   44.1/48/96 kHz) and 35 variants (features, rates, block sizes). The 2-operator conversion stays for states that need the DLL when it is not found.
-- **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay, BPM sync (period n/192 beats, REA round 33);
-  Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
-  **BassDrum:** Peak `1 + 100x³·s⁴`.
+- **Kepler:** its own instrument (`core/Kepler.cpp`, REA round 46; the channel keeps the raw state and the path of the
+  user's `engine_x64.dll`, whose LFO-shape and noise tables are read at run time, SHA-256 checked): FL's wrapper
+  (velocity from Init.Vol, same-key release, pan/pitch/X/Y expressions from the Final levels), 8 always-running voices
+  with the band-limited DCO at 2× (saw, PWM pulse, sub, noise), the saturating 4-stage ladder, envelope or gate VCA,
+  glide, key follow, the voice allocator, Hold and the internal arpeggiator (up, up/down, down; 1/2/4 octaves; free or
+  synced), LFO1 (shape table, delay ramp, trig mode, BPM sync from the song position), the half-band decimator, the
+  high-pass, the Juno chorus with its mode cross-fade and the main volume/pan — every float operation in the engine's
+  order and rounding mode (toward zero in the render). Checked against FL's DLL (`kepler_engine`: the default patch
+  bit-exact; `kepler_demo_channels`: the 4 demo channels). The synth conversion (`synthFromKepler`) stays the fallback
+  (Kepler Exo / "Kepler-2" states, gate/noise/×4 bytes, DLL missing).
+  **BassDrum** (fallback when the engine can't run): Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
   FinalLevels tables, chunks of ≤ 512 samples, voice kill), the 99-voice engine with the MIDI matrix, 512
@@ -244,6 +258,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   bit on 64/64 states, 12/12 project channels with their settings and the synthetic batteries. Version-1 states take
   the channel's 0xDA/0xDB records as their settings (FL's host hands them to the plugin: inference); the project's
   PPQ sets the tick rate.
+- **PoiZone:** its own instrument (`core/PoiZone.cpp`, REA round 44; the channel keeps the plugin's raw state): FL's
+  wrapper (velocity from Init.Vol, per-note FinalLevels tables, chunks of 64 samples), the 1 024-voice list (poly with
+  stealing, mono legato with return to the nearest held key, 4 glide modes, unison 1–16 with detune/pan, octaver, analog
+  drift), per-chunk envelopes/LFO/control values, the 8×-oversampled voices (saw/pulse phases, sync, ring, noise, soft
+  clip, 4-stage filter LP/BP/HP, DC blocker; one voice or four SSE lanes with their own operation order and the reversed
+  write-back of the oscillator levels), the decimator, the 16-step gate, the arpeggiator (4 modes, 1–4 octaves), the
+  12 kHz shelves, the 3-line chorus and the stereo tape delay — bit-identical to `rea-work/r44/py/pzmodel.py`, which is
+  bit-identical to FL's DLL on the render test, 384 of 385 presets with the delay off (one `powf` near-tie: −68 dB) and 10
+  synthetic cases at 44.1/48 kHz. With the delay on, its low/high-cut coefficients use correctly rounded sin/cos where
+  FL's CRT uses a low-accuracy vector sincosf (318 presets: median −79 dB, worst −48 dB; demo channel −72 dB). Not
+  reproducible by design: PoiZone's three random generators are process-global in FL (LYNX starts one set per
+  instance), so noise, drift, start phases, random LFO and random arpeggios differ from any given FL render; FL's
+  max-polyphony value and its state/rate order at creation are not confirmed (LYNX: 64 voices, 1 when the channel is
+  mono; state then rate).
 - **Morphine:** its own instrument (`core/Morphine.cpp`, REA round 39 §2): the whole Mor0 state tree, 32 voices
   (poly/stealing, mono legato with return to the nearest held key, 4 glide modes), control blocks of int(0.0029·fs),
   Eg1–4 with loops and the 12-slot matrix (incl. the Eg-amount destinations), master ADSR, 4 generators (keyboard
@@ -312,10 +340,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   in FL (shared by every instance), LYNX starts one per instance like a fresh FL process, so random phases differ from a
   given FL render by design; FL's max-polyphony event value and its rate-before-state order at channel creation are taken
   from the GMS findings (inference).
-- Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) with the 0.5 Hz pre-filter high-pass; "Range"
-  ×10 (Exo only); a synced LFO1 is locked to the song position at note start (FL runs it from the host's beat delta);
-  old (version < 4) synced states use the stored rate, as FL's engine right after loading (whether FL re-sends the
-  converted rate is not confirmed).
+- Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
+  on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
+  self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
+  to this plugin is not confirmed: the wrapper ignores Final.Vol and gets no MIDI-volume event); the free-running
+  oscillators/LFO pause while LYNX skips an idle channel (FL's run from instance creation); old (version < 4) synced
+  states get the converted LFO1 rate at the rate set-up after loading (whether FL re-sends it is not confirmed); the
+  synth fallback keeps its earlier approximations (chorus, LFO1).
 - Harmless: the rack compressor needs the user's FL installation (its four presets are read from it; otherwise it
   stays off and the import report says so); the chorus/delay use the x87 kernels FL picks on the test machine (another
   CPU may make FL round the chorus delay instead of truncating it — not confirmed); a fresh delay starts its feedback

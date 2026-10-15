@@ -29,13 +29,17 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/Gms.h"
+#include "core/PoiZone.h"
 #include "core/MiniSynth.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
+#include "core/BassDrum.h"
+#include "core/FruitKick.h"
 #include "core/Dx10.h"
+#include "core/Kepler.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/LiveEventQueue.h"
@@ -395,6 +399,7 @@ TEST (plugin_state_decoders_survive_garbage)
         lynx::synthFromBooBass (blob, synth);
         lynx::gmsStateUsable (blob); // (the exact engines' parsers reject garbage without crashing)
         lynx::morphineStateUsable (blob);
+        lynx::poizoneStateUsable (blob);
         if (lynx::synthFromPoiZone (blob, synth, harmlessGain) || lynx::synthFromBassDrum (blob, synth, harmlessGain) || lynx::synthFromToxic (blob, synth, harmlessGain)
             || lynx::synthFromMorphine (blob, synth, harmlessGain))
             CHECK (std::isfinite (synth.cutoff) && std::isfinite (harmlessGain));
@@ -769,8 +774,10 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int poizone = 0, poizoneUsable = 0, poizoneKind = 0, poizoneSounding = 0, poizoneGoldens = 0;
     int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
+    int kepler = 0, keplerUsable = 0, keplerKind = 0, keplerSounding = 0;
     int toxic = 0, toxicUsable = 0, toxicKind = 0, toxicSounding = 0, toxicGoldens = 0; // REA_rodada45
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
@@ -832,6 +839,26 @@ TEST (flp_real_files)
                     if (c.pluginName == "Morphine")
                         ++morphine, morphineUsable += lynx::morphineStateUsable (c.pluginState) ? 1 : 0;
                 }
+                // Kepler: every state in the demos plays on the exact engine (REA_rodada46) when the engine DLL is installed
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Kepler")
+                    {
+                        ++kepler;
+                        keplerUsable += lynx::keplerStateUsable (c.pluginState) ? 1 : 0;
+                    }
+                for (const auto& c : full.channels)
+                    if (c.instrument == lynx::InstrumentKind::kepler)
+                    {
+                        ++keplerKind;
+                        const auto y = lynx::kepler::renderReference (c.pluginState, c.samplePath, { { 0, 60, 1.0, 0.0, 0.0, 6000 }, { 2000, 67, 0.6, 0.0, 0.0, 8000 } },
+                                                                      44100.0, 11025);
+                        double e = 0.0;
+                        bool finite = ! y.empty();
+                        for (auto v : y)
+                            finite = finite && std::isfinite (v), e += (double) v * v;
+                        CHECK (finite);
+                        keplerSounding += e > 1e-6 ? 1 : 0;
+                    }
                 const auto file = entry.path().filename().string();
                 for (const auto& c : full.channels)
                 {
@@ -903,6 +930,38 @@ TEST (flp_real_files)
                         for (const auto& g : lead ? std::vector (std::begin (leadAt), std::end (leadAt)) : std::vector (std::begin (riserAt), std::end (riserAt)))
                             CHECK (y[2 * (std::size_t) g.i] == g.v && y[2 * (std::size_t) g.i + 1] == g.v);
                         ++miniSynthGoldens;
+                    }
+                }
+                // PoiZone (REA_rodada44): every state plays on the exact engine and sounds; the demo channel matches golden
+                // samples of our round-44 model
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "PoiZone")
+                        ++poizone, poizoneUsable += lynx::poizoneStateUsable (c.pluginState) ? 1 : 0;
+                for (const auto& c : full.channels)
+                {
+                    if (c.instrument != lynx::InstrumentKind::poizone)
+                        continue;
+                    ++poizoneKind;
+                    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+                    const auto golden = c.name == "PoiZone" && file.find ("NIGHT TERROR") != std::string::npos;
+                    const auto y = lynx::poizone::renderReference (c.pluginState,
+                                                                   { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 }, { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                                     { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 }, { 60000, 48, iv (127), 1.0, 0.0, 0.0, 70000 } },
+                                                                   44100.0, golden ? 88200 : 22050);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    poizoneSounding += e > 1e-6 ? 1 : 0;
+                    if (golden && ! y.empty())
+                    {
+                        // our model, same events, tempo 120, state as saved, 44.1 kHz, L = R = Final.Vol
+                        CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.018975758213507415) < 1e-7);
+                        static const struct { int i; float l, r; } at[] = { { 2000, -0.0030244605f, -0.0031888473f }, { 15000, 0.002743553f, -0.013375883f }, { 30000, 0.031268276f, 0.04751329f }, { 50000, 0.049796376f, 0.035944063f }, { 65000, -0.0014251951f, -0.01722545f }, { 80000, 0.01474628f, 0.000680499f } };
+                        for (const auto& g : at)
+                            CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-7f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-7f);
+                        ++poizoneGoldens;
                     }
                 }
                 // Toxic Biohazard (REA_rodada45): every demo state plays on the exact engine with the waves read from the
@@ -1610,6 +1669,9 @@ TEST (flp_real_files)
                  miniSynthSounding, miniSynthGoldens);
     CHECK (miniSynthUsable == miniSynth && miniSynth >= 12 && miniSynthKind == miniSynth && miniSynthSounding == miniSynthKind && miniSynthGoldens == 2);
     CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
+    std::printf ("  PoiZone: %d channels, %d usable, %d imported as PoiZone (%d sounding), %d demo golden\n", poizone, poizoneUsable, poizoneKind,
+                 poizoneSounding, poizoneGoldens);
+    CHECK (poizoneUsable == poizone && poizone >= 2 && poizoneKind == poizone && poizoneSounding == poizoneKind && poizoneGoldens == 1);
     std::printf ("  Toxic Biohazard: %d channels, %d usable, %d imported as Toxic (%d sounding), %d golden\n", toxic, toxicUsable, toxicKind,
                  toxicSounding, toxicGoldens);
     CHECK (toxicUsable == toxic && toxic >= 3 && toxicKind == toxic && toxicSounding == toxicKind && toxicGoldens == 1);
@@ -1617,6 +1679,8 @@ TEST (flp_real_files)
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
     CHECK (dx10Usable == dx10 && dx10 >= 12 && dx10Kind == dx10 && dx10Sounding == dx10Kind);
+    std::printf ("  Kepler: %d channels, %d states usable by the engine, %d imported as Kepler (%d sounding)\n", kepler, keplerUsable, keplerKind, keplerSounding);
+    CHECK (keplerUsable == kepler && kepler >= 4 && keplerSounding == keplerKind && (keplerKind == 0 || keplerKind == kepler));
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
     std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
@@ -7039,6 +7103,140 @@ static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, 
     return d;
 }
 
+// A "Kepler-1" state written from scratch (REA_rodada46 §1.1 layout, version 2): the default panel values
+std::vector<std::uint8_t> keplerTestState()
+{
+    const float panel[34] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0.5f, 0.5f, 0, 0, 0, 0.5f, 0.5f };
+    std::vector<std::uint8_t> st;
+    auto u32 = [&] (std::uint32_t v) { for (int i = 0; i < 4; ++i) st.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto f32 = [&] (float f) { std::uint32_t v; std::memcpy (&v, &f, 4); u32 (v); };
+    u32 (0), u32 (0), u32 (0), u32 (9);
+    for (char c : std::string ("Kepler-1"))
+        st.push_back ((std::uint8_t) c);
+    st.push_back (0);
+    u32 (2), u32 (34);
+    for (auto f : panel)
+        f32 (f);
+    st.push_back (0);
+    f32 (1.0f), f32 (0.5f);
+    const auto size = (std::uint32_t) st.size() - 12;
+    std::memcpy (st.data() + 4, &size, 4);
+    return st;
+}
+
+std::string keplerDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Kepler" / "engine_x64.dll").string();
+}
+
+TEST (kepler_engine)
+{
+    const auto st = keplerTestState();
+    CHECK (st.size() == 178 && lynx::keplerStateUsable (st));
+    CHECK (lynx::keplerPanelOffset (st, 19) == 0x21 + 4 * 19 && lynx::keplerPanelOffset (st, 34) == -1);
+    auto broken = st;
+    broken[17] = 'X'; // not "Kepler-1"
+    CHECK (! lynx::keplerStateUsable (broken) && lynx::keplerPanelOffset (broken, 0) == -1);
+    auto v3 = st;
+    v3[0x19] = 3; // version 3 needs the gate / noise / oversampling bytes
+    CHECK (! lynx::keplerStateUsable (v3));
+    const auto dll = keplerDll();
+    if (dll.empty() || ! lynx::keplerDllUsable (dll))
+        return; // no FL installation (the engine needs the user's own DLL tables)
+    // against FL's engine DLL (EXEC, REA_rodada46 §6): three notes, 44.1 kHz, host blocks of 512 — bit-exact
+    const std::vector<lynx::kepler::RefNote> notes { { 0, 60, 1.0, 0.0, 0.0, 20000 }, { 8000, 67, 0.6, 0.0, 0.0, 26000 }, { 16000, 55, 0.95, 0.0, 0.0, 30000 } };
+    const auto y = lynx::kepler::renderReference (st, dll, notes, 44100.0, 39690);
+    CHECK (y.size() == 2 * 39690);
+    if (y.size() != 2 * 39690)
+        return;
+    double el = 0.0, er = 0.0;
+    for (std::size_t i = 0; i < y.size(); i += 2)
+        el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+    std::printf ("  Kepler default patch: energy %.9g %.9g (FL's DLL 250.641268)\n", el, er);
+    CHECK (std::abs (el - 250.641268) < 1e-6 && std::abs (er - 250.641268) < 1e-6);
+    const std::tuple<int, float, float> golden[] { { 5000, 0.0467273332f, 0.0467273332f }, { 12000, -0.119412214f, -0.119412214f },
+                                                   { 25000, 0.0855825394f, 0.0855825394f }, { 35000, -3.34166579e-08f, -3.34166579e-08f } };
+    for (const auto& [i, l, r] : golden)
+        CHECK (y[2 * (std::size_t) i] == l && y[2 * (std::size_t) i + 1] == r);
+
+    // the instrument: FL's wrapper velocity, channel volume as an output gain, idle after the release
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::kepler;
+    c.pluginState = st;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::kepler);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (4096), r (4096);
+    inst->noteOn (60, 0.8f);
+    double e = 0.0;
+    bool finite = true;
+    for (int b = 0; b < 8; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+        for (int i = 0; i < 4096; ++i)
+            finite = finite && std::isfinite (l[(std::size_t) i]) && std::isfinite (r[(std::size_t) i]), e += (double) l[(std::size_t) i] * l[(std::size_t) i];
+        if (b == 3)
+            inst->noteOff (60);
+    }
+    CHECK (finite && e > 1.0);
+    for (int b = 0; b < 40; ++b)
+        inst->render (l.data(), r.data(), 4096, 0.5f, 0.5f);
+    CHECK (inst->idle());
+}
+
+TEST (kepler_demo_channels)
+{
+    // every Kepler channel of FL's demo projects on LYNX's engine against FL's engine DLL (EXEC fingerprints, REA_rodada46 §6;
+    // the engine differs from the DLL by −127 dB or less on these, from the DLL library's pow rounding)
+    const auto dll = keplerDll();
+    if (dll.empty() || ! lynx::keplerDllUsable (dll))
+        return;
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; const char* channel; std::size_t stateSize; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", "Pads - Kepler", 181, 2595.34411, 1181.70052, { { 5000, 0.258449465f, 0.284368932f }, { 12000, -0.0648983642f, 0.312173635f }, { 25000, -0.271028787f, 0.103852645f }, { 35000, -0.00873807631f, -0.00636588456f } } },
+        { "Demo songs/Purps On The Beat Feat Luclover - Stroll Up.flp", "Kepler", 189, 2.77173241, 1.36643586, { { 5000, 0.00653714081f, 0.00885556825f }, { 12000, 0.0316556357f, 0.0255686305f }, { 25000, -0.00359999924f, -0.0027268643f }, { 35000, 3.38630743e-05f, 3.35237855e-05f } } },
+        { "Demo songs/Sid De La Cruz - Secret Agent Rendezvous.flp", "AceBass", 181, 491.893665, 813.858274, { { 5000, 0.00933594909f, 0.0551614426f }, { 12000, 0.11930909f, -0.387893438f }, { 25000, -0.0520403236f, -0.131727993f }, { 35000, 2.78028492e-05f, 2.75182774e-05f } } },
+        { "Demo songs/Sid De La Cruz - Secret Agent Rendezvous.flp", "Badious", 181, 19.0406926, 20.1997196, { { 5000, 0.00332317385f, 0.00785329007f }, { 12000, 0.0234184917f, -0.0034834384f }, { 25000, -0.0167671479f, -0.0142839653f }, { 35000, -0.0352748372f, -0.00481338287f } } },
+    };
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / "Demo projects" / g.file, std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        if (bytes.empty())
+            continue;
+        const flp::Channel* ch = nullptr;
+        const auto project = flp::parseProject (bytes);
+        for (const auto& c : project.channels)
+            if (c.pluginName == "Kepler" && c.name == g.channel)
+                ch = &c;
+        CHECK (ch != nullptr);
+        if (ch == nullptr)
+            continue;
+        CHECK (ch->pluginState.size() == g.stateSize && lynx::keplerStateUsable (ch->pluginState));
+        const auto y = lynx::kepler::renderReference (ch->pluginState, dll, { { 0, 60, 1.0, 0.0, 0.0, 20000 }, { 8000, 67, 0.6, 0.0, 0.0, 26000 },
+                                                                              { 16000, 55, 0.95, 0.0, 0.0, 30000 } }, 44100.0, 39690);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+        if (! ok)
+            std::printf ("  Kepler %s / %s differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.file, g.channel, el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Kepler: %d demo channels checked against FL's engine DLL\n", checked);
+    CHECK (checked == (int) std::size (goldens));
+}
+
 TEST (ogun_demo_channels)
 {
     // every Ogun channel of FL's demo projects (with its plugin effects) against the round-37 reference model, which is
@@ -8450,6 +8648,295 @@ TEST (minisynth_engine)
         energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
     }
     CHECK (diff == 0.0 && energy > 1e-3 && ! inst->idle());
+}
+namespace
+{
+// A PoiZone state written from scratch (REA_rodada44 §1.3 layout, "Ver4" + 156 floats + name): pulse A synced to saw B,
+// noise, envelope to the cutoff, triangle LFO to oscillator A's pitch, 3-voice unison, gate, chorus and tape delay.
+std::vector<std::uint8_t> poizoneTestState()
+{
+    std::array<float, 156> P {};
+    const std::pair<int, float> values[] = { { 0, 1.0f }, { 1, 0.7f }, { 2, 1.0f }, { 5, 0.6f }, { 6, 0.75f }, { 7, 0.2f }, { 8, 0.4f }, { 9, 0.1f },
+                                             { 10, 0.8f }, { 11, 0.3f }, { 12, 0.5f }, { 13, 0.4f }, { 14, 0.5f }, { 15, 0.5f }, { 16, 0.5f }, { 17, 0.5f },
+                                             { 18, 0.35f }, { 19, 0.6f }, { 20, 0.5f }, { 21, 0.3f }, { 22, 0.2f }, { 23, 0.6f }, { 24, 0.7f }, { 25, 0.5f },
+                                             { 26, 0.7f }, { 28, 0.6f }, { 29, 0.3f }, { 30, 0.8f }, { 31, 1.0f }, { 32, 0.3f }, { 33, 0.5f }, { 34, 0.5f },
+                                             { 35, 0.3f }, { 37, 1.0f }, { 38, 0.6f }, { 39, 1.0f }, { 40, 0.4f }, { 41, 0.5f }, { 42, 0.5f }, { 43, 0.5f },
+                                             { 47, 0.5f }, { 48, 0.3f }, { 67, 0.2f }, { 68, 0.5f }, { 75, 2.0f }, { 76, 15.0f }, { 77, 1.0f }, { 78, 1.0f },
+                                             { 79, 1.0f } };
+    for (const auto& [i, v] : values)
+        P[(std::size_t) i] = v;
+    for (int i = 49; i < 65; ++i)
+        P[(std::size_t) i] = (i - 49) % 3 != 2 ? 1.0f : 0.0f;
+    for (int i = 81; i < 155; ++i)
+        P[(std::size_t) i] = -1.0f;
+    std::vector<std::uint8_t> blob { 'S', 'S', 'L', 'F', 0xb4, 0x02, 0x00, 0x00, '4', 'r', 'e', 'V' };
+    blob.resize (12 + 4 * 156 + 64, 0);
+    std::memcpy (blob.data() + 12, P.data(), 4 * 156);
+    std::memcpy (blob.data() + 12 + 4 * 156, "LYNX test", 9);
+    return blob;
+}
+} // namespace
+
+TEST (poizone_engine)
+{
+    const auto blob = poizoneTestState();
+    CHECK (lynx::poizoneStateUsable (blob));
+    CHECK (lynx::poizoneParamOffset (blob, 18) == 12 + 4 * 18 && lynx::poizoneParamOffset (blob, 156) < 0);
+    CHECK (lynx::poizoneParam (blob, 75) == 2.0f && ! lynx::poizoneParam (blob, -1));
+    auto broken = blob;
+    broken[8] = 'X'; // the "Ver4" tag
+    CHECK (! lynx::poizoneStateUsable (broken));
+    CHECK (! lynx::poizoneStateUsable (std::vector<std::uint8_t> (blob.begin(), blob.begin() + 10)));
+
+    // golden samples of our round-44 model (pzmodel.Plugin, tempo 120, 44.1 kHz, host blocks of 512, L = R = Final.Vol):
+    // C5 vel 100 0–30000, E5 vel 80 11025–40000, G5 vel 110 22050–52000 (Init.Vol = (11^(vel/100) − 1)/10)
+    auto iv = [] (double vel) { return (std::pow (11.0, vel / 100.0) - 1.0) / 10.0; };
+    const std::vector<lynx::poizone::RefNote> notes = { { 0, 60, iv (100), 1.0, 0.0, 0.0, 30000 },
+                                                        { 11025, 64, iv (80), 1.0, 0.0, 0.0, 40000 },
+                                                        { 22050, 67, iv (110), 1.0, 0.0, 0.0, 52000 } };
+    const auto y = lynx::poizone::renderReference (blob, notes, 44100.0, 66150);
+    CHECK (y.size() == 2 * 66150u);
+    static const struct { int i; float l, r; } golden[] = { { 100, 0.0058150403f, 0.00038307323f }, { 5000, 0.01855834f, 0.09409425f }, { 15000, -0.01985861f, -0.013393694f }, { 25000, 0.121419534f, -0.12814318f }, { 35000, -0.09936376f, 0.034945987f }, { 45000, -0.09803468f, 0.05587045f }, { 55000, -0.07215294f, 0.02417629f }, { 66000, -0.007312033f, -0.047375992f } };
+    for (const auto& g : golden)
+        CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-7f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-7f);
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    CHECK (std::abs (std::sqrt (e / (double) y.size()) - 0.10990940878400073) < 1e-7);
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre → law A), velocity → Init.Vol
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::poizone;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::poizone);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::poizone::renderReference (blob, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } }, 44100.0, 8192,
+                                                     512, 120.0, 0, true);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3);
+}
+// ---- Fruit Kick / BassDrum (REA_rodada43): synthetic states and data, golden values of our round-43 models ----
+namespace
+{
+std::vector<std::uint8_t> fruitKickStateA()
+{
+    const std::int32_t w[8] = { 0, 0, -600, 64, 128, 32, 20, 0 };
+    std::vector<std::uint8_t> b (32);
+    std::memcpy (b.data(), w, 32);
+    return b;
+}
+
+std::vector<std::uint8_t> fruitKickStateB()
+{
+    std::vector<std::uint8_t> b (400, 0);
+    const std::int32_t head[7] = { 1, 624, -8, 42, 86, 64, 0 };
+    std::memcpy (b.data(), head, sizeof (head));
+    std::int32_t recs[5][17];
+    for (auto& r : recs)
+    {
+        const std::int32_t d[17] = { 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0 };
+        std::memcpy (r, d, sizeof (d));
+    }
+    const std::int32_t pan[17] = { 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 3000, 64, 20000, 1, 0, 0, 0 };
+    const std::int32_t vol[17] = { 4, -1, 100, 3000, 100, 25000, 64, 15000, 0, 100, 20000, 0, 32950, 0, 0, 40, -101 };
+    std::memcpy (recs[0], pan, sizeof (pan));
+    std::memcpy (recs[1], vol, sizeof (vol));
+    for (int k = 0; k < 5; ++k)
+        std::memcpy (b.data() + 32 + 68 * k, recs[k], 68);
+    const std::int32_t cut = 256;
+    std::memcpy (b.data() + 32 + 0x15c, &cut, 4);
+    return b;
+}
+
+std::string bassDrumTestFolder()
+{
+    // our own oscillator table and a pseudo-random 16-bit noise sample, laid out like FL's BassDrum folder
+    const auto dir = std::filesystem::temp_directory_path() / "lynx_bassdrum_test";
+    std::filesystem::create_directories (dir / "Noise Samples");
+    auto wav = [] (const std::filesystem::path& path, const void* data, std::uint32_t bytes, std::uint16_t fmt, std::uint16_t bits) {
+        std::ofstream o (path, std::ios::binary);
+        auto u32 = [&] (std::uint32_t v) { o.write ((const char*) &v, 4); };
+        auto u16 = [&] (std::uint16_t v) { o.write ((const char*) &v, 2); };
+        o.write ("RIFF", 4), u32 (36 + bytes), o.write ("WAVEfmt ", 8), u32 (16), u16 (fmt), u16 (1), u32 (44100),
+            u32 (44100u * bits / 8), u16 ((std::uint16_t) (bits / 8)), u16 (bits), o.write ("data", 4), u32 (bytes);
+        o.write ((const char*) data, bytes);
+    };
+    std::vector<float> table (1024);
+    for (int i = 0; i < 1024; ++i)
+        table[(std::size_t) i] = (float) (0.9 * std::sin (2.0 * 3.141592653589793 * i / 1024.0) + 0.05 * std::sin (6.0 * 3.141592653589793 * i / 1024.0));
+    wav (dir / "sounddata", table.data(), 4096, 3, 32);
+    std::vector<std::int16_t> noise (3000);
+    std::uint32_t s = 12345;
+    for (auto& v : noise)
+    {
+        s = (s * 1103515245u + 12345u) & 0x7fffffffu;
+        v = (std::int16_t) ((int) ((s >> 8) % 20001u) - 10000);
+    }
+    wav (dir / "Noise Samples" / "test noise.wav", noise.data(), 6000, 1, 16);
+    return dir.string();
+}
+
+std::vector<std::uint8_t> bassDrumTestState()
+{
+    std::vector<std::uint8_t> b (0x50C + 92, 0);
+    std::memcpy (b.data(), "SSLF", 4);
+    const std::uint32_t size = 0x560;
+    std::memcpy (b.data() + 4, &size, 4);
+    std::memcpy (b.data() + 8, "2kiK", 4);
+    std::memcpy (b.data() + 12, "Test kick", 9);
+    const char path[] = "C:/Somewhere/Noise Samples/test noise.wav";
+    std::memcpy (b.data() + 268, path, sizeof (path) - 1);
+    const float P[23] = { 0.55f, 0.5f, 0.6f, 0.6f, 0.45f, 0.1f, 0.3f, 0.4f, 0.3f, 0.6f, 0.4f, 0.65f,
+                          0.5f, 0.8f, 0.15f, 0.9f, 0.3f, 0.5f, 0.6f, 0.62f, 0.4f, 0.5f, 0.85f };
+    std::memcpy (b.data() + 0x50C, P, sizeof (P));
+    return b;
+}
+
+struct Golden
+{
+    int i;
+    float l, r;
+};
+
+bool matchesGolden (const std::vector<float>& y, std::initializer_list<Golden> golden, double rms)
+{
+    bool ok = true;
+    for (const auto& g : golden)
+        ok = ok && std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f;
+    double e = 0.0;
+    for (auto v : y)
+        e += (double) v * v;
+    return ok && std::abs (std::sqrt (e / (double) y.size()) - rms) < 1e-6;
+}
+} // namespace
+
+TEST (fruitkick_engine)
+{
+    const auto A = fruitKickStateA(), B = fruitKickStateB();
+    CHECK (lynx::fruitKickStateUsable (A) && lynx::fruitKickStateUsable (B));
+    CHECK (! lynx::fruitKickStateUsable (std::vector<std::uint8_t> (A.begin(), A.begin() + 20)));
+    CHECK (lynx::fruitKickParam (A, 1) == -600 && lynx::fruitKickParam (B, 0) == 624);
+    CHECK (lynx::fruitKickFallbacks (A).empty() && lynx::fruitKickFallbacks (B).empty());
+
+    // a version-0 state takes the channel's envelope records as its snapshot (and becomes version 1)
+    std::vector<std::vector<std::uint8_t>> recs;
+    for (int k = 0; k < 5; ++k)
+        recs.emplace_back (B.begin() + 32 + 68 * k, B.begin() + 32 + 68 * (k + 1));
+    const auto withEnv = lynx::fruitKickWithChannelEnvelope (A, recs, 256, 0, 0);
+    CHECK (withEnv.size() == 400 && lynx::fruitKickParam (withEnv, 5) == 20 && std::memcmp (withEnv.data() + 32, B.data() + 32, 364) == 0);
+    CHECK (lynx::fruitKickWithChannelEnvelope (B, recs, 256, 0, 0) == B);
+
+    // golden samples of our round-43 model (fkmodel.run, 44.1 kHz, host blocks of 512): C5 at 0 held, C6 at 3000
+    // (Final.Vol 0.5, pan 0.3) released at 9000; B with the plugin's tick every 230 samples from 115
+    const std::vector<lynx::fruitkick::RefNote> notes = { { 0, 60, 1.0, 0.0, 0.0, -1 }, { 3000, 72, 0.5, 0.3, 0.0, 9000 } };
+    const auto ya = lynx::fruitkick::renderReference (A, notes, 44100.0, 20000);
+    CHECK (ya.size() == 40000u);
+    CHECK (matchesGolden (ya, { { 10, 0.803596497f, 0.803596497f }, { 700, 0.18540436f, 0.18540436f }, { 2900, -0.63492924f, -0.63492924f },
+                                { 3100, 0.339005232f, 0.544316053f }, { 5000, -0.097384721f, -0.150579333f }, { 9100, 0.124680087f, 0.0544927865f },
+                                { 9400, -0.146474078f, -0.144857526f }, { 15000, 0.00938183628f, 0.00938183628f } },
+                          0.284267726379));
+    std::vector<int> ticks;
+    for (int t = 115; t < 20000; t += 230)
+        ticks.push_back (t);
+    const auto yb = lynx::fruitkick::renderReference (B, notes, 44100.0, 20000, 512, ticks);
+    CHECK (matchesGolden (yb, { { 10, -0.00760388654f, -0.00760388654f }, { 700, 0.386696398f, 0.442232877f }, { 2900, -0.123097703f, -0.302172035f },
+                                { 3100, 0.0523624197f, 0.0877688825f }, { 5000, 0.045177035f, 0.100505695f }, { 9100, -0.00423920294f, 0.00810315367f },
+                                { 9400, 0.00482427329f, -0.010199016f }, { 15000, -0.000171193431f, 1.01026744e-05f } },
+                          0.117964927585));
+
+    // the instrument: same engine behind LYNX's channel gains (V = 1, centre), velocity → Init.Vol (link velocity on)
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::fruitkick;
+    c.pluginState = A;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::fruitkick);
+    inst->configure (c, 140.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        if (b == 10)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto iv = (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0;
+    const auto ref = lynx::fruitkick::renderReference (A, { { 0, 60, iv, 0.0, 0.0, 5120 } }, 44100.0, 8192);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff < 1e-6 && energy > 1e-2);
+}
+
+TEST (bassdrum_engine)
+{
+    // FL's CRT powf as the engine computes it: a case where its last bit differs from the correctly rounded power
+    const float x = 0.87011606f;
+    std::uint32_t bits = 0;
+    const auto p = lynx::bassdrum::powfMsvc (x, 0.125f);
+    std::memcpy (&bits, &p, 4);
+    CHECK (bits == 1065063964u);
+    CHECK (lynx::bassdrum::powfMsvc (2.0f, 1.0f) == 2.0f && lynx::bassdrum::powfMsvc (10.0f, 0.0f) == 1.0f);
+
+    const auto st = bassDrumTestState();
+    CHECK (lynx::bassDrumStateUsable (st) && lynx::bassDrumNoiseName (st) == "test noise.wav");
+    CHECK (lynx::bassDrumParamOffset (st, 6) == 0x50C + 24 && lynx::bassDrumParamOffset (st, 23) < 0);
+    auto broken = st;
+    broken[8] = 'X';
+    CHECK (! lynx::bassDrumStateUsable (broken));
+
+    // golden samples of our round-43 model (bdmodel.run with its powf port, 44.1 kHz, host blocks of 512)
+    const auto dir = bassDrumTestFolder();
+    const std::vector<lynx::bassdrum::RefNote> notes = { { 0, 60, 1.0, 1.0, 0.0, 0.0, -1 }, { 6000, 64, 0.6, 0.8, 0.4, 25.0, 9000 },
+                                                         { 6100, 55, 1.5, 1.0, -0.3, 0.0, -1 } };
+    const auto y = lynx::bassdrum::renderReference (st, notes, 44100.0, 30000, dir);
+    CHECK (y.size() == 60000u);
+    CHECK (matchesGolden (y, { { 50, 0.0122119058f, 0.0122119058f }, { 400, -0.0886279643f, -0.0886279643f }, { 3000, -0.0428197235f, -0.0428197235f },
+                               { 6050, 0.0199260078f, 0.0240648985f }, { 6300, -0.257363439f, -0.185516387f }, { 9000, 0.268954486f, 0.10506025f },
+                               { 15000, -0.0102827176f, -0.0380715057f }, { 25000, 0.0f, 0.0f } },
+                         0.230007588169));
+    CHECK (lynx::bassdrum::renderReference (st, notes, 44100.0, 100, dir + "/nowhere").empty()); // no table: no engine
+
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::bassdrum;
+    c.pluginState = st;
+    c.samplePath = dir;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::bassdrum);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (8192, 0.0f), r (8192, 0.0f);
+    for (int b = 0; b < 16; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.78125f);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 1.0f, 1.0f);
+    }
+    const auto ref = lynx::bassdrum::renderReference (st, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, -1 } }, 44100.0, 8192, dir);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-2);
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
 #include "WorkflowP2Tests.inc"

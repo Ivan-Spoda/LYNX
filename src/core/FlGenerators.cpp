@@ -1149,7 +1149,7 @@ double ms4 (double lo, double span, float x) { return (lo + span * std::pow ((do
 bool synthFromPoiZone (const std::vector<std::uint8_t>& state, SynthSettings& synth, float& gain)
 {
     float p[74];
-    if (! sslfFloats (state, "4reV", 12, p, 74))
+    if (! sslfFloats (state, "4reV", 12, p, 74) && ! sslfFloats (state, "3reV", 12, p, 74)) // "Ver3": same layout (REA_rodada44 §1.3)
         return false;
 
     SynthSettings s;
