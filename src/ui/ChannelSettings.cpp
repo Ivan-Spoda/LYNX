@@ -17,6 +17,7 @@
 #include "core/PoiZone.h"
 #include "core/BassDrum.h"
 #include "core/FruitKick.h"
+#include "core/Toxic.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -491,6 +492,7 @@ public:
         poizone = def.instrument == InstrumentKind::poizone;
         fruitkick = def.instrument == InstrumentKind::fruitkick;
         bassdrum = def.instrument == InstrumentKind::bassdrum;
+        toxic = def.instrument == InstrumentKind::toxic;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -587,6 +589,11 @@ public:
             { 0, "Output" }, { 6, "Base" }, { 7, "Peak" }, { 8, "Slide" }, { 2, "Duration" }, { 5, "Attack" }, { 4, "Drive" },
             { 3, "Butt" }, { 15, "Click level" }, { 14, "Click freq" }, { 13, "Click cut" }, { 21, "Noise mix" }, { 22, "Noise filter" },
             { 20, "Noise pitch" }, { 19, "Noise start" }, { 1, "Sampling" } };
+        // Toxic Biohazard: the plugin's 0…1 parameters P[i] inside the saved state (REA_rodada45)
+        static const FloatKnob toxicKnobs[] = {
+            { 0, "Gain" }, { 1, "Distortion" }, { 3, "Attack" }, { 4, "Decay" }, { 5, "Sustain" }, { 6, "Release" },
+            { 15, "Cutoff" }, { 16, "Resonance" }, { 23, "Filter env" }, { 8, "Uni detune" }, { 9, "Uni pan" },
+            { 10, "Glide" }, { 7, "Vel curve" }, { 2, "Transpose" } };
         // MiniSynth: its 43 floats 0…1 inside the saved state (REA_rodada41 §1.2)
         static const FloatKnob miniSynthKnobs[] = {
             { 5, "Osc kind" }, { 6, "Osc mod" }, { 7, "Noise" }, { 1, "Transpose" }, { 8, "Cutoff" }, { 9, "Resonance" },
@@ -601,7 +608,8 @@ public:
             return gms ? gmsParamOffset (st, index)
                        : miniSynth ? miniSynthParamOffset (st, index)
                        : poizone ? poizoneParamOffset (st, index)
-                       : bassdrum ? bassDrumParamOffset (st, index) : morphineParamOffset (st, index);
+                       : bassdrum ? bassDrumParamOffset (st, index)
+                       : toxic ? toxicParamOffset (st, index) : morphineParamOffset (st, index);
         };
         auto addFloat = [&] (const FloatKnob& k) {
             const auto at = paramOffset (def.pluginState, k.index);
@@ -740,6 +748,9 @@ public:
         else if (miniSynth)
             for (const auto& k : miniSynthKnobs)
                 addFloat (k);
+        else if (toxic)
+            for (const auto& k : toxicKnobs)
+                addFloat (k);
         else if (ogun)
             for (const auto& k : ogunKnobs)
                 addOgun (k);
@@ -783,6 +794,7 @@ public:
                     : kepler ? tr ("Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)")
                     : fruitkick ? tr ("Fruit Kick — FL's engine (channel envelopes stepped per tick)")
                     : bassdrum ? tr ("BassDrum — FL's engine (table and noise samples read from your FL installation)")
+                    : toxic ? tr ("Toxic Biohazard — FL's engine with its effects (waves read from your FL installation)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -803,7 +815,7 @@ private:
     AudioEngine& engine;
     int channel;
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
-         fruitkick = false, bassdrum = false, wavesFound = false;
+         fruitkick = false, bassdrum = false, toxic = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1437,7 +1449,7 @@ public:
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
                  || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
-                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
+                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1524,6 +1536,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::poizone:
         case InstrumentKind::fruitkick:
         case InstrumentKind::bassdrum:
+        case InstrumentKind::toxic:
             return true;
         default:
             return false;
@@ -1559,7 +1572,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
                  || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
                  || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
-                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum)
+                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

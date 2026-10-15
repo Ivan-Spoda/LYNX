@@ -5,6 +5,7 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/FruityDynamics.h"
 #include "core/FruityDelayBank.h"
 
 #include "core/Biquad.h"
@@ -2134,6 +2135,21 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // FL's raw controls normalised over their ranges (core/FruityDynamics.h); defaults = a new FL instance
+    static const EffectInfo fruityLimiterInfo = [] {
+        EffectInfo info { "Fruity Limiter", {} };
+        for (int i = 0; i < fldyn::limiterControls; ++i)
+            info.params.push_back ({ fldyn::limiterParamName (i), fldyn::normalised (fldyn::limiterDefault[(std::size_t) i], fldyn::limiterMin[(std::size_t) i], fldyn::limiterMax[(std::size_t) i]) });
+        info.params.push_back ({ fldyn::limiterParamName (fldyn::limiterControls), 0.0f });
+        return info;
+    }();
+    static const EffectInfo fruityCompressorInfo = [] {
+        EffectInfo info { "Fruity Compressor", {} };
+        for (int i = 0; i < fldyn::compressorControls; ++i)
+            info.params.push_back ({ fldyn::compressorParamName (i), fldyn::normalised (fldyn::compressorDefault[(std::size_t) i], fldyn::compressorMin[(std::size_t) i], fldyn::compressorMax[(std::size_t) i]) });
+        info.params.push_back ({ fldyn::compressorParamName (fldyn::compressorControls), 1.0f });
+        return info;
+    }();
     // FL's state travels in EffectSlot::state; the four global controls are the editable parameters (raw / 128)
     static const EffectInfo fruityDelayBankInfo { "Fruity Delay Bank", { { "Dry", 1.0f }, { "Output", 1.0f }, { "Input", 1.0f }, { "Feedback", 1.0f } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
@@ -2231,6 +2247,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vintagePhaser: return vintagePhaserInfo;
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
+        case EffectKind::fruityLimiter: return fruityLimiterInfo;
+        case EffectKind::fruityCompressor: return fruityCompressorInfo;
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
     }
     return eq;
@@ -2498,6 +2516,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d dB/oct", xover::dbPerOctave[xover::combo (v)]);
             return text;
 
+        case EffectKind::fruityLimiter:
+            return fldyn::limiterParamText (param, v);
+
+        case EffectKind::fruityCompressor:
+            return fldyn::compressorParamText (param, v);
         case EffectKind::fruityDelayBank:
             return fldbank::globalText (param, v);
 
@@ -2570,6 +2593,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::fruityLimiter: return fldyn::makeLimiter();
+        case EffectKind::fruityCompressor: return fldyn::makeCompressor();
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
