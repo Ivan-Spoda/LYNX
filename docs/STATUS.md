@@ -91,7 +91,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   to FL's DLL on 11 of the 12 states of FL's projects and 47 of its 91 presets, the rest within −107…−147 dB); Fruity
   DX10 on its engine with the channel processor it keeps (REA round 42: bit-identical to the reference model, which is
   bit-identical to FL's DLL on all 64 distinct installation states and on the 12 project channels with their channel
-  envelopes/filter); Kepler, Autogun, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in synth; Sakura and
+  envelopes/filter); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's DLL outside
+  the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice processor, all
+  8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own CRT
+  powf/sincosf, its table and noise samples read from the user's installation); Kepler, Autogun, Toxic Biohazard and
+  PoiZone on the built-in synth; Sakura and
   Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -215,7 +219,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   per 128-sample block, within 1.6·10⁻⁸ of the DLL at 44.1/48/96 kHz, REA round 33).
 - **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay, BPM sync (period n/192 beats, REA round 33);
   Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
-  **BassDrum:** Peak `1 + 100x³·s⁴`.
+  **BassDrum** (fallback when the engine can't run): Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
   FinalLevels tables, chunks of ≤ 512 samples, voice kill), the 99-voice engine with the MIDI matrix, 512
