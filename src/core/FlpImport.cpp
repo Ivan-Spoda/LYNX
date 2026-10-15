@@ -12,6 +12,7 @@
 #include "core/Kepler.h"
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
+#include "core/ThreeOsc.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -19,6 +20,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
+#include "core/ChorusFx.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -423,7 +425,9 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             return std::nullopt;
 
         project.channels.front().type = flp::ChannelType::native; // native generator (the .fst doesn't say)
-        const auto song = importFlp (project);
+        FlpImportOptions options;
+        options.threeOscAsSynth = true; // a 3x Osc preset fills the built-in synth
+        const auto song = importFlp (project, options);
 
         if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::sakura)
         {
@@ -911,7 +915,29 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 def.volume = std::clamp ((float) (std::log (10.0 * g + 1.0) / std::log (11.0)), 0.0f, 1.0f);
             };
 
-            if (name == "harmless")
+            if (name == "3x osc" && ! options.threeOscAsSynth && threeOscStateUsable (c.pluginState))
+            {
+                // FL's 3x Osc engine (REA_rodada47) with the channel settings its voice processor keeps (the channel's
+                // 0xDA/0xDB records, which FL restores after the plugin state) and the project's PPQ for the envelope
+                // ticks; the channel's sample (if any) is the custom wave of shape 6. The internal-synth conversion
+                // stays as the fallback (state unreadable)
+                def.instrument = InstrumentKind::threeosc;
+                const auto fromChannel = c.hasLevels || std::any_of (c.envelopes.begin(), c.envelopes.end(), [] (const auto& e) { return e.present; });
+                def.pluginState = threeOscNormalisedState (c.pluginState, fromChannel ? dx10Snapshot (c) : std::vector<std::uint8_t> {});
+                def.modelParams = { (float) (project.header.ppq > 0 ? project.header.ppq : 96) };
+                if (! c.samplePath.empty() && options.fileExists)
+                {
+                    auto path = resolveFlPath (c.samplePath, options.roots);
+                    if (! path.empty() && (path[0] == '\\' || path[0] == '/') && ! options.roots.factoryData.empty())
+                        path = options.roots.factoryData + "\\Data" + path; // (old presets: relative to FL's Data folder)
+                    if (! path.empty() && ! options.fileExists (path) && options.fileExists (path + ".wav"))
+                        path += ".wav";
+                    if (! path.empty() && options.fileExists (path))
+                        def.samplePath = path;
+                }
+                adoptedFromPlugin = true;
+            }
+            else if (name == "harmless")
             {
                 // FL's additive engine (REA_rodada32); the internal synth approximation stays as the fallback
                 if (auto params = harmlessParams (c.pluginState))
@@ -1417,6 +1443,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
     };
 
@@ -2120,6 +2148,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)
         splitDrumChannel (song, it->first, it->second);
 
+    numberChorusInstances (song); // the random LFO phases FL gives each Hyper Chorus instance (REA_rodada59 §2.6)
     return song;
 }
 } // namespace lynx

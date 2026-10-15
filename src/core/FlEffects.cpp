@@ -8,6 +8,7 @@
 #include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
+#include "core/ChorusFx.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1072,6 +1073,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return exact;
     if (auto exact = stereoFxExact (pluginName, state))
         return exact;
+    if (auto exact = chorusFromFl (pluginName, state)) // REA_rodada59; the generic chorus remains for unreadable states
+        return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
@@ -1240,6 +1243,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityCompressor: return { "Fruity Compressor" };
         case EffectKind::fruityWaveShaper: return { "Fruity WaveShaper" };
         case EffectKind::fruitySoftClipper: return { "Fruity Soft Clipper" };
+        case EffectKind::fruityChorus: return { "Fruity Chorus" };
+        case EffectKind::hyperChorus: return { "Hyper Chorus" };
+        case EffectKind::vintageChorus: return { "Vintage Chorus" };
         case EffectKind::fruityPanOMatic: return { "Fruity PanOMatic" };
         case EffectKind::fruityBalance: return { "Fruity Balance" };
         case EffectKind::fruityBloodOverdrive: return { "Fruity Blood Overdrive" };
@@ -1274,6 +1280,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact choruses take FL's controls over their ranges
+    if (chorusControls (pluginName) > k && k >= 0)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Fruity Delay 2 / 3 likewise (every control)
     if (is ("Fruity Delay 2") && k >= 0 && k < fldelay::delay2Controls)

@@ -94,6 +94,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::fruitkick: return "fruitkick";
         case InstrumentKind::bassdrum: return "bassdrum";
         case InstrumentKind::toxic: return "toxic";
+        case InstrumentKind::threeosc: return "threeosc";
     }
     return "synth";
 }
@@ -105,7 +106,8 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::plugin, InstrumentKind::controller, InstrumentKind::sakura, InstrumentKind::drumpad, InstrumentKind::boobass,
                     InstrumentKind::drumsynth, InstrumentKind::harmless, InstrumentKind::sytrus, InstrumentKind::harmor,
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
-                    InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic })
+                    InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
+                    InstrumentKind::threeosc })
         if (id == instrumentId (k))
             return k;
 
@@ -160,6 +162,9 @@ const char* effectId (EffectKind k)
         case EffectKind::stereoEnhancer: return "stereoEnhancer";
         case EffectKind::transientProcessor: return "transientProcessor";
         case EffectKind::spreader: return "spreader";
+        case EffectKind::fruityChorus: return "fruityChorus";
+        case EffectKind::hyperChorus: return "hyperChorus";
+        case EffectKind::vintageChorus: return "vintageChorus";
     }
     return "eq";
 }
@@ -302,7 +307,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
 {
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
                     EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper, EffectKind::reeverb2, EffectKind::reeverb1, EffectKind::fruityDelay2, EffectKind::fruityDelay3,
-                    EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive })
+                    EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader,
+                    EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive })
         if (id == effectId (k))
             return k;
 
