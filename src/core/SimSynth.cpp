@@ -584,7 +584,8 @@ public:
     struct Slot
     {
         bool used = false;
-        float pan = 0.0f, vol = 1.0f, pitch = 0.0f, fcut = 0.0f, fres = 0.0f; // the host's Final levels
+        int pan = 0, pitch = 0;            // the host's Final levels in the old voice-parameter record: integer pan
+        float vol = 1.0f, fcut = 0.0f, fres = 0.0f; // (−64…64) and pitch (cents); float volume, cutoff, resonance
         float l = 0.0f, r = 0.0f, dl = 0.0f, dr = 0.0f;
         int ramp = 0;
         float lastRes = 0.0f;
@@ -1220,7 +1221,7 @@ public:
 
     void noteOnVoice (Voice& v, int p, int vel, std::uint32_t counter, float fcut, float fres)
     {
-        auto x = p + pitchBase;
+        auto x = (int) (std::uint32_t) ((std::uint32_t) p + (std::uint32_t) pitchBase);
         if (x < 100)
             x = 100;
         v.pitch = x + 0x960;
@@ -1265,15 +1266,21 @@ public:
         v.smooth = 0.0f;
     }
 
-    static void hostLR (float pan, float vol, float& l, float& r)
+    // the host's integer-pan ComputeLRVol (host slot 3, §2.4)
+    static void hostLR (int pan, float vol, float& l, float& r) { flvp::panLaw ((float) pan * 0.015625f, vol, l, r); }
+
+    // TriggerVoice converts Final.Pitch as if it were a float although the old record holds an integer (§2.4):
+    // the pitch it sets up lasts until the next Gen_Render, which reads the integer
+    static int pitchAsFloat (int p) noexcept
     {
-        // the engine hands the pan's float bits to the host's integer-pan ComputeLRVol (§2.4)
-        std::int32_t bits;
-        std::memcpy (&bits, &pan, 4);
-        flvp::panLaw ((float) bits * 0.015625f, vol, l, r);
+        float f;
+        std::memcpy (&f, &p, 4);
+        if (! (f > -2147483648.0f && f < 2147483648.0f))
+            return (int) 0x80000000;
+        return (int) f;
     }
 
-    int trigger (int id, float pan, float vol, float pitch, float fcut, float fres) // TriggerVoice (§2.4)
+    int trigger (int id, int pan, float vol, int pitch, float fcut, float fres) // TriggerVoice (§2.4)
     {
         int slot = -1;
         for (int i = 0; i < numVoices; ++i)
@@ -1295,15 +1302,12 @@ public:
             }
             if (best < 0)
             {
+                // none released: the one with the highest start stamp (the newest note); ties keep the lowest slot
+                best = 0;
                 std::uint32_t top = 0;
-                best = 11;
                 for (int i = 0; i < numVoices; ++i)
-                {
-                    const auto st = slots[11 - i].started;
-                    if (top < st || (i == 0 && st >= top))
-                        top = st, best = 11 - i;
-                }
-                // ties keep the first visited (slot 11 downwards); see §2.4
+                    if (top < slots[i].started)
+                        top = slots[i].started, best = i;
             }
             slot = best;
             voices[slot].amp.stage = voices[slot].filt.stage = 4;
@@ -1315,7 +1319,7 @@ public:
         s.pan = pan, s.vol = vol, s.pitch = pitch, s.fcut = fcut, s.fres = fres;
         hostLR (pan, gain * vol, s.l, s.r);
         s.ramp = 0;
-        noteOnVoice (voices[slot], (int) pitch + 0x960, (int) (vol * 127.0f), samples, fcut, fres);
+        noteOnVoice (voices[slot], (int) ((std::uint32_t) pitchAsFloat (pitch) + 0x960u), (int) (vol * 127.0f), samples, fcut, fres);
         s.lastRes = fres;
         s.released = 0;
         s.started = g.blocks;
@@ -1493,9 +1497,9 @@ public:
             }
             auto l = s.l, r = s.r;
             auto ramp = s.ramp;
-            voicePitch (v, (int) s.pitch + 0x960);
+            voicePitch (v, s.pitch + 0x960);
             {
-                auto f = (float) pitchBase + (float) ((int) s.pitch + 0x960);
+                auto f = (float) pitchBase + (float) (s.pitch + 0x960);
                 if (! (100.0f <= f))
                     f = 100.0f;
                 v.cutoffParam = (f / 12700.0f) * d.keyTrack + s.fcut;
@@ -1696,7 +1700,11 @@ public:
         notePan[k] = nextPan;
         const auto pan = std::clamp (nextPan + (float) channelPan, -1.0f, 1.0f);
         const auto pitch = (float) (100.0 * (k - 60)) + pitchCents.load() + nextCents;
-        held[k] = eng->trigger (k, pan, (float) channelVol, pitch, 0.0f, 0.0f);
+        const auto sl = eng->trigger (k, (int) std::lround (pan * 64.0f), (float) channelVol, (int) std::lround (pitch), 0.0f, 0.0f);
+        for (auto& h : held)
+            if (h == sl)
+                h = -1;
+        held[k] = sl;
         nextPan = 0.0f;
         nextCents = 0.0f;
     }
@@ -1737,7 +1745,7 @@ public:
             channelVol = vol, channelPan = pan;
             for (auto& s : eng->slots)
                 if (s.used && s.id >= 0 && s.id < 128)
-                    s.vol = (float) vol, s.pan = std::clamp (notePan[s.id] + (float) pan, -1.0f, 1.0f);
+                    s.vol = (float) vol, s.pan = (int) std::lround (std::clamp (notePan[s.id] + (float) pan, -1.0f, 1.0f) * 64.0f);
         }
         constexpr int chunk = 512;
         for (int c0 = 0; c0 < n; c0 += chunk)
@@ -1850,7 +1858,13 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
         {
             const auto& nt = notes[i];
             if (nt.start == n0)
-                slotOf[i] = e->trigger ((int) i, nt.finalPan, nt.finalVol, (float) (100 * nt.key - 6000) + nt.pitchCents, nt.fcut, nt.fres);
+            {
+                const auto sl = e->trigger ((int) i, nt.finalPan, nt.finalVol, 100 * nt.key - 6000 + nt.pitchCents, nt.fcut, nt.fres);
+                for (auto& o : slotOf)
+                    if (o == sl)
+                        o = -1; // a stolen voice: the host forgets the old note (Voice_Kill without the handle)
+                slotOf[i] = sl;
+            }
             if (nt.release == n0 && slotOf[i] >= 0)
                 e->release (slotOf[i]);
         }

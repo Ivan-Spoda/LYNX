@@ -36,11 +36,14 @@ std::unique_ptr<Instrument> makeSimSynthInstrument();
 namespace simsynth
 {
 // One note for the reference renderer (the verification harness drives the engine exactly like run/ssx.exe drives
-// the DLL): Final.Vol, Final.Pan, Final.Pitch = 100·(key − 60) + pitchCents, Final.FCut, Final.FRes.
+// the DLL). SimSynth takes FL's old voice-parameter record: Final.Pan is an integer −64…64, Final.Pitch an integer in
+// cents (100·(key − 60) + pitchCents); Final.Vol, Final.FCut and Final.FRes are floats.
 struct RefNote
 {
     int start = 0, key = 60;
-    float finalVol = 1.0f, finalPan = 0.0f, pitchCents = 0.0f, fcut = 0.0f, fres = 0.0f;
+    float finalVol = 1.0f;
+    int finalPan = 0, pitchCents = 0;
+    float fcut = 0.0f, fres = 0.0f;
     int release = -1; // sample of the note-off (−1: held)
 };
 

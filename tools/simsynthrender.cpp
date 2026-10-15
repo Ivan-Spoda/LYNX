@@ -1,6 +1,6 @@
 // Renders a SimSynth state with LYNX's engine exactly like the round-64 EXEC harness drives the DLL (verification
 // harness, REA_rodada64 §7): simsynthrender <state.bin> <out.f32> <length> <rate> [blk=N]
-//   [note=start,key,finalVol,finalPan,pitchCents,release[,fcut,fres] ...]. Writes interleaved stereo float32 and prints
+//   [note=start,key,finalVol,finalPan(int −64…64),pitchCents(int),release[,fcut,fres] ...]. Writes interleaved stereo float32 and prints
 // the random-table index after the set-up.
 #include <cstdio>
 #include <cstdlib>
@@ -32,7 +32,7 @@ int main (int argc, char** argv)
         else if (a.rfind ("note=", 0) == 0)
         {
             lynx::simsynth::RefNote n;
-            if (std::sscanf (a.c_str() + 5, "%d,%d,%f,%f,%f,%d,%f,%f", &n.start, &n.key, &n.finalVol, &n.finalPan, &n.pitchCents,
+            if (std::sscanf (a.c_str() + 5, "%d,%d,%f,%d,%d,%d,%f,%f", &n.start, &n.key, &n.finalVol, &n.finalPan, &n.pitchCents,
                              &n.release, &n.fcut, &n.fres)
                 >= 6)
                 notes.push_back (n);
