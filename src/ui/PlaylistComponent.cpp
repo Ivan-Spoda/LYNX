@@ -996,8 +996,9 @@ ui::Hint PlaylistComponent::hoverForSnapshot()
     const auto& playlist = engine.getSong().playlist;
     const auto grid = gridArea();
 
-    for (int i = 0; i < (int) playlist.size(); ++i)
-        if (const auto r = clipBounds (i); grid.contains (r.getTopLeft()) && r.getWidth() >= 40 && playlist[(std::size_t) i].kind == ClipKind::pattern)
+    // the last clip fully in view (the floating Channel Rack tends to cover the first ones)
+    for (int i = (int) playlist.size() - 1; i >= 0; --i)
+        if (const auto r = clipBounds (i); grid.contains (r) && r.getWidth() >= 40 && playlist[(std::size_t) i].kind == ClipKind::pattern)
         {
             const auto at = juce::Point<int> (r.getRight() - 2, r.getCentreY() + 4);
             updateHover (at, {});
