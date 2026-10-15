@@ -10609,3 +10609,4 @@ TEST (fruity_delay_engines)
 }
 #include "UiRackMixerTests.inc"
 #include "LuxeVerbTests.inc"
+#include "ConvolverTests.inc"

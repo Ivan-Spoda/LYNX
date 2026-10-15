@@ -317,7 +317,8 @@ enum class EffectKind : std::uint8_t
     fruityBalance,   // FL's Fruity Balance, exact (REA_rodada58, core/FruityBasicFx.h): balance, volume; controls / range
     fruityBloodOverdrive, // FL's Fruity Blood Overdrive, exact (REA_rodada58, core/FruityBasicFx.h): 6 controls / range
     grossBeat,    // FL's Gross Beat engine (REA_rodada53, core/GrossBeat.h): slots in EffectSlot::state, parameters in params
-    luxeVerb      // FL's LuxeVerb, exact (REA_rodada60, core/LuxeVerb.h): FL's 49 controls (raw − min) / range + 4 sync switches
+    luxeVerb,     // FL's LuxeVerb, exact (REA_rodada60, core/LuxeVerb.h): FL's 49 controls (raw − min) / range + 4 sync switches
+    convolver     // FL's Fruity Convolver, exact (REA_rodada60, core/ConvolverFx.h): FL's 4 controls as (raw − min) / range; impulse response, knobs and envelopes in EffectSlot::state
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

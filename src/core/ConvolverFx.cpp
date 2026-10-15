@@ -23,6 +23,7 @@ using cd = std::complex<double>;
 constexpr float silence = 5.96046448e-08f;  // 2^-24: the kernel's trimming threshold
 constexpr float quietInput = 1.00000001e-06f; // an input block at or below this level is "silent"
 constexpr double ln2 = 0.69314718055994529;
+constexpr double pi = 3.14159265358979323846;
 
 inline float f32 (double x) noexcept { return (float) x; }
 inline int roundEven (double x) noexcept { return (int) std::nearbyint (x); }
@@ -55,7 +56,7 @@ public:
     {
         for (int k = 0; k < n / 2; ++k)
         {
-            const double a = -2.0 * M_PI * (double) k / (double) n;
+            const double a = -2.0 * pi * (double) k / (double) n;
             tw[(std::size_t) k] = cd (std::cos (a), std::sin (a));
         }
         int bits = 0;
@@ -171,7 +172,7 @@ void selfConvolve (std::vector<float>& l, std::vector<float>& r, float k)
 }
 
 // FL's sample-player sinc resampler (quality "256 points"): a Blackman-like window over ±256 taps, the cutoff lowered
-// to the new rate when shrinking; frames past the end repeat the last one, frames before the start are silent
+// to the new rate when shrinking; frames past either end repeat the first / last one
 void resample (std::vector<float>& l, std::vector<float>& r, double ratio)
 {
     constexpr int N = 256;
@@ -180,7 +181,7 @@ void resample (std::vector<float>& l, std::vector<float>& r, double ratio)
         return;
     const double speed = 1.0 / ratio;
     const long nout = (long) std::nearbyint ((double) n * ratio);
-    const double w = speed <= 1.0 ? M_PI : M_PI / speed;
+    const double w = speed <= 1.0 ? pi : pi / speed;
     std::vector<float> ol ((std::size_t) std::max (nout, 0L)), orr ((std::size_t) std::max (nout, 0L));
     // read positions: blocks of 1024; far from both ends pos + k·speed, else accumulated step by step
     std::vector<double> pos ((std::size_t) std::max (nout, 0L));
@@ -203,24 +204,27 @@ void resample (std::vector<float>& l, std::vector<float>& r, double ratio)
             j += cnt;
         }
     }
-    const double cw = std::cos (w), sw = std::sin (w), cn = std::cos (M_PI / N), sn = std::sin (M_PI / N);
+    const double cw = std::cos (w), sw = std::sin (w), cn = std::cos (pi / N), sn = std::sin (pi / N);
     for (long j = 0; j < nout; ++j)
     {
         const double p = pos[(std::size_t) j];
         const long i = (long) std::floor (p);
         const double f = p - (double) i + 1e-25;
-        // taps m = −N+1 … N, d = f − m: start at d0 = f + N − 1 and step d by −1 with rotations
-        double d = f + (double) (N - 1);
-        double s1 = std::sin (w * d), c1 = std::cos (w * d);
-        double s2 = std::sin (M_PI * d / N), c2 = std::cos (M_PI * d / N);
+        // taps m = −N+1 … N, d = f − m: the sines and cosines of w·d and π·d/N stepped by rotations
+        const double d0 = f + (double) (N - 1);
+        double s1 = std::sin (w * d0), c1 = std::cos (w * d0);
+        double s2 = std::sin (pi * d0 / N), c2 = std::cos (pi * d0 / N);
         double accL = 0.0, accR = 0.0;
         for (int m = -N + 1; m <= N; ++m)
         {
             const long idx = i + m;
-            if (idx >= 0)
             {
-                const long q = idx < n ? idx : n - 1;
-                const double h = s1 / (M_PI * d) * (0.36 + c2 + 0.64 * c2 * c2) * 0.5;
+                const long q = idx < 0 ? 0 : (idx < n ? idx : n - 1);
+                const double d = f - (double) m;
+                double sv = s1, cv = c2;
+                if (std::abs (d) < 0.5) // next to the read position: exact values (d may be ~1e-25)
+                    sv = std::sin (w * d), cv = std::cos (pi * d / N);
+                const double h = sv / (pi * d) * (0.36 + cv + 0.64 * cv * cv) * 0.5;
                 accL += h * (double) l[(std::size_t) q];
                 accR += h * (double) r[(std::size_t) q];
             }
@@ -228,7 +232,6 @@ void resample (std::vector<float>& l, std::vector<float>& r, double ratio)
             const double ns1 = s1 * cw - c1 * sw, nc1 = c1 * cw + s1 * sw;
             const double ns2 = s2 * cn - c2 * sn, nc2 = c2 * cn + s2 * sn;
             s1 = ns1, c1 = nc1, s2 = ns2, c2 = nc2;
-            d -= 1.0;
         }
         ol[(std::size_t) j] = f32 (accL);
         orr[(std::size_t) j] = f32 (accR);
@@ -826,10 +829,11 @@ std::optional<Kernel> buildKernel (const State& s, const Audio& ir, int fs)
 
 struct Engine::Impl
 {
-    static constexpr int maxBlock = 1024;
+    static constexpr int maxBlock = 16384; // one FL block (larger host blocks are split)
     Convolver conv;
     bool hasKernel = false;
     int tail = 0, quietLeft = 0;
+    double rateFactor = 1.0; // the plugin scales the wet gain by 44100 / host rate
     float dry = 1.0f, dryNow = 1.0f;
     std::array<float, 4> mIn { 1, 1, 0, 0 }, mInNow { 1, 1, 0, 0 }, mWet { 1, 1, 0, 0 }, mWetNow { 1, 1, 0, 0 };
     std::vector<float> in = std::vector<float> (2 * maxBlock), out = std::vector<float> (2 * maxBlock), buf = std::vector<float> (2 * maxBlock),
@@ -919,6 +923,8 @@ struct Engine::Impl
 Engine::Engine() : d (std::make_unique<Impl>()) {}
 Engine::~Engine() = default;
 
+void Engine::setRate (int fs) noexcept { d->rateFactor = 44100.0 / (double) (fs > 0 ? fs : 44100); }
+
 void Engine::setKernel (const Kernel& k)
 {
     d->conv.setKernel (k.l, k.r);
@@ -931,14 +937,20 @@ void Engine::setParams (const std::array<int, 4>& raw) noexcept
 {
     d->dry = dryGain (raw[0]);
     d->mIn = gainMatrix (1.0f, (float) raw[2] * 0.001f);
-    d->mWet = gainMatrix (f32 ((double) wetGain (raw[1]) * 1.0), (float) raw[3] * 0.001f);
+    d->mWet = gainMatrix (f32 ((double) wetGain (raw[1]) * d->rateFactor), (float) raw[3] * 0.001f);
 }
 
-void Engine::reset() noexcept
+void Engine::reset (bool fresh) noexcept
 {
     d->conv.clear();
     d->quietLeft = 0;
     d->snap();
+    if (fresh)
+    {
+        d->dryNow = 0.0f;
+        d->mInNow = { 0, 0, 0, 0 };
+        d->mWetNow = { 0, 0, 0, 0 };
+    }
 }
 
 void Engine::process (float* left, float* right, int n) noexcept
@@ -1035,6 +1047,7 @@ public:
         if (valid && fs != rate)
         {
             rate = fs;
+            engine.setRate (fs);
             if (auto k = convolver::buildKernel (state, ir, fs))
                 engine.setKernel (*k), ready = true;
             else

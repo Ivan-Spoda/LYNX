@@ -23,6 +23,7 @@
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
+#include "core/ConvolverFx.h"
 #include "core/ChorusFx.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
@@ -1865,6 +1866,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     // the exact LuxeVerb keeps FL's 49 controls as (raw − min) / range: FL's normalised value as is
                     if (target.param < 0 || target.param >= luxeVerbControlCount)
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::convolver)
+                {
+                    // the exact Convolver keeps FL's 4 automatable controls as (raw − min) / range
+                    if (target.param < 0 || target.param >= convolverParamCount)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && (fx.kind == EffectKind::reeverb2 || fx.kind == EffectKind::reeverb1))

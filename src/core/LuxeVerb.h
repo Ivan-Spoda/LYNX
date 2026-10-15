@@ -64,6 +64,10 @@ public:
     ~Engine();
     // creation, sample rate, state (FL's order: rate, all 49 controls, tempo with the sync choices)
     void prepare (int sampleRate, const Settings& s, double bpm);
+    // the same in two steps: create() allocates (not for the audio thread), load() only computes
+    void create (int sampleRate);
+    void load (const Settings& s, double bpm);
+    void flush() noexcept; // FL's reset: clears the lines, filters and the feedback shifter
     void set (const Settings& s, double bpm); // control / switch / tempo changes (FL's ProcessParam / tempo event)
     void process (float* left, float* right, int n, const float* scLeft = nullptr, const float* scRight = nullptr) noexcept;
 

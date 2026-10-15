@@ -94,9 +94,12 @@ class Engine
 public:
     Engine();
     ~Engine();
+    void setRate (int fs) noexcept;                        // the host rate (call before setParams)
     void setKernel (const Kernel& k);                      // off the audio thread; also clears the history
     void setParams (const std::array<int, 4>& raw) noexcept; // dry, wet, input separation, wet separation
-    void reset() noexcept;                                 // history cleared, ramps at their targets
+    // history cleared, ramps at their targets; fresh = the gains start at 0 and glide in, as in a newly created
+    // plugin whose first block is not silent
+    void reset (bool fresh = false) noexcept;
     void process (float* left, float* right, int n) noexcept;
 
 private:

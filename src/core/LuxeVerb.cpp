@@ -1380,11 +1380,28 @@ Engine::~Engine() = default;
 
 void Engine::prepare (int sampleRate, const Settings& s, double bpm)
 {
+    create (sampleRate);
+    load (s, bpm);
+}
+
+void Engine::create (int sampleRate)
+{
     CsrScope csr (0x8040u, 0x6000u);
     d = std::make_unique<Impl>();
-    const float t = (float) bpm;
-    d->setTempo (t);
+    d->setTempo (120.0f); // (setRate sets 120 again; the tempo that counts is the one load() sends)
     d->setRate ((float) sampleRate);
+}
+
+void Engine::flush() noexcept
+{
+    CsrScope csr (0x8040u, 0x6000u);
+    d->reset();
+}
+
+void Engine::load (const Settings& s, double bpm)
+{
+    CsrScope csr (0x8040u, 0x6000u);
+    const float t = (float) bpm;
     for (int k = 0; k < luxeVerbControlCount; ++k) d->setParam (k, engineValue (k, s.raw[(size_t) k]));
     d->setTempo (t);
     for (size_t j = 0; j < 4; ++j)
@@ -1449,9 +1466,14 @@ public:
     void prepare (double sampleRate) noexcept override
     {
         rate = (int) std::lround (sampleRate);
+        engine.create (rate > 0 ? rate : 44100); // allocates the lines here, not in the audio callback
+        created = true;
         ready = false;
     }
-    void reset() noexcept override { ready = false; }
+    void reset() noexcept override
+    {
+        if (created) engine.flush();
+    }
     void setSidechain (const float* l, const float* r) noexcept override
     {
         // called only when the slot has a side input: a silent source is silence (FL hands the plugin its buffer)
@@ -1464,7 +1486,12 @@ public:
         const double t = bpm > 0.0 ? bpm : 120.0;
         if (! ready)
         {
-            engine.prepare (rate > 0 ? rate : 44100, s, t);
+            if (! created)
+            {
+                engine.create (rate);
+                created = true;
+            }
+            engine.load (s, t);
             ready = true;
         }
         else engine.set (s, t);
@@ -1477,7 +1504,7 @@ public:
 private:
     luxeverb::Engine engine;
     int rate = 44100;
-    bool ready = false;
+    bool created = false, ready = false;
     const float* scL = nullptr;
     const float* scR = nullptr;
     std::vector<float> zeros = std::vector<float> (8192, 0.0f);
