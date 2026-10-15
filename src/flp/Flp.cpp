@@ -434,6 +434,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         env.decay = readLE<std::int32_t> (e.data, 20);
                         env.sustain = readLE<std::int32_t> (e.data, 24);
                         env.release = readLE<std::int32_t> (e.data, 28);
+                        env.rawSize = (int) std::min<std::size_t> (e.data.size(), env.raw.size());
+                        std::copy_n (e.data.begin(), env.rawSize, env.raw.begin());
 
                         if (e.data.size() >= 36)
                             env.amount = readLE<std::int32_t> (e.data, 32);

@@ -33,6 +33,7 @@
 #include "core/Harmor.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
+#include "core/Dx10.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/LiveEventQueue.h"
@@ -759,6 +760,7 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -1015,6 +1017,24 @@ TEST (flp_real_files)
                         finite = finite && std::isfinite (v), e += (double) v * v;
                     CHECK (finite);
                     ogunSounding += e > 1e-6 ? 1 : 0;
+                }
+
+            // Fruity DX10: every state plays on the exact engine when its channel processor is neutral (REA_rodada42)
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Fruity DX10" || c.pluginName == "DX10")
+                    ++dx10, dx10Usable += lynx::dx10StateUsable (c.pluginState) ? 1 : 0;
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::dx10)
+                {
+                    ++dx10Kind;
+                    const auto y = lynx::dx10::renderReference (c.pluginState, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 6000 }, { 2000, 67, 0.6, 1.0, 0.0, 0.0, 8000 } },
+                                                                44100.0, 11025);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    dx10Sounding += e > 1e-6 ? 1 : 0;
                 }
 
             // Sytrus: every state in the demos (zlib + 10 units) decodes, with finite values
@@ -1509,6 +1529,8 @@ TEST (flp_real_files)
     CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
+    std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
+    CHECK (dx10Usable == dx10 && dx10 >= 12 && dx10Kind >= 4 && dx10Sounding == dx10Kind);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
     std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
@@ -7857,6 +7879,119 @@ void dumpIfAsked (const char* var, const std::vector<std::uint8_t>& blob)
     }
 }
 } // namespace
+
+TEST (dx10_engine)
+{
+    // REA_rodada42: a Fruity DX10 state written from scratch (version 1: 22 raw parameters) against our reference model
+    // (dxmodel.py, bit-identical to the installation's DLL), host levels and the instrument front-end
+    const std::int32_t P[22] = { 1000, 40000, 30000, 30000, 40000, 30000, 35000, 8000, 40000, 50000, 20000,
+                                 25000, 15000, 30000, 20000, 10000, 20000, 30000, 5000, 30000, 20000, -1 };
+    std::vector<std::uint8_t> blob (4 + 22 * 4, 0);
+    blob[0] = 1;
+    std::memcpy (blob.data() + 4, P, sizeof (P));
+    CHECK (lynx::dx10StateUsable (blob) && lynx::dx10ProcessorNeutral (blob));
+    CHECK (lynx::dx10Param (blob, 21) == -1 && lynx::dx10Param (blob, 3) == 30000 && ! lynx::dx10Param (blob, 22));
+    CHECK (! lynx::dx10StateUsable (std::vector<std::uint8_t> (40, 0)));
+    {
+        auto bad = blob;
+        bad[0] = 3; // versions ≥ 3 are ignored by the plugin
+        CHECK (! lynx::dx10StateUsable (bad));
+    }
+    using N = lynx::dx10::RefNote;
+    const std::vector<N> notes { { 0, 60, 1.0, 0.8, 0.3, 0.0, 6144 }, { 2048, 67, 0.4, 1.0, -0.5, 25.0, 8192 }, { 3000, 40, 2.06, 0.6, 1.0, 0.0, -1 } };
+    struct Golden { int rate, block, maxPoly; double el, er; std::tuple<int, float, float> at[8]; };
+    const Golden goldens[] {
+        { 44100, 512, 0, 672.293115, 778.393071,
+          { { 100, -0.0943799689f, -0.154014125f }, { 1000, -0.0814286768f, -0.132879525f }, { 2500, 0.499493301f, 0.312498778f },
+            { 5000, -0.184045464f, 0.171641544f }, { 7000, 0.0381900482f, 0.134957194f }, { 9000, -0.153369367f, -0.20805186f },
+            { 12000, 0.0152501371f, 0.152430937f }, { 16383, -0.00441304967f, 0.200126961f } } },
+        // 48 kHz, odd host blocks, max polyphony 1 (the last note steals); the hard-right note keeps FL's x87 left gain
+        { 48000, 333, 1, 122.232761, 493.320297,
+          { { 100, 0.0236493405f, 0.0385922194f }, { 1000, 0.189806491f, 0.309736073f }, { 2500, -0.425576478f, -0.176279545f },
+            { 5000, -3.54030076e-18f, -0.0578194074f }, { 7000, 1.42192231e-17f, 0.232225224f }, { 9000, 1.37052479e-17f, 0.223831087f },
+            { 12000, -8.27656903e-18f, -0.135171086f }, { 16383, 9.248742e-18f, 0.151048407f } } },
+    };
+    for (const auto& g : goldens)
+    {
+        const auto y = lynx::dx10::renderReference (blob, notes, (double) g.rate, 16384, g.block, g.maxPoly);
+        CHECK (y.size() == 2 * 16384);
+        if (y.size() != 2 * 16384)
+            continue;
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        CHECK (std::abs (el - g.el) <= 1e-7 * g.el && std::abs (er - g.er) <= 1e-7 * g.er);
+        for (const auto& [i, l, r] : g.at)
+            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-7f * std::max (1e-16f, std::abs (l))
+                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-7f * std::max (1e-16f, std::abs (r)));
+    }
+
+    // the instrument: LYNX velocity v → Init.Vol = (11^(1.28·v) − 1)/10 and Final.Vol = channel volume × Init.Vol; channel
+    // gains √2·V·(cos, sin)((1 + p)π/4) → V, p; notes on block boundaries play like the reference renderer
+    auto initVol = [] (double v) { return (double) (float) ((std::pow (11.0, 1.28 * v) - 1.0) / 10.0); }; // Init.Vol is a float
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::dx10;
+    c.pluginState = blob;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::dx10);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    const float V = 0.6f, pan = 0.25f;
+    const auto gl = (float) (std::sqrt (2.0) * V * std::cos ((1.0 + pan) * 3.141592653589793 / 4.0));
+    const auto gr = (float) (std::sqrt (2.0) * V * std::sin ((1.0 + pan) * 3.141592653589793 / 4.0));
+    std::vector<float> l (16384), r (16384);
+    for (int s = 0; s < 16384; s += 512)
+    {
+        if (s == 0)
+            inst->noteOn (60, 0.78125f);
+        if (s == 2048)
+        {
+            inst->setNextNoteExpression (-0.5f, 25.0f);
+            inst->noteOn (67, 0.5f);
+        }
+        if (s == 6144)
+            inst->noteOff (60);
+        if (s == 8192)
+            inst->noteOff (67);
+        inst->render (l.data() + s, r.data() + s, 512, gl, gr);
+    }
+    // the channel level reaches the engine as FL's (recovered to float precision)
+    const auto Vr = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
+    const auto pr = std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0;
+    const auto ref = lynx::dx10::renderReference (blob, { { 0, 60, initVol (0.78125), Vr * initVol (0.78125), pr, 0.0, 6144 },
+                                                          { 2048, 67, initVol (0.5), Vr * initVol (0.5), std::clamp (-0.5 + pr, -1.0, 1.0), 25.0, 8192 } },
+                                                  44100.0, 16384);
+    double worst = 0.0, peak = 0.0;
+    for (int i = 0; i < 16384; ++i)
+        worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) }),
+        peak = std::max (peak, (double) std::abs (l[(std::size_t) i]));
+    CHECK (worst == 0.0 && peak > 0.05);
+    // the released voices end (DX10's own release) and the instrument goes idle
+    std::vector<float> tail (44100), tailR (tail.size());
+    for (int k = 0; k < 20 && ! inst->idle(); ++k)
+        inst->render (tail.data(), tailR.data(), (int) tail.size(), gl, gr);
+    CHECK (inst->idle());
+
+    // parameter edits (the channel settings panel) write the raw integers, clamped to the knob ranges
+    auto edited = blob;
+    CHECK (lynx::dx10SetParam (edited, 21, 7) && lynx::dx10Param (edited, 21) == 3);
+    CHECK (lynx::dx10SetParam (edited, 12, 70000) && lynx::dx10Param (edited, 12) == 65536);
+
+    // a version-2 state's own channel snapshot decides whether the processor is neutral (filter type 0, Mod X 256)
+    auto v2 = blob;
+    v2[0] = 2;
+    v2.resize (96 + 364, 0);
+    for (int k = 0; k < 5; ++k)
+    {
+        const std::int32_t rec[17] = { k == 1 ? 4 : 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, k == 1 ? -101 : 0 };
+        std::memcpy (v2.data() + 96 + 0x44 * k, rec, sizeof (rec));
+    }
+    const std::int32_t modX = 256;
+    std::memcpy (v2.data() + 96 + 0x15c, &modX, 4);
+    CHECK (lynx::dx10StateUsable (v2) && lynx::dx10ProcessorNeutral (v2));
+    const std::int32_t lowCut = 128;
+    std::memcpy (v2.data() + 96 + 0x15c, &lowCut, 4);
+    CHECK (! lynx::dx10ProcessorNeutral (v2));
+}
 
 TEST (gms_engine)
 {

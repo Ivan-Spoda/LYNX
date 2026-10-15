@@ -42,6 +42,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::gms: return "GMS";
         case InstrumentKind::morphine: return "Morphine";
         case InstrumentKind::ogun: return "Ogun";
+        case InstrumentKind::dx10: return "Fruity DX10";
     }
     return "?";
 }
