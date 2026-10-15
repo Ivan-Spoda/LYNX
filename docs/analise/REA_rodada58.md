@@ -251,12 +251,12 @@ full, ×100 on/off). "prime" = LYNX's start (DLL: `warm=1` + flush), "fade" = a 
 | LYNX vs DLL at 48 kHz / 300, 96 kHz / 1024, 22.05 kHz / 37 | same sets, every start mode, Blood Overdrive early and late | all bit-identical |
 | Control changes during playback (`t_auto.py`: FL's ProcessParam between calls vs LYNX's `set`), blocks 512 and 480 | 2 PanOMatic (8 and 6 changes incl. target/shape/speed), Balance (5), Blood Overdrive (7) | all bit-identical |
 | Balance targets (`t_sweep.py`, the plugin's doubles as floats vs LYNX's) | 257 balance values, 321 + 46 volumes | 624/624 equal |
-| PanOMatic LFO increments / pan / volume values (`t_sweep.py`) | 571 speeds × 44.1/48/96 kHz; 86 pans × 30 volumes | SWEEP2 |
+| PanOMatic LFO increments / pan / volume values (`t_sweep.py`) | 571 speeds × 44.1/48/96 kHz; 86 pans × 30 volumes | 1713/1713 and 2580/2580 equal |
 | RTL vs C library (`rtl.exe`) | FLEngine sine table; PanOMatic `Exp`/`Ln` on all 321 volumes and 55 001 speeds; Balance `Sin`/`SinCos`/`Exp`; Blood Overdrive `Sin` on 32768 points | equal after the conversions to float (§1.3, §2.1, §3.2) |
 | Unit test `fruity_panomatic_balance_blood_overdrive` | DLL goldens (3 PanOMatic, 2 Balance, 2 Blood Overdrive), import path with host blocks 1024/2048, texts, fallbacks | within 2·10⁻⁷ (bit-identical on the test machine) |
 
 Import (`tests.cpp`, demo-project battery): every PanOMatic, Balance and Blood Overdrive mixer slot of the
-installation's projects becomes the exact effect.
+installation's projects becomes the exact effect (274 of 275: one PanOMatic of "Bombs Away" sits in the last slot of an insert whose serial Patcher, expanded into its nodes, already fills LYNX's 10 slots — inferred from the slot layout; a limit of the existing import, not of these engines).
 
 **Cost** (one core, 44.1 kHz, 20 s of stereo noise, `cpp/fxcmp`, file I/O included): PanOMatic and Balance ≈ 0.5 %
 of real time, Blood Overdrive ≈ 3 %.

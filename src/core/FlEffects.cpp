@@ -6,6 +6,7 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityBasicFx.h"
+#include "core/FruityDelay.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1001,8 +1002,33 @@ std::optional<EffectSlot> fruityBasicExact (const std::string& pluginName, const
     return std::nullopt;
 }
 
+std::optional<EffectSlot> fruityDelayExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity Delay 2 / Delay 3 engines from the saved controls (REA_rodada52); the approximations of
+    // REA_rodada7 remain for states that cannot be read (case-insensitive: FL 3 presets say "Fruity delay 2")
+    std::string lower = pluginName;
+    std::transform (lower.begin(), lower.end(), lower.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+    if (lower == "fruity delay 2")
+        if (const auto s = fldelay::parseDelay2 (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityDelay2);
+            fldelay::delay2ToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (lower == "fruity delay 3")
+        if (const auto s = fldelay::parseDelay3 (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityDelay3);
+            fldelay::delay3ToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    if (auto exact = fruityDelayExact (pluginName, state))
+        return exact;
     if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
     if (auto exact = fruityBasicExact (pluginName, state))
@@ -1185,6 +1211,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::reverb:
         case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
+        case EffectKind::fruityDelay2: return { "Fruity Delay 2" };
+        case EffectKind::fruityDelay3: return { "Fruity Delay 3" };
         case EffectKind::utility: return { "Fruity Stereo Shaper" };
         default: return {};
     }
@@ -1205,6 +1233,11 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Fruity Delay 2 / 3 likewise (every control)
+    if (is ("Fruity Delay 2") && k >= 0 && k < fldelay::delay2Controls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    if (is ("Fruity Delay 3") && k >= 0 && k < fldelay::delay3Controls)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
