@@ -65,6 +65,7 @@ add_library(lynx_core STATIC
     src/core/FruityBasicFx.cpp
     src/core/FruityDelayBank.cpp
     src/core/FruityMultiband.cpp
+    src/core/FlangusFastDist.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Inflate.cpp
