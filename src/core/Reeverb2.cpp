@@ -2,7 +2,13 @@
 
 // Fruity Reeverb 2 (docs/analise/REA_rodada49.md). Every value below is computed in the precision the plugin uses
 // (single-precision state and coefficients, double-precision intermediates where the plugin converts), because the
-// effect is verified sample by sample against the installation's DLL.
+// effect is verified sample by sample against the installation's DLL. Fusing a·b + c into one FMA would change the
+// results: contraction stays off.
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize ("fp-contract=off")
+#endif
 
 #include <algorithm>
 #include <cmath>
