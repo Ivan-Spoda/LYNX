@@ -3,6 +3,8 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/EquoFx.h"
+#include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -12,6 +14,9 @@
 #include "core/FrequencySplitter.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/FruityDelayBank.h"
+#include "core/FruityMultiband.h"
+#include "core/FlangusFastDist.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1072,6 +1077,32 @@ std::optional<EffectSlot> stereoFxExact (const std::string& pluginName, const st
     return std::nullopt;
 }
 
+std::optional<EffectSlot> fruityDelayBankExact (const std::vector<std::uint8_t>& state)
+{
+    // FL's own Delay Bank engine from the saved state (REA_rodada56); the generic delay remains for unreadable states
+    const auto s = fldbank::parse (state);
+    if (! s)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::fruityDelayBank);
+    slot.state = fldbank::serialise (*s);
+    for (int i = 0; i < fldbank::globalControls; ++i)
+        slot.params[(std::size_t) i] = (float) std::clamp (s->p[(std::size_t) i], 0, 128) / 128.0f;
+    return slot;
+}
+
+std::optional<EffectSlot> fruityMultibandExact (const std::vector<std::uint8_t>& state)
+{
+    // FL's own Multiband Compressor engine (REA_rodada56); the single-band approximation remains for unreadable states.
+    // The slot keeps FL's state too, so that the exact integer controls survive the project file's rounding.
+    const auto s = flmb::parse (state);
+    if (! s)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::fruityMultiband);
+    flmb::toParams (*s, slot.params.data());
+    slot.state = state;
+    return slot;
+}
+
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     if (auto exact = fruityDelayExact (pluginName, state))
@@ -1086,12 +1117,56 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return exact;
     if (auto exact = chorusFromFl (pluginName, state)) // REA_rodada59; the generic chorus remains for unreadable states
         return exact;
+    if (pluginName == "Fruity Delay Bank")
+        if (auto exact = fruityDelayBankExact (state))
+            return exact;
+    if (pluginName == "Fruity Multiband Compressor")
+        if (auto exact = fruityMultibandExact (state))
+            return exact;
+    // FL's own Fast Dist / Flangus engines from the saved controls (REA_rodada55); the approximations of REA_rodada8
+    // remain for states that cannot be read
+    if (pluginName == "Fruity Fast Dist")
+        if (const auto s = fastdistfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFastDist);
+            fastdistfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Flangus")
+        if (const auto s = flangusfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFlangus);
+            flangusfx::toParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Flanger")
+        if (const auto s = flangerfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFlanger);
+            flangerfx::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
             return exact;
+    if (pluginName == "Pitch Shifter") // the exact engines (REA_rodada61); LYNX's generic pitch shifter otherwise
+        if (psfl::State ps; psfl::parsePitchShifter (state.data(), state.size(), ps))
+        {
+            auto slot = makeEffectSlot (EffectKind::flPitchShifter);
+            psfl::toParams (ps, slot.params);
+            return slot;
+        }
+    if (pluginName == "EQUO") // the exact engine (REA_rodada61); a flat parametric EQ otherwise
+        if (const auto s = equofx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::equo);
+            slot.state = state;
+            equofx::toParams (*s, slot.params);
+            return slot;
+        }
     if (pluginName == "Frequency Splitter") // FL's engine (REA_rodada62): its summed (main) output; shelves otherwise
         if (const auto s = fsplit::parseState (state))
         {
@@ -1275,6 +1350,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityPanOMatic: return { "Fruity PanOMatic" };
         case EffectKind::fruityBalance: return { "Fruity Balance" };
         case EffectKind::fruityBloodOverdrive: return { "Fruity Blood Overdrive" };
+        case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
+        case EffectKind::fruityFlangus: return { "Fruity Flangus" };
+        case EffectKind::fruityFlanger: return { "Fruity Flanger" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
@@ -1287,6 +1365,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::stereoEnhancer: return { "Fruity Stereo Enhancer" };
         case EffectKind::transientProcessor: return { "Transient Processor" };
         case EffectKind::spreader: return { "Spreader" };
+        case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
+        case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
+        case EffectKind::equo: return { "EQUO" };
+        case EffectKind::flPitchShifter: return { "Pitch Shifter" };
         default: return {};
     }
 }
@@ -1307,6 +1389,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
+    if (is ("EQUO") && k >= 0 && k < 5)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact choruses take FL's controls over their ranges
     if (chorusControls (pluginName) > k && k >= 0)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
@@ -1321,6 +1406,14 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     // the exact Stereo Enhancer and Transient Processor take every FL control over its range
     if ((is ("Fruity Stereo Enhancer") && k >= 0 && k < 6) || (is ("Transient Processor") && k >= 0 && k < 9)
         || (is ("Spreader") && k >= 0 && k < 5))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Delay Bank: its four global controls (0…128) are the slot's parameters
+    if (is ("Fruity Delay Bank") && k >= 0 && k < fldbank::globalControls)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    if (is ("Fruity Multiband Compressor") && k >= 0 && k < flmb::controls) // FL's controls as they are (value over range)
+    // the exact Fast Dist / Flangus / Flanger take FL's controls over their ranges
+    if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdistfx::params) || (is ("Fruity Flangus") && k >= 0 && k < flangusfx::params)
+        || (is ("Fruity Flanger") && k >= 0 && k < flangerfx::params))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))
@@ -1374,6 +1467,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return std::nullopt;
     }
 
+    if (is ("Pitch Shifter") && k >= 0 && k < 13) // the exact effect takes FL's 13 knobs over their ranges (REA_rodada61)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Pitch Shifter"))
     {
         if (k == 0) // pitch: −12..+12 st (in cents) -> our ±24 st

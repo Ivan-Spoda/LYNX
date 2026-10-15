@@ -506,6 +506,21 @@ Shape make (Icon icon)
             polyline (st, { { 16.5f, 8.0f }, { 18.5f, 5.5f }, { 20.5f, 8.0f } });
             polyline (st, { { 16.5f, 16.0f }, { 18.5f, 18.5f }, { 20.5f, 16.0f } });
             break;
+        case Icon::drumBrush: // a brush laying a row of short hits on the grid
+        {
+            line (st, 20.5f, 3.5f, 15.0f, 9.0f);
+            juce::Path tip;
+            tip.startNewSubPath (14.0f, 8.0f);
+            tip.lineTo (16.0f, 10.0f);
+            tip.quadraticTo (14.5f, 14.0f, 10.0f, 13.5f);
+            tip.quadraticTo (10.5f, 9.5f, 14.0f, 8.0f);
+            tip.closeSubPath();
+            fi.addPath (tip);
+            fi.addRoundedRectangle (3.0f, 17.0f, 4.0f, 3.5f, 1.0f);
+            fi.addRoundedRectangle (9.0f, 17.0f, 4.0f, 3.5f, 1.0f);
+            fi.addRoundedRectangle (15.0f, 17.0f, 4.0f, 3.5f, 1.0f);
+            break;
+        }
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot
         {
             juce::Path f;

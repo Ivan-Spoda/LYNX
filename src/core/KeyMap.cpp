@@ -136,6 +136,8 @@ std::vector<Action> makeActions()
         { "browser.swapPrevious", TR_NOOP ("Previous file into the selected channel"), Context::browser, { chord (up, shift) } },
         { "browser.swapNext", TR_NOOP ("Next file into the selected channel"), Context::browser, { chord (down, shift) } },
         { "browser.load", TR_NOOP ("Load the file into the selected channel"), Context::browser, { chord (enter) } },
+        { "browser.closeFolder", TR_NOOP ("Close the folder (or go to the parent folder)"), Context::browser, { chord (left) } },
+        { "browser.openFolder", TR_NOOP ("Open the folder"), Context::browser, { chord (right) } },
 
         // Mixer (focused)
         { "mixer.moveLeft", TR_NOOP ("Move the selected inserts left"), Context::mixer, { chord (left, alt) } },

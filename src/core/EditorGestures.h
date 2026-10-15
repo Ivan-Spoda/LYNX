@@ -16,6 +16,7 @@ enum class EditTool
 {
     pencil, // add, move and resize (the default gestures)
     brush,  // drag lays a run of notes / clips (Shift: one note at a time in the Piano Roll)
+    drumPaint, // Piano Roll only: drag lays one short note per grid cell, following the mouse across keys
     eraser, // click or drag deletes
     mute,   // click or drag mutes / unmutes
     knife,  // drag a line to cut through notes / clips; a click cuts at the cursor
@@ -133,7 +134,9 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
     if (mods.ctrl)
         return onItem ? Action::toggleSelect : Action::boxSelect;
 
-    if (tool == EditTool::lasso || (! onItem && mods.shift && tool != EditTool::brush))
+    const auto painter = tool == EditTool::brush || tool == EditTool::drumPaint;
+
+    if (tool == EditTool::lasso || (! onItem && mods.shift && ! painter))
         return Action::boxSelect;
 
     switch (tool)
@@ -146,6 +149,7 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
         case EditTool::slip: return playlist && onItem ? Action::slipContent : Action::none;
         case EditTool::pencil:
         case EditTool::brush:
+        case EditTool::drumPaint:
         case EditTool::lasso: break;
     }
 
@@ -169,7 +173,7 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
         case Target::fadeHandle: return mods.shift ? Action::copyMove : Action::move;
         case Target::rightEdge: return Action::resizeRight;
         case Target::leftEdge: return Action::resizeLeft;
-        case Target::empty: return tool == EditTool::brush ? Action::paint : Action::create;
+        case Target::empty: return painter ? Action::paint : Action::create;
         case Target::clipMenu: break;
     }
 

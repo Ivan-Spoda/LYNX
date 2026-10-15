@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LYNX VERSION 0.1.2 LANGUAGES C CXX)
+project(LYNX VERSION 0.1.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,12 +58,17 @@ add_library(lynx_core STATIC
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
+    src/core/EquoFx.cpp
+    src/core/PitchShifterFl.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
     src/core/FrequencySplitter.cpp
     src/core/ChorusFx.cpp
     src/core/FruityBasicFx.cpp
+    src/core/FruityDelayBank.cpp
+    src/core/FruityMultiband.cpp
+    src/core/FlangusFastDist.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Inflate.cpp
@@ -83,6 +88,10 @@ target_sources(lynx_core PRIVATE
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/SearchQuery.cpp)
+
+# spectral waveforms: band analysis and multi-resolution peak cache
+target_sources(lynx_core PRIVATE
+    src/core/WaveAnalysis.cpp)
 
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
@@ -165,6 +174,10 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/HintBar.cpp
         src/ui/Toolbar.cpp)
+
+    # spectral waveforms: background analysis cache and drawing
+    target_sources(LYNX PRIVATE
+        src/ui/WaveformView.cpp)
 
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE

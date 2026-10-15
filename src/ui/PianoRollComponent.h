@@ -90,7 +90,7 @@ public:
 
 private:
     enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, velocityLine, velocitySet, paint, muting, knife,
-                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect };
+                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect, drumPaint, stretch };
 
     // Channel selector: the wheel steps through the channels with notes (Ctrl+wheel: all channels).
     class ChannelBox final : public juce::ComboBox
@@ -160,7 +160,7 @@ private:
     ToolStrip tools { false };
     int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
     ChannelBox channelBox;
-    juce::ComboBox snapBox;           // "Follow global grid" or this editor's own grid
+    SnapBox snapBox { true };         // "Main" (the toolbar snap) or this editor's own grid
     IconButton ghostButton { "ghosts", Icon::ghost };
     IconButton scaleSnapButton { "scaleSnap", Icon::magnet }; // snap to the scale (next to the scale box)
     IconButton moreButton { "more", Icon::more }; // note operations, left-edge resize, MIDI import/export
@@ -191,7 +191,11 @@ private:
     {
         int note = -1, ghost = -1, key = -1;
         gesture::Zone zone = gesture::Zone::outside;
-        bool operator== (const Hover& o) const { return note == o.note && ghost == o.ghost && key == o.key && zone == o.zone; }
+        bool stretch = false; // the selection's stretch handle
+        bool operator== (const Hover& o) const
+        {
+            return note == o.note && ghost == o.ghost && key == o.key && zone == o.zone && stretch == o.stretch;
+        }
     };
     Hover hover;
     juce::Point<int> lastMouse { -1, -1 };
@@ -231,6 +235,14 @@ private:
     std::vector<int> selectionBefore; // selection at the start of a Shift+rectangle
     juce::ModifierKeys downMods;      // modifiers at the click (locks start when Shift/Ctrl are pressed later)
     bool showGhosts = true;
+    bool editGhosts = false;          // Ctrl+Alt+V: a press on a ghost note edits it (switching to its channel)
+    // the selection's stretch handle (R5): drag it to scale the selected notes in time
+    juce::Rectangle<float> stretchHandle() const;
+    std::int64_t stretchAnchor = 0, stretchEnd = 0;
+    // drum brush: lays one note per grid cell and key
+    void drumPaintAt (juce::Point<int> p, bool snapOn);
+    std::int64_t lastDrumCell = -1;
+    int lastDrumKey = -1;
     bool resizeFromLeft = true;       // the left edge of a note resizes it (Ctrl+Alt+Home turns it off)
     bool startedOnEmpty = false, erasedSomething = false, holdExpired = false;
     juce::uint32 createdAt = 0;       // when the last click created a note (a double click there is not an edit)

@@ -11,6 +11,7 @@
 #include "core/EditorGestures.h"
 #include "engine/AudioEngine.h"
 #include "ui/Icons.h"
+#include "ui/ValueControl.h"
 
 namespace lynx
 {
@@ -79,8 +80,8 @@ namespace grid
 enum class Kind
 {
     none,    // free (whole ticks)
-    screen,  // follows the lines the editor is drawing at its zoom
-    nearest, // the nearest note / clip edge (and ghost notes); otherwise the screen grid
+    screen,  // "Line": follows the lines the editor is drawing at its zoom (FL's "Line")
+    nearest, // "Events": the nearest note / clip edge (and ghost notes); otherwise the lines
     ticks,   // a fixed fraction of a step or beat
     bar      // whole bars
 };
@@ -103,7 +104,24 @@ void fillGlobalBox (juce::ComboBox& box);
 
 // The option an editor combo stands for (resolving "Follow global").
 const Option& resolve (const juce::ComboBox& editorBox);
+
+// What an option does, in one sentence (the hint bar shows it for the chosen option).
+juce::String describe (const Option& option);
 } // namespace grid
+
+// A snap selector that explains its current choice in the hint bar: the component's hint text (ui::setHint
+// or the tooltip) followed by what the chosen option does. `editor`: the box has the "Main" (follow the
+// toolbar) entry. The wheel steps through the options.
+class SnapBox : public juce::ComboBox,
+                public ui::HintSource
+{
+public:
+    explicit SnapBox (bool editor);
+    ui::Hint hintAt (juce::Point<int>) override;
+
+private:
+    bool editor;
+};
 
 // State the editors share with the main window's toolbar. Listeners hear about every change.
 class EditorGlobals final : public juce::ChangeBroadcaster
@@ -123,6 +141,11 @@ public:
     // switching) are off. The main window's typing-piano toggle (P1 #14) sets this.
     bool typingPiano = true;
 
+    // "Remember seek time" (the Stop button's right-click menu, as in FL's toolbar): Stop goes back to the
+    // position last clicked on the Playlist ruler (`seekMark`, in ticks; -1 = none) instead of the start.
+    bool rememberSeek = false;
+    std::int64_t seekMark = -1;
+
 private:
     EditorGlobals() = default;
     int gridOption = grid::screenOption, lastGridOption = grid::screenOption;
@@ -131,7 +154,7 @@ private:
 
 // The global grid selector of the main toolbar: left-click picks the grid, right-click sets the
 // default note length.
-class GlobalGridBox final : public juce::ComboBox,
+class GlobalGridBox final : public SnapBox,
                             private juce::ChangeListener
 {
 public:
