@@ -1437,6 +1437,12 @@ void MainComponent::HintBar::paint (juce::Graphics& g)
 
 juce::String MainComponent::idleHint() const
 {
+    if (engine.isWaitingForInput())
+        return tr ("Recording: waiting for the first note (Space cancels)");
+
+    if (engine.isCountingIn())
+        return tr ("Recording: count-in...");
+
     return tr ("F1 shortcuts   F5-F9 panels   Space play/stop   Ctrl+T typing piano ({0})", { typingPiano ? tr ("on") : tr ("off") });
 }
 
@@ -1530,6 +1536,8 @@ void MainComponent::timerCallback()
 
         if (engine.isLearningMidi())
             hint.text = tr ("Move a knob/fader on the MIDI controller to link it to the parameter...");
+        else if (engine.isWaitingForInput() || engine.isCountingIn())
+            hint.text = idleHint();
         else if (isShowing())
         {
             const auto source = juce::Desktop::getInstance().getMainMouseSource();

@@ -903,3 +903,5 @@ countries: br
 "Forget B" = "Esquecer B"
 "A/B compare (B stored)" = "Comparar A/B (B guardado)"
 "A/B compare" = "Comparar A/B"
+"Recording: waiting for the first note (Space cancels)" = "Gravação: esperando a primeira nota (Espaço cancela)"
+"Recording: count-in..." = "Gravação: contagem..."
