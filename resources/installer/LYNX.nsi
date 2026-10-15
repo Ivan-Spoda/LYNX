@@ -1,0 +1,169 @@
+; LYNX per-user Windows installer (NSIS 3). Built by scripts/make-installer.sh; no admin rights needed.
+; Installs to %LOCALAPPDATA%\Programs\LYNX, adds Start-menu (and optional desktop) shortcuts, registers .lynx
+; projects and offers LYNX in Explorer's "Open with" for .flp without taking over FL Studio's default.
+; The uninstaller removes only what this installer added (settings in %APPDATA%\LYNX stay).
+;
+; Defines passed by the script: VERSION (e.g. 0.1.3), STAGE (folder with LYNX.exe, LICENSE, THIRD_PARTY.md,
+; optional Demo.lynx), OUTFILE, ICON.
+
+Unicode true
+SetCompressor /SOLID lzma
+RequestExecutionLevel user
+ManifestDPIAware true
+
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+
+!define APP "LYNX"
+!define PROGID "LYNX.Project"
+!define FLP_PROGID "LYNX.FLProject"
+!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\LYNX"
+
+Name "${APP} ${VERSION}"
+OutFile "${OUTFILE}"
+InstallDir "$LOCALAPPDATA\Programs\LYNX"
+InstallDirRegKey HKCU "Software\LYNX" "InstallDir"
+BrandingText "LYNX ${VERSION}"
+VIProductVersion "${VERSION}.0"
+VIAddVersionKey "ProductName" "LYNX"
+VIAddVersionKey "FileDescription" "LYNX installer"
+VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "LegalCopyright" "AGPL-3.0"
+
+!define MUI_ICON "${ICON}"
+!define MUI_UNICON "${ICON}"
+!define MUI_ABORTWARNING
+!define MUI_FINISHPAGE_RUN "$INSTDIR\LYNX.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "$(RunLynx)"
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "${STAGE}\LICENSE"
+!insertmacro MUI_PAGE_COMPONENTS
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "PortugueseBR"
+
+LangString RunLynx ${LANG_ENGLISH} "Start LYNX"
+LangString RunLynx ${LANG_PORTUGUESEBR} "Abrir o LYNX"
+LangString SecApp ${LANG_ENGLISH} "LYNX (required)"
+LangString SecApp ${LANG_PORTUGUESEBR} "LYNX (obrigatório)"
+LangString SecDesktop ${LANG_ENGLISH} "Desktop shortcut"
+LangString SecDesktop ${LANG_PORTUGUESEBR} "Atalho na área de trabalho"
+LangString SecFlp ${LANG_ENGLISH} "Offer LYNX in $\"Open with$\" for FL Studio projects (.flp)"
+LangString SecFlp ${LANG_PORTUGUESEBR} "Oferecer o LYNX em $\"Abrir com$\" para projetos do FL Studio (.flp)"
+LangString FlpType ${LANG_ENGLISH} "FL Studio project (LYNX)"
+LangString FlpType ${LANG_PORTUGUESEBR} "Projeto do FL Studio (LYNX)"
+LangString StillRunning ${LANG_ENGLISH} "LYNX is running. Close it and click Retry."
+LangString StillRunning ${LANG_PORTUGUESEBR} "O LYNX está aberto. Feche-o e clique em Repetir."
+
+Function .onInit
+    ; the installer's language follows Windows
+    System::Call 'kernel32::GetUserDefaultUILanguage() i .r0'
+    ${If} $0 == 1046
+        StrCpy $LANGUAGE ${LANG_PORTUGUESEBR}
+    ${EndIf}
+FunctionEnd
+
+!macro CheckNotRunning
+    ; overwriting a running exe fails: ask to close it first
+    retry:
+    ClearErrors
+    ${If} ${FileExists} "$INSTDIR\LYNX.exe"
+        FileOpen $0 "$INSTDIR\LYNX.exe" a
+        ${If} ${Errors}
+            MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(StillRunning)" IDRETRY retry
+            Abort
+        ${EndIf}
+        FileClose $0
+    ${EndIf}
+!macroend
+
+Section "!$(SecApp)" SecMain
+    SectionIn RO
+    SetShellVarContext current
+    !insertmacro CheckNotRunning
+    SetOutPath "$INSTDIR"
+    File "${STAGE}\LYNX.exe"
+    File "${STAGE}\LICENSE"
+    File "${STAGE}\THIRD_PARTY.md"
+    File /nonfatal "${STAGE}\Demo.lynx"
+    WriteUninstaller "$INSTDIR\Uninstall.exe"
+
+    CreateShortCut "$SMPROGRAMS\LYNX.lnk" "$INSTDIR\LYNX.exe" "" "$INSTDIR\LYNX.exe" 0
+
+    ; .lynx projects (LYNX itself keeps this up to date at every start, too)
+    WriteRegStr HKCU "Software\Classes\.lynx" "" "${PROGID}"
+    WriteRegStr HKCU "Software\Classes\.lynx" "Content Type" "application/x-lynx-project"
+    WriteRegStr HKCU "Software\Classes\${PROGID}" "" "LYNX Project"
+    WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" '"$INSTDIR\LYNX.exe",-2'
+    WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\LYNX.exe" "%1"'
+    ; "Open with" list entry for the app
+    WriteRegStr HKCU "Software\Classes\Applications\LYNX.exe" "FriendlyAppName" "LYNX"
+    WriteRegStr HKCU "Software\Classes\Applications\LYNX.exe\shell\open\command" "" '"$INSTDIR\LYNX.exe" "%1"'
+    WriteRegStr HKCU "Software\Classes\Applications\LYNX.exe\SupportedTypes" ".lynx" ""
+
+    WriteRegStr HKCU "Software\LYNX" "InstallDir" "$INSTDIR"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "LYNX"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
+    WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "LYNX"
+    WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://github.com/Ka1-S/LYNX"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" '"$INSTDIR\LYNX.exe",0'
+    WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+    WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+    WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
+    WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
+    SectionGetSize ${SecMain} $0
+    WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" $0
+SectionEnd
+
+Section "$(SecDesktop)" SecDesktop
+    SetShellVarContext current
+    CreateShortCut "$DESKTOP\LYNX.lnk" "$INSTDIR\LYNX.exe" "" "$INSTDIR\LYNX.exe" 0
+SectionEnd
+
+Section "$(SecFlp)" SecFlp
+    ; adds LYNX to .flp's "Open with" list only: FL Studio stays the default program for .flp
+    WriteRegStr HKCU "Software\Classes\${FLP_PROGID}" "" "$(FlpType)"
+    WriteRegStr HKCU "Software\Classes\${FLP_PROGID}\DefaultIcon" "" '"$INSTDIR\LYNX.exe",0'
+    WriteRegStr HKCU "Software\Classes\${FLP_PROGID}\shell\open\command" "" '"$INSTDIR\LYNX.exe" "%1"'
+    WriteRegStr HKCU "Software\Classes\.flp\OpenWithProgids" "${FLP_PROGID}" ""
+    WriteRegStr HKCU "Software\Classes\Applications\LYNX.exe\SupportedTypes" ".flp" ""
+SectionEnd
+
+Section "-notify"
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+SectionEnd
+
+Section "Uninstall"
+    SetShellVarContext current
+    Delete "$INSTDIR\LYNX.exe"
+    Delete "$INSTDIR\LYNX.pdb"
+    Delete "$INSTDIR\LICENSE"
+    Delete "$INSTDIR\THIRD_PARTY.md"
+    Delete "$INSTDIR\Demo.lynx"
+    Delete "$INSTDIR\Uninstall.exe"
+    RMDir "$INSTDIR"
+    Delete "$SMPROGRAMS\LYNX.lnk"
+    Delete "$DESKTOP\LYNX.lnk"
+
+    ; only our own keys and values; .lynx is removed only while it still points at LYNX
+    ReadRegStr $0 HKCU "Software\Classes\.lynx" ""
+    ${If} $0 == "${PROGID}"
+        DeleteRegKey HKCU "Software\Classes\.lynx"
+    ${EndIf}
+    DeleteRegKey HKCU "Software\Classes\${PROGID}"
+    DeleteRegKey HKCU "Software\Classes\${FLP_PROGID}"
+    DeleteRegValue HKCU "Software\Classes\.flp\OpenWithProgids" "${FLP_PROGID}"
+    ; (the .flp key itself is FL Studio's: left alone)
+    DeleteRegKey HKCU "Software\Classes\Applications\LYNX.exe"
+    DeleteRegKey HKCU "Software\LYNX"
+    DeleteRegKey HKCU "${UNINST_KEY}"
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+SectionEnd

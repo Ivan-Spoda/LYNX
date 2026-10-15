@@ -176,9 +176,17 @@ A report lists what was converted, what is approximated and what was left out. F
 
 ## Download
 
-Grab the `.zip` from the [latest release](https://github.com/Ka1-S/LYNX/releases/latest), extract it and run `LYNX.exe`
-(Windows 10/11, 64-bit; no installer). The zip includes a demo project (`Demo.lynx`). The executable is not code-signed
+Grab `LYNX-x.y.z-setup-x64.exe` from the [latest release](https://github.com/Ka1-S/LYNX/releases/latest) (Windows 10/11,
+64-bit): a per-user installer that needs no admin rights, adds Start-menu/desktop shortcuts, opens `.lynx` projects and
+offers LYNX in *Open with* for `.flp` without changing FL Studio's default. Prefer no installer? The portable `.zip` is
+still there: extract it and run `LYNX.exe`. Both include a demo project (`Demo.lynx`). The executable is not code-signed
 yet, so SmartScreen may warn on first launch (*More info* → *Run anyway*).
+
+On first start a short setup wizard (skippable; *Options > Setup wizard* reopens it) picks the language, tests the audio
+device and lists the plugin folders — the standard VST3/CLAP folders plus the ones FL Studio uses on the same PC — and
+scans them in the background. If FL Studio is installed, `.flp` projects use the very plugin files FL uses (read from its
+plugin database) and find samples in FL's folders; a plugin LYNX doesn't know yet gets a quick scan of just its file
+([details](docs/FL_INTEGRATION.md)).
 
 ## Command line
 
@@ -194,6 +202,7 @@ LYNX.exe --showcase out.lynx [pattern]         generate the demo project used in
 LYNX.exe --plugintest plugin.vst3 rep.txt      test a VST3 or CLAP plugin
 LYNX.exe --sandboxtest plugin.vst3 rep.txt     test a plugin in a separate process (including a hung one)
 LYNX.exe --scantest folder rep.txt             scan a folder for plugins (separate processes)
+LYNX.exe --fldb rep.txt [project.flp] [--scan] FL Studio found here, its plugin database, a project's plugin matches
 LYNX.exe --devices rep.txt                     list audio drivers and outputs
 LYNX.exe --devicetest "ASIO" "driver" rep.txt  open a driver for 1 s of silence and report it
 ```

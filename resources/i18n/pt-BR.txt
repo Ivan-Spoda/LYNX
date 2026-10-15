@@ -1116,3 +1116,4 @@ countries: br
 "Finish" = "Concluir"
 "Look for new plugins in the background at every start" = "Procurar plugins novos em segundo plano a cada início"
 "LYNX setup" = "Configuração do LYNX"
+"{0} found (its plugin database lists no third-party plugins yet). .flp projects find their samples in FL Studio's folders; their plugins are found by scanning." = "{0} encontrado (o banco de plugins dele ainda não lista plugins de terceiros). Projetos .flp acham os samples nas pastas do FL Studio; os plugins deles são encontrados pela busca."

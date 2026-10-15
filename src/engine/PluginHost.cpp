@@ -158,7 +158,7 @@ public:
     ~BackgroundScan() override
     {
         host.stopScan = true;
-        stopThread (5000);
+        stopThread (15000); // (listing a large folder can take a moment; a running child is killed at once)
     }
 
     void run() override
@@ -221,8 +221,9 @@ juce::FileSearchPath PluginHost::suggestedFolders()
         if (folder.isDirectory())
             paths.addIfNotAlreadyThere (folder);
     };
+    // the standard folders even before they exist (plugins installed later land there)
     for (int i = 0; i < defaultSearchPath().getNumPaths(); ++i)
-        add (defaultSearchPath()[i]);
+        paths.addIfNotAlreadyThere (defaultSearchPath()[i]);
     const auto fl = findFlStudio();
     for (const auto& folder : fl.vstFolders)
         add (juce::File (folder));

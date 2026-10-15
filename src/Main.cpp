@@ -147,10 +147,21 @@ public:
                                << (d ? d->fileOrIdentifier + " (" + how + ")" : juce::String ("not known"))
                                << (entry != nullptr ? " | fl db: " + juce::String::fromUTF8 (entry->path.c_str()) : juce::String()) << "\n";
                     }
-                    report << "scan_candidates=" << host.filesToScanFor (lynx::flpForeignPlugins (
-                                                         flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() })))
-                                                         .joinIntoString (";")
-                           << "\n";
+                    const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                    const auto candidates = host.filesToScanFor (uses);
+                    report << "scan_candidates=" << candidates.joinIntoString (";") << "\n";
+                    if (args.contains ("--scan"))
+                    {
+                        // the targeted scan an open would run (child processes; the user's plugin list is not touched)
+                        report << "scanned_new=" << host.scanFiles (candidates, {}) << "\n";
+                        for (const auto& use : uses)
+                        {
+                            juce::String how;
+                            const auto d = host.findForeign (use.plugin, use.instrument, &how);
+                            report << "after_scan: " << juce::String::fromUTF8 (use.plugin.name.c_str()) << " -> "
+                                   << (d ? d->fileOrIdentifier + " (" + how + ")" : juce::String ("not known")) << "\n";
+                        }
+                    }
                 }
                 catch (const flp::Error& e)
                 {

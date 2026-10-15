@@ -561,10 +561,18 @@ Confirmed empirically on the demo projects:
   `LYNX.exe --sandboxtest plugin.vst3 report.txt`; `LYNX_SANDBOX_LOG=file` logs every step.
 - The VST3 SDK bundled with JUCE builds with Zig/MinGW; plugins are prepared at a fixed rate and re-created
   when the device rate changes; plugin latency feeds the PDC.
+- Plugin scanning runs in the background (progress in the hint bar), one child `LYNX.exe --scan-one` per file
+  (a crash or 30 s hang blacklists the file), incremental (unchanged listed files are skipped), cancellable, and
+  again a few seconds after each start for new plugins. Opening an `.flp` resolves its plugins from the list or FL
+  Studio's plugin database (the same files FL uses) and scans only the missing ones' files first
+  (`docs/FL_INTEGRATION.md`). First-run setup wizard: language, audio device, plugin folders (standard VST3/CLAP
+  plus FL Studio's), scan. Per-user installer (`scripts/make-installer.sh`, `docs/RELEASE.md`).
 
 ## Not yet verified by a human
 - Audio input recording (depends on the user's hardware; code reviewed, not tested).
 - CLAP plugin editor windows (audio hosting tested; windows not opened to avoid touching the user's screen).
+- The setup wizard's interaction (checked by an off-screen snapshot) and FL Studio's plugin-database file layout:
+  this PC's FL has no third-party plugins scanned, so `.nfo`/`.fst` parsing is tested with synthetic fixtures only.
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items

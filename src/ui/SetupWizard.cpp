@@ -72,10 +72,15 @@ public:
         if (fl.found())
         {
             const auto& db = host.flPluginDatabase();
-            flStatus.setText (tr ("{0} found. Its plugin database lists {1} plugin file(s); .flp projects use the same plugin files FL Studio uses, "
-                                  "and their samples are looked for in FL Studio's folders.",
-                                  { fl.name(), juce::String ((int) db.entries().size()) }),
-                              juce::dontSendNotification);
+            if (db.empty())
+                flStatus.setText (tr ("{0} found (its plugin database lists no third-party plugins yet). .flp projects find their "
+                                      "samples in FL Studio's folders; their plugins are found by scanning.", { fl.name() }),
+                                  juce::dontSendNotification);
+            else
+                flStatus.setText (tr ("{0} found. Its plugin database lists {1} plugin file(s); .flp projects use the same plugin files FL Studio uses, "
+                                      "and their samples are looked for in FL Studio's folders.",
+                                      { fl.name(), juce::String ((int) db.entries().size()) }),
+                                  juce::dontSendNotification);
         }
         else
             flStatus.setText (tr ("FL Studio was not found on this PC. .flp projects still open; their plugins are found by scanning."),
@@ -130,7 +135,7 @@ public:
 
         updateScanStatus();
         startTimerHz (10);
-        setSize (680, 690);
+        setSize (680, 660);
     }
 
     ~SetupWizard() override { folders.setModel (nullptr); }
@@ -150,11 +155,11 @@ public:
         r.removeFromTop (10);
 
         audioLabel.setBounds (r.removeFromTop (24));
-        devices.setBounds (r.removeFromTop (150));
+        devices.setBounds (r.removeFromTop (110));
         r.removeFromTop (6);
 
         flLabel.setBounds (r.removeFromTop (24));
-        flStatus.setBounds (r.removeFromTop (40));
+        flStatus.setBounds (r.removeFromTop (44));
         r.removeFromTop (6);
 
         foldersLabel.setBounds (r.removeFromTop (24));
@@ -245,6 +250,7 @@ private:
             scanStatus.setText (tr ("{0} plugins known. Scanning runs in the background; you can close this window.", { juce::String (count) }),
                                 juce::dontSendNotification);
         scanNow.setEnabled (! s.running);
+        progressBar.setVisible (s.running || s.finished > 0);
     }
 
     void timerCallback() override { updateScanStatus(); }

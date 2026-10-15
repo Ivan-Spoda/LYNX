@@ -40,10 +40,15 @@ FlStudioInstall findFlStudio()
                 fl.installDir = dir;
     }
 
+    // test hook: LYNX_FL_USER_DATA=<folder> stands in for FL's user data folder (synthetic plugin databases)
+    if (const auto testFolder = existingFolder (juce::SystemStats::getEnvironmentVariable ("LYNX_FL_USER_DATA", {})); testFolder.exists())
+        fl.userData = testFolder;
+
     // user data: "Shared data" (e.g. ...\Documents\Image-Line\, possibly under OneDrive) + "FL Studio"
-    if (const auto shared = existingFolder (registryValue ("Software\\Image-Line\\Shared\\Paths\\Shared data")); shared.exists())
-        if (const auto user = shared.getChildFile ("FL Studio"); user.isDirectory())
-            fl.userData = user;
+    if (! fl.userData.isDirectory())
+        if (const auto shared = existingFolder (registryValue ("Software\\Image-Line\\Shared\\Paths\\Shared data")); shared.exists())
+            if (const auto user = shared.getChildFile ("FL Studio"); user.isDirectory())
+                fl.userData = user;
     if (! fl.userData.isDirectory())
         if (const auto user = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Image-Line/FL Studio"); user.isDirectory())
             fl.userData = user;
