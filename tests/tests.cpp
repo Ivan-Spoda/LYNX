@@ -31,6 +31,7 @@
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
+#include "core/Plucked.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -7513,6 +7514,85 @@ std::string tbassDll()
     if (realFlpDir.empty())
         return {};
     return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Transistor Bass" / "engine_x64.dll").string();
+}
+
+// Plucked! (REA_rodada65 §1): the C++ engine against FL's DLL (EXEC: same notes, the DLL's RandSeed set before the first
+// note, the host killing voices when the plugin asks). LYNX renders these bit-identically to the DLL.
+TEST (plucked_engine)
+{
+    auto stateOf = [] (std::initializer_list<std::int32_t> k) {
+        std::vector<std::uint8_t> st (20);
+        std::memcpy (st.data(), std::data (k), 20);
+        return st;
+    };
+    CHECK (! lynx::pluckedStateUsable (std::vector<std::uint8_t> (19)));
+    CHECK (lynx::pluckedStateUsable (stateOf ({ 128, 64, 1, 0, 1 })));
+    CHECK (lynx::pluckedParams (stateOf ({ 7, 9, 0, 1, 0 })) == std::vector<int> ({ 7, 9, 0, 1, 0 }));
+
+    using N = lynx::plucked::RefNote;
+    struct Sample { int at; float l, r; };
+    struct Golden { int set; std::int32_t P[5]; double fs; int block, law, maxPoly; double el, er; Sample s[4]; };
+    const std::vector<std::vector<N>> sets {
+        { { 0, 60, 1.0, 0.0, 0.0, 0.0, 0.0, -1 } },
+        { { 0, 60, 1.0, 0.0, 0.0, 0.0, 0.0, 30000 }, { 5000, 67, 0.6, -0.4, 13.0, 0.0, 0.0, 20000 } },
+        { { 0, 48, 0.8, 0.5, 0.0, 0.1, -0.2, 22050 }, { 100, 52, 0.8, 0.0, 0.0, 0.0, 0.0, 22050 }, { 200, 55, 0.8, -1.0, -50.0, 0.0, 0.0, 22050 } },
+        { { 0, 24, 1.0, 0.0, 0.0, 0.0, 0.0, -1 }, { 3000, 100, 1.0, 0.2, 0.0, 0.0, 0.0, -1 } },
+        { { 0, 72, 1.0, 0.0, 0.0, -0.3, 0.6, -1 }, { 77, 84, 0.5, 0.0, 0.0, 0.0, 0.0, -1 } },
+    };
+    const Golden goldens[] {
+        { 0, { 128, 64, 1, 0, 1 }, 44100, 512, 0, 0, 455.867624, 313.77463, { { 1000, -0.1914210170507431f, -0.2735292315483093f }, { 10000, -0.037063151597976685f, 0.00110959867015481f }, { 30000, -0.009626023471355438f, -0.001515754614956677f }, { 60000, 0.0f, 0.0f } } },
+        { 1, { 128, 64, 1, 1, 1 }, 44100, 512, 1, 0, 377.99866, 237.526831, { { 1000, -0.11432178318500519f, -0.14189107716083527f }, { 10000, 0.08135657012462616f, 0.027565963566303253f }, { 30000, 0.0f, 0.0f }, { 60000, 0.0f, 0.0f } } },
+        { 2, { 60, 20, 0, 1, 0 }, 48000, 256, 1, 2, 1570.38626, 550.991338, { { 1000, 0.4817328155040741f, 0.19528728723526f }, { 10000, -0.34781914949417114f, -0.15463846921920776f }, { 30000, 0.0f, 0.0f }, { 60000, 0.0f, 0.0f } } },
+        { 3, { 256, 128, 1, 0, 0 }, 44100, 1000, 1, 0, 2007.37978, 2089.11642, { { 1000, 0.3288099467754364f, 0.3288099467754364f }, { 10000, 0.04112838953733444f, 0.05718187615275383f }, { 30000, -0.08563447743654251f, -0.08728141337633133f }, { 60000, -0.0894850566983223f, -0.09222060441970825f } } },
+        { 4, { 0, 0, 1, 0, 1 }, 96000, 512, 0, 0, 222.608052, 243.338078, { { 1000, -0.20827248692512512f, -0.13200917840003967f }, { 10000, 0.01809507980942726f, 0.013305095955729485f }, { 30000, 0.0f, 0.0f }, { 60000, 0.0f, 0.0f } } },
+    };
+    for (const auto& g : goldens)
+    {
+        const auto st = stateOf ({ g.P[0], g.P[1], g.P[2], g.P[3], g.P[4] });
+        const auto length = (int) g.fs * 2;
+        const auto y = lynx::plucked::renderReference (st, sets[(std::size_t) g.set], g.fs, length, g.block, 777u + (std::uint32_t) g.set,
+                                                       g.law != 0, g.maxPoly);
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-7 * g.el && std::abs (er - g.er) <= 1e-7 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-7f && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-7f;
+        if (! ok)
+            std::printf ("  Plucked! case %d differs from FL's DLL: energy %.9g %.9g (DLL %.9g %.9g)\n", g.set, el, er, g.el, g.er);
+        CHECK (ok);
+    }
+
+    // the instrument: plays, the gate makes a note-off silence the string, a held string dies out by itself
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::plucked;
+    c.pluginState = stateOf ({ 200, 40, 1, 1, 1 });
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::plucked);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024), r (1024);
+    inst->noteOn (57, 0.8f);
+    double e = 0.0;
+    for (int b = 0; b < 8; ++b)
+    {
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+        for (int i = 0; i < 1024; ++i)
+            e += (double) l[(std::size_t) i] * l[(std::size_t) i] + (double) r[(std::size_t) i] * r[(std::size_t) i];
+    }
+    CHECK (e > 1.0 && ! inst->idle());
+    inst->noteOff (57);
+    for (int b = 0; b < 4; ++b)
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+    CHECK (inst->idle());
+    c.pluginState = stateOf ({ 0, 64, 0, 0, 0 });
+    inst->configure (c, 120.0);
+    inst->noteOn (60, 1.0f);
+    inst->noteOff (60); // (no gate: the string rings on)
+    for (int b = 0; b < 2000 && ! inst->idle(); ++b)
+        inst->render (l.data(), r.data(), 1024, 0.7f, 0.7f);
+    CHECK (inst->idle());
 }
 
 TEST (transistorbass_engine)

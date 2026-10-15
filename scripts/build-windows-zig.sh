@@ -92,6 +92,8 @@ APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
 # FL's 3x Osc engine (REA round 47)
 APP_SOURCES+=(src/core/ThreeOsc.cpp)
+# FL's Plucked!, Sawer and BeepMap engines (REA round 65)
+APP_SOURCES+=(src/core/Plucked.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

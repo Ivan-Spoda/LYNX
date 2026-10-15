@@ -55,7 +55,8 @@ enum class InstrumentKind : std::uint8_t
     toxic,      // FL's Toxic Biohazard engine (REA_rodada45): raw saved state in pluginState, the user's DLL in samplePath
     threeosc,   // FL's 3x Osc engine (REA_rodada47): normalised state in pluginState, custom-wave sample in samplePath
     autogun,    // FL's Autogun (REA_rodada57 §1): Ogun's engine on the raw saved state (pluginState), SG.dat path in samplePath
-    transistorbass // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    transistorbass, // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
+    plucked     // FL's Plucked! (REA_rodada65 §1): the plugin's raw saved state (5 knobs) in ChannelDef::pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
