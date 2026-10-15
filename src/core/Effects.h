@@ -29,12 +29,16 @@ const EffectInfo& effectInfo (EffectKind kind);
 
 // Text for a parameter value, converted to its real unit (dB, ms, %...).
 std::string formatEffectParam (EffectKind kind, int param, float value01, double bpm);
+// The same with the slot's other parameters as context (the parametric EQ's FL modes show FL's own units)
+std::string formatEffectParam (EffectKind kind, int param, float value01, double bpm, const EffectParams& context);
 
 EffectSlot makeEffectSlot (EffectKind kind);
 
 // 7-band parametric EQ. Parameters: band b uses [4b .. 4b+3] = type, frequency, gain, Q;
 // [28] = output; [29 + b] = cut slope (1 to 4 biquads: 12/24/36/48 dB per octave).
 // For shelves the "Q" is the cookbook shelf slope S (1 = default).
+// Slots imported from FL's Parametric EQ 2 / Parametric EQ run FL's exact engine instead and give some of these
+// parameters FL's own meaning (core/ParametricEqFl.h: width instead of Q, FL's order instead of the cut slope).
 namespace peq
 {
 constexpr int bands = 7;
@@ -56,6 +60,9 @@ float qValue (double q) noexcept;
 int slopeStages (float v) noexcept; // 1 to 4 biquads (12/24/36/48 dB/oct)
 float slopeValue (int stages) noexcept;
 const char* typeName (BandType t) noexcept;
+bool flLaw (const EffectParams& params) noexcept;          // runs FL's Parametric EQ 2 / Parametric EQ engine
+std::string orderText (const EffectParams& params, int band); // slope / order of a band, as the editor shows it
+std::string widthText (const EffectParams& params, int band); // Q (LYNX) or bandwidth (FL)
 
 // Response of the whole EQ (all bands and the output) in dB, for the editor graph.
 double responseDb (const EffectParams& params, double sampleRate, double hz);
