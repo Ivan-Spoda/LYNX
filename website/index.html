@@ -9,6 +9,12 @@
 <meta property="og:description" content="Free and open source. Channel Rack, Piano Roll, Playlist and Mixer, built to run well on any PC. Opens FL Studio projects.">
 <meta property="og:image" content="https://lynx-share.com/assets/img/hero.webp">
 <meta property="og:url" content="https://lynx-share.com/">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="pt_BR">
+<link rel="canonical" href="https://lynx-share.com/">
+<link rel="alternate" hreflang="en" href="https://lynx-share.com/">
+<link rel="alternate" hreflang="pt-BR" href="https://lynx-share.com/?lang=pt">
+<link rel="alternate" hreflang="x-default" href="https://lynx-share.com/">
 <meta name="theme-color" content="#0d0e12">
 <link rel="icon" href="assets/img/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -464,10 +470,15 @@ function words(text){
   for (let i=k;i<ws.length;i++) ws[i].classList.add('grad');
 }
 let lang = 'en';
-try { lang = localStorage.getItem('lynx-lang') || ((navigator.language||'').toLowerCase().startsWith('pt') ? 'pt' : 'en'); } catch(e){}
+// English first; Portuguese when asked (?lang=pt), chosen before, or when the browser's first language is Portuguese
+const qlang = new URLSearchParams(location.search).get('lang');
+const browserPt = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase().startsWith('pt');
+try { lang = qlang === 'pt' || qlang === 'en' ? qlang : (localStorage.getItem('lynx-lang') || (browserPt ? 'pt' : 'en')); }
+catch(e){ lang = qlang === 'pt' || browserPt ? 'pt' : 'en'; }
 function setLang(l){
   lang = l; const d = l==='pt' ? PT : EN;
   document.documentElement.lang = l==='pt' ? 'pt-BR' : 'en';
+  document.title = l==='pt' ? 'LYNX — uma DAW leve com o fluxo de trabalho do FL Studio' : 'LYNX — a lightweight DAW with the FL Studio workflow';
   $$('[data-i18n]').forEach(e => { const v = d[e.dataset.i18n] ?? EN[e.dataset.i18n]; if (v!=null) e.innerHTML = v; });
   words(d['hero.title'] || EN['hero.title']);
   $('#lang').textContent = l==='pt' ? 'EN' : 'PT';
