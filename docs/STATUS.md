@@ -117,7 +117,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   −108.6 dB vs FL's DLL); SimSynth on its engine (REA round 64: the C++ engine behind the Delphi front-end, 12 voices
   with 3 table oscillators/noise, ring modulation, LFO, both envelopes, the 2-stage filter and the chorus, FL's old
   integer voice record; bit-identical to FL's DLL on all 76 installation states in every tested scenario); Wasp and
-  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Sakura and Drumpad on physical models rebuilt from their
+  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Plucked! on its Karplus-Strong engine (REA round 65 §1: bit-identical to FL's DLL for the
+  same random seed); BeepMap on its image-synthesis engine with 3x Osc's voice processor (REA round 65 §2: the bitmap
+  read from the plugin state; the 9 preset/render-test states bit-identical, synthetic batteries identical outside the
+  processor's end fades); Sawer on its engine with the oscillator cycle `data.saw` read from the user's installation
+  (REA round 65 §3: PoiZone's framework, 6× oversampled filter, phaser and reverb; all 423 preset states bit-identical to
+  FL's DLL with the effects off, as saved bit-identical except the reverb's −137…−155 dB residual); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -528,6 +533,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   as an output gain (the plugin does not read Final.Vol). SimSynth (REA round 64 §5.2): the process-wide random index
   and chorus counter are per instance in LYNX (FL: shared by every SimSynth and every sample-rate change); FL's load
   order and its rounding when it fills the old voice record are not confirmed; automation not wired.
+- Plucked! (REA round 65 §1): FL's random seed (process-global, from the clock) differs per run — LYNX starts every
+  instrument at Delphi's default seed; FL's host gain-ramp law on level changes is not decoded (linear in LYNX); a
+  channel sample as the string's exciter is not modelled. BeepMap (REA round 65 §2): bitmaps taller than "Max height"
+  are scaled with LYNX's nearest-row pick (FL's image scaler not decoded; no installation state needs it); only
+  uncompressed 24/32-bit BMP data are read; the processor's end-fade table uses the exact cosine (FL: IPP's, ≤ −95 dB).
+  Sawer (REA round 65 §3): the DLL's random generator is process-global (LYNX: one per instrument, started like a
+  freshly loaded DLL); aftertouch, pitch-bend and controller modulation sources are not fed (0); FL's host gain-ramp law
+  is not decoded; the reverb's coefficient rounding (CRT float functions) leaves −137…−155 dB; without the user's
+  `data.saw` the channel stays unsupported.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
