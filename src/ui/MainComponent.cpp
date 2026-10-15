@@ -329,6 +329,9 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     refreshRecordOptionButtons();
     refreshToolbar();
     refreshPanelButtons();
+    setToolbarLayout (toolbarLayout, false); // icon sizes and row height (loaded with the UI options)
+    if (persistent && toolbarLayout.uiScale != 100)
+        juce::Desktop::getInstance().setGlobalScaleFactor ((float) toolbarLayout.uiScale / 100.0f);
 
     setControlHints();
     fittedChannelCount = (int) engine.getSong().channels.size();
@@ -394,13 +397,15 @@ void MainComponent::paint (juce::Graphics& g)
 
 void MainComponent::resized()
 {
+    using toolbarlayout::Group;
     dividers.clear();
     const auto bar = juce::Rectangle<int> (0, 0, getWidth(), toolbarHeight);
     auto toolbar = bar.reduced (8, 4);
     const auto row1 = toolbar.getY(), row2 = toolbar.getY() + rowHeight + 2, h = rowHeight;
-    const auto big = toolbar.getHeight() - 8; // transport buttons: both rows
-    const auto bigWidth = 44;
-    constexpr int gap = 17;                    // a divider and the space around it
+    const auto big = toolbar.getHeight() - 8;                 // transport buttons: both rows
+    const auto bigWidth = juce::roundToInt (h * 1.5f);
+    constexpr int gap = 17;                                   // a divider and the space around it
+    const auto grow = h - toolbarlayout::rowHeight (toolbarlayout::IconSize::small); // wider panels for bigger rows
 
     // panel widths
     auto& lf = getLookAndFeel();
@@ -409,46 +414,28 @@ void MainComponent::resized()
         menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
-    constexpr int tempoWidth = 90, timeWidth = 110, captionWidth = 54, gridWidth = 152;
+    const int tempoWidth = 88 + grow * 2, timeWidth = 108 + grow * 3, captionWidth = 54, gridWidth = 148 + grow * 2;
 
-    enum Section { transport, master, record, snap, shortcuts, meters, monitor, sectionCount };
-    struct Info
-    {
-        int width, priority; // the lowest priority drops first when the window is narrow
-        bool shown = true;
-    };
-    std::array<Info, sectionCount> sections { {
-        { modeWidth + 8 + 3 * (bigWidth + 4) + 4 + tempoWidth + 6 + timeWidth, 100 },
-        { 92, 80 },
-        { 3 * h + 4, 60 },
-        { captionWidth + gridWidth, 90 },
-        { 6 * h, 70 },
-        { 118, 55 },
-        { 116, 50 },
-    } };
+    std::array<int, toolbarlayout::groupCount> widths {};
+    widths[(std::size_t) Group::transport] = modeWidth + 8 + 3 * (bigWidth + 4) + 4 + tempoWidth + 6 + timeWidth;
+    widths[(std::size_t) Group::master] = 90 + grow * 2;
+    widths[(std::size_t) Group::record] = 3 * h + 4;
+    widths[(std::size_t) Group::snap] = captionWidth + gridWidth;
+    widths[(std::size_t) Group::windows] = 3 * h + 4;
+    widths[(std::size_t) Group::file] = 3 * h + 4;
+    widths[(std::size_t) Group::meters] = 118 + grow * 2;
+    widths[(std::size_t) Group::output] = 116 + grow * 3;
 
     const auto room = toolbar.getWidth();
     const auto minHint = juce::jmax (menuWidth + 8, 360), maxHint = 620; // room for most hints on one line
-    auto used = [&sections] {
-        int total = 0;
-        for (const auto& s : sections)
-            total += s.shown ? s.width + gap : 0;
-        return total;
-    };
+    const auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
+    int used = 0;
+    for (int i = 0; i < toolbarlayout::groupCount; ++i)
+        used += visible[(std::size_t) i] ? widths[(std::size_t) i] + gap : 0;
 
-    while (used() + minHint > room)
-    {
-        Info* lowest = nullptr;
-        for (auto& s : sections)
-            if (s.shown && s.priority < 100 && (lowest == nullptr || s.priority < lowest->priority))
-                lowest = &s;
-        if (lowest == nullptr)
-            break;
-        lowest->shown = false;
-    }
-
-    const auto hintWidth = juce::jlimit (juce::jmin (minHint, juce::jmax (160, room - used())), maxHint, room - used());
-    const auto spare = juce::jmax (0, room - used() - hintWidth); // goes before the meters, which sit on the right
+    const auto hintWidth = juce::jlimit (juce::jmin (minHint, juce::jmax (160, room - used)), maxHint, room - used);
+    // the spare room goes before the first of the meters / output in the toolbar order (they sit on the right)
+    auto spare = juce::jmax (0, room - used - hintWidth);
 
     auto take = [&toolbar] (int width) { return toolbar.removeFromLeft (juce::jmin (width, toolbar.getWidth())); };
     auto divide = [&] {
@@ -467,8 +454,18 @@ void MainComponent::resized()
         c.setVisible (true);
         c.setBounds (r);
     };
+    // a block of icon buttons, three per row on both rows
+    auto grid = [&] (juce::Rectangle<int> panel, std::initializer_list<juce::Component*> buttons) {
+        int i = 0;
+        for (auto* b : buttons)
+        {
+            const auto x = panel.getX() + (i % 3) * (h + 2);
+            put (*b, juce::Rectangle<int> (x, i < 3 ? row1 : row2, h, h));
+            ++i;
+        }
+    };
 
-    // 1. the menu (and the project name beside it) over the hint bar
+    // 1. the menu (and the project name beside it) over the hint bar; always first
     {
         auto column = take (hintWidth);
         const auto menu = column.withY (row1).withHeight (h).removeFromLeft (juce::jmin (menuWidth + 8, column.getWidth()));
@@ -479,111 +476,221 @@ void MainComponent::resized()
         put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
     }
 
-    // 2. transport: Pattern/Song switch, play, stop, record, tempo, time display with the song position under it
-    divide();
-    {
-        auto panel = take (sections[transport].width);
-        auto mode = panel.removeFromLeft (modeWidth);
-        put (patternModeButton, mode.withY (row1).withHeight (h).reduced (0, 1));
-        put (songModeButton, mode.withY (row2).withHeight (h).reduced (0, 1));
-        panel.removeFromLeft (8);
-        const auto y = panel.getCentreY() - big / 2;
+    snapLabelArea = patternLabelArea = {};
 
-        for (auto* b : { &playButton, &stopButton, &recordButton })
+    for (const auto& entry : toolbarLayout.entries)
+    {
+        const auto group = entry.group;
+
+        if (! visible[(std::size_t) group])
         {
-            put (*b, juce::Rectangle<int> (panel.getX(), y, bigWidth, big));
-            panel.removeFromLeft (bigWidth + 4);
+            switch (group)
+            {
+                case Group::transport:
+                    hide ({ &patternModeButton, &songModeButton, &playButton, &stopButton, &recordButton, &tempoDisplay, &timeDisplay, &songPosition });
+                    break;
+                case Group::master: hide ({ &masterVolume, &masterPitch }); break;
+                case Group::record: hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton }); break;
+                case Group::snap: hide ({ &gridBox, &patternBox, &newPatternButton, &patternMenuButton }); break;
+                case Group::windows:
+                    for (auto& b : panelButtons)
+                        hide ({ &b });
+                    hide ({ &pluginPickerButton });
+                    break;
+                case Group::file: hide ({ &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton }); break;
+                case Group::meters: hide ({ &perfMeter }); break;
+                case Group::output: hide ({ &output }); break;
+                case Group::count_: break;
+            }
+            continue;
         }
 
-        panel.removeFromLeft (4);
-        const auto displays = panel.withY (y).withHeight (big);
-        const auto displayHeight = big - 12;
-        put (tempoDisplay, displays.withWidth (tempoWidth).withHeight (displayHeight));
-        put (timeDisplay, displays.withTrimmedLeft (tempoWidth + 6).withWidth (timeWidth).withHeight (displayHeight));
-        put (songPosition, displays.withTop (displays.getY() + displayHeight + 1).withWidth (tempoWidth + 6 + timeWidth));
-    }
-
-    // 3. master volume over master pitch
-    if (sections[master].shown)
-    {
-        divide();
-        auto panel = take (sections[master].width);
-        put (masterVolume, panel.withY (row1).withHeight (h).reduced (0, 1));
-        put (masterPitch, panel.withY (row2).withHeight (h).reduced (0, 1));
-    }
-    else
-        hide ({ &masterVolume, &masterPitch });
-
-    // 4. recording options: metronome, count-in and wait for input over "what to record" and typing piano
-    if (sections[record].shown)
-    {
-        divide();
-        auto panel = take (sections[record].width);
-        put (metronomeButton, juce::Rectangle<int> (panel.getX(), row1, h, h));
-        put (countInButton, juce::Rectangle<int> (panel.getX() + h + 2, row1, h, h));
-        put (waitInputButton, juce::Rectangle<int> (panel.getX() + 2 * (h + 2), row1, h, h));
-        put (recordMenuButton, juce::Rectangle<int> (panel.getX(), row2, h, h));
-        put (typingPianoButton, juce::Rectangle<int> (panel.getX() + h + 2, row2, h, h));
-    }
-    else
-        hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton });
-
-    // 5. global snap over the pattern selector, each with its name
-    if (sections[snap].shown)
-    {
-        divide();
-        auto panel = take (sections[snap].width);
-        auto first = juce::Rectangle<int> (panel.getX(), row1, panel.getWidth(), h);
-        snapLabelArea = first.removeFromLeft (captionWidth);
-        put (gridBox, first.reduced (0, 1));
-        auto second = juce::Rectangle<int> (panel.getX(), row2, panel.getWidth(), h);
-        patternLabelArea = second.removeFromLeft (captionWidth);
-        put (patternMenuButton, second.removeFromRight (h));
-        put (newPatternButton, second.removeFromRight (h));
-        second.removeFromRight (2);
-        put (patternBox, second.reduced (0, 1));
-    }
-    else
-    {
-        snapLabelArea = patternLabelArea = {};
-        hide ({ &gridBox, &patternBox, &newPatternButton, &patternMenuButton });
-    }
-
-    // 6. shortcuts: the windows over the file actions
-    if (sections[shortcuts].shown)
-    {
-        divide();
-        auto panel = take (sections[shortcuts].width);
-        auto first = panel.withY (row1).withHeight (h);
-        for (auto p : { Panel::playlist, Panel::channelRack, Panel::pianoRoll, Panel::mixer, Panel::browser })
-            put (panelButtons[(std::size_t) p], first.removeFromLeft (h));
-        put (pluginPickerButton, first.removeFromLeft (h));
-
-        auto second = panel.withY (row2).withHeight (h);
-        for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton })
-            put (*b, second.removeFromLeft (h));
-    }
-    else
-    {
-        for (auto& b : panelButtons)
-            hide ({ &b });
-        hide ({ &pluginPickerButton, &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton });
-    }
-
-    // 7. on the right: CPU / memory / polyphony, then the output monitor
-    take (spare);
-    for (auto [section, component] : { std::pair<Section, juce::Component*> { meters, &perfMeter }, { monitor, &output } })
-    {
-        if (sections[section].shown)
+        if (toolbarlayout::rightAligned (group) && spare > 0)
         {
-            divide();
-            put (*component, take (sections[section].width).withY (row1).withHeight (2 * h + 2));
+            take (spare);
+            spare = 0;
         }
-        else
-            hide ({ component });
+
+        divide();
+        auto panel = take (widths[(std::size_t) group]);
+
+        switch (group)
+        {
+            case Group::transport: // Pattern/Song switch, play, stop, record, tempo, time display with the song position under it
+            {
+                auto mode = panel.removeFromLeft (modeWidth);
+                put (patternModeButton, mode.withY (row1).withHeight (h).reduced (0, 1));
+                put (songModeButton, mode.withY (row2).withHeight (h).reduced (0, 1));
+                panel.removeFromLeft (8);
+                const auto y = panel.getCentreY() - big / 2;
+
+                for (auto* b : { &playButton, &stopButton, &recordButton })
+                {
+                    put (*b, juce::Rectangle<int> (panel.getX(), y, bigWidth, big));
+                    panel.removeFromLeft (bigWidth + 4);
+                }
+
+                panel.removeFromLeft (4);
+                const auto displays = panel.withY (y).withHeight (big);
+                const auto displayHeight = big - 12;
+                put (tempoDisplay, displays.withWidth (tempoWidth).withHeight (displayHeight));
+                put (timeDisplay, displays.withTrimmedLeft (tempoWidth + 6).withWidth (timeWidth).withHeight (displayHeight));
+                put (songPosition, displays.withTop (displays.getY() + displayHeight + 1).withWidth (tempoWidth + 6 + timeWidth));
+                break;
+            }
+            case Group::master: // master volume over master pitch
+                put (masterVolume, panel.withY (row1).withHeight (h).reduced (0, 1));
+                put (masterPitch, panel.withY (row2).withHeight (h).reduced (0, 1));
+                break;
+            case Group::record: // metronome, count-in and wait for input over "what to record" and typing piano
+                grid (panel, { &metronomeButton, &countInButton, &waitInputButton, &recordMenuButton, &typingPianoButton });
+                break;
+            case Group::snap: // global snap over the pattern selector, each with its name
+            {
+                auto first = juce::Rectangle<int> (panel.getX(), row1, panel.getWidth(), h);
+                snapLabelArea = first.removeFromLeft (captionWidth);
+                put (gridBox, first.reduced (0, 1));
+                auto second = juce::Rectangle<int> (panel.getX(), row2, panel.getWidth(), h);
+                patternLabelArea = second.removeFromLeft (captionWidth);
+                put (patternMenuButton, second.removeFromRight (h));
+                put (newPatternButton, second.removeFromRight (h));
+                second.removeFromRight (2);
+                put (patternBox, second.reduced (0, 1));
+                break;
+            }
+            case Group::windows: // the windows and the plugin picker
+                grid (panel, { &panelButtons[(std::size_t) Panel::playlist], &panelButtons[(std::size_t) Panel::channelRack],
+                               &panelButtons[(std::size_t) Panel::pianoRoll], &panelButtons[(std::size_t) Panel::mixer],
+                               &panelButtons[(std::size_t) Panel::browser], &pluginPickerButton });
+                break;
+            case Group::file: // new, open, save over export, undo, redo
+                grid (panel, { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton });
+                break;
+            case Group::meters: put (perfMeter, panel.withY (row1).withHeight (2 * h + 2)); break;
+            case Group::output: put (output, panel.withY (row1).withHeight (2 * h + 2)); break;
+            case Group::count_: break;
+        }
     }
 
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight));
+}
+
+// --- toolbar layout ------------------------------------------------------------------------------
+
+void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool save)
+{
+    const auto scaleChanged = layout.uiScale != toolbarLayout.uiScale;
+    toolbarLayout = layout;
+    const auto size = toolbarLayout.iconSize;
+    rowHeight = toolbarlayout::rowHeight (size);
+    toolbarHeight = 2 * rowHeight + 10;
+
+    const auto fraction = toolbarlayout::iconFraction (size), maxPx = toolbarlayout::iconMaxPx (size);
+    for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton,
+                     &patternMenuButton, &pluginPickerButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
+                     &patternModeButton, &songModeButton })
+        b->setIconSizing (fraction, maxPx);
+    for (auto& b : panelButtons)
+        b.setIconSizing (fraction, maxPx);
+    for (auto* b : { &playButton, &stopButton, &recordButton }) // tall buttons: the icon follows the row height
+        b->setIconSizing (1.0f, maxPx);
+
+    ToolStrip::iconSize = size;
+    pianoRoll.resized();
+    playlist.resized();
+
+    if (save && scaleChanged)
+        juce::Desktop::getInstance().setGlobalScaleFactor ((float) toolbarLayout.uiScale / 100.0f);
+
+    resized();
+    repaint();
+
+    if (save)
+        saveUiSettings();
+}
+
+juce::PopupMenu MainComponent::makeToolbarMenu()
+{
+    using toolbarlayout::Group;
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Toolbar"));
+
+    for (const auto& entry : toolbarLayout.entries)
+    {
+        const auto group = entry.group;
+        menu.addItem (tr (toolbarlayout::groupName (group)), true, entry.shown, [this, group] {
+            auto layout = toolbarLayout;
+            layout.setShown (group, ! layout.isShown (group));
+            setToolbarLayout (layout);
+        });
+    }
+
+    menu.addSeparator();
+    juce::PopupMenu sizes;
+    const char* sizeNames[] = { TR_NOOP ("Small icons"), TR_NOOP ("Medium icons"), TR_NOOP ("Large icons") };
+    for (int i = 0; i < 3; ++i)
+        sizes.addItem (tr (sizeNames[i]), true, (int) toolbarLayout.iconSize == i, [this, i] {
+            auto layout = toolbarLayout;
+            layout.iconSize = (toolbarlayout::IconSize) i;
+            setToolbarLayout (layout);
+        });
+    menu.addSubMenu (tr ("Icon size"), sizes);
+
+    juce::PopupMenu scales;
+    for (auto percent : toolbarlayout::uiScales)
+        scales.addItem (juce::String (percent) + "%", true, toolbarLayout.uiScale == percent, [this, percent] {
+            auto layout = toolbarLayout;
+            layout.uiScale = percent;
+            setToolbarLayout (layout);
+        });
+    menu.addSubMenu (tr ("UI scale"), scales);
+
+    menu.addSeparator();
+    menu.addItem (tr ("Customize toolbar..."), [this] { showCustomizeToolbar(); });
+    menu.addItem (tr ("Reset toolbar to default"), ! toolbarLayout.isDefault(), false, [this] {
+        setToolbarLayout (toolbarlayout::Layout::makeDefault());
+    });
+    return menu;
+}
+
+void MainComponent::showToolbarMenu()
+{
+    makeToolbarMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void MainComponent::showCustomizeToolbar()
+{
+    auto panel = std::make_unique<toolbar::CustomizePanel> (toolbarLayout);
+    panel->onChange = [safe = juce::Component::SafePointer<MainComponent> (this)] (const toolbarlayout::Layout& layout) {
+        if (safe != nullptr)
+            safe->setToolbarLayout (layout);
+    };
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (panel.release());
+    options.dialogTitle = tr ("Customize toolbar");
+    options.dialogBackgroundColour = theme::colour::bg2;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.escapeKeyTriggersCloseButton = true;
+    if (auto* dialog = options.launchAsync())
+        keepAboveMainWindow (*dialog);
+}
+
+void MainComponent::mouseDown (const juce::MouseEvent& e)
+{
+    // a right-click on the toolbar's background (between the panels): show / hide groups, icon size, customize
+    if (e.mods.isPopupMenu() && e.y < toolbarHeight)
+        showToolbarMenu();
+}
+
+juce::Rectangle<int> MainComponent::getToolStripAreaForSnapshot (bool playlistStrip)
+{
+    auto& editor = playlistStrip ? (juce::Component&) playlist : (juce::Component&) pianoRoll;
+    if (! editor.isShowing())
+        return {};
+    const auto area = getLocalArea (&editor, editor.getLocalBounds());
+    return area.withHeight (40).withWidth (juce::jmin (area.getWidth(), 900)).getIntersection (getLocalBounds());
 }
 
 // --- keys --------------------------------------------------------------------------------------
@@ -831,6 +938,12 @@ void MainComponent::loadUiSettings()
         else if (key == "scopeMode")
             toolbar::OutputMonitor::mode = juce::jlimit (0, toolbar::OutputMonitor::modeCount - 1,
                                                          line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "toolbarGroups")
+            toolbarLayout.orderFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
+        else if (key == "toolbarIcons")
+            toolbarLayout.iconSize = toolbarlayout::Layout::iconSizeFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
+        else if (key == "uiScale")
+            toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
             PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
     }
@@ -848,7 +961,10 @@ void MainComponent::saveUiSettings()
                                       + juce::String (PlaylistComponent::editPatternsIn) + "\nsplash=" + juce::String (startup.splash ? 1 : 0)
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
-                                      + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode) + "\n");
+                                      + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
+                                      + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
+                                      + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
+                                      + "\nuiScale=" + juce::String (toolbarLayout.uiScale) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -2144,6 +2260,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             startup.sound = ! startup.sound;
             saveUiSettings();
         });
+        menu.addSubMenu (tr ("Toolbar"), makeToolbarMenu());
         menu.addSeparator();
         menu.addItem (tr ("Edit keyboard shortcuts (keys.json)..."), [this] { editKeyMap(); });
         menu.addItem (tr ("Reload keyboard shortcuts"), [this] {
