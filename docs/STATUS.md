@@ -65,7 +65,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
-  their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
+  their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact),
   Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter, Frequency Shifter,
@@ -338,6 +338,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   automation of every control; the Freeverb mapping remains only as a fallback for unreadable states. Fruity Reeverb
   (the first version, its own copy of the plate) likewise exact (`EffectKind::reeverb1`), bit-identical on its 7 demo
   states and synthetic/automation cases.
+- **LuxeVerb:** FL's exact engine (`core/LuxeVerb`, REA round 60) — the shimmer-reverb engine of FL's shared DSP
+  library: envelope follower (→ wet or → decay, sidechain), input filters, gliding predelay and all-pass diffuser,
+  16-line modulated delay network with rotation matrix and per-line damping, freeze/sustain, granular pitch shifters
+  in the feedback path or as two feed-forward voices, limiter, output peak, width and dry/wet, with the library's own
+  float routines and rounding. FL's 49 controls and 4 sync switches stay editable. Bit-identical to the installation's
+  DLLs on all 23 installation states (44.1/48 kHz), on 60 random states over 22.05–192 kHz and with automation of
+  every control; the generic reverb mapping remains only as a fallback for unreadable states.
 - **Fruity Parametric EQ 2 and Fruity Parametric EQ:** FL's exact engines inside LYNX's parametric EQ
   (`core/ParametricEqFl`, `core/ParametricEqLinear`, REA round 50), so the EQ editor keeps working with FL's own values
   (width, Steep/Gentle orders, enable mask, HQ options): band design with the gentle/steep stage tables, double-precision

@@ -1270,10 +1270,12 @@ const std::array<const char*, luxeVerbParamCount> names { {
 
 namespace
 {
-// defaults of a new plugin (controls 0…38 as FL creates the plugin; 39…48 as a state older than version 9 sets them)
+// controls of a new plugin
 const std::array<int, luxeVerbControlCount> defaultRaw { {
-    746, 12991, 20, 1, 5756, 156, 192, 1000, 35, 32, 103, 10, 103, 0, 1, 0, 120, 2988, 192, 0, 1719, 720, 1000, 0, -4000,
-    50, 400, 50, 0, 0, 301, 10, 746, 746, 2973, 258, 487, 120, 1, 0, 0, 24, 20, 1719, 20, 1000, 192, 1000, 192 } };
+    746, 12991, 20, 1, 13105, 1, 192, 850, 50, 20, 100, 10, 1000, 0, 1, 1, 0, 1000, 192, 700, 1719, 20, 1000, 0, -4000,
+    50, 400, 50, 1, 0, 301, 10, 746, 746, 7726, 0, 1859, 125, 1, 0, 0, 0, 20, 0, 20, 1000, 192, 1000, 192 } };
+// what a state older than version 9 leaves in controls 39…48 (the plugin sets these values before reading it)
+const std::array<int, 10> oldStateTail { { 0, 0, 24, 20, 1719, 20, 1000, 192, 1000, 192 } };
 
 // the plugin's curve: lo + (hi − lo) · x^(1/k) (in double, then to float)
 float curve (float x, double lo, double hi, double k) noexcept
@@ -1351,6 +1353,8 @@ std::optional<Settings> parseState (const std::vector<std::uint8_t>& d)
     const size_t need = 13 + 4 * (size_t) count + (version >= 9 ? 2 : 0);
     if (d.size() < need) return std::nullopt;
     Settings s;
+    for (size_t k = 0; k < oldStateTail.size(); ++k) s.raw[39 + k] = oldStateTail[k];
+    if (version < 8) s.raw[38] = 1; // limiter on
     s.sync[0] = d[8] != 0;
     s.sync[1] = d[9] != 0;
     for (int k = 0; k < count; ++k) s.raw[(size_t) k] = i32 (13 + 4 * (size_t) k);
@@ -1450,8 +1454,9 @@ public:
     void reset() noexcept override { ready = false; }
     void setSidechain (const float* l, const float* r) noexcept override
     {
-        scL = l;
-        scR = r;
+        // called only when the slot has a side input: a silent source is silence (FL hands the plugin its buffer)
+        scL = l != nullptr ? l : zeros.data();
+        scR = r != nullptr ? r : zeros.data();
     }
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override
     {
@@ -1463,6 +1468,8 @@ public:
             ready = true;
         }
         else engine.set (s, t);
+        if (scL == zeros.data() && (int) zeros.size() < n) // longer than the silence buffer: follow the input
+            scL = scR = nullptr;
         engine.process (left, right, n, scL, scR);
         scL = scR = nullptr;
     }
@@ -1473,6 +1480,7 @@ private:
     bool ready = false;
     const float* scL = nullptr;
     const float* scR = nullptr;
+    std::vector<float> zeros = std::vector<float> (8192, 0.0f);
 };
 
 std::string fmt (const char* f, double v)
@@ -1513,7 +1521,7 @@ std::string luxeVerbParamText (int param, float value01)
         case 6: case 18: case 46: case 48: return fmt ("%.2f / 16", v);
         case 9: return fmt ("%.0f m", v);
         case 10: return fmt ("%.2f Hz", v);
-        case 13: return raw == 0 ? "normal" : raw == 1 ? "freeze" : "mute";
+        case 13: return raw == 0 ? "normal" : raw == 1 ? "freeze" : "sustain";
         case 28: return raw == 0 ? "env → off" : raw == 1 ? "env → wet" : "env → decay";
         case 16: case 41: case 42: return fmt ("%+.1f st", v);
         case 24: return fmt ("%.2f dB", v);

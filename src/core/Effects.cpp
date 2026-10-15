@@ -3,6 +3,7 @@
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
@@ -2240,6 +2241,15 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params[i].defaultValue = p[i];
         return info;
     }();
+    // FL's 49 controls as (raw − min) / range + the 4 sync switches (core/LuxeVerb.h); defaults = a new FL instance
+    static const EffectInfo luxeVerbInfo = [] {
+        EffectInfo info { "LuxeVerb", {} };
+        EffectParams p {};
+        luxeverb::toParams (luxeverb::Settings {}, p);
+        for (std::size_t i = 0; i < (std::size_t) luxeVerbParamCount; ++i)
+            info.params.push_back ({ luxeverb::names[i], p[i] });
+        return info;
+    }();
     // FL's controls as raw / max (core/Reeverb2.h); defaults = the plugin's own (1250, 10800, 0, 26000, 65536, 20, 4700,
     // 10800, 65536, 13120)
     static const EffectInfo reeverb1Info { "Reeverb", { { "Low cut", 1250.0f / 65536 }, { "High cut", 10800.0f / 65536 }, { "Predelay", 0.0f },
@@ -2390,6 +2400,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::luxeVerb: return luxeVerbInfo;
     }
     return eq;
 }
@@ -2620,6 +2631,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
 
         case EffectKind::reeverb2: return reeverb2ParamText (param, v);
+        case EffectKind::luxeVerb: return luxeVerbParamText (param, v);
         case EffectKind::reeverb1: return reeverb1ParamText (param, v);
         case EffectKind::fruityChorus: return fruitychorusfx::paramText (param, v);
         case EffectKind::hyperChorus: return hyperchorusfx::paramText (param, v);
@@ -2814,6 +2826,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityBalance: return flbasic::makeBalance();
         case EffectKind::fruityBloodOverdrive: return flbasic::makeBloodOverdrive();
         case EffectKind::reeverb2: return makeReeverb2();
+        case EffectKind::luxeVerb: return makeLuxeVerb();
         case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::fruityDelay2: return fldelay::makeDelay2();
         case EffectKind::fruityDelay3: return fldelay::makeDelay3();

@@ -52,6 +52,8 @@ add_library(lynx_core STATIC
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
     src/core/Reeverb2.cpp
+    src/core/LuxeVerb.cpp
+    src/core/IldspMath.cpp
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp

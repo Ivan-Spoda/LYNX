@@ -45,6 +45,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
 #include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -10607,3 +10608,4 @@ TEST (fruity_delay_engines)
     }
 }
 #include "UiRackMixerTests.inc"
+#include "LuxeVerbTests.inc"

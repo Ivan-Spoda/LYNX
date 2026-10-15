@@ -1386,7 +1386,8 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                                       EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor,
                                       EffectKind::spreader, EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
-                                      EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive };
+                                      EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive,
+                                      EffectKind::luxeVerb };
 } // namespace
 
 const std::vector<EffectKind>& addableEffects()
