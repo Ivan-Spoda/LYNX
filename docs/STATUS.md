@@ -68,7 +68,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact),
   Delay 2/3, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic, Pitch Shifter and EQUO (exact engines), Frequency Shifter,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
@@ -105,7 +105,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
-  built-in waves read from the user's FL installation); Autogun on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  built-in waves read from the user's FL installation); Autogun on Ogun's engine in its Autogun variant (REA round 57:
+  master × 0.25 and the Magic Dust stage = FL's Soundgoodizer engine with `Autogun\Data\SG.dat` read from the user's
+  installation; within −127 dB of FL's DLL on the 4 fixed-spectrum template states, 9/9 states usable); Transistor Bass
+  on its engine (REA round 57: V1 legacy and both V2 cutoff ranges, 303 Pulse with the recorded cycles read from the
+  user's engine DLL, distortion, delay, reverb and the 16-step sequencer; 55/128 factory programs bit-exact, worst
+  −108.6 dB vs FL's DLL); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -206,7 +211,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   model itself is within −60 dB of FL's DLL on 20 of 20 demo channels. The core tests check the engine against model
   fingerprints: the 20 demo channels at the state's quality and at quality 4 (`ogun_demo_channels`) and 17 feature
   variants of a state written from scratch (`ogun_engine`). The old spectral-oscillator conversion remains for
-  unreadable states, Autogun (another state layout), and the synth's "FL presets" button.
+  unreadable states and the synth's "FL presets" button. Autogun (REA round 57) uses the same engine on its state variant
+  (a 4-byte seed after the comment from version 19 on; the comment length is one byte or 0xFF + i32, which also fixes
+  Ogun states with comments of 128+ characters), master × 0.25 and the Magic Dust stage (`autogun_template_channels`).
   CPU: one inverse FFT of N per voice and frame (split re/im radix-2 passes, cache-blocked, AVX when available), the
   quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
   "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
@@ -358,6 +365,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   behaviour (interpolated table, ×16 when oversampling is on). Soft Clipper: FL's exponential knee in x87 precision
   and its post law. Controls are editable LYNX parameters. Bit-identical to both DLLs on every installation state
   (57 WaveShaper states live and rendering, at 44.1 and 48 kHz; 12 Soft Clipper states plus edge cases).
+- **Fruity PanOMatic, Fruity Balance and Fruity Blood Overdrive:** FL's exact engines as mixer effects
+  (`core/FruityBasicFx`, REA round 58). PanOMatic: pan/volume laws, its 2×2 pan matrix, the LFO on FL's host wave
+  tables (sine/triangle/square, free running in samples — tempo is never read) stepping once per render call, FL's gain
+  ramps; Balance: its sine/cosine balance law with the cross terms, FL's ramps; Blood Overdrive: the per-sample state-
+  variable filter, integrators, 65536-point sine shaper, smoothers and post filter, settled at load as FL does. Controls
+  are editable LYNX parameters and take FL's automation. Bit-identical to the three DLLs on every installation state
+  (54 PanOMatic, 10 Balance, 19 Blood Overdrive) plus synthetic states, at 22.05/44.1/48/96 kHz, several block sizes,
+  four signals and control changes during playback.
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -379,6 +394,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   L-R encoding. Bit-exact against the reference model (which is within −137 dB of FL's DLL) on all 77 comparison
   cases, the 10 demo instances included. Draft follows the stored button for playback and export alike (LYNX has
   no "HQ for all plugins" option): octave levels and 16-frame re-blocking, its 16 samples of latency reported to PDC.
+- **Gross Beat:** FL's own engine as a mixer effect (`core/GrossBeat`, REA round 53) built from the saved state, which
+  the `.lynx` project keeps: the 36 time-travel and 36 volume slots (FL's envelope player, every curve type but the
+  spline 10), slot selection with trigger/position sync, link and one-shot, the 2-bar time buffer read by FL's
+  8/16-tap windowed sinc (speed-dependent cutoff in HQ, jump declick, tempo-change crossfade, bar repeat/hold),
+  volume tension, attack/release followers with attack compensation, mixes and the DC option; the dry path keeps FL's
+  15-sample latency. The eight parameters stay editable/automatable in LYNX. Against Gross Beat_x64.dll: every one of
+  the installation's 41 states (30 demo slots, 2 template slots, 9 presets) bit-identical at 95 BPM/44.1 kHz and
+  174 BPM/48 kHz, 34 at 120 BPM (the rest −141…−153 dB, IPP's 50-bit sine at near-whole-sample read positions); slot
+  automation, tempo changes, hold, stop/start, song jumps, PPQ 96/960 and odd block sizes bit-identical.
 - **Fruity Chorus, Hyper Chorus, Vintage Chorus:** FL's own engines (`core/ChorusFx.cpp`, REA round 59) from the saved
   controls, editable as LYNX parameters: Fruity Chorus's three table LFOs, crossover and 12-bit fixed-point taps;
   Hyper Chorus's two 4-voice cores (movement panning, cubic taps, ArachnaChor), filters, high-pass cross-fade and
@@ -392,6 +416,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   (which is bit-exact with FL's DLL), Vintage Phaser (V1/V2, ×4/×8 oversampling, noise, gate, delay) within −121 dB.
 
 **Still approximated or left out** (no confirmation yet):
+- Gross Beat (REA round 53 §8): MIDI control of the slots (keys, key-held, MIDI trigger option) — LYNX effects get no
+  MIDI; the hidden parameter 8 (time offset, 65536 in every state) is ignored; curve type 10 (spline) runs as a line
+  (in no selected slot); FL's "playing" and position-jump messages are inferred from LYNX's transport.
 - Harmor (REA round 34 open items; `harmorFallbacks()` lists what a state uses): image/resynthesis data is ignored
   (the part plays its timbres; 8 demo channels carry images), arpeggio envelope points act as normal points (3 demo
   channels), the Noise resonance (type 109) is skipped, the blur variant of misc +0x46 runs as the normal blur (its one
@@ -423,6 +450,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the GMS findings (inference).
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
+- Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
+  calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
+  2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
+  editor-only state field is not identified.
 - Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
   on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
   self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
@@ -449,7 +480,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   the worst synthetic case vs the DLL); global LFOs/envelopes run per voice (none in FL's data); host answers 2/6 are 0,
   release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
   demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
-  (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
+  (LYNX's mono setting = 1). Autogun (REA round 57 §1): the same limits; FL's Seed-2 counter differs per run; the
+  Magic Dust stage is skipped when `SG.dat` is not found; automation of Magic Dust (FL updates only the stage's on/off,
+  not the hosted parameter) and a possible LFO-knob refresh difference on articulators 5–12 (no data uses it) are not
+  modelled. Transistor Bass (REA round 57 §2): the CRT's pow/powf last-bit differences (−108 dB worst); parameter
+  automation smoothing, MIDI CC/pitch-bend, the "MIDI channel 13" sequence transpose (no note channel in LYNX) and the
+  order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
+  as an output gain (the plugin does not read Final.Vol).
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
@@ -529,7 +566,7 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Autogun's engine (state layout differs from Ogun's; DLL not run), Maximus's Master Mid mode and linear-phase
+- Maximus's Master Mid mode and linear-phase
   split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
 - Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
   colour/height (need model fields), F2/F3 search stepping, instrument drops on mixer inserts, the automation

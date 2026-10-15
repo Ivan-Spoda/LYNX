@@ -776,7 +776,8 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         const auto isPlugin = slots[i].kind == EffectKind::plugin;
         const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
 
-        if (key < smartDisable.size())
+        // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
+        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat)
         {
             auto& sd = smartDisable[key];
 

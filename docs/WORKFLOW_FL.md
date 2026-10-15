@@ -401,7 +401,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| K1 | **Done** | One contract (`ui/ValueControl.*`, math in `core/ValueMath.h`): drag, **Ctrl+drag fine** (switchable mid-drag), wheel (Ctrl finer) on rack knobs and route box, mixer faders/pans, effect knobs and wet/dry, tempo, swing and every plain `juce::Slider` (global contract). No value snapping, so no Shift override |
+| K1 | **Done** | One contract (`ui/ValueControl.*`, math in `core/ValueMath.h`): drag, **Ctrl+drag fine** (switchable mid-drag), wheel (Ctrl finer) on rack knobs and route box, mixer faders/pans, effect knobs and wet/dry, tempo, swing and every plain `juce::Slider` (global contract). No value snapping, so no Shift override. **UI-C (2026-10-15):** a floating value read-out follows every custom-painted knob, fader, send knob, graph lane and effect knob while it is dragged, wheeled or reset (`ui::showValueTip`/`flashValueTip`), and plain sliders without a text box get it from the global contract; hovered knobs light their body/arc |
 | K2 | **Done** | Alt+click or middle-click resets; double-click still resets |
 | K3 | **Done** (most) | One menu: Type value…, Reset, Create automation clip, Link to MIDI controller, Unlink (wet/dry included). No "init song with this position" or larger-control view |
 | K4 | Partial | The tempo display is a draggable number; other number displays (route box) use the knob contract. No edge-hover stepping |
@@ -416,16 +416,16 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | C2 | Yes (own) | Drag-paint/erase is a LYNX design choice (FL: not documented) |
 | C3 | No | — |
 | C4 | **Done** (LYNX lanes) | Graph lane under the selected channel (Ctrl+K, channel menu → Steps): velocity, pan, release, fine pitch, Mod X, Mod Y; drag sets, right-drag draws a ramp, Alt+click resets; it writes the same note fields as the Piano Roll (`core/NoteTools.h` levels). No "note" or "shift" lanes, no Ctrl scaling |
-| C5 | **Done** | Click opens/closes the channel's editor (plugin window or settings), closing the previous one unless Alt is held or Options → Keep channel editors open is on; Ctrl+click auditions; Shift+wheel on the name/selector moves the channel; double-click opens the Piano Roll. Built-in drums and audio clips have no editor (the click only selects). Checked on [DOC][cr] |
+| C5 | **Done** | Click opens/closes the channel's editor (plugin window or settings), closing the previous one unless Alt is held or Options → Keep channel editors open is on; Ctrl+click auditions; Shift+wheel on the name/selector moves the channel; double-click opens the Piano Roll. Built-in drums and audio clips have no editor (the click only selects). Checked on [DOC][cr]. **UI-C:** the editor now opens on release, so dragging the channel button up/down **reorders the selected channels** (LYNX gesture; FL uses Shift+wheel/Alt+Up/Down, both kept) |
 | C6 | **Done** (most) | Menu has piano roll, instrument replace, rename **and colour dialog**, colour, clear notes, arpeggiator, sampler slicing, clone, insert channel here, move up/down, send to free inserts, delete selected, "Channel settings…", and **Steps → fill every 2/4/8, Euclidean fill… (pulses / length / rotation with a ring preview), rotate left/right, graph lanes**. Missing: copy/paste note data, burn MIDI |
-| C7 | **Done** (LYNX gestures) | Selector column: click selects, Ctrl+click or right-click toggles, Shift+click range, double-click all; Up/Down, Shift+Up/Down; **Alt+Up/Down moves**. The selection drives live MIDI (up to 16 extra channels) and the PC keyboard. **Sort channels by name / colour / insert / type and Select unused channels** in the channel menu (`channelSortOrder`, `unusedChannels`) |
+| C7 | **Done** (LYNX gestures) | Selector column: click selects, Ctrl+click or right-click toggles, Shift+click range, double-click all; Up/Down, Shift+Up/Down; **Alt+Up/Down moves**. The selection drives live MIDI (up to 16 extra channels) and the PC keyboard. **Sort channels by name / colour / insert / type and Select unused channels** in the channel menu (`channelSortOrder`, `unusedChannels`). **UI-C:** **left-drag over the selectors selects a range, right-drag adds the crossed rows** ([DOC][cr]: "right-drag multi-selects") |
 | C8 | Partial | Left mute; right-click or Ctrl+click solo (`:267-283`). No lock |
 | C9 | **Done** | 1..0 mute, Ctrl+1..0 solo channels 1–10 while the rack has focus and the typing piano is off |
-| C10 | **Done** (most) | Ctrl+L (and menus) send the selection to free inserts, naming and colouring each insert after its channel (`sendChannelsToFreeInserts`). Route box follows the control contract. No Alt+M toggle |
+| C10 | **Done** (most) | Ctrl+L (and menus) send the selection to free inserts, naming and colouring each insert after its channel (`sendChannelsToFreeInserts`). Route box follows the control contract. No Alt+M toggle. **UI-C:** double-click on the route box shows the Mixer at that insert ([DOC][cr]); "Next free insert" moved to its right-click menu |
 | C11 | No | No step-data clipboard in the rack |
 | C12 | Partial | Ctrl+Shift+Left/Right in the rack **rotates the selected channels' steps** by one step (wrapping in the pattern); the Piano Roll's Ctrl+Shift+arrows rotate within the bar |
 | C13 | No | — |
-| C14 | Partial | Global swing knob in the toolbar (`MainComponent.cpp:121-128`); per-channel swing mix exists in the model and is imported, but there is no UI for it |
+| C14 | **Done** (most) | Global swing knob in the toolbar (`MainComponent.cpp:121-128`); per-channel swing mix exists in the model and is imported, but there is no UI for it. **UI-C:** channel menu → Steps → **Swing mix (n%)…** sets the per-channel swing mix for the selected channels ([DOC][csx]) |
 | C15 | Partial | Length via the pattern menu (Automatic, 1–32 bars); the grid follows the length (`ChannelRackComponent.cpp:89-99`). No corner drag |
 | C16 | **Done** | Shift+wheel over the Channel Rack panel title changes the pattern (the title shows the pattern's name) |
 | C17 | No | — |
@@ -511,8 +511,8 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | ID | LYNX | Where / note |
 |---|---|---|
 | M1 | **Done** | Click selects; **Ctrl+click / Shift+click on a strip's header add / select a range**; selected faders and pans move together (offsets kept) |
-| M2 | **Done** | **Alt+Left/Right and Shift+wheel move the selected inserts**; channels, sends, sidechains and automations follow (`mixerops::moveTracks`). Strip menu: move left/right |
-| M3 | **Done** | Send arrow on other strips when one is selected; drag after enabling sets the level; **right-click the arrow: send here / send only here / sidechain only** (a level-0 send, the compressors and vocoders there listen to the source; `mixerops::sidechainTo`) |
+| M2 | **Done** | **Alt+Left/Right and Shift+wheel move the selected inserts**; channels, sends, sidechains and automations follow (`mixerops::moveTracks`). Strip menu: move left/right. **UI-C:** dragging a strip header sideways reorders the selected inserts |
+| M3 | **Done** | Send arrow on other strips when one is selected; drag after enabling sets the level; **right-click the arrow: send here / send only here / sidechain only** (a level-0 send, the compressors and vocoders there listen to the source; `mixerops::sidechainTo`). **UI-C:** compact routing lane under the strips: send switch (→ n), a **send level knob** under it once the send is on (full control contract), an "→ selected" tag on inserts that feed the selected one, and **wires** from the selected insert to its sends (red) / Master (dim) and from its sources (blue) |
 | M4 | **Done** (most) | Strip menu: **route the selected inserts here / only here**, send only to this track, send only to Master again. No submix |
 | M5 | **Done** | **Ctrl+L links the selected channels to the selected insert, Ctrl+Shift+L to consecutive inserts from it, Alt+L selects the channels linked to it** (Mixer focused; also in the strip menu). Keys checked on [DOC][sc] |
 | M6 | **Done** | Mute LED: left-click mutes, **right-click or Ctrl+click solos exclusively** (again: unsolo); the "S" button still toggles; solo along the path. No Ctrl+right-click unmute-all |
@@ -520,7 +520,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | M8 | **Done** (most) | 10 slots, click empty → add menu, bypass LED, dry/wet, menu with replace / presets / sidechain / move / delete; **drag a slot or wheel over its name to reorder it** (`mixerops::moveEffectSlot`); **A/B compare** (store as B, swap with B) in the slot menu; effect presets dropped from the Browser load into a slot |
 | M9 | **Done** | "FX" switch in the effects panel header: click turns all effects of the insert on/off, **right-click opens or closes their plugin windows** |
 | M10 | **Done** (LYNX variant) | **Record-arm dot on every insert**: arming turns audio recording on and the take plays through the armed insert (`AudioEngine::setInsertArmed`); not saved with the project. No per-insert input selector |
-| M11 | No | — |
+| M11 | Partial | **UI-C:** routing wires for the selected insert (see M3); no docks, view sizes or separators |
 | M12 | Partial | Track EQ callout with 9 sliders (`:475-562`) |
 | M13 | No | — |
 | M14 | Partial | "+" adds an insert (`:323-333`); no delete/trim/reorder |
@@ -928,6 +928,22 @@ action and when Ctrl/Shift/Alt are pressed or released. Wheel scrolling glides; 
 [main]: https://www.image-line.com/support/flstudio_online_manual/html/main_windows.htm
 
 ---
+
+### 5.6 Channel Rack rows and Mixer strips (UI-C, 2026-10-15)
+
+FL's Mixer page ([DOC][mx]) describes each insert as: name, peak meter, pan/stereo separation, fader, send
+switch/knob, plus routing cables between inserts; the Channel Rack page ([DOC][cr]) puts mute, pan, volume,
+the mixer-track field, the channel button and the selector on each row. LYNX keeps that order, drawn its own way:
+
+- **Mixer strip** (60 px, Master 76 px), top to bottom: colour band; record arm, number, effect count (`FX2`,
+  blue when on); the name **once**; pan and stereo separation knobs; mute LED and solo; stereo meters (6 px
+  each) with a **peak-hold line** and a **clip latch** (click the meter to clear; `core/MeterBallistics.h`) next
+  to the fader; the dB read-out; then the **routing lane**: send switch, send level knob, and wires. The list of
+  channels routed into an insert moved from under the strip into its hint.
+- **Routing lane**: only shown relative to the selected insert, so it never clutters: red wires to its sends,
+  a dim wire to Master, blue wires from inserts that feed it.
+- **Hover**: every knob, LED, step, route box, slot and header under the mouse is lifted, and the hint bar
+  describes it; while a value is dragged its read-out floats next to the control (`ui::showValueTip`).
 
 ## Appendix: manual pages cited
 
