@@ -8318,6 +8318,15 @@ TEST (minisynth_engine)
     }
     const auto ref = lynx::minisynth::renderReference (blobA, { { 0, 60, (std::pow (11.0, 1.28 * 0.78125) - 1.0) / 10.0, 1.0, 0.0, 0.0, 5120 } },
                                                        44100.0, 8192, osc, 512, 120.0, 0, -1.0, true);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 8192; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1e-3 && ! inst->idle());
+}
+
 // ---- Fruit Kick / BassDrum (REA_rodada43): synthetic states and data, golden values of our round-43 models ----
 namespace
 {
@@ -8524,7 +8533,6 @@ TEST (bassdrum_engine)
         diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) i]), (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) i + 1]) });
         energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
     }
-    CHECK (diff == 0.0 && energy > 1e-3 && ! inst->idle());
     CHECK (diff == 0.0 && energy > 1e-2);
 }
 // Workflow P2 (docs/WORKFLOW_FL.md)
