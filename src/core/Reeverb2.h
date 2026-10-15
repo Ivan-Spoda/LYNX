@@ -28,6 +28,36 @@ std::optional<EffectSlot> reeverb2FromFl (const std::vector<std::uint8_t>& state
 // Text of a parameter in FL's units
 std::string reeverb2ParamText (int param, float value01);
 
+// Fruity Reeverb (the first version, REA_rodada49 §6): its own Delphi copy of the plate without early reflections or
+// modulation — 10 controls (low cut, high cut, predelay, room, diffusion, colour, decay, high damping, dry, wet) kept
+// as raw / max.
+constexpr int reeverb1ParamCount = 10;
+std::unique_ptr<Effect> makeReeverb1();
+std::optional<EffectSlot> reeverb1FromFl (const std::vector<std::uint8_t>& state);
+std::string reeverb1ParamText (int param, float value01);
+
+namespace reeverb1
+{
+extern const std::array<int, reeverb1ParamCount> maxima; // FL's control ranges (all start at 0)
+using Raw = std::array<int, reeverb1ParamCount>;
+Raw fromParams (const EffectParams& params) noexcept;
+
+class Engine
+{
+public:
+    Engine();
+    ~Engine();
+    void prepare (int sampleRate, const Raw& raw); // creation, rate, state and FL's flush
+    void flush() noexcept;
+    void set (const Raw& raw);
+    void process (float* left, float* right, int n) noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> d;
+};
+} // namespace reeverb1
+
 namespace reeverb2
 {
 struct Range

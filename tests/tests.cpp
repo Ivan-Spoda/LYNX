@@ -38,6 +38,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
+#include "core/Denormals.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -7393,6 +7394,32 @@ TEST (reeverb2_engine)
     const auto approx = lynx::effectFromFl ("Fruity Reeverb 2", { 0x11, 0x27, 0, 0 }, 120.0);
     CHECK (! approx || approx->kind != lynx::EffectKind::reeverb2);
     CHECK (lynx::reeverb2ParamText (0, 0.0f) == "off" && lynx::reeverb2ParamText (5, 1.0f) == "20.0 s");
+
+    // Fruity Reeverb (the first version): Fruity Reeverb_x64.dll goldens on our own states (denormals flushed, as the
+    // plugin runs and as LYNX renders)
+    lynx::ScopedFlushDenormals ftz;
+    auto run1 = [&] (const std::vector<std::uint8_t>& state, const std::vector<Golden>& gold) {
+        const auto slot = lynx::reeverb1FromFl (state);
+        CHECK (slot.has_value() && slot->kind == lynx::EffectKind::reeverb1);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < N; s += 512)
+            fx->process (l.data() + s, r.data() + s, 512, slot->params, 120.0);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    run1 (hex ("01000000204e0000204e000025000000409c000050c300000a00000030750000a861000050c3000060ea0000"),
+          { { 777, 0.293731689f, 0.146865845f }, { 1555, 0.20980835f, 0.104904175f }, { 3333, 0.0998796821f, 0.0754205957f },
+            { 5000, -0.0994476378f, 0.0116700521f }, { 8191, -0.141061321f, 0.0601170398f } });
+    run1 (hex ("0100000000000000000001000000000000000100000001002800000000000100000001000000000000000100"),
+          { { 777, -0.016678432f, -4.58686594e-31f }, { 1555, 0.0221031085f, 0.0230635051f }, { 3333, 0.0875115693f, 0.1695389f },
+            { 5000, -0.111421227f, -0.295867324f }, { 8191, 0.503498077f, 0.190456569f } });
+    CHECK (lynx::reeverb1FromFl (std::vector<std::uint8_t> (44, 0)).has_value());
+    CHECK (! lynx::reeverb1FromFl (std::vector<std::uint8_t> (40, 0)).has_value());
+    CHECK (lynx::reeverb1ParamText (5, 0.0f) == "Brighter" && lynx::reeverb1ParamText (0, 0.0f) == "off");
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------

@@ -13,6 +13,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/Reeverb2.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -1634,10 +1635,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     else
                         target.kind = AutomationTargetKind::none;
                 }
-                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::reeverb2)
+                else if (target.kind == AutomationTargetKind::effectParam && (fx.kind == EffectKind::reeverb2 || fx.kind == EffectKind::reeverb1))
                 {
-                    // the exact Reeverb 2 keeps FL's controls as (raw − min) / range: FL's normalised value as is
-                    if (target.param < 0 || target.param >= 15)
+                    // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
+                    if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)

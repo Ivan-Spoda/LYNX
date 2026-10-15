@@ -942,6 +942,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Fruity Reeverb 2") // the exact effect (REA_rodada49); the Freeverb mapping below otherwise
         if (auto exact = reeverb2FromFl (state))
             return exact;
+    if (pluginName == "Fruity Reeverb") // the first version, exact (REA_rodada49 §6)
+        if (auto exact = reeverb1FromFl (state))
+            return exact;
     if (pluginName == "Pitcher")
     {
         // "SSLF" + u32 + "1RTP" + 33 f32 (raw parameters 0…32) + 12 B note mask + f32 (REA_rodada19 §6)

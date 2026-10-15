@@ -615,6 +615,278 @@ void Engine::process (float* left, float* right, int n) noexcept
 }
 } // namespace reeverb2
 
+// --- Fruity Reeverb (first version) --------------------------------------------------------------------------------
+
+namespace reeverb1
+{
+using namespace reeverb2; // the shared helpers and plate tables
+
+const std::array<int, reeverb1ParamCount> maxima { 65536, 65536, 250, 65536, 65536, 40, 65536, 65536, 65536, 65536 };
+
+Raw fromParams (const EffectParams& params) noexcept
+{
+    Raw r {};
+    for (int k = 0; k < reeverb1ParamCount; ++k)
+        r[(std::size_t) k] = (int) std::nearbyint (std::clamp (params[(std::size_t) k], 0.0f, 1.0f) * (float) maxima[(std::size_t) k]);
+    return r;
+}
+
+namespace
+{
+constexpr std::uint32_t fillBits = 0x0da24260u; // what the plugin's flush writes into every line
+
+float fillValue() noexcept
+{
+    float f;
+    std::memcpy (&f, &fillBits, 4);
+    return f;
+}
+} // namespace
+
+struct Engine::Impl
+{
+    int fs = 44100;
+    Raw raw {};
+    // converted controls (FUN_006bac20)
+    int lowCut = 19, highCut = 221, predelayMs = 0, room = 1, diffusion = 0, colour = 0, decay = 1, damping = 221;
+    float dry = 0, wet = 0;
+    bool dirty = true;
+    // coefficients and states (FUN_006bb8d0, FUN_006bc150)
+    float cLc = 0, cHc = 1, cDamp = 1, cIn = 0, cT1 = 0, cT2 = 0, g = 0, c1ac = 0, c1b0 = 0, gDry = 0, gWet = 0;
+    float s178 = 0, s17c = 0, s180 = 0, dA = 0, dB = 0, lfA1 = 0, lfA2 = 0, lfB1 = 0, lfB2 = 0;
+    std::array<std::vector<float>, 12> line;
+    std::array<int, 12> L {}, P {};
+    std::vector<float> pre;
+    int preLen = 1, preP = 0, storedRoom = 0;
+    std::array<int, 7> tl {}, tr {};
+
+    void convert()
+    {
+        auto x = [&] (int k) { return (float) std::clamp ((double) raw[(std::size_t) k] / (double) maxima[(std::size_t) k], 0.0, 1.0); };
+        auto trunc = [] (float v) { return (int) (double) v; };
+        lowCut = trunc (x (0) * 2981.0f + 19.0f);
+        highCut = trunc (x (1) * 216.0f + 5.0f);
+        predelayMs = raw[2];
+        room = trunc (x (3) * 99.0f + 1.0f);
+        diffusion = trunc (x (4) * 100.0f);
+        colour = roundEven ((double) ((float) raw[5] * 0.100000001f));
+        decay = trunc (x (6) * 199.0f + 1.0f);
+        damping = (int) (double) (x (7) * 216.0f + 5.0f);
+        dry = x (8);
+        wet = x (9);
+        dirty = true;
+    }
+
+    // FUN_006bb600: allocation at the rate (line sizes for room 100, predelay line for 250 ms)
+    void allocate()
+    {
+        for (int k = 0; k < 12; ++k)
+        {
+            P[(std::size_t) k] = 0;
+            L[(std::size_t) k] = (int) ((long long) lineN[k] * fs / 20000);
+            line[(std::size_t) k].assign ((std::size_t) std::max (1, L[(std::size_t) k]), 0.0f);
+        }
+        preP = 0;
+        preLen = (int) (250LL * fs / 1000);
+        pre.assign ((std::size_t) std::max (1, preLen), 0.0f);
+        storedRoom = 0;
+        dirty = true;
+    }
+
+    // FUN_006ba400: the flush
+    void flush() noexcept
+    {
+        for (auto& b : line)
+            std::fill (b.begin(), b.end(), fillValue());
+        std::fill (pre.begin(), pre.end(), fillValue());
+        s178 = s17c = s180 = 0;
+        lfA1 = lfA2 = lfB1 = lfB2 = 0;
+        dA = dB = 0;
+    }
+
+    void update()
+    {
+        const float fsF = (float) fs;
+        float lc = (float) lowCut;
+        if (lc <= 19.0f)
+            cLc = 0.0f;
+        else
+        {
+            if (fsF * 0.5f <= lc)
+                lc = fsF * 0.5f;
+            const float t = f32 (std::tan ((double) lc * 3.141592653589793 / (double) fsF));
+            cLc = (t - 1.0f) / (t + 1.0f);
+        }
+        auto onePole = [&] (int f) {
+            if (221.0f <= (float) f)
+                return 1.0f;
+            const float y = f32 (2.0 - std::cos ((double) (float) f * 628.3185307179587 / (double) fsF));
+            const double sq = std::sqrt ((double) (y * y) - 1.0);
+            return f32 (1.0 - ((double) y - sq));
+        };
+        cHc = onePole (highCut);
+        preLen = std::max (1, (int) ((long long) predelayMs * fs / 1000));
+        preP %= preLen;
+        const int R = (int) ((long long) fs * (room + 15) / 115);
+        for (int k = 0; k < 12; ++k)
+        {
+            L[(std::size_t) k] = std::max (1, (int) ((long long) lineN[k] * R / 20000));
+            P[(std::size_t) k] %= L[(std::size_t) k];
+        }
+        for (int k = 0; k < 7; ++k)
+            tl[(std::size_t) k] = (int) ((long long) tapLN[k] * R / 20000), tr[(std::size_t) k] = (int) ((long long) tapRN[k] * R / 20000);
+        if (room != storedRoom)
+        {
+            storedRoom = room;
+            for (int k = 0; k < 12; ++k)
+                std::fill (line[(std::size_t) k].begin(), line[(std::size_t) k].begin() + L[(std::size_t) k], 0.0f);
+        }
+        const float d = f32 ((double) diffusion / 100.0);
+        auto half = [&] (int a, int b) { return f32 ((double) (L[(std::size_t) a] + L[(std::size_t) b]) * 0.5 / (double) fsF); };
+        const float ln = f32 (std::log (0.001));
+        if (d == 0.0f)
+            cIn = cT1 = cT2 = 0.0f;
+        else
+        {
+            cIn = f32 (std::exp ((double) (ln * half (0, 1)) / ((double) d * 0.07)));
+            cT1 = f32 (std::exp ((double) (ln * half (4, 8)) / ((double) d * 0.35)));
+            cT2 = f32 (std::exp ((double) (ln * half (6, 10)) / ((double) d * 0.51)));
+        }
+        const float sum = (float) (L[5] + L[7] + L[9] + L[11]) / fsF;
+        const float dec = (float) decay * 0.100000001f;
+        g = f32 (power025 (std::exp ((double) ((ln * sum) / dec))));
+        constexpr float factors[5] { 0.200000003f, 0.600000024f, 1.0f, 1.5f, 3.0f };
+        const float cf = colour >= 0 && colour <= 4 ? factors[colour] : 1.0f;
+        float rho = f32 (power025 (std::exp ((double) ((ln * sum) / (dec * cf))))) / g;
+        c1b0 = f32 (((double) rho - 1.0) * 0.5);
+        if (1.0 < (double) rho)
+            rho = 1.0f;
+        const float t = f32 (std::tan ((double) 500.0f * 3.141592653589793 / (double) fsF));
+        c1ac = (t - rho) / (t + rho);
+        cDamp = onePole (damping);
+        gDry = dry, gWet = wet;
+        dirty = false;
+    }
+
+    static float allPass (std::vector<float>& b, int& p, int len, float x, float c) noexcept
+    {
+        const float y = b[(std::size_t) p] - c * x;
+        b[(std::size_t) p] = x + c * y;
+        if (--p < 0)
+            p = len - 1;
+        return y;
+    }
+
+    float tap (int k, int off) const noexcept
+    {
+        int i = P[(std::size_t) k] + off;
+        if (L[(std::size_t) k] <= i)
+            i -= L[(std::size_t) k];
+        return line[(std::size_t) k][(std::size_t) i];
+    }
+
+    void process (float* io, int n) noexcept
+    {
+        if (dirty)
+            update();
+        auto w = [&] (double c) { return f32 ((double) g + (1.0 - (double) g) * c); };
+        const float w60 = w (0.6), w25 = w (0.25), w70 = w (0.7), w50 = w (0.5), w20 = w (0.2);
+        for (int i = 0; i < n; ++i)
+        {
+            const float xl = io[2 * i], xr = io[2 * i + 1];
+            s178 = s178 + (f32 ((double) ((xl + xr) * 0.5f) + 1e-30) - s178) * cHc;
+            s17c = (s178 - s17c) * cLc + s180;
+            s180 = s178;
+            const float a = cLc == 0.0f ? s178 : f32 ((double) (s178 - s17c) * 0.5 + 1e-30);
+            float y = allPass (line[0], P[0], L[0], a, cIn);
+            y = allPass (line[1], P[1], L[1], y, cIn);
+            y = allPass (line[2], P[2], L[2], y, cIn);
+            y = allPass (line[3], P[3], L[3], y, cIn);
+            const float z = pre[(std::size_t) preP];
+            pre[(std::size_t) preP] = y;
+            if (--preP < 0)
+                preP = preLen - 1;
+
+            float u = line[11][(std::size_t) P[11]] * g;
+            lfA2 = (u - lfA2) * c1ac + lfA1;
+            lfA1 = u;
+            dA = dA + (((u + (u + lfA2) * c1b0) + z) - dA) * cDamp;
+            float v = allPass (line[4], P[4], L[4], dA, cT1);
+            float r = line[5][(std::size_t) P[5]];
+            line[5][(std::size_t) P[5]] = v;
+            if (--P[5] < 0)
+                P[5] = L[5] - 1;
+            v = allPass (line[6], P[6], L[6], r * g, cT2);
+            line[7][(std::size_t) P[7]] = v;
+            if (--P[7] < 0)
+                P[7] = L[7] - 1;
+
+            u = line[7][(std::size_t) P[7]] * g;
+            lfB2 = (u - lfB2) * c1ac + lfB1;
+            lfB1 = u;
+            dB = dB + (((u + (u + lfB2) * c1b0) + z) - dB) * cDamp;
+            v = allPass (line[8], P[8], L[8], dB, cT1);
+            r = line[9][(std::size_t) P[9]];
+            line[9][(std::size_t) P[9]] = v;
+            if (--P[9] < 0)
+                P[9] = L[9] - 1;
+            v = allPass (line[10], P[10], L[10], r * g, cT2);
+            line[11][(std::size_t) P[11]] = v;
+            if (--P[11] < 0)
+                P[11] = L[11] - 1;
+
+            const float sl = ((((tap (9, tl[0]) - tap (9, tl[1]) * w25) - tap (10, tl[2]) * w70) - tap (11, tl[3]) * w20)
+                              + tap (5, tl[4]) * w60 + tap (6, tl[5]))
+                             + tap (7, tl[6]) * w50;
+            const float sr = (((((tap (5, tr[0]) + tap (5, tr[1]) * w25) - tap (6, tr[2]) * w70) - tap (7, tr[3]) * w20)
+                               - tap (9, tr[4]) * w60)
+                              + tap (10, tr[5]))
+                             + tap (11, tr[6]) * w50;
+            io[2 * i] = xl * gDry + sl * gWet;
+            io[2 * i + 1] = xr * gDry + sr * gWet;
+        }
+    }
+
+    std::vector<float> inter;
+};
+
+Engine::Engine() : d (std::make_unique<Impl>()) {}
+Engine::~Engine() = default;
+
+void Engine::prepare (int sampleRate, const Raw& raw)
+{
+    auto& D = *d;
+    D.fs = std::max (1, sampleRate);
+    D.raw = raw;
+    D.allocate();
+    D.convert();
+    D.flush();
+}
+
+void Engine::flush() noexcept { d->flush(); }
+
+void Engine::set (const Raw& raw)
+{
+    if (raw != d->raw)
+    {
+        d->raw = raw;
+        d->convert();
+    }
+}
+
+void Engine::process (float* left, float* right, int n) noexcept
+{
+    auto& D = *d;
+    if ((int) D.inter.size() < 2 * n)
+        D.inter.resize (2 * (std::size_t) n);
+    for (int i = 0; i < n; ++i)
+        D.inter[2 * (std::size_t) i] = left[i], D.inter[2 * (std::size_t) i + 1] = right[i];
+    D.process (D.inter.data(), n);
+    for (int i = 0; i < n; ++i)
+        left[i] = D.inter[2 * (std::size_t) i], right[i] = D.inter[2 * (std::size_t) i + 1];
+}
+} // namespace reeverb1
+
 namespace
 {
 class Reeverb2Effect final : public Effect
@@ -657,9 +929,77 @@ std::int32_t i32 (const std::vector<std::uint8_t>& d, std::size_t at)
     std::memcpy (&v, d.data() + at, 4);
     return v;
 }
+class Reeverb1Effect final : public Effect
+{
+public:
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = (int) std::lround (sampleRate);
+        ready = false;
+    }
+
+    void reset() noexcept override
+    {
+        if (ready)
+            engine.flush();
+    }
+
+    void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto raw = reeverb1::fromParams (params);
+        if (! ready)
+        {
+            engine.prepare (rate, raw);
+            ready = true;
+        }
+        else
+            engine.set (raw);
+        engine.process (left, right, n);
+    }
+
+private:
+    reeverb1::Engine engine;
+    int rate = 44100;
+    bool ready = false;
+};
 } // namespace
 
 std::unique_ptr<Effect> makeReeverb2() { return std::make_unique<Reeverb2Effect>(); }
+std::unique_ptr<Effect> makeReeverb1() { return std::make_unique<Reeverb1Effect>(); }
+
+std::optional<EffectSlot> reeverb1FromFl (const std::vector<std::uint8_t>& state)
+{
+    // FUN_006ba4f0: version (written as 1; anything ≥ 2 is ignored by the plugin), then the 10 controls
+    if (state.size() < 44 || i32 (state, 0) >= 2)
+        return std::nullopt;
+    auto slot = makeEffectSlot (EffectKind::reeverb1);
+    for (std::size_t k = 0; k < (std::size_t) reeverb1ParamCount; ++k)
+        slot.params[k] = (float) std::clamp (i32 (state, 4 + 4 * k), 0, reeverb1::maxima[k]) / (float) reeverb1::maxima[k];
+    return slot;
+}
+
+std::string reeverb1ParamText (int param, float value01)
+{
+    const auto v = std::clamp (value01, 0.0f, 1.0f);
+    char text[48];
+    switch (param)
+    {
+        case 0: { const int hz = (int) (double) (v * 2981.0f + 19.0f); if (hz <= 19) return "off"; std::snprintf (text, sizeof (text), "%d Hz", hz); break; }
+        case 1: case 7: { const int k = (int) (double) (v * 216.0f + 5.0f); if (k >= 221) return "off"; std::snprintf (text, sizeof (text), "%.1f kHz", k / 10.0); break; }
+        case 2: std::snprintf (text, sizeof (text), "%d ms", (int) std::nearbyint (v * 250.0f)); break;
+        case 3: std::snprintf (text, sizeof (text), "%d", (int) (double) (v * 99.0f + 1.0f)); break;
+        case 4: std::snprintf (text, sizeof (text), "%d", (int) (double) (v * 100.0f)); break;
+        case 5:
+        {
+            static const char* names[] { "Brighter", "Bright", "Flat", "Warm", "Warmer" };
+            const int c = (int) std::nearbyint (std::nearbyint (v * 40.0f) * 0.1f);
+            return c >= 0 && c <= 4 ? names[c] : "Flat";
+        }
+        case 6: std::snprintf (text, sizeof (text), "%.1f s", (int) (double) (v * 199.0f + 1.0f) / 10.0); break;
+        default: std::snprintf (text, sizeof (text), "%.0f%%", 100.0 * v); break;
+    }
+    return text;
+}
 
 std::optional<EffectSlot> reeverb2FromFl (const std::vector<std::uint8_t>& state)
 {

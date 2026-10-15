@@ -2146,6 +2146,12 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params[i].defaultValue = p[i];
         return info;
     }();
+    // FL's controls as raw / max (core/Reeverb2.h); defaults = the plugin's own (1250, 10800, 0, 26000, 65536, 20, 4700,
+    // 10800, 65536, 13120)
+    static const EffectInfo reeverb1Info { "Reeverb", { { "Low cut", 1250.0f / 65536 }, { "High cut", 10800.0f / 65536 }, { "Predelay", 0.0f },
+                                                        { "Room size", 26000.0f / 65536 }, { "Diffusion", 1.0f }, { "Color", 0.5f },
+                                                        { "Decay", 4700.0f / 65536 }, { "High damping", 10800.0f / 65536 }, { "Dry", 1.0f },
+                                                        { "Wet", 13120.0f / 65536 } } };
     // raw FL values / max (the names are FL's controls, REA_rodada29 §2.1)
     static const EffectInfo squeezeInfo { "Squeeze", { { "Volume", 127.0f / 160.0f }, { "Mix", 0.5f }, { "Steps", 1.0f / 32768.0f },
                                                        { "Filter", 0.0f }, { "Filter type", 0.0f }, { "Resonance", 0.5f },
@@ -2242,6 +2248,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::vocodex: return vocodexInfo;
         case EffectKind::maximus: return maximusInfo;
         case EffectKind::reeverb2: return reeverb2Info;
+        case EffectKind::reeverb1: return reeverb1Info;
     }
     return eq;
 }
@@ -2458,6 +2465,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
 
         case EffectKind::reeverb2: return reeverb2ParamText (param, v);
+        case EffectKind::reeverb1: return reeverb1ParamText (param, v);
 
         case EffectKind::vintagePhaser:
             switch (param)
@@ -2578,6 +2586,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::maximus: return maximusfx::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::reeverb2: return makeReeverb2();
+        case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
