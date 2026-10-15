@@ -86,8 +86,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
   models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
   9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
-  installation); Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in
-  synth; Sakura and Drumpad on physical models rebuilt from their
+  installation); Toxic Biohazard on its engine (REA round 45: bit-identical to FL's DLL on the 3 demo channels, voice
+  and full effects chain, at 44.1/48/96 kHz, the built-in waves read from the user's FL installation); Kepler, Autogun,
+  MiniSynth, DX10, Fruit Kick, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -194,10 +195,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
   approximation: 4.9 s), the other demos with Ogun channels within ±6 s of before.
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
-- **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
-  key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
-  saturation, LP/BP/HP outputs); FL's filter envelope (time law `max(50x⁴, 0.00101)` s, exponential stages chosen
-  per 128-sample block, within 1.6·10⁻⁸ of the DLL at 44.1/48/96 kHz, REA round 33).
+- **Toxic Biohazard:** its own instrument (`core/Toxic.cpp` + `core/ToxicFx.cpp`, REA round 45): FL's wrapper
+  (velocity from Init.Vol, per-note level/pitch tables, engine chunks of 64), poly/mono voices with the 4 glide modes and
+  stealing, six operators × up to 8 unison lanes on band-limited tables built from the 128-harmonic spectra (wave 0 from the
+  state, waves 2…32 read from the user's `Toxic Biohazard_x64.dll`, SHA-256 checked), the FM matrix (operator i → j, one-sample
+  delay), operator envelopes and Catmull-Rom level ramps, LFOs, the modulation slots (velocity/LFO sources), FL's ladder with
+  its filter envelope, the master envelope, the output rack (distortion + DC blocker, two slots of delay/chorus/reverb/
+  flanger/phaser/lo-fi, 8-band EQ, sleep logic, the DLL's CRT `powf/sinf/cosf/expf/tanf`) and the master gain —
+  bit-identical to `r45/py/toxmodel.py`, which is bit-identical to FL's DLL on the 3 demo channels (voice and full chain,
+  44.1/48/96 kHz) and ~40 synthetic cases. The 2-operator conversion stays for states that need the DLL when it is not found.
 - **Kepler:** LFO1 rate, vibrato and cutoff depth (peak), delay, BPM sync (period n/192 beats, REA round 33);
   Chorus I / II / I+II (FL's chain); chorus noise and gate are off for every state in FL's data (as LYNX).
   **BassDrum:** Peak `1 + 100x³·s⁴`.
@@ -276,9 +282,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   volume); a cut voice fades over 256 samples (FL's host ramp is not confirmed).
 - BooBass: needs the exact BooBass_Eng_x64.dll build (SHA-256 checked; otherwise the saw approximation); keys below
   36 are clamped (FL reads outside its table there).
-- Toxic: the 4-pole ladder is FL's (REA round 26) with fc kept in Hz at any rate (FL's table is built for 44.1 kHz);
-  the filter envelope moves the cutoff on LYNX's 16-sample control tick (FL: every sample, quantised to 9/65535 oct);
-  the re-trigger fade of a reused voice is left out.
+- Toxic Biohazard (REA round 45 §7): the step sequencer is ignored (off in every demo state); MIDI CC/aftertouch/bend
+  sources of the modulation slots are 0 (LYNX sends none); the free-running operators' phase generator is process-global
+  in FL (shared by every instance), LYNX starts one per instance like a fresh FL process, so random phases differ from a
+  given FL render by design; FL's max-polyphony event value and its rate-before-state order at channel creation are taken
+  from the GMS findings (inference).
 - Kepler: the chorus is FL's (REA round 26, within −75 dB of the DLL) with the 0.5 Hz pre-filter high-pass; "Range"
   ×10 (Exo only); a synced LFO1 is locked to the song position at note start (FL runs it from the host's beat delta);
   old (version < 4) synced states use the stored rate, as FL's engine right after loading (whether FL re-sends the
