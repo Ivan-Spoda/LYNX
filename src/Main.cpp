@@ -19,6 +19,8 @@
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
+#include "ui/HistoryPanel.h"
+#include "ui/NoteToolDialogs.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
@@ -1263,6 +1265,21 @@ private:
             saveIconSheet (prefix + "-icons-150.png", 1.5f);
             saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
             saveMenus (ui, prefix + "-menus.png");
+            {
+                // the windows' own menus (title bars) and the toolbar's recording menu
+                juce::StringArray names;
+                std::vector<juce::PopupMenu> menus;
+                for (auto [panel, name] : { std::pair { lynx::workspace::Panel::playlist, "Playlist" }, { lynx::workspace::Panel::channelRack, "Channel Rack" },
+                                            { lynx::workspace::Panel::pianoRoll, "Piano Roll" }, { lynx::workspace::Panel::mixer, "Mixer" },
+                                            { lynx::workspace::Panel::browser, "Browser" } })
+                {
+                    names.add (name);
+                    menus.push_back (ui.getPanelMenuForSnapshot (panel));
+                }
+                names.add ("Recording");
+                menus.push_back (ui.getRecordMenuForSnapshot());
+                saveMenus (names, menus, prefix + "-panel-menus.png");
+            }
 
             auto saveAlert = [&] (std::unique_ptr<juce::AlertWindow> alert, const juce::String& name) {
                 alert->setOpaque (true);
@@ -1334,6 +1351,62 @@ private:
                 saveWindow (std::move (inspector), "-noteinspector.png");
             if (auto inspector = ui.getPianoRollForSnapshot().makeNoteInspectorForSnapshot (true))
                 saveWindow (std::move (inspector), "-noteinspector-one.png");
+
+            // workflow P2: note tool dialogs (they preview on the pattern; each one puts the notes back when destroyed)
+            {
+                auto& roll = ui.getPianoRollForSnapshot();
+                const std::pair<lynx::NoteTool, const char*> tools[] = { { lynx::NoteTool::strum, "-tool-strum.png" },
+                                                                         { lynx::NoteTool::arpeggiate, "-tool-arpeggiate.png" },
+                                                                         { lynx::NoteTool::flip, "-tool-flip.png" },
+                                                                         { lynx::NoteTool::randomise, "-tool-randomise.png" },
+                                                                         { lynx::NoteTool::scaleLevels, "-tool-scalelevels.png" },
+                                                                         { lynx::NoteTool::limit, "-tool-limit.png" } };
+                for (const auto& [tool, name] : tools)
+                    saveWindow (lynx::makeNoteToolPanel (offline, tool, roll.noteIndicesForSnapshot(), roll.gridForSnapshot()), name);
+            }
+
+            // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
+            ui.selectTabForSnapshot (0);
+            ui.getRackForSnapshot().setGraphLevelForSnapshot (0);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-rack-graph.png");
+            ui.getRackForSnapshot().setGraphLevelForSnapshot (1);
+            saveSnapshot (ui, prefix + "-rack-graph-pan.png");
+            ui.getRackForSnapshot().toggleGraphLanes();
+            saveWindow (ui.getRackForSnapshot().makeEuclideanPanel (0), "-euclidean.png");
+
+            // the Mixer with three inserts selected and one armed for recording
+            ui.selectTabForSnapshot (3);
+            if (offline.getSong().mixer.size() > 4)
+            {
+                ui.getMixerForSnapshot().getStripsForSnapshot().setSelection ({ 1, 2, 3 }, 2);
+                offline.setInsertArmed (3, true);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-mixer-multi.png");
+                offline.setInsertArmed (3, false);
+                ui.getMixerForSnapshot().getStripsForSnapshot().setSelection ({}, 0);
+            }
+
+            // the Playlist with ripple editing on
+            ui.selectTabForSnapshot (2);
+            ui.getPlaylistForSnapshot().setRipple (true);
+            saveSnapshot (ui, prefix + "-playlist-ripple.png");
+            ui.getPlaylistForSnapshot().setRipple (false);
+
+            // quick-add palette, and the Browser searching
+            saveWindow (ui.makeQuickAddForSnapshot(), "-quickadd.png");
+            ui.showDesktopForSnapshot (false);
+            ui.getBrowserForSnapshot().setSearchForSnapshot ("kick");
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-browser-search.png");
+            ui.getBrowserForSnapshot().setSearchForSnapshot ({});
+
+            // the undo history after a few edits
+            offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });
+            offline.editSong ([] (lynx::Song& s) { if (! s.channels.empty()) s.channels[0].muted = ! s.channels[0].muted; });
+            offline.editSong ([] (lynx::Song& s) { if (! s.patterns.empty()) s.patterns[(std::size_t) s.currentPattern].notes.push_back ({}); });
+            offline.undo();
+            saveWindow (lynx::makeHistoryPanel (offline), "-history.png");
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
@@ -1342,8 +1415,17 @@ private:
     // the menu bar's menus side by side, drawn with the LookAndFeel as they appear when opened
     static void saveMenus (lynx::MainComponent& ui, const juce::String& path)
     {
-        auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();
         const auto names = ui.getMenuNamesForSnapshot();
+        std::vector<juce::PopupMenu> source;
+        for (int m = 0; m < names.size(); ++m)
+            source.push_back (ui.getMenuForSnapshot (m));
+        saveMenus (names, source, path);
+    }
+
+    // menus side by side, each under its name
+    static void saveMenus (const juce::StringArray& names, const std::vector<juce::PopupMenu>& source, const juce::String& path)
+    {
+        auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();
         struct Laid
         {
             juce::PopupMenu menu;
@@ -1355,7 +1437,7 @@ private:
 
         for (int m = 0; m < names.size(); ++m)
         {
-            Laid laid { ui.getMenuForSnapshot (m) };
+            Laid laid { source[(std::size_t) m] };
             int width = 160, height = 2 * border;
 
             for (juce::PopupMenu::MenuItemIterator it (laid.menu); it.next();)

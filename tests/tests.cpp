@@ -7246,3 +7246,6 @@ TEST (startup_sound)
     CHECK (rms (0.8, 1.0) > 0.005 && rms (soundLength - 0.02, soundLength) < rms (0.8, 1.0)); // chime rings, tail fades
     CHECK (makeSound (48000.0).left == sound.left); // the same sound on every start
 }
+
+// Workflow P2 (docs/WORKFLOW_FL.md)
+#include "WorkflowP2Tests.inc"

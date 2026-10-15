@@ -53,6 +53,13 @@ target_sources(lynx_core PRIVATE
     src/core/RackOps.cpp
     src/core/StartupSound.cpp)
 
+# workflow P2 (note tools, mixer operations, history labels, browser search)
+target_sources(lynx_core PRIVATE
+    src/core/NoteTools.cpp
+    src/core/MixerOps.cpp
+    src/core/History.cpp
+    src/core/SearchQuery.cpp)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
@@ -129,6 +136,13 @@ if(LYNX_BUILD_APP)
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp
         src/ui/Splash.cpp)
+
+    # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
+    target_sources(LYNX PRIVATE
+        src/ui/NoteToolDialogs.cpp
+        src/ui/ToolWindow.cpp
+        src/ui/HistoryPanel.cpp
+        src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 

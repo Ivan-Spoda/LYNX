@@ -18,6 +18,8 @@ const KeyName keyNames[] = {
     { del, "Delete" },         { insert, "Insert" },   { up, "Up" },           { down, "Down" },         { left, "Left" },
     { right, "Right" },        { pageUp, "PageUp" },   { pageDown, "PageDown" }, { home, "Home" },       { end, "End" },
     { numpadPlus, "Numpad +" }, { numpadMinus, "Numpad -" },
+    { numpad0, "Numpad 0" }, { numpad1, "Numpad 1" }, { numpad2, "Numpad 2" }, { numpad3, "Numpad 3" }, { numpad4, "Numpad 4" },
+    { numpad5, "Numpad 5" }, { numpad6, "Numpad 6" }, { numpad7, "Numpad 7" }, { numpad8, "Numpad 8" }, { numpad9, "Numpad 9" },
 };
 
 std::string lower (std::string s)
@@ -52,7 +54,8 @@ std::vector<Action> makeActions()
         { "panel.playlist", TR_NOOP ("Show, focus or hide the Playlist"), Context::global, { chord (f5) } },
         { "panel.channelRack", TR_NOOP ("Show, focus or hide the Channel Rack"), Context::global, { chord (f6) } },
         { "panel.pianoRoll", TR_NOOP ("Show, focus or hide the Piano Roll"), Context::global, { chord (f7) } },
-        { "panel.browser", TR_NOOP ("Show, focus or hide the Browser"), Context::global, { chord (f8), chord (f8, alt) } },
+        { "panel.browser", TR_NOOP ("Show, focus or hide the Browser"), Context::global, { chord (f8, alt) } },
+        { "panel.quickAdd", TR_NOOP ("Quick-add palette: instruments and effects"), Context::global, { chord (f8) } },
         { "panel.mixer", TR_NOOP ("Show, focus or hide the Mixer"), Context::global, { chord (f9) } },
         { "panel.maximisePlaylist", TR_NOOP ("Maximize or restore the Playlist"), Context::global, { chord (enter) } },
 
@@ -62,6 +65,15 @@ std::vector<Action> makeActions()
         { "pattern.nextEmpty", TR_NOOP ("Next empty pattern (and name it)"), Context::global, { chord (f4) } },
         { "pattern.rename", TR_NOOP ("Rename and color the pattern"), Context::global, { chord (f2) } },
         { "pattern.insert", TR_NOOP ("Insert an empty pattern before the current one"), Context::global, { chord (insert, ctrl | shift) } },
+        { "pattern.clone", TR_NOOP ("Clone the current pattern"), Context::global, { chord ('C', alt) } },
+        { "pattern.moveUp", TR_NOOP ("Move the current pattern up"), Context::global, { chord (up, ctrl | shift) } },
+        { "pattern.moveDown", TR_NOOP ("Move the current pattern down"), Context::global, { chord (down, ctrl | shift) } },
+
+        // recording
+        { "transport.record", TR_NOOP ("Recording on/off"), Context::global, { chord ('R') } },
+        { "transport.metronome", TR_NOOP ("Metronome on/off"), Context::global, { chord ('M', ctrl) } },
+        { "record.countIn", TR_NOOP ("Count-in before recording on/off"), Context::global, { chord ('P', ctrl) } },
+        { "record.waitForInput", TR_NOOP ("Recording waits for the first note on/off"), Context::global, { chord ('I', ctrl) } },
 
         // files and history
         { "file.new", TR_NOOP ("New project"), Context::global, { chord ('N', ctrl) } },
@@ -71,7 +83,9 @@ std::vector<Action> makeActions()
         { "file.export", TR_NOOP ("Export audio"), Context::global, { chord ('R', ctrl) } },
         { "edit.undo", TR_NOOP ("Undo"), Context::global, { chord ('Z', ctrl) } },
         { "edit.redo", TR_NOOP ("Redo"), Context::global, { chord ('Y', ctrl), chord ('Z', ctrl | shift) } },
+        { "edit.history", TR_NOOP ("Undo history"), Context::global, { chord ('H', ctrl) } },
         { "help.shortcuts", TR_NOOP ("Shortcut sheet"), Context::global, { chord (f1) } },
+        { "browser.search", TR_NOOP ("Search the Browser"), Context::global, { chord ('F', ctrl) } },
 
         // Channel Rack (focused)
         { "rack.selectPrevious", TR_NOOP ("Select the channel above"), Context::channelRack, { chord (up) } },
@@ -84,7 +98,59 @@ std::vector<Action> makeActions()
         { "rack.clone", TR_NOOP ("Clone the selected channels"), Context::channelRack, { chord ('C', alt) } },
         { "rack.deleteSelected", TR_NOOP ("Delete the selected channels"), Context::channelRack, { chord (del, alt) } },
         { "rack.sendToInserts", TR_NOOP ("Send the selected channels to free mixer inserts"), Context::channelRack, { chord ('L', ctrl) } },
+        { "rack.graphEditor", TR_NOOP ("Step graph lanes on/off"), Context::channelRack, { chord ('K', ctrl) } },
+        { "rack.rotateLeft", TR_NOOP ("Rotate the selected channels' steps left"), Context::channelRack, { chord (left, ctrl | shift) } },
+        { "rack.rotateRight", TR_NOOP ("Rotate the selected channels' steps right"), Context::channelRack, { chord (right, ctrl | shift) } },
+
+        // Piano Roll (focused): tool dialogs and zoom
+        { "pianoRoll.arpeggiate", TR_NOOP ("Arpeggiate..."), Context::pianoRoll, { chord ('A', alt) } },
+        { "pianoRoll.strum", TR_NOOP ("Strum..."), Context::pianoRoll, { chord ('S', alt) } },
+        { "pianoRoll.flip", TR_NOOP ("Flip..."), Context::pianoRoll, { chord ('Y', alt) } },
+        { "pianoRoll.randomise", TR_NOOP ("Randomise..."), Context::pianoRoll, { chord ('R', alt) } },
+        { "pianoRoll.scaleLevels", TR_NOOP ("Scale levels..."), Context::pianoRoll, { chord ('X', alt) } },
+        { "pianoRoll.limit", TR_NOOP ("Limit to a range..."), Context::pianoRoll, { chord ('K', alt) } },
+        { "pianoRoll.zoomIn", TR_NOOP ("Zoom in"), Context::pianoRoll, { chord (pageUp) } },
+        { "pianoRoll.zoomOut", TR_NOOP ("Zoom out"), Context::pianoRoll, { chord (pageDown) } },
+        { "pianoRoll.zoom1", TR_NOOP ("Zoom: one bar"), Context::pianoRoll, { chord ('1', shift) }, true },
+        { "pianoRoll.zoom2", TR_NOOP ("Zoom: four bars"), Context::pianoRoll, { chord ('2', shift) }, true },
+        { "pianoRoll.zoom3", TR_NOOP ("Zoom: sixteen bars"), Context::pianoRoll, { chord ('3', shift) }, true },
+        { "pianoRoll.zoomAll", TR_NOOP ("Zoom to show everything"), Context::pianoRoll, { chord ('4', shift) }, true },
+        { "pianoRoll.zoomSelection", TR_NOOP ("Zoom to the selection"), Context::pianoRoll, { chord ('5', shift) }, true },
+        { "pianoRoll.centrePlayhead", TR_NOOP ("Centre the view on the playhead"), Context::pianoRoll, { chord ('0', shift) }, true },
+
+        // Playlist (focused)
+        { "playlist.zoomIn", TR_NOOP ("Zoom in"), Context::playlist, { chord (pageUp) } },
+        { "playlist.zoomOut", TR_NOOP ("Zoom out"), Context::playlist, { chord (pageDown) } },
+        { "playlist.zoom1", TR_NOOP ("Zoom: one bar"), Context::playlist, { chord ('1', shift) }, true },
+        { "playlist.zoom2", TR_NOOP ("Zoom: four bars"), Context::playlist, { chord ('2', shift) }, true },
+        { "playlist.zoom3", TR_NOOP ("Zoom: sixteen bars"), Context::playlist, { chord ('3', shift) }, true },
+        { "playlist.zoomAll", TR_NOOP ("Zoom to show everything"), Context::playlist, { chord ('4', shift) }, true },
+        { "playlist.zoomSelection", TR_NOOP ("Zoom to the selection"), Context::playlist, { chord ('5', shift) }, true },
+        { "playlist.centrePlayhead", TR_NOOP ("Centre the view on the playhead"), Context::playlist, { chord ('0', shift) }, true },
+        { "playlist.rippleDelete", TR_NOOP ("Delete the selected clips and close the gaps"), Context::playlist, { chord (del, shift) } },
+        { "playlist.ripple", TR_NOOP ("Ripple editing on/off"), Context::playlist, { chord ('S', shift) } },
+
+        // Browser (focused)
+        { "browser.previous", TR_NOOP ("Previous file (preview)"), Context::browser, { chord (up) } },
+        { "browser.next", TR_NOOP ("Next file (preview)"), Context::browser, { chord (down) } },
+        { "browser.swapPrevious", TR_NOOP ("Previous file into the selected channel"), Context::browser, { chord (up, shift) } },
+        { "browser.swapNext", TR_NOOP ("Next file into the selected channel"), Context::browser, { chord (down, shift) } },
+        { "browser.load", TR_NOOP ("Load the file into the selected channel"), Context::browser, { chord (enter) } },
+
+        // Mixer (focused)
+        { "mixer.moveLeft", TR_NOOP ("Move the selected inserts left"), Context::mixer, { chord (left, alt) } },
+        { "mixer.moveRight", TR_NOOP ("Move the selected inserts right"), Context::mixer, { chord (right, alt) } },
+        { "mixer.linkChannels", TR_NOOP ("Link the selected channels to the selected insert"), Context::mixer, { chord ('L', ctrl) } },
+        { "mixer.linkChannelsFrom", TR_NOOP ("Link the selected channels to inserts starting from the selected one"), Context::mixer, { chord ('L', ctrl | shift) } },
+        { "mixer.selectLinkedChannels", TR_NOOP ("Select the channels linked to the selected insert"), Context::mixer, { chord ('L', alt) } },
     };
+
+    // numeric keypad 1-9: select patterns 1-9
+    static const char* patternIds[] = { "pattern.select1", "pattern.select2", "pattern.select3", "pattern.select4", "pattern.select5",
+                                        "pattern.select6", "pattern.select7", "pattern.select8", "pattern.select9" };
+
+    for (int i = 0; i < 9; ++i)
+        list.push_back ({ patternIds[i], TR_NOOP ("Select pattern {0}"), Context::global, { chord (numpad1 + i) } });
 
     // number keys: mute (plain) / solo (Ctrl) channels 1-10 while the rack has focus
     static const char* muteIds[] = { "rack.mute1", "rack.mute2", "rack.mute3", "rack.mute4", "rack.mute5",

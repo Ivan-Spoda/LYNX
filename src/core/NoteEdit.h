@@ -134,4 +134,33 @@ std::vector<int> clipsInTime (const std::vector<Clip>& clips, std::int64_t from,
 // Repeats the time selection [from, to) right after itself: copies of `sources` (or, if empty, of the
 // clips that start inside it) shifted by its length. Returns the new indices.
 std::vector<int> repeatTime (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::vector<int> sources);
+
+// --- ripple editing and time-selection moves (docs/WORKFLOW_FL.md P2) -------------------------
+
+// Ripple delete: removes the clips and closes each gap: on the same track, the clips after a removed
+// clip move left by its length.
+void rippleDelete (std::vector<Clip>& clips, std::vector<int> indices);
+
+// Ripple resize: clip `index` gets `newLength` (at least 1) and every later clip on its track moves by the
+// change, so nothing after it overlaps or opens a gap.
+void rippleResize (std::vector<Clip>& clips, int index, std::int64_t newLength);
+
+// Moves (or copies) what lies inside the time selection [from, to) by `delta` ticks: clips crossing its
+// edges are cut there first, so only the part inside moves. Returns the indices of the moved clips (or
+// of the copies). The start never goes below 0.
+std::vector<int> moveTimeRange (std::vector<Clip>& clips, std::int64_t from, std::int64_t to, std::int64_t delta, bool copy);
+
+// --- Playlist tracks and clips (docs/WORKFLOW_FL.md P2: clip and track menus) ------------------
+
+// Cuts clip `index` at every multiple of `grid` (song time) inside it. Returns the indices of all pieces.
+std::vector<int> chopClip (std::vector<Clip>& clips, int index, std::int64_t grid);
+
+// Inserts an empty track at `track` (the clips there and below move down); every arrangement follows.
+void insertTrack (Song& song, int track);
+// Removes track `track` and its clips (the tracks below move up), in every arrangement.
+void removeTrack (Song& song, int track);
+// Swaps two tracks (their clips and headers), in every arrangement.
+void swapTracks (Song& song, int a, int b);
+// Solo: `track` plays alone (every other track muted); on the only unmuted track it unmutes all.
+void soloTrack (Song& song, int track, int trackCount);
 } // namespace lynx::noteedit

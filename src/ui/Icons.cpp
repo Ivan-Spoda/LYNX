@@ -459,6 +459,26 @@ Shape make (Icon icon)
             line (st, 12.0f, 17.0f, 12.0f, 20.5f);
             line (st, 8.5f, 20.5f, 15.5f, 20.5f);
             break;
+        case Icon::countIn: // a stopwatch: dial, crown and a hand, with the first quarter filled
+        {
+            st.addEllipse (4.5f, 6.0f, 15.0f, 15.0f);
+            line (st, 10.0f, 3.0f, 14.0f, 3.0f);
+            line (st, 12.0f, 3.0f, 12.0f, 6.0f);
+            line (st, 12.0f, 13.5f, 12.0f, 9.5f);
+            juce::Path quarter;
+            quarter.startNewSubPath (12.0f, 13.5f);
+            quarter.addCentredArc (12.0f, 13.5f, 5.0f, 5.0f, 0.0f, 0.0f, pi * 0.5f, false);
+            quarter.closeSubPath();
+            fi.addPath (quarter);
+            break;
+        }
+        case Icon::waitInput: // an hourglass: two triangles between two bars, sand in the bottom one
+            line (st, 6.0f, 3.5f, 18.0f, 3.5f);
+            line (st, 6.0f, 20.5f, 18.0f, 20.5f);
+            polyline (st, { { 7.5f, 3.5f }, { 7.5f, 6.5f }, { 12.0f, 12.0f }, { 7.5f, 17.5f }, { 7.5f, 20.5f } });
+            polyline (st, { { 16.5f, 3.5f }, { 16.5f, 6.5f }, { 12.0f, 12.0f }, { 16.5f, 17.5f }, { 16.5f, 20.5f } });
+            polyline (fi, { { 12.0f, 16.0f }, { 15.0f, 19.5f }, { 9.0f, 19.5f } }, true);
+            break;
     }
 
     return s;

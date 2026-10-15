@@ -22,6 +22,66 @@ std::int64_t patternPositionForTick (const Song& song, double tick, std::int64_t
     return position % std::max<std::int64_t> (1, loopLength);
 }
 
+void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, std::int64_t grid, std::vector<int>& clearedChannels)
+{
+    if (mode == RecordMode::replace)
+        for (const auto& n : notes)
+            if (std::find (clearedChannels.begin(), clearedChannels.end(), n.channel) == clearedChannels.end())
+            {
+                clearedChannels.push_back (n.channel);
+                auto& existing = pattern.notes;
+                existing.erase (std::remove_if (existing.begin(), existing.end(), [&n] (const Note& o) { return o.channel == n.channel; }),
+                                existing.end());
+            }
+
+    if (grid > 1)
+        for (auto& n : notes)
+            n.start = std::max<std::int64_t> (0, (n.start + grid / 2) / grid * grid);
+
+    pattern.notes.insert (pattern.notes.end(), notes.begin(), notes.end());
+    pattern.sortNotes();
+}
+
+bool placePatternClipAt (Song& song, int pattern, std::int64_t tick)
+{
+    if (pattern < 0 || pattern >= (int) song.patterns.size())
+        return false;
+
+    tick = std::max<std::int64_t> (0, tick);
+
+    for (const auto& c : song.playlist)
+        if (c.kind == ClipKind::pattern && c.pattern == pattern && tick >= c.start && tick < c.end())
+            return false;
+
+    const auto bar = song.barAt (tick);
+    Clip clip;
+    clip.kind = ClipKind::pattern;
+    clip.pattern = pattern;
+    clip.start = bar.tick;
+    clip.length = song.patterns[(std::size_t) pattern].effectiveLength (song.beatsPerBar);
+
+    for (int track = 0;; ++track)
+    {
+        const auto busy = std::any_of (song.playlist.begin(), song.playlist.end(), [&] (const Clip& c) {
+            return c.track == track && c.start < clip.end() && c.end() > clip.start;
+        });
+
+        if (! busy)
+        {
+            clip.track = track;
+            break;
+        }
+    }
+
+    song.playlist.push_back (clip);
+    return true;
+}
+
+std::int64_t countInLength (const Song& song, int bars, std::int64_t tick)
+{
+    return std::max (0, bars) * std::max<std::int64_t> (1, song.barAt (std::max<std::int64_t> (0, tick)).length);
+}
+
 void NoteRecorder::begin (std::int64_t loopLength)
 {
     active = true;

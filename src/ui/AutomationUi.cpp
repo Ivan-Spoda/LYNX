@@ -140,7 +140,7 @@ public:
 
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawText (tr ("Click: new point · drag: move · right-click: delete · Alt+drag: curve · Ctrl+wheel: zoom"),
+        g.drawText (tr ("Click: new point · drag: move (then Shift: time locked, Ctrl: value locked) · right-click: point menu · Alt+drag: curve · Ctrl+wheel: zoom"),
                     area.getX(), getHeight() - 18, area.getWidth(), 16, juce::Justification::centredLeft);
 
         if (hoverPoint >= 0 && hoverPoint < (int) points.size())
@@ -175,10 +175,26 @@ public:
 
         const auto hit = pointAt (e.position);
 
+        downMods = e.mods;
+
         if (e.mods.isPopupMenu())
         {
-            if (hit >= 0 && a->points.size() > 1)
-                edit ([hit] (Automation& x) { x.points.erase (x.points.begin() + hit); });
+            if (e.mods.isShiftDown() && hit < 0) // a point on the curve, keeping its level
+            {
+                AutomationPoint p;
+                p.tick = snap (xToTick (e.x), true);
+                p.value = a->valueAt ((double) p.tick);
+                edit ([p] (Automation& x) {
+                    x.points.push_back (p);
+                    std::stable_sort (x.points.begin(), x.points.end(), [] (auto& l, auto& r) { return l.tick < r.tick; });
+                });
+                return;
+            }
+
+            if (hit >= 0)
+                showPointMenu (hit);
+            else
+                showCurveMenu();
             return;
         }
 
@@ -239,7 +255,13 @@ public:
         const auto lo = dragPoint > 0 ? points[(std::size_t) dragPoint - 1].tick : 0;
         const auto hi = dragPoint + 1 < (int) points.size() ? points[(std::size_t) dragPoint + 1].tick : std::numeric_limits<std::int64_t>::max();
         tick = juce::jlimit (lo, hi, tick);
-        const auto value = yToValue (e.y);
+        auto value = yToValue (e.y);
+
+        // locks: Shift pressed after the click keeps the time, Ctrl keeps the value
+        if (e.mods.isShiftDown() && ! downMods.isShiftDown())
+            tick = points[(std::size_t) dragPoint].tick;
+        if (e.mods.isCtrlDown() && ! downMods.isCtrlDown())
+            value = points[(std::size_t) dragPoint].value;
 
         edit ([i = dragPoint, tick, value] (Automation& x) {
             x.points[(std::size_t) i].tick = tick;
@@ -268,6 +290,112 @@ public:
     }
 
 private:
+    juce::ModifierKeys downMods;
+    static inline float copiedValue = -1.0f;
+
+    juce::String valueText (float v) const
+    {
+        const auto* a = current();
+        return a != nullptr && a->target.kind == AutomationTargetKind::tempo ? juce::String (tempoFromValue (v), 2) + " BPM"
+                                                                             : juce::String (v * 100.0f, 1) + "%";
+    }
+
+    void showPointMenu (int point)
+    {
+        const auto* a = current();
+        const auto value = a->points[(std::size_t) point].value;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (valueText (value));
+        menu.addItem (tr ("Type value..."), [this, point] { typeValue (point); });
+        menu.addItem (tr ("Copy value"), [value] { copiedValue = value; });
+        menu.addItem (tr ("Paste value"), copiedValue >= 0.0f, false, [this, point] {
+            edit ([point, v = copiedValue] (Automation& x) {
+                if (point < (int) x.points.size())
+                    x.points[(std::size_t) point].value = v;
+            });
+        });
+        menu.addItem (tr ("Straight segment (reset the curve)"), [this, point] {
+            edit ([point] (Automation& x) {
+                if (point < (int) x.points.size())
+                    x.points[(std::size_t) point].tension = 0.0f;
+            });
+        });
+        menu.addSeparator();
+        menu.addItem (tr ("Delete point"), a->points.size() > 1, false, [this, point] {
+            edit ([point] (Automation& x) {
+                if (point < (int) x.points.size() && x.points.size() > 1)
+                    x.points.erase (x.points.begin() + point);
+            });
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void typeValue (int point)
+    {
+        const auto* a = current();
+        const auto tempo = a->target.kind == AutomationTargetKind::tempo;
+        const auto value = a->points[(std::size_t) point].value;
+        auto* window = new juce::AlertWindow (tr ("Point value"), tempo ? tr ("BPM") : tr ("Percent (0 to 100)"), juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("value", tempo ? juce::String (tempoFromValue (value), 2) : juce::String (value * 100.0f, 1));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, point, tempo, window] (int result) {
+                                     if (result != 1)
+                                         return;
+                                     const auto typed = window->getTextEditorContents ("value").retainCharacters ("0123456789.,-").replaceCharacter (',', '.').getDoubleValue();
+                                     const auto v = juce::jlimit (0.0f, 1.0f, tempo ? valueFromTempo (typed) : (float) typed / 100.0f);
+                                     edit ([point, v] (Automation& x) {
+                                         if (point < (int) x.points.size())
+                                             x.points[(std::size_t) point].value = v;
+                                     });
+                                 }),
+                                 true);
+    }
+
+    void showCurveMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addItem (tr ("Scale the values into a range..."), [this] { rerange(); });
+        menu.addItem (tr ("Flip the values upside down"), [this] {
+            edit ([] (Automation& x) {
+                for (auto& p : x.points)
+                    p.value = 1.0f - p.value;
+            });
+        });
+        menu.addItem (tr ("All segments straight"), [this] {
+            edit ([] (Automation& x) {
+                for (auto& p : x.points)
+                    p.tension = 0.0f;
+            });
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void rerange()
+    {
+        auto* window = new juce::AlertWindow (tr ("Scale the values into a range"), tr ("The lowest point goes to the minimum and the highest to the maximum (percent)."),
+                                              juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("min", "0", tr ("Minimum"));
+        window->addTextEditor ("max", "100", tr ("Maximum"));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window] (int result) {
+                                     if (result != 1)
+                                         return;
+                                     const auto lo = juce::jlimit (0.0f, 1.0f, window->getTextEditorContents ("min").getFloatValue() / 100.0f);
+                                     const auto hi = juce::jlimit (0.0f, 1.0f, window->getTextEditorContents ("max").getFloatValue() / 100.0f);
+                                     edit ([lo, hi] (Automation& x) {
+                                         if (x.points.empty())
+                                             return;
+                                         auto [mn, mx] = std::minmax_element (x.points.begin(), x.points.end(), [] (auto& a, auto& b) { return a.value < b.value; });
+                                         const auto from = mn->value, span = mx->value - mn->value;
+                                         for (auto& p : x.points)
+                                             p.value = span > 1e-6f ? lo + (p.value - from) / span * (hi - lo) : lo;
+                                     });
+                                 }),
+                                 true);
+    }
+
     const Automation* current() const
     {
         const auto& song = engine.getSong();

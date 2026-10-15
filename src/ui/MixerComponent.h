@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -10,6 +11,9 @@
 
 namespace lynx
 {
+// The built-in effects offered in the slot menus and the quick-add palette, in menu order.
+const std::vector<EffectKind>& addableEffects();
+
 // FL-style mixer: one vertical strip per track (Master first).
 //  - fader and pan: the shared control contract (ui/ValueControl.h): drag (Ctrl: fine), wheel,
 //    Alt/middle-click or double-click resets, right-click: type value / reset / automation
@@ -43,11 +47,19 @@ public:
     void selectTrack (int track);
     std::function<void (int)> onSelectionChanged;
 
+    // Multi-selection (docs/WORKFLOW_FL.md P2, M1): Ctrl+click on a strip's header toggles it, Shift+click
+    // selects a range; selected faders and pans move together. Always contains the selected track.
+    const std::vector<int>& getSelection() const noexcept { return selection; }
+    void setSelection (std::vector<int> tracks, int primary);
+    bool moveSelected (int delta);           // Alt+Left/Right
+    void linkSelectedChannels (bool startingHere); // Ctrl+L / Ctrl+Shift+L
+    void selectLinkedChannels();             // Alt+L
+
     static constexpr int stripWidth = 70;
     static constexpr int masterWidth = 86;
 
 private:
-    enum class Part { none, pan, fader, mute, solo, route, body, add };
+    enum class Part { none, pan, fader, mute, solo, route, body, add, arm };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -61,6 +73,12 @@ private:
     juce::Rectangle<int> muteArea (int track) const;
     juce::Rectangle<int> soloArea (int track) const;
     juce::Rectangle<int> routeArea (int track) const;
+    juce::Rectangle<int> armArea (int track) const;
+    void showSendMenu (int track);
+    void soloExclusive (int track);
+    std::vector<int> selection { 0 };
+    std::vector<std::pair<int, float>> groupStart; // (track, value) of the selection when a group drag starts
+    float groupGrab = 0.0f;
     void showMenu (int track);
     void showTrackEq (int track);
     ui::ValueSpec specFor (Part part, int track) const;
@@ -87,13 +105,24 @@ private:
 //  - knob to the right of the slot: dry/wet (drag; double-click resets to 100%)
 class EffectsPanel final : public juce::Component,
                            public ui::HintSource,
+                           public juce::DragAndDropTarget,
+                           public juce::FileDragAndDropTarget,
                            private juce::ChangeListener
 {
 public:
+    // Effect presets (.fst) dragged from the Browser or Explorer: dropped on a slot they replace it,
+    // anywhere else they go into the first free slot.
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    bool dropPreset (const juce::File& file, juce::Point<int> position);
+
     explicit EffectsPanel (AudioEngine& engine);
     ~EffectsPanel() override;
 
     void setTrack (int track);
+    int getSelectedSlot() const noexcept { return selectedSlot; }
     void selectSlot (int slot)
     {
         selectedSlot = slot;
@@ -129,6 +158,12 @@ private:
     void showSlotMenu (int slot);
     juce::Rectangle<int> pluginButtonBounds() const;
     void openPluginWindow (int slot);
+    juce::Rectangle<int> fxSwitchBounds() const; // all effects on/off; right-click opens/closes their windows
+    void toggleAllWindows();
+    int slotAt (juce::Point<int> p) const;
+    int dragSlot = -1, dropSlot = -1; // dragging a slot to reorder it
+    // A/B compare: a spare state per (insert, slot), swapped with the live one on request (not saved)
+    std::map<std::pair<int, int>, EffectSlot> spare;
 
     AudioEngine& engine;
     int track = 0;
@@ -150,6 +185,13 @@ public:
     void selectFirstTrackWithEffects();
     void selectTrack (int track) { strips.selectTrack (track); }
     void selectSlot (int slot) { effects.selectSlot (slot); }
+
+    // The key map's mixer.* actions.
+    bool runAction (const std::string& id);
+
+    // Adds an effect to the first free slot of the selected insert (quick-add palette). False when full.
+    bool addEffectToSelected (EffectSlot slot);
+    MixerStrips& getStripsForSnapshot() { return strips; }
 
     static constexpr int effectsWidth = 300;
 

@@ -20,10 +20,11 @@ enum class Icon
     // workspace and control contract
     detach, dock, restore, keyboard, automate, rightClick, tap,
     brush, knife, zoom, listen, slip, ghost, // editor tools (Piano Roll / Playlist)
-    panelMenu, pluginPicker, mic // window options menu, plugin picker, recording options
+    panelMenu, pluginPicker, mic, // window options menu, plugin picker, recording options
+    countIn, waitInput // recording: count-in and wait for input
 };
 
-constexpr int iconCount = (int) Icon::mic + 1;
+constexpr int iconCount = (int) Icon::waitInput + 1;
 
 namespace icons
 {

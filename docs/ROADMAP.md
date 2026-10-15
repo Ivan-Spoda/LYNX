@@ -59,6 +59,8 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] ASIO via the Steinberg ASIO SDK's GPLv3 option (2025), compatible with LYNX's AGPL-3.0
 - [x] GPU UI: JUCE 8 draws with Direct2D on Windows
 - [x] Idle channels skipped by the renderer
+- [x] FL workflow P2 (`docs/WORKFLOW_FL.md`): step graph lanes, mixer gestures, slot drag, Browser search, quick-add
+  palette, undo history, recording options, note tools, scale snap, zoom presets, ripple editing
 
 ## Phase 6: FL fidelity (with REA)
 - [x] Volume/fader curves, swing, envelopes, time-stretch, cut groups (round 3)

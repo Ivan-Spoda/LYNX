@@ -14,7 +14,6 @@
 |---|---|---|---|
 | `wip/ogun` | Port Ogun's exact engine (`InstrumentKind::ogun`) | `docs/analise/REA_rodada37.md`, model `rea-work/r37/py/ogmodel.py` | engine ported, was running the C++-vs-model battery |
 | `wip/gms-morphine` | Port GMS and Morphine engines | `REA_rodada39.md`, models `rea-work/r39/py/gmsmodel.py`, `mormodel.py` | just started (first file) |
-| `wip/wf-p2` | Workflow P2 items (step lanes, mixer gestures, slot drag, browser search, palette, undo history, recording options, note tools, scale…) | `docs/WORKFLOW_FL.md` P2 list | 7 commits; must `git merge main` (FL layout landed) and place buttons per the new layout |
 
 Not started: REA round 41 (MiniSynth, DX10, Fruit Kick, BassDrum, then PoiZone/Toxic/Kepler full engines).
 

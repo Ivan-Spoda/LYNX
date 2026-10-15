@@ -3,6 +3,7 @@
 // Recording of notes played live (MIDI or PC keyboard) into the current pattern.
 // Runs on the UI thread; events arrive with the absolute transport position.
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -23,6 +24,26 @@ struct RecordedEvent
 // the position within the loop; in song mode, within the current pattern's clip that is
 // playing there (or, without a clip, as if it were the pattern loop).
 std::int64_t patternPositionForTick (const Song& song, double tick, std::int64_t loopLength);
+
+// --- recording options (docs/WORKFLOW_FL.md P2: recording set) ---------------------------------
+
+enum class RecordMode : std::uint8_t
+{
+    overdub, // recorded notes are added to what the pattern has
+    replace  // a channel's first recorded note of a take clears that channel's notes in the pattern
+};
+
+// Commits finished notes of a take into `pattern`: starts quantised to the nearest multiple of `grid`
+// (grid <= 1: as played; lengths kept). In replace mode, `clearedChannels` remembers the channels already
+// cleared during this take, so later notes of the same take stay.
+void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, std::int64_t grid, std::vector<int>& clearedChannels);
+
+// Song mode: makes sure a clip of `pattern` plays at `tick`. If none does, one is placed at the start of
+// that bar, on the first track that is free there. Returns true when a clip was added.
+bool placePatternClipAt (Song& song, int pattern, std::int64_t tick);
+
+// Length of a count-in of `bars` bars at the song position `tick` (bars follow the time signature there).
+std::int64_t countInLength (const Song& song, int bars, std::int64_t tick = 0);
 
 class NoteRecorder
 {

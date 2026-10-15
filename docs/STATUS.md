@@ -9,19 +9,36 @@ exports the 30 demo projects shipped with FL Studio 2026.
 ### Editing
 - **Channel Rack:** step sequencer, per-channel volume/pan/mute/solo, swing (FL formula, per-channel mix),
   multiple patterns (rename, colour, length, clone, remove), cut groups, mono channels, arpeggiator,
-  PC keyboard as a piano (FL layout), MIDI input, note recording (one undo step per take).
+  PC keyboard as a piano (FL layout), MIDI input, note recording (one undo step per take). Step graph lanes
+  (Ctrl+K: velocity, pan, release, fine pitch, Mod X/Y; drag, right-drag ramp, Alt+click reset), fill every
+  2/4/8, Euclidean fill, rotate, sort channels, select unused.
+- **Recording options:** count-in (Ctrl+P), wait for the first note (Ctrl+I), overdub/replace, record quantise
+  following the global grid, a pattern clip placed in Song mode; switches next to the metronome in the main
+  toolbar and the full set in the "what to record" menu and Options → Recording.
+- **Quick-add palette (F8 / plugin-picker icon):** searchable instruments and effects (new channel or selected
+  insert). **Undo history** (Ctrl+H, Edit menu): named steps, click to jump.
 - **Piano Roll:** selection (Ctrl+drag, Shift+click, Ctrl+A), group move/resize, Ctrl+C/X/V, Ctrl+B duplicate,
   Ctrl+Q quantize, arrow keys (Shift = octave/bar), snap selector, chords and scale highlighting, per-note
-  velocity/pan/fine pitch/mute, slide (808 glide) and porta notes, `.mid` import/export.
+  velocity/pan/fine pitch/mute, slide (808 glide) and porta notes, `.mid` import/export. Note tools
+  (Arpeggiate, Strum, Flip, Randomise, Scale levels, Limit; Alt+A/S/Y/R/X/K), snap to scale (toolbar switch next
+  to the scale box, also for incoming MIDI), zoom presets (PgUp/PgDn, Shift+1..5/0), vertical zoom.
 - **Playlist:** pattern, audio and automation clips; multiple arrangements; loop region; multi-selection,
   copy/paste/duplicate, split, "make unique"; named/muted tracks; markers and time-signature changes on the
-  ruler; normalize audio clips; pattern picker.
+  ruler; normalize audio clips; pattern picker. Ripple editing (Shift+S) and ripple delete, zoom presets,
+  inline automation-point editing (axis locks, typed values, re-range), track and clip menus.
 - **Automation:** right-click any knob/fader (channel, mixer, effects, plugin parameters) → a Playlist clip with
   a point/curve editor (Alt+drag for curves); tempo automation; MIDI learn on any parameter.
 - **Mixer:** up to 127 inserts, sends with levels, "route to this track only", solo along the signal path, FL
   fader curve, gain ramps, stereo separation, phase invert, L/R swap, colours, built-in 3-band track EQ,
   10 effect slots with dry/wet, smart disable, per-edge PDC, **sidechain** (right-click a compressor slot →
-  "Sidechain from"), render insert to audio.
+  "Sidechain from"), render insert to audio. Multi-select inserts (faders/pans move together), Alt+Left/Right
+  reorder, link selected channels (Ctrl+L / Ctrl+Shift+L / Alt+L), "sidechain only" sends, per-insert record
+  arm, effect slots dragged to reorder, all-effects switch, A/B compare per slot, effect presets dropped from the
+  Browser.
+- **Browser:** search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
+  selected channel, user folders.
+- **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
+  lanes/rotate/sort, Piano Roll tools/zoom/scale snap, Mixer move/link, Browser search/add folder).
 - **Project safety:** "*" in the title, "save changes?", autosave every 2 minutes and an emergency save on crash
   (`%APPDATA%\LYNX\autosave`).
 
@@ -303,3 +320,6 @@ Confirmed empirically on the demo projects:
 ## Open items
 - Ogun's per-partial release and ALT DECAY, Maximus's Master Mid mode and linear-phase split, Harmor's image
   synthesis, arpeggio envelopes and Noise resonance.
+- Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
+  colour/height (need model fields), F2/F3 search stepping, instrument drops on mixer inserts, the automation
+  record filter, and the remaining note tools (chop, quantise, articulate, flam, period slicing, LFO).
