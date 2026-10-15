@@ -1432,9 +1432,9 @@ TEST (flp_real_files)
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
     std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
                  maximusSlots, sgzExact, sgzSlots, vocodexWithData, vocodexSlots);
-    // REA_rodada40 §6: in Demo projects the 6 states left on the approximation use the Frequency Splitter linear-phase
-    // option (4) or the legacy linear-phase FIR (2); the other Data folders add states with options not decoded
-    CHECK (maximusSlots - maximusExact <= 18 && maximusExact >= 95 && sgzExact == sgzSlots && sgzSlots > 90);
+    // REA_rodada40 §6: in Demo projects the 4 states left on the approximation use the Frequency Splitter linear-phase
+    // option; the other Data folders add states with options not decoded
+    CHECK (maximusSlots - maximusExact <= 16 && maximusExact >= 97 && sgzExact == sgzSlots && sgzSlots > 90);
     CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
@@ -6713,9 +6713,9 @@ TEST (harmless_rack)
         auto rms = st;
         rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada40)
         CHECK (lynx::hlfx::makeMaximusPreset (rms) != nullptr);
-        auto legacy = st;
-        legacy[0x1fd] = 1; // the legacy linear-phase FIR crossover: not decoded
-        CHECK (lynx::hlfx::makeMaximusPreset (legacy) == nullptr);
+        auto masterMid = st;
+        masterMid[0x1fc] = 1; // "Master Mid mode": not decoded
+        CHECK (lynx::hlfx::makeMaximusPreset (masterMid) == nullptr);
     }
 }
 
@@ -6764,6 +6764,12 @@ TEST (maximus_engine)
     check (run (lynx::hlfx::makeMaximusPreset (solo), 1000),
            { { 100, 3.2922967e-06f, 0.00036916698f }, { 1000, 0.15653539f, -0.047913823f }, { 2047, -0.17336531f, 0.019099623f },
              { 3000, 0.17185682f, -0.017173048f }, { 4095, 0.16714551f, 0.019473195f } });
+    // the legacy linear-phase FIR band split (UI byte 0x1FD; SG_x64.dll: port within −148 dB)
+    auto fir = st3;
+    fir[0x1fd] = 1;
+    check (run (lynx::hlfx::makeMaximusPreset (fir), 1000),
+           { { 100, 0.0f, 0.0f }, { 1000, 0.97986746f, 0.18555209f }, { 2047, -0.98930448f, -0.95970845f },
+             { 3000, 0.98856646f, -0.44592777f }, { 4095, 0.99069679f, 0.94382554f } });
     // Soundgoodizer_x64.dll's own build with a v4 file (its presets' layout): a copy of the round-36 state without
     // oversampling, through a byte-identical copy of the installation's DLL with this file as its preset (EXEC)
     const auto st2 = maximusTestState ({ 19800, 1, 48065, 1, 891, 600, 32768 },
