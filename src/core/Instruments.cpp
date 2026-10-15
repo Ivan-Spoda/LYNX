@@ -14,6 +14,7 @@
 #include "core/BassDrum.h"
 #include "core/FruitKick.h"
 #include "core/Toxic.h"
+#include "core/ThreeOsc.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -218,6 +219,7 @@ private:
             case InstrumentKind::fruitkick:
             case InstrumentKind::bassdrum:
             case InstrumentKind::toxic:
+            case InstrumentKind::threeosc:
                 break;
         }
 
@@ -2040,6 +2042,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeBassDrumInstrument();
     if (kind == InstrumentKind::toxic)
         return makeToxicInstrument();
+    if (kind == InstrumentKind::threeosc)
+        return makeThreeOscInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }
