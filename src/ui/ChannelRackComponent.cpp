@@ -45,6 +45,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::minisynth: return "MiniSynth";
         case InstrumentKind::dx10: return "Fruity DX10";
         case InstrumentKind::kepler: return "Kepler";
+        case InstrumentKind::poizone: return "PoiZone";
     }
     return "?";
 }

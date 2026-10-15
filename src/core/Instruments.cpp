@@ -10,6 +10,7 @@
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
+#include "core/PoiZone.h"
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
@@ -210,6 +211,7 @@ private:
             case InstrumentKind::minisynth:
             case InstrumentKind::dx10:
             case InstrumentKind::kepler:
+            case InstrumentKind::poizone:
                 break;
         }
 
@@ -2024,6 +2026,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeDx10Instrument();
     if (kind == InstrumentKind::kepler)
         return makeKeplerInstrument();
+    if (kind == InstrumentKind::poizone)
+        return makePoiZoneInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }
