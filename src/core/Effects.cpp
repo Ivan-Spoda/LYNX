@@ -9,6 +9,7 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityDelay.h"
+#include "core/StereoFx.h"
 #include "core/GrossBeat.h"
 
 #include "core/Biquad.h"
@@ -2191,6 +2192,17 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                       / (float) (fldelay::delay3Max[(std::size_t) i] - fldelay::delay3Min[(std::size_t) i]) });
         return info;
     }();
+    // FL's controls over their ranges (core/StereoFx.h); defaults = a new FL instance
+    static const EffectInfo stereoShaperInfo { "Stereo Shaper", { { "R > L", 0.5f }, { "Left", 0.75f }, { "Right", 0.75f }, { "L > R", 0.5f },
+                                                                 { "Delay", 0.5f }, { "Phase", 0.5f }, { "Effects post", 0.0f },
+                                                                 { "Difference", 0.0f } } };
+    static const EffectInfo stereoEnhancerInfo { "Stereo Enhancer", { { "Pan", 0.5f }, { "Volume", 0.8f }, { "Separation", 0.5f },
+                                                                     { "Phase offset", 0.5f }, { "Effects post", 1.0f }, { "Invert", 0.0f } } };
+    static const EffectInfo transientProcessorInfo { "Transient Processor", { { "Attack", 0.5f }, { "Drive", 0.0f }, { "Release", 0.5f },
+                                                                             { "Gain", 0.5f }, { "Attack shape", 0.5f }, { "Release shape", 0.5f },
+                                                                             { "Split freq.", 0.5f }, { "Split balance", 0.5f }, { "On", 1.0f } } };
+    static const EffectInfo spreaderInfo { "Spreader", { { "Width", 0.5f }, { "Separation", 0.5f }, { "Low bypass", 9990.0f / 999000.0f },
+                                                         { "Mono bass", 0.0f }, { "Enable", 1.0f } } };
     // FL's eight Gross Beat parameters (core/GrossBeat.h); the slots' envelopes travel in EffectSlot::state
     static const EffectInfo grossBeatInfo { "Gross Beat", { { "Time slot", 0.0f }, { "Volume slot", 0.0f }, { "Time mix", 1.0f },
                                                             { "Volume mix", 1.0f }, { "Attack", 0.1765f }, { "Release", 0.5f },
@@ -2298,6 +2310,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::reeverb1: return reeverb1Info;
         case EffectKind::fruityDelay2: return fruityDelay2Info;
         case EffectKind::fruityDelay3: return fruityDelay3Info;
+        case EffectKind::stereoShaper: return stereoShaperInfo;
+        case EffectKind::stereoEnhancer: return stereoEnhancerInfo;
+        case EffectKind::transientProcessor: return transientProcessorInfo;
+        case EffectKind::spreader: return spreaderInfo;
         case EffectKind::grossBeat: return grossBeatInfo;
     }
     return eq;
@@ -2578,6 +2594,17 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::fruitySoftClipper:
             return flshape::softClipperParamText (param, v);
+        case EffectKind::stereoShaper:
+            return stereofx::stereoShaperParamText (param, v);
+
+        case EffectKind::stereoEnhancer:
+            return stereofx::stereoEnhancerParamText (param, v);
+
+        case EffectKind::transientProcessor:
+            return stereofx::transientProcessorParamText (param, v);
+
+        case EffectKind::spreader:
+            return stereofx::spreaderParamText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -2680,6 +2707,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::reeverb1: return makeReeverb1();
         case EffectKind::fruityDelay2: return fldelay::makeDelay2();
         case EffectKind::fruityDelay3: return fldelay::makeDelay3();
+        case EffectKind::stereoShaper: return stereofx::makeStereoShaper();
+        case EffectKind::stereoEnhancer: return stereofx::makeStereoEnhancer();
+        case EffectKind::transientProcessor: return stereofx::makeTransientProcessor();
+        case EffectKind::spreader: return stereofx::makeSpreader();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
