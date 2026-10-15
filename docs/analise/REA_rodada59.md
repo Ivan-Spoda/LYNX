@@ -312,8 +312,8 @@ arguments **[EXEC, `py/t_crt2.py`]**, so LYNX re-creates it (hardware FMA when t
 | Engine math routines (re-created vs DLL, `run/sc.c`) | sine/cosine 38 006 × 3 MXCSR; powf 45 002 × 2 | all identical |
 | Vintage Chorus front-end vs engine driven directly | 11 demo states | identical |
 | Vintage Chorus LYNX C++ vs DLL engine | 11 demo states × 3 rate/block sets, 5 synthetic (modes 0/1 + link, extremes, hiss + gate, mono, polarity) × 3 × with/without 12-event automation, hiss states also as instance 2 | all 96 bit-identical |
-| Vintage Chorus LFO sync, transport playing | 2 states × 4 tempo/start positions | all 8 bit-identical |
-| LYNX C++ built for Windows (zig, MinGW runtime) vs DLL | 11 + 16 + 11 demo states | all 38 bit-identical (a library `sqrtf` had rounded to nearest inside Hyper Chorus's toward-zero render: LYNX uses the SSE instruction) |
+| Vintage Chorus LFO sync, transport playing | 2 states × 4 tempo/start positions (from −0.5, 0, 3.25, 12.7 beats) | all 8 bit-identical |
+| LYNX C++ built for Windows (zig, MinGW runtime) vs DLL | 11 + 16 + 11 demo states; the Hyper Chorus (60) and Vintage Chorus (104) suites above | all bit-identical (a library `sqrtf` had rounded to nearest inside Hyper Chorus's toward-zero render: LYNX uses the SSE instruction) |
 | Unit test `chorus_family_engines` | goldens of 3 + 2 + 3 states, imports, fallbacks | within 2·10⁻⁷ (bit-identical on the test machine) |
 
 Import (`tests.cpp`, demo-project battery): every Fruity / Hyper / Vintage Chorus mixer slot of the installation's
