@@ -27,6 +27,21 @@ struct LinearOptions
 };
 LinearOptions parseLinearOptions (const std::vector<std::uint8_t>& state);
 
+// The engine's block FFT convolver (shared with Frequency Splitter's linear-phase mode and Maximus's linear-phase band
+// split, REA_rodada62): stereo, block n/2, FFT n, the kernel an n/2-tap windowed zero-phase FIR from an n/2 + 1 bin
+// magnitude table; output delayed by 3n/4. Computed here in double precision.
+struct FftConvolver
+{
+    int n = 0, hop = 0, pos = 0;
+    std::vector<std::complex<double>> kernel;          // spectrum of the zero-padded FIR
+    std::vector<float> in[2], out[2];                  // block input (hop) and overlap-add output (n), per channel
+    void init (int size);
+    void clear() noexcept;
+    void setKernel (const std::vector<float>& table);
+    void step (float& l, float& r) noexcept;
+    void block() noexcept;
+};
+
 class LinearPhase
 {
 public:
@@ -40,17 +55,7 @@ public:
     int latencySamples() const noexcept { return 3 * size / 4; }
 
 private:
-    struct Convolver
-    {
-        int n = 0, hop = 0, pos = 0;
-        std::vector<std::complex<double>> kernel;          // spectrum of the zero-padded FIR
-        std::vector<float> in[2], out[2];                  // block input (hop) and overlap-add output (n), per channel
-        void init (int size);
-        void clear() noexcept;
-        void setKernel (const std::vector<float>& table);
-        void step (float& l, float& r) noexcept;
-        void block() noexcept;
-    };
+    using Convolver = FftConvolver;
 
     void load() noexcept;
 

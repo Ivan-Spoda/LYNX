@@ -9,6 +9,7 @@
 #include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
+#include "core/FrequencySplitter.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
 #include "core/SytrusEngine.h"
@@ -1091,6 +1092,13 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
             return exact;
+    if (pluginName == "Frequency Splitter") // FL's engine (REA_rodada62): its summed (main) output; shelves otherwise
+        if (const auto s = fsplit::parseState (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::frequencySplitter);
+            fsplit::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Effector")
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder")
@@ -1898,6 +1906,17 @@ PatcherBranchHead patcherBranchHead (const std::string& plugin, const std::vecto
 
     if (name == "frequency splitter")
     {
+        if (const auto s = fsplit::parseState (d))
+        {
+            // the exact engine (REA_rodada62): bus 0 = the summed output, bus k = the bands whose send destination is k
+            if (! fsplit::busUsed (*s, bus))
+                return head;
+            auto exact = makeEffectSlot (EffectKind::frequencySplitter);
+            fsplit::toParams (*s, exact.params.data(), bus);
+            head.valid = true;
+            head.slot = exact;
+            return head;
+        }
         if (d.size() < 18 * 4)
             return head;
         auto word = [&] (int i) { return i32At (d, 4 * (std::size_t) i); };
