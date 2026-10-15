@@ -117,7 +117,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   −108.6 dB vs FL's DLL); SimSynth on its engine (REA round 64: the C++ engine behind the Delphi front-end, 12 voices
   with 3 table oscillators/noise, ring modulation, LFO, both envelopes, the 2-stage filter and the chorus, FL's old
   integer voice record; bit-identical to FL's DLL on all 76 installation states in every tested scenario); Wasp and
-  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Sakura and Drumpad on physical models rebuilt from their
+  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Fruity Granulizer
+  on its engine (REA round 67: grains on the channel's sample with the library's 24-point windowed-sinc reader, grain
+  envelope, stereo separation, randomness, wobble, freeze, loop, sample start, key modes, and the plugin voice processor;
+  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -502,7 +505,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
   as an output gain (the plugin does not read Final.Vol). SimSynth (REA round 64 §5.2): the process-wide random index
   and chorus counter are per instance in LYNX (FL: shared by every SimSynth and every sample-rate change); FL's load
-  order and its rounding when it fills the old voice record are not confirmed; automation not wired.
+  order and its rounding when it fills the old voice record are not confirmed; automation not wired. Fruity Granulizer
+  (REA round 67 §5): the slice modes (the sample's regions, "auto slicing": 2 presets, no project) and the slice key
+  mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
+  confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
+  exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
+  speed); the end fade uses the exact cosine; the sample's own loop points are not read (whole sample); one random seed
+  per instrument.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

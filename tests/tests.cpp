@@ -35,6 +35,7 @@
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
+#include "core/Granulizer.h"
 #include "core/Wasp.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
@@ -11132,6 +11133,149 @@ TEST (wasp_is_a_silent_placeholder)
         CHECK (song.channels[0].instrument == lynx::InstrumentKind::simsynth && song.channels[0].pluginState == ss);
         CHECK (song.channels[1].instrument == lynx::InstrumentKind::wasp && song.channels[1].pluginState == wasp);
         CHECK (song.channels[2].instrument == lynx::InstrumentKind::wasp);
+    }
+}
+// --- REA round 67: Fruity Granulizer (exact engine) --------------------------------------------------------------
+namespace
+{
+// our own deterministic test sample (a fading 220 Hz sine plus LCG noise per channel), as r67/py/gold67.py builds it
+lynx::SampleData granulizerTestSample (int n, int ch)
+{
+    lynx::SampleData d;
+    std::uint32_t s = 12345;
+    for (int i = 0; i < n; ++i)
+    {
+        const auto base = 0.5 * std::sin (2.0 * 3.141592653589793 * 220.0 * i / 44100.0) * (1.0 - 0.7 * i / n);
+        for (int c = 0; c < ch; ++c)
+        {
+            s = s * 1664525u + 1013904223u;
+            const auto v = (float) (base + 0.2 * ((double) (std::int32_t) s * (1.0 / 2147483648.0)));
+            (c == 0 ? d.left : d.right).push_back (v);
+        }
+    }
+    return d;
+}
+std::vector<std::uint8_t> granulizerTestState (const std::array<int, 12>& P, int keyMode = 0)
+{
+    std::vector<std::uint8_t> b (60, 0);
+    const std::int32_t v = 5;
+    std::memcpy (b.data(), &v, 4);
+    std::memcpy (b.data() + 4, P.data(), 48);
+    std::memcpy (b.data() + 56, &keyMode, 4);
+    return b;
+}
+} // namespace
+
+TEST (granulizer_engine)
+{
+    // REA_rodada67: states written from scratch against our reference model (granmodel.py, which renders like the
+    // installation's DLL within −128 dB: the DLL's rcpps and IPP sines are not replicated)
+    const auto v5 = granulizerTestState ({ 204, 50, 611, 611, 0, 180, 0, 0, 0, 0, 0, 228 });
+    CHECK (lynx::granulizerStateUsable (v5));
+    const auto n5 = lynx::granulizerNormalisedState (v5, {});
+    CHECK (n5.size() == 428 && n5[0] == 7 && lynx::granulizerParam (n5, 0) == 204 && lynx::granulizerParam (n5, 11) == 228
+           && ! lynx::granulizerParam (n5, 12));
+    // version 1 (10 parameters): parameter 11 takes the plugin's 0xf8
+    {
+        std::vector<std::uint8_t> v1 (v5.begin(), v5.begin() + 44);
+        v1[0] = 1;
+        const auto n1 = lynx::granulizerNormalisedState (v1, {});
+        CHECK (lynx::granulizerParam (n1, 9) == 0 && lynx::granulizerParam (n1, 11) == 0xf8 && lynx::granulizerParam (n1, 3) == 611);
+        std::vector<std::uint8_t> bad (v5);
+        bad[0] = 9;
+        CHECK (! lynx::granulizerStateUsable (bad) && lynx::granulizerNormalisedState (bad, {}).empty());
+        auto edited = n5;
+        CHECK (lynx::granulizerSetParam (edited, 3, -5000) && lynx::granulizerParam (edited, 3) == -1000);
+    }
+
+    using N = lynx::granulizer::RefNote;
+    struct Golden { std::vector<std::uint8_t> state; int ch, fs, rate; lynx::granulizer::RefOptions opt; std::vector<N> notes;
+                    double el, er; std::tuple<int, float, float> at[6]; };
+    auto check = [] (const Golden& g) {
+        auto smp = granulizerTestSample (20000, g.ch);
+        smp.sampleRate = g.rate;
+        const auto y = lynx::granulizer::renderReference (lynx::granulizerNormalisedState (g.state, {}), smp, g.notes, (double) g.fs, 16384, g.opt);
+        CHECK (y.size() == 2 * 16384);
+        if (y.size() != 2 * 16384)
+            return;
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        CHECK (std::abs (el - g.el) <= 1e-6 * g.el && std::abs (er - g.er) <= 1e-6 * g.er);
+        for (const auto& [i, l, r] : g.at)
+            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-6f * std::max (1e-16f, std::abs (l))
+                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-6f * std::max (1e-16f, std::abs (r)));
+    };
+    lynx::granulizer::RefOptions o1, o2, o3;
+    o2.block = 333, o2.seed = 777;
+    o3.block = 64, o3.seed = 5;
+    // the plugin's defaults, two notes (one pitched by +23 cents and released: the processor's end fade)
+    check ({ v5, 2, 44100, 44100, o1, { { 0, 60, 0.8, 0.0, 0.0, -1 }, { 3000, 64, 0.6, -0.3, 23.0, 9000 } }, 553.4541810458171, 470.3837027429263,
+             { { 100, 0.057010360062122345f, 0.08960580080747604f }, { 1000, 0.07210570573806763f, -0.048257164657115936f },
+               { 2500, 0.14769265055656433f, -0.0194698516279459f }, { 4000, 0.11169229447841644f, 0.17487481236457825f },
+               { 7777, -0.4309714436531067f, -0.17027156054973602f }, { 12000, -0.11129666864871979f, -0.19622492790222168f } } });
+    // backwards, randomness, depth/speed wobble, stereo separation, loop, sample start; a mono 44.1 kHz sample at 48 kHz
+    check ({ granulizerTestState ({ 150, 120, 300, -480, 200, 90, 120, 40, 1, 0, 900, 300 }), 1, 48000, 44100, o2,
+             { { 0, 55, 1.0, 0.2, -37.0, 12000 }, { 5000, 67, 0.5, 0.0, 0.0, -1 } }, 959.5011214226065, 1294.4823684530272,
+             { { 100, 0.02567935362458229f, 0.010721667669713497f }, { 1000, 0.3007732629776001f, 0.08214527368545532f },
+               { 2500, 0.435413658618927f, 0.09068503230810165f }, { 4000, -0.24611327052116394f, -0.20149046182632446f },
+               { 7777, -0.008478119969367981f, 0.31221628189086914f }, { 12000, 0.20371171832084656f, 0.32494625449180603f } } });
+    // key mode 1 (the sample spread over two octaves), freeze, hard stereo separation; 48 kHz sample at 96 kHz, 64-sample blocks
+    check ({ granulizerTestState ({ 300, 0, 800, 700, 0, 180, 0, 64, 0, 1, 2000, 100 }, 1), 2, 96000, 48000, o3,
+             { { 0, 62, 0.9, 0.0, 0.0, -1 }, { 4000, 50, 0.7, 0.0, 11.0, -1 } }, 366.79556669810813, 0.00825590391720353,
+             { { 100, 0.004204070195555687f, 7.680895437786243e-20f }, { 1000, 0.008516596630215645f, 3.0263170437258543e-19f },
+               { 2500, 0.06948182731866837f, 4.5391312775082004e-18f }, { 4000, -0.01754589192569256f, -4.895453905423713e-19f },
+               { 7777, 0.10338862985372543f, 2.344363859234514e-18f }, { 12000, -0.09385982155799866f, -1.3493021437162966e-17f } } });
+
+    // the instrument: silent without a sample (FL's plugin refuses the note), sounding with one
+    {
+        auto silent = lynx::makeInstrument (lynx::InstrumentKind::granulizer);
+        silent->prepare (44100.0);
+        std::vector<float> l (2048, 0.0f), r (2048, 0.0f);
+        silent->noteOn (60, 1.0f);
+        silent->render (l.data(), r.data(), 2048, 1.0f, 1.0f);
+        CHECK (silent->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+        auto smp = std::make_shared<lynx::SampleData> (granulizerTestSample (20000, 2));
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::granulizer, smp);
+        lynx::ChannelDef def;
+        def.instrument = lynx::InstrumentKind::granulizer;
+        def.pluginState = n5;
+        inst->configure (def, 140.0);
+        inst->prepare (44100.0);
+        inst->noteOn (60, 0.8f);
+        inst->render (l.data(), r.data(), 2048, 1.0f, 1.0f);
+        double e = 0.0;
+        for (auto v : l)
+            e += (double) v * v;
+        CHECK (! inst->idle() && e > 1.0);
+        inst->noteOff (60);
+        for (int k = 0; k < 4; ++k)
+            inst->render (l.data(), r.data(), 512, 1.0f, 1.0f);
+        CHECK (inst->idle()); // the 10 ms end fade of the plugin's voice processor
+    }
+
+    // import: a Fruity Granulizer channel plays on the exact engine with its sample
+    {
+        FlpBuilder b;
+        b.ascii (0xC7, "25.2.5.5319");
+        b.u8 (0x40); b.u16 (0);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, u"Fruity Granulizer");
+        b.data (0xD5, v5);
+        b.utf16 (0xC4, u"%FLStudioFactoryData%\\Data\\Patches\\Packs\\Drums\\Kicks\\808 Kick.wav");
+        lynx::FlpImportOptions options;
+        options.roots.factoryData = "C:\\FL";
+        options.fileExists = [] (const std::string& path) { return path == "C:\\FL\\Data\\Patches\\Packs\\Drums\\Kicks\\808 Kick.wav"; };
+        lynx::FlpImportReport report;
+        options.report = &report;
+        const auto song = lynx::importFlp (flp::parseProject (b.bytes), options);
+        CHECK (song.channels.size() == 1u);
+        if (song.channels.size() == 1u)
+        {
+            CHECK (song.channels[0].instrument == lynx::InstrumentKind::granulizer && song.channels[0].pluginState == n5);
+            CHECK (song.channels[0].samplePath == "C:\\FL\\Data\\Patches\\Packs\\Drums\\Kicks\\808 Kick.wav");
+        }
+        CHECK (report.converted["Fruity Granulizer"] == 1);
     }
 }
 #include "WaveAnalysisTests.inc"

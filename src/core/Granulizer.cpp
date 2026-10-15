@@ -598,7 +598,7 @@ public:
             if (P.keyMode == 1)
                 d = (double) (smp.le * k) / 24.0;
             else if (P.keyMode == 2)
-                d = (((double) k / 4.0) * 60.0 * smp.rate) / tempo;
+                d = (((double) k / 4.0) * 60.0 * smp.rate) / (double) (float) tempo; // (P+0x1a0: the tempo as a float)
             const auto p = rnd ((double) v.pos + d);
             v.pos = (float) (p % ((std::int64_t) smp.le + 1));
         }
