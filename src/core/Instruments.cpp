@@ -218,6 +218,7 @@ private:
             case InstrumentKind::fruitkick:
             case InstrumentKind::bassdrum:
             case InstrumentKind::toxic:
+            case InstrumentKind::autogun:
                 break;
         }
 
@@ -2040,6 +2041,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeBassDrumInstrument();
     if (kind == InstrumentKind::toxic)
         return makeToxicInstrument();
+    if (kind == InstrumentKind::autogun)
+        return makeAutogunInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

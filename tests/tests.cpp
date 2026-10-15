@@ -778,6 +778,7 @@ TEST (flp_real_files)
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
     int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
+    int autogun = 0, autogunUsable = 0, autogunKind = 0, autogunWithSg = 0, autogunSounding = 0; // REA_rodada57
     int poizone = 0, poizoneUsable = 0, poizoneKind = 0, poizoneSounding = 0, poizoneGoldens = 0;
     int miniSynth = 0, miniSynthUsable = 0, miniSynthKind = 0, miniSynthSounding = 0, miniSynthGoldens = 0;
     int dx10 = 0, dx10Usable = 0, dx10Kind = 0, dx10Sounding = 0;
@@ -1174,6 +1175,39 @@ TEST (flp_real_files)
                     CHECK (finite);
                     ogunSounding += e > 1e-6 ? 1 : 0;
                 }
+
+            // Autogun (REA_rodada57): every state plays on Ogun's engine in its Autogun variant; with the installation, the
+            // Magic Dust stage gets Autogun\Data\SG.dat
+            {
+                bool any = false;
+                for (const auto& c : p.channels)
+                    if (c.pluginName == "Autogun")
+                        ++autogun, autogunUsable += lynx::autogunStateUsable (c.pluginState) ? 1 : 0, any = true;
+                if (any)
+                    for (const auto& c : lynx::importFlp (p, withFiles).channels)
+                        if (c.instrument == lynx::InstrumentKind::autogun)
+                        {
+                            ++autogunKind;
+                            lynx::ogun::RefOptions opt;
+                            opt.autogun = true;
+                            if (! c.samplePath.empty())
+                            {
+                                auto local = c.samplePath;
+                                std::replace (local.begin(), local.end(), '\\', '/');
+                                std::ifstream sg (local, std::ios::binary);
+                                opt.sgState.assign ((std::istreambuf_iterator<char> (sg)), std::istreambuf_iterator<char>());
+                                autogunWithSg += opt.sgState.size() == 1342 ? 1 : 0;
+                            }
+                            const auto y = lynx::ogun::renderReference (c.pluginState, { { 0, 48, 0.8, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6000 } },
+                                                                        44100.0, 11025, opt);
+                            double e = 0.0;
+                            bool finite = ! y.empty();
+                            for (auto v : y)
+                                finite = finite && std::isfinite (v), e += (double) v * v;
+                            CHECK (finite);
+                            autogunSounding += e > 1e-6 ? 1 : 0;
+                        }
+            }
 
             // Fruity DX10: every state plays on the exact engine when its channel processor is neutral (REA_rodada42)
             for (const auto& c : p.channels)
@@ -1694,6 +1728,9 @@ TEST (flp_real_files)
     CHECK (toxicUsable == toxic && toxic >= 3 && toxicKind == toxic && toxicSounding == toxicKind && toxicGoldens == 1);
     std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
     CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
+    std::printf ("  Autogun: %d channels, %d states usable by the engine, %d imported as Autogun (%d with SG.dat, %d sounding)\n", autogun,
+                 autogunUsable, autogunKind, autogunWithSg, autogunSounding);
+    CHECK (autogunUsable == autogun && autogun >= 9 && autogunKind == autogun && autogunWithSg == autogun && autogunSounding == autogun);
     std::printf ("  Fruity DX10: %d channels, %d states usable by the engine, %d imported as DX10 (%d sounding)\n", dx10, dx10Usable, dx10Kind, dx10Sounding);
     CHECK (dx10Usable == dx10 && dx10 >= 12 && dx10Kind == dx10 && dx10Sounding == dx10Kind);
     std::printf ("  Kepler: %d channels, %d states usable by the engine, %d imported as Kepler (%d sounding)\n", kepler, keplerUsable, keplerKind, keplerSounding);
@@ -7351,6 +7388,113 @@ TEST (ogun_demo_channels)
     }
     std::printf ("  Ogun: %d demo renders checked against the reference model\n", checked);
     CHECK (checked == (int) std::size (goldens));
+}
+
+TEST (autogun_template_channels)
+{
+    // REA_rodada57: every distinct Autogun state of the installation's projects (templates and the render test), with its
+    // effects and the Magic Dust stage (SG.dat from the installation), three notes (C5 1.0 0–20000, G5 0.6 8000–26000,
+    // G4 0.95 16000–30000), 39 690 samples at 44.1 kHz, at the state's quality and at the export quality 4. The template
+    // goldens are renders of the installation's Autogun_x64.dll (LYNX is within −127 dB of them); the render-test state
+    // uses Seed 2 "Random", so its golden is LYNX's own render with the counter at 0 (a fingerprint of the engine).
+    if (realFlpDir.empty())
+        return;
+    const auto sgPath = std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "Autogun" / "Data" / "SG.dat";
+    std::ifstream sgIn (sgPath, std::ios::binary);
+    const std::vector<std::uint8_t> sgState ((std::istreambuf_iterator<char> (sgIn)), std::istreambuf_iterator<char>());
+    if (sgState.size() != 1342)
+        return; // not this installation
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; std::size_t stateSize; bool export4; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+{ "System/Render tests/Autogun.flp", 2403, false, 1898.57144, 1609.64764, { { 5000, 0.189644396f, 0.104252934f }, { 12000, 0.0354045518f, 0.002853852f }, { 25000, -0.212527201f, -0.364677101f }, { 35000, 0.00715163164f, -0.0779336989f } } }, // Autogun (LYNX engine, counter 0)
+        { "System/Render tests/Autogun.flp", 2403, true, 1883.83096, 1696.41005, { { 5000, -0.229550153f, -0.0656554326f }, { 12000, -0.243209839f, -0.191908702f }, { 25000, 0.174803019f, 0.125847161f }, { 35000, 0.0609342083f, 0.0861448273f } } }, // Autogun (LYNX engine, counter 0)
+        { "Templates/Advanced/Electronic/Breakbeat.flp", 43615, false, 1156.8126, 667.1251, { { 5000, -0.122245498f, -0.00968936551f }, { 12000, 0.088016659f, 0.0382440798f }, { 25000, -0.0438547991f, -0.0149139315f }, { 35000, -0.0162006877f, 0.0219070036f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Breakbeat.flp", 43615, true, 541.425656, 476.875716, { { 5000, 0.15942347f, 0.0947837308f }, { 12000, 0.172008425f, 0.197265282f }, { 25000, 0.0506084785f, 0.0015097193f }, { 35000, 0.0400503464f, 0.0195946041f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Chillout.flp", 171641, false, 1463.17228, 1370.65276, { { 5000, 0.158808231f, -0.128741398f }, { 12000, 0.208011121f, -0.153484732f }, { 25000, -0.184889361f, 0.0409393087f }, { 35000, 0.0255694874f, 0.0495453961f } } }, // Pad 5 (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Chillout.flp", 171641, true, 1412.70901, 1469.84358, { { 5000, -0.0218960885f, -0.0802078545f }, { 12000, -0.458583713f, 0.146813422f }, { 25000, -0.198403969f, 0.0604776815f }, { 35000, -0.097854577f, 0.0806856826f } } }, // Pad 5 (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/HipHop-Trap.flp", 9787, false, 2807.37714, 3754.76445, { { 5000, -0.0391585156f, 0.332697481f }, { 12000, -0.128277287f, -0.632223666f }, { 25000, 0.103559501f, 0.521154523f }, { 35000, 0.309904903f, 0.280873239f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/HipHop-Trap.flp", 9787, true, 3526.66329, 4199.20992, { { 5000, 0.256542385f, 0.0431160629f }, { 12000, -0.283133686f, -0.732375383f }, { 25000, -0.210154608f, -0.276185691f }, { 35000, -0.144943774f, -0.315269828f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Trap.flp", 9780, false, 2807.37714, 3754.76445, { { 5000, -0.0391585156f, 0.332697481f }, { 12000, -0.128277287f, -0.632223666f }, { 25000, 0.103559501f, 0.521154523f }, { 35000, 0.309904903f, 0.280873239f } } }, // Pad (Autogun_x64.dll)
+        { "Templates/Advanced/Electronic/Trap.flp", 9780, true, 3526.66329, 4199.20992, { { 5000, 0.256542385f, 0.0431160629f }, { 12000, -0.283133686f, -0.732375383f }, { 25000, -0.210154608f, -0.276185691f }, { 35000, -0.144943774f, -0.315269828f } } }, // Pad (Autogun_x64.dll)
+    };
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / g.file, std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        if (bytes.empty())
+            continue;
+        std::vector<std::uint8_t> st;
+        for (const auto& c : flp::parseProject (bytes).channels)
+            if (c.pluginName == "Autogun" && st.empty())
+                st = c.pluginState;
+        CHECK (st.size() == g.stateSize);
+        CHECK (lynx::autogunStateUsable (st));
+        lynx::ogun::RefOptions opt;
+        opt.autogun = true;
+        opt.sgState = sgState;
+        opt.quality = g.export4 ? 4 : -1;
+        const auto y = lynx::ogun::renderReference (st, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20000 },
+                                                          { 8000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 26000 },
+                                                          { 16000, 55, 0.95, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30000 } }, 44100.0, 39690, opt);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 2e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 2e-5 * peak;
+        if (! ok)
+            std::printf ("  Autogun %s (q%s) differs: energy %.9g %.9g (golden %.9g %.9g)\n", g.file, g.export4 ? "4" : "-state", el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Autogun: %d template/render-test renders checked (DLL goldens for the fixed-spectrum states)\n", checked);
+    CHECK (checked == (int) std::size (goldens));
+
+    // the instrument (SG.dat read from ChannelDef::samplePath) plays like the reference renderer, then goes idle
+    {
+        std::ifstream in (std::filesystem::path (realFlpDir) / "Templates" / "Advanced" / "Electronic" / "Trap.flp", std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::autogun;
+        for (const auto& ch : flp::parseProject (bytes).channels)
+            if (ch.pluginName == "Autogun")
+                c.pluginState = ch.pluginState;
+        c.samplePath = sgPath.string();
+        lynx::ogun::RefOptions opt;
+        opt.autogun = true;
+        opt.sgState = sgState;
+        const auto ref = lynx::ogun::renderReference (c.pluginState, { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6144 } }, 44100.0, 16384, opt);
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::autogun);
+        inst->configure (c, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l (16384), r (16384);
+        for (int s = 0; s < 16384; s += 512)
+        {
+            if (s == 0)
+                inst->noteOn (60, 0.75f);
+            if (s == 6144)
+                inst->noteOff (60);
+            inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        }
+        double worst = 0.0, peak = 0.0;
+        for (int i = 0; i < 16384; ++i)
+            worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) }),
+            peak = std::max (peak, (double) std::abs (l[(std::size_t) i]));
+        CHECK (ref.size() == 2 * 16384 && peak > 0.01 && worst == 0.0);
+        std::vector<float> tail (44100), tailR (tail.size());
+        for (int k = 0; k < 40 && ! inst->idle(); ++k)
+            inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+
+    // the state variants: Ogun's parser rejects the version-19 Autogun layout, the comment length is one byte or 0xff + i32
+    std::ifstream rt (std::filesystem::path (realFlpDir) / "System" / "Render tests" / "Autogun.flp", std::ios::binary);
+    const std::vector<std::uint8_t> rtBytes ((std::istreambuf_iterator<char> (rt)), std::istreambuf_iterator<char>());
+    for (const auto& c : flp::parseProject (rtBytes).channels)
+        if (c.pluginName == "Autogun")
+            CHECK (lynx::autogunStateUsable (c.pluginState) && lynx::ogunParam (c.pluginState, 63) == 430);
 }
 
 TEST (harmless_rack)

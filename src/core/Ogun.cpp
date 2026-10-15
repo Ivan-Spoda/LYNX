@@ -11,8 +11,11 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <mutex>
 
+#include "core/HarmlessFx.h"
 #include "core/Inflate.h"
 #include "core/PlateReverb.h"
 
@@ -102,6 +105,7 @@ struct StateData
     std::array<int, 3> eqtype {};
     std::array<ArtData, 13> arts;
     std::array<CurveData, 4> maps; // 13 forced, 14 impulse, 15 decay, 16 release
+    bool autogun = false;          // Autogun's variant of the state (REA_rodada57 §1)
     std::uint8_t byte (int plugOffset) const noexcept { return body[(std::size_t) (plugOffset - 0x12c)]; }
 };
 
@@ -200,13 +204,14 @@ bool readCurve (Reader& r, CurveData& c, int cfg, double centre)
     return r.ok;
 }
 
-std::optional<StateData> parseState (const std::vector<std::uint8_t>& blob)
+std::optional<StateData> parseState (const std::vector<std::uint8_t>& blob, bool autogun = false)
 {
     if (blob.size() < 8)
         return std::nullopt;
     std::uint32_t vw = 0;
     std::memcpy (&vw, blob.data(), 4);
     StateData S;
+    S.autogun = autogun;
     S.version = (int) (vw > 0xffff ? vw >> 16 : vw);
     if (S.version < 14)
         return std::nullopt;
@@ -229,18 +234,19 @@ std::optional<StateData> parseState (const std::vector<std::uint8_t>& blob)
     }
     else
     {
-        std::size_t v = 0;
-        int shift = 0;
-        while (r.ok)
+        // comment: UTF-16 characters, count as one byte or 0xff + i32 (REA_rodada57 §1.2)
+        std::size_t v = r.u8();
+        if (v == 0xff)
         {
-            const auto c = r.u8();
-            v |= (std::size_t) (c & 0x7f) << shift;
-            shift += 7;
-            if (! (c & 0x80) || shift > 28)
-                break;
+            const auto n = r.i32();
+            if (n < 0)
+                return std::nullopt;
+            v = (std::size_t) n;
         }
         r.skip (2 * v);
     }
+    if (autogun && S.version >= 19)
+        r.skip (4); // Autogun: the random-pad seed (user interface only)
     for (int k = 0; k < 13; ++k)
     {
         auto& a = S.arts[(std::size_t) k];
@@ -1386,6 +1392,10 @@ struct Patch
     float reverbWet = 0;
     int tailLen = 0;
     int maxBlock = 512;
+    // Autogun's Magic Dust: FL's Soundgoodizer engine (Maximus, Shared build) loaded with Autogun\Data\SG.dat, band mix =
+    // P63, in place on the host-rate output when P63 > 0 (REA_rodada57 §1.4); null for Ogun or without SG.dat
+    std::shared_ptr<const hlfx::MaximusPreset> sg;
+    int sgMix = 0;
     std::vector<std::string> fallbacks;
 
     std::uint8_t flag (int off) const noexcept { return fl[(std::size_t) (off - 0x200)]; }
@@ -1434,6 +1444,8 @@ std::shared_ptr<Patch> buildPatch (const StateData& S, double fsHost, int qualit
     p.declickLen = f32 (96.0 / (r20 * r20));
     const auto x = f32 (P[0] * 0.0078125);
     p.master = x == 1.0 ? 1.0 : f32 ((std::exp (x * f32 (std::log (3.0))) - 1.0) * 0.5);
+    if (S.autogun)
+        p.master = f32 (p.master * 0.25); // Autogun: the same law × 0.25 (REA_rodada57 §1.3)
     p.masterCents = P[1] * 100 + P[2];
     p.pre = f32 (P[5] * f32 (0.001));
     p.dec = P[6] == 10000 ? -1.0 : f32 (P[6] * 0.0001);
@@ -1916,6 +1928,11 @@ public:
             reverb.allocate (p.reverbPre);
         }
         decSt.fill (0.0);
+        if (p.sg != nullptr && p.sgMix > 0)
+        {
+            sg = std::make_unique<hlfx::MaximusProcessor>();
+            sg->prepare (p.sg, p.fsHost, p.sgMix);
+        }
         quietNeeded = (long long) (2.0 * p.fsHost) + (p.chorusOn ? p.chorusRing : 0) + (p.delayOn ? 4LL * p.delaySize : 0)
                       + (p.reverbOn ? (long long) p.reverbPre + reverb.L[5] + reverb.L[9] : 0);
         quietFor = quietNeeded;
@@ -2056,6 +2073,8 @@ public:
         }
         if (p.osf > 1)
             decimate (m);
+        if (sg != nullptr)
+            sg->process (bufL.data(), bufR.data(), n);
         float peak = 0.0f;
         for (int i = 0; i < n; ++i)
         {
@@ -2084,6 +2103,13 @@ public:
             dr = (int) ((dr + (long long) m) % p.delaySize);
             dw = (int) ((dw + (long long) m) % p.delaySize);
         }
+        if (sg != nullptr)
+        {
+            // the Soundgoodizer stage keeps running on silence (its envelopes relax as in FL's Gen_Render)
+            std::fill (tmpL.begin(), tmpL.begin() + n, 0.0f);
+            std::fill (tmpR.begin(), tmpR.begin() + n, 0.0f);
+            sg->process (tmpL.data(), tmpR.data(), n);
+        }
     }
 
 private:
@@ -2109,6 +2135,7 @@ private:
     PlateReverb reverb;
     // decimator: per channel 12 doubles
     std::array<double, 24> decSt {};
+    std::unique_ptr<hlfx::MaximusProcessor> sg; // Autogun's Magic Dust stage
     long long quietFor = 0, quietNeeded = 0;
 
     void grow (int count)
@@ -3381,10 +3408,46 @@ private:
 // are recovered exactly and Ogun's law is applied once. Final.Pitch = 100·(key − 60) + channel pitch + note cents;
 // velocity = LYNX velocity (FL velocity / 128); release velocity 0.5; Mod X/Y (Final.FCut/FRes) 0.
 // Seed 2 "Random": the per-note counter starts at 0 for every instance (FL: from the RTL random seed).
+// Autogun (REA_rodada57): the same engine on Autogun's state variant, master × 0.25, then the Magic Dust stage, whose
+// preset SG.dat is read from the user's installation (ChannelDef::samplePath); without it the stage is skipped.
+
+std::vector<std::uint8_t> readInstallFile (std::string path)
+{
+    if (path.empty())
+        return {};
+    std::ifstream in (path, std::ios::binary);
+    if (! in)
+    {
+        std::replace (path.begin(), path.end(), '\\', '/');
+        in.open (path, std::ios::binary);
+    }
+    if (! in)
+        return {};
+    return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+}
+
+std::shared_ptr<const hlfx::MaximusPreset> sgPresetFrom (const std::vector<std::uint8_t>& sgState)
+{
+    if (sgState.empty())
+        return nullptr;
+    try
+    {
+        return hlfx::makeMaximusPreset (sgState, hlfx::MaximusBuild::shared);
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+}
 
 class OgunInstrument final : public Instrument
 {
 public:
+    explicit OgunInstrument (bool isAutogun = false)
+        : autogun (isAutogun)
+    {
+    }
+
     ~OgunInstrument() override
     {
         delete incoming.exchange (nullptr);
@@ -3412,14 +3475,20 @@ public:
         mono.store (channel.synth.mono);
         const bool render = offlineRendering();
         const std::lock_guard<std::mutex> lock (buildMutex);
-        if (channel.pluginState == loadedState && loadedRate == rate.load() && loadedMode == render && b == loadedBpm)
+        const bool sgChanged = autogun && channel.samplePath != loadedSgPath;
+        if (channel.pluginState == loadedState && loadedRate == rate.load() && loadedMode == render && b == loadedBpm && ! sgChanged)
             return;
+        if (sgChanged)
+        {
+            loadedSgPath = channel.samplePath;
+            sgPreset = sgPresetFrom (readInstallFile (loadedSgPath));
+        }
         if (channel.pluginState != loadedState)
         {
             loadedState = channel.pluginState;
             try
             {
-                parsed = parseState (loadedState);
+                parsed = parseState (loadedState, autogun);
             }
             catch (...)
             {
@@ -3502,6 +3571,8 @@ private:
         try
         {
             auto patch = buildPatch (*parsed, sr, render ? 4 : -1, loadedBpm, Engine::maxHostBlock);
+            if (autogun)
+                patch->sg = sgPreset, patch->sgMix = parsed->P[63];
             auto e = std::make_unique<Engine> (std::move (patch));
             delete incoming.exchange (e.release());
         }
@@ -3531,7 +3602,10 @@ private:
     std::atomic<double> rate { 44100.0 };
     std::atomic<float> channelCents { 0.0f };
     std::atomic<bool> mono { false };
+    const bool autogun;
     std::vector<std::uint8_t> loadedState;
+    std::string loadedSgPath;
+    std::shared_ptr<const hlfx::MaximusPreset> sgPreset;
     std::optional<StateData> parsed;
     double loadedRate = 0.0, loadedBpm = 120.0;
     bool loadedMode = false;
@@ -3608,9 +3682,21 @@ bool ogunSetParam (std::vector<std::uint8_t>& state, int index, int value)
     return true;
 }
 
-std::vector<std::string> ogunFallbacks (const std::vector<std::uint8_t>& state)
+bool autogunStateUsable (const std::vector<std::uint8_t>& state)
 {
-    const auto S = parseState (state);
+    try
+    {
+        return parseState (state, true).has_value();
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+std::vector<std::string> ogunFallbacks (const std::vector<std::uint8_t>& state, bool autogun)
+{
+    const auto S = parseState (state, autogun);
     if (! S)
         return { "state not usable" };
     auto f = buildPatch (*S, 44100.0, -1, 140.0, 512)->fallbacks;
@@ -3620,16 +3706,19 @@ std::vector<std::string> ogunFallbacks (const std::vector<std::uint8_t>& state)
 }
 
 std::unique_ptr<Instrument> makeOgunInstrument() { return std::make_unique<OgunInstrument>(); }
+std::unique_ptr<Instrument> makeAutogunInstrument() { return std::make_unique<OgunInstrument> (true); }
 
 namespace ogun
 {
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
                                     int length, const RefOptions& opt)
 {
-    const auto S = parseState (state);
+    const auto S = parseState (state, opt.autogun);
     if (! S || length <= 0)
         return {};
     const auto patch = buildPatch (*S, sampleRate, opt.quality, opt.tempo, 512);
+    if (opt.autogun)
+        patch->sg = sgPresetFrom (opt.sgState), patch->sgMix = S->P[63];
     auto engine = std::make_unique<Engine> (patch);
     engine->counter = opt.counter;
     engine->maxpoly = opt.maxPolyphony;
