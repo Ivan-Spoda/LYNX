@@ -95,7 +95,7 @@ std::string dbText (double g)
 } // namespace
 
 // ===================================================================================================== Fast Dist
-namespace fastdist
+namespace fastdistfx
 {
 namespace
 {
@@ -263,17 +263,17 @@ public:
     {
         const auto s = fromParams (params.data());
         const bool render = offlineRendering();
-        fastdist::process (left, n, s, render);
-        fastdist::process (right, n, s, render);
+        fastdistfx::process (left, n, s, render);
+        fastdistfx::process (right, n, s, render);
     }
 };
 } // namespace
 
 std::unique_ptr<Effect> make() { return std::make_unique<FastDistEffect>(); }
-} // namespace fastdist
+} // namespace fastdistfx
 
 // ======================================================================================================= Flangus
-namespace flangus
+namespace flangusfx
 {
 namespace
 {
@@ -706,7 +706,7 @@ public:
         // parameter changes go through FL's ProcessParam in control order (unchanged controls would not change the
         // engine); a fresh or reset effect then starts from FL's flushed state rather than ramping in from silence
         const auto s = fromParams (params.data());
-        for (int i = 0; i < flangus::params; ++i)
+        for (int i = 0; i < flangusfx::params; ++i)
             if (s[(std::size_t) i] != engine.param (i))
                 engine.setParam (i, s[(std::size_t) i]);
         if (fresh)
@@ -739,5 +739,297 @@ private:
 } // namespace
 
 std::unique_ptr<Effect> make() { return std::make_unique<FlangusEffect>(); }
-} // namespace flangus
+} // namespace flangusfx
+
+// ======================================================================================================= Flanger
+namespace flangerfx
+{
+namespace
+{
+inline std::int32_t wrap32 (long long v) noexcept { return (std::int32_t) (std::uint32_t) (std::uint64_t) v; }
+// the plugin's curve of a normalised control: ((k + 1)·v) / (k·v + 1)
+float law (float v, float k) noexcept { return (float) ((((double) k + 1.0) * (double) v) / ((double) (k * v) + 1.0)); }
+
+struct Tables
+{
+    std::array<std::int32_t, 4096> tri {}, sine {}, dtri {}, dsine {};
+    std::array<float, 4096> frac {};
+    Tables()
+    {
+        // triangle: 0 → 1 over a quarter, 1 → −1 over half, −1 → 0 over the last quarter; steps of 1/1024 in double
+        double d = 0.0;
+        const double st = 0.0009765625;
+        int i = 0;
+        for (; i < 1024; ++i, d += st)
+            tri[(std::size_t) i] = (std::int32_t) (d * 32767.0);
+        if (d > 1.0)
+            d = 2.0 - d;
+        for (; i < 3072; ++i, d -= st)
+            tri[(std::size_t) i] = (std::int32_t) (d * 32767.0);
+        if (d < -1.0)
+            d = -2.0 - d;
+        for (; i < 4096; ++i, d += st)
+            tri[(std::size_t) i] = (std::int32_t) (d * 32767.0);
+        for (i = 0; i < 4096; ++i)
+            sine[(std::size_t) i] = (std::int32_t) (std::sin (((double) i * 6.283185307) / 4096.0) * 32767.0);
+        for (i = 0; i < 4095; ++i)
+        {
+            dtri[(std::size_t) i] = tri[(std::size_t) i + 1] - tri[(std::size_t) i];
+            dsine[(std::size_t) i] = sine[(std::size_t) i + 1] - sine[(std::size_t) i];
+        }
+        dtri[4095] = tri[0] - tri[4095];
+        dsine[4095] = sine[0] - sine[4095];
+        for (i = 0; i < 4096; ++i)
+            frac[(std::size_t) i] = (float) ((double) i / 4096.0);
+    }
+};
+const Tables& tables()
+{
+    static const Tables t;
+    return t;
+}
+} // namespace
+
+struct Engine::Impl
+{
+    State raw = defaults;
+    std::array<float, params> v {};
+    int fs = 44100;
+    // LFO (24-bit cycle in a 32-bit phase)
+    float lfoFs = 44100.0f;
+    std::uint32_t pl = 0, pr = 0;
+    std::int32_t rate = 0;
+    std::array<std::int32_t, 4096> tab {}, dtab {};
+    // delay lines
+    std::vector<float> bl, br;
+    std::uint32_t mask = 0, w = 0;
+    int size = 0;
+    float d0 = 0, d1 = 0, fb = 0, lfoRate = 0, fbl = 0, fbr = 0, damp = 0, dry = 0, wet = 0, cross = 0;
+    std::int32_t c140 = 0, c144 = 0;
+
+    void lfoSet (float r, float phase, bool reset) noexcept
+    {
+        if (reset)
+            pl = 0;
+        rate = (std::int32_t) std::llrint ((double) (((r * 4096.0f) / lfoFs) * 4096.0f));
+        pr = pl + (std::uint32_t) std::llrint ((double) (phase * 16777216.0f));
+    }
+    void lfoShape (float s) noexcept
+    {
+        const auto& t = tables();
+        const long long a = std::llrint ((double) (s * 4096.0f)), b = std::llrint ((double) (1.0f - s) * 4096.0);
+        for (std::size_t i = 0; i < 4096; ++i)
+        {
+            tab[i] = wrap32 (a * t.tri[i] + b * t.sine[i]);
+            dtab[i] = (std::int32_t) ((long long) wrap32 (a * t.dtri[i] + b * t.dsine[i]) >> 12);
+        }
+    }
+    std::int32_t lfoValue (std::uint32_t p) const noexcept
+    {
+        const auto i = (std::size_t) ((p >> 12) & 0xfffu);
+        return (std::int32_t) ((long long) wrap32 ((long long) tab[i] + (long long) (p & 0xfffu) * dtab[i]) >> 12);
+    }
+    void resize (int frames)
+    {
+        int b = 0;
+        while (! (frames <= (1 << b)))
+            ++b;
+        if ((1 << b) != size)
+        {
+            size = 1 << b;
+            mask = (std::uint32_t) size - 1;
+            bl.assign ((std::size_t) size, 0.0f); // FL keeps the reallocated memory (not modelled: cleared)
+            br.assign ((std::size_t) size, 0.0f);
+            w = 0;
+        }
+    }
+    void delays() noexcept
+    {
+        d0 = law (v[0], -0.8f) * 20.0f;
+        d1 = law (v[1], -0.8f) * 20.0f;
+        c140 = (std::int32_t) (long long) ((((double) d0 + (double) d1 * 0.5) * (double) fs * 4096.0) / 1000.0);
+        c144 = (std::int32_t) (long long) (((double) d1 * 0.5 * (double) fs) / 1000.0);
+    }
+    void rateSet (bool reset) noexcept
+    {
+        lfoRate = law (v[2], -0.9f) * 5.0f;
+        lfoSet (lfoRate, v[3], reset);
+    }
+    void setParam (int i, int r) noexcept
+    {
+        raw[(std::size_t) i] = r;
+        double x = (double) r * (1.0 / rawMax[(std::size_t) i]);
+        x = ! (0.0 <= x) ? 0.0 : (x > 1.0 ? 1.0 : x);
+        v[(std::size_t) i] = (float) x;
+        if (i < 2)
+            delays();
+        else if (i < 4)
+            rateSet (false);
+        else if (i == 4)
+            damp = (float) (1.0 - (double) v[4]);
+        else if (i == 5)
+            lfoShape (v[5]);
+        else if (i < 8)
+            fb = (float) ((double) (v[7] > 0.5f ? -v[6] : v[6]) * 0.98);
+        else
+        {
+            const bool inv = (double) v[8] > 0.5;
+            wet = inv ? -v[10] : v[10];
+            cross = inv ? -v[11] : v[11];
+            dry = v[9];
+        }
+    }
+    void setRate (int sampleRate)
+    {
+        fs = std::max (sampleRate, 1);
+        resize ((int) std::llrint (fs / 10.0));
+        lfoFs = (float) fs;
+        rateSet (false);
+        delays();
+    }
+    void render (const float* in, float* out, int n) noexcept
+    {
+        const auto& F = tables().frac;
+        for (int k = 0; k < n; ++k)
+        {
+            const float il = in[2 * k], ir = in[2 * k + 1];
+            const std::int32_t vl = lfoValue (pl);
+            pl += (std::uint32_t) rate;
+            const std::int32_t vr = lfoValue (pr);
+            pr += (std::uint32_t) rate;
+            const auto ul = (std::uint32_t) (std::uint64_t) (((long long) wrap32 ((long long) c144 * vl) >> 3) + c140);
+            const auto ur = (std::uint32_t) (std::uint64_t) (((long long) wrap32 ((long long) c144 * vr) >> 3) + c140);
+            bl[w] = il + fbl * fb;
+            br[w] = ir + fbr * fb;
+            const std::uint32_t dl = w - (ul >> 12), dr = w - (ur >> 12);
+            float s0 = bl[dl & mask], s1 = bl[(dl - 1) & mask];
+            const float xl = s0 + (s1 - s0) * F[ul & 0xfffu];
+            s0 = br[dr & mask];
+            s1 = br[(dr - 1) & mask];
+            const float xr = s0 + (s1 - s0) * F[ur & 0xfffu];
+            w = (w + 1) & mask;
+            fbl = fbl + damp * (xl - fbl);
+            fbr = fbr + damp * (xr - fbr);
+            out[2 * k] = (fbl * wet + il * dry) + cross * fbr;
+            out[2 * k + 1] = (fbr * wet + ir * dry) + cross * fbl;
+        }
+    }
+};
+
+Engine::Engine() : d (std::make_unique<Impl>())
+{
+    // the plugin's constructor: LFO at 44.1 kHz, sine shape, delay lines for 44.1 kHz, then every default control
+    d->lfoShape (0.0f);
+    d->resize (4410);
+    d->rateSet (true);
+    for (int i = 0; i < params; ++i)
+        d->setParam (i, defaults[(std::size_t) i]);
+}
+Engine::~Engine() = default;
+void Engine::prepare (int sampleRate) { d->setRate (sampleRate); }
+void Engine::setParam (int index, int raw) noexcept
+{
+    if (index >= 0 && index < params)
+        d->setParam (index, raw);
+}
+void Engine::load (const State& s) noexcept
+{
+    for (int i = 0; i < params; ++i)
+        d->setParam (i, s[(std::size_t) i]);
+}
+void Engine::enable() noexcept
+{
+    std::fill (d->bl.begin(), d->bl.end(), 0.0f);
+    std::fill (d->br.begin(), d->br.end(), 0.0f);
+    d->w = 0;
+    d->rateSet (true);
+    d->fbl = d->fbr = 0.0f;
+}
+int Engine::param (int index) const noexcept { return d->raw[(std::size_t) index]; }
+void Engine::render (const float* in, float* out, int n) noexcept { d->render (in, out, n); }
+
+std::optional<State> parse (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 4 + 4 * params || i32At (state, 0) >= 2)
+        return std::nullopt;
+    State s {};
+    for (int i = 0; i < params; ++i)
+        s[(std::size_t) i] = i32At (state, 4 + 4 * (std::size_t) i);
+    return s;
+}
+void toParams (const State& s, float* p) noexcept
+{
+    for (int i = 0; i < params; ++i)
+        p[i] = norm (s[(std::size_t) i], 0, rawMax[(std::size_t) i]);
+}
+State fromParams (const float* p) noexcept
+{
+    State s {};
+    for (int i = 0; i < params; ++i)
+        s[(std::size_t) i] = rawFrom (p[i], 0, rawMax[(std::size_t) i]);
+    return s;
+}
+const char* paramName (int param) noexcept
+{
+    static const char* names[params] { "Delay", "Depth", "Rate", "Phase", "Damp", "Shape", "Feed", "Invert feed",
+                                       "Invert wet", "Dry", "Wet", "Cross" };
+    return param >= 0 && param < params ? names[param] : "";
+}
+std::string paramText (int param, float value01)
+{
+    char text[32];
+    const int p = std::clamp (param, 0, params - 1);
+    const int raw = rawFrom (value01, 0, rawMax[(std::size_t) p]);
+    const float x = (float) ((double) raw / rawMax[(std::size_t) p]);
+    switch (param)
+    {
+        case 0:
+        case 1: std::snprintf (text, sizeof (text), "%.2f ms", (double) (law (x, -0.8f) * 20.0f)); return text;
+        case 2: std::snprintf (text, sizeof (text), "%.3f Hz", (double) (law (x, -0.9f) * 5.0f)); return text;
+        case 3: std::snprintf (text, sizeof (text), "%d°", raw); return text;
+        case 7:
+        case 8: return x > 0.5f ? "on" : "off";
+        default: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (100.0 * x)); return text;
+    }
+}
+
+namespace
+{
+class FlangerEffect final : public Effect
+{
+public:
+    void prepare (double sampleRate) noexcept override { engine.prepare ((int) std::lround (sampleRate)); }
+    // LYNX's reset = FL's "enabled" notification: delay lines cleared, LFO restarted
+    void reset() noexcept override { engine.enable(); }
+    void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
+    {
+        const auto s = fromParams (params.data());
+        for (int i = 0; i < flangerfx::params; ++i)
+            if (s[(std::size_t) i] != engine.param (i))
+                engine.setParam (i, s[(std::size_t) i]);
+        for (int o = 0; o < n; o += 512)
+        {
+            const int m = std::min (512, n - o);
+            for (int i = 0; i < m; ++i)
+            {
+                buf[2 * (std::size_t) i] = left[o + i];
+                buf[2 * (std::size_t) i + 1] = right[o + i];
+            }
+            engine.render (buf.data(), buf.data(), m);
+            for (int i = 0; i < m; ++i)
+            {
+                left[o + i] = buf[2 * (std::size_t) i];
+                right[o + i] = buf[2 * (std::size_t) i + 1];
+            }
+        }
+    }
+
+private:
+    Engine engine;
+    std::array<float, 1024> buf {};
+};
+} // namespace
+
+std::unique_ptr<Effect> make() { return std::make_unique<FlangerEffect>(); }
+} // namespace flangerfx
 } // namespace lynx

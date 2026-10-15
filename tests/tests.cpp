@@ -784,7 +784,7 @@ TEST (flp_real_files)
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
-    int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0; // REA_rodada55
+    int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -997,6 +997,7 @@ TEST (flp_real_files)
                         vocodexSlots += slot.plugin == "Vocodex";
                         fastDistSlots += slot.plugin == "Fruity Fast Dist";
                         flangusSlots += slot.plugin == "Fruity Flangus";
+                        flangerSlots += slot.plugin == "Fruity Flanger";
                     }
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
@@ -1010,6 +1011,7 @@ TEST (flp_real_files)
                         }
                         fastDistExact += fx.kind == lynx::EffectKind::fruityFastDist;
                         flangusExact += fx.kind == lynx::EffectKind::fruityFlangus;
+                        flangerExact += fx.kind == lynx::EffectKind::fruityFlanger;
                         if (fx.kind == lynx::EffectKind::vocodex)
                             vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
                     }
@@ -1657,9 +1659,10 @@ TEST (flp_real_files)
     // option; the other Data folders add states with options not decoded
     CHECK (maximusSlots - maximusExact <= 16 && maximusExact >= 97 && sgzExact == sgzSlots && sgzSlots > 90);
     CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
-    std::printf ("  Fruity Fast Dist: %d of %d slots on the exact engine; Fruity Flangus: %d of %d\n", fastDistExact, fastDistSlots,
-                 flangusExact, flangusSlots);
-    CHECK (fastDistExact >= fastDistSlots && fastDistSlots >= 30 && flangusExact >= flangusSlots && flangusSlots >= 30); // REA_rodada55
+    std::printf ("  Fruity Fast Dist: %d of %d slots on the exact engine; Fruity Flangus: %d of %d; Fruity Flanger: %d of %d\n", fastDistExact,
+                 fastDistSlots, flangusExact, flangusSlots, flangerExact, flangerSlots);
+    CHECK (fastDistExact >= fastDistSlots && fastDistSlots >= 30 && flangusExact >= flangusSlots && flangusSlots >= 30
+           && flangerExact >= flangerSlots && flangerSlots >= 3); // REA_rodada55
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -8820,8 +8823,8 @@ TEST (bassdrum_engine)
     }
     CHECK (diff == 0.0 && energy > 1e-2);
 }
-// REA_rodada55: Fruity Fast Dist and Fruity Flangus, goldens from the installation's DLLs (EXEC, our own states)
-TEST (fruity_fast_dist_and_flangus)
+// REA_rodada55: Fruity Fast Dist, Fruity Flangus and Fruity Flanger, goldens from the installation's DLLs (EXEC, our own states)
+TEST (fruity_fast_dist_flangus_flanger)
 {
     std::vector<float> inL (4096), inR (4096);
     for (int n = 0; n < 4096; ++n)
@@ -8833,10 +8836,10 @@ TEST (fruity_fast_dist_and_flangus)
     auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
 
     // Fast Dist (+ FL's host waveshaper): live and render kernels
-    auto dist = [&] (lynx::fastdist::State s, bool render, std::initializer_list<Gold> gold) {
+    auto dist = [&] (lynx::fastdistfx::State s, bool render, std::initializer_list<Gold> gold) {
         std::vector<float> l (inL), r (inR);
-        lynx::fastdist::process (l.data(), 4096, s, render);
-        lynx::fastdist::process (r.data(), 4096, s, render);
+        lynx::fastdistfx::process (l.data(), 4096, s, render);
+        lynx::fastdistfx::process (r.data(), 4096, s, render);
         for (const auto& g : gold)
             CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
     };
@@ -8851,13 +8854,13 @@ TEST (fruity_fast_dist_and_flangus)
     dist ({ 90, 7, 0, 40, 120 }, true, { { 100, 0.0f, -0.346223623f }, { 1000, -0.511893749f, 0.287246734f }, { 2047, 0.212909341f, -0.340341568f },
                                         { 3000, -0.511893749f, -0.227846757f }, { 4095, 0.0910428166f, 0.197928891f } });
     {
-        const auto* T = lynx::fastdist::curve (0, 10);
-        CHECK (T[0] == 0 && T[8191] == T[8192] && lynx::fastdist::curve (1, 1)[8191] == 32767);
+        const auto* T = lynx::fastdistfx::curve (0, 10);
+        CHECK (T[0] == 0 && T[8191] == T[8192] && lynx::fastdistfx::curve (1, 1)[8191] == 32767);
     }
 
     // Flangus: FL's call order (state, sample rate, block size of 512), no flush
-    auto flange = [&] (lynx::flangus::State s, int fs, std::initializer_list<Gold> gold) {
-        lynx::flangus::Engine e;
+    auto flange = [&] (lynx::flangusfx::State s, int fs, std::initializer_list<Gold> gold) {
+        lynx::flangusfx::Engine e;
         e.prepare (fs);
         e.load (s);
         e.setRate (fs);
@@ -8883,6 +8886,29 @@ TEST (fruity_fast_dist_and_flangus)
                                                              { 2047, 1.02325416f, -1.17055321f }, { 3000, -1.74136555f, -0.535462856f },
                                                              { 4095, 1.49345946f, -0.537866116f } });
 
+    // Flanger: state, then the sample rate (FL's call order)
+    auto flanger = [&] (lynx::flangerfx::State s, int fs, std::initializer_list<Gold> gold) {
+        lynx::flangerfx::Engine e;
+        e.load (s);
+        e.prepare (fs);
+        std::vector<float> io (8192);
+        for (int n = 0; n < 4096; ++n)
+        {
+            io[2 * (std::size_t) n] = inL[(std::size_t) n];
+            io[2 * (std::size_t) n + 1] = inR[(std::size_t) n];
+        }
+        for (int o = 0; o < 4096; o += 512)
+            e.render (io.data() + 2 * o, io.data() + 2 * o, 512);
+        for (const auto& g : gold)
+            CHECK (close (io[2 * (std::size_t) g.i], g.l) && close (io[2 * (std::size_t) g.i + 1], g.r));
+    };
+    flanger ({ 0, 2000, 2000, 118, 0, 0, 23, 0, 1024, 3500, 3000, 2500 }, 44100,
+             { { 100, -1.22955823f, -1.98144293f }, { 1000, -0.975861192f, 0.646231353f }, { 2047, 0.518505156f, -0.857361794f },
+               { 3000, -0.546559215f, -0.0157452822f }, { 4095, 0.104127884f, 0.206255436f } });
+    flanger ({ 300, 4000, 4500, 90, 1000, 300, 99, 1024, 1024, 2000, 4000, 1000 }, 48000,
+             { { 100, 0.0f, -0.440000027f }, { 1000, 0.24619779f, 0.775473535f }, { 2047, 1.11609459f, -0.0639692694f },
+               { 3000, -1.22629714f, -1.41118503f }, { 4095, -0.263562649f, 0.80683732f } });
+
     // import: FL's states become the exact effects with the controls as parameters; short states keep the approximations
     {
         const std::vector<std::uint8_t> fd { 192, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 77, 0, 0, 0, 97, 0, 0, 0 };
@@ -8890,7 +8916,7 @@ TEST (fruity_fast_dist_and_flangus)
         CHECK (slot && slot->kind == lynx::EffectKind::fruityFastDist);
         if (slot)
         {
-            const auto s = lynx::fastdist::fromParams (slot->params.data());
+            const auto s = lynx::fastdistfx::fromParams (slot->params.data());
             CHECK (s.pre == 192 && s.threshold == 4 && s.type == 1 && s.mix == 77 && s.post == 97);
             auto fx = lynx::makeEffect (*slot);
             fx->prepare (44100.0);
@@ -8905,7 +8931,7 @@ TEST (fruity_fast_dist_and_flangus)
         CHECK (f2 && f2->kind == lynx::EffectKind::fruityFlangus);
         if (f2)
         {
-            const auto s = lynx::flangus::fromParams (f2->params.data());
+            const auto s = lynx::flangusfx::fromParams (f2->params.data());
             for (int i = 0; i < 8; ++i)
                 CHECK (s[(std::size_t) i] == v[i]);
             auto fx = lynx::makeEffect (*f2);
@@ -8913,6 +8939,22 @@ TEST (fruity_fast_dist_and_flangus)
             std::vector<float> l (inL), r (inR);
             fx->process (l.data(), r.data(), 4096, f2->params, 120.0);
             CHECK (std::isfinite (l[4095]) && std::isfinite (r[4095]) && std::abs (l[2000]) > 0.0f);
+        }
+        std::vector<std::uint8_t> fl (52);
+        const int w[13] { 1, 300, 4000, 4500, 90, 1000, 300, 99, 1024, 1024, 2000, 4000, 1000 };
+        std::memcpy (fl.data(), w, 52);
+        const auto f3 = lynx::effectFromFl ("Fruity Flanger", fl, 120.0);
+        CHECK (f3 && f3->kind == lynx::EffectKind::fruityFlanger);
+        if (f3)
+        {
+            const auto s = lynx::flangerfx::fromParams (f3->params.data());
+            for (int i = 0; i < 12; ++i)
+                CHECK (s[(std::size_t) i] == w[i + 1]);
+            auto fx = lynx::makeEffect (*f3);
+            fx->prepare (48000.0);
+            std::vector<float> l (inL), r (inR);
+            fx->process (l.data(), r.data(), 4096, f3->params, 120.0);
+            CHECK (l[1000] == 0.24619779f && r[4095] == 0.80683732f);
         }
         const auto shortFd = lynx::effectFromFl ("Fruity Fast Dist", std::vector<std::uint8_t> (8, 0), 120.0);
         CHECK (! shortFd || shortFd->kind != lynx::EffectKind::fruityFastDist);

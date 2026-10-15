@@ -295,7 +295,8 @@ enum class EffectKind : std::uint8_t
     vocodex,      // FL's Vocodex (REA_rodada35, core/Vocodex.h): built from FL's raw state (EffectSlot::state)
     maximus,      // FL's Maximus / Soundgoodizer engine (REA_rodada36/38, core/MaximusFx.h): built from EffectSlot::state
     fruityFastDist, // FL's Fruity Fast Dist, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
-    fruityFlangus   // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
+    fruityFlanger   // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them

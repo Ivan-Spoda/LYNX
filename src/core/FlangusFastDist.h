@@ -1,6 +1,6 @@
 #pragma once
 
-// FL Studio's Fruity Flangus and Fruity Fast Dist as LYNX mixer effects, exact engines rebuilt in
+// FL Studio's Fruity Flangus, Fruity Fast Dist and Fruity Flanger as LYNX mixer effects, exact engines rebuilt in
 // docs/analise/REA_rodada55.md (clean-room: layouts, formulas and behaviour in our own words; no Image-Line code or
 // data in this repository). Both are stateless apart from what the parameters hold: FL's saved state is only the
 // controls, which become the slot parameters (value = (raw − min) / (max − min)) so the LYNX editor and automation
@@ -12,6 +12,9 @@
 //   a file is taken; live playback uses FL's live (non-interpolating) kernel.
 // Flangus (EffectKind::fruityFlangus): [0] order 1…9, [1] depth 0…1024, [2] speed 0…1024, [3] delay 0…128,
 //   [4] spread 0…128, [5] cross −128…128, [6] dry −128…128, [7] wet −128…128.
+// Flanger (EffectKind::fruityFlanger): [0] delay 0…1024, [1] depth 0…5000, [2] rate 0…5000, [3] phase 0…360,
+//   [4] damp 0…5000, [5] shape 0…1024, [6] feed 0…100, [7] invert feed, [8] invert wet (0…1024, on above half),
+//   [9] dry, [10] wet, [11] cross 0…5000.
 
 #include <array>
 #include <cstdint>
@@ -22,7 +25,7 @@
 
 #include "core/Effects.h"
 
-namespace lynx::fastdist
+namespace lynx::fastdistfx
 {
 constexpr int params = 5;
 struct State
@@ -46,9 +49,9 @@ const std::int16_t* curve (int set, int curveIndex) noexcept;
 // one channel, in place; render = FL's file-render kernel (interpolated)
 void process (float* x, int n, const State& s, bool render) noexcept;
 std::unique_ptr<Effect> make();
-} // namespace lynx::fastdist
+} // namespace lynx::fastdistfx
 
-namespace lynx::flangus
+namespace lynx::flangusfx
 {
 constexpr int params = 8;
 constexpr int maxOrder = 9;
@@ -89,4 +92,38 @@ private:
 
 // the mixer effect (the slot parameters carry FL's controls)
 std::unique_ptr<Effect> make();
-} // namespace lynx::flangus
+} // namespace lynx::flangusfx
+
+namespace lynx::flangerfx
+{
+constexpr int params = 12;
+using State = std::array<int, params>; // raw controls, all from 0
+constexpr State defaults { 0, 2000, 2000, 118, 0, 0, 23, 0, 1024, 3500, 3000, 2500 };
+constexpr State rawMax { 1024, 5000, 5000, 360, 5000, 1024, 100, 1024, 1024, 5000, 5000, 5000 };
+
+// FL's saved state: i32 version (1), then twelve i32 in control order (later versions are not read by FL either)
+std::optional<State> parse (const std::vector<std::uint8_t>& state);
+void toParams (const State& s, float* params) noexcept;
+State fromParams (const float* params) noexcept;
+const char* paramName (int param) noexcept;
+std::string paramText (int param, float value01);
+
+class Engine
+{
+public:
+    Engine();
+    ~Engine();
+    void prepare (int sampleRate); // allocates the delay lines and applies the rate
+    void setParam (int index, int raw) noexcept;
+    void load (const State& s) noexcept;
+    void enable() noexcept; // FL's "enabled" notification: delay lines cleared, LFO restarted, feedback at 0
+    int param (int index) const noexcept;
+    void render (const float* in, float* out, int n) noexcept; // interleaved stereo; in may equal out
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> d;
+};
+
+std::unique_ptr<Effect> make();
+} // namespace lynx::flangerfx
