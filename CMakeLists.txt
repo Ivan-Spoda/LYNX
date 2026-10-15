@@ -42,6 +42,8 @@ add_library(lynx_core STATIC
     src/core/BassDrum.cpp
     src/core/Ogun.cpp
     src/core/MiniSynth.cpp
+    src/core/SimSynth.cpp
+    src/core/Wasp.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp
@@ -127,7 +129,9 @@ if(LYNX_BUILD_APP)
 
     juce_add_gui_app(LYNX
         PRODUCT_NAME "LYNX"
-        COMPANY_NAME "Kauan")
+        COMPANY_NAME "Ka1-S"
+        COMPANY_COPYRIGHT "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
+        DESCRIPTION "LYNX digital audio workstation")
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
