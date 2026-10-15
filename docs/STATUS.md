@@ -86,9 +86,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
   models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
   9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
-  installation); Toxic Biohazard on its engine (REA round 45: bit-identical to FL's DLL on the 3 demo channels, voice
-  and full effects chain, at 44.1/48/96 kHz, the built-in waves read from the user's FL installation); Kepler, Autogun,
-  MiniSynth, DX10, Fruit Kick, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  installation); MiniSynth on its engine (REA round 41: wrapper, 99 voices, the ten oscillator kinds on the 1024
+  tables built from the user's `oscdata.dat`, the exact matrix filter, envelopes, LFO and its four effects; bit-identical
+  to FL's DLL on 11 of the 12 states of FL's projects and 47 of its 91 presets, the rest within −107…−147 dB); Toxic Biohazard on its engine (REA round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects
+  chain, at 44.1/48/96 kHz, the built-in waves read from the user's FL installation); Kepler, Autogun, DX10, Fruit Kick,
+  PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -194,7 +196,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
   "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
   approximation: 4.9 s), the other demos with Ogun channels within ±6 s of before.
-- **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
+- **MiniSynth:** its own instrument (`core/MiniSynth.cpp`, REA round 41): FL's wrapper (velocity from Init.Vol,
+  per-note FinalLevels tables, engine calls of ≤ 512 samples in 32-sample blocks, voice kill), POLY/MONO/LEAD voice
+  allocation with glide from the last note, the ten oscillator kinds as phased/detuned table saws with dithered reads on
+  1024 band-limited tables built at run time from the user's `Minisynth\oscdata.dat`, noise, drift, the 4-pole filter
+  integrated exactly per sample (4096 sub-steps by 12 matrix squarings) with its saturating first stage and DC blocker,
+  both envelopes, the engine LFO (song-locked while the transport plays) and the effects (distortion + decimator, tempo
+  delay, 6-stage phaser, chorus) — bit-identical to `rea-work/r41/py/msmodel.py` on all 12 installation states and 91
+  presets, and bit-identical to FL's DLL on 11/12 and 47/91 (the others within −107…−147 dB: last-bit differences of
+  the C runtime's sin/pow). Not reproducible by design: the random generator is process-global in FL (LYNX: one per
+  instance, started like a fresh plugin). FL's max-polyphony value at channel creation is not confirmed (LYNX: 0 → 99
+  voices). Without `oscdata.dat` the importer keeps the internal-synth approximation.
 - **Toxic Biohazard:** its own instrument (`core/Toxic.cpp` + `core/ToxicFx.cpp`, REA round 45): FL's wrapper
   (velocity from Init.Vol, per-note level/pitch tables, engine chunks of 64), poly/mono voices with the 4 glide modes and
   stealing, six operators × up to 8 unison lanes on band-limited tables built from the 128-harmonic spectra (wave 0 from the

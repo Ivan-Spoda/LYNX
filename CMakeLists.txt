@@ -39,6 +39,7 @@ add_library(lynx_core STATIC
     src/core/Gms.cpp
     src/core/Morphine.cpp
     src/core/Ogun.cpp
+    src/core/MiniSynth.cpp
     src/core/Toxic.cpp
     src/core/ToxicFx.cpp
     src/core/HarmlessFx.cpp
