@@ -11301,7 +11301,6 @@ TEST (fl_sample_relocation)
     CHECK (lynx::locateFlSample ("Z:\\nowhere.wav", roots, project, exists).empty());
     CHECK (lynx::locateFlSample ("", roots, project, exists).empty());
 }
-#include "UiPolish2Tests.inc"
 
 // --- REA round 64: SimSynth (exact engine) and Wasp / Wasp XT (FL 2026's silent placeholder) ---------------------
 namespace
