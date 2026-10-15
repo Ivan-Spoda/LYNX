@@ -51,11 +51,14 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/Reeverb2.h"
+#include "core/LuxeVerb.h"
 #include "core/Denormals.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
+#include "core/EquoFx.h"
+#include "core/PitchShifterFl.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
@@ -503,7 +506,7 @@ TEST (fl_round15_effects_convert_known_values)
     }
     // Pitch Shifter +12 st, mix 100%
     const auto ps = lynx::effectFromFl ("Pitch Shifter", blob ({ 7, 1200, 0, 0, 2400, 8500, 200, 0, 0, 768, 0, 0, 65536, 0, 65536, 0, 0, 0, 0 }));
-    CHECK (ps && ps->kind == lynx::EffectKind::pitchShift && std::abs (ps->params[0] - (0.5f + 12.0f / 48.0f)) < 1e-4f);
+    CHECK (ps && ps->kind == lynx::EffectKind::flPitchShifter && ps->params[0] == 1.0f && ps->params[3] == 1.0f); // REA_rodada61
 }
 
 TEST (frequency_shifter_moves_spectrum_by_hz)
@@ -928,6 +931,7 @@ TEST (flp_real_files)
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
     int flPeqSlots = 0, flPeqExact = 0;                                        // REA_rodada50
     int basicSlots = 0, basicExact = 0; // REA_rodada58: PanOMatic, Balance, Blood Overdrive
+    int equoSlots = 0, equoExact = 0, pitchShifterSlots = 0, pitchShifterExact = 0; // REA_rodada61
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
@@ -1179,6 +1183,8 @@ TEST (flp_real_files)
                         vocodexSlots += slot.plugin == "Vocodex";
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
+                        equoSlots += slot.plugin == "EQUO";
+                        pitchShifterSlots += slot.plugin == "Pitch Shifter";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
                         basicSlots += slot.plugin == "Fruity PanOMatic" || slot.plugin == "Fruity Balance" || slot.plugin == "Fruity Blood Overdrive";
                         chorusSlots += lynx::chorusControls (slot.plugin) > 0 && slot.state.size() >= 4 ? 1 : 0;
@@ -1207,6 +1213,8 @@ TEST (flp_real_files)
                         flPeqExact += fx.kind == lynx::EffectKind::parametricEq && lynx::peq::flLaw (fx.params);
                         basicExact += fx.kind == lynx::EffectKind::fruityPanOMatic || fx.kind == lynx::EffectKind::fruityBalance
                                       || fx.kind == lynx::EffectKind::fruityBloodOverdrive;
+                        equoExact += fx.kind == lynx::EffectKind::equo && lynx::equofx::parse (fx.state).has_value();
+                        pitchShifterExact += fx.kind == lynx::EffectKind::flPitchShifter;
                         delay2Exact += fx.kind == lynx::EffectKind::fruityDelay2;
                         delay3Exact += fx.kind == lynx::EffectKind::fruityDelay3;
                         chorusExact += fx.kind == lynx::EffectKind::fruityChorus || fx.kind == lynx::EffectKind::hyperChorus || fx.kind == lynx::EffectKind::vintageChorus ? 1 : 0;
@@ -1930,6 +1938,10 @@ TEST (flp_real_files)
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
     // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
     CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    std::printf ("  EQUO: %d of %d slots on the exact engine\n", equoExact, equoSlots);
+    CHECK (equoExact == equoSlots && equoSlots >= 10); // REA_rodada61
+    std::printf ("  Pitch Shifter: %d of %d slots on the exact engine\n", pitchShifterExact, pitchShifterSlots);
+    CHECK (pitchShifterExact == pitchShifterSlots && pitchShifterSlots >= 15); // REA_rodada61
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     CHECK (delay2Exact == delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
@@ -8756,6 +8768,171 @@ std::vector<std::uint8_t> peq1TestState (const PeqTestBand (&bands)[7], int main
 }
 } // namespace
 
+// EQUO test state (our own LCG curves, no FL data; REA_rodada61 equo/teststate.py builds the same bytes)
+static std::vector<std::uint8_t> equoTestState (int ovs, int bw, bool add)
+{
+    std::vector<std::uint8_t> b;
+    auto put = [&b] (const void* p, std::size_t n) { b.insert (b.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    auto putI = [&put] (std::int32_t v) { put (&v, 4); };
+    auto putF = [&put] (float v) { put (&v, 4); };
+    std::uint32_t seed = 12345;
+    auto rnd = [&seed] {
+        seed = (std::uint32_t) (((std::uint64_t) seed * 1103515245u + 12345u) & 0x7fffffffu);
+        return (float) ((double) (seed % 20001) / 10000.0);
+    };
+    putI (4);
+    for (int k = 0; k < 93; ++k)
+    {
+        putF (rnd());
+        putI (k % 11 == 0 ? 1 : (k % 13 == 0 ? 2 : 0));
+    }
+    for (int bank = 0; bank < 9; ++bank)
+        for (int k = 0; k < 93; ++k)
+        {
+            const float v = rnd();
+            putF (bank == 8 ? 0.75f + v * 0.25f : v);
+        }
+    for (int v : { 1500, 90, 2600, 170, 150, ovs, bw, -1, 0, 0 })
+        putI (v);
+    for (int v : { 0, add ? 1 : 0, 0 })
+        b.push_back ((std::uint8_t) v);
+    putI (1);
+    return b;
+}
+
+// Pitch Shifter state (version 7, our own settings; REA_rodada61 ps/teststate.py builds the same bytes)
+static std::vector<std::uint8_t> pitchShifterTestState (std::array<int, 13> p, int engine, int detector)
+{
+    std::vector<std::uint8_t> b;
+    auto putI = [&b] (std::int32_t v) { const auto* q = (const std::uint8_t*) &v; b.insert (b.end(), q, q + 4); };
+    putI (7);
+    for (int v : p)
+        putI (v);
+    putI (p[11]);
+    b.push_back (0);
+    putI (engine);
+    putI (detector);
+    putI (1000);
+    b.push_back (1);
+    b.push_back (0);
+    return b;
+}
+
+TEST (pitch_shifter_exact)
+{
+    std::vector<float> inL (8192), inR (8192);
+    for (int n = 0; n < 8192; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0) * 0.3f;
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0) * 0.3f;
+    }
+    struct Gold { int i; float l, r; };
+    // goldens: Pitch Shifter_x64.dll on the same states and signal (REA_rodada61)
+    auto run = [&] (const std::vector<std::uint8_t>& st, int latency, std::initializer_list<Gold> gold) {
+        lynx::psfl::State s;
+        CHECK (st.size() == 75 && lynx::psfl::parsePitchShifter (st.data(), st.size(), s));
+        // through the mixer effect: FL import → slot parameters → effect, odd host blocks
+        const auto slot = lynx::effectFromFl ("Pitch Shifter", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::flPitchShifter);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0, k = 0; i < 8192; ++k)
+        {
+            const int n = std::min (8192 - i, k % 2 == 0 ? 700 : 333);
+            fx->process (l.data() + i, r.data() + i, n, slot->params, 120.0);
+            i += n;
+        }
+        CHECK (fx->latencySamples() == latency);
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    // "FFT" (pitch-synchronous) engine: +5 st, formant −3 st, correction 50 %, mix 79 %, accurate detector
+    run (pitchShifterTestState ({ 500, -300, 2, 1900, 8500, 200, 0, 0, 768, 0, 0, 32768, 0 }, 0, 1), 2457,
+         { { 1000, 0.0f, 0.0f }, { 3000, 0.142123833f, 0.0878119618f }, { 5000, 0.139498621f, -0.365035176f },
+           { 7000, 0.139498621f, 0.161137447f }, { 8191, 0.449655473f, 0.453882188f } });
+    // granular engine: −7 st, 60 ms grains, density 300 %, jitter 30 %, random 20 %, post delay with feedback 40 %
+    run (pitchShifterTestState ({ -700, 0, 2, 2400, 6000, 300, 30, 20, 200, 40, 1, 65536, 0 }, 1, 0), 0,
+         { { 1000, -0.0736689344f, -0.349420458f }, { 3000, 0.086801365f, 0.0471927896f }, { 5000, -0.0939825475f, 0.31712544f },
+           { 7000, -0.28462702f, -0.437854528f }, { 8191, 0.138916701f, -0.0426892526f } });
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flPitchShifter, 0, 0.75f, 120.0) == "+6.00 st");
+}
+
+TEST (equo_exact)
+{
+    std::vector<float> inL (4096), inR (4096);
+    for (int n = 0; n < 4096; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
+    }
+    struct Gold { int i; float l, r; };
+    // goldens: EQUO_x64.dll run on the same states and signal (REA_rodada61 §5)
+    auto run = [&] (const std::vector<std::uint8_t>& st, bool hq, bool ticks, std::initializer_list<Gold> gold) {
+        const auto s = lynx::equofx::parse (st);
+        CHECK (s.has_value());
+        if (! s)
+            return;
+        lynx::equofx::Engine e;
+        e.prepare (44100.0, hq);
+        e.set (*s);
+        std::vector<float> l (inL), r (inR);
+        if (! ticks)
+            e.process (l.data(), r.data(), 4096);
+        else
+        {
+            auto k = *s;
+            e.startFromConstruction();
+            for (int i = 0; i < 4096; i += 256)
+            {
+                if (i == 2048)
+                    k.knob[2] = 5300, e.setKnobs (k);
+                e.tick();
+                e.process (l.data() + i, r.data() + i, 256);
+            }
+        }
+        for (const auto& g : gold)
+            CHECK (l[(std::size_t) g.i] == g.l && r[(std::size_t) g.i] == g.r);
+    };
+    const auto plain = equoTestState (0, 150, false);
+    run (plain, false, false, { { 100, -0.00154058414f, -0.00550224911f }, { 1000, -0.908149242f, 0.619277894f }, { 2047, 0.411961317f, -0.364051819f },
+                                { 3000, -1.42823684f, -0.0602950938f }, { 4095, -0.0661701784f, 0.300809383f } });
+    run (equoTestState (1, 300, true), false, false,
+         { { 100, 0.0312003642f, 0.0184187777f }, { 1000, 0.0379521511f, 0.224126667f }, { 2047, -0.135689721f, 0.0444660783f },
+           { 3000, 0.113949843f, -1.00256324f }, { 4095, -0.176232055f, 0.79159987f } });
+    run (plain, true, false, { { 100, -0.00104017637f, 0.000872685807f }, { 1000, -0.0426855832f, 0.0402083024f }, { 2047, 0.191993102f, 0.174184501f },
+                               { 3000, -0.114048228f, 0.419817507f }, { 4095, 0.0376945846f, -0.274040252f } });
+    run (plain, false, true, { { 100, -0.0019897793f, -0.00981196482f }, { 1000, -1.09574401f, 0.83203429f }, { 2047, 0.839113712f, -0.691361725f } });
+
+    // the mixer effect from the FL import: FL's state in the slot, the knobs in its parameters, any host block size
+    const auto slot = lynx::effectFromFl ("EQUO", plain, 140.0);
+    CHECK (slot && slot->kind == lynx::EffectKind::equo && slot->state == plain);
+    if (slot)
+    {
+        auto back = *lynx::equofx::parse (plain);
+        lynx::equofx::applyParams (slot->params, back);
+        CHECK (back.knob == lynx::equofx::parse (plain)->knob && back.bandwidth == 150 && back.oversample == 0);
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        fx->process (l.data(), r.data(), 700, slot->params, 0.0);
+        fx->process (l.data() + 700, r.data() + 700, 3396, slot->params, 0.0);
+        // the engine glides its bands per processing call, as FL does per host buffer: compare with the engine run on
+        // the same 700 + 3396 split (sample 1000 differs from the single-call golden), and with the golden once settled
+        lynx::equofx::Engine ref;
+        ref.prepare (44100.0, false);
+        ref.set (*lynx::equofx::parse (plain));
+        std::vector<float> rl (inL), rr (inR);
+        ref.process (rl.data(), rr.data(), 700);
+        ref.process (rl.data() + 700, rr.data() + 700, 3396);
+        CHECK (l == rl && rr == r && r[3000] == -0.0602950938f);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::equo, 4, slot->params[4], 120.0, slot->params).find ("dB") != std::string::npos);
+    }
+    CHECK (! lynx::equofx::parse (std::vector<std::uint8_t> (100, 0)).has_value());
+}
+
 TEST (fruity_parametric_eq_exact)
 {
     std::vector<float> inL (4096), inR (4096);
@@ -11280,3 +11457,5 @@ TEST (granulizer_engine)
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
+#include "LuxeVerbTests.inc"
+#include "ConvolverTests.inc"
