@@ -107,13 +107,14 @@ public:
     static constexpr int toolbarHeight = 28;
     static constexpr int timelineHeight = 24;
     static constexpr int headerHeight = toolbarHeight + timelineHeight;
-    static constexpr int trackHeight = 38;
+    static constexpr int trackHeight = 38; // the default row height (each track can be resized: P18)
     static constexpr int scrollBarSize = 12;
 
     static juce::Colour patternColour (const Song& song, int pattern);
 
 private:
-    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint };
+    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
+                      trackResize, preview };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -125,6 +126,21 @@ private:
     int trackToY (int track) const;
     int yToTrack (int y) const;
     int numTracks() const;
+    // track rows have their own heights (Song::playlistTracks[i].height): tops are cached here
+    std::vector<int> trackTops;          // top of each track from the first one, plus the total at the end
+    void refreshTrackLayout();
+    int heightOf (int track) const;
+    int tracksHeight() const;            // all tracks, top to bottom
+    int dividerAt (juce::Point<int> p) const; // the track whose bottom edge (in the headers) is under p, or -1
+    void setTrackHeights (std::vector<int> tracks, int height);
+    int resizeTrack = -1, resizeStartHeight = 0;
+    bool resizeAll = false;
+    // Alt+right-click on a clip: hear it while the button is held (pattern clips play their pattern)
+    void startPreview (int clip, int x);
+    void stopPreview();
+    bool previewRestoreSong = false;
+    int previewPatternBefore = -1;
+    double previewPositionBefore = 0.0;
     std::int64_t gridTicks() const; // the grid step in use (resolving Screen / Nearest note)
     std::int64_t snap (double tick, bool enabled) const;
     std::vector<std::int64_t> snapCandidates() const;
@@ -168,7 +184,7 @@ private:
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true };
     juce::ComboBox arrangementBox;
-    juce::ComboBox snapBox; // "Follow global grid" or this editor's own grid
+    SnapBox snapBox { true }; // "Main" (the toolbar snap) or this editor's own grid
     ToolStrip tools { true };
     int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
 
@@ -215,9 +231,10 @@ private:
         int clip = -1, track = -1;
         gesture::Target target = gesture::Target::empty;
         bool header = false, led = false;
+        int divider = -1; // the track whose bottom edge in the headers is under the mouse (resizes it)
         bool operator== (const Hover& o) const
         {
-            return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led;
+            return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led && divider == o.divider;
         }
     };
     Hover hover;

@@ -1525,6 +1525,9 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-search.png");
             ui.getBrowserForSnapshot().setSearchForSnapshot ({});
+            ui.getBrowserForSnapshot().selectFirstSampleForSnapshot(); // the tree with a sample selected and its waveform
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-browser-tree.png");
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });

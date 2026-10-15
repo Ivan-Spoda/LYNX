@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -114,7 +115,9 @@ private:
     int voices = 0, peakVoices = 0;
 };
 
-// The output: an oscilloscope of what is heard and a peak meter (red after clipping, for a while).
+// The output: a display of what is heard and a peak meter (red after clipping, for a while). Like FL's
+// output panel, the display has modes (right-click menu, or a click steps through them): the oscilloscope,
+// a long scrolling view of the level, and a spectrum (low frequencies on the left).
 class OutputMonitor final : public juce::Component,
                             public ui::HintSource
 {
@@ -123,10 +126,26 @@ public:
     void update();
     void paint (juce::Graphics& g) override;
     ui::Hint hintAt (juce::Point<int> position) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+
+    enum Mode
+    {
+        oscilloscope,
+        longView,
+        spectrum,
+        modeCount_
+    };
+    static constexpr int modeCount = (int) modeCount_;
+    static inline int mode = oscilloscope; // shared by every instance; saved in the UI options
+    static juce::String modeName (int m);
+    std::function<void()> onModeChanged;   // the main window saves the choice
 
 private:
+    void setMode (int newMode);
     AudioEngine& engine;
     std::array<float, 1024> samples {};
+    std::array<float, 256> history {};     // long view: one peak per update, oldest first
+    std::array<float, 128> bands {};       // spectrum: smoothed level per band, 0..1
     float peak = 0.0f, held = 0.0f;
     int holdFrames = 0, clipFrames = 0;
 };

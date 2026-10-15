@@ -2,6 +2,8 @@
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
 
+#include "core/EditorPolish.h"
+
 #include "ui/HistoryPanel.h"
 #include "ui/QuickAddPalette.h"
 #include "ui/ToolWindow.h"
@@ -145,6 +147,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     stopButton.setTooltip (tr ("Stop and return to the start (double-click: all notes off)"));
     stopButton.onClick = [this] { stopAndRewind(); };
     stopButton.onDoubleClick = [this] { engine.panic(); };
+    stopButton.onRightClick = [this] { showStopMenu(); };
+    output.onModeChanged = [this] { saveUiSettings(); };
     recordButton.setOnColour (theme::colour::record);
     recordButton.setIconColour (theme::colour::record.withMultipliedSaturation (0.8f));
     recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
@@ -709,6 +713,8 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("browser.swapPrevious")) browser.step (-1, true);
     else if (is ("browser.swapNext")) browser.step (1, true);
     else if (is ("browser.load")) browser.loadSelected();
+    else if (is ("browser.closeFolder")) browser.openFolder (false);
+    else if (is ("browser.openFolder")) browser.openFolder (true);
     else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
     else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
     else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
@@ -830,6 +836,11 @@ void MainComponent::loadUiSettings()
             typingPiano = on;
         else if (key == "keepEditorsOpen")
             ChannelRackComponent::keepEditorsOpen = on;
+        else if (key == "rememberSeek")
+            EditorGlobals::get().rememberSeek = on;
+        else if (key == "scopeMode")
+            toolbar::OutputMonitor::mode = juce::jlimit (0, toolbar::OutputMonitor::modeCount - 1,
+                                                         line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
             PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
     }
@@ -845,7 +856,9 @@ void MainComponent::saveUiSettings()
     uiSettingsFile().replaceWithText ("typingPiano=" + juce::String (typingPiano ? 1 : 0) + "\nkeepEditorsOpen="
                                       + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\neditPatternsIn="
                                       + juce::String (PlaylistComponent::editPatternsIn) + "\nsplash=" + juce::String (startup.splash ? 1 : 0)
-                                      + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0) + "\n");
+                                      + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
+                                      + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
+                                      + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -886,8 +899,29 @@ void MainComponent::playPause()
 void MainComponent::stopAndRewind()
 {
     engine.stop();
-    engine.rewind();
-    playStartTicks = 0.0;
+    const auto& globals = EditorGlobals::get();
+    const auto back = polish::stopReturnTick (globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
+
+    if (back > 0) // "Remember seek time": back to the position clicked on the Playlist ruler
+        engine.seek ((double) back);
+    else
+        engine.rewind();
+
+    playStartTicks = (double) back;
+}
+
+void MainComponent::showStopMenu()
+{
+    auto& globals = EditorGlobals::get();
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Stop"));
+    menu.addItem (tr ("Remember seek time: Stop goes back to the position clicked on the Playlist ruler"), true, globals.rememberSeek, [this] {
+        EditorGlobals::get().rememberSeek = ! EditorGlobals::get().rememberSeek;
+        saveUiSettings();
+    });
+    menu.addSeparator();
+    menu.addItem (tr ("All notes off (panic)") + "\t" + tr ("double-click"), [this] { engine.panic(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&stopButton));
 }
 
 void MainComponent::toggleMode()
@@ -1669,7 +1703,9 @@ void MainComponent::setControlHints()
 
     ui::setHint (playButton, with (tr ("Play: [LMB] play; again: stop and go back to where it started"), "transport.playStop")
                                  + "  " + keyMarkup ("transport.pause") + " " + tr ("pause"));
-    ui::setHint (stopButton, tr ("Stop: [LMB] stop and go back to the start  [2xLMB] all notes off (panic)"));
+    ui::setHint (stopButton, tr ("Stop: [LMB] stop and go back to the start (or the remembered position)  [2xLMB] all notes off (panic)  "
+                                 "[RMB] remember seek time"),
+                 true);
     ui::setHint (recordButton, with (tr ("Record: [LMB] arm, then play to record notes (and audio, when armed)  [RMB] what to record"), "transport.record"),
                  true);
     ui::setHint (recordMenuButton, tr ("What to record: notes, input audio, count-in, overdub or replace, quantise  [LMB] menu"), true);
