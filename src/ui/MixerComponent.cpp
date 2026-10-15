@@ -10,6 +10,7 @@
 #include "engine/Text.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
@@ -19,10 +20,17 @@ namespace lynx
 {
 namespace
 {
-constexpr int headerHeight = 34;
-constexpr int panHeight = 34;
-constexpr int buttonsHeight = 22;
-constexpr int feedsHeight = 46;
+// strip layout, top to bottom: header (arm, number, name), knobs (pan, stereo), mute/solo, meters +
+// fader, the dB read-out, then the routing lane (send switch, send knob, wires)
+constexpr int headerHeight = 36;
+constexpr int knobsHeight = 32;
+constexpr int buttonsHeight = 20;
+constexpr int readoutHeight = 16;
+constexpr int switchHeight = 16;
+constexpr int sendKnobHeight = 26;
+constexpr int wiresHeight = 14;
+constexpr int laneHeight = switchHeight + sendKnobHeight + wiresHeight + 4;
+constexpr int meterWidth = 6;
 
 // Fader 0..1 -> dB, with 0.8 = 0 dB (as in FL).
 juce::String faderToDb (float volume)
@@ -39,6 +47,46 @@ float meterPosition (float gain)
 {
     const auto db = juce::Decibels::gainToDecibels (gain, -60.0f);
     return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f);
+}
+
+// Stereo separation: -1 = widest, 0 = normal, +1 = mono (MixerTrack::stereo).
+ui::ValueSpec stereoSpec (const juce::String& name)
+{
+    ui::ValueSpec spec;
+    spec.name = name;
+    spec.minimum = -1.0;
+    spec.maximum = 1.0;
+    spec.defaultValue = 0.0;
+    spec.toText = [] (double v) {
+        const auto percent = juce::roundToInt (std::abs (v) * 100.0);
+        if (percent == 0)
+            return tr ("Normal width");
+        if (v > 0.0 && percent >= 100)
+            return tr ("Mono");
+        return v < 0.0 ? tr ("{0}% wider", { juce::String (percent) }) : tr ("{0}% narrower", { juce::String (percent) });
+    };
+    spec.fromText = [] (const juce::String& t) -> std::optional<double> {
+        const auto lower = t.toLowerCase().trim();
+        if (lower.startsWith ("mono"))
+            return 1.0;
+        if (lower.startsWith ("n") && ! lower.containsAnyOf ("0123456789"))
+            return 0.0;
+        const auto digits = lower.initialSectionContainingOnly ("+-0123456789.,").replaceCharacter (',', '.');
+        if (digits.isEmpty() || digits.containsOnly ("+-."))
+            return std::nullopt;
+        auto v = digits.getDoubleValue() / 100.0;
+        if (lower.contains ("wid") || lower.contains ("larg")) // "50% wider" / "50% mais largo"
+            v = -std::abs (v);
+        return v;
+    };
+    return spec;
+}
+
+ui::ValueSpec sendSpec (const juce::String& name)
+{
+    auto spec = ui::percentSpec (name, 1.0);
+    spec.pixelsForRange = 120.0;
+    return spec;
 }
 } // namespace
 
@@ -59,7 +107,7 @@ MixerStrips::~MixerStrips()
 
 void MixerStrips::setVisibleHeight (int height)
 {
-    visibleHeight = juce::jmax (260, height);
+    visibleHeight = juce::jmax (300, height);
     updateSize();
 }
 
@@ -67,12 +115,12 @@ void MixerStrips::updateSize()
 {
     const auto tracks = (int) engine.getSong().mixer.size();
     setSize (stripX (tracks) + stripWidth + 8, visibleHeight);
-    levels.resize ((std::size_t) juce::jmax (1, tracks) * 2, 0.0f);
+    levels.resize ((std::size_t) juce::jmax (1, tracks) * 2);
 }
 
 int MixerStrips::stripX (int track) const noexcept
 {
-    return track == 0 ? 4 : 4 + masterWidth + 10 + (track - 1) * stripWidth;
+    return track == 0 ? 4 : 4 + masterWidth + 8 + (track - 1) * stripWidth;
 }
 
 int MixerStrips::trackAt (int x) const noexcept
@@ -86,56 +134,165 @@ int MixerStrips::trackAt (int x) const noexcept
     return -1;
 }
 
-juce::Rectangle<int> MixerStrips::panArea (int t) const
+int MixerStrips::laneTop() const noexcept
 {
-    return { stripX (t), headerHeight, stripWidthOf (t), panHeight };
+    return getHeight() - laneHeight;
 }
 
-juce::Rectangle<int> MixerStrips::muteArea (int t) const
+juce::Rectangle<int> MixerStrips::headerArea (int t) const
 {
-    return { stripX (t) + 6, headerHeight + panHeight, 26, buttonsHeight };
-}
-
-juce::Rectangle<int> MixerStrips::soloArea (int t) const
-{
-    return { stripX (t) + stripWidthOf (t) - 32, headerHeight + panHeight, 26, buttonsHeight };
-}
-
-juce::Rectangle<int> MixerStrips::routeArea (int t) const
-{
-    return { stripX (t) + 6, getHeight() - feedsHeight - 2, stripWidthOf (t) - 16, 16 };
+    return { stripX (t), 0, stripWidthOf (t) - 4, headerHeight };
 }
 
 juce::Rectangle<int> MixerStrips::armArea (int t) const
 {
-    return { stripX (t) + 4, 4, 14, 14 };
+    return { stripX (t) + 4, 6, 13, 13 };
+}
+
+juce::Rectangle<int> MixerStrips::panArea (int t) const
+{
+    const auto w = stripWidthOf (t) - 4;
+    return { stripX (t), headerHeight, w / 2, knobsHeight };
+}
+
+juce::Rectangle<int> MixerStrips::stereoArea (int t) const
+{
+    const auto w = stripWidthOf (t) - 4;
+    return { stripX (t) + w / 2, headerHeight, w - w / 2, knobsHeight };
+}
+
+juce::Rectangle<int> MixerStrips::muteArea (int t) const
+{
+    return { stripX (t) + 4, headerHeight + knobsHeight, 24, buttonsHeight };
+}
+
+juce::Rectangle<int> MixerStrips::soloArea (int t) const
+{
+    return { stripX (t) + stripWidthOf (t) - 32, headerHeight + knobsHeight, 24, buttonsHeight };
 }
 
 juce::Rectangle<int> MixerStrips::faderArea (int t) const
 {
-    const auto top = headerHeight + panHeight + buttonsHeight + 8;
-    return { stripX (t) + 6, top, stripWidthOf (t) - 12, getHeight() - top - feedsHeight - 22 };
+    const auto top = headerHeight + knobsHeight + buttonsHeight + 8;
+    return { stripX (t) + 5, top, stripWidthOf (t) - 14, juce::jmax (40, laneTop() - readoutHeight - 4 - top) };
+}
+
+juce::Rectangle<int> MixerStrips::meterArea (int t) const
+{
+    return faderArea (t).withWidth (meterWidth * 2 + 2);
+}
+
+juce::Rectangle<int> MixerStrips::faderRail (int t) const
+{
+    return faderArea (t).withTrimmedLeft (meterWidth * 2 + 6);
+}
+
+juce::Rectangle<int> MixerStrips::routeArea (int t) const
+{
+    return { stripX (t) + 5, laneTop() + 2, stripWidthOf (t) - 14, switchHeight };
+}
+
+juce::Rectangle<int> MixerStrips::sendArea (int t) const
+{
+    return { stripX (t), laneTop() + 2 + switchHeight, stripWidthOf (t) - 4, sendKnobHeight };
 }
 
 MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
 {
-    if (t == (int) engine.getSong().mixer.size())
+    const auto& song = engine.getSong();
+
+    if (t == (int) song.mixer.size())
         return Part::add;
 
-    if (t > 0 && armArea (t).contains (p))
+    if (t < 0 || t > (int) song.mixer.size())
+        return Part::none;
+
+    const auto sending = selected > 0 && t != selected && selected < (int) song.mixer.size();
+
+    if (t > 0 && armArea (t).expanded (1).contains (p))
         return Part::arm;
+    if (headerArea (t).contains (p))
+        return Part::header;
     if (panArea (t).contains (p))
         return Part::pan;
+    if (stereoArea (t).contains (p))
+        return Part::stereo;
     if (muteArea (t).contains (p))
         return Part::mute;
     if (t > 0 && soloArea (t).contains (p))
         return Part::solo;
-    if (routeArea (t).contains (p) && selected > 0 && t != selected)
+    if (sending && routeArea (t).contains (p) && (song.routes (selected, t) || song.canRoute (selected, t)))
         return Part::route;
-    if (faderArea (t).expanded (0, 6).contains (p))
+    if (sending && t > 0 && sendArea (t).contains (p) && song.routes (selected, t))
+        return Part::send;
+    if (meterArea (t).contains (p))
+        return Part::meter;
+    if (faderRail (t).expanded (0, 6).contains (p))
         return Part::fader;
 
     return Part::body;
+}
+
+juce::Rectangle<int> MixerStrips::tipArea (Part part, int t) const
+{
+    switch (part)
+    {
+        case Part::pan: return panArea (t);
+        case Part::stereo: return stereoArea (t);
+        case Part::send: return sendArea (t);
+        case Part::route: return routeArea (t);
+        case Part::fader:
+        {
+            const auto rail = faderRail (t);
+            const auto& mixer = engine.getSong().mixer;
+            const auto v = t >= 0 && t < (int) mixer.size() ? mixer[(std::size_t) t].volume : 0.0f;
+            const auto capY = rail.getBottom() - (int) (v * (float) rail.getHeight());
+            return { rail.getX(), capY - 6, rail.getWidth(), 12 };
+        }
+        default: return {};
+    }
+}
+
+void MixerStrips::showTip (Part part, int t, bool transient)
+{
+    if (t < 0 || t >= (int) engine.getSong().mixer.size())
+        return;
+
+    const auto spec = specFor (part, t);
+    const auto text = spec.text (valueOf (part, t));
+    ui::postHint (ui::valueHint (spec, valueOf (part, t), ui::valueGestures()));
+
+    if (transient)
+        ui::flashValueTip (*this, tipArea (part, t), text);
+    else
+        ui::showValueTip (*this, tipArea (part, t), text);
+}
+
+void MixerStrips::setHover (Part part, int t)
+{
+    if (part == hoverPart && t == hoverTrack)
+        return;
+
+    auto dirty = [this] (int track) {
+        if (track >= 0)
+            repaint (stripX (track) - 2, 0, stripWidthOf (track) + 4, getHeight());
+    };
+
+    dirty (hoverTrack);
+    hoverPart = part;
+    hoverTrack = t;
+    dirty (hoverTrack);
+}
+
+void MixerStrips::mouseMove (const juce::MouseEvent& e)
+{
+    const auto t = trackAt (e.x);
+    setHover (t >= 0 ? partAt (t, e.getPosition()) : Part::none, t);
+}
+
+void MixerStrips::mouseExit (const juce::MouseEvent&)
+{
+    setHover (Part::none, -1);
 }
 
 void MixerStrips::paint (juce::Graphics& g)
@@ -146,6 +303,10 @@ void MixerStrips::paint (juce::Graphics& g)
     const auto clip = g.getClipBounds();
     g.fillAll (colour::bg1);
 
+    // the routing lane runs under all strips
+    g.setColour (colour::bg0.withAlpha (0.55f));
+    g.fillRect (0, laneTop() + switchHeight + sendKnobHeight + 2, getWidth(), wiresHeight + 2);
+
     for (int t = 0; t < tracks; ++t)
     {
         const auto x = stripX (t);
@@ -155,11 +316,14 @@ void MixerStrips::paint (juce::Graphics& g)
             continue;
 
         const auto& track = song.mixer[(std::size_t) t];
-        const auto strip = juce::Rectangle<int> (x, 2, w - 4, getHeight() - 4);
+        const auto strip = juce::Rectangle<int> (x, 2, w - 4, laneTop() - 2);
         const auto isSelected = t == selected;
         const auto inSelection = std::binary_search (selection.begin(), selection.end(), t);
+        const auto stripHovered = hoverTrack == t;
+        const auto hovered = [this, t] (Part p) { return hoverTrack == t && hoverPart == p; };
+        const auto dragging = [this, t] (Part p) { return dragTrack == t && dragPart == p; };
 
-        g.setColour (isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : colour::bg2));
+        g.setColour (isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2));
         g.fillRoundedRectangle (strip.toFloat(), radius::md);
 
         if (track.colour != 0) // thin colour band at the top
@@ -182,24 +346,39 @@ void MixerStrips::paint (juce::Graphics& g)
             g.fillRoundedRectangle (strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f);
         }
 
+        if (headerDragged && headerDragTrack == t)
+        {
+            g.setColour (colour::accent);
+            g.drawRoundedRectangle (strip.toFloat().reduced (0.5f), radius::md, 1.5f);
+        }
+
         // record arm: the input recording goes through this insert
         if (t > 0)
         {
             const auto armed = engine.isInsertArmed (t);
             const auto r = armArea (t).toFloat().reduced (2.0f);
-            g.setColour (armed ? colour::record : colour::bg0);
+            g.setColour (armed ? colour::record : hovered (Part::arm) ? colour::bg5 : colour::bg0);
             g.fillEllipse (r);
-            g.setColour (armed ? colour::record.brighter (0.3f) : colour::borderStrong);
+            g.setColour (armed ? colour::record.brighter (0.3f) : hovered (Part::arm) ? colour::textSecondary : colour::borderStrong);
             g.drawEllipse (r, 1.0f);
         }
 
-        // header: number and name
+        // header: number and effect count on one line, the name (once) below
         g.setColour (isSelected ? colour::accent : colour::textSecondary);
         g.setFont (font (type::caption, isSelected));
-        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 5, w - 4, 12, juce::Justification::centred);
-        g.setColour (track.muted ? colour::textDisabled : colour::textPrimary);
-        g.setFont (font (type::small));
-        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 3, 17, w - 10, 15, juce::Justification::centred, 1, 0.7f);
+        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 6, w - 4, 13, juce::Justification::centred);
+
+        if (! track.effects.empty())
+        {
+            const auto on = mixerops::anyEffectEnabled (song, t);
+            g.setColour (on ? colour::info : colour::textDisabled);
+            g.setFont (font (9.0f, true));
+            g.drawText ("FX" + juce::String ((int) track.effects.size()), x + w - 30, 6, 23, 13, juce::Justification::centredRight);
+        }
+
+        g.setColour (track.muted ? colour::textDisabled : (hovered (Part::header) ? colour::textPrimary : colour::textPrimary.withAlpha (0.9f)));
+        g.setFont (font (type::small, isSelected));
+        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 3, 20, w - 10, 14, juce::Justification::centred, 1, 0.7f);
 
         // compensated latency (PDC) on the Master
         if (t == 0 && engine.getLatencySamples() > 0)
@@ -207,37 +386,33 @@ void MixerStrips::paint (juce::Graphics& g)
             const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
             g.setColour (colour::textSecondary);
             g.setFont (font (10.0f));
-            g.drawFittedText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 34).withWidth (w - 40),
+            g.drawFittedText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 30).withWidth (w - 36),
                               juce::Justification::centredLeft, 1, 0.8f); // the Master has no solo: use its spot
         }
 
-        if (! track.effects.empty())
-        {
-            g.setColour (colour::info);
-            g.setFont (font (9.0f, true));
-            g.drawText ("FX " + juce::String ((int) track.effects.size()), x + w - 31, 5, 24, 11, juce::Justification::centredRight);
-        }
-
-        // pan
-        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (28.0f, 28.0f), (track.pan + 1.0f) * 0.5f, true, colour::info);
+        // pan and stereo separation
+        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f), (track.pan + 1.0f) * 0.5f, true,
+                  dragging (Part::pan) ? colour::accent : colour::info, hovered (Part::pan) || dragging (Part::pan));
+        drawKnob (g, stereoArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), (track.stereo + 1.0f) * 0.5f, true,
+                  dragging (Part::stereo) ? colour::accent : colour::knobArc, hovered (Part::stereo) || dragging (Part::stereo));
 
         // mute and solo
         {
             const auto m = muteArea (t).toFloat().withSizeKeepingCentre (12.0f, 12.0f);
             g.setColour (muteLed (track.muted));
             g.fillEllipse (m);
-            if (! track.muted)
+            if (! track.muted || hovered (Part::mute))
             {
-                g.setColour (colour::ledOn.withAlpha (0.25f));
+                g.setColour (hovered (Part::mute) ? colour::textSecondary : colour::ledOn.withAlpha (0.25f));
                 g.drawEllipse (m.expanded (2.0f), 1.0f);
             }
 
             if (t > 0)
             {
                 const auto s = soloArea (t).toFloat().reduced (2.0f);
-                g.setColour (track.solo ? colour::accent : colour::bg0);
+                g.setColour (track.solo ? colour::accent : hovered (Part::solo) ? colour::bg5 : colour::bg0);
                 g.fillRoundedRectangle (s, radius::sm);
-                g.setColour (track.solo ? colour::onAccent : colour::textSecondary);
+                g.setColour (track.solo ? colour::onAccent : hovered (Part::solo) ? colour::textPrimary : colour::textSecondary);
                 g.setFont (font (type::caption, true));
                 g.drawText ("S", s.toNearestInt(), juce::Justification::centred);
             }
@@ -246,18 +421,18 @@ void MixerStrips::paint (juce::Graphics& g)
         // meters + fader
         {
             const auto area = faderArea (t);
-            const auto meterW = 5;
-            const auto meters = area.withWidth (meterW * 2 + 2);
-            const auto fader = area.withTrimmedLeft (meterW * 2 + 8);
+            const auto meters = meterArea (t);
+            const auto fader = faderRail (t);
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterW + 2), meters.getY(), meterW, meters.getHeight());
+                const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterWidth + 2), meters.getY(), meterWidth, meters.getHeight());
                 g.setColour (colour::bg0);
                 g.fillRoundedRectangle (bar.toFloat(), 1.5f);
 
-                const auto level = (std::size_t) t * 2 + (std::size_t) ch < levels.size() ? levels[(std::size_t) t * 2 + (std::size_t) ch] : 0.0f;
-                const auto h = (int) (meterPosition (level) * (float) bar.getHeight());
+                const auto index = (std::size_t) t * 2 + (std::size_t) ch;
+                const auto meter = index < levels.size() ? levels[index] : meters::PeakHold {};
+                const auto h = (int) (meterPosition (meter.level) * (float) bar.getHeight());
                 const auto lit = bar.withTop (bar.getBottom() - h);
                 juce::ColourGradient gradient (colour::meterClip, (float) bar.getX(), (float) bar.getY(), colour::meterLow, (float) bar.getX(),
                                                (float) bar.getBottom(), false);
@@ -267,11 +442,24 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.setGradientFill (gradient);
                 g.fillRect (lit);
 
-                if (level >= 1.0f) // clip indicator
+                if (meter.peak > 0.001f) // peak hold line
+                {
+                    const auto peakY = bar.getBottom() - (int) (meterPosition (meter.peak) * (float) bar.getHeight());
+                    g.setColour (meter.peak >= 1.0f ? colour::meterClip : meter.peak >= 0.5f ? colour::meterMid : colour::textPrimary.withAlpha (0.85f));
+                    g.fillRect (bar.getX(), juce::jmax (bar.getY(), peakY - 1), bar.getWidth(), 2);
+                }
+
+                if (meter.clipped) // clip latch: stays until the meter is clicked
                 {
                     g.setColour (colour::meterClip);
-                    g.fillRect (bar.withHeight (3));
+                    g.fillRect (bar.withHeight (4));
                 }
+            }
+
+            if (hovered (Part::meter))
+            {
+                g.setColour (colour::textSecondary.withAlpha (0.5f));
+                g.drawRect (meters.expanded (1), 1);
             }
 
             // fader track and 0 dB mark
@@ -286,68 +474,115 @@ void MixerStrips::paint (juce::Graphics& g)
             g.drawHorizontalLine ((int) unityY, (float) fader.getX(), railX - 5.0f);
             g.drawHorizontalLine ((int) unityY, railX + 5.0f, (float) fader.getRight());
 
-            const auto capWidth = juce::jmin ((float) fader.getWidth() - 2.0f, 26.0f);
+            const auto capActive = hovered (Part::fader) || dragging (Part::fader);
+            const auto capWidth = juce::jmin ((float) fader.getWidth() + 2.0f, 26.0f);
             const auto cap = juce::Rectangle<float> (capWidth, 12.0f).withCentre ({ railX, capY });
             g.setColour (juce::Colours::black.withAlpha (0.35f));
             g.fillRoundedRectangle (cap.translated (0.0f, 1.5f), radius::sm);
-            g.setColour (juce::Colour (0xffd4d7dd)); // same cap as the LookAndFeel's linear faders
+            g.setColour (capActive ? juce::Colour (0xffffffff) : juce::Colour (0xffd4d7dd)); // same cap as the LookAndFeel's linear faders
             g.fillRoundedRectangle (cap, radius::sm);
-            g.setColour (colour::bg0.withAlpha (0.8f));
+            g.setColour ((dragging (Part::fader) ? colour::accent : colour::bg0).withAlpha (0.8f));
             g.fillRect (cap.withSizeKeepingCentre (capWidth - 8.0f, 1.5f));
 
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 4, w - 4, 14, juce::Justification::centred);
+            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
         }
 
-        // send from the selected track to this one
+        // routing lane: send switch from the selected insert to this one, and its level knob
         if (selected > 0 && t != selected && selected < tracks)
         {
             const auto r = routeArea (t).toFloat();
             const auto on = song.routes (selected, t);
             const auto possible = on || song.canRoute (selected, t);
+            const auto feedsSelected = t > 0 && song.routes (t, selected);
 
             if (possible)
             {
-                g.setColour (on ? colour::accent : colour::bg0);
+                g.setColour (on ? colour::accent : hovered (Part::route) ? colour::bg5 : colour::bg0);
                 g.fillRoundedRectangle (r, radius::sm);
+                if (hovered (Part::route))
+                {
+                    g.setColour (on ? colour::accentHover : colour::textSecondary);
+                    g.drawRoundedRectangle (r.reduced (0.5f), radius::sm, 1.0f);
+                }
                 g.setColour (on ? colour::onAccent : colour::textSecondary);
                 g.setFont (font (10.0f, on));
-                juce::String label = juce::String::fromUTF8 ("\xe2\x86\x92"); // arrow
+                g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92 ") + (t == 0 ? juce::String ("M") : juce::String (t)), r.toNearestInt(),
+                            juce::Justification::centred);
 
                 if (on && t > 0)
                     for (const auto& send : song.mixer[(std::size_t) selected].sends)
                         if (send.target == t)
-                            label << " " << juce::roundToInt (send.level * 100.0f) << "%";
-
-                g.drawText (label, r.toNearestInt(), juce::Justification::centred);
+                            drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), send.level, false,
+                                      dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
+            }
+            else if (feedsSelected) // this insert sends into the selected one
+            {
+                g.setColour (colour::info.withAlpha (0.18f));
+                g.fillRoundedRectangle (r, radius::sm);
+                g.setColour (colour::info);
+                g.setFont (font (10.0f, true));
+                g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92 ") + juce::String (selected), r.toNearestInt(), juce::Justification::centred);
             }
         }
-
-        // channels routed into this track
-        {
-            juce::StringArray feeds;
-            for (const auto& c : song.channels)
-                if (juce::jlimit (0, tracks - 1, c.mixerTrack) == t)
-                    feeds.add (juce::String::fromUTF8 (c.name.c_str()));
-
-            g.setColour (colour::textSecondary);
-            g.setFont (font (10.0f));
-            const auto text = feeds.size() > 3 ? feeds[0] + ", " + feeds[1] + " +" + juce::String (feeds.size() - 2) : feeds.joinIntoString (", ");
-            g.drawFittedText (text, x + 3, getHeight() - feedsHeight + 16, w - 10, feedsHeight - 20, juce::Justification::centredTop, 2, 0.8f);
-        }
     }
+
+    paintRouting (g);
 
     // "+" button
     if (tracks < maxMixerTracks)
     {
         const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60).toFloat();
-        g.setColour (colour::bg2);
+        const auto addHovered = hoverPart == Part::add;
+        g.setColour (addHovered ? colour::bg4 : colour::bg2);
         g.fillRoundedRectangle (add, radius::md);
-        g.setColour (colour::border);
+        g.setColour (addHovered ? colour::borderStrong : colour::border);
         g.drawRoundedRectangle (add.reduced (0.5f), radius::md, 1.0f);
-        icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), colour::textSecondary);
+        icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), addHovered ? colour::textPrimary : colour::textSecondary);
     }
+}
+
+// Wires in the lane under the strips: from the selected insert to where it sends (accent), and from the
+// inserts that feed it (blue). The Master output is drawn dimmer.
+void MixerStrips::paintRouting (juce::Graphics& g)
+{
+    using namespace theme;
+    const auto& song = engine.getSong();
+    const auto tracks = (int) song.mixer.size();
+
+    if (selected <= 0 || selected >= tracks)
+        return;
+
+    const auto top = (float) (laneTop() + switchHeight + sendKnobHeight + 3);
+    const auto bottom = top + (float) wiresHeight - 2.0f;
+    const auto centre = [this] (int t) { return (float) stripX (t) + (float) (stripWidthOf (t) - 4) * 0.5f; };
+
+    auto wire = [&] (int from, int to, juce::Colour c, float thickness) {
+        const auto x0 = centre (from), x1 = centre (to);
+        juce::Path p;
+        p.startNewSubPath (x0, top);
+        p.cubicTo (x0, bottom + 2.0f, x1, bottom + 2.0f, x1, top);
+        g.setColour (c);
+        g.strokePath (p, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.fillEllipse (x1 - 2.5f, top - 2.5f, 5.0f, 5.0f);
+    };
+
+    const auto& from = song.mixer[(std::size_t) selected];
+
+    for (int t = 1; t < tracks; ++t)
+        if (t != selected && song.routes (t, selected))
+            wire (t, selected, colour::info.withAlpha (0.85f), 1.5f);
+
+    if (from.toMaster)
+        wire (selected, 0, colour::accent.withAlpha (0.4f), 1.0f);
+
+    for (const auto& send : from.sends)
+        if (send.target > 0 && send.target < tracks)
+            wire (selected, send.target, colour::accent.withAlpha (0.5f + 0.5f * juce::jlimit (0.0f, 1.0f, send.level)), 1.8f);
+
+    g.setColour (colour::accent);
+    g.fillEllipse (centre (selected) - 3.0f, top - 3.0f, 6.0f, 6.0f);
 }
 
 void MixerStrips::mouseDown (const juce::MouseEvent& e)
@@ -358,6 +593,8 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         return;
 
     const auto part = partAt (t, e.getPosition());
+    headerDragTrack = -1;
+    headerDragged = false;
 
     if (part == Part::add)
     {
@@ -378,9 +615,47 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (part == Part::meter && ! e.mods.isPopupMenu()) // clears the clip latch and the peak hold
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            if (const auto i = (std::size_t) t * 2 + (std::size_t) ch; i < levels.size())
+                levels[i].resetClip();
+        repaint (meterArea (t).expanded (2));
+        return;
+    }
+
     if (part == Part::route && e.mods.isPopupMenu())
     {
         showSendMenu (t);
+        return;
+    }
+
+    if (part == Part::send)
+    {
+        const auto from = selected;
+        if (e.mods.isPopupMenu())
+        {
+            juce::PopupMenu menu;
+            const auto spec = specFor (Part::send, t);
+            menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (Part::send, t)));
+            ui::addValueItems (menu, *this, nullptr, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
+            menu.addSeparator();
+            menu.addItem (tr ("Remove this send"), [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return;
+        }
+
+        if (ui::isResetClick (e))
+        {
+            setValue (Part::send, t, 1.0);
+            showTip (Part::send, t, true);
+            return;
+        }
+
+        dragPart = Part::send;
+        dragTrack = t;
+        drag.begin (e, valueOf (Part::send, t));
+        showTip (Part::send, t, false);
         return;
     }
 
@@ -406,7 +681,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (part == Part::body && ! e.mods.isPopupMenu() && (e.mods.isCtrlDown() || e.mods.isShiftDown()) && t > 0)
+    if ((part == Part::body || part == Part::header) && ! e.mods.isPopupMenu() && (e.mods.isCtrlDown() || e.mods.isShiftDown()) && t > 0)
     {
         auto s = selection;
         if (e.mods.isShiftDown())
@@ -430,17 +705,19 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
     else if (selected != t)
         setSelection (selection, t);
 
-    if (part == Part::pan || part == Part::fader)
+    if (part == Part::pan || part == Part::fader || part == Part::stereo)
     {
         if (e.mods.isPopupMenu())
         {
-            ui::showValueMenu (*this, &engine, specFor (part, t), valueOf (part, t), [this, part, t] (double v) { setValue (part, t, v); });
+            ui::showValueMenu (*this, part == Part::stereo ? nullptr : &engine, specFor (part, t), valueOf (part, t),
+                               [this, part, t] (double v) { setValue (part, t, v); });
             return;
         }
 
         if (ui::isResetClick (e))
         {
             setValue (part, t, specFor (part, t).defaultValue);
+            showTip (part, t, true);
             return;
         }
     }
@@ -463,6 +740,20 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].solo = ! s.mixer[(std::size_t) t].solo; });
             return;
 
+        case Part::header:
+            if (t > 0)
+                headerDragTrack = t; // dragging sideways reorders
+            return;
+
+        case Part::stereo:
+            dragPart = part;
+            dragTrack = t;
+            dragStartValue = track.stereo;
+            drag.begin (e, dragStartValue);
+            groupStart.clear();
+            showTip (part, t, false);
+            return;
+
         case Part::pan:
         case Part::fader:
             dragPart = part;
@@ -471,7 +762,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
             if (part == Part::fader && ! e.mods.isCtrlDown()) // clicking the track jumps the fader there
             {
-                const auto area = faderArea (t);
+                const auto area = faderRail (t);
                 const auto capY = area.getBottom() - track.volume * (float) area.getHeight();
 
                 if (std::abs ((float) e.y - capY) > 9.0f)
@@ -483,16 +774,19 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
             drag.begin (e, dragStartValue);
             groupStart.clear();
-            groupGrab = part == Part::pan ? track.pan : track.volume;
+            groupGrab = dragStartValue;
             if (selection.size() > 1) // the selected strips follow, keeping their offsets
                 for (auto s : selection)
                     if (s != t && s < (int) engine.getSong().mixer.size())
                         groupStart.push_back ({ s, part == Part::pan ? engine.getSong().mixer[(std::size_t) s].pan
                                                                       : engine.getSong().mixer[(std::size_t) s].volume });
+            showTip (part, t, false);
             return;
 
         case Part::arm:
         case Part::route:
+        case Part::send:
+        case Part::meter:
         case Part::body:
         case Part::none:
         case Part::add:
@@ -502,6 +796,25 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
 void MixerStrips::mouseDrag (const juce::MouseEvent& e)
 {
+    if (headerDragTrack > 0)
+    {
+        if (! headerDragged && std::abs (e.getDistanceFromDragStartX()) < 6)
+            return;
+
+        headerDragged = true;
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        const auto count = (int) engine.getSong().mixer.size();
+        const auto target = juce::jlimit (1, juce::jmax (1, count - 1), trackAt (juce::jlimit (stripX (1), stripX (count) - 1, e.x)));
+
+        for (int guard = 0; guard < count && selected != target; ++guard)
+            if (! moveSelected (target < selected ? -1 : 1))
+                break;
+
+        headerDragTrack = selected;
+        repaint();
+        return;
+    }
+
     if (dragPart == Part::none)
         return;
 
@@ -512,16 +825,21 @@ void MixerStrips::mouseDrag (const juce::MouseEvent& e)
         const auto from = selected;
         const auto v = juce::jlimit (0.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / 120.0f);
         engine.editSong ([from, t, v] (Song& s) { s.setRoute (from, t, true, v); });
+        ui::showValueTip (*this, routeArea (t), juce::String (juce::roundToInt (v * 100.0f)) + "%");
         return;
     }
 
     setValue (dragPart, t, drag.update (e, specFor (dragPart, t)));
+    showTip (dragPart, t, false);
 }
 
 ui::ValueSpec MixerStrips::specFor (Part part, int t) const
 {
     const auto& song = engine.getSong();
-    const auto name = t >= 0 && t < (int) song.mixer.size() ? juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()) : juce::String();
+    const auto nameOf = [&song] (int track) {
+        return track >= 0 && track < (int) song.mixer.size() ? juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) : juce::String();
+    };
+    const auto name = nameOf (t);
 
     if (part == Part::pan)
     {
@@ -531,22 +849,52 @@ ui::ValueSpec MixerStrips::specFor (Part part, int t) const
         return spec;
     }
 
+    if (part == Part::stereo)
+        return stereoSpec (name + " - " + tr ("Stereo separation"));
+
+    if (part == Part::send)
+        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + tr ("Send level"));
+
     auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
-    spec.pixelsForRange = juce::jmax (60, faderArea (juce::jmax (0, t)).getHeight());
+    spec.pixelsForRange = juce::jmax (60, faderRail (juce::jmax (0, t)).getHeight());
     spec.target = AutomationTarget { AutomationTargetKind::mixerVolume, t };
     return spec;
 }
 
 double MixerStrips::valueOf (Part part, int t) const
 {
-    const auto& track = engine.getSong().mixer[(std::size_t) t];
-    return part == Part::pan ? track.pan : track.volume;
+    const auto& song = engine.getSong();
+    const auto& track = song.mixer[(std::size_t) t];
+
+    if (part == Part::send)
+    {
+        if (selected > 0 && selected < (int) song.mixer.size())
+            for (const auto& send : song.mixer[(std::size_t) selected].sends)
+                if (send.target == t)
+                    return send.level;
+        return 0.0;
+    }
+
+    return part == Part::pan ? track.pan : part == Part::stereo ? track.stereo : track.volume;
 }
 
 void MixerStrips::setValue (Part part, int t, double value)
 {
     if (t < 0 || t >= (int) engine.getSong().mixer.size())
         return;
+
+    if (part == Part::send)
+    {
+        const auto from = selected;
+        engine.editSong ([from, t, v = (float) value] (Song& s) { s.setRoute (from, t, true, v); });
+        return;
+    }
+
+    if (part == Part::stereo)
+    {
+        engine.editSong ([t, v = (float) value] (Song& s) { s.mixer[(std::size_t) t].stereo = v; });
+        return;
+    }
 
     // during a drag of a selected strip, the other selected strips move by the same amount
     const auto delta = (float) value - groupGrab;
@@ -657,19 +1005,23 @@ void MixerStrips::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
 {
     const auto t = trackAt (e.x);
 
-    if (t > 0 && t < (int) engine.getSong().mixer.size() && e.mods.isShiftDown() && partAt (t, e.getPosition()) == Part::body)
-    {
-        if (! std::binary_search (selection.begin(), selection.end(), t))
-            setSelection ({ t }, t);
-        moveSelected ((wheel.deltaY != 0.0f ? wheel.deltaY : -wheel.deltaX) > 0.0f ? -1 : 1);
-        return;
-    }
+    if (t > 0 && t < (int) engine.getSong().mixer.size() && e.mods.isShiftDown())
+        if (const auto part = partAt (t, e.getPosition()); part == Part::body || part == Part::header)
+        {
+            if (! std::binary_search (selection.begin(), selection.end(), t))
+                setSelection ({ t }, t);
+            moveSelected ((wheel.deltaY != 0.0f ? wheel.deltaY : -wheel.deltaX) > 0.0f ? -1 : 1);
+            return;
+        }
 
     if (t >= 0 && t < (int) engine.getSong().mixer.size())
-        if (const auto part = partAt (t, e.getPosition()); part == Part::pan || part == Part::fader)
+        if (const auto part = partAt (t, e.getPosition()); part == Part::pan || part == Part::fader || part == Part::stereo || part == Part::send)
         {
             if (const auto v = ui::wheelValue (valueOf (part, t), e, wheel, specFor (part, t)))
+            {
                 setValue (part, t, *v);
+                showTip (part, t, true);
+            }
             return;
         }
 
@@ -678,33 +1030,55 @@ void MixerStrips::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
 
 ui::Hint MixerStrips::hintAt (juce::Point<int> p)
 {
-    const auto active = dragPart == Part::pan || dragPart == Part::fader;
+    const auto active = dragPart == Part::pan || dragPart == Part::fader || dragPart == Part::stereo || dragPart == Part::send;
     const auto t = active ? dragTrack : trackAt (p.x);
+    const auto& song = engine.getSong();
     ui::Hint h;
 
-    if (t < 0 || t >= (int) engine.getSong().mixer.size())
+    if (t < 0 || t >= (int) song.mixer.size())
     {
-        if (t == (int) engine.getSong().mixer.size())
+        if (t == (int) song.mixer.size())
             h.text = tr ("Add a mixer insert");
         return h;
     }
 
     const auto part = active ? dragPart : partAt (t, p);
-    const auto name = juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str());
+    const auto name = juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
+    const auto gesture = ui::valueGestures();
+
+    // the channels that play into this insert (FL shows them by the insert; LYNX in the hint)
+    auto feeds = [&song, t, tracks = (int) song.mixer.size()] {
+        juce::StringArray names;
+        for (const auto& c : song.channels)
+            if (juce::jlimit (0, tracks - 1, c.mixerTrack) == t)
+                names.add (juce::String::fromUTF8 (c.name.c_str()));
+        if (names.isEmpty())
+            return juce::String();
+        const auto shown = names.size() > 6 ? names[0] + ", " + names[1] + ", " + names[2] + " +" + juce::String (names.size() - 3)
+                                            : names.joinIntoString (", ");
+        return "   " + tr ("Channels: {0}", { shown });
+    };
 
     switch (part)
     {
         case Part::pan:
         case Part::fader:
-            return ui::valueHint (specFor (part, t), valueOf (part, t), tr ("drag (Ctrl: fine), wheel, Alt+click resets"));
+        case Part::stereo:
+        case Part::send:
+            return ui::valueHint (specFor (part, t), valueOf (part, t), gesture);
         case Part::mute: h.text = name + " - " + tr ("Click: mute.  Right-click or Ctrl+click: solo"); break;
         case Part::arm: h.text = name + " - " + tr ("Record arm: audio takes from the input play through this insert"); break;
         case Part::solo: h.text = name + " - " + tr ("Solo"); break;
+        case Part::meter: h.text = name + " - " + tr ("Peak meter (left/right) with peak hold  [LMB] clears the clip light"); break;
         case Part::route: h.text = name + " - " + tr ("Send from the selected insert to this one (drag after enabling: level; right-click: sidechain, only here)"); h.hasMenu = true; break;
         case Part::add: h.text = tr ("Add a mixer insert"); break;
+        case Part::header:
+            h.text = name + " - " + tr ("[LMB] selects  [Ctrl]+[LMB] adds  [Shift]+[LMB] range  [LMB] drag sideways reorders  [RMB] insert menu") + feeds();
+            h.hasMenu = true;
+            break;
         case Part::body:
         case Part::none:
-            h.text = name + " - " + tr ("Click selects the insert (Ctrl: add, Shift: range), right-click opens its menu; Alt+Left/Right moves the selection");
+            h.text = name + " - " + tr ("Click selects the insert (Ctrl: add, Shift: range), right-click opens its menu; Alt+Left/Right moves the selection") + feeds();
             h.hasMenu = true;
             break;
     }
@@ -714,9 +1088,19 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
 
 void MixerStrips::mouseUp (const juce::MouseEvent&)
 {
+    if (headerDragged)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    if (dragPart != Part::none || headerDragged)
+        repaint();
+
+    headerDragTrack = -1;
+    headerDragged = false;
     dragPart = Part::none;
     dragTrack = -1;
     drag.end();
+    ui::hideValueTip();
+    ui::clearPostedHint();
 }
 
 void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
@@ -728,10 +1112,11 @@ void MixerStrips::mouseDoubleClick (const juce::MouseEvent& e)
 
     const auto part = partAt (t, e.getPosition());
 
-    if (part == Part::fader)
-        engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].volume = unityFader; });
-    else if (part == Part::pan)
-        engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].pan = 0.0f; });
+    if (part == Part::fader || part == Part::pan || part == Part::stereo || part == Part::send)
+    {
+        setValue (part, t, specFor (part, t).defaultValue);
+        showTip (part, t, true);
+    }
 }
 
 void MixerStrips::selectTrack (int track)
@@ -975,19 +1360,13 @@ void MixerStrips::timerCallback()
 
     for (std::size_t i = 0; i < levels.size(); ++i)
     {
-        const auto peak = meters.takePeak ((int) (i / 2), (int) (i % 2));
-        const auto next = juce::jmax (peak, levels[i] * 0.86f); // ~20 dB/s falloff at 30 Hz
-        const auto shown = next < 0.001f ? 0.0f : next;
+        auto& m = levels[i];
+        const auto before = m;
+        m.tick (meters.takePeak ((int) (i / 2), (int) (i % 2))); // ~20 dB/s falloff at 30 Hz, 1.5 s peak hold
 
         // only the meter that changed is repainted
-        if (showing && std::abs (shown - levels[i]) > 1e-4f)
-        {
-            const auto t = (int) (i / 2);
-            const auto area = faderArea (t);
-            repaint (area.getX(), area.getY(), 16, area.getHeight());
-        }
-
-        levels[i] = shown;
+        if (showing && (std::abs (m.level - before.level) > 1e-4f || std::abs (m.peak - before.peak) > 1e-4f || m.clipped != before.clipped))
+            repaint (meterArea ((int) (i / 2)).expanded (1));
     }
 }
 
@@ -1006,7 +1385,8 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::reeverb2, EffectKind::reeverb1,
                                       EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                                       EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor,
-                                      EffectKind::spreader, EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus };
+                                      EffectKind::spreader, EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
+                                      EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive };
 } // namespace
 
 const std::vector<EffectKind>& addableEffects()
@@ -1198,12 +1578,13 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto r = slotBounds (i);
         const auto filled = i < (int) s->size();
         const auto isSelected = i == selectedSlot && filled;
-        g.setColour (isSelected ? colour::bg5 : filled ? colour::bg3 : colour::bg2.brighter (0.03f));
+        const auto slotHovered = i == hoverSlot && dragSlot < 0;
+        g.setColour (isSelected ? colour::bg5 : filled ? (slotHovered ? colour::bg4 : colour::bg3) : (slotHovered ? colour::bg3 : colour::bg2.brighter (0.03f)));
         g.fillRoundedRectangle (r.toFloat(), radius::sm);
 
         if (! filled)
         {
-            g.setColour (colour::border);
+            g.setColour (slotHovered ? colour::borderStrong : colour::border);
             g.drawRoundedRectangle (r.toFloat().reduced (0.5f), radius::sm, 1.0f);
         }
 
@@ -1218,6 +1599,11 @@ void EffectsPanel::paint (juce::Graphics& g)
             const auto& slot = (*s)[(std::size_t) i];
             g.setColour (muteLed (! slot.enabled));
             g.fillEllipse ((float) r.getX() + 8, (float) r.getCentreY() - 4, 8, 8);
+            if (slotHovered && hoverLed)
+            {
+                g.setColour (colour::textSecondary);
+                g.drawEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 6, 12, 12, 1.0f);
+            }
             g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
                                                         : juce::String::fromUTF8 (effectInfo (slot.kind).name);
@@ -1226,12 +1612,13 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
 
             // slot's dry/wet knob
+            const auto mixActive = (hoverParam == mixParam && hoverSlot == i) || (dragParam == mixParam && selectedSlot == i);
             drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (20.0f, 20.0f), slot.mix, false,
-                      slot.enabled ? colour::info : colour::textDisabled);
+                      slot.enabled ? (dragParam == mixParam && selectedSlot == i ? colour::accent : colour::info) : colour::textDisabled, mixActive);
         }
-        else if (i == (int) s->size())
+        else if (i == (int) s->size() || slotHovered)
         {
-            g.setColour (colour::textDisabled);
+            g.setColour (slotHovered ? colour::textSecondary : colour::textDisabled);
             g.drawText (juce::String (i + 1) + ". " + tr ("(empty: click to add)"), r.withTrimmedLeft (24), juce::Justification::centredLeft);
         }
     }
@@ -1337,7 +1724,8 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto value = slot.params[(std::size_t) p];
         // 38 px knob; in tight grids (Effector) it shrinks to fit name and value below
         const auto knobHeight = juce::jlimit (30, 44, r.getHeight() - 30);
-        drawKnob (g, r.withHeight (knobHeight).toFloat(), value, false, slot.enabled ? colour::knobArc : colour::textDisabled, dragParam == p);
+        drawKnob (g, r.withHeight (knobHeight).toFloat(), value, false, slot.enabled ? colour::knobArc : colour::textDisabled,
+                  dragParam == p || (hoverParam == p && hoverSlot < 0));
 
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
@@ -1389,12 +1777,16 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
             if (e.mods.isPopupMenu())
                 ui::showValueMenu (*this, &engine, specFor (mixParam, i), valueOf (mixParam, i), [this, i] (double v) { setValue (mixParam, i, v); });
             else if (ui::isResetClick (e))
+            {
                 setValue (mixParam, i, 1.0);
+                showTip (mixParam, i, true);
+            }
             else
             {
                 dragParam = mixParam;
                 dragStart = (*s)[(std::size_t) i].mix;
                 drag.begin (e, dragStart);
+                showTip (mixParam, i, false);
             }
             return;
         }
@@ -1451,6 +1843,7 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
     if (dragParam >= 0 && ui::isResetClick (e))
     {
         setValue (dragParam, selectedSlot, specFor (dragParam, selectedSlot).defaultValue);
+        showTip (dragParam, selectedSlot, true);
         dragParam = -1;
         return;
     }
@@ -1459,6 +1852,7 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
     {
         dragStart = (*s)[(std::size_t) selectedSlot].params[(std::size_t) dragParam];
         drag.begin (e, dragStart);
+        showTip (dragParam, selectedSlot, false);
     }
 }
 
@@ -1533,14 +1927,20 @@ void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
     if (const auto slot = mixKnobAt (e.getPosition()); slot >= 0)
     {
         if (const auto v = ui::wheelValue (valueOf (mixParam, slot), e, wheel, specFor (mixParam, slot)))
+        {
             setValue (mixParam, slot, *v);
+            showTip (mixParam, slot, true);
+        }
         return;
     }
 
     if (const auto p = knobAt (e.getPosition()); p >= 0)
     {
         if (const auto v = ui::wheelValue (valueOf (p, selectedSlot), e, wheel, specFor (p, selectedSlot)))
+        {
             setValue (p, selectedSlot, *v);
+            showTip (p, selectedSlot, true);
+        }
         return;
     }
 
@@ -1561,7 +1961,7 @@ void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
 
 ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
 {
-    const auto gesture = tr ("drag (Ctrl: fine), wheel, Alt+click resets");
+    const auto gesture = ui::valueGestures();
 
     if (dragParam == mixParam || (dragParam >= 0 && drag.isActive()))
         return ui::valueHint (specFor (dragParam, dragParam == mixParam ? juce::jmax (0, selectedSlot) : selectedSlot),
@@ -1620,6 +2020,7 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
     if (dragParam == mixParam)
     {
         setValue (mixParam, selectedSlot, drag.update (e, specFor (mixParam, selectedSlot)));
+        showTip (mixParam, selectedSlot, false);
         return;
     }
 
@@ -1627,6 +2028,64 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
         return;
 
     setValue (dragParam, selectedSlot, drag.update (e, specFor (dragParam, selectedSlot)));
+    showTip (dragParam, selectedSlot, false);
+}
+
+void EffectsPanel::showTip (int param, int slot, bool transient)
+{
+    const auto* s = slots();
+
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return;
+
+    const auto area = param == mixParam ? mixBounds (slot) : knobBounds (param).withHeight (juce::jlimit (30, 44, knobBounds (param).getHeight() - 30));
+    const auto text = specFor (param, slot).text (valueOf (param, slot));
+    ui::postHint (ui::valueHint (specFor (param, slot), valueOf (param, slot), ui::valueGestures()));
+
+    if (transient)
+        ui::flashValueTip (*this, area, text);
+    else
+        ui::showValueTip (*this, area, text);
+}
+
+void EffectsPanel::mouseMove (const juce::MouseEvent& e)
+{
+    const auto p = e.getPosition();
+    auto slot = slotAt (p);
+    auto param = -1;
+    auto led = false;
+
+    for (int i = 0; i < maxEffectSlots; ++i)
+        if (slotBounds (i).contains (p))
+            slot = i;
+
+    if (const auto m = mixKnobAt (p); m >= 0)
+    {
+        slot = m;
+        param = mixParam;
+    }
+    else if (slot < 0)
+        param = knobAt (p);
+    else
+        led = p.x < slotBounds (slot).getX() + 22;
+
+    if (slot != hoverSlot || param != hoverParam || led != hoverLed)
+    {
+        hoverSlot = slot;
+        hoverParam = param;
+        hoverLed = led;
+        repaint();
+    }
+}
+
+void EffectsPanel::mouseExit (const juce::MouseEvent&)
+{
+    if (hoverSlot >= 0 || hoverParam != -1)
+    {
+        hoverSlot = hoverParam = -1;
+        hoverLed = false;
+        repaint();
+    }
 }
 
 void EffectsPanel::mouseUp (const juce::MouseEvent&)
@@ -1646,6 +2105,8 @@ void EffectsPanel::mouseUp (const juce::MouseEvent&)
     repaint();
     dragParam = -1;
     drag.end();
+    ui::hideValueTip();
+    ui::clearPostedHint();
 }
 
 void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
@@ -2020,6 +2481,20 @@ void MixerComponent::selectFirstTrackWithEffects()
             strips.selectTrack (t);
             return;
         }
+}
+
+void MixerComponent::selectTrack (int track)
+{
+    strips.selectTrack (track);
+
+    // scroll the strip into view
+    const auto t = strips.getSelectedTrack();
+    const auto x = t == 0 ? 0 : 4 + MixerStrips::masterWidth + 8 + (t - 1) * MixerStrips::stripWidth;
+    const auto w = t == 0 ? MixerStrips::masterWidth : MixerStrips::stripWidth;
+    const auto view = viewport.getViewArea();
+
+    if (x < view.getX() || x + w > view.getRight())
+        viewport.setViewPosition (juce::jmax (0, x - view.getWidth() / 2), 0);
 }
 
 void MixerComponent::resized()

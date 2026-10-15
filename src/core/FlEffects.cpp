@@ -6,9 +6,11 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
+#include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
+#include "core/GrossBeat.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -984,6 +986,34 @@ std::optional<EffectSlot> fruityShaperExact (const std::string& pluginName, cons
     return std::nullopt;
 }
 
+std::optional<EffectSlot> fruityBasicExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity PanOMatic / Balance / Blood Overdrive engines from the saved state (REA_rodada58); the utility
+    // and distortion approximations remain for states that cannot be read
+    if (pluginName == "Fruity PanOMatic")
+        if (const auto s = flbasic::parsePanOMatic (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityPanOMatic);
+            flbasic::panOMaticToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Balance")
+        if (const auto s = flbasic::parseBalance (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityBalance);
+            flbasic::balanceToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Blood Overdrive")
+        if (const auto s = flbasic::parseBloodOverdrive (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityBloodOverdrive);
+            flbasic::bloodOverdriveToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> fruityDelayExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
 {
     // FL's own Fruity Delay 2 / Delay 3 engines from the saved controls (REA_rodada52); the approximations of
@@ -1047,6 +1077,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return exact;
     if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
+    if (auto exact = fruityBasicExact (pluginName, state))
+        return exact;
     if (auto exact = fruityShaperExact (pluginName, state))
         return exact;
     if (auto exact = stereoFxExact (pluginName, state))
@@ -1055,6 +1087,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         return exact;
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
+            return exact;
+    if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
+        if (auto exact = grossbeat::slotFromFl (state))
             return exact;
     if (pluginName == "Effector")
         return effector (state, bpm);
@@ -1229,6 +1264,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityChorus: return { "Fruity Chorus" };
         case EffectKind::hyperChorus: return { "Hyper Chorus" };
         case EffectKind::vintageChorus: return { "Vintage Chorus" };
+        case EffectKind::fruityPanOMatic: return { "Fruity PanOMatic" };
+        case EffectKind::fruityBalance: return { "Fruity Balance" };
+        case EffectKind::fruityBloodOverdrive: return { "Fruity Blood Overdrive" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
@@ -1255,6 +1293,11 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact WaveShaper (pre, mix, post) and Soft Clipper (threshold, post) take FL's controls over their ranges
     if ((is ("Fruity WaveShaper") && k >= 0 && k < 3) || (is ("Fruity Soft Clipper") && k >= 0 && k < 2))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact PanOMatic, Balance and Blood Overdrive likewise (REA_rodada58)
+    if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
+        || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
+        || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact choruses take FL's controls over their ranges
     if (chorusControls (pluginName) > k && k >= 0)

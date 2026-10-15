@@ -95,6 +95,8 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::bassdrum: return "bassdrum";
         case InstrumentKind::toxic: return "toxic";
         case InstrumentKind::threeosc: return "threeosc";
+        case InstrumentKind::autogun: return "autogun";
+        case InstrumentKind::transistorbass: return "transistorbass";
     }
     return "synth";
 }
@@ -107,7 +109,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::drumsynth, InstrumentKind::harmless, InstrumentKind::sytrus, InstrumentKind::harmor,
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
-                    InstrumentKind::threeosc })
+                    InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass })
         if (id == instrumentId (k))
             return k;
 
@@ -151,6 +153,9 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityCompressor: return "fruityCompressor";
         case EffectKind::fruityWaveShaper: return "fruityWaveShaper";
         case EffectKind::fruitySoftClipper: return "fruitySoftClipper";
+        case EffectKind::fruityPanOMatic: return "fruityPanOMatic";
+        case EffectKind::fruityBalance: return "fruityBalance";
+        case EffectKind::fruityBloodOverdrive: return "fruityBloodOverdrive";
         case EffectKind::reeverb2: return "reeverb2";
         case EffectKind::reeverb1: return "reeverb1";
         case EffectKind::fruityDelay2: return "fruityDelay2";
@@ -162,6 +167,7 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityChorus: return "fruityChorus";
         case EffectKind::hyperChorus: return "hyperChorus";
         case EffectKind::vintageChorus: return "vintageChorus";
+        case EffectKind::grossBeat: return "grossBeat";
     }
     return "eq";
 }
@@ -305,7 +311,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
     for (auto k : { EffectKind::eq, EffectKind::compressor, EffectKind::delay, EffectKind::reverb, EffectKind::plugin,
                     EffectKind::limiter, EffectKind::filter, EffectKind::distortion, EffectKind::chorus, EffectKind::parametricEq, EffectKind::utility, EffectKind::volumeGate, EffectKind::peakController, EffectKind::pitchShift, EffectKind::freqShift, EffectKind::parallel, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::rhythmGain, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect, EffectKind::squeeze, EffectKind::vintagePhaser, EffectKind::vocodex, EffectKind::maximus, EffectKind::fruityLimiter, EffectKind::fruityCompressor, EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper, EffectKind::reeverb2, EffectKind::reeverb1, EffectKind::fruityDelay2, EffectKind::fruityDelay3,
                     EffectKind::stereoShaper, EffectKind::stereoEnhancer, EffectKind::transientProcessor, EffectKind::spreader,
-                    EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus })
+                    EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat })
         if (id == effectId (k))
             return k;
 
