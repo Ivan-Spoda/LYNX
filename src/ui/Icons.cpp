@@ -479,6 +479,46 @@ Shape make (Icon icon)
             polyline (st, { { 16.5f, 3.5f }, { 16.5f, 6.5f }, { 12.0f, 12.0f }, { 16.5f, 17.5f }, { 16.5f, 20.5f } });
             polyline (fi, { { 12.0f, 16.0f }, { 15.0f, 19.5f }, { 9.0f, 19.5f } }, true);
             break;
+        case Icon::mouseLeft: // a mouse with the left button lit (the mirror of rightClick)
+        {
+            roundRect (st, 6.5f, 3.5f, 11.0f, 17.0f, 5.5f);
+            line (st, 6.5f, 10.5f, 17.5f, 10.5f);
+            line (st, 12.0f, 3.5f, 12.0f, 10.5f);
+            juce::Path b;
+            b.startNewSubPath (12.0f, 3.5f);
+            b.lineTo (12.0f, 10.5f);
+            b.lineTo (6.5f, 10.5f);
+            b.lineTo (6.5f, 9.0f);
+            b.quadraticTo (6.5f, 3.5f, 12.0f, 3.5f);
+            b.closeSubPath();
+            fi.addPath (b);
+            break;
+        }
+        case Icon::mouseMiddle: // a mouse with its wheel button lit
+            roundRect (st, 6.5f, 3.5f, 11.0f, 17.0f, 5.5f);
+            line (st, 6.5f, 11.0f, 17.5f, 11.0f);
+            fi.addRoundedRectangle (10.25f, 4.5f, 3.5f, 6.0f, 1.75f);
+            break;
+        case Icon::mouseWheel: // a narrower mouse with its wheel, and up/down chevrons beside it
+            roundRect (st, 3.5f, 4.5f, 10.0f, 15.0f, 5.0f);
+            line (st, 3.5f, 11.0f, 13.5f, 11.0f);
+            fi.addRoundedRectangle (7.25f, 5.5f, 3.5f, 5.0f, 1.75f);
+            polyline (st, { { 16.5f, 8.0f }, { 18.5f, 5.5f }, { 20.5f, 8.0f } });
+            polyline (st, { { 16.5f, 16.0f }, { 18.5f, 18.5f }, { 20.5f, 16.0f } });
+            break;
+        case Icon::tuningFork: // two prongs on a stem, with a weighted foot
+        {
+            juce::Path f;
+            f.startNewSubPath (8.5f, 3.5f);
+            f.lineTo (8.5f, 10.0f);
+            f.quadraticTo (8.5f, 14.0f, 12.0f, 14.0f);
+            f.quadraticTo (15.5f, 14.0f, 15.5f, 10.0f);
+            f.lineTo (15.5f, 3.5f);
+            st.addPath (f);
+            line (st, 12.0f, 14.0f, 12.0f, 18.0f);
+            fi.addEllipse (10.0f, 17.0f, 4.0f, 4.0f);
+            break;
+        }
     }
 
     return s;
@@ -589,22 +629,44 @@ int IconButton::getIdealWidth (int height) const
     return juce::jmax (height, iconSize + gap + textWidth + (textWidth > 0 ? 20 : 0));
 }
 
+void IconButton::buttonStateChanged()
+{
+    juce::Button::buttonStateChanged();
+
+    const auto target = isOver() || isDown() ? 1.0f : 0.0f;
+
+    if (target != hover && ! isTimerRunning())
+        startTimerHz (60);
+}
+
+void IconButton::timerCallback()
+{
+    const auto target = isOver() || isDown() ? 1.0f : 0.0f;
+    const auto step = target > hover ? 0.34f : 0.18f; // in quickly, out a little slower
+    hover = target > hover ? juce::jmin (target, hover + step) : juce::jmax (target, hover - step);
+
+    if (hover == target)
+        stopTimer();
+
+    repaint();
+}
+
 void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     using namespace theme;
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
     const auto on = getToggleState();
     const auto enabled = isEnabled();
+    // the animated hover level (snaps to the state when nothing animates, e.g. in snapshots)
+    const auto h = isTimerRunning() ? hover : (highlighted ? 1.0f : 0.0f);
 
     juce::Colour bg;
     if (on || primary)
-        bg = down ? colour::accentPressed : highlighted ? onColour.brighter (0.12f) : onColour;
+        bg = down ? colour::accentPressed : onColour.interpolatedWith (onColour.brighter (0.12f), h);
     else if (down)
         bg = colour::bg6;
-    else if (highlighted)
-        bg = colour::bg5;
     else
-        bg = flat ? juce::Colours::transparentBlack : colour::bg4;
+        bg = flat ? colour::bg5.withAlpha (h) : colour::bg4.interpolatedWith (colour::bg5, h);
 
     if (! enabled)
         bg = bg.withMultipliedAlpha (0.5f);
@@ -619,8 +681,8 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     }
 
     auto fg = (on || primary) ? iconOnColour
-                              : (! iconColour.isTransparent() ? (highlighted ? iconColour.brighter (0.2f) : iconColour)
-                                                              : (highlighted ? colour::textPrimary : colour::textSecondary.brighter (0.25f)));
+                              : (! iconColour.isTransparent() ? iconColour.interpolatedWith (iconColour.brighter (0.2f), h)
+                                                              : colour::textSecondary.brighter (0.25f).interpolatedWith (colour::textPrimary, h));
     if (! enabled)
         fg = colour::textDisabled;
 

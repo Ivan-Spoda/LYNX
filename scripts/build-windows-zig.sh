@@ -88,6 +88,8 @@ APP_SOURCES+=(src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp 
 APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
 APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
+# main window chrome: hint bar and toolbar widgets
+APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
