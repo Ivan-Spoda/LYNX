@@ -30,6 +30,7 @@
 #include "core/FlWrapper.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
+#include "core/Ogun.h"
 #include "core/HarmlessFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
@@ -746,6 +747,7 @@ TEST (flp_real_files)
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
+    int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
@@ -912,6 +914,27 @@ TEST (flp_real_files)
                         finite = finite && std::isfinite (v), e += (double) v * v;
                     CHECK (finite);
                     harmorSounding += e > 1e-6 ? 1 : 0;
+                }
+
+            // Ogun: every state in the demos plays on the exact engine (REA_rodada37) and sounds, with finite samples
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Ogun")
+                {
+                    ++ogun;
+                    ogunUsable += lynx::ogunStateUsable (c.pluginState) ? 1 : 0;
+                }
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::ogun)
+                {
+                    ++ogunKind;
+                    const auto y = lynx::ogun::renderReference (c.pluginState, { { 0, 60, 0.8, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6000 },
+                                                                                 { 2000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 8000 } }, 44100.0, 11025);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    ogunSounding += e > 1e-6 ? 1 : 0;
                 }
 
             // Sytrus: every state in the demos (zlib + 10 units) decodes, with finite values
@@ -1400,6 +1423,8 @@ TEST (flp_real_files)
     CHECK (harmlessParsed == harmless && harmlessKind >= harmless);
     std::printf ("  Harmor: %d channels, %d states usable by the engine, %d imported as Harmor (%d sounding)\n", harmor, harmorUsable, harmorKind, harmorSounding);
     CHECK (harmorUsable == harmor && harmor > 90 && harmorKind >= harmor && harmorSounding >= harmorKind * 9 / 10);
+    std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
+    CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
 
@@ -4689,8 +4714,11 @@ int main (int argc, char** argv)
     if (argc > 1)
         realFlpDir = argv[1];
 
+    const char* only = std::getenv ("LYNX_TEST"); // run only the tests whose name contains this
     for (auto& [name, fn] : registry())
     {
+        if (only != nullptr && std::strstr (name, only) == nullptr)
+            continue;
         std::printf ("%s\n", name);
         fn();
     }
@@ -6113,6 +6141,213 @@ TEST (harmor_engine)
     for (int i = 0; i < 2048; ++i)
         el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
     CHECK (el < 1e-10 * er && er > 1e-3);
+}
+
+namespace
+{
+// An Ogun state written from scratch (REA_rodada37 §1.3 layout, version 18; zlib with stored blocks): richness 4
+// (255 partials), pre-decay, decay/release, fullness, Seed 1 + fixed Seed 2 with morph, 3-voice unison, a 2-stage
+// low-pass with an LFO on its cutoff, a volume envelope with a sustain point and a velocity map, declick, normalisation,
+// Impulse/Decay maps, and every plugin effect (EQ band, chorus, ping-pong delay, reverb). Everything else is neutral.
+std::vector<std::uint8_t> ogunTestState()
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f32v = [&] (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); i32 ((std::int32_t) u); };
+    auto f64 = [&] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    struct Pt { double dx, y, tension; int mode; };
+    auto curve = [&] (int type, const std::vector<Pt>& pts, std::array<std::int32_t, 5> hdr) {
+        i32 (type), i32 (3), i32 ((std::int32_t) pts.size());
+        for (const auto& p : pts)
+        {
+            f64 (p.dx), f64 (p.y), f32v ((float) p.tension);
+            b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+        }
+        for (auto h : hdr)
+            i32 (h);
+    };
+    const std::array<std::int32_t, 5> off { 0, 0, -1, -1, -1 }, on { 0, 1, -1, -1, -1 };
+    auto flat = [&] (int type, double y) { curve (type, { { 0, y, 0, 0 }, { 1, y, 0, 0 } }, off); };
+    std::array<std::int32_t, 64> P {};
+    const std::pair<int, int> values[] = { { 0, 128 }, { 5, 300 }, { 6, 3000 }, { 7, 2000 }, { 8, 200 }, { 9, 500 }, { 10, 12 },
+        { 11, 34 }, { 12, 3 }, { 13, 64 }, { 14, 64 }, { 15, 40 }, { 16, 64 }, { 17, 180 }, { 18, 60 }, { 19, 2 }, { 20, 300 },
+        { 21, 400 }, { 22, 40 }, { 23, 30 }, { 24, 20 }, { 25, 64 }, { 26, 40 }, { 27, 96 }, { 28, 100 }, { 29, 64 }, { 30, 2 },
+        { 31, 19 }, { 32, 221 }, { 33, 0 }, { 34, 50 }, { 35, 100 }, { 36, 20 }, { 37, 60 }, { 38, 2 }, { 39, 64 }, { 40, 300 },
+        { 43, 30000 }, { 46, 20000 }, { 49, 0 }, { 50, 2 }, { 51, 0 }, { 52, 9 }, { 53, 1 }, { 54, 0 },
+        { 55, 0x01000000 },   // +0x20b: pitch follows the key
+        { 56, 0x00010000 },   // +0x20e: declick
+        { 62, 0x00000100 } }; // +0x225: normalise
+    for (const auto& [i, v] : values)
+        P[(std::size_t) i] = v;
+    for (auto v : P)
+        i32 (v);
+    b.push_back (0), b.push_back (1), b.push_back (0); // delay: not tempo-based, on
+    i32 (1), i32 (1), i32 (1);                         // EQ band types: peaking
+    b.push_back (0);                                   // comment: 0 characters
+    for (int k = 0; k < 13; ++k)
+    {
+        static constexpr int sum[] = { 1, 2, 3, 9, 11, 12 };
+        const double neutral = std::find (std::begin (sum), std::end (sum), k) != std::end (sum) ? 0.5 : 1.0;
+        i32 (1);
+        f32v (0.0f), f32v (1.0f), f32v (k == 1 ? 0.3f : 0.0f);
+        if (k == 0) // volume envelope: attack, decay to the sustain point, release
+            curve (1, { { 0, 0, 0, 0 }, { 0.02, 1, 0.3, 0 }, { 0.3, 0.5, -0.4, 0 }, { 0.5, 0, 0.2, 0 } }, { 0, 1, 2, -1, 2 });
+        else
+            flat (1, neutral);
+        for (int a : { 128, 128, 128, 128 })
+            i32 (a);
+        if (k == 1) // cutoff LFO
+            curve (2, { { 0, 0.8, 0, 0 } }, on);
+        else
+            flat (2, 0.5);
+        for (int a : { k == 1 ? 40000 : 0, 0, 0, 0 })
+            i32 (a);
+        i32 (0);
+        for (int m = 0; m < 4; ++m)
+            if (k == 0 && m == 1)
+                curve (3, { { 0, 0.3, 0, 0 }, { 1, 1, -0.2, 0 } }, off); // velocity → volume
+            else
+                flat (3, neutral);
+    }
+    flat (3, 0.0);                                                // Forced: none
+    curve (3, { { 0, 0.6, 0, 0 }, { 1, 0.4, 0.3, 0 } }, off);     // Impulse EQ
+    curve (3, { { 0, 0.5, 0, 0 }, { 1, 0.3, 0, 0 } }, off);       // Decay EQ
+    flat (3, 0.5);                                                // Release EQ
+    // u32 version + zlib (stored blocks)
+    std::vector<std::uint8_t> s { 18, 0, 0, 0, 0x78, 0x01 };
+    for (std::size_t i = 0; i < b.size();)
+    {
+        const auto len = std::min<std::size_t> (65535, b.size() - i);
+        s.push_back (i + len >= b.size() ? 1 : 0);
+        s.push_back ((std::uint8_t) len), s.push_back ((std::uint8_t) (len >> 8));
+        s.push_back ((std::uint8_t) ~len), s.push_back ((std::uint8_t) (~len >> 8));
+        s.insert (s.end(), b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + len));
+        i += len;
+    }
+    std::uint32_t a1 = 1, a2 = 0;
+    for (auto c : b)
+        a1 = (a1 + c) % 65521u, a2 = (a2 + a1) % 65521u;
+    for (int sh = 24; sh >= 0; sh -= 8)
+        s.push_back ((std::uint8_t) (((a2 << 16) | a1) >> sh));
+    return s;
+}
+} // namespace
+
+TEST (ogun_engine)
+{
+    // REA_rodada37: state parsing, the engine against our reference model (ogmodel.py), host levels, export quality
+    const auto blob = ogunTestState();
+    if (const char* dump = std::getenv ("LYNX_DUMP_OGUN"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
+    CHECK (lynx::ogunStateUsable (blob));
+    CHECK (lynx::ogunFallbacks (blob).empty());
+    CHECK (lynx::ogunParam (blob, 17) == 180 && lynx::ogunParam (blob, 52) == 9 && ! lynx::ogunParam (blob, 64));
+    auto broken = blob;
+    broken.resize (broken.size() - 300);
+    CHECK (! lynx::ogunStateUsable (broken));
+    auto old = blob;
+    old[0] = 13; // the articulator layout is from version 14
+    CHECK (! lynx::ogunStateUsable (old));
+
+    // reference model (REA round 37 ogmodel.Plugin(state).run: C5 velocity 0.75 released at 6144, G5 velocity 0.625 at 2048
+    // released at 8192; host block 512)
+    const std::vector<lynx::ogun::RefNote> notes { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6144 }, { 2048, 67, 0.625, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 8192 } };
+    const auto ref = lynx::ogun::renderReference (blob, notes, 44100.0, 16384);
+    CHECK (ref.size() == 2 * 16384);
+    if (const char* dump = std::getenv ("LYNX_DUMP_OGUN_OUT"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) ref.data(), (std::streamsize) (ref.size() * 4));
+    const std::tuple<int, float, float> golden[] {
+        { 100, -7.763202e-05f, -8.919523e-05f }, { 1000, 0.06195267f, 0.03858230f }, { 3000, 0.01363476f, -0.00378433f },
+        { 6000, -0.06601223f, -0.03084030f }, { 9000, 0.04204506f, 0.02452896f }, { 12000, 0.03420147f, -0.01837870f },
+        { 16383, -0.00465311f, -0.00119627f } };
+    for (const auto& [i, gl, gr] : golden)
+        CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+
+    // the instrument plays like the reference renderer (Final.Vol 1, centre)
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::ogun;
+    c.pluginState = blob;
+    auto render = [&] (const lynx::ChannelDef& def, int total, float gl, float gr, bool held = false) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::ogun);
+        inst->configure (def, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        for (int s = 0; s < total; s += 512)
+        {
+            if (s == 0)
+                inst->noteOn (60, 0.75f);
+            if (s == 2048)
+                inst->noteOn (67, 0.625f);
+            if (s == 6144 && ! held)
+                inst->noteOff (60);
+            if (s == 8192 && ! held)
+                inst->noteOff (67);
+            inst->render (l.data() + s, r.data() + s, std::min (512, total - s), gl, gr);
+        }
+        return std::make_tuple (l, r, std::move (inst));
+    };
+    {
+        auto [l, r, inst] = render (c, 16384, 1.0f, 1.0f);
+        double worst = 0.0;
+        for (int i = 0; i < 16384; ++i)
+            worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) });
+        CHECK (worst == 0.0);
+        // the voices end and the effect tails die out: the instrument goes idle
+        std::vector<float> tail (44100), tailR (tail.size());
+        for (int k = 0; k < 20 && ! inst->idle(); ++k)
+            inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+    // FL's level law applied once (effects off): half the channel volume halves the output once the gain ramps
+    // (limited to 0.001 per sample) have settled on the sustain level; full right pan silences the left side
+    {
+        auto dry = c;
+        for (int i : { 19, 29, 40, 53 })
+            CHECK (lynx::ogunSetParam (dry.pluginState, i, 0)); // chorus, delay wet, EQ band and reverb off
+        CHECK (lynx::ogunStateUsable (dry.pluginState) && lynx::ogunParam (dry.pluginState, 19) == 0);
+        const auto full = std::get<0> (render (dry, 32768, 1.0f, 1.0f, true));
+        const auto half = std::get<0> (render (dry, 32768, 0.5f, 0.5f, true));
+        double worst = 0.0, peak = 0.0;
+        for (int i = 30000; i < 32768; ++i)
+            worst = std::max (worst, (double) std::abs (half[(std::size_t) i] - 0.5f * full[(std::size_t) i])),
+            peak = std::max (peak, (double) std::abs (full[(std::size_t) i]));
+        CHECK (worst <= 1e-7 * peak && peak > 1e-3);
+        // FL's default channel volume (100/128): FL hands Ogun Final.Vol = (11^v − 1)/10 (REA_rodada28 §4.1); LYNX's
+        // centred channel gains (√2·V·cos(π/4) each) give the reference model's level at that Final.Vol
+        const auto V = lynx::channelGain (0.78125f);
+        const auto g = V * std::cos (0.25f * 3.14159265f) * 1.41421356f;
+        const auto atDefault = std::get<0> (render (dry, 32768, g, g, true));
+        const auto refDefault = lynx::ogun::renderReference (dry.pluginState, { { 0, 60, 0.75, V, 0.0, 0.0, 0.0, 0.0, 0.5, -1 },
+                                                                                { 2048, 67, 0.625, V, 0.0, 0.0, 0.0, 0.0, 0.5, -1 } }, 44100.0, 32768);
+        double ei = 0.0, er0 = 0.0;
+        for (int i = 30000; i < 32768; ++i)
+            ei += (double) atDefault[(std::size_t) i] * atDefault[(std::size_t) i], er0 += (double) refDefault[2 * (std::size_t) i] * refDefault[2 * (std::size_t) i];
+        CHECK (er0 > 0.0 && std::abs (10.0 * std::log10 (ei / er0)) < 0.001);
+        const auto [pl, pr, pi] = render (dry, 4096, 0.0f, 1.41421356f);
+        double el = 0.0, er = 0.0;
+        for (int i = 0; i < 4096; ++i)
+            el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
+        CHECK (el < 1e-10 * er && er > 1e-3);
+    }
+    // export: FL renders Ogun at quality 4 (×2 rate, 32-point reader), LYNX too while it renders offline
+    {
+        lynx::setOfflineRendering (true);
+        auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f);
+        lynx::setOfflineRendering (false);
+        lynx::ogun::RefOptions q4;
+        q4.quality = 4;
+        const auto ref4 = lynx::ogun::renderReference (blob, notes, 44100.0, 8192, q4);
+        double worst = 0.0, diff = 0.0;
+        for (int i = 0; i < 8192; ++i)
+            worst = std::max (worst, (double) std::abs (ref4[2 * (std::size_t) i] - l[(std::size_t) i])),
+            diff = std::max (diff, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]));
+        CHECK (worst == 0.0 && diff > 1e-3);
+        const std::tuple<int, float, float> golden4[] {
+            { 100, 0.00605961f, 0.00628969f }, { 1000, 0.03729841f, 0.01727954f }, { 3000, -0.09010383f, -0.02551294f },
+            { 6000, 0.02167798f, -0.01115632f }, { 8191, 0.00320288f, -0.00615792f } };
+        for (const auto& [i, gl, gr] : golden4)
+            CHECK (std::abs (ref4[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref4[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+    }
 }
 
 // our own Maximus v7 state (layout REA_rodada8 §1.1): 7 globals, 4 × 13 band parameters, 8 envelopes (dx, y, tension, type)

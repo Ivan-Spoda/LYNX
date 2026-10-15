@@ -2,6 +2,7 @@
 #include "core/DrumSynthLive.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
+#include "core/Ogun.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -418,6 +419,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             SynthSettings synth;
             float gain = 1.0f;
             if (synthFromHarmor (project.channels.front().pluginState, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::ogun)
+        {
+            // ... and of an Ogun / Autogun patch (the spectral-oscillator conversion)
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromOgun (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
@@ -870,8 +879,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
             else if (name == "gms" && synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
                 adopt();
-            else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "ogun" || name == "autogun")
+            {
+                // FL's inverse-FFT engine from the raw state (REA_rodada37); Autogun (its own state variant and DLL, not
+                // verified in round 37) and states the engine can't read keep the spectral-oscillator conversion
+                if (name == "ogun" && ogunStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::ogun;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromOgun (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "sakura")
             {
                 // the physical string model (REA_rodada28 §1); the old saw + triangle stays as a fallback
@@ -1002,8 +1022,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || ((plugin == "fruity slicer" || plugin == "slicex") && ! def.samplePath.empty())
                      || (plugin == "fpc" && ! drumKits.empty() && drumKits.back().first == (int) song.channels.size()))
                 ++r.converted[c.pluginName];
-            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
-                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
+            else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin)
+                     || ((plugin == "ogun" || plugin == "autogun") && def.instrument != InstrumentKind::ogun && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
+                     || ((plugin == "sytrus" || plugin == "gms" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
                          || plugin == "toxic biohazard" || plugin == "morphine") && adoptedFromPlugin)
                      || (plugin == "wave traveller" && def.instrument == InstrumentKind::sampler)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::sampler))
@@ -1011,7 +1032,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (((plugin == "fruity envelope controller" || plugin == "fruity keyboard controller") && def.instrument == InstrumentKind::controller)
                      || (plugin == "fruity drumsynth live" && def.instrument == InstrumentKind::drumsynth)
                      || (plugin == "harmless" && def.instrument == InstrumentKind::harmless)
-                     || (plugin == "harmor" && def.instrument == InstrumentKind::harmor))
+                     || (plugin == "harmor" && def.instrument == InstrumentKind::harmor)
+                     || ((plugin == "ogun" || plugin == "autogun") && def.instrument == InstrumentKind::ogun))
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)

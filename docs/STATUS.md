@@ -63,7 +63,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   state — operators, FM/RM matrix, articulators, unison, portamento, filters, effects chain; FL's render settings when
   exporting, its live ones when playing); Harmor on its additive engine (REA round 34: both parts, 520-partial bank,
   module chain, articulators; within −150 dB of the reference model on 88 of the 89 demo channels it runs, 85 of 99
-  demo channels within −60 dB of FL's DLL); GMS, Kepler, Ogun/Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
+  demo channels within −60 dB of FL's DLL); Ogun on its inverse-FFT engine (REA round 37: the whole voice, articulators
+  and plugin effects from the raw state; within float rounding of the reference model — which is within −60 dB of
+  FL's DLL on 20 of 20 demo channels — on all 20 demo channels and ~70 synthetic cases); GMS, Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard,
   Morphine, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
@@ -136,9 +138,28 @@ accordingly. Highlights of what is **confirmed and applied**:
   release / release-2 stages, drawn-curve gain tables with tensions, lookahead, saturation, band mix) loaded with
   `Harmless/Data/Compression/<n>.fst` from the user's installation. The old synth approximation remains for unreadable
   states and for the synth's "FL presets" button.
-- **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
-  weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
-  with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
+- **Ogun:** its own instrument (`core/Ogun.cpp`, REA round 37; the channel keeps the plugin's raw state): per voice
+  up to 32 767 partials (Richness) with seeded IPP-style weights, fullness shaping, morph, Forced (B·(1 − F) + F),
+  Impulse/Decay/Release per-partial maps (sequential curve sampling, fixed patterns, 1/√h, logarithmic axis, EQ shift),
+  pre-decay, RMS normalisation, band limit and update span; per 50/25 ms frame the spectrum follows the hold, ALT DECAY
+  or release law and becomes an N-point table by an inverse real FFT (N = 2^(P52+q)); the two latest tables are read
+  with the quality's kernel (linear, 6-point 5th-order Hermite, 32-point windowed sinc), crossfaded with the unison
+  sub-voices' pan gains and phase spread (read start at the table's smallest sample), then declick, the 4-type ×
+  1–3-stage filter (2× zero-order hold below 88.2 kHz), FL's volume/pan matrix with gain ramps, silence end, same-key
+  cut and max polyphony; the 13 articulators (point curves modes 0–12, envelopes with ADSR knob scales, tempo sync,
+  velocity options and portamento, LFOs with tension/skew/pulse width, key/velocity/X/Y maps); the plugin's 3-band EQ,
+  chorus, delay (normal/inverted/ping-pong, stereo offset, tempo sync) and reverb (FL's shared plate reverb,
+  `core/PlateReverb.h`, shared with Harmless's rack), and the 2:1 polyphase decimator of qualities 2–4. Level law
+  `(3^(P0/128) − 1)/2`·Final.Vol through Ogun's own pan matrix (channel volume/pan applied once). LYNX plays the
+  state's quality and exports at quality 4, as FL does when it renders. Against the round-37 reference model (own
+  read start, same Seed-2 counter): bit-identical or within −125 dB on all 20 demo channels (44.1 and 48 kHz, every
+  effect on, and at the export quality 4) and on ~70 synthetic cases (qualities 0–4, LFO shapes, polyphony, host
+  values). The old spectral-oscillator conversion remains for unreadable states, Autogun (another state layout), and
+  the synth's "FL presets" button.
+  CPU: one inverse FFT of N per voice and frame (split re/im radix-2 passes, cache-blocked, AVX when available), the
+  quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
+  "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
+  approximation: 4.9 s), the other demos with Ogun channels within ±6 s of before.
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
   key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
@@ -217,11 +238,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   answers for the release-time factor (p30) and release velocity (p46) are 1 and 0 (FL's not observed); Mod X/Y
   (Final.FCut/FRes) are 0; FL's per-channel max polyphony is not imported (LYNX's limit is its 96-record pool);
   the LFO/phaser phases follow song-position jumps but not the start of playback.
-- Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
-  share an energy-weighted decay; ALT DECAY morphs every harmonic towards its Decay EQ level (REA round 26); the
-  per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
-  are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
-  key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
+- Ogun (REA round 37 §1.20 and open questions): Seed 2 "Random" uses a per-instance counter starting at 0 (FL's starts
+  from its clock-seeded RTL random seed), so Random spectra are deterministic and differ from any given FL render; the
+  read start j₀ (argmin of the first table) occasionally picks a neighbouring sample vs FL (a time shift of that
+  note's table); IPP's 11-bit `exp` in the fullness shaping is evaluated exactly (up to −79 dB on the demos, −52 dB on
+  the worst synthetic case vs the DLL); global LFOs/envelopes run per voice (none in FL's data); host answers 2/6 are 0,
+  release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
+  demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
+  (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
 - Sytrus: chaotic FM patches (two-way FM loops, strong self-feedback) cannot be sample-exact — FL builds sine tables
   with IPP's tone generator (≈1 ulp from an exact sine) and the chaos amplifies it (statistically equivalent);
   random maps use a fixed per-instance seed (FL's is clock-seeded, so they are not reproducible in FL either); the
@@ -288,6 +312,6 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
+- Autogun's engine (state layout differs from Ogun's; DLL not run), Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
   Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes, Noise resonance and
   effects rack.
