@@ -290,6 +290,7 @@ Each interaction has an ID, which section 3 uses for the gap matrix.
 | P22 | Audio clip keys: transpose (7/8), reverse (9), stretch mode, fades view | [DOC][sc-pl] |
 | P23 | Dropping a plugin/audio file on a track header creates a linked instrument/audio track | [DOC][pl-trackmode] |
 | P24 | Live clip launching ("performance" mode, Ctrl+P in the Playlist) | [DOC][perf] |
+| P25 | Audio clips show a detailed waveform at every zoom level; the sample's waveform is also drawn in the Sampler channel settings and while previewing in the Browser | [DOC][ac] [DOC][csm] [DOC][br] |
 
 ### 2.6 Automation clips (A)
 
@@ -494,6 +495,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | P22 | No | — |
 | P23 | No | — |
 | P24 | No | — |
+| P25 | **Done** | `core/WaveAnalysis.*` + `ui/WaveformView.*` (feature/spectral-wave). Own design, not FL's: a multi-resolution peak cache (min/max/RMS per channel + the RMS of three bands, low < 250 Hz, mid 250 Hz-4 kHz, high > 4 kHz) built on a worker thread and cached on disk (`%APPDATA%\LYNX\wavecache`, keyed by path + size + date). Each column is coloured by its band mix in LYNX's own palette (warm red-orange = bass, soft lime = mids, cyan-white = treble), RMS body + peak hull with a light outline, interpolated when zoomed far in. Options → Waveforms: spectral (default) or classic one colour, stereo lanes. Drawn in the Playlist clips, in a strip at the top of the Sampler settings (Start/End region dimmed, reverse) and under the Browser list for the previewed file |
 
 **Automation**
 

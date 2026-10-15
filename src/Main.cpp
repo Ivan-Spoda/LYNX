@@ -24,6 +24,7 @@
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
+#include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
 
 namespace
@@ -1496,9 +1497,156 @@ private:
             offline.editSong ([] (lynx::Song& s) { if (! s.patterns.empty()) s.patterns[(std::size_t) s.currentPattern].notes.push_back ({}); });
             offline.undo();
             saveWindow (lynx::makeHistoryPanel (offline), "-history.png");
+
+            // spectral waveforms: a synthetic beat (kick, hats, a chord, a noise riser) as audio clips in spectral
+            // colours, zoomed in, classic and stereo; the same file in the Sampler editor and the Browser preview
+            {
+                const juce::File wav (prefix + "-wavedemo.wav");
+                writeWaveDemo (wav, offline.getSong().bpm);
+                const auto path = wav.getFullPathName();
+                const auto pathUtf8 = path.toStdString();
+                int samplerChannel = -1, firstTrack = 0;
+                offline.editSong ([&] (lynx::Song& s) {
+                    for (const auto& clip : s.playlist)
+                        firstTrack = std::max (firstTrack, clip.track + 1);
+                    lynx::ChannelDef audio;
+                    audio.name = "Beat (audio)";
+                    audio.instrument = lynx::InstrumentKind::audioClip;
+                    audio.samplePath = pathUtf8;
+                    s.channels.push_back (audio);
+                    const auto audioChannel = (int) s.channels.size() - 1;
+                    lynx::ChannelDef sampler = audio;
+                    sampler.name = "Beat (sampler)";
+                    sampler.instrument = lynx::InstrumentKind::sampler;
+                    sampler.sampler.regionStart = 0.06f;
+                    sampler.sampler.regionEnd = 0.94f;
+                    s.channels.push_back (sampler);
+                    samplerChannel = (int) s.channels.size() - 1;
+
+                    const auto bar = (std::int64_t) lynx::ppq * std::max (1, s.beatsPerBar);
+                    const auto whole = (std::int64_t) std::llround (8.0 * s.bpm / 60.0 * lynx::ppq);
+                    lynx::Clip clip;
+                    clip.kind = lynx::ClipKind::audio;
+                    clip.channel = audioChannel;
+                    clip.track = firstTrack;
+                    clip.length = whole;
+                    s.playlist.push_back (clip);
+                    clip.track = firstTrack + 1; // a slice of it, later in the song
+                    clip.start = bar;
+                    clip.offset = bar;
+                    clip.length = 2 * bar;
+                    s.playlist.push_back (clip);
+                    // taller rows for the audio (tracks can be resized: P18)
+                    if ((int) s.playlistTracks.size() < firstTrack + 2)
+                        s.playlistTracks.resize ((std::size_t) firstTrack + 2);
+                    s.playlistTracks[(std::size_t) firstTrack].height = 80;
+                    s.playlistTracks[(std::size_t) firstTrack + 1].height = 60;
+                });
+                offline.dispatchPendingMessages();
+                auto& cache = *lynx::ui::WaveformCache::getInstance();
+                cache.find (path, [&offline, path] { return offline.getSampleLibrary().load (path); });
+                cache.waitUntilIdle (30000);
+
+                ui.selectTabForSnapshot (2);
+                auto& playlist = ui.getPlaylistForSnapshot();
+                playlist.setTimeSelectionForSnapshot (0, 0);
+                {
+                    // the Playlist alone (the floating Channel Rack would cover the clips)
+                    auto saveSnapshot = [&playlist] (juce::Component&, const juce::String& file) { saveArea (playlist, playlist.getLocalBounds(), file); };
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio.png");
+                    playlist.setViewForSnapshot (1400.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-zoom.png");
+                    lynx::ui::WaveformCache::stereo = true;
+                    saveSnapshot (ui, prefix + "-playlist-audio-stereo.png");
+                    lynx::ui::WaveformCache::stereo = false;
+                    lynx::ui::WaveformCache::spectral = false;
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-classic.png");
+                    lynx::ui::WaveformCache::spectral = true;
+                }
+
+                saveWindow (lynx::makeChannelSettingsPanel (offline, samplerChannel), "-sampler-wave.png");
+
+                ui.showDesktopForSnapshot (false);
+                ui.getBrowserForSnapshot().showPreviewForSnapshot (wav);
+                saveSnapshot (ui, prefix + "-browser-preview.png");
+            }
         }
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
+    }
+
+    // --snapshot: 8 s of a synthetic stereo beat whose parts sit in different bands (kick = low, chord = mid,
+    // hats and the noise riser = high), to show the spectral waveform colours
+    static void writeWaveDemo (const juce::File& file, double bpm)
+    {
+        constexpr double rate = 44100.0;
+        const auto frames = (int) (8.0 * rate);
+        juce::AudioBuffer<float> buffer (2, frames);
+        buffer.clear();
+        auto* l = buffer.getWritePointer (0);
+        auto* r = buffer.getWritePointer (1);
+        const auto beat = 60.0 / juce::jlimit (40.0, 300.0, bpm);
+        std::uint32_t noise = 0x9e3779b9u;
+        auto white = [&noise] {
+            noise ^= noise << 13;
+            noise ^= noise >> 17;
+            noise ^= noise << 5;
+            return (float) (noise & 0xffffff) / (float) 0x800000 - 1.0f;
+        };
+        float previous = 0.0f;
+
+        for (int i = 0; i < frames; ++i)
+        {
+            const auto t = i / rate;
+            const auto inBeat = std::fmod (t, beat);
+            const auto bar = (int) (t / (beat * 4.0));
+            float left = 0.0f, right = 0.0f;
+
+            // kick on every beat: a falling sine
+            {
+                const auto phase = 2.0 * juce::MathConstants<double>::pi * (48.0 * inBeat + 4.0 * (1.0 - std::exp (-inBeat * 30.0)));
+                const auto k = (float) (std::sin (phase) * std::exp (-inBeat * 7.0)) * 0.85f;
+                left += k;
+                right += k;
+            }
+            // hats on the off-beats: high-passed noise bursts, a little to the right
+            {
+                const auto h = std::fmod (t + beat * 0.5, beat);
+                const auto n = white();
+                const auto hp = (n - previous) * 0.5f;
+                previous = n;
+                const auto hat = hp * (float) std::exp (-h * 45.0) * 0.55f;
+                left += hat * 0.6f;
+                right += hat;
+            }
+            // a chord in the second and third bars (mid band)
+            if (bar == 1 || bar == 2)
+            {
+                const auto env = (float) std::min (1.0, std::min (t - beat * 4.0, beat * 12.0 - t) * 8.0);
+                float chord = 0.0f;
+                for (const auto hz : { 523.25, 659.25, 783.99 })
+                    chord += (float) (std::sin (2.0 * juce::MathConstants<double>::pi * hz * t) + 0.3 * std::sin (4.0 * juce::MathConstants<double>::pi * hz * t));
+                left += chord * 0.09f * std::max (0.0f, env);
+                right += chord * 0.09f * std::max (0.0f, env);
+            }
+            // a white-noise riser over the last two seconds (high band)
+            if (t > 6.0)
+            {
+                const auto rise = (float) ((t - 6.0) / 2.0);
+                left += white() * 0.4f * rise * rise;
+                right += white() * 0.4f * rise * rise;
+            }
+            l[i] = left;
+            r[i] = right;
+        }
+
+        buffer.applyGain (0.9f / juce::jmax (1.0e-6f, buffer.getMagnitude (0, frames)));
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        if (std::unique_ptr<juce::AudioFormatWriter> writer { wav.createWriterFor (file.createOutputStream().release(), rate, 2, 24, {}, 0) })
+            writer->writeFromAudioSampleBuffer (buffer, 0, frames);
     }
 
     // the menu bar's menus side by side, drawn with the LookAndFeel as they appear when opened
