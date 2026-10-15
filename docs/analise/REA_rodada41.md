@@ -132,7 +132,8 @@ plugin. Derived values (all float unless noted):
   `v7 = trunc(127·(float)ln(10·Init.Vol + 1)·0.32846) ` clamped 0…127 (the float `0.32846 = 1/ln 21`), the same law as GMS
   (round 39 §1.3). A second host voice on a key that already has one first sends a note-off for that key and kills the old
   host voice. The engine receives `vel = v7·(1/127)`.
-- Voice_Release(handle) = note-off for that key; Voice_Kill is handled the same way.
+- Voice_Release(handle) = note-off for that key; Voice_Kill (`FUN_180004a30`) sends the same note-off (the engine voice is
+  only released, it keeps sounding through its release) and kills the host voice.
 - Before every Gen_Render the wrapper builds five 128-entry per-key tables from the host voices it holds: L and R from the
   host's ComputeLRVol(Final.Pan, Final.Vol), pitch offset `(float)(Final.Pitch·0.01 − key + 60)` semitones, cutoff offset
   = Final.FCut, resonance offset = Final.FRes. Keys without a host voice repeat the values of the previous key that has
@@ -195,7 +196,7 @@ glide position, age.
   Then the voice starts: velocity and key set; unless (LEAD and the voice is not released), the filter-envelope level is
   set to 0, both envelopes get target 4.0 with their attack rates, and the voice is marked not released (the amp
   envelope level is **not** reset: a retriggered voice attacks from its current level). The last note becomes this key.
-- **Note off:** ignored while the sustain flag (MIDI CC) is set. For every voice playing that key: in LEAD, if another key
+- **Note off:** ignored while the engine's hold flag (`+0x39DC`; what sets it is **not confirmed**, 0 in every test) is set. For every voice playing that key: in LEAD, if another key
   is held the voice moves to it (preference: the highest held key below, else the lowest held key above) with that key's
   velocity and without retrigger, and it becomes the last note; otherwise (and always in POLY/MONO) the voice is
   released: both envelope targets 0 with the release rates.
@@ -380,7 +381,9 @@ ProcessEvent 1 = 0.
 | Variants (`tvar.py`, `out/tvar1.log`) | 48 kHz (2 states), host blocks 64/100/1000/2048, tempo 90/97, transport playing at 3.3 beats (LFO and phaser song-locked), max polyphony 1 and 2 (stealing), MONO 48 kHz, same-key retrigger, Init.Vol 0.05/2.0, LEAD same key | pan law A −140 dB (the harness' and Python's cos/sin of the host law differ in the last bit) |
 
 **LYNX's C++ engine** (`build-local/minisynthrender`, `ccmp.py`): identical results to the model on all 12 installation
-states and all 91 presets (same per-preset mismatch counts against the DLL; 11/12 and 47/91 bit-identical to the DLL).
+states and all 91 presets (same per-preset mismatch counts against the DLL; 11/12 and 47/91 bit-identical to the DLL). The
+same source built for Windows with Zig/MinGW (`run/minisynthrender_win.exe`, `ccmp_win.py`, `out/ccmp_win.log`) gives the
+same counts (11/12, 47/91; worst −106.9 dB).
 
 ---
 
@@ -453,6 +456,6 @@ cached. Without the file (or with an unreadable state) the old internal-synth co
 - **Random generator:** process-global in FL; its state at any point of an FL session (other MiniSynth instances, rate
   changes) is not reproducible.
 - **CRT last-bit differences** (§7): reproducing them would need the DLL's own sin/cos/pow algorithms; not attempted.
-- **Not exercised:** pitch bend, mod wheel and sustain (MIDI messages the wrapper forwards; FL delivers bends through
-  Final.Pitch), Final.FCut/FRes ≠ 0 (note properties), parameter automation during notes beyond the per-block reading,
+- **Not exercised:** pitch bend, mod wheel and the hold flag (engine fields `+0x39D4`, `+0x39D8`, `+0x39DC`, fed by MIDI
+  paths of the framework that FL's note events do not use; FL delivers bends through Final.Pitch), Final.FCut/FRes ≠ 0 (note properties), parameter automation during notes beyond the per-block reading,
   the fxp-header branch of the state reader.
