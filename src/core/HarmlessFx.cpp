@@ -878,7 +878,7 @@ std::vector<float> legacyTaps (int N, int kind, double f1, int L1, double f2, in
 
 struct Fir
 {
-    std::vector<float> taps;
+    std::vector<float> taps, rev;           // rev: the taps in time order of the history (oldest first)
     std::array<std::vector<float>, 2> hist; // the last N − 1 inputs, then the block
 
     void reset() noexcept
@@ -890,6 +890,7 @@ struct Fir
     void prepare (std::vector<float> t, int maxFrames)
     {
         taps = std::move (t);
+        rev.assign (taps.rbegin(), taps.rend());
         for (auto& h : hist)
             h.assign (taps.size() - 1 + (std::size_t) maxFrames, 0.0f);
     }
@@ -903,13 +904,24 @@ struct Fir
         {
             auto& h = hist[(std::size_t) c];
             std::copy (in[c], in[c] + n, h.begin() + (N - 1));
+            // double accumulation in four interleaved partial sums (IPP's own summation order is not known; the
+            // difference stays far below the float output's rounding)
+            const float* rt = rev.data();
             for (int i = 0; i < n; ++i)
             {
-                double acc = 0.0;
-                const float* x = h.data() + i + N - 1;
-                for (int k = 0; k < N; ++k)
-                    acc += (double) taps[(std::size_t) k] * (double) x[-k];
-                out[c][i] = (float) acc;
+                const float* x = h.data() + i;
+                double a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0;
+                int k = 0;
+                for (; k + 4 <= N; k += 4)
+                {
+                    a0 += (double) rt[k] * (double) x[k];
+                    a1 += (double) rt[k + 1] * (double) x[k + 1];
+                    a2 += (double) rt[k + 2] * (double) x[k + 2];
+                    a3 += (double) rt[k + 3] * (double) x[k + 3];
+                }
+                for (; k < N; ++k)
+                    a0 += (double) rt[k] * (double) x[k];
+                out[c][i] = (float) ((a0 + a1) + (a2 + a3));
             }
             std::copy (h.begin() + n, h.begin() + n + (N - 1), h.begin());
         }
