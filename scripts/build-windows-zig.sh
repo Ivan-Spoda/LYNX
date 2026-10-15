@@ -88,6 +88,8 @@ APP_SOURCES+=(src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp 
 APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
 APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
+# Image-Line's plugin voice processor (DX10, 3x Osc) and FL's 3x Osc engine
+APP_SOURCES+=(src/core/FlVoiceProcessor.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
