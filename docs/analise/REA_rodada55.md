@@ -274,8 +274,12 @@ projects becomes the exact effect.
 
 - Fast Dist live vs file render: the flag's meaning (set while FL writes a `.wav`) is an inference from where it is
   set; whether FL's start-up could set the CPU byte that selects the SSE host routines is not confirmed by running it
-  (only the identical unit of the plugin DLLs was run). Note for round 43: Fruit Kick calls the same host routine;
-  its port follows the SSE interpolating variant, which differs from the x87 one in the last bits (−143 dB here).
+  (only the identical unit of the plugin DLLs was run).
+- Fruit Kick (round 43) calls the same host routine (set 0, curve 10, drive 0.1). Its port followed the SSE
+  interpolating routine; it now uses the x87 routines of §2.3 (live / file render). With FL's own routine forwarded
+  from FLEngine (`run/kd55.c`, `py/fkx.py`), Fruit Kick_x64.dll and LYNX's `fruitkickrender` are bit-identical on all
+  11 states × 3 note cases × 44.1/48 kHz, live and render (66/66 each); before, live renders of distorted states
+  differed by up to −60 dB **[EXEC]**.
 - The x87 control word of FL's audio thread (Fast Dist's live routine does not set it): the plugins' value `0x037F`
   is assumed.
 - Whether FL flushes Flangus (dispatcher 2) or sends the Flanger's "enabled" notification before playback, and in

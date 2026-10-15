@@ -9330,10 +9330,11 @@ TEST (fruitkick_engine)
     const std::vector<lynx::fruitkick::RefNote> notes = { { 0, 60, 1.0, 0.0, 0.0, -1 }, { 3000, 72, 0.5, 0.3, 0.0, 9000 } };
     const auto ya = lynx::fruitkick::renderReference (A, notes, 44100.0, 20000);
     CHECK (ya.size() == 40000u);
-    CHECK (matchesGolden (ya, { { 10, 0.803596497f, 0.803596497f }, { 700, 0.18540436f, 0.18540436f }, { 2900, -0.63492924f, -0.63492924f },
-                                { 3100, 0.339005232f, 0.544316053f }, { 5000, -0.097384721f, -0.150579333f }, { 9100, 0.124680087f, 0.0544927865f },
-                                { 9400, -0.146474078f, -0.144857526f }, { 15000, 0.00938183628f, 0.00938183628f } },
-                          0.284267726379));
+    // (A uses the distortion: values since REA_rodada55 with FL's x87 live host waveshaper, checked against FLEngine's own)
+    CHECK (matchesGolden (ya, { { 10, 0.803601742f, 0.803601742f }, { 700, 0.185467482f, 0.185467482f }, { 2900, -0.63492614f, -0.63492614f },
+                                { 3100, 0.339092523f, 0.544403195f }, { 5000, -0.0974622667f, -0.150664076f }, { 9100, 0.124627575f, 0.0544180274f },
+                                { 9400, -0.146492869f, -0.144876853f }, { 15000, 0.009439799f, 0.009439799f } },
+                          0.284267678986));
     std::vector<int> ticks;
     for (int t = 115; t < 20000; t += 230)
         ticks.push_back (t);

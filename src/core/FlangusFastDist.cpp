@@ -241,6 +241,18 @@ const std::int16_t* curve (int set, int c) noexcept
     return curves().t[(std::size_t) std::clamp (set, 0, 1)][(std::size_t) std::clamp (c, 1, 10) - 1].data();
 }
 
+void hostShaper (float* x, int n, int set, int c, float dry, float wet, float drive, bool render) noexcept
+{
+    Gains g;
+    g.dry = dry;
+    g.wet = wet;
+    g.drive = drive;
+    if (render)
+        kernelRender (x, n, curve (set, c), g);
+    else
+        kernelLive (x, n, curve (set, c), g);
+}
+
 void process (float* x, int n, const State& s, bool render) noexcept
 {
     const auto g = gains (s);

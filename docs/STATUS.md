@@ -97,8 +97,8 @@ exports the 30 demo projects shipped with FL Studio 2026.
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
   coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
-  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper and DX10's shared voice
-  processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
+  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper (its x87 live / file-render
+  routines since REA round 55, checked against FLEngine's own) and DX10's shared voice processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
   built-in waves read from the user's FL installation); Autogun on the built-in synth; Sakura and Drumpad on physical models rebuilt from their

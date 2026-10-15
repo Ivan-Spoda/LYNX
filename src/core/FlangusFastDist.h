@@ -46,6 +46,9 @@ struct Gains
 Gains gains (const State& s) noexcept;
 // FL's host curve: set 0 (type A) / 1 (type B), curve 1…10; entries 0…8192 (8192 repeats 8191)
 const std::int16_t* curve (int set, int curveIndex) noexcept;
+// FL's host waveshaper (host slot 24) as any plugin calls it, in place: set 0/1, curve 1…10, dry/wet/drive gains;
+// render = FL's file-render routine (interpolated), else the live one (Fast Dist; Fruit Kick's distortion)
+void hostShaper (float* x, int n, int set, int curveIndex, float dry, float wet, float drive, bool render) noexcept;
 // one channel, in place; render = FL's file-render kernel (interpolated)
 void process (float* x, int n, const State& s, bool render) noexcept;
 std::unique_ptr<Effect> make();
