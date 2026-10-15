@@ -19,6 +19,7 @@
 #include "core/FruitKick.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
+#include "core/BeepMap.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
