@@ -8,6 +8,7 @@
 #include "core/FruitKick.h"
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
+#include "core/SimSynth.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
@@ -1136,6 +1137,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromSakura (c.pluginState, fromPlugin))
                     adopt();
             }
+            else if (name == "simsynth")
+            {
+                // FL's SimSynth engine from the raw state (REA_rodada64 §1–4); it needs no installation data. A state the
+                // engine can't read keeps the channel unsupported (there is no conversion to fall back to)
+                if (simSynthStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::simsynth;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "wasp" || name == "wasp xt")
+            {
+                // FL 2026 has no 64-bit Wasp: its DLL is a placeholder that keeps the state and plays nothing (REA_rodada64 §5)
+                def.instrument = InstrumentKind::wasp;
+                def.pluginState = c.pluginState;
+                adoptedFromPlugin = true;
+            }
             else if (name == "transistor bass")
             {
                 // FL's engine from the raw state (REA_rodada57 §2) with the "303 Pulse" oscillator cycles read at run time
@@ -1393,6 +1412,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::kepler || def.instrument == InstrumentKind::poizone
                      || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
+                     || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
                      || def.instrument == InstrumentKind::sawer)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state

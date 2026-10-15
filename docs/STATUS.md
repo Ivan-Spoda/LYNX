@@ -114,7 +114,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   installation; within −127 dB of FL's DLL on the 4 fixed-spectrum template states, 9/9 states usable); Transistor Bass
   on its engine (REA round 57: V1 legacy and both V2 cutoff ranges, 303 Pulse with the recorded cycles read from the
   user's engine DLL, distortion, delay, reverb and the 16-step sequencer; 55/128 factory programs bit-exact, worst
-  −108.6 dB vs FL's DLL); Plucked! on its Karplus-Strong engine (REA round 65 §1: bit-identical to FL's DLL for the
+  −108.6 dB vs FL's DLL); SimSynth on its engine (REA round 64: the C++ engine behind the Delphi front-end, 12 voices
+  with 3 table oscillators/noise, ring modulation, LFO, both envelopes, the 2-stage filter and the chorus, FL's old
+  integer voice record; bit-identical to FL's DLL on all 76 installation states in every tested scenario); Wasp and
+  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Plucked! on its Karplus-Strong engine (REA round 65 §1: bit-identical to FL's DLL for the
   same random seed); BeepMap on its image-synthesis engine with 3x Osc's voice processor (REA round 65 §2: the bitmap
   read from the plugin state; the 9 preset/render-test states bit-identical, synthetic batteries identical outside the
   processor's end fades); Sawer on its engine with the oscillator cycle `data.saw` read from the user's installation
@@ -502,7 +505,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   modelled. Transistor Bass (REA round 57 §2): the CRT's pow/powf last-bit differences (−108 dB worst); parameter
   automation smoothing, MIDI CC/pitch-bend, the "MIDI channel 13" sequence transpose (no note channel in LYNX) and the
   order of FL's rate call vs state load (V2 decay quirk) are not modelled / not confirmed; the channel volume is applied
-  as an output gain (the plugin does not read Final.Vol).
+  as an output gain (the plugin does not read Final.Vol). SimSynth (REA round 64 §5.2): the process-wide random index
+  and chorus counter are per instance in LYNX (FL: shared by every SimSynth and every sample-rate change); FL's load
+  order and its rounding when it fills the old voice record are not confirmed; automation not wired.
 - Plucked! (REA round 65 §1): FL's random seed (process-global, from the clock) differs per run — LYNX starts every
   instrument at Delphi's default seed; FL's host gain-ramp law on level changes is not decoded (linear in LYNX); a
   channel sample as the string's exciter is not modelled. BeepMap (REA round 65 §2): bitmaps taller than "Max height"

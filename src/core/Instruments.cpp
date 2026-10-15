@@ -7,6 +7,8 @@
 #include "core/SytrusEngine.h"
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
+#include "core/SimSynth.h"
+#include "core/Wasp.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
@@ -226,6 +228,8 @@ private:
             case InstrumentKind::threeosc:
             case InstrumentKind::autogun:
             case InstrumentKind::transistorbass:
+            case InstrumentKind::simsynth:
+            case InstrumentKind::wasp:
             case InstrumentKind::plucked:
             case InstrumentKind::beepmap:
             case InstrumentKind::sawer:
@@ -2057,6 +2061,10 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeAutogunInstrument();
     if (kind == InstrumentKind::transistorbass)
         return makeTransistorBassInstrument();
+    if (kind == InstrumentKind::simsynth)
+        return makeSimSynthInstrument();
+    if (kind == InstrumentKind::wasp)
+        return makeWaspInstrument();
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)
