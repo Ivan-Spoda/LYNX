@@ -9,6 +9,7 @@
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
 #include "core/Gms.h"
+#include "core/MiniSynth.h"
 #include "core/Morphine.h"
 #include "core/Ogun.h"
 #include "core/Kepler.h"
@@ -480,6 +481,7 @@ public:
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
         ogun = def.instrument == InstrumentKind::ogun;
+        miniSynth = def.instrument == InstrumentKind::minisynth;
         kepler = def.instrument == InstrumentKind::kepler;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
@@ -572,8 +574,16 @@ public:
         static const FloatKnob morphineKnobs[] = {
             { 0, "Master" }, { 9, "Attack" }, { 10, "Decay" }, { 11, "Sustain" }, { 12, "Release" }, { 1, "Glide" }, { 4, "Vel curve" },
             { 7, "Overdrive" }, { 14, "Chorus mix" }, { 21, "Delay mix" }, { 25, "Reverb mix" }, { 36, "Noise mix" } };
+        // MiniSynth: its 43 floats 0…1 inside the saved state (REA_rodada41 §1.2)
+        static const FloatKnob miniSynthKnobs[] = {
+            { 5, "Osc kind" }, { 6, "Osc mod" }, { 7, "Noise" }, { 1, "Transpose" }, { 8, "Cutoff" }, { 9, "Resonance" },
+            { 16, "Filter env" }, { 21, "Attack" }, { 22, "Decay" }, { 23, "Sustain" }, { 24, "Release" }, { 20, "LFO amount" },
+            { 19, "LFO rate" }, { 2, "Slide time" } };
+        auto paramOffset = [this] (const std::vector<std::uint8_t>& st, int index) {
+            return gms ? gmsParamOffset (st, index) : miniSynth ? miniSynthParamOffset (st, index) : morphineParamOffset (st, index);
+        };
         auto addFloat = [&] (const FloatKnob& k) {
-            const auto at = gms ? gmsParamOffset (def.pluginState, k.index) : morphineParamOffset (def.pluginState, k.index);
+            const auto at = paramOffset (def.pluginState, k.index);
             if (at < 0)
                 return;
             float value = 0.0f;
@@ -583,10 +593,10 @@ public:
             knob->setRange (0.0, 1.0, 0.001);
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
-            knob->onValueChange = [this, k, isGms = gms, s = knob.get()] {
-                engine.editSong ([c = channel, k, isGms, v = (float) s->getValue()] (Song& song) {
+            knob->onValueChange = [this, k, paramOffset, s = knob.get()] {
+                engine.editSong ([c = channel, k, paramOffset, v = (float) s->getValue()] (Song& song) {
                     auto& st = song.channels[(std::size_t) c].pluginState;
-                    if (const auto o = isGms ? gmsParamOffset (st, k.index) : morphineParamOffset (st, k.index); o >= 0)
+                    if (const auto o = paramOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
             };
@@ -651,6 +661,9 @@ public:
         else if (morphine)
             for (const auto& k : morphineKnobs)
                 addFloat (k);
+        else if (miniSynth)
+            for (const auto& k : miniSynthKnobs)
+                addFloat (k);
         else if (ogun)
             for (const auto& k : ogunKnobs)
                 addOgun (k);
@@ -688,6 +701,7 @@ public:
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
                     : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
+                    : miniSynth ? tr ("MiniSynth — FL's engine with its effects (wave tables read from your FL installation)")
                     : kepler ? tr ("Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
@@ -708,7 +722,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, kepler = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, miniSynth = false, kepler = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1340,7 +1354,7 @@ public:
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1421,6 +1435,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::gms:
         case InstrumentKind::morphine:
         case InstrumentKind::ogun:
+        case InstrumentKind::minisynth:
         case InstrumentKind::kepler:
             return true;
         default:
@@ -1455,7 +1470,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
                  || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::kepler)
+                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth || kind == InstrumentKind::kepler)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);
