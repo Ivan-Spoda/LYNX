@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "core/DelphiMath.h"
 #include "core/Effects.h"
 
 #if defined(__clang__)
@@ -23,6 +24,27 @@ namespace
 {
 using ld = long double;
 inline float F (double v) noexcept { return (float) v; }
+
+// the plugin's x87 kernels run with 64-bit precision and rounding to nearest (Windows threads start with 53 bits)
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+struct X87Extended
+{
+    unsigned short saved = 0;
+    X87Extended() noexcept
+    {
+        asm volatile ("fnstcw %0" : "=m"(saved) : : "memory");
+        unsigned short cw = (unsigned short) ((saved & ~0x0F00u) | 0x0300u);
+        asm volatile ("fldcw %0" : : "m"(cw) : "memory");
+    }
+    ~X87Extended() { asm volatile ("fldcw %0" : : "m"(saved) : "memory"); }
+    X87Extended (const X87Extended&) = delete;
+    X87Extended& operator= (const X87Extended&) = delete;
+};
+#else
+struct X87Extended
+{
+};
+#endif
 constexpr float kTiny = 5.960464477539063e-08f;
 const float kLn11f = 2.39789534f;
 const double kLn2Half = 0.34657359027997264, kCentLn = 0.00057762265046662107; // ln 2 / 2, ln 2 / 1200
@@ -43,14 +65,9 @@ float curve11 (int raw) noexcept
     const float x = (float) raw * 0.0078125f;
     if (x == 1.0f)
         return 1.0f;
-    return F ((std::exp ((double) (x * kLn11f)) - 1.0) * (double) 0.1f);
+    return F ((delphi::exp ((double) (x * kLn11f)) - 1.0) * (double) 0.1f);
 }
-double sinhD (double x) noexcept
-{
-    if (std::abs (x) <= 1e-12)
-        return 0.0;
-    return (std::exp (x) - std::exp (-x)) / 2.0;
-}
+inline double sinhD (double x) noexcept { return delphi::sinh (x); }
 inline double flushD (double v) noexcept { return std::abs (v) < (double) kTiny ? 0.0 : v; }
 
 struct Biquad
@@ -150,34 +167,34 @@ struct Engine::Impl
         for (int k = 0; k < 2; ++k)
         {
             const double x = (double) p[(std::size_t) k] * 1.52587890625e-05;
-            const double e = std::exp ((double) F (x) * std::log (101.0));
+            const double e = delphi::exp ((double) F (x) * delphi::ln (101.0));
             fr[k] = F ((double) F (e - 1.0) * 159.9 + 10.0);
         }
         if (fr[1] < fr[0])
             fr[0] = fr[1] - 1.0f;
         kGain = (wet * 1500.0f) / (float) p[5];
         const float bwk = ((float) p[5] * (float) s.order) / 120000.0f;
-        const double e = std::exp ((double) ((float) p[2] * 0.0078125f) * std::log (10000.0));
+        const double e = delphi::exp ((double) ((float) p[2] * 0.0078125f) * delphi::ln (10000.0));
         const float scale = (float) ((long long) std::nearbyint ((double) F (e - 1.0)) + 1);
         const float top = (float) ((double) (std::int32_t) ((std::uint32_t) fs * 20000u) / 44100.0); // 32-bit product, as the plugin
         bank (syn, true, fr, scale, bwk, top);
         bank (ana, false, fr, scale, bwk, top);
         const double ms = (double) fs * 0.001;
-        const float ln01 = (float) std::log (0.01);
-        att = F (std::exp ((double) (ln01 / ((float) p[6] * (float) ms))));
-        rel = F (std::exp ((double) (ln01 / ((float) p[7] * (float) ms))));
+        const float ln01 = (float) delphi::ln (0.01);
+        att = F (delphi::exp ((double) (ln01 / ((float) p[6] * (float) ms))));
+        rel = F (delphi::exp ((double) (ln01 / ((float) p[7] * (float) ms))));
     }
 
     void bank (std::array<Band, 128>& b, bool synthesis, const float* fr, float scale, float bwk, float top)
     {
         const int N = s.bands;
         float prev = 0.0f;
-        const double lnS = std::log ((double) (scale + 1.0f));
+        const double lnS = delphi::ln ((double) (scale + 1.0f));
         for (int i = 0; i <= N; ++i)
         {
-            const double e = std::exp ((double) ((float) i / (float) N) * lnS);
+            const double e = delphi::exp ((double) ((float) i / (float) N) * lnS);
             const float f = fr[0] + (F (e - 1.0) / scale) * (fr[1] - fr[0]);
-            float cents = F (std::log ((double) (f / 440.0f)) / kCentLn + 5700.0);
+            float cents = F (delphi::ln ((double) (f / 440.0f)) / kCentLn + 5700.0);
             int idx = i - 1;
             if (synthesis)
             {
@@ -188,7 +205,7 @@ struct Engine::Impl
             if (i > 0)
             {
                 auto& band = b[(std::size_t) idx];
-                band.hz = F (std::exp ((double) ((prev + cents) * 0.5f - 5700.0f) * kCentLn) * 440.0);
+                band.hz = F (delphi::exp ((double) ((prev + cents) * 0.5f - 5700.0f) * kCentLn) * 440.0);
                 bool on = ! (band.hz < 10.0f) && band.hz < top;
                 if (! synthesis && ! syn[(std::size_t) idx].active)
                     on = false;
@@ -215,7 +232,7 @@ struct Engine::Impl
     void design (Band& b) const
     {
         const double w = (double) b.hz * (1.0 / (double) fs * 6.283185307179586);
-        const double sn = std::sin (w), cs = std::cos (w);
+        const double sn = delphi::sin (w), cs = delphi::cos (w);
         const double a = sinhD ((kLn2Half * (double) b.width * w) / sn);
         const double alpha = sn * a;
         const double d = 1.0 / (alpha + 1.0);
@@ -266,6 +283,7 @@ struct Engine::Impl
 
     void block (const float* x, float* y, int n)
     {
+        const X87Extended x87;
         if ((int) mod.size() < n + 1)
             for (auto* v : { &mod, &car, &tmp, &tmp2, &out })
                 v->assign ((std::size_t) n + 1, 0.0f);
