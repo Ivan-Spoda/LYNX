@@ -302,7 +302,11 @@ enum class EffectKind : std::uint8_t
     reeverb2,     // FL's Fruity Reeverb 2, exact (REA_rodada49, core/Reeverb2.h): FL's 15 controls + 2 options, (raw − min) / range
     reeverb1,     // FL's Fruity Reeverb (first version), exact (REA_rodada49 §6, core/Reeverb2.h): FL's 10 controls, raw / max
     fruityDelay2, // FL's Fruity Delay 2, exact (REA_rodada52, core/FruityDelay.h): FL's 8 raw controls / range
-    fruityDelay3  // FL's Fruity Delay 3, exact (REA_rodada52, core/FruityDelay.h): FL's 26 raw controls / range
+    fruityDelay3, // FL's Fruity Delay 3, exact (REA_rodada52, core/FruityDelay.h): FL's 26 raw controls / range
+    stereoShaper, // FL's Fruity Stereo Shaper, exact (REA_rodada54, core/StereoFx.h): FL's 8 controls / range + difference flag
+    stereoEnhancer, // FL's Fruity Stereo Enhancer, exact (REA_rodada54, core/StereoFx.h): FL's 6 controls / range
+    transientProcessor, // FL's Transient Processor, exact (REA_rodada54, core/StereoFx.h): FL's 9 controls / range
+    spreader      // FL's Spreader, exact (REA_rodada54, core/StereoFx.h): FL's 5 controls / range
 };
 
 constexpr int maxEffectParams = 48; // the 7-band parametric EQ and the Pitcher use most of them
