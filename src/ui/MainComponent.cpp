@@ -276,15 +276,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     workspace.setContent (Panel::browser, browser, "Browser", Icon::browser);
     workspace.setTitleTooltip (Panel::channelRack, tr ("Shift+wheel here changes the pattern"));
     workspace.setTitleAccessory (Panel::channelRack, &swingSlider, 26); // FL keeps the global swing in the rack's title bar
-    workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) {
-        if (panel == Panel::channelRack)
-            menu.addSubMenu (tr ("Pattern"), makePatternMenu());
-        else if (panel == Panel::playlist)
-            menu.addItem (tr ("Maximize or restore the Playlist") + shortcutText ("panel.maximisePlaylist"), [this] {
-                workspace.toggleMaximised (Panel::playlist);
-                refreshPanelButtons();
-            });
-    };
+    workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
     workspace.onFocusChanged = [this] (Panel) { refreshPanelButtons(); };
     workspace.onKeyInDetachedWindow = [this] (const juce::KeyPress& key) { return keyPressed (key); };
     workspace.onTitleWheel = [this] (Panel panel, const juce::MouseEvent& ev, const juce::MouseWheelDetails& wheel) {
@@ -1010,6 +1002,87 @@ void MainComponent::nextEmptyPattern()
 void MainComponent::insertPatternHere()
 {
     engine.editSong ([] (Song& s) { insertPattern (s, s.currentPattern, newPatternName (s)); });
+}
+
+// --- window menus ------------------------------------------------------------------------------
+
+// Each window's own items, at the top of the menu in its title bar (FL keeps an editor's options in the
+// small menu at the left of its title bar). Items run the key map's actions, so they show their keys.
+void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
+{
+    auto action = [this] (juce::PopupMenu& m, const char* id, const juce::String& text, bool enabled = true, bool ticked = false) {
+        m.addItem (text + shortcutText (id), enabled, ticked, [this, id] { runAction (id); });
+    };
+    auto zoomMenu = [&action] (const juce::String& prefix) {
+        juce::PopupMenu zoom;
+        const std::pair<const char*, const char*> items[] = {
+            { "zoomIn", TR_NOOP ("Zoom in") }, { "zoomOut", TR_NOOP ("Zoom out") }, { "zoom1", TR_NOOP ("Zoom: one bar") },
+            { "zoom2", TR_NOOP ("Zoom: four bars") }, { "zoom3", TR_NOOP ("Zoom: sixteen bars") },
+            { "zoomAll", TR_NOOP ("Zoom to show everything") }, { "zoomSelection", TR_NOOP ("Zoom to the selection") },
+            { "centrePlayhead", TR_NOOP ("Centre the view on the playhead") }
+        };
+        for (const auto& [id, text] : items)
+            if (const auto* a = keys::findAction ((prefix + id).toStdString())) // the key map holds the id strings
+                action (zoom, a->id, tr (text));
+        return zoom;
+    };
+
+    switch (panel)
+    {
+        case Panel::channelRack:
+        {
+            menu.addSubMenu (tr ("Pattern"), makePatternMenu());
+            menu.addSeparator();
+            action (menu, "rack.graphEditor", tr ("Graph lanes (velocity, pan, pitch...)"), true, rack.areGraphLanesShown());
+            action (menu, "rack.rotateLeft", tr ("Rotate the selected channels' steps left"));
+            action (menu, "rack.rotateRight", tr ("Rotate the selected channels' steps right"));
+            juce::PopupMenu sort;
+            sort.addItem (tr ("By name"), [this] { rack.sortChannels (ChannelSort::name); });
+            sort.addItem (tr ("By color"), [this] { rack.sortChannels (ChannelSort::colour); });
+            sort.addItem (tr ("By mixer insert"), [this] { rack.sortChannels (ChannelSort::insert); });
+            sort.addItem (tr ("By type"), [this] { rack.sortChannels (ChannelSort::type); });
+            menu.addSubMenu (tr ("Sort channels"), sort);
+            menu.addItem (tr ("Select unused channels"), [this] { rack.selectUnused(); });
+            break;
+        }
+        case Panel::playlist:
+            menu.addItem (tr ("Maximize or restore the Playlist") + shortcutText ("panel.maximisePlaylist"), [this] {
+                workspace.toggleMaximised (Panel::playlist);
+                refreshPanelButtons();
+            });
+            menu.addSeparator();
+            action (menu, "playlist.ripple", tr ("Ripple editing (resizing and deleting move the later clips)"), true, playlist.isRippleOn());
+            action (menu, "playlist.rippleDelete", tr ("Delete the selected clips and close the gaps"));
+            menu.addSubMenu (tr ("Zoom"), zoomMenu ("playlist."));
+            break;
+        case Panel::pianoRoll:
+        {
+            juce::PopupMenu tools;
+            for (const auto* id : { "pianoRoll.arpeggiate", "pianoRoll.strum", "pianoRoll.flip", "pianoRoll.randomise",
+                                    "pianoRoll.scaleLevels", "pianoRoll.limit" })
+                if (const auto* a = keys::findAction (id))
+                    action (tools, a->id, tr (a->description));
+            menu.addSubMenu (tr ("Tools"), tools);
+            menu.addSubMenu (tr ("Zoom"), zoomMenu ("pianoRoll."));
+            menu.addItem (tr ("Snap notes to the scale"), pianoRoll.hasScale(), pianoRoll.isScaleSnapOn(),
+                          [this] { pianoRoll.setScaleSnap (! pianoRoll.isScaleSnapOn()); });
+            break;
+        }
+        case Panel::mixer:
+            action (menu, "mixer.moveLeft", tr ("Move the selected inserts left"));
+            action (menu, "mixer.moveRight", tr ("Move the selected inserts right"));
+            menu.addSeparator();
+            action (menu, "mixer.linkChannels", tr ("Link the selected channels to the selected insert"));
+            action (menu, "mixer.linkChannelsFrom", tr ("Link the selected channels to inserts starting from the selected one"));
+            action (menu, "mixer.selectLinkedChannels", tr ("Select the channels linked to the selected insert"));
+            break;
+        case Panel::browser:
+            action (menu, "browser.search", tr ("Search the Browser"));
+            menu.addItem (tr ("Add folder..."), [this] { browser.addUserFolder(); });
+            break;
+        default:
+            break;
+    }
 }
 
 // --- quick-add palette and history -------------------------------------------------------------

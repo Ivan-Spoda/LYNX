@@ -21,10 +21,10 @@ enum class Icon
     detach, dock, restore, keyboard, automate, rightClick, tap,
     brush, knife, zoom, listen, slip, ghost, // editor tools (Piano Roll / Playlist)
     panelMenu, pluginPicker, mic, // window options menu, plugin picker, recording options
-    countIn, waitInput, history   // recording: count-in and wait for input; undo history
+    countIn, waitInput // recording: count-in and wait for input
 };
 
-constexpr int iconCount = (int) Icon::history + 1;
+constexpr int iconCount = (int) Icon::waitInput + 1;
 
 namespace icons
 {

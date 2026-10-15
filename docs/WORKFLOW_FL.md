@@ -668,7 +668,9 @@ select-unused, ripple editing and Shift+drag time-selection move/copy.
 
 #### P2: deepens the workflow
 
-Status (`feature/wf-p2`): every item below landed except where its note says otherwise. Testable logic is in
+Status (`feature/wf-p2`, merged with the FL-style layout of section 5): every item below landed except where its
+note says otherwise. Each window's own P2 items are also in the menu at the left of its title bar
+(`MainComponent::addPanelMenuItems`). Testable logic is in
 `core/NoteTools`, `core/MixerOps`, `core/History`, `core/SearchQuery`, `core/RackOps`, `core/NoteEdit` and
 `core/Recorder` (tests in `tests/WorkflowP2Tests.inc`); new keys are in `core/KeyMap`. Deferred: per-segment curve
 shapes for automation (needs a model field), clip colour/name (model fields), track colour/height/groups, F2/F3
@@ -702,7 +704,7 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
     preview, Shift+Up/Down load into the selected channel (checked on [DOC][br]).
 - **Quick-add palette (B9).** A searchable plugin list (F8 in LYNX) with instruments and effects. Double-click
   adds it to a new channel or to the selected insert, depending on which panel is focused.
-  - **Status:** Done (F8; the Browser moved to Alt+F8).
+  - **Status:** Done (F8 and the toolbar's plugin-picker icon; the Browser moved to Alt+F8).
 - **History panel (G13).** A list of undo steps with names (the action labels already passed to `editSong`).
   Clicking a step jumps there. Keep conventional undo (Ctrl+Z back, Ctrl+Y/Ctrl+Shift+Z forward). FL's
   toggle-style undo is deliberately *not* copied.
@@ -713,7 +715,8 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
   - Input quantise follows the global grid.
   - In Song mode a take places a pattern clip at the start point.
   - **Status:** Done except the automation filter: count-in (Ctrl+P), wait for input (Ctrl+I), overdub/replace,
-    quantise and song clips in Options → Recording and the Rec "v" menu; R toggles recording.
+    quantise and song clips in Options → Recording and the toolbar's "what to record" menu; count-in and
+    wait-for-input also have switches next to the metronome; R toggles recording.
 - **Automation clip editing (A2, A3, A4, A6).** Edit inline in the Playlist as well as in the window. Axis locks
   (Shift/Ctrl), right-click a point to type a value, a curve-shape menu per segment (single, double, hold,
   stairs, pulse, wave, smooth), min/max re-range.
@@ -729,7 +732,7 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
     preference sets this.
   - **Status:** Done except clip colour/rename and track colour/height (no model fields yet).
 - **Scale snap (R14).** "Snap to scale" when drawing or moving notes, and for incoming MIDI.
-  - **Status:** Done (Piano Roll … menu).
+  - **Status:** Done (switch next to the Piano Roll's scale box, also in its window menu and … menu).
 - **Zoom presets (R24, P17).** PgUp/PgDn, zoom to selection, show all, vertical zoom (Ctrl+Alt+wheel), and
   middle-drag pan.
   - **Status:** Done in both editors (vertical zoom in the Piano Roll only).
@@ -814,9 +817,11 @@ colours, icons and fonts stay LYNX's own (dark theme, red accent, `ui/Icons.cpp`
 **LYNX** (`ui/MainComponent.cpp`, `resized()`): one band, two rows high, panels left to right:
 1. the menu, with the **hint bar under it** (the bottom status strip is gone);
 2. the transport: a two-line Pattern/Song switch, play, stop, record, tempo and the song position;
-3. the recording options: metronome, typing keyboard as piano, and "what to record";
+3. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
+   as piano;
 4. global snap, with the pattern selector under it;
-5. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker), with the file
+5. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
+   palette, F8), with the file
    actions under them (new, open, save, export, undo, redo);
 6. the output scope with the CPU load under it, on the right.
 

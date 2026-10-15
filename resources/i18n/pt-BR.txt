@@ -929,3 +929,4 @@ countries: br
 "Count-in before recording: off" = "Contagem antes de gravar: desligada"
 "Recording waits for the first note: on" = "Gravação espera a primeira nota: ligada"
 "Recording waits for the first note: off" = "Gravação espera a primeira nota: desligada"
+"Snap notes to the scale: new and moved notes, and incoming MIDI, land on the chosen scale" = "Encaixar as notas na escala: notas novas e movidas, e o MIDI que chega, caem na escala escolhida"

@@ -28,6 +28,7 @@ public:
     std::function<bool (const juce::File&)> onLoadIntoChannel;
 
     void focusSearch();
+    void addUserFolder(); // asks for a folder and adds it to the folder list
     void setSearchForSnapshot (const juce::String& text);
     // Up/Down (load = false) or Shift+Up/Down (load = true); Enter = loadSelected()
     void step (int delta, bool load);
@@ -58,7 +59,6 @@ private:
     void textEditorReturnKeyPressed (juce::TextEditor&) override;
     void timerCallback() override;
     void runSearch();
-    void addUserFolder();
     void rebuildRoots();
     static juce::File userFoldersFile();
     void openFile (const juce::File& file); // what a double-click does

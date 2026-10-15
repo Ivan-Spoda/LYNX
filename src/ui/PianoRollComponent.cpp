@@ -110,7 +110,13 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     moreButton.setTooltip (tr ("Note operations, left-edge resizing and MIDI import/export"));
     moreButton.onClick = [this] { showMoreMenu(); };
 
-    for (auto* b : { &ghostButton, &moreButton })
+    scaleSnapButton.setOnColour (theme::colour::bg6);
+    scaleSnapButton.setIconColourWhenOn (theme::colour::accent);
+    scaleSnapButton.setFlat (true);
+    scaleSnapButton.setTooltip (tr ("Snap notes to the scale: new and moved notes, and incoming MIDI, land on the chosen scale"));
+    scaleSnapButton.onClick = [this] { setScaleSnap (! scaleSnap); };
+
+    for (auto* b : { &ghostButton, &scaleSnapButton, &moreButton })
     {
         b->setWantsKeyboardFocus (false);
         b->setMouseClickGrabsKeyboardFocus (false);
@@ -136,6 +142,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
             scaleBox.addItem (tr ("{0} {1}", { juce::String (noteNames[root]), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
     }
     scaleBox.setSelectedId (1, juce::dontSendNotification);
+    scaleSnapButton.setEnabled (false); // until a scale is chosen
     scaleBox.setTooltip (tr ("Highlights the notes of a scale"));
 
     slideButton.setClickingTogglesState (true);
@@ -152,6 +159,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         box->setMouseClickGrabsKeyboardFocus (false);
         box->onChange = [this] {
             publishScale();
+            scaleSnapButton.setEnabled (scaleIndex() > 0);
             repaint();
         };
         addAndMakeVisible (box);
@@ -327,6 +335,10 @@ void PianoRollComponent::resized()
     place (slideButton, 54, true);
     place (chordBox, 86, true);
     place (scaleBox, 150, true);
+    if (scaleBox.isVisible())
+        place (scaleSnapButton, h);
+    else
+        scaleSnapButton.setVisible (false);
     place (moreButton, h);
     // the shortcut hint only shows when there is room for it
     const auto hintArea = juce::Rectangle<int> (bar.getX() + 4, 0, bar.getWidth() - 4, toolbarHeight);
@@ -393,6 +405,7 @@ int PianoRollComponent::snapKey (int key) const
 void PianoRollComponent::setScaleSnap (bool on)
 {
     scaleSnap = on;
+    scaleSnapButton.setToggleState (on, juce::dontSendNotification);
     publishScale();
     repaint();
 }

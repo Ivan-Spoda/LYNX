@@ -54,6 +54,7 @@ public:
     // Scale snap: new and moved notes (and incoming MIDI) land on the highlighted scale.
     bool isScaleSnapOn() const noexcept { return scaleSnap; }
     void setScaleSnap (bool on);
+    bool hasScale() const { return scaleIndex() > 0; } // a scale is chosen in the toolbar
 
     // Centers the view on the channel's notes (called on open).
     void scrollToNotes();
@@ -148,6 +149,7 @@ private:
     ChannelBox channelBox;
     juce::ComboBox snapBox;           // "Follow global grid" or this editor's own grid
     IconButton ghostButton { "ghosts", Icon::ghost };
+    IconButton scaleSnapButton { "scaleSnap", Icon::magnet }; // snap to the scale (next to the scale box)
     IconButton moreButton { "more", Icon::more }; // note operations, left-edge resize, MIDI import/export
     juce::ComboBox laneBox; // what the bottom lane edits: velocity, pan or fine pitch
     juce::ComboBox chordBox; // chord created on each click (like FL's "stamp")

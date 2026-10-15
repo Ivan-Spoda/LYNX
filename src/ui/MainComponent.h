@@ -50,6 +50,18 @@ public:
     void waitForBrowserForSnapshot() { browser.waitForListing (5000); }
     juce::StringArray getMenuNamesForSnapshot() { return getMenuBarNames(); }
     juce::PopupMenu getMenuForSnapshot (int index) { return getMenuForIndex (index, {}); }
+    juce::PopupMenu getPanelMenuForSnapshot (workspace::Panel panel)
+    {
+        juce::PopupMenu menu;
+        addPanelMenuItems (panel, menu);
+        return menu;
+    }
+    juce::PopupMenu getRecordMenuForSnapshot()
+    {
+        juce::PopupMenu menu;
+        addRecordOptions (menu);
+        return menu;
+    }
     void setHintForSnapshot (const ui::Hint& hint) { hintBar.setHint (hint); }
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
@@ -111,6 +123,7 @@ private:
 
     // workflow P2 windows and menus
     void showQuickAdd();
+    void addPanelMenuItems (Panel panel, juce::PopupMenu& menu); // a window's own items in its title-bar menu
     void showHistory();
     void addRecordOptions (juce::PopupMenu& menu); // count-in, wait, overdub/replace, quantise, song clip
     void updateRecordQuantise(); // record quantise follows the global grid

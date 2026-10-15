@@ -479,12 +479,6 @@ Shape make (Icon icon)
             polyline (st, { { 16.5f, 3.5f }, { 16.5f, 6.5f }, { 12.0f, 12.0f }, { 16.5f, 17.5f }, { 16.5f, 20.5f } });
             polyline (fi, { { 12.0f, 16.0f }, { 15.0f, 19.5f }, { 9.0f, 19.5f } }, true);
             break;
-        case Icon::history: // a clock face with an arrow turning back around it
-            st.startNewSubPath (4.0f, 12.0f);
-            st.addCentredArc (12.0f, 12.0f, 8.0f, 8.0f, 0.0f, -pi * 0.5f, pi * 1.2f, false);
-            polyline (st, { { 2.0f, 9.0f }, { 4.0f, 12.0f }, { 7.0f, 10.0f } });
-            polyline (st, { { 12.0f, 7.5f }, { 12.0f, 12.0f }, { 15.0f, 14.0f } });
-            break;
     }
 
     return s;
