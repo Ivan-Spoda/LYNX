@@ -42,6 +42,8 @@ add_library(lynx_core STATIC
     src/core/BassDrum.cpp
     src/core/Ogun.cpp
     src/core/MiniSynth.cpp
+    src/core/SimSynth.cpp
+    src/core/Wasp.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp

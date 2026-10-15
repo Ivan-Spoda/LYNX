@@ -1657,32 +1657,52 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& b)
 }
 
 // --------------------------------------------------------------------------------------------- LYNX front-end
-struct Setup
-{
-    State st;
-    bool valid = false;
-};
-
 class SimSynthInstrument final : public Instrument
 {
 public:
-    SimSynthInstrument() { rebuild(); }
+    SimSynthInstrument()
+    {
+        eng = build (std::nullopt, 44100.0);
+        for (auto& h : held)
+            h = -1;
+    }
+    ~SimSynthInstrument() override
+    {
+        delete incoming.exchange (nullptr);
+        delete retired.exchange (nullptr);
+    }
+
+    // a plugin as FL creates it: created, the state restored, block size and sample rate set (§2.3)
+    static std::unique_ptr<Engine> build (const std::optional<State>& st, double sr)
+    {
+        auto e = std::make_unique<Engine>();
+        e->create();
+        if (st)
+            e->load (st->p, st->s, st->version);
+        e->setRate (sr);
+        return e;
+    }
 
     void prepare (double sr) noexcept override
     {
-        rate = sr;
-        rebuild();
+        delete incoming.exchange (nullptr);
+        rate.store (sr);
+        eng = build (current, sr);
+        for (auto& h : held)
+            h = -1;
     }
 
     void configure (const ChannelDef& channel, double) noexcept override
     {
+        delete retired.exchange (nullptr);
         pitchCents.store (channel.sampler.pitch * 100.0f);
         if (channel.pluginState == state)
             return;
         state = channel.pluginState;
-        if (auto s = parseState (state))
-            pending = *s, havePending = true;
-        dirty.store (true);
+        current = parseState (state);
+        // a new state restarts the plugin (its voices go silent, as when FL restores a state); built here, swapped in by
+        // the audio thread
+        delete incoming.exchange (build (current, rate.load()).release());
     }
 
     void setNextNoteExpression (float pan, float cents, bool) noexcept override
@@ -1700,6 +1720,7 @@ public:
         notePan[k] = nextPan;
         const auto pan = std::clamp (nextPan + (float) channelPan, -1.0f, 1.0f);
         const auto pitch = (float) (100.0 * (k - 60)) + pitchCents.load() + nextCents;
+        // FL hands SimSynth the old voice record: integer pan (−64…64) and pitch (cents)
         const auto sl = eng->trigger (k, (int) std::lround (pan * 64.0f), (float) channelVol, (int) std::lround (pitch), 0.0f, 0.0f);
         for (auto& h : held)
             if (h == sl)
@@ -1730,12 +1751,14 @@ public:
         for (const auto& s : eng->slots)
             if (s.used)
                 return false;
-        return eng->tail == 0;
+        return eng->tail == 0 && incoming.load() == nullptr;
     }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
         take();
+        // FL's channel volume/pan reach SimSynth only through Final.Vol/Final.Pan: recover them from LYNX's gains
+        // (√2·V·cos((1 + p)π/4), √2·V·sin(…)) so they are not applied twice
         const auto vol = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
         auto pan = vol > 0.0 ? std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0 : 0.0;
         if (std::fabs (pan) < 1e-9)
@@ -1764,36 +1787,30 @@ public:
     }
 
 private:
-    void rebuild() noexcept
-    {
-        eng = std::make_unique<Engine>();
-        eng->create();
-        if (havePending)
-        {
-            eng->load (pending.p, pending.s, pending.version);
-        }
-        eng->setRate (rate);
-        for (auto& h : held)
-            h = -1;
-        dirty.store (false);
-    }
     void take() noexcept
     {
-        if (dirty.load())
-            rebuild();
+        if (retired.load() != nullptr)
+            return;
+        if (auto* e = incoming.exchange (nullptr))
+        {
+            retired.store (eng.release());
+            eng.reset (e);
+            for (auto& h : held)
+                h = -1;
+        }
     }
 
     std::unique_ptr<Engine> eng;
-    State pending;
-    bool havePending = false;
-    std::atomic<bool> dirty { false };
+    std::atomic<Engine*> incoming { nullptr }, retired { nullptr };
+    std::optional<State> current;
+    std::atomic<double> rate { 44100.0 };
     std::atomic<float> pitchCents { 0.0f };
     std::vector<std::uint8_t> state;
-    double rate = 44100.0, channelVol = 1.0, channelPan = 0.0;
+    double channelVol = 1.0, channelPan = 0.0;
     int held[128] {};
     float notePan[128] {};
     float nextPan = 0.0f, nextCents = 0.0f;
-    std::vector<int> finished;
+    std::vector<int> finished = std::vector<int> (numVoices);
 };
 } // namespace
 
