@@ -45,6 +45,50 @@ int splitPatternByChannel (Song& song, int index);
 // Default name for a new pattern: "Pattern N" with the lowest N not in use.
 std::string newPatternName (const Song& song);
 
+// Copies pattern `index` (notes, length, colour) right after it, named "<name> #2" (or the next free
+// number), and selects it. Playlist clips keep pointing at the same patterns. Returns the new index.
+int clonePattern (Song& song, int index);
+
+// Swaps pattern `index` with its neighbour above (delta < 0) or below; clips and the current pattern
+// follow. Returns false at the ends.
+bool movePattern (Song& song, int index, int delta);
+
+// --- step sequencer (docs/WORKFLOW_FL.md P2: fill, Euclidean fill, rotate, graph lanes) --------------
+
+// Steps the pattern shows in the rack (its length in sixteenths, at least 16).
+int patternSteps (const Song& song, const Pattern& pattern) noexcept;
+
+// An Euclidean rhythm: `pulses` onsets spread as evenly as possible over `steps`, starting on the first
+// step, then rotated right by `rotation` steps. pulses is clamped to 0..steps.
+std::vector<bool> euclideanRhythm (int pulses, int steps, int rotation = 0);
+
+// Turns on every `every`-th step of `channel` (from `offset`) over `steps` steps; existing notes stay.
+void fillEverySteps (Pattern& pattern, int channel, int every, int steps, int offset = 0);
+
+// Replaces the channel's step notes (notes starting exactly on a step) inside the first `steps` steps by
+// `rhythm`, repeated to fill them. Notes that are off the step grid are left alone.
+void setStepRhythm (Pattern& pattern, int channel, const std::vector<bool>& rhythm, int steps);
+
+// Moves every note of `channel` by `delta` steps, wrapping inside the first `steps` steps.
+void rotateSteps (Pattern& pattern, int channel, int delta, int steps);
+
+// True when the pattern has notes the step sequencer can't show as steps (off the step grid, another key
+// or a held length): the Playlist then opens it in the Piano Roll.
+bool hasPianoRollNotes (const Pattern& pattern) noexcept;
+
+// Indices of the channel's notes that start inside step `step` (the cell the rack draws).
+std::vector<int> notesInStep (const Pattern& pattern, int channel, int step);
+
+// --- channel organisation ----------------------------------------------------------------------
+
+enum class ChannelSort { name, colour, insert, type };
+
+// The order (newOrder for permuteChannels) that sorts the channels; stable, so equal keys keep their order.
+std::vector<int> channelSortOrder (const Song& song, ChannelSort by);
+
+// Channels no pattern plays and no Playlist clip uses (and that no automation reads as a live source).
+std::vector<int> unusedChannels (const Song& song);
+
 // --- channel selection -------------------------------------------------------------------------
 
 // Multi-selection of Channel Rack rows: always sorted, unique and inside [0, count).

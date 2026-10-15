@@ -10,6 +10,7 @@
 #include "core/Harmor.h"
 #include "core/Gms.h"
 #include "core/Morphine.h"
+#include "core/Ogun.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -477,6 +478,7 @@ public:
         harmor = def.instrument == InstrumentKind::harmor;
         gms = def.instrument == InstrumentKind::gms;
         morphine = def.instrument == InstrumentKind::morphine;
+        ogun = def.instrument == InstrumentKind::ogun;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -589,12 +591,38 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
+        // Ogun: raw FL integers P0…P63 inside the saved (zlib) state (REA_rodada37 §1.3)
+        static const Ranged ogunKnobs[] = {
+            { 0, "Master vol", 0, 256 }, { 5, "Pre-decay", 0, 1000 }, { 6, "Decay", 0, 10000 }, { 7, "Release", 0, 10000 },
+            { 8, "Fullness", -1000, 1000 }, { 9, "Morph", 0, 1000 }, { 10, "Seed 1", 0, 1000 }, { 11, "Seed 2", 0, 1000 },
+            { 52, "Richness", 6, 16 }, { 12, "Unison", 1, 9 }, { 15, "Uni pitch", 0, 256 }, { 17, "Cutoff", 0, 256 },
+            { 18, "Resonance", 0, 256 }, { 3, "Mod X", 0, 512 }, { 4, "Mod Y", 0, 512 }, { 54, "Quality", 0, 4 } };
+        auto addOgun = [&] (const Ranged& k) {
+            const auto value = ogunParam (def.pluginState, k.index);
+            if (! value)
+                return;
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (k.low, k.high, 1.0);
+            knob->setValue (*value, juce::dontSendNotification);
+            knob->setName (k.name);
+            knob->onValueChange = [this, index = k.index, s = knob.get()] {
+                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
+                    ogunSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
         if (gms)
             for (const auto& k : gmsKnobs)
                 addFloat (k);
         else if (morphine)
             for (const auto& k : morphineKnobs)
                 addFloat (k);
+        else if (ogun)
+            for (const auto& k : ogunKnobs)
+                addOgun (k);
         else if (harmor)
             for (const auto& k : harmorKnobs)
                 addHarmor (k);
@@ -628,6 +656,7 @@ public:
                     : harmor ? tr ("Harmor — FL's additive engine (effects rack off; image synthesis not decoded)")
                     : gms ? tr ("GMS — FL's engine (waves read from your FL installation)")
                     : morphine ? tr ("Morphine — FL's additive engine (new settings restart the voices)")
+                    : ogun ? tr ("Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
@@ -647,7 +676,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
-    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, wavesFound = false;
+    bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1278,7 +1307,8 @@ public:
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
-                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine)
+                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
+                 || kind == InstrumentKind::ogun)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1358,6 +1388,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::harmor:
         case InstrumentKind::gms:
         case InstrumentKind::morphine:
+        case InstrumentKind::ogun:
             return true;
         default:
             return false;
@@ -1390,7 +1421,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
-                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine)
+                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
+                 || kind == InstrumentKind::ogun)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

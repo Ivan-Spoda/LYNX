@@ -429,6 +429,45 @@ private:
 
 // --- a detached panel's native window -----------------------------------------------------------
 
+// Detached windows snap to the screen edges, the main window and the other detached panels while they are
+// moved or resized (Alt held: no snapping). The native title bar's moves come through the constrainer.
+class SnapConstrainer final : public juce::ComponentBoundsConstrainer
+{
+public:
+    std::function<std::vector<juce::Rectangle<int>>()> others;
+
+    void checkBounds (juce::Rectangle<int>& bounds, const juce::Rectangle<int>& previous, const juce::Rectangle<int>& limits,
+                      bool stretchingTop, bool stretchingLeft, bool stretchingBottom, bool stretchingRight) override
+    {
+        juce::ComponentBoundsConstrainer::checkBounds (bounds, previous, limits, stretchingTop, stretchingLeft, stretchingBottom, stretchingRight);
+
+        if (juce::ModifierKeys::getCurrentModifiersRealtime().isAltDown() || previous.isEmpty())
+            return;
+
+        const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (bounds);
+
+        if (display == nullptr)
+            return;
+
+        const auto area = display->userArea;
+        auto local = [&area] (juce::Rectangle<int> r) { return workspace::Rect { r.getX() - area.getX(), r.getY() - area.getY(), r.getWidth(), r.getHeight() }; };
+        std::vector<workspace::Rect> rects;
+
+        if (others)
+            for (const auto& o : others())
+                rects.push_back (local (o));
+
+        const auto edges = (stretchingLeft ? workspace::left : 0) | (stretchingTop ? workspace::top : 0) | (stretchingRight ? workspace::right : 0)
+                           | (stretchingBottom ? workspace::bottom : 0);
+
+        if (edges == 0 && bounds.getWidth() != previous.getWidth()) // a resize the window manager reports without edges
+            return;
+
+        const auto r = workspace::snap (local (bounds), rects, area.getWidth(), area.getHeight(), 10, edges);
+        bounds = { r.x + area.getX(), r.y + area.getY(), r.w, r.h };
+    }
+};
+
 class DetachedPanelWindow final : public juce::DocumentWindow
 {
 public:
@@ -439,7 +478,9 @@ public:
     {
         setUsingNativeTitleBar (true);
         setResizable (true, false);
-        setResizeLimits (workspace::minWidth, workspace::minHeight + Workspace::titleHeight, 10000, 10000);
+        snapping.setSizeLimits (workspace::minWidth, workspace::minHeight + Workspace::titleHeight, 10000, 10000);
+        snapping.others = [this] { return owner.otherWindowScreenBounds (panel); };
+        setConstrainer (&snapping);
         setContentNonOwned (&frame, false);
 
         if (screenBounds.isEmpty() || juce::Desktop::getInstance().getDisplays().getDisplayForRect (screenBounds) == nullptr)
@@ -479,6 +520,7 @@ public:
 private:
     Workspace& owner;
     Panel panel;
+    SnapConstrainer snapping;
 };
 
 // --- the desktop -------------------------------------------------------------------------------
@@ -625,6 +667,20 @@ void Workspace::setFocusedPanel (Panel panel)
 void Workspace::frameMoved (Panel panel, juce::Rectangle<int> bounds)
 {
     layout[panel].bounds = toRect (bounds);
+}
+
+std::vector<juce::Rectangle<int>> Workspace::otherWindowScreenBounds (Panel panel) const
+{
+    std::vector<juce::Rectangle<int>> out;
+
+    if (auto* top = getTopLevelComponent(); top != nullptr && top->isShowing())
+        out.push_back (top->getScreenBounds());
+
+    for (int i = 0; i < workspace::panelCount; ++i)
+        if ((Panel) i != panel && windows[(std::size_t) i] != nullptr && windows[(std::size_t) i]->isVisible())
+            out.push_back (windows[(std::size_t) i]->getBounds());
+
+    return out;
 }
 
 void Workspace::detachedWindowMoved (Panel panel, juce::Rectangle<int> screenBounds)

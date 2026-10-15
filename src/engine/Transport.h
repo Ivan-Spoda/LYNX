@@ -28,6 +28,9 @@ struct Transport
     std::atomic<std::uint32_t> signatureVersion { 0 };
     std::atomic<double> sampleRate { 44100.0 };
     std::atomic<double> positionTicks { 0.0 };
+    // Count-in before recording: ticks of pre-roll left. While > 0 playback has not started (`playing` is
+    // false), the metronome clicks the count and the audio thread counts it down, then starts playing.
+    std::atomic<double> countIn { 0.0 };
     std::atomic<bool> rewindRequested { false };
     std::atomic<double> seekRequest { -1.0 }; // < 0 = none; the audio thread applies it on the next block
 

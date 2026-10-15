@@ -4,6 +4,7 @@
 
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
+#include "ui/NoteToolDialogs.h"
 
 namespace lynx
 {
@@ -44,6 +45,17 @@ public:
     // Editing shortcuts; the main window forwards keys when the Piano Roll is visible.
     bool handleKey (const juce::KeyPress& key);
 
+    // The key map's pianoRoll.* actions (tool dialogs, zoom presets). Returns false for unknown ids.
+    bool runAction (const std::string& id);
+
+    // Note tool dialogs on the selection (or all of the channel's notes).
+    void openNoteTool (NoteTool tool);
+
+    // Scale snap: new and moved notes (and incoming MIDI) land on the highlighted scale.
+    bool isScaleSnapOn() const noexcept { return scaleSnap; }
+    void setScaleSnap (bool on);
+    bool hasScale() const { return scaleIndex() > 0; } // a scale is chosen in the toolbar
+
     // Centers the view on the channel's notes (called on open).
     void scrollToNotes();
 
@@ -53,17 +65,19 @@ public:
     // For snapshots: the tool in use and the Note inspector of the selection.
     void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }
     std::unique_ptr<juce::Component> makeNoteInspectorForSnapshot (bool singleNote = false);
+    std::vector<int> noteIndicesForSnapshot() const { return selectionOrAll(); }
+    std::int64_t gridForSnapshot() const { return gridTicks(); }
 
     static constexpr int keyboardWidth = 64;
     static constexpr int toolbarHeight = 28;
     static constexpr int timelineHeight = 22;
     static constexpr int headerHeight = toolbarHeight + timelineHeight;
     static constexpr int velocityHeight = 72;
-    static constexpr int rowHeight = 14;
+    int rowHeight = 14; // vertical zoom (Ctrl+Alt+wheel): 6..32 px per key
     static constexpr int scrollBarSize = 12;
 
 private:
-    enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, paint, muting, knife, zoomRange, listen };
+    enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, paint, muting, knife, zoomRange, listen, pan };
 
     // Channel selector: the wheel steps through the channels with notes (Ctrl+wheel: all channels).
     class ChannelBox final : public juce::ComboBox
@@ -135,6 +149,7 @@ private:
     ChannelBox channelBox;
     juce::ComboBox snapBox;           // "Follow global grid" or this editor's own grid
     IconButton ghostButton { "ghosts", Icon::ghost };
+    IconButton scaleSnapButton { "scaleSnap", Icon::magnet }; // snap to the scale (next to the scale box)
     IconButton moreButton { "more", Icon::more }; // note operations, left-edge resize, MIDI import/export
     juce::ComboBox laneBox; // what the bottom lane edits: velocity, pan or fine pitch
     juce::ComboBox chordBox; // chord created on each click (like FL's "stamp")
@@ -142,6 +157,19 @@ private:
     juce::ComboBox scaleBox; // scale highlighted on the keyboard rows
     std::vector<int> chordIntervals() const;
     bool inScale (int key) const;
+    int scaleRoot() const;  // 0..11
+    int scaleIndex() const; // index into notetools::scales(), 0 = none
+    int snapKey (int key) const; // the key itself, or the nearest in-scale key while scale snap is on
+    void publishScale();
+    bool scaleSnap = false;
+    double panStartTicks = 0.0;
+    int panStartY = 0;
+    void zoomAroundCentre (double factor);
+    void zoomToBars (int bars);
+    void zoomToSelection();
+    void zoomAll();
+    void centreOnPlayhead();
+    juce::PopupMenu toolsMenu();
     std::unique_ptr<juce::FileChooser> chooser;
     juce::PopupMenu midiMenu();
     juce::Label hintLabel;

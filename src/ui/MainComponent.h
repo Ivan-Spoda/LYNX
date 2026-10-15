@@ -50,11 +50,27 @@ public:
     void waitForBrowserForSnapshot() { browser.waitForListing (5000); }
     juce::StringArray getMenuNamesForSnapshot() { return getMenuBarNames(); }
     juce::PopupMenu getMenuForSnapshot (int index) { return getMenuForIndex (index, {}); }
+    juce::PopupMenu getPanelMenuForSnapshot (workspace::Panel panel)
+    {
+        juce::PopupMenu menu;
+        addPanelMenuItems (panel, menu);
+        return menu;
+    }
+    juce::PopupMenu getRecordMenuForSnapshot()
+    {
+        juce::PopupMenu menu;
+        addRecordOptions (menu);
+        return menu;
+    }
     void setHintForSnapshot (const ui::Hint& hint) { hintBar.setHint (hint); }
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
     std::unique_ptr<juce::AlertWindow> makeConfirmDiscardWindow();
     PianoRollComponent& getPianoRollForSnapshot() { return pianoRoll; }
+    ChannelRackComponent& getRackForSnapshot() { return rack; }
+    BrowserComponent& getBrowserForSnapshot() { return browser; }
+    MixerComponent& getMixerForSnapshot() { return mixer; }
+    std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
@@ -102,6 +118,16 @@ private:
     void nextEmptyPattern();
     void insertPatternHere();
     void splitPatternByChannelNow();
+    void clonePatternNow();
+    void movePatternNow (int delta);
+
+    // workflow P2 windows and menus
+    void showQuickAdd();
+    void addPanelMenuItems (Panel panel, juce::PopupMenu& menu); // a window's own items in its title-bar menu
+    void showHistory();
+    void addRecordOptions (juce::PopupMenu& menu); // count-in, wait, overdub/replace, quantise, song clip
+    void updateRecordQuantise(); // record quantise follows the global grid
+    bool recordQuantiseOn = true;
     void showRenamePattern (int index);
 
     // user settings (UI options)
@@ -150,6 +176,9 @@ private:
     IconButton patternModeButton { "patternMode", Icon::pattern }, songModeButton { "songMode", Icon::song };
     IconButton metronomeButton { "metronome", Icon::metronome };
     IconButton typingPianoButton { "typingPiano", Icon::keyboard };
+    IconButton countInButton { "countIn", Icon::countIn };
+    IconButton waitInputButton { "waitInput", Icon::waitInput };
+    void refreshRecordOptionButtons();
 
     // tempo: a number dragged by its digits (whole BPM or decimals), with tap tempo in its menu
     class TempoDisplay final : public juce::Component,

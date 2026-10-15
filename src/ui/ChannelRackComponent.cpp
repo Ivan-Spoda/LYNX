@@ -1,6 +1,8 @@
 #include "ui/ChannelRackComponent.h"
 
 #include "ui/AutomationUi.h"
+#include "core/NoteTools.h"
+#include "ui/ToolWindow.h"
 #include "core/Slicer.h"
 #include "ui/ChannelSettings.h"
 
@@ -39,6 +41,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::harmor: return "Harmor";
         case InstrumentKind::gms: return "GMS";
         case InstrumentKind::morphine: return "Morphine";
+        case InstrumentKind::ogun: return "Ogun";
     }
     return "?";
 }
@@ -107,26 +110,64 @@ int ChannelRackComponent::numSteps() const
 void ChannelRackComponent::updateSize()
 {
     const auto rows = (int) engine.getSong().channels.size() + 1; // +1 = "add channel" row
-    setSize (gridLeft() + numSteps() * stepWidth + 8, rows * rowHeight + 8);
+    setSize (gridLeft() + numSteps() * stepWidth + 8, rows * rowHeight + 8 + (graphRow() >= 0 ? laneHeight : 0));
+}
+
+int ChannelRackComponent::graphRow() const
+{
+    const auto count = (int) engine.getSong().channels.size();
+    return graphLanes && count > 0 ? juce::jlimit (0, count - 1, engine.getSelectedChannel()) : -1;
+}
+
+int ChannelRackComponent::rowY (int row) const
+{
+    const auto lane = graphRow();
+    return 4 + row * rowHeight + (lane >= 0 && row > lane ? laneHeight : 0);
+}
+
+int ChannelRackComponent::rowAtY (int y) const
+{
+    if (y < 4)
+        return -1;
+
+    if (const auto lane = graphRow(); lane >= 0)
+    {
+        const auto laneTop = rowY (lane) + rowHeight;
+        if (y >= laneTop && y < laneTop + laneHeight)
+            return lane;
+        if (y >= laneTop + laneHeight)
+            y -= laneHeight;
+    }
+
+    return (y - 4) / rowHeight;
+}
+
+juce::Rectangle<int> ChannelRackComponent::laneBounds() const
+{
+    const auto lane = graphRow();
+    return lane < 0 ? juce::Rectangle<int>() : juce::Rectangle<int> (0, rowY (lane) + rowHeight, getWidth(), laneHeight);
 }
 
 juce::Rectangle<int> ChannelRackComponent::rowBounds (int row) const
 {
-    return { 0, 4 + row * rowHeight, getWidth(), rowHeight };
+    return { 0, rowY (row), getWidth(), rowHeight };
 }
 
 juce::Rectangle<int> ChannelRackComponent::stepBounds (int row, int step) const
 {
-    return { gridLeft() + step * stepWidth + 1, 4 + row * rowHeight + 4, stepWidth - 3, rowHeight - 8 };
+    return { gridLeft() + step * stepWidth + 1, rowY (row) + 4, stepWidth - 3, rowHeight - 8 };
 }
 
 ChannelRackComponent::Area ChannelRackComponent::areaAt (int x, int y, int& row) const
 {
     const auto channels = (int) engine.getSong().channels.size();
-    row = (y - 4) / rowHeight;
+    row = rowAtY (y);
 
-    if (y < 4 || row > channels)
+    if (row < 0 || row > channels)
         return Area::none;
+
+    if (laneBounds().contains (x, y))
+        return x < gridLeft() ? Area::laneLevels : Area::lane;
 
     if (row == channels)
         return x < gridLeft() ? Area::addRow : Area::none;
@@ -180,7 +221,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
     for (int row = 0; row < (int) song.channels.size(); ++row)
     {
-        const auto y = 4 + row * rowHeight;
+        const auto y = rowY (row);
 
         if (y > clip.getBottom() || y + rowHeight < clip.getY())
             continue;
@@ -261,7 +302,8 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         }
     }
 
-    const auto addY = 4 + (int) song.channels.size() * rowHeight;
+    paintLane (g);
+    const auto addY = rowY ((int) song.channels.size());
     {
         const auto addArea = juce::Rectangle<float> ((float) nameLeft(), (float) addY + 3, (float) nameWidth, (float) rowHeight - 6);
         const float dash[] = { 3.0f, 3.0f };
@@ -548,6 +590,361 @@ void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
     openEditorRow = channel;
 }
 
+// --- step graph lanes (docs/WORKFLOW_FL.md P2, C4) --------------------------------------------------
+
+juce::Rectangle<int> ChannelRackComponent::levelButtonBounds (int level) const
+{
+    const auto lane = laneBounds();
+    const auto width = (gridLeft() - 24) / 3;
+    return { 12 + (level % 3) * width, lane.getY() + 8 + (level / 3) * 24, width - 4, 20 };
+}
+
+void ChannelRackComponent::paintLane (juce::Graphics& g)
+{
+    using namespace theme::colour;
+    const auto lane = laneBounds();
+
+    if (lane.isEmpty() || ! g.getClipBounds().intersects (lane))
+        return;
+
+    const auto& song = engine.getSong();
+    const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
+    const auto channel = graphRow();
+    const auto level = (notetools::Level) graphLevel;
+
+    g.setColour (bg0);
+    g.fillRect (lane);
+    g.setColour (border);
+    g.drawHorizontalLine (lane.getY(), 0.0f, (float) getWidth());
+    g.drawHorizontalLine (lane.getBottom() - 1, 0.0f, (float) getWidth());
+
+    for (int l = 0; l < notetools::levelCount; ++l)
+    {
+        const auto r = levelButtonBounds (l).toFloat();
+        g.setColour (l == graphLevel ? accent : bg4);
+        g.fillRoundedRectangle (r, theme::radius::sm);
+        g.setColour (l == graphLevel ? onAccent : textSecondary);
+        g.setFont (theme::font (theme::type::caption, l == graphLevel));
+        g.drawFittedText (tr (notetools::levelName ((notetools::Level) l)), r.toNearestInt(), juce::Justification::centred, 1, 0.8f);
+    }
+
+    g.setColour (textDisabled);
+    g.setFont (theme::font (theme::type::caption));
+    g.drawFittedText (tr ("Drag: set  ·  Right-drag: ramp  ·  Alt+click: reset"),
+                      juce::Rectangle<int> (12, lane.getBottom() - 20, gridLeft() - 24, 16), juce::Justification::centredLeft, 1, 0.8f);
+
+    const auto top = (float) lane.getY() + 6.0f, bottom = (float) lane.getBottom() - 6.0f;
+    const auto bipolar = notetools::levelIsBipolar (level);
+    const auto base = bipolar ? (top + bottom) * 0.5f : bottom;
+
+    for (int step = 0; step < numSteps(); ++step)
+    {
+        const auto x = (float) (gridLeft() + step * stepWidth + 1);
+        const auto w = (float) stepWidth - 3.0f;
+
+        if (step % 4 == 0 && step > 0)
+        {
+            g.setColour (step % 16 == 0 ? gridBar : gridBeat);
+            g.drawVerticalLine ((int) x - 2, top, bottom);
+        }
+
+        const auto notes = notesInStep (pattern, channel, step);
+
+        if (notes.empty())
+        {
+            g.setColour (theme::stepOff (step));
+            g.fillRect (x + w * 0.5f - 1.0f, base - 1.0f, 2.0f, 2.0f);
+            continue;
+        }
+
+        const auto v = notetools::levelValue (pattern.notes[(std::size_t) notes.front()], level);
+        const auto y = bottom - v * (bottom - top);
+        g.setColour ((level == notetools::Level::velocity ? accent : info).withAlpha (0.85f));
+        g.fillRect (juce::Rectangle<float> (x + 2.0f, juce::jmin (y, base), w - 4.0f, juce::jmax (2.0f, std::abs (base - y))));
+        g.setColour (textPrimary);
+        g.fillRect (x + 1.0f, y - 1.0f, w - 2.0f, 2.0f);
+    }
+
+    if (bipolar)
+    {
+        g.setColour (gridBar);
+        g.drawHorizontalLine ((int) base, (float) gridLeft(), (float) getWidth());
+    }
+}
+
+float ChannelRackComponent::laneValueAt (int y) const
+{
+    const auto lane = laneBounds();
+    const auto top = (float) lane.getY() + 6.0f, bottom = (float) lane.getBottom() - 6.0f;
+    return juce::jlimit (0.0f, 1.0f, (bottom - (float) y) / juce::jmax (1.0f, bottom - top));
+}
+
+void ChannelRackComponent::setLaneValue (int step, float value)
+{
+    const auto channel = graphRow();
+    const auto level = (notetools::Level) graphLevel;
+    engine.editSong ([channel, step, value, level] (Song& s) {
+        auto& p = s.patterns[(std::size_t) s.currentPattern];
+        for (auto i : notesInStep (p, channel, step))
+            notetools::setLevelValue (p.notes[(std::size_t) i], level, value);
+    });
+}
+
+void ChannelRackComponent::applyLane (const juce::MouseEvent& e)
+{
+    const auto steps = numSteps();
+    const auto step = juce::jlimit (0, steps - 1, (e.x - gridLeft()) / stepWidth);
+    const auto value = laneValueAt (e.y);
+
+    if (e.mods.isRightButtonDown()) // a straight ramp from the press to here
+    {
+        const auto from = juce::jmin (laneDownStep, step), to = juce::jmax (laneDownStep, step);
+        const auto channel = graphRow();
+        const auto level = (notetools::Level) graphLevel;
+        const auto v0 = laneDownStep <= step ? laneDownValue : value, v1 = laneDownStep <= step ? value : laneDownValue;
+        engine.editSong ([=] (Song& s) {
+            auto& p = s.patterns[(std::size_t) s.currentPattern];
+            for (int st = from; st <= to; ++st)
+            {
+                const auto t = to > from ? (float) (st - from) / (float) (to - from) : 0.0f;
+                for (auto i : notesInStep (p, channel, st))
+                    notetools::setLevelValue (p.notes[(std::size_t) i], level, v0 + (v1 - v0) * t);
+            }
+        });
+        return;
+    }
+
+    setLaneValue (step, value);
+}
+
+void ChannelRackComponent::toggleGraphLanes()
+{
+    graphLanes = ! graphLanes;
+    updateSize();
+    repaint();
+}
+
+// --- fills, rotation and organisation ------------------------------------------------------------
+
+void ChannelRackComponent::rotateSelected (int steps)
+{
+    const auto rows = engine.getSelectedChannels();
+    engine.editSong ([rows, steps] (Song& s) {
+        auto& p = s.patterns[(std::size_t) s.currentPattern];
+        const auto length = patternSteps (s, p);
+        for (auto r : rows)
+            rotateSteps (p, r, steps, length);
+    });
+}
+
+void ChannelRackComponent::fillSelected (int every)
+{
+    const auto rows = engine.getSelectedChannels();
+    engine.editSong ([rows, every] (Song& s) {
+        auto& p = s.patterns[(std::size_t) s.currentPattern];
+        const auto length = patternSteps (s, p);
+        for (auto r : rows)
+            if (r < (int) s.channels.size() && s.channels[(std::size_t) r].instrument != InstrumentKind::audioClip)
+                fillEverySteps (p, r, every, length);
+    });
+}
+
+void ChannelRackComponent::sortChannels (ChannelSort by)
+{
+    engine.editSong ([by] (Song& s) { permuteChannels (s, channelSortOrder (s, by)); });
+    openEditorRow = -1;
+    selectRows ({ 0 }, 0);
+}
+
+void ChannelRackComponent::selectUnused()
+{
+    const auto unused = unusedChannels (engine.getSong());
+
+    if (unused.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Select unused channels"),
+                                                tr ("Every channel is used by a pattern or a Playlist clip."));
+        return;
+    }
+
+    selectRows (unused, unused.front());
+}
+
+int ChannelRackComponent::addChannel (ChannelDef c, bool openEditor)
+{
+    int index = 0;
+    engine.editSong ([&] (Song& s) {
+        c.mixerTrack = s.nextFreeInsert();
+        s.channels.push_back (c);
+        index = (int) s.channels.size() - 1;
+    });
+    selectionAnchor = index;
+    selectRows ({ index }, index);
+
+    if (openEditor && c.instrument == InstrumentKind::plugin)
+    {
+        openPluginWindow (index);
+        openEditorRow = index;
+    }
+
+    return index;
+}
+
+bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
+{
+    const auto row = engine.getSelectedChannel();
+    const auto& song = engine.getSong();
+
+    if (row < 0 || row >= (int) song.channels.size() || ! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        return false;
+
+    const auto kind = song.channels[(std::size_t) row].instrument;
+
+    // only channels that play a sample (or the built-in drums, which become samplers) take a file
+    if (kind != InstrumentKind::sampler && kind != InstrumentKind::kick && kind != InstrumentKind::snare && kind != InstrumentKind::hat
+        && kind != InstrumentKind::clap)
+        return false;
+
+    assignSample (row, file);
+    return true;
+}
+
+namespace
+{
+// Euclidean fill: pulses spread evenly over a length, rotated; previewed live on the pattern.
+class EuclideanPanel final : public juce::Component
+{
+public:
+    EuclideanPanel (AudioEngine& e, int c) : engine (e), channel (c)
+    {
+        const auto& song = engine.getSong();
+        patternIndex = song.currentPattern;
+        originals = song.patterns[(std::size_t) patternIndex].notes;
+        steps = patternSteps (song, song.patterns[(std::size_t) patternIndex]);
+
+        auto setup = [this] (juce::Slider& s, juce::Label& l, const juce::String& name, double lo, double hi, double v) {
+            l.setText (name, juce::dontSendNotification);
+            addAndMakeVisible (l);
+            s.setSliderStyle (juce::Slider::LinearHorizontal);
+            s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 50, 20);
+            s.setRange (lo, hi, 1.0);
+            s.setValue (v, juce::dontSendNotification);
+            s.onValueChange = [this] { preview(); };
+            addAndMakeVisible (s);
+        };
+        setup (pulses, pulsesLabel, tr ("Pulses"), 0, 32, 5);
+        setup (length, lengthLabel, tr ("Length (steps)"), 1, 32, 16);
+        setup (rotation, rotationLabel, tr ("Rotation"), -16, 16, 0);
+        title.setText (tr ("Euclidean fill: {0}", { juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()) }), juce::dontSendNotification);
+        title.setFont (theme::font (theme::type::title, true));
+        addAndMakeVisible (title);
+
+        for (auto* b : { &accept, &cancel })
+            addAndMakeVisible (b);
+        accept.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
+        accept.onClick = [this] {
+            restore();
+            const auto rhythm = current();
+            engine.editSong ([this, rhythm] (Song& s) { setStepRhythm (s.patterns[(std::size_t) patternIndex], channel, rhythm, steps); });
+            done = true;
+            closeToolWindowOf (*this);
+        };
+        cancel.onClick = [this] { closeToolWindowOf (*this); };
+        setSize (380, 330);
+        preview();
+    }
+
+    ~EuclideanPanel() override
+    {
+        if (! done)
+            restore();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        // the rhythm as a ring of steps, the first step at the top
+        const auto rhythm = current();
+        const auto ring = juce::Rectangle<float> (0, 150, (float) getWidth(), 120).withSizeKeepingCentre (110, 110);
+        const auto n = (int) rhythm.size();
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto angle = juce::MathConstants<float>::twoPi * (float) i / (float) n;
+            const auto centre = ring.getCentre() + juce::Point<float> (std::sin (angle), -std::cos (angle)) * 50.0f;
+            const auto dot = juce::Rectangle<float> (12, 12).withCentre (centre);
+            g.setColour (rhythm[(std::size_t) i] ? theme::colour::stepOn : theme::colour::stepOff);
+            g.fillEllipse (dot);
+            if (i == 0)
+            {
+                g.setColour (theme::colour::textPrimary);
+                g.drawEllipse (dot.expanded (2.0f), 1.0f);
+            }
+        }
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 10);
+        title.setBounds (area.removeFromTop (24));
+        area.removeFromTop (6);
+        for (auto [s, l] : { std::pair { &pulses, &pulsesLabel }, std::pair { &length, &lengthLabel }, std::pair { &rotation, &rotationLabel } })
+        {
+            auto row = area.removeFromTop (30);
+            l->setBounds (row.removeFromLeft (120));
+            s->setBounds (row);
+        }
+        auto buttons = area.removeFromBottom (28);
+        accept.setBounds (buttons.removeFromRight (100));
+        buttons.removeFromRight (8);
+        cancel.setBounds (buttons.removeFromRight (90));
+    }
+
+private:
+    std::vector<bool> current() const
+    {
+        return euclideanRhythm ((int) pulses.getValue(), (int) length.getValue(), (int) rotation.getValue());
+    }
+
+    void restore()
+    {
+        if (patternIndex < (int) engine.getSong().patterns.size())
+            engine.editSong ([this] (Song& s) { s.patterns[(std::size_t) patternIndex].notes = originals; }, false);
+    }
+
+    void preview()
+    {
+        const auto rhythm = current();
+        if (patternIndex < (int) engine.getSong().patterns.size())
+            engine.editSong ([this, rhythm] (Song& s) {
+                auto& p = s.patterns[(std::size_t) patternIndex];
+                p.notes = originals;
+                setStepRhythm (p, channel, rhythm, steps);
+            }, false);
+        repaint();
+    }
+
+    AudioEngine& engine;
+    int channel, patternIndex = 0, steps = 16;
+    std::vector<Note> originals;
+    bool done = false;
+    juce::Label title, pulsesLabel, lengthLabel, rotationLabel;
+    juce::Slider pulses, length, rotation;
+    juce::TextButton accept { tr ("Accept") }, cancel { tr ("Cancel") };
+};
+} // namespace
+
+std::unique_ptr<juce::Component> ChannelRackComponent::makeEuclideanPanel (int channel)
+{
+    return std::make_unique<EuclideanPanel> (engine, juce::jlimit (0, juce::jmax (0, (int) engine.getSong().channels.size() - 1), channel));
+}
+
+void ChannelRackComponent::showEuclideanFill (int channel)
+{
+    if (channel >= 0 && channel < (int) engine.getSong().channels.size())
+        openToolWindow (makeEuclideanPanel (channel), tr ("Euclidean fill"), "euclidean");
+}
+
 // --- mouse -------------------------------------------------------------------------------------
 
 void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
@@ -564,6 +961,31 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
         case Area::addRow:
             showAddChannelMenu();
             return;
+
+        case Area::laneLevels:
+            for (int l = 0; l < notetools::levelCount; ++l)
+                if (levelButtonBounds (l).contains (e.getPosition()))
+                {
+                    graphLevel = l;
+                    repaint();
+                }
+            return;
+
+        case Area::lane:
+        {
+            const auto step = juce::jlimit (0, numSteps() - 1, (e.x - gridLeft()) / stepWidth);
+
+            if (e.mods.isAltDown() || e.mods.isMiddleButtonDown())
+            {
+                setLaneValue (step, notetools::levelDefault ((notetools::Level) graphLevel));
+                return;
+            }
+
+            laneDownStep = step;
+            laneDownValue = laneValueAt (e.y);
+            applyLane (e);
+            return;
+        }
 
         case Area::mute:
             if (e.mods.isPopupMenu() || e.mods.isCtrlDown())
@@ -673,6 +1095,12 @@ void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
+    if (laneDownStep >= 0)
+    {
+        applyLane (e);
+        return;
+    }
+
     if (paintMode != PaintMode::none)
         applyPaint (e);
 }
@@ -684,6 +1112,7 @@ void ChannelRackComponent::mouseUp (const juce::MouseEvent&)
 
     auditionRow = -1;
     paintMode = PaintMode::none;
+    laneDownStep = -1;
 
     if (knobDrag != Area::none)
         repaint();
@@ -768,6 +1197,12 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
         case Area::addRow:
             h.text = tr ("Add a channel (or drop audio files on the rack)");
             break;
+        case Area::laneLevels:
+            h.text = tr ("Graph lane: choose what the bars edit (Ctrl+K hides the lane)");
+            break;
+        case Area::lane:
+            h.text = name + " - " + tr ("Graph lane: drag sets the steps, right-drag draws a ramp, Alt+click resets");
+            break;
         default:
             break;
     }
@@ -778,8 +1213,11 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
 void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
 {
     const auto& song = engine.getSong();
-    const auto row = (e.y - 4) / rowHeight;
+    const auto row = rowAtY (e.y);
     const auto step = (e.x - gridLeft()) / stepWidth;
+
+    if (laneBounds().contains (e.getPosition()))
+        return;
 
     if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < gridLeft()
         || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip)
@@ -915,6 +1353,19 @@ void ChannelRackComponent::showChannelMenu (int channel)
 
         menu.addSubMenu (tr ("Color"), colours);
     }
+    {
+        juce::PopupMenu steps;
+        steps.addItem (tr ("Fill every 2 steps"), [this] { fillSelected (2); });
+        steps.addItem (tr ("Fill every 4 steps"), [this] { fillSelected (4); });
+        steps.addItem (tr ("Fill every 8 steps"), [this] { fillSelected (8); });
+        steps.addItem (tr ("Euclidean fill..."), [this, channel] { showEuclideanFill (channel); });
+        steps.addSeparator();
+        steps.addItem (tr ("Rotate left") + "\tCtrl+Shift+Left", [this] { rotateSelected (-1); });
+        steps.addItem (tr ("Rotate right") + "\tCtrl+Shift+Right", [this] { rotateSelected (1); });
+        steps.addSeparator();
+        steps.addItem (tr ("Graph lanes (velocity, pan, pitch...)") + "\tCtrl+K", true, graphLanes, [this] { toggleGraphLanes(); });
+        menu.addSubMenu (tr ("Steps"), steps);
+    }
     menu.addItem (tr ("Clear notes in this pattern"), [this, channel] {
         engine.editSong ([channel] (Song& s) {
             auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
@@ -936,6 +1387,15 @@ void ChannelRackComponent::showChannelMenu (int channel)
     menu.addItem (tr ("Move up") + "\tAlt+Up", engine.getSelectedChannels().front() > 0, false, [this] { moveSelected (-1); });
     menu.addItem (tr ("Move down") + "\tAlt+Down", engine.getSelectedChannels().back() < count - 1, false, [this] { moveSelected (1); });
     menu.addItem (tr ("Send to free mixer inserts") + "\tCtrl+L", [this] { sendSelectedToInserts(); });
+    {
+        juce::PopupMenu sort;
+        sort.addItem (tr ("By name"), [this] { sortChannels (ChannelSort::name); });
+        sort.addItem (tr ("By color"), [this] { sortChannels (ChannelSort::colour); });
+        sort.addItem (tr ("By mixer insert"), [this] { sortChannels (ChannelSort::insert); });
+        sort.addItem (tr ("By type"), [this] { sortChannels (ChannelSort::type); });
+        menu.addSubMenu (tr ("Sort channels"), sort);
+    }
+    menu.addItem (tr ("Select unused channels"), [this] { selectUnused(); });
     menu.addSeparator();
 
     if (selected > 1)
@@ -1161,13 +1621,12 @@ void ChannelRackComponent::timerCallback()
 
 bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return details.description.toString() == BrowserComponent::dragDescription;
+    return BrowserComponent::isBrowserDrag (details);
 }
 
 void ChannelRackComponent::itemDropped (const SourceDetails& details)
 {
-    if (auto* tree = dynamic_cast<juce::FileTreeComponent*> (details.sourceComponent.get()))
-        if (tree->getSelectedFile().existsAsFile())
-            filesDropped ({ tree->getSelectedFile().getFullPathName() }, details.localPosition.x, details.localPosition.y);
+    if (const auto file = BrowserComponent::draggedFile (details); file.existsAsFile())
+        filesDropped ({ file.getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }
 } // namespace lynx

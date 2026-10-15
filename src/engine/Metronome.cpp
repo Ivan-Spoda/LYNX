@@ -27,7 +27,10 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
 {
     buffer.clear();
 
-    if (! transport.playing.load (std::memory_order_relaxed) || ! transport.metronome.load (std::memory_order_relaxed))
+    const auto countIn = transport.countIn.load (std::memory_order_relaxed);
+    const auto counting = countIn > 0.0 && ! transport.playing.load (std::memory_order_relaxed);
+
+    if (! counting && (! transport.playing.load (std::memory_order_relaxed) || ! transport.metronome.load (std::memory_order_relaxed)))
     {
         lastBeat = -1;
         clickSamplesLeft = 0;
@@ -62,8 +65,8 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     }
 
     auto isDownbeat = [&] (std::int64_t beat) {
-        if (! songMode || signatureCount == 0)
-            return beat % beatsPerBar == 0;
+        if (beat < 0 || ! songMode || signatureCount == 0)
+            return ((beat % beatsPerBar) + beatsPerBar) % beatsPerBar == 0;
 
         const auto tick = beat * ppq;
         auto index = 0;
@@ -74,13 +77,14 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
         const auto [start, length] = signatures[(std::size_t) index];
         return (tick - start) % juce::jmax<std::int64_t> (1, length) == 0;
     };
-    const auto startTick = transport.positionTicks.load (std::memory_order_relaxed);
+    // during the count-in the clicks run on a position before the start (whole bars, so the beats line up)
+    const auto startTick = transport.positionTicks.load (std::memory_order_relaxed) - (counting ? countIn : 0.0);
     const auto tps = transport.ticksPerSample();
     const auto clickLength = (int) (clickLengthSeconds * currentSampleRate);
 
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
-        const auto beat = (std::int64_t) ((startTick + i * tps) / ppq);
+        const auto beat = (std::int64_t) std::floor ((startTick + i * tps) / ppq);
 
         if (beat != lastBeat)
         {

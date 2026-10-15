@@ -1,6 +1,7 @@
 #include "ui/PianoRollComponent.h"
 
 #include "core/NoteEdit.h"
+#include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -49,20 +50,9 @@ const std::vector<NamedIntervals>& chords()
     return list;
 }
 
-const std::vector<NamedIntervals>& scales()
+const std::vector<notetools::ScaleInfo>& scales()
 {
-    static const std::vector<NamedIntervals> list {
-        { TR_NOOP ("No scale"), {} },
-        { TR_NOOP ("Major"), { 0, 2, 4, 5, 7, 9, 11 } },
-        { TR_NOOP ("Natural minor"), { 0, 2, 3, 5, 7, 8, 10 } },
-        { TR_NOOP ("Harmonic minor"), { 0, 2, 3, 5, 7, 8, 11 } },
-        { TR_NOOP ("Major pentatonic"), { 0, 2, 4, 7, 9 } },
-        { TR_NOOP ("Minor pentatonic"), { 0, 3, 5, 7, 10 } },
-        { "Blues", { 0, 3, 5, 6, 7, 10 } },
-        { TR_NOOP ("Dorian"), { 0, 2, 3, 5, 7, 9, 10 } },
-        { TR_NOOP ("Phrygian"), { 0, 1, 3, 5, 7, 8, 10 } },
-    };
-    return list;
+    return notetools::scales();
 }
 
 } // namespace
@@ -120,7 +110,13 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     moreButton.setTooltip (tr ("Note operations, left-edge resizing and MIDI import/export"));
     moreButton.onClick = [this] { showMoreMenu(); };
 
-    for (auto* b : { &ghostButton, &moreButton })
+    scaleSnapButton.setOnColour (theme::colour::bg6);
+    scaleSnapButton.setIconColourWhenOn (theme::colour::accent);
+    scaleSnapButton.setFlat (true);
+    scaleSnapButton.setTooltip (tr ("Snap notes to the scale: new and moved notes, and incoming MIDI, land on the chosen scale"));
+    scaleSnapButton.onClick = [this] { setScaleSnap (! scaleSnap); };
+
+    for (auto* b : { &ghostButton, &scaleSnapButton, &moreButton })
     {
         b->setWantsKeyboardFocus (false);
         b->setMouseClickGrabsKeyboardFocus (false);
@@ -146,6 +142,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
             scaleBox.addItem (tr ("{0} {1}", { juce::String (noteNames[root]), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
     }
     scaleBox.setSelectedId (1, juce::dontSendNotification);
+    scaleSnapButton.setEnabled (false); // until a scale is chosen
     scaleBox.setTooltip (tr ("Highlights the notes of a scale"));
 
     slideButton.setClickingTogglesState (true);
@@ -160,7 +157,11 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     {
         box->setWantsKeyboardFocus (false);
         box->setMouseClickGrabsKeyboardFocus (false);
-        box->onChange = [this] { repaint(); };
+        box->onChange = [this] {
+            publishScale();
+            scaleSnapButton.setEnabled (scaleIndex() > 0);
+            repaint();
+        };
         addAndMakeVisible (box);
     }
 
@@ -334,6 +335,10 @@ void PianoRollComponent::resized()
     place (slideButton, 54, true);
     place (chordBox, 86, true);
     place (scaleBox, 150, true);
+    if (scaleBox.isVisible())
+        place (scaleSnapButton, h);
+    else
+        scaleSnapButton.setVisible (false);
     place (moreButton, h);
     // the shortcut hint only shows when there is room for it
     const auto hintArea = juce::Rectangle<int> (bar.getX() + 4, 0, bar.getWidth() - 4, toolbarHeight);
@@ -375,16 +380,39 @@ std::vector<int> PianoRollComponent::chordIntervals() const
     return chords()[(std::size_t) index].intervals;
 }
 
-bool PianoRollComponent::inScale (int key) const
+int PianoRollComponent::scaleIndex() const
 {
     const auto id = scaleBox.getSelectedId();
+    return id <= 1 ? 0 : id / 100;
+}
 
-    if (id <= 1)
-        return false;
+int PianoRollComponent::scaleRoot() const
+{
+    const auto id = scaleBox.getSelectedId();
+    return id <= 1 ? 0 : (id % 100) - 1;
+}
 
-    const auto& intervals = scales()[(std::size_t) (id / 100)].intervals;
-    const auto root = (id % 100) - 1;
-    return std::find (intervals.begin(), intervals.end(), ((key - root) % 12 + 12) % 12) != intervals.end();
+bool PianoRollComponent::inScale (int key) const
+{
+    return scaleIndex() > 0 && notetools::inScale (key, scaleRoot(), scaleIndex());
+}
+
+int PianoRollComponent::snapKey (int key) const
+{
+    return scaleSnap ? notetools::snapToScale (key, scaleRoot(), scaleIndex()) : key;
+}
+
+void PianoRollComponent::setScaleSnap (bool on)
+{
+    scaleSnap = on;
+    scaleSnapButton.setToggleState (on, juce::dontSendNotification);
+    publishScale();
+    repaint();
+}
+
+void PianoRollComponent::publishScale()
+{
+    engine.setInputScale (scaleSnap ? scaleIndex() : 0, scaleRoot());
 }
 
 bool PianoRollComponent::isSelected (int index) const
@@ -888,8 +916,9 @@ void PianoRollComponent::paintNoteAt (std::int64_t start, int key, bool monophon
         if (n.key + interval <= 127)
         {
             auto chordNote = n;
-            chordNote.key = n.key + interval;
-            stamp.push_back (chordNote);
+            chordNote.key = snapKey (n.key + interval); // with scale snap the chord follows the scale
+            if (std::none_of (stamp.begin(), stamp.end(), [&chordNote] (const Note& o) { return o.key == chordNote.key; }))
+                stamp.push_back (chordNote);
         }
 
     editNotes ([&] (Pattern& p) {
@@ -916,6 +945,15 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
     downMods = e.mods;
     startedOnEmpty = erasedSomething = holdExpired = false;
+
+    if (e.mods.isMiddleButtonDown()) // middle-drag pans both ways, in every tool
+    {
+        drag = Drag::pan;
+        panStartTicks = scrollTicks;
+        panStartY = scrollY;
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        return;
+    }
 
     if (e.x < keyboardWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
@@ -1086,16 +1124,16 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         drag = Drag::paint;
         paintLength = juce::jmax<std::int64_t> (1, newNoteLength());
         const auto start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
-        paintNoteAt (start, yToKey (e.y), e.mods.isShiftDown());
+        paintNoteAt (start, snapKey (yToKey (e.y)), e.mods.isShiftDown());
         nextPaintTick = start + paintLength;
-        previewOn (yToKey (e.y), 0.78f);
+        previewOn (snapKey (yToKey (e.y)), 0.78f);
         return;
     }
 
     Note n;
     n.start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
     n.length = newNoteLength();
-    n.key = yToKey (e.y);
+    n.key = snapKey (yToKey (e.y));
     n.channel = engine.getSelectedChannel();
     n.slide = slideButton.getToggleState();
 
@@ -1104,8 +1142,9 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         if (n.key + interval <= 127)
         {
             auto chordNote = n;
-            chordNote.key = n.key + interval;
-            stamp.push_back (chordNote);
+            chordNote.key = snapKey (n.key + interval); // with scale snap the chord follows the scale
+            if (std::none_of (stamp.begin(), stamp.end(), [&chordNote] (const Note& o) { return o.key == chordNote.key; }))
+                stamp.push_back (chordNote);
         }
 
     std::vector<int> added;
@@ -1128,6 +1167,13 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
     switch (drag)
     {
         case Drag::none:
+            return;
+
+        case Drag::pan:
+            scrollTicks = juce::jmax (0.0, panStartTicks - e.getDistanceFromDragStartX() / pixelsPerTick);
+            scrollY = juce::jlimit (0, juce::jmax (0, 128 * rowHeight - gridArea().getHeight()), panStartY - e.getDistanceFromDragStartY());
+            updateScrollBars();
+            repaint();
             return;
 
         case Drag::keyboard:
@@ -1233,12 +1279,12 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             const auto tick = snap (xToTick (e.x), snapOn);
             for (int guard = 0; tick >= nextPaintTick && guard < 64; ++guard)
             {
-                paintNoteAt (nextPaintTick, yToKey (e.y), e.mods.isShiftDown());
+                paintNoteAt (nextPaintTick, snapKey (yToKey (e.y)), e.mods.isShiftDown());
                 nextPaintTick += paintLength;
             }
 
-            if (yToKey (e.y) != previewKey)
-                previewOn (yToKey (e.y), 0.78f);
+            if (snapKey (yToKey (e.y)) != previewKey)
+                previewOn (snapKey (yToKey (e.y)), 0.78f);
             return;
         }
 
@@ -1246,7 +1292,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
         {
             const auto& grabbed = dragOriginals[(std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragNote) - dragIndices.begin())];
             auto deltaTicks = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset) - grabbed.start;
-            auto deltaKeys = yToKey (e.y) - grabbed.key;
+            auto deltaKeys = snapKey (yToKey (e.y)) - grabbed.key;
 
             // locks: Shift pressed after the click keeps the pitch, Ctrl keeps the time
             if (e.mods.isShiftDown() && ! downMods.isShiftDown())
@@ -1347,6 +1393,9 @@ void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
 
     if (drag == Drag::listen)
         stopListening();
+
+    if (drag == Drag::pan)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
 
     if (drag == Drag::move || drag == Drag::resize || drag == Drag::resizeLeft || drag == Drag::paint)
         sortNotes();
@@ -1608,15 +1657,156 @@ void PianoRollComponent::showMoreMenu()
     menu.addItem (tr ("Rotate left within the bar") + "\tCtrl+Shift+Left", [this, grid, bar] { runOperation ([grid, bar] (Pattern& p, const std::vector<int>& t) { noteedit::rotate (p, t, grid, bar, -1); return t; }); });
     menu.addItem (tr ("Rotate right within the bar") + "\tCtrl+Shift+Right", [this, grid, bar] { runOperation ([grid, bar] (Pattern& p, const std::vector<int>& t) { noteedit::rotate (p, t, grid, bar, 1); return t; }); });
     menu.addSeparator();
+    menu.addSubMenu (tr ("Tools"), toolsMenu());
+    {
+        juce::PopupMenu zoom;
+        zoom.addItem (tr ("Zoom in") + "\tPageUp", [this] { runAction ("pianoRoll.zoomIn"); });
+        zoom.addItem (tr ("Zoom out") + "\tPageDown", [this] { runAction ("pianoRoll.zoomOut"); });
+        zoom.addItem (tr ("Zoom: one bar") + "\tShift+1", [this] { runAction ("pianoRoll.zoom1"); });
+        zoom.addItem (tr ("Zoom: four bars") + "\tShift+2", [this] { runAction ("pianoRoll.zoom2"); });
+        zoom.addItem (tr ("Zoom: sixteen bars") + "\tShift+3", [this] { runAction ("pianoRoll.zoom3"); });
+        zoom.addItem (tr ("Zoom to show everything") + "\tShift+4", [this] { runAction ("pianoRoll.zoomAll"); });
+        zoom.addItem (tr ("Zoom to the selection") + "\tShift+5", [this] { runAction ("pianoRoll.zoomSelection"); });
+        zoom.addItem (tr ("Centre the view on the playhead") + "\tShift+0", [this] { runAction ("pianoRoll.centrePlayhead"); });
+        zoom.addSeparator();
+        zoom.addItem (tr ("Taller keys") + "\tCtrl+Alt+Wheel", [this] { rowHeight = juce::jmin (32, rowHeight + 2); updateScrollBars(); repaint(); });
+        zoom.addItem (tr ("Shorter keys"), [this] { rowHeight = juce::jmax (6, rowHeight - 2); updateScrollBars(); repaint(); });
+        menu.addSubMenu (tr ("Zoom"), zoom);
+    }
+    menu.addSeparator();
+    menu.addItem (tr ("Snap notes to the scale"), scaleIndex() > 0, scaleSnap, [this] { setScaleSnap (! scaleSnap); });
+    menu.addItem (tr ("Move the notes onto the scale"), scaleIndex() > 0, false, [this] {
+        const auto root = scaleRoot(), scale = scaleIndex();
+        runOperation ([root, scale] (Pattern& p, const std::vector<int>& t) { notetools::snapNotesToScale (p, t, root, scale); return t; });
+    });
+    menu.addSeparator();
     menu.addItem (tr ("Resize notes from the left edge too") + "\tCtrl+Alt+Home", true, resizeFromLeft, [this] { resizeFromLeft = ! resizeFromLeft; });
     menu.addSeparator();
     menu.addSubMenu ("MIDI", midiMenu());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton));
 }
 
+juce::PopupMenu PianoRollComponent::toolsMenu()
+{
+    juce::PopupMenu menu;
+    const std::pair<NoteTool, const char*> items[] = { { NoteTool::arpeggiate, "Alt+A" }, { NoteTool::strum, "Alt+S" },
+                                                       { NoteTool::flip, "Alt+Y" },       { NoteTool::randomise, "Alt+R" },
+                                                       { NoteTool::scaleLevels, "Alt+X" }, { NoteTool::limit, "Alt+K" } };
+
+    for (const auto& [tool, key] : items)
+        menu.addItem (tr (noteToolTitle (tool)) + "...\t" + key, [this, tool = tool] { openNoteTool (tool); });
+
+    return menu;
+}
+
+void PianoRollComponent::openNoteTool (NoteTool tool)
+{
+    const auto target = selectionOrAll();
+
+    if (target.empty())
+        return;
+
+    showNoteTool (engine, tool, target, gridTicks(), [safe = juce::Component::SafePointer<PianoRollComponent> (this)] {
+        if (safe != nullptr)
+            safe->setSelection ({});
+    });
+}
+
+void PianoRollComponent::zoomAroundCentre (double factor)
+{
+    const auto grid = gridArea();
+    const auto centre = xToTick (grid.getCentreX());
+    pixelsPerTick = juce::jlimit (2.0 / ticksPerStep, 120.0 / ticksPerStep, pixelsPerTick * factor);
+    scrollTicks = juce::jmax (0.0, centre - (grid.getCentreX() - keyboardWidth) / pixelsPerTick);
+    updateScrollBars();
+    repaint();
+}
+
+void PianoRollComponent::zoomToBars (int bars)
+{
+    const auto bar = (double) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+    const auto from = std::floor (scrollTicks / bar) * bar;
+    zoomToTicks (from, from + bars * bar);
+}
+
+void PianoRollComponent::zoomAll()
+{
+    const auto& song = engine.getSong();
+    zoomToTicks (0.0, (double) currentPattern (song).effectiveLength (song.beatsPerBar));
+}
+
+void PianoRollComponent::zoomToSelection()
+{
+    const auto target = selectionOrAll();
+
+    if (target.empty())
+        return zoomAll();
+
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    std::int64_t from = INT64_MAX, to = 0;
+    int low = 127, high = 0;
+
+    for (auto i : target)
+    {
+        const auto& n = notes[(std::size_t) i];
+        from = juce::jmin (from, n.start);
+        to = juce::jmax (to, n.start + n.length);
+        low = juce::jmin (low, n.key);
+        high = juce::jmax (high, n.key);
+    }
+
+    const auto margin = (double) ticksPerStep;
+    zoomToTicks (juce::jmax (0.0, (double) from - margin), (double) to + margin);
+    scrollY = juce::jmax (0, (127 - (low + high) / 2) * rowHeight - gridArea().getHeight() / 2);
+    updateScrollBars();
+    repaint();
+}
+
+void PianoRollComponent::centreOnPlayhead()
+{
+    const auto& song = engine.getSong();
+    const auto length = (double) juce::jmax<std::int64_t> (1, currentPattern (song).effectiveLength (song.beatsPerBar));
+    const auto tick = std::fmod (engine.getTransport().positionTicks.load(), length);
+    scrollTicks = juce::jmax (0.0, tick - gridArea().getWidth() / pixelsPerTick / 2.0);
+    updateScrollBars();
+    repaint();
+}
+
+bool PianoRollComponent::runAction (const std::string& id)
+{
+    auto is = [&id] (const char* name) { return id == name; };
+
+    if (is ("pianoRoll.arpeggiate")) openNoteTool (NoteTool::arpeggiate);
+    else if (is ("pianoRoll.strum")) openNoteTool (NoteTool::strum);
+    else if (is ("pianoRoll.flip")) openNoteTool (NoteTool::flip);
+    else if (is ("pianoRoll.randomise")) openNoteTool (NoteTool::randomise);
+    else if (is ("pianoRoll.scaleLevels")) openNoteTool (NoteTool::scaleLevels);
+    else if (is ("pianoRoll.limit")) openNoteTool (NoteTool::limit);
+    else if (is ("pianoRoll.zoomIn")) zoomAroundCentre (1.25);
+    else if (is ("pianoRoll.zoomOut")) zoomAroundCentre (1.0 / 1.25);
+    else if (is ("pianoRoll.zoom1")) zoomToBars (1);
+    else if (is ("pianoRoll.zoom2")) zoomToBars (4);
+    else if (is ("pianoRoll.zoom3")) zoomToBars (16);
+    else if (is ("pianoRoll.zoomAll")) zoomAll();
+    else if (is ("pianoRoll.zoomSelection")) zoomToSelection();
+    else if (is ("pianoRoll.centrePlayhead")) centreOnPlayhead();
+    else
+        return false;
+
+    return true;
+}
+
 void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (e.mods.isCtrlDown())
+    if (e.mods.isCtrlDown() && e.mods.isAltDown())
+    {
+        // vertical zoom keeping the key under the mouse in place
+        const auto key = yToKey (e.y);
+        const auto offset = e.y - keyToY (key);
+        rowHeight = juce::jlimit (6, 32, rowHeight + (wheel.deltaY > 0 ? 2 : -2));
+        scrollY = juce::jmax (0, (127 - key) * rowHeight + offset - (e.y - headerHeight));
+    }
+    else if (e.mods.isCtrlDown())
     {
         // zoom keeping the tick under the mouse in place
         const auto anchor = xToTick (e.x);

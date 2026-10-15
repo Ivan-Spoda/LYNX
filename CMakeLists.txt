@@ -38,10 +38,12 @@ add_library(lynx_core STATIC
     src/core/Harmor.cpp
     src/core/Gms.cpp
     src/core/Morphine.cpp
+    src/core/Ogun.cpp
     src/core/HarmlessFx.cpp
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
     src/core/Vocodex.cpp
+    src/core/MaximusFx.cpp
     src/core/FlPatcher.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
@@ -53,6 +55,13 @@ target_sources(lynx_core PRIVATE
     src/core/Workspace.cpp
     src/core/RackOps.cpp
     src/core/StartupSound.cpp)
+
+# workflow P2 (note tools, mixer operations, history labels, browser search)
+target_sources(lynx_core PRIVATE
+    src/core/NoteTools.cpp
+    src/core/MixerOps.cpp
+    src/core/History.cpp
+    src/core/SearchQuery.cpp)
 
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
@@ -93,6 +102,7 @@ if(LYNX_BUILD_APP)
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
+        src/platform/FileTypes.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
         src/engine/Metronome.cpp
@@ -129,6 +139,13 @@ if(LYNX_BUILD_APP)
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp
         src/ui/Splash.cpp)
+
+    # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
+    target_sources(LYNX PRIVATE
+        src/ui/NoteToolDialogs.cpp
+        src/ui/ToolWindow.cpp
+        src/ui/HistoryPanel.cpp
+        src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
 

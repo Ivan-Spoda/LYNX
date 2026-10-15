@@ -9,19 +9,36 @@ exports the 30 demo projects shipped with FL Studio 2026.
 ### Editing
 - **Channel Rack:** step sequencer, per-channel volume/pan/mute/solo, swing (FL formula, per-channel mix),
   multiple patterns (rename, colour, length, clone, remove), cut groups, mono channels, arpeggiator,
-  PC keyboard as a piano (FL layout), MIDI input, note recording (one undo step per take).
+  PC keyboard as a piano (FL layout), MIDI input, note recording (one undo step per take). Step graph lanes
+  (Ctrl+K: velocity, pan, release, fine pitch, Mod X/Y; drag, right-drag ramp, Alt+click reset), fill every
+  2/4/8, Euclidean fill, rotate, sort channels, select unused.
+- **Recording options:** count-in (Ctrl+P), wait for the first note (Ctrl+I), overdub/replace, record quantise
+  following the global grid, a pattern clip placed in Song mode; switches next to the metronome in the main
+  toolbar and the full set in the "what to record" menu and Options → Recording.
+- **Quick-add palette (F8 / plugin-picker icon):** searchable instruments and effects (new channel or selected
+  insert). **Undo history** (Ctrl+H, Edit menu): named steps, click to jump.
 - **Piano Roll:** selection (Ctrl+drag, Shift+click, Ctrl+A), group move/resize, Ctrl+C/X/V, Ctrl+B duplicate,
   Ctrl+Q quantize, arrow keys (Shift = octave/bar), snap selector, chords and scale highlighting, per-note
-  velocity/pan/fine pitch/mute, slide (808 glide) and porta notes, `.mid` import/export.
+  velocity/pan/fine pitch/mute, slide (808 glide) and porta notes, `.mid` import/export. Note tools
+  (Arpeggiate, Strum, Flip, Randomise, Scale levels, Limit; Alt+A/S/Y/R/X/K), snap to scale (toolbar switch next
+  to the scale box, also for incoming MIDI), zoom presets (PgUp/PgDn, Shift+1..5/0), vertical zoom.
 - **Playlist:** pattern, audio and automation clips; multiple arrangements; loop region; multi-selection,
   copy/paste/duplicate, split, "make unique"; named/muted tracks; markers and time-signature changes on the
-  ruler; normalize audio clips; pattern picker.
+  ruler; normalize audio clips; pattern picker. Ripple editing (Shift+S) and ripple delete, zoom presets,
+  inline automation-point editing (axis locks, typed values, re-range), track and clip menus.
 - **Automation:** right-click any knob/fader (channel, mixer, effects, plugin parameters) → a Playlist clip with
   a point/curve editor (Alt+drag for curves); tempo automation; MIDI learn on any parameter.
 - **Mixer:** up to 127 inserts, sends with levels, "route to this track only", solo along the signal path, FL
   fader curve, gain ramps, stereo separation, phase invert, L/R swap, colours, built-in 3-band track EQ,
   10 effect slots with dry/wet, smart disable, per-edge PDC, **sidechain** (right-click a compressor slot →
-  "Sidechain from"), render insert to audio.
+  "Sidechain from"), render insert to audio. Multi-select inserts (faders/pans move together), Alt+Left/Right
+  reorder, link selected channels (Ctrl+L / Ctrl+Shift+L / Alt+L), "sidechain only" sends, per-insert record
+  arm, effect slots dragged to reorder, all-effects switch, A/B compare per slot, effect presets dropped from the
+  Browser.
+- **Browser:** search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
+  selected channel, user folders.
+- **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
+  lanes/rotate/sort, Piano Roll tools/zoom/scale snap, Mixer move/link, Browser search/add folder).
 - **Project safety:** "*" in the title, "save changes?", autosave every 2 minutes and an emergency save on crash
   (`%APPDATA%\LYNX\autosave`).
 
@@ -63,11 +80,14 @@ exports the 30 demo projects shipped with FL Studio 2026.
   state — operators, FM/RM matrix, articulators, unison, portamento, filters, effects chain; FL's render settings when
   exporting, its live ones when playing); Harmor on its additive engine (REA round 34: both parts, 520-partial bank,
   module chain, articulators, and its effects rack from REA round 38; within −150 dB of the reference model on 88 of
-  the 89 demo channels it runs, 82 of 99 demo channels within −60 dB of FL's DLL with the whole rack on); GMS and
-  Morphine on their engines (REA round 39: bit-identical to the reference models on every demo channel, voice and
-  full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on 9/9 GMS and 7/7 Morphine demo
-  channels; GMS's waves and Morphine's noise samples read from the user's FL installation); Kepler, Ogun/Autogun,
-  MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in synth; Sakura and Drumpad on physical models rebuilt from their
+  the 89 demo channels it runs, 82 of 99 demo channels within −60 dB of FL's DLL with the whole rack on); Ogun on its
+  inverse-FFT engine (REA round 37: the whole voice, articulators and plugin effects from the raw state; within float
+  rounding of the reference model — which is within −60 dB of FL's DLL on 20 of 20 demo channels — on all 20 demo
+  channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
+  models on every demo channel, voice and full chain, at 44.1 and 48 kHz; the models are within −60 dB of FL's DLLs on
+  9/9 GMS and 7/7 Morphine demo channels; GMS's waves and Morphine's noise samples read from the user's FL
+  installation); Kepler, Autogun, MiniSynth, DX10, Fruit Kick, Toxic Biohazard, PoiZone and BassDrum on the built-in
+  synth; Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -148,9 +168,31 @@ accordingly. Highlights of what is **confirmed and applied**:
   release / release-2 stages, drawn-curve gain tables with tensions, lookahead, saturation, band mix) loaded with
   `Harmless/Data/Compression/<n>.fst` from the user's installation. The old synth approximation remains for unreadable
   states and for the synth's "FL presets" button.
-- **Ogun:** exact initial spectrum of the timbre engine (seeded IPP-style generator, fullness/morph/pre-decay
-  weights, Forced/Impulse maps and patterns, RMS normalisation, fixed seed-3 phases) on the spectral oscillator,
-  with each partial's own decay `(t − 0.025)·B·E_dec + 0.025` (the spectrum evolves during the note); cutoff `44100·(c + c₀)` Hz, FL's Q/width, 20 s release, unison ±5(11^(P15/256) − 1) cents.
+- **Ogun:** its own instrument (`core/Ogun.cpp`, REA round 37; the channel keeps the plugin's raw state): per voice
+  up to 32 767 partials (Richness) with seeded IPP-style weights, fullness shaping, morph, Forced (B·(1 − F) + F),
+  Impulse/Decay/Release per-partial maps (sequential curve sampling, fixed patterns, 1/√h, logarithmic axis, EQ shift),
+  pre-decay, RMS normalisation, band limit and update span; per 50/25 ms frame the spectrum follows the hold, ALT DECAY
+  or release law and becomes an N-point table by an inverse real FFT (N = 2^(P52+q)); the two latest tables are read
+  with the quality's kernel (linear, 6-point 5th-order Hermite, 32-point windowed sinc), crossfaded with the unison
+  sub-voices' pan gains and phase spread (read start at the table's smallest sample), then declick, the 4-type ×
+  1–3-stage filter (2× zero-order hold below 88.2 kHz), FL's volume/pan matrix with gain ramps, silence end, same-key
+  cut and max polyphony; the 13 articulators (point curves modes 0–12, envelopes with ADSR knob scales, tempo sync,
+  velocity options and portamento, LFOs with tension/skew/pulse width, key/velocity/X/Y maps); the plugin's 3-band EQ,
+  chorus, delay (normal/inverted/ping-pong, stereo offset, tempo sync) and reverb (FL's shared plate reverb,
+  `core/PlateReverb.h`, shared with Harmless's rack), and the 2:1 polyphase decimator of qualities 2–4. Level law
+  `(3^(P0/128) − 1)/2`·Final.Vol through Ogun's own pan matrix (channel volume/pan applied once). LYNX plays the
+  state's quality and exports at quality 4, as FL does when it renders. Against the round-37 reference model (own
+  read start, same Seed-2 counter): bit-identical or within −125 dB (float rounding) on all 20 demo channels (44.1 and
+  48 kHz, every effect on, and at the export quality 4) and on 55 synthetic cases (qualities 0–4, richness, unison,
+  filter types, ALT DECAY, 1/√h, patterns, velocity options, portamento, host pan/volume/pitch/Mod X-Y, 48/96 kHz); the
+  model itself is within −60 dB of FL's DLL on 20 of 20 demo channels. The core tests check the engine against model
+  fingerprints: the 20 demo channels at the state's quality and at quality 4 (`ogun_demo_channels`) and 17 feature
+  variants of a state written from scratch (`ogun_engine`). The old spectral-oscillator conversion remains for
+  unreadable states, Autogun (another state layout), and the synth's "FL presets" button.
+  CPU: one inverse FFT of N per voice and frame (split re/im radix-2 passes, cache-blocked, AVX when available), the
+  quality-4 sinc reader vectorised with per-sub-voice tables, finished voices removed and idle channels skipped;
+  "Electric Loop – The Ogun Dream" (14 Ogun channels, 96 s) exports at FL's quality 4 in ~15–22 s (the old
+  approximation: 4.9 s), the other demos with Ogun channels within ±6 s of before.
 - **MiniSynth:** LFO periods, squared LFO depth, release, second voice in whole semitones + 7.5 cents.
 - **Toxic Biohazard:** FM 2·cell (matrix direction read from the code), filter modes (p300), cutoff `2^(9u + 5)`,
   key-track 0.09·KT oct/semitone, envelope ±9·EGAmt oct; FL's 4-pole ladder (table, resonance scale R(u), input
@@ -194,6 +236,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
 - **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Maximus and Soundgoodizer:** FL's exact Maximus engine as a mixer effect (`core/MaximusFx`, REA round 40) —
+  RMS detector, saturation A/B, state versions 3–15, solo, legacy linear-phase FIR split, x87-precision smoothers;
+  Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
+  at import and Amount as the band mix. Within −139 dB of Maximus_x64.dll on 96 of the 100 demo states (53
+  bit-identical) and within −126 dB of Soundgoodizer_x64.dll on every preset/amount; latency reported to PDC.
 - **Vocodex:** its own engine (`core/Vocodex.cpp`, REA round 35) built from FL's raw state, which the `.lynx`
   project keeps: band layout and the 13 per-band maps, 64-bit band-pass banks (orders 1–4, flatness, 2×
   oversampling above 11.05 kHz), PEAK/RMS followers, gate, saturation, double-precision smoother, unison, IPP-style
@@ -239,8 +286,8 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Harmless: the rack compressor needs the user's FL installation (its four presets are read from it; otherwise it
   stays off and the import report says so); the chorus/delay use the x87 kernels FL picks on the test machine (another
   CPU may make FL round the chorus delay instead of truncating it — not confirmed); a fresh delay starts its feedback
-  ramp at the stored value (FL's host call order not observed); Maximus features unused by the presets (RMS detector,
-  saturation B, other curve segment types, linear-phase mode) are not decoded; the editor's quality
+  ramp at the stored value (FL's host call order not observed); Maximus's Master Mid mode, its v14+ linear-phase split and curve
+  segment types other than 0/7 are not decoded (REA round 40); the editor's quality
   (0/1) is used for playback and export alike (FL renders with quality 2; LYNX's engine does not tell instruments
   when it renders offline); FL seeds its random draws from the clock, LYNX from a fixed seed (spectral-random
   phases, Noise resonance and the LFO "voice random" are deterministic and differ from any FL render by design);
@@ -248,11 +295,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   answers for the release-time factor (p30) and release velocity (p46) are 1 and 0 (FL's not observed); Mod X/Y
   (Final.FCut/FRes) are 0; FL's per-channel max polyphony is not imported (LYNX's limit is its 96-record pool);
   the LFO/phaser phases follow song-position jumps but not the start of playback.
-- Ogun: the evolving spectrum is 8 snapshots per note with linear crossfades; partials binned onto one harmonic
-  share an energy-weighted decay; ALT DECAY morphs every harmonic towards its Decay EQ level (REA round 26); the
-  per-partial release (which restarts from the current level) is one overall envelope; the read-start phase offset is not reproduced; articulators
-  are at their neutral values, Seed 2 "Random" (new spectrum per note in FL) is one fixed draw, Seed 1 per key uses
-  key C5, and with richness > 9 the inharmonic partials are binned (by energy) onto harmonics of f/4.
+- Ogun (REA round 37 §1.20 and open questions): Seed 2 "Random" uses a per-instance counter starting at 0 (FL's starts
+  from its clock-seeded RTL random seed), so Random spectra are deterministic and differ from any given FL render; the
+  read start j₀ (argmin of the first table) occasionally picks a neighbouring sample vs FL (a time shift of that
+  note's table); IPP's 11-bit `exp` in the fullness shaping is evaluated exactly (up to −79 dB on the demos, −52 dB on
+  the worst synthetic case vs the DLL); global LFOs/envelopes run per voice (none in FL's data); host answers 2/6 are 0,
+  release velocity 0.5, Mod X/Y 0; parameter changes rebuild the instance (sounding notes stop); a voice pool grows on
+  demand up to 64 voices per channel (the oldest is cut beyond that); FL's per-channel max polyphony is not imported
+  (LYNX's mono setting = 1). Autogun stays on the synth approximation (its states mostly use another layout).
 - Sytrus: chaotic FM patches (two-way FM loops, strong self-feedback) cannot be sample-exact — FL builds sine tables
   with IPP's tone generator (≈1 ulp from an exact sine) and the chaos amplifies it (statistically equivalent);
   random maps use a fixed per-instance seed (FL's is clock-seeded, so they are not reproducible in FL either); the
@@ -270,13 +320,12 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
-- Vocodex: the Soundgoodizer stage (SG > 0, all demo instances) is LYNX's Soundgoodizer approximation (preset A,
-  amount = SG, then the presets' −0.2 dB master limiter) on the engine's output — FL hosts its own Soundgoodizer
-  with `Data/SG.dat`, not decoded yet (on the "Vocodex demo" inputs FL's SG_x64.dll with SG.dat peaks at −0.39 dBFS
-  and sits ≈1.7 dB above the approximation, median of 100 ms windows); the
-  internal Sytrus carrier (CarIn = "---", Ookay and NewStuff) is not available, so that Vocodex passes its
-  modulator unchanged (`vocodex::makeInternalCarrier` is the hook for it); map segments with tension ≠ 0 are read
-  as straight lines (no demo uses them).
+- Vocodex: the Soundgoodizer stage (FL's engine with `Data/SG.dat`) and the internal Sytrus carrier (Ookay,
+  NewStuff) need the user's FL installation at import (otherwise the old approximation / modulator pass-through and
+  the import report says so); with the internal carrier the match is −112 dB (LYNX's Sytrus on that preset), the
+  others −136…−145 dB; map segments with tension ≠ 0 are read as straight lines (no demo uses them).
+- Maximus: 4 of the 100 demo states use the v15 linear-phase band split (Frequency Splitter's engine) or Master Mid
+  mode is set — those keep the approximation (REA round 40 §8).
 - FLEX: its packs are encrypted; LYNX never opens them (the channel gets a synth patch by preset name).
 
 ## `.flp` format findings (besides `docs/ANALISE_FL_STUDIO.md`)
@@ -319,5 +368,8 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
-- Ogun's per-partial release and ALT DECAY, Vocodex's internal carrier synth (needs LYNX's exact Sytrus) and its
-  Soundgoodizer stage (SG_x64.dll not decoded), Harmor's image synthesis, arpeggio envelopes and Noise resonance.
+- Autogun's engine (state layout differs from Ogun's; DLL not run), Maximus's Master Mid mode and linear-phase
+  split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
+- Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
+  colour/height (need model fields), F2/F3 search stepping, instrument drops on mixer inserts, the automation
+  record filter, and the remaining note tools (chop, quantise, articulate, flam, period slicing, LFO).

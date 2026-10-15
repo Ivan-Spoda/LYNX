@@ -10,6 +10,7 @@
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
 #include "core/FlpImport.h"
+#include "core/History.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
 #include "engine/PluginHost.h"
@@ -56,7 +57,30 @@ public:
     void capturePluginStates();
 
     void play() noexcept;
-    void stop() noexcept;
+    void stop() noexcept; // also cancels a count-in or a wait for the first note
+
+    // Recording options (docs/WORKFLOW_FL.md P2: recording set). UI thread.
+    struct RecordOptions
+    {
+        int countInBars = 0;            // 0 = off
+        bool waitForInput = false;      // playback starts at the first played note
+        RecordMode mode = RecordMode::overdub;
+        std::int64_t quantise = 0;      // record quantise in ticks (<= 1: as played); follows the global grid
+        bool placeSongClip = true;      // song mode: a take puts a clip of the pattern where recording started
+    };
+    const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
+    void setRecordOptions (const RecordOptions& options);
+
+    // Play pressed: with recording on, honours wait-for-input and the count-in; otherwise play().
+    void startPlayback();
+    bool isWaitingForInput() const noexcept { return waitingForInput.load(); }
+    bool isCountingIn() const noexcept { return transport.countIn.load() > 0.0; }
+
+    // Per-insert record arm: an armed insert receives the audio takes (arming one turns audio recording on;
+    // disarming the last one turns it off). Not saved with the project.
+    void setInsertArmed (int track, bool armed);
+    bool isInsertArmed (int track) const noexcept;
+    const std::vector<int>& getArmedInserts() const noexcept { return armedInserts; }
     void rewind() noexcept;
     void seek (double ticks) noexcept;
 
@@ -68,6 +92,11 @@ public:
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
     void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
+
+    // Scale snap for played notes (MIDI input and the PC keyboard): scale index into notetools::scales()
+    // (0 = off) and its root (0..11). Any thread.
+    void setInputScale (int scale, int root) noexcept;
+    int snapInputKey (int key) const noexcept;
 
     // All notes off on every channel (double-click on Stop). UI thread.
     void panic();
@@ -107,6 +136,13 @@ public:
     bool canRedo() const noexcept { return ! redoStack.empty(); }
     void undo();
     void redo();
+
+    // Undo history as a list of states, oldest first: the undo steps, the current state, then the redo
+    // steps. Each entry is named after what changed from the previous one (core/History.h).
+    int getHistorySize() const noexcept { return (int) (undoStack.size() + 1 + redoStack.size()); }
+    int getHistoryPosition() const noexcept { return (int) undoStack.size(); }
+    ChangeLabel getHistoryLabel (int index) const; // index 0 = the oldest state kept
+    void jumpToHistory (int index);
 
     // Channel selected in the Channel Rack (target of the Piano Roll and keyboard). UI thread.
     int getSelectedChannel() const noexcept { return selectedChannel; }
@@ -204,7 +240,14 @@ private:
     std::vector<RecordedEvent> uiRecorded;           // PC keyboard -> recording
     NoteRecorder recorder;
     bool takeHasUndoStep = false;
+    RecordOptions recordOptions;
+    std::vector<int> takeClearedChannels; // replace mode: channels already cleared in this take
+    double takeStartPosition = 0.0;
+    std::atomic<bool> waitingForInput { false };
+    void startOnInput() noexcept; // MIDI or UI thread: the first note while waiting starts playback
+    std::vector<int> armedInserts;
     double lastPlayingTick = 0.0;
+    std::atomic<int> inputScale { 0 }, inputScaleRoot { 0 };
     std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
     static constexpr int maxLiveChannels = 16;       // other selected channels that also get MIDI input
     std::array<std::atomic<int>, maxLiveChannels> extraLiveChannels {};

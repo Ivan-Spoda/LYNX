@@ -4,6 +4,7 @@
 #include "core/Harmless.h"
 #include "core/Morphine.h"
 #include "core/Harmor.h"
+#include "core/Ogun.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -429,6 +430,14 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
             SynthSettings synth;
             float gain = 1.0f;
             if (synthFromHarmor (project.channels.front().pluginState, synth, gain))
+                return synth;
+        }
+        if (! song.channels.empty() && song.channels.front().instrument == InstrumentKind::ogun)
+        {
+            // ... and of an Ogun / Autogun patch (the spectral-oscillator conversion)
+            SynthSettings synth;
+            float gain = 1.0f;
+            if (synthFromOgun (project.channels.front().pluginState, synth, gain))
                 return synth;
         }
         if (song.channels.empty() || song.channels.front().instrument != InstrumentKind::synth)
@@ -921,8 +930,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (synthFromGms (c.pluginState, song.bpm, fromPlugin, pluginGain))
                     adopt();
             }
-            else if ((name == "ogun" || name == "autogun") && synthFromOgun (c.pluginState, fromPlugin, pluginGain))
-                adopt();
+            else if (name == "ogun" || name == "autogun")
+            {
+                // FL's inverse-FFT engine from the raw state (REA_rodada37); Autogun (its own state variant and DLL, not
+                // verified in round 37) and states the engine can't read keep the spectral-oscillator conversion
+                if (name == "ogun" && ogunStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::ogun;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+                else if (synthFromOgun (c.pluginState, fromPlugin, pluginGain))
+                    adopt();
+            }
             else if (name == "sakura")
             {
                 // the physical string model (REA_rodada28 §1); the old saw + triangle stays as a fallback
@@ -1078,7 +1098,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::boobass || def.instrument == InstrumentKind::drumsynth
                      || def.instrument == InstrumentKind::harmless || def.instrument == InstrumentKind::sytrus
                      || def.instrument == InstrumentKind::harmor || def.instrument == InstrumentKind::gms
-                     || def.instrument == InstrumentKind::morphine)
+                     || def.instrument == InstrumentKind::morphine
+                     || def.instrument == InstrumentKind::ogun)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || plugin == "minisynth" || plugin == "fruity dx10" || plugin == "dx10" || plugin == "fruit kick"
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
@@ -1167,6 +1188,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     };
     std::map<std::pair<int, int>, decltype (LovePhilterConversion::paramMap)> lovePhilterMaps; // Love Philter automation
 
+    // data files of the user's FL installation that some effects load at run time (Soundgoodizer's presets,
+    // REA_rodada40); nothing of them is stored in LYNX itself, only in the imported project
+    const FlDataReader flData = [&options] (const std::string& relative) -> std::vector<std::uint8_t> {
+        const auto path = resolveFlPath ("%FLStudioFactoryData%\\" + relative, options.roots);
+        if (path.empty() || ! options.readFile || (options.fileExists && ! options.fileExists (path)))
+            return {};
+        return options.readFile (path);
+    };
+    // exact engines that fell back to their approximation (for the report)
+    auto noteFallback = [&options] (const std::string& plugin, const EffectSlot& fx) {
+        if (options.report == nullptr || fx.kind == EffectKind::maximus)
+            return;
+        if (plugin == "Maximus")
+            ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
+        else if (plugin == "Soundgoodizer")
+            ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+    };
+
     for (const auto& insert : project.mixer)
     {
         if (insert.index < 0 || insert.index >= tracks)
@@ -1237,8 +1276,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                     if (! head.note.empty() && options.report != nullptr)
                                         ++options.report->droppedEffects[head.note];
                                 }
-                                else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm); fx && fx->kind != EffectKind::plugin)
+                                else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm, flData); fx && fx->kind != EffectKind::plugin)
+                                {
+                                    noteFallback (node.plugin, *fx);
                                     chain.push_back (std::move (*fx));
+                                }
                                 else if (options.report != nullptr)
                                     ++options.report->droppedEffects[node.plugin + " (in Patcher)"];
                                 break;
@@ -1318,7 +1360,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     made->plugin.foreign = std::move (foreign);
                 }
                 else
-                    made = effectFromFl (slot.plugin, slot.state, song.bpm); // native effect with the saved settings (REA_rodada7)
+                {
+                    made = effectFromFl (slot.plugin, slot.state, song.bpm, flData); // native effect with the saved settings (REA_rodada7)
+                    if (made)
+                        noteFallback (slot.plugin, *made);
+                }
 
                 if (! made)
                 {
@@ -1357,7 +1403,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (slot.plugin == "Vocodex")
                 {
                     // ModIn/CarIn index the same inputs list as the sidechains (REA_rodada22 §1)
-                    if (const auto v = vocodexEffect (slot.state))
+                    if (const auto v = vocodexEffect (slot.state, flData))
                     {
                         fx.sidechain = sidechainSource (insert.index, v->modIn);
                         fx.sidechain2 = sidechainSource (insert.index, v->carIn);

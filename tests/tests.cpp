@@ -32,7 +32,9 @@
 #include "core/Harmless.h"
 #include "core/Harmor.h"
 #include "core/Morphine.h"
+#include "core/Ogun.h"
 #include "core/HarmlessFx.h"
+#include "core/MaximusFx.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -756,11 +758,13 @@ TEST (flp_real_files)
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
     int gms = 0, gmsUsable = 0, gmsKind = 0, gmsSounding = 0, morphine = 0, morphineUsable = 0, morphineKind = 0, morphineSounding = 0, demoGoldens = 0;
+    int ogun = 0, ogunUsable = 0, ogunKind = 0, ogunSounding = 0;
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
     int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
+    int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -875,6 +879,28 @@ TEST (flp_real_files)
                     padChannels += c.name.find (" - ") != std::string::npos && c.instrument == lynx::InstrumentKind::sampler ? 1 : 0;
                 }
                 fpcKits += hasFpc;
+                // Maximus / Soundgoodizer become the exact engine (REA_rodada40); Vocodex carries SG.dat (and its
+                // carrier's Sytrus preset) read from the installation
+                for (const auto& insert : p.mixer)
+                    for (const auto& slot : insert.slots)
+                    {
+                        maximusSlots += slot.plugin == "Maximus";
+                        sgzSlots += slot.plugin == "Soundgoodizer";
+                        vocodexSlots += slot.plugin == "Vocodex";
+                    }
+                for (const auto& t : full.mixer)
+                    for (const auto& fx : t.effects)
+                    {
+                        if (fx.kind == lynx::EffectKind::maximus)
+                        {
+                            const auto blob = lynx::maximusfx::unpack (fx.state);
+                            CHECK (blob && lynx::maximusfx::presetOf (*blob) != nullptr);
+                            if (blob)
+                                (blob->build == lynx::hlfx::MaximusBuild::soundgoodizer ? sgzExact : maximusExact) += 1;
+                        }
+                        if (fx.kind == lynx::EffectKind::vocodex)
+                            vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
+                    }
                 for (const auto& pat : full.patterns)
                     for (const auto& n : pat.notes)
                     {
@@ -968,6 +994,27 @@ TEST (flp_real_files)
                         finite = finite && std::isfinite (v), e += (double) v * v;
                     CHECK (finite);
                     harmorSounding += e > 1e-6 ? 1 : 0;
+                }
+
+            // Ogun: every state in the demos plays on the exact engine (REA_rodada37) and sounds, with finite samples
+            for (const auto& c : p.channels)
+                if (c.pluginName == "Ogun")
+                {
+                    ++ogun;
+                    ogunUsable += lynx::ogunStateUsable (c.pluginState) ? 1 : 0;
+                }
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::ogun)
+                {
+                    ++ogunKind;
+                    const auto y = lynx::ogun::renderReference (c.pluginState, { { 0, 60, 0.8, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6000 },
+                                                                                 { 2000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 8000 } }, 44100.0, 11025);
+                    double e = 0.0;
+                    bool finite = ! y.empty();
+                    for (auto v : y)
+                        finite = finite && std::isfinite (v), e += (double) v * v;
+                    CHECK (finite);
+                    ogunSounding += e > 1e-6 ? 1 : 0;
                 }
 
             // Sytrus: every state in the demos (zlib + 10 units) decodes, with finite values
@@ -1460,8 +1507,16 @@ TEST (flp_real_files)
                  gms, gmsUsable, gmsKind, gmsSounding, morphine, morphineUsable, morphineKind, morphineSounding, demoGoldens);
     CHECK (gmsUsable == gms && gms >= 9 && gmsKind == gms && gmsSounding == gmsKind);
     CHECK (morphineUsable == morphine && morphine >= 7 && morphineKind == morphine && morphineSounding == morphineKind && demoGoldens == 2);
+    std::printf ("  Ogun: %d channels, %d states usable by the engine, %d imported as Ogun (%d sounding)\n", ogun, ogunUsable, ogunKind, ogunSounding);
+    CHECK (ogunUsable == ogun && ogun >= 20 && ogunKind >= ogun && ogunSounding >= ogunKind * 9 / 10);
     std::printf ("  Harmless rack compressor: %d of %d presets read from the installation\n", harmlessCompLoaded, harmlessCompWanted);
     CHECK (harmlessCompLoaded == harmlessCompWanted && harmlessCompWanted > 100);
+    std::printf ("  Maximus: %d of %d slots on the exact engine; Soundgoodizer: %d of %d; Vocodex with SG.dat: %d of %d\n", maximusExact,
+                 maximusSlots, sgzExact, sgzSlots, vocodexWithData, vocodexSlots);
+    // REA_rodada40 §6: in Demo projects the 4 states left on the approximation use the Frequency Splitter linear-phase
+    // option; the other Data folders add states with options not decoded
+    CHECK (maximusSlots - maximusExact <= 16 && maximusExact >= 97 && sgzExact == sgzSlots && sgzSlots > 90);
+    CHECK (vocodexWithData == vocodexSlots && vocodexSlots >= 10);
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -5161,7 +5216,7 @@ int main (int argc, char** argv)
     if (argc > 1)
         realFlpDir = argv[1];
 
-    const char* only = std::getenv ("LYNX_TEST"); // optional: run only the tests whose name contains this
+    const char* only = std::getenv ("LYNX_TEST"); // run only the tests whose name contains this
     for (auto& [name, fn] : registry())
     {
         if (only != nullptr && std::strstr (name, only) == nullptr)
@@ -6592,6 +6647,256 @@ TEST (harmor_engine)
     CHECK (el < 1e-10 * er && er > 1e-3);
 }
 
+namespace
+{
+// An Ogun state written from scratch (REA_rodada37 §1.3 layout, version 18; zlib with stored blocks): richness 4
+// (255 partials), pre-decay, decay/release, fullness, Seed 1 + fixed Seed 2 with morph, 3-voice unison, a 2-stage
+// low-pass with an LFO on its cutoff, a volume envelope with a sustain point and a velocity map, declick, normalisation,
+// Impulse/Decay maps, and every plugin effect (EQ band, chorus, ping-pong delay, reverb). Everything else is neutral.
+std::vector<std::uint8_t> ogunTestState()
+{
+    std::vector<std::uint8_t> b;
+    auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f32v = [&] (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); i32 ((std::int32_t) u); };
+    auto f64 = [&] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    struct Pt { double dx, y, tension; int mode; };
+    auto curve = [&] (int type, const std::vector<Pt>& pts, std::array<std::int32_t, 5> hdr) {
+        i32 (type), i32 (3), i32 ((std::int32_t) pts.size());
+        for (const auto& p : pts)
+        {
+            f64 (p.dx), f64 (p.y), f32v ((float) p.tension);
+            b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+        }
+        for (auto h : hdr)
+            i32 (h);
+    };
+    const std::array<std::int32_t, 5> off { 0, 0, -1, -1, -1 }, on { 0, 1, -1, -1, -1 };
+    auto flat = [&] (int type, double y) { curve (type, { { 0, y, 0, 0 }, { 1, y, 0, 0 } }, off); };
+    std::array<std::int32_t, 64> P {};
+    const std::pair<int, int> values[] = { { 0, 128 }, { 5, 300 }, { 6, 3000 }, { 7, 2000 }, { 8, 200 }, { 9, 500 }, { 10, 12 },
+        { 11, 34 }, { 12, 3 }, { 13, 64 }, { 14, 64 }, { 15, 40 }, { 16, 64 }, { 17, 180 }, { 18, 60 }, { 19, 2 }, { 20, 300 },
+        { 21, 400 }, { 22, 40 }, { 23, 30 }, { 24, 20 }, { 25, 64 }, { 26, 40 }, { 27, 96 }, { 28, 100 }, { 29, 64 }, { 30, 2 },
+        { 31, 19 }, { 32, 221 }, { 33, 0 }, { 34, 50 }, { 35, 100 }, { 36, 20 }, { 37, 60 }, { 38, 2 }, { 39, 64 }, { 40, 300 },
+        { 43, 30000 }, { 46, 20000 }, { 49, 0 }, { 50, 2 }, { 51, 0 }, { 52, 9 }, { 53, 1 }, { 54, 0 },
+        { 55, 0x01000000 },   // +0x20b: pitch follows the key
+        { 56, 0x00010000 },   // +0x20e: declick
+        { 62, 0x00000100 } }; // +0x225: normalise
+    for (const auto& [i, v] : values)
+        P[(std::size_t) i] = v;
+    for (auto v : P)
+        i32 (v);
+    b.push_back (0), b.push_back (1), b.push_back (0); // delay: not tempo-based, on
+    i32 (1), i32 (1), i32 (1);                         // EQ band types: peaking
+    b.push_back (0);                                   // comment: 0 characters
+    for (int k = 0; k < 13; ++k)
+    {
+        static constexpr int sum[] = { 1, 2, 3, 9, 11, 12 };
+        const double neutral = std::find (std::begin (sum), std::end (sum), k) != std::end (sum) ? 0.5 : 1.0;
+        i32 (1);
+        f32v (0.0f), f32v (1.0f), f32v (k == 1 ? 0.3f : 0.0f);
+        if (k == 0) // volume envelope: attack, decay to the sustain point, release
+            curve (1, { { 0, 0, 0, 0 }, { 0.02, 1, 0.3, 0 }, { 0.3, 0.5, -0.4, 0 }, { 0.5, 0, 0.2, 0 } }, { 0, 1, 2, -1, 2 });
+        else
+            flat (1, neutral);
+        for (int a : { 128, 128, 128, 128 })
+            i32 (a);
+        if (k == 1) // cutoff LFO
+            curve (2, { { 0, 0.8, 0, 0 } }, on);
+        else
+            flat (2, 0.5);
+        for (int a : { k == 1 ? 40000 : 0, 0, 0, 0 })
+            i32 (a);
+        i32 (0);
+        for (int m = 0; m < 4; ++m)
+            if (k == 0 && m == 1)
+                curve (3, { { 0, 0.3, 0, 0 }, { 1, 1, -0.2, 0 } }, off); // velocity → volume
+            else
+                flat (3, neutral);
+    }
+    flat (3, 0.0);                                                // Forced: none
+    curve (3, { { 0, 0.6, 0, 0 }, { 1, 0.4, 0.3, 0 } }, off);     // Impulse EQ
+    curve (3, { { 0, 0.5, 0, 0 }, { 1, 0.3, 0, 0 } }, off);       // Decay EQ
+    flat (3, 0.5);                                                // Release EQ
+    // u32 version + zlib (stored blocks)
+    std::vector<std::uint8_t> s { 18, 0, 0, 0, 0x78, 0x01 };
+    for (std::size_t i = 0; i < b.size();)
+    {
+        const auto len = std::min<std::size_t> (65535, b.size() - i);
+        s.push_back (i + len >= b.size() ? 1 : 0);
+        s.push_back ((std::uint8_t) len), s.push_back ((std::uint8_t) (len >> 8));
+        s.push_back ((std::uint8_t) ~len), s.push_back ((std::uint8_t) (~len >> 8));
+        s.insert (s.end(), b.begin() + (std::ptrdiff_t) i, b.begin() + (std::ptrdiff_t) (i + len));
+        i += len;
+    }
+    std::uint32_t a1 = 1, a2 = 0;
+    for (auto c : b)
+        a1 = (a1 + c) % 65521u, a2 = (a2 + a1) % 65521u;
+    for (int sh = 24; sh >= 0; sh -= 8)
+        s.push_back ((std::uint8_t) (((a2 << 16) | a1) >> sh));
+    return s;
+}
+} // namespace
+
+TEST (ogun_engine)
+{
+    // REA_rodada37: state parsing, the engine against our reference model (ogmodel.py), host levels, export quality
+    const auto blob = ogunTestState();
+    if (const char* dump = std::getenv ("LYNX_DUMP_OGUN"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
+    CHECK (lynx::ogunStateUsable (blob));
+    CHECK (lynx::ogunFallbacks (blob).empty());
+    CHECK (lynx::ogunParam (blob, 17) == 180 && lynx::ogunParam (blob, 52) == 9 && ! lynx::ogunParam (blob, 64));
+    auto broken = blob;
+    broken.resize (broken.size() - 300);
+    CHECK (! lynx::ogunStateUsable (broken));
+    auto old = blob;
+    old[0] = 13; // the articulator layout is from version 14
+    CHECK (! lynx::ogunStateUsable (old));
+
+    // reference model (REA round 37 ogmodel.Plugin(state).run: C5 velocity 0.75 released at 6144, G5 velocity 0.625 at 2048
+    // released at 8192; host block 512)
+    const std::vector<lynx::ogun::RefNote> notes { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 6144 }, { 2048, 67, 0.625, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 8192 } };
+    const auto ref = lynx::ogun::renderReference (blob, notes, 44100.0, 16384);
+    CHECK (ref.size() == 2 * 16384);
+    if (const char* dump = std::getenv ("LYNX_DUMP_OGUN_OUT"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) ref.data(), (std::streamsize) (ref.size() * 4));
+    const std::tuple<int, float, float> golden[] {
+        { 100, -7.763202e-05f, -8.919523e-05f }, { 1000, 0.06195267f, 0.03858230f }, { 3000, 0.01363476f, -0.00378433f },
+        { 6000, -0.06601223f, -0.03084030f }, { 9000, 0.04204506f, 0.02452896f }, { 12000, 0.03420147f, -0.01837870f },
+        { 16383, -0.00465311f, -0.00119627f } };
+    for (const auto& [i, gl, gr] : golden)
+        CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+
+    // the instrument plays like the reference renderer (Final.Vol 1, centre)
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::ogun;
+    c.pluginState = blob;
+    auto render = [&] (const lynx::ChannelDef& def, int total, float gl, float gr, bool held = false) {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::ogun);
+        inst->configure (def, 120.0);
+        inst->prepare (44100.0);
+        std::vector<float> l ((std::size_t) total), r ((std::size_t) total);
+        for (int s = 0; s < total; s += 512)
+        {
+            if (s == 0)
+                inst->noteOn (60, 0.75f);
+            if (s == 2048)
+                inst->noteOn (67, 0.625f);
+            if (s == 6144 && ! held)
+                inst->noteOff (60);
+            if (s == 8192 && ! held)
+                inst->noteOff (67);
+            inst->render (l.data() + s, r.data() + s, std::min (512, total - s), gl, gr);
+        }
+        return std::make_tuple (l, r, std::move (inst));
+    };
+    {
+        auto [l, r, inst] = render (c, 16384, 1.0f, 1.0f);
+        double worst = 0.0;
+        for (int i = 0; i < 16384; ++i)
+            worst = std::max ({ worst, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]), (double) std::abs (ref[2 * (std::size_t) i + 1] - r[(std::size_t) i]) });
+        CHECK (worst == 0.0);
+        // the voices end and the effect tails die out: the instrument goes idle
+        std::vector<float> tail (44100), tailR (tail.size());
+        for (int k = 0; k < 20 && ! inst->idle(); ++k)
+            inst->render (tail.data(), tailR.data(), (int) tail.size(), 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+    // FL's level law applied once (effects off): half the channel volume halves the output once the gain ramps
+    // (limited to 0.001 per sample) have settled on the sustain level; full right pan silences the left side
+    {
+        auto dry = c;
+        for (int i : { 19, 29, 40, 53 })
+            CHECK (lynx::ogunSetParam (dry.pluginState, i, 0)); // chorus, delay wet, EQ band and reverb off
+        CHECK (lynx::ogunStateUsable (dry.pluginState) && lynx::ogunParam (dry.pluginState, 19) == 0);
+        const auto full = std::get<0> (render (dry, 32768, 1.0f, 1.0f, true));
+        const auto half = std::get<0> (render (dry, 32768, 0.5f, 0.5f, true));
+        double worst = 0.0, peak = 0.0;
+        for (int i = 30000; i < 32768; ++i)
+            worst = std::max (worst, (double) std::abs (half[(std::size_t) i] - 0.5f * full[(std::size_t) i])),
+            peak = std::max (peak, (double) std::abs (full[(std::size_t) i]));
+        CHECK (worst <= 1e-7 * peak && peak > 1e-3);
+        // FL's default channel volume (100/128): FL hands Ogun Final.Vol = (11^v − 1)/10 (REA_rodada28 §4.1); LYNX's
+        // centred channel gains (√2·V·cos(π/4) each) give the reference model's level at that Final.Vol
+        const auto V = lynx::channelGain (0.78125f);
+        const auto g = V * std::cos (0.25f * 3.14159265f) * 1.41421356f;
+        const auto atDefault = std::get<0> (render (dry, 32768, g, g, true));
+        const auto refDefault = lynx::ogun::renderReference (dry.pluginState, { { 0, 60, 0.75, V, 0.0, 0.0, 0.0, 0.0, 0.5, -1 },
+                                                                                { 2048, 67, 0.625, V, 0.0, 0.0, 0.0, 0.0, 0.5, -1 } }, 44100.0, 32768);
+        double ei = 0.0, er0 = 0.0;
+        for (int i = 30000; i < 32768; ++i)
+            ei += (double) atDefault[(std::size_t) i] * atDefault[(std::size_t) i], er0 += (double) refDefault[2 * (std::size_t) i] * refDefault[2 * (std::size_t) i];
+        CHECK (er0 > 0.0 && std::abs (10.0 * std::log10 (ei / er0)) < 0.001);
+        const auto [pl, pr, pi] = render (dry, 4096, 0.0f, 1.41421356f);
+        double el = 0.0, er = 0.0;
+        for (int i = 0; i < 4096; ++i)
+            el += (double) pl[(std::size_t) i] * pl[(std::size_t) i], er += (double) pr[(std::size_t) i] * pr[(std::size_t) i];
+        CHECK (el < 1e-10 * er && er > 1e-3);
+    }
+    // export: FL renders Ogun at quality 4 (×2 rate, 32-point reader), LYNX too while it renders offline
+    {
+        lynx::setOfflineRendering (true);
+        auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f);
+        lynx::setOfflineRendering (false);
+        lynx::ogun::RefOptions q4;
+        q4.quality = 4;
+        const auto ref4 = lynx::ogun::renderReference (blob, notes, 44100.0, 8192, q4);
+        double worst = 0.0, diff = 0.0;
+        for (int i = 0; i < 8192; ++i)
+            worst = std::max (worst, (double) std::abs (ref4[2 * (std::size_t) i] - l[(std::size_t) i])),
+            diff = std::max (diff, (double) std::abs (ref[2 * (std::size_t) i] - l[(std::size_t) i]));
+        CHECK (worst == 0.0 && diff > 1e-3);
+        const std::tuple<int, float, float> golden4[] {
+            { 100, 0.00605961f, 0.00628969f }, { 1000, 0.03729841f, 0.01727954f }, { 3000, -0.09010383f, -0.02551294f },
+            { 6000, 0.02167798f, -0.01115632f }, { 8191, 0.00320288f, -0.00615792f } };
+        for (const auto& [i, gl, gr] : golden4)
+            CHECK (std::abs (ref4[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref4[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+    }
+    // feature variants of the same state against the reference model (energy per side over 8192 samples, three
+    // samples; C1 released at 6144): qualities, richness, unison, the filter types, ALT DECAY, 1/√h, Seed 2 Random,
+    // infinite decay, logarithmic axis, velocity → position, other rates. Goldens from ogmodel.py (REA round 37).
+    {
+        struct Sample { int at; float l, r; };
+        struct Variant { const char* name; std::vector<std::pair<int, int>> params; int rate; double el, er; Sample s[3]; };
+        const Variant variants[] {
+        { "q1", { { 54, 1 } }, 44100, 11.0970402, 6.87820714, { { 1500, 0.0240363069f, -0.0148524037f }, { 4000, 0.0873190612f, -0.000715861097f }, { 7000, -0.0378603041f, -0.00338819111f } } },
+        { "q2", { { 54, 2 } }, 44100, 11.2405446, 6.68045082, { { 1500, 0.0448660068f, -0.00560745923f }, { 4000, -0.0122657465f, 0.0104285963f }, { 7000, -0.0216034129f, -0.0134632047f } } },
+        { "q3", { { 54, 3 } }, 44100, 11.3200608, 6.86196449, { { 1500, -0.0031537537f, -0.0242648814f }, { 4000, 0.0426301025f, 0.0364697985f }, { 7000, 0.00843803957f, 0.0302239582f } } },
+        { "rich16_q0", { { 52, 16 }, { 54, 0 } }, 44100, 26.7616786, 19.2591256, { { 1500, 0.0728010684f, -0.0116148153f }, { 4000, 0.0797849894f, 0.0765359923f }, { 7000, -0.00811834447f, -0.0104534971f } } },
+        { "uni9", { { 12, 9 }, { 15, 20 }, { 16, 0 }, { 14, 16 } }, 44100, 61.7485898, 36.6693432, { { 1500, 0.0531249829f, -0.0374071151f }, { 4000, 0.165054232f, -0.0192129575f }, { 7000, -0.0373774841f, -0.00196591392f } } },
+        { "lp1", { { 50, 1 }, { 49, 0 } }, 44100, 7.81941168, 4.72659869, { { 1500, 0.0377117358f, -0.0157920271f }, { 4000, 0.0747607499f, 0.00154248625f }, { 7000, -0.0510631353f, 0.00884498842f } } },
+        { "bp3flat", { { 50, 3 }, { 49, 1 }, { 51, 1 } }, 44100, 2.19181431, 1.29483907, { { 1500, 0.0291239917f, -0.00288665155f }, { 4000, -0.0084345676f, -0.00400509313f }, { 7000, -0.00592403999f, 0.00150578981f } } },
+        { "bs2", { { 50, 2 }, { 49, 2 } }, 44100, 32.8440514, 25.7202184, { { 1500, 0.0730303749f, -0.0496222489f }, { 4000, 0.0696200803f, 0.0595823973f }, { 7000, -0.0482789353f, 0.0764200836f } } },
+        { "hp3", { { 50, 3 }, { 49, 3 } }, 44100, 8.623214, 7.95253188, { { 1500, -0.0325722694f, 0.00703159999f }, { 4000, 0.0183976218f, -0.0372007042f }, { 7000, -0.0126833525f, -0.00160143059f } } },
+        { "alt", { { 62, 257 } }, 44100, 17.2485711, 9.99223979, { { 1500, -0.0319156498f, -0.0186850764f }, { 4000, -0.0769012421f, -0.0375530645f }, { 7000, 0.0310976505f, 0.0445244014f } } },
+        { "isqrt", { { 62, 65792 } }, 44100, 45.7309307, 27.1224593, { { 1500, -0.04376591f, -0.00845711026f }, { 4000, 0.0351300463f, -0.129557073f }, { 7000, 0.0096148327f, 0.00123740174f } } },
+        { "seed2rnd", { { 11, 0 } }, 44100, 16.8228819, 11.5433061, { { 1500, -0.0117614279f, -0.026497297f }, { 4000, 0.00265733898f, -0.07069581f }, { 7000, 0.00576663949f, 0.0565217957f } } },
+        { "decinf", { { 6, 10000 } }, 44100, 19.1879226, 11.0487311, { { 1500, -0.0324105881f, -0.0190765262f }, { 4000, -0.0809780285f, -0.0395730771f }, { 7000, 0.034197174f, 0.048585102f } } },
+        { "logx", { { 57, 16777216 } }, 44100, 12.3064326, 7.31519289, { { 1500, -0.0438990779f, 0.0096983267f }, { 4000, -0.0175748877f, 0.0313935578f }, { 7000, 0.0639200211f, 0.024419222f } } },
+        { "velpos", { { 56, 66304 } }, 44100, 4.9966925, 3.16540662, { { 1500, 0.0083851777f, -0.0165472236f }, { 4000, 0.0630451962f, 0.0156494901f }, { 7000, -0.0293043777f, -0.00182877108f } } },
+        { "fs48", {  }, 48000, 10.8813888, 6.53592373, { { 1500, -0.0485184453f, -0.0319588967f }, { 4000, 0.0230421089f, -0.0286604818f }, { 7000, -0.0117630213f, -0.017459048f } } },
+        { "fs96", {  }, 96000, 11.0189683, 6.39821883, { { 1500, -0.0267860368f, -0.0227564126f }, { 4000, 0.0238709711f, -0.0100849615f }, { 7000, -0.0034619756f, 0.0451687202f } } },
+        };
+        for (const auto& v : variants)
+        {
+            auto st = blob;
+            for (const auto& [i, x] : v.params)
+                CHECK (lynx::ogunSetParam (st, i, x));
+            const auto y = lynx::ogun::renderReference (st, { { 0, 60, 0.75, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6144 },
+                                                              { 2048, 67, 0.625, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1 } }, (double) v.rate, 8192);
+            double el = 0.0, er = 0.0, peak = 0.0;
+            for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+                el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+            bool ok = y.size() == 2 * 8192 && std::abs (el - v.el) <= 1e-5 * v.el && std::abs (er - v.er) <= 1e-5 * v.er;
+            for (const auto& smp : v.s)
+                ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 1e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 1e-5 * peak;
+            if (! ok)
+                std::printf ("  Ogun variant %s differs from the model: energy %.9g %.9g (model %.9g %.9g)\n", v.name, el, er, v.el, v.er);
+            CHECK (ok);
+        }
+    }
+}
+
 // our own Maximus v7 state (layout REA_rodada8 §1.1): 7 globals, 4 × 13 band parameters, 8 envelopes (dx, y, tension, type)
 static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, const std::array<std::array<int, 13>, 4>& bands,
                                                    const std::array<std::vector<std::array<double, 4>>, 8>& envs, int oversampling)
@@ -6624,6 +6929,101 @@ static std::vector<std::uint8_t> maximusTestState (const std::array<int, 7>& g, 
         i32 (0), i32 (-1), i32 (-1), i32 (-1), i32 (-1);
     }
     return d;
+}
+
+TEST (ogun_demo_channels)
+{
+    // every Ogun channel of FL's demo projects (with its plugin effects) against the round-37 reference model, which is
+    // within −60 dB of FL's DLL on all of them: three notes (C5 1.0 0–20000, G5 0.6 8000–26000, G4 0.95 16000–30000),
+    // 39 690 samples at 44.1 kHz, at the state's quality and at the export quality 4. Fingerprint: energy per side and
+    // four samples (the engine matches the model within float rounding, −125 dB or better on the whole signal).
+    if (realFlpDir.empty())
+        return;
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* file; int ordinal; std::size_t stateSize; bool export4; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "Demo songs/Astes - Bien Duro.flp", 0, 64728, false, 710.708198, 710.708198, { { 5000, 0.133627325f, 0.133627325f }, { 12000, -0.143534407f, -0.143534407f }, { 25000, 0.079226315f, 0.079226315f }, { 35000, -0.0128487358f, -0.0128487358f } } }, // 3.3.1 Metal Drums: Drum
+        { "Demo songs/Astes - Bien Duro.flp", 0, 64728, true, 794.506558, 794.506558, { { 5000, -0.0112881307f, -0.0112881307f }, { 12000, -0.068779245f, -0.068779245f }, { 25000, -0.0289028231f, -0.0289028231f }, { 35000, -0.0161623377f, -0.0161623377f } } }, // 3.3.1 Metal Drums: Drum
+        { "Demo songs/Astes - Bien Duro.flp", 1, 4261, false, 297.957631, 297.957631, { { 5000, -0.000330464332f, -0.000330464332f }, { 12000, -0.00156057056f, -0.00156057056f }, { 25000, -9.24126434e-05f, -9.24126434e-05f }, { 35000, 0.0f, 0.0f } } }, // 3.3.1 Metal Drums: Click
+        { "Demo songs/Astes - Bien Duro.flp", 1, 4261, true, 189.545711, 189.545711, { { 5000, 0.00102557975f, 0.00102557975f }, { 12000, -0.00522088073f, -0.00522088073f }, { 25000, 5.81103013e-05f, 5.81103013e-05f }, { 35000, 0.0f, 0.0f } } }, // 3.3.1 Metal Drums: Click
+        { "Demo songs/Astes - Bien Duro.flp", 2, 133836, false, 125.683557, 125.683557, { { 5000, 0.0176561493f, 0.0176561493f }, { 12000, 0.019205872f, 0.019205872f }, { 25000, 0.0046372693f, 0.0046372693f }, { 35000, -0.00165430119f, -0.00165430119f } } }, // 3.3.2 Tibetan
+        { "Demo songs/Astes - Bien Duro.flp", 2, 133836, true, 105.621798, 105.621798, { { 5000, 0.00897848886f, 0.00897848886f }, { 12000, -0.0171215143f, -0.0171215143f }, { 25000, -0.00821319036f, -0.00821319036f }, { 35000, -0.00245537539f, -0.00245537539f } } }, // 3.3.2 Tibetan
+        { "Demo songs/Astes - Bien Duro.flp", 3, 97085, false, 2066.75611, 2066.75611, { { 5000, -0.101155393f, -0.101155393f }, { 12000, 0.355391592f, 0.355391592f }, { 25000, 0.00365939317f, 0.00365939317f }, { 35000, -0.0191957876f, -0.0191957876f } } }, // 3.3.3 Chase
+        { "Demo songs/Astes - Bien Duro.flp", 3, 97085, true, 1667.28674, 1667.28674, { { 5000, -0.236701503f, -0.236701503f }, { 12000, -0.126374632f, -0.126374632f }, { 25000, 0.0533663221f, 0.0533663221f }, { 35000, -0.0100225089f, -0.0100225089f } } }, // 3.3.3 Chase
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", 0, 819, false, 551.263856, 371.038684, { { 5000, 0.0253486633f, 0.160556272f }, { 12000, 0.194370747f, -0.0359776132f }, { 25000, -0.00528950989f, 0.01478827f }, { 35000, 0.110768802f, -0.0237054806f } } }, // Bellish 11
+        { "Demo songs/Edlan & Ella Noël - Song For You.flp", 0, 819, true, 547.662092, 381.048456, { { 5000, 0.0401367024f, 0.0261611789f }, { 12000, -0.157383129f, -0.0282031279f }, { 25000, -0.000249146833f, 0.0388034321f }, { 35000, -0.105665907f, 0.0320193283f } } }, // Bellish 11
+        { "Demo songs/LollieVox & Lezina J - I'll Be Your Madonna.flp", 0, 105571, false, 833.288142, 909.880193, { { 5000, 0.0276863724f, 0.214677185f }, { 12000, 0.00827352796f, 0.141611829f }, { 25000, -0.160458148f, 0.0101522766f }, { 35000, -0.0157076102f, 0.00129696913f } } }, // High Chords
+        { "Demo songs/LollieVox & Lezina J - I'll Be Your Madonna.flp", 0, 105571, true, 928.749154, 967.940976, { { 5000, -0.0623336285f, -0.0959333256f }, { 12000, 0.0601816922f, -0.0748261437f }, { 25000, -0.0872222036f, -0.101655915f }, { 35000, -0.002591094f, 0.0107459351f } } }, // High Chords
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 0, 813, false, 21576.8988, 21576.8988, { { 5000, 0.00724618789f, 0.00724618789f }, { 12000, 0.0337664448f, 0.0337664448f }, { 25000, -1.44279329e-05f, -1.44279329e-05f }, { 35000, 0.0f, 0.0f } } }, // Kick
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 0, 813, true, 17857.5027, 17857.5027, { { 5000, -0.0114536202f, -0.0114536202f }, { 12000, -0.00848954543f, -0.00848954543f }, { 25000, 1.20320046e-05f, 1.20320046e-05f }, { 35000, 0.0f, 0.0f } } }, // Kick
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 1, 789, false, 172.127165, 170.39981, { { 5000, -0.00470701791f, -0.000373305753f }, { 12000, 0.0417476855f, 0.0339940563f }, { 25000, 0.0204325765f, 0.0191226583f }, { 35000, -0.000425090868f, -0.000144533216f } } }, // Clap
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 1, 789, true, 163.557022, 149.810459, { { 5000, 0.00246403809f, 0.0228729937f }, { 12000, 0.0378073864f, 0.0445459485f }, { 25000, -0.0242712852f, -0.0313444398f }, { 35000, -0.00112735468f, -0.00138637482f } } }, // Clap
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 2, 635, false, 125.48103, 127.519836, { { 5000, -0.00389297446f, 0.00181007839f }, { 12000, -0.0543250106f, -0.0736973509f }, { 25000, -0.00448145531f, 0.000426211918f }, { 35000, 5.35470353e-05f, 4.34564136e-05f } } }, // High Hat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 2, 635, true, 245.916518, 254.34816, { { 5000, 0.00147765165f, 0.00267027458f }, { 12000, 0.0883170143f, 0.173417449f }, { 25000, -0.00118842872f, 0.000863731664f }, { 35000, -0.000298409053f, -9.04561821e-05f } } }, // High Hat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 3, 45647, false, 271.486026, 271.486026, { { 5000, -4.96093298e-06f, -4.96093298e-06f }, { 12000, 0.000292191253f, 0.000292191253f }, { 25000, -8.18665136e-10f, -8.18665136e-10f }, { 35000, 0.0f, 0.0f } } }, // HiHat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 3, 45647, true, 167.753037, 167.753037, { { 5000, 2.2048649e-05f, 2.2048649e-05f }, { 12000, -1.77328075e-05f, -1.77328075e-05f }, { 25000, -3.00809999e-09f, -3.00809999e-09f }, { 35000, 0.0f, 0.0f } } }, // HiHat
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 4, 887, false, 6005.75168, 6293.90961, { { 5000, -0.19636783f, -0.0313744769f }, { 12000, 0.178472087f, 0.601032794f }, { 25000, -0.351912051f, -0.0497151017f }, { 35000, -0.182245821f, -0.181938142f } } }, // Snare
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 4, 887, true, 6151.47444, 6049.47136, { { 5000, -0.102814399f, 0.0690701902f }, { 12000, 0.0902677849f, 0.114889771f }, { 25000, -0.173990116f, 0.140671447f }, { 35000, 0.0744562522f, 0.0291433111f } } }, // Snare
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 5, 705, false, 6511.3723, 5580.42134, { { 5000, 0.478397369f, 0.536334693f }, { 12000, -0.312448859f, -0.301919997f }, { 25000, 0.260874003f, -0.0129742175f }, { 35000, 0.0223956257f, 0.033103168f } } }, // Swebass 1
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 5, 705, true, 6415.0768, 5859.44881, { { 5000, 0.0342692807f, 0.00727743423f }, { 12000, -0.0324966274f, 0.125386745f }, { 25000, -0.0785191655f, -0.25017795f }, { 35000, -0.0524680056f, -0.0384391509f } } }, // Swebass 1
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 6, 708, false, 2487.6041, 2190.17262, { { 5000, -0.0770967156f, -0.00940297544f }, { 12000, 0.329836905f, 0.183736563f }, { 25000, 0.0137981772f, -0.0334252715f }, { 35000, 0.0132095823f, 0.0277119074f } } }, // Swebass 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 6, 708, true, 2519.26975, 2230.77243, { { 5000, -0.204216316f, -0.16732122f }, { 12000, 0.0762225091f, 0.0964485779f }, { 25000, -0.0833523944f, -0.132980049f }, { 35000, -0.015998248f, 0.0112942485f } } }, // Swebass 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 7, 109827, false, 1326.11782, 1397.71125, { { 5000, 0.0306534693f, 0.026510708f }, { 12000, -0.139238164f, -0.104713492f }, { 25000, 0.106734768f, 0.0295313746f }, { 35000, 0.258899271f, 0.260215104f } } }, // Midnight Lady
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 7, 109827, true, 1252.058, 1287.83169, { { 5000, -0.0980920121f, -0.108575724f }, { 12000, 0.131130368f, 0.176118359f }, { 25000, 0.0581845529f, 0.174699515f }, { 35000, -0.17453593f, 0.0978319347f } } }, // Midnight Lady
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 8, 34816, false, 10793.0192, 11904.6549, { { 5000, 0.36459741f, -0.0714551434f }, { 12000, 0.565215111f, -0.205066338f }, { 25000, -0.652977228f, -0.432422459f }, { 35000, -0.284279644f, -0.122116163f } } }, // Supersaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 8, 34816, true, 10132.5107, 11590.7617, { { 5000, 0.192168862f, 0.0883051828f }, { 12000, -0.590734482f, 0.512839496f }, { 25000, 0.682625771f, 0.287306368f }, { 35000, -0.00662239315f, 0.700808227f } } }, // Supersaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 9, 94266, false, 826.69243, 1157.08939, { { 5000, 0.0348474756f, -0.168766886f }, { 12000, -0.0719366521f, 0.288826376f }, { 25000, 0.181558818f, 0.0424098521f }, { 35000, -0.321783781f, -0.0548994206f } } }, // Airguitar 3
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 9, 94266, true, 830.517691, 772.62552, { { 5000, -0.208309069f, 0.152180359f }, { 12000, -0.264171928f, 0.163982511f }, { 25000, 0.0313629843f, -0.187507361f }, { 35000, 0.133838147f, 0.0704783946f } } }, // Airguitar 3
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 10, 1004, false, 12678.7464, 11831.2032, { { 5000, 0.192205578f, 0.613839507f }, { 12000, 0.269521117f, -0.585603476f }, { 25000, 0.0944993123f, 0.0806781948f }, { 35000, -0.16715017f, 0.412193805f } } }, // Trumpet
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 10, 1004, true, 12261.8266, 9962.482, { { 5000, 0.422391087f, -0.251674503f }, { 12000, -0.46900028f, -0.57652849f }, { 25000, -0.535878778f, 0.115671799f }, { 35000, -0.545713186f, 0.0383624472f } } }, // Trumpet
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 11, 30605, false, 1358.26232, 1520.29691, { { 5000, -0.0350573957f, 0.0372484438f }, { 12000, 0.0963054374f, -0.130206674f }, { 25000, 0.0404771306f, -0.270439237f }, { 35000, -0.0870027244f, 0.0245792065f } } }, // Silverswirll
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 11, 30605, true, 964.637209, 1040.25756, { { 5000, 0.111636952f, -0.00114471605f }, { 12000, 0.0483313873f, 0.0637735277f }, { 25000, -0.152803347f, 0.101604536f }, { 35000, 0.0288163591f, 0.0194431469f } } }, // Silverswirll
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 12, 34708, false, 21463.1948, 22013.1021, { { 5000, -0.00810255855f, -0.0122786947f }, { 12000, -0.163549975f, -0.203571558f }, { 25000, 0.419101298f, -1.1141516f }, { 35000, 0.498232335f, -0.394363374f } } }, // Padsaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 12, 34708, true, 22903.9209, 21556.3509, { { 5000, -0.00977799948f, -0.0114432834f }, { 12000, -0.0759382695f, 0.077038914f }, { 25000, -0.556497335f, -1.22787583f }, { 35000, -1.31076968f, -1.73392022f } } }, // Padsaw
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 13, 6395, false, 3516.18148, 3565.45486, { { 5000, -0.0564712696f, -0.262329876f }, { 12000, 0.113444217f, 0.168150783f }, { 25000, -0.45024398f, -0.694699228f }, { 35000, 0.151807249f, -0.00405737339f } } }, // Turbular Bells 2
+        { "Product demos/Electric Loop - The Ogun Dream.flp", 13, 6395, true, 3571.34372, 3626.15163, { { 5000, -0.0878480822f, -0.275067806f }, { 12000, 0.230907321f, 0.28320539f }, { 25000, -0.470044613f, -0.701287091f }, { 35000, 0.195627496f, 0.0175700653f } } }, // Turbular Bells 2
+    };
+    std::map<std::string, std::vector<std::vector<std::uint8_t>>> states;
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        if (! states.contains (g.file))
+        {
+            std::ifstream in (std::filesystem::path (realFlpDir) / "Demo projects" / g.file, std::ios::binary);
+            const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+            auto& list = states[g.file];
+            if (! bytes.empty())
+                for (const auto& c : flp::parseProject (bytes).channels)
+                    if (c.pluginName == "Ogun")
+                        list.push_back (c.pluginState);
+        }
+        const auto& list = states[g.file];
+        if (list.empty())
+            continue; // not this installation
+        CHECK ((int) list.size() > g.ordinal);
+        if ((int) list.size() <= g.ordinal)
+            continue;
+        const auto& st = list[(std::size_t) g.ordinal];
+        CHECK (st.size() == g.stateSize);
+        lynx::ogun::RefOptions opt;
+        opt.quality = g.export4 ? 4 : -1;
+        const auto y = lynx::ogun::renderReference (st, { { 0, 60, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20000 },
+                                                          { 8000, 67, 0.6, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 26000 },
+                                                          { 16000, 55, 0.95, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30000 } }, 44100.0, 39690, opt);
+        double el = 0.0, er = 0.0, peak = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1], peak = std::max ({ peak, (double) std::abs (y[i]), (double) std::abs (y[i + 1]) });
+        bool ok = y.size() == 2 * 39690 && std::abs (el - g.el) <= 1e-5 * g.el && std::abs (er - g.er) <= 1e-5 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && std::abs (y[2 * (std::size_t) smp.at] - smp.l) <= 2e-5 * peak && std::abs (y[2 * (std::size_t) smp.at + 1] - smp.r) <= 2e-5 * peak;
+        if (! ok)
+            std::printf ("  Ogun %s #%d (q%s) differs from the model: energy %.9g %.9g (model %.9g %.9g)\n", g.file, g.ordinal,
+                         g.export4 ? "4" : "-state", el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    std::printf ("  Ogun: %d demo renders checked against the reference model\n", checked);
+    CHECK (checked == (int) std::size (goldens));
 }
 
 TEST (harmless_rack)
@@ -6687,9 +7087,10 @@ TEST (harmless_rack)
         std::array<int, 100> p {};
         p[98] = 1000;
         const auto [l, r] = run (p, 1, preset, 4096, 4096);
-        const std::tuple<int, float, float> golden[] { { 100, 0.02499794f, 0.88166064f }, { 1000, 0.56971455f, -0.62808162f },
-                                                       { 2047, -0.27541649f, 0.70913559f }, { 3000, 0.32431602f, -0.37985173f },
-                                                       { 4095, -0.12743534f, -0.15237498f } };
+        // SG_x64.dll's own output (EXEC, REA_rodada40: bit-identical to the port)
+        const std::tuple<int, float, float> golden[] { { 100, 0.024997942f, 0.88166064f }, { 1000, 0.56971401f, -0.62808102f },
+                                                       { 2047, -0.27541628f, 0.709135f }, { 3000, 0.32431623f, -0.37985197f },
+                                                       { 4095, -0.12743522f, -0.15237485f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
         float peak = 0.0f;
@@ -6712,9 +7113,10 @@ TEST (harmless_rack)
         std::array<int, 100> p {};
         p[98] = 600;
         const auto [l, r] = run (p, 2, preset, 4096, 4096);
-        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856275f, -0.63261062f },
-                                                       { 2047, 0.20268074f, 0.5414567f }, { 3000, -0.25614089f, -0.49984524f },
-                                                       { 4095, 0.10172816f, 0.0505573f } };
+        // SG_x64.dll's own output (EXEC, REA_rodada40; the port is within −142 dB of it)
+        const std::tuple<int, float, float> golden[] { { 100, 0.0f, 0.0f }, { 1000, -0.46856543f, -0.63262129f },
+                                                       { 2047, 0.20268451f, 0.54145539f }, { 3000, -0.25613472f, -0.49985155f },
+                                                       { 4095, 0.10172445f, 0.050564945f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
     }
@@ -6738,9 +7140,112 @@ TEST (harmless_rack)
         const auto found = lynx::hlfx::maximusStateFromFst (fst);
         CHECK (found && *found == st);
         auto rms = st;
-        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada38: Harmor's preset 2)
+        rms[4 + 4 * (7 + 13 * 3 + 12)] = 1; // RMS detector on the master (decoded in REA_rodada40)
         CHECK (lynx::hlfx::makeMaximusPreset (rms) != nullptr);
+        auto masterMid = st;
+        masterMid[0x1fc] = 1; // "Master Mid mode": not decoded
+        CHECK (lynx::hlfx::makeMaximusPreset (masterMid) == nullptr);
     }
+}
+
+TEST (maximus_engine)
+{
+    // REA_rodada40: the engine on its own (MaximusProcessor), states of our own against the installation's DLLs
+    // (goldens = the DLL's output for the same input, EXEC), and the containers of the mixer effect and Vocodex
+    std::vector<float> inL (4096), inR (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = (float) (1.5 * std::sin (2.0 * 3.141592653589793 * 440.0 * i / 44100.0) * std::min (1.0, i / 400.0));
+        inR[(std::size_t) i] = (float) (1.2 * std::sin (2.0 * 3.141592653589793 * 660.0 * i / 44100.0));
+    }
+    auto run = [&] (std::shared_ptr<const lynx::hlfx::MaximusPreset> preset, int mix) {
+        lynx::hlfx::MaximusProcessor m;
+        m.prepare (std::move (preset), 44100.0, mix);
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 512)
+            m.process (l.data() + s, r.data() + s, 512);
+        return std::make_pair (l, r);
+    };
+    using Env = std::vector<std::array<double, 4>>;
+    const Env def { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    const Env knee { { 0.0, 0.0, 0.0, 0 }, { 0.35, 0.35, 0.0, 0 }, { 0.65, 0.6, 0.36, 7 } };
+    const Env t0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.14, 0 }, { 0.5, 0.5, 0.0, 0 } };
+    const Env m0 { { 0.0, 0.0, 0.0, 0 }, { 0.5, 0.5, 0.0, 0 }, { 0.5, 0.6, 0.085, 0 } };
+    auto band = [] (int mode, int pre = 1000, int post = 1000, int sep = 0, int sat = 0, int ceil = 1000, int att = 1115, int rel2 = 0,
+                    int sus = 2882, int rms = 0) { return std::array<int, 13> { mode, pre, post, sep, sat, ceil, att, rel2, 2, 5000, 3, sus, rms }; };
+    auto check = [] (const std::pair<std::vector<float>, std::vector<float>>& out, const std::vector<std::tuple<int, float, float>>& golden) {
+        for (const auto& [i, gl, gr] : golden)
+            CHECK (std::abs (out.first[(std::size_t) i] - gl) < 2e-6f && std::abs (out.second[(std::size_t) i] - gr) < 2e-6f);
+    };
+    // RMS detectors, saturation mode B, a 5 Hz low cut, 12 dB high split (SG_x64.dll: port within −152 dB)
+    auto st3 = maximusTestState ({ 19800, 1, 48065, 0, 1115, 1000, 0 },
+                                 { band (0, 1500, 1000, 0, 400, 900, 1115, 0, 2882, 1), band (0, 1340, 1000, 0, 0, 1000, 1115, 0, 1570, 1),
+                                   band (1, 1000, 1200, 0, 1000, 1000), band (0, 1000, 1000, 0, 250, 1000, 1115, 4464, 2882, 1) },
+                                 { def, def, knee, def, t0, def, m0, def }, 0);
+    const auto p3 = lynx::hlfx::makeMaximusPreset (st3);
+    CHECK (p3 != nullptr);
+    check (run (p3, 1000), { { 100, 0.0f, 0.0f }, { 1000, 0.87061065f, 0.64004499f }, { 2047, -0.97266865f, 0.60940075f },
+                             { 3000, 0.96658099f, 0.9250561f }, { 4095, 0.99094611f, -0.964059f } });
+    // the same with solo on (UI byte 0x1EF) and the low band selected (0x1E0): bit-identical to SG_x64.dll
+    auto solo = st3;
+    solo[0x1ef] = 1;
+    std::memset (solo.data() + 0x1e0, 0, 4);
+    check (run (lynx::hlfx::makeMaximusPreset (solo), 1000),
+           { { 100, 3.2922967e-06f, 0.00036916698f }, { 1000, 0.15653539f, -0.047913823f }, { 2047, -0.17336531f, 0.019099623f },
+             { 3000, 0.17185682f, -0.017173048f }, { 4095, 0.16714551f, 0.019473195f } });
+    // the legacy linear-phase FIR band split (UI byte 0x1FD; SG_x64.dll: port within −148 dB)
+    auto fir = st3;
+    fir[0x1fd] = 1;
+    check (run (lynx::hlfx::makeMaximusPreset (fir), 1000),
+           { { 100, 0.0f, 0.0f }, { 1000, 0.97986746f, 0.18555209f }, { 2047, -0.98930448f, -0.95970845f },
+             { 3000, 0.98856646f, -0.44592777f }, { 4095, 0.99069679f, 0.94382554f } });
+    // Soundgoodizer_x64.dll's own build with a v4 file (its presets' layout): a copy of the round-36 state without
+    // oversampling, through a byte-identical copy of the installation's DLL with this file as its preset (EXEC)
+    const auto st2 = maximusTestState ({ 19800, 1, 48065, 1, 891, 600, 32768 },
+                                       { band (1, 1264, 1296, 500, -500, 1200), band (0, 1340, 1000, -348, 0, 1000, 1115, 0, 1570),
+                                         band (0, 1364, 1152, 0, 0, 1000, 1115, 0, 1186), band (0, 1000, 1000, 0, -196, 1000, 1115, 4464, 1538) },
+                                       { def, def, knee, def, t0, def, m0, def }, 0);
+    std::vector<std::uint8_t> v4 { 4, 0, 0, 0 };
+    v4.insert (v4.end(), st2.begin() + 4, st2.begin() + 0x1f5);
+    v4.insert (v4.end(), st2.begin() + 0x1fe, st2.end());
+    const auto p4 = lynx::hlfx::makeMaximusPreset (v4, lynx::hlfx::MaximusBuild::soundgoodizer);
+    CHECK (p4 != nullptr);
+    check (run (p4, 600), { { 100, 0.0f, 0.0f }, { 1000, -0.60926896f, -0.6652832f }, { 2047, 0.40872875f, 0.36375371f },
+                            { 3000, -0.41941205f, -0.61312866f }, { 4095, -0.12878418f, 0.27944946f } });
+    CHECK (lynx::hlfx::makeMaximusPreset (st2, lynx::hlfx::MaximusBuild::soundgoodizer) != nullptr); // v7: also read by that build
+    // the mixer effect's container and the effect itself
+    lynx::maximusfx::Blob blob;
+    blob.build = lynx::hlfx::MaximusBuild::soundgoodizer;
+    blob.mix = 600;
+    blob.state = v4;
+    const auto packed = lynx::maximusfx::pack (blob);
+    const auto back = lynx::maximusfx::unpack (packed);
+    CHECK (back && back->build == blob.build && back->mix == 600 && back->state == v4);
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::maximus);
+    slot.state = packed;
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (44100.0);
+    {
+        std::vector<float> l (inL), r (inR);
+        for (int s = 0; s < 4096; s += 1024) // longer host blocks are split into the engine's 512-frame calls
+            fx->process (l.data() + s, r.data() + s, 1024, slot.params, 120.0);
+        const auto ref = run (p4, 600);
+        CHECK (l == ref.first && r == ref.second);
+    }
+    const std::vector<std::uint8_t> sgState { 3, 0, 0, 0, 2, 0, 0, 0, 0x78, 2, 0, 0 };
+    const auto sg = lynx::maximusfx::parseSoundgoodizer (sgState);
+    CHECK (sg && sg->preset == 2 && sg->amount == 632 && std::string (lynx::maximusfx::soundgoodizerPresetFile (2)) == "c.dat");
+    CHECK (lynx::soundgoodizerPresetPath (sgState) == "Plugins\\Fruity\\Effects\\Soundgoodizer\\Data\\Presets\\c.dat");
+    CHECK (lynx::soundgoodizerExact (sgState, v4).has_value() && ! lynx::soundgoodizerExact (sgState, {}).has_value());
+    // Vocodex's appended installation data survives a round trip and leaves FL's state untouched
+    const std::vector<std::uint8_t> flState { 8, 0, 0, 0, 1, 2, 3 };
+    lynx::vocodex::InstallData data;
+    data.sgDat = st2;
+    data.carrierState = { 9, 9, 9 };
+    const auto joined = lynx::vocodex::appendInstallData (flState, data);
+    const auto [raw, files] = lynx::vocodex::splitInstallData (joined);
+    CHECK (raw == flState && files.sgDat == st2 && files.carrierState == data.carrierState);
+    CHECK (lynx::vocodex::splitInstallData (flState).first == flState);
 }
 
 // ---- Sytrus (REA_rodada31) -------------------------------------------------------------------------------------------
@@ -7463,3 +7968,5 @@ TEST (morphine_engine)
     }
     CHECK (diff == 0.0 && energy > 1e-3);
 }
+// Workflow P2 (docs/WORKFLOW_FL.md)
+#include "WorkflowP2Tests.inc"
