@@ -750,7 +750,8 @@ search stepping, instrument drops on mixer inserts, record filters for automatio
 - Bound channel ↔ track ↔ insert "instrument tracks" (P23).
 - Live clip launching (P24); always-on capture buffer (X8); step entry (X7).
 - Mixer docks, views, routing cables, insert state presets (M11, M13); browser tabs, tags, favourites (B7).
-- Toolbar customisation presets (DATA: toolbar preset files); save-new-version (G14); user templates (G15).
+- Toolbar presets and free spacers (DATA: toolbar preset files; LYNX has show/hide/reorder, icon size and UI scale,
+  section 5.1); save-new-version (G14); user templates (G15).
 - Plugin window header with preset arrows, rename and MIDI options (W1, W3, W4).
 
 ---
@@ -825,14 +826,52 @@ band, two rows high, panels left to right:
 4. the recording options: metronome, count-in and wait-for-input over "what to record" and the typing keyboard
    as piano;
 5. global snap over the pattern selector, each with a caption (SNAP, PATTERN); the wheel steps both;
-6. shortcuts: the windows (Playlist, Channel Rack, Piano Roll, Mixer, Browser, plugin picker = the quick-add
-   palette, F8), with the file actions under them (new, open, save, export, undo, redo);
+6. shortcuts, two groups of three icons per row: the windows (Playlist, Channel Rack, Piano Roll / Mixer,
+   Browser, plugin picker = the quick-add palette, F8), then the file actions (new, open, save / export, undo,
+   redo);
 7. on the right, after any spare room: **CPU / RAM / polyphony**, then the **output** oscilloscope and peak meter.
 
-When the window is narrow, panels drop by priority (the first to go: meters, output, recording options,
-shortcuts, master, snap/pattern); the transport always stays. Everything they hold is also in the menus or on
+This is the default order; the user can hide and reorder the groups (see "Toolbar customization" below).
+When the window is narrow, panels drop by priority (the first to go: output, meters, recording options, file
+actions, window shortcuts, master, snap/pattern); the transport always stays. Everything they hold is also in the menus or on
 keys. Every control has a hint with its mouse gestures and keys. Toolbar icon buttons fade their hover state in
 and out (`IconButton`). The LYNX logo is not drawn inside the window; it stays the window and taskbar icon.
+
+**Toolbar customization and icon sizes (observed in FL Studio 2026, October 2026; behaviour only).**
+- *Observed* (fresh FL Studio 2026 window, 1920×1032, 100% scaling): the toolbar is two rows of about 41 px.
+  Shortcut buttons are about 30 px wide and 32 px high with glyphs of about 20 px; play/stop/record are the same
+  size. The editors' tools sit in the window's title row (about 22 px high), at about 21 px per tool with glyphs
+  of about 16 px. So the tools are small next to the toolbar, but not tiny. **[observed]**
+- *Data*: the toolbar preset files list each panel or button with a width and a row (row 13 = upper, 14 =
+  lower); icon buttons are 30 px wide at 100%, and a spacer ("Splitter") holds the spare width. [DATA]
+- Right-click on an empty part of the toolbar opens the toolbar menu: Edit (edit mode), Separators, Flat
+  buttons, Hint bar (the extended hint panel), Hide (Ctrl+F11) and Presets (factory presets and "Auto saved",
+  the last edited layout). [DOC][tb]
+- Edit mode: items are dragged from a tray below the toolbar onto it to add them, and dragged off it to remove
+  them. Spacers push items to the right; the rightmost spacer absorbs window resizes. When the window is too
+  narrow, the right spacer shrinks first, then the other spacers, then resizable panels, then icons. Presets are
+  saved and loaded from a menu in edit mode. [DOC][tbe]
+- Sizes: there is no icon-size setting. General Settings has **Main GUI scaling** (System by default, or a
+  percentage; 125–200% suggested for 4K/5K), with separate **Toolbars**, pop-up and plugin scaling that follow it
+  by default; changes need a restart. [DOC][envgen]
+
+**LYNX** (`core/ToolbarLayout.h`, unit-tested; `MainComponent::setToolbarLayout`, `toolbar::CustomizePanel`):
+- **Right-click on the toolbar background** opens the toolbar menu: one tick item per group (Transport, Master
+  volume and pitch, Recording options, Snap and pattern, Window shortcuts, File and undo, CPU/memory/polyphony,
+  Output monitor) to show or hide it, **Icon size** (small / medium / large), **UI scale** (80–250%),
+  **Customize toolbar…** and **Reset toolbar to default**. The same menu is in Options → Toolbar.
+- **Customize toolbar…** lists the groups in toolbar order with a check box each; Move up / Move down (or
+  Alt+Up/Down) reorder the selected group; icon size, UI scale and Reset to default are there too. Changes apply
+  at once and are saved in `ui-options.txt` (`toolbarGroups`, `toolbarIcons`, `uiScale`).
+- The menu with the hint bar under it always comes first. The spare width goes before the first of the meters or
+  the output monitor (LYNX's single "spacer"). When the window is narrow, shown groups still drop by priority;
+  the transport stays. No drag-and-drop edit mode or named presets (yet).
+- **Icon size** sets the toolbar row height (26 / **32** / 38 px) and the icon box (18 / **24** / 30 px; 24 px is
+  the icon grid at 1:1, the sharpest). The window and file shortcuts are now blocks of three per row. The same
+  setting sizes the editors' tool strips: 16 / **20** / 22 px icon boxes (up from 13 px) on buttons 2–6 px wider
+  than high. Icons are drawn on whole pixels so every button renders them equally sharp; other icon buttons
+  use 66% of their height (was 60%).
+- **UI scale** scales the whole interface (`juce::Desktop` global scale factor) at once, without a restart.
 
 ### 5.2 Editor tools live in each editor's own toolbar
 - **Playlist.** Its toolbar runs along the top of the Playlist window. Left to right: the Playlist menu, the snap
@@ -962,6 +1001,7 @@ Base: `https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/htm
 [tools]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_tools.htm
 [pat-menu]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/menu_patterns.htm
 [tb]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm
+[tbe]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_edit.htm
 [tb-snap]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm#panel_globalsnap
 [tb-rec]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/toolbar_panels.htm#record_button
 [envgen]: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/envsettings_general.htm

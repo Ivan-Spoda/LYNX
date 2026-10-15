@@ -587,8 +587,7 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
 
     const auto fraction = toolbarlayout::iconFraction (size), maxPx = toolbarlayout::iconMaxPx (size);
     for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton,
-                     &patternMenuButton, &pluginPickerButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
-                     &patternModeButton, &songModeButton })
+                     &patternMenuButton, &pluginPickerButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton })
         b->setIconSizing (fraction, maxPx);
     for (auto& b : panelButtons)
         b.setIconSizing (fraction, maxPx);
