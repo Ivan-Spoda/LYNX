@@ -253,7 +253,14 @@ accordingly. Highlights of what is **confirmed and applied**:
   FL's pan law (√2·cos/sin with the far side folded in), pan-LFO tension, pulse curves (type 5) as steps.
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
-  Compressor with a side input become LYNX's compressor listening to the source track.
+  Compressor with a side input listen to the source track (their exact engines below).
+- **Fruity Limiter and Fruity Compressor:** FL's exact engines as mixer effects (`core/FruityDynamics`, REA round 48),
+  editable with FL's own controls. Limiter: gain, RMS compressor section (ratio/knee laws, curve stages, side input),
+  peak window + look-ahead limiter with release/attack curves, noise gate, soft saturation or clip, silence bypass,
+  x87-precision stages; look-ahead reported to PDC. Compressor: DC blocker, peak follower, the eight knee types incl.
+  Vintage and "/R" dynamic release, makeup and the fixed 64-frame look-ahead brick wall. Compressor bit-identical to
+  its DLL on all 70 unique installation states; Limiter bit-identical on 101 of 272 and within −129.5 dB on all (median
+  −151 dB; the residual is IPP's vector log/exp/sqrt in the compressor section).
 - **Pitcher:** FL's DSP (REA round 30, bit-exact against the reference model): integer-lag AMDF detector,
   nearest-allowed-note correction with FL's laws (speed, Fine, A reference, the note mask stored in the state, Key
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
