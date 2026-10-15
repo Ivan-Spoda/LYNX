@@ -443,6 +443,7 @@ countries: br
 "GMS — FL's engine (waves read from your FL installation)" = "GMS — motor do FL (ondas lidas da sua instalação do FL)"
 "Morphine — FL's additive engine (new settings restart the voices)" = "Morphine — motor aditivo do FL (novos ajustes reiniciam as vozes)"
 "Ogun — FL's engine with its effects (Seed 2 Random is a fixed draw per channel)" = "Ogun — motor do FL com seus efeitos (Seed 2 Random é um sorteio fixo por canal)"
+"Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)" = "Kepler — motor do FL (forma do LFO e ruído lidos da sua instalação do FL; novos ajustes reiniciam as vozes)"
 "BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)" = "BooBass — motor do FL, som lido da sua instalação do FL (knobs: EQ de 3 bandas)"
 "Sakura — physical strings (FL's engine; new parameters apply to the next note)" = "Sakura — cordas físicas (motor do FL; novos parâmetros valem a partir da próxima nota)"
 "Drumpad — physical drum (FL's engine; new parameters apply to the next hit)" = "Drumpad — tambor físico (motor do FL; novos parâmetros valem a partir do próximo hit)"

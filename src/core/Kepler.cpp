@@ -7,8 +7,6 @@
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -62,17 +60,13 @@ struct NearestMode
 };
 #endif
 
-// pow in extended precision, rounded to double in the current SSE mode (toward zero inside the render)
+// pow evaluated in extended precision, then rounded to double (the DLL's library is close to this; single-ulp
+// differences remain, §6.2)
 double powD (double a, double b) noexcept
 {
-    const auto r = std::pow ((long double) a, (long double) b);
-    auto d = (double) r;
-#ifdef LYNX_KEPLER_MXCSR
-    if ((_mm_getcsr() & 0x6000u) == 0x6000u && std::fabs ((long double) d) > std::fabs (r))
-        d = std::nextafter (d, 0.0);
-#endif
-    return d;
+    return (double) std::pow ((long double) a, (long double) b);
 }
+
 float powF (float a, float b) noexcept
 {
     return (float) powD ((double) a, (double) b);
@@ -165,9 +159,6 @@ std::vector<float> blitRows()
     }
     // 1/max as the DLL's reciprocal estimate + Newton step gives it on the analysed machine: one unit above 1/max [EXEC]
     const auto inv = std::nextafter (1.0f / (float) peak, 1e30f);
-#ifdef KEPLER_PROBE
-    std::fprintf (stderr, "blit peak %.17g inv %.9g c %.17g f100 %.9g\n", peak, (double) inv, c, (double) f[100]);
-#endif
     std::vector<float> k ((std::size_t) n);
     for (int i = 0; i < n; ++i)
         k[(std::size_t) i] = f[(std::size_t) (i + pre)] * 1.0f * inv;
@@ -245,14 +236,6 @@ std::shared_ptr<const Tables> loadTables (const std::string& path)
     t->noise.resize ((std::size_t) noisePoints);
     std::memcpy (t->noise.data(), b.data() + no, 2 * (std::size_t) noisePoints);
     t->blit = blitRows();
-#ifdef KEPLER_PROBE
-    if (const char* f = std::getenv ("KEPLER_DUMP_BLIT"))
-        if (auto* o = std::fopen (f, "wb"))
-        {
-            std::fwrite (t->blit.data(), 4, t->blit.size(), o);
-            std::fclose (o);
-        }
-#endif
     cache[path] = t;
     return t;
 }
@@ -637,14 +620,6 @@ public:
             arpClock (t);
             float l = 0.0f, r = 0.0f;
             sample (l, r, beatPos);
-#ifdef KEPLER_PROBE
-            {
-                const auto& v = voices[0];
-                std::fprintf (stderr, "P %.9g %.9g %.9g %.9g %.17g %.9g %.9g %.9g %.9g %.9g %.9g\n", (double) v.env1, (double) v.cutoffHz, (double) v.laneCut,
-                              (double) groups[0].in[0], v.osc.inc, (double) groups[0].out[0], (double) v.amp, (double) mainSL, (double) v.osc.out,
-                              (double) v.osc.pw, (double) lfo1Out);
-            }
-#endif
             left[i] += l;
             right[i] += r;
             beatPos = beatPos + dt * beatsPerSecond;
@@ -652,10 +627,12 @@ public:
         }
     }
 
+    // no voice sounds: gates closed and every amplitude below −600 dB (the followers stall at tiny values with flushed
+    // denormals, as in the engine)
     bool silent() const noexcept
     {
         for (const auto& v : voices)
-            if (v.gate != 0.0f || v.amp != 0.0f || v.vca != 0.0f)
+            if (v.gate != 0.0f || std::fabs (v.amp) > 1e-30f)
                 return false;
         return held.empty() && arpNote < 0;
     }
@@ -2037,12 +2014,6 @@ int velocityFromInitVol (double initVol) noexcept
 // = (11^(1.28·velocity) − 1)/10 from LYNX's velocity (as for GMS, REA_rodada28 inference). The tempo is the song tempo;
 // while the transport plays, the song position (beats) drives the synced LFO1 and the arpeggiator clock.
 
-struct Setup
-{
-    Patch patch;
-    std::shared_ptr<const Tables> tables;
-};
-
 class KeplerInstrument final : public Instrument
 {
 public:
@@ -2054,9 +2025,14 @@ public:
 
     void prepare (double sr) noexcept override
     {
+        delete retired.exchange (nullptr);
         take();
-        rate = sr;
-        rebuild();
+        if (sr == rate.load() && synth != nullptr)
+            return;
+        rate.store (sr);
+        // a new engine at this rate (not on the audio thread's hot path: prepare runs before playback)
+        delete incoming.exchange (build().release());
+        take();
     }
 
     void configure (const ChannelDef& channel, double bpm) noexcept override
@@ -2068,10 +2044,9 @@ public:
             return;
         state = channel.pluginState;
         dll = channel.samplePath;
-        auto s = std::make_unique<Setup>();
-        s->patch = parseState (state);
-        s->tables = loadTables (dll);
-        delete incoming.exchange (s.release());
+        patch = parseState (state);
+        tables = loadTables (dll);
+        delete incoming.exchange (build().release()); // built here, swapped in by the audio thread
     }
 
     void setNextNoteExpression (float pan, float cents, bool) noexcept override
@@ -2106,6 +2081,7 @@ public:
         sentPan[(std::size_t) k] = -10000.0f;
         sentCents[(std::size_t) k] = -10000.0f;
         nextPan = 0.0f, nextCents = 0.0f;
+        quiet = 0;
     }
 
     void noteOff (int key) noexcept override
@@ -2124,7 +2100,8 @@ public:
             noteOff (k);
     }
 
-    bool idle() const noexcept override { return synth == nullptr || synth->silent(); }
+    // idle once every voice is silent and the chorus/filters had a quarter of a second to ring out
+    bool idle() const noexcept override { return synth == nullptr || quiet >= (int) (rate.load() * 0.25); }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
@@ -2161,20 +2138,17 @@ public:
             }
             done += m;
         }
+        quiet = synth->silent() ? std::min (quiet + n, 1 << 30) : 0;
     }
 
 private:
-    void rebuild() noexcept
+    std::unique_ptr<Synth> build() const
     {
-        if (setup == nullptr || ! setup->patch.usable || setup->tables == nullptr)
-        {
-            synth.reset();
-            return;
-        }
+        if (! patch.usable || tables == nullptr)
+            return nullptr;
         auto s = std::make_unique<Synth>();
-        s->init (setup->patch, setup->tables, rate);
-        synth = std::move (s);
-        sounding.fill (false);
+        s->init (patch, tables, rate.load());
+        return s;
     }
 
     void take() noexcept
@@ -2183,20 +2157,24 @@ private:
             return;
         if (auto* s = incoming.exchange (nullptr))
         {
-            retired.store (setup);
-            setup = s;
-            rebuild();
+            retired.store (synth.release());
+            synth.reset (s);
+            sounding.fill (false);
+            quiet = 0;
         }
     }
 
     std::unique_ptr<Synth> synth;
-    Setup* setup = nullptr;
-    std::atomic<Setup*> incoming { nullptr }, retired { nullptr };
+    std::atomic<Synth*> incoming { nullptr }, retired { nullptr };
+    Patch patch;
+    std::shared_ptr<const Tables> tables;
+    std::atomic<double> rate { 44100.0 };
     std::atomic<float> tempo { 140.0f }, channelCents { 0.0f };
     std::vector<std::uint8_t> state;
     std::string dll;
-    double rate = 44100.0, lastTicks = -1.0, songBeats = 0.0;
+    double lastTicks = -1.0, songBeats = 0.0;
     bool playing = false;
+    int quiet = 0;
     std::array<bool, 128> sounding {};
     std::array<float, 128> notePan {}, noteCents {}, sentPan {}, sentCents {};
     float nextPan = 0.0f, nextCents = 0.0f;
@@ -2207,6 +2185,13 @@ private:
 bool keplerStateUsable (const std::vector<std::uint8_t>& state) { return parseState (state).usable; }
 
 bool keplerDllUsable (const std::string& path) { return loadTables (path) != nullptr; }
+
+int keplerPanelOffset (const std::vector<std::uint8_t>& state, int k)
+{
+    if (! parseState (state).usable || k < 0 || k >= (int) u32 (state, 0x1D))
+        return -1;
+    return 0x21 + 4 * k;
+}
 
 std::unique_ptr<Instrument> makeKeplerInstrument() { return std::make_unique<KeplerInstrument>(); }
 
@@ -2227,6 +2212,7 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
     // the harness (and FL's wrapper): note-ons/offs between blocks, per-note Final levels sent at the next block
     struct Pending { int key; float pan, cents; };
     std::vector<Pending> pending;
+    std::array<bool, 128> sounding {}; // the wrapper's per-key voice records
     for (int n0 = 0; n0 < length;)
     {
         auto len = std::min (options.block, length - n0);
@@ -2238,12 +2224,19 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
                 len = nt.release - n0;
         }
         for (const auto& nt : notes)
-            if (nt.release == n0)
+            if (nt.release == n0 && sounding[(std::size_t) (nt.key & 127)])
+            {
+                sounding[(std::size_t) (nt.key & 127)] = false;
                 synth->noteOff (nt.key, 0);
+            }
         for (const auto& nt : notes)
             if (nt.start == n0)
             {
-                synth->noteOn (nt.key, velocityFromInitVol (nt.initVol));
+                const auto v = velocityFromInitVol (nt.initVol);
+                if (sounding[(std::size_t) (nt.key & 127)])
+                    synth->noteOff (nt.key, v); // FL's wrapper releases the key's previous voice first
+                sounding[(std::size_t) (nt.key & 127)] = true;
+                synth->noteOn (nt.key, v);
                 synth->setPanExpression (nt.key, 0.0f); // Init.Pan
                 pending.push_back ({ nt.key, (float) nt.finalPan, (float) nt.pitchCents });
             }

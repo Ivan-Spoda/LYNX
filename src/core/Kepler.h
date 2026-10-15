@@ -28,11 +28,14 @@
 
 namespace lynx
 {
-// true for a "Kepler-1" state the engine can play (layout parsed, version 1…4)
+// true for a "Kepler-1" state the engine can play (layout parsed, version 2…4)
 bool keplerStateUsable (const std::vector<std::uint8_t>& state);
 
 // true when `path` is the analysed build of Kepler's engine_x64.dll (its shape and noise tables can be read)
 bool keplerDllUsable (const std::string& path);
+
+// byte offset of the panel float `k` (0…n−1, "Kepler-1" order) inside a usable state, or −1
+int keplerPanelOffset (const std::vector<std::uint8_t>& state, int k);
 
 std::unique_ptr<Instrument> makeKeplerInstrument();
 
