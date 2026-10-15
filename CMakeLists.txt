@@ -76,6 +76,9 @@ add_library(lynx_core STATIC
     src/core/FlangusFastDist.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
+    src/core/Plucked.cpp
+    src/core/BeepMap.cpp
+    src/core/Sawer.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)

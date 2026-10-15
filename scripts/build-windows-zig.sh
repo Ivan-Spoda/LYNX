@@ -98,6 +98,8 @@ APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
 APP_SOURCES+=(src/core/ThreeOsc.cpp)
 # spectral waveforms: band analysis, background cache and drawing
 APP_SOURCES+=(src/core/WaveAnalysis.cpp src/ui/WaveformView.cpp)
+# FL's Plucked!, Sawer and BeepMap engines (REA round 65)
+APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
