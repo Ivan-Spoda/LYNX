@@ -44,6 +44,8 @@ add_library(lynx_core STATIC
     src/core/MiniSynth.cpp
     src/core/SimSynth.cpp
     src/core/Wasp.cpp
+    src/core/Granulizer.cpp
+    src/core/Drumaxx.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp
