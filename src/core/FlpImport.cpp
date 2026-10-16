@@ -1,6 +1,7 @@
 #include "core/FlpImport.h"
 #include "core/HardcoreFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -1662,7 +1663,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             // Patcher with a simple serial chain: the plugins inside become consecutive slots
             std::vector<flp::MixerInsert::Slot> expanded { original };
             // Fruity Love Philter: the units become parametric EQ + gain/pan (or a parallel container)
-            if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots)
+            // (only for states the exact engine cannot read: the others go through effectFromFl, REA_rodada66)
+            if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots
+                && philter::parse (original.state) == nullptr)
                 if (auto conversion = lovePhilterEffects (original.state))
                 {
                     const auto first = (int) track.effects.size();
@@ -2013,7 +2016,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 target.slot = found->second.first;
                 const auto& fx = song.mixer[(std::size_t) target.index].effects[(std::size_t) target.slot];
 
-                if (target.kind == AutomationTargetKind::effectParam && found->second.second == "Fruity Love Philter")
+                if (target.kind == AutomationTargetKind::effectParam && found->second.second == "Fruity Love Philter"
+                    && fx.kind != EffectKind::lovePhilter)
                 {
                     const auto map = lovePhilterMaps.find ({ id.track(), id.slot() });
                     const auto mapped = map != lovePhilterMaps.end() && map->second ? map->second (target.param) : std::nullopt;
@@ -2024,6 +2028,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::lovePhilter)
+                {
+                    // the exact Love Philter exposes 48 of FL's controls as (raw − min) / range (core/LovePhilter.h)
+                    target.param = philter::paramOfFlIndex (target.param);
+                    if (target.param < 0)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::luxeVerb)

@@ -63,6 +63,7 @@ add_library(lynx_core STATIC
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp
+    src/core/LovePhilter.cpp
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
