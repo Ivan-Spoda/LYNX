@@ -11949,5 +11949,6 @@ TEST (slayer_and_fruity_dance_import)
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
+#include "UiToolbarTests.inc"
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"

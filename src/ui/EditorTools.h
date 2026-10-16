@@ -9,6 +9,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/EditorGestures.h"
+#include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
@@ -52,11 +53,13 @@ juce::MouseCursor editorCursor (gesture::Cursor cursor);
 juce::String actionHint (gesture::Action action, bool playlist);
 const EditToolInfo& editToolInfo (EditTool tool);
 
-// A row of radio icon buttons, one per tool.
+// A row of radio icon buttons, one per tool. Icon size and button width follow the toolbar icon size
+// (Options > Toolbar), shared by every strip; the owner re-lays the strip out after a change.
 class ToolStrip final : public juce::Component
 {
 public:
     explicit ToolStrip (bool includeSlip);
+    static inline toolbarlayout::IconSize iconSize = toolbarlayout::IconSize::medium;
 
     EditTool getTool() const noexcept { return tool; }
     void setTool (EditTool newTool);
