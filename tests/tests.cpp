@@ -2572,7 +2572,7 @@ TEST (directwave_matches_fl_with_demo_programs)
         o.velocityAsInitVol = (st->flags & 2) != 0;
         o.noGainClamp = (st->flags & 1) != 0;
         const auto out = renderReference (*prog, zs, o, notes, 44100.0, 120000, 512, 1);
-        std::uint64_t h = 1469598103934665603ull;
+        std::uint64_t h = 14695981039346656037ull;
         for (const float x : out)
         {
             std::uint32_t b;

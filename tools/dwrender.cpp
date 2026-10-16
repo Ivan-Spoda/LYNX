@@ -36,7 +36,23 @@ int main (int argc, char** argv)
     }
     const auto& prog = st->programs[(std::size_t) pi];
     std::vector<std::shared_ptr<const dw::ZoneSamples>> samples;
-    if (std::strcmp (argv[2], "-") != 0)
+    if (std::strcmp (argv[2], "synth") == 0) // our own 16-bit samples (r72/py/synth.py, tests.cpp)
+    {
+        for (int z = 0; z < (int) prog.zones.size(); ++z)
+        {
+            auto s = std::make_shared<dw::ZoneSamples>();
+            s->bits = 16; s->channels = 1; s->frames = prog.zones[(std::size_t) z].frames;
+            std::vector<std::int16_t> v ((std::size_t) s->frames + 512, 0);
+            for (std::int64_t j = 0; j < s->frames; ++j)
+            {
+                const auto a = (j * (13 + z * 7)) % 4096 - 2048, b = ((j * j + z * 31) % 997) - 498;
+                v[(std::size_t) j + 256] = (std::int16_t) std::max<std::int64_t> (-32768, std::min<std::int64_t> (32767, a * 6 + b * 8));
+            }
+            s->i16.push_back (std::move (v));
+            samples.push_back (s);
+        }
+    }
+    else if (std::strcmp (argv[2], "-") != 0)
     {
         const auto zd = readAll (argv[2]);
         std::size_t o = 0xd60;
