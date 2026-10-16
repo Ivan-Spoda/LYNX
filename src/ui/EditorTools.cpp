@@ -88,15 +88,20 @@ void ToolStrip::setTool (EditTool newTool)
 
 int ToolStrip::getIdealWidth (int height) const
 {
-    return (int) buttons.size() * height;
+    return (int) buttons.size() * toolbarlayout::toolButtonWidth (iconSize, height);
 }
 
 void ToolStrip::resized()
 {
     const auto size = getHeight();
+    const auto width = toolbarlayout::toolButtonWidth (iconSize, size);
+    const auto icon = toolbarlayout::toolIconPx (iconSize);
 
     for (std::size_t i = 0; i < buttons.size(); ++i)
-        buttons[i]->setBounds ((int) i * size, 0, size, size);
+    {
+        buttons[i]->setIconSizing (1.0f, icon);
+        buttons[i]->setBounds ((int) i * width, 0, width, size);
+    }
 }
 
 void ToolStrip::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)

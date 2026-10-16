@@ -236,7 +236,7 @@ std::vector<float> linearMagnitudes (const Settings& s, int hostRate, int n)
 
 // ------------------------------------------------------------------------------------------------- convolver
 
-void LinearPhase::Convolver::init (int size)
+void FftConvolver::init (int size)
 {
     n = size;
     hop = size / 2;
@@ -249,7 +249,7 @@ void LinearPhase::Convolver::init (int size)
     }
 }
 
-void LinearPhase::Convolver::clear() noexcept
+void FftConvolver::clear() noexcept
 {
     pos = 0;
     for (int c = 0; c < 2; ++c)
@@ -259,7 +259,7 @@ void LinearPhase::Convolver::clear() noexcept
     }
 }
 
-void LinearPhase::Convolver::setKernel (const std::vector<float>& t)
+void FftConvolver::setKernel (const std::vector<float>& t)
 {
     // zero-phase impulse centred at n/2: (1/n)·IFFT of the table times (−1)^k, mirrored; its middle half is kept,
     // weighted by a sine window, and becomes an n/2-tap FIR with its centre at tap n/4 (§5.3)
@@ -281,7 +281,7 @@ void LinearPhase::Convolver::setKernel (const std::vector<float>& t)
     kernel = taps;
 }
 
-void LinearPhase::Convolver::block() noexcept
+void FftConvolver::block() noexcept
 {
     const auto scale = 1.0f / (float) n;
     std::vector<std::complex<double>> x ((std::size_t) n);
@@ -302,7 +302,7 @@ void LinearPhase::Convolver::block() noexcept
     }
 }
 
-void LinearPhase::Convolver::step (float& l, float& r) noexcept
+void FftConvolver::step (float& l, float& r) noexcept
 {
     in[0][(std::size_t) pos] = l;
     in[1][(std::size_t) pos] = r;

@@ -9,6 +9,11 @@
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
 #include "core/Wasp.h"
+#include "core/Plucked.h"
+#include "core/BeepMap.h"
+#include "core/Sawer.h"
+#include "core/Drumaxx.h"
+#include "core/Granulizer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -227,6 +232,11 @@ private:
             case InstrumentKind::transistorbass:
             case InstrumentKind::simsynth:
             case InstrumentKind::wasp:
+            case InstrumentKind::plucked:
+            case InstrumentKind::beepmap:
+            case InstrumentKind::sawer:
+            case InstrumentKind::granulizer:
+            case InstrumentKind::drumaxx:
                 break;
         }
 
@@ -2059,6 +2069,16 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeSimSynthInstrument();
     if (kind == InstrumentKind::wasp)
         return makeWaspInstrument();
+    if (kind == InstrumentKind::plucked)
+        return makePluckedInstrument();
+    if (kind == InstrumentKind::beepmap)
+        return makeBeepMapInstrument();
+    if (kind == InstrumentKind::sawer)
+        return makeSawerInstrument();
+    if (kind == InstrumentKind::granulizer)
+        return makeGranulizerInstrument (std::move (sample));
+    if (kind == InstrumentKind::drumaxx)
+        return makeDrumaxxInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

@@ -55,6 +55,11 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::transistorbass: return "Transistor Bass";
         case InstrumentKind::simsynth: return "SimSynth";
         case InstrumentKind::wasp: return "Wasp";
+        case InstrumentKind::plucked: return "Plucked!";
+        case InstrumentKind::beepmap: return "BeepMap";
+        case InstrumentKind::sawer: return "Sawer";
+        case InstrumentKind::granulizer: return "Fruity Granulizer";
+        case InstrumentKind::drumaxx: return "Drumaxx";
     }
     return "?";
 }

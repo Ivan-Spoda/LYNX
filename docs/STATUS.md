@@ -70,7 +70,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
@@ -117,7 +117,18 @@ exports the 30 demo projects shipped with FL Studio 2026.
   −108.6 dB vs FL's DLL); SimSynth on its engine (REA round 64: the C++ engine behind the Delphi front-end, 12 voices
   with 3 table oscillators/noise, ring modulation, LFO, both envelopes, the 2-stage filter and the chorus, FL's old
   integer voice record; bit-identical to FL's DLL on all 76 installation states in every tested scenario); Wasp and
-  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Sakura and Drumpad on physical models rebuilt from their
+  Wasp XT as FL 2026 plays them (REA round 64: the 64-bit DLL is a placeholder — silent, state kept); Plucked! on its Karplus-Strong engine (REA round 65 §1: bit-identical to FL's DLL for the
+  same random seed); BeepMap on its image-synthesis engine with 3x Osc's voice processor (REA round 65 §2: the bitmap
+  read from the plugin state; the 9 preset/render-test states bit-identical, synthetic batteries identical outside the
+  processor's end fades); Sawer on its engine with the oscillator cycle `data.saw` read from the user's installation
+  (REA round 65 §3: PoiZone's framework, 6× oversampled filter, phaser and reverb; all 423 preset states bit-identical to
+  FL's DLL with the effects off, as saved bit-identical except the reverb's −137…−155 dB residual); Fruity Granulizer on its engine (REA round 67: grains on the channel's sample with the library's 24-point windowed-sinc reader, grain
+  envelope, stereo separation, randomness, wobble, freeze, loop, sample start, key modes, and the plugin voice processor;
+  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Drumaxx on
+  its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
+  SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
+  limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
+  FL's DLLs on random notes); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -345,7 +356,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
-- **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Frequency Splitter:** FL's own engine (`core/FrequencySplitter`, REA round 62) from the saved state, editable as
+  LYNX parameters: IIR crossovers for every slope (6–96 dB/oct, incl. the 18 dB/oct all-pass structure), the 3-band
+  phase compensation, gain smoothing, mutes/solos and the FFT linear-phase mode (3N/4 latency to PDC); mixer slots use
+  the summed output, Patcher buses the bands sent to them. IIR mode bit-identical to the DLL on all 25 IIR
+  installation states (summed output and every band send, 44.1/48 kHz, automation); FFT mode within −113…−155 dB on
+  its 6 states (the engine's single-precision IPP FFT is not replicated).
 - **Maximus and Soundgoodizer:** FL's exact Maximus engine as a mixer effect (`core/MaximusFx`, REA round 40) —
   RMS detector, saturation A/B, state versions 3–15, solo, legacy linear-phase FIR split, x87-precision smoothers;
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation
@@ -407,6 +423,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   are editable LYNX parameters and take FL's automation. Bit-identical to the three DLLs on every installation state
   (54 PanOMatic, 10 Balance, 19 Blood Overdrive) plus synthetic states, at 22.05/44.1/48/96 kHz, several block sizes,
   four signals and control changes during playback.
+- **Fruity Fast LP, Fruity Free Filter and Fruity Filter:** FL's exact engines as mixer effects
+  (`core/FruityFilters`, REA round 63) from the saved controls, editable/automatable as LYNX parameters. Fast LP: its
+  two-state resonant low-pass in x87 precision with the per-call cutoff glide; Free Filter: the seven RBJ-style types
+  designed at a fixed 44.1 kHz, x87 direct form I, CENTER DC remover; Fruity Filter: the Chamberlin SVF (×2 cascade),
+  per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
+  Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
+  render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -489,6 +512,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the GMS findings (inference).
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
+- Fruity Fast LP / Free Filter / Filter (REA round 63 §7): FL's render-call size for mixer effects is not confirmed
+  (LYNX uses calls of at most 512 frames; the glides and end-of-call guards are per call). Low Lifter and Emphasis keep
+  their approximations (parametric EQ without the harmonics generator; limiter) — not ported yet.
 - Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
   calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
   2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
@@ -528,6 +554,27 @@ accordingly. Highlights of what is **confirmed and applied**:
   as an output gain (the plugin does not read Final.Vol). SimSynth (REA round 64 §5.2): the process-wide random index
   and chorus counter are per instance in LYNX (FL: shared by every SimSynth and every sample-rate change); FL's load
   order and its rounding when it fills the old voice record are not confirmed; automation not wired.
+- Plucked! (REA round 65 §1): FL's random seed (process-global, from the clock) differs per run — LYNX starts every
+  instrument at Delphi's default seed; FL's host gain-ramp law on level changes is not decoded (linear in LYNX); a
+  channel sample as the string's exciter is not modelled. BeepMap (REA round 65 §2): bitmaps taller than "Max height"
+  are scaled with LYNX's nearest-row pick (FL's image scaler not decoded; no installation state needs it); only
+  uncompressed 24/32-bit BMP data are read; the processor's end-fade table uses the exact cosine (FL: IPP's, ≤ −95 dB).
+  Sawer (REA round 65 §3): the DLL's random generator is process-global (LYNX: one per instrument, started like a
+  freshly loaded DLL); aftertouch, pitch-bend and controller modulation sources are not fed (0); FL's host gain-ramp law
+  is not decoded; the reverb's coefficient rounding (CRT float functions) leaves −137…−155 dB; without the user's
+  `data.saw` the channel stays unsupported.
+- Fruity Granulizer
+  (REA round 67 §5): the slice modes (the sample's regions, "auto slicing": 2 presets, no project) and the slice key
+  mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
+  confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
+  exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
+  speed); the end fade uses the exact cosine; the sample's own loop points are not read (whole sample); one random seed
+  per instrument.
+- Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
+  in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
+  separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
+  double sinh/pow are the C library's (last-bit double differences that changed no float sample in the tests); CPUs
+  without FMA take other CRT paths in FL (not checked).
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

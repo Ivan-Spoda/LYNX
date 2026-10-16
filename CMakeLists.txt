@@ -45,6 +45,8 @@ add_library(lynx_core STATIC
     src/core/MiniSynth.cpp
     src/core/SimSynth.cpp
     src/core/Wasp.cpp
+    src/core/Granulizer.cpp
+    src/core/Drumaxx.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp
@@ -69,13 +71,18 @@ add_library(lynx_core STATIC
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
+    src/core/FrequencySplitter.cpp
     src/core/ChorusFx.cpp
     src/core/FruityBasicFx.cpp
     src/core/FruityDelayBank.cpp
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
+    src/core/FruityFilters.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
+    src/core/Plucked.cpp
+    src/core/BeepMap.cpp
+    src/core/Sawer.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)
