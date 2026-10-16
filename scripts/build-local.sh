@@ -57,7 +57,7 @@ mkdir -p build-local/vorbis
 for f in third_party/vorbis/src/*.c; do
     [[ "$(basename "$f")" == lookup.c ]] && continue # (included by lsp.c)
     obj="build-local/vorbis/$(basename "$f" .c).o"
-    [[ -f "$obj" && "$obj" -nt "$f" ]] || $CC -c -O2 -w -ffp-contract=off -Ithird_party/vorbis/include -Ithird_party/vorbis/src "$f" -o "$obj"
+    [[ -f "$obj" && "$obj" -nt "$f" ]] || $CC -c -O2 -w -ffp-contract=off -include third_party/vorbis/include/lynx_vorbis_prefix.h -Ithird_party/vorbis/include -Ithird_party/vorbis/src "$f" -o "$obj"
 done
 WAVPACK="$WAVPACK $(ls build-local/vorbis/*.o | tr '\n' ' ')"
 $CXX $FLAGS $CORE $WAVPACK tests/tests.cpp -o build-local/lynx_tests 2> >(grep -v 'glibc version' >&2)

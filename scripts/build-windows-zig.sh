@@ -126,7 +126,7 @@ for f in third_party/vorbis/src/*.c; do
     [[ "$(basename "$f")" == lookup.c ]] && continue # (included by lsp.c)
     obj="$OUT/vorbis/$(basename "$f" .c).o"
     if [[ ! -f "$obj" || "$f" -nt "$obj" ]]; then
-        "$ZIG" cc -target "$TARGET" -O2 -w -ffp-contract=off -Ithird_party/vorbis/include -Ithird_party/vorbis/src -c "$f" -o "$obj"
+        "$ZIG" cc -target "$TARGET" -O2 -w -ffp-contract=off -include third_party/vorbis/include/lynx_vorbis_prefix.h -Ithird_party/vorbis/include -Ithird_party/vorbis/src -c "$f" -o "$obj"
     fi
 done
 

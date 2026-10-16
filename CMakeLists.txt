@@ -130,7 +130,9 @@ file(GLOB VORBIS_SOURCES third_party/vorbis/src/*.c)
 list(FILTER VORBIS_SOURCES EXCLUDE REGEX "/lookup\\.c$") # (included by lsp.c)
 add_library(vorbis_decoder STATIC ${VORBIS_SOURCES})
 target_include_directories(vorbis_decoder PUBLIC third_party/vorbis/include PRIVATE third_party/vorbis/src)
-target_compile_options(vorbis_decoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-ffp-contract=off -w>)
+target_compile_options(vorbis_decoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-ffp-contract=off -w>
+    # every symbol gets a lynx_ prefix (JUCE links its own copy with the same C names)
+    $<IF:$<C_COMPILER_ID:MSVC>,/FI${CMAKE_CURRENT_SOURCE_DIR}/third_party/vorbis/include/lynx_vorbis_prefix.h,-include${CMAKE_CURRENT_SOURCE_DIR}/third_party/vorbis/include/lynx_vorbis_prefix.h>)
 target_link_libraries(lynx_core PUBLIC vorbis_decoder)
 
 add_executable(lynx_tests tests/tests.cpp)
