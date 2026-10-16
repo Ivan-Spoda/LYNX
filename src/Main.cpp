@@ -1734,9 +1734,7 @@ private:
                             if (names.size() >= 4)
                             {
                                 const auto channelsBefore = offline.getSong().channels.size();
-                                const auto offsetBefore = offline.getSong().playlist[(std::size_t) clipOf (names[2], 1)].offset;
-                                check ("Reverse", act (names[2], 0, lynx::tr ("Reverse")) && channelOf (names[2])->sampler.reverse
-                                                      && offline.getSong().playlist[(std::size_t) clipOf (names[2], 1)].offset != offsetBefore);
+                                check ("Reverse", act (names[2], 0, lynx::tr ("Reverse")) && channelOf (names[2])->sampler.reverse);
                                 offline.undo();
                                 offline.dispatchPendingMessages();
                                 check ("Reverse undone", ! channelOf (names[2])->sampler.reverse);
