@@ -235,6 +235,7 @@ private:
             case InstrumentKind::plucked:
             case InstrumentKind::beepmap:
             case InstrumentKind::sawer:
+            case InstrumentKind::flkeys:
                 break;
         }
 

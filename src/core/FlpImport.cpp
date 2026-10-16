@@ -10,6 +10,7 @@
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
 #include "core/Plucked.h"
+#include "core/FlKeys.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
 #include "core/Ogun.h"
@@ -827,8 +828,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
         }
 
-        // FL Keys: the samples of the set (.wti) that ships with FL
+        // FL Keys: FL's engine on the wavetable (.wti) that ships with FL (REA_rodada69 §7); the zoned sampler is the
+        // fallback when the wavetable cannot be read
+        bool flKeysExact = false;
         if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())
+            flKeysExact = flkeys::importChannel (def, c.pluginState, options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables",
+                                                 options.readFile, existing, options.saveEmbedded);
+        if (c.pluginName == "FL Keys" && ! flKeysExact && options.readFile && ! options.roots.factoryData.empty())
             if (const auto set = flKeysSet (c.pluginState))
             {
                 const auto folder = options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables";
@@ -1433,7 +1439,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
-                     || def.instrument == InstrumentKind::sawer)
+                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

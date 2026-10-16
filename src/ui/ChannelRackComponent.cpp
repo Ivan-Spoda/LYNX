@@ -58,6 +58,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::plucked: return "Plucked!";
         case InstrumentKind::beepmap: return "BeepMap";
         case InstrumentKind::sawer: return "Sawer";
+        case InstrumentKind::flkeys: return "FL Keys";
     }
     return "?";
 }

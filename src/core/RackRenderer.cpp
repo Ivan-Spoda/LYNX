@@ -2,11 +2,14 @@
 
 #include "core/WorkerPool.h"
 #include "core/Denormals.h"
+#include "core/FlKeys.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <map>
+#include <mutex>
 
 namespace lynx
 {
@@ -22,6 +25,39 @@ public:
     void allNotesOff() noexcept override {}
     void render (float*, float*, int, float, float) noexcept override {}
 };
+
+// FL Keys: the data FL builds from a wavetable's files, shared by every channel that plays the same wavetable
+// (Grand Piano holds 40 MB of 16-bit samples)
+std::shared_ptr<const flkeys::Wavetable> flKeysWavetable (const ChannelDef& channel, const RackState::SampleProvider& samples)
+{
+    const auto table = flkeys::FlKeysTable::decode (channel.modelParams);
+    if (! table || ! samples || table->files.size() != channel.zones.size())
+        return nullptr;
+    std::string key;
+    for (const auto& z : channel.zones)
+        key += z.path + '\n';
+    for (auto v : channel.modelParams)
+        key += std::to_string (v) + ' ';
+    static std::mutex lock;
+    static std::map<std::string, std::weak_ptr<const flkeys::Wavetable>> cache;
+    {
+        std::lock_guard<std::mutex> guard (lock);
+        if (auto found = cache[key].lock())
+            return found;
+    }
+    std::vector<flkeys::FileSamples> files;
+    for (std::size_t i = 0; i < channel.zones.size(); ++i)
+    {
+        const auto sample = samples (channel.zones[i].path);
+        if (sample == nullptr || sample->frames() == 0)
+            return nullptr;
+        files.push_back (flkeys::toFileSamples (*sample, table->files[i].scale));
+    }
+    auto built = flkeys::buildWavetable (*table, files);
+    std::lock_guard<std::mutex> guard (lock);
+    cache[key] = built;
+    return built;
+}
 
 // Effect that does nothing: missing plugin slot.
 class BypassEffect final : public Effect
@@ -60,8 +96,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
-            && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip)
+            && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip && kind != InstrumentKind::flkeys)
                 || (previous->song.channels[i].samplePath == channel.samplePath && previous->song.channels[i].zones == channel.zones
+                    && previous->song.channels[i].modelParams == channel.modelParams
                     && previous->song.channels[i].sampler.keepPitch == channel.sampler.keepPitch
                     && (! channel.sampler.keepPitch
                         || (previous->song.channels[i].sampler.stretchBeats == channel.sampler.stretchBeats
@@ -82,6 +119,16 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 instrument = factories.pluginInstruments (channel.plugin, sampleRate);
 
             state->instruments.push_back (instrument != nullptr ? instrument : std::make_shared<SilentInstrument>());
+            continue;
+        }
+
+        // FL Keys: its wavetable built from the channel's files
+        if (kind == InstrumentKind::flkeys)
+        {
+            std::shared_ptr<Instrument> instrument = flkeys::makeFlKeysInstrument (flKeysWavetable (channel, samples));
+            instrument->prepare (sampleRate);
+            instrument->configure (channel, song.bpm);
+            state->instruments.push_back (std::move (instrument));
             continue;
         }
 
