@@ -170,6 +170,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   mda-style voice and the global treble/tremolo/stereo stage), bit-identical to the plugin; Grand Piano's Ogg samples
   through LYNX's decoder match FL's 16-bit buffer on 99.99 % of the values (±1 LSB otherwise). Fruity Slicer: state
   fields and the pre-stretch of its slices decoded (§7).
+- **Native sampler voice (REA round 76):** imported native sampler channels run FL's whole voice — the velocity law
+  (`(11^(v/100) − 1)/10`), the channel's volume and pan inside the voice through FL's sin/cos pan law (centre −3 dB),
+  the five channel articulators stepped on the song's tick grid with FL's gain ramps, the channel filter (all 8 types,
+  `flvp`), the 10 ms end fade after the filter, note-off releasing only with the volume envelope on; note events land on
+  FL's rounded tick samples. Checked against FL's own command-line renders (`FL64.exe /R /Ewav`) of 17 crafted projects:
+  every sample within one 16-bit code. WAV loop points of native sampler channels are not read yet.
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
   locked to the song, Mod Rate/Tempo Reduce, input/output gain; exact Distort cascade, Lo-fi, Delay (Mod Rate
