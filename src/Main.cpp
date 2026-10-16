@@ -27,6 +27,8 @@
 #include "ui/PluginManager.h"
 #include "ui/ShortcutManager.h"
 #include "ui/NoteToolDialogs.h"
+#include "ui/EventEditor.h"
+#include "core/EventEdit.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
@@ -1515,9 +1517,32 @@ private:
                                                                          { lynx::NoteTool::flip, "-tool-flip.png" },
                                                                          { lynx::NoteTool::randomise, "-tool-randomise.png" },
                                                                          { lynx::NoteTool::scaleLevels, "-tool-scalelevels.png" },
-                                                                         { lynx::NoteTool::limit, "-tool-limit.png" } };
+                                                                         { lynx::NoteTool::limit, "-tool-limit.png" },
+                                                                         { lynx::NoteTool::quantize, "-tool-quantize.png" },
+                                                                         { lynx::NoteTool::chop, "-tool-chop.png" },
+                                                                         { lynx::NoteTool::flam, "-tool-flam.png" },
+                                                                         { lynx::NoteTool::lfo, "-tool-lfo.png" },
+                                                                         { lynx::NoteTool::claw, "-tool-claw.png" },
+                                                                         { lynx::NoteTool::articulate, "-tool-articulate.png" },
+                                                                         { lynx::NoteTool::riffMachine, "-tool-riff.png" },
+                                                                         { lynx::NoteTool::chordProgression, "-tool-chords.png" } };
                 for (const auto& [tool, name] : tools)
                     saveWindow (lynx::makeNoteToolPanel (offline, tool, roll.noteIndicesForSnapshot(), roll.gridForSnapshot()), name);
+            }
+
+            // round 83: the event editor, with sample events on the selected channel's volume (removed afterwards)
+            {
+                const lynx::AutomationTarget volume { lynx::AutomationTargetKind::channelVolume, offline.getSelectedChannel() };
+                const auto before = offline.getSong().patterns[(std::size_t) offline.getSong().currentPattern].events;
+                offline.editSong ([&] (lynx::Song& s) {
+                    auto& lane = lynx::eventedit::laneFor (s.patterns[(std::size_t) s.currentPattern], volume);
+                    lynx::eventedit::line (lane, 0, lynx::ppq * 2, 0.2f, 0.9f, lynx::ticksPerStep);
+                    lynx::prtools::LfoOptions lfo;
+                    lfo.startSpeed = 7 * 4096; // one beat
+                    lynx::eventedit::applyLfo (lane, lynx::ppq * 2, lynx::ppq * 4, lfo, lynx::ticksPerStep);
+                }, false);
+                saveWindow (lynx::makeEventEditor (offline, volume), "-eventeditor.png");
+                offline.editSong ([&] (lynx::Song& s) { s.patterns[(std::size_t) s.currentPattern].events = before; }, false);
             }
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window

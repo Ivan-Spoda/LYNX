@@ -108,6 +108,15 @@ ChangeLabel describeChange (const Song& before, const Song& after)
             return label (TR_NOOP ("Rename pattern: {0}"), b.name);
         if (a.lengthTicks != b.lengthTicks)
             return label (TR_NOOP ("Pattern length: {0}"), b.name);
+
+        const auto sameEvents = a.events.size() == b.events.size()
+                                && std::equal (a.events.begin(), a.events.end(), b.events.begin(), [] (const PatternEvents& x, const PatternEvents& y) {
+                                       return x.target == y.target && x.events.size() == y.events.size()
+                                              && std::equal (x.events.begin(), x.events.end(), y.events.begin(),
+                                                             [] (const PatternEvent& e, const PatternEvent& f) { return e.tick == f.tick && e.value == f.value; });
+                                   });
+        if (! sameEvents)
+            return label (TR_NOOP ("Edit events: {0}"), b.name);
     }
 
     // channels
