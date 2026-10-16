@@ -18,12 +18,14 @@
 #include "core/FruityShapers.h"
 #include "core/FruityBasicFx.h"
 #include "core/FruityFilters.h"
+#include "core/NewtoneFx.h"
 #include "core/FruityDelay.h"
 #include "core/FrequencySplitter.h"
 #include "core/HardcoreFx.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
@@ -1847,6 +1849,13 @@ public:
                 c.effect->setSongPosition (ticks);
     }
 
+    void setPlaying (bool playing) noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->setPlaying (playing);
+    }
+
     void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
     {
         for (int done = 0; done < n; done += capacity)
@@ -2284,6 +2293,9 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo fastLPInfo { "Fruity Fast LP", { { "Cutoff", 1.0f }, { "Resonance", 0.0f } } };
     static const EffectInfo freeFilterInfo { "Fruity Free Filter", { { "Type", 0.0f }, { "Frequency", 0.5f }, { "Q", 169.0f / 1024.0f },
                                                                     { "Gain", 676.0f / 1024.0f }, { "Center", 0.0f } } };
+    // FL's Newtone / Newtime: the sample and its edits travel in EffectSlot::state / samplePath (core/NewtoneFx.h)
+    static const EffectInfo newtoneInfo { "Newtone", { { "Slave to host playback", 0.0f } } };
+    static const EffectInfo newtimeInfo { "Newtime", { { "Slave to host playback", 0.0f } } };
     static const EffectInfo fruityFilterInfo { "Fruity Filter", { { "Cutoff", 1.0f }, { "Resonance", 205.0f / 1024.0f }, { "Low pass", 1.0f },
                                                                  { "Band pass", 0.0f }, { "High pass", 0.5f }, { "x2", 0.0f }, { "Center", 0.0f } } };
     // FL's eight Gross Beat parameters (core/GrossBeat.h); the slots' envelopes travel in EffectSlot::state
@@ -2422,6 +2434,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::lovePhilter: return philter::info();
         case EffectKind::luxeVerb: return luxeVerbInfo;
         case EffectKind::convolver: return convolverInfo;
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
@@ -2438,6 +2451,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFilter: return fruityFilterInfo;
         case EffectKind::hardcore: return hardcore::info();
         case EffectKind::distructor: return distructorInfo;
+        case EffectKind::newtone: return newtoneInfo;
+        case EffectKind::newtime: return newtimeInfo;
     }
     return eq;
 }
@@ -2796,11 +2811,18 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::multibandDelay:
             return mbdelay::paramText (param, v);
 
+        case EffectKind::newtone:
+        case EffectKind::newtime:
+            return newtonefx::paramText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
         case EffectKind::fruityDelay3:
             return fldelay::delay3ParamText (param, v, bpm);
+
+        case EffectKind::lovePhilter:
+            return philter::paramText (param, v);
 
         case EffectKind::grossBeat:
         {
@@ -2873,6 +2895,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::grossBeat)
         return grossbeat::make (slot.state);
+    if (slot.kind == EffectKind::lovePhilter)
+        return philter::make (slot);
     if (slot.kind == EffectKind::convolver)
         return makeConvolver (slot.state);
     if (slot.kind == EffectKind::fruityDelayBank)
@@ -2935,6 +2959,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::lovePhilter: return philter::make (EffectSlot {}); // without a state: passes the signal
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
@@ -2947,6 +2972,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();
         case EffectKind::fruityFlanger: return flangerfx::make();
+        case EffectKind::newtone:
+        case EffectKind::newtime: return newtonefx::make (nullptr); // without its sample: a pass-through
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
