@@ -11765,5 +11765,6 @@ TEST (wasp_is_a_silent_placeholder)
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
+#include "UiToolbarTests.inc"
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"

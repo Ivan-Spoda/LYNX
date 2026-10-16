@@ -1,5 +1,6 @@
 #include "ui/Icons.h"
 
+#include <cmath>
 #include <map>
 
 #include "ui/Theme.h"
@@ -554,8 +555,10 @@ void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colo
     if (icon == Icon::none || area.isEmpty())
         return;
 
-    const auto size = juce::jmin (area.getWidth(), area.getHeight());
-    const auto box = area.withSizeKeepingCentre (size, size);
+    // a whole-pixel box on whole-pixel coordinates: the grid's half units then land on the same
+    // sub-pixel phase on every button, so strokes look equally sharp everywhere
+    const auto size = std::floor (juce::jmin (area.getWidth(), area.getHeight()));
+    const auto box = juce::Rectangle<float> (std::round (area.getCentreX() - size * 0.5f), std::round (area.getCentreY() - size * 0.5f), size, size);
     const auto scale = size / 24.0f;
     const auto transform = juce::AffineTransform::scale (scale).translated (box.getX(), box.getY());
     const auto& shape = get (icon);
@@ -576,6 +579,16 @@ IconButton::IconButton (const juce::String& name, Icon i, const juce::String& t)
     : juce::Button (name), icon (i), text (t), onColour (theme::colour::accent), iconOnColour (theme::colour::onAccent)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
+}
+
+void IconButton::setIconSizing (float fraction, float maxPx)
+{
+    if (fraction != iconFraction || maxPx != iconMax)
+    {
+        iconFraction = fraction;
+        iconMax = maxPx;
+        repaint();
+    }
 }
 
 void IconButton::setIcon (Icon newIcon)
@@ -702,7 +715,7 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
         fg = colour::textDisabled;
 
     auto area = getLocalBounds().toFloat();
-    const auto iconSize = juce::jmin (area.getHeight() * 0.6f, 20.0f);
+    const auto iconSize = juce::jmin (area.getHeight() * iconFraction, iconMax);
 
     if (text.isEmpty())
     {

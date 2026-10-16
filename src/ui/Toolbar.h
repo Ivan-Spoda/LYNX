@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
 #include "ui/ValueControl.h"
 
@@ -148,5 +149,32 @@ private:
     std::array<float, 128> bands {};       // spectrum: smoothed level per band, 0..1
     float peak = 0.0f, held = 0.0f;
     int holdFrames = 0, clipFrames = 0;
+};
+
+// "Customize toolbar": the groups in toolbar order, each with a check box (shown / hidden), Move up / Move
+// down for the selected group (also Alt+Up / Alt+Down), the icon size, the UI scale and Reset to default.
+// Every change applies at once through onChange.
+class CustomizePanel final : public juce::Component
+{
+public:
+    explicit CustomizePanel (const toolbarlayout::Layout& layout);
+    std::function<void (const toolbarlayout::Layout&)> onChange;
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    bool keyPressed (const juce::KeyPress& key) override;
+    void select (toolbarlayout::Group g);
+
+private:
+    void rebuild();
+    void changed();
+    void move (int delta);
+    juce::Rectangle<int> listArea() const;
+    static constexpr int rowHeight = 30;
+    toolbarlayout::Layout layout;
+    toolbarlayout::Group selected = toolbarlayout::Group::transport;
+    juce::OwnedArray<juce::ToggleButton> checks;
+    juce::TextButton upButton, downButton, resetButton;
+    juce::ComboBox iconSizeBox, scaleBox;
 };
 } // namespace lynx::toolbar

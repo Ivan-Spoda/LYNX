@@ -62,6 +62,9 @@ public:
     void setFlat (bool shouldBeFlat);                    // no background at rest (toolbar style)
     void setCorners (bool roundLeft, bool roundRight);   // for segmented groups
     int getIdealWidth (int height) const;
+    // The icon's box: `fraction` of the button's height, at most `maxPx` (default 0.66 and 20 px). Icons are
+    // drawn on whole pixels, so 16, 20 and 24 px boxes stay crisp.
+    void setIconSizing (float fraction, float maxPx);
 
     // Optional extra gestures: when set, a right-click calls onRightClick instead of clicking the button,
     // and a double-click calls onDoubleClick (after the two single clicks).
@@ -80,6 +83,7 @@ private:
     Icon icon;
     juce::String text;
     bool primary = false, flat = false, roundLeft = true, roundRight = true;
+    float iconFraction = 0.66f, iconMax = 20.0f;
     juce::Colour onColour, iconOnColour, iconColour;
 };
 } // namespace lynx

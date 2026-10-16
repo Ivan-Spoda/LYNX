@@ -5,6 +5,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/KeyMap.h"
+#include "core/ToolbarLayout.h"
 #include "core/ValueMath.h"
 #include "engine/AudioEngine.h"
 #include "ui/BrowserComponent.h"
@@ -35,6 +36,7 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override; // right-click on the toolbar: the toolbar menu
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
 
@@ -70,6 +72,10 @@ public:
         hintBar.setHint (hint, live);
     }
     juce::Rectangle<int> getToolbarBoundsForSnapshot() const { return { 0, 0, getWidth(), toolbarHeight }; }
+    // --snapshot: a toolbar layout (icon size, hidden/reordered groups) without saving it
+    void setToolbarLayoutForSnapshot (const toolbarlayout::Layout& layout) { setToolbarLayout (layout, false); }
+    juce::PopupMenu getToolbarMenuForSnapshot() { return makeToolbarMenu(); }
+    juce::Rectangle<int> getToolStripAreaForSnapshot (bool playlistStrip);
     void setMetersForSnapshot (double cpu, std::int64_t memory, int polyphony) { perfMeter.setValues (cpu, memory, polyphony); }
     static std::unique_ptr<juce::Component> makeHelpContent();
     static std::unique_ptr<juce::AlertWindow> makeAboutWindow();
@@ -159,8 +165,15 @@ private:
     // position slider), master volume and pitch, recording options, global snap and pattern selector, window
     // and file shortcuts, then CPU / memory / polyphony and the output monitor on the right. Panels drop
     // out by priority when the window is narrow; the hint bar takes the room that is left.
-    static constexpr int rowHeight = 28;
-    static constexpr int toolbarHeight = 2 * rowHeight + 10;
+    // The user can hide and reorder the groups, pick the icon size and the UI scale (right-click on the
+    // toolbar, or Options > Toolbar; core/ToolbarLayout.h). Row height follows the icon size.
+    toolbarlayout::Layout toolbarLayout = toolbarlayout::Layout::makeDefault();
+    int rowHeight = toolbarlayout::rowHeight (toolbarlayout::IconSize::medium);
+    int toolbarHeight = 2 * rowHeight + 10;
+    void setToolbarLayout (const toolbarlayout::Layout& layout, bool save = true);
+    juce::PopupMenu makeToolbarMenu();
+    void showToolbarMenu();
+    void showCustomizeToolbar();
     void newProject();
     void chooseFileToOpen();
     void chooseFileToOpenNow();

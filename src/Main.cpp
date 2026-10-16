@@ -1227,6 +1227,24 @@ private:
                     saveSnapshot (ui, prefix + "-desktop-" + juce::String (w) + ".png");
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + juce::String (w) + ".png");
                 }
+                // the toolbar with small and large icons, and a customized one (groups hidden and reordered)
+                ui.setSize (1600, 900);
+                for (auto [iconSize, name] : { std::pair { lynx::toolbarlayout::IconSize::small, "small" }, { lynx::toolbarlayout::IconSize::large, "large" } })
+                {
+                    auto layout = lynx::toolbarlayout::Layout::makeDefault();
+                    layout.iconSize = iconSize;
+                    ui.setToolbarLayoutForSnapshot (layout);
+                    saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + name + "-1600.png");
+                }
+                {
+                    auto layout = lynx::toolbarlayout::Layout::makeDefault();
+                    layout.move (lynx::toolbarlayout::Group::windows, -3);
+                    layout.setShown (lynx::toolbarlayout::Group::record, false);
+                    layout.setShown (lynx::toolbarlayout::Group::meters, false);
+                    ui.setToolbarLayoutForSnapshot (layout);
+                    saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-custom-1600.png");
+                }
+                ui.setToolbarLayoutForSnapshot (lynx::toolbarlayout::Layout::makeDefault());
                 ui.setBounds (size);
                 offline.dispatchPendingMessages();
             }
@@ -1256,11 +1274,15 @@ private:
             saveSnapshot (ui, prefix + "-rack.png");
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
+            if (const auto strip = ui.getToolStripAreaForSnapshot (false); ! strip.isEmpty())
+                saveArea (ui, strip, prefix + "-pianoroll-tools.png");
             // the editors' mouse feel: the hovered note / clip edge (grip, outline) and its hint in the hint bar
             ui.setHintForSnapshot (ui.getPianoRollForSnapshot().hoverForSnapshot());
             saveSnapshot (ui, prefix + "-pianoroll-hover.png");
             ui.selectTabForSnapshot (2);
             saveSnapshot (ui, prefix + "-playlist.png");
+            if (const auto strip = ui.getToolStripAreaForSnapshot (true); ! strip.isEmpty())
+                saveArea (ui, strip, prefix + "-playlist-tools.png");
             ui.setHintForSnapshot (ui.getPlaylistForSnapshot().hoverForSnapshot());
             saveSnapshot (ui, prefix + "-playlist-hover.png");
             ui.setHintForSnapshot ({ lynx::tr ("Volume") + " - " + lynx::tr ("drag (Ctrl: fine), wheel, Alt+click resets"), "78%", true, true });
@@ -1305,6 +1327,7 @@ private:
             saveIconSheet (prefix + "-icons.png", 1.0f);
             saveIconSheet (prefix + "-icons-150.png", 1.5f);
             saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
+            saveWindow (std::make_unique<lynx::toolbar::CustomizePanel> (lynx::toolbarlayout::Layout::makeDefault()), "-customize-toolbar.png");
             saveMenus (ui, prefix + "-menus.png");
             {
                 // the windows' own menus (title bars) and the toolbar's recording menu
@@ -1319,6 +1342,8 @@ private:
                 }
                 names.add ("Recording");
                 menus.push_back (ui.getRecordMenuForSnapshot());
+                names.add ("Toolbar");
+                menus.push_back (ui.getToolbarMenuForSnapshot());
                 saveMenus (names, menus, prefix + "-panel-menus.png");
             }
 
