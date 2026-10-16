@@ -54,7 +54,8 @@ State layout (confirms round 20 §4.1.1): `i32` version (loads if > 1), then 13 
 bands / order / listen / swap, `bands × f32` levels, `12 × i32` controls. Load order **[DECOMP]**: the band block, the
 levels, a reset of all filter states and envelopes (`FUN_006d07f0`), a set-up with the old controls, then the controls
 one by one through ProcessParam (each one runs the set-up again). The band count is not validated on load; LYNX
-accepts only 4, 8, 16, 32, 64, 128 (the UI's values).
+accepts only 4, 8, 16, 32, 64, 128 (the UI's values). The controls are not clamped to the knob ranges either
+(round 78 §1).
 
 UI handlers **[DECOMP]**: changing the band count resets the levels to 1 and every state; changing the order resets
 every state; listen and swap only reconfigure. The controls never reset anything.
@@ -150,7 +151,8 @@ follower and the product sums were checked at 53 and 24 bits too and only 64 bit
   The word after a block is taken as +0.0, which is what the harness gives; in FL it is whatever the host left in the
   output buffer after the block — **not confirmed**, and it can only zero an envelope already below 2⁻²⁴ one sample
   earlier.
-- **`core/DelphiMath`** (`dmath::exp`, `ln`, `sinCos`, `sinh`): §2, reusable by other Delphi plugins.
+- **`core/DelphiMath`** (`dmath::exp`, `ln`, `sinCos`, `sinh`): §2, reusable by other Delphi plugins. (Round 78 merged
+  round 66's `core/DelphiRuntime.h` into it: expm1, sin, cos, power, tanh and SinCos up to 4194304 were added.)
 - Both files switch floating-point contraction off: the core test build (zig c++, native CPU) fused multiply-adds and
   missed the goldens until then; g++ and zig builds now give the same bits.
 - **`EffectKind::vocoder`** keeps its parameter layout (bands, order, listen, swap, the twelve controls as

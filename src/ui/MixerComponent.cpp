@@ -1524,10 +1524,7 @@ fvocoder::State vocoderState (const EffectSlot& slot)
     s.listen = std::clamp ((int) std::lround (slot.params[2] * 2.0f), 0, 2);
     s.swap = slot.params[3] > 0.5f;
     for (int c = 0; c < fvocoder::controls; ++c)
-    {
-        const auto lo = fvocoder::controlMin (c), hi = fvocoder::controlMax (c);
-        s.c[(std::size_t) c] = lo + (int) std::lround (std::clamp (slot.params[(std::size_t) (4 + c)], 0.0f, 1.0f) * (float) (hi - lo));
-    }
+        s.c[(std::size_t) c] = fvocoder::rawFromKnob (slot.params[(std::size_t) (4 + c)], c, s.c[(std::size_t) c]);
     return s;
 }
 
