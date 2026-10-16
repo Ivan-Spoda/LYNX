@@ -760,6 +760,11 @@ struct EnvState
     int aidx = -1, own = -1, cnt = -1;
     double hold = 0.0;
     bool muted = false;
+    // per-state time scales (+0x50…+0x5c, from the knobs; the global envelope scales act on them), the sustain offset
+    // used on entering the sustain (+0x34) and the loop stop (+0x38)
+    std::array<double, 4> sc { 1.0, 1.0, 0.0, 1.0 };
+    double susmod = 0.0;
+    bool loopstop = false;
 };
 
 struct EnvDef
@@ -882,7 +887,22 @@ struct EnvDef
         s.ys = f32 (val (0, 0.0));
         s.dl = 0.0;
         s.out = s.ys;
+        for (std::size_t i = 0; i < 4; ++i)
+            s.sc[i] = f32 (scale[i]);
+        s.susmod = sus >= 0 ? s.sc[2] : 0.0;
+        s.loopstop = zeroLoop || s.sc[1] <= 0.0;
         return s;
+    }
+
+    // global envelope attack/decay scale, sustain offset, release scale (first block, FUN_007a2c80 / FUN_007a2d60)
+    void globalScales (EnvState& s, const double* g) const noexcept
+    {
+        s.sc = { f32 (s.sc[0] * g[0]), f32 (s.sc[1] * g[1]), f32 (s.sc[2] + g[2]), f32 (s.sc[3] * g[3]) };
+        s.susmod = sus >= 0 ? s.sc[2] : 0.0;
+        s.loopstop = s.loopstop || s.sc[1] <= 0.0;
+        if (s.stage >= 2)
+            s.mod = s.susmod;
+        s.out = f32 (val (0, s.mod));
     }
 
     double step (EnvState& s, double dt) const noexcept
@@ -912,7 +932,7 @@ struct EnvDef
             if (s.idx < rel || rel < 0 || s.stage > 5)
             {
                 if (decay >= 0 && s.idx >= decay && s.sub < 3)
-                    s.stage = std::max (s.stage, 3), s.sub = 3, s.mod = scale[2];
+                    s.stage = std::max (s.stage, 3), s.sub = 3, s.mod = s.susmod;
                 if (s.idx < n - 1)
                     ++s.idx;
                 else
@@ -924,7 +944,7 @@ struct EnvDef
             {
                 s.sub = 4;
                 s.idx = loop + 1;
-                stop = zeroLoop;
+                stop = s.loopstop;
                 if (s.idx > n - 1)
                     s.idx = n - 1;
             }
@@ -935,7 +955,7 @@ struct EnvDef
             if (! stop)
             {
                 const int kx = (s.stage > 2 ? 1 : 0) + ((s.stage >= 6 && sus >= 0) ? 2 : 0);
-                const auto d = c.dx[(std::size_t) s.idx] * scale[(std::size_t) kx];
+                const auto d = c.dx[(std::size_t) s.idx] * s.sc[(std::size_t) kx];
                 if (d <= 0.0)
                     s.rate = 1.0, s.t = s.t + 1.0;
                 else
@@ -1819,7 +1839,7 @@ std::uint32_t rand64f (double* out, int n, double lo, double hi, std::uint32_t s
 // ---------------------------------------------------------------------------------------------------------------
 // Per-part patch (hmodel.Part / Filt): everything derived from the state, the rate and the tempo
 
-enum Module : std::uint8_t { mLeq, mPrism, mHarmonizer, mFilter, mPhaser, mPluck, mBlur, mProt, mClip, mVolume };
+enum Module : std::uint8_t { mLeq, mPrism, mHarmonizer, mFilter, mPhaser, mPluck, mBlur, mProt, mClip, mVolume, mHrand };
 
 // per-type unison detune factors (DLL data 0x928290, DATA — 3×9 constants, as round 32's)
 const double unisonDetuneD[3][9] {
@@ -1919,7 +1939,8 @@ struct Image
     int cols = 0, rows = 0, stride = 0, lm = 0, k5c = 0, k90 = 0, k94 = 0;
     std::vector<float> gain, freq;
     bool hasGain = false, hasFreq = false;
-    double s60 = 0.0, s68 = 0.0, s70 = 0.0, s88 = 0.0;
+    double s60 = 0.0, s68 = 0.0, s70 = 0.0, s88 = 0.0, s78 = std::numeric_limits<double>::max();
+    float a0 = 0.0f;
     float k30 = 0.0f, k34 = 0.0f, k38 = 1.0f, k174 = 0.0f, smThr = 0.0f, smCoef = 0.0f, gmix = 1.0f, fmix = 0.0f;
     double toff = 0.0, speed = 0.0;
     int interpGain = 0, interpFreq = 0, fmode = 0;
@@ -1957,8 +1978,20 @@ struct Image
         return (int) i;
     }
 
-    // FUN_00797bd0: plane at position pos, cnt entries (no loop crossfade)
+    // FUN_00797bd0: plane at position pos, cnt entries, with the loop crossfade (FUN_00793020)
     void column (const std::vector<float>& A, double pos, int interp, int cnt, float* out) const noexcept
+    {
+        column1 (A, pos, interp, cnt, out);
+        if (pos <= s78)
+            return;
+        const auto t = (float) ((pos - s78) * (double) a0);
+        float sec[4096 + 8];
+        column1 (A, pos - s70, interp, cnt, sec);
+        for (int j = 0; j < cnt; ++j)
+            out[j] = (sec[j] - out[j]) * t + out[j];
+    }
+
+    void column1 (const std::vector<float>& A, double pos, int interp, int cnt, float* out) const noexcept
     {
         const auto fi = std::floor (pos);
         const auto i = (long long) fi;
@@ -2096,8 +2129,12 @@ struct Image
             {
                 if (e8 >= 0.0)
                 {
-                    why = "image loop crossfade (not modelled: the part plays its timbres)";
-                    return false;
+                    // loop crossfade (+0xf8): the loop shortened by the fade, a second read one loop length back faded
+                    // in over [+0x78, +0x68)
+                    a70 = std::max (a70 * (1.0 - f8), 5.960464477539063e-08);
+                    s78 = a60 + a70;
+                    a0 = (float) (1.0 / (a68 - s78));
+                    a60 = a68 - a70;
                 }
             }
             else
@@ -2431,8 +2468,10 @@ struct Part
     bool blurOn = false;
     float tbA = 0, tbD = 0, protAmt = 1, lvl248 = 0, blurMix = 0, autog = 0;
     std::array<std::array<float, 2>, 2> blurShape {};
-    bool hasBlurMask = false;
-    std::array<float, bankSize> blurMask {};
+    bool hasBlurMask = false, hasHmMask = false;
+    std::array<float, bankSize> blurMask {}, hmMask {};
+    int hrSt = 0, hrCnt = 0;           // harmonic randomness table (part +0xa0/+0xa8/+0xac)
+    std::array<float, bankSize> hrTab {};
     std::array<float, bankSize> protTab {}, clipTab {};
     int protEnd = 0, protSt = 0, clipSt = 0, clipCnt = 0;
     int clipC = 0; // 0: per-partial table, 1: none, 2: constant
@@ -2454,10 +2493,11 @@ struct Part
     double hzS = 0, hzW = 0;
     bool phOn = false;
     std::vector<float> phTab;
+    Table phMask;
     double phF18 = 1024, phF1c = 1024, phW = 0, phRate = 0;
     double prismK = 0, prismConst = -1;
     std::array<double, bankSize> prismTab {};
-    std::array<float, bankSize> pkTab {};
+    std::array<float, bankSize> pkTab {}, pkTabDll {}, T2raw {};
     double pkBase = 0;
     std::array<double, 9> hzDist {};
     int maxMapRandArt = -1;
@@ -2695,6 +2735,23 @@ struct Part
         }
         vibDepth = f32 (p[45] * 0.1);
         vibRate = f32 (std::exp ((3.0 - f32 (p[46] * milli)) * ln2) * (1.0 / fs));
+        {
+            // harmonic randomness (FUN_008895a0): curve 0x2f rendered like a timbre, centre 0.5, trimmed on 0, × 8 ln 2
+            const Curve c (shp[4].pts, 0.5);
+            const double sub0 = submode == 0 ? 0.5 : 0.0, sub1 = submode == 0 ? 1.5 : 0.0;
+            std::array<float, bankSize> hv {};
+            c.render (516, 0.0, hv.data() + 4);
+            hv[2] = sub0 != 0.0 ? c.render (2, sub0 / 515.0 * c.length)[1] : hv[4];
+            hv[3] = sub1 != 0.0 ? c.render (2, sub1 / 515.0 * c.length)[1] : hv[4];
+            hv[1] = hv[4], hv[0] = 0.0f;
+            int st = 0, e = 0;
+            trim8 (hv, 0.0f, st, e);
+            hrSt = st, hrCnt = std::max (e - st, 0);
+            const auto k8 = (float) (ln2 * 8.0);
+            for (int i = 0; i < hrCnt; ++i)
+                hv[(std::size_t) i] = hv[(std::size_t) i] * k8;
+            hrTab = hv;
+        }
         // module chain (FUN_008737e0)
         chainLen = 0;
         for (auto c : order)
@@ -2703,6 +2760,8 @@ struct Part
                 chain[(std::size_t) chainLen++] = mLeq;
             else if (c == 1)
                 chain[(std::size_t) chainLen++] = mPrism;
+            else if (c == 2 && hrCnt > 0)
+                chain[(std::size_t) chainLen++] = mHrand;
             else if (c == 3)
                 chain[(std::size_t) chainLen++] = mHarmonizer;
             else if (c == 4 || c == 5)
@@ -2719,7 +2778,6 @@ struct Part
                 chain[(std::size_t) chainLen++] = mClip;
             else if (c == 11)
                 chain[(std::size_t) chainLen++] = mVolume;
-            // (2: harmonic randomness, absent while its table count is 0 — always in FL's data, see harmorFallbacks)
         }
         if (chainLen > 0 && chain[(std::size_t) chainLen - 1] == mVolume)
             --chainLen;
@@ -2778,8 +2836,7 @@ struct Part
                 phOn = false;
                 fallbacks.push_back ("phaser type " + std::to_string (phCode) + " (off)");
             }
-            if (maskTable (Curve (shp[22].pts)).flag)
-                fallbacks.push_back ("phaser mask curve (ignored)");
+            phMask = maskTable (Curve (shp[22].pts)); // (part +0x3b0, flag +0x3e4)
         }
         phW = f32 (p[78] * 0.0001);
         {
@@ -2838,6 +2895,17 @@ struct Part
             for (int i = 1; i < bankSize; ++i)
                 pkTab[(std::size_t) i] = (float) (1.0 / std::exp (f32 (f32 (pv[(std::size_t) i] - 1.0f) * 16.0) * ln2));
             pkBase = ln001 * B / fs;
+            // the DLL's own table (part +0x258) holds the reciprocal 2^((v − 1)·16); the pluck blend (mode 5) multiplies
+            // timbre 2 by it (at least 2^-16, FUN_0088f310)
+            pkTabDll[0] = 1.0f;
+            for (int i = 1; i < bankSize; ++i)
+                pkTabDll[(std::size_t) i] = (float) std::exp (f32 (f32 (pv[(std::size_t) i] - 1.0f) * 16.0) * ln2);
+            if (blend == 5)
+            {
+                const auto lo = (float) std::exp (ln2 * -16.0);
+                for (std::size_t i = 0; i < bankSize; ++i)
+                    T2[i] = std::max (T2raw[i] * pkTabDll[i], lo);
+            }
         }
         {
             const Curve dc (shp[16].pts);
@@ -2849,11 +2917,22 @@ struct Part
             }
         }
         {
+            // harmonizer local mask (FUN_0088a0c0, part +0x610): curve per partial, squared where not 1; all 1 → none
             const Curve c (shp[23].pts);
-            if (std::any_of (c.y.begin(), c.y.end(), [] (double y) { return (float) y != 1.0f; }))
-                fallbacks.push_back ("harmonizer mask curve (ignored)");
+            std::array<float, 516> mv {};
+            if (c.constant())
+                mv.fill ((float) c.y[0]);
+            else
+            {
+                const auto xs = harmonicPositions (c.length);
+                c.renderAt (xs.data(), 516, mv.data());
+            }
+            hasHmMask = std::any_of (mv.begin(), mv.end(), [] (float x) { return x != 1.0f; });
+            hmMask.fill (0.0f);
+            for (int i = 0; i < 516; ++i)
+                hmMask[(std::size_t) i] = mv[(std::size_t) i] != 1.0f ? mv[(std::size_t) i] * mv[(std::size_t) i] : mv[(std::size_t) i];
         }
-        if (blend != 0)
+        if (blend > 5)
             fallbacks.push_back ("timbre blend mode " + std::to_string (blend) + " (played as mode 0)");
         if (pd.tail > 1024)
             buildImage (pd);
@@ -3027,10 +3106,21 @@ struct Part
                 v[i] = (v[i] * 4.0f) * (v[i] * 4.0f);
             v[1] = v[4];
         }
+        // timbre blending (FUN_0088f310, combo +0x00): timbre 2 combined with the raw timbre 1 before the local EQ
+        for (std::size_t i = 0; i < bankSize; ++i)
+            switch (blend)
+            {
+                case 1: T2[i] = std::max (T1[i] - T2[i], 0.0f); break;
+                case 2: T2[i] = T2[i] * T1[i]; break;
+                case 3: T2[i] = T1[i] > T2[i] ? T1[i] : T2[i]; break;
+                case 4: T2[i] = T1[i] < T2[i] ? T1[i] : T2[i]; break;
+                default: break;
+            }
+        T2raw = T2; // (pluck blend: finished once the pluck table exists, without the local EQ)
         leq = localEq (pd);
         if (order[0] == 0)
             for (std::size_t i = 0; i < bankSize; ++i)
-                T1[i] = T1[i] * leq[i], T2[i] = T2[i] * leq[i];
+                T1[i] = T1[i] * leq[i], T2[i] = blend == 5 ? T2[i] : T2[i] * leq[i];
         const Curve c (pd.shp[1].pts, 0.5);
         std::array<float, 516> ph {};
         c.render (516, 0.0, ph.data());
@@ -3326,8 +3416,6 @@ std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm, co
         if (hook->enabled())
             P->rack = std::move (hook);
     }
-    if (P->actCount > 0)
-        P->fallbacks.push_back ("harmonic randomness module (absent: never active in FL's data)");
     return P;
 }
 
@@ -3529,8 +3617,10 @@ struct Record
     std::uint32_t seed148 = 0, s148 = 0, s14c = 0;
     std::array<float, 3> xyz {}; // smoothed X/Y/Z (voice +0x3334)
     std::array<float, bankSize> bpDec {}; // blur-mode pluck decay per partial
-    bool bpValid = false;
+    std::array<float, bankSize> hr {};    // harmonic randomness factors (voice +0xd8)
+    bool bpValid = false, pbValid = false;
     float bpV = 0.0f;
+    double pbMix = 0.0;
     int bpN = 0;
     std::uint32_t nzSeed = 0;    // noise resonance state
     float nzW = -1.0f;
@@ -3757,7 +3847,7 @@ public:
             }
             std::array<float, 9> udk {};
             const bool hasUdk = p.nuni > 1 && p.unitype == 3;
-            if (hasUdk)
+            if (p.unitype == 3) // (drawn for any unison count: TriggerVoice)
             {
                 const auto w = (float) f32 (0.5 / (p.nuni - 0.5));
                 seed60 = rand32f (udk.data(), p.nuni, -w, w, seed60);
@@ -3779,11 +3869,17 @@ public:
                 if (bd)
                     s108 = s14c;
                 bd = P->vrmode == 3;
+                std::array<float, bankSize> hrr {};
+                if (p.hrCnt > 0) // harmonic randomness draws (after the MT draw)
+                    seed60 = rand32f (hrr.data(), p.hrCnt, 0.0f, 1.0f, seed60);
                 if (freeCount == 0)
                     continue;
                 const auto ri = allocRecord();
                 auto& v = records[(std::size_t) ri];
                 startRecord (v, pk, ku, nt, gsearch, hasUdk ? udk[(std::size_t) ku] : 0.0f, hzu, s14c, s108);
+                v.hr.fill (1.0f);
+                for (int i = 0; i < p.hrCnt; ++i)
+                    v.hr[(std::size_t) (p.hrSt + i)] = (float) std::exp ((double) (hrr[(std::size_t) i] * p.hrTab[(std::size_t) (p.hrSt + i)]));
                 v.note = slot;
                 if (nt.nv < (int) nt.voices.size())
                     nt.voices[(std::size_t) nt.nv++] = ri;
@@ -4224,7 +4320,7 @@ private:
         v.seed148 = s14c, v.s14c = s14c, v.s148 = s148;
         v.xyz = { (float) p.modx, (float) p.mody, (float) p.modz };
         v.nzSeed = s148, v.nzW = -1.0f, v.nzPos = 0.0, v.nzLen = 0.0, v.nzRate = 0.0;
-        v.bpValid = false;
+        v.bpValid = false, v.pbValid = false;
         v.ipos = ImagePos {};
         if (p.img != nullptr)
             v.ipos.off = p.img->toff;
@@ -4367,14 +4463,18 @@ private:
                     const auto& a = *s.a;
                     if (a.hasEnv)
                     {
-                        // (non-neutral global envelope scales, b29, are not modelled: only the attack skip runs)
+                        if (b29)
+                        {
+                            const double g[4] { g34, g35, g36, g37 };
+                            a.env.globalScales (s.es, g);
+                        }
                         const auto ax = a.k == 1 ? b0 : b4;
                         if (ax > 0.0 && a.env.decay >= 0)
                         {
                             double tot = 0.0;
                             for (int i = 0; i <= a.env.decay && i < a.env.c.size(); ++i)
                                 tot += a.env.c.dx[(std::size_t) i];
-                            a.env.step (s.es, (tot * s.esScale0 * std::min (1.0, ax)) / a.env.rate);
+                            a.env.step (s.es, (tot * s.es.sc[0] * std::min (1.0, ax)) / a.env.rate);
                         }
                     }
                     if (ph40 != 0.0 && a.lfoOn)
@@ -4459,7 +4559,10 @@ private:
             const auto nb = (int) ((cnt + 7) & ~7LL);
             const auto oldn = v.n;
             if (nb > v.n)
+            {
                 v.n = nb;
+                v.pkPrev = std::numeric_limits<double>::quiet_NaN(), v.bpValid = false; // (+0x1cc = −1)
+            }
             n = v.n;
             for (int i = 0; i < n; ++i)
                 v.f[(std::size_t) i] = p.ratio[(std::size_t) i] * f0fs;
@@ -4546,6 +4649,13 @@ private:
         auto mt = f32 (p.tmix * A[3]);
         if (mt >= 1.0)
             mt = 1.0;
+        if (p.blend == 5)
+        {
+            // pluck blend (FUN_00885b70): timbre 1 plays; the mix steers the pluck decay (a change invalidates it)
+            if (! v.pbValid || mt != v.pbMix)
+                v.pbValid = true, v.pbMix = mt, v.pkPrev = std::numeric_limits<double>::quiet_NaN(), v.bpValid = false;
+            mt = 0.0;
+        }
         auto& T = tmpT;
         if (mt <= 0.0)
             std::copy (p.T1.begin(), p.T1.begin() + n, T.begin());
@@ -4584,6 +4694,14 @@ private:
                         prismModule (v, p, T.data());
                     break;
                 case mHarmonizer: harmonizer (v, p, A, T.data()); break;
+                case mHrand:
+                {
+                    // FUN_00886e30: T ·= the record's random factors over [start, start + count)
+                    const int mm = std::min (n - p.hrSt, p.hrCnt);
+                    for (int i = 0; i < mm; ++i)
+                        T[(std::size_t) (p.hrSt + i)] = T[(std::size_t) (p.hrSt + i)] * v.hr[(std::size_t) (p.hrSt + i)];
+                    break;
+                }
                 case mPhaser: phaser (v, p, A, T.data()); break;
                 case mPluck: pluck (v, p, A, T.data()); break;
                 case mBlur: hblur (v, p, A, T.data()); break;
@@ -4889,8 +5007,7 @@ private:
                 v.bpValid = true, v.bpV = v2, v.bpN = n;
                 const auto t1c8 = (float) (std::exp ((double) ((v2 - 1.0f) * 17.0f) * ln2) * 20000.0);
                 const auto f5 = (float) (p.pkBase / ((double) t1c8 + 0.25));
-                for (int i = 0; i < n; ++i)
-                    v.bpDec[(std::size_t) i] = (float) std::exp ((double) (p.pkTab[(std::size_t) i] * f5));
+                pluckRates (p, A, n, f5, v.bpDec.data());
             }
             if (v.tbFresh)
             {
@@ -5284,8 +5401,33 @@ private:
         if (p.b69)
             tot = (float) std::sqrt ((double) tot);
         const auto inv = (float) f32 (1.0 / tot);
+        if (! p.hasHmMask)
+            for (int i = 0; i < n; ++i)
+                base[i] = base[i] * inv;
+        else
+            for (int i = 0; i < n; ++i) // FUN_00882980
+                base[i] = (base[i] * inv - snap[(std::size_t) i]) * p.hmMask[(std::size_t) i] + snap[(std::size_t) i];
+    }
+
+    // FUN_00888da0: per-partial pluck decay exp(table·f5); with the pluck blend exp(f5 / mix of the DLL's pluck table and
+    // timbre 2), the mix being the timbre-mix value (at most 1)
+    static void pluckRates (const Part& p, const double* A, int n, float f5, float* out) noexcept
+    {
+        if (p.blend != 5)
+        {
+            for (int i = 0; i < n; ++i)
+                out[i] = (float) fastExp ((double) (p.pkTab[(std::size_t) i] * f5));
+            return;
+        }
+        auto m = (float) f32 (p.tmix * A[3]);
+        if (m >= 1.0f)
+            m = 1.0f;
+        const auto w = 1.0f - m;
         for (int i = 0; i < n; ++i)
-            base[i] = base[i] * inv;
+        {
+            const auto t = (p.pkTabDll[(std::size_t) i] - p.T2[(std::size_t) i]) * w + p.T2[(std::size_t) i];
+            out[i] = (float) std::exp ((double) (f5 / t));
+        }
     }
 
     void pluck (Record& v, const Part& p, const double* A, float* T) noexcept
@@ -5307,8 +5449,7 @@ private:
                 else
                 {
                     const auto f5 = (float) f32 (p.pkBase / (v.pkT + 0.25));
-                    for (int i = 0; i < n; ++i)
-                        v.pkRate[(std::size_t) i] = (float) fastExp ((double) (p.pkTab[(std::size_t) i] * f5));
+                    pluckRates (p, A, n, f5, v.pkRate.data());
                 }
                 if (v.pkIc < n)
                 {
@@ -5393,12 +5534,18 @@ private:
                     y = y > 0.0f ? std::numeric_limits<float>::max() : -std::numeric_limits<float>::max();
                 Pv = tab[toInt64 ((double) rndf (y)) & (N - 1)];
             }
+            float Mv = 1.0f;
+            const bool masked = p.phMask.flag;
+            if (masked)
+                Mv = tableRead (p.phMask, v.l2[(std::size_t) i] * (float) p.phMask.S + (float) p.phMask.o, P->prec);
             if (freq)
             {
-                const auto e = Pv * e3;
+                const auto e = masked ? (Mv * Pv) * e3 : Pv * e3;
                 const auto g = P->prec >= 1 ? std::exp ((double) e * ln2) : (double) std::exp (e * (float) ln2);
                 v.f[(std::size_t) i] = v.f[(std::size_t) i] * g;
             }
+            else if (masked)
+                T[i] = ((Pv * Mv) * mxF - Mv * mxF) * T[i] + T[i]; // FUN_00882900
             else
                 T[i] = (Pv * mxF + one) * T[i];
         }

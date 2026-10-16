@@ -7383,12 +7383,14 @@ namespace
 // A Harmor state written from scratch (REA_rodada11 §4.1 layout, version 18): part A only — a decaying-harmonics
 // timbre, low-pass + resonance, filter envelope, 3-voice unison, vibrato, pluck, tremolo, volume envelope with a
 // velocity map — and the global block. Every other curve is neutral.
-std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = false)
+// features (REA_rodada75): 1 arpeggio markers on the volume envelope, 2 noise resonance on filter 1, 4 "pluck replaces
+// blur decay", 8 pluck blend, 16 harmonic randomness, 32 phaser + harmonizer masks
+std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = false, int features = 0)
 {
     std::vector<std::uint8_t> b;
     auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
     auto f64 = [&] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
-    struct Pt { double dx, y, tension; int mode; };
+    struct Pt { double dx, y, tension; int mode; int arp = 0; };
     auto curve = [&] (const std::vector<Pt>& pts, std::array<std::int32_t, 5> hdr) {
         i32 (3), i32 (3), i32 ((std::int32_t) pts.size());
         for (const auto& p : pts)
@@ -7398,7 +7400,7 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = fals
             std::uint32_t u;
             std::memcpy (&u, &t, 4);
             i32 ((std::int32_t) u);
-            b.push_back ((std::uint8_t) p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+            b.push_back ((std::uint8_t) p.mode), b.push_back ((std::uint8_t) p.arp), b.push_back (0), b.push_back (0);
         }
         for (auto h : hdr)
             i32 (h);
@@ -7417,6 +7419,14 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = fals
         { 64, 8192 }, { 66, 500 }, { 72, 600 }, { 74, 1000 }, { 75, 600 }, { 78, 5000 }, { 79, 500 }, { 80, 3000 } };
     for (const auto& [i, v] : values)
         p[(std::size_t) i] = v;
+    if ((features & 2) != 0)
+        p[57] = 400, p[59] = 300; // filter-1 resonance amount and width (noise type set in the combo block)
+    if ((features & 4) != 0)
+        p[75] = 700, p[21] = 300; // pluck value, time-blur attack
+    if ((features & 8) != 0)
+        p[75] = 650, p[4] = 600; // pluck, timbre mix
+    if ((features & 32) != 0)
+        p[76] = 700, p[27] = 600; // phaser mix, harmonizer mix
     if (image) // image synthesis (REA_rodada75): speed, cubic gain / linear freq interpolation, Hz freq mode, formant
         for (const auto& [i, v] : std::initializer_list<std::pair<int, int>> { { 82, 200 }, { 83, 100000 }, { 84, 10000 }, { 85, 20000 },
                  { 86, 750 }, { 87, 4 }, { 88, 600 }, { 89, 900 }, { 90, 1 }, { 91, 3 }, { 92, 1500 }, { 93, -300 }, { 94, 800 } })
@@ -7429,8 +7439,12 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = fals
     auto put = [&] (int o, std::int32_t v) { std::memcpy (misc.data() + o, &v, 4); };
     const float one = 1.0f;
     put (0x08, 107), put (0x1c, 1), put (0x28, 200), std::memcpy (misc.data() + 0x30, &one, 4);
-    put (0x34, 0), put (0x38, 4), put (0x3c, 100), put (0x40, 108);
+    put (0x34, 0), put (0x38, 4), put (0x3c, (features & 2) != 0 ? 109 : 100), put (0x40, 108);
+    if ((features & 8) != 0)
+        put (0x00, 5);
     misc[0x44] = 1;
+    if ((features & 4) != 0)
+        misc[0x46] = 1;
     b.insert (b.end(), misc.begin(), misc.end());
     static const int mode1[] = { 0, 2, 4, 5, 12, 13, 14, 15, 17, 18, 23, 24, 27, 28, 29, 30, 33, 36, 38, 39, 40, 41, 42 };
     for (int k = 0; k < 43; ++k)
@@ -7441,7 +7455,11 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = fals
         const double neutral = centred && ! doubled ? 0.5 : 1.0;
         i32 (3);
         i32 (1065353216), i32 (1065353216), i32 (1065353216);
-        if (k == 1) // volume envelope: attack, decay to the sustain point, release
+        if (k == 1 && (features & 1) != 0) // arpeggio volume envelope: a looping pattern with chord markers
+            curve ({ { 0, 0, 0, 0, 2 }, { 0.005, 1, 0.3, 0 }, { 0.08, 0.2, -0.4, 0, 3 }, { 0.005, 1, 0.2, 0 }, { 0.08, 0.1, 0, 0, 1 },
+                     { 0.1, 0, 0.2, 0 } },
+                   { 0, 1, -1, 0, 4 });
+        else if (k == 1) // volume envelope: attack, decay to the sustain point, release
             curve ({ { 0, 0, 0, 0 }, { 0.01, 1, 0.3, 0 }, { 0.3, 0.6, -0.4, 0 }, { 0.4, 0, 0.2, 0 } }, { 0, 1, 1, -1, 2 });
         else if (k == 4) // filter-1 envelope
             curve ({ { 0, 1, 0, 0 }, { 0.25, 0.2, -0.5, 0 } }, { 0, 1, -1, -1, -1 });
@@ -7463,7 +7481,13 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = fals
                 flat (neutral);
     }
     for (int c = 0; c < 26; ++c)
-        if (c == 2 || c == 3)
+        if ((features & 16) != 0 && c == 4)
+            curve ({ { 0, 0.5, 0, 0 }, { 0.2, 0.8, 0.3, 0 }, { 0.8, 0.3, 0, 0 } }, off); // harmonic randomness
+        else if ((features & 32) != 0 && (c == 22 || c == 23))
+            curve ({ { 0, 0.3, 0, 0 }, { 0.6, 1.0, 0.2, 0 }, { 0.4, 0.5, 0, 0 } }, off); // phaser / harmonizer masks
+        else if (c == 3 && (features & 8) != 0)
+            curve ({ { 0, 0.2, 0, 0 }, { 1, 0.05, 0.4, 0 } }, off); // timbre 2 for the pluck blend
+        else if (c == 2 || c == 3)
             curve ({ { 0, 0.25, 0, 0 }, { 0.006, 0.12, -0.46, 0 }, { 0.994, 0, 0, 0 } }, off); // timbres
         else if (c == 14)
             curve ({ { 0, 1, 0, 0 }, { 1, 0, 0, 0 } }, off); // pluck curve
@@ -7522,7 +7546,7 @@ TEST (harmor_engine)
     if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR"))
         std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
     CHECK (lynx::harmorStateUsable (blob));
-    CHECK (lynx::harmorFallbacks (blob).size() == 1); // (only the harmonic-randomness note)
+    CHECK (lynx::harmorFallbacks (blob).empty());
     const auto at = lynx::harmorParamOffset (blob, 0, 52);
     std::int32_t cutoff = 0;
     CHECK (at > 0 && (std::memcpy (&cutoff, blob.data() + at, 4), cutoff == 5000));
@@ -10522,13 +10546,16 @@ TEST (harmor_image)
     if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR_IMAGE"))
         std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
     CHECK (lynx::harmorStateUsable (blob));
-    CHECK (lynx::harmorFallbacks (blob).size() == 1); // (only the harmonic-randomness note: the image is modelled)
+    CHECK (lynx::harmorFallbacks (blob).empty()); // (the image is modelled)
     const auto ref = lynx::harmor::renderReference (blob, { { 0, 60, 0.78125, 1.0, 0.0, 6144 }, { 2000, 64, 0.6, 1.0, 0.0, 7000 } }, 44100.0, 8192);
     CHECK (ref.size() == 2 * 8192);
     if (std::getenv ("LYNX_PRINT_HARMOR_IMAGE") != nullptr)
         for (int i : { 100, 1000, 2500, 3000, 5000, 6500, 8191 })
             std::printf ("harmor image %d %.8g %.8g\n", i, (double) ref[2 * (std::size_t) i], (double) ref[2 * (std::size_t) i + 1]);
-    const std::tuple<int, float, float> golden[] { { 0, 0.0f, 0.0f } };
+    const std::tuple<int, float, float> golden[] {
+        { 100, 0.0022269291f, 0.018017211f }, { 1000, 0.013962966f, -0.028602127f }, { 2500, 0.016781429f, -0.028931717f },
+        { 3000, -0.010532441f, -0.0061010128f }, { 5000, -0.017426063f, 0.016474312f }, { 6500, 0.1689423f, 0.078417062f },
+        { 8191, -0.045403875f, -0.049045475f } };
     for (const auto& [i, gl, gr] : golden)
         CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
     // the image changes the sound: without it (gain mix 0, frequency scale 0) the same notes render differently
@@ -10554,6 +10581,36 @@ TEST (harmor_image)
     }
     const auto fb = lynx::harmorFallbacks (resyn);
     CHECK (std::any_of (fb.begin(), fb.end(), [] (const std::string& f) { return f.find ("resynthesis") != std::string::npos; }));
+}
+
+TEST (harmor_round75_features)
+{
+    // REA_rodada75: arpeggio markers, noise resonance, pluck blur mode, pluck blend, harmonic randomness, phaser and
+    // harmonizer masks — LYNX's engine against our reference model (r75 hmodel.py, the Mersenne Twister seeded like LYNX's)
+    const std::vector<lynx::harmor::RefNote> chord { { 0, 60, 0.8, 1.0, 0.0, 9000 }, { 1500, 64, 0.7, 1.0, 0.0, 9500 }, { 3000, 67, 0.9, 1.0, 0.0, 10000 } };
+    struct Case { int features; std::array<std::tuple<int, float, float>, 4> golden; };
+    const Case cases[] {
+        { 1, { { { 2000, 0.00326227601f, -0.00143631078f }, { 4500, 0.104633873f, 0.0262026641f }, { 7000, -0.00242280135f, 0.00364600495f }, { 11000, -0.0029983636f, -0.00308720154f } } } },
+        { 2, { { { 2000, 0.294110536f, -0.229805974f }, { 4500, -0.00492941859f, -0.00132748827f }, { 7000, 0.0132401136f, 0.00544014934f }, { 11000, -0.00105760543f, -0.00210882883f } } } },
+        { 4, { { { 2000, 0.0720629904f, -0.0296807697f }, { 4500, -0.10764533f, 0.113311439f }, { 7000, -0.229827746f, -0.101087983f }, { 11000, -0.0519010639f, -0.0665841137f } } } },
+        { 8, { { { 2000, 0.0720039901f, -0.0297230242f }, { 4500, -0.107470558f, 0.113653905f }, { 7000, -0.228478677f, -0.152556434f }, { 11000, -0.0412466244f, -0.0504480202f } } } },
+        { 16, { { { 2000, 0.0634379551f, -0.0309438618f }, { 4500, -0.112099687f, 0.112784195f }, { 7000, -0.231666087f, -0.167064955f }, { 11000, -0.0411841346f, -0.0503804788f } } } },
+        { 32, { { { 2000, 0.0862953135f, -0.0358822417f }, { 4500, 0.0694009664f, 0.141198453f }, { 7000, -0.158969622f, -0.103794064f }, { 11000, -0.0294273162f, -0.0417808629f } } } },
+        { 63, { { { 2000, 0.0172010472f, -0.0106831535f }, { 4500, 0.556600683f, 0.0811084217f }, { 7000, -0.00255421684f, 0.020610704f }, { 11000, -0.00318711501f, 0.000247763831f } } } } };
+    for (const auto& c : cases)
+    {
+        const auto blob = harmorTestState (false, false, c.features);
+        if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR_R75"))
+            std::ofstream (std::string (dump) + std::to_string (c.features) + ".bin", std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
+        CHECK (lynx::harmorStateUsable (blob));
+        CHECK (lynx::harmorFallbacks (blob).empty());
+        const auto ref = lynx::harmor::renderReference (blob, chord, 44100.0, 12000);
+        if (std::getenv ("LYNX_PRINT_HARMOR_R75") != nullptr)
+            for (int i : { 2000, 4500, 7000, 11000 })
+                std::printf ("harmor r75 %d %d %.8g %.8g\n", c.features, i, (double) ref[2 * (std::size_t) i], (double) ref[2 * (std::size_t) i + 1]);
+        for (const auto& [i, gl, gr] : c.golden)
+            CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+    }
 }
 
 TEST (harmor_effects_rack)
