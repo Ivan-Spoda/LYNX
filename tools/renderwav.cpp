@@ -2,6 +2,7 @@
 // Usage: renderwav project.flp output.wav [pattern-index] [loops]
 // Without an index, picks the pattern with the most notes.
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -94,8 +95,8 @@ int main (int argc, char** argv)
     const bool wholeSong = argc > 3 && std::string (argv[3]) == "song";
     std::int64_t songTicks = 0;
 
-    if (wholeSong)
-        song = lynx::makeExportSong (song, true, 0, songTicks);
+    if (wholeSong) // with the app's empty tail (1 s), so the song does not wrap to its start inside the rendered tail
+        song = lynx::makeExportSong (song, true, (std::int64_t) std::ceil (lynx::ticksPerSample (song.bpm, 44100) * 44100.0), songTicks);
 
     int chosen = argc > 3 && ! wholeSong ? std::atoi (argv[3]) : -1;
 
