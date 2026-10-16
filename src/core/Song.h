@@ -158,6 +158,13 @@ struct SamplerSettings
     // by the project's PPQ. When present it replaces attack/decay/sustain/release (delay, hold, tensions, FL's tick
     // stepping); editing the ADSR by hand clears it.
     std::vector<std::int32_t> flVolumeEnvelope;
+    // FL's native sampler channel as the project stored it (REA_rodada76): the five 0xDA articulator records (pan,
+    // volume, cutoff, resonance, pitch; 17 values each), Mod X, Mod Y and the filter type (0xDB), then the project's
+    // PPQ — 89 values. When present the sampler runs FL's voice: the velocity and pan laws with the channel's volume and
+    // pan inside the voice, the articulators stepped on the song's tick grid with FL's gain ramps, and the channel filter
+    // (core/FlVoiceProcessor.h); ADSR, cutoff/resonance/type, the modulation envelopes and LFOs above are then unused.
+    // Editing the envelope or the filter by hand clears it.
+    std::vector<std::int32_t> flChannel;
 
     bool operator== (const SamplerSettings&) const = default;
 };
