@@ -113,6 +113,8 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& state);
 struct ZoneSamples
 {
     int bits = 32;
+    std::int64_t frames = 0;                  // as loaded (the zone record's values are replaced by these)
+    int channels = 0;
     std::vector<std::vector<std::int16_t>> i16;
     std::vector<std::vector<float>> f32;
 };

@@ -42,13 +42,17 @@ int main (int argc, char** argv)
         std::size_t o = 0xd60;
         for (const auto& z : prog.zones)
         {
+            std::int32_t rec[4] {};
+            if (o + 16 <= zd.size()) std::memcpy (rec, zd.data() + o, 16);
             o += 0x41a;
             auto s = std::make_shared<dw::ZoneSamples>();
-            s->bits = z.bits;
-            const auto n = (std::size_t) z.frames + 512;
-            for (int c = 0; c < z.channels; ++c)
+            s->bits = rec[3]; // the loaded file's format, not the state's
+            s->frames = rec[0];
+            s->channels = rec[1];
+            const auto n = (std::size_t) rec[0] + 512;
+            for (int c = 0; c < rec[1]; ++c)
             {
-                if (z.bits == 32)
+                if (s->bits == 32)
                 {
                     std::vector<float> v (n);
                     if (o + 4 * n <= zd.size()) std::memcpy (v.data(), zd.data() + o, 4 * n);

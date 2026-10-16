@@ -379,6 +379,13 @@ double powCrt (double x, double y) { return std::pow (x, y); }
 // ================================================================================================= engine
 namespace
 {
+// the host gives Final.Pitch (float, 100·key − 6000 + offset); the voice takes (Final.Pitch + 6000) − 100·note
+float hostCents (int key, int note, double cents)
+{
+    const auto fp = (float) (100.0 * key - 6000.0 + cents);
+    return (fp + 6000.0f) - (float) note * 100.0f;
+}
+
 std::uint32_t crtRand (std::uint32_t& s)
 {
     s = s * 0x343fdu + 0x269ec3u;
@@ -575,6 +582,8 @@ struct Voice
 
 struct Engine::Impl
 {
+    std::uint32_t& randState;
+    explicit Impl (std::uint32_t& r) : randState (r) {}
     Program prog;
     std::vector<std::shared_ptr<const ZoneSamples>> samples;
     EngineOptions opt;
@@ -584,6 +593,144 @@ struct Engine::Impl
     LfoState progLfo[2];
     float progLfoOut[2] {};
     int lastNote = 0;
+    int heldVel[128] {};
+    std::uint64_t heldId[128] {};
+    float heldFinal[128][3] {};
+    int altLast[100];
+
+    void releaseVoice (Voice& v, bool force)
+    {
+        if (v.amp.state >= 1 && v.amp.state <= 3 && v.zone >= 0 && v.zone < (int) prog.zones.size()
+            && (prog.zones[(std::size_t) v.zone].loopMode != 1 || force))
+        {
+            v.amp.release();
+            v.menv[0].release();
+            v.menv[1].release();
+        }
+        if (v.start)
+        {
+            v.start = false;
+            v.amp.state = 0;
+        }
+    }
+
+    Voice* freeVoice()
+    {
+        for (auto& v : voices)
+            if (v.amp.state == 0 && ! v.start)
+                return &v;
+        return nullptr;
+    }
+
+    void initVoice (Voice& v, int zi, int note, std::uint64_t id, bool legato, float fv, float fp, float cents)
+    {
+        // the plugin reuses the voice record: what its start does not set (the LFOs' phase and held values) carries over
+        const LfoState keep[2] { v.lfo[0], v.lfo[1] };
+        v = Voice();
+        v.lfo[0] = keep[0];
+        v.lfo[1] = keep[1];
+        v.start = true;
+        v.zone = zi;
+        v.prevNote = lastNote;
+        v.note = note;
+        v.legato = legato;
+        v.group = prog.zones[(std::size_t) zi].exclusiveGroup;
+        v.id = id;
+        v.vel = fv;
+        v.pan = fp;
+        v.cents = cents;
+    }
+
+    // FUN_180024f90: zone choice (key, velocity with the group's tolerance, alternation groups), exclusive groups,
+    // poly / mono / legato voices
+    void startNote (std::uint64_t id, int note, int vel, float fv, float fp, float cents)
+    {
+        bool held = false;
+        for (int k = 0; k < 128; ++k)
+            if (heldVel[k] > 0)
+                held = true;
+        progLfo[0].reset (prog.lfo[0].phase);
+        progLfo[1].reset (prog.lfo[1].phase);
+        std::vector<int> cand[100];
+        for (int zi = 0; zi < (int) prog.zones.size(); ++zi)
+        {
+            const auto& z = prog.zones[(std::size_t) zi];
+            if (note < z.lowKey || note > z.highKey)
+                continue;
+            const auto g = (std::size_t) std::clamp (z.altGroup, 0, 99);
+            const auto tol = (float) ((double) prog.groups[g].velTolerance * 127.0);
+            if ((float) z.lowVel - tol <= (float) vel && (float) vel <= (float) z.highVel + tol)
+                cand[g].push_back (zi);
+        }
+        for (int g = 0; g < 100; ++g)
+        {
+            auto& c = cand[g];
+            if (c.empty())
+                continue;
+            const auto& G = prog.groups[(std::size_t) g];
+            if (! (1.0f <= G.probability))
+            {
+                // the plugin draws from rand_s (operating-system randomness) here: not reproducible
+                const auto u = (float) (std::uint32_t) (randState * 2654435761u) * fbits (0x2f800000u);
+                if (! (u <= G.probability)) { c.clear(); continue; }
+            }
+            const int n = (int) c.size();
+            if (n != 1)
+            {
+                int u = -1;
+                auto pick = [&] (int m) { return m > 0 ? (int) crtRand (randState) / (0x7fff / m) : 0; };
+                if (G.mode == 1)
+                    u = altLast[g] + 1 < n ? altLast[g] + 1 : 0;
+                else if (G.mode == 3 && altLast[g] > -1)
+                {
+                    u = pick (n - 1);
+                    if (altLast[g] <= u) ++u;
+                }
+                else if (G.mode == 2 || G.mode == 3)
+                    u = pick (n);
+                if (u >= 0)
+                {
+                    u = std::min (u, n - 1);
+                    const int z = c[(std::size_t) u];
+                    c.assign (1, z);
+                    altLast[g] = u;
+                }
+            }
+            for (const int zi : c)
+            {
+                const auto& z = prog.zones[(std::size_t) zi];
+                if (z.exclusiveGroup != 0)
+                    for (auto& v : voices)
+                        if (v.amp.state >= 1 && v.amp.state <= 3 && v.group == z.exclusiveGroup)
+                            releaseVoice (v, true);
+                if (prog.voiceMode == 1)
+                    for (auto& v : voices)
+                    {
+                        v.ended = v.ended || v.playing();
+                        releaseVoice (v, true);
+                    }
+                if (prog.voiceMode == 2)
+                {
+                    Voice* lv = nullptr;
+                    for (auto& v : voices)
+                        if (v.amp.state >= 1 && v.amp.state <= 3) { lv = &v; break; }
+                    if (lv)
+                    {
+                        lv->prevNote = lastNote;
+                        lv->note = note;
+                        lv->id = id;
+                        continue;
+                    }
+                }
+                if (auto* v = freeVoice())
+                    initVoice (*v, zi, note, id, held, fv, fp, cents);
+            }
+        }
+        heldVel[note] = vel;
+        heldId[note] = id;
+        heldFinal[note][0] = fv; heldFinal[note][1] = fp; heldFinal[note][2] = cents;
+        lastNote = note;
+    }
     // slot (MIDI channel 0) controllers
     float bend = 0.0f, wheel = 0.0f, volume = 100.0f / 127.0f, slotPan = 0.5f, expression = 1.0f;
     int bendRange = 2;
@@ -612,7 +759,9 @@ struct Engine::Impl
         }
         const Zone& z = prog.zones[(std::size_t) v.zone];
         const ZoneSamples* zs = samples.size() > (std::size_t) v.zone ? samples[(std::size_t) v.zone].get() : nullptr;
-        if (z.channels == 0 || z.frames == 0)
+        const std::int64_t zFrames = zs && zs->channels > 0 ? zs->frames : z.frames;
+        const int zChannels = zs && zs->channels > 0 ? zs->channels : z.channels;
+        if (zChannels == 0 || zFrames == 0)
         {
             v.amp.state = 0; v.start = false;
             return;
@@ -634,7 +783,7 @@ struct Engine::Impl
         }
         if (v.amp.state < 1)
             return;
-        const auto frames = (std::uint32_t) z.frames;
+        const auto frames = (std::uint32_t) zFrames;
         if (frames <= v.frame())
             v.setFrame (frames);
 
@@ -831,7 +980,7 @@ struct Engine::Impl
         // ------------------------------------------------------------------ sample reading
         float* L = buf[0];
         float* R = buf[1];
-        const bool stereo = z.channels == 2;
+        const bool stereo = zChannels == 2;
         auto sampleAt = [&] (int ch, std::uint32_t i) -> float {
             if (! zs)
                 return 0.0f;
@@ -1104,7 +1253,7 @@ struct Engine::Impl
     }
 };
 
-Engine::Engine() : d (std::make_unique<Impl>()) { d->rnd = &randState; d->setRate (44100.0f); }
+Engine::Engine() : d (std::make_unique<Impl> (randState)) { d->rnd = &randState; d->setRate (44100.0f); reset(); }
 Engine::~Engine() = default;
 
 void Engine::setProgram (const Program& program, std::vector<std::shared_ptr<const ZoneSamples>> samples, const EngineOptions& o)
@@ -1123,6 +1272,9 @@ void Engine::reset()
     for (auto& v : d->voices)
         v = Voice();
     d->progLfo[0] = d->progLfo[1] = LfoState();
+    std::fill (std::begin (d->altLast), std::end (d->altLast), -1);
+    std::fill (std::begin (d->heldVel), std::end (d->heldVel), 0);
+    std::fill (std::begin (d->heldId), std::end (d->heldId), 0);
 }
 
 bool Engine::active() const
@@ -1135,70 +1287,35 @@ bool Engine::active() const
 
 void Engine::noteOn (std::uint64_t id, int key, double velocity, double finalVol, double finalPan, double cents)
 {
-    auto& P = d->prog;
     const int note = std::clamp (key, 0, 127);
     const int vel = std::clamp ((int) ((float) velocity * 127.0f), 1, 127);
-    bool held = false;
-    for (const auto& v : d->voices)
-        if (v.playing() && ! v.released)
-            held = true;
-    d->progLfo[0].reset (P.lfo[0].phase);
-    d->progLfo[1].reset (P.lfo[1].phase);
-    for (int zi = 0; zi < (int) P.zones.size(); ++zi)
-    {
-        const auto& z = P.zones[(std::size_t) zi];
-        if (note < z.lowKey || note > z.highKey)
-            continue;
-        const auto g = (std::size_t) std::clamp (z.altGroup, 0, 99);
-        const float tol = (float) ((double) P.groups[g].velTolerance * 127.0);
-        if (! ((float) z.lowVel - tol <= (float) vel && (float) vel <= (float) z.highVel + tol))
-            continue;
-        if (z.exclusiveGroup != 0)
-            for (auto& v : d->voices)
-                if (v.amp.state >= 1 && v.amp.state <= 3 && v.group == z.exclusiveGroup)
-                    v.amp.release(), v.menv[0].release(), v.menv[1].release();
-        for (auto& v : d->voices)
-        {
-            if (v.amp.state == 0 && ! v.start)
-            {
-                v = Voice();
-                v.start = true;
-                v.zone = zi;
-                v.prevNote = d->lastNote;
-                v.note = note;
-                v.legato = held;
-                v.group = z.exclusiveGroup;
-                v.id = id;
-                v.vel = (float) finalVol;
-                v.pan = (float) finalPan;
-                v.cents = (float) cents;
-                break;
-            }
-        }
-    }
-    d->lastNote = note;
+    d->startNote (id, note, vel, (float) finalVol, (float) finalPan, hostCents (key, note, cents));
 }
 
 void Engine::noteOff (std::uint64_t id)
 {
-    for (auto& v : d->voices)
-    {
-        if (v.id != id || ! v.playing())
-            continue;
-        v.released = true;
-        const auto& z = d->prog.zones[(std::size_t) v.zone];
-        if (v.amp.state >= 1 && v.amp.state <= 3 && z.loopMode != 1)
-        {
-            v.amp.release();
-            v.menv[0].release();
-            v.menv[1].release();
-        }
-        if (v.start)
-        {
-            v.start = false;
-            v.amp.state = 0;
-        }
-    }
+    auto& I = *d;
+    int note = -1;
+    for (const auto& v : I.voices)
+        if (v.id == id && (v.playing() || v.start))
+            note = v.note;
+    for (int k = 0; k < 128; ++k)
+        if (I.heldId[k] == id && I.heldVel[k] > 0)
+            note = k;
+    if (note < 0)
+        return;
+    I.heldVel[note] = 0;
+    I.heldId[note] = 0;
+    for (auto& v : I.voices)
+        if (v.note == note && v.id == id)
+            I.releaseVoice (v, false);
+    if (I.prog.voiceMode > 0 && note == I.lastNote)
+        for (int k = 0; k < 128; ++k)
+            if (I.heldVel[k] > 0)
+            {
+                I.startNote (I.heldId[k], k, I.heldVel[k], I.heldFinal[k][0], I.heldFinal[k][1], I.heldFinal[k][2]);
+                break;
+            }
 }
 
 void Engine::setLevels (std::uint64_t id, double finalVol, double finalPan, double cents)
@@ -1208,7 +1325,7 @@ void Engine::setLevels (std::uint64_t id, double finalVol, double finalPan, doub
         {
             v.vel = (float) finalVol;
             v.pan = (float) finalPan;
-            v.cents = (float) cents;
+            v.cents = hostCents (v.note, v.note, cents);
         }
 }
 
@@ -1250,6 +1367,8 @@ void Engine::render (float* out, int n)
         }
         done += m;
     }
+    if (std::getenv ("DWRS"))
+        std::fprintf (stderr, "#rs %u\n", randState);
 }
 
 std::vector<float> renderReference (const Program& program, const std::vector<std::shared_ptr<const ZoneSamples>>& samples,
