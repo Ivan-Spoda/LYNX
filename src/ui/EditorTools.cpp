@@ -1,6 +1,7 @@
 #include "ui/EditorTools.h"
 
 #include "core/NoteEdit.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 
@@ -49,10 +50,11 @@ ToolStrip::ToolStrip (bool includeSlip)
         button->setFlat (true);
         button->setWantsKeyboardFocus (false);
         button->setMouseClickGrabsKeyboardFocus (false);
-        button->setOnColour (theme::colour::bg6);
-        button->setIconColourWhenOn (theme::colour::accent);
+        button->setOnColour (theme::colour::accent.withAlpha (0.16f)); // the light header style: a faint accent wash
+        button->setIconColourWhenOn (theme::colour::accentHover);
         button->setTooltip (tr (info.name) + " (" + juce::String::charToString ((juce::juce_wchar) info.key) + ")\n" + tr (info.description) + "\n"
                             + tr ("Every tool: right-click deletes, Alt ignores the grid, Ctrl+drag selects"));
+        ui::setQuickTip (*button, tr (info.name), juce::String::charToString ((juce::juce_wchar) info.key));
         button->setToggleState (info.tool == tool, juce::dontSendNotification);
         button->onClick = [this, t = info.tool] {
             if (tool != t)

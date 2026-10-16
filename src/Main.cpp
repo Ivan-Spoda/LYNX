@@ -1308,6 +1308,9 @@ private:
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-custom-1600.png");
                 }
                 ui.setToolbarLayoutForSnapshot (lynx::toolbarlayout::Layout::makeDefault());
+                // quick tips: the toolbar and title bars with a few name bubbles, and every tip on one sheet
+                offline.dispatchPendingMessages();
+                saveQuickTips (ui, prefix);
                 ui.setBounds (size);
                 offline.dispatchPendingMessages();
             }
@@ -1897,6 +1900,68 @@ private:
         juce::PNGImageFormat png;
         if (auto out = file.createOutputStream())
             png.writeImageToStream (c.createComponentSnapshot (area), *out);
+    }
+
+    static void savePng (const juce::Image& image, const juce::String& path)
+    {
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (image, *out);
+    }
+
+    // -toolbar-tips.png: the top of the window with the bubbles of a few controls as they appear under the
+    // mouse; -tips-sheet.png: every quick tip of the window, to check names, shortcuts and translations
+    static void saveQuickTips (lynx::MainComponent& ui, const juce::String& prefix)
+    {
+        const auto tips = ui.getQuickTipsForSnapshot();
+        const auto top = juce::Rectangle<int> (0, 0, ui.getWidth(), juce::jmin (ui.getHeight(), ui.getToolbarBoundsForSnapshot().getHeight() + 72));
+        auto image = ui.createComponentSnapshot (top);
+        {
+            juce::Graphics g (image);
+            const juce::String shown[] = { lynx::tr ("Pattern mode"), lynx::tr ("Play"), lynx::tr ("Metronome"), lynx::tr ("Mixer"), lynx::tr ("Save project"),
+                                           lynx::tr ("Window options"), lynx::tr ("Close") };
+            std::vector<juce::Rectangle<int>> used;
+            for (const auto& [area, tip] : tips)
+            {
+                const auto name = tip.upToFirstOccurrenceOf ("\t", false, false);
+                if (std::find (std::begin (shown), std::end (shown), name) == std::end (shown))
+                    continue;
+                const auto bubble = lynx::ui::quickTipBounds (tip, area, top);
+                if (std::any_of (used.begin(), used.end(), [&] (const auto& r) { return r.intersects (bubble); }))
+                    continue;
+                used.push_back (bubble);
+                g.setColour (juce::Colours::white.withAlpha (0.075f)); // the hovered control
+                g.fillRoundedRectangle (area.toFloat().reduced (0.5f), lynx::theme::radius::md);
+                lynx::ui::paintQuickTip (g, bubble.toFloat(), tip);
+            }
+        }
+        savePng (image, prefix + "-toolbar-tips.png");
+
+        // the sheet: bubbles in rows
+        const int width = 900;
+        int x = 12, y = 12;
+        std::vector<std::pair<juce::Rectangle<int>, juce::String>> placed;
+        for (const auto& [area, tip] : tips)
+        {
+            auto r = lynx::ui::quickTipSize (tip);
+            if (x + r.getWidth() > width - 12)
+            {
+                x = 12;
+                y += r.getHeight() + 10;
+            }
+            placed.emplace_back (r.withPosition (x, y), tip);
+            x += r.getWidth() + 10;
+        }
+        juce::Image sheet (juce::Image::ARGB, width, y + 20 + 12, true);
+        {
+            juce::Graphics g (sheet);
+            g.fillAll (lynx::theme::colour::bg3);
+            for (const auto& [r, tip] : placed)
+                lynx::ui::paintQuickTip (g, r.toFloat(), tip);
+        }
+        savePng (sheet, prefix + "-tips-sheet.png");
     }
 
     static void saveSnapshot (juce::Component& c, const juce::String& path)

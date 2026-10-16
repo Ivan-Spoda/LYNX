@@ -1,5 +1,7 @@
 #include "ui/HintBar.h"
 
+#include <cmath>
+
 #include "core/HintMarkup.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
@@ -305,4 +307,111 @@ void HintBar::paint (juce::Graphics& g)
         g.fillRect (fade);
     }
 }
+// --- quick tips ----------------------------------------------------------------------------------
+
+namespace
+{
+const juce::Identifier quickTipProperty ("lynxQuickTip");
+
+juce::Font tipNameFont() { return juce::Font (theme::font (theme::type::caption)); }
+juce::Font tipKeyFont() { return juce::Font (theme::font (theme::type::caption - 1.0f)); }
+constexpr float tipPadX = 7.0f, tipGap = 8.0f;
+constexpr int tipHeight = 20;
+} // namespace
+
+void setQuickTip (juce::Component& c, const juce::String& name, const juce::String& shortcut)
+{
+    c.getProperties().set (quickTipProperty, shortcut.trim().isEmpty() ? name : name + "\t" + shortcut.trim());
+}
+
+juce::String quickTipOf (const juce::Component& c)
+{
+    return c.getProperties()[quickTipProperty].toString();
+}
+
+juce::Rectangle<int> quickTipSize (const juce::String& tip)
+{
+    const auto name = tip.upToFirstOccurrenceOf ("\t", false, false), key = tip.fromFirstOccurrenceOf ("\t", false, false);
+    auto w = juce::GlyphArrangement::getStringWidth (tipNameFont(), name) + 2.0f * tipPadX;
+    if (key.isNotEmpty())
+        w += tipGap + juce::GlyphArrangement::getStringWidth (tipKeyFont(), key);
+    return { 0, 0, (int) std::ceil (w) + 2, tipHeight };
+}
+
+void paintQuickTip (juce::Graphics& g, juce::Rectangle<float> bubble, const juce::String& tip)
+{
+    using namespace theme;
+    const auto name = tip.upToFirstOccurrenceOf ("\t", false, false), key = tip.fromFirstOccurrenceOf ("\t", false, false);
+    g.setColour (colour::bg0.withAlpha (0.96f));
+    g.fillRoundedRectangle (bubble, radius::sm);
+    g.setColour (colour::borderStrong.withAlpha (0.9f));
+    g.drawRoundedRectangle (bubble.reduced (0.5f), radius::sm, 1.0f);
+
+    auto text = bubble.reduced (tipPadX, 0.0f);
+    g.setColour (colour::textPrimary.withAlpha (0.92f));
+    g.setFont (tipNameFont());
+    const auto nameWidth = juce::GlyphArrangement::getStringWidth (tipNameFont(), name);
+    g.drawText (name, text.removeFromLeft (nameWidth + 1.0f), juce::Justification::centredLeft, false);
+
+    if (key.isNotEmpty())
+    {
+        text.removeFromLeft (tipGap);
+        g.setColour (colour::textSecondary.withAlpha (0.85f));
+        g.setFont (tipKeyFont());
+        g.drawText (key, text, juce::Justification::centredLeft, false);
+    }
+}
+
+juce::Rectangle<int> quickTipBounds (const juce::String& tip, juce::Rectangle<int> target, juce::Rectangle<int> area)
+{
+    auto r = quickTipSize (tip).withCentre ({ target.getCentreX(), 0 }).withY (target.getBottom() + 5);
+    if (r.getBottom() > area.getBottom())
+        r.setY (target.getY() - 5 - r.getHeight());
+    return r.constrainedWithin (area);
+}
+
+struct QuickTipWindow::Look final : juce::LookAndFeel_V4
+{
+    juce::Rectangle<int> target; // screen bounds of the control the tip is for
+
+    juce::Rectangle<int> getTooltipBounds (const juce::String& tip, juce::Point<int> pos, juce::Rectangle<int> parentArea) override
+    {
+        return quickTipBounds (tip, target.isEmpty() ? juce::Rectangle<int> (pos.x, pos.y, 1, 16) : target, parentArea);
+    }
+
+    void drawTooltip (juce::Graphics& g, const juce::String& tip, int width, int height) override
+    {
+        paintQuickTip (g, juce::Rectangle<int> (width, height).toFloat(), tip);
+    }
+};
+
+QuickTipWindow::QuickTipWindow() : juce::TooltipWindow (nullptr, 400), look (std::make_unique<Look>())
+{
+    setOpaque (false);
+    setLookAndFeel (look.get());
+}
+
+QuickTipWindow::~QuickTipWindow()
+{
+    hideTip();
+    setLookAndFeel (nullptr);
+}
+
+juce::String QuickTipWindow::getTipFor (juce::Component& c)
+{
+    if (juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown() || c.isCurrentlyBlockedByAnotherModalComponent())
+        return {};
+
+    // the control itself or the component it is drawn in (a button's inner parts)
+    auto* owner = &c;
+    for (int depth = 0; owner != nullptr && depth < 3 && quickTipOf (*owner).isEmpty(); ++depth)
+        owner = owner->getParentComponent();
+
+    if (owner == nullptr || quickTipOf (*owner).isEmpty() || ! owner->isEnabled())
+        return {};
+
+    look->target = owner->getScreenBounds();
+    return quickTipOf (*owner);
+}
+
 } // namespace lynx::ui
