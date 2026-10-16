@@ -11,6 +11,12 @@
 // Behaviour per docs/analise/REA_rodada72.md. Every float operation keeps the order and precision the plugin uses
 // (single precision unless noted), so that the output matches the DLL's bit for bit on the same data.
 
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off")
+#endif
+
 namespace lynx
 {
 namespace dw
@@ -1020,6 +1026,7 @@ struct Engine::Impl
                 const float noise = (float) (int) crtRand (*rnd) * kTiny;
                 const float xl = noise + L[i];
                 const float xr = noise + R[i];
+                if (std::getenv ("DWDBG")) std::fprintf (stderr, "#x %d %.9g %.9g\n", i, (double) xl, (double) noise);
                 float yl, yr;
                 if (! z.parallelFilters)
                 {
