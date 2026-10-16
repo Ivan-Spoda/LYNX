@@ -1,5 +1,7 @@
 #include "engine/PluginHost.h"
 
+#include "core/Preferences.h"
+
 #include "core/FlWrapper.h"
 
 #include "engine/ClapFormat.h"
@@ -148,10 +150,11 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 class PluginHost::BackgroundScan final : public juce::Thread
 {
 public:
-    BackgroundScan (PluginHost& h, juce::FileSearchPath p)
+    BackgroundScan (PluginHost& h, juce::FileSearchPath p, juce::StringArray f = {})
         : juce::Thread ("LYNX plugin scan"),
           host (h),
-          paths (std::move (p))
+          paths (std::move (p)),
+          files (std::move (f))
     {
     }
 
@@ -163,12 +166,13 @@ public:
 
     void run() override
     {
-        const auto found = host.scan (paths, [this] (float progress, const juce::String& file) {
+        const auto progress = [this] (float done, const juce::String& file) {
             const std::scoped_lock lock (host.stateLock);
-            host.state.progress = progress;
+            host.state.progress = done;
             host.state.file = juce::File::createFileWithoutCheckingPath (file).getFileName();
             return ! threadShouldExit();
-        });
+        };
+        const auto found = files.isEmpty() ? host.scan (paths, progress) : host.scanFiles (files, progress);
         const std::scoped_lock lock (host.stateLock);
         host.state.running = false;
         host.state.found = found;
@@ -180,6 +184,7 @@ public:
 private:
     PluginHost& host;
     juce::FileSearchPath paths;
+    juce::StringArray files; // a targeted scan of these files instead of the folders
 };
 
 PluginHost::PluginHost (bool keep)
@@ -187,8 +192,11 @@ PluginHost::PluginHost (bool keep)
 {
     addPluginFormats (formats);
     if (persistent)
+    {
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
             known.recreateFromXml (*xml);
+        favouriteIds = prefs::parseFavourites (settingsFolder().getChildFile ("plugin-favourites.txt").loadFileAsString().toStdString());
+    }
 }
 
 PluginHost::~PluginHost()
@@ -355,6 +363,48 @@ int PluginHost::scanFiles (const juce::StringArray& files, const std::function<b
     }
     save();
     return known.getNumTypes() - before;
+}
+
+void PluginHost::startBackgroundScanOfFiles (const juce::StringArray& files)
+{
+    if (backgroundScan().running || files.isEmpty())
+        return;
+    background = nullptr;
+    {
+        const std::scoped_lock lock (stateLock);
+        state.running = true;
+        state.progress = 0.0f;
+        state.found = 0;
+        state.file = {};
+    }
+    background = std::make_unique<BackgroundScan> (*this, juce::FileSearchPath(), files);
+    background->startThread (juce::Thread::Priority::low);
+}
+
+void PluginHost::forgetFile (const juce::String& file)
+{
+    for (const auto& t : known.getTypes())
+        if (t.fileOrIdentifier == file)
+            known.removeType (t);
+    known.removeFromBlacklist (file);
+    save();
+}
+
+void PluginHost::forgetAll()
+{
+    known.clear();
+    known.clearBlacklistedFiles();
+    save();
+}
+
+void PluginHost::setFavourite (const std::string& id, bool favourite)
+{
+    if (favourite)
+        favouriteIds.insert (id);
+    else
+        favouriteIds.erase (id);
+    if (persistent)
+        settingsFolder().getChildFile ("plugin-favourites.txt").replaceWithText (juce::String (prefs::formatFavourites (favouriteIds)));
 }
 
 void PluginHost::startBackgroundScan (const juce::FileSearchPath& paths)

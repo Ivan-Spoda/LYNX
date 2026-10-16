@@ -1,11 +1,14 @@
 #pragma once
 
 #include <deque>
+#include <map>
+#include <tuple>
 #include <functional>
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "core/HeldNotes.h"
+#include "core/Preferences.h"
 #include "core/LiveEventQueue.h"
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
@@ -121,8 +124,16 @@ public:
     void learnMidiController (const AutomationTarget& target);
     bool isLearningMidi() const noexcept { return learning.kind != AutomationTargetKind::none; }
 
-    // MIDI inputs: all available ones are enabled and play the selected channel.
+    // MIDI inputs: every device is enabled and plays the selected channels unless the MIDI settings say otherwise
+    // (Settings › MIDI: device off, one MIDI channel only, a fixed Channel Rack channel; velocity curve; pickup).
     juce::StringArray getActiveMidiInputs() const;
+    const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
+    // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
+    void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
+
+    // How many undo steps are kept (Settings › General).
+    void setUndoLevels (int levels);
+    int getUndoLevels() const noexcept { return (int) maxUndoSteps; }
 
     // Document (UI thread)
     const Song& getSong() const noexcept { return song; }
@@ -217,6 +228,7 @@ private:
     void timerCallback() override;
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
     void enableAllMidiInputs();
+    void saveAudioDeviceState();
     void updateRecording();
     void updateAudioRecording();
     void startAudioTake();
@@ -266,6 +278,12 @@ private:
     std::array<std::atomic<float>, scopeSize> scope {}; // ring buffer of the output (written by audio)
     std::atomic<int> scopeWrite { 0 };
     juce::MidiDeviceListConnection midiDevicesChanged;
+    prefs::MidiPrefs midiPrefs;                      // UI thread
+    juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
+    prefs::MidiPrefs midiPrefsShared;
+    std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
+    struct DeviceStateSaver;
+    std::unique_ptr<DeviceStateSaver> deviceStateSaver;
 
     // audio recording
     bool audioArmed = false;
@@ -293,7 +311,7 @@ private:
     bool modified = false;
     std::unique_ptr<StreamPrefetcher> prefetcher; // only with an audio device (playing live)
 
-    static constexpr std::size_t maxUndoSteps = 100;
+    std::size_t maxUndoSteps = prefs::defaultUndoLevels;
     std::deque<Song> undoStack, redoStack;
     juce::Time lastUndoPress; // mouse click that already produced an undo step
     SnapshotExchange<RackState> rackExchange;

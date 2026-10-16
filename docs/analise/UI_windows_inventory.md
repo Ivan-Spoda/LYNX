@@ -45,9 +45,9 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 
 | Page | Content in FL | LYNX | Notes |
 |---|---|---|---|
-| Audio | device, sample rate, buffer, resampling quality, preview/metronome track, CPU options | partial | JUCE device selector dialog (Options › Audio settings); no mixer/CPU options |
-| MIDI | input/output devices, controller type, ports, sync, velocity curves | missing | every MIDI input is enabled and plays the selected channel |
-| General | GUI scaling, animations, startup project/template, splash, undo levels, language, note names | partial | spread over the Options menu (splash, startup sound, language, toolbar, UI scale) |
+| Audio | device, sample rate, buffer, resampling quality, preview/metronome track, CPU options | **exists (round 82)** | Settings › Audio: driver, output/input, rate, buffer + latency, driver panel, test sound, status/CPU/dropouts; device saved between sessions (no mixer/CPU options) |
+| MIDI | input/output devices, controller type, ports, sync, velocity curves | **partial (round 82)** | Settings › MIDI: inputs on/off, MIDI channel filter, fixed target channel, velocity curve, pickup, controller links; no outputs/sync |
+| General | GUI scaling, animations, startup project/template, splash, undo levels, language, note names | **exists (round 82)** | Settings › General: language, UI size, waveforms, startup, editing options, undo levels, backups (interval + kept), plugin sandbox |
 | File | browser extra search folders, plugin folders, backup (autosave), user data folder | **exists (round 81)** | Settings › Files: missing-files search folders, Browser folders, plugin folders (autosave folder still a menu item) |
 | Project | time settings (PPQ, beats per bar, steps per beat), data folder, pan law, playlist crossfades | **exists (round 81)** | Settings › Project: tempo, beats per bar, swing, master pitch, timebase read-out (no data folder / pan law) |
 | Info | title, author, genre, web link, comments, working time | **exists (round 81)** | Settings › Info; kept in .lynx, imported from .flp (comments = event 0xC3); no working time |
@@ -69,7 +69,7 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | TExportScoreForm "Export as score sheet" | missing | |
 | TMIDIImportForm "Import MIDI data" | partial | .mid opens as a project / into a channel, no options dialog |
 | TDWPRenderForm "DirectWave Instrument rendering" | n/a | |
-| TShortcutForm / TShortcutEditorForm "Manage shortcuts" | partial | keys.json edited by hand (Options menu) |
+| TShortcutForm / TShortcutEditorForm "Manage shortcuts" | **exists (round 82)** | Shortcut manager: search, place filter, rebind by key press, clash check, reset; keys.json keeps changes only |
 | TPaletteEditorForm "Palette editor" | missing | fixed LYNX palette |
 | TThemeEditorForm "Theme selector" | n/a | |
 | TTapTempoForm "Tempo tapper" | exists | tempo menu › Tap tempo |
@@ -82,8 +82,8 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | TEnvMapForm "Mapping" (velocity/controller curves) | missing | |
 | TParamCtrlForm (link to controller) | exists | "Link to MIDI controller" |
 | TMIDIInputForm "Remote control settings", TMIDIInputForm_Generic "Global link settings" | partial | MIDI learn exists, no settings dialog |
-| TPlugListForm / TPluginListForm (plugin picker / database) | partial | quick-add palette + scan; no plugin manager window |
-| (Plugin Manager is a separate FL app) | missing | scan folders, list, errors, favourites |
+| TPlugListForm / TPluginListForm (plugin picker / database) | **exists (round 82)** | Plugin manager window + quick-add palette |
+| (Plugin Manager is a separate FL app) | **exists (round 82)** | Plugin manager: list/status/failed/favourites, rescan, retry, folders |
 | TLargePluginDataForm | n/a | |
 | TNameEditForm (rename/colour) | exists | Rename and color dialog |
 | TMsgForm / TFLMsgForm / TFLBasePluginsMsgDlg | exists | LYNX alert windows |
@@ -121,6 +121,8 @@ denoiser, Sample properties: **missing** (LYNX has no audio editor; channel samp
 normalise, region and stretch). These belong to an "Audio editor" feature, not to single windows.
 
 ## Queue (not done in round 81), priority order
+
+Round 82 did items 1 (General + Audio; not pan law / data folder), 2, 4 (inputs; not outputs/sync) and 6.
 
 1. **Settings › General** (moves the scattered Options items into one page) and **Settings › Audio** as a page
    (today a separate dialog); Project page: pan law, data folder.

@@ -108,7 +108,9 @@ private:
     // The "Missing files" window (ui/MissingFilesDialog.h) for the current project; `afterOpening`: shown by opening a
     // project (only when something is missing; the FL import report follows it), else from the menu (always).
     void showMissingFiles (bool afterOpening);
-    void openSettings (int page); // ui/SettingsDialog.h: 0 Project, 1 Info, 2 Files
+    void openSettings (int page); // ui/SettingsDialog.h SettingsPage: 0 Project, 1 Info, 2 Files, 3 General, 4 Audio, 5 MIDI
+    void showPluginManager();
+    void showShortcutManager();
     int scansSeen = 0; // background plugin scans already announced in the hint bar
     void showHelp();
 
@@ -123,7 +125,6 @@ private:
     bool runAction (const std::string& id);
     keys::Context focusContext() const;
     void loadKeyMap();
-    void editKeyMap();
     keys::KeyMap keyMap;
     bool typingPiano = false; // off by default so single-letter editor tools work (the manual does not state a default)
     void setTypingPiano (bool on);
@@ -193,6 +194,7 @@ private:
     void updateTitle();
     void autosave();
     int autosaveTicks = 0;
+    int autosaveMinutes = 2, autosaveKeep = 10; // Settings › General › Backup
     bool lastModified = false;
     void openPianoRoll();
     void toggleMode();

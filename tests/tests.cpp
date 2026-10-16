@@ -37,6 +37,7 @@
 #include "core/MissingFiles.h"
 #include "core/PianoRollTools.h"
 #include "core/EventEdit.h"
+#include "core/Preferences.h"
 #include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
@@ -14688,3 +14689,4 @@ TEST (event_editor_playback)
     CHECK (lanesPattern == 1);
     CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }
+#include "PrefsTests.inc"

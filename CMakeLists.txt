@@ -28,6 +28,7 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
     src/core/MissingFiles.cpp
+    src/core/Preferences.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -229,6 +230,9 @@ if(LYNX_BUILD_APP)
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp
         src/ui/SettingsDialog.cpp
+        src/ui/SettingsPages.cpp
+        src/ui/PluginManager.cpp
+        src/ui/ShortcutManager.cpp
         src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)

@@ -28,6 +28,8 @@ CORE="$CORE src/core/ThreeOsc.cpp"
 CORE="$CORE src/core/FlPluginDb.cpp"
 # missing files of an opened project: search and relocation (round 81)
 CORE="$CORE src/core/MissingFiles.cpp"
+# settings pages, plugin manager and shortcut manager logic (round 82)
+CORE="$CORE src/core/Preferences.cpp"
 # spectral waveforms (band analysis, multi-resolution peak cache)
 CORE="$CORE src/core/WaveAnalysis.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
