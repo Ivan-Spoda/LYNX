@@ -48,9 +48,9 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | Audio | device, sample rate, buffer, resampling quality, preview/metronome track, CPU options | partial | JUCE device selector dialog (Options › Audio settings); no mixer/CPU options |
 | MIDI | input/output devices, controller type, ports, sync, velocity curves | missing | every MIDI input is enabled and plays the selected channel |
 | General | GUI scaling, animations, startup project/template, splash, undo levels, language, note names | partial | spread over the Options menu (splash, startup sound, language, toolbar, UI scale) |
-| File | browser extra search folders, plugin folders, backup (autosave), user data folder | partial | browser folders (Browser › Add folder), plugin folders (setup wizard), autosave folder (menu) - no single page |
-| Project | time settings (PPQ, beats per bar, steps per beat), data folder, pan law, playlist crossfades | missing | tempo/time signature only from the toolbar and markers |
-| Info | title, author, genre, web link, comments, working time | missing | FL's title/artist/genre/url are already parsed from .flp (flp::Project) but not kept |
+| File | browser extra search folders, plugin folders, backup (autosave), user data folder | **exists (round 81)** | Settings › Files: missing-files search folders, Browser folders, plugin folders (autosave folder still a menu item) |
+| Project | time settings (PPQ, beats per bar, steps per beat), data folder, pan law, playlist crossfades | **exists (round 81)** | Settings › Project: tempo, beats per bar, swing, master pitch, timebase read-out (no data folder / pan law) |
+| Info | title, author, genre, web link, comments, working time | **exists (round 81)** | Settings › Info; kept in .lynx, imported from .flp (comments = event 0xC3); no working time |
 | About | version, license | exists | About LYNX |
 | Theme | theme selector | n/a | one LYNX theme |
 | Debug | debug log | n/a | |
@@ -60,7 +60,7 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | FL form (Caption) | LYNX | Notes |
 |---|---|---|
 | TMissingPluginsForm + "%d sample(s) required by this project could not be located." | **exists (round 81)** | Missing files window: samples (search folder, locate, skip, remembered folders), plugins with replacements, auto-relocated list |
-| TInfoForm "Song info" (shown on opening) | missing | see Settings › Info |
+| TInfoForm "Song info" (shown on opening) | exists (round 81) | Settings › Info opens with the project when "Show this page when the project is opened" is on |
 | TNewProjForm "New project" (PPQ, time signature, name/location, info) | partial | File › New + templates menu; no dialog |
 | TProjectRenameForm "Rename project" | missing | |
 | TRenderForm / TWAVRenderForm "WAV rendering" | exists | Export dialog: WAV 16/24/32f, FLAC, OGG, sample rate, tail, stems |
@@ -122,10 +122,8 @@ normalise, region and stretch). These belong to an "Audio editor" feature, not t
 
 ## Queue (not done in round 81), priority order
 
-1. **Settings window** with pages, starting with *Project* (tempo, time signature, swing, PPQ shown) and *Info*
-   (title, author, genre, web link, comments - kept in .lynx, imported from .flp), then *File* (search folders of
-   the missing-files window, Browser folders, plugin folders, autosave folder) and *General* (moves the scattered
-   Options items into one page).
+1. **Settings › General** (moves the scattered Options items into one page) and **Settings › Audio** as a page
+   (today a separate dialog); Project page: pan law, data folder.
 2. **Plugin manager**: scanned plugins (name, vendor, format, path, status), scan folders, rescan, failed plugins.
 3. **Event editor** for a channel's or insert's parameter events (FL's TEventEditForm), next to automation clips.
 4. **MIDI settings** page: inputs on/off, which channel each input plays, output/sync.
