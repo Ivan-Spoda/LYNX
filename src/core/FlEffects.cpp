@@ -6,6 +6,7 @@
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
 #include "core/EquoFx.h"
+#include "core/HardcoreFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
@@ -945,6 +946,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Fruity Convolver" && data) // impulse response file of the installation (REA_rodada60)
         if (auto exact = convolverFromFl (state, data))
             return exact;
+    if (pluginName == "Hardcore" && data) // the exact engine with the installation's cabinet impulses (REA_rodada71)
+        if (auto exact = hardcore::fromFl (state, data))
+            return exact;
     if (pluginName == "Soundgoodizer" && data)
         if (const auto path = soundgoodizerPresetPath (state); ! path.empty())
             if (auto exact = soundgoodizerExact (state, data (path)))
@@ -1164,6 +1168,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             psfl::toParams (ps, slot.params);
             return slot;
         }
+    if (pluginName == "Hardcore") // the exact engine without the cabinet impulses (REA_rodada71)
+        if (auto exact = hardcore::fromFl (state, {}))
+            return exact;
     if (pluginName == "EQUO") // the exact engine (REA_rodada61); a flat parametric EQ otherwise
         if (const auto s = equofx::parse (state))
         {
@@ -1381,6 +1388,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
         case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
         case EffectKind::equo: return { "EQUO" };
+        case EffectKind::hardcore: return { "Hardcore" };
         case EffectKind::flPitchShifter: return { "Pitch Shifter" };
         default: return {};
     }
@@ -1402,6 +1410,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // Hardcore's 50 parameters: FL sends 0…1 for all of them (the box types and the cabinet as raw numbers, REA_rodada71)
+    if (is ("Hardcore") && k >= 0 && k < hardcore::numParams)
+        return FlParamMap { k, [k] (float v) { return hardcore::toSlot (k, std::clamp (v, 0.0f, 1.0f)); } };
     // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
     if (is ("EQUO") && k >= 0 && k < 5)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };

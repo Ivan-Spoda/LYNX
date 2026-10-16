@@ -16,6 +16,7 @@
 #include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
 #include "core/FrequencySplitter.h"
+#include "core/HardcoreFx.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
@@ -2470,6 +2471,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::equo: return equoInfo;
         case EffectKind::flPitchShifter: return flPitchShifterInfo;
         case EffectKind::frequencySplitter: return fsplit::info();
+        case EffectKind::hardcore: return hardcore::info();
     }
     return eq;
 }
@@ -2797,6 +2799,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::frequencySplitter:
             return fsplit::paramText (param, v);
 
+        case EffectKind::hardcore:
+            return hardcore::paramText (param, v);
+
         case EffectKind::fruityPanOMatic:
             return flbasic::panOMaticParamText (param, v);
 
@@ -2870,6 +2875,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return maximusfx::make (slot.state);
     if (slot.kind == EffectKind::equo)
         return equofx::make (slot.state);
+    if (slot.kind == EffectKind::hardcore)
+        return hardcore::make (slot);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
     if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
@@ -2944,6 +2951,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
         case EffectKind::flPitchShifter: return psfl::make();
         case EffectKind::frequencySplitter: return fsplit::make();
+        case EffectKind::hardcore: return hardcore::make (makeEffectSlot (EffectKind::hardcore)); // no cabinet impulses; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();

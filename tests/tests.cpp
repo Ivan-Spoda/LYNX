@@ -11768,3 +11768,4 @@ TEST (wasp_is_a_silent_placeholder)
 #include "UiToolbarTests.inc"
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"
+#include "HardcoreTests.inc"

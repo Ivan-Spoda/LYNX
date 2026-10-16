@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/HardcoreFx.h"
 #include "core/GrossBeat.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
@@ -122,6 +123,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
+        { "Hardcore", EffectKind::hardcore },
     };
 
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")
@@ -1552,6 +1554,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
                  || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
+                 && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))
+        {
+            if (hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet]) > 0.0f)
+                ++options.report->droppedEffects["Hardcore (cabinet impulse not found: cabinet off)"];
+        }
     };
 
     for (const auto& insert : project.mixer)

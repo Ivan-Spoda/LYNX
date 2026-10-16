@@ -75,7 +75,7 @@ struct CrtTables
             exp2[(std::size_t) i] = std::exp2 (i / 64.0);
     }
 };
-const CrtTables& crt()
+inline const CrtTables& crt()
 {
     static const CrtTables t;
     return t;
@@ -292,6 +292,8 @@ struct PlainCrt
     static float sinf (float x) noexcept { return sinfCrt (x); }
     static float cosf (float x) noexcept { return cosfCrt (x); }
     static void sincosf (float x, float& s, float& c) noexcept { sinCosK (x, s, c); }
+    static float expf (float x) noexcept { return expfCrt (x); }
+    static float tanf (float x) noexcept { return tanfCrt (x); }
 };
 
 // low-pass biquad of the lo-fi effect (FUN_18001c3a0 design, skipped when unchanged; FUN_18001c4a0 tick)
@@ -591,6 +593,317 @@ struct EqBandT
         return y;
     }
 };
+
+// ------------------------------------------------------------------------------------------------ reverb
+// class fxReverb (the plate of GMS's reverb slot, REA_rodada39 §1.13) with its early-reflection tap active, processing
+// in place (REA_rodada45 §FX.5; Hardcore's reverb pedal is the same class, REA_rodada71).
+template <class Crt>
+struct ReverbT
+{
+    static constexpr double qa[18][2] = { { 421.0, -360.5 }, { 2981.0, 19.5 }, { 216.0, 5.5 }, { 250.0, 0.5 }, { 99.0, 1.5 }, { 100.0, 0.5 },
+                                          { 28.0, 2.5 }, { 1975.0, 25.5 }, { 199.0, 1.5 }, { 216.0, 5.5 }, { 421.0, -360.5 }, { 421.0, -360.5 },
+                                          { 421.0, -360.5 }, { 200.0, 0.5 }, { 1.0, 0.5 }, { 1.0, 0.5 }, { 1.0, 0.5 }, { 1.0, 0.5 } };
+    static constexpr int lines[12] = { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
+    static constexpr int taps0[14] = { 266, 2974, 1913, 2496, 1690, 187, 1566, 353, 3627, 1728, 3173, 1811, 335, 621 };
+    static constexpr int erTapL = 1102, erTapR = 837; // first entries of the early-reflection tables (the only taps with gain ≠ 0)
+    // the whole early-reflection tables (Hardcore's build gives every tap a gain and sums 7 left / 8 right taps)
+    static constexpr int erTabL[8] = { 1102, 2904, 3784, 4873, 5878, 7470, 9062, 9263 };
+    static constexpr int erTabR[8] = { 837, 1423, 2865, 3938, 5278, 5978, 7532, 9263 };
+    bool allTaps = false;
+    int erTL[8] {}, erTR[8] {};
+    float erGL[8] {}, erGR[8] {};
+    static constexpr float tiny = 1e-30f;
+
+    float fs = 44100.0f;
+    int pi[18] {};
+    std::vector<float> buf[12], pre, er;
+    int len[12] {}, pos[12] {}, prepos = 0, prelen = 1, lastsize = 0, erSize = 2, erPos = 0, erTl = 0, erTr = 0;
+    int taps[14] {};
+    bool dirty = true;
+    float lp = 0, hpx = 0, hpy = 0, dL0 = 0, dL1 = 0, dR0 = 0, dR1 = 0, tL = 0, tR = 0, lev = -1000.0f;
+    float gin = 0, hpk = 0, lpk = 1, ap1 = 0, ap2 = 0, tap1 = 0, tap2 = 0, decay = 0, shelf = 0, shk = 0, damp = 1, dry = 0;
+    float erLev = 0, tank = 0, erGl = 0, erGr = 0;
+
+    static int floorI (float x) noexcept
+    {
+        auto i = (int) x;
+        if ((double) i != (double) x && x < 0.0f)
+            --i;
+        return i;
+    }
+    static int cdiv (long long a, long long b) noexcept { return (int) (a / b); }
+    static float db (int i) noexcept // FUN_18002c200
+    {
+        if (i <= -361)
+            return 0.0f;
+        return Crt::powf (10.0f, (float) i * 0.004999999888241291f);
+    }
+
+    void construct()
+    {
+        static constexpr float preset[18] = { 0.8574821949005127f, 0.018785642459988594f, 0.16203702986240387f, 0.0f, 0.49494948983192444f, 1.0f,
+                                              0.2857142984867096f, 0.2405063360929489f, 0.07035175710916519f, 0.16203702986240387f,
+                                              0.8574821949005127f, 0.7743467688560486f, 0.5724465847015381f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f };
+        lastsize = 0;
+        setRate (44100.0f);
+        for (int i = 0; i < 18; ++i)
+            setp (i, preset[i]);
+        reset();
+    }
+    void setRate (float rate) // FUN_18002a7d0 / FUN_18002a7e0
+    {
+        fs = rate;
+        const auto fsi = (int) fs;
+        for (int k = 0; k < 12; ++k)
+        {
+            const auto n = cdiv ((long long) fsi * lines[k], 20000);
+            buf[k].assign ((std::size_t) std::max (1, n), tiny);
+            len[k] = std::max (1, n);
+            pos[k] = 0;
+        }
+        prelen = cdiv ((long long) fsi * 250, 1000);
+        pre.assign ((std::size_t) std::max (1, prelen), tiny);
+        prelen = std::max (1, prelen);
+        prepos = 0;
+        auto u = (unsigned) (fsi * 0.31632653061224492);
+        int bitsN = 0;
+        while (u != 0)
+            ++bitsN, u >>= 1;
+        erSize = 1 << (bitsN + 1);
+        er.assign ((std::size_t) erSize, tiny);
+        erPos = 0;
+        for (int t = 0; t < 14; ++t)
+            taps[t] = cdiv ((long long) fsi * taps0[t], 20000);
+    }
+    void setp (int i, float v) noexcept // FUN_18002b380
+    {
+        const auto b = (float) qa[i][1];
+        const auto x = b >= 0.0f ? v * (float) qa[i][0] + b : v * (float) qa[i][0] - (-b);
+        pi[i] = floorI (x);
+        dirty = true;
+    }
+    void reset() noexcept // FUN_18002b170 (positions are kept)
+    {
+        for (auto& b : buf)
+            std::fill (b.begin(), b.end(), tiny);
+        std::fill (pre.begin(), pre.end(), tiny);
+        std::fill (er.begin(), er.end(), tiny);
+        lp = hpx = hpy = 0.0f;
+        dL0 = dL1 = dR0 = dR1 = 0.0f;
+        tL = tR = 0.0f;
+        lev = -1000.0f;
+    }
+    float onePole (int p) const noexcept
+    {
+        if ((float) p < 221.0f)
+        {
+            const auto c = Crt::cosf (((float) p * 628.3185424804688f) / fs);
+            const auto t = 2.0f - c;
+            const auto s = std::sqrt ((t * t) - 1.0f);
+            return 1.0f - (t - s);
+        }
+        return 1.0f;
+    }
+    void recalc() noexcept // FUN_18002c230
+    {
+        const auto fsi = (int) fs;
+        const auto* p = pi;
+        const auto one = 1.0f;
+        gin = p[14] == 0 ? db (p[0]) : 0.0f;
+        if ((float) p[1] > 19.0f)
+        {
+            const auto x = (std::min (fs * 0.5f, (float) p[1]) * 3.1415927410125732f) / fs;
+            const auto e = Crt::tanf (x);
+            hpk = (e - one) / (e + one);
+        }
+        else
+            hpk = 0.0f;
+        lpk = onePole (p[2]);
+        prelen = std::max (1, cdiv ((long long) fsi * p[3], 1000));
+        prelen = std::min (prelen, (int) pre.size());
+        prepos %= prelen;
+        const auto base = cdiv ((long long) (p[4] + 15) * fsi, 115);
+        for (int k = 0; k < 12; ++k)
+        {
+            len[k] = std::max (1, cdiv ((long long) base * lines[k], 20000));
+            len[k] = std::min (len[k], (int) buf[k].size());
+            pos[k] %= len[k];
+        }
+        for (int t = 0; t < 14; ++t)
+            taps[t] = cdiv ((long long) base * taps0[t], 20000);
+        const auto sc = (float) cdiv ((long long) (p[4] + 3) * fsi, 103);
+        erTl = (int) (((float) erTapL * 3.4013603e-05f) * sc);
+        erTr = (int) (((float) erTapR * 3.4013603e-05f) * sc);
+        const auto m = erTl < erTr ? (float) erTl : (float) erTr;
+        erGl = (m * 0.5f) / (float) erTl;
+        if (allTaps)
+            for (int k = 0; k < 8; ++k)
+            {
+                erTL[k] = (int) (((float) erTabL[k] * 3.4013603e-05f) * sc);
+                erTR[k] = (int) (((float) erTabR[k] * 3.4013603e-05f) * sc);
+                erGL[k] = (m * 0.5f) / (float) erTL[k];
+                erGR[k] = (m * 0.36000001430511475f) / (float) erTR[k];
+            }
+        erGr = (m * 0.36000001430511475f) / (float) erTr;
+        if (p[4] != lastsize)
+        {
+            lastsize = p[4];
+            for (int k = 0; k < 12; ++k)
+                std::fill (buf[k].begin(), buf[k].begin() + len[k], 0.0f);
+            std::fill (er.begin(), er.end(), 0.0f);
+        }
+        const auto diff = (float) p[5] * 0.01f;
+        const auto inv = one / fs;
+        if (diff != 0.0f)
+        {
+            ap1 = Crt::expf (((float) (len[0] + len[1]) * (-49.34111022949219f / diff)) * inv);
+            ap2 = Crt::expf (((-31.398887634277344f / diff) * (float) (len[2] + len[3])) * inv);
+            auto x = (((float) (len[4] + len[8]) * -3.4538776874542236f) / fs) * (2.857142925262451f / diff);
+            tap1 = Crt::expf (x);
+            x = ((-3.4538776874542236f / fs) * (float) (len[6] + len[10])) * (1.9607843160629272f / diff);
+            tap2 = Crt::expf (x);
+        }
+        else
+            ap1 = ap2 = tap1 = tap2 = 0.0f;
+        const auto tsum = ((float) (len[9] + len[7] + len[5] + len[11]) / fs) * -6.907755374908447f;
+        const auto t60 = (float) p[8] * 0.10000000149011612f;
+        decay = Crt::powf (Crt::expf (tsum / t60), 0.25f);
+        auto rr = Crt::powf (Crt::expf ((10.0f / ((float) p[6] * t60)) * tsum), 0.25f);
+        rr = rr / decay;
+        shelf = (rr - one) * 0.5f;
+        const auto rm = std::min (rr, one);
+        const auto e = Crt::tanf (((float) p[7] * 3.1415927410125732f) / fs);
+        shk = (e - rm) / (rm + e);
+        damp = onePole (p[9]);
+        dry = p[15] == 0 ? db (p[10]) : 0.0f;
+        erLev = p[16] == 0 ? db (p[11]) * 0.5f : 0.0f;
+        tank = p[17] == 0 ? db (p[12]) * 0.30000001192092896f : 0.0f;
+        dirty = false;
+    }
+    float ap (int k, float x, float c1, float c2) noexcept
+    {
+        auto& b = buf[k];
+        const auto i = pos[k];
+        const auto t = b[(std::size_t) i] - (c1 * x);
+        b[(std::size_t) i] = (c2 * t) + x;
+        pos[k] = i > 0 ? i - 1 : len[k] - 1;
+        return t;
+    }
+    static int wrap (int i, int n) noexcept { return i >= n ? i - n : i; }
+    void process (float* outL, float* outR, int n) noexcept // FUN_18002dda0, in place
+    {
+        if (dirty)
+            recalc();
+        const auto d = decay, one = 1.0f, half = 0.5f, dd = one - d;
+        const auto g41 = (dd * 0.6000000238418579f) + d, g42 = (dd * 0.25f) + d, g43 = (dd * 0.699999988079071f) + d;
+        const auto g56 = (dd * 0.20000000298023224f) + d, g44 = (dd * half) + d;
+        const auto width = (float) pi[13] * 0.009999999776482582f;
+        const auto erm = erSize - 1;
+        auto* B = buf;
+        auto* L = len;
+        auto* P = pos;
+        const auto* T = taps;
+        for (int s = 0; s < n; ++s)
+        {
+            const auto xl = gin * outL[s], xr = gin * outR[s];
+            const auto m = ((xr + xl) * half) + tiny;
+            auto l = ((m - lp) * lpk) + lp;
+            lp = l;
+            const auto h = ((l - hpx) * hpk) + hpy;
+            hpy = l;
+            hpx = h;
+            if (hpk != 0.0f)
+                l = ((l - h) * half) + tiny;
+            float erl = 0.0f, err = 0.0f;
+            if (erLev != 0.0f)
+            {
+                if (allTaps)
+                {
+                    auto e = [&] (int tap) { return er[(std::size_t) ((tap + erPos) & erm)]; };
+                    erl = e (erTL[0]) * erGL[0] + e (erTL[1]) * erGL[1];
+                    erl = erl - e (erTL[2]) * erGL[2];
+                    erl = e (erTL[3]) * erGL[3] + erl;
+                    erl = erl + e (erTL[4]) * erGL[4];
+                    erl = erl + e (erTL[5]) * erGL[5];
+                    erl = erl + e (erTL[6]) * erGL[6];
+                    err = e (erTR[0]) * erGR[0] - e (erTR[1]) * erGR[1];
+                    err = err + e (erTR[2]) * erGR[2];
+                    err = err + e (erTR[3]) * erGR[3];
+                    err = err - e (erTR[4]) * erGR[4];
+                    err = err + e (erTR[5]) * erGR[5];
+                    err = err + e (erTR[6]) * erGR[6];
+                    err = err - e (erTR[7]) * erGR[7];
+                }
+                else
+                {
+                    erl = er[(std::size_t) ((erTl + erPos) & erm)] * erGl;
+                    err = er[(std::size_t) ((erTr + erPos) & erm)] * erGr;
+                }
+            }
+            auto t = ap (0, l, ap1, ap1);
+            auto u = ap (1, t, ap2, ap1);
+            er[(std::size_t) erPos] = t;
+            erPos = erPos > 0 ? erPos - 1 : erm;
+            t = ap (2, u, ap1, ap1);
+            u = ap (3, t, ap2, ap1);
+            const auto pv = pre[(std::size_t) prepos];
+            pre[(std::size_t) prepos] = u;
+            prepos = prepos > 0 ? prepos - 1 : prelen - 1;
+            const auto tin = pv + 9.99999968e-21f;
+            auto v = B[11][(std::size_t) P[11]] * d;
+            auto s2 = ((v - dL1) * shk) + dL0;
+            dL0 = v, dL1 = s2;
+            auto w = (((((s2 + v) * shelf) + v) + tin) - tL) * damp;
+            w = w + tL;
+            tL = w;
+            u = ap (4, w, tap1, tap1);
+            auto i = P[5];
+            auto o = B[5][(std::size_t) i];
+            B[5][(std::size_t) i] = u;
+            P[5] = i > 0 ? i - 1 : L[5] - 1;
+            o = o * d;
+            u = ap (6, o, tap2, tap2);
+            i = P[7];
+            B[7][(std::size_t) i] = u;
+            i = i > 0 ? i - 1 : L[7] - 1;
+            P[7] = i;
+            v = B[7][(std::size_t) i] * d;
+            s2 = ((v - dR1) * shk) + dR0;
+            dR0 = v, dR1 = s2;
+            w = (((((s2 + v) * shelf) + v) + tin) - tR) * damp;
+            w = w + tR;
+            tR = w;
+            u = ap (8, w, tap1, tap1);
+            i = P[9];
+            o = B[9][(std::size_t) i];
+            B[9][(std::size_t) i] = u;
+            P[9] = i > 0 ? i - 1 : L[9] - 1;
+            o = o * d;
+            u = ap (10, o, tap2, tap2);
+            i = P[11];
+            B[11][(std::size_t) i] = u;
+            P[11] = i > 0 ? i - 1 : L[11] - 1;
+            auto at = [&] (int line, int tap) { return B[line][(std::size_t) wrap (tap + P[line], L[line])]; };
+            const auto fA = at (9, T[0]), fB = at (9, T[1]), fC = at (10, T[2]), fD = at (11, T[3]);
+            const auto fE = at (5, T[4]), fF = at (6, T[5]), fG = at (7, T[6]);
+            const auto f7 = at (5, T[8]), f8 = at (5, T[7]), f9 = at (6, T[9]), f10 = at (7, T[10]), f11 = at (9, T[11]);
+            const auto f12 = at (10, T[12]), f13 = at (11, T[13]);
+            auto tl = (((fA - (g42 * fB)) - (g43 * fC)) - (g56 * fD)) + (g41 * fE);
+            tl = (tl + fF) + (g44 * fG);
+            auto tr = ((((g42 * f7) + f8) - (g43 * f9)) - (g56 * f10)) - (g41 * f11);
+            tr = (tr + f12) + (g44 * f13);
+            if (lev < -99.0f)
+                lev = tank;
+            lev = ((tank - lev) * 0.0010000000474974513f) + lev;
+            const auto a = (lev * tl) + (erLev * erl), b = (lev * tr) + (erLev * err);
+            const auto sm = b + a, df = (a - b) * width;
+            outL[s] = (xl * dry) + (df + sm);
+            outR[s] = (xr * dry) + (sm - df);
+        }
+    }
+};
+
 using LpBiquad = LpBiquadT<PlainCrt>;
+using Reverb = ReverbT<PlainCrt>;
 using EqBand = EqBandT<PlainCrt>;
 } // namespace lynx::ilfx

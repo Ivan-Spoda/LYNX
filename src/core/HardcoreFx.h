@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +24,7 @@
 namespace lynx
 {
 class Effect;
+struct EffectInfo;
 }
 
 namespace lynx::hardcore
@@ -85,6 +87,16 @@ public:
 private:
     std::unique_ptr<Impl> impl;
 };
+
+// the slot's parameter list for the generic editor (FL's 50 parameters)
+const EffectInfo& info();
+// an imported slot from FL's state: params from the state, EffectSlot::state = the cabinet impulse files the reader
+// returns (relative path → bytes; empty reader = no cabinet). nullopt = not a Hardcore state
+using FileReader = std::function<std::vector<std::uint8_t> (const std::string& relativePath)>;
+std::optional<EffectSlot> fromFl (const std::vector<std::uint8_t>& state, const FileReader& read);
+// EffectSlot::state packing of cabinet files (index 1…20 → WAV bytes)
+std::vector<std::uint8_t> packCabinets (const std::vector<std::pair<int, std::vector<std::uint8_t>>>& files);
+bool hasCabinet (const EffectSlot& slot, int cabinet);
 
 std::unique_ptr<Effect> make (const EffectSlot& slot);
 } // namespace lynx::hardcore

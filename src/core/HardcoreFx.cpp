@@ -15,6 +15,9 @@
 #include <cstring>
 #include <optional>
 
+#include <cpuid.h>
+#include <immintrin.h>
+
 #if defined(__clang__)
 #pragma clang fp contract(off)
 #elif defined(__GNUC__)
@@ -37,6 +40,8 @@ struct HcCrt
     static float sinf (float x) noexcept { return ildsp::sinf_ (x); }
     static float cosf (float x) noexcept { return ildsp::cosf_ (x); }
     static void sincosf (float x, float& s, float& c) noexcept { ildsp::sincosf_ (x, s, c); }
+    static float expf (float x) noexcept { return ildsp::expf_ (x); }
+    static float tanf (float x) noexcept { return tanfCrt (x); } // no FMA path in this routine
 };
 using LpBiquad = LpBiquadT<HcCrt>;
 using EqBand = EqBandT<HcCrt>;
@@ -776,6 +781,7 @@ struct Phaser final : PedalFx
         for (int k = 0; k < 6; ++k)
             sL[k] = sR[k] = 0.0f;
         fbL = fbR = 0.0f;
+        ph = 0.0f; // the plug-in clears the LFO phase with the right channel's feedback (one 8-byte store)
         sfrq = smix = -1.0f;
     }
     void setParam (int k, float v) noexcept override
@@ -835,13 +841,37 @@ struct Phaser final : PedalFx
     }
 };
 
-// type 5: not decoded yet — passes the signal
+// type 5: the plate reverb of Toxic Biohazard's rack (class fxReverb) driven by three knobs (FUN_18002dfc0 …)
 struct ReverbPedal final : PedalFx
 {
-    void setRate (double) override {}
-    void reset() noexcept override {}
-    void setParam (int, float) noexcept override {}
-    void process (float*, float*, int) noexcept override {}
+    ReverbT<HcCrt> rev;
+
+    ReverbPedal()
+    {
+        rev.allTaps = true;
+        rev.construct();
+    }
+    void setRate (double fs) override
+    {
+        rev.setRate ((float) fs);
+        reset();
+    }
+    void reset() noexcept override
+    {
+        rev.reset();
+        rev.setp (2, 1.0f);
+        rev.setp (5, 1.0f);
+    }
+    void setParam (int k, float v) noexcept override
+    {
+        if (k == 0)
+            rev.setp (8, (float) ((double) ((v * v) * v) * 0.59999999999999998));
+        else if (k == 1)
+            rev.setp (9, std::fabs (1.0f - v));
+        else if (k == 2)
+            rev.setp (12, (float) ((double) (v * 0.999000013f) + 0.001));
+    }
+    void process (float* L, float* R, int n) noexcept override { rev.process (L, R, n); }
 };
 
 std::unique_ptr<PedalFx> makePedal (int type)
@@ -864,6 +894,41 @@ std::unique_ptr<PedalFx> makePedal (int type)
 }
 
 // ------------------------------------------------------------------------------------------------ cabinet
+// acc[j] += x·h[j] (a product then a sum, as the plug-in's SSE loop: any vector width gives the same floats)
+bool cpuHasAvx()
+{
+    static const bool f = [] {
+        unsigned a = 0, b = 0, c = 0, d = 0;
+        if (! __get_cpuid (1, &a, &b, &c, &d))
+            return false;
+        if ((c & (1u << 27)) == 0 || (c & (1u << 28)) == 0)
+            return false;
+        unsigned lo = 0, hi = 0;
+        asm volatile ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+        return (lo & 6u) == 6u;
+    }();
+    return f;
+}
+__attribute__ ((target ("avx"))) void macAvx (float* acc, const float* h, float x, std::size_t n) noexcept
+{
+    const auto vx = _mm256_set1_ps (x);
+    std::size_t j = 0;
+    for (; j + 8 <= n; j += 8)
+        _mm256_storeu_ps (acc + j, _mm256_add_ps (_mm256_mul_ps (vx, _mm256_loadu_ps (h + j)), _mm256_loadu_ps (acc + j)));
+    for (; j < n; ++j)
+        acc[j] = x * h[j] + acc[j];
+}
+void mac (float* acc, const float* h, float x, std::size_t n) noexcept
+{
+    if (cpuHasAvx())
+    {
+        macAvx (acc, h, x, n);
+        return;
+    }
+    for (std::size_t j = 0; j < n; ++j)
+        acc[j] = x * h[j] + acc[j];
+}
+
 // impulse resampled to the rate by linear interpolation, ×0.2, run as a direct convolution whose sums add the oldest
 // input first (FUN_180026f00 / FUN_180027260)
 // the plug-in's RIFF/WAVE reader (FUN_18001c890): integer PCM 16/24/32 bits or float32, planar; its integer scales are
@@ -1019,10 +1084,8 @@ struct Cabinet
             float* ar = accR.data() + pos;
             const float* h0 = hl.data();
             const float* h1 = hr.data();
-            for (std::size_t j = 0; j < T; ++j)
-                al[j] = xl * h0[j] + al[j];
-            for (std::size_t j = 0; j < T; ++j)
-                ar[j] = xr * h1[j] + ar[j];
+            mac (al, h0, xl, T);
+            mac (ar, h1, xr, T);
             L[i] = al[0];
             R[i] = ar[0];
             ++pos;
@@ -1430,4 +1493,66 @@ private:
 } // namespace
 
 std::unique_ptr<Effect> make (const EffectSlot& slot) { return std::make_unique<HardcoreEffect> (slot.state); }
+
+const EffectInfo& info()
+{
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> n;
+        for (int i = 0; i < numParams; ++i)
+            n.push_back (paramName (i));
+        return n;
+    }();
+    static const EffectInfo i = [] {
+        EffectInfo e { "Hardcore", {} };
+        const auto d = defaultValues();
+        for (int k = 0; k < numParams; ++k)
+            e.params.push_back ({ names[(std::size_t) k].c_str(), toSlot (k, d[(std::size_t) k]) });
+        return e;
+    }();
+    return i;
+}
+
+std::vector<std::uint8_t> packCabinets (const std::vector<std::pair<int, std::vector<std::uint8_t>>>& files)
+{
+    std::vector<std::uint8_t> out { 'L', 'X', 'H', 'C' };
+    auto put = [&] (std::uint32_t x) {
+        for (int b = 0; b < 4; ++b)
+            out.push_back ((std::uint8_t) (x >> (8 * b)));
+    };
+    put ((std::uint32_t) files.size());
+    for (const auto& [idx, bytes] : files)
+    {
+        put ((std::uint32_t) idx);
+        put ((std::uint32_t) bytes.size());
+        out.insert (out.end(), bytes.begin(), bytes.end());
+    }
+    return out;
+}
+
+bool hasCabinet (const EffectSlot& slot, int cabinet)
+{
+    for (const auto& f : unpackFiles (slot.state))
+        if (f.first == cabinet && ! f.second.empty())
+            return true;
+    return false;
+}
+
+std::optional<EffectSlot> fromFl (const std::vector<std::uint8_t>& state, const FileReader& read)
+{
+    const auto s = parse (state);
+    if (! s)
+        return std::nullopt;
+    EffectSlot slot;
+    slot.kind = EffectKind::hardcore;
+    toParams (*s, slot.params);
+    // every impulse of the installation travels with the slot (about 290 kB) so the cabinet stays switchable
+    std::vector<std::pair<int, std::vector<std::uint8_t>>> files;
+    if (read)
+        for (int c = 1; c <= numCabinets; ++c)
+            if (auto b = read (cabinetPath (c)); ! b.empty() && readWav (b))
+                files.emplace_back (c, std::move (b));
+    if (! files.empty())
+        slot.state = packCabinets (files);
+    return slot;
+}
 } // namespace lynx::hardcore
