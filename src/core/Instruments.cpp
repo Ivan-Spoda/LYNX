@@ -2004,6 +2004,12 @@ public:
     {
         const auto& S = modulation.fl;
         auto& pr = v.flProc;
+        // global LFOs (flag 0x20): one phase for the whole channel, advanced on every song tick — at tick k it is
+        // (k + 1)·increment (EXEC: FL's render of a global volume LFO, REA_rodada76 §10)
+        if (S.hasGlobal)
+            for (auto& r : modulation.fl.recs)
+                if ((r.flags & 0x20) != 0)
+                    r.globalPhase = (std::uint32_t) ((std::uint64_t) (v.tickIndex + 1) * (std::uint64_t) r.lfoInc);
         pr.control (S);
         const auto finalVol = v.initVol * chanVol, finalPan = v.notePan + chanPan;
         float tL, tR;

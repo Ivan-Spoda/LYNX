@@ -185,6 +185,13 @@ The project event 0x17 holds FL's pan law: 0 = the circular sin/cos law (§3), 2
 appended as the 90th value of `SamplerSettings::flChannel` (89-value projects keep the circular law). The pan law of
 the mixer and of the other generators is unchanged (**not checked**).
 
+## 10. Global LFOs **[EXEC: FL render `g1`]**
+
+A channel LFO with the global flag (0x20; here the volume LFO, amount 80, speed 24000, notes at ticks 0, 100, 300)
+has one phase for the channel: at song tick k it is `(k + 1)·increment` (32-bit wrap), whatever the note's start.
+With `k·increment` or `(k − 1)·increment` LYNX is off by up to 2 % of the peak; with `(k + 1)` every note is ±1 code.
+LYNX sets the global phase of the channel's records from the voice's song tick before stepping it (`flTick`).
+
 ## Where I stopped / next steps
 
 - State (2026-10-16): branch feature/sampler76 (= origin/wip/sampler76) has the port, origin/main merged, the
@@ -192,8 +199,7 @@ the mixer and of the other generators is unchanged (**not checked**).
   (log `tmp/r76/build3.log`) when the round was paused. Next: confirm 0 failures, Windows build, selftest, land
   (`tmp/coord/land.sh sampler76` under the merge lock).
 
-- Global LFOs (flag 0x20) of the native sampler are stepped per voice (FL keeps a global phase); the velocity/release
-  cross-modulation table and layer parents are not ported.
+- The velocity/release cross-modulation table and layer parents are not ported.
 - Other sample rates (end-fade length, rate ratio) are unverified: FL's command-line render uses 44.1 kHz here.
 - FL's command-line render forwards to a running FL instance and then writes nothing; `fl.sh` waits until no
   `FL64.exe` runs and retries.

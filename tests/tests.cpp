@@ -2460,6 +2460,21 @@ TEST (fl_native_sampler_voice_matches_fl_renders)
         CHECK (check (out, L, R) == 0);
     }
     {
+        // a global volume LFO (flag 0x20, amount 80, speed 24000): one phase for the channel, (k + 1)·increment at song
+        // tick k (notes on ticks 0, 100, 300)
+        auto vol = volPlain;
+        vol[0] = 4 | 0x20, vol[11] = 80, vol[12] = 24000;
+        const auto out = render (records (vol, plain, plain), { 256, 0, 0 },
+                                 { { 0, 22050, 100.0f / 128, 0.0f }, { 22969, 45019, 80.0f / 128, 0.0f }, { 68906, 90956, 100.0f / 128, 0.0f } },
+                                 noise, chan);
+        const int pos[] = { 500, 3000, 7000, 12000, 23469, 26000, 30000, 69406, 72000, 80000 };
+        const int gold[] = { 1149, 765, 374, 4530, 846, -911, -646, 1160, 2316, 727 };
+        int bad = 0;
+        for (int k = 0; k < 10; ++k)
+            bad += std::abs ((int) std::lround (out.first[(std::size_t) pos[k]] * 32767.0f) - gold[k]) > 1;
+        CHECK (bad == 0);
+    }
+    {
         // a sample with its own loop (WAV smpl 4410…8819): FL loops it while the note lasts and fades it out over 10 ms
         // after the note-off (no volume envelope)
         auto looped = std::make_shared<lynx::SampleData>();
