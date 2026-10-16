@@ -12170,6 +12170,7 @@ TEST (drumaxx_engine)
             CHECK (song.channels[0].instrument == lynx::InstrumentKind::drumaxx && song.channels[0].pluginState == st);
         CHECK (report.converted["Drumaxx"] == 1);
     }
+}
 // --- REA round 68: FL Slayer (exact engine) and Fruity Dance (visual only) ------------------------------------------
 namespace
 {
