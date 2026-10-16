@@ -52,7 +52,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   LP/BP/HP/BS filter with keytracking, cutoff and pitch envelopes, 4 LFOs, AM, FM with decaying index, ring
   modulation, kick pitch sweep, 3-band tone EQ, mono and portamento.
 - **Sampler:** multi-sample zones (key/velocity), slices, reverse, cut, time-stretch (resample or WSOLA), root
-  note, start offset, channel filter and envelopes; long audio streamed from a memory-mapped disk cache.
+  note, start offset, channel filter and envelopes; FL's own interpolators (24-point sinc while playing, 32-point when
+  exporting — FL's defaults; linear/6-point/sinc kernels bit-identical to FLEngine's, REA round 69); long audio
+  streamed from a memory-mapped disk cache.
 - **Built-in drums:** kick, snare, hat, clap.
 - **Effects:** EQ, 7-band parametric EQ, compressor (with sidechain), limiter (lookahead, PDC), delay, reverb,
   chorus, filter, distortion, lo-fi, Effector (12 algorithms), vocoder, pitch correction, volume gate, rhythmic
@@ -79,7 +81,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
   band-limited oscillators, and the plugin voice processor 3x Osc keeps, with its release path; bit-identical to FL's
   DLL through our reference model on all 239 distinct non-HQ states of the installation at 44.1/48/96 kHz and on 43
-  processor cases; HQ within −137 dB), FPC, DirectWave, FL Keys, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
+  processor cases; HQ within −137 dB), FL Keys on its engine (REA round 69 §8: FL's wavetable loader and voice — 16.16
+  linear reads, envelope, overdrive, muffle filter, treble, tremolo, stereo delay, MaxPoly 32 stealing; bit-identical to the
+  installation's DLL on all 11 demo states and on dense 150-note stress runs), FPC, DirectWave, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
   installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
@@ -143,6 +147,20 @@ exports the 30 demo projects shipped with FL Studio 2026.
 Every conversion rule comes from the behavioural analysis in `docs/analise/REA_rodada*.md` (decompilation,
 the official manual and project data). Rounds 17–24 verified the earlier hypotheses and the code was fixed
 accordingly. Highlights of what is **confirmed and applied**:
+
+- **Sample players (REA round 69):** native sampler channels and audio clips read samples through FL's `TResampler`
+  rules — index→kernel table, the 2-point linear and 6-point kernels (x87 extended precision) and the windowed sinc
+  (IPP-seeded sine/cosine recurrences, SSE `rcpps`+Newton reciprocal), bit-identical to FLEngine's own kernels on
+  synthetic signals (except positions within ~10⁻⁹ of a frame with the cutoff lowered, where FL's result depends on
+  IPP's last-bit sine); FL's defaults (24-point sinc live, 32-point in the render dialog), speed formula
+  `exp(cents·ln2/1200)·ratio`, width/cutoff widening above speed 1, the copy path at speed 1.0, edge frames repeated,
+  loop wrapping and the end rule. The volume envelope of native sampler channels runs FL's articulator (the host's is
+  the plugins' `flvp` one: delay, hold, tensions, tick steps, linear ramp per tick). FPC: velocity index
+  `round(v·128)` and the "cycle" choice among overlapping layers (every demo pad that overlaps uses it). Slicex: master
+  volume through FL's L11 law. FL Keys: FL's own engine (wavetable layout, raw repacking and guard samples, the
+  mda-style voice and the global treble/tremolo/stereo stage), bit-identical to the plugin; Grand Piano's Ogg samples
+  through LYNX's decoder match FL's 16-bit buffer on 99.99 % of the values (±1 LSB otherwise). Fruity Slicer: state
+  fields and the pre-stretch of its slices decoded (§7).
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
   locked to the song, Mod Rate/Tempo Reduce, input/output gain; exact Distort cascade, Lo-fi, Delay (Mod Rate
@@ -710,6 +728,14 @@ which cannot change without changing output bits.
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
+
+- Sample players (REA round 69 §9): DirectWave's zone filter (834 of 1 287 demo zones have a low-pass; cutoff law
+  `440·2^((127v)/12 − 5)` Hz known, the filter and the modulation matrix not decoded — zones play unfiltered); the host
+  sampler voice's velocity/pan laws and channel filter; FL's song-aligned tick phase for the sampler's volume envelope
+  (LYNX counts ticks from the note start, ≤ 1 tick apart); FPC's random layer modes and simultaneous layers (unused in
+  the demos); Fruity Slicer's time-stretched slices (5 demo channels pre-stretch their loop by 0.6–5.5 % through a
+  licensed stretch engine — LYNX plays the slices unstretched); FL Keys' resampling of "resample" wavetables (Roto
+  Organ) when the host rate is not 44.1 kHz.
 - Maximus's Master Mid mode and linear-phase
   split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
 - Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
