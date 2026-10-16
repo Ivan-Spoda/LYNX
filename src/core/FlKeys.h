@@ -16,8 +16,8 @@
 // description in ChannelDef::modelParams (see FlKeysTable).
 //
 // Not reproduced (REA_rodada69 §8.6): wavetables with "resample" (Roto Organ) are not resampled to the host rate when
-// it differs from 44.1 kHz, as FL does; Ogg-compressed samples (Grand Piano) depend on the decoder (LYNX's libvorbis
-// rounds 0.01 % of the values to the other neighbour); FL counts its tremolo LFO, its denormal flush and the end of a
+// it differs from 44.1 kHz, as FL does (Ogg-compressed samples, Grand Piano, are exact since LYNX decodes them as FL,
+// REA_rodada77); FL counts its tremolo LFO, its denormal flush and the end of a
 // voice per host block, LYNX per 512-sample block.
 
 #include <array>

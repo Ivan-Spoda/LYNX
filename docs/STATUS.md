@@ -168,7 +168,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   `round(v·128)` and the "cycle" choice among overlapping layers (every demo pad that overlaps uses it). Slicex: master
   volume through FL's L11 law. FL Keys: FL's own engine (wavetable layout, raw repacking and guard samples, the
   mda-style voice and the global treble/tremolo/stereo stage), bit-identical to the plugin; Grand Piano's Ogg samples
-  through LYNX's decoder match FL's 16-bit buffer on 99.99 % of the values (±1 LSB otherwise). Fruity Slicer: state
+  through LYNX's FL-exact Ogg decoder (round 77) match FL's 16-bit buffer on all 20 081 840 values. Fruity Slicer: state
   fields and the pre-stretch of its slices decoded (§7).
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
@@ -705,7 +705,9 @@ Confirmed empirically on the demo projects:
   floats; −1 (NaN when read as float) = no slice. In channel clips (audio/automation) they are floats, in beats
   or milliseconds depending on the project. FL does not stretch audio clips.
 - Many factory samples are WAV files with format tag 0x674F/0x6750 and an Ogg Vorbis stream in the `data`
-  chunk; others are plain Ogg files with a `.wav` extension. Paths use `%FLStudioFactoryData%` (install folder),
+  chunk; others are plain Ogg files with a `.wav` extension. LYNX decodes them as FL's `oggio_x64.dll` does
+  (libvorbis' packet loop, FL's stream-end rule, FL's MDCT table; `src/core/OggVorbis.*`, REA round 77): all 3 137
+  installation files bit-identical to FL's decode (JUCE's vorbisfile reader dropped blocks in 295 of them). Paths use `%FLStudioFactoryData%` (install folder),
   `%FLStudioData%` (install\Data) and `%FLStudioUserData%` (Documents\Image-Line\FL Studio).
 
 ## Audio drivers
@@ -775,8 +777,7 @@ which cannot change without changing output bits.
 
 ## Open items
 
-- Sample players (REA rounds 69 §9 and 72 §9): DirectWave's Ogg samples go through LYNX's libvorbis (within ~4·10⁻⁷ of
-  FL's oggio decode, not bit-equal), its HQ interpolation, time-stretch modes (§8); the host
+- Sample players (REA rounds 69 §9 and 72 §9): DirectWave's HQ interpolation, time-stretch modes (§8); the host
   sampler voice's velocity/pan laws and channel filter (decoded in part, round 72 §9, not applied); FL's song-aligned tick phase for the sampler's volume envelope
   (LYNX counts ticks from the note start, ≤ 1 tick apart); FPC's random layer modes and simultaneous layers (unused in
   the demos); Fruity Slicer's time-stretched slices (5 demo channels pre-stretch their loop by 0.6–5.5 % through a

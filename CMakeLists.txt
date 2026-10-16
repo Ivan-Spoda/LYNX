@@ -93,6 +93,7 @@ add_library(lynx_core STATIC
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/DirectWave.cpp
+    src/core/OggVorbis.cpp
     src/core/BeepMap.cpp
     src/core/Sawer.cpp
     src/core/Inflate.cpp
@@ -123,6 +124,17 @@ add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
 target_include_directories(wavpack_decoder PUBLIC third_party/wavpack/include PRIVATE third_party/wavpack/src)
 target_compile_definitions(wavpack_decoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:HAVE___BUILTIN_CLZ=1>)
 target_link_libraries(lynx_core PUBLIC wavpack_decoder)
+
+# libogg + libvorbis decoder (BSD; third_party/vorbis, mdct.c modified as FL builds it, REA_rodada77) for FL's
+# Ogg-in-WAV samples; no FMA contraction so the float operation order stays libvorbis'
+file(GLOB VORBIS_SOURCES third_party/vorbis/src/*.c)
+list(FILTER VORBIS_SOURCES EXCLUDE REGEX "/lookup\\.c$") # (included by lsp.c)
+add_library(vorbis_decoder STATIC ${VORBIS_SOURCES})
+target_include_directories(vorbis_decoder PUBLIC third_party/vorbis/include PRIVATE third_party/vorbis/src)
+target_compile_options(vorbis_decoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-ffp-contract=off -w>
+    # every symbol gets a lynx_ prefix (JUCE links its own copy with the same C names)
+    $<IF:$<C_COMPILER_ID:MSVC>,/FI${CMAKE_CURRENT_SOURCE_DIR}/third_party/vorbis/include/lynx_vorbis_prefix.h,-include${CMAKE_CURRENT_SOURCE_DIR}/third_party/vorbis/include/lynx_vorbis_prefix.h>)
+target_link_libraries(lynx_core PUBLIC vorbis_decoder)
 
 add_executable(lynx_tests tests/tests.cpp)
 target_link_libraries(lynx_tests PRIVATE lynx_core)

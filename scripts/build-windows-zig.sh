@@ -43,7 +43,7 @@ cmp -s "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h" 2>/dev/null && rm "$OUT/JuceC
 
 COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
         -include "$OUT/JuceConfig.h" -include cmake/mingw/mingw_compat.h
-        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/asiosdk/common -Isrc)
+        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/vorbis/include -Ithird_party/asiosdk/common -Isrc)
 
 export ZIG OUT JUCE_DIR TARGET
 export COMMON_STR="${COMMON[*]}"
@@ -109,6 +109,8 @@ APP_SOURCES+=(src/core/FlResampler.cpp src/core/FlKeys.cpp)
 APP_SOURCES+=(src/core/HardcoreFx.cpp)
 # FL's DirectWave (REA round 72)
 APP_SOURCES+=(src/core/DirectWave.cpp)
+# Ogg Vorbis decoding as FL does (REA round 77)
+APP_SOURCES+=(src/core/OggVorbis.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
@@ -116,6 +118,16 @@ for f in third_party/wavpack/src/*.c; do
     obj="$OUT/wavpack/$(basename "$f" .c).o"
     if [[ ! -f "$obj" || "$f" -nt "$obj" ]]; then
         "$ZIG" cc -target "$TARGET" -O2 -w -DHAVE___BUILTIN_CLZ=1 -Ithird_party/wavpack/include -Ithird_party/wavpack/src -c "$f" -o "$obj"
+    fi
+done
+
+echo "libogg + libvorbis (decoder, C)..."
+mkdir -p "$OUT/vorbis"
+for f in third_party/vorbis/src/*.c; do
+    [[ "$(basename "$f")" == lookup.c ]] && continue # (included by lsp.c)
+    obj="$OUT/vorbis/$(basename "$f" .c).o"
+    if [[ ! -f "$obj" || "$f" -nt "$obj" ]]; then
+        "$ZIG" cc -target "$TARGET" -O2 -w -ffp-contract=off -include third_party/vorbis/include/lynx_vorbis_prefix.h -Ithird_party/vorbis/include -Ithird_party/vorbis/src -c "$f" -o "$obj"
     fi
 done
 
@@ -137,7 +149,7 @@ IFS=. read -r VMAJ VMIN VPAT <<< "$VERSION"
 ( cd resources && "$ZIG" rc /i "$OUT_ABS" /fo "$OUT_ABS/LYNX.res" LYNX.rc )
 
 echo "Linking..."
-"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT/LYNX.res" \
+"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT"/vorbis/*.o "$OUT/LYNX.res" \
     -Wl,--subsystem,windows \
     -lole32 -loleaut32 -luuid -lwinmm -lws2_32 -lshlwapi -lversion -lwininet -limm32 -lcomdlg32 \
     -lgdi32 -luser32 -lcomctl32 -lshell32 -ladvapi32 -lrpcrt4 -ldbghelp -lsetupapi -luxtheme -ldwmapi \
