@@ -102,6 +102,8 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::plucked: return "plucked";
         case InstrumentKind::beepmap: return "beepmap";
         case InstrumentKind::sawer: return "sawer";
+        case InstrumentKind::granulizer: return "granulizer";
+        case InstrumentKind::drumaxx: return "drumaxx";
     }
     return "synth";
 }
@@ -115,7 +117,8 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
-                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer })
+                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::granulizer,
+                    InstrumentKind::drumaxx })
         if (id == instrumentId (k))
             return k;
 
@@ -184,6 +187,9 @@ const char* effectId (EffectKind k)
         case EffectKind::equo: return "equo";
         case EffectKind::flPitchShifter: return "flPitchShifter";
         case EffectKind::frequencySplitter: return "frequencySplitter";
+        case EffectKind::fruityFastLP: return "fruityFastLP";
+        case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
+        case EffectKind::fruityFilter: return "fruityFilter";
     }
     return "eq";
 }
@@ -332,7 +338,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
                     EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
                     EffectKind::equo, EffectKind::flPitchShifter,
-                    EffectKind::frequencySplitter })
+                    EffectKind::frequencySplitter,
+                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter })
         if (id == effectId (k))
             return k;
 

@@ -44,6 +44,8 @@ add_library(lynx_core STATIC
     src/core/MiniSynth.cpp
     src/core/SimSynth.cpp
     src/core/Wasp.cpp
+    src/core/Granulizer.cpp
+    src/core/Drumaxx.cpp
     src/core/Dx10.cpp
     src/core/Kepler.cpp
     src/core/TransistorBass.cpp
@@ -76,6 +78,7 @@ add_library(lynx_core STATIC
     src/core/DelphiMath.cpp
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
+    src/core/FruityFilters.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp

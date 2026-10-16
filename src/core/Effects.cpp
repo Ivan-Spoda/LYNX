@@ -15,6 +15,7 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityBasicFx.h"
+#include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
 #include "core/FrequencySplitter.h"
 #include "core/StereoFx.h"
@@ -2258,6 +2259,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                              { "Split freq.", 0.5f }, { "Split balance", 0.5f }, { "On", 1.0f } } };
     static const EffectInfo spreaderInfo { "Spreader", { { "Width", 0.5f }, { "Separation", 0.5f }, { "Low bypass", 9990.0f / 999000.0f },
                                                          { "Mono bass", 0.0f }, { "Enable", 1.0f } } };
+    // FL's controls over their ranges (core/FruityFilters.h); defaults = a new FL instance
+    static const EffectInfo fastLPInfo { "Fruity Fast LP", { { "Cutoff", 1.0f }, { "Resonance", 0.0f } } };
+    static const EffectInfo freeFilterInfo { "Fruity Free Filter", { { "Type", 0.0f }, { "Frequency", 0.5f }, { "Q", 169.0f / 1024.0f },
+                                                                    { "Gain", 676.0f / 1024.0f }, { "Center", 0.0f } } };
+    static const EffectInfo fruityFilterInfo { "Fruity Filter", { { "Cutoff", 1.0f }, { "Resonance", 205.0f / 1024.0f }, { "Low pass", 1.0f },
+                                                                 { "Band pass", 0.0f }, { "High pass", 0.5f }, { "x2", 0.0f }, { "Center", 0.0f } } };
     // FL's eight Gross Beat parameters (core/GrossBeat.h); the slots' envelopes travel in EffectSlot::state
     static const EffectInfo grossBeatInfo { "Gross Beat", { { "Time slot", 0.0f }, { "Volume slot", 0.0f }, { "Time mix", 1.0f },
                                                             { "Volume mix", 1.0f }, { "Attack", 0.1765f }, { "Release", 0.5f },
@@ -2404,6 +2411,9 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::equo: return equoInfo;
         case EffectKind::flPitchShifter: return flPitchShifterInfo;
         case EffectKind::frequencySplitter: return fsplit::info();
+        case EffectKind::fruityFastLP: return fastLPInfo;
+        case EffectKind::fruityFreeFilter: return freeFilterInfo;
+        case EffectKind::fruityFilter: return fruityFilterInfo;
     }
     return eq;
 }
@@ -2745,6 +2755,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::flPitchShifter:
             return psfl::paramText (param, v);
 
+        case EffectKind::fruityFastLP:
+            return flfilter::fastLPParamText (param, v);
+
+        case EffectKind::fruityFreeFilter:
+            return flfilter::freeFilterParamText (param, v);
+
+        case EffectKind::fruityFilter:
+            return flfilter::filterParamText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2861,6 +2880,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityPanOMatic: return flbasic::makePanOMatic();
         case EffectKind::fruityBalance: return flbasic::makeBalance();
         case EffectKind::fruityBloodOverdrive: return flbasic::makeBloodOverdrive();
+        case EffectKind::fruityFastLP: return flfilter::makeFastLP();
+        case EffectKind::fruityFreeFilter: return flfilter::makeFreeFilter();
+        case EffectKind::fruityFilter: return flfilter::makeFilter();
         case EffectKind::reeverb2: return makeReeverb2();
         case EffectKind::luxeVerb: return makeLuxeVerb();
         case EffectKind::convolver: return makeConvolver(); // no impulse response: dry only; use makeEffect (slot)
