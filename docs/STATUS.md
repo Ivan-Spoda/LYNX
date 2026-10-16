@@ -645,11 +645,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
   double sinh/pow are the C library's (last-bit double differences that changed no float sample in the tests); CPUs
   without FMA take other CRT paths in FL (not checked).
-- FL Slayer (REA round 68 §9): the phase of the engine's 5 ms control grid relative to the song (FL's engine runs
-  since load, LYNX's from the render with one primer sample: note starts can differ by up to 5 ms), the C runtime's
-  rand seed per bridge thread in FL (per engine in LYNX), MIDI pan/volume/pitch events and parameter automation (state
-  edits restart the engine) are not modelled; FL applying the channel volume/pan to the output is an inference from
-  the plugin's flags.
+- FL Slayer (REA rounds 68 §9, 79): the channel's pan/volume/pitch now act as FL sends them (MIDI events: the
+  front-end's gains from twice the channel gain, the pitch as a pitch bend) and parameter automation / settings edits
+  reach the running engine (EXEC: 120/120 random scenarios bit-identical). Not reproducible: the phase of the engine's
+  5 ms control grid and the position of its noise sequence, which in FL depend on everything the engine processed since
+  the project was loaded (round 79 §4); the master pitch reaches the engine through the notes, not the bend.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

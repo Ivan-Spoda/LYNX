@@ -7,7 +7,9 @@
 // (Slayer_Engine.dll, a VST 2 plugin) in FL's 32-bit bridge process. The front-end turns FL's calls into VST calls:
 // parameters as setParameter(i, value/max), notes as MIDI note on/off with deltaFrames 0 (velocity from Init.Vol, key
 // from Final.Pitch), parameter 28 as MIDI CC 1, a centred pitch bend after loading; it mixes the engine's stereo output
-// with the host's ComputeLRVol(pan 0, vol 1) gains. The engine: six waveguide strings at an internal 44.1 kHz (two
+// with the host's ComputeLRVol of the channel's MIDI pan and twice its MIDI volume (FL sends the channel's pan, volume
+// and pitch to this plugin as ProcessEvent 2/3/4 — REA_rodada79; the pitch becomes a pitch bend), and forwards
+// parameter automation / settings edits as setParameter calls to the running engine. The engine: six waveguide strings at an internal 44.1 kHz (two
 // fractional delay lines with damping, a noise or recorded-pick exciter, slide noise, one or two "coil" pickups with a
 // resonant filter), resampled to the host rate with a cubic interpolator, played in six modes (single, chords, power
 // chords, strum, mono glide); then the effects block (16 effects: phaser, tremolo, auto-wah, wah, ring modulation,
@@ -61,7 +63,16 @@ struct RefOptions
     double tempo = 120.0; // host tempo (VST time info)
     std::vector<int> peek; // engine fields (original byte offsets) printed after every block (verification only)
     std::vector<std::array<int, 4>> midi; // extra MIDI events: sample, status, data 1, data 2
+    std::vector<std::array<int, 3>> params; // parameter changes: sample, index, integer (front-end units; 28 = CC 1),
+                                            // applied before the MIDI events of that sample
 };
+
+// The host's MIDI levels (REA_rodada79 §2): the pitch bend the front-end sends for ProcessEvent 4 (channel pitch in
+// cents), the integer pan of ProcessEvent 2 for a LYNX channel pan (−1…1), and the front-end's output gains for that pan
+// and the channel gain carried by ProcessEvent 3
+int pitchBend (int cents) noexcept;
+int midiPan (double pan) noexcept;
+void hostGains (int pan, float channelGain, float& left, float& right) noexcept;
 
 // the MIDI velocity the front-end sends for a voice's Init.Vol (TriggerVoice: Round(127·ln(10·v + 1)/ln 21.551182), ≤ 127)
 int midiVelocity (double initVol) noexcept;
