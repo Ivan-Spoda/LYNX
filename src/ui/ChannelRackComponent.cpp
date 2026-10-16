@@ -108,13 +108,21 @@ ChannelRackComponent::ChannelRackComponent (AudioEngine& e)
     setWantsKeyboardFocus (false);
     setMouseClickGrabsKeyboardFocus (false);
     engine.addChangeListener (this);
+    previews.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on); });
     updateSize();
     startTimerHz (30);
 }
 
 ChannelRackComponent::~ChannelRackComponent()
 {
+    previews.releaseAll();
     engine.removeChangeListener (this);
+}
+
+void ChannelRackComponent::visibilityChanged()
+{
+    if (! isShowing())
+        previews.releaseAll(); // hidden mid-gesture: nothing keeps sounding
 }
 
 int ChannelRackComponent::numSteps() const
@@ -1206,8 +1214,7 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 
             if (e.mods.isCtrlDown()) // audition without opening anything
             {
-                auditionRow = row;
-                engine.sendLiveNote (row, 60, 0.8f, true);
+                previews.press (row, 60, 0.8f); // stops on release
                 return;
             }
 
@@ -1325,8 +1332,7 @@ void ChannelRackComponent::mouseDrag (const juce::MouseEvent& e)
 
 void ChannelRackComponent::mouseUp (const juce::MouseEvent& e)
 {
-    if (auditionRow >= 0)
-        engine.sendLiveNote (auditionRow, 60, 0.0f, false);
+    previews.releaseAll(); // the audition (Ctrl+click) and the steps' previews stop with the button
 
     if (nameDownRow >= 0 && ! nameDragged && e.mouseWasClicked())
         toggleEditor (nameDownRow, nameDownAlt);
@@ -1340,7 +1346,6 @@ void ChannelRackComponent::mouseUp (const juce::MouseEvent& e)
     selectDragBase.clear();
     ui::hideValueTip();
     ui::clearPostedHint();
-    auditionRow = -1;
     paintMode = PaintMode::none;
     laneDownStep = -1;
 
@@ -1473,8 +1478,11 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
 
     engine.editSong ([row, step, on] (Song& s) { setStep (s.patterns[(std::size_t) s.currentPattern], row, step, on); });
 
-    if (on)
-        engine.sendLiveNote (row, 60, 0.78f, true);
+    if (on) // the new step sounds while the button is held (the previous one stops)
+    {
+        previews.releaseAll();
+        previews.press (row, 60, 0.78f);
+    }
 }
 
 // --- menus -------------------------------------------------------------------------------------

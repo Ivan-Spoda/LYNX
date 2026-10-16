@@ -134,6 +134,7 @@ private:
     void updateScrollBars();
     void previewOn (int key, float velocity);
     void previewOff();
+    void visibilityChanged() override;
 
     bool isSelected (int index) const;
     std::vector<int> channelNotes() const;           // indices of the channel's notes
@@ -251,6 +252,9 @@ private:
     std::vector<int> touchedNotes;    // notes already muted/unmuted during this drag
     juce::Point<int> knifeFrom, knifeTo;
     std::vector<int> listenKeys;
+    int listenChannel = -1;
+    HeldNotes previewNotes;           // the note a click/drag previews (keyboard, notes); stops on release
+    HeldNotes listenNotes;            // the Listen tool's notes under the mouse
     std::vector<std::int64_t> snapCandidates() const;
     juce::Rectangle<int> rubberBand;
     int lastVelocityX = 0;

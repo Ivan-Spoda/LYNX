@@ -1,5 +1,7 @@
 #include "ui/PlaylistComponent.h"
 
+#include "core/ClipOps.h"
+
 #include "core/EditorPolish.h"
 
 #include "core/RackOps.h"
@@ -8,6 +10,7 @@
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
+#include "ui/Dialogs.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -2181,137 +2184,50 @@ void PlaylistComponent::editMarkerName (std::int64_t tick, int existing)
 
 void PlaylistComponent::showClipMenu (int index)
 {
-    const auto& clip = engine.getSong().playlist[(std::size_t) index];
+    const auto& song = engine.getSong();
+    if (index < 0 || index >= (int) song.playlist.size())
+        return;
+
+    const auto clip = song.playlist[(std::size_t) index];
     const auto targets = isSelected (index) ? selection : std::vector<int> { index };
+    const auto many = targets.size() > 1;
+    const auto mouseX = getMouseXYRelative().x;
     juce::PopupMenu menu;
 
-    // split at the clicked point (on a 1-beat grid)
-    const auto splitAt = snap (xToTick (getMouseXYRelative().x) + ppq / 2.0, true);
+    // --- the source: name, colour, uniqueness -------------------------------------------------------
+    juce::String sourceName;
+    if (clip.kind == ClipKind::pattern && clip.pattern >= 0 && clip.pattern < (int) song.patterns.size())
+        sourceName = juce::String::fromUTF8 (song.patterns[(std::size_t) clip.pattern].name.c_str());
+    else if (clip.kind == ClipKind::audio && clip.channel >= 0 && clip.channel < (int) song.channels.size())
+        sourceName = juce::String::fromUTF8 (song.channels[(std::size_t) clip.channel].name.c_str());
+    else if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) song.automations.size())
+        sourceName = juce::String::fromUTF8 (song.automations[(std::size_t) clip.automation].name.c_str());
+    menu.addSectionHeader (sourceName);
 
-    if (splitAt > clip.start && splitAt < clip.end())
-        menu.addItem (tr ("Split here"), [this, index, splitAt] {
-            setSelection ({});
-            engine.editSong ([index, splitAt] (Song& s) {
-                auto rest = splitClip (s.playlist[(std::size_t) index], splitAt);
-                s.playlist.push_back (rest);
-            });
-            sortClips();
+    if (clip.kind == ClipKind::pattern && onRenamePattern)
+        menu.addItem (tr ("Rename and color..."), [this, p = clip.pattern] { onRenamePattern (p); });
+    else if (clip.kind == ClipKind::audio)
+        menu.addItem (tr ("Rename and color..."), [this, ch = clip.channel] {
+            const auto& c = engine.getSong().channels[(std::size_t) ch];
+            showNameAndColourDialog (tr ("Rename audio clip"), juce::String::fromUTF8 (c.name.c_str()), c.colour,
+                                     [this, ch] (const juce::String& name, std::uint32_t colour) {
+                                         if (ch < (int) engine.getSong().channels.size())
+                                             engine.editSong ([ch, n = name.toStdString(), colour] (Song& s) {
+                                                 s.channels[(std::size_t) ch].name = n;
+                                                 s.channels[(std::size_t) ch].colour = colour;
+                                             });
+                                     });
         });
-
-    menu.addItem (clip.muted ? tr ("Unmute") : tr ("Mute"), [this, targets, m = ! clip.muted] {
-        engine.editSong ([targets, m] (Song& s) {
-            for (auto i : targets)
-                if (i < (int) s.playlist.size())
-                    s.playlist[(std::size_t) i].muted = m;
-        });
-    });
-    menu.addItem (tr ("Chop to grid"), [this, targets, grid = gridTicks()] {
-        setSelection ({});
-        engine.editSong ([targets, grid] (Song& s) {
-            for (auto i : targets)
-                noteedit::chopClip (s.playlist, i, grid);
-        });
-        sortClips();
-    });
 
     if (clip.kind == ClipKind::pattern)
-    {
-        menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().patterns[(std::size_t) clip.pattern].name.c_str()));
-        // like FL's "Make unique": the chosen clips switch to using a copy of the pattern
         menu.addItem (tr ("Make unique") + "\tShift+V+drag", [this, targets] {
             engine.editSong ([targets] (Song& s) { polish::makeClipsUnique (s, targets); });
         });
-        menu.addItem (tr ("Select all of this pattern"), [this, p = clip.pattern] {
-            std::vector<int> same;
-            const auto& playlist = engine.getSong().playlist;
-
-            for (int i = 0; i < (int) playlist.size(); ++i)
-                if (playlist[(std::size_t) i].kind == ClipKind::pattern && playlist[(std::size_t) i].pattern == p)
-                    same.push_back (i);
-
-            setSelection (same);
+    else if (clip.kind == ClipKind::audio)
+        menu.addItem (tr ("Make unique"), [this, targets] {
+            engine.editSong ([targets] (Song& s) { clipops::makeAudioUnique (s, targets); });
         });
-        menu.addItem (tr ("Open in Channel Rack"), [this] {
-            if (onOpenPattern)
-                onOpenPattern();
-        });
-        menu.addItem (tr ("Open in Piano Roll"), [this] {
-            if (onOpenPianoRoll)
-                onOpenPianoRoll();
-        });
-    }
-
-    if (clip.kind == ClipKind::audio)
-    {
-        juce::PopupMenu gains;
-
-        for (auto db : { 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -12.0f })
-        {
-            const auto g = juce::Decibels::decibelsToGain (db);
-            gains.addItem ((db > 0 ? "+" : "") + juce::String (db, 0) + " dB", true, std::abs (clip.gain - g) < 0.01f, [this, targets, g] {
-                engine.editSong ([targets, g] (Song& s) {
-                    for (auto i : targets)
-                        if (s.playlist[(std::size_t) i].kind == ClipKind::audio)
-                            s.playlist[(std::size_t) i].gain = g;
-                });
-            });
-        }
-
-        menu.addSubMenu (tr ("Clip volume"), gains);
-
-        menu.addItem (tr ("Normalize"), [this, targets] {
-            // clip gain so that the peak of the played segment reaches 0 dB (at most +24 dB)
-            const auto& song = engine.getSong();
-            const auto secondsPerTick = 60.0 / (juce::jmax (1.0, song.bpm) * ppq);
-            std::vector<std::pair<int, float>> gainsFor;
-
-            for (auto i : targets)
-            {
-                const auto& c = song.playlist[(std::size_t) i];
-
-                if (c.kind != ClipKind::audio || c.channel < 0 || c.channel >= (int) song.channels.size())
-                    continue;
-
-                const auto sample = engine.getSampleLibrary().load (juce::String::fromUTF8 (song.channels[(std::size_t) c.channel].samplePath.c_str()));
-
-                if (sample == nullptr || sample->frames() == 0)
-                    continue;
-
-                const auto from = (std::size_t) juce::jlimit (0.0, (double) sample->frames(), (double) c.offset * secondsPerTick * sample->sampleRate);
-                const auto to = (std::size_t) juce::jlimit ((double) from, (double) sample->frames(),
-                                                            (double) (c.offset + c.length) * secondsPerTick * sample->sampleRate);
-                float peak = 0.0f;
-
-                for (auto* data : { sample->leftData(), sample->rightData() })
-                    if (data != nullptr)
-                        for (auto f = from; f < to; ++f)
-                            peak = juce::jmax (peak, std::abs (data[f]));
-
-                if (peak > 1.0e-6f)
-                    gainsFor.push_back ({ i, juce::jmin (1.0f / peak, juce::Decibels::decibelsToGain (24.0f)) });
-            }
-
-            if (! gainsFor.empty())
-                engine.editSong ([gainsFor] (Song& s) {
-                    for (auto [i, g] : gainsFor)
-                        if (i < (int) s.playlist.size())
-                            s.playlist[(std::size_t) i].gain = g;
-                });
-        });
-
-        if (clip.fadeIn > 0 || clip.fadeOut > 0)
-            menu.addItem (tr ("Remove fades"), [this, targets] {
-                engine.editSong ([targets] (Song& s) {
-                    for (auto i : targets)
-                        s.playlist[(std::size_t) i].fadeIn = s.playlist[(std::size_t) i].fadeOut = 0;
-                });
-            });
-    }
-
-    if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) engine.getSong().automations.size())
-    {
-        menu.addSectionHeader (juce::String::fromUTF8 (engine.getSong().automations[(std::size_t) clip.automation].name.c_str()));
-        menu.addItem (tr ("Edit points..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
+    else if (clip.kind == ClipKind::automation)
         menu.addItem (tr ("Make unique"), [this, index] {
             engine.editSong ([index] (Song& s) {
                 auto& c = s.playlist[(std::size_t) index];
@@ -2321,24 +2237,242 @@ void PlaylistComponent::showClipMenu (int index)
                 c.automation = (int) s.automations.size() - 1;
             });
         });
+
+    menu.addItem (tr ("Select all clips of this source"), [this, index] { setSelection (clipops::sameSource (engine.getSong(), index)); });
+    menu.addSeparator();
+
+    // --- cutting and joining -------------------------------------------------------------------------
+    const auto splitAt = snap (xToTick (mouseX) + gridTicks() / 2.0, true);
+    menu.addItem (tr ("Split here"), splitAt > clip.start && splitAt < clip.end(), false, [this, index, splitAt] {
+        setSelection ({});
+        engine.editSong ([index, splitAt] (Song& s) {
+            if (index < (int) s.playlist.size() && splitAt > s.playlist[(std::size_t) index].start && splitAt < s.playlist[(std::size_t) index].end())
+                s.playlist.push_back (splitClip (s.playlist[(std::size_t) index], splitAt));
+        });
+        sortClips();
+    });
+    menu.addItem (tr ("Chop to grid"), [this, targets, grid = gridTicks()] {
+        setSelection ({});
+        engine.editSong ([targets, grid] (Song& s) {
+            auto sorted = targets; // chopping adds clips at the end: indices below stay valid
+            for (auto i : sorted)
+                noteedit::chopClip (s.playlist, i, grid);
+        });
+        sortClips();
+    });
+    menu.addItem (tr ("Merge clips"), clipops::canMerge (song, targets), false, [this, targets] {
+        setSelection ({});
+        engine.editSong ([targets] (Song& s) { clipops::mergeClips (s, targets); });
+        sortClips();
+    });
+
+    // --- audio ---------------------------------------------------------------------------------------
+    if (clip.kind == ClipKind::audio && clip.channel >= 0 && clip.channel < (int) song.channels.size())
+    {
+        menu.addSeparator();
+        const auto& channel = song.channels[(std::size_t) clip.channel];
+        const auto path = juce::String::fromUTF8 (channel.samplePath.c_str());
+        const auto sample = engine.getSampleLibrary().load (path);
+        const auto frames = sample != nullptr ? (double) sample->frames() : 0.0;
+        const auto rate = sample != nullptr ? sample->sampleRate : 44100.0;
+
+        menu.addItem (tr ("Reverse"), sample != nullptr, channel.sampler.reverse, [this, index, frames, rate] {
+            engine.editSong ([index, frames, rate] (Song& s) {
+                const auto ch = s.playlist[(std::size_t) index].channel;
+                clipops::reverseAudio (s, index, clipops::fileTicks (s.channels[(std::size_t) ch].sampler, frames, rate, s.bpm));
+            });
+        });
+
+        menu.addItem (tr ("Normalize"), [this, targets] { normalizeClips (targets); });
+
+        juce::PopupMenu gains;
+        for (auto db : { 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -12.0f })
+        {
+            const auto g = juce::Decibels::decibelsToGain (db);
+            gains.addItem ((db > 0 ? "+" : "") + juce::String (db, 0) + " dB", true, std::abs (clip.gain - g) < 0.01f, [this, targets, g] {
+                engine.editSong ([targets, g] (Song& s) {
+                    for (auto i : targets)
+                        if (i < (int) s.playlist.size() && s.playlist[(std::size_t) i].kind == ClipKind::audio)
+                            s.playlist[(std::size_t) i].gain = g;
+                });
+            });
+        }
+        menu.addSubMenu (tr ("Clip volume"), gains);
+
+        // stretching the channel's file to a whole number of beats at the project tempo
+        juce::PopupMenu fit;
+        const auto seconds = frames / juce::jmax (1.0, rate);
+        const auto beats = clipops::fitBeats (seconds, song.bpm);
+        auto fitTo = [this, index, frames, rate] (float toBeats, bool keepPitch) {
+            engine.editSong ([index, frames, rate, toBeats, keepPitch] (Song& s) {
+                const auto ch = s.playlist[(std::size_t) index].channel;
+                auto& sampler = s.channels[(std::size_t) ch].sampler;
+                const auto before = clipops::fileTicks (sampler, frames, rate, s.bpm);
+                sampler.stretchBeats = toBeats;
+                sampler.keepPitch = keepPitch && toBeats > 0.0f;
+                const auto after = clipops::fileTicks (sampler, frames, rate, s.bpm);
+                if (before <= 0 || after <= 0)
+                    return;
+                // every clip of the file keeps showing the same audio: offsets and lengths scale with it
+                const auto k = (double) after / (double) before;
+                for (auto& c : s.playlist)
+                    if (c.kind == ClipKind::audio && c.channel == ch)
+                    {
+                        c.offset = (std::int64_t) std::llround ((double) c.offset * k);
+                        c.length = juce::jmax<std::int64_t> (1, (std::int64_t) std::llround ((double) c.length * k));
+                        c.fadeIn = (std::int64_t) std::llround ((double) c.fadeIn * k);
+                        c.fadeOut = (std::int64_t) std::llround ((double) c.fadeOut * k);
+                    }
+            });
+            sortClips();
+        };
+        if (beats > 0.0f)
+        {
+            const auto label = juce::String (beats, 0) + " " + (beats == 1.0f ? tr ("beat") : tr ("beats"));
+            fit.addItem (tr ("Fit to tempo, keep pitch ({0})", { label }), true, channel.sampler.stretchBeats == beats && channel.sampler.keepPitch,
+                         [fitTo, beats] { fitTo (beats, true); });
+            fit.addItem (tr ("Fit to tempo, resample ({0})", { label }), true, channel.sampler.stretchBeats == beats && ! channel.sampler.keepPitch,
+                         [fitTo, beats] { fitTo (beats, false); });
+            fit.addItem (tr ("Half as long"), channel.sampler.stretchBeats > 0.0f, false,
+                         [fitTo, b = channel.sampler.stretchBeats, kp = channel.sampler.keepPitch] { fitTo (juce::jmax (0.25f, b * 0.5f), kp); });
+            fit.addItem (tr ("Twice as long"), channel.sampler.stretchBeats > 0.0f, false,
+                         [fitTo, b = channel.sampler.stretchBeats, kp = channel.sampler.keepPitch] { fitTo (juce::jmin (1024.0f, b * 2.0f), kp); });
+            fit.addSeparator();
+        }
+        fit.addItem (tr ("Original speed (no stretch)"), true, channel.sampler.stretchBeats <= 0.0f, [fitTo] { fitTo (0.0f, false); });
+        menu.addSubMenu (tr ("Fit to tempo"), fit, sample != nullptr);
+
+        if (clip.fadeIn > 0 || clip.fadeOut > 0)
+            menu.addItem (tr ("Remove fades"), [this, targets] {
+                engine.editSong ([targets] (Song& s) {
+                    for (auto i : targets)
+                        if (i < (int) s.playlist.size())
+                            s.playlist[(std::size_t) i].fadeIn = s.playlist[(std::size_t) i].fadeOut = 0;
+                });
+            });
+
+        menu.addItem (tr ("Open in a new Sampler channel"), sample != nullptr, false, [this, ch = clip.channel] {
+            if (onOpenInSampler)
+                onOpenInSampler (ch);
+        });
+        menu.addItem (tr ("Show the file in Explorer"), juce::File (path).existsAsFile(), false, [path] { juce::File (path).revealToUser(); });
+    }
+
+    // --- pattern -------------------------------------------------------------------------------------
+    if (clip.kind == ClipKind::pattern)
+    {
+        menu.addSeparator();
+        menu.addItem (tr ("Open in Channel Rack"), [this, p = clip.pattern] {
+            engine.editSong ([p] (Song& s) { if (p < (int) s.patterns.size()) s.currentPattern = p; }, false);
+            if (onOpenPattern)
+                onOpenPattern();
+        });
+        menu.addItem (tr ("Open in Piano Roll"), [this, p = clip.pattern] {
+            engine.editSong ([p] (Song& s) { if (p < (int) s.patterns.size()) s.currentPattern = p; }, false);
+            if (onOpenPianoRoll)
+                onOpenPianoRoll();
+        });
+    }
+
+    // --- automation ----------------------------------------------------------------------------------
+    if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) song.automations.size())
+    {
+        menu.addSeparator();
+        menu.addItem (tr ("Edit points..."), [this, a = clip.automation] { openAutomationEditor (engine, a); });
         menu.addItem (tr ("Delete automation (all of its clips)"), [this, a = clip.automation] {
             setSelection ({});
             engine.editSong ([a] (Song& s) { s.removeAutomation (a); });
         });
     }
 
-    menu.addItem (targets.size() > 1 ? tr ("Delete selected") : tr ("Delete"), [this, targets] {
-        setSelection ({});
-        engine.editSong ([targets] (Song& s) {
-            auto sorted = targets;
-            std::sort (sorted.rbegin(), sorted.rend());
-
-            for (auto i : sorted)
-                s.playlist.erase (s.playlist.begin() + i);
+    // --- mute and the clipboard ----------------------------------------------------------------------
+    menu.addSeparator();
+    menu.addItem (clip.muted ? tr ("Unmute") : tr ("Mute"), [this, targets, m = ! clip.muted] {
+        engine.editSong ([targets, m] (Song& s) {
+            for (auto i : targets)
+                if (i < (int) s.playlist.size())
+                    s.playlist[(std::size_t) i].muted = m;
         });
+    });
+    menu.addItem (tr ("Cut") + "\tCtrl+X", [this, targets] {
+        setSelection (targets);
+        copySelection();
+        deleteSelection();
+    });
+    menu.addItem (tr ("Copy") + "\tCtrl+C", [this, targets] {
+        setSelection (targets);
+        copySelection();
+    });
+    menu.addItem (tr ("Paste here") + "\tCtrl+V", ! clipboard.empty(), false, [this, at = snap (xToTick (mouseX), true)] { pasteClips (at); });
+    menu.addItem ((many ? tr ("Delete selected") : tr ("Delete")) + "\tDel", [this, targets] {
+        setSelection (targets);
+        deleteSelection();
     });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void PlaylistComponent::normalizeClips (const std::vector<int>& targets)
+{
+    // clip gain so that the peak of the played segment reaches 0 dB (at most +24 dB)
+    const auto& song = engine.getSong();
+    std::vector<std::pair<int, float>> gainsFor;
+
+    for (auto i : targets)
+    {
+        if (i < 0 || i >= (int) song.playlist.size())
+            continue;
+        const auto& c = song.playlist[(std::size_t) i];
+
+        if (c.kind != ClipKind::audio || c.channel < 0 || c.channel >= (int) song.channels.size())
+            continue;
+
+        const auto& channel = song.channels[(std::size_t) c.channel];
+        const auto sample = engine.getSampleLibrary().load (juce::String::fromUTF8 (channel.samplePath.c_str()));
+
+        if (sample == nullptr || sample->frames() == 0)
+            continue;
+
+        const auto total = (double) sample->frames();
+        const auto perTick = clipops::framesPerTick (channel.sampler, total, sample->sampleRate, song.bpm);
+        auto from = juce::jlimit (0.0, total, (double) c.offset * perTick);
+        auto to = juce::jlimit (from, total, (double) (c.offset + c.length) * perTick);
+        if (channel.sampler.reverse) // the clip's offset counts from the file's end
+        {
+            const auto f = total - to, t = total - from;
+            from = f;
+            to = t;
+        }
+        float peak = 0.0f;
+
+        for (auto* data : { sample->leftData(), sample->rightData() })
+            if (data != nullptr)
+                for (auto f = (std::size_t) from; f < (std::size_t) to; ++f)
+                    peak = juce::jmax (peak, std::abs (data[f]));
+
+        if (peak > 1.0e-6f)
+            gainsFor.push_back ({ i, juce::jmin (1.0f / peak, juce::Decibels::decibelsToGain (24.0f)) });
+    }
+
+    if (! gainsFor.empty())
+        engine.editSong ([gainsFor] (Song& s) {
+            for (auto [i, g] : gainsFor)
+                if (i < (int) s.playlist.size())
+                    s.playlist[(std::size_t) i].gain = g;
+        });
+}
+
+void PlaylistComponent::visibilityChanged()
+{
+    // hidden while a clip preview or the Listen tool is sounding (no mouse up will come here): stop it
+    if (! isShowing() && (drag == Drag::preview || drag == Drag::listen))
+    {
+        if (drag == Drag::preview)
+            stopPreview();
+        else
+            engine.stop();
+        drag = Drag::none;
+    }
 }
 
 void PlaylistComponent::startPreview (int clip, int x)
@@ -2513,17 +2647,18 @@ void PlaylistComponent::copySelection()
         clipboard.push_back (engine.getSong().playlist[(std::size_t) i]);
 }
 
-void PlaylistComponent::pasteClips()
+void PlaylistComponent::pasteClips (std::int64_t at)
 {
     if (clipboard.empty())
         return;
 
-    // pastes at the playback cursor (or where the first clip was), keeping tracks and spacing
+    // pastes at `at` (the clip menu's click), else at the playback cursor (or where the first clip was),
+    // keeping tracks and spacing
     std::int64_t first = clipboard.front().start;
     for (const auto& c : clipboard)
         first = juce::jmin (first, c.start);
 
-    const auto target = playheadTick >= 0.0 ? snap (playheadTick, true) : first;
+    const auto target = at >= 0 ? at : playheadTick >= 0.0 ? snap (playheadTick, true) : first;
     std::vector<int> added;
 
     engine.editSong ([&added, target, first] (Song& s) {

@@ -113,6 +113,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
       mixer (e),
       browser (e)
 {
+    heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
     if (persistent)
@@ -292,6 +293,21 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         openPianoRoll();
     };
     picker.onOpenPattern = [this] { showPanel (Panel::channelRack); };
+    playlist.onRenamePattern = [this] (int p) { showRenamePattern (p); };
+    playlist.onOpenInSampler = [this] (int channel) {
+        // the audio clip's file in a new Sampler channel (to play it from notes), its settings open
+        const auto& song = engine.getSong();
+        if (channel < 0 || channel >= (int) song.channels.size())
+            return;
+        ChannelDef c;
+        c.name = song.channels[(std::size_t) channel].name;
+        c.instrument = InstrumentKind::sampler;
+        c.samplePath = song.channels[(std::size_t) channel].samplePath;
+        c.colour = song.channels[(std::size_t) channel].colour;
+        const auto added = rack.addChannel (c, false);
+        showPanel (Panel::channelRack);
+        rack.toggleEditor (added, false);
+    };
     ui::setHint (pianoRoll, tr ("Piano Roll: [LMB] add a note, drag to move  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"));
     ui::setHint (playlist, tr ("Playlist: [LMB] paint the current pattern  [RMB] delete  [Ctrl][LMB] drag to select  [Ctrl][Wheel] zoom"));
 
@@ -727,14 +743,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     {
         const auto note = keys::typingPianoNote (chord.key);
 
-        if (heldKeys.find (key.getKeyCode()) == heldKeys.end())
-        {
-            const auto channels = engine.getSelectedChannels();
-            heldKeys[key.getKeyCode()] = channels;
-
-            for (auto c : channels)
-                engine.sendLiveNote (c, note, 0.8f, true, true);
-        }
+        if (! heldKeys.hasTag (key.getKeyCode())) // key repeat: the note is already sounding
+            for (auto c : engine.getSelectedChannels())
+                heldKeys.press (c, note, 0.8f, key.getKeyCode());
         return true;
     }
 
@@ -853,21 +864,16 @@ bool MainComponent::runAction (const std::string& id)
 
 bool MainComponent::keyStateChanged (bool)
 {
-    // JUCE has no per-key "keyReleased"; check which held keys were released.
-    for (auto it = heldKeys.begin(); it != heldKeys.end();)
-    {
-        if (! juce::KeyPress::isKeyCurrentlyDown (it->first))
-        {
-            const auto note = keys::typingPianoNote ((int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) it->first));
+    // JUCE has no per-key "keyReleased"; check which held keys were released (each held note remembers its
+    // channel and key, so the selection changing meanwhile can't leave one sounding)
+    std::vector<int> released;
+    heldKeys.forEachTag ([&released] (int code) {
+        if (! juce::KeyPress::isKeyCurrentlyDown (code))
+            released.push_back (code);
+    });
 
-            for (auto c : it->second)
-                engine.sendLiveNote (c, note, 0.0f, false, true);
-
-            it = heldKeys.erase (it);
-        }
-        else
-            ++it;
-    }
+    for (auto code : released)
+        heldKeys.releaseTag (code);
 
     return false;
 }
@@ -890,11 +896,7 @@ void MainComponent::setTypingPiano (bool on)
                                   + ")");
 
     // release anything still sounding from the keyboard
-    for (const auto& [code, channels] : heldKeys)
-        for (auto c : channels)
-            engine.sendLiveNote (c, keys::typingPianoNote ((int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code)), 0.0f, false);
-
-    heldKeys.clear();
+    heldKeys.releaseAll();
 }
 
 void MainComponent::loadKeyMap()
@@ -943,7 +945,7 @@ void MainComponent::loadUiSettings()
             typingPiano = on;
         else if (key == "keepEditorsOpen")
             ChannelRackComponent::keepEditorsOpen = on;
-        else if (key == "waveColours")
+        else if (key == "waveSpectral") // ("waveColours", the old spectral-by-default key, is ignored)
             ui::WaveformCache::spectral = on;
         else if (key == "waveStereo")
             ui::WaveformCache::stereo = on;
@@ -974,7 +976,7 @@ void MainComponent::saveUiSettings()
                                       + juce::String (ChannelRackComponent::keepEditorsOpen ? 1 : 0) + "\neditPatternsIn="
                                       + juce::String (PlaylistComponent::editPatternsIn) + "\nsplash=" + juce::String (startup.splash ? 1 : 0)
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
-                                      + "\nwaveColours=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
+                                      + "\nwaveSpectral=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
                                       + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
@@ -1891,8 +1893,13 @@ void MainComponent::timerCallback()
 
     auto& transport = engine.getTransport();
 
-    if (! heldKeys.empty()) // keys released while a detached panel window had the focus
-        keyStateChanged (false);
+    if (! heldKeys.empty())
+    {
+        if (! juce::Process::isForegroundProcess()) // switched to another app with keys down: no key-up will come
+            heldKeys.releaseAll();
+        else // keys released while another window (a detached panel, a dialog) had the focus
+            keyStateChanged (false);
+    }
 
     // hint bar: a gesture's own posted hint, else the control under the mouse (while it is dragged, the
     // control that was pressed, at the point it was pressed, so its value updates live); MIDI learn and
@@ -1939,9 +1946,7 @@ void MainComponent::timerCallback()
     if (++meterTicks >= 8 && perfMeter.isVisible() && ! hintsFrozen)
     {
         meterTicks = 0;
-        int held = 0;
-        for (const auto& [code, channels] : heldKeys)
-            held += (int) channels.size();
+        const auto held = (int) heldKeys.size();
         const auto notes = playing ? songstats::soundingNotes (engine.getSong(), transport.positionTicks.load()) : 0;
         perfMeter.setValues (engine.getDeviceManager().getCpuUsage(), toolbar::PerformanceMeter::processMemoryBytes(), notes + held);
     }
@@ -2314,13 +2319,13 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         {
             // waveforms of audio clips, the Sampler and the Browser preview (ui/WaveformView)
             juce::PopupMenu waves;
-            waves.addItem (tr ("Spectral colours (warm = bass, cool = treble)"), true, ui::WaveformCache::spectral, [this] {
-                ui::WaveformCache::spectral = true;
+            waves.addItem (tr ("Clean (the clip colour)"), true, ! ui::WaveformCache::spectral, [this] {
+                ui::WaveformCache::spectral = false;
                 saveUiSettings();
                 ui::WaveformCache::getInstance()->settingsChanged();
             });
-            waves.addItem (tr ("Classic (one colour)"), true, ! ui::WaveformCache::spectral, [this] {
-                ui::WaveformCache::spectral = false;
+            waves.addItem (tr ("Spectral colours (warm = bass, cool = treble)"), true, ui::WaveformCache::spectral, [this] {
+                ui::WaveformCache::spectral = true;
                 saveUiSettings();
                 ui::WaveformCache::getInstance()->settingsChanged();
             });

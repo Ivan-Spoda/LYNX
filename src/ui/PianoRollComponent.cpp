@@ -63,6 +63,9 @@ const std::vector<notetools::ScaleInfo>& scales()
 PianoRollComponent::PianoRollComponent (AudioEngine& e)
     : engine (e)
 {
+    auto sender = [this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on); };
+    previewNotes.setSender (sender);
+    listenNotes.setSender (sender);
     setWantsKeyboardFocus (false);
     setMouseClickGrabsKeyboardFocus (false);
 
@@ -189,6 +192,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
 PianoRollComponent::~PianoRollComponent()
 {
     stopListening();
+    previewNotes.releaseAll();
     EditorGlobals::get().removeChangeListener (this);
     engine.removeChangeListener (this);
 }
@@ -919,19 +923,30 @@ int PianoRollComponent::ghostAt (int x, int y) const
 
 void PianoRollComponent::previewOn (int key, float velocity)
 {
-    previewOff();
+    // one preview note at a time; it remembers its channel, so a channel switch meanwhile can't strand it
+    previewNotes.releaseAll();
     previewKey = key;
-    engine.sendLiveNote (engine.getSelectedChannel(), key, velocity, true);
+    previewNotes.press (engine.getSelectedChannel(), key, velocity);
     repaint (0, headerHeight, keyboardWidth, getHeight());
 }
 
 void PianoRollComponent::previewOff()
 {
+    previewNotes.releaseAll();
+
     if (previewKey >= 0)
     {
-        engine.sendLiveNote (engine.getSelectedChannel(), previewKey, 0.0f, false);
         previewKey = -1;
         repaint (0, headerHeight, keyboardWidth, getHeight());
+    }
+}
+
+void PianoRollComponent::visibilityChanged()
+{
+    if (! isShowing()) // hidden mid-gesture (window closed, tab switched): nothing keeps sounding
+    {
+        previewOff();
+        stopListening();
     }
 }
 
@@ -2162,20 +2177,22 @@ void PianoRollComponent::listenAt (int x)
 
     for (auto k : listenKeys)
         if (std::find (keys.begin(), keys.end(), k) == keys.end())
-            engine.sendLiveNote (channel, k, 0.0f, false);
+            listenNotes.release (listenChannel, k);
+
+    if (channel != listenChannel)
+        listenNotes.releaseAll();
 
     for (std::size_t i = 0; i < keys.size(); ++i)
-        if (std::find (listenKeys.begin(), listenKeys.end(), keys[i]) == listenKeys.end())
-            engine.sendLiveNote (channel, keys[i], velocities[i], true);
+        if (! listenNotes.isHeld (channel, keys[i]))
+            listenNotes.press (channel, keys[i], velocities[i]);
 
     listenKeys = keys;
+    listenChannel = channel;
 }
 
 void PianoRollComponent::stopListening()
 {
-    for (auto k : listenKeys)
-        engine.sendLiveNote (engine.getSelectedChannel(), k, 0.0f, false);
-
+    listenNotes.releaseAll();
     listenKeys.clear();
 }
 

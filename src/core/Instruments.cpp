@@ -1386,7 +1386,7 @@ struct SamplerVoice
 class SamplerInstrument final : public Instrument
 {
 public:
-    // clipMode: Playlist audio clip (no transposition, stops on noteOff)
+    // clipMode: Playlist audio clip (no transposition, stops on noteOff; it follows Reverse and the stretch)
     SamplerInstrument (std::shared_ptr<const SampleData> s, bool clip) : sample (std::move (s)), clipMode (clip) {}
 
     // multi-sample: called before the instrument goes to the audio thread
@@ -1510,7 +1510,7 @@ public:
             return;
 
         sliceMailbox.read (slices);
-        const auto backwards = ! clipMode && reverse.load();
+        const auto backwards = reverse.load(); // audio clips too (the clip menu's Reverse)
         const auto total = (double) (data->frames() - 1);
         // sample region (the start acts as "start offset"); audio clips use the whole file. `last` is the region's
         // last frame: FL plays until the read position passes it, interpolating with that frame repeated.

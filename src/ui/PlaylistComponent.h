@@ -56,9 +56,12 @@ public:
 
     explicit PlaylistComponent (AudioEngine& engine);
     ~PlaylistComponent() override;
+    void visibilityChanged() override;
 
     std::function<void()> onOpenPattern;
     std::function<void()> onOpenPianoRoll;
+    std::function<void (int pattern)> onRenamePattern;  // clip menu: Rename and color (pattern clips)
+    std::function<void (int channel)> onOpenInSampler;  // clip menu: the audio clip's file in a new Sampler channel
 
     // Double-click on a pattern clip opens it in: 0 = the Piano Roll when it has piano-roll notes, else the
     // Channel Rack; 1 = always the Channel Rack; 2 = always the Piano Roll. Alt+double-click opens the other one.
@@ -166,7 +169,8 @@ private:
     void editMarkerName (std::int64_t tick, int existing); // existing = index, or -1 to create
     void deleteSelection();
     void copySelection();
-    void pasteClips();
+    void pasteClips (std::int64_t at = -1);
+    void normalizeClips (const std::vector<int>& targets);
     void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
