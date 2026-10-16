@@ -4,6 +4,7 @@
 #include "core/PitchShifterFl.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -579,7 +580,7 @@ struct DelayFx
 {
     SingleBiquad hp[2], lp[2];
     std::vector<float> buf[2];
-    float time = 0.0f, fb = 0.0f, y[2] {};
+    float time = 32768.0f, fb = 0.5f, y[2] {}; // the delay's reset (FUN_180011a?0 family) start values
     std::uint32_t wp = 0;
 
     void run (const Program& P, float sr, float bpm, int n, float (*bus)[kMaxBlockFx], std::uint32_t& rnd)
@@ -793,7 +794,7 @@ struct ReverbFx
 struct ChorusFx
 {
     std::vector<float> buf[2];
-    float d[2] {}, fb = 0.0f, phase = 0.0f, y[2] {};
+    float d[2] { 8192.0f, 8192.0f }, fb = 0.5f, phase = 0.0f, y[2] {}; // FUN_180011970's start values
     std::int32_t wp = 0;
 
     void run (const Program& P, float sr, int n, float (*bus)[kMaxBlockFx], std::uint32_t& rnd)
@@ -1684,6 +1685,290 @@ void Engine::render (float* out, int n)
     }
     if (std::getenv ("DWRS"))
         std::fprintf (stderr, "#rs %u\n", randState);
+}
+
+
+// ================================================================================================= LYNX channel
+const Program* playedProgram (const State& state)
+{
+    for (const auto& p : state.programs)
+        if (! p.zones.empty())
+            return &p;
+    return nullptr;
+}
+
+std::vector<float> encodeFormats (const std::vector<bool>& int16)
+{
+    std::vector<float> v { 1.0f, (float) int16.size() };
+    for (const bool b : int16)
+        v.push_back (b ? 1.0f : 0.0f);
+    return v;
+}
+
+std::vector<bool> decodeFormats (const std::vector<float>& p)
+{
+    std::vector<bool> v;
+    if (p.size() < 2 || p[0] != 1.0f || p[1] < 0.0f || (std::size_t) p[1] + 2 != p.size())
+        return v;
+    for (std::size_t i = 2; i < p.size(); ++i)
+        v.push_back (p[i] != 0.0f);
+    return v;
+}
+
+std::shared_ptr<const ZoneSamples> zoneSamples (const SampleData& sample, bool int16)
+{
+    auto z = std::make_shared<ZoneSamples>();
+    const auto n = sample.frames();
+    if (n == 0)
+        return nullptr;
+    z->frames = (std::int64_t) n;
+    z->channels = sample.isStereo() ? 2 : 1;
+    z->bits = int16 ? 16 : 32;
+    for (int c = 0; c < z->channels; ++c)
+    {
+        const float* src = c == 0 ? sample.leftData() : sample.rightData();
+        if (int16)
+        {
+            std::vector<std::int16_t> v (n + 512, 0);
+            for (std::size_t i = 0; i < n; ++i)
+                v[i + 256] = (std::int16_t) std::clamp (std::nearbyint ((double) src[i] * 32768.0), -32768.0, 32767.0);
+            z->i16.push_back (std::move (v));
+        }
+        else
+        {
+            std::vector<float> v (n + 512, 0.0f);
+            std::copy (src, src + n, v.begin() + 256);
+            z->f32.push_back (std::move (v));
+        }
+    }
+    return z;
+}
+
+namespace
+{
+// a WAV whose audio is 16-bit PCM (format 1, or extensible with the PCM sub-format)
+bool isPcm16Wav (const std::vector<std::uint8_t>& w)
+{
+    if (w.size() < 12 || std::memcmp (w.data(), "RIFF", 4) != 0 || std::memcmp (w.data() + 8, "WAVE", 4) != 0)
+        return false;
+    std::size_t o = 12;
+    while (o + 8 <= w.size())
+    {
+        std::uint32_t sz = 0;
+        std::memcpy (&sz, w.data() + o + 4, 4);
+        if (std::memcmp (w.data() + o, "fmt ", 4) == 0 && o + 8 + 16 <= w.size())
+        {
+            const auto tag = ru16 (w.data() + o + 8), bits = ru16 (w.data() + o + 22);
+            bool pcm = tag == 1;
+            if (tag == 0xFFFE && sz >= 26 && o + 8 + 26 <= w.size())
+                pcm = ru16 (w.data() + o + 8 + 24) == 1;
+            return pcm && bits == 16;
+        }
+        o += 8 + sz + (sz & 1);
+    }
+    return false;
+}
+
+std::vector<std::uint8_t> wavOf (const Zone& z)
+{
+    const auto bytes = (std::size_t) (z.bits == 16 ? 2 : 4);
+    const auto frames = (std::size_t) std::max<std::int64_t> (0, z.frames);
+    const auto block = (frames + 512) * bytes;
+    if (z.embedded.empty() || z.channels < 1 || z.channels > 2 || (z.bits != 16 && z.bits != 32)
+        || block * (std::size_t) z.channels != z.embedded.size() || ! (z.rate >= 1000.0f && z.rate <= 384000.0f))
+        return {};
+    const int ch = z.channels;
+    const auto data = frames * (std::size_t) ch * bytes;
+    std::vector<std::uint8_t> w (44 + data);
+    auto put32 = [&] (std::size_t o, std::uint32_t v) { std::memcpy (w.data() + o, &v, 4); };
+    auto put16 = [&] (std::size_t o, std::uint16_t v) { std::memcpy (w.data() + o, &v, 2); };
+    std::memcpy (w.data(), "RIFF", 4); put32 (4, (std::uint32_t) (36 + data)); std::memcpy (w.data() + 8, "WAVEfmt ", 8);
+    put32 (16, 16); put16 (20, z.bits == 16 ? 1 : 3); put16 (22, (std::uint16_t) ch);
+    const auto rate = (std::uint32_t) std::lround (z.rate);
+    put32 (24, rate); put32 (28, rate * (std::uint32_t) (ch * (int) bytes)); put16 (32, (std::uint16_t) (ch * (int) bytes));
+    put16 (34, (std::uint16_t) (bytes * 8)); std::memcpy (w.data() + 36, "data", 4); put32 (40, (std::uint32_t) data);
+    for (std::size_t i = 0; i < frames; ++i)
+        for (int c = 0; c < ch; ++c)
+            std::memcpy (w.data() + 44 + (i * (std::size_t) ch + (std::size_t) c) * bytes,
+                         z.embedded.data() + (std::size_t) c * block + (i + 256) * bytes, bytes);
+    return w;
+}
+} // namespace
+
+bool importChannel (ChannelDef& def, const std::vector<std::uint8_t>& state,
+                    const std::function<std::string (const std::string&)>& existing,
+                    const std::function<std::vector<std::uint8_t> (const std::string&)>& readFile,
+                    const std::function<std::string (const std::vector<std::uint8_t>&, const std::string&)>& saveEmbedded)
+{
+    const auto st = parseState (state);
+    if (! st || ! existing)
+        return false;
+    const auto* prog = playedProgram (*st);
+    if (prog == nullptr)
+        return false;
+    std::vector<SampleZone> zones;
+    std::vector<bool> int16;
+    int found = 0;
+    for (std::size_t i = 0; i < prog->zones.size(); ++i)
+    {
+        const auto& z = prog->zones[i];
+        SampleZone sz;
+        sz.rootKey = std::clamp (z.root, 0, 127);
+        sz.lowKey = std::clamp (z.lowKey, 0, 127);
+        sz.highKey = std::clamp (z.highKey, sz.lowKey, 127);
+        sz.lowVelocity = std::clamp (z.lowVel, 0, 127);
+        sz.highVelocity = std::clamp (z.highVel, sz.lowVelocity, 127);
+        bool i16 = false;
+        sz.path = z.path.empty() ? std::string() : existing (z.path);
+        if (! sz.path.empty())
+            i16 = readFile && isPcm16Wav (readFile (sz.path));
+        else if (saveEmbedded)
+        {
+            const auto wav = wavOf (z);
+            if (! wav.empty())
+            {
+                sz.path = saveEmbedded (wav, def.name + " " + std::to_string (i + 1));
+                i16 = z.bits == 16;
+            }
+        }
+        found += sz.path.empty() ? 0 : 1;
+        zones.push_back (std::move (sz));
+        int16.push_back (i16);
+    }
+    if (found == 0)
+        return false;
+    def.instrument = InstrumentKind::directwave;
+    def.zones = std::move (zones);
+    def.modelParams = encodeFormats (int16);
+    def.pluginState = state;
+    return true;
+}
+
+namespace
+{
+class DirectWaveInstrument final : public Instrument
+{
+public:
+    explicit DirectWaveInstrument (std::vector<std::shared_ptr<const ZoneSamples>> s) : samples (std::move (s)) { notes.reserve (1024); }
+
+    void prepare (double sr) noexcept override
+    {
+        rate = sr;
+        engine.setSampleRate (sr);
+    }
+
+    void configure (const ChannelDef& channel, double bpm) noexcept override
+    {
+        tempo.store (bpm);
+        pitchCents.store (channel.sampler.pitch * 100.0f);
+        if (! loaded)
+        {
+            loaded = true;
+            if (const auto st = parseState (channel.pluginState))
+                if (const auto* p = playedProgram (*st))
+                {
+                    EngineOptions o;
+                    o.velocityAsInitVol = (st->flags & 2) != 0;
+                    o.noGainClamp = (st->flags & 1) != 0;
+                    engine.setProgram (*p, samples, o);
+                    usable = true;
+                }
+        }
+    }
+
+    void setNextNoteExpression (float pan, float cents, bool) noexcept override
+    {
+        nextPan = pan;
+        nextCents = cents;
+    }
+
+    void noteOn (int key, float velocity) noexcept override
+    {
+        if (! usable)
+            return;
+        const auto vel = std::clamp ((double) velocity, 0.0, 1.0);
+        const auto initVol = (std::pow (11.0, 1.28 * vel) - 1.0) / 10.0;
+        Note n;
+        n.id = nextId++;
+        n.key = std::clamp (key, 0, 127);
+        n.initVol = initVol;
+        n.pan = nextPan;
+        n.cents = (double) pitchCents.load() + (double) nextCents;
+        engine.setTempo (tempo.load());
+        engine.noteOn (n.id, n.key, vel, channelVol * initVol, std::clamp ((double) n.pan + channelPan, -1.0, 1.0), n.cents);
+        if (notes.size() < 1024)
+            notes.push_back (n);
+        nextPan = 0.0f;
+        nextCents = 0.0f;
+    }
+
+    void noteOff (int key) noexcept override
+    {
+        for (std::size_t i = 0; i < notes.size();)
+            if (notes[i].key == key)
+            {
+                engine.noteOff (notes[i].id);
+                notes.erase (notes.begin() + (std::ptrdiff_t) i);
+            }
+            else
+                ++i;
+    }
+
+    void allNotesOff() noexcept override
+    {
+        for (const auto& n : notes)
+            engine.noteOff (n.id);
+        notes.clear();
+    }
+
+    bool idle() const noexcept override { return ! engine.active(); }
+
+    void render (float* left, float* right, int n, float gl, float gr) noexcept override
+    {
+        const auto vol = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
+        auto pan = vol > 0.0 ? std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0 : 0.0;
+        if (std::fabs (pan) < 1e-9)
+            pan = 0.0;
+        if (vol != channelVol || pan != channelPan)
+        {
+            channelVol = vol, channelPan = pan;
+            for (const auto& nt : notes)
+                engine.setLevels (nt.id, channelVol * nt.initVol, std::clamp ((double) nt.pan + pan, -1.0, 1.0), nt.cents);
+        }
+        if (! usable)
+            return;
+        float tmp[2 * 256];
+        for (int done = 0; done < n;)
+        {
+            const int len = std::min (256, n - done);
+            std::fill (tmp, tmp + 2 * len, 0.0f);
+            engine.render (tmp, len);
+            for (int i = 0; i < len; ++i)
+            {
+                left[done + i] += tmp[2 * i];
+                right[done + i] += tmp[2 * i + 1];
+            }
+            done += len;
+        }
+    }
+
+private:
+    struct Note { std::uint64_t id = 0; int key = 0; double initVol = 1.0, pan = 0.0, cents = 0.0; };
+    Engine engine;
+    std::vector<std::shared_ptr<const ZoneSamples>> samples;
+    std::vector<Note> notes;
+    std::uint64_t nextId = 1;
+    double rate = 44100.0, channelVol = 1.0, channelPan = 0.0;
+    std::atomic<double> tempo { 120.0 };
+    std::atomic<float> pitchCents { 0.0f };
+    float nextPan = 0.0f, nextCents = 0.0f;
+    bool loaded = false, usable = false;
+};
+} // namespace
+
+std::unique_ptr<Instrument> makeDirectWaveInstrument (std::vector<std::shared_ptr<const ZoneSamples>> samples)
+{
+    return std::make_unique<DirectWaveInstrument> (std::move (samples));
 }
 
 std::vector<float> renderReference (const Program& program, const std::vector<std::shared_ptr<const ZoneSamples>>& samples,

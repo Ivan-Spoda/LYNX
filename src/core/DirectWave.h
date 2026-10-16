@@ -16,6 +16,7 @@
 // ChannelDef::zones (one per zone of the played program, in order).
 
 #include <array>
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -155,6 +156,28 @@ private:
     struct Impl;
     std::unique_ptr<Impl> d;
 };
+
+// --------------------------------------------------------------------------------------------- LYNX channel
+// The program LYNX plays: the first one with zones (the one the demos' first MIDI slot selects).
+const Program* playedProgram (const State& state);
+
+// modelParams of an imported channel: { 1, zone count, then per zone 1 when DirectWave holds it as 16-bit
+// integers (16-bit PCM file or 16-bit embedded audio), else 0 }
+std::vector<float> encodeFormats (const std::vector<bool>& int16);
+std::vector<bool> decodeFormats (const std::vector<float>& params);
+
+// a decoded sample as the plugin holds it (16-bit sources back to their integers)
+std::shared_ptr<const ZoneSamples> zoneSamples (const SampleData& sample, bool int16);
+
+// Fills an imported channel (FlpImport): the state, the zones' files (resolved with `existing`, or the audio
+// the project embeds, stored with `saveEmbedded`) and their formats (read with `readFile`). False: not usable.
+bool importChannel (ChannelDef& def, const std::vector<std::uint8_t>& state,
+                    const std::function<std::string (const std::string&)>& existing,
+                    const std::function<std::vector<std::uint8_t> (const std::string&)>& readFile,
+                    const std::function<std::string (const std::vector<std::uint8_t>&, const std::string&)>& saveEmbedded);
+
+// `samples[i]`: program zone i (null = silent)
+std::unique_ptr<Instrument> makeDirectWaveInstrument (std::vector<std::shared_ptr<const ZoneSamples>> samples);
 
 // --------------------------------------------------------------------------------------------- reference
 struct RefNote

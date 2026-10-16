@@ -13,6 +13,7 @@
 #include "core/Drumaxx.h"
 #include "core/Plucked.h"
 #include "core/FlKeys.h"
+#include "core/DirectWave.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
 #include "core/Granulizer.h"
@@ -749,7 +750,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             return ! resolved.empty() && options.fileExists && options.fileExists (resolved) ? resolved : std::string();
         };
 
+        // DirectWave: the exact engine (REA_rodada72); the multi-sample sampler stays as the fallback
+        bool directWaveExact = false;
         if (c.pluginName == "DirectWave")
+            directWaveExact = dw::importChannel (def, c.pluginState, existing, options.readFile, options.saveEmbedded);
+        if (c.pluginName == "DirectWave" && ! directWaveExact)
             if (auto program = directWaveProgram (c.pluginState))
             {
                 std::vector<SampleZone> zones;
@@ -1500,7 +1505,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
                      || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
                      || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
-                     || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance)
+                     || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance
+                     || def.instrument == InstrumentKind::directwave)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
