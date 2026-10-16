@@ -10,6 +10,7 @@
 #include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
 #include "core/EquoFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -2225,6 +2226,17 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // Multiband Delay: FL's twelve global controls (raw − min) / range; the banks come from FL's state (core/MultibandDelayFx.h)
+    static const EffectInfo multibandDelayInfo = [] {
+        EffectParams p {};
+        mbdelay::toParams (mbdelay::State {}, p);
+        EffectInfo info { "Multiband Delay", {} };
+        const char* const names[mbdelay::numGlobals] = { "Delay scale", "Delay x0.1", "Feedback", "Smoothing", "Filter mode", "Keep pitch",
+                                                         "Morph", "Mix", "Harmonic scale", "Weighting", "High pass", "Saturation" };
+        for (int i = 0; i < mbdelay::numGlobals; ++i)
+            info.params.push_back ({ names[i], p[(std::size_t) i] });
+        return info;
+    }();
     // EQUO: FL's knobs (raw − min) / range and options; the bands come from FL's state (core/EquoFx.h)
     static const EffectInfo equoInfo { "EQUO", { { "Band shift", 0.5f }, { "Band mix", 1.0f }, { "Morph", 0.0f },
                                                  { "Smoothness", 170.0f / 1024.0f }, { "Volume", 0.5f },
@@ -2469,6 +2481,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerInfo;
         case EffectKind::equo: return equoInfo;
         case EffectKind::flPitchShifter: return flPitchShifterInfo;
+        case EffectKind::multibandDelay: return multibandDelayInfo;
         case EffectKind::frequencySplitter: return fsplit::info();
     }
     return eq;
@@ -2811,6 +2824,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::flPitchShifter:
             return psfl::paramText (param, v);
 
+        case EffectKind::multibandDelay:
+            return mbdelay::paramText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2868,6 +2884,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::multibandDelay)
+        return mbdelay::make (slot.state);
     if (slot.kind == EffectKind::equo)
         return equofx::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
@@ -2944,6 +2962,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
         case EffectKind::flPitchShifter: return psfl::make();
         case EffectKind::frequencySplitter: return fsplit::make();
+        case EffectKind::multibandDelay: return mbdelay::make ({}); // FL's default Multiband Delay; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();

@@ -60,6 +60,7 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
 #include "core/EquoFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
@@ -9382,6 +9383,85 @@ TEST (equo_exact)
         CHECK (lynx::formatEffectParam (lynx::EffectKind::equo, 4, slot->params[4], 120.0, slot->params).find ("dB") != std::string::npos);
     }
     CHECK (! lynx::equofx::parse (std::vector<std::uint8_t> (100, 0)).has_value());
+}
+
+// Multiband Delay test state (version 7, our own LCG cells, no FL data; REA_rodada71 mbd/py/teststate.py builds the same bytes)
+static std::vector<std::uint8_t> multibandDelayTestState (std::array<int, 12> globals, std::uint32_t seed)
+{
+    std::vector<std::uint8_t> b;
+    auto putI = [&b] (std::int32_t v) { const auto* q = (const std::uint8_t*) &v; b.insert (b.end(), q, q + 4); };
+    putI (7);
+    putI (396);
+    std::uint64_t s = seed;
+    for (int i = 0; i < 384; ++i)
+    {
+        s = (s * 1103515245u + 12345u) & 0x7fffffffu;
+        putI ((std::int32_t) ((s % 100001u) * (1u << 30) / 100000u));
+    }
+    for (int v : globals)
+        putI (v);
+    putI (0);
+    putI (3);
+    for (int v : { 1, 1, 0 })
+        b.push_back ((std::uint8_t) v);
+    b.insert (b.end(), 192, 0);
+    return b;
+}
+
+TEST (multiband_delay_exact)
+{
+    std::vector<float> inL (8192), inR (8192);
+    for (int n = 0; n < 8192; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0 * 0.3);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0 * 0.3);
+    }
+    struct Gold { int i; float l, r; };
+    // goldens: Multiband Delay_x64.dll (+ its engine_x64.dll) on the same states and signal, 512-frame blocks (REA_rodada71)
+    auto run = [&] (const std::vector<std::uint8_t>& st, int latency, float tol, std::initializer_list<Gold> gold) {
+        CHECK (st.size() == 1795 && lynx::mbdelay::parse (st).has_value());
+        const auto slot = lynx::effectFromFl ("Multiband Delay", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::multibandDelay && slot->state == st);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0, k = 0; i < 8192; ++k)
+        {
+            const int n = std::min (8192 - i, k % 2 == 0 ? 700 : 333);
+            fx->process (l.data() + i, r.data() + i, n, slot->params, 120.0);
+            i += n;
+        }
+        CHECK (fx->latencySamples() == latency);
+        for (const auto& g : gold)
+            CHECK (std::fabs (l[(std::size_t) g.i] - g.l) <= tol && std::fabs (r[(std::size_t) g.i] - g.r) <= tol);
+    };
+    // steep crossover, keep pitch, weighted feedback, compressor
+    run (multibandDelayTestState ({ 2000, 0, 3000, 600, 1, 1, 3500, 64, 0, 1, 30000, 0 }, 777), 0, 0.0f,
+         { { 1000, -0.125012308f, 0.0675066486f }, { 3000, -0.125002861f, -0.0525011979f }, { 5000, -0.110439189f, 0.0597563162f },
+           { 7000, -0.146480903f, 0.0139919929f }, { 8191, -0.0454496294f, 0.0398242511f } });
+    // gentle crossover, harmonic scale, delay ×0.1, saturation
+    run (multibandDelayTestState ({ -2500, 1, 4500, 0, 0, 0, 0, 128, 1, 0, 1000, 1 }, 4242), 0, 0.0f,
+         { { 1000, 0.0679653957f, 0.0137896547f }, { 3000, 0.0620588325f, 0.0558352768f }, { 5000, 0.0558495969f, -0.0220566839f },
+           { 7000, 0.057009533f, 0.00332171144f }, { 8191, 0.0673644915f, 0.00163267844f } });
+    // linear-phase crossover (FL's IPP FFTs are approximated: about −120 dB), clipper
+    run (multibandDelayTestState ({ 1500, 0, 2000, 1500, 2, 0, 1000, 100, 0, 0, 5000, 2 }, 99), 1536, 2e-6f,
+         { { 1000, 0.0f, 0.0f }, { 3000, 0.103910387f, -0.0521105044f }, { 5000, 0.0516818762f, -0.0134486742f },
+           { 7000, 0.065563485f, -0.00765838847f }, { 8191, -0.0376662463f, -0.0434602089f } });
+
+    const auto st = multibandDelayTestState ({ 2000, 0, 3000, 600, 1, 1, 3500, 64, 0, 1, 30000, 0 }, 777);
+    const auto s = *lynx::mbdelay::parse (st);
+    CHECK (lynx::mbdelay::parse (lynx::mbdelay::serialize (s))->raw == s.raw);
+    lynx::EffectParams p {};
+    lynx::mbdelay::toParams (s, p);
+    auto back = s;
+    lynx::mbdelay::applyParams (p, back);
+    CHECK (back.raw == s.raw);
+    CHECK (lynx::mbdelay::engineValue (s, 384 + 7) == (float) (192.0 / 256.0));
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::multibandDelay, 4, p[4], 120.0) == "steep");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::multibandDelay, 7, 1.0f, 120.0) == "100% wet");
+    CHECK (! lynx::mbdelay::parse (std::vector<std::uint8_t> (16, 0)).has_value());
 }
 
 TEST (fruity_parametric_eq_exact)

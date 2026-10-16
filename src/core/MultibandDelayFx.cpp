@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstdio>
 #include <cstring>
 
@@ -66,6 +65,64 @@ float tanfCrt (float x) noexcept
     const double num = -0.017203248047148168 * x2 + 0.3852960712639954;
     const double den = (0.01844239256901656 * x2 + -0.5139650547885454) * x2 + 1.1558882143468838;
     return (float) (xd + (x2 * xd) * (num / den));
+}
+
+// the plug-in's CRT tanhf (single precision throughout). Its exp table 2^(j/32) as a head (cut to 9 fraction bits) and
+// a tail (2^(j/32) cut to 33 fraction bits, minus the head, rounded to float), generated from that definition
+constexpr float tanhHi[32] = {0x1.0000000000000p+0f, 0x1.0580000000000p+0f, 0x1.0b00000000000p+0f, 0x1.1100000000000p+0f, 0x1.1700000000000p+0f, 0x1.1d00000000000p+0f, 0x1.2380000000000p+0f, 0x1.2980000000000p+0f, 0x1.3000000000000p+0f, 0x1.3700000000000p+0f, 0x1.3d80000000000p+0f, 0x1.4480000000000p+0f, 0x1.4b80000000000p+0f, 0x1.5300000000000p+0f, 0x1.5a80000000000p+0f, 0x1.6200000000000p+0f, 0x1.6a00000000000p+0f, 0x1.7180000000000p+0f, 0x1.7a00000000000p+0f, 0x1.8200000000000p+0f, 0x1.8a80000000000p+0f, 0x1.9300000000000p+0f, 0x1.9c00000000000p+0f, 0x1.a500000000000p+0f, 0x1.ae80000000000p+0f, 0x1.b780000000000p+0f, 0x1.c180000000000p+0f, 0x1.cb00000000000p+0f, 0x1.d580000000000p+0f, 0x1.df80000000000p+0f, 0x1.ea00000000000p+0f, 0x1.f500000000000p+0f};
+constexpr float tanhLo[32] = {0x0.0p+0f, 0x1.b0d3100000000p-12f, 0x1.561b3e0000000p-10f, 0x1.80e8080000000p-11f, 0x1.5c1e3c0000000p-11f, 0x1.21cc5a0000000p-10f, 0x1.e9b9c00000000p-14f, 0x1.a77d460000000p-10f, 0x1.bf828c0000000p-10f, 0x1.a737380000000p-12f, 0x1.a993040000000p-10f, 0x1.8218180000000p-10f, 0x1.f6b54c0000000p-10f, 0x1.0ad5a60000000p-10f, 0x1.83eea40000000p-11f, 0x1.1fac0e0000000p-10f, 0x1.3cccf00000000p-13f, 0x1.dd7a3a0000000p-10f, 0x1.1473e80000000p-12f, 0x1.6266520000000p-10f, 0x1.39508a0000000p-10f, 0x1.cdec320000000p-10f, 0x1.2460a80000000p-10f, 0x1.40ec8e0000000p-10f, 0x1.3f32b00000000p-13f, 0x1.ddbcbe0000000p-10f, 0x1.9bdd800000000p-12f, 0x1.c8373a0000000p-10f, 0x1.8dcf800000000p-16f, 0x1.25ccde0000000p-10f, 0x1.2be8a80000000p-10f, 0x1.d96da00000000p-14f};
+float tanhfCrt (float x) noexcept
+{
+    const std::uint32_t bits = ildsp::fbits (x), ax = bits & 0x7fffffffu;
+    if (ax < 0x39000000u || ax > 0x7f800000u)
+        return x; // tiny or NaN
+    const float sgn = 1.0f - (float) (ax != bits ? 1 : 0) * 2.0f;
+    const float a = sgn * x;
+    float r;
+    if (a > 10.0f)
+        r = 1.0f;
+    else if (! (1.0f < a))
+    {
+        const float x2 = a * a, x3 = x2 * a;
+        float num, den;
+        if (0.899999976f > a)
+        {
+            num = ((x2 * 4.89163103e-05f - 0.00146283559f) * x2) - 0.281928062f;
+            den = x2 * 0.342701793f + 0.845784187f;
+        }
+        else
+        {
+            num = ((x2 * 3.82753497e-05f - 0.00123256445f) * x2) - 0.240698591f;
+            den = x2 * 0.292529076f + 0.722097397f;
+        }
+        r = (num * x3) / den + a;
+    }
+    else
+    {
+        float t = a + a;
+        float y = t * 46.1662407f;
+        y = y > 0.0f ? y + 0.5f : y - 0.5f;
+        const int n = (int) y;
+        const int j = n & 31, m = n & ~31;
+        const float hi = tanhHi[j], lo = tanhLo[j];
+        t = t - (float) n * 0.0216598511f;
+        const float tl = (float) (-n) * 9.98318228e-07f;
+        const int k = m / 32, k2 = k / 2;
+        const float s1 = ildsp::ffrom ((std::uint32_t) (k2 + 127) << 23), s2 = ildsp::ffrom ((std::uint32_t) (k - k2 + 127) << 23);
+        const float rr = tl + t;
+        float q = rr * 0.166666672f + 0.5f;
+        q = q * (rr * rr);
+        q = q + tl;
+        q = q + t;
+        q = q * (lo + hi);
+        q = q + lo;
+        q = q + hi;
+        q = q * s1;
+        q = q * s2;
+        q = q + 1.0f;
+        r = 1.0f - 2.0f / q;
+    }
+    return r * sgn;
 }
 
 // the plug-in's double sine (a two-lane polynomial kernel; its sincos evaluates it at x and |x| + π/2)
@@ -197,17 +254,43 @@ struct Biquad4
     }
 };
 
-// FFT convolver of the linear-phase crossover: 1024-tap FIR, blocks of 1024, FFT size 2048 (overlap-add)
+// FFT convolver of the linear-phase crossover: 1024-tap FIR, blocks of 1024, FFT size 2048 (overlap-add). Our own
+// double-precision radix-2 FFT (FL uses IPP's single-precision transforms; REA_rodada71 §4)
 struct Convolver
 {
     static constexpr int N = 2048, H = 1024;
-    std::vector<std::complex<double>> kernel;   // spectrum of the zero-padded FIR
-    std::vector<float> in[2], out[2];           // per channel: input block, output accumulator (N)
+    std::vector<double> kre, kim;          // spectrum of the zero-padded FIR
+    std::vector<double> wre, wim;          // scratch
+    std::vector<float> in[2], out[2];      // per channel: input block, output accumulator (N)
     int pos = 0;
+
+    struct Tables
+    {
+        std::vector<double> c, s; // cos / sin (2πk/N), k < N/2
+        std::vector<int> rev;
+        Tables() : c ((std::size_t) N / 2), s ((std::size_t) N / 2), rev ((std::size_t) N)
+        {
+            for (int k = 0; k < N / 2; ++k)
+                c[(std::size_t) k] = std::cos (2.0 * 3.141592653589793 * k / N), s[(std::size_t) k] = std::sin (2.0 * 3.141592653589793 * k / N);
+            for (int i = 0, j = 0; i < N; ++i)
+            {
+                rev[(std::size_t) i] = j;
+                int bit = N >> 1;
+                for (; j & bit; bit >>= 1)
+                    j ^= bit;
+                j ^= bit;
+            }
+        }
+    };
+    static const Tables& tables()
+    {
+        static const Tables t;
+        return t;
+    }
 
     Convolver()
     {
-        kernel.assign (N, {});
+        kre.assign (N, 0.0), kim.assign (N, 0.0), wre.assign (N, 0.0), wim.assign (N, 0.0);
         for (auto& v : in)
             v.assign (H, 0.0f);
         for (auto& v : out)
@@ -221,30 +304,28 @@ struct Convolver
         for (auto& v : out)
             std::fill (v.begin(), v.end(), 0.0f);
     }
-    static void fft (std::vector<std::complex<double>>& a, bool inverse)
+    // in place; inverse: conjugate twiddles, unscaled
+    static void fft (double* re, double* im, bool inverse) noexcept
     {
-        const int n = (int) a.size();
-        for (int i = 1, j = 0; i < n; ++i)
+        const auto& t = tables();
+        for (int i = 0; i < N; ++i)
         {
-            int bit = n >> 1;
-            for (; j & bit; bit >>= 1)
-                j ^= bit;
-            j ^= bit;
+            const int j = t.rev[(std::size_t) i];
             if (i < j)
-                std::swap (a[(std::size_t) i], a[(std::size_t) j]);
+                std::swap (re[i], re[j]), std::swap (im[i], im[j]);
         }
-        for (int len = 2; len <= n; len <<= 1)
+        const double sg = inverse ? 1.0 : -1.0;
+        for (int len = 2; len <= N; len <<= 1)
         {
-            const double ang = 2.0 * 3.141592653589793 / len * (inverse ? 1.0 : -1.0);
-            for (int i = 0; i < n; i += len)
-                for (int k = 0; k < len / 2; ++k)
+            const int half = len / 2, step = N / len;
+            for (int i = 0; i < N; i += len)
+                for (int k = 0; k < half; ++k)
                 {
-                    const std::complex<double> w (std::cos (ang * k), std::sin (ang * k));
-                    auto& u = a[(std::size_t) (i + k)];
-                    auto& v = a[(std::size_t) (i + k + len / 2)];
-                    const auto t = v * w;
-                    v = u - t;
-                    u = u + t;
+                    const double c = t.c[(std::size_t) (k * step)], s = sg * t.s[(std::size_t) (k * step)];
+                    const int a = i + k, b = a + half;
+                    const double xr = re[b] * c - im[b] * s, xi = re[b] * s + im[b] * c;
+                    re[b] = re[a] - xr, im[b] = im[a] - xi;
+                    re[a] = re[a] + xr, im[a] = im[a] + xi;
                 }
         }
     }
@@ -252,23 +333,22 @@ struct Convolver
     // taps under a sine window
     void design (const std::vector<float>& mask)
     {
-        std::vector<std::complex<double>> spec ((std::size_t) N);
+        std::vector<double> re ((std::size_t) N), im ((std::size_t) N, 0.0);
         for (int k = 0; k < N; ++k)
         {
             const int kk = k <= N / 2 ? k : N - k;
-            const double sign = (k & 1) ? -1.0 : 1.0; // delay of N/2
-            spec[(std::size_t) k] = { (double) mask[(std::size_t) kk] * sign, 0.0 };
+            re[(std::size_t) k] = (double) mask[(std::size_t) kk] * ((k & 1) ? -1.0 : 1.0); // delay of N/2
         }
-        fft (spec, true);
-        std::vector<std::complex<double>> h ((std::size_t) N);
+        fft (re.data(), im.data(), true);
+        std::fill (kre.begin(), kre.end(), 0.0);
+        std::fill (kim.begin(), kim.end(), 0.0);
         for (int i = 0; i < H; ++i)
         {
-            const double tap = spec[(std::size_t) (H / 2 + i)].real() / N;
+            const double tap = re[(std::size_t) (H / 2 + i)] / N;
             const double w = std::sin ((double) i * 3.141592653589793 / (double) (H - 1));
-            h[(std::size_t) i] = { (double) (float) ((float) tap * (float) w), 0.0 };
+            kre[(std::size_t) i] = (double) (float) ((float) tap * (float) w);
         }
-        fft (h, false);
-        kernel = h;
+        fft (kre.data(), kim.data(), false);
     }
     void tick (float& l, float& r) noexcept
     {
@@ -277,21 +357,31 @@ struct Convolver
         if (++pos == H)
         {
             pos = 0;
+            // both channels in one complex transform (left real, right imaginary; the FIR is real)
+            double* xr = wre.data();
+            double* xi = wim.data();
+            for (int i = 0; i < N; ++i)
+            {
+                xr[i] = i < H ? (double) in[0][(std::size_t) i] : 0.0;
+                xi[i] = i < H ? (double) in[1][(std::size_t) i] : 0.0;
+            }
+            fft (xr, xi, false);
+            for (int k = 0; k < N; ++k)
+            {
+                const double a = xr[k], b = xi[k], c = kre[(std::size_t) k], d = kim[(std::size_t) k];
+                xr[k] = a * c - b * d;
+                xi[k] = a * d + b * c;
+            }
+            fft (xr, xi, true);
+            const float inv = 1.0f / (float) N;
             for (int c = 0; c < 2; ++c)
             {
-                std::vector<std::complex<double>> x ((std::size_t) N);
-                for (int i = 0; i < H; ++i)
-                    x[(std::size_t) i] = { (double) in[c][(std::size_t) i], 0.0 };
-                fft (x, false);
-                for (int k = 0; k < N; ++k)
-                    x[(std::size_t) k] *= kernel[(std::size_t) k];
-                fft (x, true);
                 auto& o = out[c];
+                const double* v = c == 0 ? xr : xi;
                 std::memmove (o.data(), o.data() + H, (std::size_t) H * sizeof (float));
                 std::fill (o.begin() + H, o.end(), 0.0f);
-                const float inv = 1.0f / (float) N;
                 for (int i = 0; i < N; ++i)
-                    o[(std::size_t) i] = inv * (float) x[(std::size_t) i].real() + o[(std::size_t) i];
+                    o[(std::size_t) i] = inv * (float) v[i] + o[(std::size_t) i];
             }
         }
     }
@@ -363,8 +453,8 @@ std::optional<State> parse (const std::vector<std::uint8_t>& d)
         if (i < numEngineParams)
             s.raw[(std::size_t) i] = i32At (d, o);
     s.version = ver;
-    s.editBank = i32At (d, o);
-    s.drawMode = i32At (d, o + 4);
+    s.targetSel = i32At (d, o);
+    s.bank = i32At (d, o + 4);
     o += 8;
     if (ver >= 4)
     {
@@ -394,8 +484,8 @@ std::vector<std::uint8_t> serialize (const State& s)
     putI32 (d, numEngineParams);
     for (int v : s.raw)
         putI32 (d, v);
-    putI32 (d, s.editBank);
-    putI32 (d, s.drawMode);
+    putI32 (d, s.targetSel);
+    putI32 (d, s.bank);
     d.push_back (s.flagA);
     d.push_back (s.flagB);
     d.push_back (s.flagC);
@@ -411,7 +501,18 @@ float engineValue (const State& s, int i) noexcept
         return 0.0f;
     const int raw = s.raw[(std::size_t) i];
     if (i < 384)
+    {
+        // after the load FL's editor re-sends the selected bank's cells, clamped to 0…2 in its own units (raw / 2^29)
+        const int bank = i / 48, target = (i % 48) / 16, band = i % 16;
+        if (bank == s.bank && s.mode[(std::size_t) band][(std::size_t) target] == 0)
+        {
+            float v = (float) ((double) raw / 536870912.0);
+            v = 0.0f <= v ? (2.0f < v ? 2.0f : v) : 0.0f;
+            const double r = std::nearbyint ((double) v * 536870912.0); // Delphi Round: ties to even
+            return (float) (r / 1073741824.0);
+        }
         return (float) ((double) raw / 1073741824.0);
+    }
     const auto r = globalRange[i - 384];
     double v = (double) (raw - r.min) * (1.0 / (double) (r.max - r.min));
     v = std::clamp (v, 0.0, 1.0);
@@ -747,8 +848,8 @@ struct Engine::Impl
             dl.mask = size - 1;
             dl.buf.assign ((std::size_t) size * 4, 0.0f);
             dl.w = 0;
-            for (auto& fl : b.f)
-                fl.fs = rate;
+            for (int j = 0; j < 8; ++j) // the gentle filters f[8], f[9] keep the constructor's 44.1 kHz (as in FL)
+                b.f[j].fs = rate;
             std::fill (std::begin (b.gCoef), std::end (b.gCoef), gc);
         }
         for (int i = 0; i < numEngineParams; ++i)
@@ -915,8 +1016,8 @@ struct Engine::Impl
             }
             else if (satType == 2)
             {
-                yl = (float) std::tanh ((double) yl);
-                yr = (float) std::tanh ((double) yr);
+                yl = tanhfCrt (yl);
+                yr = tanhfCrt (yr);
             }
             else if (satType == 3)
             {

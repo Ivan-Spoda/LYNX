@@ -39,7 +39,7 @@ struct State
 {
     int version = 7;
     std::array<int, numEngineParams> raw {}; // FL's raw control values: bank cells ×2^30, globals in their own ranges
-    int editBank = 0, drawMode = 7;          // editor fields (not used by the sound)
+    int targetSel = 0, bank = 7;             // editor: selected target and bank (FL re-sends that bank's cells clamped)
     std::uint8_t flagA = 1, flagB = 1, flagC = 1;
     std::array<std::array<int, 3>, numBands> mode {}; // per band and target (delay, volume, pan): editor mode, 0 = on
 
@@ -50,7 +50,8 @@ struct State
 std::optional<State> parse (const std::vector<std::uint8_t>& state);
 std::vector<std::uint8_t> serialize (const State& s);
 
-// the value FL's front end hands the engine for parameter i (bank cells raw / 2^30, globals (raw − min) / range)
+// the value FL's front end hands the engine for parameter i after a state load (bank cells raw / 2^30, those of the
+// selected bank clamped to 0…1; globals (raw − min) / range)
 float engineValue (const State& s, int i) noexcept;
 
 // slot parameters ⇄ the global controls of a state

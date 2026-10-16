@@ -122,6 +122,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
+        { "Multiband Delay", EffectKind::delay },
     };
 
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")
@@ -1535,7 +1536,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Spreader" && fx.kind != EffectKind::spreader)
                  || (plugin == "EQUO" && fx.kind != EffectKind::equo)
                  || (plugin == "Pitch Shifter" && fx.kind != EffectKind::flPitchShifter)
-                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter))
+                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter)
+                 || (plugin == "Multiband Delay" && fx.kind != EffectKind::multibandDelay))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
