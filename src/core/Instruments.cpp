@@ -16,6 +16,7 @@
 #include "core/Sawer.h"
 #include "core/Drumaxx.h"
 #include "core/Granulizer.h"
+#include "core/Slayer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -240,6 +241,8 @@ private:
             case InstrumentKind::flkeys:
             case InstrumentKind::granulizer:
             case InstrumentKind::drumaxx:
+            case InstrumentKind::slayer:
+            case InstrumentKind::fruitydance:
                 break;
         }
 
@@ -2206,8 +2209,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeTransistorBassInstrument();
     if (kind == InstrumentKind::simsynth)
         return makeSimSynthInstrument();
-    if (kind == InstrumentKind::wasp)
-        return makeWaspInstrument();
+    if (kind == InstrumentKind::wasp || kind == InstrumentKind::fruitydance)
+        return makeWaspInstrument(); // both make no sound and keep their state
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)
@@ -2218,6 +2221,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeGranulizerInstrument (std::move (sample));
     if (kind == InstrumentKind::drumaxx)
         return makeDrumaxxInstrument();
+    if (kind == InstrumentKind::slayer)
+        return makeSlayerInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

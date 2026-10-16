@@ -43,6 +43,7 @@
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
+#include "core/Slayer.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -10536,14 +10537,14 @@ TEST (harmor_effects_rack)
     {
         if (s == 8192)
             inst->noteOff (60);
-        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        inst->render (l.data() + s, r.data() + s, std::min (512, (int) l.size() - s), 1.0f, 1.0f);
     }
     for (std::size_t i = 0; i < l.size(); ++i)
         finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
     CHECK (finite && energy > 1.0);
     std::vector<float> tail (44100 * 6), tailR (tail.size());
     for (int s = 0; s < (int) tail.size(); s += 512)
-        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+        inst->render (tail.data() + s, tailR.data() + s, std::min (512, (int) tail.size() - s), 1.0f, 1.0f);
     CHECK (inst->idle());
 }
 
@@ -12714,6 +12715,189 @@ TEST (drumaxx_engine)
             CHECK (song.channels[0].instrument == lynx::InstrumentKind::drumaxx && song.channels[0].pluginState == st);
         CHECK (report.converted["Drumaxx"] == 1);
     }
+}
+// --- REA round 68: FL Slayer (exact engine) and Fruity Dance (visual only) ------------------------------------------
+namespace
+{
+std::string slayerDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "FL Slayer" / "Slayer_Engine.dll").string();
+}
+
+std::vector<std::uint8_t> slayerPreset (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    const auto file = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer" / (std::string (name) + ".fst");
+    const auto states = pluginStatesIn (file, "FL Slayer");
+    return states.empty() ? std::vector<std::uint8_t> {} : states.front();
+}
+} // namespace
+
+TEST (slayer_state)
+{
+    // the saved state: int version, then the parameter integers (version 0: 28, version 1: 29 with the mod wheel)
+    std::vector<std::uint8_t> v0 (4 + 28 * 4, 0), v1 (4 + 29 * 4, 0);
+    const std::int32_t one = 1, wheel = 77, mode = 5;
+    std::memcpy (v1.data(), &one, 4);
+    std::memcpy (v1.data() + 4 + 28 * 4, &wheel, 4);
+    std::memcpy (v0.data() + 4 + 24 * 4, &mode, 4);
+    CHECK (lynx::slayerStateUsable (v0) && lynx::slayerStateUsable (v1));
+    CHECK (! lynx::slayerStateUsable (std::vector<std::uint8_t> (v0.begin(), v0.end() - 1)));
+    auto v2 = v1;
+    v2[0] = 2;
+    CHECK (! lynx::slayerStateUsable (v2));
+    const auto p0 = lynx::slayerStateParams (v0), p1 = lynx::slayerStateParams (v1);
+    CHECK (p0.size() == 29u && p0[24] == 5 && p0[28] == 0 && p1.size() == 29u && p1[28] == 77);
+    // the controls' maxima (the front-end sends value / max)
+    CHECK (lynx::slayerParamMax (0) == 6 && lynx::slayerParamMax (20) == 15 && lynx::slayerParamMax (24) == 5 && lynx::slayerParamMax (28) == 127
+           && lynx::slayerParamMax (3) == 65535);
+    // MIDI velocity from Init.Vol (0 → 0, which the engine takes as a note-off; FL's full velocity → 127)
+    CHECK (lynx::slayer::midiVelocity (0.0) == 0 && lynx::slayer::midiVelocity (1.0) == 99 && lynx::slayer::midiVelocity (2.0) == 126
+           && lynx::slayer::midiVelocity ((std::pow (11.0, 1.28) - 1.0) / 10.0) == 127);
+}
+
+TEST (slayer_engine)
+{
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return; // no FL installation
+    // against the installation's Slayer_Engine.dll (EXEC, REA_rodada68 §7: the DLL driven like FL's front-end drives it,
+    // host blocks of 512 at 44.1 kHz, tempo 120): bit-identical output. C3 vel 90 1024–20000, G3 vel 120 8000–30000,
+    // E4 vel 40 16000–40000, C5 vel 127 from 30000.
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* preset; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "BASS Ebass 2", 15073.5614896, 15073.5614896, { { 5000, 0.39340171217918396f, 0.39340171217918396f }, { 12000, -1.6453207731246948f, -1.6453207731246948f }, { 25000, 0.4477591812610626f, 0.4477591812610626f }, { 40000, 0.15478527545928955f, 0.15478527545928955f } } },
+        { "DIST Dire Straits", 1667.57549156, 1687.24007956, { { 5000, 0.026657210662961006f, -0.10683870315551758f }, { 12000, 0.16261409223079681f, -0.402504026889801f }, { 25000, 0.06702516227960587f, -0.04462721571326256f }, { 40000, -0.35892999172210693f, 0.29433923959732056f } } },
+        { "POWER Metal", 2041.24961449, 2041.24961449, { { 5000, -0.045430999249219894f, -0.045430999249219894f }, { 12000, 0.009085401892662048f, 0.009085401892662048f }, { 25000, -0.15170709788799286f, -0.15170709788799286f }, { 40000, -0.0430934801697731f, -0.0430934801697731f } } },
+        { "SINGLE Chorus", 1199.72408266, 1228.23838997, { { 5000, 0.08928016573190689f, 0.07585708051919937f }, { 12000, 0.22826193273067474f, 0.16860444843769073f }, { 25000, 0.14708775281906128f, 0.12602058053016663f }, { 40000, -0.02422964572906494f, -0.021596161648631096f } } },
+        { "AUTO Leslie", 2045.59821914, 16901.1532986, { { 5000, 0.09575536102056503f, -0.0019274931401014328f }, { 12000, -0.0070709832943975925f, -0.3028614819049835f }, { 25000, 0.07535621523857117f, 0.24308738112449646f }, { 40000, -0.09379560500383377f, -0.008114430122077465f } } },
+        { "FX Mad Photons", 1849.74988002, 1849.74988002, { { 5000, -0.11505282670259476f, -0.11505282670259476f }, { 12000, 0.3610122501850128f, 0.3610122501850128f }, { 25000, 0.36028820276260376f, 0.36028820276260376f }, { 40000, -0.5374203324317932f, -0.5374203324317932f } } },
+        { "ELEKTRO Jungle", 3929.94173335, 3929.94173335, { { 5000, 0.3158963918685913f, 0.3158963918685913f }, { 12000, 0.2988760769367218f, 0.2988760769367218f }, { 25000, 0.15749095380306244f, 0.15749095380306244f }, { 40000, -0.12722519040107727f, -0.12722519040107727f } } },
+        { "DIST Sololead Glide", 988.454469266, 1208.61893055, { { 5000, -0.03612576052546501f, -0.015017407014966011f }, { 12000, -0.008314903825521469f, 0.03836013376712799f }, { 25000, -0.047041457146406174f, -0.13751298189163208f }, { 40000, -0.03302673622965813f, -0.23574480414390564f } } },
+        { "SINGLE Funky", 1393.67536587, 4191.35072624, { { 5000, -0.09534210711717606f, 0.36347872018814087f }, { 12000, 0.3368682265281677f, -0.9259893894195557f }, { 25000, -0.022296791896224022f, 0.01075129397213459f }, { 40000, 0.044511131942272186f, -0.37124285101890564f } } },
+        { "AUTO Chorus Chords", 26161.9618548, 26396.2394554, { { 5000, -0.19687165319919586f, 0.08371803164482117f }, { 12000, 1.0583257675170898f, 1.5273079872131348f }, { 25000, -0.88118577003479f, -0.0774342492222786f }, { 40000, -0.3456699848175049f, -0.4140896201133728f } } },
+        { "POWER Rock Taps", 1306.21610814, 1164.18639692, { { 5000, 0.019661661237478256f, 0.07336095720529556f }, { 12000, -0.06010562554001808f, -0.3300100862979889f }, { 25000, 0.04404725879430771f, 0.0837465152144432f }, { 40000, -0.029322467744350433f, -0.1399042010307312f } } },
+        { "FX Atari 2600 Computer", 1391.44227691, 1391.44227691, { { 5000, 0.18123838305473328f, 0.18123838305473328f }, { 12000, -0.1220453679561615f, -0.1220453679561615f }, { 25000, 0.17565210163593292f, 0.17565210163593292f }, { 40000, 0.21183894574642181f, 0.21183894574642181f } } },
+    };
+    const std::vector<lynx::slayer::RefNote> notes = { { 1024, 48, 90, 20000 }, { 8000, 55, 120, 30000 }, { 16000, 64, 40, 40000 }, { 30000, 72, 127, -1 } };
+    constexpr int length = 44100;
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        const auto st = slayerPreset (g.preset);
+        CHECK (lynx::slayerStateUsable (st));
+        if (! lynx::slayerStateUsable (st))
+            continue;
+        const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, notes, 44100.0, length);
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-10 * g.el && std::abs (er - g.er) <= 1e-10 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && y[2 * (std::size_t) smp.at] == smp.l && y[2 * (std::size_t) smp.at + 1] == smp.r;
+        if (! ok)
+            std::printf ("  FL Slayer %s differs from FL's DLL: energy %.12g %.12g (DLL %.12g %.12g)\n", g.preset, el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    CHECK (checked == 12);
+
+    // the instrument: the engine primed with one sample, FL's velocity curve, the front-end's host gain cos(π/4), the
+    // channel gains on top; a note with velocity 0.8 is the reference note one sample later
+    const auto st = slayerPreset ("BASS Ebass 2");
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::slayer;
+    c.pluginState = st;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::slayer);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (16384, 0.0f), r (16384, 0.0f);
+    for (int b = 0; b < 32; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.8f);
+        if (b == 20)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 0.5f, 0.25f);
+    }
+    const int vel = lynx::slayer::midiVelocity ((std::pow (11.0, 1.28 * 0.8) - 1.0) / 10.0);
+    const auto ref = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, { { 1, 60, vel, 1 + 20 * 512 } }, 44100.0, 16385);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 16384; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * 0.70710677f * 0.5f),
+                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * 0.70710677f * 0.25f) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1.0 && vel == 102);
+
+    // every preset of the installation: usable and sounding
+    int presets = 0, sounding = 0;
+    const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer";
+    if (std::filesystem::exists (folder))
+        for (const auto& entry : std::filesystem::directory_iterator (folder))
+            for (const auto& s : pluginStatesIn (entry.path(), "FL Slayer"))
+            {
+                ++presets;
+                const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (s), dll, { { 1024, 52, 100, 20000 } }, 44100.0, 22050);
+                double e = 0.0;
+                bool finite = true;
+                for (auto v : y)
+                    finite = finite && std::isfinite (v), e += (double) v * v;
+                CHECK (finite);
+                sounding += e > 1.0 ? 1 : 0;
+            }
+    std::printf ("  FL Slayer presets: %d, %d sounding\n", presets, sounding);
+    CHECK (presets == 64 && sounding == 64);
+}
+
+TEST (slayer_and_fruity_dance_import)
+{
+    // FL Slayer plays on the exact engine when the installation's engine DLL is there (otherwise it stays unsupported);
+    // Fruity Dance (a visual plugin) becomes a silent channel that keeps its state
+    std::vector<std::uint8_t> slayer (4 + 28 * 4, 0), dance (40, 1);
+    FlpBuilder b;
+    b.ascii (0xC7, "25.2.5.5319");
+    int index = 0;
+    for (const auto& [name, state] : { std::pair<std::u16string, std::vector<std::uint8_t>> { u"FL Slayer", slayer }, { u"Fruity Dance", dance } })
+    {
+        b.u8 (0x40); b.u16 ((std::uint16_t) index++);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, name);
+        b.data (0xD5, state);
+    }
+    const auto project = flp::parseProject (b.bytes);
+    const auto plain = lynx::importFlp (project);
+    CHECK (plain.channels.size() == 2u);
+    if (plain.channels.size() == 2u)
+    {
+        CHECK (plain.channels[0].instrument != lynx::InstrumentKind::slayer);
+        CHECK (plain.channels[1].instrument == lynx::InstrumentKind::fruitydance && plain.channels[1].pluginState == dance);
+    }
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::fruitydance);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 1024, 1.0f, 1.0f);
+    CHECK (inst->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return;
+    lynx::FlpImportOptions withFiles;
+    withFiles.roots = { std::filesystem::path (realFlpDir).parent_path().string(), realFlpDir, "" };
+    withFiles.fileExists = [] (const std::string& path) {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        return std::filesystem::exists (local);
+    };
+    const auto song = lynx::importFlp (project, withFiles);
+    CHECK (song.channels.size() == 2u && song.channels[0].instrument == lynx::InstrumentKind::slayer && song.channels[0].pluginState == slayer
+           && ! song.channels[0].samplePath.empty());
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"

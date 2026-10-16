@@ -132,7 +132,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
   SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
   limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
-  FL's DLLs on random notes); Sakura and Drumpad on physical models rebuilt from their
+  FL's DLLs on random notes); FL Slayer on its engine (REA round 68: the 32-bit
+  reFX VST engine FL runs in its bridge — six waveguide strings at 44.1 kHz with the recorded picks, chord/glide
+  tables read from the user's `Slayer_Engine.dll`, the six play modes, 15 effects, four amps, EQ and cabinet, under the
+  engine's x87 truncating rounding; bit-identical to FL's DLL on all 64 presets in every tested scenario and on 340
+  random parameter sets at 22.05–96 kHz); Fruity Dance as a silent channel (REA round 68: a visual plugin); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -611,6 +615,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
   double sinh/pow are the C library's (last-bit double differences that changed no float sample in the tests); CPUs
   without FMA take other CRT paths in FL (not checked).
+- FL Slayer (REA round 68 §9): the phase of the engine's 5 ms control grid relative to the song (FL's engine runs
+  since load, LYNX's from the render with one primer sample: note starts can differ by up to 5 ms), the C runtime's
+  rand seed per bridge thread in FL (per engine in LYNX), MIDI pan/volume/pitch events and parameter automation (state
+  edits restart the engine) are not modelled; FL applying the channel volume/pan to the output is an inference from
+  the plugin's flags.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
