@@ -1,5 +1,7 @@
 #include "core/Instruments.h"
 #include "core/FlSynths.h"
+#include "core/FlResampler.h"
+#include "core/FlVoiceProcessor.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -1328,13 +1330,17 @@ private:
 
 // ---------------------------------------------------------------------------
 // Sampler: plays the whole sample on each note (one-shot, like an FL step),
-// transposed by the key (60 = original pitch), with linear interpolation.
+// transposed by the key (60 = original pitch), with FL's sampler interpolation (core/FlResampler.h: 24-point sinc while
+// playing, 32-point when exporting, FL's defaults; REA_rodada69 §1).
 
 struct SamplerVoice
 {
     bool active = false;
-    double position = 0.0;
-    double rate = 1.0;
+    double position = 0.0; // read position in region order (reversed voices read the region backwards)
+    double rate = 1.0;     // frames per output sample (> 0)
+    bool reversed = false;
+    int loops = 0;         // times the zone loop has wrapped (FL lets taps before the loop start wrap only then)
+    flrs::Kernel kernel;
     float velocity = 0.0f;
     float fade = 1.0f;     // < 1 when the voice was stolen (declick)
     bool stolen = false;
@@ -1343,7 +1349,7 @@ struct SamplerVoice
     float env = 1.0f;      // envelope
     float envStep = 0.0f;  // attack step (> 0) or release step (< 0)
     int stage = 1;         // 0 attack, 1 decay, 2 sustain, 3 release
-    double first = 0.0, last = 0.0; // played region
+    double first = 0.0, last = 0.0; // played region: first and last frame (inclusive)
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f; // clip fades
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
@@ -1409,6 +1415,7 @@ public:
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
+        quality = offlineRendering() ? flrs::renderQuality : flrs::liveQuality;
         fadeStep = (float) (1.0 / (0.003 * sr)); // 3 ms
         updateModulation();
         allNotesOff();
@@ -1453,7 +1460,7 @@ public:
         if (beats > 0.0f)
             return (double) data.frames() / ((double) beats * 60.0 / bpm.load() * sampleRate);
 
-        return data.sampleRate / sampleRate;
+        return data.sampleRate * (1.0 / sampleRate);
     }
 
     void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
@@ -1469,7 +1476,8 @@ public:
         sliceMailbox.read (slices);
         const auto backwards = ! clipMode && reverse.load();
         const auto total = (double) (data->frames() - 1);
-        // sample region (the start acts as "start offset"); audio clips use the whole file
+        // sample region (the start acts as "start offset"); audio clips use the whole file. `last` is the region's
+        // last frame: FL plays until the read position passes it, interpolating with that frame repeated.
         auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
         auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
         auto sliced = false;
@@ -1483,18 +1491,15 @@ public:
                 return;
 
             first = std::floor (total * slices.starts[(std::size_t) index]);
-            last = index + 1 < slices.count ? std::floor (total * slices.starts[(std::size_t) index + 1]) : total;
+            last = index + 1 < slices.count ? std::max (first, std::floor (total * slices.starts[(std::size_t) index + 1]) - 1.0) : total;
             sliced = true;
         }
         const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
 
-        if (startFrame >= last)
+        if (startFrame >= last + 1.0)
             return;
-
-        if (backwards)
-            startFrame = last - 1.0 - (startFrame - first); // the pair [index, index + 1] must fit
 
         if (! clipMode && cut.load())
             for (auto& v : voices)
@@ -1548,13 +1553,16 @@ public:
         target->fadeIn = nextClip[2];
         target->fadeOut = nextClip[3];
         nextClip = {};
-        target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
+        // FL's read speed: the rate ratio at the original pitch, else exp(cents·ln2/1200)·ratio
+        target->rate = stretched ? base : flrs::speedFor ((float) (semitones * 100.0), base);
+        target->reversed = backwards;
+        target->kernel.setQuality (quality);
 
         // portamento (channel porta, inverted by the note): starts from the previous note's pitch
         if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0 && ! stretched)
         {
             const auto steps = (int) (portaBeats.load() * 60.0 / bpm.load() * sampleRate);
-            const auto from = std::abs (lastRate) * (target->rate < 0.0 ? -1.0 : 1.0);
+            const auto from = std::abs (lastRate);
 
             if (steps >= 1 && from != 0.0)
             {
@@ -1602,7 +1610,7 @@ public:
         for (auto& v : voices)
             if (v.active && ! v.stolen && v.rate != 0.0 && v.data != nullptr)
             {
-                const auto target = v.data->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (v.rate < 0.0 ? -1.0 : 1.0);
+                const auto target = flrs::speedFor ((float) (semitones * 100.0), v.data->sampleRate * (1.0 / sampleRate));
                 v.glideRatio = std::pow (target / v.rate, 1.0 / steps);
                 v.glideLeft = steps;
             }
@@ -1666,6 +1674,8 @@ public:
             sharedFilter.set (fc, res, sampleRate, type);
         }
 
+        const flvp::X87Extended precision; // FL's interpolators run the x87 unit at 64-bit precision
+
         for (auto& v : voices)
         {
             if (! v.active || v.data == nullptr)
@@ -1673,24 +1683,27 @@ public:
 
             const auto* l = v.data->leftData();
             const auto* r = v.data->rightData();
-            const auto last = (double) (v.data->frames() - 1);
+            const auto lastFrame = std::min ((double) (v.data->frames() - 1), v.last);
 
             for (int i = 0; i < n; ++i)
             {
                 // loop: jump back to its start (the "while held" mode stops looping on release)
-                if (v.loopEnd > v.loopStart && v.position >= v.loopEnd && (! v.loopWhileHeld || v.stage < 3))
-                    v.position -= v.loopEnd - v.loopStart;
+                const auto looping = v.loopEnd > v.loopStart && (! v.loopWhileHeld || v.stage < 3);
+                if (looping && v.position >= v.loopEnd)
+                {
+                    while (v.position >= v.loopEnd)
+                        v.position = (v.position - v.loopEnd) + v.loopStart;
+                    ++v.loops;
+                }
 
-                if (v.position >= std::min (last, v.last) || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
+                if ((double) flrs::wholeFrames (v.position) > lastFrame || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
                 {
                     v.active = false;
                     break;
                 }
 
-                const auto index = (std::size_t) v.position;
-                const auto frac = (float) (v.position - (double) index);
-                auto sl = l[index] + frac * (l[index + 1] - l[index]);
-                auto sr = r[index] + frac * (r[index + 1] - r[index]);
+                float sl, sr;
+                readFrame (v, l, r, lastFrame, looping, sl, sr);
 
                 if (modulated)
                 {
@@ -1801,6 +1814,53 @@ public:
         }
     }
 
+    // FL's sampler read (REA_rodada69 §1): the kernel's taps around the read position, frames outside the region
+    // repeating its first/last frame, taps past the loop end wrapping to the loop start (and, once the voice has
+    // looped, taps before the loop start wrapping to its end), a reversed voice reading the region backwards
+    void readFrame (SamplerVoice& v, const float* l, const float* r, double lastFrame, bool looping, float& outL, float& outR) noexcept
+    {
+        v.kernel.setSpeed (v.rate * v.pitchMul);
+        const auto half = v.kernel.halfWidth;
+        const auto whole = flrs::wholeFrames (v.position);
+        const auto frac = v.position - (double) whole;
+        const auto first = (std::int64_t) v.first, last = (std::int64_t) lastFrame;
+        const auto lo = whole - half + 1, hi = whole + half;
+        const auto loopStart = (std::int64_t) v.loopStart, loopEnd = (std::int64_t) v.loopEnd;
+
+        // at the original rate on a whole frame FL copies the sample instead of interpolating
+        if (v.rate * v.pitchMul == 1.0 && frac == 0.0)
+        {
+            const auto q = v.reversed ? first + last - whole : whole;
+            outL = l[q];
+            outR = r[q];
+            return;
+        }
+
+        if (! v.reversed && lo >= first && hi <= last && ! (looping && hi >= loopEnd))
+        {
+            flrs::interpolate (v.kernel, l + lo, r + lo, frac, outL, outR);
+            return;
+        }
+
+        for (std::int64_t t = 0; t < 2 * half; ++t)
+        {
+            auto q = lo + t;
+            if (looping && loopEnd > loopStart)
+            {
+                while (q >= loopEnd)
+                    q -= loopEnd - loopStart;
+                if (v.loops > 0 && q < loopStart)
+                    q += loopEnd - loopStart;
+            }
+            q = std::clamp (q, first, last);
+            if (v.reversed)
+                q = first + last - q;
+            tapL[(std::size_t) t] = l[q];
+            tapR[(std::size_t) t] = r[q];
+        }
+        flrs::interpolate (v.kernel, tapL.data(), tapR.data(), frac, outL, outR);
+    }
+
     bool idle() const noexcept override
     {
         return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
@@ -1812,6 +1872,8 @@ private:
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
+    int quality = flrs::liveQuality;        // FL's interpolation index (prepare)
+    std::array<float, 1024> tapL {}, tapR {}; // kernel taps gathered near the region edges and loops
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };

@@ -28,6 +28,8 @@ CORE="$CORE src/core/ThreeOsc.cpp"
 CORE="$CORE src/core/WaveAnalysis.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
 CORE="$CORE src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp"
+# FL's sampler interpolation (REA round 69)
+CORE="$CORE src/core/FlResampler.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

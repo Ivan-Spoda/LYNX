@@ -100,6 +100,8 @@ APP_SOURCES+=(src/core/ThreeOsc.cpp)
 APP_SOURCES+=(src/core/WaveAnalysis.cpp src/ui/WaveformView.cpp)
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
 APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
+# FL's sampler interpolation (REA round 69)
+APP_SOURCES+=(src/core/FlResampler.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
