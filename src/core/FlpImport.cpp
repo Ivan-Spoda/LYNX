@@ -1569,6 +1569,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity Fast LP" && fx.kind != EffectKind::fruityFastLP)
+                 || (plugin == "Fruity Free Filter" && fx.kind != EffectKind::fruityFreeFilter)
+                 || (plugin == "Fruity Filter" && fx.kind != EffectKind::fruityFilter))
+            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
