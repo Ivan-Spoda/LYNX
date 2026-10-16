@@ -15,6 +15,7 @@
 #include "core/FruityShapers.h"
 #include "core/FruityBasicFx.h"
 #include "core/FruityDelay.h"
+#include "core/FrequencySplitter.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
@@ -1914,6 +1915,21 @@ public:
             processPiece (l + done, r + done, std::min (capacity, n - done), bpm);
     }
 
+    // the longest branch's latency (the branches themselves are not aligned; FL's Patcher PDC is not confirmed)
+    int latencySamples() const noexcept override
+    {
+        int longest = 0;
+        for (const auto& b : branches)
+        {
+            int sum = 0;
+            for (const auto& c : b.chain)
+                if (c.slot.enabled && c.slot.mix > 0.0f)
+                    sum += c.effect->latencySamples();
+            longest = std::max (longest, sum);
+        }
+        return longest;
+    }
+
 private:
     struct Child
     {
@@ -2453,6 +2469,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerInfo;
         case EffectKind::equo: return equoInfo;
         case EffectKind::flPitchShifter: return flPitchShifterInfo;
+        case EffectKind::frequencySplitter: return fsplit::info();
     }
     return eq;
 }
@@ -2777,6 +2794,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::fruityMultiband:
             return flmb::paramText (param, v);
 
+        case EffectKind::frequencySplitter:
+            return fsplit::paramText (param, v);
+
         case EffectKind::fruityPanOMatic:
             return flbasic::panOMaticParamText (param, v);
 
@@ -2923,6 +2943,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
         case EffectKind::flPitchShifter: return psfl::make();
+        case EffectKind::frequencySplitter: return fsplit::make();
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();
