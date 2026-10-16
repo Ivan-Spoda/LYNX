@@ -96,6 +96,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
+            && (kind != InstrumentKind::granulizer || previous->song.channels[i].samplePath == channel.samplePath)
             && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip && kind != InstrumentKind::flkeys)
                 || (previous->song.channels[i].samplePath == channel.samplePath && previous->song.channels[i].zones == channel.zones
                     && previous->song.channels[i].modelParams == channel.modelParams
@@ -149,11 +150,13 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
         std::shared_ptr<const SampleData> sample;
 
-        if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip) && samples && ! channel.samplePath.empty())
+        if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip || kind == InstrumentKind::granulizer) && samples
+            && ! channel.samplePath.empty())
             sample = samples (channel.samplePath);
 
         // pitch-preserving stretch: the sample comes already stretched to the current tempo
-        if (sample != nullptr && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f && factories.stretchedSamples
+        if (sample != nullptr && kind != InstrumentKind::granulizer && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f
+            && factories.stretchedSamples
             && sample->frames() > 0)
         {
             const auto target = channel.sampler.stretchBeats * 60.0 / std::max (1.0, song.bpm);
