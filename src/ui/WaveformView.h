@@ -9,8 +9,9 @@
 //    physical-pixel resolution, anti-aliased peak and RMS edges), so many clips still scroll smoothly.
 //  - WaveformDisplay: a small component that shows a whole file (Sampler editor, Browser preview strip).
 //
-// Settings (Options > Waveforms): spectral colours (default) or the classic one-colour waveform; stereo
-// (left and right in two lanes) or merged.
+// Settings (Options > Waveforms): the clean one-colour waveform (default: the peak envelope mirrored around
+// the centre, filled and anti-aliased, in a light tint of the clip colour) or spectral colours; stereo (left and
+// right in two lanes) or merged.
 
 #include <functional>
 #include <map>
@@ -55,7 +56,7 @@ public:
     juce::Image& scratchImage() noexcept { return scratch; }
 
     // Options > Waveforms (kept in the UI settings)
-    static inline bool spectral = true;
+    static inline bool spectral = false;
     static inline bool stereo = false;
 
 private:
@@ -73,8 +74,8 @@ private:
 
 struct WaveStyle
 {
-    juce::Colour classic { 0xff7fa8d6 }; // colour of the classic waveform
-    bool spectral = true;
+    juce::Colour classic { 0xff7fa8d6 }; // colour of the clean (one-colour) waveform
+    bool spectral = false;
     bool stereo = false;
     float gain = 1.0f; // display gain (normalisation)
 };

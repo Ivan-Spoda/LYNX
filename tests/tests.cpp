@@ -14079,3 +14079,4 @@ TEST (newtone_rack_follows_transport)
 }
 #include "HardcoreTests.inc"
 #include "DistructorTests.inc"
+#include "UiFixTests.inc"
