@@ -195,6 +195,7 @@ struct PartData
     std::vector<ArtData> arts;     // 43
     std::vector<CurveData> shp;    // 26
     std::size_t paramOffset = 0, tail = 0;
+    std::vector<std::uint8_t> tailBytes; // what follows the 26 shaping curves (image object + file name)
     bool present = false;
 
     std::int32_t I (int o) const noexcept { std::int32_t v; std::memcpy (&v, misc.data() + o, 4); return v; }
@@ -360,6 +361,7 @@ std::optional<StateData> parseState (const std::vector<std::uint8_t>& d)
             if (! readCurve (r, c))
                 return std::nullopt;
         P.tail = end - r.i;
+        P.tailBytes.assign (d.begin() + (std::ptrdiff_t) r.i, d.begin() + (std::ptrdiff_t) end);
         P.present = true;
         o = end;
     }
@@ -753,6 +755,11 @@ struct EnvState
 {
     int idx = 0, stage = 1, sub = 1;
     double mod = 0.0, rate = 0.0, t = 0.0, ys = 0.0, dl = 0.0, out = 0.0;
+    // arpeggio (REA_rodada75): chord position played (+0x3c), this note's place (+0x40) and the chord size (+0x44),
+    // level held while another note plays (+0x48), muted (+0x39)
+    int aidx = -1, own = -1, cnt = -1;
+    double hold = 0.0;
+    bool muted = false;
 };
 
 struct EnvDef
@@ -762,10 +769,15 @@ struct EnvDef
     std::array<double, 4> scale { 1.0, 1.0, 0.0, 1.0 };
     double rate = 1.0;
     std::vector<double> w;
+    std::vector<int> arp;           // point arpeggio markers (point byte +0xD: 1 below, 2 same, 3 above)
+    bool arpOn = false, zeroLoop = false;
 
     void build (const CurveData& part, double centre, double r, bool knobs)
     {
         c.build (part.pts, centre);
+        arp.clear();
+        for (const auto& pt : part.pts)
+            arp.push_back (pt.arp);
         flags = part.hdr[0], enabled = part.hdr[1], decay = part.hdr[2], loop = part.hdr[3], sus = part.hdr[4];
         const std::array<std::int32_t, 4> kn = knobs ? part.adsr : std::array<std::int32_t, 4> { 128, 128, 0, 128 };
         for (int i = 0; i < 4; ++i)
@@ -774,6 +786,26 @@ struct EnvDef
         const auto n = c.size();
         rel = sus >= 0 ? sus : (loop >= 0 ? n - 1 : -1);
         weights();
+        // arpeggio markers act when one lies at or before the sustain point and the loop has a length (+0x8d, +0x8c)
+        auto tm = [&] (int i) {
+            double t = 0.0;
+            for (int k = 0; k <= i && k < n; ++k)
+                t += c.dx[(std::size_t) k];
+            return t;
+        };
+        zeroLoop = rel >= 0 && loop >= 0 && tm (rel) - tm (loop) <= 0.0;
+        arpOn = false;
+        for (int i = 0; i < (int) arp.size(); ++i)
+            arpOn = arpOn || (arp[(std::size_t) i] != 0 && i <= sus);
+        arpOn = arpOn && ! zeroLoop;
+    }
+
+    // FUN_007a24b0: this note's place in the held chord and the chord size
+    void setChord (EnvState& s, int own, int cnt) const noexcept
+    {
+        s.own = own, s.cnt = cnt;
+        if (s.stage == 5 && cnt < 1)
+            release (s);
     }
 
     void weights()
@@ -863,6 +895,19 @@ struct EnvDef
         {
             s.t = s.rate == 0.0 ? dt : (s.t - 1.0) / s.rate;
             s.ys = f32 (val (s.idx, s.mod));
+            if (arpOn && s.stage < 6 && arp[(std::size_t) s.idx] != 0)
+            {
+                if (s.stage == 5)
+                {
+                    s.aidx = -1;
+                    release (s);
+                }
+                else if (s.cnt > 0)
+                {
+                    const int a = (std::max (s.aidx, 0) - 2 + arp[(std::size_t) s.idx] + s.cnt) % s.cnt;
+                    s.aidx = a, s.muted = a != s.own, s.hold = s.ys;
+                }
+            }
             bool stop = false;
             if (s.idx < rel || rel < 0 || s.stage > 5)
             {
@@ -879,11 +924,14 @@ struct EnvDef
             {
                 s.sub = 4;
                 s.idx = loop + 1;
-                stop = false;
+                stop = zeroLoop;
                 if (s.idx > n - 1)
                     s.idx = n - 1;
             }
-            s.dl = f32 (val (s.idx, s.mod) - s.ys);
+            if (! s.muted)
+                s.dl = f32 (val (s.idx, s.mod) - s.ys);
+            else
+                s.ys = s.hold, s.dl = 0.0;
             if (! stop)
             {
                 const int kx = (s.stage > 2 ? 1 : 0) + ((s.stage >= 6 && sus >= 0) ? 2 : 0);
@@ -904,14 +952,41 @@ struct EnvDef
     {
         if (s.stage < 6)
         {
-            if (sus >= 0)
+            // the note playing an arpeggio carries on to the next marker (stage 5)
+            bool wait = false;
+            const int n = c.size();
+            if (s.aidx >= 0 && ! s.muted && s.cnt >= 2 && s.idx >= 0 && s.idx <= n - 1)
             {
-                s.idx = std::min (sus, c.size() - 1);
-                s.mod = f32 (s.mod + (s.out - val (s.idx, s.mod)));
-                s.t = 1.0;
-                s.sub = 6;
+                int u = s.idx, end = s.idx;
+                while (true)
+                {
+                    if (arp[(std::size_t) u] != 0)
+                    {
+                        wait = true;
+                        break;
+                    }
+                    if (u == sus && sus >= 0 && loop >= 0)
+                        u = loop + 1, end = std::max (end, u);
+                    else if (++u > n - 1)
+                        break;
+                    if (u == end || u > n - 1)
+                        break;
+                }
             }
-            s.stage = 6;
+            if (wait)
+                s.stage = 5;
+            else
+            {
+                if (sus >= 0)
+                {
+                    s.idx = std::min (sus, c.size() - 1);
+                    s.mod = f32 (s.mod + (s.out - val (s.idx, s.mod)));
+                    s.t = 1.0;
+                    s.muted = false;
+                    s.sub = 6;
+                }
+                s.stage = 6;
+            }
             if (s.rate == 0.0)
                 s.t = 1.0;
         }
@@ -1126,7 +1201,11 @@ struct ArtState
         base = b;
         cached.fill (false);
         if (art.hasEnv)
+        {
             es = share != nullptr ? *share : art.env.start();
+            if (share != nullptr && es.aidx >= 0) // inside an arpeggio: join muted at the last marker's level (FUN_007a2cc0)
+                es.muted = true, es.ys = es.hold, es.dl = 0.0, es.out = es.ys;
+        }
         esScale0 = art.hasEnv ? art.env.scale[0] : 1.0;
         depth = art.mode == 2 ? 2.0 : 1.0;
         if (art.k == 4 || art.k == 5)
@@ -1759,6 +1838,576 @@ struct Filt
     int r = 0;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// Image synthesis (REA_rodada75; our model r75/py/imgm.py): the part's image object (two planes of columns × rows
+// pixels: gain and frequency offset) read along a time position, applied to the timbre mix and to the partial
+// frequencies; formant shift with its per-column pitch track. Resynthesis-mode images (a sample analysed at load
+// time) are not modelled: such parts keep playing their timbres.
+
+struct ImageData
+{
+    bool usable = false;
+    std::string why;            // why an image tail is not used (fallback report)
+    int cols = 0, rows = 0, stride = 0, loopMode = 0;
+    float f100 = 0.0f;
+    double e8 = -1.0, f0 = -1.0, f8 = 0.0;
+    std::vector<float> gain, freq; // planes 0 and 1 (cols × stride, the padding is 0)
+};
+
+// The image object stored after the part's 26 shaping curves (FUN_00793300, read path)
+ImageData parseImage (const std::vector<std::uint8_t>& t)
+{
+    ImageData im;
+    if (t.size() < 4 + 0x2c)
+        return im;
+    Reader r { t.data(), t.size(), 0 };
+    if (r.i32() >= 1)
+    {
+        im.why = "image object version not supported";
+        return im;
+    }
+    const auto mode = r.i32();
+    im.loopMode = r.i32();
+    im.f100 = r.f32v();
+    im.e8 = r.f64v(), im.f0 = r.f64v(), im.f8 = r.f64v();
+    im.cols = r.i32(), im.rows = r.i32();
+    if (mode != 0)
+    {
+        im.why = "resynthesis-mode image (not modelled: the part plays its timbres)";
+        return im;
+    }
+    if (! r.ok || im.cols <= 0 || im.rows <= 0 || im.rows > 4096 || (long long) im.cols * im.rows > 64LL * 1024 * 1024)
+    {
+        im.why = "image data unreadable";
+        return im;
+    }
+    im.stride = (im.rows + 7) & ~7;
+    for (int pl = 0; pl < 3; ++pl)
+    {
+        const auto n = r.i32();
+        if (n <= 0)
+            continue;
+        if (! r.need ((std::size_t) im.cols * (std::size_t) im.rows * 4))
+            break;
+        std::vector<float> a ((std::size_t) im.cols * (std::size_t) im.stride, 0.0f);
+        for (int c = 0; c < im.cols; ++c)
+            std::memcpy (a.data() + (std::size_t) c * (std::size_t) im.stride, t.data() + r.i + (std::size_t) c * (std::size_t) im.rows * 4,
+                         (std::size_t) im.rows * 4);
+        r.i += (std::size_t) im.cols * (std::size_t) im.rows * 4;
+        if (pl == 0)
+            im.gain = std::move (a);
+        else if (pl == 1)
+            im.freq = std::move (a);
+    }
+    if (! r.ok)
+    {
+        im.why = "image data unreadable";
+        return im;
+    }
+    if (im.gain.empty() && im.freq.empty())
+        return im; // (no planes: nothing to play, like a part without image)
+    im.usable = true;
+    return im;
+}
+
+inline float expF (float x) noexcept { return (float) std::exp ((double) x); }     // IPP Exp_32f (taken as correctly rounded)
+inline float expm1F (float x) noexcept { return (float) std::expm1 ((double) x); } // IPP Expm1_32f
+inline float divF (float a, float b) noexcept { return (float) ((double) a / (double) b); } // IPP Div_32f
+
+struct Image
+{
+    int cols = 0, rows = 0, stride = 0, lm = 0, k5c = 0, k90 = 0, k94 = 0;
+    std::vector<float> gain, freq;
+    bool hasGain = false, hasFreq = false;
+    double s60 = 0.0, s68 = 0.0, s70 = 0.0, s88 = 0.0;
+    float k30 = 0.0f, k34 = 0.0f, k38 = 1.0f, k174 = 0.0f, smThr = 0.0f, smCoef = 0.0f, gmix = 1.0f, fmix = 0.0f;
+    double toff = 0.0, speed = 0.0;
+    int interpGain = 0, interpFreq = 0, fmode = 0;
+    std::vector<float> t48;                 // per-column fundamental position (pitch track), empty = all 0
+    bool hasT78 = false;
+    std::array<float, bankSize> t78 {};     // formant mutation positions (part +0x78)
+    std::array<float, bankSize> fmask {};   // image freq local mask (part +0x180)
+    int fmaskSt = 0, fmaskN = 0;
+
+    static float pix2ampK() noexcept { return (float) (std::log (256.0) / 255.0); }
+
+    // FUN_007981f0: (256^(pix/255) − 1) / 255 for one column
+    void pix2amp (const float* col, float* out) const noexcept
+    {
+        const auto k = pix2ampK();
+        for (int i = 0; i < stride; ++i)
+            out[i] = expm1F (col[i] * k) * 0.003921568859368563f;
+    }
+
+    // FUN_00798400
+    int colidx (long long i) const noexcept
+    {
+        if (k5c < 1)
+            return (int) std::min (std::max (i, 0LL), (long long) cols - 1);
+        if (i < 0)
+        {
+            if (k5c < 2)
+                return 0;
+            while (i < 0)
+                i += k94;
+            return (int) i;
+        }
+        while (i >= k90)
+            i -= k94;
+        return (int) i;
+    }
+
+    // FUN_00797bd0: plane at position pos, cnt entries (no loop crossfade)
+    void column (const std::vector<float>& A, double pos, int interp, int cnt, float* out) const noexcept
+    {
+        const auto fi = std::floor (pos);
+        const auto i = (long long) fi;
+        auto t = (float) (pos - fi);
+        const float* c1 = A.data() + (std::size_t) colidx (i) * (std::size_t) stride;
+        if (interp < 1)
+        {
+            std::copy (c1, c1 + cnt, out);
+            return;
+        }
+        if (interp == 4)
+        {
+            const float* p0 = A.data() + (std::size_t) colidx (i - 1) * (std::size_t) stride;
+            const float* p2 = A.data() + (std::size_t) colidx (i + 1) * (std::size_t) stride;
+            const float* p3 = A.data() + (std::size_t) colidx (i + 2) * (std::size_t) stride;
+            for (int j = 0; j < cnt; ++j)
+            {
+                auto a = (c1[j] - p2[j]) * 1.5f + (p3[j] - p0[j]) * 0.5f;
+                a = a * t + p0[j];
+                a = a - p3[j] * 0.5f;
+                a = a + p2[j];
+                a = a + p2[j];
+                a = a - c1[j] * 2.5f;
+                a = a * t + (p2[j] - p0[j]) * 0.5f;
+                out[j] = a * t + c1[j];
+            }
+            return;
+        }
+        if (interp == 1)
+        {
+            if (t > 0.5f)
+            {
+                auto u = 2.0f - t * 2.0f;
+                u = (u * u) * u;
+                t = (float) (1.0 - (double) ((u * u) * u) * 0.5);
+            }
+            else
+            {
+                auto u = t * 2.0f;
+                u = (u * u) * u;
+                t = (float) ((double) ((u * u) * u) * 0.5);
+            }
+        }
+        else if (interp == 2)
+        {
+            if (t > 0.5f)
+            {
+                const auto u = 2.0f - t * 2.0f;
+                t = (float) (1.0 - (double) ((u * u) * u) * 0.5);
+            }
+            else
+            {
+                const auto u = t * 2.0f;
+                t = (float) ((double) ((u * u) * u) * 0.5);
+            }
+        }
+        else if (interp == 5)
+        {
+            auto u = 1.0f - t;
+            u = (u * u) * u;
+            t = 1.0f - u * u;
+        }
+        else if (interp != 3)
+        {
+            const auto u = (t * t) * t;
+            t = u * u;
+        }
+        const float* c2 = A.data() + (std::size_t) colidx (i + 1) * (std::size_t) stride;
+        const auto w1 = 1.0f - t;
+        for (int j = 0; j < cnt; ++j)
+            out[j] = c1[j] * w1 + c2[j] * t;
+    }
+
+    // gain plane at pos → partial levels (FUN_00798110 + FUN_00797570 + FUN_00798130; the +0x50 table is all 1)
+    void amp (double pos, int cnt, float* out) const noexcept
+    {
+        column (gain, pos, interpGain, cnt, out);
+        const float g = 1.0f;
+        if (k34 == 0.0f)
+        {
+            const auto k = k30 * g;
+            for (int j = 0; j < cnt; ++j)
+                out[j] = std::max (out[j] * k, 0.0f);
+            return;
+        }
+        const auto k = k34 * g;
+        for (int j = 0; j < cnt; ++j)
+            out[j] = expm1F (std::max (out[j] * k30, 0.0f)) * k;
+    }
+
+    void setGainScale (double x) noexcept
+    {
+        // FUN_007975f0 / FUN_007976e0
+        if (x == 0.0)
+        {
+            k30 = (float) ((double) k38 * 0.0011300795218523825);
+            k34 = 0.0f;
+        }
+        else
+        {
+            k30 = (float) (std::log (x + 1.0) * 0.00392156862745098);
+            k34 = (float) (1.0 / x);
+            const auto fv = (float) ((std::exp ((double) (170.0f * k30)) - 1.0) * (double) k34);
+            k34 = (float) (((double) k38 * 0.192113518714905) / (x * (double) fv));
+        }
+    }
+
+    // FUN_00798450 (loop points; the +0x100 per-column gain table is not modelled)
+    bool loopSetup (const ImageData& d, std::string& why)
+    {
+        auto e8 = d.e8, f0 = d.f0, f8 = d.f8;
+        double a60 = 0.0, a68 = 0.0;
+        if (e8 >= 0.0)
+        {
+            e8 = std::min (std::max (e8, 0.0), cols - 1.0);
+            a60 = e8;
+        }
+        else
+            a60 = 0.0, f8 = 0.0;
+        if (f0 >= 0.0)
+        {
+            f0 = std::min (std::max (e8 + 1.0, f0), (double) cols);
+            a68 = f0;
+        }
+        else
+            a68 = (double) cols;
+        auto a70 = a68 - a60;
+        k5c = 0;
+        lm = d.loopMode;
+        if (lm == 0)
+            a60 = 0.0, a68 = (double) cols;
+        else if (lm == 1)
+        {
+            if (f8 > 0.0)
+            {
+                if (e8 >= 0.0)
+                {
+                    why = "image loop crossfade (not modelled: the part plays its timbres)";
+                    return false;
+                }
+            }
+            else
+            {
+                const auto i5 = (int) std::min (std::max (rndi (a60), 0LL), (long long) cols - 1);
+                const auto l2 = (int) std::min (std::max (rndi (a68), (long long) i5 + 1), (long long) cols);
+                a60 = i5, a68 = l2, a70 = l2 - i5;
+                k5c = (a70 == (double) cols ? 1 : 0) + 1;
+            }
+        }
+        else if (lm == 2)
+        {
+            s88 = a68;
+            a70 = a70 * 2.0;
+            a68 = a60 + a70;
+            k5c = a70 == (double) cols ? 2 : 0;
+        }
+        const auto i5 = (int) std::min (std::max (rndi (a60), 0LL), (long long) cols - 1);
+        const auto l2 = (int) std::max (rndi (a68), (long long) i5 + 1);
+        k90 = l2, k94 = l2 - i5;
+        s60 = a60, s68 = a68, s70 = a70;
+        if (d.f100 > 0.0f)
+        {
+            why = "image per-column gain table (not modelled: the part plays its timbres)";
+            return false;
+        }
+        return true;
+    }
+
+    static double hpos (float p, int k) noexcept { return (double) ((((p + 1.0f) * (float) k)) - 1.0f); }
+
+    // per-column fundamental position (+0x48): FUN_00795090 per column, then the clean-up and the 9-tap Hann
+    // smoothing of FUN_00795720
+    void pitchTrack()
+    {
+        const int R = rows;
+        const float w6[6] { 1.0f, 0.5f, 0.3333333432674408f, 0.25f, 0.20000000298023224f, 0.1666666716337204f };
+        const auto k40 = (float) ((R + 1) / 512.0);
+        std::vector<float> t ((std::size_t) cols, 0.0f), run ((std::size_t) R, 0.0f), amp ((std::size_t) stride), X ((std::size_t) R),
+            q ((std::size_t) R), q2 ((std::size_t) R);
+        for (int c = 0; c < cols; ++c)
+        {
+            pix2amp (gain.data() + (std::size_t) c * (std::size_t) stride, amp.data());
+            const float* fp = freq.data() + (std::size_t) c * (std::size_t) stride;
+            for (int i = 0; i < R; ++i)
+            {
+                X[(std::size_t) i] = std::max ((float) i + fp[i], 0.0f) + 1.0f;
+                auto v = divF (amp[(std::size_t) i], X[(std::size_t) i] * X[(std::size_t) i]);
+                v = v * v;
+                v = v * 0.25f;
+                v = v + run[(std::size_t) i] * 0.75f;
+                q[(std::size_t) i] = v;
+            }
+            run = q;
+            const auto L = (int) std::min ((long long) rndi ((double) (k40 * 64.0f)), (long long) R - 3);
+            int best = 2, j = 2;
+            float bs = -2147483648.0f;
+            if (L > 1)
+            {
+                for (j = 2; j <= L; ++j)
+                {
+                    float sc = 0.0f;
+                    for (int k = 1; k <= 6; ++k)
+                    {
+                        auto idx = rndi (hpos ((float) j + fp[j], k));
+                        idx = std::min (std::max (idx, 0LL), (long long) R - 1);
+                        sc = sc + (float) std::sqrt ((double) (q[(std::size_t) idx] * w6[k - 1]));
+                    }
+                    if (bs < sc)
+                        bs = sc, best = j;
+                }
+                j = L + 1;
+            }
+            const auto fa = amp[(std::size_t) best];
+            if (best < 3 || amp[(std::size_t) best - 1] * (float) (j + 1) <= fa * (float) j)
+            {
+                if (best < R && fa * (float) (j + 2) < amp[(std::size_t) best + 1] * (float) (j + 1))
+                    ++best;
+            }
+            else
+                --best;
+            for (int i = 0; i < R; ++i)
+            {
+                const auto v = divF (amp[(std::size_t) i], X[(std::size_t) i]);
+                q2[(std::size_t) i] = v * v;
+            }
+            float s1 = 0.0f, s2 = 0.0f;
+            const auto K = (int) rndi ((double) (k40 * 50.0f));
+            if (K > 1)
+                for (int k = 2; k <= K; ++k)
+                {
+                    auto i1 = rndi (hpos ((float) best + fp[best], k));
+                    if (i1 < 0)
+                        i1 = 0;
+                    if (i1 >= (R >> 1))
+                        break;
+                    s1 = s1 + q2[(std::size_t) i1];
+                    const auto f15 = (float) (best + 2) + fp[best + 2];
+                    auto i2 = rndi (hpos (f15, k));
+                    if (i2 < 0)
+                        i2 = 0;
+                    if (i2 >= (R >> 1))
+                        break;
+                    s2 = s2 + q2[(std::size_t) i2 + 2];
+                }
+            t[(std::size_t) c] = s2 * 3.0f <= s1 ? (float) best + fp[best] : 10000.0f;
+        }
+        for (auto& v : t)
+            v = std::max (v, 0.0f);
+        for (int c = 2; c < cols - 2; ++c)
+        {
+            double sm = 0.0;
+            for (int u = c - 2; u <= c + 2; ++u)
+                sm += (double) t[(std::size_t) u];
+            const auto s = (float) sm;
+            if (s < 10000.0f)
+            {
+                const auto mean = (float) ((double) s * 0.2);
+                if (std::fabs ((double) t[(std::size_t) c] - (double) mean) >= 2.0)
+                    t[(std::size_t) c] = mean, c += 2;
+            }
+        }
+        for (int c = 0; c < cols; ++c)
+            if (t[(std::size_t) c] >= 10000.0f)
+            {
+                int j = c;
+                while (j < cols - 1 && t[(std::size_t) j + 1] >= 10000.0f)
+                    ++j;
+                auto lft = c > 0 ? t[(std::size_t) c - 1] : -1.0f;
+                auto rgt = j < cols - 1 ? t[(std::size_t) j + 1] : -1.0f;
+                if (lft >= 0.0f)
+                {
+                    if (rgt < 0.0f)
+                        rgt = lft;
+                }
+                else
+                {
+                    if (rgt < 0.0f)
+                        rgt = 0.0f;
+                    lft = rgt;
+                }
+                const int h = (j - c + 1) >> 1;
+                for (int u = c; u < c + h; ++u)
+                    t[(std::size_t) u] = lft;
+                for (int u = c + h; u <= j; ++u)
+                    t[(std::size_t) u] = rgt;
+                c = j;
+            }
+        std::array<float, 9> win {};
+        std::array<double, 9> wd {};
+        for (int i = 0; i < 9; ++i)
+            win[(std::size_t) i] = (float) (0.5 - std::cos (6.283185307179586 / 8.0 * i) * 0.5), wd[(std::size_t) i] = win[(std::size_t) i];
+        const auto g = (float) (1.0 / (double) (float) pairwiseSum (wd.data(), 9));
+        std::vector<float> pad ((std::size_t) cols + 8);
+        for (int i = 0; i < cols + 8; ++i)
+            pad[(std::size_t) i] = t[(std::size_t) std::min (std::max (i - 4, 0), cols - 1)];
+        t48.assign ((std::size_t) cols, 0.0f);
+        for (int c = 0; c < cols; ++c)
+        {
+            double acc = 0.0;
+            for (int u = 0; u < 9; ++u)
+                acc += (double) pad[(std::size_t) (c + u)] * (double) win[(std::size_t) (8 - u)];
+            t48[(std::size_t) c] = (float) acc * g;
+        }
+    }
+
+    // FUN_00888720: formant shift of the gain column a (stride entries) by x cents; tmp scratch of 4·(stride + 1)
+    void formant (float* a, double pos, float x, float* tmp) const noexcept
+    {
+        const int n = stride;
+        float f0 = 0.0f;
+        if (! t48.empty())
+        {
+            const auto fi = std::floor (pos);
+            const auto tt = (float) (pos - fi);
+            const auto v0 = t48[(std::size_t) colidx ((long long) fi)], v1 = t48[(std::size_t) colidx ((long long) fi + 1)];
+            f0 = v0 + tt * (v1 - v0);
+        }
+        if (! (f0 > 2.0f))
+            f0 = 2.0f;
+        const auto fac = (float) std::exp ((double) x * -0.0008333333333333334 * ln2);
+        const auto c = (float) (1.0 - std::exp (-4.6051701859880918 / (double) (f0 * 3.0f)));
+        float* env = tmp;            // n + 1
+        float* fine = tmp + n + 1;   // n
+        float* outp = fine + n;      // n
+        float y = 0.0f;
+        for (int k = n - 1; k >= 0; --k)
+        {
+            const auto v = a[k];
+            if (y <= v)
+                y = v;
+            y = y + (v - y) * c;
+            env[k] = y;
+        }
+        y = 0.0f;
+        for (int k = 0; k < n; ++k)
+        {
+            const auto v = env[k];
+            if (y <= v)
+                y = v;
+            y = y + (v - y) * c;
+            env[k] = y;
+        }
+        for (int k = 0; k < n; ++k)
+            env[k] = std::max (env[k], 1.52587890625e-05f);
+        env[n] = env[n - 1];
+        const auto r = (int) std::min (rndi ((double) f0), (long long) n - 1);
+        for (int k = 0; k < r; ++k)
+            env[k] = env[r];
+        for (int k = 0; k < n; ++k)
+            fine[k] = divF (a[k], env[k]);
+        const auto hi = (float) (n - 1);
+        for (int k = 0; k < n; ++k)
+        {
+            auto p = hasT78 ? t78[(std::size_t) k] * fac + -1.0f : (float) (((double) fac - 1.0) + (double) fac * k);
+            p = std::min (std::max (p, 0.0f), hi);
+            const auto ki = (int) p;
+            const auto fr = p - (float) ki;
+            const auto e0 = env[ki], e1 = env[ki + 1];
+            outp[k] = (e0 + (e1 - e0) * fr) * fine[k];
+        }
+        if (fmix == 1.0f)
+            std::copy (outp, outp + n, a);
+        else
+            for (int k = 0; k < n; ++k)
+                a[k] = (outp[k] - a[k]) * fmix + a[k];
+    }
+};
+
+// position state of a record (+0x150 accumulator, +0x158 position, +0x168 smoothed time offset)
+struct ImagePos
+{
+    double acc = 0.0, pos = 0.0, off = 0.0;
+    bool ended = false;
+
+    void step (const Image& im, double A27, double A28) noexcept
+    {
+        auto diff = (float) (off - im.toff);
+        if (diff != 0.0f)
+        {
+            if (std::fabs (diff) <= 0.5f || im.lm < 1)
+                off = std::fabs (diff) > im.smThr ? im.toff : im.toff + (double) (diff * im.smCoef);
+            else
+            {
+                off = off - (diff > 0.0f ? 1.0 : -1.0);
+                diff = (float) (off - im.toff);
+                if (std::fabs (diff) > im.smThr)
+                    off = im.toff;
+                else
+                {
+                    const auto v = im.toff + (double) (diff * im.smCoef);
+                    off = v - std::trunc (v); // Delphi Frac
+                }
+            }
+        }
+        const auto d = (off + A27 * 2.0) * (double) im.cols + acc;
+        ended = im.lm == 0 && im.s68 <= d;
+        double p = d;
+        if (im.lm == 0)
+            p = d < 0.0 ? 0.0 : std::min (d, (double) im.cols);
+        else if (im.lm == 1)
+        {
+            if (d >= 0.0)
+            {
+                if (d > im.s60)
+                {
+                    if (im.k5c < 1)
+                    {
+                        const auto x = d - im.s60;
+                        p = im.s60 + (x - std::trunc (x / im.s70) * im.s70);
+                    }
+                    else
+                    {
+                        const auto e = im.s60 + im.s70;
+                        if (e < d)
+                            p = e + ((d - e) - std::trunc ((d - e) / im.s70) * im.s70);
+                    }
+                }
+            }
+            else
+            {
+                p = 0.0;
+                if (im.k5c > 1)
+                    p = d - std::floor (d / im.s70) * im.s70;
+            }
+        }
+        else
+        {
+            if (d >= 0.0)
+            {
+                if (d > im.s88)
+                {
+                    const auto x = d - im.s60;
+                    p = im.s60 + (x - std::trunc (x / im.s70) * im.s70);
+                    if (p > im.s88)
+                        p = im.s88 * 2.0 - p;
+                }
+            }
+            else
+            {
+                p = 0.0;
+                if (im.k5c > 1)
+                    p = d - std::floor (d / im.s70) * im.s70;
+            }
+        }
+        pos = p;
+        acc = acc + im.speed * A28;
+    }
+};
+
 struct Part
 {
     int k = 0;
@@ -1813,6 +2462,10 @@ struct Part
     std::array<double, 9> hzDist {};
     int maxMapRandArt = -1;
     bool anyEnvGlobal = false;
+    double part30 = 0.0;                 // part +0x30: the part's pitch knob in cents (formant reference)
+    int misc47 = 0;                      // part +0x238 (combo +0x47): auto gain measured after the image
+    float xyzC = 0.0f;                   // X/Y/Z smoothing coefficient (plugin +0x1118)
+    std::shared_ptr<const Image> img;    // image synthesis (null: no usable image)
     std::vector<std::string> fallbacks;
 
     // FUN_00888ed0: curve sampled per partial position (index 4+i at log2(i+1)·length/9), [1] = [4], [2]/[3] at the
@@ -1921,6 +2574,9 @@ struct Part
         abmix = g[10];
         mainLfo = f32 (g[15] * milli);
         modx = f32 (g[0] * 0.001953125), mody = f32 (g[1] * 0.001953125), modz = f32 (g[2] * 0.001953125);
+        // X/Y/Z smoothed per control block (FUN_008826b0), 100 ms; off when global misc +0x39 is 0
+        xyzC = S.gmisc[0x39] != 0 ? (float) std::exp (-4.6051701859880918 / ((fs * 0.1) / B)) : 0.0f;
+        misc47 = pd.I (0x47);
         {
             const auto x = f32 (std::abs (glideV) * milli);
             const auto gv = x == 1.0 ? 1.0 : f32 ((std::exp (x * f32 (std::log (7.0))) - 1.0) * f32 (1.0 / 6.0));
@@ -1932,6 +2588,7 @@ struct Part
         const auto p41 = p[41] != 0 ? p[41] : 1;
         const auto pr = p[40] > 0 ? p[40] / (p41 * 10000.0) : 1.0;
         pitch = f32 (mainpitch + (std::log (pr) * 1.4426950408889634 * 1200.0 - 1200.0));
+        part30 = std::log (pr) * 1.4426950408889634 * 1200.0 - 1200.0;
         phase0 = f32 (p[0] * milli);
         {
             const auto x1 = f32 (p[1] * milli);
@@ -1948,8 +2605,6 @@ struct Part
         mix12 = f32 (p[74] * milli);
         pitchamt = f32 (p[44] * 2.0);
         blurOn = pd.misc[0x46] != 0;
-        if (blurOn)
-            fallbacks.push_back ("blur mode misc+0x46 (played as the normal blur)");
         auto tbcoef = [&] (int v) {
             const auto Nn = ((std::exp ((double) ((float) v * 0.01f) * ln2) - 1.0) * 0.001 * fs) / B;
             return ! (Nn > 0.0) ? 0.0f : (float) std::exp (-4.6051701859880918 / Nn);
@@ -2201,14 +2856,124 @@ struct Part
         if (blend != 0)
             fallbacks.push_back ("timbre blend mode " + std::to_string (blend) + " (played as mode 0)");
         if (pd.tail > 1024)
-            fallbacks.push_back ("image/resynthesis data (ignored: the part plays its timbres)");
-        bool arp = false;
-        for (const auto& a : pd.arts)
-            for (int i = 0; i < 2; ++i)
-                for (const auto& pt : a.parts[(std::size_t) i].pts)
-                    arp = arp || pt.arp != 0;
-        if (arp)
-            fallbacks.push_back ("arpeggio envelope points (played as normal points)");
+            buildImage (pd);
+    }
+
+    // the image object (imgm.Image): planes, loop points, normalisation, gain/frequency scales, masks, pitch track
+    void buildImage (const PartData& pd)
+    {
+        const auto d = parseImage (pd.tailBytes);
+        if (! d.usable)
+        {
+            if (! d.why.empty())
+                fallbacks.push_back (d.why);
+            return;
+        }
+        auto im = std::make_shared<Image>();
+        im->cols = d.cols, im->rows = d.rows, im->stride = d.stride;
+        im->gain = d.gain, im->freq = d.freq;
+        im->hasGain = ! d.gain.empty(), im->hasFreq = ! d.freq.empty();
+        std::string why;
+        if (! im->loopSetup (d, why))
+        {
+            fallbacks.push_back (why);
+            return;
+        }
+        // normalisation (FUN_00795720): 1 / sqrt(max over columns of Σ (amp_i/(i + 1))²), at least 2^-12
+        if (im->hasGain)
+        {
+            std::vector<float> a ((std::size_t) im->stride);
+            std::vector<double> a2 ((std::size_t) im->rows);
+            float best = 0.0f;
+            for (int c = 0; c < im->cols; ++c)
+            {
+                im->pix2amp (im->gain.data() + (std::size_t) c * (std::size_t) im->stride, a.data());
+                for (int i = 0; i < im->rows; ++i)
+                {
+                    const auto w = (float) (1.0 / (i + 1));
+                    const auto x = a[(std::size_t) i] * w;
+                    a2[(std::size_t) i] = (double) (x * x);
+                }
+                const auto sm = (float) pairwiseSum (a2.data(), a2.size());
+                if (sm > best)
+                    best = sm;
+            }
+            auto x = (float) std::sqrt ((double) best);
+            if (x <= 0.000244140625f)
+                x = 0.000244140625f;
+            im->k38 = (float) (1.0 / (double) x);
+        }
+        im->setGainScale (std::exp (p[88] * 0.016 * ln2) - 1.0);
+        im->toff = p[83] * 9.5367431640625e-07;
+        {
+            const auto v = (float) std::abs (p[82]) * 0.001f;
+            const auto d16 = (double) v * (double) v;
+            const auto d13 = (d16 * 2.0 * fs) / B;
+            im->smCoef = d13 > 0.0 ? (float) std::exp (-4.6051701859880918 / d13) : 0.0f;
+            if (p[82] == 0)
+                im->smThr = 0.0f;
+            else if (p[82] < 0)
+                im->smThr = 2147483648.0f;
+            else
+                im->smThr = (float) ((d16 * 250.0) / std::max ((double) im->cols, 5.960464477539063e-08));
+        }
+        // speed: columns per control block (+0x138 = B / (100 ms · fs) at fine speed 1)
+        im->speed = p[84] * 0.0001 * std::exp (p[85] * 0.0001 * ln2) * (B / (100.0 * 0.001 * fs));
+        im->interpGain = p[87], im->interpFreq = p[91], im->fmode = p[90];
+        im->gmix = (float) p[89] * 0.001f;
+        im->fmix = (float) p[94] * 0.001f;
+        {
+            auto sc = (double) ((float) p[92] * 0.001f);
+            if (im->fmode == 0)
+                sc = sc * ln2;
+            else if (im->fmode == 2)
+                sc = (double) std::max (0.0f, (float) ((sc + 2.0) * 32.0));
+            else if (im->fmode == 3)
+                sc = (sc + 2.0) * 0.125;
+            im->k174 = (float) sc;
+        }
+        const auto& shp = pd.shp;
+        {
+            // FUN_00889c50: "Image formant mutation" curve per partial → positions (i + 1)·2^(−2v)
+            const Curve c (shp[9].pts, 0.5);
+            bool flat = true;
+            for (auto y : c.y)
+                flat = flat && (float) y == 0.5f;
+            if (! flat)
+            {
+                const auto xs = harmonicPositions (c.length);
+                std::array<float, bankSize> v {};
+                c.renderAt (xs.data(), 516, v.data());
+                for (int i = 0; i < bankSize; ++i)
+                    im->t78[(std::size_t) i] = (float) ((i + 1) * std::exp ((double) (-v[(std::size_t) i] * 2.0f) * ln2));
+                im->hasT78 = true;
+            }
+        }
+        {
+            // FUN_0088a320: image freq local mask (curve 25) per partial, trimmed on 1.0
+            const Curve c (shp[25].pts);
+            std::array<float, bankSize> mv {};
+            if (c.constant())
+                std::fill (mv.begin(), mv.begin() + 516, (float) c.y[0]);
+            else
+            {
+                const auto xs = harmonicPositions (c.length);
+                c.renderAt (xs.data(), 516, mv.data());
+            }
+            const float one = 1.0f;
+            int k2 = 0;
+            while (k2 < 516 && std::memcmp (&mv[(std::size_t) k2], &one, 4) == 0)
+                ++k2;
+            const int st = (std::max (k2 - 7, 0) + 7) & ~7;
+            int e = 516;
+            while (e > st && std::memcmp (&mv[(std::size_t) e - 1], &one, 4) == 0)
+                --e;
+            e = std::min ((e + 7) & ~7, 516);
+            im->fmask = mv, im->fmaskSt = st, im->fmaskN = e - st;
+        }
+        if (im->hasFreq && im->hasGain && im->rows >= 16)
+            im->pitchTrack();
+        img = std::move (im);
     }
 
     void uniTable()
@@ -2408,8 +3173,6 @@ struct Part
             else
                 fallbacks.push_back ("resonance shape " + std::to_string (fl.rcode) + " (off)");
         }
-        else if (p[(std::size_t) (57 + o)] > 0)
-            fallbacks.push_back ("noise resonance (type 109, skipped)");
         fl.mask = maskTable (Curve (pd.shp[(std::size_t) (18 + f)].pts));
         fl.rmask = maskTable (Curve (pd.shp[(std::size_t) (20 + f)].pts));
         fl.adaptEnv = p[(std::size_t) (51 + o)] > 0;
@@ -2447,6 +3210,7 @@ struct Patch
     double fs = 44100.0, bpm = 120.0, fclamp = 0.0, coef = 0.0, masterTarget = 1.0;
     int B = 88, prec = 0, monoMode = 0, vrmode = 0, maxrk = 0, e8 = 0;
     bool legato = false, porta = false;
+    bool arpAny = false, arpDesc = false; // some envelope has arpeggio markers; chord order (global 16: descending)
     double legLim = 2147483647.0;
     float kfade = 0.0f;
     std::array<Part, 2> parts;
@@ -2533,6 +3297,14 @@ std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm, co
     P->monoMode = S.GI (8);
     P->vrmode = S.GI (12);
     P->legLim = S.g[3] > 0 ? (double) S.g[3] : 2147483647.0;
+    P->arpDesc = S.g[16] != 0;
+    for (int k = 0; k < 2; ++k)
+        if (P->present[(std::size_t) k])
+            for (int i = 0; i < 31; ++i)
+            {
+                const auto& a = P->parts[(std::size_t) k].arts[(std::size_t) i];
+                P->arpAny = P->arpAny || (a.hasEnv && a.env.arpOn) || (a.lfoOn && a.lfoEnv.arpOn);
+            }
     // the effects rack (REA_rodada38): distortion, chorus, delay, reverb, compressor in the state's order
     {
         hlfx::HarmorRackSettings rs;
@@ -2755,6 +3527,18 @@ struct Record
     std::array<float, 8> gx {}, gy {};
     std::array<double, 4> cur {};
     std::uint32_t seed148 = 0, s148 = 0, s14c = 0;
+    std::array<float, 3> xyz {}; // smoothed X/Y/Z (voice +0x3334)
+    std::array<float, bankSize> bpDec {}; // blur-mode pluck decay per partial
+    bool bpValid = false;
+    float bpV = 0.0f;
+    int bpN = 0;
+    std::uint32_t nzSeed = 0;    // noise resonance state
+    float nzW = -1.0f;
+    double nzPos = 0.0, nzLen = 0.0, nzRate = 0.0;
+    ImagePos ipos;            // image time position
+    bool imgEnd = false;      // a one-shot image ran out (record state 9)
+    double v1b0 = 0.0;        // voice +0x1b0: pitch in cents incl. the unison detune (formant reference)
+    float agref = 1.6428422f; // auto-gain reference energy
 };
 
 struct NoteRec
@@ -2880,6 +3664,7 @@ public:
         nt.used = true, nt.pressed = true, nt.held = false, nt.inHeads = false, nt.inHeld = false;
         nt.key = key, nt.vel = vel, nt.fv = fv, nt.fp = fp, nt.fpitch = fpitch, nt.notePan = notePan;
         nt.st = now, nt.seq = noteSeq++, nt.nv = 0, nt.group = 0;
+        arpDirty = true;
         if (P->legato)
         {
             int best = -1;
@@ -3019,6 +3804,7 @@ public:
         if (slot < 0 || slot >= maxNotes || ! notes[(std::size_t) slot].used)
             return;
         notes[(std::size_t) slot].pressed = false;
+        arpDirty = true;
         releaseNote (slot);
         maybeFree (slot);
     }
@@ -3059,12 +3845,60 @@ public:
         }
     }
 
+    // arpeggio chord (Gen_Render after a note event, plugin +0xe90): the distinct pitches of the records still
+    // playing, ascending (descending with global 16 set); every such record learns its place and the chord size
+    // (FUN_007a24b0 on the envelopes and LFO envelopes of articulators 0…30)
+    void arpChord() noexcept
+    {
+        int keys[maxNotes];
+        int nk = 0;
+        for (int i = 0; i < liveCount; ++i)
+        {
+            const auto& r = records[(std::size_t) live[(std::size_t) i]];
+            if (r.released || r.dpos >= 0 || r.note < 0)
+                continue;
+            const auto key = notes[(std::size_t) r.note].key;
+            bool have = false;
+            for (int j = 0; j < nk; ++j)
+                have = have || keys[j] == key;
+            if (! have && nk < maxNotes)
+                keys[nk++] = key;
+        }
+        std::sort (keys, keys + nk);
+        if (P->arpDesc)
+            std::reverse (keys, keys + nk);
+        for (int i = 0; i < liveCount; ++i)
+        {
+            auto& r = records[(std::size_t) live[(std::size_t) i]];
+            if (r.released || r.dpos >= 0 || r.note < 0)
+                continue;
+            const auto key = notes[(std::size_t) r.note].key;
+            const int own = (int) (std::find (keys, keys + nk, key) - keys);
+            const auto& p = P->parts[(std::size_t) r.part];
+            for (int k = 0; k < 31; ++k)
+            {
+                const auto& a = p.arts[(std::size_t) k];
+                auto& st = r.arts[(std::size_t) k];
+                if (a.hasEnv)
+                    a.env.setChord (st.es, own, nk);
+                if (a.lfoOn)
+                    a.lfoEnv.setChord (st.ls, own, nk);
+            }
+        }
+    }
+
     // ---- one host block of n ≤ 512 samples (no events inside); adds into left/right ----
 
     void render (float* left, float* right, int n) noexcept
     {
         if (P == nullptr || n <= 0)
             return;
+        if (arpDirty)
+        {
+            arpDirty = false;
+            if (P->arpAny)
+                arpChord();
+        }
         std::fill (mixL.begin(), mixL.begin() + n, 0.0);
         std::fill (mixR.begin(), mixR.begin() + n, 0.0);
         const bool voices = liveCount > 0;
@@ -3137,6 +3971,7 @@ private:
     std::array<NoteRec, maxNotes> notes {};
     std::array<int, maxNotes> heads {}, held {};
     int headCount = 0, heldCount = 0, gcount = 0;
+    bool arpDirty = false;
     Levels last {};
     bool hasLast = false;
     long long stampCounter = 0, noteSeq = 0, now = 0;
@@ -3150,6 +3985,8 @@ private:
     std::array<double, 4 * maxHostBlock> gains {};
     std::array<double, 8 * maxHostBlock> laneSums {};
     std::array<float, bankSize> tmpT {}, tmpT0 {}, tmpA {}, tmpB {};
+    std::array<float, 4096 + 8> imgAmp {};        // image column (≤ stride entries)
+    std::array<float, 3 * (4096 + 8) + 8> imgTmp {}; // formant scratch (envelope, fine structure, output)
     std::array<double, bankSize + 600> convBuf {};
 
     // ---- bookkeeping ----
@@ -3321,6 +4158,8 @@ private:
     bool ended (const Record& v) const noexcept
     {
         const auto& p = P->parts[(std::size_t) v.part];
+        if (v.imgEnd)
+            return true;
         if (p.arts[1].hasEnv)
             return v.arts[1].es.stage > 8;
         return v.released;
@@ -3383,6 +4222,13 @@ private:
         v.dpos = -1, v.pendOldn = -1, v.forceChanged = false, v.freephase = false;
         v.hz.fill (0.0f), v.l2.fill (0.0f), v.hzdirty = true;
         v.seed148 = s14c, v.s14c = s14c, v.s148 = s148;
+        v.xyz = { (float) p.modx, (float) p.mody, (float) p.modz };
+        v.nzSeed = s148, v.nzW = -1.0f, v.nzPos = 0.0, v.nzLen = 0.0, v.nzRate = 0.0;
+        v.bpValid = false;
+        v.ipos = ImagePos {};
+        if (p.img != nullptr)
+            v.ipos.off = p.img->toff;
+        v.imgEnd = false, v.v1b0 = 0.0;
         v.cnt = 0;
         v.firstlen = v.shared ? gv->cnt : -1;
         v.curValid = false;
@@ -3488,12 +4334,19 @@ private:
             }
         }
         const auto dt = v.firstblk ? 0.0 : 1.0;
+        {
+            // X/Y/Z smoothing state (voice +0x3334…): ((t + c) + (y − t)·c) − c in float, every block
+            const float tg[3] { (float) p.modx, (float) p.mody, (float) p.modz };
+            const auto c = p.xyzC;
+            for (int i = 0; i < 3; ++i)
+                v.xyz[(std::size_t) i] = ((tg[i] + c) + (v.xyz[(std::size_t) i] - tg[i]) * c) - c;
+        }
         ArtInputs in;
         in.in[inKey] = f32 ((v.fpitch + p.mainpitch + (double) v.gy[2] + 6000.0) * 8.333333333333333e-05);
         in.in[inVel] = f32 (v.vel + (double) v.gy[5]); // (the model's offsets are doubles once a glide has set them)
-        in.in[inX] = f32 (p.modx + (double) ((0.0f + v.gy[3]) * 0.5f));
-        in.in[inY] = f32 (p.mody + (double) ((0.0f + v.gy[4]) * 0.5f));
-        in.in[inZ] = p.modz;
+        in.in[inX] = (double) (v.xyz[0] + (0.0f + v.gy[3]) * 0.5f);
+        in.in[inY] = (double) (v.xyz[1] + (0.0f + v.gy[4]) * 0.5f);
+        in.in[inZ] = (double) v.xyz[2];
         for (int k = 31; k < 43; ++k)
         {
             v.arts[(std::size_t) k].step (v.dtPrev, in);
@@ -3540,6 +4393,21 @@ private:
         double A[43];
         for (int k = 0; k < 43; ++k)
             A[k] = v.arts[(std::size_t) k].out;
+        const Image* im = p.img.get();
+        if (im != nullptr)
+        {
+            v.ipos.step (*im, A[27], A[28]);
+            // a one-shot image that ran out ends the record when the time-offset articulator (27, or 28 with the
+            // filters in reverse order: part +0xb64) has no envelope (FUN_008856b0, record state 9 inside the block)
+            if (v.ipos.ended && ! p.arts[(std::size_t) (27 + p.firstF)].hasEnv)
+            {
+                v.imgEnd = true;
+                if (v.dpos < 0)
+                    v.dpos = 0;
+            }
+        }
+        const bool imf = im != nullptr && im->hasFreq;
+        const bool imu = imf && im->fmode == 3;
 
         auto cents = (double) (((float) v.fpitch + (float) p.pitch) + v.gy[2]);
         if (p.vibDepth != 0.0)
@@ -3562,17 +4430,20 @@ private:
         }
         const bool hbChanged = hblurUpdate (v, p, A);
         bool changed = ! v.centsValid || cents != v.centsPrev || a4 != v.a4Prev || prismChanged || hbChanged;
+        if (imf)
+            changed = true; // image frequency plane: frequencies rebuilt every block (voice +0x7c forced)
         int n = v.n;
         if (changed)
         {
             v.centsValid = true;
             v.centsPrev = cents, v.a4Prev = a4;
+            v.v1b0 = f32 (cents + a4);
             const auto l2 = f32 (log2Of440 + (f32 (f32 (cents * f32 (0.01)) + 60.0) - 57.0) * 0.08333333333333333);
             v.l2f0 = l2;
             const auto f0 = f32 (std::exp (l2 * ln2));
             auto f0fs = f32 (f0 * (1.0 / fs));
             v.f0 = f0, v.f0fs32 = f0fs;
-            if (p.unitype < 4 && ! p.hasUniTab)
+            if (p.unitype < 4 && ! p.hasUniTab && ! imu)
                 f0fs = f32 (f0fs * std::exp (a4 * 0.0008333333333333334 * ln2));
             double q = p.pmode == 0 ? f32 ((p.l2fmax - std::log (f0) * 1.4426950408889634) * p.k19c) : f32 (p.fmax / f0);
             if (p.prismMul > 0 && v.prism != 0.0)
@@ -3595,7 +4466,7 @@ private:
             if (p.pmode == 0)
                 for (int i = 0; i < n; ++i)
                     v.f[(std::size_t) i] = std::min (v.f[(std::size_t) i], P->fclamp);
-            if (p.unitype == 4 && p.nuni > 1)
+            if (p.unitype == 4 && p.nuni > 1 && ! imu)
             {
                 const auto val = (float) (a4 * 0.006666666666666667 * v.f0fs32);
                 for (int i = 0; i < n; ++i)
@@ -3606,7 +4477,7 @@ private:
                     v.f[(std::size_t) i] = v.f[(std::size_t) i] + (double) off;
                 }
             }
-            if (p.unitype < 4 && p.hasUniTab && a4 != 0.0)
+            if (p.unitype < 4 && p.hasUniTab && a4 != 0.0 && ! imu)
             {
                 const auto val = (float) (a4 * 0.0008333333333333334 * ln2);
                 for (int i = 0; i < n; ++i)
@@ -3667,6 +4538,8 @@ private:
             }
             else if (n > oldn)
                 v.pendOldn = oldn; // entering partials get their phase offset at the end of the block
+            if (imf)
+                imageFreq (v, p, *im, A, a4);
             v.hzdirty = true;
         }
         // timbre mix + sub gains (voice +0x1a0 is also the source of the protection module)
@@ -3688,6 +4561,9 @@ private:
             T[i] = T[i] * p.subg[i];
         auto& T0 = tmpT0;
         std::copy (T.begin(), T.begin() + n, T0.begin());
+        v.agref = 1.6428422f;
+        if (im != nullptr && im->hasGain)
+            imageGain (v, p, *im, A, T.data(), T0.data());
         v.volB4 = (float) f32 (f32 (A[1] * A[1]) * p.gain12);
         v.volB8 = 1.0f;
         const auto mixv = f32 (std::min (std::max (f32 (p.mix12 * A[14]), -1.0), 1.0));
@@ -3710,7 +4586,7 @@ private:
                 case mHarmonizer: harmonizer (v, p, A, T.data()); break;
                 case mPhaser: phaser (v, p, A, T.data()); break;
                 case mPluck: pluck (v, p, A, T.data()); break;
-                case mBlur: hblur (v, p, T.data()); break;
+                case mBlur: hblur (v, p, A, T.data()); break;
                 case mProt:
                 {
                     const auto e = std::min (p.protEnd, n);
@@ -3772,10 +4648,7 @@ private:
             float g = 4096.0f;
             if (E > 0.0f)
             {
-                std::uint32_t bits = 0x3fd248a7u;
-                float ref = 0.0f;
-                std::memcpy (&ref, &bits, 4);
-                g = (float) std::sqrt ((double) (ref / E));
+                g = (float) std::sqrt ((double) (v.agref / E));
                 g = g < 0.000244140625f ? 0.000244140625f : (g > 4096.0f ? 4096.0f : g);
             }
             v.volB4 = v.volB4 * (((p.autog * g) + 1.0f) - p.autog);
@@ -3815,6 +4688,128 @@ private:
         v.fxv = f32 (f32 (p.fx) * A[2]);
         v.artpan = A[0];
         v.firstblk = false;
+    }
+
+    // ---- image synthesis (REA_rodada75) ----
+
+    // gain plane × timbre mix (voice FUN_0088ab10, image branch), with the formant shift and the gain mix
+    void imageGain (Record& v, const Part& p, const Image& im, const double* A, float* T, const float* T0) noexcept
+    {
+        const int n = v.n;
+        const auto x = (float) ((double) (float) (((float) p.p[93] + (float) A[29] * 12000.0f) - (float) v.v1b0) + p.part30);
+        const bool noform = im.fmix == 0.0f || (std::fabs ((double) x) < 5.960464477539063e-08 && ! im.hasT78);
+        const int cnt = noform ? std::min ((n - 4 + 7) & ~7, im.stride) : im.stride;
+        auto& a = imgAmp;
+        im.amp (v.ipos.pos, cnt, a.data());
+        if (! noform)
+            im.formant (a.data(), v.ipos.pos, x, imgTmp.data());
+        const int m = std::min (cnt, n - 4);
+        const int m8 = (m & 7) != 0 ? (m & ~7) + 4 : m;
+        for (int i = 0; i < m8; ++i)
+            T[4 + i] = a[(std::size_t) i] * T0[4 + i];
+        T[0] = 0.0f;
+        T[1] = T0[1] * a[0];
+        if (p.submode == 0)
+        {
+            T[2] = (T0[2] * (a[0] + a[1])) * 0.5f;
+            T[3] = (T0[3] * (a[1] + a[2])) * 0.5f;
+        }
+        else
+            T[2] = T0[2] * a[0], T[3] = T0[3] * a[0];
+        for (int i = m + 4; i < n; ++i)
+            T[i] = 0.0f;
+        if (im.gmix != 1.0f)
+        {
+            const auto w = 1.0f - im.gmix;
+            for (int i = 0; i < n; ++i)
+                T[i] = (T0[i] - T[i]) * w + T[i];
+        }
+        if (p.p[13] != 0 && p.misc47 == 1)
+        {
+            float acc[8] {};
+            for (int r = 0; r < n; r += 8)
+                for (int j = 0; j < 8; ++j)
+                    acc[j] = acc[j] + T[r + j] * T[r + j];
+            float E = 0.0f;
+            for (int j : { 4, 0, 6, 2, 5, 1, 7, 3 })
+                E = E + acc[j];
+            v.agref = E;
+        }
+    }
+
+    // frequency plane applied to the partial frequencies (modes Oct, Hz, Wide Hz, Unison)
+    void imageFreq (Record& v, const Part& p, const Image& im, const double* A, double a4) noexcept
+    {
+        const int n = v.n;
+        const int e0 = std::min ((n - 4 + 7) & ~7, im.stride);
+        const int m = std::min (e0, n - 4);
+        const auto a0 = (float) (im.k174 * A[30]);
+        if (a0 == 0.0f)
+            return;
+        auto& buf = imgAmp;
+        im.column (im.freq, v.ipos.pos, im.interpFreq, e0, buf.data());
+        auto mask = [&] {
+            const int c = std::min (e0 - im.fmaskSt, im.fmaskN);
+            for (int i = im.fmaskSt; i < im.fmaskSt + c; ++i)
+                buf[(std::size_t) i] = buf[(std::size_t) i] * im.fmask[(std::size_t) i];
+        };
+        switch (im.fmode)
+        {
+            case 0:
+                mask();
+                for (int i = 0; i < m; ++i)
+                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] * (double) expF (buf[(std::size_t) i] * a0);
+                break;
+            case 1:
+            case 2:
+            {
+                if (im.fmode == 2)
+                    for (int i = 0; i < e0; ++i)
+                        buf[(std::size_t) i] = buf[(std::size_t) i] + 1.0f;
+                mask();
+                const auto sc = (float) (v.f0fs32 * p.d * (im.fmode == 2 ? std::fabs ((double) a0) : (double) a0));
+                for (int i = 0; i < m; ++i)
+                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] + (double) (buf[(std::size_t) i] * sc);
+                break;
+            }
+            default:
+            {
+                auto& t = imgTmp;
+                std::fill (t.begin(), t.begin() + std::max (n, 4 + m), 0.0f);
+                for (int i = 0; i < m; ++i)
+                    t[(std::size_t) (4 + i)] = buf[(std::size_t) i] + 1.0f;
+                t[0] = 0.0f, t[1] = t[4];
+                if (p.submode == 0)
+                    t[2] = (t[4] + t[5]) * 0.5f, t[3] = (t[5] + t[6]) * 0.5f;
+                else
+                    t[2] = t[4], t[3] = t[4];
+                const int c = m + 4;
+                for (int i = 0; i < c; ++i)
+                    t[(std::size_t) i] = t[(std::size_t) i] * t[(std::size_t) i];
+                for (int i = c; i < n; ++i)
+                    t[(std::size_t) i] = 1.0f;
+                if (p.unitype == 4 && p.nuni > 1)
+                {
+                    const auto s = (float) (a4 * 0.006666666666666667 * v.f0fs32 * std::fabs ((double) a0));
+                    for (int i = 0; i < n; ++i)
+                    {
+                        auto w = (v.hzu[(std::size_t) i] * t[(std::size_t) i]) * s;
+                        if (p.hasUniTab)
+                            w = p.uniTab[(std::size_t) i] * w;
+                        v.f[(std::size_t) i] = v.f[(std::size_t) i] + (double) w;
+                    }
+                }
+                else
+                {
+                    const auto s = (float) (a4 * 0.0008333333333333334 * ln2 * std::fabs ((double) a0));
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const auto w = p.hasUniTab ? (p.uniTab[(std::size_t) i] * t[(std::size_t) i]) * s : t[(std::size_t) i] * s;
+                        v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) expF (w);
+                    }
+                }
+            }
+        }
     }
 
     // ---- modules (FUN_00886xxx) ----
@@ -3879,12 +4874,42 @@ private:
     }
 
     // FUN_00886610: time blur (per-partial one-pole towards T) and harmonic blur (partials 4… convolved), mask/mix
-    void hblur (Record& v, const Part& p, float* T) noexcept
+    void hblur (Record& v, const Part& p, const double* A, float* T) noexcept
     {
         const int M = v.hbM, n = v.n;
         const float* src = T;
         bool srcIsT = true;
-        if (p.tbA != 0.0f || p.tbD != 0.0f)
+        if (p.blurOn)
+        {
+            // "pluck replaces blur decay" (combo +0x46, REA_rodada75): the time blur decays each partial at the pluck
+            // rate (voice +0x1c8/+0x1cc/+0x1e0, FUN_00888da0), recomputed when the pluck value or the partial count changes
+            const auto v2 = (float) ((double) ((float) p.p[75] * 0.001f) + A[15]);
+            if (! v.bpValid || v2 != v.bpV || n != v.bpN)
+            {
+                v.bpValid = true, v.bpV = v2, v.bpN = n;
+                const auto t1c8 = (float) (std::exp ((double) ((v2 - 1.0f) * 17.0f) * ln2) * 20000.0);
+                const auto f5 = (float) (p.pkBase / ((double) t1c8 + 0.25));
+                for (int i = 0; i < n; ++i)
+                    v.bpDec[(std::size_t) i] = (float) std::exp ((double) (p.pkTab[(std::size_t) i] * f5));
+            }
+            if (v.tbFresh)
+            {
+                v.tbBuf.fill (0.0f);
+                if (! v.firstblk)
+                    std::copy (T, T + n, v.tbBuf.begin());
+                v.tbFresh = false;
+            }
+            for (int i = 0; i < n; ++i)
+            {
+                const auto bb = v.tbBuf[(std::size_t) i];
+                const auto mn = std::min (T[i], bb);
+                v.tbBuf[(std::size_t) i] = (((bb - mn) * v.bpDec[(std::size_t) i]) + T[i]) + ((mn - T[i]) * p.tbA);
+            }
+            std::copy (v.tbBuf.begin(), v.tbBuf.begin() + n, tmpA.begin());
+            src = tmpA.data();
+            srcIsT = false;
+        }
+        else if (p.tbA != 0.0f || p.tbD != 0.0f)
         {
             if (v.tbFresh)
             {
@@ -4090,7 +5115,8 @@ private:
                 T[i] = T[i] * (float) fastExp ((double) e);
             }
         }
-        // (noise resonance, type 109: not decoded — skipped)
+        else if (r > 0.0 && fl.noise && v.fcarry != 0.0)
+            noiseResonance (v, p, fl, A, f, r, T);
         if (v.fsign < 0)
         {
             if (first)
@@ -4118,6 +5144,85 @@ private:
         }
         v.fcarry = v.fmix;
         v.fwhich ^= 1;
+    }
+
+    // noise resonance (type 109, REA_rodada75): partials switched on at random, the pattern held for a time set by the
+    // resonance width (voice +0x27c seed, +0x280 width cache, +0x288 position, +0x290 rate, +0x298 length)
+    void noiseResonance (Record& v, const Part& p, const Filt& fl, const double* A, int f, double r, float* T) noexcept
+    {
+        const int n = v.n;
+        const auto lw = (float) f32 (fl.rw * A[10 + f]);
+        if (lw != v.nzW)
+        {
+            v.nzW = lw;
+            const auto d = std::exp ((double) (lw * 0.25f) * std::log (801.0));
+            v.nzLen = 9999.0 / ((d - 1.0) * 1.2475056689342403 + 1.9954648526077097);
+            v.nzRate = p.B * 0.1000100010001 * (1.0 / p.fs) * v.nzLen;
+        }
+        const auto rr = f32 (r * r);
+        auto a21 = (float) (rr * rr * rr * v.nzLen * 2.0);
+        if (fl.rhz)
+            a21 = a21 * 2.0f;
+        auto a20 = a21 + 1.0f;
+        auto& buf = tmpA;
+        rand32f (buf.data(), n, 0.0f, a20, v.nzSeed);
+        a20 = (float) std::sqrt ((double) a20);
+        hzarr (v);
+        const float kHz = -5.63707763e-05f; // runtime constant 0x94e11c
+        if (! fl.rhz)
+            for (int i = 0; i < n; ++i)
+                buf[(std::size_t) i] = v.hz[(std::size_t) i] * kHz + buf[(std::size_t) i];
+        if (! fl.radapt)
+            for (int i = 0; i < n; ++i)
+            {
+                auto b = buf[(std::size_t) i];
+                if (b < a21)
+                    b = 0.0f;
+                if (b > 0.0f)
+                    b = a20;
+                buf[(std::size_t) i] = b;
+            }
+        else
+        {
+            const auto k = a20 * 2.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                auto b = std::max (buf[(std::size_t) i] + -a21, 0.0f);
+                if (! fl.rhz)
+                {
+                    const auto q = v.hz[(std::size_t) i] * kHz + 1.0f;
+                    if (b > 0.0f && q > 0.0f)
+                        b = b / q;
+                }
+                buf[(std::size_t) i] = (b * b) * k;
+            }
+        }
+        if (fl.rmask.flag)
+        {
+            const auto mS = (float) fl.rmask.S, mO = (float) fl.rmask.o;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto Mv = tableRead (fl.rmask, v.l2[(std::size_t) i] * mS + mO, P->prec);
+                T[i] = (buf[(std::size_t) i] * Mv - Mv) * T[i] + T[i];
+            }
+        }
+        else
+            for (int i = 0; i < n; ++i)
+                T[i] = T[i] * buf[(std::size_t) i];
+        v.nzPos = v.nzPos + v.nzRate;
+        if (v.nzPos >= 1.0)
+        {
+            v.nzPos = v.nzPos - std::trunc (v.nzPos);
+            std::uint32_t u8 = (v.nzSeed - 0x2036au) ^ 0xcu;
+            std::uint32_t u10 = (0u - u8 - 0x12c58u) ^ (u8 << 8);
+            std::uint32_t u12 = (0x197e1u - u8 - u10) ^ (u10 >> 13);
+            u8 = (u8 - u10 - u12) ^ (u12 >> 12);
+            u10 = (u10 - u12 - u8) ^ (u8 << 16);
+            u12 = (u12 - u8 - u10) ^ (u10 >> 5);
+            u8 = (u8 - u10 - u12) ^ (u12 >> 3);
+            u10 = (u10 - u12 - u8) ^ (u8 << 10);
+            v.nzSeed = (u12 - u8 - u10) ^ (u10 >> 15);
+        }
     }
 
     void harmonizer (Record& v, const Part& p, const double* A, float* T) noexcept

@@ -7383,7 +7383,7 @@ namespace
 // A Harmor state written from scratch (REA_rodada11 §4.1 layout, version 18): part A only — a decaying-harmonics
 // timbre, low-pass + resonance, filter envelope, 3-voice unison, vibrato, pluck, tremolo, volume envelope with a
 // velocity map — and the global block. Every other curve is neutral.
-std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
+std::vector<std::uint8_t> harmorTestState (bool panLfo = true, bool image = false)
 {
     std::vector<std::uint8_t> b;
     auto i32 = [&] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
@@ -7417,6 +7417,10 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
         { 64, 8192 }, { 66, 500 }, { 72, 600 }, { 74, 1000 }, { 75, 600 }, { 78, 5000 }, { 79, 500 }, { 80, 3000 } };
     for (const auto& [i, v] : values)
         p[(std::size_t) i] = v;
+    if (image) // image synthesis (REA_rodada75): speed, cubic gain / linear freq interpolation, Hz freq mode, formant
+        for (const auto& [i, v] : std::initializer_list<std::pair<int, int>> { { 82, 200 }, { 83, 100000 }, { 84, 10000 }, { 85, 20000 },
+                 { 86, 750 }, { 87, 4 }, { 88, 600 }, { 89, 900 }, { 90, 1 }, { 91, 3 }, { 92, 1500 }, { 93, -300 }, { 94, 800 } })
+            p[(std::size_t) i] = v;
     for (auto v : p)
         i32 (v);
     for (int i = 0; i < 12; ++i)
@@ -7464,7 +7468,35 @@ std::vector<std::uint8_t> harmorTestState (bool panLfo = true)
         else if (c == 14)
             curve ({ { 0, 1, 0, 0 }, { 1, 0, 0, 0 } }, off); // pluck curve
         else
-            flat (c == 0 || c == 17 ? 0.25 : (c == 5 ? 0.0 : (c == 6 || c == 10 || c == 11 || (c >= 18 && c <= 24) ? 1.0 : 0.5)));
+            flat (c == 0 || c == 17 ? 0.25 : (c == 5 ? 0.0 : (c == 6 || c == 10 || c == 11 || (c >= 18 && c <= 25) ? 1.0 : 0.5)));
+    if (image)
+    {
+        // the image object (FUN_00793300 layout): version 0, image mode, looping, 6 columns × 40 rows, gain + freq planes
+        const int cols = 6, rows = 40;
+        i32 (0), i32 (0), i32 (1), i32 (0);
+        f64 (-1.0), f64 (-1.0), f64 (0.0);
+        i32 (cols), i32 (rows);
+        i32 (cols * rows);
+        for (int c2 = 0; c2 < cols; ++c2)
+            for (int r2 = 0; r2 < rows; ++r2)
+            {
+                const auto v = (float) (255.0 * std::pow (0.93, r2) * (0.6 + 0.4 * std::cos (0.9 * c2 + 0.37 * r2)));
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                i32 ((std::int32_t) u);
+            }
+        i32 (cols * rows);
+        for (int c2 = 0; c2 < cols; ++c2)
+            for (int r2 = 0; r2 < rows; ++r2)
+            {
+                const auto v = (float) (0.3 * std::sin (1.3 * c2 + 0.5 * r2));
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                i32 ((std::int32_t) u);
+            }
+        i32 (0);
+        b.push_back (0); // (file name: empty)
+    }
     std::swap (b, part);
     i32 ((std::int32_t) part.size());
     b.insert (b.end(), part.begin(), part.end());
@@ -10480,6 +10512,48 @@ TEST (sytrus_instrument)
     inst->render (tail.data(), tailR.data(), (int) tail.size(), 0.5f, 0.5f);
     CHECK (inst->idle());
     CHECK (tail.back() == 0.0f);
+}
+
+TEST (harmor_image)
+{
+    // REA_rodada75: image synthesis — a looping 6-column image (gain + frequency planes) read at a speed, cubic gain and
+    // linear frequency interpolation, Hz frequency mode, formant shift — against our reference model (r75 imgm.py)
+    const auto blob = harmorTestState (false, true);
+    if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR_IMAGE"))
+        std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
+    CHECK (lynx::harmorStateUsable (blob));
+    CHECK (lynx::harmorFallbacks (blob).size() == 1); // (only the harmonic-randomness note: the image is modelled)
+    const auto ref = lynx::harmor::renderReference (blob, { { 0, 60, 0.78125, 1.0, 0.0, 6144 }, { 2000, 64, 0.6, 1.0, 0.0, 7000 } }, 44100.0, 8192);
+    CHECK (ref.size() == 2 * 8192);
+    if (std::getenv ("LYNX_PRINT_HARMOR_IMAGE") != nullptr)
+        for (int i : { 100, 1000, 2500, 3000, 5000, 6500, 8191 })
+            std::printf ("harmor image %d %.8g %.8g\n", i, (double) ref[2 * (std::size_t) i], (double) ref[2 * (std::size_t) i + 1]);
+    const std::tuple<int, float, float> golden[] { { 0, 0.0f, 0.0f } };
+    for (const auto& [i, gl, gr] : golden)
+        CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
+    // the image changes the sound: without it (gain mix 0, frequency scale 0) the same notes render differently
+    auto plain = blob;
+    const std::int32_t zero = 0;
+    std::memcpy (plain.data() + lynx::harmorParamOffset (plain, 0, 89), &zero, 4);
+    std::memcpy (plain.data() + lynx::harmorParamOffset (plain, 0, 92), &zero, 4);
+    std::memcpy (plain.data() + lynx::harmorParamOffset (plain, 0, 94), &zero, 4);
+    const auto ref0 = lynx::harmor::renderReference (plain, { { 0, 60, 0.78125, 1.0, 0.0, 6144 }, { 2000, 64, 0.6, 1.0, 0.0, 7000 } }, 44100.0, 8192);
+    double diff = 0.0, energy = 0.0;
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        diff += (double) (ref[i] - ref0[i]) * (ref[i] - ref0[i]), energy += (double) ref[i] * ref[i];
+    CHECK (energy > 1.0 && diff > 0.01 * energy);
+    // a resynthesis-mode image (a sample analysed at load time) is not modelled: reported, the part plays its timbres
+    auto resyn = blob;
+    {
+        // the image object follows the 26 curves: find its header (version 0, mode 0, loop 1) from the end of part A
+        const std::uint8_t hdr[] = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0xbf };
+        const auto it = std::search (resyn.begin(), resyn.end(), std::begin (hdr), std::end (hdr));
+        CHECK (it != resyn.end());
+        if (it != resyn.end())
+            *(it + 4) = 1;
+    }
+    const auto fb = lynx::harmorFallbacks (resyn);
+    CHECK (std::any_of (fb.begin(), fb.end(), [] (const std::string& f) { return f.find ("resynthesis") != std::string::npos; }));
 }
 
 TEST (harmor_effects_rack)
