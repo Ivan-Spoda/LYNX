@@ -356,7 +356,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
 - **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
-- **Frequency Splitter:** exact Linkwitz-Riley structure for every slope (6–96 dB/oct).
+- **Frequency Splitter:** FL's own engine (`core/FrequencySplitter`, REA round 62) from the saved state, editable as
+  LYNX parameters: IIR crossovers for every slope (6–96 dB/oct, incl. the 18 dB/oct all-pass structure), the 3-band
+  phase compensation, gain smoothing, mutes/solos and the FFT linear-phase mode (3N/4 latency to PDC); mixer slots use
+  the summed output, Patcher buses the bands sent to them. IIR mode bit-identical to the DLL on all 25 IIR
+  installation states (summed output and every band send, 44.1/48 kHz, automation); FFT mode within −113…−155 dB on
+  its 6 states (the engine's single-precision IPP FFT is not replicated).
 - **Maximus and Soundgoodizer:** FL's exact Maximus engine as a mixer effect (`core/MaximusFx`, REA round 40) —
   RMS detector, saturation A/B, state versions 3–15, solo, legacy linear-phase FIR split, x87-precision smoothers;
   Soundgoodizer runs the older engine copy of its own DLL with the preset `a…d.dat` read from the user's installation

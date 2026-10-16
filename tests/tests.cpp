@@ -65,6 +65,7 @@
 #include "core/PitchShifterFl.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
+#include "core/FrequencySplitter.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
 #include "core/FlangusFastDist.h"
@@ -739,14 +740,14 @@ TEST (patcher_branch_heads_follow_rea)
     CHECK (low.valid && low.slot && low.note.empty());
     if (low.slot)
     {
-        // low band = just the Crossover low-pass, combo 3 (24 dB/oct)
-        CHECK (low.slot->kind == lynx::EffectKind::crossover && low.slot->params[0] == 0.0f && low.slot->params[3] == 1.0f);
-        CHECK (std::lround (low.slot->params[5] * 7.0f) == 3);
+        // the exact engine (REA_rodada62): the low band's send, 24 dB/oct
+        CHECK (low.slot->kind == lynx::EffectKind::frequencySplitter && low.slot->params[26] == 1.0f && low.slot->params[27] == 0.0f);
+        CHECK (low.slot->params[2] == 3.0f / 7.0f);
     }
     const auto mid = lynx::patcherBranchHead ("Frequency Splitter", split, 2);
-    CHECK (mid.valid && mid.gain == 0.0f); // with 2 bands the mid is silent
+    CHECK (mid.valid && mid.slot && mid.slot->params[27] == 1.0f && mid.slot->params[5] == 0.0f); // 2 bands: the engine's mid is silent
     const auto high = lynx::patcherBranchHead ("Frequency Splitter", split, 3);
-    CHECK (high.valid && std::abs (high.gain - std::pow (10.0f, -6.0f / 20.0f)) < 1e-4f);
+    CHECK (high.valid && high.slot && high.slot->params[28] == 1.0f && high.slot->params[10] == (float) (1200.0 / 3600.0));
     CHECK (! lynx::patcherBranchHead ("Frequency Splitter", split, 7).valid);
 
     // Stereo Shaper: the difference destination (4) is the exact engine with its difference output (REA_rodada54)
@@ -8614,6 +8615,103 @@ TEST (stereo_shaper_engine)
         CHECK (head.valid && head.slot && head.slot->kind == lynx::EffectKind::stereoShaper && head.slot->params[7] == 1.0f);
     }
     CHECK (! lynx::stereofx::parseStereoShaper ({ 1, 2, 3 }));
+}
+
+TEST (frequency_splitter_engine)
+{
+    // Frequency Splitter (REA_rodada62): our own states through Frequency Splitter_x64.dll from its creation (gains
+    // ramping up from 0, FFT response faded in), blocks of 512 at 44.1 kHz; every band sent to its own destination
+    // (1 low, 2 mid, 3 high). IIR modes are bit-exact; the FFT mode's residual is the plugin's single-precision FFT.
+    using Gold = std::vector<std::tuple<int, float, float>>;
+    struct Case
+    {
+        std::vector<int> words;
+        int mute, latency;
+        std::array<Gold, 4> gold; // low, mid, high sends, summed output
+    };
+    const std::vector<Case> cases {
+        { { 19800, 48065, 3, 3, 0, 1, 2, 45820, 0, 0, 0, 300, -600, 0, 1, 2, 3 }, 0, 0, { Gold { { 100, 0.0090178391f, 0.0807745308f }, { 1000, 0.0443177596f, 0.000449771265f }, { 2047, -0.0277729966f, -0.00895843748f }, { 3000, 0.0306171384f, -0.00373467989f }, { 4095, 0.00322337216f, 0.00886098202f } }, Gold { { 100, 0.121696919f, -0.131051332f }, { 1000, 1.03903234f, 0.0533506982f }, { 2047, -0.651134431f, -1.06304717f }, { 3000, 0.717791438f, -0.443113774f }, { 4095, 0.0754866973f, 1.05140531f } }, Gold { { 100, 1.72075161e-05f, -0.00040520617f }, { 1000, 0.000452454377f, 0.000117809883f }, { 2047, -0.000283558591f, -0.00234806887f }, { 3000, 0.000312690681f, -0.00097864517f }, { 4095, 3.28165661e-05f, 0.00232247845f } }, Gold { { 100, 0.100601904f, 0.0864751786f }, { 1000, 0.788743436f, 0.0366551876f }, { 2047, -0.494284719f, -0.730370402f }, { 3000, 0.544887185f, -0.304443926f }, { 4095, 0.0573106967f, 0.722373366f } } } }, // A
+        { { 30000, 48065, 2, 3, 0, 0, 2, 45820, -900, 0, 0, 0, 0, 900, 1, 2, 3 }, 8, 0, { Gold { { 100, -0.06870462f, 0.0430903696f }, { 1000, -0.581374586f, -0.0143744675f }, { 2047, 0.450544685f, 0.249298006f }, { 3000, -0.47477895f, 0.101792879f }, { 4095, -0.220592439f, -0.244846866f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.0f, 0.0f }, { 2047, 0.0f, 0.0f }, { 3000, 0.0f, 0.0f }, { 4095, 0.0f, 0.0f } }, Gold { { 100, -0.0655785128f, 0.674460888f }, { 1000, -0.335665613f, -1.06249368f }, { 2047, 0.535273552f, 0.467255145f }, { 3000, -0.507586002f, -0.989780664f }, { 4095, -0.696575642f, 0.500667155f } }, Gold { { 100, -0.293243587f, 3.01594687f }, { 1000, -1.50097573f, -4.7510891f }, { 2047, 2.39354587f, 2.08939266f }, { 3000, -2.26973724f, -4.42593384f }, { 4095, -3.11482906f, 2.23879886f } } } }, // B
+        { { 40000, 10000, 0, 7, 0, 1, 2, 45820, 0, 200, 0, 0, 0, 0, 1, 2, 3 }, 0, 0, { Gold { { 100, 0.0171653964f, 0.0719543025f }, { 1000, 0.260783046f, -0.0546497703f }, { 2047, -0.236395031f, -0.087237671f }, { 3000, 0.242068797f, -0.103661537f }, { 4095, 0.169910118f, 0.140984371f } }, Gold { { 100, 0.00201279344f, -1.5109539f }, { 1000, 0.290754616f, 1.94614983f }, { 2047, -1.13570976f, -1.65917897f }, { 3000, 1.00995052f, 1.43215704f }, { 4095, 1.99373484f, -0.085176453f } }, Gold { { 100, -0.000444336678f, -0.000979390694f }, { 1000, -5.45688827e-08f, 7.50747904e-06f }, { 2047, 3.00044505e-08f, -6.34059734e-06f }, { 3000, 6.5076847e-08f, 5.3382596e-06f }, { 4095, -2.39666864e-08f, -2.14470973e-07f } }, Gold { { 100, 0.0178572834f, -0.781959713f }, { 1000, 0.424914241f, 1.04396117f }, { 2047, -0.877504408f, -1.02385247f }, { 3000, 0.812187135f, 0.704798162f }, { 4095, 1.2953757f, 0.0929019526f } } } }, // C
+        { { 15000, 45000, 1, 4, 0, 1, 2, 45820, 0, 0, 0, -1800, 0, 1800, 1, 2, 3 }, 2, 0, { Gold { { 100, -0.00273601874f, 0.0286290813f }, { 1000, 0.0418281667f, 0.0362898856f }, { 2047, -0.0745894462f, 0.00119503727f }, { 3000, 0.069945626f, 0.0419373475f }, { 4095, 0.103130348f, -0.0348644778f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.0f, 0.0f }, { 2047, 0.0f, 0.0f }, { 3000, 0.0f, 0.0f }, { 4095, 0.0f, 0.0f } }, Gold { { 100, 1.42701356e-05f, -0.000351782364f }, { 1000, 2.80272197e-05f, 0.000625129556f }, { 2047, -4.9891918e-05f, 2.06105178e-05f }, { 3000, 4.68442995e-05f, 0.000722356897f }, { 4095, 6.91349633e-05f, -0.000600588392f } }, Gold { { 100, 0.0475500524f, -0.553698778f }, { 1000, 0.508395135f, 0.997257531f }, { 2047, -0.906660676f, 0.0328744054f }, { 3000, 0.850252867f, 1.15249836f }, { 4095, 1.25358307f, -0.958129764f } } } }, // D
+        { { 22000, 50000, 6, 5, 0, 1, 2, 45820, 0, 0, 0, 0, 0, 0, 1, 2, 3 }, 0, 0, { Gold { { 100, 3.86351439e-06f, 0.000115638592f }, { 1000, -0.00223262212f, -4.85793389e-05f }, { 2047, 0.000411115587f, -2.57531383e-06f }, { 3000, -0.000485932804f, 7.87844056e-06f }, { 4095, 0.000189639119f, -4.06740628e-06f } }, Gold { { 100, -0.00987921655f, -0.683375061f }, { 1000, -0.876032948f, 1.17169452f }, { 2047, 0.424173862f, -0.340972483f }, { 3000, -0.499300569f, 1.1738565f }, { 4095, 0.195038065f, -0.732422411f } }, Gold { { 100, -2.29351427e-09f, -9.91509751e-07f }, { 1000, 2.00191561e-08f, 1.13525857e-06f }, { 2047, 2.50544758e-07f, -4.20314734e-07f }, { 3000, 1.65429199e-07f, 1.16024421e-06f }, { 4095, -7.31824983e-08f, -5.04818445e-07f } }, Gold { { 100, -0.00987535529f, -0.683260441f }, { 1000, -0.87826556f, 1.17164707f }, { 2047, 0.424585223f, -0.340975463f }, { 3000, -0.499786317f, 1.17386556f }, { 4095, 0.195227623f, -0.732426941f } } } }, // E
+        { { 25000, 48065, 3, 3, 1, 0, 1, 30000, 0, 0, 0, 0, 0, 0, 1, 2, 3 }, 0, 768, { Gold { { 100, 0.0f, 0.0f }, { 1000, 0.119619228f, 0.00655745994f }, { 2047, -0.258448333f, 0.0300254505f }, { 3000, 0.257131875f, 0.0218825918f }, { 4095, 0.243620604f, -0.0373107828f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.0f, 0.0f }, { 2047, 0.0f, 0.0f }, { 3000, 0.0f, 0.0f }, { 4095, 0.0f, 0.0f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.679369271f, 0.20265615f }, { 2047, -1.23796761f, 0.901739538f }, { 3000, 1.23174798f, 0.658331215f }, { 4095, 1.16627932f, -1.12146437f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.798988521f, 0.209213614f }, { 2047, -1.49641597f, 0.93176496f }, { 3000, 1.48887992f, 0.680213809f }, { 4095, 1.40989995f, -1.15877521f } } } }, // F
+        { { 20000, 45000, 2, 6, 1, 1, 1, 10000, 0, 0, 0, 0, 0, 0, 1, 2, 3 }, 0, 768, { Gold { { 100, 0.0f, 0.0f }, { 1000, 0.0390846208f, 0.00320863165f }, { 2047, -0.0802573487f, 0.0139643671f }, { 3000, 0.0798483118f, 0.0101885898f }, { 4095, 0.0756546259f, -0.0173618793f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.75990212f, 0.206010818f }, { 2047, -1.41615629f, 0.91779983f }, { 3000, 1.40902948f, 0.670024157f }, { 4095, 1.33424342f, -1.14141202f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 1.7614849e-06f, -5.86210172e-06f }, { 2047, -2.34208687e-06f, 7.51287303e-07f }, { 3000, 2.19281083e-06f, 1.06230493e-06f }, { 4095, 1.8608597e-06f, -1.35364621e-06f } }, Gold { { 100, 0.0f, 0.0f }, { 1000, 0.798988521f, 0.2092136f }, { 2047, -1.49641597f, 0.93176496f }, { 3000, 1.48887992f, 0.680213809f }, { 4095, 1.40989995f, -1.15877521f } } } }, // G
+    };
+    auto [l, r] = stereoFxInput();
+    for (const auto& c : cases)
+    {
+        auto words = c.words;
+        words.insert (words.begin(), 4);
+        for (const int w : { 0, 0, 0, c.mute })
+            words.push_back (w);
+        std::vector<std::uint8_t> st;
+        for (const auto w : words)
+            for (int b = 0; b < 4; ++b)
+                st.push_back ((std::uint8_t) ((std::uint32_t) w >> (8 * b)));
+        st.push_back (0);
+        st.resize (st.size() + 24, 0);
+        const auto s = lynx::fsplit::parseState (st);
+        CHECK (s.has_value());
+        if (! s)
+            continue;
+        lynx::fsplit::Engine e;
+        for (int i = 0; i < lynx::fsplit::engineParams; ++i)
+            e.setParameter (i, s->params[(std::size_t) i]);
+        e.prepare (44100.0);
+        e.reset (false);
+        std::array<std::vector<float>, 8> o;
+        for (auto& v : o)
+            v.assign (4096, 0.0f);
+        for (int b = 0; b < 4096; b += 512)
+        {
+            float* out[8];
+            for (int k = 0; k < 8; ++k)
+                out[k] = o[(std::size_t) k].data() + b;
+            e.process (l.data() + b, r.data() + b, out, 512);
+        }
+        CHECK (e.latencySamples() == c.latency);
+        const auto tol = c.latency > 0 ? 2e-5f : 2e-6f;
+        for (int k = 0; k < 4; ++k)
+            for (const auto& [i, gl, gr] : c.gold[(std::size_t) k])
+                CHECK (std::abs (o[(std::size_t) (2 * k)][(std::size_t) i] - gl) <= tol * std::max (1.0f, std::abs (gl))
+                       && std::abs (o[(std::size_t) (2 * k + 1)][(std::size_t) i] - gr) <= tol * std::max (1.0f, std::abs (gr)));
+
+        // the mixer effect: the summed output (FL's main output) of an instance that has been running, and a
+        // Patcher bus = the bands sent to it
+        auto slot = lynx::effectFromFl ("Frequency Splitter", st);
+        CHECK (slot && slot->kind == lynx::EffectKind::frequencySplitter);
+        const auto head = lynx::patcherBranchHead ("Frequency Splitter", st, 3);
+        CHECK (head.valid && head.slot && head.slot->params[lynx::fsplit::outputHigh] == 1.0f
+               && head.slot->params[lynx::fsplit::outputLow] == 0.0f);
+        if (slot && head.slot)
+        {
+            lynx::fsplit::Engine settled;
+            for (int i = 0; i < lynx::fsplit::engineParams; ++i)
+                settled.setParameter (i, s->params[(std::size_t) i]);
+            settled.prepare (44100.0);
+            settled.reset (true);
+            std::vector<float> sl (4096), sr (4096), hl (4096), hr (4096);
+            float* out[8] { nullptr, nullptr, nullptr, nullptr, hl.data(), hr.data(), sl.data(), sr.data() };
+            settled.process (l.data(), r.data(), out, 4096);
+            const lynx::EffectSlot* both[2] { &*slot, &*head.slot };
+            for (const auto* p : both)
+            {
+                auto fx = lynx::makeEffect (*p);
+                fx->prepare (44100.0);
+                auto ml = l, mr = r;
+                for (int b = 0; b < 4096; b += 300)
+                    fx->process (ml.data() + b, mr.data() + b, std::min (300, 4096 - b), p->params, 120.0);
+                const auto& wl = p == &*slot ? sl : hl;
+                const auto& wr = p == &*slot ? sr : hr;
+                CHECK (ml == wl && mr == wr);
+                CHECK (fx->latencySamples() == c.latency);
+            }
+        }
+    }
+    CHECK (! lynx::patcherBranchHead ("Frequency Splitter", std::vector<std::uint8_t> (0x58, 0), 2).valid); // no band sent to bus 2
+    CHECK (lynx::fsplit::paramText (2, 3.0f / 7.0f) == "24 dB/oct" && lynx::fsplit::paramText (11, 0.5f) == "0.0 dB");
+    CHECK (lynx::fsplit::paramText (0, 0.0f) == "30.0 Hz" && lynx::fsplit::paramText (4, 1.0f) == "FFT");
 }
 
 TEST (stereo_enhancer_transient_spreader_engines)
