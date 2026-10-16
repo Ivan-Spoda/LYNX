@@ -4,7 +4,7 @@
 
 // LYNX's own vector icons, drawn with juce::Path on a 24x24 grid. Original designs, one family:
 // - live area 3..21 (a 3-unit margin), coordinates on half units so 24 px and 16 px stay crisp;
-// - line icons share one stroke (1.75 units at 24 px, never thinner than 1.2 px), round caps and joins;
+// - line icons share one fine stroke (strokeWidth(): about 1.25-1.5 px at toolbar sizes), round caps and joins;
 // - transport symbols and small accents (a lit step, a note, a dot) are solid fills.
 namespace lynx
 {
@@ -38,6 +38,9 @@ struct Shape
 };
 
 const Shape& get (Icon icon);
+
+// The line width of the icons drawn `size` pixels square.
+float strokeWidth (float size);
 
 // Draws `icon` fitted (centred, square) into `area`.
 void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colour colour);

@@ -327,6 +327,30 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
                      &pluginPickerButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton })
         b->setFlat (true);
 
+    // a light header: every toolbar button is flat; "on" is a faint wash, in the accent for the states that
+    // matter while working (playing, recording, metronome, recording options)
+    {
+        using namespace theme;
+        const auto onWash = colour::accent.withAlpha (0.16f), onIcon = colour::accentHover;
+        for (auto* b : { &playButton, &stopButton, &recordButton, &patternModeButton, &songModeButton })
+            b->setFlat (true);
+        playButton.setOnColour (onWash);
+        playButton.setIconColourWhenOn (onIcon);
+        recordButton.setOnColour (colour::record.withAlpha (0.2f));
+        recordButton.setIconColourWhenOn (colour::record);
+        for (auto* b : { &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton, &patternModeButton, &songModeButton })
+        {
+            b->setOnColour (onWash);
+            b->setIconColourWhenOn (onIcon);
+        }
+        for (auto& b : panelButtons)
+        {
+            b.setOnColour (colour::textPrimary.withAlpha (0.08f));
+            b.setIconColourWhenOn (colour::textPrimary);
+        }
+    }
+    quickTips = std::make_unique<ui::QuickTipWindow>();
+
     ui::installSliderContract();
     addAndMakeVisible (gridBox); // global grid (editors)
     engine.addChangeListener (this);
@@ -380,8 +404,18 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (colour::border);
     g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 1));
 
+    g.setColour (colour::border.brighter (0.08f));
     for (auto x : dividers)
-        g.fillRect (x, bar.getY() + 8, 1, bar.getHeight() - 16);
+        g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
+
+    // play, stop and record share one quiet well
+    if (! transportArea.isEmpty())
+    {
+        g.setColour (colour::bg2);
+        g.fillRoundedRectangle (transportArea.toFloat(), radius::lg);
+        g.setColour (colour::border);
+        g.drawRoundedRectangle (transportArea.toFloat().reduced (0.5f), radius::lg, 1.0f);
+    }
 
     // the hint bar sits in an inset well under the menu
     if (! hintBar.getBounds().isEmpty())
@@ -413,10 +447,10 @@ void MainComponent::resized()
     using toolbarlayout::Group;
     dividers.clear();
     const auto bar = juce::Rectangle<int> (0, 0, getWidth(), toolbarHeight);
-    auto toolbar = bar.reduced (8, 4);
+    auto toolbar = bar.reduced (8, 3);
     const auto row1 = toolbar.getY(), row2 = toolbar.getY() + rowHeight + 2, h = rowHeight;
-    const auto big = toolbar.getHeight() - 8;                 // transport buttons: both rows
-    const auto bigWidth = h > 32 ? 46 : 42;
+    const auto big = h + 6;                                   // transport buttons: one slim row, centred on both
+    const auto bigWidth = h + 4;
     constexpr int gap = 17;                                   // a divider and the space around it
     const auto grow = h - toolbarlayout::rowHeight (toolbarlayout::IconSize::medium); // wider panels for bigger rows
 
@@ -489,7 +523,7 @@ void MainComponent::resized()
         put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
     }
 
-    snapLabelArea = patternLabelArea = {};
+    snapLabelArea = patternLabelArea = transportArea = {};
 
     for (const auto& entry : toolbarLayout.entries)
     {
@@ -537,15 +571,16 @@ void MainComponent::resized()
                 panel.removeFromLeft (8);
                 const auto y = panel.getCentreY() - big / 2;
 
+                transportArea = juce::Rectangle<int> (panel.getX(), y, 3 * bigWidth + 2 * 4, big);
                 for (auto* b : { &playButton, &stopButton, &recordButton })
                 {
-                    put (*b, juce::Rectangle<int> (panel.getX(), y, bigWidth, big));
+                    put (*b, juce::Rectangle<int> (panel.getX(), y, bigWidth, big).reduced (0, 3));
                     panel.removeFromLeft (bigWidth + 4);
                 }
 
                 panel.removeFromLeft (4);
-                const auto displays = panel.withY (y).withHeight (big);
-                const auto displayHeight = big - 12;
+                const auto displays = juce::Rectangle<int> (panel.getX(), row1 + 3, panel.getWidth(), 2 * h - 6);
+                const auto displayHeight = displays.getHeight() - 10;
                 put (tempoDisplay, displays.withWidth (tempoWidth).withHeight (displayHeight));
                 put (timeDisplay, displays.withTrimmedLeft (tempoWidth + 6).withWidth (timeWidth).withHeight (displayHeight));
                 put (songPosition, displays.withTop (displays.getY() + displayHeight + 1).withWidth (tempoWidth + 6 + timeWidth));
@@ -596,7 +631,7 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
     toolbarLayout = layout;
     const auto size = toolbarLayout.iconSize;
     rowHeight = toolbarlayout::rowHeight (size);
-    toolbarHeight = 2 * rowHeight + 10;
+    toolbarHeight = 2 * rowHeight + 8;
 
     const auto fraction = toolbarlayout::iconFraction (size), maxPx = toolbarlayout::iconMaxPx (size);
     for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton,
@@ -604,8 +639,8 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
         b->setIconSizing (fraction, maxPx);
     for (auto& b : panelButtons)
         b.setIconSizing (fraction, maxPx);
-    for (auto* b : { &playButton, &stopButton, &recordButton }) // tall buttons: the icon follows the row height
-        b->setIconSizing (1.0f, maxPx);
+    for (auto* b : { &playButton, &stopButton, &recordButton }) // solid transport glyphs, a little smaller than the line icons
+        b->setIconSizing (0.5f, maxPx - 2.0f);
 
     ToolStrip::iconSize = size;
     pianoRoll.resized();
@@ -1597,7 +1632,7 @@ void MainComponent::TempoDisplay::paint (juce::Graphics& g)
 {
     using namespace theme;
     const auto area = getLocalBounds().toFloat();
-    g.setColour (colour::bg0);
+    g.setColour (colour::bg1);
     g.fillRoundedRectangle (area, radius::md);
 
     if (dragging)
@@ -1610,12 +1645,12 @@ void MainComponent::TempoDisplay::paint (juce::Graphics& g)
     const auto whole = juce::String ((int) std::floor (bpm + 1e-9));
     const auto fraction = juce::String (bpm - std::floor (bpm + 1e-9), 3).fromFirstOccurrenceOf (".", false, false).paddedRight ('0', 3).substring (0, 3);
 
-    const juce::Font big (monoFont (22.0f)), small (monoFont (13.0f)), caption (font (type::caption, true));
+    const juce::Font big (monoFont (18.0f)), small (monoFont (11.0f)), caption (font (type::caption - 1.0f));
     const auto wholeWidth = juce::GlyphArrangement::getStringWidth (big, whole);
     const auto fracWidth = juce::GlyphArrangement::getStringWidth (small, "." + fraction);
     const auto unitWidth = juce::GlyphArrangement::getStringWidth (caption, "BPM");
     auto x = area.getCentreX() - (wholeWidth + fracWidth + 6.0f + unitWidth) / 2.0f;
-    const auto baseline = area.getCentreY() + 6.0f;
+    const auto baseline = area.getCentreY() + 5.0f;
 
     g.setColour (colour::textPrimary);
     g.setFont (big);
@@ -1857,6 +1892,66 @@ void MainComponent::setControlHints()
         ui::setHint (panelButtons[(std::size_t) i],
                      with (panelName ((Panel) i) + ": " + tr (panelHelp[i]) + "  " + tr ("[LMB] show, focus or hide  [RMB] maximized"),
                            panelAction ((Panel) i)));
+
+    setQuickTips();
+}
+
+std::vector<std::pair<juce::Rectangle<int>, juce::String>> MainComponent::getQuickTipsForSnapshot()
+{
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> tips;
+    std::function<void (juce::Component&)> visit = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (! child->isVisible())
+                continue;
+            if (const auto tip = ui::quickTipOf (*child); tip.isNotEmpty() && ! child->getBounds().isEmpty())
+                tips.emplace_back (getLocalArea (child->getParentComponent(), child->getBounds()), tip);
+            visit (*child);
+        }
+    };
+    visit (*this);
+    return tips;
+}
+
+// the small name bubble of every toolbar control (the hint bar keeps the full description)
+void MainComponent::setQuickTips()
+{
+    auto tip = [this] (juce::Component& c, const juce::String& name, const char* actionId = nullptr) {
+        ui::setQuickTip (c, name, actionId != nullptr ? shortcutText (actionId).trim() : juce::String());
+    };
+
+    tip (newButton, tr ("New project"), "file.new");
+    tip (openButton, tr ("Open project"), "file.open");
+    tip (saveButton, tr ("Save project"), "file.save");
+    tip (exportButton, tr ("Export audio"), "file.export");
+    tip (undoButton, tr ("Undo"), "edit.undo");
+    tip (redoButton, tr ("Redo"), "edit.redo");
+    tip (pluginPickerButton, tr ("Plugin picker"), "panel.quickAdd");
+    tip (playButton, tr ("Play"), "transport.playStop");
+    tip (stopButton, tr ("Stop"));
+    tip (recordButton, tr ("Record"), "transport.record");
+    tip (recordMenuButton, tr ("Recording options"));
+    tip (patternModeButton, tr ("Pattern mode"), "transport.toggleMode");
+    tip (songModeButton, tr ("Song mode"), "transport.toggleMode");
+    tip (metronomeButton, tr ("Metronome"), "transport.metronome");
+    tip (countInButton, tr ("Count-in"), "record.countIn");
+    tip (waitInputButton, tr ("Wait for input"), "record.waitForInput");
+    tip (typingPianoButton, tr ("Typing keyboard to piano"), "view.typingPiano");
+    tip (tempoDisplay, tr ("Tempo (BPM)"));
+    tip (timeDisplay, tr ("Song time"));
+    tip (songPosition, tr ("Song position"));
+    tip (masterVolume, tr ("Master volume"));
+    tip (masterPitch, tr ("Master pitch"));
+    tip (gridBox, tr ("Snap"));
+    tip (patternBox, tr ("Pattern"));
+    tip (newPatternButton, tr ("New pattern"));
+    tip (patternMenuButton, tr ("Pattern options"));
+    tip (perfMeter, tr ("CPU, memory and polyphony"));
+    tip (output, tr ("Output monitor"));
+    tip (swingSlider, tr ("Swing"));
+
+    for (int i = 0; i < workspace::panelCount; ++i)
+        tip (panelButtons[(std::size_t) i], tr (panelName ((Panel) i)), panelAction ((Panel) i));
 }
 
 void MainComponent::timerCallback()

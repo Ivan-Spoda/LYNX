@@ -868,11 +868,15 @@ and out (`IconButton`). The LYNX logo is not drawn inside the window; it stays t
 - The menu with the hint bar under it always comes first. The spare width goes before the first of the meters or
   the output monitor (LYNX's single "spacer"). When the window is narrow, shown groups still drop by priority;
   the transport stays. No drag-and-drop edit mode or named presets (yet).
-- **Icon size** sets the toolbar row height (26 / **32** / 38 px) and the icon box (18 / **24** / 30 px; 24 px is
-  the icon grid at 1:1, the sharpest). The window and file shortcuts are now blocks of three per row. The same
-  setting sizes the editors' tool strips: 16 / **20** / 22 px icon boxes (up from 13 px) on buttons 2–6 px wider
-  than high. Icons are drawn on whole pixels so every button renders them equally sharp; other icon buttons
-  use 66% of their height (was 60%).
+- **Icon size** sets the toolbar row height (24 / **28** / 34 px) and the icon box (14 / **16** / 20 px). Since the
+  light-header round (docs/analise/UI_toolbar_study.md) icons use one fine line (`icons::strokeWidth`, about
+  1.25-1.5 px at these sizes), every toolbar button is flat (a faint wash on hover, a faint accent wash when on),
+  and play / stop / record are one slim row in a quiet well. The same setting sizes the editors' tool strips:
+  14 / **16** / 18 px icon boxes. The window and file shortcuts are blocks of three per row.
+- **Quick tips**: every icon button of the toolbar and of the panel title bars (and the toolbar's displays and
+  selectors) shows its name, and its shortcut if it has one, in a small dark bubble under it about 400 ms after
+  the mouse rests on it (`ui::setQuickTip`, `ui::QuickTipWindow` in `ui/HintBar.h`); moving to the next control
+  swaps the bubble at once. The hint bar keeps the full description and the mouse gestures.
 - **UI scale** scales the whole interface (`juce::Desktop` global scale factor) at once, without a restart.
 
 ### 5.2 Editor tools live in each editor's own toolbar
