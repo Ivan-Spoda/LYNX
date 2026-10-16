@@ -3,10 +3,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <complex>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <memory>
 
 #include "core/FlangusFastDist.h"
 #include "core/FruityDelay.h"
+#include "core/WavPack.h"
 
 // Distructor (REA_rodada71): see DistructorFx.h. The module keeps FL's own operation order and types (float32 where
 // the plugin computes in float, double where it does, the x87 routines in long double with the plugin's precision)
@@ -39,6 +44,81 @@ void putI32 (std::vector<std::uint8_t>& v, std::int32_t x)
 constexpr std::array<int, moduleParams> moduleDefaults { 0, 5000, 0, 10000, 0, 0, 500, 5000, 5000, 10000, 500, 5000, 5000, 10000, 2000, 0,
                                                           128, 10, 128, 128, 0, 100, 128, 500, 0, 1000, 0, 950, 2000, 5000, 2000, 5000,
                                                           8400, 0, 0, 0, 5000, 10000, 5000, 10000, 0, 0, 0, 108, 2880, 1500, 1995, 0, 0 };
+
+// the amp/cabinet module's impulse list (Module_x64's table: display name, file in the installation's
+// Plugins\\Fruity\\Effects\\Distructor\\module\\impulses folder, output level); entries without a file are headings
+struct ImpulseInfo
+{
+    const char* name;
+    const char* file;
+    float level;
+};
+constexpr ImpulseInfo impulseTable[59] = {
+    { "-Cabinets Stereo", nullptr, 0.0f },
+    { "Blues", "IMP Cabinet Stereo Blues.wv", 0.0260000005f },
+    { "Guitaro", "IMP Cabinet Stereo Guitaro.wv", 0.100000001f },
+    { "Metal", "IMP Cabinet Stereo Metal.wv", 0.0799999982f },
+    { "Muffled", "IMP Cabinet Stereo Muffled.wv", 0.0580000021f },
+    { "Wide", "IMP Cabinet Stereo Wide.wv", 0.0860000029f },
+    { "Combo 01", "IMP Cabinet Stereo Combo 01.wv", 0.150000006f },
+    { "Combo 02", "IMP Cabinet Stereo Combo 02.wv", 0.136000007f },
+    { "Combo 03", "IMP Cabinet Stereo Combo 03.wv", 0.128000006f },
+    { "Combo 04", "IMP Cabinet Stereo Combo 04.wv", 0.100000001f },
+    { "Combo 05", "IMP Cabinet Stereo Combo 05.wv", 0.159999996f },
+    { "Combo 06", "IMP Cabinet Stereo Combo 06.wv", 0.128000006f },
+    { "Combo 07", "IMP Cabinet Stereo Combo 07.wv", 0.120000005f },
+    { "Combo 08", "IMP Cabinet Stereo Combo 08.wv", 0.100000001f },
+    { "Combo 09", "IMP Cabinet Stereo Combo 09.wv", 0.129999995f },
+    { "Combo 10", "IMP Cabinet Stereo Combo 10.wv", 0.120000005f },
+    { "Combo 11", "IMP Cabinet Stereo Combo 11.wv", 0.100000001f },
+    { "Combo 12", "IMP Cabinet Stereo Combo 12.wv", 0.120000005f },
+    { "Combo 13", "IMP Cabinet Stereo Combo 13.wv", 0.101999998f },
+    { "Combo 14", "IMP Cabinet Stereo Combo 14.wv", 0.100000001f },
+    { "-Cabinets Mono", nullptr, 0.0f },
+    { "Closest", "IMP Cabinet Mono Closest.wv", 0.158000007f },
+    { "Closer", "IMP Cabinet Mono Closer.wv", 0.129999995f },
+    { "Close", "IMP Cabinet Mono Close.wv", 0.129999995f },
+    { "Medium", "IMP Cabinet Mono Medium.wv", 0.109999999f },
+    { "Far", "IMP Cabinet Mono Far.wv", 0.0960000008f },
+    { "Farther", "IMP Cabinet Mono Farther.wv", 0.0879999995f },
+    { "-Hardcore Stereo", nullptr, 0.0f },
+    { "Model AB", "IMP Cabinet Model AB.wv", 0.0260000005f },
+    { "Model CD", "IMP Cabinet Model CD.wv", 0.129999995f },
+    { "Model EF", "IMP Cabinet Model EF.wv", 0.120000005f },
+    { "Model GH", "IMP Cabinet Model GH.wv", 0.200000003f },
+    { "Model IJ", "IMP Cabinet Model IJ.wv", 0.0700000003f },
+    { "Model KL", "IMP Cabinet Model KL.wv", 0.172000006f },
+    { "Model MN", "IMP Cabinet Model MN.wv", 0.0680000037f },
+    { "Model OP", "IMP Cabinet Model OP.wv", 0.0250000004f },
+    { "Model QR", "IMP Cabinet Model QR.wv", 0.0560000017f },
+    { "Model ST", "IMP Cabinet Model ST.wv", 0.0240000002f },
+    { "-Hardcore Mono", nullptr, 0.0f },
+    { "Model A", "IMP Cabinet Model A.wv", 0.104000002f },
+    { "Model B", "IMP Cabinet Model B.wv", 0.120000005f },
+    { "Model C", "IMP Cabinet Model C.wv", 0.101999998f },
+    { "Model D", "IMP Cabinet Model D.wv", 0.137999997f },
+    { "Model E", "IMP Cabinet Model E.wv", 0.120000005f },
+    { "Model F", "IMP Cabinet Model F.wv", 0.0799999982f },
+    { "Model G", "IMP Cabinet Model G.wv", 0.120000005f },
+    { "Model H", "IMP Cabinet Model H.wv", 0.136000007f },
+    { "Model I", "IMP Cabinet Model I.wv", 0.108000003f },
+    { "Model J", "IMP Cabinet Model J.wv", 0.148000002f },
+    { "Model K", "IMP Cabinet Model K.wv", 0.124000005f },
+    { "Model L", "IMP Cabinet Model L.wv", 0.140000001f },
+    { "Model M", "IMP Cabinet Model M.wv", 0.0799999982f },
+    { "Model N", "IMP Cabinet Model N.wv", 0.109999999f },
+    { "Model O", "IMP Cabinet Model O.wv", 0.0560000017f },
+    { "Model P", "IMP Cabinet Model P.wv", 0.0520000011f },
+    { "Model Q", "IMP Cabinet Model Q.wv", 0.0759999976f },
+    { "Model R", "IMP Cabinet Model R.wv", 0.064000003f },
+    { "Model S", "IMP Cabinet Model S.wv", 0.0920000002f },
+    { "Model T", "IMP Cabinet Model T.wv", 0.064000003f },
+};
+std::string& impulseFolder()
+{
+    static std::string f;
+    return f;
+}
 
 // Delphi's Sign of a double (−0 counts as 0)
 double sgn (double x) noexcept { return (x == 0.0) ? 0.0 : (std::signbit (x) ? -1.0 : 1.0); }
@@ -286,7 +366,8 @@ struct Mt19937
 {
     std::uint32_t mt[624] {};
     int idx = 624;
-    explicit Mt19937 (std::uint32_t seed = 19650218u)
+    Mt19937() : Mt19937 (19650218u) {}
+    explicit Mt19937 (std::uint32_t seed)
     {
         mt[0] = seed;
         for (int i = 1; i < 624; ++i)
@@ -1375,6 +1456,435 @@ struct Filter
     }
 };
 
+// ------------------------------------------------------------------------------------------------ amp / cabinet
+// The amp/cabinet module (FUN_00734260): input stereo-separation matrix → stereo convolution with the chosen
+// impulse response → output matrix (gain = 44100/rate) → the impulse's level. FL convolves with IPP's float FFT
+// (a direct 128-tap head and partitioned tails); LYNX uses the same structure in double precision, so the result
+// matches FL to float rounding (not bit for bit). The FFT and the zero-latency partitioned convolver below are the
+// ones LYNX wrote for Fruity Convolver (core/ConvolverFx.cpp).
+using cd = std::complex<double>;
+constexpr double pi = 3.14159265358979323846;
+// ---------------------------------------------------------------------------------------------- radix-2 FFT
+class Fft
+{
+public:
+    explicit Fft (int size) : n (size), tw ((std::size_t) size / 2), rev ((std::size_t) size)
+    {
+        for (int k = 0; k < n / 2; ++k)
+        {
+            const double a = -2.0 * pi * (double) k / (double) n;
+            tw[(std::size_t) k] = cd (std::cos (a), std::sin (a));
+        }
+        int bits = 0;
+        while ((1 << bits) < n)
+            ++bits;
+        for (int i = 0; i < n; ++i)
+        {
+            int r = 0;
+            for (int b = 0; b < bits; ++b)
+                r |= ((i >> b) & 1) << (bits - 1 - b);
+            rev[(std::size_t) i] = r;
+        }
+    }
+    int size() const noexcept { return n; }
+    // in place; the inverse is unscaled
+    void run (cd* a, bool inverse) const noexcept
+    {
+        for (int i = 0; i < n; ++i)
+            if (i < rev[(std::size_t) i])
+                std::swap (a[i], a[rev[(std::size_t) i]]);
+        for (int len = 2; len <= n; len <<= 1)
+        {
+            const int half = len / 2, step = n / len;
+            for (int i = 0; i < n; i += len)
+                for (int j = 0; j < half; ++j)
+                {
+                    cd w = tw[(std::size_t) (j * step)];
+                    if (inverse)
+                        w = std::conj (w);
+                    const cd u = a[i + j], v = a[i + j + half] * w;
+                    a[i + j] = u + v;
+                    a[i + j + half] = u - v;
+                }
+        }
+    }
+
+private:
+    int n;
+    std::vector<cd> tw;
+    std::vector<int> rev;
+};
+
+int pow2AtLeast (std::size_t v) noexcept
+{
+    int p = 1;
+    while ((std::size_t) p < v)
+        p <<= 1;
+    return p;
+}
+
+// ------------------------------------------------------------------------------- partitioned convolution
+// Zero-latency stereo convolution: a direct head, then uniformly partitioned overlap-save levels whose partitions
+// never start before their own size (so each level's output is ready when its block begins).
+class CabConvolver
+{
+public:
+    void setKernel (const std::vector<float>& kl, const std::vector<float>& kr)
+    {
+        const std::size_t len = std::max (kl.size(), kr.size());
+        headL.assign ((std::size_t) head, 0.0f);
+        headR.assign ((std::size_t) head, 0.0f);
+        for (std::size_t i = 0; i < std::min (len, (std::size_t) head); ++i)
+            headL[i] = i < kl.size() ? kl[i] : 0.0f, headR[i] = i < kr.size() ? kr[i] : 0.0f;
+        levels.clear();
+        static const int sizes[] = { 128, 1024, 8192, 16384 };
+        static const int starts[] = { 128, 1024, 8192, 65536 };
+        static const int ends[] = { 1024, 8192, 65536, 1 << 30 };
+        for (int k = 0; k < 4; ++k)
+        {
+            if ((std::size_t) starts[k] >= len)
+                break;
+            Level lv;
+            lv.N = sizes[k];
+            lv.j0 = starts[k] / sizes[k];
+            const std::size_t stop = std::min (len, (std::size_t) ends[k]);
+            lv.parts = (int) ((stop - (std::size_t) starts[k] + (std::size_t) lv.N - 1) / (std::size_t) lv.N);
+            lv.fft = std::make_shared<Fft> (2 * lv.N);
+            const int bins = lv.N + 1;
+            lv.hl.assign ((std::size_t) (lv.parts * bins), {});
+            lv.hr.assign ((std::size_t) (lv.parts * bins), {});
+            std::vector<cd> z ((std::size_t) (2 * lv.N));
+            for (int p = 0; p < lv.parts; ++p)
+            {
+                std::fill (z.begin(), z.end(), cd {});
+                for (int i = 0; i < lv.N; ++i)
+                {
+                    const std::size_t t = (std::size_t) starts[k] + (std::size_t) (p * lv.N + i);
+                    if (t < len)
+                        z[(std::size_t) i] = cd (t < kl.size() ? kl[t] : 0.0f, t < kr.size() ? kr[t] : 0.0f);
+                }
+                lv.fft->run (z.data(), false);
+                split (z, 2 * lv.N, lv.hl.data() + p * bins, lv.hr.data() + p * bins);
+            }
+            lv.ages = lv.j0 + lv.parts - 1;
+            lv.xl.assign ((std::size_t) (lv.ages * bins), {});
+            lv.xr.assign ((std::size_t) (lv.ages * bins), {});
+            lv.out.assign ((std::size_t) (2 * lv.N), 0.0f);
+            lv.work.assign ((std::size_t) (2 * lv.N), {});
+            lv.accL.assign ((std::size_t) bins, {});
+            lv.accR.assign ((std::size_t) bins, {});
+            levels.push_back (std::move (lv));
+        }
+        int maxN = 128;
+        for (const auto& lv : levels)
+            maxN = std::max (maxN, lv.N);
+        ring = pow2AtLeast ((std::size_t) (2 * maxN + head));
+        histL.assign ((std::size_t) ring, 0.0f);
+        histR.assign ((std::size_t) ring, 0.0f);
+        clear();
+    }
+
+    void clear() noexcept
+    {
+        std::fill (histL.begin(), histL.end(), 0.0f);
+        std::fill (histR.begin(), histR.end(), 0.0f);
+        for (auto& lv : levels)
+        {
+            std::fill (lv.xl.begin(), lv.xl.end(), cd {});
+            std::fill (lv.xr.begin(), lv.xr.end(), cd {});
+            std::fill (lv.out.begin(), lv.out.end(), 0.0f);
+            lv.newest = 0;
+        }
+        t = 0;
+    }
+
+    // in place, planar
+    void process (float* l, float* r, int n) noexcept
+    {
+        const int mask = ring - 1;
+        for (int s = 0; s < n; ++s)
+        {
+            if ((t & 127) == 0)
+                for (auto& lv : levels)
+                    if (t % lv.N == 0)
+                        step (lv);
+            const int w = (int) (t & mask);
+            histL[(std::size_t) w] = l[s];
+            histR[(std::size_t) w] = r[s];
+            double yl = 0.0, yr = 0.0;
+            for (int k = 0; k < head; ++k)
+            {
+                const auto q = (std::size_t) ((w - k) & mask);
+                yl += (double) headL[(std::size_t) k] * (double) histL[q];
+                yr += (double) headR[(std::size_t) k] * (double) histR[q];
+            }
+            for (auto& lv : levels)
+            {
+                const auto o = (std::size_t) (t % lv.N);
+                yl += (double) lv.out[o];
+                yr += (double) lv.out[(std::size_t) lv.N + o];
+            }
+            l[s] = (float) yl;
+            r[s] = (float) yr;
+            ++t;
+        }
+    }
+
+private:
+    struct Level
+    {
+        int N = 0, j0 = 1, parts = 0, ages = 0, newest = 0;
+        std::shared_ptr<Fft> fft;
+        std::vector<std::complex<float>> hl, hr, xl, xr; // spectra (N + 1 bins) of the partitions / of the inputs
+        std::vector<cd> work, accL, accR;
+        std::vector<float> out; // [0, N) left, [N, 2N) right: the level's output for the current block
+    };
+
+    // spectra of the two real signals packed in z = a + ib (bins 0…N of a 2N transform)
+    template <typename T>
+    static void split (const std::vector<cd>& z, int size, T* a, T* b) noexcept
+    {
+        for (int k = 0; k <= size / 2; ++k)
+        {
+            const cd zk = z[(std::size_t) k], zc = std::conj (z[(std::size_t) ((size - k) % size)]);
+            const cd x = (zk + zc) * 0.5, y = (zk - zc) * cd (0.0, -0.5);
+            a[k] = T (x);
+            b[k] = T (y);
+        }
+    }
+
+    void step (Level& lv) noexcept
+    {
+        const int N = lv.N, bins = N + 1, mask = ring - 1;
+        // spectrum of the last 2N inputs (times t−2N … t−1)
+        for (int i = 0; i < 2 * N; ++i)
+        {
+            const auto q = (std::size_t) ((t - 2 * N + i) & mask);
+            lv.work[(std::size_t) i] = cd (histL[q], histR[q]);
+        }
+        lv.fft->run (lv.work.data(), false);
+        lv.newest = (lv.newest + lv.ages - 1) % lv.ages;
+        split (lv.work, 2 * N, lv.xl.data() + lv.newest * bins, lv.xr.data() + lv.newest * bins);
+        std::fill (lv.accL.begin(), lv.accL.end(), cd {});
+        std::fill (lv.accR.begin(), lv.accR.end(), cd {});
+        for (int p = 0; p < lv.parts; ++p)
+        {
+            const int age = lv.j0 - 1 + p;
+            const int slot = (lv.newest + age) % lv.ages;
+            const auto* xl = lv.xl.data() + slot * bins;
+            const auto* xr = lv.xr.data() + slot * bins;
+            const auto* hl = lv.hl.data() + p * bins;
+            const auto* hr = lv.hr.data() + p * bins;
+            for (int k = 0; k < bins; ++k)
+            {
+                lv.accL[(std::size_t) k] += cd (xl[k]) * cd (hl[k]);
+                lv.accR[(std::size_t) k] += cd (xr[k]) * cd (hr[k]);
+            }
+        }
+        // Z = YL + i·YR over the full spectrum (Hermitian halves rebuilt)
+        for (int k = 0; k <= N; ++k)
+            lv.work[(std::size_t) k] = lv.accL[(std::size_t) k] + cd (0.0, 1.0) * lv.accR[(std::size_t) k];
+        for (int k = N + 1; k < 2 * N; ++k)
+            lv.work[(std::size_t) k] = std::conj (lv.accL[(std::size_t) (2 * N - k)]) + cd (0.0, 1.0) * std::conj (lv.accR[(std::size_t) (2 * N - k)]);
+        lv.fft->run (lv.work.data(), true);
+        const double inv = 1.0 / (double) (2 * N);
+        for (int i = 0; i < N; ++i)
+        {
+            lv.out[(std::size_t) i] = (float) (lv.work[(std::size_t) (N + i)].real() * inv);
+            lv.out[(std::size_t) (N + i)] = (float) (lv.work[(std::size_t) (N + i)].imag() * inv);
+        }
+    }
+
+    static constexpr int head = 128;
+    std::vector<float> headL, headR, histL, histR;
+    std::vector<Level> levels;
+    int ring = 256;
+    long long t = 0;
+};
+
+
+// FL's stereo gain matrix (outL = m0·L + m2·R, outR = m1·R + m3·L) for a gain and a separation at centre pan:
+// separation > 0 merges ((5^s − 1)/4), < 0 separates
+std::array<float, 4> gainMatrix (float gain, float sep) noexcept
+{
+    if (sep == 0.0f)
+        return { gain, gain, 0.0f, 0.0f };
+    if (gain == 0.0f)
+        return { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, 4> m {};
+    const long double a = (1.0L + 0.0L) * (long double) 0.7853981633974483;
+    const long double g = (long double) (gain * 1.41421354f);
+    m[0] = (float) (cosl (a) * g);
+    m[1] = (float) (sinl (a) * g);
+    float k = sep;
+    if (sep > 0.0f)
+        k = (float) (std::exp ((double) sep * std::log (5.0)) - 1.0) * 0.25f;
+    const float fa = std::min (0.0f + k, 1.0f), fb = std::min (0.0f + k, 1.0f);
+    m[2] = m[0] * fa * 0.5f;
+    m[0] = m[0] * (1.0f - fa * 0.5f);
+    m[3] = m[1] * fb * 0.5f;
+    m[1] = m[1] * (1.0f - fb * 0.5f);
+    return m;
+}
+
+struct Ramp
+{
+    float start = 0.0f, inc = 0.0f;
+};
+Ramp ramp (float& current, float target, int n, float maxStep) noexcept
+{
+    Ramp r;
+    r.start = current;
+    r.inc = target - r.start;
+    if (r.inc != 0.0f)
+    {
+        current = target;
+        r.inc = r.inc / (float) n;
+        if (std::abs (r.inc) > maxStep)
+        {
+            r.inc = std::copysign (maxStep, r.inc);
+            current = r.start + r.inc * (float) n;
+            if (std::fabs (current) < 5.96046448e-08f) // (an integer compare of the magnitudes' bits)
+            {
+                current = 0.0f;
+                r.inc = -r.start / (float) n;
+            }
+        }
+    }
+    return r;
+}
+
+// dst (=, or += when `add`) src × matrix, the matrix ramped per sample in pairs as the plugin's unrolled loop does
+void applyMatrix (const float* src, float* dst, int n, const std::array<float, 4>& m0, const std::array<Ramp, 4>& rp, bool add) noexcept
+{
+    const bool ramping = rp[0].inc != 0.0f || rp[1].inc != 0.0f || rp[2].inc != 0.0f || rp[3].inc != 0.0f;
+    auto put = [add] (float& d, float v) { d = add ? v + d : v; };
+    std::array<float, 4> m = m0;
+    if (! ramping)
+    {
+        if (m[2] == 0.0f && m[3] == 0.0f)
+        {
+            if (m[0] == 0.0f && m[1] == 0.0f)
+            {
+                if (! add)
+                    std::fill (dst, dst + 2 * n, 0.0f);
+                return;
+            }
+            for (int i = 0; i < n; ++i)
+            {
+                put (dst[2 * i], src[2 * i] * m[0]);
+                put (dst[2 * i + 1], src[2 * i + 1] * m[1]);
+            }
+            return;
+        }
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = src[2 * i], b = src[2 * i + 1];
+            put (dst[2 * i], a * m[0] + b * m[2]);
+            put (dst[2 * i + 1], b * m[1] + a * m[3]);
+        }
+        return;
+    }
+    int i = 0;
+    for (; i + 1 < n; i += 2)
+    {
+        std::array<float, 4> m1;
+        for (int k = 0; k < 4; ++k)
+            m1[(std::size_t) k] = m[(std::size_t) k] + rp[(std::size_t) k].inc;
+        float a = src[2 * i], b = src[2 * i + 1];
+        put (dst[2 * i], a * m[0] + b * m[2]);
+        put (dst[2 * i + 1], b * m[1] + a * m[3]);
+        a = src[2 * i + 2], b = src[2 * i + 3];
+        put (dst[2 * i + 2], a * m1[0] + b * m1[2]);
+        put (dst[2 * i + 3], b * m1[1] + a * m1[3]);
+        for (int k = 0; k < 4; ++k)
+            m[(std::size_t) k] = m1[(std::size_t) k] + rp[(std::size_t) k].inc;
+    }
+    if (i < n)
+    {
+        const float a = src[2 * i], b = src[2 * i + 1];
+        put (dst[2 * i], a * m[0] + b * m[2]);
+        put (dst[2 * i + 1], b * m[1] + a * m[3]);
+    }
+}
+
+struct Cab
+{
+    std::vector<float> irL, irR;
+    float level = 0.1f;
+    double fs = 44100.0, runFs = 44100.0; // the rate at state load (gains) and the running rate (ramp steps)
+    CabConvolver conv;
+    bool ready = false;
+    std::array<float, 4> mIn {}, mOut {}, mInNow {}, mOutNow {};
+    int len = 0, count = 0;
+    float dryNow = 0.0f;
+    std::vector<float> buf, pl, pr;
+
+    void setRate (double stateRate, double rate) noexcept { fs = stateRate, runFs = rate; }
+    void setImpulse (const std::vector<float>& l, const std::vector<float>& r, float lvl)
+    {
+        irL = l, irR = r.empty() ? l : r;
+        level = lvl > 0.0f ? lvl : 0.1f;
+        len = (int) std::max (irL.size(), irR.size());
+        count = len;
+        conv.setKernel (irL, irR);
+        ready = len > 0;
+    }
+    void setSeparation (int which, int raw) noexcept // FUN_00734680
+    {
+        const auto sep = (float) raw * 0.00100000005f;
+        if (which == 0)
+            mIn = gainMatrix (1.0f, sep);
+        else
+            mOut = gainMatrix ((float) (44100.0 / fs), sep); // the host's 44100/rate ratio
+    }
+    void process (const float* x, float* y, int n) noexcept
+    {
+        if (! ready)
+        {
+            std::memcpy (y, x, sizeof (float) * 2 * (std::size_t) n);
+            return;
+        }
+        bool silent = true;
+        for (int i = 0; i < 2 * n; ++i)
+            if (std::fabs (x[i]) > 9.99999997e-07f)
+            {
+                silent = false;
+                break;
+            }
+        if (! silent)
+            count = len;
+        else
+            count -= n;
+        if (! (-n < count))
+        {
+            count = 0;
+            std::memcpy (y, x, sizeof (float) * 2 * (std::size_t) n);
+            mInNow = mIn, mOutNow = mOut;
+            return;
+        }
+        const auto maxStep = (float) ((44100.0 / runFs) * 0.001);
+        buf.resize ((std::size_t) n * 2);
+        std::array<Ramp, 4> rp;
+        std::array<float, 4> st {};
+        for (std::size_t k = 0; k < 4; ++k)
+            rp[k] = ramp (mInNow[k], mIn[k], n, maxStep), st[k] = rp[k].start;
+        applyMatrix (x, buf.data(), n, st, rp, false);
+        pl.resize ((std::size_t) n), pr.resize ((std::size_t) n);
+        for (int i = 0; i < n; ++i)
+            pl[(std::size_t) i] = buf[(std::size_t) (2 * i)], pr[(std::size_t) i] = buf[(std::size_t) (2 * i + 1)];
+        conv.process (pl.data(), pr.data(), n);
+        for (int i = 0; i < n; ++i)
+            buf[(std::size_t) (2 * i)] = pl[(std::size_t) i], buf[(std::size_t) (2 * i + 1)] = pr[(std::size_t) i];
+        std::fill (y, y + 2 * n, 0.0f); // the dry path of this module is always at 0
+        for (std::size_t k = 0; k < 4; ++k)
+            rp[k] = ramp (mOutNow[k], mOut[k], n, maxStep), st[k] = rp[k].start;
+        applyMatrix (buf.data(), y, n, st, rp, true);
+        for (int i = 0; i < 2 * n; ++i)
+            y[i] = y[i] * level;
+    }
+};
+
 // ------------------------------------------------------------------------------------------------ DC blocker
 struct DcBlocker // FUN_005fbdf0 (x87)
 {
@@ -1513,9 +2023,12 @@ struct Module::Impl
 {
     ModuleState st;
     double fs = 44100.0;
+    double stateRate = 0.0; // the host rate when the state is loaded (0: the same as fs)
+    double loadRate() const noexcept { return stateRate > 0.0 ? stateRate : fs; }
     Distortion dist;
     Filter filt;
     std::unique_ptr<fldelay::Delay3Engine> chorus;
+    Cab cab;
     std::vector<float> chL, chR;
     DcBlocker dc;
     std::vector<HalfbandStage> upSt, downSt;
@@ -1528,15 +2041,14 @@ struct Module::Impl
     {
         upSt.assign ((std::size_t) st.oversample, HalfbandStage {});
         downSt.assign ((std::size_t) st.oversample, HalfbandStage {});
-        dist.setRate (fs, factor());
         dc.setRate (fs);
         dist = Distortion {};
-        dist.setRate (fs, factor());
+        dist.setRate (loadRate(), factor());
         for (int i = 0; i < 36; ++i)
             dist.p[(std::size_t) i] = st.p[(std::size_t) i];
         dist.setAlgorithm (st.algorithm);
         filt = Filter {};
-        filt.setRate (fs * factor());
+        filt.setRate (loadRate() * factor());
         filt.setParam (1, 0.5f), filt.setParam (2, 0.5f); // the processor's own initial controls
         filt.type = st.filterType;
         filt.smooth = st.smoothFilter;
@@ -1546,6 +2058,9 @@ struct Module::Impl
             setupChorus();
         else
             chorus.reset();
+        cab = Cab {};
+        if (st.type == 3)
+            setupCab();
     }
     // the chorus module drives an instance of Fruity Delay 3's engine (TChorusProcessor, FUN_0074b000): its 26 controls
     // start from a fixed set, the mode picks the delay type and stereo spread, the six chorus knobs map to six controls
@@ -1573,6 +2088,22 @@ struct Module::Impl
         // creation rate (as with Fruity Delay 3 itself, REA_rodada52 §2)
         chorus->setSampleRate (44100.0);
         chorus->setSampleRate (fs);
+    }
+    void setupCab()
+    {
+        cab.setRate (loadRate(), fs);
+        const auto& info = impulseTable[std::clamp (st.impulse, 0, 58)];
+        auto bytes = st.impulseFile;
+        if (bytes.empty() && info.file != nullptr && ! impulseFolder().empty())
+        {
+            std::ifstream f (impulseFolder() + "/" + info.file, std::ios::binary);
+            bytes.assign (std::istreambuf_iterator<char> (f), {});
+        }
+        DecodedAudio a;
+        if (! bytes.empty() && decodeWavPack (bytes.data(), bytes.size(), a) && ! a.channels.empty())
+            cab.setImpulse (a.channels[0], a.channels.size() > 1 ? a.channels[1] : a.channels[0], info.level);
+        cab.setSeparation (0, st.p[41]);
+        cab.setSeparation (1, st.p[42]);
     }
     void processChorus (const float* x, float* y, int n)
     {
@@ -1620,6 +2151,8 @@ struct Module::Impl
             filt.process (s1.data(), w, m);
         else if (st.type == 2 && chorus)
             processChorus (s1.data(), w, m);
+        else if (st.type == 3)
+            cab.process (s1.data(), w, m);
         const auto dryG = (float) (1.0 - mix), wetG = (float) mix;
         for (int i = 0; i < 2 * m; ++i)
         {
@@ -1646,9 +2179,10 @@ struct Module::Impl
 
 Module::Module() : impl (std::make_unique<Impl>()) {}
 Module::~Module() = default;
-void Module::prepare (double sampleRate, int)
+void Module::prepare (double sampleRate, int, double stateRate)
 {
     impl->fs = sampleRate;
+    impl->stateRate = stateRate;
     impl->configure();
 }
 void Module::set (const ModuleState& s)
@@ -1671,17 +2205,17 @@ const ModuleState& Module::state() const noexcept { return impl->st; }
 struct Engine::Impl
 {
     State st;
-    double fs = 44100.0;
+    double fs = 44100.0, stateRate = 0.0;
     int maxBlock = 512;
     std::vector<std::unique_ptr<Module>> mods;
 };
 Engine::Engine() : impl (std::make_unique<Impl>()) {}
 Engine::~Engine() = default;
-void Engine::prepare (double sampleRate, int maxBlock)
+void Engine::prepare (double sampleRate, int maxBlock, double stateRate)
 {
-    impl->fs = sampleRate, impl->maxBlock = maxBlock;
+    impl->fs = sampleRate, impl->maxBlock = maxBlock, impl->stateRate = stateRate;
     for (auto& m : impl->mods)
-        m->prepare (sampleRate, maxBlock);
+        m->prepare (sampleRate, maxBlock, stateRate);
 }
 void Engine::set (const State& s)
 {
@@ -1690,7 +2224,7 @@ void Engine::set (const State& s)
     for (const auto& ms : s.modules)
     {
         auto m = std::make_unique<Module>();
-        m->prepare (impl->fs, impl->maxBlock);
+        m->prepare (impl->fs, impl->maxBlock, impl->stateRate);
         m->set (ms);
         impl->mods.push_back (std::move (m));
     }
@@ -1707,5 +2241,5 @@ std::string moduleName (const ModuleState& m)
     static const char* types[] = { "Distortion", "Filter", "Chorus", "Amp/Cab" };
     return types[std::clamp (m.type, 0, 3)];
 }
-void setImpulseFolder (const std::string&) {}
+void setImpulseFolder (const std::string& folder) { impulseFolder() = folder; }
 } // namespace lynx::distructor

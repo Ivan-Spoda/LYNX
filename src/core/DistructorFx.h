@@ -50,6 +50,9 @@ struct ModuleState
     int impulse = 1;       // amp/cabinet impulse 0…58
     std::array<int, moduleParams> p {};
     int chorusMode = 0;    // chorus: 0 wide, 1 mono, 2 stereo
+    // amp/cabinet: the impulse's .wv file (from the user's installation; not part of FL's state). Empty: read it
+    // from the folder given to setImpulseFolder
+    std::vector<std::uint8_t> impulseFile;
 };
 
 struct State
@@ -85,7 +88,9 @@ public:
     ~Module();
     Module (const Module&) = delete;
     Module& operator= (const Module&) = delete;
-    void prepare (double sampleRate, int maxBlock);
+    // stateRate: the host rate the module saw when its state was loaded, if different (the processors keep the
+    // coefficients computed then; only the DC blocker and the chorus follow a later rate change). 0 = sampleRate.
+    void prepare (double sampleRate, int maxBlock, double stateRate = 0.0);
     void set (const ModuleState& s); // a newly loaded state (as FL's state load: smoothers start from rest)
     void process (float* left, float* right, int n) noexcept;
     const ModuleState& state() const noexcept;
@@ -100,7 +105,7 @@ class Engine
 public:
     Engine();
     ~Engine();
-    void prepare (double sampleRate, int maxBlock);
+    void prepare (double sampleRate, int maxBlock, double stateRate = 0.0);
     void set (const State& s);
     void process (float* left, float* right, int n) noexcept; // FL processes blocks of ≤ 512 frames
     void reset();

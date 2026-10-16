@@ -1,7 +1,8 @@
 // Renders an interleaved float32 stereo file through LYNX's Distructor engine (core/DistructorFx), the way FL calls
 // the plugin: state load, sample rate, then blocks. Used to compare against the installation's plugin (REA round 71).
-// usage: distructorrender <state.bin> <in.f32> <out.f32> [rate] [block] [module]
+// usage: distructorrender <state.bin> <in.f32> <out.f32> [rate] [block] [module|plugin] [impulse folder]
 //   module: the state is a single Module_x64 state block instead of a whole Distructor state
+//   impulse folder: the installation's Plugins/Fruity/Effects/Distructor/module/impulses
 #include "core/DistructorFx.h"
 
 #include <cstdio>
@@ -27,6 +28,8 @@ int main (int argc, char** argv)
     const double rate = argc > 4 ? std::atof (argv[4]) : 44100.0;
     const int blk = argc > 5 ? std::atoi (argv[5]) : 512;
     const bool module = argc > 6 && std::strcmp (argv[6], "module") == 0;
+    if (argc > 7)
+        lynx::distructor::setImpulseFolder (argv[7]);
     lynx::distructor::State s;
     if (module)
     {
@@ -44,7 +47,8 @@ int main (int argc, char** argv)
         s = *p;
     }
     lynx::distructor::Engine e;
-    e.prepare (rate, blk);
+    // like the EXEC harness: the state is loaded before the host sets the rate (at 44100)
+    e.prepare (rate, blk, std::getenv ("DISTRUCTOR_STATE_RATE") ? std::atof (std::getenv ("DISTRUCTOR_STATE_RATE")) : 0.0);
     e.set (s);
     const auto n = (int) (x.size() / 2);
     std::vector<float> l ((std::size_t) n), r ((std::size_t) n);
