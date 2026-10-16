@@ -1044,7 +1044,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     for (const auto& v : *env)
                         def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
 
-                if (auto* fl = s["flChannel"].getArray(); fl != nullptr && fl->size() == 89)
+                if (auto* fl = s["flChannel"].getArray(); fl != nullptr && (fl->size() == 89 || fl->size() == 90))
                     for (const auto& v : *fl)
                         def.sampler.flChannel.push_back ((std::int32_t) (int) v);
 

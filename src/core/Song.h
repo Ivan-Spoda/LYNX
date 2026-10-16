@@ -160,7 +160,7 @@ struct SamplerSettings
     std::vector<std::int32_t> flVolumeEnvelope;
     // FL's native sampler channel as the project stored it (REA_rodada76): the five 0xDA articulator records (pan,
     // volume, cutoff, resonance, pitch; 17 values each), Mod X, Mod Y and the filter type (0xDB), then the project's
-    // PPQ — 89 values. When present the sampler runs FL's voice: the velocity and pan laws with the channel's volume and
+    // PPQ, the project's pan law (FLP event 0x17; 2 = triangular) — 90 values (89: circular). When present the sampler runs FL's voice: the velocity and pan laws with the channel's volume and
     // pan inside the voice, the articulators stepped on the song's tick grid with FL's gain ramps, and the channel filter
     // (core/FlVoiceProcessor.h); ADSR, cutoff/resonance/type, the modulation envelopes and LFOs above are then unused.
     // Editing the envelope or the filter by hand clears it.

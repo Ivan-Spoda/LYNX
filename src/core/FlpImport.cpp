@@ -700,7 +700,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.type == flp::ChannelType::sampler && def.instrument == InstrumentKind::sampler)
         {
             const auto defaults = flvp::defaultSnapshot();
-            def.sampler.flChannel.assign (89, 0);
+            def.sampler.flChannel.assign (90, 0);
             for (int k = 0; k < 5; ++k)
             {
                 const auto& env = c.envelopes[(std::size_t) k];
@@ -711,6 +711,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.flChannel[86] = c.modY;
             def.sampler.flChannel[87] = c.filterType;
             def.sampler.flChannel[88] = project.header.ppq > 0 ? project.header.ppq : 96;
+            def.sampler.flChannel[89] = project.panLaw;
         }
 
         // channel filter (Mod X/Y + type from 0xDB) applies to the sampler too

@@ -1489,7 +1489,7 @@ public:
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
         {
             Modulation m { { s.filterEnv, s.pitchEnv }, s.lfo };
-            if (s.flChannel.size() == 89)
+            if (s.flChannel.size() == 89 || s.flChannel.size() == 90)
             {
                 // FL's channel articulators and filter in the plugins' 364-byte snapshot layout (REA_rodada76 §4)
                 std::array<std::uint8_t, flvp::snapshotSize> snap {};
@@ -1499,6 +1499,7 @@ public:
                 std::memcpy (snap.data() + 0x168, &s.flChannel[87], 4);
                 const auto ppq = std::clamp ((int) s.flChannel[88], 24, 3840);
                 m.flNative = true;
+                m.flTriangular = s.flChannel.size() == 90 && s.flChannel[89] == 2;
                 m.fl.build (snap.data(), ppq, std::max (1.0, songBpm));
                 m.ticksPerSecond = (double) ppq * std::max (1.0, songBpm) / 60.0;
             }
@@ -2006,7 +2007,20 @@ public:
         pr.control (S);
         const auto finalVol = v.initVol * chanVol, finalPan = v.notePan + chanPan;
         float tL, tR;
-        flvp::panLaw (finalPan + pr.pan, finalVol * pr.vol, tL, tR);
+        if (modulation.flTriangular)
+        {
+            // FL's pan-law mode 1 (FLEngine FUN_006a39c0, x87): vol·sin(π/4) on the louder side, (1 ∓ pan)·that on the
+            // other (EXEC: FL's render with the project's pan law 2, REA_rodada76 §9)
+            const auto pan = std::min (std::max (finalPan + pr.pan, -1.0f), 1.0f);
+            const auto vol = finalVol * pr.vol * 0.70710677f;
+            using ld = long double;
+            if (std::signbit (pan))
+                tL = vol, tR = (float) (((ld) 1 + (ld) pan) * (ld) vol);
+            else
+                tR = vol, tL = (float) (((ld) 1 - (ld) pan) * (ld) vol);
+        }
+        else
+            flvp::panLaw (finalPan + pr.pan, finalVol * pr.vol, tL, tR);
         v.pitchMul = pr.pitch != 0.0f ? std::exp2 ((double) pr.pitch / 1200.0) : 1.0;
 
         const auto first = pr.first;
@@ -2281,6 +2295,7 @@ private:
         flvp::Rec volume {};       // its settings (FLEngine FUN_009ce9e0 = the plugins' FUN_0071ff00, REA_rodada69 §3)
         double ticksPerSecond = 0; // FL steps it once per sequencer tick
         bool flNative = false;     // FL's whole sampler voice (SamplerSettings::flChannel)
+        bool flTriangular = false; // the project's triangular pan law
         flvp::Settings fl {};
     };
     SettingsMailbox<Modulation> envelopeMailbox;
