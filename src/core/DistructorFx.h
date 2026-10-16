@@ -93,6 +93,7 @@ public:
     void prepare (double sampleRate, int maxBlock, double stateRate = 0.0);
     void set (const ModuleState& s); // a newly loaded state (as FL's state load: smoothers start from rest)
     void process (float* left, float* right, int n) noexcept;
+    void processInterleaved (float* lr, int n) noexcept; // L, R pairs
     const ModuleState& state() const noexcept;
 
 private:

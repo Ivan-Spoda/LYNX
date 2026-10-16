@@ -480,6 +480,39 @@ ld x87Exp2 (ld v) noexcept
 #endif
 }
 
+// the plugins' soft clipper (FUN_005fdb10 / FUN_005df670, x87): |x| above thr bends into
+// thr + (1 − thr)·(1 − 2^((thr − |x|)·log2(e)/(1 − thr))), keeping the sign
+void softClipBlock (float* y, int count, float thr) noexcept
+{
+    auto w = 1.0f - thr;
+    if (w <= 0.0f)
+        w = 1.5258789e-05f;
+    const auto c = 1.0f / w;
+    X87Precision pc (x87Pc);
+    std::uint32_t thrBits;
+    std::memcpy (&thrBits, &thr, 4);
+    const ld T = thr, Wd = w, C = c;
+    for (int i = 0; i < count; ++i)
+    {
+        std::uint32_t xb;
+        std::memcpy (&xb, &y[i], 4);
+        const auto ab = xb & 0x7fffffffu;
+        if ((std::int32_t) thrBits < (std::int32_t) ab)
+        {
+            float ax;
+            std::memcpy (&ax, &ab, 4);
+            ld v = (T - (ld) ax) * C;
+            v = v * 1.44269504088896340736L;
+            const ld r = (-x87Exp2 (v) + 1.0L) * Wd + T;
+            auto f = (float) r;
+            std::uint32_t fb;
+            std::memcpy (&fb, &f, 4);
+            fb |= xb & 0x80000000u;
+            std::memcpy (&y[i], &fb, 4);
+        }
+    }
+}
+
 struct Distortion
 {
     int algo = 0;
@@ -862,33 +895,9 @@ struct Distortion
             y[i] = (float) (a + b);
         }
     }
-    void softClip (float* y, int n) noexcept // FUN_0071fcd0 → FUN_005fdb10 (x87), then the post gain
+    void softClip (float* y, int n) noexcept // FUN_0071fcd0 → FUN_005fdb10, then the post gain
     {
-        {
-            X87Precision pc (x87Pc);
-            std::uint32_t thrBits;
-            std::memcpy (&thrBits, &scThr, 4);
-            const ld T = scThr, Wd = scW, C = scC;
-            for (int i = 0; i < 2 * n; ++i)
-            {
-                std::uint32_t xb;
-                std::memcpy (&xb, &y[i], 4);
-                const auto ab = xb & 0x7fffffffu;
-                if ((std::int32_t) thrBits < (std::int32_t) ab)
-                {
-                    float ax;
-                    std::memcpy (&ax, &ab, 4);
-                    ld v = (T - (ld) ax) * C;
-                    v = v * 1.44269504088896340736L;
-                    const ld r = (-x87Exp2 (v) + 1.0L) * Wd + T;
-                    auto f = (float) r;
-                    std::uint32_t fb;
-                    std::memcpy (&fb, &f, 4);
-                    fb |= xb & 0x80000000u;
-                    std::memcpy (&y[i], &fb, 4);
-                }
-            }
-        }
+        softClipBlock (y, 2 * n, scThr);
         if (scPost != 1.0f)
             for (int i = 0; i < 2 * n; ++i)
                 y[i] = y[i] * scPost;
@@ -2199,6 +2208,7 @@ void Module::process (float* left, float* right, int n) noexcept
     for (int i = 0; i < n; ++i)
         left[i] = lr[(std::size_t) (2 * i)], right[i] = lr[(std::size_t) (2 * i + 1)];
 }
+void Module::processInterleaved (float* lr, int n) noexcept { impl->process (lr, n); }
 const ModuleState& Module::state() const noexcept { return impl->st; }
 
 // ------------------------------------------------------------------------------------------------ plugin
@@ -2208,6 +2218,7 @@ struct Engine::Impl
     double fs = 44100.0, stateRate = 0.0;
     int maxBlock = 512;
     std::vector<std::unique_ptr<Module>> mods;
+    std::vector<float> lr;
 };
 Engine::Engine() : impl (std::make_unique<Impl>()) {}
 Engine::~Engine() = default;
@@ -2232,8 +2243,20 @@ void Engine::set (const State& s)
 void Engine::reset() { set (impl->st); }
 void Engine::process (float* left, float* right, int n) noexcept
 {
+    if (n <= 0)
+        return;
+    auto& lr = impl->lr;
+    if (lr.size() < (std::size_t) n * 2)
+        lr.resize ((std::size_t) n * 2);
+    for (int i = 0; i < n; ++i)
+        lr[(std::size_t) (2 * i)] = left[i], lr[(std::size_t) (2 * i + 1)] = right[i];
+    // the modules in their stored order (FUN_006a8a10), then the optional final soft clipper above 0.78125
     for (auto& m : impl->mods)
-        m->process (left, right, n);
+        m->processInterleaved (lr.data(), n);
+    if (impl->st.clip)
+        softClipBlock (lr.data(), 2 * n, 0.78125f);
+    for (int i = 0; i < n; ++i)
+        left[i] = lr[(std::size_t) (2 * i)], right[i] = lr[(std::size_t) (2 * i + 1)];
 }
 
 std::string moduleName (const ModuleState& m)
