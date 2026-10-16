@@ -1391,6 +1391,7 @@ struct SamplerVoice
     std::int64_t tickIndex = 0;
     double nextGap = 0.0;             // samples from this tick to the next one on the song's grid
     int endFade = -1;                 // ≥ 0: past the sample's end, the last frame fading out (FL's 10 ms end fade)
+    int offFade = -1;                 // ≥ 0: a looping voice fading out after its note-off (the same table)
     float holdL = 0.0f, holdR = 0.0f; // the last frame read
 };
 
@@ -1678,6 +1679,14 @@ public:
             target->tickIndex = (std::int64_t) std::nearbyint (songSample / spt);
             target->tickLeft = 0.0;
             target->nextGap = std::max (1.0, (double) flvp::roundEven ((double) (target->tickIndex + 1) * spt) - songSample);
+            // the file's own loop (WAV smpl): FL plays it while the note lasts (REA_rodada76 §8)
+            if (zone == nullptr && ! backwards && data->loopStart >= 0 && data->loopEnd > data->loopStart + 1
+                && (double) data->loopStart >= first && (double) data->loopEnd <= last + 1.0)
+            {
+                target->loopStart = (double) data->loopStart;
+                target->loopEnd = (double) data->loopEnd;
+                target->loopWhileHeld = false;
+            }
         }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
@@ -1741,6 +1750,8 @@ public:
                 if (modulation.fl.recs[1].enabled != 0)
                     for (int k = 1; k < 5; ++k)
                         v.flProc.arts[(std::size_t) k].release (modulation.fl.recs[(std::size_t) k]);
+                else if (v.loopEnd > v.loopStart && v.offFade < 0)
+                    v.offFade = 0; // a looping sample without volume envelope fades out in 10 ms (EXEC, §8)
                 v.stage = 3;
             }
 
@@ -2110,6 +2121,16 @@ public:
                 }
                 flX[(std::size_t) (2 * m)] = sl;
                 flX[(std::size_t) (2 * m + 1)] = sr;
+                if (v.offFade >= 0)
+                {
+                    const auto& table = flvp::endTable();
+                    if (v.offFade >= (int) table.size())
+                    {
+                        ended = true;
+                        break;
+                    }
+                    endGain *= table[(std::size_t) v.offFade++];
+                }
                 flG[(std::size_t) m] = gain * endGain;
                 v.position += v.rate * v.pitchMul;
                 ++v.age;

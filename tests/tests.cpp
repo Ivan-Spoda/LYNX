@@ -2459,6 +2459,23 @@ TEST (fl_native_sampler_voice_matches_fl_renders)
         CHECK (check (out, L, R) == 0);
     }
     {
+        // a sample with its own loop (WAV smpl 4410…8819): FL loops it while the note lasts and fades it out over 10 ms
+        // after the note-off (no volume envelope)
+        auto looped = std::make_shared<lynx::SampleData>();
+        looped->sampleRate = 44100.0;
+        for (int i = 0; i < 8820; ++i)
+            looped->left.push_back ((float) ((0.5 * (1.0 - 0.5 * i / 8820.0)) * std::sin (2.0 * 3.141592653589793 * 441.0 * i / 44100.0)));
+        looped->loopStart = 4410, looped->loopEnd = 8820;
+        const auto out = render (records (volPlain, plain, plain), { 256, 0, 0 },
+                                 { { 0, 22050, 100.0f / 128, 0.0f }, { 44100, 49612, 100.0f / 128, 0.0f } }, looped, chan);
+        const int pos[] = { 125, 4525, 8925, 13337, 17725, 22025, 22125, 22325, 22437, 49625, 49737, 50025 };
+        const int gold[] = { 6338, 4746, 3842, 4161, -1470, -989, -3577, -1174, -32, 4373, 2573, 42 };
+        int bad = 0;
+        for (int k = 0; k < 12; ++k)
+            bad += std::abs ((int) std::lround (out.first[(std::size_t) pos[k]] * 32767.0f) - gold[k]) > 1;
+        CHECK (bad == 0);
+    }
+    {
         // a constant sample: velocity law (FL: vel 100 → 0.389608, 128 → 0.799753, 64 → 0.141805 at the default
         // channel volume, pan centre) and a hard-left note (0.550997 / 0)
         auto dc = std::make_shared<lynx::SampleData>();

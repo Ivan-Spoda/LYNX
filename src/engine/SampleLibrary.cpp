@@ -269,6 +269,17 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     auto data = std::make_shared<SampleData>();
     data->sampleRate = reader->sampleRate;
     data->left.assign (buffer.getReadPointer (0), buffer.getReadPointer (0) + frames);
+    // the file's own loop (WAV smpl, first loop; JUCE gives the end frame inclusive)
+    {
+        const auto& meta = reader->metadataValues;
+        if (meta.getValue ("NumSampleLoops", "0").getIntValue() > 0)
+        {
+            const auto start = meta.getValue ("Loop0Start", "-1").getLargeIntValue();
+            const auto end = meta.getValue ("Loop0End", "-1").getLargeIntValue() + 1;
+            if (start >= 0 && end > start && end <= frames)
+                data->loopStart = start, data->loopEnd = end;
+        }
+    }
 
     if (channels > 1)
         data->right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + frames);
