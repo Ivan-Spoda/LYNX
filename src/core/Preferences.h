@@ -1,0 +1,126 @@
+#pragma once
+
+// The logic behind the Settings window's General, Audio and MIDI pages and the Plugin manager (FL Studio's
+// Settings pages and plugin manager, interpreted). No JUCE, so it can be tested in isolation: the UI reads and
+// writes the files and devices, these functions decide what the settings mean.
+
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace lynx::prefs
+{
+// --- "key=value" settings files (ui-options.txt, midi-settings.txt) -------------------------------------------------
+// Lines "key=value" (spaces around both trimmed); blank lines and lines without '=' are ignored, the last of a
+// repeated key wins.
+std::map<std::string, std::string> parseKeyValues (const std::string& text);
+
+// --- autosave (General page) ------------------------------------------------------------------------------------
+// The choices for "Save a backup copy every": 0 = never, else minutes.
+const std::vector<int>& autosaveIntervals();
+int clampAutosaveMinutes (int minutes); // the nearest choice
+constexpr int defaultAutosaveMinutes = 2;
+constexpr int defaultAutosaveKeep = 10;
+int clampAutosaveKeep (int keep); // 1..100
+
+// Backup file name (without extension) of project `stem` saved at a date/time: "Night Drive (2026-10-16 19.50.03)".
+// Sorting these names sorts them by time.
+std::string backupName (const std::string& stem, int year, int month, int day, int hour, int minute, int second);
+// True when `name` (without extension) is a backup of `stem` made by backupName, or the plain "stem" of older versions.
+bool isBackupOf (const std::string& name, const std::string& stem);
+// The backups of `stem` among `names` that go when only the `keep` newest are kept (oldest first).
+std::vector<std::string> backupsToRemove (const std::vector<std::string>& names, const std::string& stem, int keep);
+
+// --- undo levels (General page) ---------------------------------------------------------------------------------
+constexpr int defaultUndoLevels = 100;
+int clampUndoLevels (int levels); // 10..1000
+
+// --- audio (Audio page) -----------------------------------------------------------------------------------------
+// The latency one buffer adds, in milliseconds.
+double bufferLatencyMs (int bufferSamples, double sampleRate);
+
+// --- MIDI (MIDI page) -------------------------------------------------------------------------------------------
+// How a played note's velocity reaches the instrument.
+enum class VelocityCurve
+{
+    linear, // as played
+    soft,   // light playing sounds louder
+    hard,   // needs harder playing
+    fixed   // every note at full velocity
+};
+float mapVelocity (float velocity, VelocityCurve curve) noexcept; // 0..1 -> 0..1 (0 stays 0: a note-off)
+
+struct MidiInputPrefs
+{
+    std::string name;     // the device name (as the system shows it)
+    bool enabled = true;  // new devices are on
+    int midiChannel = 0;  // 0 = any (omni), 1..16 = only that channel
+    int target = -1;      // -1 = the selected channels of the Channel Rack, else that Channel Rack channel (0-based)
+
+    bool operator== (const MidiInputPrefs&) const = default;
+};
+
+struct MidiPrefs
+{
+    std::vector<MidiInputPrefs> inputs; // the devices the user changed (others use the defaults)
+    VelocityCurve velocity = VelocityCurve::linear;
+    bool pickup = false;                // a controller takes over a parameter only once it reaches its value
+
+    // The settings of a device (the defaults when it was never changed).
+    MidiInputPrefs input (const std::string& name) const;
+    void setInput (const MidiInputPrefs& input);
+
+    // Should a message on MIDI channel `channel` (1..16) from `device` be played?
+    bool accepts (const std::string& device, int channel) const;
+
+    std::string toText() const;
+    static MidiPrefs fromText (const std::string& text);
+
+    bool operator== (const MidiPrefs&) const = default;
+};
+
+// Takeover ("pickup") of a parameter by a hardware controller: the controller changes the parameter only once its
+// value reaches the parameter's (moving past it in either direction, or landing within `tolerance`), so a knob that
+// sits elsewhere doesn't make the parameter jump. `previous` is the controller's last value (< 0 = none yet).
+bool pickupReached (float parameter, float previous, float incoming, float tolerance = 1.5f / 127.0f) noexcept;
+
+// One controller-to-parameter link under takeover: once caught, the controller keeps the parameter until something
+// else moves the parameter away from what the controller set (then it has to reach it again).
+struct PickupState
+{
+    bool caught = false;
+    float lastController = -1.0f; // the controller's last value
+    float lastSet = -1.0f;        // what the controller last set the parameter to
+};
+// Returns whether `incoming` should be applied to a parameter now at `parameter`.
+bool pickupUpdate (PickupState& state, float parameter, float incoming, float tolerance = 1.5f / 127.0f) noexcept;
+
+// --- plugin manager ---------------------------------------------------------------------------------------------
+enum class PluginStatus
+{
+    ok,
+    failed,     // the scan couldn't load it (it crashed, hung or isn't a plugin): skipped by later scans
+    missingFile // listed, but its file is gone
+};
+
+struct PluginRow
+{
+    std::string name, vendor, format, category, file, id;
+    bool instrument = false;
+    PluginStatus status = PluginStatus::ok;
+    bool favourite = false;
+};
+
+enum class PluginFilter { all, instruments, effects, favourites, failed };
+enum class PluginSort { name, vendor, format, type, status };
+
+// The rows to show (indices into `rows`): those passing `filter` whose name, vendor, format, category or file
+// contain every word of `query` (case-insensitive), sorted by `sort` (then by name).
+std::vector<int> visiblePlugins (const std::vector<PluginRow>& rows, const std::string& query, PluginFilter filter,
+                                 PluginSort sort, bool descending = false);
+
+// Favourite plugins: one identifier per line.
+std::set<std::string> parseFavourites (const std::string& text);
+std::string formatFavourites (const std::set<std::string>& ids);
+} // namespace lynx::prefs

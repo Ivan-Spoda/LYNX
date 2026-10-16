@@ -95,6 +95,13 @@ public:
     bool loadJson (const std::string& json, std::vector<std::string>* errors = nullptr);
     std::string toJson() const; // every action with its current chords
 
+    // Shortcut manager: the actions other than `except` that `chord` triggers in `context` (same context only:
+    // a panel's binding wins over a global one there, so those don't clash).
+    std::vector<std::string> actionsWith (const Chord& chord, Context context, const std::string& except = {}) const;
+    bool isDefault (const std::string& actionId) const;
+    // Only the actions whose chords differ from the defaults, as loadJson reads them (what keys.json keeps).
+    std::string overridesJson() const;
+
     // Pairs of actions bound to the same chord in overlapping contexts (for the help sheet / tests).
     std::vector<std::pair<std::string, std::string>> conflicts() const;
 

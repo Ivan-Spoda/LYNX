@@ -13,38 +13,7 @@ namespace
 {
 juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
-// a section title with a hairline under it
-class SectionTitle final : public juce::Component
-{
-public:
-    explicit SectionTitle (juce::String t) : text (std::move (t)) {}
-
-    void paint (juce::Graphics& g) override
-    {
-        g.setFont (theme::font (theme::type::small, true));
-        g.setColour (theme::colour::textSecondary);
-        g.drawText (text.toUpperCase(), 0, 0, getWidth(), getHeight() - 6, juce::Justification::bottomLeft);
-        g.setColour (theme::colour::border);
-        g.fillRect (0, getHeight() - 2, getWidth(), 1);
-    }
-
-private:
-    juce::String text;
-};
-
-juce::Label& styleLabel (juce::Label& label, const juce::String& text, bool secondary = true)
-{
-    label.setText (text, juce::dontSendNotification);
-    label.setFont (theme::font (theme::type::body));
-    label.setColour (juce::Label::textColourId, secondary ? theme::colour::textSecondary : theme::colour::textPrimary);
-    return label;
-}
-
-void styleEditor (juce::TextEditor& editor)
-{
-    editor.setFont (theme::font (theme::type::body));
-    editor.setIndents (8, 5);
-}
+using namespace settingsui;
 
 // --- Project page ----------------------------------------------------------------------------------
 class ProjectPage final : public juce::Component,
@@ -513,16 +482,32 @@ private:
 class SettingsPanel final : public juce::Component
 {
 public:
-    SettingsPanel (AudioEngine& engine, SettingsPage page, bool persistent, std::function<void()> browserChanged)
+    SettingsPanel (AudioEngine& engine, SettingsPage page, bool persistent, SettingsHooks hooks)
     {
         tabs.setTabBarDepth (34);
         tabs.setOutline (0);
-        tabs.addTab (tr ("Project"), theme::colour::bg2, new ProjectPage (engine), true);
-        tabs.addTab (tr ("Info"), theme::colour::bg2, new InfoPage (engine), true);
-        tabs.addTab (tr ("Files"), theme::colour::bg2, new FilesPage (engine, persistent, std::move (browserChanged)), true);
-        tabs.setCurrentTabIndex ((int) page, false);
+        // FL's order: device pages first, then the app, then the project
+        const std::pair<SettingsPage, juce::String> order[] = { { SettingsPage::audio, tr ("Audio") },     { SettingsPage::midi, tr ("MIDI") },
+                                                                { SettingsPage::general, tr ("General") }, { SettingsPage::files, tr ("Files") },
+                                                                { SettingsPage::project, tr ("Project") }, { SettingsPage::info, tr ("Info") } };
+        for (const auto& [p, name] : order)
+        {
+            juce::Component* content = nullptr;
+            switch (p)
+            {
+                case SettingsPage::audio: content = makeAudioPage (engine, persistent).release(); break;
+                case SettingsPage::midi: content = makeMidiPage (engine, hooks, persistent).release(); break;
+                case SettingsPage::general: content = makeGeneralPage (engine, hooks, persistent).release(); break;
+                case SettingsPage::files: content = new FilesPage (engine, persistent, hooks.browserFoldersChanged); break;
+                case SettingsPage::project: content = new ProjectPage (engine); break;
+                case SettingsPage::info: content = new InfoPage (engine); break;
+            }
+            tabs.addTab (name, theme::colour::bg2, content, true);
+            if (p == page)
+                tabs.setCurrentTabIndex (tabs.getNumTabs() - 1, false);
+        }
         addAndMakeVisible (tabs);
-        setSize (640, 560);
+        setSize (680, 620);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
@@ -533,13 +518,14 @@ private:
 };
 } // namespace
 
-void showSettings (AudioEngine& engine, SettingsPage page, std::function<void()> onBrowserFoldersChanged)
+void showSettings (AudioEngine& engine, SettingsPage page, SettingsHooks hooks)
 {
-    openToolWindow (std::make_unique<SettingsPanel> (engine, page, true, std::move (onBrowserFoldersChanged)), tr ("Settings"), "settings");
+    // one Settings window: opening it again shows the asked page
+    openToolWindow (std::make_unique<SettingsPanel> (engine, page, true, std::move (hooks)), tr ("Settings"), "settings");
 }
 
-std::unique_ptr<juce::Component> makeSettingsPanel (AudioEngine& engine, SettingsPage page, bool persistent)
+std::unique_ptr<juce::Component> makeSettingsPanel (AudioEngine& engine, SettingsPage page, bool persistent, SettingsHooks hooks)
 {
-    return std::make_unique<SettingsPanel> (engine, page, persistent, std::function<void()> {});
+    return std::make_unique<SettingsPanel> (engine, page, persistent, std::move (hooks));
 }
 } // namespace lynx

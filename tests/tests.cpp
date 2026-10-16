@@ -35,6 +35,7 @@
 #include "core/FlWrapper.h"
 #include "core/FlPluginDb.h"
 #include "core/MissingFiles.h"
+#include "core/Preferences.h"
 #include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
@@ -14236,3 +14237,4 @@ TEST (project_info_history_and_flp_import)
     CHECK (song.info.comments == "line 1\nline 2");
 }
 #include "UiFixTests.inc"
+#include "PrefsTests.inc"

@@ -196,19 +196,34 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
 {
     auto types = engine.getPluginHost().getKnownPlugins().getTypes();
     std::sort (types.begin(), types.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+    const auto& favourites = engine.getPluginHost().favourites();
     int added = 0;
 
-    for (const auto& type : types)
+    // favourites first (Plugin manager), then all of them
+    for (const auto favouritesPass : { true, false })
     {
-        if (type.isInstrument != instruments)
-            continue;
+        const auto before = added;
+        for (const auto& type : types)
+        {
+            if (type.isInstrument != instruments)
+                continue;
 
-        PluginRef ref;
-        ref.id = type.createIdentifierString().toStdString();
-        ref.name = type.name.toStdString();
-        menu.addItem (type.name + " (" + type.manufacturerName + ")  [" + type.pluginFormatName + "]", [ref, onChosen] { onChosen (ref); });
-        ++added;
+            PluginRef ref;
+            ref.id = type.createIdentifierString().toStdString();
+            ref.name = type.name.toStdString();
+            if (favouritesPass && favourites.count (ref.id) == 0)
+                continue;
+            menu.addItem ((favouritesPass ? juce::String::fromUTF8 ("\xe2\x98\x85 ") : juce::String()) + type.name + " (" + type.manufacturerName + ")  ["
+                              + type.pluginFormatName + "]",
+                          [ref, onChosen] { onChosen (ref); });
+            ++added;
+        }
+        if (favouritesPass && added > before)
+            menu.addSeparator();
     }
+    added = 0;
+    for (const auto& type : types)
+        added += type.isInstrument == instruments ? 1 : 0;
 
     if (added == 0)
         menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});

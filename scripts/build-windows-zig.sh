@@ -99,6 +99,8 @@ APP_SOURCES+=(src/core/ThreeOsc.cpp)
 # onboarding: FL Studio integration (plugin database, sample relocation), background scan, setup wizard
 APP_SOURCES+=(src/core/FlPluginDb.cpp src/engine/FlStudio.cpp src/ui/SetupWizard.cpp)
 APP_SOURCES+=(src/core/MissingFiles.cpp src/ui/MissingFilesDialog.cpp src/ui/SettingsDialog.cpp)
+# settings pages (General/Audio/MIDI), plugin manager, shortcut manager (round 82)
+APP_SOURCES+=(src/core/Preferences.cpp src/ui/SettingsPages.cpp src/ui/PluginManager.cpp src/ui/ShortcutManager.cpp)
 # spectral waveforms: band analysis, background cache and drawing
 APP_SOURCES+=(src/core/WaveAnalysis.cpp src/ui/WaveformView.cpp)
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
