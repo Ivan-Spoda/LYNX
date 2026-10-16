@@ -69,14 +69,15 @@ enum class IconSize
 };
 
 // Height of one toolbar row and the share of a button's height its icon takes, per icon size.
-// Medium is the default: 24 px icons on 32 px rows (the icon grid at 1:1, so it is perfectly sharp). For
-// comparison, FL Studio 2026 at 100% draws about 20 px glyphs on 30 px buttons (docs/WORKFLOW_FL.md 5.1).
-inline int rowHeight (IconSize s) { return s == IconSize::small ? 26 : s == IconSize::medium ? 32 : 38; }
-inline float iconFraction (IconSize s) { return s == IconSize::small ? 0.66f : s == IconSize::medium ? 0.75f : 0.8f; }
-inline float iconMaxPx (IconSize s) { return s == IconSize::small ? 18.0f : s == IconSize::medium ? 24.0f : 30.0f; }
-// Editor tool strips (inside a 28 px title row, buttons 22 px high): icon box in px and button width.
-inline float toolIconPx (IconSize s) { return s == IconSize::small ? 16.0f : s == IconSize::medium ? 20.0f : 22.0f; }
-inline int toolButtonWidth (IconSize s, int height) { return height + (s == IconSize::small ? 2 : s == IconSize::medium ? 4 : 6); }
+// Medium is the default: 16 px icons on 28 px rows, drawn with a fine line (ui/Icons.h strokeWidth), so the
+// header stays light with air around each glyph. For comparison, FL Studio 2026 at 100% draws its toolbar
+// glyphs at roughly 16-20 px on buttons about 26-30 px apart (docs/analise/UI_toolbar_study.md).
+inline int rowHeight (IconSize s) { return s == IconSize::small ? 24 : s == IconSize::medium ? 28 : 34; }
+inline float iconFraction (IconSize) { return 0.6f; }
+inline float iconMaxPx (IconSize s) { return s == IconSize::small ? 14.0f : s == IconSize::medium ? 16.0f : 20.0f; }
+// Editor tool strips (inside the panel title row): icon box in px and button width.
+inline float toolIconPx (IconSize s) { return s == IconSize::small ? 14.0f : s == IconSize::medium ? 16.0f : 18.0f; }
+inline int toolButtonWidth (IconSize s, int height) { return height + (s == IconSize::small ? 0 : s == IconSize::medium ? 2 : 4); }
 
 constexpr std::array<int, 9> uiScales { 80, 90, 100, 110, 125, 150, 175, 200, 250 };
 inline int clampScale (int percent) { return std::clamp (percent, 75, 250); }

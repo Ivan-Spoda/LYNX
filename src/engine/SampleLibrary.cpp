@@ -1,5 +1,6 @@
 #include "engine/SampleLibrary.h"
 
+#include "core/OggVorbis.h"
 #include "core/TimeStretch.h"
 #include "engine/WavPackFormat.h"
 
@@ -44,6 +45,78 @@ std::unique_ptr<juce::MemoryBlock> extractOggFromWav (const juce::File& file)
 
     return nullptr;
 }
+// Serves samples decoded up front (FL-exact Ogg Vorbis, core/OggVorbis.h) through JUCE's reader interface.
+class DecodedReader final : public juce::AudioFormatReader
+{
+public:
+    explicit DecodedReader (oggvorbis::Decoded d) : juce::AudioFormatReader (nullptr, "Ogg Vorbis (FL)"), decoded (std::move (d))
+    {
+        sampleRate = decoded.sampleRate;
+        bitsPerSample = 32;
+        usesFloatingPointData = true;
+        numChannels = (unsigned int) decoded.channels;
+        lengthInSamples = decoded.data.empty() ? 0 : (juce::int64) decoded.data[0].size();
+    }
+
+    bool readSamples (int* const* destSamples, int numDestChannels, int startOffsetInDestBuffer,
+                      juce::int64 startSampleInFile, int numSamples) override
+    {
+        for (int c = 0; c < numDestChannels; ++c)
+        {
+            if (destSamples[c] == nullptr)
+                continue;
+
+            auto* dest = reinterpret_cast<float*> (destSamples[c]) + startOffsetInDestBuffer;
+
+            if (c >= decoded.channels)
+            {
+                std::fill (dest, dest + numSamples, 0.0f);
+                continue;
+            }
+
+            const auto& src = decoded.data[(size_t) c];
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto pos = startSampleInFile + i;
+                dest[i] = pos >= 0 && pos < (juce::int64) src.size() ? src[(size_t) pos] : 0.0f;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    oggvorbis::Decoded decoded;
+};
+
+// FL's Ogg-in-WAV samples and .ogg files, decoded the way FL decodes them (REA_rodada77); null when the file is
+// something else or does not decode.
+std::unique_ptr<juce::AudioFormatReader> createFlOggReader (const juce::File& file)
+{
+    juce::MemoryBlock head;
+
+    if (auto in = file.createInputStream())
+        in->readIntoMemoryBlock (head, 4096);
+
+    const auto* h = static_cast<const std::uint8_t*> (head.getData());
+
+    if (! oggvorbis::isOggWav (h, head.getSize()) && ! oggvorbis::isOggStream (h, head.getSize()))
+        return nullptr;
+
+    juce::MemoryBlock bytes;
+
+    if (! file.loadFileAsData (bytes))
+        return nullptr;
+
+    oggvorbis::Decoded decoded;
+
+    if (! oggvorbis::decode (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize(), decoded)
+        || decoded.sampleRate <= 0 || decoded.data.empty() || decoded.data[0].empty())
+        return nullptr;
+
+    return std::make_unique<DecodedReader> (std::move (decoded));
+}
 } // namespace
 
 SampleLibrary::SampleLibrary()
@@ -59,6 +132,10 @@ juce::String SampleLibrary::wildcard() const
 
 std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce::File& file)
 {
+    // before JUCE's own Ogg reader (vorbisfile), which drops blocks in many of FL's files (REA_rodada77 §3)
+    if (auto reader = createFlOggReader (file))
+        return reader;
+
     if (auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)))
         return reader;
 

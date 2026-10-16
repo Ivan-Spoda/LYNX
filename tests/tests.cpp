@@ -59,6 +59,7 @@
 #include "core/FlResampler.h"
 #include "core/FlKeys.h"
 #include "core/DirectWave.h"
+#include "core/OggVorbis.h"
 #include "core/FlVoiceProcessor.h"
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
@@ -2625,6 +2626,52 @@ TEST (fl_keys_state_wti_and_loader)
     CHECK (inst->idle() && l[100] == 0.0f);
 }
 
+
+TEST (ogg_vorbis_decodes_like_fl)
+{
+    using namespace lynx::oggvorbis;
+    const std::uint8_t wavHeader[] = { 'R', 'I', 'F', 'F', 30, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 2, 0, 0, 0, 0x4F, 0x67 };
+    CHECK (isOggWav (wavHeader, sizeof wavHeader));
+    CHECK (! isOggStream (wavHeader, sizeof wavHeader));
+    Decoded none;
+    CHECK (! decode (wavHeader, sizeof wavHeader, none) && none.channels == 0);
+
+    // FNV-1a 64 of the planar float32 samples FL's oggio_x64.dll decodes from installation files (REA_rodada77 §3):
+    // a plain file, one with a second (PCM) stream multiplexed in, one where an empty stream's end-of-stream page
+    // ends the decode early (FL keeps 17 728 of 20 691 frames), and an FL Keys wavetable
+    if (realFlpDir.empty())
+        return;
+    const auto root = std::filesystem::path (realFlpDir).parent_path();
+    const struct { const char* file; std::uint64_t hash; std::size_t frames; int channels; } cases[] = {
+        { "Data/Patches/Packs/Drums/Percussion/FPC Wood Hit 2.wav", 0xe6137a6141cd5946ull, 29664, 1 },
+        { "Data/Patches/Packs/Instruments/Keyboard/Grand/FL Piano (11).wav", 0x3f60df388ac0c636ull, 264600, 2 },
+        { "Data/Patches/Packs/Drums/Percussion/Grv Perc 08.wav", 0x7f235f467e90efe0ull, 17728, 0 },
+        { "Plugins/Fruity/Generators/FL Keys/Wavtables/Grand Piano/CHANGPIANOHARD_A8.wav", 0x00bbf4cc42f5f72cull, 153280, 0 },
+    };
+    for (const auto& c : cases)
+    {
+        const auto path = root / c.file;
+        if (! std::filesystem::exists (path))
+            continue;
+        std::ifstream in (path, std::ios::binary);
+        const std::vector<std::uint8_t> bytes { std::istreambuf_iterator<char> (in), {} };
+        CHECK (isOggWav (bytes.data(), bytes.size()));
+        Decoded d;
+        CHECK (decode (bytes.data(), bytes.size(), d));
+        if (d.channels == 0)
+            continue;
+        std::uint64_t h = 1469598103934665603ULL;
+        for (const auto& ch : d.data)
+        {
+            const auto* p = reinterpret_cast<const std::uint8_t*> (ch.data());
+            for (std::size_t i = 0; i < ch.size() * sizeof (float); ++i)
+                h = (h ^ p[i]) * 1099511628211ULL;
+        }
+        CHECK (d.data[0].size() == c.frames && d.sampleRate == 44100);
+        CHECK (c.channels == 0 || d.channels == c.channels);
+        CHECK (h == c.hash);
+    }
+}
 
 TEST (directwave_crt_math_and_state)
 {
