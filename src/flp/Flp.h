@@ -283,6 +283,7 @@ struct Project
     double tempo = 140.0;
     int beatsPerBar = 4; // event 0x11 (the first one, the project's)
     int swing = 0;       // event 0x0B: 0..128
+    int panLaw = 0;      // event 0x17: 0 = FL's circular (sin/cos) pan law, 2 = triangular (REA_rodada76 §9)
     std::uint32_t flagsA9 = 0;
     std::string title, artist, genre, url;
     std::string comments; // event 0xC3 (the Info page's comments; line breaks saved as CR)

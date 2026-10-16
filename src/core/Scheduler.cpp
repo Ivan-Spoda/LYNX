@@ -25,17 +25,33 @@ void EventBuffer::sortByOffset() noexcept
 
 namespace
 {
-// Emits an event for each repetition of tick `t` (within the pattern) that falls in [start, end).
+// The sample a tick falls on, as FL's sequencer places it: round(position in samples), ties to even (FLEngine
+// FUN_00d0ece0: the k-th tick is at round(Σ samples per tick), cvtsd2si; REA_rodada76 §5). Positions within 10⁻⁶ of a
+// half are taken as the exact tie the tick arithmetic rounds off.
+double flSampleOf (double samples) noexcept
+{
+    const auto below = std::floor (samples);
+    if (std::abs (samples - below - 0.5) < 1.0e-6)
+        return std::fmod (below, 2.0) == 0.0 ? below : below + 1.0;
+    return std::nearbyint (samples);
+}
+
+// Emits an event for each repetition of tick `t` (within the pattern) whose sample (FL's rounding) falls in the block
+// [start, end).
 void emitOccurrences (double t, std::int64_t loopLength, double start, double end, double tps, int numSamples,
                       NoteEvent event, EventBuffer& out) noexcept
 {
     const auto len = (double) loopLength;
-    // first repetition k with t + k*len >= start
-    auto k = std::ceil ((start - t) / len);
+    const auto first = std::nearbyint (start / tps); // the block's first sample (start is a whole sample)
+    // first repetition k with t + k*len >= start - one sample
+    auto k = std::ceil ((start - tps - t) / len);
 
     for (auto tick = t + k * len; tick < end; tick += len)
     {
-        event.sampleOffset = std::clamp ((int) std::floor ((tick - start) / tps), 0, numSamples - 1);
+        const auto offset = flSampleOf (tick / tps) - first;
+        if (offset < 0.0 || offset >= (double) numSamples)
+            continue;
+        event.sampleOffset = (int) offset;
         out.add (event);
     }
 }

@@ -224,12 +224,105 @@ float normalisingGain (const wave::Summary& summary)
     return summary.peak > 0.0f ? std::min (1.0f / summary.peak, 15.85f) : 1.0f;
 }
 
+namespace
+{
+// The clean style: per lane, the peak envelope mirrored around the centre and filled as one anti-aliased
+// path in a single colour; no RMS layer, no outline, so it reads calmly at any zoom. The envelope is computed
+// per physical pixel and lightly smoothed (a 1-2-1 blend that never goes below the true peak), which removes
+// one-pixel spikes without hiding transients.
+void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::Rectangle<float> visible, const wave::Summary& summary,
+                         double startFrame, double framesPerPixel, const WaveStyle& style)
+{
+    const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const auto columns = (int) std::ceil (visible.getWidth() * scale) + 1;
+    const auto framesPerColumn = framesPerPixel / scale;
+    const auto firstFrame = startFrame + (double) (visible.getX() - body.getX()) * framesPerPixel;
+    const auto lanes = style.stereo && summary.channels > 1 ? 2 : 1;
+    const auto laneHeight = body.getHeight() / (float) lanes;
+
+    std::vector<float> peak ((std::size_t) columns), smooth ((std::size_t) columns);
+    std::vector<char> valid ((std::size_t) columns);
+
+    for (int lane = 0; lane < lanes; ++lane)
+    {
+        for (int x = 0; x < columns; ++x)
+        {
+            auto from = firstFrame + (double) x * framesPerColumn;
+            auto to = from + framesPerColumn;
+            if (to < from)
+                std::swap (from, to);
+            // zoomed in closer than the summary's finest columns: look at least one column wide, centred, so the
+            // envelope stays a smooth outline instead of beading along single cycles
+            if (const auto minWidth = (double) summary.bucket * 1.5; to - from < minWidth)
+            {
+                const auto centre = (from + to) * 0.5;
+                const auto end = (double) summary.frames;
+                const auto inside = centre >= 0.0 && centre < end;
+                from = std::max (0.0, centre - minWidth * 0.5);
+                to = std::min (end, centre + minWidth * 0.5);
+                if (! inside)
+                    from = to = -1.0;
+            }
+            const auto p = from < 0.0 ? wave::Point {} : summary.query (from, to, lanes == 2 ? lane : -1);
+            valid[(std::size_t) x] = p.valid ? 1 : 0;
+            peak[(std::size_t) x] = p.valid ? std::min (1.0f, std::max (std::abs (p.hi), std::abs (p.lo)) * style.gain) : 0.0f;
+        }
+
+        for (int x = 0; x < columns; ++x)
+        {
+            const auto l = peak[(std::size_t) std::max (0, x - 1)], c = peak[(std::size_t) x], r = peak[(std::size_t) std::min (columns - 1, x + 1)];
+            smooth[(std::size_t) x] = std::max (c, (l + 2.0f * c + r) * 0.25f);
+        }
+
+        const auto centre = body.getY() + laneHeight * ((float) lane + 0.5f);
+        const auto half = laneHeight * 0.5f - 1.0f;
+        const auto minHalf = 0.5f; // silence still shows as a hairline
+
+        // one closed path per run of valid columns: the top edge left to right, the bottom edge back
+        juce::Path wave;
+        int x = 0;
+        while (x < columns)
+        {
+            while (x < columns && ! valid[(std::size_t) x])
+                ++x;
+            if (x >= columns)
+                break;
+            const auto runStart = x;
+            while (x < columns && valid[(std::size_t) x])
+                ++x;
+            const auto runEnd = x; // exclusive
+
+            auto px = [&] (int i) { return visible.getX() + (float) i / scale; };
+            wave.startNewSubPath (px (runStart), centre - std::max (minHalf, smooth[(std::size_t) runStart] * half));
+            for (int i = runStart + 1; i < runEnd; ++i)
+                wave.lineTo (px (i), centre - std::max (minHalf, smooth[(std::size_t) i] * half));
+            wave.lineTo (px (runEnd), centre - std::max (minHalf, smooth[(std::size_t) (runEnd - 1)] * half));
+            wave.lineTo (px (runEnd), centre + std::max (minHalf, smooth[(std::size_t) (runEnd - 1)] * half));
+            for (int i = runEnd - 1; i >= runStart; --i)
+                wave.lineTo (px (i), centre + std::max (minHalf, smooth[(std::size_t) i] * half));
+            wave.closeSubPath();
+        }
+
+        g.setColour (style.classic);
+        g.fillPath (wave);
+    }
+}
+} // namespace
+
 void paintWaveform (juce::Graphics& g, juce::Rectangle<float> body, const wave::Summary& summary, double startFrame, double framesPerPixel,
                     const WaveStyle& style)
 {
     const auto visible = body.getIntersection (g.getClipBounds().toFloat());
     if (visible.isEmpty() || summary.levels.empty() || framesPerPixel == 0.0 || body.getHeight() < 2.0f)
         return;
+
+    if (! style.spectral)
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (body.getSmallestIntegerContainer());
+        paintCleanWaveform (g, body, visible, summary, startFrame, framesPerPixel, style);
+        return;
+    }
 
     // one pixel buffer at physical resolution (sharp on high-DPI screens), reused between calls
     const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());

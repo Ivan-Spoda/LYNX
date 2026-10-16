@@ -11,6 +11,7 @@ namespace
 enum : std::uint32_t
 {
     evSwing = 0x0B,
+    evPanLaw = 0x17,
     evTimeSignatureNumerator = 0x11,
     evChannelSwingMix = 0x61,
     evChannelCutGroups = 0x84,
@@ -379,6 +380,10 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
             case evSwing:
                 project.swing = (int) e.value;
+                break;
+
+            case evPanLaw:
+                project.panLaw = (int) e.value;
                 break;
 
             case evFileFlags:

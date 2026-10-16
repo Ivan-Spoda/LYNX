@@ -5,6 +5,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "core/HeldNotes.h"
 #include "core/LiveEventQueue.h"
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
@@ -234,6 +235,8 @@ private:
     SampleLibrary samples;
     LiveEventQueue liveEvents;   // UI -> audio
     LiveEventQueue midiEvents;   // MIDI thread -> audio
+    InputHeldNotes midiHeld;     // MIDI thread: what each held MIDI key started
+    KeyLedger playedKeys;        // UI thread: the keys the typing piano started (after the scale snap)
     SpscQueue<RecordedEvent, 1024> midiRecordQueue; // MIDI thread -> UI (recording)
 
     struct ControllerEvent

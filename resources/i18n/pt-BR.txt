@@ -1297,6 +1297,23 @@ countries: br
 "not found" = "não encontrada"
 "Time signature" = "Fórmula de compasso"
 "Project info" = "Informações do projeto"
+# --- Playlist clip menu and clean waveforms (uifix round)
+"Clean (the clip colour)" = "Limpa (a cor do clipe)"
+"Rename audio clip" = "Renomear clipe de áudio"
+"Select all clips of this source" = "Selecionar todos os clipes desta fonte"
+"Merge clips" = "Juntar clipes"
+"beat" = "beat"
+"Fit to tempo, keep pitch ({0})" = "Ajustar ao andamento, manter o tom ({0})"
+"Fit to tempo, resample ({0})" = "Ajustar ao andamento, reamostrar ({0})"
+"Half as long" = "Metade da duração"
+"Twice as long" = "O dobro da duração"
+"Original speed (no stretch)" = "Velocidade original (sem esticar)"
+"Fit to tempo" = "Ajustar ao andamento"
+"Open in a new Sampler channel" = "Abrir num novo canal Sampler"
+"Show the file in Explorer" = "Mostrar o arquivo no Explorer"
+"Cut" = "Recortar"
+"Paste here" = "Colar aqui"
+
 # --- Quick tips (tool names under the mouse: toolbar and panel title bars)
 "Plugin picker" = "Seletor de plugins"
 "Play" = "Tocar"

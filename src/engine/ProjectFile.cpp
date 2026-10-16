@@ -645,6 +645,13 @@ juce::String toJson (const Song& song)
                     env.add ((int) v);
                 sampler->setProperty ("flVolumeEnvelope", env);
             }
+            if (! c.sampler.flChannel.empty())
+            {
+                juce::Array<juce::var> fl;
+                for (auto v : c.sampler.flChannel)
+                    fl.add ((int) v);
+                sampler->setProperty ("flChannel", fl);
+            }
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             writeLfos (*sampler, c.sampler.lfo);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -1062,6 +1069,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 if (auto* env = s["flVolumeEnvelope"].getArray(); env != nullptr && env->size() == 18)
                     for (const auto& v : *env)
                         def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
+
+                if (auto* fl = s["flChannel"].getArray(); fl != nullptr && (fl->size() == 89 || fl->size() == 90))
+                    for (const auto& v : *fl)
+                        def.sampler.flChannel.push_back ((std::int32_t) (int) v);
 
                 if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {
