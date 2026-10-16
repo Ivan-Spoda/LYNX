@@ -135,9 +135,18 @@ const std::vector<prtools::RhythmPreset>& rhythmPresets()
 
 struct Control
 {
-    enum Kind { slider, choice, toggle, text, header } kind = slider;
+    enum Kind { slider, choice, toggle, text, header };
+
+    Control (Kind k = slider, juce::String n = {}, double min = 0.0, double max = 1.0, double step = 0.01, double init = 0.0,
+             std::function<juce::String (double)> f = {}, juce::StringArray items = {}, juce::String initText = {})
+        : kind (k), name (std::move (n)), minimum (min), maximum (max), interval (step), initial (init), format (std::move (f)),
+          choices (std::move (items)), initialText (std::move (initText))
+    {
+    }
+
+    Kind kind;
     juce::String name;
-    double minimum = 0.0, maximum = 1.0, interval = 0.01, initial = 0.0;
+    double minimum, maximum, interval, initial;
     std::function<juce::String (double)> format;
     juce::StringArray choices;
     juce::String initialText;
@@ -508,7 +517,8 @@ private:
             }
             case NoteTool::lfo:
             {
-                const auto speed = [] (double v) { return stepsText (prtools::lfoPeriod (juce::roundToInt (v)) / ticksPerStep); };
+                // FL's speed wheel, shown as the period (right = longer)
+                const auto speed = [] (double v) { return stepsText (prtools::lfoPeriod (40960 - juce::roundToInt (v)) / ticksPerStep); };
                 add ({ Control::choice, tr ("Level"), 0, (double) notetools::levelCount - 1, 1, 0, {}, levelNames() });
                 add ({ Control::choice, tr ("Shape"), 0, 2, 1, 0, {}, { tr ("Sine"), tr ("Triangle"), tr ("Square") } });
                 add ({ Control::slider, tr ("Phase"), 0.0, 1.0, 0.01, 0.5, percent });
@@ -661,6 +671,7 @@ private:
     {
         using namespace notetools;
         status.clear();
+        chordNames.clear();
 
         switch (tool)
         {
@@ -765,11 +776,11 @@ private:
                 o.phase = juce::jlimit (0, 65535, juce::roundToInt (value (2) * 65536.0));
                 o.startValue = juce::roundToInt (value (4) * 65536.0);
                 o.startRange = juce::roundToInt (value (5) * 65536.0);
-                o.startSpeed = intValue (6);
+                o.startSpeed = 40960 - intValue (6);
                 o.useEnd = on (8);
                 o.endValue = juce::roundToInt (value (9) * 65536.0);
                 o.endRange = juce::roundToInt (value (10) * 65536.0);
-                o.endSpeed = intValue (11);
+                o.endSpeed = 40960 - intValue (11);
                 o.logSpeed = on (12);
                 prtools::lfo (p, indices, (Level) intValue (0), o);
                 break;
@@ -869,7 +880,7 @@ private:
                 juce::StringArray names;
                 for (const auto& c : *chords)
                     names.add (prtools::chordName (c));
-                status = names.joinIntoString ("  ");
+                chordNames = tr ("Chords") + ": " + names.joinIntoString ("  ");
                 break;
             }
         }
@@ -924,6 +935,8 @@ private:
 
         if (status.isNotEmpty())
             text = status;
+        else if (chordNames.isNotEmpty())
+            text << "\n" << chordNames;
 
         info.setText (text, juce::dontSendNotification);
     }
@@ -936,8 +949,31 @@ private:
             engine.editSong ([this] (Song& s) { s.patterns[(std::size_t) patternIndex].notes = originals; }, false);
     }
 
+    void updateEnablement()
+    {
+        const auto enable = [this] (std::size_t c, bool yes) {
+            editors[c]->setEnabled (yes);
+            labels[c]->setEnabled (yes);
+        };
+
+        if (tool == NoteTool::lfo)
+            for (std::size_t c = 9; c <= 12; ++c)
+                enable (c, on (8));
+        else if (tool == NoteTool::quantize)
+            enable (1, intValue (0) == 0); // the swing applies to the grid template
+        else if (tool == NoteTool::riffMachine)
+        {
+            enable (4, on (3));
+            enable (6, on (5));
+            enable (13, on (12));
+            enable (14, on (12));
+        }
+    }
+
     void preview()
     {
+        updateEnablement();
+
         if (patternStillThere())
             engine.editSong ([this] (Song& s) {
                 auto& p = s.patterns[(std::size_t) patternIndex];
@@ -982,7 +1018,7 @@ private:
     std::uint32_t seed = 1;
     bool accepted = false, updating = false;
     std::size_t levelsAt = 0;
-    juce::String status;
+    juce::String status, chordNames;
     mutable std::map<juce::String, prtools::Score> scoreCache;
 
     struct Dice // the riff machine's hidden choices, changed by "Throw dice"

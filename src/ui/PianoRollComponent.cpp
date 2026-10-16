@@ -5,6 +5,7 @@
 #include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
 #include "engine/Text.h"
+#include "ui/EventEditor.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -2340,6 +2341,10 @@ juce::PopupMenu PianoRollComponent::toolsMenu()
     menu.addSeparator();
     for (auto tool : { NoteTool::riffMachine, NoteTool::chordProgression })
         menu.addItem (tr (noteToolTitle (tool)) + "...", [this, tool] { openNoteTool (tool); });
+    menu.addSeparator();
+    menu.addItem (tr ("Edit events..."), [this] {
+        openEventEditor (engine, { AutomationTargetKind::channelVolume, engine.getSelectedChannel() });
+    });
 
     return menu;
 }
