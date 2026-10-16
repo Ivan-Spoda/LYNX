@@ -1,7 +1,6 @@
 #include "core/FlpImport.h"
 #include "core/GrossBeat.h"
 #include "core/LovePhilter.h"
-#include "core/FruityVocoderFx.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -13,6 +12,7 @@
 #include "core/SimSynth.h"
 #include "core/Drumaxx.h"
 #include "core/Plucked.h"
+#include "core/FlKeys.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
 #include "core/Granulizer.h"
@@ -20,6 +20,7 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/TransistorBass.h"
+#include "core/Slayer.h"
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
@@ -669,6 +670,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.decay = std::clamp (seconds (env.decay), 0.0f, 10.0f);
             def.sampler.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope on: the note ends
+
+            // FL's own articulator (delay, hold, tensions, tick steps; REA_rodada69 §3) from the record as stored
+            if (env.rawSize >= 68 && c.type == flp::ChannelType::sampler)
+            {
+                def.sampler.flVolumeEnvelope.resize (18);
+                std::memcpy (def.sampler.flVolumeEnvelope.data(), env.raw.data(), 68);
+                def.sampler.flVolumeEnvelope[17] = project.header.ppq > 0 ? project.header.ppq : 96;
+            }
         }
 
         // channel filter (Mod X/Y + type from 0xDB) applies to the sampler too
@@ -805,6 +814,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.samplePath = path;
                     def.sampler.pitch = std::clamp (def.sampler.pitch + sliced->pitchCents / 100.0f, -24.0f, 24.0f);
 
+                    // Slicex's master volume (REA_rodada69 §5): a single full-range zone carries the gain
+                    if (sliced->gain != 1.0f && ! path.empty())
+                    {
+                        SampleZone zone;
+                        zone.path = path;
+                        zone.gain = sliced->gain;
+                        def.zones = { zone };
+                    }
+
                     if (frames > 0)
                         for (auto p : positions)
                             if (p >= 0 && p < frames)
@@ -814,8 +832,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
         }
 
-        // FL Keys: the samples of the set (.wti) that ships with FL
+        // FL Keys: FL's engine on the wavetable (.wti) that ships with FL (REA_rodada69 §8); the zoned sampler is the
+        // fallback when the wavetable cannot be read
+        bool flKeysExact = false;
         if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())
+            flKeysExact = flkeys::importChannel (def, c.pluginState, options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables",
+                                                 options.readFile, existing, options.saveEmbedded);
+        if (c.pluginName == "FL Keys" && ! flKeysExact && options.readFile && ! options.roots.factoryData.empty())
             if (const auto set = flKeysSet (c.pluginState))
             {
                 const auto folder = options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables";
@@ -1193,6 +1216,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 def.pluginState = c.pluginState;
                 adoptedFromPlugin = true;
             }
+            else if (name == "fl slayer")
+            {
+                // FL's engine from the raw state (REA_rodada68) with the recorded pick excitations, chord and glide tables
+                // read at run time from the user's own Slayer_Engine.dll; there is no conversion to fall back to (state or
+                // DLL not usable: the channel stays unsupported)
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\FL Slayer\\Slayer_Engine.dll", options.roots);
+                if (slayerStateUsable (c.pluginState) && ! dll.empty() && options.fileExists && options.fileExists (dll) && slayerDllUsable (dll))
+                {
+                    def.instrument = InstrumentKind::slayer;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = dll;
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "fruity dance")
+            {
+                // a visual plugin: notes change the dance, its Gen_Render writes nothing (REA_rodada68 §8)
+                def.instrument = InstrumentKind::fruitydance;
+                def.pluginState = c.pluginState;
+                adoptedFromPlugin = true;
+            }
             else if (name == "transistor bass")
             {
                 // FL's engine from the raw state (REA_rodada57 §2) with the "303 Pulse" oscillator cycles read at run time
@@ -1452,8 +1496,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
-                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::granulizer
-                     || def.instrument == InstrumentKind::drumaxx)
+                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
+                     || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
+                     || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
@@ -1972,12 +2017,6 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
-                        target.kind = AutomationTargetKind::none;
-                }
-                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::fruityVocoder)
-                {
-                    // the exact Fruity Vocoder keeps FL's twelve controls as (raw − min) / range (core/FruityVocoderFx.h)
-                    if (target.param < 0 || target.param >= flvocoder::paramCount)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::lovePhilter)

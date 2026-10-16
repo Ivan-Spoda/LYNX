@@ -102,8 +102,11 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::plucked: return "plucked";
         case InstrumentKind::beepmap: return "beepmap";
         case InstrumentKind::sawer: return "sawer";
+        case InstrumentKind::flkeys: return "flkeys";
         case InstrumentKind::granulizer: return "granulizer";
         case InstrumentKind::drumaxx: return "drumaxx";
+        case InstrumentKind::slayer: return "slayer";
+        case InstrumentKind::fruitydance: return "fruitydance";
     }
     return "synth";
 }
@@ -117,8 +120,8 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
-                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::granulizer,
-                    InstrumentKind::drumaxx })
+                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance })
         if (id == instrumentId (k))
             return k;
 
@@ -191,7 +194,6 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
         case EffectKind::fruityFilter: return "fruityFilter";
         case EffectKind::lovePhilter: return "lovePhilter";
-        case EffectKind::fruityVocoder: return "fruityVocoder";
     }
     return "eq";
 }
@@ -342,7 +344,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::equo, EffectKind::flPitchShifter,
                     EffectKind::frequencySplitter,
                     EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
-                    EffectKind::lovePhilter, EffectKind::fruityVocoder })
+                    EffectKind::lovePhilter })
         if (id == effectId (k))
             return k;
 
@@ -610,6 +612,13 @@ juce::String toJson (const Song& song)
             if (c.sampler.portaBeats != SamplerSettings {}.portaBeats)
                 sampler->setProperty ("portaTime", c.sampler.portaBeats);
             sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
+            if (! c.sampler.flVolumeEnvelope.empty())
+            {
+                juce::Array<juce::var> env;
+                for (auto v : c.sampler.flVolumeEnvelope)
+                    env.add ((int) v);
+                sampler->setProperty ("flVolumeEnvelope", env);
+            }
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             writeLfos (*sampler, c.sampler.lfo);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -1013,6 +1022,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
                 def.sampler.porta = (bool) s.getProperty ("porta", false);
                 def.sampler.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SamplerSettings {}.portaBeats));
+
+                if (auto* env = s["flVolumeEnvelope"].getArray(); env != nullptr && env->size() == 18)
+                    for (const auto& v : *env)
+                        def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
 
                 if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {

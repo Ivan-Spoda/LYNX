@@ -16,7 +16,7 @@
 #include <cstdio>
 #endif
 
-#include "core/DelphiMath.h"
+#include "core/DelphiRuntime.h"
 #include "core/Inflate.h"
 #include "core/Instruments.h"
 
@@ -1233,7 +1233,7 @@ void biquadDesign (Stage& s, int code, double A, double alpha, double sn, double
     }
 }
 
-// the plugin runtime's math (core/DelphiMath.h): Power for doubles and singles
+// the plugin runtime's math (core/DelphiRuntime.h): Power for doubles and singles
 inline double powD (double x, double y) noexcept { return delphi::power (x, y); }
 float powf32 (float x, float y) noexcept
 {

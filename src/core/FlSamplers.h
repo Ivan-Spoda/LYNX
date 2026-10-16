@@ -34,6 +34,7 @@ struct SlicedSample
     std::vector<std::uint8_t> embeddedWav;
     std::vector<std::int64_t> positions; // Slicer: start of each slice (frames)
     float pitchCents = 0.0f;
+    float gain = 1.0f; // Slicex master volume: (11^(v/12800) − 1)/10 (REA_rodada69 §5)
 };
 std::optional<SlicedSample> fruitySlicer (const std::vector<std::uint8_t>& state);
 std::optional<SlicedSample> slicex (const std::vector<std::uint8_t>& state);

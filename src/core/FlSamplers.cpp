@@ -390,6 +390,11 @@ std::optional<SlicedSample> slicex (const std::vector<std::uint8_t>& d)
     for (auto& m : master)
         m = in.read<std::int32_t>();
     result.pitchCents = (float) std::clamp (master[5], -1200, 1200);
+    // master volume (DFM range 0…16000, 12800 = 100 %): FL's L11 law in single precision (Slicex FUN_0087efe0)
+    {
+        const auto x = (float) std::clamp (master[2], 0, 16000) * 7.8125e-05f;
+        result.gain = x == 1.0f ? 1.0f : (float) ((std::exp ((double) (x * (float) std::log (11.0))) - 1.0) * (double) 0.1f);
+    }
     in.skip (47 + 12); // options and UI state: deck A starts at 0x5F
 
     const auto referenceOnly = in.read<std::uint8_t>(); // 0 = embedded WAV follows
