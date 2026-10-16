@@ -373,7 +373,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   nearest-allowed-note correction with FL's laws (speed, Fine, A reference, the note mask stored in the state, Key
   Bypass, range, Pitch Reference L/independent/R), plain 4-head shifter (9-sample latency) and Formant/Gender
   PSOLA path (257-sample latency), Harmonize and MIDI masks; latency reported to PDC.
-- **Fruity Vocoder:** FL's algorithm (band edges, cascaded band-passes, envelope followers, levels).
+- **Fruity Vocoder:** FL's exact engine (`core/FruityVocoder`, REA round 70): band edges and RBJ band-pass banks
+  (formant, invert, order 1–3), the x87 envelope followers with FL's silence logic, per-band levels kept in the slot's
+  FL state and drawn in the mixer's band-level strip, mix levels, swap, hold; mono output. Bit-identical to the DLL on
+  every installation state, 84 rate/block cases and 500 random states/automation runs. The set-up uses
+  `core/DelphiMath`, an exact replica of the Delphi RTL's exp / ln / SinCos (0 differences on 1.26 M arguments).
 - **Frequency Splitter:** FL's own engine (`core/FrequencySplitter`, REA round 62) from the saved state, editable as
   LYNX parameters: IIR crossovers for every slope (6–96 dB/oct, incl. the 18 dB/oct all-pass structure), the 3-band
   phase compensation, gain smoothing, mutes/solos and the FFT linear-phase mode (3N/4 latency to PDC); mixer slots use

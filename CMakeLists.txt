@@ -74,6 +74,8 @@ add_library(lynx_core STATIC
     src/core/ChorusFx.cpp
     src/core/FruityBasicFx.cpp
     src/core/FruityDelayBank.cpp
+    src/core/FruityVocoder.cpp
+    src/core/DelphiMath.cpp
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
     src/core/FruityFilters.cpp
