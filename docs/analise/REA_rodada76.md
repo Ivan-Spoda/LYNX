@@ -58,8 +58,9 @@ Per voice (`FUN_00d265e0`, at creation and whenever the channel or a slide chang
 
 - Final.Pan = Init.Pan + channel pan, Final.Vol = Init.Vol · channel volume (the "linked" byte `+0x240` is set to 1 by
   the voice reset `0xd23687`; only the plugin voice API writes it otherwise), Final.Pitch / FCut / FRes = Init + channel;
-  a non-zero per-note pan override replaces the pan clamped to [−1, 1]; the velocity/release cross-modulation table
-  (`+0x6ed`) and a layer parent add on top (rare; **not ported**).
+  Final.Pitch also adds the note's fine pitch (`+0x1e0`); an extra pan offset from the voice request (`+0x25c`, 0 for
+  sequencer notes) is added and clamped to [−1, 1]; the velocity/release cross-modulation table (`+0x6ed`) and a layer
+  parent add on top (rare; **not ported**).
 
 Per render block (`FUN_00d24ae0`): target L = Final.Vol · (volume articulator · (1 + LFO·amount)) and the pan law of
 `(Final.Pan + pan articulator, target)` gives the target gains. The pan law is a function pointer chosen at start-up
@@ -102,12 +103,70 @@ tick, `A` = the start sample (so the first tick is at once). Hence:
 - the k-th following tick falls at `round(start + Σ samples-per-tick)` (repeated double addition), i.e. ticks are
   **song-aligned**, not counted from the note;
 - each tick recomputes the slope; the gains keep moving by that slope until the next tick (they are not clamped at
-  the target; the tick intervals alternate between ⌊spt⌉ ± 1 while the slope divides by `round(spt)`).
+  the target): the slope divides by `round(spt)` while the actual tick intervals are `round(A_{k+1}) − round(A_k)`.
+- the same rule places the note events: a note on project tick k sounds from sample `round(k · spt)`, ties to even.
 
 ---
 
+## 6. FL reference renders **[EXEC: `FL64.exe /R /Ewav <project>`]**
+
+FL Studio renders a project from the command line (`FL64.exe /R /Ewav C:\...\x.flp` writes `x.wav` next to the
+project and exits; 16-bit PCM, 44.1 kHz, no dither noise in silence, scale ×32767). Scripts: `fl.sh` (FL render),
+`rl.sh` (LYNX `renderwav` of the same project, float), `py/flpw.py` (our FLP event reader/writer), `py/mk1.py` /
+`py/mk2.py` (crafted projects from FL's own render test `Data/System/Render tests/Sampler.flp`: its sample path
+replaced by our synthetic WAVs — a 441 Hz sine, an LCG noise — and its notes, 0xDB levels and 0xDA records patched),
+`py/an1.py` (per-note L/R gain fit), `py/cmp.py` / `py/cmpn.py` (sample comparison in int16 codes, per note with lag).
+
+| Project | What it exercises | Result (LYNX vs FL) |
+|---|---|---|
+| `t1` | 14 notes: velocities 1…128, note pans 0…128, default channel | gains within 0.0003 dB (the ×32767 scale); all samples ±1 code |
+| `f0a`, `f0b` | fast LP (type 0), with and without resonance, three notes (velocity/pan) | ±1 code |
+| `f1` … `f7` | 12 dB LP, BP, HP, band stop, LP×2, SVF, SVF×2 | ±1 code |
+| `e1`, `e4` | volume envelope (delay/attack/hold/decay/sustain/release), notes of 47…49 ticks | ±1 code |
+| `e2`, `e5` | cutoff envelope + volume LFO with the volume envelope **off** | ±1 code (see the note-off rule) |
+| `e6` | 12 dB LP, volume + cutoff + **pitch** (600 cents) envelopes and their releases | ±1 code |
+| `e7` | SVF, resonance envelope (negative amount), pan LFO, volume envelope with delay and LFO | ±1 code |
+
+(The only other differences are in the last ~230 frames of each file, where LYNX's `renderwav` starts the pattern
+again at the song end and FL does not — a property of the crafted projects' playlist, not of the voice.)
+
+Behaviours found only through the renders (**[EXEC]**):
+
+- **Sample end:** past the region's last frame the voice holds that frame and fades it out with the 441-entry end
+  table `0.5·(1 + cos((i + 1)·π/442))` (the plugins' 10 ms end fade), the fade applied **after** the channel filter
+  (before-filter fading differs by up to 2 %, after-filter matches every case). The table length at other sample rates
+  is **not confirmed** (LYNX keeps 441 entries, as for the plugins).
+- **Note-off:** with the volume envelope enabled the four articulators (volume, cutoff, resonance, pitch) release; with
+  it disabled the note-off changes nothing — the sample plays on (one-shot) and the other envelopes hold their level
+  (`e2`/`e5`). The decompiled release (`FUN_00d241e0`) releases records 1–4 unconditionally, so the gate sits in its
+  caller (**not traced**).
+- **Event placement:** with LYNX's old `floor` placement a note on tick 192 (sample 44100.0 in exact arithmetic) could
+  land one sample early; after the change every note of every project lines up (lag 0).
+- `Sampler.flp` itself (FL's render test) uses a sample with a `smpl` loop (frames 3099…4111) over keys C1…C7: FL loops
+  the sample while the note is held and stops at the note-off; LYNX's native sampler does not read WAV loops yet, so
+  this project still differs (**not ported**, see below).
+
+## 7. LYNX port **[model]**
+
+- `SamplerSettings::flChannel` (`core/Song.h`): the five 0xDA records, Mod X/Y, filter type and the project's PPQ (89
+  values), filled by `FlpImport` for native sampler channels (a missing record keeps the plugins' default), saved in the
+  project (`ProjectFile`), cleared when the envelope or filter is edited by hand (`ChannelSettings`).
+- `SamplerInstrument` (`core/Instruments.cpp`), when `flChannel` is present: the voice is FL's — `flvp::Settings` built
+  from the records in the plugins' snapshot layout (the host's rate ratio and ramp limit set), `flvp::Proc` per voice;
+  initial volume by FL's velocity law (`flInitVolume`), note pan; the channel's volume and pan recovered from the
+  rack's gains and applied **inside** the voice through `flvp::panLaw` (centre −3 dB); per tick: articulators, target
+  gains, filter coefficients, gain and fast-LP ramps (`flTick`); per segment between ticks: FL's interpolators, the
+  channel filter (`renderFast`/`renderBiquad`/`renderSvf`, second stages and gain correction), the ramped mix, the end
+  fade (`renderFl`). Ticks fall on the song's grid: the note's tick `round(songSample/spt)`, then `round(k·spt)`.
+- `Scheduler` (`emitOccurrences`): an event on tick t goes to sample `round(t/tps)` (ties to even), FL's placement.
+- `tools/renderwav`: absolute Windows paths in a project (`C:\…`) map to `/mnt/c/…`.
+- Test `fl_native_sampler_voice_matches_fl_renders`: FL's int16 codes from `f0b` and `e6` at 48 frames each (±1), the
+  velocity law and a hard-left note against FL's measured gains.
+
 ## Where I stopped / next steps
 
-- Port: sampler voice levels (velocity law, flvp pan law with channel pan/volume inside the voice), the flvp channel
-  filter, song-aligned ticks.
-- FL reference renders (FL64.exe command-line render) — being tried.
+- WAV loop points (`smpl`) for the native sampler, and FL's looping/note-off behaviour (FL's `Sampler.flp` render test
+  is the reference).
+- Global LFOs (flag 0x20) of the native sampler are stepped per voice (FL keeps a global phase); the velocity/release
+  cross-modulation table and layer parents are not ported.
+- The pan-law mode 1 (FLP value not traced) and other sample rates (end-fade length) are unverified.
