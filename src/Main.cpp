@@ -1508,7 +1508,15 @@ private:
                                                                          { lynx::NoteTool::flip, "-tool-flip.png" },
                                                                          { lynx::NoteTool::randomise, "-tool-randomise.png" },
                                                                          { lynx::NoteTool::scaleLevels, "-tool-scalelevels.png" },
-                                                                         { lynx::NoteTool::limit, "-tool-limit.png" } };
+                                                                         { lynx::NoteTool::limit, "-tool-limit.png" },
+                                                                         { lynx::NoteTool::quantize, "-tool-quantize.png" },
+                                                                         { lynx::NoteTool::chop, "-tool-chop.png" },
+                                                                         { lynx::NoteTool::flam, "-tool-flam.png" },
+                                                                         { lynx::NoteTool::lfo, "-tool-lfo.png" },
+                                                                         { lynx::NoteTool::claw, "-tool-claw.png" },
+                                                                         { lynx::NoteTool::articulate, "-tool-articulate.png" },
+                                                                         { lynx::NoteTool::riffMachine, "-tool-riff.png" },
+                                                                         { lynx::NoteTool::chordProgression, "-tool-chords.png" } };
                 for (const auto& [tool, name] : tools)
                     saveWindow (lynx::makeNoteToolPanel (offline, tool, roll.noteIndicesForSnapshot(), roll.gridForSnapshot()), name);
             }

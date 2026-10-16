@@ -2333,6 +2333,14 @@ juce::PopupMenu PianoRollComponent::toolsMenu()
     for (const auto& [tool, key] : items)
         menu.addItem (tr (noteToolTitle (tool)) + "...\t" + key, [this, tool = tool] { openNoteTool (tool); });
 
+    // round 83: FL's quantizer, chopper, flamer, LFO, claw machine, articulator; riff machine, chord progression
+    menu.addSeparator();
+    for (auto tool : { NoteTool::quantize, NoteTool::chop, NoteTool::flam, NoteTool::lfo, NoteTool::claw, NoteTool::articulate })
+        menu.addItem (tr (noteToolTitle (tool)) + "...", [this, tool] { openNoteTool (tool); });
+    menu.addSeparator();
+    for (auto tool : { NoteTool::riffMachine, NoteTool::chordProgression })
+        menu.addItem (tr (noteToolTitle (tool)) + "...", [this, tool] { openNoteTool (tool); });
+
     return menu;
 }
 
@@ -2340,7 +2348,7 @@ void PianoRollComponent::openNoteTool (NoteTool tool)
 {
     const auto target = selectionOrAll();
 
-    if (target.empty())
+    if (target.empty() && ! noteToolGenerates (tool))
         return;
 
     showNoteTool (engine, tool, target, gridTicks(), [safe = juce::Component::SafePointer<PianoRollComponent> (this)] {

@@ -36,6 +36,7 @@
 #include "core/FlPluginDb.h"
 #include "core/MissingFiles.h"
 #include "core/PianoRollTools.h"
+#include "core/EventEdit.h"
 #include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
@@ -14584,4 +14585,100 @@ TEST (prtools_riff_machine)
     Pattern q;
     const auto first = riffMachine (q, {}, o, 4);
     CHECK (first.size() == builtInRiffProgression (0).notes.size() * 2 && q.notes[0].key == 48);
+}
+
+TEST (event_editor_lanes)
+{
+    using namespace lynx;
+    Pattern p;
+    const AutomationTarget vol { AutomationTargetKind::channelVolume, 2 };
+    auto& lane = eventedit::laneFor (p, vol);
+    CHECK (p.events.size() == 1 && &eventedit::laneFor (p, vol) == &lane && eventedit::findLane (p, { AutomationTargetKind::channelPan, 2 }) == nullptr);
+
+    eventedit::fill (lane, 0, 960, 0.25f, 240);
+    CHECK (lane.events.size() == 4 && lane.events[3].tick == 720 && lane.events[3].value == 0.25f);
+    CHECK (lane.valueAt (-5.0) == 0.25f && lane.valueAt (5000.0) == 0.25f);
+
+    eventedit::line (lane, 960, 1920, 0.0f, 1.0f, 240); // 4 cells: 0, 1/3, 2/3, 1
+    CHECK (lane.events.size() == 8 && lane.events[4].value == 0.0f && lane.events[7].value == 1.0f);
+    CHECK (std::abs (lane.valueAt (1500.0) - 2.0f / 3.0f) < 1e-6f); // held from 1440
+
+    eventedit::setEvent (lane, 1440, 0.1f);
+    CHECK (lane.events.size() == 8 && lane.valueAt (1440.0) == 0.1f);
+    eventedit::setEvent (lane, 100, 0.9f);
+    CHECK (lane.events.size() == 9 && lane.events[1].tick == 100);
+
+    eventedit::scale (lane, 0, 960, 2.0f, 0.0f, false);
+    CHECK (lane.events[0].value == 0.5f && lane.events[1].value == 1.0f); // clamped
+    eventedit::scale (lane, 0, 960, 0.0f, 0.0f, true); // bipolar: toward the centre
+    CHECK (lane.events[0].value == 0.5f && lane.events[2].value == 0.5f);
+
+    eventedit::erase (lane, 0, 960);
+    CHECK (lane.events.size() == 4 && lane.events.front().tick == 960);
+
+    auto copy = lane;
+    eventedit::randomize (lane, 0, 4000, 0.2f, 3);
+    eventedit::randomize (copy, 0, 4000, 0.2f, 3);
+    CHECK (lane.events[1].value == copy.events[1].value && std::abs (lane.events[1].value - 1.0f / 3.0f) <= 0.2f + 1e-6f);
+
+    prtools::LfoOptions o;
+    eventedit::applyLfo (lane, 0, 3840, o, 960); // FL's LFO: bottom, middle, top, middle
+    CHECK (lane.events.size() == 4 && std::abs (lane.events[0].value - 0.25f) < 1e-4f && std::abs (lane.events[2].value - 0.75f) < 1e-3f);
+
+    p.events.push_back ({ { AutomationTargetKind::channelPan, 1 }, {} });
+    eventedit::removeEmptyLanes (p);
+    CHECK (p.events.size() == 1);
+
+    // channel removal re-targets the lanes like automations
+    auto song = Song::makeDefault();
+    song.patterns[0].events.push_back ({ { AutomationTargetKind::channelVolume, 3 }, { { 0, 0.5f } } });
+    song.removeChannel (1);
+    CHECK (song.patterns[0].events[0].target.index == 2);
+}
+
+TEST (event_editor_playback)
+{
+    // pattern events on the Master volume: silent first half of each pattern, sound in the second half
+    auto song = lynx::Song::makeDefault();
+    song.bpm = 120.0;
+    const auto bar = (std::int64_t) lynx::ppq * 4;
+    song.patterns[0].lengthTicks = bar;
+    song.patterns[0].notes.clear();
+    for (int s = 0; s < 16; ++s)
+        song.patterns[0].notes.push_back ({ s * 240, 200, 0, 60 });
+    song.patterns[0].events.push_back ({ { lynx::AutomationTargetKind::mixerVolume, 0 }, { { 0, 0.0f }, { bar / 2, 0.8f } } });
+
+    const auto peaks = [&] (lynx::PlayMode mode) {
+        song.mode = mode;
+        song.playlist.clear();
+        song.playlist.push_back ({ 0, 0, bar, bar, 0 }); // one clip, in the second bar
+        const double sr = 48000.0;
+        auto state = lynx::RackState::build (song, nullptr, sr);
+        lynx::RackRenderer r;
+        r.prepare (sr, 512);
+        std::vector<float> l (512), rr (512);
+        const auto tps = lynx::ticksPerSample (song.bpm, sr);
+        std::array<float, 6> peak {}; // half bars
+        for (double tick = 0.0; tick < (double) (bar * 3); tick += 512 * tps)
+        {
+            r.process (state.get(), true, tick, 512, l.data(), rr.data());
+            // blocks inside a half bar, away from its edges (the gain glides over one chunk at a change)
+            const auto blockEnd = tick + 512 * tps;
+            const auto half = (std::size_t) (tick / (double) (bar / 2));
+            const auto edge = (double) half * (double) (bar / 2);
+            if (half > 5 || tick - edge < 2 * 512 * tps || blockEnd > edge + (double) (bar / 2))
+                continue;
+            for (auto v : l)
+                peak[half] = std::max (peak[half], std::abs (v));
+        }
+        return std::make_pair (state->eventLanes.size(), peak);
+    };
+
+    const auto [lanesSong, song3] = peaks (lynx::PlayMode::song);
+    CHECK (lanesSong == 1);
+    CHECK (song3[2] < 1.0e-4f && song3[3] > 0.01f); // inside the clip: silent, then sound
+
+    const auto [lanesPattern, loop] = peaks (lynx::PlayMode::pattern);
+    CHECK (lanesPattern == 1);
+    CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }

@@ -704,6 +704,25 @@ juce::String toJson (const Song& song)
         }
 
         o->setProperty ("notes", notes);
+
+        // event editor lanes: [kind, index, slot, param] + [[tick, value], ...]
+        juce::Array<juce::var> lanes;
+        for (const auto& lane : p.events)
+        {
+            if (lane.events.empty() || lane.target.kind == AutomationTargetKind::none)
+                continue;
+
+            auto l = std::make_unique<juce::DynamicObject>();
+            l->setProperty ("target", juce::Array<juce::var> { targetKindName (lane.target.kind), lane.target.index, lane.target.slot, lane.target.param });
+            juce::Array<juce::var> events;
+            for (const auto& e : lane.events)
+                events.add (juce::Array<juce::var> { (juce::int64) e.tick, juce::roundToInt (e.value * 10000.0f) / 10000.0 });
+            l->setProperty ("events", events);
+            lanes.add (juce::var (l.release()));
+        }
+        if (! lanes.isEmpty())
+            o->setProperty ("events", lanes);
+
         patterns.add (juce::var (o.release()));
     }
 
@@ -1132,6 +1151,22 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
 
             pattern.sortNotes();
+
+            if (auto* lanes = p["events"].getArray())
+                for (const auto& l : *lanes)
+                {
+                    PatternEvents lane;
+                    if (const auto& t = l["target"]; t.isArray() && t.size() == 4)
+                        lane.target = { targetKindFromName (t[0].toString()), (int) t[1], (int) t[2], (int) t[3] };
+                    if (auto* events = l["events"].getArray())
+                        for (const auto& e : *events)
+                            if (e.isArray() && e.size() >= 2)
+                                lane.events.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) e[0]), juce::jlimit (0.0f, 1.0f, (float) (double) e[1]) });
+                    std::stable_sort (lane.events.begin(), lane.events.end(), [] (const PatternEvent& a, const PatternEvent& b) { return a.tick < b.tick; });
+                    if (lane.target.kind != AutomationTargetKind::none && ! lane.events.empty())
+                        pattern.events.push_back (std::move (lane));
+                }
+
             song.patterns.push_back (std::move (pattern));
         }
 

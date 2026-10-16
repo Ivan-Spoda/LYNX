@@ -459,27 +459,6 @@ struct Note
 // is odd move, with triangular weight by distance to the grid; half a step at swing 1.
 std::int64_t swingDelay (std::int64_t start, float swing, float channelMix = 1.0f) noexcept;
 
-struct Pattern
-{
-    std::string name;
-    std::vector<Note> notes;  // sorted by start (kept by sortNotes)
-    std::int64_t lengthTicks = 0; // 0 = automatic (rounds up to bars)
-    std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automatic (by index)
-
-    void sortNotes();
-    std::int64_t effectiveLength (int beatsPerBar) const noexcept;
-
-    bool hasStep (int channel, int step) const noexcept;
-    void toggleStep (int channel, int step);
-};
-
-enum class ClipKind : std::uint8_t
-{
-    pattern,
-    audio,
-    automation
-};
-
 // What an automation clip controls. Values always 0..1 (like the model's knobs).
 enum class AutomationTargetKind : std::uint8_t
 {
@@ -510,6 +489,46 @@ struct AutomationTarget
         return kind == o.kind && index == o.index && slot == o.slot && param == o.param;
     }
 };
+
+// Event editor (round 83): a pattern's own parameter events, like FL's pattern events (.flp 0xDF). Each event
+// holds its value (0..1, like automation) until the next one; while the pattern plays they drive the target.
+struct PatternEvent
+{
+    std::int64_t tick = 0; // from the start of the pattern
+    float value = 0.5f;    // 0..1
+};
+
+struct PatternEvents
+{
+    AutomationTarget target;
+    std::vector<PatternEvent> events; // sorted by tick, one per tick
+
+    // Value at `tick` (held from the previous event; before the first = the first value).
+    float valueAt (double tick) const noexcept;
+};
+
+struct Pattern
+{
+    std::string name;
+    std::vector<Note> notes;  // sorted by start (kept by sortNotes)
+    std::int64_t lengthTicks = 0; // 0 = automatic (rounds up to bars)
+    std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automatic (by index)
+    std::vector<PatternEvents> events; // event editor lanes (one per target)
+
+    void sortNotes();
+    std::int64_t effectiveLength (int beatsPerBar) const noexcept;
+
+    bool hasStep (int channel, int step) const noexcept;
+    void toggleStep (int channel, int step);
+};
+
+enum class ClipKind : std::uint8_t
+{
+    pattern,
+    audio,
+    automation
+};
+
 
 struct AutomationPoint
 {
@@ -653,6 +672,9 @@ struct Song
             fn (a.target);
         for (auto& l : midiLinks)
             fn (l.target);
+        for (auto& p : patterns)
+            for (auto& lane : p.events)
+                fn (lane.target);
     }
     void removeDeadMidiLinks();
 

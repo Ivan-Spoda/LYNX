@@ -445,13 +445,8 @@ void RackState::buildAutomationTables()
     hasAutomation = false;
     tempoAutomation = -1;
 
-    // the last automation of the same target wins
-    for (int a = 0; a < count; ++a)
-    {
-        if (automationClips[(std::size_t) a].empty() && ! automations[(std::size_t) a].isLive())
-            continue;
-
-        const auto& t = automations[(std::size_t) a].target;
+    // binds automation slot `a` (an automation, or a pattern event lane after them) to its target
+    const auto bind = [this] (int a, const AutomationTarget& t) {
         const auto channelOk = t.index >= 0 && t.index < (int) song.channels.size();
         const auto trackOk = t.index >= 0 && t.index < (int) song.mixer.size();
         auto used = true;
@@ -499,7 +494,47 @@ void RackState::buildAutomationTables()
         }
 
         hasAutomation = hasAutomation || used;
+    };
+
+    // the last automation of the same target wins
+    for (int a = 0; a < count; ++a)
+    {
+        if (automationClips[(std::size_t) a].empty() && ! automations[(std::size_t) a].isLive())
+            continue;
+
+        bind (a, automations[(std::size_t) a].target);
     }
+
+    // pattern events (event editor): slots after the automations; they win over automation clips of the same
+    // target. The tempo is not driven by pattern events.
+    eventLanes.clear();
+    patternClips.assign (song.patterns.size(), {});
+
+    for (int i = 0; i < (int) song.playlist.size(); ++i)
+    {
+        const auto& c = song.playlist[(std::size_t) i];
+        if (c.kind == ClipKind::pattern && c.pattern >= 0 && c.pattern < (int) song.patterns.size() && c.length > 0 && ! c.muted
+            && ! song.isTrackMuted (c.track))
+            patternClips[(std::size_t) c.pattern].push_back (i);
+    }
+
+    for (auto& clips : patternClips)
+        std::sort (clips.begin(), clips.end(),
+                   [this] (int a, int b) { return song.playlist[(std::size_t) a].start < song.playlist[(std::size_t) b].start; });
+
+    auto slot = count;
+
+    for (int p = 0; p < (int) song.patterns.size(); ++p)
+        for (int l = 0; l < (int) song.patterns[(std::size_t) p].events.size(); ++l)
+        {
+            const auto& lane = song.patterns[(std::size_t) p].events[(std::size_t) l];
+
+            if (lane.events.empty() || lane.target.kind == AutomationTargetKind::tempo || slot >= maxAutomations)
+                continue;
+
+            eventLanes.push_back ({ p, l, slot });
+            bind (slot++, lane.target);
+        }
 }
 
 namespace
@@ -640,9 +675,60 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
             automationValues[(std::size_t) a] = automation.mapLive (state.effects[(std::size_t) src.track][(std::size_t) src.slot]->controlOutput (src.output));
     }
 
+    // pattern events: in pattern mode the current pattern's (looped); in song mode those of the pattern clip
+    // that covers the position. Elsewhere the value holds.
+    if (! state.eventLanes.empty())
+    {
+        if (song.mode != PlayMode::song)
+        {
+            const auto current = song.currentPattern;
+
+            if (current >= 0 && current < (int) song.patterns.size())
+            {
+                const auto& pattern = song.patterns[(std::size_t) current];
+                const auto length = (double) std::max<std::int64_t> (1, pattern.effectiveLength (song.beatsPerBar));
+                const auto t = std::fmod (std::max (0.0, startTick), length);
+
+                for (const auto& lane : state.eventLanes)
+                    if (lane.pattern == current)
+                        automationValues[(std::size_t) lane.slot] = pattern.events[(std::size_t) lane.lane].valueAt (t);
+            }
+        }
+        else
+        {
+            const auto length = (double) std::max<std::int64_t> (1, state.schedule.songLength);
+            const auto tick = std::fmod (std::max (0.0, startTick), length);
+
+            // inside a clip of the pattern: its events; after one: the value it ended with; before the first:
+            // no value (the target's own). Depends only on the position, like automation clips.
+            for (const auto& lane : state.eventLanes)
+            {
+                const auto& events = song.patterns[(std::size_t) lane.pattern].events[(std::size_t) lane.lane];
+                auto value = std::numeric_limits<float>::quiet_NaN();
+
+                for (auto i : state.patternClips[(std::size_t) lane.pattern]) // sorted by start
+                {
+                    const auto& c = song.playlist[(std::size_t) i];
+
+                    if (tick < (double) c.start)
+                        break;
+
+                    value = tick < (double) c.end() ? events.valueAt (tick - (double) c.start + (double) c.offset)
+                                                    : events.valueAt ((double) (c.offset + c.length) - 1.0);
+                }
+
+                automationValues[(std::size_t) lane.slot] = value;
+            }
+        }
+    }
+
     // in pattern mode the Playlist does not play: values stay as they were
     if (song.mode != PlayMode::song)
+    {
+        if (! state.eventLanes.empty()) // only the plugin parameters driven by pattern events
+            applyPluginParams (state, std::min<int> ((int) song.automations.size(), RackState::maxAutomations));
         return;
+    }
 
     const auto length = (double) std::max<std::int64_t> (1, state.schedule.songLength);
     const auto tick = std::fmod (std::max (0.0, startTick), length);
@@ -651,8 +737,16 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
         if (! state.automationClips[a].empty())
             automationValues[a] = automationValueAt (song, song.automations[a], state.automationClips[a], tick);
 
+    applyPluginParams (state, 0);
+}
+
+void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noexcept
+{
     for (const auto& b : state.pluginParams)
     {
+        if (b.automation < firstSlot)
+            continue;
+
         const auto v = automationValues[(std::size_t) b.automation];
 
         if (std::isnan (v))

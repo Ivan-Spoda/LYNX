@@ -40,6 +40,14 @@ struct RackState
     std::vector<std::vector<int>> effectMixAuto;                                 // [track][slot]: dry/wet
     std::vector<int> liveAutomations;                                            // automations with a live source (controllers)
 
+    // pattern events (event editor): each lane uses an automation slot after the song's automations
+    struct EventLane
+    {
+        int pattern = 0, lane = 0, slot = 0;
+    };
+    std::vector<EventLane> eventLanes;
+    std::vector<std::vector<int>> patternClips; // per pattern: its clips in the Playlist, by start
+
     struct PluginParamBinding
     {
         int automation = 0;
@@ -163,6 +171,7 @@ private:
     void runEffects (const RackState& state, int track, int n) noexcept;
     void setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept;
     void updateAutomation (const RackState& state, double startTick) noexcept;
+    void applyPluginParams (const RackState& state, int firstSlot) noexcept; // bindings from this automation slot on
     float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;
 
