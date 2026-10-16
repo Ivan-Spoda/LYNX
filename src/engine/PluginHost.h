@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -109,6 +110,19 @@ public:
     ScanState backgroundScan() const;
     void cancelBackgroundScan();
 
+    // Background scan of these files only (Plugin manager: "Try again", "Add plugin file").
+    void startBackgroundScanOfFiles (const juce::StringArray& files);
+
+    // Plugin manager: forgets a plugin file (its plugins and its failed-scan mark, so a later scan examines it
+    // again), or everything (before a full rescan). UI thread, not while a scan runs.
+    void forgetFile (const juce::String& file);
+    void forgetAll();
+
+    // Favourite plugins (identifier strings), listed first by the plugin menus and the quick-add palette.
+    // Saved in %APPDATA%\LYNX\plugin-favourites.txt. UI thread.
+    const std::set<std::string>& favourites() const noexcept { return favouriteIds; }
+    void setFavourite (const std::string& id, bool favourite);
+
     // Scan child mode: describes a file's plugins into `output` (XML). Returns the number found.
     static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
 
@@ -150,6 +164,8 @@ private:
     FlPluginDb flDb;
     int flDbFiles = 0;
     bool flDbLoaded = false;
+
+    std::set<std::string> favouriteIds;
 
     class BackgroundScan;
     std::unique_ptr<BackgroundScan> background;

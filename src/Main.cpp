@@ -24,6 +24,8 @@
 #include "ui/HistoryPanel.h"
 #include "ui/MissingFilesDialog.h"
 #include "ui/SettingsDialog.h"
+#include "ui/PluginManager.h"
+#include "ui/ShortcutManager.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
@@ -1435,6 +1437,11 @@ private:
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::project), "-settings-project.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::info), "-settings-info.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::files), "-settings-files.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::general), "-settings-general.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::audio), "-settings-audio.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::midi), "-settings-midi.png");
+                saveWindow (lynx::makePluginManagerPanel (offline, false), "-plugin-manager.png");
+                saveWindow (lynx::makeShortcutManagerPanel (false), "-shortcuts.png");
             }
 
             if (! offline.getSong().automations.empty())

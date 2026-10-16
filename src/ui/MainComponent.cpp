@@ -7,6 +7,9 @@
 #include "ui/HistoryPanel.h"
 #include "ui/MissingFilesDialog.h"
 #include "ui/SettingsDialog.h"
+#include "ui/PluginManager.h"
+#include "ui/ShortcutManager.h"
+#include "ui/WaveformView.h"
 #include "ui/QuickAddPalette.h"
 #include "ui/ToolWindow.h"
 #include "ui/WindowOwner.h"
@@ -52,44 +55,6 @@ const char* panelAction (Panel p)
         case Panel::browser: return "panel.browser";
     }
     return "";
-}
-
-// JUCE key event -> LYNX key map chord
-keys::Chord toChord (const juce::KeyPress& key)
-{
-    keys::Chord c;
-    const auto code = key.getKeyCode();
-    const auto mods = key.getModifiers();
-    c.mods = (std::uint8_t) ((mods.isCommandDown() ? keys::ctrl : 0) | (mods.isShiftDown() ? keys::shift : 0) | (mods.isAltDown() ? keys::alt : 0));
-
-    struct Pair
-    {
-        int juceCode, key;
-    };
-    const Pair specials[] = {
-        { juce::KeyPress::spaceKey, keys::space },       { juce::KeyPress::returnKey, keys::enter },     { juce::KeyPress::escapeKey, keys::escape },
-        { juce::KeyPress::tabKey, keys::tab },           { juce::KeyPress::backspaceKey, keys::backspace }, { juce::KeyPress::deleteKey, keys::del },
-        { juce::KeyPress::insertKey, keys::insert },     { juce::KeyPress::upKey, keys::up },             { juce::KeyPress::downKey, keys::down },
-        { juce::KeyPress::leftKey, keys::left },         { juce::KeyPress::rightKey, keys::right },       { juce::KeyPress::pageUpKey, keys::pageUp },
-        { juce::KeyPress::pageDownKey, keys::pageDown }, { juce::KeyPress::homeKey, keys::home },         { juce::KeyPress::endKey, keys::end },
-        { juce::KeyPress::numberPadAdd, keys::numpadPlus }, { juce::KeyPress::numberPadSubtract, keys::numpadMinus },
-        { juce::KeyPress::F1Key, keys::f1 },   { juce::KeyPress::F2Key, keys::f2 },   { juce::KeyPress::F3Key, keys::f3 },
-        { juce::KeyPress::F4Key, keys::f4 },   { juce::KeyPress::F5Key, keys::f5 },   { juce::KeyPress::F6Key, keys::f6 },
-        { juce::KeyPress::F7Key, keys::f7 },   { juce::KeyPress::F8Key, keys::f8 },   { juce::KeyPress::F9Key, keys::f9 },
-        { juce::KeyPress::F10Key, keys::f10 }, { juce::KeyPress::F11Key, keys::f11 }, { juce::KeyPress::F12Key, keys::f12 },
-    };
-
-    for (const auto& p : specials)
-        if (code == p.juceCode)
-        {
-            c.key = p.key;
-            return c;
-        }
-
-    if (code > ' ' && code < 0x7f)
-        c.key = (int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
-
-    return c;
 }
 
 juce::String panelName (Panel p)
@@ -773,7 +738,7 @@ keys::Context MainComponent::focusContext() const
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
-    const auto chord = toChord (key);
+    const auto chord = chordFromKeyPress (key);
 
     // 1. the typing piano (its keys win over plain-letter shortcuts while it is on)
     if (keys::KeyMap::playsNote (chord, typingPiano))
@@ -951,16 +916,6 @@ void MainComponent::loadKeyMap()
     }
 }
 
-void MainComponent::editKeyMap()
-{
-    const auto file = PluginHost::settingsFolder().getChildFile ("keys.json");
-
-    if (! file.existsAsFile())
-        file.replaceWithText (juce::String (keys::KeyMap().toJson()));
-
-    file.startAsProcess();
-}
-
 // --- UI options ----------------------------------------------------------------------------------
 
 juce::File MainComponent::uiSettingsFile() const
@@ -999,6 +954,12 @@ void MainComponent::loadUiSettings()
             toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
             PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "autosaveMinutes")
+            autosaveMinutes = prefs::clampAutosaveMinutes (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "autosaveKeep")
+            autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "undoLevels")
+            engine.setUndoLevels (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
     }
 
     startup = StartupOptions::load();
@@ -1019,7 +980,9 @@ void MainComponent::saveUiSettings()
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
-                                      + "\nuiScale=" + juce::String (toolbarLayout.uiScale) + "\n");
+                                      + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
+                                      + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
+                                      + "\nundoLevels=" + juce::String (engine.getUndoLevels()) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -1971,8 +1934,8 @@ void MainComponent::timerCallback()
         updateTitle();
     }
 
-    // autosave every 2 minutes when there are changes
-    if (++autosaveTicks >= 30 * 120)
+    // a backup copy every few minutes (Settings › General) when there are changes
+    if (autosaveMinutes > 0 && ++autosaveTicks >= 30 * 60 * autosaveMinutes)
     {
         autosaveTicks = 0;
 
@@ -2098,12 +2061,23 @@ void MainComponent::confirmDiscard (std::function<void()> then)
 void MainComponent::autosave()
 {
     // backup copy of the open project, so work isn't lost if something crashes
-    const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    // (one file per save, "Name (date time).lynx"; only the newest few of each project are kept)
+    const auto folder = autosaveFolder();
     folder.createDirectory();
     const auto name = projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled");
+    const auto now = juce::Time::getCurrentTime();
+    const auto stem = juce::String::fromUTF8 (prefs::backupName (name.toStdString(), now.getYear(), now.getMonth() + 1, now.getDayOfMonth(),
+                                                                 now.getHours(), now.getMinutes(), now.getSeconds()).c_str());
     juce::String error;
     engine.capturePluginStates();
-    ProjectFile::save (engine.getSong(), folder.getChildFile (name + ProjectFile::extension), error);
+    if (! ProjectFile::save (engine.getSong(), folder.getChildFile (stem + ProjectFile::extension), error))
+        return;
+
+    std::vector<std::string> names;
+    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, juce::String ("*") + ProjectFile::extension))
+        names.push_back (f.getFileNameWithoutExtension().toStdString());
+    for (const auto& old : prefs::backupsToRemove (names, name.toStdString(), autosaveKeep))
+        folder.getChildFile (juce::String::fromUTF8 (old.c_str()) + ProjectFile::extension).deleteFile();
 }
 
 void MainComponent::newProject()
@@ -2244,11 +2218,96 @@ void MainComponent::openLynxProject (const juce::File& file)
 
 void MainComponent::openSettings (int page)
 {
-    showSettings (engine, (SettingsPage) juce::jlimit (0, 2, page),
-                  [safe = juce::Component::SafePointer<MainComponent> (this)] {
-                      if (safe != nullptr)
-                          safe->browser.reloadUserFolders();
-                  });
+    const juce::Component::SafePointer<MainComponent> safe (this);
+    SettingsHooks hooks;
+    hooks.browserFoldersChanged = [safe] {
+        if (safe != nullptr)
+            safe->browser.reloadUserFolders();
+    };
+    hooks.getGeneral = [safe] {
+        GeneralOptions o;
+        if (safe == nullptr)
+            return o;
+        o.language = i18n::saved();
+        o.uiScale = safe->toolbarLayout.uiScale;
+        o.waveSpectral = ui::WaveformCache::spectral;
+        o.waveStereo = ui::WaveformCache::stereo;
+        o.splash = safe->startup.splash;
+        o.startupSound = safe->startup.sound;
+        o.scanAtStart = backgroundScanAtStart();
+        o.typingPiano = safe->typingPiano;
+        o.keepEditorsOpen = ChannelRackComponent::keepEditorsOpen;
+        o.rememberSeek = EditorGlobals::get().rememberSeek;
+        o.editPatternsIn = PlaylistComponent::editPatternsIn;
+        o.undoLevels = safe->engine.getUndoLevels();
+        o.autosaveMinutes = safe->autosaveMinutes;
+        o.autosaveKeep = safe->autosaveKeep;
+        o.pluginSandbox = pluginSandboxEnabled();
+        return o;
+    };
+    hooks.setGeneral = [safe] (const GeneralOptions& o) {
+        if (safe == nullptr)
+            return;
+        auto& self = *safe;
+        if (o.uiScale != self.toolbarLayout.uiScale)
+        {
+            auto layout = self.toolbarLayout;
+            layout.uiScale = toolbarlayout::clampScale (o.uiScale);
+            self.setToolbarLayout (layout, true);
+        }
+        if (o.waveSpectral != ui::WaveformCache::spectral || o.waveStereo != ui::WaveformCache::stereo)
+        {
+            ui::WaveformCache::spectral = o.waveSpectral;
+            ui::WaveformCache::stereo = o.waveStereo;
+            ui::WaveformCache::getInstance()->settingsChanged();
+        }
+        if (o.typingPiano != self.typingPiano)
+            self.setTypingPiano (o.typingPiano);
+        if (o.scanAtStart != backgroundScanAtStart())
+            setBackgroundScanAtStart (o.scanAtStart);
+        if (o.pluginSandbox != pluginSandboxEnabled())
+            setPluginSandboxEnabled (o.pluginSandbox);
+        ChannelRackComponent::keepEditorsOpen = o.keepEditorsOpen;
+        EditorGlobals::get().rememberSeek = o.rememberSeek;
+        PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, o.editPatternsIn);
+        self.startup.splash = o.splash;
+        self.startup.sound = o.startupSound;
+        self.engine.setUndoLevels (o.undoLevels);
+        self.autosaveMinutes = prefs::clampAutosaveMinutes (o.autosaveMinutes);
+        self.autosaveKeep = prefs::clampAutosaveKeep (o.autosaveKeep);
+        self.autosaveTicks = 0;
+        self.saveUiSettings();
+        if (o.language != i18n::saved())
+            self.showLanguageChoice (o.language);
+    };
+    hooks.manageShortcuts = [safe] {
+        if (safe != nullptr)
+            safe->showShortcutManager();
+    };
+    hooks.managePlugins = [safe] {
+        if (safe != nullptr)
+            safe->showPluginManager();
+    };
+    showSettings (engine, (SettingsPage) juce::jlimit (0, 5, page), std::move (hooks));
+}
+
+void MainComponent::showPluginManager()
+{
+    lynx::showPluginManager (engine, [safe = juce::Component::SafePointer<MainComponent> (this)] {
+        if (safe != nullptr)
+            safe->openSettings ((int) SettingsPage::files);
+    });
+}
+
+void MainComponent::showShortcutManager()
+{
+    lynx::showShortcutManager ([safe = juce::Component::SafePointer<MainComponent> (this)] {
+        if (safe == nullptr)
+            return;
+        safe->loadKeyMap();
+        safe->setControlHints();
+        safe->menuItemsChanged();
+    });
 }
 
 void MainComponent::showMissingFiles (bool afterOpening)
@@ -2466,11 +2525,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     }
     else if (index == 4)
     {
-        menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings (0); });
-        menu.addItem (tr ("Project info..."), [this] { openSettings (1); });
-        menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings (2); });
-        menu.addItem (tr ("Audio settings..."), [this] { showAudioSettings(); });
-        menu.addItem (tr ("Setup wizard (language, audio, plugin folders)..."), [this] { showSetupWizard(); });
+        // the Settings window's pages (Settings › General gathers the app options that were menu items here)
+        menu.addItem (tr ("Audio settings..."), [this] { openSettings ((int) SettingsPage::audio); });
+        menu.addItem (tr ("MIDI settings..."), [this] { openSettings ((int) SettingsPage::midi); });
+        menu.addItem (tr ("General settings..."), [this] { openSettings ((int) SettingsPage::general); });
+        menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings ((int) SettingsPage::files); });
+        menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings ((int) SettingsPage::project); });
+        menu.addItem (tr ("Project info..."), [this] { openSettings ((int) SettingsPage::info); });
+        menu.addSeparator();
+        menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
         const auto scanning = engine.getPluginHost().backgroundScan().running;
         menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins (VST3 and CLAP)"), [this, scanning] {
             if (scanning)
@@ -2478,14 +2541,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             else
                 engine.getPluginHost().startBackgroundScan(); // progress in the hint bar; LYNX stays usable
         });
-        menu.addItem (tr ("Run plugins in a separate process (protects LYNX from crashes)"), true, pluginSandboxEnabled(), [] {
-            setPluginSandboxEnabled (! pluginSandboxEnabled());
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugins"),
-                                                    pluginSandboxEnabled()
-                                                        ? tr ("On: plugins opened from now on run in a separate process. "
-                                                              "If one crashes, it goes silent and LYNX keeps running. Reopen the project to apply this to plugins already open.")
-                                                        : tr ("Off: plugins opened from now on run inside LYNX."));
-        });
+        menu.addItem (tr ("Manage shortcuts..."), [this] { showShortcutManager(); });
+        menu.addSeparator();
         menu.addItem (tr ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
         });
@@ -2497,66 +2554,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             addRecordOptions (recording);
             menu.addSubMenu (tr ("Recording"), recording);
         }
-        {
-            juce::PopupMenu editIn;
-            const char* choices[] = { TR_NOOP ("Piano Roll when it has piano-roll notes, else Channel Rack"), TR_NOOP ("Channel Rack"), TR_NOOP ("Piano Roll") };
-            for (int i = 0; i < 3; ++i)
-                editIn.addItem (tr (choices[i]), true, PlaylistComponent::editPatternsIn == i, [this, i] {
-                    PlaylistComponent::editPatternsIn = i;
-                    saveUiSettings();
-                });
-            menu.addSubMenu (tr ("Double-click on a pattern clip opens"), editIn);
-        }
-        {
-            // waveforms of audio clips, the Sampler and the Browser preview (ui/WaveformView)
-            juce::PopupMenu waves;
-            waves.addItem (tr ("Clean (the clip colour)"), true, ! ui::WaveformCache::spectral, [this] {
-                ui::WaveformCache::spectral = false;
-                saveUiSettings();
-                ui::WaveformCache::getInstance()->settingsChanged();
-            });
-            waves.addItem (tr ("Spectral colours (warm = bass, cool = treble)"), true, ui::WaveformCache::spectral, [this] {
-                ui::WaveformCache::spectral = true;
-                saveUiSettings();
-                ui::WaveformCache::getInstance()->settingsChanged();
-            });
-            waves.addSeparator();
-            waves.addItem (tr ("Stereo (left and right channels apart)"), true, ui::WaveformCache::stereo, [this] {
-                ui::WaveformCache::stereo = ! ui::WaveformCache::stereo;
-                saveUiSettings();
-                ui::WaveformCache::getInstance()->settingsChanged();
-            });
-            menu.addSubMenu (tr ("Waveforms"), waves);
-        }
-        menu.addItem (tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), true,
-                      ChannelRackComponent::keepEditorsOpen, [this] {
-                          ChannelRackComponent::keepEditorsOpen = ! ChannelRackComponent::keepEditorsOpen;
-                          saveUiSettings();
-                      });
-        menu.addItem (tr ("Show the splash screen at startup"), true, startup.splash, [this] {
-            startup.splash = ! startup.splash;
-            saveUiSettings();
-        });
-        menu.addItem (tr ("Play the startup sound"), true, startup.sound, [this] {
-            startup.sound = ! startup.sound;
-            saveUiSettings();
-        });
         menu.addSubMenu (tr ("Toolbar"), makeToolbarMenu());
         menu.addSeparator();
-        menu.addItem (tr ("Edit keyboard shortcuts (keys.json)..."), [this] { editKeyMap(); });
-        menu.addItem (tr ("Reload keyboard shortcuts"), [this] {
-            loadKeyMap();
-            setControlHints();
-        });
-        menu.addSeparator();
-
-        juce::PopupMenu languages;
-        for (const auto& language : i18n::languages())
-        {
-            const juce::String id (language.id);
-            languages.addItem (juce::String::fromUTF8 (language.nativeName), true, i18n::saved() == id, [this, id] { showLanguageChoice (id); });
-        }
-        menu.addSubMenu (tr ("Language"), languages);
+        menu.addItem (tr ("Setup wizard (language, audio, plugin folders)..."), [this] { showSetupWizard(); });
     }
     else
     {
@@ -2822,17 +2822,6 @@ void MainComponent::showImportReport()
 
 void MainComponent::showAudioSettings()
 {
-    auto selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
-        engine.getDeviceManager(), 0, 0, 2, 2, false, false, true, false);
-    selector->setSize (500, 400);
-
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (selector.release());
-    options.dialogTitle = tr ("Audio settings");
-    options.dialogBackgroundColour = theme::colour::bg2;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    if (auto* dialog = options.launchAsync())
-        keepAboveMainWindow (*dialog);
+    openSettings ((int) SettingsPage::audio);
 }
 } // namespace lynx

@@ -1,0 +1,818 @@
+#include "ui/SettingsPages.h"
+
+#include "core/ToolbarLayout.h"
+#include "engine/AudioEngine.h"
+#include "engine/PluginHost.h"
+#include "ui/AutomationUi.h"
+#include "ui/I18n.h"
+
+namespace lynx
+{
+using namespace settingsui;
+
+juce::File autosaveFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+}
+
+namespace
+{
+constexpr int labelWidth = 190;
+constexpr int rowHeight = 28;
+constexpr int rowGap = 8;
+constexpr int sectionHeight = 28;
+
+void styleCombo (juce::ComboBox& box)
+{
+    box.setColour (juce::ComboBox::outlineColourId, theme::colour::borderStrong);
+}
+
+void styleToggle (juce::ToggleButton& t, const juce::String& text)
+{
+    t.setButtonText (text);
+}
+
+// Lays out rows top to bottom inside a page of a given width.
+struct Rows
+{
+    juce::Rectangle<int> area;
+    int y = 0;
+
+    explicit Rows (int width) : area (20, 14, width - 40, 100000), y (14) {}
+
+    void section (juce::Component& title, bool first = false)
+    {
+        if (! first)
+            y += 10;
+        title.setBounds (area.getX(), y, area.getWidth(), sectionHeight);
+        y += sectionHeight + rowGap;
+    }
+
+    // label + control (control width 0 = to the right edge)
+    juce::Rectangle<int> row (juce::Label& label, int controlWidth = 260, int height = rowHeight)
+    {
+        label.setBounds (area.getX(), y, labelWidth, height);
+        auto r = juce::Rectangle<int> (area.getX() + labelWidth, y, controlWidth > 0 ? controlWidth : area.getWidth() - labelWidth, height);
+        y += height + rowGap;
+        return r;
+    }
+
+    juce::Rectangle<int> full (int height = rowHeight)
+    {
+        auto r = juce::Rectangle<int> (area.getX(), y, area.getWidth(), height);
+        y += height + rowGap;
+        return r;
+    }
+
+    juce::Rectangle<int> indented (int height = rowHeight)
+    {
+        auto r = juce::Rectangle<int> (area.getX() + labelWidth, y, area.getWidth() - labelWidth, height);
+        y += height + rowGap;
+        return r;
+    }
+
+    int bottom() const { return y + 14; }
+};
+
+// ================================================================================================================
+// General
+// ================================================================================================================
+class GeneralPage final : public ScrollingPage
+{
+public:
+    GeneralPage (AudioEngine& e, SettingsHooks h, bool keep) : engine (e), hooks (std::move (h)), persistent (keep)
+    {
+        if (hooks.getGeneral)
+            options = hooks.getGeneral();
+        else
+            options.language = "en";
+
+        for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
+                                                                 &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
+                                                                 &wavesLabel, &wavesBox, &stereoWaves, &splash, &startupSound, &scanAtStart,
+                                                                 &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
+                                                                 &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups,
+                                                                 &sandbox, &sandboxNote, &managePlugins, &manageShortcuts, &shortcutsNote })
+            add (*c);
+
+        styleLabel (languageLabel, tr ("Language"));
+        styleNote (languageNote, tr ("A new language is applied when LYNX restarts."));
+        int id = 1;
+        for (const auto& l : i18n::languages())
+        {
+            languageBox.addItem (juce::String::fromUTF8 (l.nativeName), id);
+            if (options.language == l.id)
+                languageBox.setSelectedId (id, juce::dontSendNotification);
+            ++id;
+        }
+        languageBox.onChange = [this] {
+            const auto index = languageBox.getSelectedId() - 1;
+            if (juce::isPositiveAndBelow (index, (int) i18n::languages().size()))
+                change ([&] { options.language = i18n::languages()[(std::size_t) index].id; });
+        };
+
+        styleLabel (scaleLabel, tr ("Interface size"));
+        for (auto percent : toolbarlayout::uiScales)
+            scaleBox.addItem (juce::String (percent) + "%", percent);
+        scaleBox.setSelectedId (options.uiScale, juce::dontSendNotification);
+        scaleBox.onChange = [this] { change ([&] { options.uiScale = scaleBox.getSelectedId(); }); };
+
+        styleLabel (wavesLabel, tr ("Waveforms"));
+        wavesBox.addItem (tr ("Clean (the clip colour)"), 1);
+        wavesBox.addItem (tr ("Spectral colours (warm = bass, cool = treble)"), 2);
+        wavesBox.setSelectedId (options.waveSpectral ? 2 : 1, juce::dontSendNotification);
+        wavesBox.onChange = [this] { change ([&] { options.waveSpectral = wavesBox.getSelectedId() == 2; }); };
+        toggle (stereoWaves, tr ("Stereo (left and right channels apart)"), options.waveStereo, [this] (bool on) { options.waveStereo = on; });
+
+        toggle (splash, tr ("Show the splash screen at startup"), options.splash, [this] (bool on) { options.splash = on; });
+        toggle (startupSound, tr ("Play the startup sound"), options.startupSound, [this] (bool on) { options.startupSound = on; });
+        toggle (scanAtStart, tr ("Look for new plugins in the background at every start"), options.scanAtStart,
+                [this] (bool on) { options.scanAtStart = on; });
+
+        toggle (typingPiano, tr ("Typing keyboard as a piano"), options.typingPiano, [this] (bool on) { options.typingPiano = on; });
+        toggle (keepEditors, tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), options.keepEditorsOpen,
+                [this] (bool on) { options.keepEditorsOpen = on; });
+        toggle (rememberSeek, tr ("Remember seek time: Stop goes back to the position clicked on the Playlist ruler"), options.rememberSeek,
+                [this] (bool on) { options.rememberSeek = on; });
+
+        styleLabel (editInLabel, tr ("Double-click on a pattern clip opens"));
+        const char* choices[] = { TR_NOOP ("Piano Roll when it has piano-roll notes, else Channel Rack"), TR_NOOP ("Channel Rack"), TR_NOOP ("Piano Roll") };
+        for (int i = 0; i < 3; ++i)
+            editInBox.addItem (tr (choices[i]), i + 1);
+        editInBox.setSelectedId (options.editPatternsIn + 1, juce::dontSendNotification);
+        editInBox.onChange = [this] { change ([&] { options.editPatternsIn = editInBox.getSelectedId() - 1; }); };
+
+        styleLabel (undoLabel, tr ("Maximum undo levels"));
+        for (auto n : { 25, 50, 100, 200, 500, 1000 })
+            undoBox.addItem (juce::String (n), n);
+        selectNearest (undoBox, options.undoLevels);
+        undoBox.onChange = [this] { change ([&] { options.undoLevels = undoBox.getSelectedId(); }); };
+
+        styleLabel (autosaveLabel, tr ("Save a backup copy"));
+        for (auto minutes : prefs::autosaveIntervals())
+            autosaveBox.addItem (minutes == 0 ? tr ("Never")
+                                 : minutes == 1 ? tr ("Every minute")
+                                                : tr ("Every {0} minutes", { juce::String (minutes) }),
+                                 minutes + 1);
+        autosaveBox.setSelectedId (prefs::clampAutosaveMinutes (options.autosaveMinutes) + 1, juce::dontSendNotification);
+        autosaveBox.onChange = [this] {
+            change ([&] { options.autosaveMinutes = autosaveBox.getSelectedId() - 1; });
+            keepBox.setEnabled (options.autosaveMinutes > 0);
+        };
+
+        styleLabel (keepLabel, tr ("Backups kept per project"));
+        for (auto n : { 1, 3, 5, 10, 20, 50 })
+            keepBox.addItem (juce::String (n), n);
+        selectNearest (keepBox, options.autosaveKeep);
+        keepBox.setEnabled (options.autosaveMinutes > 0);
+        keepBox.onChange = [this] { change ([&] { options.autosaveKeep = keepBox.getSelectedId(); }); };
+        openBackups.onClick = [] {
+            autosaveFolder().createDirectory();
+            autosaveFolder().startAsProcess();
+        };
+
+        toggle (sandbox, tr ("Run plugins in a separate process (protects LYNX from crashes)"), options.pluginSandbox,
+                [this] (bool on) { options.pluginSandbox = on; });
+        styleNote (sandboxNote, tr ("Applies to plugins opened from now on; reopen the project to move the others."));
+        managePlugins.onClick = [this] {
+            if (hooks.managePlugins)
+                hooks.managePlugins();
+        };
+        manageShortcuts.onClick = [this] {
+            if (hooks.manageShortcuts)
+                hooks.manageShortcuts();
+        };
+        styleNote (shortcutsNote, tr ("See, search and change every keyboard shortcut."));
+
+        for (auto* b : { &languageBox, &scaleBox, &wavesBox, &editInBox, &undoBox, &autosaveBox, &keepBox })
+            styleCombo (*b);
+        juce::ignoreUnused (engine, persistent);
+    }
+
+private:
+    int layout (int width) override
+    {
+        Rows r (width);
+        r.section (languageTitle, true);
+        languageBox.setBounds (r.row (languageLabel, 220));
+        languageNote.setBounds (r.indented (16).translated (0, -6));
+        scaleBox.setBounds (r.row (scaleLabel, 120));
+        wavesBox.setBounds (r.row (wavesLabel, 0));
+        stereoWaves.setBounds (r.indented (24));
+
+        r.section (startupTitle);
+        for (auto* t : { &splash, &startupSound, &scanAtStart })
+            t->setBounds (r.full (24));
+
+        r.section (editingTitle);
+        for (auto* t : { &typingPiano, &keepEditors, &rememberSeek })
+            t->setBounds (r.full (24));
+        editInBox.setBounds (r.row (editInLabel, 0));
+        undoBox.setBounds (r.row (undoLabel, 120));
+
+        r.section (backupTitle);
+        {
+            auto row = r.row (autosaveLabel, 0);
+            autosaveBox.setBounds (row.removeFromLeft (220));
+            row.removeFromLeft (8);
+            openBackups.setBounds (row.removeFromLeft (juce::jmin (row.getWidth(), 170)));
+        }
+        keepBox.setBounds (r.row (keepLabel, 120));
+
+        r.section (pluginsTitle);
+        sandbox.setBounds (r.full (24));
+        sandboxNote.setBounds (r.full (16).translated (0, -6));
+        {
+            auto row = r.full();
+            managePlugins.setBounds (row.removeFromLeft (180));
+            row.removeFromLeft (8);
+            manageShortcuts.setBounds (row.removeFromLeft (180));
+            row.removeFromLeft (12);
+            shortcutsNote.setBounds (row.withTrimmedTop (6));
+        }
+        displayTitle.setVisible (false);
+        return r.bottom();
+    }
+
+    void toggle (juce::ToggleButton& t, const juce::String& text, bool value, std::function<void (bool)> set)
+    {
+        styleToggle (t, text);
+        t.setToggleState (value, juce::dontSendNotification);
+        t.onClick = [this, &t, set = std::move (set)] { change ([&] { set (t.getToggleState()); }); };
+    }
+
+    static void selectNearest (juce::ComboBox& box, int value)
+    {
+        auto best = box.getItemId (0);
+        for (int i = 0; i < box.getNumItems(); ++i)
+            if (std::abs (box.getItemId (i) - value) < std::abs (best - value))
+                best = box.getItemId (i);
+        box.setSelectedId (best, juce::dontSendNotification);
+    }
+
+    void change (const std::function<void()>& fn)
+    {
+        fn();
+        if (hooks.setGeneral)
+            hooks.setGeneral (options);
+    }
+
+    AudioEngine& engine;
+    SettingsHooks hooks;
+    bool persistent;
+    GeneralOptions options;
+    SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
+        backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
+    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, shortcutsNote;
+    juce::ComboBox languageBox, scaleBox, wavesBox, editInBox, undoBox, autosaveBox, keepBox;
+    juce::ToggleButton stereoWaves, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox;
+    juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
+};
+
+// ================================================================================================================
+// Audio
+// ================================================================================================================
+class AudioPage final : public ScrollingPage,
+                        private juce::ChangeListener,
+                        private juce::Timer
+{
+public:
+    AudioPage (AudioEngine& e) : engine (e), devices (e.getDeviceManager())
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &outputLabel,
+                                                                 &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
+                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &recordInput, &recordNote })
+            add (*c);
+
+        styleLabel (driverLabel, tr ("Driver"));
+        styleLabel (outputLabel, tr ("Output device"));
+        styleLabel (inputLabel, tr ("Input device"));
+        styleLabel (rateLabel, tr ("Sample rate"));
+        styleLabel (bufferLabel, tr ("Buffer size"));
+        styleNote (bufferNote, tr ("Smaller buffers answer faster when you play; larger ones give the CPU more room (fewer clicks)."));
+        for (auto* l : { &status, &load })
+        {
+            styleLabel (*l, {}, false);
+            l->setJustificationType (juce::Justification::centredLeft);
+        }
+        for (auto* b : { &driverBox, &outputBox, &inputBox, &rateBox, &bufferBox })
+        {
+            styleCombo (*b);
+            b->setTextWhenNoChoicesAvailable (tr ("(open an output device first)"));
+            b->setTextWhenNothingSelected (tr ("(choose)"));
+        }
+
+        driverBox.onChange = [this] {
+            if (updating)
+                return;
+            auto& types = devices.getAvailableDeviceTypes();
+            const auto index = driverBox.getSelectedId() - 1;
+            if (juce::isPositiveAndBelow (index, types.size()))
+                devices.setCurrentAudioDeviceType (types[index]->getTypeName(), true);
+            refresh();
+        };
+        outputBox.onChange = [this] {
+            apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.outputDeviceName = outputBox.getText(); });
+        };
+        inputBox.onChange = [this] {
+            apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) {
+                if (inputBox.getSelectedId() <= 1)
+                {
+                    s.inputDeviceName = {};
+                    s.inputChannels.clear();
+                }
+                else
+                {
+                    s.inputDeviceName = inputBox.getText();
+                    s.useDefaultInputChannels = false;
+                    s.inputChannels.clear();
+                    s.inputChannels.setRange (0, 2, true);
+                }
+            });
+        };
+        rateBox.onChange = [this] {
+            apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.sampleRate = (double) rateBox.getSelectedId(); });
+        };
+        bufferBox.onChange = [this] {
+            apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.bufferSize = bufferBox.getSelectedId(); });
+        };
+        panelButton.onClick = [this] {
+            if (auto* device = devices.getCurrentAudioDevice(); device != nullptr && device->hasControlPanel())
+            {
+                // the driver's own window (ASIO): the device is reopened afterwards with what was set there
+                devices.closeAudioDevice();
+                device->showControlPanel();
+                devices.restartLastAudioDevice();
+                refresh();
+            }
+        };
+        testButton.onClick = [this] { devices.playTestSound(); };
+
+        styleToggle (recordInput, tr ("Record input audio"));
+        styleNote (recordNote, tr ("With recording on, the sound card input becomes a Playlist clip (the Input device above)."));
+        recordInput.onClick = [this] { engine.setAudioRecordingArmed (recordInput.getToggleState()); };
+
+        devices.addChangeListener (this);
+        refresh();
+        startTimerHz (2);
+    }
+
+    ~AudioPage() override { devices.removeChangeListener (this); }
+
+private:
+    int layout (int width) override
+    {
+        Rows r (width);
+        r.section (deviceTitle, true);
+        driverBox.setBounds (r.row (driverLabel, 260));
+        outputBox.setBounds (r.row (outputLabel, 0));
+        inputBox.setBounds (r.row (inputLabel, 0));
+        rateBox.setBounds (r.row (rateLabel, 160));
+        bufferBox.setBounds (r.row (bufferLabel, 260));
+        bufferNote.setBounds (r.indented (18).translated (0, -6));
+        {
+            auto row = r.indented();
+            panelButton.setBounds (row.removeFromLeft (170));
+            row.removeFromLeft (8);
+            testButton.setBounds (row.removeFromLeft (150));
+        }
+        r.section (statusTitle);
+        status.setBounds (r.full (22));
+        load.setBounds (r.full (22));
+        r.section (recordTitle);
+        recordInput.setBounds (r.full (24));
+        recordNote.setBounds (r.full (16).translated (0, -6));
+        return r.bottom();
+    }
+
+    void apply (const std::function<void (juce::AudioDeviceManager::AudioDeviceSetup&)>& change)
+    {
+        if (updating)
+            return;
+        auto setup = devices.getAudioDeviceSetup();
+        change (setup);
+        error = devices.setAudioDeviceSetup (setup, true);
+        refresh();
+    }
+
+    void refresh()
+    {
+        const juce::ScopedValueSetter<bool> guard (updating, true);
+        auto* type = devices.getCurrentDeviceTypeObject();
+        auto* device = devices.getCurrentAudioDevice();
+        const auto setup = devices.getAudioDeviceSetup();
+
+        driverBox.clear (juce::dontSendNotification);
+        auto& types = devices.getAvailableDeviceTypes();
+        for (int i = 0; i < types.size(); ++i)
+        {
+            driverBox.addItem (types[i]->getTypeName(), i + 1);
+            if (types[i] == type)
+                driverBox.setSelectedId (i + 1, juce::dontSendNotification);
+        }
+
+        outputBox.clear (juce::dontSendNotification);
+        inputBox.clear (juce::dontSendNotification);
+        inputBox.addItem (tr ("(none)"), 1);
+        inputBox.setSelectedId (1, juce::dontSendNotification);
+        if (type != nullptr)
+        {
+            if (type->getDeviceNames (false).isEmpty())
+                type->scanForDevices(); // (a driver type not opened yet this session)
+            const auto outs = type->getDeviceNames (false);
+            for (int i = 0; i < outs.size(); ++i)
+            {
+                outputBox.addItem (outs[i], i + 1);
+                if (outs[i] == setup.outputDeviceName)
+                    outputBox.setSelectedId (i + 1, juce::dontSendNotification);
+            }
+            if (type->hasSeparateInputsAndOutputs())
+            {
+                const auto ins = type->getDeviceNames (true);
+                for (int i = 0; i < ins.size(); ++i)
+                {
+                    inputBox.addItem (ins[i], i + 2);
+                    if (ins[i] == setup.inputDeviceName && ! setup.inputChannels.isZero())
+                        inputBox.setSelectedId (i + 2, juce::dontSendNotification);
+                }
+            }
+            else if (setup.outputDeviceName.isNotEmpty())
+            {
+                // ASIO: one device does both
+                inputBox.addItem (setup.outputDeviceName, 2);
+                if (! setup.inputChannels.isZero())
+                    inputBox.setSelectedId (2, juce::dontSendNotification);
+            }
+        }
+
+        rateBox.clear (juce::dontSendNotification);
+        bufferBox.clear (juce::dontSendNotification);
+        if (device != nullptr)
+        {
+            const auto rate = device->getCurrentSampleRate();
+            for (auto r : device->getAvailableSampleRates())
+                rateBox.addItem (juce::String ((int) r) + " Hz", (int) r);
+            rateBox.setSelectedId ((int) rate, juce::dontSendNotification);
+
+            for (auto b : device->getAvailableBufferSizes())
+                bufferBox.addItem (tr ("{0} samples ({1} ms)", { juce::String (b), juce::String (prefs::bufferLatencyMs (b, rate), 1) }), b);
+            bufferBox.setSelectedId (device->getCurrentBufferSizeSamples(), juce::dontSendNotification);
+        }
+        for (auto* b : { &outputBox, &inputBox, &rateBox, &bufferBox })
+            b->setEnabled (b->getNumItems() > 0);
+        panelButton.setEnabled (device != nullptr && device->hasControlPanel());
+        testButton.setEnabled (device != nullptr);
+        recordInput.setToggleState (engine.isAudioRecordingArmed(), juce::dontSendNotification);
+        updateStatus();
+    }
+
+    void updateStatus()
+    {
+        auto* device = devices.getCurrentAudioDevice();
+        if (device == nullptr)
+        {
+            status.setText (error.isNotEmpty() ? error : tr ("No audio device is open: choose an output device."), juce::dontSendNotification);
+            status.setColour (juce::Label::textColourId, theme::colour::warning);
+            load.setText ({}, juce::dontSendNotification);
+            return;
+        }
+        const auto rate = device->getCurrentSampleRate();
+        const auto latency = prefs::bufferLatencyMs (device->getOutputLatencyInSamples() + device->getCurrentBufferSizeSamples(), rate);
+        status.setText (tr ("{0} is running: {1} Hz, output latency {2} ms",
+                            { device->getName(), juce::String ((int) rate), juce::String (latency, 1) }),
+                        juce::dontSendNotification);
+        status.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+        const auto xruns = device->getXRunCount();
+        load.setText (tr ("Audio CPU load: {0}%", { juce::String (juce::roundToInt (devices.getCpuUsage() * 100.0)) })
+                          + (xruns > 0 ? juce::String::fromUTF8 ("   \xc2\xb7   ") + tr ("{0} dropouts (buffer underruns) so far", { juce::String (xruns) }) : juce::String()),
+                      juce::dontSendNotification);
+        load.setColour (juce::Label::textColourId, xruns > 0 ? theme::colour::warning : theme::colour::textSecondary);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
+    void timerCallback() override { updateStatus(); }
+
+    AudioEngine& engine;
+    juce::AudioDeviceManager& devices;
+    bool updating = false;
+    juce::String error;
+    SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
+    juce::Label driverLabel, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote;
+    juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
+    juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
+    juce::ToggleButton recordInput;
+};
+
+// ================================================================================================================
+// MIDI
+// ================================================================================================================
+// One input device: on/off, which MIDI channel it listens to and what it plays.
+class MidiInputRow final : public juce::Component
+{
+public:
+    MidiInputRow (const juce::String& deviceName, const prefs::MidiInputPrefs& p, const std::vector<std::string>& channels,
+                  std::function<void (const prefs::MidiInputPrefs&)> changed)
+        : prefsNow (p), onChange (std::move (changed))
+    {
+        enabled.setButtonText (deviceName);
+        enabled.setToggleState (p.enabled, juce::dontSendNotification);
+        enabled.onClick = [this] {
+            prefsNow.enabled = enabled.getToggleState();
+            update();
+        };
+        addAndMakeVisible (enabled);
+
+        channel.addItem (tr ("Any MIDI channel"), 1);
+        for (int c = 1; c <= 16; ++c)
+            channel.addItem (tr ("MIDI channel {0}", { juce::String (c) }), c + 1);
+        channel.setSelectedId (p.midiChannel + 1, juce::dontSendNotification);
+        channel.onChange = [this] {
+            prefsNow.midiChannel = channel.getSelectedId() - 1;
+            update();
+        };
+
+        plays.addItem (tr ("Plays the selected channels"), 1);
+        for (int i = 0; i < (int) channels.size(); ++i)
+            plays.addItem (tr ("Plays {0}", { juce::String (i + 1) + "  " + juce::String::fromUTF8 (channels[(std::size_t) i].c_str()) }), i + 2);
+        if (p.target >= (int) channels.size()) // a channel this project doesn't have (kept)
+            plays.addItem (tr ("Plays channel {0}", { juce::String (p.target + 1) }), p.target + 2);
+        plays.setSelectedId (p.target + 2, juce::dontSendNotification);
+        plays.onChange = [this] {
+            prefsNow.target = plays.getSelectedId() - 2;
+            update();
+        };
+        for (auto* b : { &channel, &plays })
+        {
+            styleCombo (*b);
+            addAndMakeVisible (b);
+        }
+        update (false);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (8, 4);
+        plays.setBounds (r.removeFromRight (230));
+        r.removeFromRight (8);
+        channel.setBounds (r.removeFromRight (150));
+        r.removeFromRight (8);
+        enabled.setBounds (r);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::bg1);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), theme::radius::md);
+    }
+
+private:
+    void update (bool notify = true)
+    {
+        channel.setEnabled (prefsNow.enabled);
+        plays.setEnabled (prefsNow.enabled);
+        if (notify && onChange)
+            onChange (prefsNow);
+    }
+
+    prefs::MidiInputPrefs prefsNow;
+    std::function<void (const prefs::MidiInputPrefs&)> onChange;
+    juce::ToggleButton enabled;
+    juce::ComboBox channel, plays;
+};
+
+class MidiPage final : public ScrollingPage,
+                       private juce::ChangeListener,
+                       private juce::ListBoxModel
+{
+public:
+    MidiPage (AudioEngine& e, SettingsHooks h, bool keep) : engine (e), hooks (std::move (h)), persistent (keep)
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &inputsTitle, &notesTitle, &controllersTitle, &inputsNote, &refresh, &noDevices,
+                                                                 &velocityLabel, &velocityBox, &velocityNote, &typeLabel, &typeValue, &pickup,
+                                                                 &pickupNote, &linksLabel, &links, &removeLink, &removeAll })
+            add (*c);
+        styleNote (inputsNote, tr ("Each input device can be turned off, listen to one MIDI channel only and play a fixed channel of the "
+                                   "Channel Rack instead of the selected ones."));
+        styleLabel (noDevices, tr ("No MIDI input devices found. Connect one and refresh the list."));
+        refresh.onClick = [this] { rebuildInputs(); };
+
+        styleLabel (velocityLabel, tr ("Velocity"));
+        velocityBox.addItem (tr ("As played"), 1);
+        velocityBox.addItem (tr ("Soft (light playing sounds louder)"), 2);
+        velocityBox.addItem (tr ("Hard (needs harder playing)"), 3);
+        velocityBox.addItem (tr ("Fixed (every note at full velocity)"), 4);
+        velocityBox.onChange = [this] {
+            auto p = engine.getMidiPrefs();
+            p.velocity = (prefs::VelocityCurve) (velocityBox.getSelectedId() - 1);
+            set (p);
+        };
+        styleCombo (velocityBox);
+        styleNote (velocityNote, tr ("For notes from MIDI devices (the typing keyboard always plays at the Piano Roll's velocity)."));
+
+        styleLabel (typeLabel, tr ("Controller type"));
+        typeLabel.setJustificationType (juce::Justification::topLeft);
+        styleLabel (typeValue, tr ("Generic controller: link a knob or fader with a control's right-click menu > Link to MIDI controller."), false);
+        typeValue.setMinimumHorizontalScale (1.0f);
+        typeValue.setJustificationType (juce::Justification::topLeft);
+        styleToggle (pickup, tr ("Pickup (takeover mode)"));
+        pickup.onClick = [this] {
+            auto p = engine.getMidiPrefs();
+            p.pickup = pickup.getToggleState();
+            set (p);
+        };
+        styleNote (pickupNote, tr ("A controller moves a parameter only after reaching its current value, so nothing jumps."));
+
+        styleLabel (linksLabel, tr ("Links in this project"));
+        linksLabel.setJustificationType (juce::Justification::topLeft);
+        links.setModel (this);
+        links.setRowHeight (24);
+        links.setColour (juce::ListBox::backgroundColourId, theme::colour::bg0);
+        links.setColour (juce::ListBox::outlineColourId, theme::colour::border);
+        links.setOutlineThickness (1);
+        removeLink.onClick = [this] {
+            const auto row = links.getSelectedRow();
+            if (juce::isPositiveAndBelow (row, (int) engine.getSong().midiLinks.size()))
+                engine.editSong ([row] (Song& s) { s.midiLinks.erase (s.midiLinks.begin() + row); });
+        };
+        removeAll.onClick = [this] { engine.editSong ([] (Song& s) { s.midiLinks.clear(); }); };
+
+        if (! persistent)
+        {
+            // --snapshot: devices of a typical setup, and two links
+            sampleDevices = { "Arturia KeyLab 49", "Akai MPD218" };
+            engine.editSong ([] (Song& s) {
+                AutomationTarget volume;
+                volume.kind = AutomationTargetKind::mixerVolume;
+                volume.index = 0;
+                AutomationTarget pan;
+                pan.kind = AutomationTargetKind::channelPan;
+                pan.index = 0;
+                s.midiLinks = { { 7, -1, volume }, { 10, 0, pan } };
+            }, false);
+        }
+
+        engine.addChangeListener (this);
+        rebuildInputs();
+        load();
+    }
+
+    ~MidiPage() override { engine.removeChangeListener (this); }
+
+private:
+    int layout (int width) override
+    {
+        Rows r (width);
+        r.section (inputsTitle, true);
+        inputsNote.setBounds (r.full (32).translated (0, -4));
+        if (rows.empty())
+            noDevices.setBounds (r.full (24));
+        for (auto& row : rows)
+            row->setBounds (r.full (34).translated (0, -4));
+        refresh.setBounds (r.full().removeFromLeft (150));
+
+        r.section (notesTitle);
+        velocityBox.setBounds (r.row (velocityLabel, 300));
+        velocityNote.setBounds (r.indented (16).translated (0, -6));
+
+        r.section (controllersTitle);
+        {
+            auto row = r.row (typeLabel, 0, 36);
+            typeLabel.setBounds (typeLabel.getBounds().withTrimmedTop (6));
+            typeValue.setBounds (row.withTrimmedTop (6));
+        }
+        pickup.setBounds (r.full (24));
+        pickupNote.setBounds (r.full (16).translated (0, -6));
+        {
+            auto row = r.row (linksLabel, 0, 110);
+            linksLabel.setBounds (linksLabel.getBounds().withTrimmedTop (4));
+            auto buttons = row.removeFromRight (120);
+            row.removeFromRight (8);
+            links.setBounds (row);
+            removeLink.setBounds (buttons.removeFromTop (26));
+            buttons.removeFromTop (6);
+            removeAll.setBounds (buttons.removeFromTop (26));
+        }
+        return r.bottom();
+    }
+
+    void set (const prefs::MidiPrefs& p)
+    {
+        if (loading)
+            return;
+        engine.setMidiPrefs (p, persistent);
+        if (hooks.midiChanged)
+            hooks.midiChanged();
+    }
+
+    void load()
+    {
+        const juce::ScopedValueSetter<bool> guard (loading, true);
+        const auto& p = engine.getMidiPrefs();
+        velocityBox.setSelectedId ((int) p.velocity + 1, juce::dontSendNotification);
+        pickup.setToggleState (p.pickup, juce::dontSendNotification);
+        links.updateContent();
+        links.repaint();
+        removeLink.setEnabled (links.getSelectedRow() >= 0);
+        removeAll.setEnabled (! engine.getSong().midiLinks.empty());
+    }
+
+    void rebuildInputs()
+    {
+        rows.clear();
+        juce::StringArray names;
+        if (persistent)
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
+                names.add (d.name);
+        else
+            names = sampleDevices;
+
+        std::vector<std::string> channels;
+        for (const auto& c : engine.getSong().channels)
+            channels.push_back (c.name);
+
+        for (const auto& name : names)
+        {
+            auto row = std::make_unique<MidiInputRow> (name, engine.getMidiPrefs().input (name.toStdString()), channels,
+                                                       [this] (const prefs::MidiInputPrefs& in) {
+                                                           auto p = engine.getMidiPrefs();
+                                                           p.setInput (in);
+                                                           set (p);
+                                                       });
+            add (*row);
+            rows.push_back (std::move (row));
+        }
+        noDevices.setVisible (rows.empty());
+        resized();
+    }
+
+    // links list
+    int getNumRows() override { return juce::jmax (1, (int) engine.getSong().midiLinks.size()); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        const auto& list = engine.getSong().midiLinks;
+        if (list.empty())
+        {
+            g.setFont (theme::font (theme::type::small));
+            g.setColour (theme::colour::textDisabled);
+            g.drawText (tr ("(none yet)"), 10, 0, width - 20, height, juce::Justification::centredLeft);
+            return;
+        }
+        if (selected)
+        {
+            g.setColour (theme::colour::accentMuted);
+            g.fillRect (0, 0, width, height);
+        }
+        const auto& link = list[(std::size_t) row];
+        g.setFont (theme::font (theme::type::body));
+        g.setColour (theme::colour::info);
+        const auto source = "CC " + juce::String (link.cc) + (link.channel >= 0 ? juce::String::fromUTF8 (" \xc2\xb7 ") + tr ("ch. {0}", { juce::String (link.channel + 1) }) : juce::String());
+        g.drawText (source, 10, 0, 110, height, juce::Justification::centredLeft);
+        g.setColour (theme::colour::textPrimary);
+        g.drawText (describeAutomationTarget (engine, link.target), 124, 0, width - 134, height, juce::Justification::centredLeft, true);
+    }
+
+    void selectedRowsChanged (int) override { removeLink.setEnabled (links.getSelectedRow() >= 0 && ! engine.getSong().midiLinks.empty()); }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        if (engine.getSong().channels.size() != channelCount)
+        {
+            channelCount = engine.getSong().channels.size();
+            rebuildInputs();
+        }
+        load();
+    }
+
+    AudioEngine& engine;
+    SettingsHooks hooks;
+    bool persistent;
+    bool loading = false;
+    std::size_t channelCount = 0;
+    juce::StringArray sampleDevices;
+    std::vector<std::unique_ptr<MidiInputRow>> rows;
+    SectionTitle inputsTitle { tr ("Input devices") }, notesTitle { tr ("Notes") }, controllersTitle { tr ("Controllers") };
+    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, typeLabel, typeValue, pickupNote, linksLabel;
+    juce::TextButton refresh { tr ("Refresh device list") }, removeLink { tr ("Remove link") }, removeAll { tr ("Remove all") };
+    juce::ComboBox velocityBox;
+    juce::ToggleButton pickup;
+    juce::ListBox links;
+};
+} // namespace
+
+std::unique_ptr<juce::Component> makeGeneralPage (AudioEngine& engine, const SettingsHooks& hooks, bool persistent)
+{
+    return std::make_unique<GeneralPage> (engine, hooks, persistent);
+}
+
+std::unique_ptr<juce::Component> makeAudioPage (AudioEngine& engine, bool persistent)
+{
+    juce::ignoreUnused (persistent);
+    return std::make_unique<AudioPage> (engine);
+}
+
+std::unique_ptr<juce::Component> makeMidiPage (AudioEngine& engine, const SettingsHooks& hooks, bool persistent)
+{
+    return std::make_unique<MidiPage> (engine, hooks, persistent);
+}
+} // namespace lynx

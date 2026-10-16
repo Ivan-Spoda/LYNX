@@ -127,15 +127,22 @@ public:
         for (auto kind : addableEffects())
             effects.all.push_back ({ juce::String::fromUTF8 (effectInfo (kind).name), tr ("built-in"), [this, kind] { targets.addEffect (makeEffectSlot (kind)); } });
 
+        // plugins: favourites (Plugin manager) first, each group by name
         auto types = engine.getPluginHost().getKnownPlugins().getTypes();
-        std::sort (types.begin(), types.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+        const auto& favourites = engine.getPluginHost().favourites();
+        const auto isFavourite = [&favourites] (const juce::PluginDescription& t) { return favourites.count (t.createIdentifierString().toStdString()) > 0; };
+        std::sort (types.begin(), types.end(), [&] (const auto& a, const auto& b) {
+            if (isFavourite (a) != isFavourite (b))
+                return isFavourite (a);
+            return a.name.compareIgnoreCase (b.name) < 0;
+        });
 
         for (const auto& type : types)
         {
             PluginRef ref;
             ref.id = type.createIdentifierString().toStdString();
             ref.name = type.name.toStdString();
-            const auto detail = type.manufacturerName + " · " + type.pluginFormatName;
+            const auto detail = (isFavourite (type) ? juce::String::fromUTF8 ("\xe2\x98\x85 ") : juce::String()) + type.manufacturerName + " · " + type.pluginFormatName;
 
             if (type.isInstrument)
                 instruments.all.push_back ({ type.name, detail, [this, ref] {
