@@ -74,7 +74,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
@@ -132,7 +132,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
   SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
   limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
-  FL's DLLs on random notes); Sakura and Drumpad on physical models rebuilt from their
+  FL's DLLs on random notes); FL Slayer on its engine (REA round 68: the 32-bit
+  reFX VST engine FL runs in its bridge — six waveguide strings at 44.1 kHz with the recorded picks, chord/glide
+  tables read from the user's `Slayer_Engine.dll`, the six play modes, 15 effects, four amps, EQ and cabinet, under the
+  engine's x87 truncating rounding; bit-identical to FL's DLL on all 64 presets in every tested scenario and on 340
+  random parameter sets at 22.05–96 kHz); Fruity Dance as a silent channel (REA round 68: a visual plugin); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -418,6 +422,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   response, cross-fades, 3N/4 latency), main-level glide and silence gate; v1's own laws (one biquad per band). On all
   1 138 + 9 installation states: the IIR modes and v1 bit-identical on 912 of 1 139 and within −166 dB on all,
   linear phase within −127 dB (IPP FFT rounding).
+- **Hardcore:** FL's exact engine (`core/HardcoreFx`, REA round 71) — five pedal boxes (11 pedals: distortion Model A,
+  chorus, flanger, phaser, reverb, delay, noise gate, equalizer, compressor, modulator, tube drive), cabinet convolution
+  with the installation's impulses (carried in the slot), 8-band EQ, levels; bit-identical to `Hardcore_x64.dll` on both
+  installation states, random chains at four rates, automation and pedal switching. Shares Toxic Biohazard's building
+  blocks (`core/IlFxKit.h`).
+- **Distructor:** FL's exact engine (`core/DistructorFx`, REA round 71) — the chain of up to four modules
+  (Module_x64: 18 distortion algorithms with ×2…×16 oversampling and DC blocker, 22 filter types, the chorus on LYNX's
+  Fruity Delay 3 engine, amp/cabinet convolution with the installation's impulses carried in the slot) and the final soft
+  clipper; bit-identical to the DLL on every module type except the Harmor shapes (IPP vector math: last-bit
+  differences, which the bit-jam quantizer can turn into step flips, −55 dB on one preset) and the cabinet (float FFT
+  in FL, float accuracy in LYNX); the 4 installation slots −∞ or below −127 dB.
+- **Multiband Delay:** FL's exact engine (`core/MultibandDelayFx`, REA round 71) — 16 bands × 8 banks of delay /
+  volume / pan, morph, feedback, keep pitch, gentle / steep / linear-phase crossovers (1536-sample latency), saturation;
+  bit-identical to the DLL with the IIR crossovers, linear phase within about −120 dB (IPP FFT rounding).
 - **EQUO:** FL's exact engine (`core/EquoFx`, REA round 61) — 31 third-octave band passes with FL's design, the eight
   banks plus master bank, band shift / mix / morph laws, per-band volume, pan and add mode with FL's float gain ramps,
   the doubled top bands, ×2^n half-band oversampling, FL's render-mode quirk (bands designed for 2× the rate), silence
@@ -597,6 +615,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
   double sinh/pow are the C library's (last-bit double differences that changed no float sample in the tests); CPUs
   without FMA take other CRT paths in FL (not checked).
+- FL Slayer (REA round 68 §9): the phase of the engine's 5 ms control grid relative to the song (FL's engine runs
+  since load, LYNX's from the render with one primer sample: note starts can differ by up to 5 ms), the C runtime's
+  rand seed per bridge thread in FL (per engine in LYNX), MIDI pan/volume/pitch events and parameter automation (state
+  edits restart the engine) are not modelled; FL applying the channel volume/pan to the output is an inference from
+  the plugin's flags.
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

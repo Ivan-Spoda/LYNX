@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/HardcoreFx.h"
 #include "core/GrossBeat.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
@@ -19,6 +20,7 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/TransistorBass.h"
+#include "core/Slayer.h"
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
@@ -125,6 +127,8 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
+        { "Hardcore", EffectKind::hardcore },
+        { "Multiband Delay", EffectKind::delay },
     };
 
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")
@@ -1214,6 +1218,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 def.pluginState = c.pluginState;
                 adoptedFromPlugin = true;
             }
+            else if (name == "fl slayer")
+            {
+                // FL's engine from the raw state (REA_rodada68) with the recorded pick excitations, chord and glide tables
+                // read at run time from the user's own Slayer_Engine.dll; there is no conversion to fall back to (state or
+                // DLL not usable: the channel stays unsupported)
+                const auto dll = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\FL Slayer\\Slayer_Engine.dll", options.roots);
+                if (slayerStateUsable (c.pluginState) && ! dll.empty() && options.fileExists && options.fileExists (dll) && slayerDllUsable (dll))
+                {
+                    def.instrument = InstrumentKind::slayer;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = dll;
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "fruity dance")
+            {
+                // a visual plugin: notes change the dance, its Gen_Render writes nothing (REA_rodada68 §8)
+                def.instrument = InstrumentKind::fruitydance;
+                def.pluginState = c.pluginState;
+                adoptedFromPlugin = true;
+            }
             else if (name == "transistor bass")
             {
                 // FL's engine from the raw state (REA_rodada57 §2) with the "303 Pulse" oscillator cycles read at run time
@@ -1474,7 +1499,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
                      || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
-                     || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx)
+                     || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
+                     || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
@@ -1593,7 +1619,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Spreader" && fx.kind != EffectKind::spreader)
                  || (plugin == "EQUO" && fx.kind != EffectKind::equo)
                  || (plugin == "Pitch Shifter" && fx.kind != EffectKind::flPitchShifter)
-                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter))
+                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter)
+                 || (plugin == "Distructor" && fx.kind != EffectKind::distructor)
+                 || (plugin == "Multiband Delay" && fx.kind != EffectKind::multibandDelay))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
@@ -1614,6 +1642,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
                  || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
+                 && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))
+        {
+            if (hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet]) > 0.0f)
+                ++options.report->droppedEffects["Hardcore (cabinet impulse not found: cabinet off)"];
+        }
     };
 
     for (const auto& insert : project.mixer)

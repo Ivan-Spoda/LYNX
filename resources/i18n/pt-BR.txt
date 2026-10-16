@@ -450,6 +450,8 @@ countries: br
 "Wasp — FL Studio 2026 has no 64-bit Wasp: the channel keeps its settings and stays silent, as in FL" = "Wasp — o FL Studio 2026 não tem Wasp de 64 bits: o canal guarda seus ajustes e fica em silêncio, como no FL"
 "Fruity Granulizer — FL's engine on the channel's sample" = "Fruity Granulizer — motor do FL sobre o sample do canal"
 "Drumaxx — FL's physical drum engine (pads on their keys; patterns not played)" = "Drumaxx — motor de bateria física do FL (pads nas suas teclas; padrões não são tocados)"
+"FL Slayer — FL's engine with its effects, amp and cabinet (picks read from your FL installation; new settings restart the voices)" = "FL Slayer — o motor do FL com seus efeitos, amplificador e gabinete (palhetas lidas da sua instalação do FL; novos ajustes reiniciam as vozes)"
+"Fruity Dance — a visual plugin: it makes no sound, the channel keeps its settings" = "Fruity Dance — um plugin visual: não produz som, o canal guarda seus ajustes"
 "Fruity DX10 — FL's FM engine" = "Fruity DX10 — motor FM do FL"
 "Kepler — FL's engine (LFO shape and noise read from your FL installation; new settings restart the voices)" = "Kepler — motor do FL (forma do LFO e ruído lidos da sua instalação do FL; novos ajustes reiniciam as vozes)"
 "PoiZone — FL's engine with its gate, chorus, delay and arpeggiator (new settings restart the voices)" = "PoiZone — motor do FL com seu gate, chorus, delay e arpejador (novos ajustes reiniciam as vozes)"

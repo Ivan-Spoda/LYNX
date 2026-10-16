@@ -105,6 +105,8 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::flkeys: return "flkeys";
         case InstrumentKind::granulizer: return "granulizer";
         case InstrumentKind::drumaxx: return "drumaxx";
+        case InstrumentKind::slayer: return "slayer";
+        case InstrumentKind::fruitydance: return "fruitydance";
     }
     return "synth";
 }
@@ -119,7 +121,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance })
         if (id == instrumentId (k))
             return k;
 
@@ -191,6 +193,9 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFastLP: return "fruityFastLP";
         case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
         case EffectKind::fruityFilter: return "fruityFilter";
+        case EffectKind::hardcore: return "hardcore";
+        case EffectKind::distructor: return "distructor";
+        case EffectKind::multibandDelay: return "multibandDelay";
     }
     return "eq";
 }
@@ -340,7 +345,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
                     EffectKind::equo, EffectKind::flPitchShifter,
                     EffectKind::frequencySplitter,
-                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter })
+                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter, EffectKind::hardcore, EffectKind::distructor, EffectKind::multibandDelay })
         if (id == effectId (k))
             return k;
 

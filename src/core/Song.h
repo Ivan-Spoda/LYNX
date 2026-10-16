@@ -63,7 +63,9 @@ enum class InstrumentKind : std::uint8_t
     sawer,      // FL's Sawer (REA_rodada65 §3): raw saved state in pluginState, the user's Sawer\data.saw in samplePath
     flkeys,     // FL Keys (REA_rodada69 §8): raw saved state in pluginState, wavetable files in zones, .wti table in modelParams
     granulizer, // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
-    drumaxx     // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
+    drumaxx,    // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
+    slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
+    fruitydance // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -341,7 +343,10 @@ enum class EffectKind : std::uint8_t
     frequencySplitter, // FL's Frequency Splitter, exact (REA_rodada62, core/FrequencySplitter.h): 26 engine values + output bands
     fruityFastLP, // FL's Fruity Fast LP, exact (REA_rodada63 §1, core/FruityFilters.h): cutoff, resonance; controls / range
     fruityFreeFilter, // FL's Fruity Free Filter, exact (REA_rodada63 §2, core/FruityFilters.h): 4 controls / range + CENTER
-    fruityFilter  // FL's Fruity Filter, exact (REA_rodada63 §3, core/FruityFilters.h): 6 controls / range + CENTER
+    fruityFilter, // FL's Fruity Filter, exact (REA_rodada63 §3, core/FruityFilters.h): 6 controls / range + CENTER
+    hardcore,     // FL's Hardcore, exact (REA_rodada71, core/HardcoreFx.h): FL's 50 parameters (cabinet / 20, types / 11); impulses in EffectSlot::state
+    distructor,   // FL's Distructor, exact (REA_rodada71, core/DistructorFx.h): FL's state (+ cabinet impulses) in EffectSlot::state, module gains / 10000 + clipper
+    multibandDelay // FL's Multiband Delay, exact (REA_rodada71, core/MultibandDelayFx.h): FL's state in EffectSlot::state, 12 globals (raw − min) / range
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

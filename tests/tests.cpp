@@ -43,6 +43,7 @@
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
+#include "core/Slayer.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -67,6 +68,8 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
 #include "core/EquoFx.h"
+#include "core/DistructorFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
@@ -946,6 +949,7 @@ TEST (flp_real_files)
     int basicSlots = 0, basicExact = 0; // REA_rodada58: PanOMatic, Balance, Blood Overdrive
     int equoSlots = 0, equoExact = 0, pitchShifterSlots = 0, pitchShifterExact = 0; // REA_rodada61
     int filterSlots = 0, filterExact = 0; // REA_rodada63: Fast LP, Free Filter, Fruity Filter
+    int distructorSlots = 0, distructorExact = 0, distructorImpulses = 0;             // REA_rodada71
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
@@ -1198,6 +1202,7 @@ TEST (flp_real_files)
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
                         equoSlots += slot.plugin == "EQUO";
+                        distructorSlots += slot.plugin == "Distructor";
                         pitchShifterSlots += slot.plugin == "Pitch Shifter";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
                         basicSlots += slot.plugin == "Fruity PanOMatic" || slot.plugin == "Fruity Balance" || slot.plugin == "Fruity Blood Overdrive";
@@ -1229,6 +1234,13 @@ TEST (flp_real_files)
                         basicExact += fx.kind == lynx::EffectKind::fruityPanOMatic || fx.kind == lynx::EffectKind::fruityBalance
                                       || fx.kind == lynx::EffectKind::fruityBloodOverdrive;
                         equoExact += fx.kind == lynx::EffectKind::equo && lynx::equofx::parse (fx.state).has_value();
+                        if (fx.kind == lynx::EffectKind::distructor)
+                            if (const auto d = lynx::distructor::parseBlob (fx.state))
+                            {
+                                ++distructorExact;
+                                for (const auto& m : d->modules)
+                                    distructorImpulses += m.type == 3 && ! m.impulseFile.empty();
+                            }
                         pitchShifterExact += fx.kind == lynx::EffectKind::flPitchShifter;
                         filterExact += fx.kind == lynx::EffectKind::fruityFastLP || fx.kind == lynx::EffectKind::fruityFreeFilter
                                        || fx.kind == lynx::EffectKind::fruityFilter;
@@ -1955,6 +1967,10 @@ TEST (flp_real_files)
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
     // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
     CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    // (Patcher graphs can add Distructor nodes of their own to the imported mixer)
+    std::printf ("  Distructor: %d of %d slots on the exact engine (%d cabinet impulses read from the installation)\n",
+                 distructorExact, distructorSlots, distructorImpulses);
+    CHECK (distructorExact >= distructorSlots && distructorSlots >= 4 && distructorImpulses >= 1); // REA_rodada71
     std::printf ("  EQUO: %d of %d slots on the exact engine\n", equoExact, equoSlots);
     CHECK (equoExact == equoSlots && equoSlots >= 10); // REA_rodada61
     std::printf ("  Pitch Shifter: %d of %d slots on the exact engine\n", pitchShifterExact, pitchShifterSlots);
@@ -9826,6 +9842,85 @@ TEST (equo_exact)
     CHECK (! lynx::equofx::parse (std::vector<std::uint8_t> (100, 0)).has_value());
 }
 
+// Multiband Delay test state (version 7, our own LCG cells, no FL data; REA_rodada71 mbd/py/teststate.py builds the same bytes)
+static std::vector<std::uint8_t> multibandDelayTestState (std::array<int, 12> globals, std::uint32_t seed)
+{
+    std::vector<std::uint8_t> b;
+    auto putI = [&b] (std::int32_t v) { const auto* q = (const std::uint8_t*) &v; b.insert (b.end(), q, q + 4); };
+    putI (7);
+    putI (396);
+    std::uint64_t s = seed;
+    for (int i = 0; i < 384; ++i)
+    {
+        s = (s * 1103515245u + 12345u) & 0x7fffffffu;
+        putI ((std::int32_t) ((s % 100001u) * (1u << 30) / 100000u));
+    }
+    for (int v : globals)
+        putI (v);
+    putI (0);
+    putI (3);
+    for (int v : { 1, 1, 0 })
+        b.push_back ((std::uint8_t) v);
+    b.insert (b.end(), 192, 0);
+    return b;
+}
+
+TEST (multiband_delay_exact)
+{
+    std::vector<float> inL (8192), inR (8192);
+    for (int n = 0; n < 8192; ++n)
+    {
+        inL[(std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0 * 0.3);
+        inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0 * 0.3);
+    }
+    struct Gold { int i; float l, r; };
+    // goldens: Multiband Delay_x64.dll (+ its engine_x64.dll) on the same states and signal, 512-frame blocks (REA_rodada71)
+    auto run = [&] (const std::vector<std::uint8_t>& st, int latency, float tol, std::initializer_list<Gold> gold) {
+        CHECK (st.size() == 1795 && lynx::mbdelay::parse (st).has_value());
+        const auto slot = lynx::effectFromFl ("Multiband Delay", st, 120.0);
+        CHECK (slot && slot->kind == lynx::EffectKind::multibandDelay && slot->state == st);
+        if (! slot)
+            return;
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l (inL), r (inR);
+        for (int i = 0, k = 0; i < 8192; ++k)
+        {
+            const int n = std::min (8192 - i, k % 2 == 0 ? 700 : 333);
+            fx->process (l.data() + i, r.data() + i, n, slot->params, 120.0);
+            i += n;
+        }
+        CHECK (fx->latencySamples() == latency);
+        for (const auto& g : gold)
+            CHECK (std::fabs (l[(std::size_t) g.i] - g.l) <= tol && std::fabs (r[(std::size_t) g.i] - g.r) <= tol);
+    };
+    // steep crossover, keep pitch, weighted feedback, compressor
+    run (multibandDelayTestState ({ 2000, 0, 3000, 600, 1, 1, 3500, 64, 0, 1, 30000, 0 }, 777), 0, 0.0f,
+         { { 1000, -0.125012308f, 0.0675066486f }, { 3000, -0.125002861f, -0.0525011979f }, { 5000, -0.110439189f, 0.0597563162f },
+           { 7000, -0.146480903f, 0.0139919929f }, { 8191, -0.0454496294f, 0.0398242511f } });
+    // gentle crossover, harmonic scale, delay ×0.1, saturation
+    run (multibandDelayTestState ({ -2500, 1, 4500, 0, 0, 0, 0, 128, 1, 0, 1000, 1 }, 4242), 0, 0.0f,
+         { { 1000, 0.0679653957f, 0.0137896547f }, { 3000, 0.0620588325f, 0.0558352768f }, { 5000, 0.0558495969f, -0.0220566839f },
+           { 7000, 0.057009533f, 0.00332171144f }, { 8191, 0.0673644915f, 0.00163267844f } });
+    // linear-phase crossover (FL's IPP FFTs are approximated: about −120 dB), clipper
+    run (multibandDelayTestState ({ 1500, 0, 2000, 1500, 2, 0, 1000, 100, 0, 0, 5000, 2 }, 99), 1536, 2e-6f,
+         { { 1000, 0.0f, 0.0f }, { 3000, 0.103910387f, -0.0521105044f }, { 5000, 0.0516818762f, -0.0134486742f },
+           { 7000, 0.065563485f, -0.00765838847f }, { 8191, -0.0376662463f, -0.0434602089f } });
+
+    const auto st = multibandDelayTestState ({ 2000, 0, 3000, 600, 1, 1, 3500, 64, 0, 1, 30000, 0 }, 777);
+    const auto s = *lynx::mbdelay::parse (st);
+    CHECK (lynx::mbdelay::parse (lynx::mbdelay::serialize (s))->raw == s.raw);
+    lynx::EffectParams p {};
+    lynx::mbdelay::toParams (s, p);
+    auto back = s;
+    lynx::mbdelay::applyParams (p, back);
+    CHECK (back.raw == s.raw);
+    CHECK (lynx::mbdelay::engineValue (s, 384 + 7) == (float) (192.0 / 256.0));
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::multibandDelay, 4, p[4], 120.0) == "steep");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::multibandDelay, 7, 1.0f, 120.0) == "100% wet");
+    CHECK (! lynx::mbdelay::parse (std::vector<std::uint8_t> (16, 0)).has_value());
+}
+
 TEST (fruity_parametric_eq_exact)
 {
     std::vector<float> inL (4096), inR (4096);
@@ -10442,14 +10537,14 @@ TEST (harmor_effects_rack)
     {
         if (s == 8192)
             inst->noteOff (60);
-        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        inst->render (l.data() + s, r.data() + s, std::min (512, (int) l.size() - s), 1.0f, 1.0f);
     }
     for (std::size_t i = 0; i < l.size(); ++i)
         finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
     CHECK (finite && energy > 1.0);
     std::vector<float> tail (44100 * 6), tailR (tail.size());
     for (int s = 0; s < (int) tail.size(); s += 512)
-        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+        inst->render (tail.data() + s, tailR.data() + s, std::min (512, (int) tail.size() - s), 1.0f, 1.0f);
     CHECK (inst->idle());
 }
 
@@ -12621,8 +12716,193 @@ TEST (drumaxx_engine)
         CHECK (report.converted["Drumaxx"] == 1);
     }
 }
+// --- REA round 68: FL Slayer (exact engine) and Fruity Dance (visual only) ------------------------------------------
+namespace
+{
+std::string slayerDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "FL Slayer" / "Slayer_Engine.dll").string();
+}
+
+std::vector<std::uint8_t> slayerPreset (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    const auto file = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer" / (std::string (name) + ".fst");
+    const auto states = pluginStatesIn (file, "FL Slayer");
+    return states.empty() ? std::vector<std::uint8_t> {} : states.front();
+}
+} // namespace
+
+TEST (slayer_state)
+{
+    // the saved state: int version, then the parameter integers (version 0: 28, version 1: 29 with the mod wheel)
+    std::vector<std::uint8_t> v0 (4 + 28 * 4, 0), v1 (4 + 29 * 4, 0);
+    const std::int32_t one = 1, wheel = 77, mode = 5;
+    std::memcpy (v1.data(), &one, 4);
+    std::memcpy (v1.data() + 4 + 28 * 4, &wheel, 4);
+    std::memcpy (v0.data() + 4 + 24 * 4, &mode, 4);
+    CHECK (lynx::slayerStateUsable (v0) && lynx::slayerStateUsable (v1));
+    CHECK (! lynx::slayerStateUsable (std::vector<std::uint8_t> (v0.begin(), v0.end() - 1)));
+    auto v2 = v1;
+    v2[0] = 2;
+    CHECK (! lynx::slayerStateUsable (v2));
+    const auto p0 = lynx::slayerStateParams (v0), p1 = lynx::slayerStateParams (v1);
+    CHECK (p0.size() == 29u && p0[24] == 5 && p0[28] == 0 && p1.size() == 29u && p1[28] == 77);
+    // the controls' maxima (the front-end sends value / max)
+    CHECK (lynx::slayerParamMax (0) == 6 && lynx::slayerParamMax (20) == 15 && lynx::slayerParamMax (24) == 5 && lynx::slayerParamMax (28) == 127
+           && lynx::slayerParamMax (3) == 65535);
+    // MIDI velocity from Init.Vol (0 → 0, which the engine takes as a note-off; FL's full velocity → 127)
+    CHECK (lynx::slayer::midiVelocity (0.0) == 0 && lynx::slayer::midiVelocity (1.0) == 99 && lynx::slayer::midiVelocity (2.0) == 126
+           && lynx::slayer::midiVelocity ((std::pow (11.0, 1.28) - 1.0) / 10.0) == 127);
+}
+
+TEST (slayer_engine)
+{
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return; // no FL installation
+    // against the installation's Slayer_Engine.dll (EXEC, REA_rodada68 §7: the DLL driven like FL's front-end drives it,
+    // host blocks of 512 at 44.1 kHz, tempo 120): bit-identical output. C3 vel 90 1024–20000, G3 vel 120 8000–30000,
+    // E4 vel 40 16000–40000, C5 vel 127 from 30000.
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* preset; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "BASS Ebass 2", 15073.5614896, 15073.5614896, { { 5000, 0.39340171217918396f, 0.39340171217918396f }, { 12000, -1.6453207731246948f, -1.6453207731246948f }, { 25000, 0.4477591812610626f, 0.4477591812610626f }, { 40000, 0.15478527545928955f, 0.15478527545928955f } } },
+        { "DIST Dire Straits", 1667.57549156, 1687.24007956, { { 5000, 0.026657210662961006f, -0.10683870315551758f }, { 12000, 0.16261409223079681f, -0.402504026889801f }, { 25000, 0.06702516227960587f, -0.04462721571326256f }, { 40000, -0.35892999172210693f, 0.29433923959732056f } } },
+        { "POWER Metal", 2041.24961449, 2041.24961449, { { 5000, -0.045430999249219894f, -0.045430999249219894f }, { 12000, 0.009085401892662048f, 0.009085401892662048f }, { 25000, -0.15170709788799286f, -0.15170709788799286f }, { 40000, -0.0430934801697731f, -0.0430934801697731f } } },
+        { "SINGLE Chorus", 1199.72408266, 1228.23838997, { { 5000, 0.08928016573190689f, 0.07585708051919937f }, { 12000, 0.22826193273067474f, 0.16860444843769073f }, { 25000, 0.14708775281906128f, 0.12602058053016663f }, { 40000, -0.02422964572906494f, -0.021596161648631096f } } },
+        { "AUTO Leslie", 2045.59821914, 16901.1532986, { { 5000, 0.09575536102056503f, -0.0019274931401014328f }, { 12000, -0.0070709832943975925f, -0.3028614819049835f }, { 25000, 0.07535621523857117f, 0.24308738112449646f }, { 40000, -0.09379560500383377f, -0.008114430122077465f } } },
+        { "FX Mad Photons", 1849.74988002, 1849.74988002, { { 5000, -0.11505282670259476f, -0.11505282670259476f }, { 12000, 0.3610122501850128f, 0.3610122501850128f }, { 25000, 0.36028820276260376f, 0.36028820276260376f }, { 40000, -0.5374203324317932f, -0.5374203324317932f } } },
+        { "ELEKTRO Jungle", 3929.94173335, 3929.94173335, { { 5000, 0.3158963918685913f, 0.3158963918685913f }, { 12000, 0.2988760769367218f, 0.2988760769367218f }, { 25000, 0.15749095380306244f, 0.15749095380306244f }, { 40000, -0.12722519040107727f, -0.12722519040107727f } } },
+        { "DIST Sololead Glide", 988.454469266, 1208.61893055, { { 5000, -0.03612576052546501f, -0.015017407014966011f }, { 12000, -0.008314903825521469f, 0.03836013376712799f }, { 25000, -0.047041457146406174f, -0.13751298189163208f }, { 40000, -0.03302673622965813f, -0.23574480414390564f } } },
+        { "SINGLE Funky", 1393.67536587, 4191.35072624, { { 5000, -0.09534210711717606f, 0.36347872018814087f }, { 12000, 0.3368682265281677f, -0.9259893894195557f }, { 25000, -0.022296791896224022f, 0.01075129397213459f }, { 40000, 0.044511131942272186f, -0.37124285101890564f } } },
+        { "AUTO Chorus Chords", 26161.9618548, 26396.2394554, { { 5000, -0.19687165319919586f, 0.08371803164482117f }, { 12000, 1.0583257675170898f, 1.5273079872131348f }, { 25000, -0.88118577003479f, -0.0774342492222786f }, { 40000, -0.3456699848175049f, -0.4140896201133728f } } },
+        { "POWER Rock Taps", 1306.21610814, 1164.18639692, { { 5000, 0.019661661237478256f, 0.07336095720529556f }, { 12000, -0.06010562554001808f, -0.3300100862979889f }, { 25000, 0.04404725879430771f, 0.0837465152144432f }, { 40000, -0.029322467744350433f, -0.1399042010307312f } } },
+        { "FX Atari 2600 Computer", 1391.44227691, 1391.44227691, { { 5000, 0.18123838305473328f, 0.18123838305473328f }, { 12000, -0.1220453679561615f, -0.1220453679561615f }, { 25000, 0.17565210163593292f, 0.17565210163593292f }, { 40000, 0.21183894574642181f, 0.21183894574642181f } } },
+    };
+    const std::vector<lynx::slayer::RefNote> notes = { { 1024, 48, 90, 20000 }, { 8000, 55, 120, 30000 }, { 16000, 64, 40, 40000 }, { 30000, 72, 127, -1 } };
+    constexpr int length = 44100;
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        const auto st = slayerPreset (g.preset);
+        CHECK (lynx::slayerStateUsable (st));
+        if (! lynx::slayerStateUsable (st))
+            continue;
+        const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, notes, 44100.0, length);
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-10 * g.el && std::abs (er - g.er) <= 1e-10 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && y[2 * (std::size_t) smp.at] == smp.l && y[2 * (std::size_t) smp.at + 1] == smp.r;
+        if (! ok)
+            std::printf ("  FL Slayer %s differs from FL's DLL: energy %.12g %.12g (DLL %.12g %.12g)\n", g.preset, el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    CHECK (checked == 12);
+
+    // the instrument: the engine primed with one sample, FL's velocity curve, the front-end's host gain cos(π/4), the
+    // channel gains on top; a note with velocity 0.8 is the reference note one sample later
+    const auto st = slayerPreset ("BASS Ebass 2");
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::slayer;
+    c.pluginState = st;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::slayer);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (16384, 0.0f), r (16384, 0.0f);
+    for (int b = 0; b < 32; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.8f);
+        if (b == 20)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 0.5f, 0.25f);
+    }
+    const int vel = lynx::slayer::midiVelocity ((std::pow (11.0, 1.28 * 0.8) - 1.0) / 10.0);
+    const auto ref = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, { { 1, 60, vel, 1 + 20 * 512 } }, 44100.0, 16385);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 16384; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * 0.70710677f * 0.5f),
+                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * 0.70710677f * 0.25f) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1.0 && vel == 102);
+
+    // every preset of the installation: usable and sounding
+    int presets = 0, sounding = 0;
+    const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer";
+    if (std::filesystem::exists (folder))
+        for (const auto& entry : std::filesystem::directory_iterator (folder))
+            for (const auto& s : pluginStatesIn (entry.path(), "FL Slayer"))
+            {
+                ++presets;
+                const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (s), dll, { { 1024, 52, 100, 20000 } }, 44100.0, 22050);
+                double e = 0.0;
+                bool finite = true;
+                for (auto v : y)
+                    finite = finite && std::isfinite (v), e += (double) v * v;
+                CHECK (finite);
+                sounding += e > 1.0 ? 1 : 0;
+            }
+    std::printf ("  FL Slayer presets: %d, %d sounding\n", presets, sounding);
+    CHECK (presets == 64 && sounding == 64);
+}
+
+TEST (slayer_and_fruity_dance_import)
+{
+    // FL Slayer plays on the exact engine when the installation's engine DLL is there (otherwise it stays unsupported);
+    // Fruity Dance (a visual plugin) becomes a silent channel that keeps its state
+    std::vector<std::uint8_t> slayer (4 + 28 * 4, 0), dance (40, 1);
+    FlpBuilder b;
+    b.ascii (0xC7, "25.2.5.5319");
+    int index = 0;
+    for (const auto& [name, state] : { std::pair<std::u16string, std::vector<std::uint8_t>> { u"FL Slayer", slayer }, { u"Fruity Dance", dance } })
+    {
+        b.u8 (0x40); b.u16 ((std::uint16_t) index++);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, name);
+        b.data (0xD5, state);
+    }
+    const auto project = flp::parseProject (b.bytes);
+    const auto plain = lynx::importFlp (project);
+    CHECK (plain.channels.size() == 2u);
+    if (plain.channels.size() == 2u)
+    {
+        CHECK (plain.channels[0].instrument != lynx::InstrumentKind::slayer);
+        CHECK (plain.channels[1].instrument == lynx::InstrumentKind::fruitydance && plain.channels[1].pluginState == dance);
+    }
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::fruitydance);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 1024, 1.0f, 1.0f);
+    CHECK (inst->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return;
+    lynx::FlpImportOptions withFiles;
+    withFiles.roots = { std::filesystem::path (realFlpDir).parent_path().string(), realFlpDir, "" };
+    withFiles.fileExists = [] (const std::string& path) {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        return std::filesystem::exists (local);
+    };
+    const auto song = lynx::importFlp (project, withFiles);
+    CHECK (song.channels.size() == 2u && song.channels[0].instrument == lynx::InstrumentKind::slayer && song.channels[0].pluginState == slayer
+           && ! song.channels[0].samplePath.empty());
+}
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
 #include "UiToolbarTests.inc"
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"
+#include "HardcoreTests.inc"
+#include "DistructorTests.inc"
