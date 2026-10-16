@@ -193,6 +193,9 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFastLP: return "fruityFastLP";
         case EffectKind::fruityFreeFilter: return "fruityFreeFilter";
         case EffectKind::fruityFilter: return "fruityFilter";
+        case EffectKind::hardcore: return "hardcore";
+        case EffectKind::distructor: return "distructor";
+        case EffectKind::multibandDelay: return "multibandDelay";
         case EffectKind::newtone: return "newtone";
         case EffectKind::newtime: return "newtime";
     }
@@ -347,7 +350,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
                     EffectKind::equo, EffectKind::flPitchShifter,
                     EffectKind::frequencySplitter,
-                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
+                    EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter, EffectKind::hardcore, EffectKind::distructor, EffectKind::multibandDelay,
                     EffectKind::newtone, EffectKind::newtime })
         if (id == effectId (k))
             return k;

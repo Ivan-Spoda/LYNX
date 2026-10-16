@@ -74,7 +74,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
@@ -422,6 +422,20 @@ accordingly. Highlights of what is **confirmed and applied**:
   response, cross-fades, 3N/4 latency), main-level glide and silence gate; v1's own laws (one biquad per band). On all
   1 138 + 9 installation states: the IIR modes and v1 bit-identical on 912 of 1 139 and within −166 dB on all,
   linear phase within −127 dB (IPP FFT rounding).
+- **Hardcore:** FL's exact engine (`core/HardcoreFx`, REA round 71) — five pedal boxes (11 pedals: distortion Model A,
+  chorus, flanger, phaser, reverb, delay, noise gate, equalizer, compressor, modulator, tube drive), cabinet convolution
+  with the installation's impulses (carried in the slot), 8-band EQ, levels; bit-identical to `Hardcore_x64.dll` on both
+  installation states, random chains at four rates, automation and pedal switching. Shares Toxic Biohazard's building
+  blocks (`core/IlFxKit.h`).
+- **Distructor:** FL's exact engine (`core/DistructorFx`, REA round 71) — the chain of up to four modules
+  (Module_x64: 18 distortion algorithms with ×2…×16 oversampling and DC blocker, 22 filter types, the chorus on LYNX's
+  Fruity Delay 3 engine, amp/cabinet convolution with the installation's impulses carried in the slot) and the final soft
+  clipper; bit-identical to the DLL on every module type except the Harmor shapes (IPP vector math: last-bit
+  differences, which the bit-jam quantizer can turn into step flips, −55 dB on one preset) and the cabinet (float FFT
+  in FL, float accuracy in LYNX); the 4 installation slots −∞ or below −127 dB.
+- **Multiband Delay:** FL's exact engine (`core/MultibandDelayFx`, REA round 71) — 16 bands × 8 banks of delay /
+  volume / pan, morph, feedback, keep pitch, gentle / steep / linear-phase crossovers (1536-sample latency), saturation;
+  bit-identical to the DLL with the IIR crossovers, linear phase within about −120 dB (IPP FFT rounding).
 - **EQUO:** FL's exact engine (`core/EquoFx`, REA round 61) — 31 third-octave band passes with FL's design, the eight
   banks plus master bank, band shift / mix / morph laws, per-band volume, pan and add mode with FL's float gain ramps,
   the doubled top bands, ×2^n half-band oversampling, FL's render-mode quirk (bands designed for 2× the rate), silence

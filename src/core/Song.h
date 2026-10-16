@@ -344,6 +344,9 @@ enum class EffectKind : std::uint8_t
     fruityFastLP, // FL's Fruity Fast LP, exact (REA_rodada63 §1, core/FruityFilters.h): cutoff, resonance; controls / range
     fruityFreeFilter, // FL's Fruity Free Filter, exact (REA_rodada63 §2, core/FruityFilters.h): 4 controls / range + CENTER
     fruityFilter, // FL's Fruity Filter, exact (REA_rodada63 §3, core/FruityFilters.h): 6 controls / range + CENTER
+    hardcore,     // FL's Hardcore, exact (REA_rodada71, core/HardcoreFx.h): FL's 50 parameters (cabinet / 20, types / 11); impulses in EffectSlot::state
+    distructor,   // FL's Distructor, exact (REA_rodada71, core/DistructorFx.h): FL's state (+ cabinet impulses) in EffectSlot::state, module gains / 10000 + clipper
+    multibandDelay, // FL's Multiband Delay, exact (REA_rodada71, core/MultibandDelayFx.h): FL's state in EffectSlot::state, 12 globals (raw − min) / range
     newtone,      // FL's Newtone (REA_rodada73, core/NewtoneFx.h): pass-through; in slave mode adds its source sample at the song time
     newtime       // FL's Newtime (REA_rodada73, core/NewtoneFx.h): the same contract (its time warping is not reproduced)
 };
