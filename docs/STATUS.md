@@ -72,7 +72,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
@@ -476,6 +476,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
   Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
   render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
+- **Newtone and Newtime:** imported as mixer effects that keep FL's state (`core/NewtoneFx`, REA round 73). Like FL,
+  they pass the insert's input through unchanged (bit-identical to the DLLs); with FL's "slave to host playback"
+  switch on (an editable LYNX parameter) they add their source sample from the song time while the song plays —
+  identical to Newtone's output for an unedited sample played from the song start at the sample's rate (−138 dB).
+  The source sample comes from the path FL stored (or the engine's working copy), or is chosen in the slot menu.
+  Not reproduced: the note/time edits and Newtime's time warping (zplane engines), Newtone's pitch-mark alignment when
+  playback starts mid-song, and its behaviour at other project rates (LYNX resamples linearly).
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):

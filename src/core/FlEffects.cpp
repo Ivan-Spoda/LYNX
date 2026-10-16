@@ -36,6 +36,7 @@
 
 #include "core/Effects.h"
 #include "core/FlpImport.h"
+#include "core/NewtoneFx.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1143,6 +1144,17 @@ std::optional<EffectSlot> fruityMultibandExact (const std::vector<std::uint8_t>&
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    // Newtone / Newtime: FL's state kept as it is; the source sample is resolved by the project import (REA_rodada73)
+    if (pluginName == "Newtone" || pluginName == "Newtime")
+    {
+        auto slot = makeEffectSlot (pluginName == "Newtone" ? EffectKind::newtone : EffectKind::newtime);
+        if (const auto parsed = newtonefx::parse (state))
+        {
+            newtonefx::toParams (*parsed, slot.params);
+            slot.state = state;
+        }
+        return slot;
+    }
     if (auto exact = fruityDelayExact (pluginName, state))
         return exact;
     if (auto exact = fruityDynamicsExact (pluginName, state))
@@ -1424,6 +1436,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityFastLP: return { "Fruity Fast LP" };
         case EffectKind::fruityFreeFilter: return { "Fruity Free Filter" };
         case EffectKind::fruityFilter: return { "Fruity Filter" };
+        case EffectKind::newtone: return { "Newtone" };
+        case EffectKind::newtime: return { "Newtime" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

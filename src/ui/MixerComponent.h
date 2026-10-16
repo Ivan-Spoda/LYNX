@@ -196,6 +196,7 @@ private:
     int dragSlot = -1, dropSlot = -1; // dragging a slot to reorder it
     // A/B compare: a spare state per (insert, slot), swapped with the live one on request (not saved)
     std::map<std::pair<int, int>, EffectSlot> spare;
+    std::unique_ptr<juce::FileChooser> sampleChooser; // Newtone / Newtime source sample
 
     AudioEngine& engine;
     int track = 0;

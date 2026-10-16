@@ -84,6 +84,8 @@ public:
     virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
     // Song position at the start of the block, in ticks (for tempo-synced effects).
     virtual void setSongPosition (double /*ticks*/) noexcept {}
+    // Whether the song is playing during the next process() (effects that follow the host transport, like Newtone).
+    virtual void setPlaying (bool /*playing*/) noexcept {}
     // Sidechain input for the next process(): another track's output, or nullptr if that track is
     // silent. Only called when the slot has a sidechain.
     virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}

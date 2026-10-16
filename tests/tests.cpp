@@ -73,6 +73,7 @@
 #include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityFilters.h"
+#include "core/NewtoneFx.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/FrequencySplitter.h"
@@ -13301,5 +13302,218 @@ TEST (slayer_and_fruity_dance_import)
 #include "UiToolbarTests.inc"
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"
+
+// --- Newtone / Newtime (REA_rodada73) -----------------------------------------------------------------------------
+
+namespace newtonetest
+{
+void put32 (std::vector<std::uint8_t>& b, std::int32_t v) { for (int i = 0; i < 4; ++i) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * i))); }
+void put64 (std::vector<std::uint8_t>& b, std::int64_t v) { for (int i = 0; i < 8; ++i) b.push_back ((std::uint8_t) ((std::uint64_t) v >> (8 * i))); }
+void record (std::vector<std::uint8_t>& b, int id, const std::vector<std::uint8_t>& d)
+{
+    put32 (b, id);
+    put64 (b, (std::int64_t) d.size());
+    b.insert (b.end(), d.begin(), d.end());
+}
+
+// a state with our own layout reading (REA_rodada73 §2): options, the wrapper record around the engine XML, the source path
+std::vector<std::uint8_t> state (int version, std::uint32_t flags, const std::string& xml, const std::string& source)
+{
+    std::vector<std::uint8_t> b, r1, r2;
+    put32 (b, version);
+    put32 (r1, 727);
+    put32 (r1, 582);
+    put32 (r1, (std::int32_t) flags);
+    r1.resize (0x28, 0);
+    record (b, 1, r1);
+    std::vector<std::uint8_t> chunk { 'V', 'C', '2', '!' };
+    put32 (chunk, (std::int32_t) xml.size() + 1);
+    chunk.insert (chunk.end(), xml.begin(), xml.end());
+    chunk.push_back (0);
+    put32 (r2, -9);
+    r2.push_back (0x0c);
+    put32 (r2, -2);
+    put64 (r2, (std::int64_t) chunk.size());
+    put32 (r2, 0);
+    r2.insert (r2.end(), chunk.begin(), chunk.end());
+    record (b, 2, r2);
+    record (b, 3, std::vector<std::uint8_t> (source.begin(), source.end()));
+    record (b, 4, std::vector<std::uint8_t> (12, 0));
+    record (b, 5, std::vector<std::uint8_t> (16, 0));
+    record (b, 6, std::vector<std::uint8_t> (32, 0));
+    return b;
+}
+
+const char* xmlWithTrack (bool edited)
+{
+    return edited ? "<NewToneProject NumOfTracks=\"1\"><Tracks><Trk_0 TrackNum=\"0\" Type=\"class CzplJPositionablePSOLASource\" "
+                    "FilePath=\"C:\\tmp\\a&amp;b.wav\"><AudioObject SelfBPM=\"120.0\" OriginalFileLength=\"1000\" GlobalTune=\"0.0\">"
+                    "<Pitch_0 fOrigPitch=\"60.0\" fCurPitch=\"60.0\" iOrigLength=\"500\" iCurLength=\"500\"/>"
+                    "<Pitch_1 fOrigPitch=\"62.0\" fCurPitch=\"64.0\" iOrigLength=\"500\" iCurLength=\"500\"/></AudioObject></Trk_0></Tracks></NewToneProject>"
+                  : "<NewToneProject NumOfTracks=\"1\"><Tracks><Trk_0 TrackNum=\"0\" Type=\"class CzplJTimelineWarpSource\" "
+                    "FilePath=\"x.wav\"><AudioObject SelfBPM=\"80.0\" OriginalFileLength=\"1000\">"
+                    "<Pitch_0 fOrigPitch=\"60.0\" fCurPitch=\"60.0\" fCurVolume=\"1.0\"/></AudioObject></Trk_0></Tracks></NewToneProject>";
+}
+} // namespace newtonetest
+
+TEST (newtone_state)
+{
+    using namespace newtonetest;
+    const auto a = lynx::newtonefx::parse (state (0, 5, xmlWithTrack (true), "%FLStudioUserData%\\vox.wav"));
+    CHECK (a.has_value());
+    CHECK (a->version == 0 && a->editorWidth == 727 && a->editorHeight == 582 && a->slave());
+    CHECK (a->sourcePath == "%FLStudioUserData%\\vox.wav");
+    CHECK (a->tracks.size() == 1 && a->tracks[0].notes == 2 && a->tracks[0].frames == 1000 && ! a->tracks[0].timeWarp);
+    CHECK (a->tracks[0].filePath == "C:\\tmp\\a&b.wav" && a->tracks[0].selfBpm == 120.0);
+    CHECK (a->tracks[0].edited && a->edited()); // note 1 moved from 62 to 64
+
+    const auto b = lynx::newtonefx::parse (state (1, 0x41, xmlWithTrack (false), ""));
+    CHECK (b.has_value() && ! b->slave() && b->sourcePath.empty());
+    CHECK (b->tracks.size() == 1 && b->tracks[0].timeWarp && ! b->edited());
+
+    // an empty project, as the installation's presets
+    const auto c = lynx::newtonefx::parse (state (0, 1, "<NewToneProject NumOfTracks=\"0\"><Tracks/></NewToneProject>", ""));
+    CHECK (c.has_value() && c->tracks.empty());
+
+    // broken: other version, truncated record, no options record
+    CHECK (! lynx::newtonefx::parse (state (2, 1, "", "")));
+    auto cut = state (0, 1, xmlWithTrack (true), "");
+    cut.resize (cut.size() - 3);
+    CHECK (! lynx::newtonefx::parse (cut));
+    CHECK (! lynx::newtonefx::parse ({ 0, 0, 0, 0 }));
+
+    // the FL import keeps the state and takes the slave switch as the editable parameter
+    const auto raw = state (0, 5, xmlWithTrack (false), "");
+    const auto slot = lynx::effectFromFl ("Newtone", raw, 120.0);
+    CHECK (slot && slot->kind == lynx::EffectKind::newtone && slot->state == raw && slot->params[0] == 1.0f);
+    const auto slot2 = lynx::effectFromFl ("Newtime", state (1, 0x41, xmlWithTrack (false), ""), 120.0);
+    CHECK (slot2 && slot2->kind == lynx::EffectKind::newtime && slot2->params[0] == 0.0f);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::newtone, 0, 1.0f, 120.0) == "on");
+
+    // the installation's own states (plugin database and the playlist's pitch/warp correction tracks) [DATA]
+    if (! realFlpDir.empty())
+    {
+        int found = 0, read = 0;
+        for (const char* rel : { "System/PitchCorrectionTrack.fst", "System/WarpCorrectionTrack.fst",
+                                 "Patches/Plugin database/Effects/Misc/Newtone.fst", "Patches/Plugin database/Effects/Misc/Newtime.fst" })
+        {
+            const auto path = std::filesystem::path (realFlpDir) / rel;
+            if (! std::filesystem::exists (path))
+                continue;
+            ++found;
+            std::ifstream f (path, std::ios::binary);
+            std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+            const auto fx = lynx::effectFromFlPreset (bytes, 120.0);
+            read += fx && (fx->kind == lynx::EffectKind::newtone || fx->kind == lynx::EffectKind::newtime) && ! fx->state.empty()
+                    && fx->params[0] == 0.0f && lynx::newtonefx::parse (fx->state)->tracks.empty();
+        }
+        std::printf ("  %d Newtone/Newtime states, %d read\n", found, read);
+        CHECK (read == found);
+    }
+}
+
+TEST (newtone_engine)
+{
+    // REA_rodada73 §3-4 [EXEC]: the input passes unchanged unless slave mode is on and the song plays; then the source
+    // sample is added from the song time on (at the source's own rate)
+    auto sample = std::make_shared<lynx::SampleData>();
+    sample->sampleRate = 44100.0;
+    for (int i = 0; i < 3000; ++i)
+        sample->left.push_back (0.001f * (float) (i % 97) - 0.04f);
+    const double sr = 44100.0, bpm = 120.0;
+    const auto tps = lynx::ticksPerSample (bpm, sr);
+
+    auto fx = lynx::newtonefx::make (sample);
+    fx->prepare (sr);
+    lynx::EffectParams on {}, off {};
+    on[0] = 1.0f;
+
+    std::vector<float> l (256), r (256), in (256);
+    auto block = [&] (double tick, bool playing, const lynx::EffectParams& p) {
+        for (int i = 0; i < 256; ++i)
+            l[(std::size_t) i] = r[(std::size_t) i] = in[(std::size_t) i] = 0.25f * std::sin (0.01f * (float) (i + tick));
+        fx->setSongPosition (tick);
+        fx->setPlaying (playing);
+        fx->process (l.data(), r.data(), 256, p, bpm);
+    };
+    auto same = [&] { return std::equal (l.begin(), l.end(), in.begin()) && std::equal (r.begin(), r.end(), in.begin()); };
+
+    block (0.0, true, off);
+    CHECK (same()); // slave off
+    block (0.0, false, on);
+    CHECK (same()); // not playing
+
+    // playing from the start: in + source, sample by sample, over consecutive blocks
+    bool exact = true;
+    for (int b = 0; b < 4; ++b)
+    {
+        block (b * 256 * tps, true, on);
+        for (int i = 0; i < 256; ++i)
+            exact = exact && l[(std::size_t) i] == in[(std::size_t) i] + sample->left[(std::size_t) (b * 256 + i)]
+                    && r[(std::size_t) i] == l[(std::size_t) i];
+    }
+    CHECK (exact);
+
+    // a jump re-seeks to the song time; past the end of the sample only the input remains
+    block (2000 * tps, true, on);
+    CHECK (l[0] == in[0] + sample->left[2000] && l[255] == in[255] + sample->left[2255]);
+    block (2900 * tps, true, on);
+    CHECK (l[99] == in[99] + sample->left[2999] && l[100] == in[100]);
+    // stopping and playing again: from the new song time
+    block (0.0, false, on);
+    CHECK (same());
+    block (10 * tps, true, on);
+    CHECK (l[0] == in[0] + sample->left[10]);
+
+    // without its sample: a pass-through
+    auto none = lynx::makeEffect (lynx::EffectKind::newtime);
+    none->prepare (sr);
+    for (int i = 0; i < 256; ++i)
+        l[(std::size_t) i] = r[(std::size_t) i] = in[(std::size_t) i] = 0.1f * (float) i / 256.0f;
+    none->setPlaying (true);
+    none->process (l.data(), r.data(), 256, on, bpm);
+    CHECK (same());
+}
+
+TEST (newtone_rack_follows_transport)
+{
+    // the mixer gives the effect the transport, and keeps it running on a silent insert (no smart disable)
+    auto song = lynx::Song::makeDefault();
+    for (auto& p : song.patterns)
+        p.notes.clear();
+    song.bpm = 120.0;
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::newtone);
+    slot.params[0] = 1.0f;
+    slot.samplePath = "newtone-test.wav";
+    song.mixer[1].effects.push_back (slot);
+
+    auto sample = std::make_shared<lynx::SampleData>();
+    sample->sampleRate = 48000.0;
+    sample->left.assign (48000, 0.5f);
+    int loads = 0;
+    lynx::RackState::SampleProvider provider = [&] (const std::string& path) -> std::shared_ptr<const lynx::SampleData> {
+        ++loads;
+        return path == "newtone-test.wav" ? sample : nullptr;
+    };
+    const double sr = 48000.0;
+    auto state = lynx::RackState::build (song, nullptr, sr, provider);
+    CHECK (loads == 1);
+
+    lynx::RackRenderer rr;
+    rr.prepare (sr);
+    std::vector<float> l (512), r (512);
+    auto peakOf = [&] (bool playing, double tick) {
+        float peak = 0.0f;
+        for (int b = 0; b < 8; ++b)
+        {
+            rr.process (state.get(), playing, tick + b * 512 * lynx::ticksPerSample (song.bpm, sr), 512, l.data(), r.data());
+            for (auto v : l)
+                peak = std::max (peak, std::abs (v));
+        }
+        return peak;
+    };
+    CHECK (peakOf (false, 0.0) == 0.0f);
+    CHECK (peakOf (true, 0.0) > 0.1f);
+}
 #include "HardcoreTests.inc"
 #include "DistructorTests.inc"

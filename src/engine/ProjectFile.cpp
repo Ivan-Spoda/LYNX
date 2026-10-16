@@ -197,6 +197,8 @@ const char* effectId (EffectKind k)
         case EffectKind::distructor: return "distructor";
         case EffectKind::multibandDelay: return "multibandDelay";
         case EffectKind::lovePhilter: return "lovePhilter";
+        case EffectKind::newtone: return "newtone";
+        case EffectKind::newtime: return "newtime";
     }
     return "eq";
 }
@@ -240,6 +242,8 @@ juce::var effectToVar (const EffectSlot& slot)
         e->setProperty ("sidechain2", slot.sidechain2);
     if (! slot.state.empty()) // FL's raw state of an exact effect (Vocodex), base64
         e->setProperty ("state", juce::Base64::toBase64 (slot.state.data(), slot.state.size()));
+    if (! slot.samplePath.empty()) // Newtone / Newtime source sample
+        e->setProperty ("sample", str (slot.samplePath));
 
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
@@ -300,6 +304,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     slot.plugin = pluginFromVar (e["plugin"]);
     slot.sidechain = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain", -1));
     slot.sidechain2 = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain2", -1));
+    slot.samplePath = e.getProperty ("sample", "").toString().toStdString();
     if (e.hasProperty ("state"))
     {
         juce::MemoryOutputStream raw;
@@ -347,7 +352,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::equo, EffectKind::flPitchShifter,
                     EffectKind::frequencySplitter,
                     EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter, EffectKind::hardcore, EffectKind::distructor, EffectKind::multibandDelay,
-                    EffectKind::lovePhilter })
+                    EffectKind::lovePhilter,
+                    EffectKind::newtone, EffectKind::newtime })
         if (id == effectId (k))
             return k;
 
