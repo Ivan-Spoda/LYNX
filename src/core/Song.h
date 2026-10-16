@@ -333,7 +333,10 @@ enum class EffectKind : std::uint8_t
     convolver,    // FL's Fruity Convolver, exact (REA_rodada60, core/ConvolverFx.h): FL's 4 controls as (raw − min) / range; impulse response, knobs and envelopes in EffectSlot::state
     equo,         // FL's EQUO, exact (REA_rodada61, core/EquoFx.h): FL's state in EffectSlot::state, knobs (raw − min) / range
     flPitchShifter, // FL's Pitch Shifter, exact (REA_rodada61, core/PitchShifterFl.h): FL's 13 knobs (raw − min) / range + 3 options
-    frequencySplitter // FL's Frequency Splitter, exact (REA_rodada62, core/FrequencySplitter.h): 26 engine values + output bands
+    frequencySplitter, // FL's Frequency Splitter, exact (REA_rodada62, core/FrequencySplitter.h): 26 engine values + output bands
+    fruityFastLP, // FL's Fruity Fast LP, exact (REA_rodada63 §1, core/FruityFilters.h): cutoff, resonance; controls / range
+    fruityFreeFilter, // FL's Fruity Free Filter, exact (REA_rodada63 §2, core/FruityFilters.h): 4 controls / range + CENTER
+    fruityFilter  // FL's Fruity Filter, exact (REA_rodada63 §3, core/FruityFilters.h): 6 controls / range + CENTER
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
