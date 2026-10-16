@@ -21,6 +21,7 @@
 #include "core/FrequencySplitter.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
@@ -35,6 +36,7 @@
 
 #include "core/Effects.h"
 #include "core/FlpImport.h"
+#include "core/NewtoneFx.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1142,6 +1144,17 @@ std::optional<EffectSlot> fruityMultibandExact (const std::vector<std::uint8_t>&
 
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
+    // Newtone / Newtime: FL's state kept as it is; the source sample is resolved by the project import (REA_rodada73)
+    if (pluginName == "Newtone" || pluginName == "Newtime")
+    {
+        auto slot = makeEffectSlot (pluginName == "Newtone" ? EffectKind::newtone : EffectKind::newtime);
+        if (const auto parsed = newtonefx::parse (state))
+        {
+            newtonefx::toParams (*parsed, slot.params);
+            slot.state = state;
+        }
+        return slot;
+    }
     if (auto exact = fruityDelayExact (pluginName, state))
         return exact;
     if (auto exact = fruityDynamicsExact (pluginName, state))
@@ -1190,6 +1203,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             return exact;
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
+            return exact;
+    if (pluginName == "Fruity Love Philter") // FL's own engine (REA_rodada66); lovePhilterEffects' conversion otherwise
+        if (auto exact = philter::slotFromFl (state))
             return exact;
     if (pluginName == "Pitch Shifter") // the exact engines (REA_rodada61); LYNX's generic pitch shifter otherwise
         if (psfl::State ps; psfl::parsePitchShifter (state.data(), state.size(), ps))
@@ -1420,6 +1436,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityFastLP: return { "Fruity Fast LP" };
         case EffectKind::fruityFreeFilter: return { "Fruity Free Filter" };
         case EffectKind::fruityFilter: return { "Fruity Filter" };
+        case EffectKind::newtone: return { "Newtone" };
+        case EffectKind::newtime: return { "Newtime" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

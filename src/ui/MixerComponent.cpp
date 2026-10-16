@@ -2482,6 +2482,35 @@ void EffectsPanel::showSlotMenu (int slot)
         sideMenu (tr ("Modulator from"), false);
         sideMenu (tr ("Carrier from"), true);
     }
+    if (kind == EffectKind::newtone || kind == EffectKind::newtime)
+    {
+        // the sample the plugin plays in slave mode (REA_rodada73): FL's edits are kept in the state but not reproduced
+        const auto& fx = (*slots())[(std::size_t) slot];
+        const auto current = juce::File (juce::String::fromUTF8 (fx.samplePath.c_str()));
+        juce::PopupMenu source;
+        source.addItem (fx.samplePath.empty() ? tr ("No sample") : current.getFileName(), false, false, [] {});
+        source.addItem (tr ("Choose a sample..."), [this, slot, current] {
+            sampleChooser = std::make_unique<juce::FileChooser> (tr ("Source sample"), current.existsAsFile() ? current : juce::File(),
+                                                                 "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+            sampleChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                        [this, slot] (const juce::FileChooser& fc) {
+                                            const auto file = fc.getResult();
+                                            if (file == juce::File())
+                                                return;
+                                            engine.editSong ([t = track, slot, path = file.getFullPathName().toStdString()] (Song& s) {
+                                                if (t < (int) s.mixer.size() && slot < (int) s.mixer[(std::size_t) t].effects.size())
+                                                    s.mixer[(std::size_t) t].effects[(std::size_t) slot].samplePath = path;
+                                            });
+                                        });
+        });
+        source.addItem (tr ("Remove the sample"), ! fx.samplePath.empty(), false, [this, slot] {
+            engine.editSong ([t = track, slot] (Song& s) {
+                if (t < (int) s.mixer.size() && slot < (int) s.mixer[(std::size_t) t].effects.size())
+                    s.mixer[(std::size_t) t].effects[(std::size_t) slot].samplePath.clear();
+            });
+        });
+        menu.addSubMenu (tr ("Source sample"), source);
+    }
     {
         // A/B compare: keep a copy of the settings, then swap between it and the current ones
         const auto key = std::make_pair (track, slot);

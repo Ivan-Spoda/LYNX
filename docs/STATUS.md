@@ -72,10 +72,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
-  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
+  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
   phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
@@ -348,11 +348,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   synthetic cases. Not modelled (unused by FL's data): release loops, unison (hidden parameters). LYNX creates the
   instance at its playing rate, so the rate-change quirks of REA round 39 §2.13 do not apply; FL's max-polyphony value
   at creation is not confirmed (LYNX uses 0 → 32 voices). A missing noise sample leaves the noise silent (reported).
-- **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
-  octaves), 7 (all-pass) and 11 (Mango); pattern envelopes on volume (rhythmic envelope effect, in beats, looped,
-  song-locked, tension curves), pan LFO (auto-pan effect), cutoff and resonance envelope/LFO as live
-  modulation of the EQ (top-level live automation, or links inside the parallel container with several units);
-  FL's pan law (√2·cos/sin with the far side folded in), pan-LFO tension, pulse curves (type 5) as steps.
+- **Love Philter:** FL's exact engine as a mixer effect (`core/LovePhilter`, REA round 66): the whole state (8 units,
+  their 8 articulators with the selected pattern envelope, LFO and X/Y/follower maps, waveshaper curves), FL's
+  oversampling (×1…×16, doubled when exporting) through the half-band cascade, the control tick with its block ramps,
+  the twelve filter kernels (Chocolate SVF, Lime, the eight Vanilla biquads, Mango with drive) in their precision,
+  NEXT chaining, solo, the waveshaper, the input/unit-1 envelope follower, Mod X/Y smoothing, FL's pan law and CENTER;
+  pattern envelopes and LFOs are positioned at the song position when the transport starts or jumps. FL's controls
+  stay editable and automatable (48 of them: globals, cutoff/resonance/envelope amount/pan/volume per unit).
+  Bit-identical to the installation's DLL on all 86 states of the installation (39 demo slots + 47 presets) in live
+  and export modes, on Linux and Windows builds, with automation, transport positions and 22–96 kHz. The DLL's own
+  Delphi math runtime (exp, ln, sin, cos, power, tanh) is re-created (`core/DelphiRuntime.h`). The old parametric-EQ
+  conversion remains only for states the engine cannot read.
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input listen to the source track (their exact engines below).
@@ -474,6 +480,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
   Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
   render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
+- **Newtone and Newtime:** imported as mixer effects that keep FL's state (`core/NewtoneFx`, REA round 73). Like FL,
+  they pass the insert's input through unchanged (bit-identical to the DLLs); with FL's "slave to host playback"
+  switch on (an editable LYNX parameter) they add their source sample from the song time while the song plays —
+  identical to Newtone's output for an unedited sample played from the song start at the sample's rate (−138 dB).
+  The source sample comes from the path FL stored (or the engine's working copy), or is chosen in the slot menu.
+  Not reproduced: the note/time edits and Newtime's time warping (zplane engines), Newtone's pitch-mark alignment when
+  playback starts mid-song, and its behaviour at other project rates (LYNX resamples linearly).
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -646,8 +659,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   resonant Vanilla HP); the polyphony limit was not exercised against the DLL. States older than version 17 still use
   the old 3-oscillator conversion. Export with the render settings is CPU-heavy: most demo patches run their voices
   8× oversampled when FL exports, and LYNX does the same.
-- Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
-  (control slot → live link); pulse curves with more than 10 cycles.
+- Love Philter: what FL sends when an export starts (a flush, which skips the first tick's ramps) is not observed; LYNX
+  starts like a freshly loaded plugin.
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.

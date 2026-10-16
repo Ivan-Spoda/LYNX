@@ -812,7 +812,7 @@ struct ReverbFx
             line[k].assign ((std::size_t) std::max (1, (sr * kLen[k]) / 20000) + 1, 0.0f);
             pos[k] = 0;
         }
-        pre.assign ((std::size_t) std::max (1, (sr * 250) / 1000), 0.0f);
+        pre.assign ((std::size_t) std::max (1, (sr * 250) / 1000), fbits (0x0da24260u)); // starts at 1e-30 [EXEC]
         prePos = 0;
     }
 

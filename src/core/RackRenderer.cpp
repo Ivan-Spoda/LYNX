@@ -4,6 +4,7 @@
 #include "core/Denormals.h"
 #include "core/FlKeys.h"
 #include "core/DirectWave.h"
+#include "core/NewtoneFx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -210,6 +211,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
                 && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::parallel // the container is rebuilt
                 && previous->song.mixer[t].effects[i].state == slots[i].state
+                && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
                     || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate)))
             {
@@ -226,6 +228,12 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
                 if (effect == nullptr)
                     effect = std::make_shared<BypassEffect>();
+            }
+            else if ((kind == EffectKind::newtone || kind == EffectKind::newtime))
+            {
+                // Newtone / Newtime: their source sample (loaded off the audio thread), REA_rodada73
+                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr);
+                effect->prepare (sampleRate);
             }
             else
             {
@@ -851,7 +859,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
 
         // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
-        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat)
+        // (nor Newtone / Newtime: in slave mode they play their sample whatever the input)
+        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
+            && slots[i].kind != EffectKind::newtime)
         {
             auto& sd = smartDisable[key];
 
@@ -888,12 +898,14 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 params[p] = automated (autos[p], params[p]);
 
             effects[i]->setSongPosition (chunkTick);
+            effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
             effects[i]->process (l, r, n, params, bpm);
         }
         else
         {
             effects[i]->setSongPosition (chunkTick);
+            effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
             effects[i]->process (l, r, n, slots[i].params, bpm);
         }
@@ -1029,6 +1041,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
                                  float* left, float* right, MeterBank* meters) noexcept
 {
     chunkTick = startTick;
+    chunkPlaying = playing;
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
 
