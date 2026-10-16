@@ -1,5 +1,7 @@
 #include "core/Instruments.h"
 #include "core/FlSynths.h"
+#include "core/FlResampler.h"
+#include "core/FlVoiceProcessor.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -14,6 +16,7 @@
 #include "core/Sawer.h"
 #include "core/Drumaxx.h"
 #include "core/Granulizer.h"
+#include "core/Slayer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
 #include "core/Dx10.h"
@@ -235,8 +238,11 @@ private:
             case InstrumentKind::plucked:
             case InstrumentKind::beepmap:
             case InstrumentKind::sawer:
+            case InstrumentKind::flkeys:
             case InstrumentKind::granulizer:
             case InstrumentKind::drumaxx:
+            case InstrumentKind::slayer:
+            case InstrumentKind::fruitydance:
                 break;
         }
 
@@ -1332,13 +1338,21 @@ private:
 
 // ---------------------------------------------------------------------------
 // Sampler: plays the whole sample on each note (one-shot, like an FL step),
-// transposed by the key (60 = original pitch), with linear interpolation.
+// transposed by the key (60 = original pitch), with FL's sampler interpolation (core/FlResampler.h: 24-point sinc while
+// playing, 32-point when exporting, FL's defaults; REA_rodada69 §1).
 
 struct SamplerVoice
 {
     bool active = false;
-    double position = 0.0;
-    double rate = 1.0;
+    double position = 0.0; // read position in region order (reversed voices read the region backwards)
+    double rate = 1.0;     // frames per output sample (> 0)
+    bool reversed = false;
+    int loops = 0;         // times the zone loop has wrapped (FL lets taps before the loop start wrap only then)
+    flrs::Kernel kernel;
+    bool flEnvelope = false; // FL's volume articulator drives the level (the ADSR stays at 1)
+    flvp::Art volumeArt;
+    double tickLeft = 0.0;   // samples until the next sequencer tick
+    float flLevel = 0.0f, flStep = 0.0f; // the level ramps linearly to each tick's value over the tick (FL)
     float velocity = 0.0f;
     float fade = 1.0f;     // < 1 when the voice was stolen (declick)
     bool stolen = false;
@@ -1347,7 +1361,7 @@ struct SamplerVoice
     float env = 1.0f;      // envelope
     float envStep = 0.0f;  // attack step (> 0) or release step (< 0)
     int stage = 1;         // 0 attack, 1 decay, 2 sustain, 3 release
-    double first = 0.0, last = 0.0; // played region
+    double first = 0.0, last = 0.0; // played region: first and last frame (inclusive)
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f; // clip fades
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
@@ -1383,22 +1397,28 @@ public:
             sample = zones.front().sample;
     }
 
-    // the zone for the key/velocity; several covering the same note take turns (round-robin, like
-    // FPC's cycled layers); if none covers it, the one with the nearest root key
+    // the zone for the key/velocity; several covering the same note take turns like FPC's "cycle" layers (REA_rodada69
+    // §4: among the zones covering the note, in order, the one after the last chosen, wrapping); if none covers it, the
+    // one with the nearest root key. The velocity index is FL's round(velocity · 128), at most 127.
     const LoadedZone* zoneFor (int key, float velocity) noexcept
     {
         if (zones.empty())
             return nullptr;
 
-        const auto vel = (int) std::lround (std::clamp (velocity, 0.0f, 1.0f) * 127.0f);
+        const auto vel = std::min (127, (int) std::nearbyint (std::clamp (velocity, 0.0f, 1.0f) * 128.0f));
         const LoadedZone* nearest = nullptr;
-        const LoadedZone* matches[16] {};
-        int matchCount = 0;
+        int matches[16] {};
+        int matchCount = 0, lastAt = -1;
 
-        for (const auto& z : zones)
+        for (int i = 0; i < (int) zones.size(); ++i)
         {
+            const auto& z = zones[(std::size_t) i];
             if (key >= z.zone.lowKey && key <= z.zone.highKey && vel >= z.zone.lowVelocity && vel <= z.zone.highVelocity && matchCount < 16)
-                matches[matchCount++] = &z;
+            {
+                if (i == lastZone)
+                    lastAt = matchCount;
+                matches[matchCount++] = i;
+            }
 
             if (nearest == nullptr || std::abs (z.zone.rootKey - key) < std::abs (nearest->zone.rootKey - key))
                 nearest = &z;
@@ -1407,12 +1427,15 @@ public:
         if (matchCount == 0)
             return nearest;
 
-        return matches[(roundRobin++) % (unsigned) matchCount];
+        const auto pick = matchCount == 1 || lastAt + 1 >= matchCount ? 0 : lastAt + 1;
+        lastZone = matches[pick];
+        return &zones[(std::size_t) lastZone];
     }
 
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
+        quality = offlineRendering() ? flrs::renderQuality : flrs::liveQuality;
         fadeStep = (float) (1.0 / (0.003 * sr)); // 3 ms
         updateModulation();
         allNotesOff();
@@ -1438,7 +1461,17 @@ public:
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         filterType.store (std::clamp (s.filterType, 0, 3));
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
-        envelopeMailbox.write ({ { s.filterEnv, s.pitchEnv }, s.lfo });
+        {
+            Modulation m { { s.filterEnv, s.pitchEnv }, s.lfo };
+            if (s.flVolumeEnvelope.size() == 18)
+            {
+                const auto ppq = std::clamp ((int) s.flVolumeEnvelope[17], 24, 3840);
+                m.flVolume = true;
+                m.volume.build (s.flVolumeEnvelope.data(), ppq, std::max (1.0, songBpm));
+                m.ticksPerSecond = (double) ppq * std::max (1.0, songBpm) / 60.0;
+            }
+            envelopeMailbox.write (m);
+        }
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
         for (int i = 0; i < table.count; ++i)
@@ -1457,7 +1490,7 @@ public:
         if (beats > 0.0f)
             return (double) data.frames() / ((double) beats * 60.0 / bpm.load() * sampleRate);
 
-        return data.sampleRate / sampleRate;
+        return data.sampleRate * (1.0 / sampleRate);
     }
 
     void noteOn (int key, float velocity) noexcept override { noteOnAt (key, velocity, 0.0); }
@@ -1467,13 +1500,17 @@ public:
         const auto* zone = clipMode ? nullptr : zoneFor (key, velocity);
         const auto* data = zone != nullptr ? zone->sample.get() : sample.get();
 
+        if (envelopeMailbox.read (modulation))
+            updateModulation();
+
         if (data == nullptr || data->frames() < 2)
             return;
 
         sliceMailbox.read (slices);
         const auto backwards = ! clipMode && reverse.load();
         const auto total = (double) (data->frames() - 1);
-        // sample region (the start acts as "start offset"); audio clips use the whole file
+        // sample region (the start acts as "start offset"); audio clips use the whole file. `last` is the region's
+        // last frame: FL plays until the read position passes it, interpolating with that frame repeated.
         auto first = clipMode ? 0.0 : std::floor (total * std::min (regionStart.load(), regionEnd.load()));
         auto last = clipMode ? total : std::max (first + 1.0, std::floor (total * regionEnd.load()));
         auto sliced = false;
@@ -1487,18 +1524,15 @@ public:
                 return;
 
             first = std::floor (total * slices.starts[(std::size_t) index]);
-            last = index + 1 < slices.count ? std::floor (total * slices.starts[(std::size_t) index + 1]) : total;
+            last = index + 1 < slices.count ? std::max (first, std::floor (total * slices.starts[(std::size_t) index + 1]) - 1.0) : total;
             sliced = true;
         }
         const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
 
-        if (startFrame >= last)
+        if (startFrame >= last + 1.0)
             return;
-
-        if (backwards)
-            startFrame = last - 1.0 - (startFrame - first); // the pair [index, index + 1] must fit
 
         if (! clipMode && cut.load())
             for (auto& v : voices)
@@ -1552,13 +1586,16 @@ public:
         target->fadeIn = nextClip[2];
         target->fadeOut = nextClip[3];
         nextClip = {};
-        target->rate = base * std::pow (2.0, semitones / 12.0) * (backwards ? -1.0 : 1.0);
+        // FL's read speed: the rate ratio at the original pitch, else exp(cents·ln2/1200)·ratio
+        target->rate = stretched ? base : flrs::speedFor ((float) (semitones * 100.0), base);
+        target->reversed = backwards;
+        target->kernel.setQuality (quality);
 
         // portamento (channel porta, inverted by the note): starts from the previous note's pitch
         if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0 && ! stretched)
         {
             const auto steps = (int) (portaBeats.load() * 60.0 / bpm.load() * sampleRate);
-            const auto from = std::abs (lastRate) * (target->rate < 0.0 ? -1.0 : 1.0);
+            const auto from = std::abs (lastRate);
 
             if (steps >= 1 && from != 0.0)
             {
@@ -1573,6 +1610,20 @@ public:
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
         target->stage = attackSeconds > 0.0f ? 0 : 1;
+
+        // FL's volume articulator: starts at its initial level and is stepped on the voice's first block (FLEngine
+        // FUN_00d24ae0 steps a new voice at once, then once per sequencer tick)
+        target->flEnvelope = ! clipMode && modulation.flVolume && modulation.ticksPerSecond > 0.0;
+        if (target->flEnvelope)
+        {
+            target->env = 1.0f;
+            target->envStep = 0.0f;
+            target->stage = 1;
+            target->volumeArt.init (modulation.volume);
+            target->flLevel = target->volumeArt.val;
+            target->flStep = 0.0f;
+            target->tickLeft = 0.0;
+        }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
 
@@ -1606,7 +1657,7 @@ public:
         for (auto& v : voices)
             if (v.active && ! v.stolen && v.rate != 0.0 && v.data != nullptr)
             {
-                const auto target = v.data->sampleRate / sampleRate * std::pow (2.0, semitones / 12.0) * (v.rate < 0.0 ? -1.0 : 1.0);
+                const auto target = flrs::speedFor ((float) (semitones * 100.0), v.data->sampleRate * (1.0 / sampleRate));
                 v.glideRatio = std::pow (target / v.rate, 1.0 / steps);
                 v.glideLeft = steps;
             }
@@ -1626,6 +1677,14 @@ public:
                 for (std::size_t e = 0; e < 2; ++e)
                     modEnv[e].release (v.mod[e]);
 
+        // FL's volume articulator enters its release stage from the current level
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.flEnvelope && v.stage < 3)
+            {
+                v.volumeArt.release (modulation.volume);
+                v.stage = 3; // released (stops "while held" loops); the ADSR level stays at 1
+            }
+
         // with release, the released note decays; without release the sample plays in full (one-shot)
         const auto seconds = release.load();
 
@@ -1634,7 +1693,7 @@ public:
 
         // linear release from the current level (like FL)
         for (auto& v : voices)
-            if (v.active && v.key == key && v.stage < 3)
+            if (v.active && v.key == key && v.stage < 3 && ! v.flEnvelope)
             {
                 v.stage = 3;
                 v.envStep = -(float) (std::max (v.env, 0.001f) / (seconds * sampleRate));
@@ -1670,6 +1729,8 @@ public:
             sharedFilter.set (fc, res, sampleRate, type);
         }
 
+        const flvp::X87Extended precision; // FL's interpolators run the x87 unit at 64-bit precision
+
         for (auto& v : voices)
         {
             if (! v.active || v.data == nullptr)
@@ -1677,24 +1738,44 @@ public:
 
             const auto* l = v.data->leftData();
             const auto* r = v.data->rightData();
-            const auto last = (double) (v.data->frames() - 1);
+            const auto lastFrame = std::min ((double) (v.data->frames() - 1), v.last);
 
             for (int i = 0; i < n; ++i)
             {
                 // loop: jump back to its start (the "while held" mode stops looping on release)
-                if (v.loopEnd > v.loopStart && v.position >= v.loopEnd && (! v.loopWhileHeld || v.stage < 3))
-                    v.position -= v.loopEnd - v.loopStart;
+                const auto looping = v.loopEnd > v.loopStart && (! v.loopWhileHeld || v.stage < 3);
+                if (looping && v.position >= v.loopEnd)
+                {
+                    while (v.position >= v.loopEnd)
+                        v.position = (v.position - v.loopEnd) + v.loopStart;
+                    ++v.loops;
+                }
 
-                if (v.position >= std::min (last, v.last) || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
+                if ((double) flrs::wholeFrames (v.position) > lastFrame || v.position < v.first || (v.stolen && v.fade <= 0.0f) || (v.env <= 0.0f && v.stage >= 1))
                 {
                     v.active = false;
                     break;
                 }
 
-                const auto index = (std::size_t) v.position;
-                const auto frac = (float) (v.position - (double) index);
-                auto sl = l[index] + frac * (l[index + 1] - l[index]);
-                auto sr = r[index] + frac * (r[index + 1] - r[index]);
+                if (v.flEnvelope)
+                {
+                    if (v.tickLeft <= 0.0)
+                    {
+                        // a sequencer tick: step the articulator; the level ramps to its value over round(tick) samples
+                        v.volumeArt.step (modulation.volume);
+                        const auto perTick = sampleRate / modulation.ticksPerSecond;
+                        v.flStep = (v.volumeArt.val - v.flLevel) / (float) std::max (1.0, std::nearbyint (perTick));
+                        v.tickLeft += perTick;
+                    }
+                    if (v.volumeArt.state == 9 && v.flLevel <= 0.0f && v.flStep <= 0.0f)
+                    {
+                        v.active = false;
+                        break;
+                    }
+                }
+
+                float sl, sr;
+                readFrame (v, l, r, lastFrame, looping, sl, sr);
 
                 if (modulated)
                 {
@@ -1737,6 +1818,15 @@ public:
                 }
 
                 auto gain = v.velocity * v.fade * v.env * v.lfoGain * v.zoneGain;
+
+                if (v.flEnvelope)
+                {
+                    gain *= std::max (0.0f, v.flLevel);
+                    const auto next = v.flLevel + v.flStep;
+                    // the ramp stops at the tick's value
+                    v.flLevel = (v.flStep > 0.0f && next > v.volumeArt.val) || (v.flStep < 0.0f && next < v.volumeArt.val) ? v.volumeArt.val : next;
+                    v.tickLeft -= 1.0;
+                }
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
@@ -1805,6 +1895,53 @@ public:
         }
     }
 
+    // FL's sampler read (REA_rodada69 §1): the kernel's taps around the read position, frames outside the region
+    // repeating its first/last frame, taps past the loop end wrapping to the loop start (and, once the voice has
+    // looped, taps before the loop start wrapping to its end), a reversed voice reading the region backwards
+    void readFrame (SamplerVoice& v, const float* l, const float* r, double lastFrame, bool looping, float& outL, float& outR) noexcept
+    {
+        v.kernel.setSpeed (v.rate * v.pitchMul);
+        const auto half = v.kernel.halfWidth;
+        const auto whole = flrs::wholeFrames (v.position);
+        const auto frac = v.position - (double) whole;
+        const auto first = (std::int64_t) v.first, last = (std::int64_t) lastFrame;
+        const auto lo = whole - half + 1, hi = whole + half;
+        const auto loopStart = (std::int64_t) v.loopStart, loopEnd = (std::int64_t) v.loopEnd;
+
+        // at the original rate on a whole frame FL copies the sample instead of interpolating
+        if (v.rate * v.pitchMul == 1.0 && frac == 0.0)
+        {
+            const auto q = v.reversed ? first + last - whole : whole;
+            outL = l[q];
+            outR = r[q];
+            return;
+        }
+
+        if (! v.reversed && lo >= first && hi <= last && ! (looping && hi >= loopEnd))
+        {
+            flrs::interpolate (v.kernel, l + lo, r + lo, frac, outL, outR);
+            return;
+        }
+
+        for (std::int64_t t = 0; t < 2 * half; ++t)
+        {
+            auto q = lo + t;
+            if (looping && loopEnd > loopStart)
+            {
+                while (q >= loopEnd)
+                    q -= loopEnd - loopStart;
+                if (v.loops > 0 && q < loopStart)
+                    q += loopEnd - loopStart;
+            }
+            q = std::clamp (q, first, last);
+            if (v.reversed)
+                q = first + last - q;
+            tapL[(std::size_t) t] = l[q];
+            tapR[(std::size_t) t] = r[q];
+        }
+        flrs::interpolate (v.kernel, tapL.data(), tapR.data(), frac, outL, outR);
+    }
+
     bool idle() const noexcept override
     {
         return std::none_of (voices.begin(), voices.end(), [] (const auto& v) { return v.active; });
@@ -1816,6 +1953,8 @@ private:
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
+    int quality = flrs::liveQuality;        // FL's interpolation index (prepare)
+    std::array<float, 1024> tapL {}, tapR {}; // kernel taps gathered near the region edges and loops
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
@@ -1829,7 +1968,7 @@ public:
     void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
 
 private:
-    unsigned roundRobin = 0;        // turn of the next overlapping layer
+    int lastZone = -1;              // the zone the last note chose (overlapping layers cycle from it)
     double lastRate = 0.0; // read speed of the last note (where porta starts from)
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // values the coefficients were computed with
@@ -1838,6 +1977,9 @@ private:
     {
         std::array<ModEnvelope, 2> envelopes {};
         std::array<ChannelLfo, lfoTargets> lfo {};
+        bool flVolume = false;     // FL's volume articulator replaces the ADSR
+        flvp::Rec volume {};       // its settings (FLEngine FUN_009ce9e0 = the plugins' FUN_0071ff00, REA_rodada69 §3)
+        double ticksPerSecond = 0; // FL steps it once per sequencer tick
     };
     SettingsMailbox<Modulation> envelopeMailbox;
     Modulation modulation;
@@ -2067,8 +2209,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeTransistorBassInstrument();
     if (kind == InstrumentKind::simsynth)
         return makeSimSynthInstrument();
-    if (kind == InstrumentKind::wasp)
-        return makeWaspInstrument();
+    if (kind == InstrumentKind::wasp || kind == InstrumentKind::fruitydance)
+        return makeWaspInstrument(); // both make no sound and keep their state
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)
@@ -2079,6 +2221,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeGranulizerInstrument (std::move (sample));
     if (kind == InstrumentKind::drumaxx)
         return makeDrumaxxInstrument();
+    if (kind == InstrumentKind::slayer)
+        return makeSlayerInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

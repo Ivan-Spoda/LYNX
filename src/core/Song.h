@@ -61,8 +61,11 @@ enum class InstrumentKind : std::uint8_t
     plucked,    // FL's Plucked! (REA_rodada65 §1): the plugin's raw saved state (5 knobs) in ChannelDef::pluginState
     beepmap,    // FL's BeepMap (REA_rodada65 §2): the plugin's raw saved state (settings + bitmap) in ChannelDef::pluginState
     sawer,      // FL's Sawer (REA_rodada65 §3): raw saved state in pluginState, the user's Sawer\data.saw in samplePath
+    flkeys,     // FL Keys (REA_rodada69 §8): raw saved state in pluginState, wavetable files in zones, .wti table in modelParams
     granulizer, // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
-    drumaxx     // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
+    drumaxx,    // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
+    slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
+    fruitydance // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -150,6 +153,10 @@ struct SamplerSettings
     ModEnvelope filterEnv;     // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;      // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget
+    // FL's volume envelope as the channel stored it (REA_rodada69 §3): the 17 values of its 0xDA volume record followed
+    // by the project's PPQ. When present it replaces attack/decay/sustain/release (delay, hold, tensions, FL's tick
+    // stepping); editing the ADSR by hand clears it.
+    std::vector<std::int32_t> flVolumeEnvelope;
 
     bool operator== (const SamplerSettings&) const = default;
 };

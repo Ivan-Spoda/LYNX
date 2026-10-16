@@ -1,6 +1,8 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
 #include <atomic>
+#include <chrono>
+#include <random>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -42,6 +44,7 @@
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
+#include "core/Slayer.h"
 #include "core/Toxic.h"
 #include "core/Harmless.h"
 #include "core/Harmor.h"
@@ -52,6 +55,9 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/ThreeOsc.h"
+#include "core/FlResampler.h"
+#include "core/FlKeys.h"
+#include "core/FlVoiceProcessor.h"
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
@@ -71,6 +77,8 @@
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
 #include "core/FlangusFastDist.h"
+#include "core/FruityVocoder.h"
+#include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -2238,6 +2246,327 @@ TEST (live_queue_is_fifo_and_bounded)
     while (q.push (e))
         ++pushed;
     CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // one slot stays free to tell full from empty
+}
+
+// FL's sampler interpolators (REA_rodada69 §1): outputs of FLEngine's own kernels (EXEC, r69/py/gold.py) on a synthetic
+// 16-bit stereo signal; the port must give the same bits (linear, 6-point, 24-point sinc, 32-point sinc at speed 1.37,
+// 16-point sinc widened to 24 points with the cutoff at π/9.5 at speed 9.5)
+TEST (fl_sampler_interpolators_match_fl)
+{
+    std::vector<float> l, r;
+    std::uint32_t x = 12345;
+    for (int k = 0; k < 2 * 144; ++k)
+    {
+        x = x * 1103515245u + 12345u;
+        const auto v = (float) (std::int16_t) (std::uint16_t) (x >> 16) / 32768.0f;
+        (k % 2 == 0 ? l : r).push_back (v);
+    }
+    const int pad = 40;
+    const std::pair<int, double> positions[] = { { 20, 0.0 }, { 21, 0.25 }, { 22, 0.5 }, { 23, 0.71828 }, { 30, 0.999 }, { 31, 1e-7 }, { 40, 0.3333 }, { 41, 0.875 } };
+    struct Case { int quality; double speed; std::uint32_t bits[16]; };
+    const Case cases[] = {
+        { 1, 1.0, { 0x3ec1a000, 0x3d774000, 0x3ca1e000, 0x3ec39900, 0xbf2d4600, 0xbe096800, 0xbea0cd17, 0x3f433097, 0x3f2796da, 0xbd9fbd17, 0x3f27a3ff, 0xbda03ff2, 0x3dace746, 0x3eba19c4, 0x3e477a00, 0x3f0f2a80 } },
+        { 2, 1.0, { 0x3ec1a000, 0x3d773fff, 0x3d34885d, 0x3eedeaa0, 0xbf49e298, 0xbea52fc4, 0xbeba55fc, 0x3f7c58da, 0x3f27c5c2, 0xbda139af, 0x3f27a3ff, 0xbda03ffa, 0x3dd8e7b1, 0x3ee872c1, 0x3e05b2d5, 0x3f144c4f } },
+        { 4, 1.0, { 0x3ec19fff, 0x3d773fff, 0x3d889c32, 0x3ef6b184, 0xbf57cf0d, 0xbf0abecd, 0xbea14a13, 0x3f94f11b, 0x3f27edc4, 0xbda10d8c, 0x3f27a3fd, 0xbda03ffa, 0x3e5baf41, 0x3edb298c, 0x3dd76cbf, 0x3ef9d212 } },
+        { 5, 1.37, { 0x3f19d373, 0x3ea9b6a3, 0xbdcbe56e, 0x3e2af6c6, 0xbf476f7a, 0xbe566a13, 0xbe9f166a, 0x3f52b5ad, 0x3f27ad16, 0xbce48792, 0x3f27960a, 0xbce01ebe, 0x3e1b96be, 0x3e163fd8, 0x3f042e42, 0x3ec4be83 } },
+        { 3, 9.5, { 0xbd97308e, 0x3dd8783c, 0xbd911374, 0x3e162a41, 0xbd8a959e, 0x3e38b220, 0xbd7e6785, 0x3e58895c, 0xbd380c4f, 0x3e7e3008, 0xbd380e4e, 0x3e7e2696, 0x3d00c6d0, 0xbd627d87, 0x3e308cb8, 0xbcece918 } },
+    };
+    const lynx::flvp::X87Extended precision;
+    for (const auto& c : cases)
+    {
+        lynx::flrs::Kernel k;
+        k.setQuality (c.quality);
+        k.setSpeed (c.speed);
+        int same = 0;
+        for (int p = 0; p < 8; ++p)
+        {
+            const auto lo = pad + positions[p].first - k.halfWidth + 1;
+            float a, b;
+            lynx::flrs::interpolate (k, l.data() + lo, r.data() + lo, positions[p].second, a, b);
+            std::uint32_t ba, bb;
+            std::memcpy (&ba, &a, 4);
+            std::memcpy (&bb, &b, 4);
+            same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+        }
+        CHECK (same == 16);
+    }
+    CHECK (lynx::flrs::halfWidthFor (4) == 12 && lynx::flrs::halfWidthFor (5) == 16 && lynx::flrs::halfWidthFor (9) == 256);
+    CHECK (lynx::flrs::speedFor (0.0f, 1.0) == 1.0 && std::abs (lynx::flrs::speedFor (1200.0f, 0.5) - 1.0) < 1e-12);
+}
+
+// The sampler at the original rate copies the sample (FL's copy path), and plays until the read position passes the
+// last frame
+TEST (fl_sampler_copies_at_original_rate)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    for (int i = 0; i < 300; ++i)
+        data->left.push_back (std::sin (0.05f * (float) i) * 0.5f);
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    sampler->noteOn (60, 1.0f);
+    std::vector<float> l (400), r (400);
+    sampler->render (l.data(), r.data(), 400, 1.0f, 1.0f);
+    const auto panL = std::cos ((0.0f + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f; // the sampler's centre pan gain
+    int exact = 0;
+    for (int i = 0; i < 300; ++i)
+        exact += l[(std::size_t) i] == data->left[(std::size_t) i] * panL ? 1 : 0;
+    CHECK (exact == 300);
+    CHECK (l[300] == 0.0f);
+}
+
+// FL's volume envelope on the sampler (REA_rodada69 §3): the articulator is stepped once per sequencer tick and the level
+// ramps linearly to each tick's value; 96 PPQ at 120 BPM and 48 kHz = 250 samples per tick, attack 20000 = 89 ticks
+TEST (fl_sampler_volume_envelope_steps_per_tick)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    data->left.assign (96000, 0.5f);
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sampler;
+    c.sampler.flVolumeEnvelope = { 0, 1, 100, 20000, 0, 30000, 128, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0, 96 };
+    sampler->configure (c, 120.0);
+    sampler->noteOn (60, 1.0f);
+    std::vector<float> l (40000), r (40000);
+    sampler->render (l.data(), r.data(), 40000, 1.0f, 1.0f);
+    const auto panL = std::cos ((0.0f + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f;
+    auto level = [&] (int n) { return l[(std::size_t) n] / (0.5f * panL); };
+    CHECK (std::abs (level (1000) - 1000.0f / 22500.0f) < 2e-5f);
+    CHECK (std::abs (level (10125) - 10125.0f / 22500.0f) < 2e-5f);
+    CHECK (std::abs (level (39000) - 1.0f) < 1e-6f); // the attack ended after 90 ticks; sustain 128 = 1.0
+    // release: 20000 = 89 ticks, linear (tension 0), from the current level
+    sampler->noteOff (60);
+    std::fill (l.begin(), l.end(), 0.0f);
+    sampler->render (l.data(), r.data(), 40000, 1.0f, 1.0f);
+    CHECK (std::abs (level (2500) - (1.0f - 10.0f / 90.0f)) < 1e-3f);
+    CHECK (l[39999] == 0.0f && sampler->idle());
+}
+
+// FPC's "cycle" layers (REA_rodada69 §4): among the layers covering the velocity, in order, the one after the last
+// chosen, wrapping; FL's velocity index is round(v·128). Slicex's master volume uses FL's L11 law (§5).
+TEST (fl_fpc_cycle_layers_and_slicex_master_volume)
+{
+    auto level = [] (float v) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->sampleRate = 48000.0;
+        d->left.assign (4800, v);
+        return d;
+    };
+    // A covers 0…63, B 32…95, C 64…127 (all keys)
+    auto inst = lynx::makeZonedSampler ({ { { "a.wav", 60, 0, 127, 0, 63 }, level (0.1f) },
+                                          { { "b.wav", 60, 0, 127, 32, 95 }, level (0.2f) },
+                                          { { "c.wav", 60, 0, 127, 64, 127 }, level (0.3f) } });
+    inst->prepare (48000.0);
+    inst->configure (lynx::ChannelDef {}, 120.0);
+    auto play = [&] (float velocity) {
+        inst->allNotesOff();
+        std::vector<float> l (2000), r (2000);
+        inst->render (l.data(), r.data(), 2000, 1.0f, 1.0f);
+        std::fill (l.begin(), l.end(), 0.0f);
+        inst->noteOn (60, velocity);
+        inst->render (l.data(), r.data(), 10, 1.0f, 1.0f);
+        return l[5] / velocity;
+    };
+    auto which = [] (float x) { return (int) std::lround (x / 0.1f / std::cos (0.25f * 3.14159265f) / 1.41421356f); };
+    CHECK (which (play (64.0f / 128.0f)) == 2); // candidates B, C: first B
+    CHECK (which (play (64.0f / 128.0f)) == 3); // then C
+    CHECK (which (play (40.0f / 128.0f)) == 1); // candidates A, B: C is not among them → the first, A
+    CHECK (which (play (40.0f / 128.0f)) == 2); // then B
+    CHECK (which (play (64.0f / 128.0f)) == 3); // B was last → C
+
+    // Slicex state: version, 8 master values (volume 16000), options and UI state, deck A referencing a file
+    std::vector<std::uint8_t> state (4 + 32 + 47 + 12, 0);
+    const std::int32_t version = 0x00060003, volume = 16000;
+    std::memcpy (state.data(), &version, 4);
+    std::memcpy (state.data() + 4 + 8, &volume, 4);
+    state.push_back (1);
+    state.push_back (5);
+    for (char ch : std::string ("x.wav"))
+        state.push_back ((std::uint8_t) ch);
+    const auto sliced = lynx::slicex (state);
+    CHECK (sliced.has_value() && sliced->path == "x.wav");
+    CHECK (sliced && std::abs (sliced->gain - (float) ((std::pow (11.0, 1.25) - 1.0) / 10.0)) < 1e-5f);
+}
+
+TEST (fl_keys_state_wti_and_loader)
+{
+    using namespace lynx::flkeys;
+    // state: u32 1, the wavetable name, 15 int32 knobs
+    State st;
+    st.wavetable = "Grand Piano";
+    for (int i = 0; i < 15; ++i)
+        st.knobs[(std::size_t) i] = 10 * i - 50;
+    const auto bytes = writeState (st);
+    CHECK (bytes.size() == 4 + 1 + 11 + 60);
+    const auto back = parseState (bytes);
+    CHECK (back && back->wavetable == "Grand Piano" && back->knobs == st.knobs);
+
+    // one WAV per keygroup: the file's own loop gives the default end and loop; a keygroup without a file reuses
+    // the previous one; a repeated file name copies the earlier keygroup; each file is followed by a guard frame
+    // that repeats the frame `loop` before the end (REA_rodada69 §8.2)
+    std::vector<std::string> names;
+    auto riff = parseWti ("[info]\nsamples=3\nfiletype=riff\npath=W\nvelocityfactor=2\nsamplerate=22050\n"
+                          "[sample0]\nname=a.wav\nroot=40\nhigh=50\n[sample1]\nroot=51\nhigh=999\npos=2\nend=5\nloop=3\n"
+                          "[sample2]\nname=A.WAV\nroot=60\nhigh=70\n", names);
+    CHECK (riff && names.size() == 1 && names[0] == "W\\a.wav");
+    CHECK (riff && riff->keygroups.size() == 3 && riff->keygroups[2].duplicateOf == 0 && riff->thresholds == std::vector<int> { 0 });
+    if (riff)
+    {
+        riff->files[0].loopStart = 4, riff->files[0].loopEnd = 8;
+        FileSamples a;
+        for (int i = 0; i < 10; ++i)
+            a.samples.push_back ((std::int16_t) (100 * (i + 1)));
+        const auto decoded = FlKeysTable::decode (riff->encode());
+        CHECK (decoded.has_value());
+        const auto w = buildWavetable (*decoded, { a });
+        CHECK (w != nullptr);
+        if (w != nullptr)
+        {
+            auto same = [] (const Keygroup& k, Keygroup e) { return k.root == e.root && k.high == e.high && k.pos == e.pos && k.end == e.end && k.loop == e.loop; };
+            CHECK (same (w->keygroups[0], { 40, 50, 0, 8, 5 }));
+            CHECK (same (w->keygroups[1], { 51, 999, 2, 5, 3 }));
+            CHECK (same (w->keygroups[2], { 60, 70, 0, 8, 5 }));
+            CHECK (w->data[9] == 400 && w->data[10] == 0 && w->data[8] == 900);
+            CHECK (w->sampleRate == 22050.0f && w->velocityFactor == 2.0f && ! w->stereo);
+        }
+    }
+
+    // one raw file: every keygroup's part is copied one after another with a guard sample; "canloop=false" makes the
+    // loop as long as the keygroup's end, so the voice stops there
+    auto raw = parseWti ("[info]\nsamples=2\nsamplefile=x.dat\nfiletype=raw\n[sample0]\nroot=36\nhigh=47\npos=0\nend=3\nloop=2\n"
+                         "[sample1]\nroot=48\nhigh=999\npos=4\nend=7\nloop=4\ncanloop=false\n", names);
+    CHECK (raw && raw->raw && names.size() == 1 && names[0] == "x.dat");
+    if (raw)
+    {
+        FileSamples x;
+        for (int i = 0; i < 10; ++i)
+            x.samples.push_back ((std::int16_t) (10 * (i + 1)));
+        const auto w = buildWavetable (*raw, { x });
+        CHECK (w != nullptr);
+        if (w != nullptr)
+        {
+            CHECK (w->keygroups[0].pos == 0 && w->keygroups[0].end == 3 && w->keygroups[0].loop == 2);
+            CHECK (w->keygroups[1].pos == 5 && w->keygroups[1].end == 8 && w->keygroups[1].loop == 8);
+            const std::vector<std::int16_t> expected { 10, 20, 30, 40, 30, 50, 60, 70, 80, 50, 0, 0 };
+            CHECK (std::equal (expected.begin(), expected.end(), w->data.begin()));
+
+            // a held note on the non-looping keygroup ends by itself; 33 notes leave 32 sounding (FL's MaxPoly)
+            State s2;
+            s2.knobs = { -1000, 0, 0, -1000, 500, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+            RefNote n;
+            n.key = 60;
+            const auto out = renderReference (*w, s2, { n }, 44100.0, 4096, 512, true);
+            double early = 0, late = 0;
+            for (int i = 0; i < 64; ++i)
+                early += std::fabs (out[(std::size_t) (2 * i)]);
+            for (int i = 2048; i < 4096; ++i)
+                late += std::fabs (out[(std::size_t) (2 * i)]);
+            CHECK (early > 0.0 && late == 0.0);
+        }
+    }
+
+    // instrument front-end without a wavetable: silent and idle
+    auto inst = makeFlKeysInstrument (nullptr);
+    inst->prepare (44100.0);
+    inst->noteOn (60, 0.78f);
+    std::vector<float> l (256), r (256);
+    inst->render (l.data(), r.data(), 256, 1.0f, 1.0f);
+    CHECK (inst->idle() && l[100] == 0.0f);
+}
+
+TEST (fl_keys_matches_fl_with_the_installation)
+{
+    // FL Keys' own output (r69/keys/kcmp3.py: the installation's DLL, FL's x87 host pan law, blocks of 512 at
+    // 44.1 kHz): FNV-1a 64 of the interleaved float bits of 24 000 frames
+    if (realFlpDir.empty())
+        return;
+    using namespace lynx::flkeys;
+    const auto folder = std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "FL Keys" / "Wavtables";
+    if (! std::filesystem::exists (folder / "mda Piano.wti"))
+        return;
+    auto readAll = [] (const std::filesystem::path& p) {
+        std::ifstream f (p, std::ios::binary);
+        return std::vector<std::uint8_t> { std::istreambuf_iterator<char> (f), {} };
+    };
+    auto pcm = [] (const std::vector<std::uint8_t>& w) {
+        FileSamples f;
+        std::uint16_t channels = 1;
+        for (std::size_t pos = 12; pos + 8 <= w.size();)
+        {
+            std::uint32_t size = 0;
+            std::memcpy (&size, w.data() + pos + 4, 4);
+            if (std::memcmp (w.data() + pos, "fmt ", 4) == 0)
+                std::memcpy (&channels, w.data() + pos + 10, 2);
+            else if (std::memcmp (w.data() + pos, "data", 4) == 0)
+            {
+                f.samples.resize (std::min<std::size_t> (size, w.size() - pos - 8) / 2);
+                std::memcpy (f.samples.data(), w.data() + pos + 8, f.samples.size() * 2);
+                f.channels = channels;
+            }
+            pos += 8 + size + (size & 1);
+        }
+        return f;
+    };
+    auto run = [&] (const std::string& name, std::array<int, 15> knobs, std::uint64_t expected) {
+        const auto wti = readAll (folder / (name + ".wti"));
+        std::vector<std::string> names;
+        auto table = parseWti (std::string (wti.begin(), wti.end()), names);
+        CHECK (table.has_value());
+        if (! table)
+            return;
+        std::vector<FileSamples> files;
+        for (std::size_t i = 0; i < names.size(); ++i)
+        {
+            auto rel = names[i];
+            std::replace (rel.begin(), rel.end(), '\\', '/');
+            const auto bytes = readAll (folder / rel);
+            if (table->raw)
+            {
+                FileSamples f;
+                f.samples.resize (bytes.size() / 2);
+                std::memcpy (f.samples.data(), bytes.data(), f.samples.size() * 2);
+                files.push_back (std::move (f));
+            }
+            else
+            {
+                table->files[i] = wavFileInfo (bytes);
+                files.push_back (pcm (bytes));
+            }
+        }
+        const auto w = buildWavetable (*table, files);
+        CHECK (w != nullptr);
+        if (w == nullptr)
+            return;
+        State s;
+        s.wavetable = name;
+        s.knobs = knobs;
+        auto note = [] (int start, int key, double iv, double fv, double fp, double cents) {
+            RefNote n;
+            n.start = start, n.key = key, n.initVol = iv, n.finalVol = fv, n.finalPan = fp, n.cents = cents;
+            return n;
+        };
+        std::vector<RefNote> notes { note (0, 60, 1, 0.78, 0, 0), note (700, 72, 0.6, 0.5, -0.3, 0), note (1500, 30, 0.2, 0.9, 0.5, 25),
+                                     note (2100, 100, 1.3, 0.7, 1, -40), note (2500, 48, 0.05, 0.8, -1, 0), note (16000, 96, 0.9, 0.8, 0, 0) };
+        // (floats as the harness parses them)
+        for (auto& n : notes)
+            n.initVol = (float) n.initVol, n.finalVol = (float) n.finalVol, n.finalPan = (float) n.finalPan;
+        notes[0].release = 9000, notes[2].release = 12000, notes[3].release = 15000, notes[5].release = 20000;
+        const auto out = renderReference (*w, s, notes, 44100.0, 24000, 512, true);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (auto v : out)
+        {
+            std::uint32_t b;
+            std::memcpy (&b, &v, 4);
+            for (int k = 0; k < 4; ++k)
+                h = (h ^ ((b >> (8 * k)) & 0xff)) * 0x100000001b3ull;
+        }
+        CHECK (h == expected);
+    };
+    run ("mda Piano", { 1000, 138, 388, -1000, 716, 0, -1000, 256, 0, 0, 0, 0, 0, 0, 0 }, 0x78268ec007f31309ull);
+    run ("Rhodes", { 200, 300, 500, 800, 300, 1500, 300, 1500, 300, 400, 400, 800, 900, 30000, 700 }, 0xcc91c93d917f1d31ull);
+    run ("Roto Organ", { 1000, 1000, 1000, 1000, 0, 0, -1000, 0, 1000, 0, 500, 1000, 1000, 0, 300 }, 0x99eb13e87640a1c6ull);
 }
 
 TEST (sampler_plays_pitched_one_shot)
@@ -6059,6 +6388,111 @@ TEST (vocoder_follows_modulator)
     CHECK (rms (40000, 48000) < 0.1 * rms (6000, 20000)); // modulator silent: the vocoder fades out (100 ms release)
     for (std::size_t i = 0; i < l.size(); ++i)
         CHECK (l[i] == r[i] && std::isfinite (l[i]));    // mono output
+}
+
+TEST (fruity_vocoder_engine)
+{
+    // REA_rodada70: Fruity Vocoder, states of our own against the installation's DLL (goldens = the DLL's output for
+    // the same input, EXEC; all three bit-identical over the whole 4096 frames)
+    std::vector<float> inL (4096), inR (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = i < 3000 ? (float) (((i * 37) % 200) - 100) / 128.0f : 0.0f; // modulator, then silence
+        inR[(std::size_t) i] = (i * 13) % 64 < 32 ? 0.5f : -0.5f;                        // carrier
+    }
+    auto make = [] (int bands, int order, int listen, bool swap, std::vector<float> levels, std::array<int, 12> c) {
+        lynx::fvocoder::State s;
+        s.bands = bands;
+        s.order = order;
+        s.listen = listen;
+        s.swap = swap;
+        for (std::size_t k = 0; k < levels.size(); ++k)
+            s.levels[k] = levels[k];
+        s.c = c;
+        return s;
+    };
+    auto run = [&] (const lynx::fvocoder::State& s, double rate, int block, int holdAt) {
+        std::vector<float> l = inL, r = inR;
+        lynx::fvocoder::Engine e;
+        e.setState (s);
+        e.prepare (rate);
+        for (int i = 0; i < 4096;)
+        {
+            auto len = std::min (block, 4096 - i);
+            if (holdAt > i && holdAt < i + len)
+                len = holdAt - i;
+            if (i == holdAt)
+            {
+                auto t = e.state();
+                t.c[lynx::fvocoder::hold] = 1;
+                e.setState (t);
+            }
+            e.processStereo (l.data() + i, r.data() + i, len);
+            i += len;
+        }
+        return std::make_pair (l, r);
+    };
+    auto check = [] (const std::pair<std::vector<float>, std::vector<float>>& out, const std::vector<std::pair<int, float>>& golden) {
+        for (const auto& [i, g] : golden)
+            CHECK (out.first[(std::size_t) i] == g && out.second[(std::size_t) i] == g);
+    };
+    // 16 bands, order 2, edited band levels, modulator and carrier levels in the mix
+    const auto a = make (16, 2, 2, false, { 1.0f, 0.5f, 1.5f, 1.0f, 0.25f, 2.0f, 1.0f, 1.0f, 0.75f, 1.25f, 1.0f, 0.0f, 1.0f, 1.0f, 1.75f, 1.0f },
+                         { 0, 65536, 64, 0, 0, 50, 20, 100, 0, 20, 10, 128 });
+    const auto outA = run (a, 44100.0, 512, -1);
+    check (outA, { { 100, -0.23145467042922974f }, { 1000, 0.2901436686515808f }, { 2047, 0.03407000005245209f }, { 2500, 0.8314149379730225f },
+                   { 3000, 0.606562614440918f }, { 3500, 0.2637328505516052f }, { 4095, -0.001206810586154461f } });
+    // 64 bands, order 3, inverted synthesis bank shifted by −300 cents, 48 kHz in blocks of 300, Hold from frame 2048
+    const auto b = make (64, 3, 2, false, {}, { 2000, 60000, 90, 1, -300, 120, 15, 300, 0, 0, 5, 150 });
+    check (run (b, 48000.0, 300, 2048), { { 100, 0.005184958688914776f }, { 1000, -0.0008608861826360226f }, { 2047, -0.026466617360711098f },
+                                          { 2500, -0.009371745400130749f }, { 3000, -0.018949978053569794f }, { 3500, -0.02667868137359619f },
+                                          { 4095, -0.021947938948869705f } });
+    // 4 bands, order 1, swapped inputs, narrow 30000…50000 range with the linear scale, 22.05 kHz in blocks of 77
+    const auto c = make (4, 1, 2, true, { 1.0f, 0.8f, 1.2f, 1.0f }, { 30000, 50000, 0, 0, 700, 180, 300, 40, 0, 64, 0, 160 });
+    check (run (c, 22050.0, 77, -1), { { 100, 0.31434211134910583f }, { 1000, -1.953513264656067f }, { 2047, 1.4135023355484009f },
+                                       { 2500, 1.539392352104187f }, { 3000, -0.27189597487449646f }, { 3500, -0.11583124846220016f },
+                                       { 4095, -0.11583124846220016f } });
+
+    // FL's state imports into the LYNX slot (controls as parameters, the levels in the state) and the slot's effect
+    // (one 4096-frame call, split into 512-frame engine blocks) gives the same output
+    const auto bytes = lynx::fvocoder::serialise (a);
+    CHECK (bytes.size() == 17 + 16 * 4 + 12 * 4);
+    const auto slot = lynx::effectFromFl ("Fruity Vocoder", bytes);
+    CHECK (slot && slot->kind == lynx::EffectKind::vocoder && slot->state == bytes);
+    CHECK (slot && slot->params[0] == 0.4f && slot->params[1] == 0.5f && slot->params[2] == 1.0f && slot->params[15] == 0.8f);
+    if (slot)
+    {
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l = inL, r = inR;
+        fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+        CHECK (l == outA.first && r == outA.second);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 5, slot->params[5], 120.0) == "16000 Hz");
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 10, slot->params[10], 120.0) == "20 ms");
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 15, slot->params[15], 120.0) == "1.00");
+    }
+    const auto parsed = lynx::fvocoder::parse (bytes);
+    CHECK (parsed && parsed->bands == 16 && parsed->levels[5] == 2.0f && parsed->c[lynx::fvocoder::release] == 100);
+    CHECK (! lynx::fvocoder::parse ({ 2, 0, 0, 0, 12, 0, 0, 0 })); // 12 bands is not a valid count
+}
+
+// Delphi run-time math (REA_rodada70 §2): values the plugin's own exp / ln / SinCos return (EXEC, called in place)
+TEST (delphi_math_matches_plugin_runtime)
+{
+    // arguments where the C library differs from the Delphi run-time in the last bit
+    CHECK (lynx::dmath::exp (0x1.f6e5c5a26a7f8p+3) == 0x1.98170c3deea30p+22);
+    CHECK (lynx::dmath::exp (-0x1.12fc91a51d906p+4) == 0x1.27108f934a58cp-25);
+    CHECK (lynx::dmath::exp (-0x1.2e9e4c229e93ap+4) == 0x1.a3bf2e4ee3f1ep-28);
+    CHECK (lynx::dmath::ln (0x1.76a77e2a09abep-1) == -0x1.3fd111c5297f8p-2);
+    CHECK (lynx::dmath::ln (0x1.da1feaa8547dfp+0) == 0x1.3b8abd2756774p-1);
+    CHECK (lynx::dmath::ln (0x1.a1e28772a0d78p-1) == -0x1.9ffcaa3a11e30p-3);
+    double s = 0.0, c = 0.0;
+    lynx::dmath::sinCos (0x1.91b4a19e65a9bp-1, s, c);
+    CHECK (s == 0x1.69be278761916p-1 && c == 0x1.6a559572e1ac9p-1);
+    lynx::dmath::sinCos (0x1.3284a93d70a8ap-1, s, c);
+    CHECK (s == 0x1.2088b313ea643p-1 && c == 0x1.a6f4d889fd91ap-1);
+    lynx::dmath::sinCos (0x1.f9b2f53d6ce02p+0, s, c);
+    CHECK (s == 0x1.d6a9b8f170994p-1 && c == -0x1.931701be7b5f3p-2);
 }
 
 // Vocodex (REA_rodada35): a synthetic state in FL's layout (version 8, 13 maps, 20 parameters, the 0x24 block,
@@ -10010,14 +10444,14 @@ TEST (harmor_effects_rack)
     {
         if (s == 8192)
             inst->noteOff (60);
-        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        inst->render (l.data() + s, r.data() + s, std::min (512, (int) l.size() - s), 1.0f, 1.0f);
     }
     for (std::size_t i = 0; i < l.size(); ++i)
         finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
     CHECK (finite && energy > 1.0);
     std::vector<float> tail (44100 * 6), tailR (tail.size());
     for (int s = 0; s < (int) tail.size(); s += 512)
-        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+        inst->render (tail.data() + s, tailR.data() + s, std::min (512, (int) tail.size() - s), 1.0f, 1.0f);
     CHECK (inst->idle());
 }
 
@@ -10882,10 +11316,28 @@ std::array<float, 43> miniSynthDefaults()
     return { 0.375f, 0.5f, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0.5f, 0, 0, 0.25f, 0.5f, 0, 1, 1, 0.07f, 0, 0, 0, 0, 0.7f, 0.5f, 1,
              0.5f, 0, 0.25f, 0.5f, 0.5f, 0, 0.11222222f, 0.4f, 0.1f, 1, 0.5f };
 }
+// per-process suffix for scratch files: several test binaries (one per worktree) may run at the same time, and a
+// fixed name let one process read a file another one was rewriting
+std::string processTempTag()
+{
+    static const std::string tag = std::to_string (std::random_device {}()) + "_"
+                                   + std::to_string (std::chrono::steady_clock::now().time_since_epoch().count());
+    static const struct Cleanup
+    {
+        ~Cleanup()
+        {
+            std::error_code ec;
+            std::filesystem::remove (std::filesystem::temp_directory_path (ec) / ("lynx_test_oscdata_" + tag + ".dat"), ec);
+            std::filesystem::remove_all (std::filesystem::temp_directory_path (ec) / ("lynx_bassdrum_test_" + tag), ec);
+        }
+    } cleanup;
+    (void) cleanup;
+    return tag;
+}
 // a synthetic oscdata.dat (amplitudes 0.3/k, phases −π/2 + 0.001·(k − 1)): the test does not need an FL installation
 std::string miniSynthTestOscdata()
 {
-    const auto path = (std::filesystem::temp_directory_path() / "lynx_test_oscdata.dat").string();
+    const auto path = (std::filesystem::temp_directory_path() / ("lynx_test_oscdata_" + processTempTag() + ".dat")).string();
     std::vector<float> d (2048);
     for (int h = 0; h < 1024; ++h)
         d[(std::size_t) h] = (float) (0.3 / (h + 1)), d[1024 + (std::size_t) h] = (float) (-1.5707963267948966 + 0.001 * h);
@@ -11092,7 +11544,7 @@ std::vector<std::uint8_t> fruitKickStateB()
 std::string bassDrumTestFolder()
 {
     // our own oscillator table and a pseudo-random 16-bit noise sample, laid out like FL's BassDrum folder
-    const auto dir = std::filesystem::temp_directory_path() / "lynx_bassdrum_test";
+    const auto dir = std::filesystem::temp_directory_path() / ("lynx_bassdrum_test_" + processTempTag());
     std::filesystem::create_directories (dir / "Noise Samples");
     auto wav = [] (const std::filesystem::path& path, const void* data, std::uint32_t bytes, std::uint16_t fmt, std::uint16_t bits) {
         std::ofstream o (path, std::ios::binary);
@@ -12342,6 +12794,189 @@ TEST (drumaxx_engine)
             CHECK (song.channels[0].instrument == lynx::InstrumentKind::drumaxx && song.channels[0].pluginState == st);
         CHECK (report.converted["Drumaxx"] == 1);
     }
+}
+// --- REA round 68: FL Slayer (exact engine) and Fruity Dance (visual only) ------------------------------------------
+namespace
+{
+std::string slayerDll()
+{
+    if (realFlpDir.empty())
+        return {};
+    return (std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "FL Slayer" / "Slayer_Engine.dll").string();
+}
+
+std::vector<std::uint8_t> slayerPreset (const char* name)
+{
+    if (realFlpDir.empty())
+        return {};
+    const auto file = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer" / (std::string (name) + ".fst");
+    const auto states = pluginStatesIn (file, "FL Slayer");
+    return states.empty() ? std::vector<std::uint8_t> {} : states.front();
+}
+} // namespace
+
+TEST (slayer_state)
+{
+    // the saved state: int version, then the parameter integers (version 0: 28, version 1: 29 with the mod wheel)
+    std::vector<std::uint8_t> v0 (4 + 28 * 4, 0), v1 (4 + 29 * 4, 0);
+    const std::int32_t one = 1, wheel = 77, mode = 5;
+    std::memcpy (v1.data(), &one, 4);
+    std::memcpy (v1.data() + 4 + 28 * 4, &wheel, 4);
+    std::memcpy (v0.data() + 4 + 24 * 4, &mode, 4);
+    CHECK (lynx::slayerStateUsable (v0) && lynx::slayerStateUsable (v1));
+    CHECK (! lynx::slayerStateUsable (std::vector<std::uint8_t> (v0.begin(), v0.end() - 1)));
+    auto v2 = v1;
+    v2[0] = 2;
+    CHECK (! lynx::slayerStateUsable (v2));
+    const auto p0 = lynx::slayerStateParams (v0), p1 = lynx::slayerStateParams (v1);
+    CHECK (p0.size() == 29u && p0[24] == 5 && p0[28] == 0 && p1.size() == 29u && p1[28] == 77);
+    // the controls' maxima (the front-end sends value / max)
+    CHECK (lynx::slayerParamMax (0) == 6 && lynx::slayerParamMax (20) == 15 && lynx::slayerParamMax (24) == 5 && lynx::slayerParamMax (28) == 127
+           && lynx::slayerParamMax (3) == 65535);
+    // MIDI velocity from Init.Vol (0 → 0, which the engine takes as a note-off; FL's full velocity → 127)
+    CHECK (lynx::slayer::midiVelocity (0.0) == 0 && lynx::slayer::midiVelocity (1.0) == 99 && lynx::slayer::midiVelocity (2.0) == 126
+           && lynx::slayer::midiVelocity ((std::pow (11.0, 1.28) - 1.0) / 10.0) == 127);
+}
+
+TEST (slayer_engine)
+{
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return; // no FL installation
+    // against the installation's Slayer_Engine.dll (EXEC, REA_rodada68 §7: the DLL driven like FL's front-end drives it,
+    // host blocks of 512 at 44.1 kHz, tempo 120): bit-identical output. C3 vel 90 1024–20000, G3 vel 120 8000–30000,
+    // E4 vel 40 16000–40000, C5 vel 127 from 30000.
+    struct Sample { int at; float l, r; };
+    struct Golden { const char* preset; double el, er; Sample s[4]; };
+    const Golden goldens[] {
+        { "BASS Ebass 2", 15073.5614896, 15073.5614896, { { 5000, 0.39340171217918396f, 0.39340171217918396f }, { 12000, -1.6453207731246948f, -1.6453207731246948f }, { 25000, 0.4477591812610626f, 0.4477591812610626f }, { 40000, 0.15478527545928955f, 0.15478527545928955f } } },
+        { "DIST Dire Straits", 1667.57549156, 1687.24007956, { { 5000, 0.026657210662961006f, -0.10683870315551758f }, { 12000, 0.16261409223079681f, -0.402504026889801f }, { 25000, 0.06702516227960587f, -0.04462721571326256f }, { 40000, -0.35892999172210693f, 0.29433923959732056f } } },
+        { "POWER Metal", 2041.24961449, 2041.24961449, { { 5000, -0.045430999249219894f, -0.045430999249219894f }, { 12000, 0.009085401892662048f, 0.009085401892662048f }, { 25000, -0.15170709788799286f, -0.15170709788799286f }, { 40000, -0.0430934801697731f, -0.0430934801697731f } } },
+        { "SINGLE Chorus", 1199.72408266, 1228.23838997, { { 5000, 0.08928016573190689f, 0.07585708051919937f }, { 12000, 0.22826193273067474f, 0.16860444843769073f }, { 25000, 0.14708775281906128f, 0.12602058053016663f }, { 40000, -0.02422964572906494f, -0.021596161648631096f } } },
+        { "AUTO Leslie", 2045.59821914, 16901.1532986, { { 5000, 0.09575536102056503f, -0.0019274931401014328f }, { 12000, -0.0070709832943975925f, -0.3028614819049835f }, { 25000, 0.07535621523857117f, 0.24308738112449646f }, { 40000, -0.09379560500383377f, -0.008114430122077465f } } },
+        { "FX Mad Photons", 1849.74988002, 1849.74988002, { { 5000, -0.11505282670259476f, -0.11505282670259476f }, { 12000, 0.3610122501850128f, 0.3610122501850128f }, { 25000, 0.36028820276260376f, 0.36028820276260376f }, { 40000, -0.5374203324317932f, -0.5374203324317932f } } },
+        { "ELEKTRO Jungle", 3929.94173335, 3929.94173335, { { 5000, 0.3158963918685913f, 0.3158963918685913f }, { 12000, 0.2988760769367218f, 0.2988760769367218f }, { 25000, 0.15749095380306244f, 0.15749095380306244f }, { 40000, -0.12722519040107727f, -0.12722519040107727f } } },
+        { "DIST Sololead Glide", 988.454469266, 1208.61893055, { { 5000, -0.03612576052546501f, -0.015017407014966011f }, { 12000, -0.008314903825521469f, 0.03836013376712799f }, { 25000, -0.047041457146406174f, -0.13751298189163208f }, { 40000, -0.03302673622965813f, -0.23574480414390564f } } },
+        { "SINGLE Funky", 1393.67536587, 4191.35072624, { { 5000, -0.09534210711717606f, 0.36347872018814087f }, { 12000, 0.3368682265281677f, -0.9259893894195557f }, { 25000, -0.022296791896224022f, 0.01075129397213459f }, { 40000, 0.044511131942272186f, -0.37124285101890564f } } },
+        { "AUTO Chorus Chords", 26161.9618548, 26396.2394554, { { 5000, -0.19687165319919586f, 0.08371803164482117f }, { 12000, 1.0583257675170898f, 1.5273079872131348f }, { 25000, -0.88118577003479f, -0.0774342492222786f }, { 40000, -0.3456699848175049f, -0.4140896201133728f } } },
+        { "POWER Rock Taps", 1306.21610814, 1164.18639692, { { 5000, 0.019661661237478256f, 0.07336095720529556f }, { 12000, -0.06010562554001808f, -0.3300100862979889f }, { 25000, 0.04404725879430771f, 0.0837465152144432f }, { 40000, -0.029322467744350433f, -0.1399042010307312f } } },
+        { "FX Atari 2600 Computer", 1391.44227691, 1391.44227691, { { 5000, 0.18123838305473328f, 0.18123838305473328f }, { 12000, -0.1220453679561615f, -0.1220453679561615f }, { 25000, 0.17565210163593292f, 0.17565210163593292f }, { 40000, 0.21183894574642181f, 0.21183894574642181f } } },
+    };
+    const std::vector<lynx::slayer::RefNote> notes = { { 1024, 48, 90, 20000 }, { 8000, 55, 120, 30000 }, { 16000, 64, 40, 40000 }, { 30000, 72, 127, -1 } };
+    constexpr int length = 44100;
+    int checked = 0;
+    for (const auto& g : goldens)
+    {
+        const auto st = slayerPreset (g.preset);
+        CHECK (lynx::slayerStateUsable (st));
+        if (! lynx::slayerStateUsable (st))
+            continue;
+        const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, notes, 44100.0, length);
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        bool ok = y.size() == 2 * (std::size_t) length && std::abs (el - g.el) <= 1e-10 * g.el && std::abs (er - g.er) <= 1e-10 * g.er;
+        for (const auto& smp : g.s)
+            ok = ok && y[2 * (std::size_t) smp.at] == smp.l && y[2 * (std::size_t) smp.at + 1] == smp.r;
+        if (! ok)
+            std::printf ("  FL Slayer %s differs from FL's DLL: energy %.12g %.12g (DLL %.12g %.12g)\n", g.preset, el, er, g.el, g.er);
+        CHECK (ok);
+        ++checked;
+    }
+    CHECK (checked == 12);
+
+    // the instrument: the engine primed with one sample, FL's velocity curve, the front-end's host gain cos(π/4), the
+    // channel gains on top; a note with velocity 0.8 is the reference note one sample later
+    const auto st = slayerPreset ("BASS Ebass 2");
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::slayer;
+    c.pluginState = st;
+    c.samplePath = dll;
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::slayer);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    std::vector<float> l (16384, 0.0f), r (16384, 0.0f);
+    for (int b = 0; b < 32; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (60, 0.8f);
+        if (b == 20)
+            inst->noteOff (60);
+        inst->render (l.data() + 512 * b, r.data() + 512 * b, 512, 0.5f, 0.25f);
+    }
+    const int vel = lynx::slayer::midiVelocity ((std::pow (11.0, 1.28 * 0.8) - 1.0) / 10.0);
+    const auto ref = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, { { 1, 60, vel, 1 + 20 * 512 } }, 44100.0, 16385);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < 16384; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * 0.70710677f * 0.5f),
+                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * 0.70710677f * 0.25f) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1.0 && vel == 102);
+
+    // every preset of the installation: usable and sounding
+    int presets = 0, sounding = 0;
+    const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "FL Slayer";
+    if (std::filesystem::exists (folder))
+        for (const auto& entry : std::filesystem::directory_iterator (folder))
+            for (const auto& s : pluginStatesIn (entry.path(), "FL Slayer"))
+            {
+                ++presets;
+                const auto y = lynx::slayer::renderReference (lynx::slayerStateParams (s), dll, { { 1024, 52, 100, 20000 } }, 44100.0, 22050);
+                double e = 0.0;
+                bool finite = true;
+                for (auto v : y)
+                    finite = finite && std::isfinite (v), e += (double) v * v;
+                CHECK (finite);
+                sounding += e > 1.0 ? 1 : 0;
+            }
+    std::printf ("  FL Slayer presets: %d, %d sounding\n", presets, sounding);
+    CHECK (presets == 64 && sounding == 64);
+}
+
+TEST (slayer_and_fruity_dance_import)
+{
+    // FL Slayer plays on the exact engine when the installation's engine DLL is there (otherwise it stays unsupported);
+    // Fruity Dance (a visual plugin) becomes a silent channel that keeps its state
+    std::vector<std::uint8_t> slayer (4 + 28 * 4, 0), dance (40, 1);
+    FlpBuilder b;
+    b.ascii (0xC7, "25.2.5.5319");
+    int index = 0;
+    for (const auto& [name, state] : { std::pair<std::u16string, std::vector<std::uint8_t>> { u"FL Slayer", slayer }, { u"Fruity Dance", dance } })
+    {
+        b.u8 (0x40); b.u16 ((std::uint16_t) index++);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, name);
+        b.data (0xD5, state);
+    }
+    const auto project = flp::parseProject (b.bytes);
+    const auto plain = lynx::importFlp (project);
+    CHECK (plain.channels.size() == 2u);
+    if (plain.channels.size() == 2u)
+    {
+        CHECK (plain.channels[0].instrument != lynx::InstrumentKind::slayer);
+        CHECK (plain.channels[1].instrument == lynx::InstrumentKind::fruitydance && plain.channels[1].pluginState == dance);
+    }
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::fruitydance);
+    inst->prepare (44100.0);
+    std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+    inst->noteOn (60, 1.0f);
+    inst->render (l.data(), r.data(), 1024, 1.0f, 1.0f);
+    CHECK (inst->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return;
+    lynx::FlpImportOptions withFiles;
+    withFiles.roots = { std::filesystem::path (realFlpDir).parent_path().string(), realFlpDir, "" };
+    withFiles.fileExists = [] (const std::string& path) {
+        auto local = path;
+        std::replace (local.begin(), local.end(), '\\', '/');
+        return std::filesystem::exists (local);
+    };
+    const auto song = lynx::importFlp (project, withFiles);
+    CHECK (song.channels.size() == 2u && song.channels[0].instrument == lynx::InstrumentKind::slayer && song.channels[0].pluginState == slayer
+           && ! song.channels[0].samplePath.empty());
 }
 #include "WaveAnalysisTests.inc"
 #include "UiPolish2Tests.inc"
