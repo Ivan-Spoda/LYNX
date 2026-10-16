@@ -1,6 +1,7 @@
 #include "core/DirectWave.h"
 
 #include "core/BassDrum.h"
+#include "core/PitchShifterFl.h"
 
 #include <algorithm>
 #include <cmath>
@@ -472,11 +473,8 @@ struct LfoState
     }
 };
 
-struct Biquad
+void designBiquad (float* c, int type, float hz, float q, float sr)
 {
-    float c[5] { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f }; // b0, b1, b2, a1, a2
-
-    void design (int type, float hz, float q, float sr)
     {
         if (type == 0)
         {
@@ -524,6 +522,12 @@ struct Biquad
             default: break;
         }
     }
+}
+
+struct Biquad
+{
+    float c[5] { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f }; // b0, b1, b2, a1, a2
+    void design (int type, float hz, float q, float sr) { designBiquad (c, type, hz, q, sr); }
 };
 
 // two passes of the same biquad, then an optional clip at ±(1 − shape)
@@ -551,6 +555,292 @@ struct BiquadState
 };
 
 constexpr int kMaxBlock = 256;
+constexpr int kMaxBlockFx = 256;
+
+float cutoffHz (float v) { return powfCrt (2.0f, (v * 127.0f) / 12.0f - 5.0f) * 440.0f; }
+void designBiquad (float* c, int type, float hz, float q, float sr);
+
+// ------------------------------------------------------------------------------------------------- program effects
+float tanfCrt (float x) { return (float) std::tan ((double) x); } // equal to the plugin's on the arguments used (EXEC)
+
+struct SingleBiquad
+{
+    float s[4] {}; // y1, y2, x1, x2
+    float run (float x, const float* c)
+    {
+        const float y = (((s[2] * c[1] + x * c[0]) + c[2] * s[3]) - s[0] * c[3]) - c[4] * s[1];
+        s[3] = s[2]; s[2] = x; s[1] = s[0]; s[0] = y;
+        return y;
+    }
+};
+
+// FUN_180011f10: stereo delay, allpass-interpolated read, high- and low-pass in the feedback, optional cross feedback
+struct DelayFx
+{
+    SingleBiquad hp[2], lp[2];
+    std::vector<float> buf[2];
+    float time = 0.0f, fb = 0.0f, y[2] {};
+    std::uint32_t wp = 0;
+
+    void run (const Program& P, float sr, float bpm, int n, float (*bus)[kMaxBlockFx], std::uint32_t& rnd)
+    {
+        if (buf[0].empty()) { buf[0].assign (65536, 0.0f); buf[1].assign (65536, 0.0f); }
+        float target = sr * 60.0f / bpm * P.delay[0];
+        target = std::max (target, sr * fbits (0x3a83126fu));
+        const float k = 16.0f / sr;
+        const float q = std::sqrt (2.0f) * 0.5f;
+        float ch[5], cl[5];
+        designBiquad (ch, 2, cutoffHz (P.delay[2]), q, sr);
+        designBiquad (cl, 1, cutoffHz (P.delay[3]), q, sr);
+        const float fbT = P.delay[1];
+        for (int i = 0; i < n; ++i)
+        {
+            const float noise = (float) (int) crtRand (rnd) * fbits (0x283424dcu);
+            const auto w16 = wp & 0xffffu;
+            const int ti = (int) time;
+            const float f = time - (float) ti;
+            const float w = 1.0f - f;
+            const auto r0 = (std::uint32_t) (ti + (int) wp) & 0xffffu, r1 = (std::uint32_t) (ti + (int) wp + 1) & 0xffffu;
+            const float y1 = (buf[1][r0] * w + buf[1][r1]) - w * y[1];
+            const float y0 = (w * buf[0][r0] + buf[0][r1]) - w * y[0];
+            y[1] = y1; y[0] = y0;
+            if (P.delayCross)
+            {
+                buf[0][w16] = lp[0].run (hp[0].run (y1 * fb + (noise + bus[2][i]), ch), cl);
+                buf[1][w16] = lp[1].run (hp[1].run (y[0] * fb + noise, ch), cl);
+            }
+            else
+            {
+                buf[0][w16] = lp[0].run (hp[0].run (y0 * fb + (noise + bus[2][i]), ch), cl);
+                buf[1][w16] = lp[1].run (hp[1].run (y[1] * fb + (noise + bus[3][i]), ch), cl);
+            }
+            --wp;
+            bus[0][i] = y[0] + bus[0][i];
+            bus[1][i] = bus[1][i] + y[1];
+            time = ((target - time) * k + noise) + time;
+            fb = ((fbT - fb) * k + noise) + fb;
+        }
+    }
+};
+
+
+// FUN_18002d0b0 (+ FUN_18002c9a0): plate reverb — input low-pass and DC blocker, four input allpasses, a one-sample
+// pre-delay, a two-branch tank (damping one-pole + shelf, decay allpasses, delays) and fixed output taps
+struct ReverbFx
+{
+    static constexpr int kLen[12] { 0x8e, 0x6b, 0x17b, 0x115, 0x2a0, 0x1165, 0x708, 0xe88, 0x38c, 0x1079, 0xa60, 0xc5b };
+    static constexpr int kTap[14] { 0x10a, 0xb9e, 0x779, 0x9c0, 0x69a, 0xbb, 0x61e, 0x161, 0xe2b, 0x6c0, 0xc65, 0x713, 0x14f, 0x26d };
+    int size = -1, rate = -1;
+    int pos[12] {}, len[12] {}, tap[14] {};
+    int prePos = 0, preLen = 1;
+    std::vector<float> line[12], pre;
+    float lp = 0.0f, hpY = 0.0f, hpX = 0.0f;  // +0xb4, +0xb8, +0xbc
+    float shA = 0.0f, shAy = 0.0f, dampA = 0.0f; // +0xc0, +0xc4, +0xd0
+    float shB = 0.0f, shBy = 0.0f, dampB = 0.0f; // +0xc8, +0xcc, +0xd4
+
+    void allocate (int sr)
+    {
+        if (sr == rate)
+            return;
+        rate = sr;
+        for (int k = 0; k < 12; ++k)
+        {
+            line[k].assign ((std::size_t) std::max (1, (sr * kLen[k]) / 20000) + 1, 0.0f);
+            pos[k] = 0;
+        }
+        pre.assign ((std::size_t) std::max (1, (sr * 250) / 1000), 0.0f);
+        prePos = 0;
+    }
+
+    void run (const Program& P, float sr, int n, float (*bus)[kMaxBlockFx])
+    {
+        const float roomV = P.reverb[0], dampV = P.reverb[1], diffV = P.reverb[2], decayV = P.reverb[3];
+        const int isr = (int) sr;
+        allocate (isr);
+        const float lnK = fbits (0xc0dd0c55u); // logf(0.001)
+        float t = tanfCrt ((kPi * 94.5f) / sr);
+        const float aHp = (t - 1.0f) / (t + 1.0f);
+        float c = 2.0f - cosfCrt ((kTwoPi * 22000.0f) / sr);
+        float sq = c * c - 1.0f;
+        sq = std::sqrt (sq);
+        const float lpK = 1.0f - (c - sq);
+        preLen = std::max (1, (int) ((sr * 0.0f) * fbits (0x3a83126fu)));
+        prePos = prePos % preLen;
+        const int sizeI = (int) (roomV * 99.0f + 1.0f);
+        const int base = ((sizeI + 15) * isr) / 115;
+        for (int k = 0; k < 12; ++k)
+        {
+            len[k] = std::max (1, (base * kLen[k]) / 20000);
+            len[k] = std::min (len[k], (int) line[k].size());
+            pos[k] = pos[k] % len[k];
+        }
+        for (int j = 0; j < 14; ++j)
+            tap[j] = (base * kTap[j]) / 20000;
+        if (sizeI != size)
+        {
+            size = sizeI;
+            for (int k = 0; k < 12; ++k)
+                std::fill (line[k].begin(), line[k].begin() + len[k], 0.0f);
+        }
+        float a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+        if (diffV > 0.0f)
+        {
+            a1 = expfCrt (((((float) (len[0] + len[1]) * 0.5f) / sr) * lnK) / (diffV * fbits (0x3d8f5c29u)));
+            a2 = expfCrt (((((float) (len[8] + len[4]) * 0.5f) / sr) * lnK) / (diffV * fbits (0x3eb33333u)));
+            a3 = expfCrt (((((float) (len[6] + len[10]) * 0.5f) / sr) * lnK) / (diffV * fbits (0x3f028f5cu)));
+        }
+        float dd = decayV * 199.0f;
+        dd = dd * decayV + 1.0f;
+        dd = dd / 10.0f;
+        const float g = powfCrt (expfCrt ((((float) (len[11] + len[9] + len[7] + len[5]) / sr) * lnK) / dd), 0.25f);
+        const float one = g / g;
+        const float oneMin = std::min (1.0f, one);
+        const float tilt = (one - 1.0f) * 0.5f;
+        t = tanfCrt ((kPi * 500.0f) / sr);
+        const float aSh = (t - oneMin) / (t + oneMin);
+        float c2 = 2.0f - cosfCrt ((((dampV * 216.0f + 5.0f) * 100.0f) * kTwoPi) / sr);
+        float sq2 = c2 * c2 - 1.0f;
+        sq2 = std::sqrt (sq2);
+        const float dampK = 1.0f - (c2 - sq2);
+        const float gm = 1.0f - g;
+        const float k07 = gm * fbits (0x3f333333u) + g, k06 = gm * fbits (0x3f19999au) + g, k025 = gm * 0.25f + g;
+        const float k02 = gm * fbits (0x3e4ccccdu) + g, k05 = gm * 0.5f + g;
+        auto step = [&] (int k) { if (--pos[k] < 0) pos[k] = len[k] - 1; };
+        auto at = [&] (int k, int i) -> float& { return line[k][(std::size_t) i]; };
+        for (int i = 0; i < n; ++i)
+        {
+            const float tiny = fbits (0x0da24260u);
+            float x = ((bus[7][i] + bus[6][i]) * 0.5f + tiny - lp) * lpK + lp;
+            lp = x;
+            const float h = (x - hpY) * aHp + hpX;
+            hpX = x;
+            hpY = h;
+            const float in = (x - h) * 0.5f + tiny;
+            // input allpasses
+            float u0 = at (0, pos[0]) - in * a1;
+            float t0 = u0 * a1;
+            at (0, pos[0]) = t0 + in; step (0);
+            float u1 = at (1, pos[1]) - t0;
+            float t1 = u1 * a1;
+            at (1, pos[1]) = t1 + u0; step (1);
+            float u2 = at (2, pos[2]) - t1;
+            float t2 = u2 * a1;
+            at (2, pos[2]) = t2 + u1; step (2);
+            float u3 = at (3, pos[3]) - t2;
+            at (3, pos[3]) = u3 * a1 + u2; step (3);
+            const float pd = pre[(std::size_t) prePos];
+            pre[(std::size_t) prePos] = u3;
+            if (--prePos < 0) prePos = preLen - 1;
+            // branch A
+            {
+                const float r = g * at (11, pos[11]);
+                const float sh = (r - shAy) * aSh + shA;
+                shA = r;
+                shAy = sh;
+                const float v = ((((sh + r) * tilt + r) + pd) - dampA) * dampK + dampA;
+                dampA = v;
+                float w = at (4, pos[4]) - v * a2;
+                at (4, pos[4]) = w * a2 + v; step (4);
+                const float dly = at (5, pos[5]);
+                at (5, pos[5]) = w; step (5);
+                const float q = dly * g;
+                float w2 = at (6, pos[6]) - q * a3;
+                at (6, pos[6]) = w2 * a3 + q; step (6);
+                at (7, pos[7]) = w2; step (7);
+            }
+            // branch B
+            {
+                const float r = g * at (7, pos[7]);
+                const float sh = (r - shBy) * aSh + shB;
+                shB = r;
+                shBy = sh;
+                const float v = ((((sh + r) * tilt + r) + pd) - dampB) * dampK + dampB;
+                dampB = v;
+                float w = at (8, pos[8]) - v * a2;
+                at (8, pos[8]) = w * a2 + v; step (8);
+                const float dly = at (9, pos[9]);
+                at (9, pos[9]) = w; step (9);
+                const float q = dly * g;
+                float w2 = at (10, pos[10]) - q * a3;
+                at (10, pos[10]) = w2 * a3 + q; step (10);
+                at (11, pos[11]) = w2; step (11);
+            }
+            auto wrap = [&] (int v, int k) { return v < len[k] ? v : v - len[k]; };
+            const float rR = ((((k025 * at (5, wrap (tap[8] + pos[5], 5)) + at (5, wrap (tap[7] + pos[5], 5)))
+                                - k07 * at (6, wrap (tap[9] + pos[6], 6)))
+                               - k02 * at (7, wrap (tap[10] + pos[7], 7)))
+                              - k06 * at (9, wrap (tap[11] + pos[9], 9)))
+                             + at (10, wrap (pos[10] + tap[12], 10)) + k05 * at (11, wrap (pos[11] + tap[13], 11));
+            const float rL = (((at (9, wrap (tap[0] + pos[9], 9)) - k025 * at (9, wrap (tap[1] + pos[9], 9)))
+                               - k07 * at (10, wrap (tap[2] + pos[10], 10)))
+                              - k02 * at (11, wrap (pos[11] + tap[3], 11)))
+                             + k06 * at (5, wrap (tap[4] + pos[5], 5)) + at (6, wrap (tap[5] + pos[6], 6))
+                             + k05 * at (7, wrap (tap[6] + pos[7], 7));
+            bus[1][i] = rR + bus[1][i];
+            bus[0][i] = rL + bus[0][i];
+        }
+        if (std::getenv ("DWDBG"))
+        {
+            std::fprintf (stderr, "#rev pos"); for (int k = 0; k < 12; ++k) std::fprintf (stderr, " %d", pos[k]);
+            std::fprintf (stderr, " len"); for (int k = 0; k < 12; ++k) std::fprintf (stderr, " %d", len[k]);
+            std::fprintf (stderr, " tap"); for (int k = 0; k < 14; ++k) std::fprintf (stderr, " %d", tap[k]);
+            std::fprintf (stderr, " f %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g g %.9g a %.9g %.9g %.9g\n", (double) lp, (double) hpY, (double) hpX, (double) shA, (double) shAy, (double) shB, (double) shBy, (double) dampA, (double) dampB, (double) g, (double) a1, (double) a2, (double) a3);
+        }
+    }
+};
+
+// FUN_1800119c0: stereo chorus, two allpass-interpolated taps moved by quadrature sines, feedback
+struct ChorusFx
+{
+    std::vector<float> buf[2];
+    float d[2] {}, fb = 0.0f, phase = 0.0f, y[2] {};
+    std::int32_t wp = 0;
+
+    void run (const Program& P, float sr, int n, float (*bus)[kMaxBlockFx], std::uint32_t& rnd)
+    {
+        if (buf[0].empty()) { buf[0].assign (16384, 0.0f); buf[1].assign (16384, 0.0f); }
+        const float ms = sr * fbits (0x3a83126fu);
+        const float k = 16.0f / sr;
+        float depth = P.chorus[1] * P.chorus[1];
+        depth = depth * 24.0f;
+        depth = depth * ms;
+        depth = depth * 0.5f;
+        float centre = P.chorus[0] * P.chorus[0];
+        centre = centre * fbits (0x423f999au) + fbits (0x3dcccccdu);
+        centre = centre * ms;
+        const float mid = depth + centre;
+        float inc = P.chorus[2] * kTwoPi;
+        inc = inc * P.chorus[2];
+        inc = inc * 20.0f;
+        inc = inc / sr;
+        const float fbT = P.chorus[3];
+        for (int i = 0; i < n; ++i)
+        {
+            const float noise = (float) (int) crtRand (rnd) * fbits (0x283424dcu);
+            const float sl = sinfCrt (phase) * depth + mid;
+            const float sr2 = sinfCrt (kTwoPi * 0.25f + phase) * depth + mid;
+            const int il = (int) d[0], ir = (int) d[1];
+            const float wl = 1.0f - (d[0] - (float) il);
+            const float wr = 1.0f - (d[1] - (float) ir);
+            const float yl = (wl * buf[0][(std::uint32_t) (wp + il) & 0x3fffu] + buf[0][(std::uint32_t) (wp + il + 1) & 0x3fffu]) - wl * y[0];
+            y[0] = yl;
+            const float yr = (wr * buf[1][(std::uint32_t) (wp + ir) & 0x3fffu] + buf[1][(std::uint32_t) (wp + ir + 1) & 0x3fffu]) - wr * y[1];
+            y[1] = yr;
+            bus[0][i] = yl + bus[0][i];
+            bus[1][i] = y[1] + bus[1][i];
+            const auto w = (std::uint32_t) wp & 0x3fffu;
+            buf[0][w] = (y[0] * fb + bus[4][i]) + noise;
+            buf[1][w] = (y[1] * fb + bus[5][i]) + noise;
+            float ph = inc + phase;
+            --wp;
+            phase = ph;
+            if (ph > kTwoPi) phase = ph - kTwoPi;
+            d[0] = ((sl - d[0]) * k + noise) + d[0];
+            d[1] = ((sr2 - d[1]) * k + noise) + d[1];
+            fb = ((fbT - fb) * k + noise) + fb;
+        }
+    }
+};
 constexpr int kVoices = 256;
 
 struct Voice
@@ -591,6 +881,9 @@ struct Engine::Impl
     float smoothK = 0.0f, limUp = 0.0f, limDown = 0.0f, twoPiOverSr = 0.0f;
     std::array<Voice, kVoices> voices;
     LfoState progLfo[2];
+    DelayFx delayFx;
+    ChorusFx chorusFx;
+    ReverbFx reverbFx;
     float progLfoOut[2] {};
     int lastNote = 0;
     int heldVel[128] {};
@@ -736,7 +1029,7 @@ struct Engine::Impl
     int bendRange = 2;
     // per block
     float buf[2][kMaxBlock] {};
-    float bus[8][kMaxBlock] {}; // dry L/R, delay L/R, chorus L/R, reverb L/R
+    float bus[8][kMaxBlockFx] {}; // dry L/R, delay L/R, chorus L/R, reverb L/R
     std::uint32_t* rnd = nullptr;
 
     void setRate (float r)
@@ -1359,7 +1652,29 @@ void Engine::render (float* out, int n)
         for (auto& v : I.voices)
             if (v.amp.state > 0 || v.start)
                 I.renderVoice (v, m, blockRate, lfoScale, blockTempo);
-        // program effects: §6 (delay, chorus, reverb, shapers) — not yet
+        if (I.prog.delayOn) I.delayFx.run (I.prog, I.sr, I.bpm, m, I.bus, randState);
+        if (I.prog.chorusOn) I.chorusFx.run (I.prog, I.sr, m, I.bus, randState);
+        if (I.prog.reverbOn) I.reverbFx.run (I.prog, I.sr, m, I.bus);
+        if (I.prog.shape1)
+        {
+            const float g = 1.0f - I.prog.shape1Amount * 0.75f;
+            const float s = 1.0f / (g * g * g);
+            for (int i = 0; i < m; ++i)
+            {
+                I.bus[0][i] = psfl::tanhfCrt (s * I.bus[0][i]) * g;
+                I.bus[1][i] = psfl::tanhfCrt (s * I.bus[1][i]) * g;
+            }
+        }
+        if (I.prog.shape2)
+        {
+            const float g = 1.0f - I.prog.shape2Amount * 0.75f;
+            const float s = 1.0f / (g * g * g);
+            for (int i = 0; i < m; ++i)
+            {
+                I.bus[0][i] = sinfCrt (s * I.bus[0][i]) * g;
+                I.bus[1][i] = sinfCrt (s * I.bus[1][i]) * g;
+            }
+        }
         for (int i = 0; i < m; ++i)
         {
             out[2 * (done + i)] = I.bus[0][i] + out[2 * (done + i)];
