@@ -10,6 +10,7 @@
 #include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
 #include "core/EquoFx.h"
+#include "core/DistructorFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -2227,6 +2228,13 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // Distructor: each module's input volume, mix and output volume (FL's 0…10000 / 10000), the final clipper; the
+    // modules themselves come from FL's state (core/DistructorFx.h)
+    static const EffectInfo distructorInfo { "Distructor", { { "M1 In", 0.5f }, { "M1 Mix", 1.0f }, { "M1 Out", 0.5f },
+                                                             { "M2 In", 0.5f }, { "M2 Mix", 1.0f }, { "M2 Out", 0.5f },
+                                                             { "M3 In", 0.5f }, { "M3 Mix", 1.0f }, { "M3 Out", 0.5f },
+                                                             { "M4 In", 0.5f }, { "M4 Mix", 1.0f }, { "M4 Out", 0.5f },
+                                                             { "Clipper", 1.0f } } };
     // EQUO: FL's knobs (raw − min) / range and options; the bands come from FL's state (core/EquoFx.h)
     static const EffectInfo equoInfo { "EQUO", { { "Band shift", 0.5f }, { "Band mix", 1.0f }, { "Morph", 0.0f },
                                                  { "Smoothness", 170.0f / 1024.0f }, { "Volume", 0.5f },
@@ -2482,6 +2490,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFreeFilter: return freeFilterInfo;
         case EffectKind::fruityFilter: return fruityFilterInfo;
         case EffectKind::hardcore: return hardcore::info();
+        case EffectKind::distructor: return distructorInfo;
     }
     return eq;
 }
@@ -2823,6 +2832,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::equo:
             return equofx::paramText (param, v);
 
+        case EffectKind::distructor:
+            return distructor::paramText (param, v);
+
         case EffectKind::flPitchShifter:
             return psfl::paramText (param, v);
 
@@ -2896,6 +2908,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return equofx::make (slot.state);
     if (slot.kind == EffectKind::hardcore)
         return hardcore::make (slot);
+    if (slot.kind == EffectKind::distructor)
+        return distructor::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
     if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
@@ -2974,6 +2988,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::flPitchShifter: return psfl::make();
         case EffectKind::frequencySplitter: return fsplit::make();
         case EffectKind::hardcore: return hardcore::make (makeEffectSlot (EffectKind::hardcore)); // no cabinet impulses; use makeEffect (slot)
+        case EffectKind::distructor: return distructor::make ({}); // without a state: passes the signal; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();

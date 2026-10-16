@@ -60,6 +60,7 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
 #include "core/EquoFx.h"
+#include "core/DistructorFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
@@ -937,6 +938,7 @@ TEST (flp_real_files)
     int basicSlots = 0, basicExact = 0; // REA_rodada58: PanOMatic, Balance, Blood Overdrive
     int equoSlots = 0, equoExact = 0, pitchShifterSlots = 0, pitchShifterExact = 0; // REA_rodada61
     int filterSlots = 0, filterExact = 0; // REA_rodada63: Fast LP, Free Filter, Fruity Filter
+    int distructorSlots = 0, distructorExact = 0, distructorImpulses = 0;             // REA_rodada71
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
@@ -1189,6 +1191,7 @@ TEST (flp_real_files)
                         shaperSlots += slot.plugin == "Fruity WaveShaper";
                         flPeqSlots += slot.plugin == "Fruity Parametric EQ 2" || slot.plugin == "Fruity Parametric EQ";
                         equoSlots += slot.plugin == "EQUO";
+                        distructorSlots += slot.plugin == "Distructor";
                         pitchShifterSlots += slot.plugin == "Pitch Shifter";
                         clipperSlots += slot.plugin == "Fruity Soft Clipper";
                         basicSlots += slot.plugin == "Fruity PanOMatic" || slot.plugin == "Fruity Balance" || slot.plugin == "Fruity Blood Overdrive";
@@ -1220,6 +1223,13 @@ TEST (flp_real_files)
                         basicExact += fx.kind == lynx::EffectKind::fruityPanOMatic || fx.kind == lynx::EffectKind::fruityBalance
                                       || fx.kind == lynx::EffectKind::fruityBloodOverdrive;
                         equoExact += fx.kind == lynx::EffectKind::equo && lynx::equofx::parse (fx.state).has_value();
+                        if (fx.kind == lynx::EffectKind::distructor)
+                            if (const auto d = lynx::distructor::parseBlob (fx.state))
+                            {
+                                ++distructorExact;
+                                for (const auto& m : d->modules)
+                                    distructorImpulses += m.type == 3 && ! m.impulseFile.empty();
+                            }
                         pitchShifterExact += fx.kind == lynx::EffectKind::flPitchShifter;
                         filterExact += fx.kind == lynx::EffectKind::fruityFastLP || fx.kind == lynx::EffectKind::fruityFreeFilter
                                        || fx.kind == lynx::EffectKind::fruityFilter;
@@ -1946,6 +1956,10 @@ TEST (flp_real_files)
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
     // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
     CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    // (Patcher graphs can add Distructor nodes of their own to the imported mixer)
+    std::printf ("  Distructor: %d of %d slots on the exact engine (%d cabinet impulses read from the installation)\n",
+                 distructorExact, distructorSlots, distructorImpulses);
+    CHECK (distructorExact >= distructorSlots && distructorSlots >= 4 && distructorImpulses >= 1); // REA_rodada71
     std::printf ("  EQUO: %d of %d slots on the exact engine\n", equoExact, equoSlots);
     CHECK (equoExact == equoSlots && equoSlots >= 10); // REA_rodada61
     std::printf ("  Pitch Shifter: %d of %d slots on the exact engine\n", pitchShifterExact, pitchShifterSlots);
@@ -11855,3 +11869,4 @@ TEST (wasp_is_a_silent_placeholder)
 #include "LuxeVerbTests.inc"
 #include "ConvolverTests.inc"
 #include "HardcoreTests.inc"
+#include "DistructorTests.inc"
