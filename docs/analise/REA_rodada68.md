@@ -269,7 +269,8 @@ slot 3, integer pan): `cos(π/4)` on both sides, 0.70710677 **[DECOMP]**. The pl
 | scenario F | host blocks of 64, extreme keys, held notes | 64 / 64 bit-identical |
 | random | 340 random parameter sets (every effect, amp, cabinet, strings type, mode, latch, glissando), 1–6 random notes, random bend / mod wheel, 22.05/44.1/48/96 kHz, blocks 64…1024, tempo 90/120/174.5 | 340 / 340 bit-identical |
 
-`tests.cpp` `slayer_engine` holds 12 preset goldens from the DLL (energies and samples, compared exactly).
+The same comparison with the engine built for Windows (Zig, x86_64-windows-gnu, as LYNX.exe is built) on 22 presets
+in scenario A: bit-identical. `tests.cpp` `slayer_engine` holds 12 preset goldens from the DLL (energies and samples, compared exactly).
 
 ## 8. Fruity Dance **[DECOMP + DATA]**
 
