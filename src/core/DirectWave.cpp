@@ -531,6 +531,171 @@ struct Biquad
     void design (int type, float hz, float q, float sr) { designBiquad (c, type, hz, q, sr); }
 };
 
+
+// filter type 6 (FUN_18003b860 / FUN_18003b4b0 / FUN_18003b680): a four-pole ladder in double precision whose
+// one-sample transition is the 4096th power of a small step (12 squarings), a soft saturation of the first stage,
+// and a DC blocker shared by both channels
+struct Ladder
+{
+    double sr = 44100.0;
+    double s[2][4] {};
+    double m[20] {}; // m[4·i + j]: input i (state 0…3, then the input) → state j
+    double dc = 0.0;
+
+    void clear() { std::fill (&s[0][0], &s[0][0] + 8, 0.0); dc = 0.0; }
+
+    void set (float hz, float res)
+    {
+        const float fc = hz <= 20000.0f ? hz : 20000.0f;
+        double g = ((double) fc * 6.25) / (sr * 4096.0);
+        g = 0.0 <= g ? g : 0.0;
+        g = g <= 1.0 ? g : 1.0;
+        const auto k = (double) -(res * fbits (0x4081999au));
+        const double a = 1.0 - g;
+        double* p = m - 9; // p[9…28] as the plugin numbers them
+        p[0x19] = g;
+        double kg = k * g;
+        p[9] = a;
+        const double ag = a * g;
+        p[0x15] = kg;
+        kg = kg * g;
+        p[0x1a] = g * g;
+        const double ag2 = ag * g;
+        const double g3 = g * g * g;
+        p[0x16] = kg;
+        kg = kg * g;
+        p[0x1b] = g3;
+        p[0xc] = ag2 * g;
+        p[10] = ag; p[0xe] = a; p[0xb] = ag2; p[0xf] = ag; p[0x13] = a; p[0x17] = kg; p[0x10] = ag2; p[0x14] = ag;
+        p[0x18] = g * kg + a;
+        p[0x1c] = g3 * g;
+        p[0xd] = 0.0; p[0x11] = 0.0; p[0x12] = 0.0;
+        for (int it = 0; it < 12; ++it)
+        {
+            double o[29];
+            std::copy (p + 9, p + 29, o + 9);
+            const double d32 = o[0xd], d20 = o[0x11], d28 = o[0x15], d27 = o[9], d29 = o[10], d30 = o[0xe], d1 = o[0xb], d2 = o[0xc];
+            const double d3 = o[0x12], d4 = o[0x19], d5 = o[0x16], d6 = o[0xf], d7 = o[0x13], d8 = o[0x17], d11 = o[0x1a];
+            const double d31 = o[0x14], d12 = o[0x10], d13 = o[0x18], d14 = o[0xc];
+            const double d23 = d27 * d14 + d29 * d12 + d1 * d31 + d14 * d13;
+            const double d24 = d32 * d14 + o[0xe] * d12 + o[0xf] * d31 + d12 * d13;
+            const double d21 = d20 * d14 + o[0x12] * d12 + o[0x13] * d31 + d31 * d13;
+            const double d22 = d28 * d14 + o[0x16] * d12 + o[0x17] * d31 + d13 * d13;
+            const double d31n = d4 * d14 + o[0x1a] * d12 + o[0x1b] * d31 + o[0x1c] * d13 + o[0x1c];
+            p[9] = d27 * d27 + d32 * d29 + d20 * d1 + d28 * d2;
+            p[10] = d29 * d27 + d30 * d29 + d3 * d1 + d5 * d2;
+            p[0xb] = d1 * d27 + d6 * d29 + d7 * d1 + d8 * d2;
+            p[0xc] = d23;
+            p[0xd] = d32 * d27 + d32 * d30 + d20 * o[0xf] + d28 * o[0x10];
+            p[0xe] = d29 * d32 + d30 * d30 + d3 * o[0xf] + d5 * o[0x10];
+            p[0xf] = d1 * d32 + d6 * d30 + d7 * d6 + d8 * o[0x10];
+            p[0x10] = d24;
+            p[0x11] = d20 * d27 + d32 * d3 + d20 * o[0x13] + d28 * o[0x14];
+            p[0x12] = d29 * d20 + d30 * d3 + d3 * o[0x13] + d5 * o[0x14];
+            p[0x13] = d1 * d20 + d6 * o[0x12] + d7 * d7 + d8 * o[0x14];
+            p[0x14] = d21;
+            p[0x15] = d28 * d27 + d32 * o[0x16] + d20 * o[0x17] + d28 * o[0x18];
+            p[0x16] = d29 * d28 + d30 * d5 + d3 * o[0x17] + d5 * o[0x18];
+            p[0x17] = d1 * d28 + d6 * o[0x16] + d7 * d8 + d8 * o[0x18];
+            p[0x18] = d22;
+            p[0x19] = d4 * d27 + d32 * o[0x1a] + d20 * o[0x1b] + d28 * o[0x1c] + d4;
+            p[0x1a] = d29 * d4 + d30 * o[0x1a] + d3 * o[0x1b] + d5 * o[0x1c] + o[0x1a];
+            p[0x1b] = d1 * d4 + d6 * d11 + d7 * o[0x1b] + d8 * o[0x1c] + o[0x1b];
+            p[0x1c] = d31n;
+        }
+    }
+
+    float run (int ch, float x)
+    {
+        double* st = s[ch];
+        const double* p = m - 9;
+        const double s0 = st[0], s1 = st[1], s2 = st[2], s3 = st[3];
+        const auto in = (double) ((x + fbits (0x3eb33333u)) * fbits (0x3e4ccccdu));
+        double y = s0 * p[0xc] + s1 * p[0x10] + s2 * p[0x14] + s3 * p[0x18] + in * p[0x1c];
+        st[3] = y;
+        y = y / 0.20000000298023224;
+        const double v = s0 * p[9] + s1 * p[0xd] + s2 * p[0x11] + s3 * p[0x15] + in * p[0x19];
+        const double den = v * v + 1.0;
+        st[1] = s1 * p[0xe] + s0 * p[10] + s2 * p[0x12] + s3 * p[0x16] + in * p[0x1a];
+        st[0] = v / den;
+        st[2] = s1 * p[0xf] + s0 * p[0xb] + s2 * p[0x13] + s3 * p[0x17] + in * p[0x1b];
+        dc = (y - dc) * 0.004999999888241291 + dc;
+        return (float) (y - dc);
+    }
+};
+
+
+// filter type 7 (FUN_180044f60, FUN_180044e50): a vowel filter — eight constant-skirt band-passes per channel at
+// formant frequencies morphed between three vowel tables by the cutoff, scaled by 2^((res − ½)·1.7)
+struct Vowel
+{
+    float sr = 44100.0f, cut = 0.0f, res = 0.0f;
+    float band[2][8][10] {}; // per band: frequency, Q, rate, gain, 2cos/a0, (1 − α)/a0, x2, x1, y2, y1
+
+    static void design (float* b, float f, float q, float rate)
+    {
+        if (b[0] == f && q == b[1] && rate == b[2])
+            return;
+        b[0] = f;
+        b[1] = q;
+        b[2] = rate;
+        const double w = (double) f * 6.2831853071795898 / (double) rate;
+        const double sn = std::sin (w), cs = std::cos (w);
+        const double alpha = sn / ((double) q + (double) q);
+        const double a0 = alpha + 1.0;
+        b[3] = (float) ((double) (float) (sn * 0.5) / a0);
+        b[4] = (float) ((double) (float) (cs + cs) / a0);
+        b[5] = (float) ((double) (float) (1.0 - alpha) / a0);
+    }
+
+    void run (float& l, float& r)
+    {
+        static const float tA[8] { 700.0f, 1250.0f, 2500.0f, 3500.0f, 4200.0f, 8500.0f, 10000.0f, 12000.0f };
+        static const float tB[8] { 250.0f, 700.0f, 2500.0f, 3500.0f, 4200.0f, 8500.0f, 10000.0f, 12000.0f };
+        static const float tC[8] { 250.0f, 2500.0f, 2700.0f, 3500.0f, 4200.0f, 8500.0f, 10000.0f, 12000.0f };
+        const auto gain = (float) powCrt (2.0, (double) ((res - 0.5f) * fbits (0x3fd9999au)));
+        const float pos = cut * 3.0f;
+        const int i = (int) pos;
+        const int sel = i < 3 ? i : 0;
+        const float fr = pos - (float) i;
+        float wA = 0.0f, wB = 0.0f, wC = 0.0f;
+        if (sel >= 0)
+        {
+            if (sel == 0) { wA = fr; wB = 1.0f - fr; }
+            else if (sel == 1) { wA = 1.0f - fr; wC = fr; }
+            else { wB = fr; wC = 1.0f - fr; }
+        }
+        const float scale = 1.0f - (float) sel * 0.125f;
+        float sl = 0.0f, sr2 = 0.0f;
+        for (int k = 0; k < 8; ++k)
+        {
+            const float f = (wA * tA[k] + wB * tB[k] + wC * tC[k]) * gain;
+            design (band[0][k], f, 12.0f, sr);
+            design (band[1][k], f, 12.0f, sr);
+            float* b = band[0][k];
+            const float xl = l;
+            const float x2 = b[6];
+            b[6] = b[7]; b[7] = xl;
+            const float y2 = b[8];
+            b[8] = b[9];
+            float y = ((xl - x2) * b[3] + b[9] * b[4]) - b[5] * y2;
+            b[9] = y;
+            sl = sl + y * scale;
+            b = band[1][k];
+            const float xr = r;
+            const float x1r = b[7], y2r = b[8];
+            b[7] = xr; b[8] = b[9];
+            const float x2r = b[6];
+            b[6] = x1r;
+            y = ((xr - x2r) * b[3] + b[9] * b[4]) - b[5] * y2r;
+            b[9] = y;
+            sr2 = sr2 + y * scale;
+        }
+        l = l * 0.0f + sl;
+        r = r * 0.0f + sr2;
+    }
+};
+
 // two passes of the same biquad, then an optional clip at ±(1 − shape)
 struct BiquadState
 {
@@ -854,6 +1019,9 @@ struct Voice
     float glide = 0.0f, random = 0.0f, follow = 0.0f;
     float cutA = 0.0f, cutB = 0.0f, gainL = 0.0f, gainR = 0.0f;
     float lim = 1.0f, lim2 = 1.0f;
+    float ringPhase = 0.0f, shCount = 0.0f, shHold[2] {};      // +0x58…+0x64
+    float fxA = 0.0f, fxD = 0.0f, ringMix = 0.0f, shMix = 0.0f, crushMix = 0.0f, phMix = 0.0f; // +0x68…+0x7c
+    float chain[2][9] {};                                    // +0x89c, +0x8c0
     std::uint64_t pos = 0; // high 32 bits: frame, low 32 bits: fraction
     std::int64_t step = 0;
     double speed = 0.0;
@@ -862,6 +1030,8 @@ struct Voice
     Env amp, menv[2];
     LfoState lfo[2];
     BiquadState fa[2], fb[2];
+    Ladder la, lb;
+    Vowel va, vb;
 
     std::uint32_t frame() const { return (std::uint32_t) (pos >> 32); }
     std::uint32_t frac() const { return (std::uint32_t) pos; }
@@ -920,9 +1090,12 @@ struct Engine::Impl
     {
         // the plugin reuses the voice record: what its start does not set (the LFOs' phase and held values) carries over
         const LfoState keep[2] { v.lfo[0], v.lfo[1] };
+        const Ladder la = v.la, lb = v.lb;
+        const Vowel va = v.va, vb = v.vb;
         v = Voice();
         v.lfo[0] = keep[0];
         v.lfo[1] = keep[1];
+        v.la = la; v.lb = lb; v.va = va; v.vb = vb;
         v.start = true;
         v.zone = zi;
         v.prevNote = lastNote;
@@ -1263,6 +1436,9 @@ struct Engine::Impl
             v.lim = 1.0f; v.lim2 = 1.0f;
             v.fa[0].clear(); v.fa[1].clear(); v.fb[0].clear(); v.fb[1].clear();
             v.cutA = D[7]; v.cutB = D[10];
+            v.fxA = D[17]; v.ringMix = D[18]; v.shMix = D[20]; v.crushMix = D[22]; v.fxD = D[23]; v.phMix = D[24];
+            v.ringPhase = v.shCount = v.shHold[0] = v.shHold[1] = 0.0f;
+            std::fill (&v.chain[0][0], &v.chain[0][0] + 18, 0.0f);
             v.gainL = targetL; v.gainR = targetR;
             v.setFrame ((std::uint32_t) startFrame);
             v.bounceDir = 0; v.loopState = 0;
@@ -1453,38 +1629,66 @@ struct Engine::Impl
             const float k = expfCrt (-1.0f / (blockRate * fbits (0x3ba3d70au)));
             Biquad ca, cb;
             const float hzA = flCutoff (v.cutA);
-            if (z.filter[0].type < 6)
-                ca.design (z.filter[0].type, hzA, kQBase / (kQRes - D[8]), sr);
+            const int tA = z.filter[0].type, tB = z.filter[1].type;
+            if (tA < 6)
+                ca.design (tA, hzA, kQBase / (kQRes - D[8]), sr);
+            else if (tA == 6)
+            {
+                v.la.sr = (double) sr;
+                v.la.set (hzA, D[8]);
+            }
+            else if (tA == 7)
+            {
+                v.va.sr = sr;
+                v.va.cut = v.cutA;
+                v.va.res = D[8];
+            }
             const float hzB = flCutoff (v.cutB);
-            if (z.filter[1].type < 6)
-                cb.design (z.filter[1].type, hzB, kQBase / (kQRes - D[11]), sr);
-            if (std::getenv ("DWDBG"))
-                std::fprintf (stderr, "#f hzA %.9g q %.9g c %.9g %.9g %.9g %.9g %.9g type %d res %.9g\n", (double) hzA, (double) (kQBase / (kQRes - D[8])), (double) ca.c[0], (double) ca.c[1],
-                              (double) ca.c[2], (double) ca.c[3], (double) ca.c[4], z.filter[0].type, (double) D[8]);
+            if (tB < 6)
+                cb.design (tB, hzB, kQBase / (kQRes - D[11]), sr);
+            else if (tB == 6)
+            {
+                v.lb.sr = (double) sr;
+                v.lb.set (hzB, D[11]);
+            }
+            else if (tA == 7) // (the plugin tests filter A's type here)
+            {
+                v.vb.sr = sr;
+                v.vb.cut = v.cutB;
+                v.vb.res = D[11];
+            }
             v.cutA = (v.cutA - D[7]) * k + D[7];
             v.cutB = (v.cutB - D[10]) * k + D[10];
             const float shA = D[9], shB = D[12];
+            float pl = 0.0f, pr = 0.0f; // the previous outputs (what an unknown type leaves)
             for (int i = 0; i < n; ++i)
             {
                 const float noise = (float) (int) crtRand (*rnd) * kTiny;
                 const float xl = noise + L[i];
                 const float xr = noise + R[i];
-                if (std::getenv ("DWDBG")) std::fprintf (stderr, "#x %d %.9g %.9g\n", i, (double) xl, (double) noise);
-                float yl, yr;
+                float yl = pl, yr = pr;
+                if (tA < 6) { yl = v.fa[0].run (xl, shA, ca.c); yr = v.fa[1].run (xr, shA, ca.c); }
+                else if (tA == 6) { yl = v.la.run (0, xl); yr = v.la.run (1, xr); }
+                else if (tA == 7) { yl = xl; yr = xr; v.va.run (yl, yr); }
                 if (! z.parallelFilters)
                 {
-                    yl = v.fa[0].run (xl, shA, ca.c);
-                    yr = v.fa[1].run (xr, shA, ca.c);
-                    yl = v.fb[0].run (yl, shB, cb.c);
-                    yr = v.fb[1].run (yr, shB, cb.c);
+                    if (tB < 6) { yl = v.fb[0].run (yl, shB, cb.c); yr = v.fb[1].run (yr, shB, cb.c); }
+                    else if (tB == 6) { yl = v.lb.run (0, yl); yr = v.lb.run (1, yr); }
+                    else if (tB == 7) v.vb.run (yl, yr);
                 }
                 else
                 {
-                    yl = v.fa[0].run (xl, shA, ca.c);
-                    yr = v.fa[1].run (xr, shA, ca.c);
-                    yl = yl + v.fb[0].run (xl, shB, cb.c);
-                    yr = yr + v.fb[1].run (xr, shB, cb.c);
+                    if (tB < 6) { yl = yl + v.fb[0].run (xl, shB, cb.c); yr = yr + v.fb[1].run (xr, shB, cb.c); }
+                    else if (tB == 6) { yl = yl + v.lb.run (0, xl); yr = yr + v.lb.run (0, xr); }
+                    else if (tB == 7)
+                    {
+                        float bl = xl, br = xr;
+                        v.vb.run (bl, br);
+                        yl = yl + bl;
+                        yr = yr + br;
+                    }
                 }
+                pl = yl; pr = yr;
                 L[i] = yl;
                 R[i] = yr;
                 limiter (L[i], R[i], v.lim);
@@ -1494,6 +1698,86 @@ struct Engine::Impl
         if (std::getenv ("DWDBG") && filters)
             std::fprintf (stderr, "#fs %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", (double) v.fa[0].s[0], (double) v.fa[0].s[1], (double) v.fa[0].s[2], (double) v.fa[0].s[3],
                           (double) v.fa[0].s[4], (double) v.fa[0].s[5], (double) v.fa[0].s[6], (double) v.fa[0].s[7]);
+
+        // ------------------------------------------------------------------ zone effects (0x1FE…0x201)
+        const float smoothK2 = smoothK;
+        if (z.fxOn[0]) // ring modulator: sine at the cutoff law of D17, mix D18
+        {
+            const float tgA = D[17], tgM = D[18];
+            for (int i = 0; i < n; ++i)
+            {
+                const float inc = flCutoff (tgA) * twoPiOverSr;
+                const float sn = sinfCrt (v.ringPhase);
+                L[i] = (L[i] * sn) * v.ringMix + (1.0f - v.ringMix) * L[i];
+                R[i] = (R[i] * sn) * v.ringMix + (1.0f - v.ringMix) * R[i];
+                float ph = inc + v.ringPhase;
+                v.ringPhase = ph;
+                if (! (ph < kTwoPi)) v.ringPhase = ph - kTwoPi;
+                v.fxA = (v.fxA - tgA) * smoothK2 + tgA + kTiny;
+                v.ringMix = (v.ringMix - tgM) * smoothK2 + tgM + kTiny;
+            }
+        }
+        if (z.fxOn[1]) // sample-and-hold: step 1 − 0.99·D19, mix D20
+        {
+            const float step = 1.0f - D[19] * fbits (0x3f7d70a4u), tgM = D[20];
+            for (int i = 0; i < n; ++i)
+            {
+                if (! (v.shCount < 1.0f))
+                {
+                    v.shHold[0] = L[i];
+                    v.shHold[1] = R[i];
+                    v.shCount = v.shCount - 1.0f;
+                }
+                L[i] = (1.0f - v.shMix) * L[i] + v.shHold[0] * v.shMix;
+                R[i] = (1.0f - v.shMix) * R[i] + v.shMix * v.shHold[1];
+                v.shCount = step + v.shCount;
+                v.shMix = (v.shMix - tgM) * smoothK2 + tgM + kTiny;
+            }
+        }
+        if (z.fxOn[2]) // bit crusher: 3 + trunc(13·(1 − D21)) bits, mix D22
+        {
+            const int bits = 3 - (int) ((1.0f - D[21]) * -13.0f);
+            const float q = (float) (1 << (bits & 31));
+            const float tgM = D[22];
+            for (int i = 0; i < n; ++i)
+            {
+                const float ql = (float) (int) (q * L[i]) / q;
+                const float qr = (float) (int) (q * R[i]) / q;
+                L[i] = ql * v.crushMix + (1.0f - v.crushMix) * L[i];
+                R[i] = (1.0f - v.crushMix) * R[i] + v.crushMix * qr;
+                v.crushMix = (v.crushMix - tgM) * smoothK2 + tgM + kTiny;
+            }
+        }
+        if (z.fxOn[3]) // phaser: eight first-order allpasses, feedback ½, depth D23, mix D24, then the limiter
+        {
+            const float tgD = D[23], tgM = D[24];
+            auto chainRun = [&] (float* st, float x, float p) {
+                const float a = (1.0f - p) / (p + 1.0f);
+                const float noise = (float) (int) crtRand (*rnd) * kTiny;
+                const float in = 0.5f * st[8] + (noise + x);
+                float prev = in, t = in * a;
+                for (int k = 0; k < 8; ++k)
+                {
+                    const float u = st[k] - t;
+                    const float tn = u * a;
+                    st[k] = tn + prev;
+                    prev = u;
+                    t = tn;
+                }
+                st[8] = prev;
+                return prev;
+            };
+            for (int i = 0; i < n; ++i)
+            {
+                (void) flCutoff (tgD);
+                L[i] = chainRun (v.chain[0], L[i], v.fxD) * v.phMix + L[i];
+                R[i] = chainRun (v.chain[1], R[i], v.fxD) * v.phMix + R[i];
+                limiter (L[i], R[i], v.lim2);
+                v.fxD = (v.fxD - tgD) * smoothK2 + tgD + kTiny;
+                v.phMix = (v.phMix - tgM) * smoothK2 + tgM + kTiny;
+            }
+        }
+
         // ------------------------------------------------------------------ amplitude
         for (int i = 0; i < n; ++i)
         {
@@ -1762,7 +2046,7 @@ bool isPcm16Wav (const std::vector<std::uint8_t>& w)
             bool pcm = tag == 1;
             if (tag == 0xFFFE && sz >= 26 && o + 8 + 26 <= w.size())
                 pcm = ru16 (w.data() + o + 8 + 24) == 1;
-            return pcm && bits == 16;
+            return pcm && (bits == 16 || bits == 8); // the plugin keeps 8- and 16-bit PCM as 16-bit integers (EXEC)
         }
         o += 8 + sz + (sz & 1);
     }
