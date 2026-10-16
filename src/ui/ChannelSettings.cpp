@@ -6,6 +6,7 @@
 
 #include "core/DrumSynthLive.h"
 #include "core/FlSynths.h"
+#include "core/FlKeys.h"
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
 #include "core/Gms.h"
@@ -508,6 +509,7 @@ public:
         plucked = def.instrument == InstrumentKind::plucked;
         beepMap = def.instrument == InstrumentKind::beepmap;
         sawer = def.instrument == InstrumentKind::sawer;
+        flKeys = def.instrument == InstrumentKind::flkeys;
         granulizer = def.instrument == InstrumentKind::granulizer;
         drumaxx = def.instrument == InstrumentKind::drumaxx;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
@@ -905,7 +907,34 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        if (plucked)
+        // FL Keys: the 15 int32 knobs of the saved state (REA_rodada69 §8.1)
+        auto addFlKeys = [&] (int index) {
+            const auto state = flkeys::parseState (def.pluginState);
+            if (! state)
+                return;
+            const auto& r = flkeys::knobRange[index];
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (r.min, r.max, 1.0);
+            knob->setValue (std::clamp ((double) state->knobs[(std::size_t) index], (double) r.min, (double) r.max), juce::dontSendNotification);
+            knob->setName (r.name);
+            knob->onValueChange = [this, index, s = knob.get()] {
+                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
+                    auto& st = song.channels[(std::size_t) c].pluginState;
+                    if (auto parsed = flkeys::parseState (st))
+                    {
+                        parsed->knobs[(std::size_t) index] = v;
+                        st = flkeys::writeState (*parsed);
+                    }
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        if (flKeys)
+            for (int i = 0; i < 15; ++i)
+                addFlKeys (i);
+        else if (plucked)
             for (const auto& k : pluckedKnobs)
                 addPlucked (k);
         else if (beepMap)
@@ -1012,6 +1041,7 @@ public:
                     : threeOsc ? tr ("3x Osc — FL's engine (custom wave from the channel's sample)")
                     : simSynth ? tr ("SimSynth — FL's engine (new settings restart the voices)")
                     : wasp ? tr ("Wasp — FL Studio 2026 has no 64-bit Wasp: the channel keeps its settings and stays silent, as in FL")
+                    : flKeys ? tr ("FL Keys — FL's engine (wavetable read from your FL installation)")
                     : plucked ? tr ("Plucked! — FL's plucked-string engine")
                     : beepMap ? tr ("BeepMap — FL's engine (plays the bitmap saved with the channel)")
                     : sawer ? tr ("Sawer — FL's engine with its effects (oscillator cycle read from your FL installation)")
@@ -1038,7 +1068,7 @@ private:
     int channel;
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
          fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, plucked = false, beepMap = false,
-         sawer = false, granulizer = false, drumaxx = false, wavesFound = false;
+         sawer = false, flKeys = false, granulizer = false, drumaxx = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1230,6 +1260,13 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
+        {
+            // an ADSR edited by hand replaces FL's imported volume envelope
+            const auto& old = current()->sampler;
+            auto moved = [] (float a, float b) { return std::abs (a - b) > 1.0e-4f; };
+            if (moved (s.attack, old.attack) || moved (s.decay, old.decay) || moved (s.sustain, old.sustain) || moved (s.release, old.release))
+                s.flVolumeEnvelope.clear();
+        }
         if (s == current()->sampler)
             return;
 
@@ -1688,7 +1725,7 @@ public:
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
                  || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
-                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer
+                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
                  || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
@@ -1785,6 +1822,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::plucked:
         case InstrumentKind::beepmap:
         case InstrumentKind::sawer:
+        case InstrumentKind::flkeys:
         case InstrumentKind::granulizer:
         case InstrumentKind::drumaxx:
             return true;
@@ -1826,7 +1864,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::threeosc
                  || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
                  || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
-                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer
+                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
                  || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx)
         return std::make_unique<ModelPanel> (engine, channel);
 
