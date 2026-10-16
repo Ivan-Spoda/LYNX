@@ -4687,6 +4687,93 @@ bool stateUsable (const std::vector<std::uint8_t>& state)
     return parseState (state, S);
 }
 
+// ------------------------------------------------------------------------------------------------------------------
+// the main settings page (REA_rodada74 §3): controls of Sytrus's "Main settings" tab (names and ranges from the
+// plugin's form), each an int of the main block (index = offset / 4) or, for PORTA, a byte of the flag block
+
+namespace
+{
+constexpr int kPortaByte = -1; // byte 1 of the flag block after the main block (REA_rodada11 §1.2)
+
+const std::vector<Setting>& settingTable()
+{
+    static const std::vector<Setting> t = {
+        { "Master level", 0, 0, 160 }, { "Master LFO", 1, -128, 128 }, { "Master pitch", 2, -24, 24 },
+        { "Vol attack", 165, 0, 256 }, { "Vol decay", 166, 0, 256 }, { "Vol sustain", 167, -128, 128 }, { "Vol release", 168, 0, 256 },
+        { "Flt attack", 169, 0, 256 }, { "Flt decay", 170, 0, 256 }, { "Flt sustain", 171, -128, 128 }, { "Flt release", 172, 0, 256 },
+        { "Unison", 173, 1, 9 }, { "Uni pan", 174, 0, 128 }, { "Uni volume", 175, 16, 128 }, { "Uni pitch", 176, 0, 256 },
+        { "Uni sub", 177, 0, 96 }, { "Uni phase", 178, 0, 128 }, { "Uni env var", 179, 0, 192 },
+        { "Mod X", 190, 0, 512 }, { "Mod Y", 191, 0, 512 },
+        { "Porta", kPortaByte, 0, 1 },
+        // quality: oversampling order (2^order) and extra-high envelope accuracy, live ("draft") and export
+        { "Live oversampling", 195, 0, 4 }, { "Export oversampling", 196, 0, 4 },
+        { "Live env accuracy", 193, 0, 1 }, { "Export env accuracy", 194, 0, 1 } };
+    return t;
+}
+
+// the decompressed body of a state the engine can read, or nothing
+std::optional<std::vector<std::uint8_t>> settingsBody (const std::vector<std::uint8_t>& state)
+{
+    StateRaw S;
+    if (! parseState (state, S))
+        return std::nullopt;
+    auto body = inflateZlib (state.data() + 4, state.size() - 4);
+    if (! body || body->size() < 962 + 4 + 3 + 2)
+        return std::nullopt;
+    return body;
+}
+
+std::size_t settingOffset (int index) noexcept
+{
+    return index == kPortaByte ? (std::size_t) (962 + 4 + 3 + 1) : (std::size_t) (4 * index);
+}
+} // namespace
+
+const std::vector<Setting>& settings()
+{
+    return settingTable();
+}
+
+std::optional<int> settingValue (const std::vector<std::uint8_t>& state, int setting)
+{
+    const auto& t = settingTable();
+    if (setting < 0 || setting >= (int) t.size())
+        return std::nullopt;
+    const auto body = settingsBody (state);
+    if (! body)
+        return std::nullopt;
+    const auto at = settingOffset (t[(std::size_t) setting].index);
+    if (t[(std::size_t) setting].index == kPortaByte)
+        return (*body)[at] != 0 ? 1 : 0;
+    std::int32_t v = 0;
+    std::memcpy (&v, body->data() + at, 4);
+    return (int) v;
+}
+
+bool setSetting (std::vector<std::uint8_t>& state, int setting, int value)
+{
+    const auto& t = settingTable();
+    if (setting < 0 || setting >= (int) t.size())
+        return false;
+    auto body = settingsBody (state);
+    if (! body)
+        return false;
+    const auto& d = t[(std::size_t) setting];
+    const auto v = std::clamp (value, d.low, d.high);
+    const auto at = settingOffset (d.index);
+    if (d.index == kPortaByte)
+        (*body)[at] = (std::uint8_t) (v != 0 ? 1 : 0);
+    else
+    {
+        const std::int32_t x = v;
+        std::memcpy (body->data() + at, &x, 4);
+    }
+    const auto z = zlibStored (*body);
+    state.resize (4); // the version word stays
+    state.insert (state.end(), z.begin(), z.end());
+    return true;
+}
+
 Engine::Engine() : impl (std::make_unique<Impl>()) {}
 Engine::~Engine() = default;
 

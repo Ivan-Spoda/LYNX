@@ -109,7 +109,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
   coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
-  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper (its x87 live / file-render
+  DLL, release fades included (REA round 74: IPP's cosine restated, 441-entry fade at every rate), with FL's host waveshaper (its x87 live / file-render
   routines since REA round 55, checked against FLEngine's own) and DX10's shared voice processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
@@ -214,7 +214,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   overlapping notes with a key re-trigger (voice management, MONO KEY): 262/268 (REA round 31 §10).
   CPU: idle effects bypass themselves (exact), voices on the same tick grid are rendered in lockstep and the block
   reader runs in SSE2 — all bit-identical; "Overcome – Sytrus" (72 instances, several at 8× even live) plays in
-  0.46× real time on one thread, 0.17× on four.
+  0.46× real time on one thread, 0.17× on four. The channel settings panel shows the plugin's "Main settings" page
+  (REA round 74 §3): master level/LFO/pitch, the global volume and filter A/D/S/R, unison, Mod X/Y, PORTA and the
+  live/export oversampling and envelope accuracy, written into the saved state (FL's DLL reads the edited state).
 - **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
   partials per voice record (self-oscillation, Sub 1/3/4, 524 harmonics; partial count and band limit per quality,
   10 ms amplitude glide), targets rebuilt every control block (88/44/8 samples at 44.1 kHz) in FL's order — colour ×
@@ -621,7 +623,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
   confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
   exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
-  speed); the end fade uses the exact cosine; the sample's own loop points are not read (whole sample); one random seed
+  speed); the sample's own loop points are not read (whole sample); one random seed
   per instrument.
 - Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
   in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
@@ -636,10 +638,9 @@ accordingly. Highlights of what is **confirmed and applied**:
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
-  is per instrument, FL's is drawn per session and shared by all 3x Osc channels; the end fade uses the exact cosine;
+  is per instrument, FL's is drawn per session and shared by all 3x Osc channels;
   channel records win over a stale state snapshot (inference).
-- Fruity DX10 (REA round 42 §4–5): the end-fade table uses the exact cosine (FL: IPP's 11-bit cosine; −129 dB worst
-  case); FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
+- Fruity DX10 (REA round 42 §4–5): FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
   sequencer ticks are inferences (LYNX ticks on the song's PPQ grid while playing, free-running otherwise); global
   LFOs ignore song-position jumps; notes have no Mod X/Y; the filters are bit-exact only where long double is the x87
   format.

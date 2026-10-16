@@ -9,6 +9,8 @@
 // (r42/py/dxproc.py, r47/py/osc3model.py), checked against the three DLLs.
 // The float/double operation order is the plugins': includers keep FP contraction off.
 
+#include "core/IppCos.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -705,14 +707,12 @@ inline void mixRamp (const float* x, float* l, float* r, int n, float gL, float 
 }
 
 // The end-fade table (FUN_0071e060 mode 3, 10 ms): 0.5·(1 + cos((i + 1)·π/442)), built while the plugin's rate object
-// still holds 44 100 Hz, so 441 entries at every rate (REA_rodada42 §3.8); FL computes it with IPP's cosine, LYNX exactly
+// still holds 44 100 Hz, so 441 entries at every rate (REA_rodada42 §3.8), with IPP's cosine (REA_rodada74 §1)
 inline const std::array<float, 441>& endTable() noexcept
 {
     static const auto table = [] {
         std::array<float, 441> t {};
-        const auto k = (float) (1.0 / 442.0 * 3.141592653589793);
-        for (int i = 0; i < 441; ++i)
-            t[(std::size_t) i] = ((float) std::cos ((double) (((float) i + 1.0f) * k)) + 1.0f) * 0.5f;
+        ippcos::endFadeTable (t.data(), 441);
         return t;
     }();
     return table;
