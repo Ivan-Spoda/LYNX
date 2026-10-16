@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "core/FlangusFastDist.h"
+#include "core/FruityDelay.h"
 
 // Distructor (REA_rodada71): see DistructorFx.h. The module keeps FL's own operation order and types (float32 where
 // the plugin computes in float, double where it does, the x87 routines in long double with the plugin's precision)
@@ -1514,6 +1515,8 @@ struct Module::Impl
     double fs = 44100.0;
     Distortion dist;
     Filter filt;
+    std::unique_ptr<fldelay::Delay3Engine> chorus;
+    std::vector<float> chL, chR;
     DcBlocker dc;
     std::vector<HalfbandStage> upSt, downSt;
     std::vector<float> s1, s2, s3, hi, tmp;
@@ -1539,6 +1542,46 @@ struct Module::Impl
         filt.smooth = st.smoothFilter;
         filt.setParam (1, (float) ((double) st.p[39] / 10000.0));
         filt.setParam (2, (float) ((double) st.p[40] / 10000.0));
+        if (st.type == 2)
+            setupChorus();
+        else
+            chorus.reset();
+    }
+    // the chorus module drives an instance of Fruity Delay 3's engine (TChorusProcessor, FUN_0074b000): its 26 controls
+    // start from a fixed set, the mode picks the delay type and stereo spread, the six chorus knobs map to six controls
+    void setupChorus()
+    {
+        static constexpr float init[26] = { 1.0f, 0.330000013f, 0.0f, 1.0f, 0.0677966103f, 0.839999974f, 0.5f, 1.0f, 0.5f, 0.5f, 0.0f, 0.0f, 0.0f,
+                                            1.0f, 0.159999996f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f };
+        chorus = std::make_unique<fldelay::Delay3Engine> (44100.0);
+        chorus->setTempo (120.0); // the chorus never syncs to the tempo
+        for (int i = 0; i < 26; ++i)
+            chorus->setParameter (i, init[i]);
+        const auto mode = std::clamp (st.chorusMode, 0, 2);
+        static constexpr float type1[3] = { 0.330000013f, 0.0f, 0.660000026f }, spread5[3] = { 0.839999974f, 0.5f, 0.5f };
+        chorus->setParameter (1, type1[mode]);
+        chorus->setParameter (5, spread5[mode]);
+        const auto& p = st.p;
+        chorus->setParameter (4, (float) ((double) p[43] / 768.0));
+        chorus->setParameter (14, (float) ((double) p[44] / 6000.0));
+        chorus->setParameter (8, (float) ((double) p[45] / 6000.0));
+        chorus->setParameter (9, (float) ((double) p[46] / 6000.0));
+        chorus->setParameter (11, (float) ((double) p[47] / 6000.0));
+        chorus->setParameter (12, (float) ((double) p[47] / 6000.0));
+        chorus->setParameter (24, (float) (((double) p[48] + 3000.0) / 6000.0));
+        // the module's rate set-up after the state: the engine behaves as if its rate set-up ran twice, first at the
+        // creation rate (as with Fruity Delay 3 itself, REA_rodada52 §2)
+        chorus->setSampleRate (44100.0);
+        chorus->setSampleRate (fs);
+    }
+    void processChorus (const float* x, float* y, int n)
+    {
+        chL.resize ((std::size_t) n), chR.resize ((std::size_t) n);
+        for (int i = 0; i < n; ++i)
+            chL[(std::size_t) i] = x[2 * i], chR[(std::size_t) i] = x[2 * i + 1];
+        chorus->process (chL.data(), chR.data(), n);
+        for (int i = 0; i < n; ++i)
+            y[2 * i] = chL[(std::size_t) i], y[2 * i + 1] = chR[(std::size_t) i];
     }
     void process (float* x, int n)
     {
@@ -1575,6 +1618,8 @@ struct Module::Impl
             dist.process (s1.data(), w, m);
         else if (st.type == 1)
             filt.process (s1.data(), w, m);
+        else if (st.type == 2 && chorus)
+            processChorus (s1.data(), w, m);
         const auto dryG = (float) (1.0 - mix), wetG = (float) mix;
         for (int i = 0; i < 2 * m; ++i)
         {
