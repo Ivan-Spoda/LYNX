@@ -8,6 +8,7 @@
 #include "core/EquoFx.h"
 #include "core/HardcoreFx.h"
 #include "core/DistructorFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
@@ -1231,6 +1232,14 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             equofx::toParams (*s, slot.params);
             return slot;
         }
+    if (pluginName == "Multiband Delay") // the exact engine (REA_rodada71); LYNX's generic delay otherwise
+        if (const auto s = mbdelay::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::multibandDelay);
+            slot.state = state;
+            mbdelay::toParams (*s, slot.params);
+            return slot;
+        }
     if (pluginName == "Frequency Splitter") // FL's engine (REA_rodada62): its summed (main) output; shelves otherwise
         if (const auto s = fsplit::parseState (state))
         {
@@ -1446,6 +1455,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::hardcore: return { "Hardcore" };
         case EffectKind::distructor: return { "Distructor" };
         case EffectKind::flPitchShifter: return { "Pitch Shifter" };
+        case EffectKind::multibandDelay: return { "Multiband Delay" };
         default: return {};
     }
 }
@@ -1475,6 +1485,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return FlParamMap { 3 * (k / distructor::moduleParams) + k % distructor::moduleParams - 36,
                             [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
+    // Multiband Delay's twelve global controls (FL parameters 384…395) over their ranges; bank cells are not mapped
+    if (is ("Multiband Delay") && k >= 384 && k < 396)
+        return FlParamMap { k - 384, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("EQUO") && k >= 0 && k < 5)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Fast LP, Free Filter and Fruity Filter likewise (REA_rodada63; the Free Filter's CENTER and the
