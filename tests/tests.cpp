@@ -9922,14 +9922,14 @@ TEST (harmor_effects_rack)
     {
         if (s == 8192)
             inst->noteOff (60);
-        inst->render (l.data() + s, r.data() + s, 512, 1.0f, 1.0f);
+        inst->render (l.data() + s, r.data() + s, std::min (512, (int) l.size() - s), 1.0f, 1.0f);
     }
     for (std::size_t i = 0; i < l.size(); ++i)
         finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]), energy += (double) l[i] * l[i];
     CHECK (finite && energy > 1.0);
     std::vector<float> tail (44100 * 6), tailR (tail.size());
     for (int s = 0; s < (int) tail.size(); s += 512)
-        inst->render (tail.data() + s, tailR.data() + s, 512, 1.0f, 1.0f);
+        inst->render (tail.data() + s, tailR.data() + s, std::min (512, (int) tail.size() - s), 1.0f, 1.0f);
     CHECK (inst->idle());
 }
 
