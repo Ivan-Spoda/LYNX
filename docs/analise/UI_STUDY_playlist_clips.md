@@ -24,8 +24,53 @@ Core: `src/core/HeldNotes.h` (`HeldNotes`, `KeyLedger`, `InputHeldNotes`), tests
 
 ## 2. Clip look (FL reference → LYNX)
 
-See section "Reference notes" below.
+What the reference showed (FL 2026, default skin, measured on screenshots at 125 % scaling):
+
+- A clip fills its track; a 1 px near-black edge separates neighbours; square corners.
+- Header bar ≈ 25 % of the track height (≈ 11 logical px), a faint vertical gradient, in the clip colour
+  greyed towards neutral (pattern headers are almost grey); light text; a small kind icon at the left, which
+  is also where the clip menu opens.
+- Body: a deep tint of the clip colour.
+- Audio: one filled shape — the peak envelope mirrored around the centre, no outline, no RMS layer — in a
+  very light tint of the clip colour, using the whole body height. Pattern clips: the notes as thin (2–3 px)
+  light bars.
+
+What LYNX does now (own drawing code, LYNX palette, `PlaylistComponent.cpp` "clip look" + `WaveformView.cpp`):
+
+- `paintClipFrame`: body = clip colour 72 % towards `bg1`; header = clip colour 50 % towards a neutral slate,
+  with a 12 % lighter top and a darker bottom edge; LYNX's own kind glyphs (stepped bars / mini waveform /
+  rising curve); name in bold caption type; 1 px `bg0` edge, rounded `radius::sm` corners (LYNX style).
+- Audio clips take their channel's colour (default: the theme's audio blue).
+- `paintCleanWaveform`: per physical pixel, the peak of the column (at least 1.5 summary columns wide, so
+  zooming in shows a smooth outline instead of single cycles), a 1-2-1 blend that never drops below the true
+  peak, mirrored and filled as one anti-aliased path in `clipContentColour` (clip colour 70 % towards white).
+  Display gain: normalised, at most +12 dB, times the clip gain. Stereo lanes still optional.
+- The waveform follows Reverse and the stretch (`clipops::framesPerTick`).
+- Pattern clips: 2 px rounded note bars spread by pitch (min. 6-key span, centred), repeating along clips
+  longer than the pattern.
+- The spectral colouring is now opt-in (Options > Waveforms); the old settings key is ignored so every user
+  gets the clean style once.
 
 ## 3. Clip menu
 
-See section "Menu" below.
+FL's audio clip menu (two columns): Preview, Muted, Rename and color, Change color, Random color, Change icon,
+Select source channel, Channel settings, Make unique, Select all similar clips, Delete, Properties, Region
+(Select region, Chop: auto-slicing modes, time/repeating/marching/pattern chops), Sample (Make unique as sample,
+Edit sample, Pitch-correct, Time-warp, Extract stems, Deverb, Detect tempo, Fit to tempo), Automation
+(Automate, Crossfade with), Fades (Reset fades, Fade in/out curve).
+
+LYNX's clip menu (`PlaylistComponent::buildClipMenu`, every action one undo step):
+Rename and color… (pattern or audio channel), Make unique (pattern, audio: copy of the channel, automation),
+Select all clips of this source, Split here, Chop to grid, Merge clips (same source, same track, continuing
+time and offset), Reverse (audio; the offset is mirrored so the same audio stays in the clip), Normalize,
+Clip volume ▸, Fit to tempo ▸ (power-of-two beats at the project tempo, keep pitch or resample; half / twice
+as long; original speed — every clip of the file keeps showing the same audio), Remove fades, Open in a new
+Sampler channel, Show the file in Explorer, Open in Channel Rack / Piano Roll (pattern), Edit points / Delete
+automation (automation), Mute, Cut, Copy, Paste here, Delete.
+
+Left out (not doable well now): Preview item (Alt+right-click previews), Change icon, Properties, Detect
+tempo, pitch correction / time warp / stems / deverb, Automate, Crossfade with, fade curves, auto-slicing
+chop modes, Select region, Show in Browser (Explorer instead).
+
+The actions are exercised through the menu itself by `--snapshot` (`-clip-actions.txt`), the core operations
+by `tests/UiFixTests.inc`.

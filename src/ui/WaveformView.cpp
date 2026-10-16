@@ -251,7 +251,19 @@ void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::R
             auto to = from + framesPerColumn;
             if (to < from)
                 std::swap (from, to);
-            const auto p = summary.query (from, to, lanes == 2 ? lane : -1);
+            // zoomed in closer than the summary's finest columns: look at least one column wide, centred, so the
+            // envelope stays a smooth outline instead of beading along single cycles
+            if (const auto minWidth = (double) summary.bucket * 1.5; to - from < minWidth)
+            {
+                const auto centre = (from + to) * 0.5;
+                const auto end = (double) summary.frames;
+                const auto inside = centre >= 0.0 && centre < end;
+                from = std::max (0.0, centre - minWidth * 0.5);
+                to = std::min (end, centre + minWidth * 0.5);
+                if (! inside)
+                    from = to = -1.0;
+            }
+            const auto p = from < 0.0 ? wave::Point {} : summary.query (from, to, lanes == 2 ? lane : -1);
             valid[(std::size_t) x] = p.valid ? 1 : 0;
             peak[(std::size_t) x] = p.valid ? std::min (1.0f, std::max (std::abs (p.hi), std::abs (p.lo)) * style.gain) : 0.0f;
         }

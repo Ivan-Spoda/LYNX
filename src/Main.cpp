@@ -1689,6 +1689,77 @@ private:
                             saveMenus (juce::StringArray { "Audio clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-audio.png");
                         if (const auto menu = playlist.getClipMenuForSnapshot (0); menu.getNumItems() > 0)
                             saveMenus (juce::StringArray { "Pattern clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-pattern.png");
+
+                        // the clip menu's actions, run through the menu itself; results in -clip-actions.txt
+                        {
+                            juce::StringArray log;
+                            auto clipOf = [&offline] (const std::string& channelName, int nth) {
+                                const auto& sg = offline.getSong();
+                                for (int i = 0; i < (int) sg.playlist.size(); ++i)
+                                {
+                                    const auto& c = sg.playlist[(std::size_t) i];
+                                    if (c.kind == lynx::ClipKind::audio && c.channel >= 0 && sg.channels[(std::size_t) c.channel].name == channelName && nth-- == 0)
+                                        return i;
+                                }
+                                return -1;
+                            };
+                            std::function<bool (const juce::PopupMenu&, const juce::String&)> run = [&run] (const juce::PopupMenu& m, const juce::String& text) {
+                                for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+                                {
+                                    auto& item = it.getItem();
+                                    if (item.subMenu != nullptr && run (*item.subMenu, text))
+                                        return true;
+                                    if (item.text.startsWith (text) && item.isEnabled && item.action)
+                                    {
+                                        item.action();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            auto act = [&] (const std::string& name, int nth, const juce::String& text) {
+                                const auto clip = clipOf (name, nth);
+                                const auto ok = clip >= 0 && run (playlist.getClipMenuForSnapshot (clip), text);
+                                offline.dispatchPendingMessages();
+                                return ok;
+                            };
+                            auto channelOf = [&] (const std::string& name) -> const lynx::ChannelDef* {
+                                for (const auto& c : offline.getSong().channels)
+                                    if (c.name == name)
+                                        return &c;
+                                return nullptr;
+                            };
+                            auto check = [&log] (const juce::String& what, bool ok) { log.add ((ok ? "OK    " : "FAIL  ") + what); };
+                            const auto names = [&] { std::vector<std::string> n; for (auto& p2 : paths) n.push_back (juce::File (p2).getFileNameWithoutExtension().toStdString()); return n; }();
+                            if (names.size() >= 4)
+                            {
+                                const auto channelsBefore = offline.getSong().channels.size();
+                                const auto offsetBefore = offline.getSong().playlist[(std::size_t) clipOf (names[2], 1)].offset;
+                                check ("Reverse", act (names[2], 0, lynx::tr ("Reverse")) && channelOf (names[2])->sampler.reverse
+                                                      && offline.getSong().playlist[(std::size_t) clipOf (names[2], 1)].offset != offsetBefore);
+                                offline.undo();
+                                offline.dispatchPendingMessages();
+                                check ("Reverse undone", ! channelOf (names[2])->sampler.reverse);
+                                act (names[2], 0, lynx::tr ("Reverse"));
+                                check ("Make unique", act (names[3], 1, lynx::tr ("Make unique")) && offline.getSong().channels.size() == channelsBefore + 1
+                                                          && channelOf (names[3] + " #2") != nullptr);
+                                check ("Fit to tempo, resample", act (names[1], 0, lynx::tr ("Fit to tempo, resample").upToFirstOccurrenceOf ("(", false, false))
+                                                                     && channelOf (names[1])->sampler.stretchBeats > 0.0f && ! channelOf (names[1])->sampler.keepPitch);
+                                const auto gainBefore = offline.getSong().playlist[(std::size_t) clipOf (names[0], 1)].gain;
+                                check ("Normalize", act (names[0], 1, lynx::tr ("Normalize"))
+                                                        && offline.getSong().playlist[(std::size_t) clipOf (names[0], 1)].gain != gainBefore);
+                                const auto clipsBefore = offline.getSong().playlist.size();
+                                check ("Split here", act (names[3], 0, lynx::tr ("Split here")) && offline.getSong().playlist.size() == clipsBefore + 1);
+                                check ("Mute", act (names[0], 0, lynx::tr ("Mute")) && offline.getSong().playlist[(std::size_t) clipOf (names[0], 0)].muted);
+                                check ("Copy + Paste here", act (names[0], 0, lynx::tr ("Copy")) && act (names[0], 1, lynx::tr ("Paste here"))
+                                                                && offline.getSong().playlist.size() == clipsBefore + 2);
+                                check ("Delete", act (names[0], 2, lynx::tr ("Delete")) && offline.getSong().playlist.size() == clipsBefore + 1);
+                                check ("Chop to grid", act (names[3], 0, lynx::tr ("Chop to grid")) && offline.getSong().playlist.size() > clipsBefore + 1);
+                            }
+                            playlist.setViewForSnapshot (160.0, 0, std::max (0, realTrack - 4));
+                            saveSnapshot (ui, prefix + "-playlist-real-actions.png");
+                            juce::File (prefix + "-clip-actions.txt").replaceWithText (log.joinIntoString ("\n") + "\n");
+                        }
                     }
                 }
 
