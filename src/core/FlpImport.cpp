@@ -10,9 +10,11 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
+#include "core/Drumaxx.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
+#include "core/Granulizer.h"
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
@@ -949,6 +951,27 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
                 adoptedFromPlugin = true;
             }
+            else if (name == "fruity granulizer" && granulizerStateUsable (c.pluginState))
+            {
+                // FL's Fruity Granulizer engine (REA_rodada67) on the channel's sample (FL hands it to the plugin), with the
+                // channel settings its voice processor keeps and the project's PPQ, as 3x Osc. Without the sample the
+                // channel stays silent, as in FL (the plugin refuses notes)
+                def.instrument = InstrumentKind::granulizer;
+                const auto fromChannel = c.hasLevels || std::any_of (c.envelopes.begin(), c.envelopes.end(), [] (const auto& e) { return e.present; });
+                def.pluginState = granulizerNormalisedState (c.pluginState, fromChannel ? dx10Snapshot (c) : std::vector<std::uint8_t> {});
+                def.modelParams = { (float) (project.header.ppq > 0 ? project.header.ppq : 96) };
+                if (! c.samplePath.empty() && options.fileExists)
+                {
+                    auto path = resolveFlPath (c.samplePath, options.roots);
+                    if (! path.empty() && (path[0] == '\\' || path[0] == '/') && ! options.roots.factoryData.empty())
+                        path = options.roots.factoryData + "\\Data" + path;
+                    if (! path.empty() && ! options.fileExists (path) && options.fileExists (path + ".wav"))
+                        path += ".wav";
+                    if (! path.empty() && options.fileExists (path))
+                        def.samplePath = path;
+                }
+                adoptedFromPlugin = true;
+            }
             else if (name == "harmless")
             {
                 // FL's additive engine (REA_rodada32); the internal synth approximation stays as the fallback
@@ -1149,6 +1172,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 if (simSynthStateUsable (c.pluginState))
                 {
                     def.instrument = InstrumentKind::simsynth;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "drumaxx")
+            {
+                // FL's Drumaxx engine from the raw state (REA_rodada67 §6–§9); it needs no installation data. A state the
+                // engine can't read keeps the channel unsupported (there is no conversion to fall back to)
+                if (drumaxxStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::drumaxx;
                     def.pluginState = c.pluginState;
                     adoptedFromPlugin = true;
                 }
@@ -1419,7 +1453,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
-                     || def.instrument == InstrumentKind::sawer)
+                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::granulizer
+                     || def.instrument == InstrumentKind::drumaxx)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"
