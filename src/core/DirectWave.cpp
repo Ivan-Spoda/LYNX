@@ -27,7 +27,6 @@ namespace
 {
 // ------------------------------------------------------------------------------------------------- bits
 float fbits (std::uint32_t b) { float f; std::memcpy (&f, &b, 4); return f; }
-std::uint32_t bitsf (float f) { std::uint32_t b; std::memcpy (&b, &f, 4); return b; }
 
 const float kTwoPi = fbits (0x40c90fdbu);     // 6.2831855f
 const float kPi = fbits (0x40490fdbu);
@@ -264,7 +263,6 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& d)
 namespace
 {
 double dbits (std::uint64_t b) { double v; std::memcpy (&v, &b, 8); return v; }
-std::uint64_t bitsd (double v) { std::uint64_t b; std::memcpy (&b, &v, 8); return b; }
 
 // polynomial coefficients of the run-time's single-precision sine and cosine (on |r| ≤ π/4, in double)
 const double kS1 = -0.16666666666666666, kS2 = 0.0083333333333333332, kS3 = -0.00019841269841269841, kS4 = 2.7557319223985893e-06;
@@ -944,13 +942,6 @@ struct ReverbFx
                              + k05 * at (7, wrap (tap[6] + pos[7], 7));
             bus[1][i] = rR + bus[1][i];
             bus[0][i] = rL + bus[0][i];
-        }
-        if (std::getenv ("DWDBG"))
-        {
-            std::fprintf (stderr, "#rev pos"); for (int k = 0; k < 12; ++k) std::fprintf (stderr, " %d", pos[k]);
-            std::fprintf (stderr, " len"); for (int k = 0; k < 12; ++k) std::fprintf (stderr, " %d", len[k]);
-            std::fprintf (stderr, " tap"); for (int k = 0; k < 14; ++k) std::fprintf (stderr, " %d", tap[k]);
-            std::fprintf (stderr, " f %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g g %.9g a %.9g %.9g %.9g\n", (double) lp, (double) hpY, (double) hpX, (double) shA, (double) shAy, (double) shB, (double) shBy, (double) dampA, (double) dampB, (double) g, (double) a1, (double) a2, (double) a3);
         }
     }
 };
@@ -1695,9 +1686,6 @@ struct Engine::Impl
             }
         }
 
-        if (std::getenv ("DWDBG") && filters)
-            std::fprintf (stderr, "#fs %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", (double) v.fa[0].s[0], (double) v.fa[0].s[1], (double) v.fa[0].s[2], (double) v.fa[0].s[3],
-                          (double) v.fa[0].s[4], (double) v.fa[0].s[5], (double) v.fa[0].s[6], (double) v.fa[0].s[7]);
 
         // ------------------------------------------------------------------ zone effects (0x1FE…0x201)
         const float smoothK2 = smoothK;
@@ -1788,9 +1776,6 @@ struct Engine::Impl
             v.gainR = (v.gainR - targetR) * smoothK + targetR + kTiny;
         }
 
-        if (std::getenv ("DWDBG"))
-            std::fprintf (stderr, "#v zone %d gainL %.9g gainR %.9g cutA %.9g cutB %.9g lim %.9g amp %.9g glide %.9g vel %.9g speed %.17g D2 %.9g D3 %.9g\n", v.zone,
-                          (double) v.gainL, (double) v.gainR, (double) v.cutA, (double) v.cutB, (double) v.lim, (double) v.amp.level, (double) v.glide, (double) v.vel, v.speed, (double) D[2], (double) D[3]);
         // ------------------------------------------------------------------ buses
         auto send = [&] (int b, float gain) {
             for (int i = 0; i < n; ++i)
@@ -1967,8 +1952,6 @@ void Engine::render (float* out, int n)
         }
         done += m;
     }
-    if (std::getenv ("DWRS"))
-        std::fprintf (stderr, "#rs %u\n", randState);
 }
 
 
