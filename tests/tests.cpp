@@ -6638,6 +6638,11 @@ TEST (fruity_vocoder_engine)
     const auto parsed = lynx::fvocoder::parse (bytes);
     CHECK (parsed && parsed->bands == 16 && parsed->levels[5] == 2.0f && parsed->c[lynx::fvocoder::release] == 100);
     CHECK (! lynx::fvocoder::parse ({ 2, 0, 0, 0, 12, 0, 0, 0 })); // 12 bands is not a valid count
+    // a raw control outside the knob range (FL keeps it, REA_rodada78 §1) survives while the knob shows it, clamped
+    CHECK (lynx::fvocoder::rawFromKnob (0.0f, lynx::fvocoder::attack, 5) == 5);
+    CHECK (lynx::fvocoder::rawFromKnob (0.5f, lynx::fvocoder::attack, 5) == 505);
+    CHECK (lynx::fvocoder::rawFromKnob (1.0f, lynx::fvocoder::wetLevel, 250) == 250);
+    CHECK (lynx::fvocoder::rawFromKnob (0.5f, lynx::fvocoder::freqScale, 64) == 64);
 }
 
 // Delphi run-time math (REA_rodada70 §2): values the plugin's own exp / ln / SinCos return (EXEC, called in place)
@@ -9871,8 +9876,9 @@ TEST (love_philter_engine)
 
 TEST (fruity_vocoder_round66_goldens)
 {
-    // REA_rodada66 §6 goldens, now checked against the round-70 engine (core/FruityVocoder):
-    // Fruity Vocoder_x64.dll on our own states (44.1 kHz, blocks of 512): left = modulator, right = carrier
+    // REA_rodada66 §6 goldens against the round-70 engine (core/FruityVocoder), through FL's state import and the mixer
+    // effect: Fruity Vocoder_x64.dll on our own states (44.1 kHz, blocks of 512): left = modulator, right = carrier.
+    // The first state's attack (5 ms) is below the knob range (10…1000): the plugin uses it as it is (REA_rodada78 §1)
     lynx::ScopedFlushDenormals ftz;
     auto hex = [] (const char* h) {
         std::vector<std::uint8_t> v;
@@ -9907,19 +9913,10 @@ TEST (fruity_vocoder_round66_goldens)
         std::vector<float> l (inL), r (inR);
         for (int s = 0; s < N; s += 512)
             fx->process (l.data() + s, r.data() + s, 512, slot->params, 120.0);
-        // open item (REA_rodada66 §6 merge note): the round-70 engine does not reproduce every round-66 golden yet, so
-        // the differences are reported rather than checked
-        int same = 0;
-        double worst = 0.0;
         for (const auto& g : gold)
-        {
-            CHECK (std::isfinite (l[(std::size_t) g.i]) && l[(std::size_t) g.i] == r[(std::size_t) g.i]);
-            same += l[(std::size_t) g.i] == g.v ? 1 : 0;
-            worst = std::max (worst, std::abs ((double) l[(std::size_t) g.i] - (double) g.v));
-        }
-        std::printf ("  round-66 vocoder goldens: %d/%d identical, max |diff| %.9g\n", same, (int) gold.size(), worst);
+            CHECK (l[(std::size_t) g.i] == g.v && r[(std::size_t) g.i] == g.v);
     };
-    // 32 bands, order 3, inverted carrier bank with a formant shift, fast attack
+    // 32 bands, order 3, inverted carrier bank with a formant shift, fast attack (5 ms, outside the knob range)
     run (hex (
              "02000000200000000300000002000000000000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000"
              "803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f00"

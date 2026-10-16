@@ -369,7 +369,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   stay editable and automatable (48 of them: globals, cutoff/resonance/envelope amount/pan/volume per unit).
   Bit-identical to the installation's DLL on all 86 states of the installation (39 demo slots + 47 presets) in live
   and export modes, on Linux and Windows builds, with automation, transport positions and 22–96 kHz. The DLL's own
-  Delphi math runtime (exp, ln, sin, cos, power, tanh) is re-created (`core/DelphiRuntime.h`). The old parametric-EQ
+  Delphi math runtime (exp, ln, sin, cos, power, tanh) is re-created (`core/DelphiMath`, shared with the Fruity Vocoder since round 78). The old parametric-EQ
   conversion remains only for states the engine cannot read.
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
@@ -402,8 +402,10 @@ accordingly. Highlights of what is **confirmed and applied**:
 - **Fruity Vocoder:** FL's exact engine (`core/FruityVocoder`, REA round 70): band edges and RBJ band-pass banks
   (formant, invert, order 1–3), the x87 envelope followers with FL's silence logic, per-band levels kept in the slot's
   FL state and drawn in the mixer's band-level strip, mix levels, swap, hold; mono output. Bit-identical to the DLL on
-  every installation state, 84 rate/block cases and 500 random states/automation runs. The set-up uses
-  `core/DelphiMath`, an exact replica of the Delphi RTL's exp / ln / SinCos (0 differences on 1.26 M arguments).
+  every installation state, 84 rate/block cases and 500 random states/automation runs, and (round 78) on states whose
+  raw controls lie outside the knob ranges (FL uses them unclamped; the slot keeps them while the knob is untouched).
+  The set-up uses `core/DelphiMath`, the one exact replica of the Delphi RTL's math (exp / expm1 / ln / SinCos / power /
+  sinh / tanh; rounds 66, 70 and 78: 0 differences against the DLLs' own routines).
 - **Frequency Splitter:** FL's own engine (`core/FrequencySplitter`, REA round 62) from the saved state, editable as
   LYNX parameters: IIR crossovers for every slope (6–96 dB/oct, incl. the 18 dB/oct all-pass structure), the 3-band
   phase compensation, gain smoothing, mutes/solos and the FFT linear-phase mode (3N/4 latency to PDC); mixer slots use
