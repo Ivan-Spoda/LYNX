@@ -6,6 +6,7 @@
 
 #include "ui/HistoryPanel.h"
 #include "ui/MissingFilesDialog.h"
+#include "ui/SettingsDialog.h"
 #include "ui/QuickAddPalette.h"
 #include "ui/ToolWindow.h"
 #include "ui/WindowOwner.h"
@@ -2134,7 +2135,20 @@ void MainComponent::openLynxProject (const juce::File& file)
     updateTitle();
 
     if (persistent)
+    {
         showMissingFiles (true);
+        if (engine.getSong().info.showOnOpen)
+            openSettings (1);
+    }
+}
+
+void MainComponent::openSettings (int page)
+{
+    showSettings (engine, (SettingsPage) juce::jlimit (0, 2, page),
+                  [safe = juce::Component::SafePointer<MainComponent> (this)] {
+                      if (safe != nullptr)
+                          safe->browser.reloadUserFolders();
+                  });
 }
 
 void MainComponent::showMissingFiles (bool afterOpening)
@@ -2352,6 +2366,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     }
     else if (index == 4)
     {
+        menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings (0); });
+        menu.addItem (tr ("Project info..."), [this] { openSettings (1); });
+        menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings (2); });
         menu.addItem (tr ("Audio settings..."), [this] { showAudioSettings(); });
         menu.addItem (tr ("Setup wizard (language, audio, plugin folders)..."), [this] { showSetupWizard(); });
         const auto scanning = engine.getPluginHost().backgroundScan().running;

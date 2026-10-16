@@ -285,6 +285,7 @@ struct Project
     int swing = 0;       // event 0x0B: 0..128
     std::uint32_t flagsA9 = 0;
     std::string title, artist, genre, url;
+    std::string comments; // event 0xC3 (the Info page's comments; line breaks saved as CR)
 
     std::vector<Channel> channels;
     std::vector<Pattern> patterns;

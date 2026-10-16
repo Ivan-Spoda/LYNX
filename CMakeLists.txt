@@ -225,6 +225,7 @@ if(LYNX_BUILD_APP)
         src/ui/ToolWindow.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp
+        src/ui/SettingsDialog.cpp
         src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)

@@ -35,6 +35,7 @@
 #include "core/FlWrapper.h"
 #include "core/FlPluginDb.h"
 #include "core/MissingFiles.h"
+#include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
@@ -14074,4 +14075,21 @@ TEST (missing_files_flp_report_and_relocation)
     song = lynx::importFlp (project, options);
     CHECK (again.missingFiles.empty());
     CHECK (song.channels.size() == 1 && song.channels[0].samplePath == "/found/snare 7.wav" && song.channels[0].instrument == lynx::InstrumentKind::sampler);
+}
+
+TEST (project_info_history_and_flp_import)
+{
+    lynx::Song a;
+    auto b = a;
+    b.info.title = "Night Drive";
+    CHECK (lynx::describeChangeText (a, b) == "Project info");
+    auto c = a;
+    c.beatsPerBar = 3;
+    CHECK (lynx::describeChangeText (a, c) == "Time signature");
+
+    flp::Project project;
+    project.title = "Song", project.artist = "Me", project.genre = "House", project.url = "https://x", project.comments = "line 1\rline 2";
+    const auto song = lynx::importFlp (project);
+    CHECK (song.info.title == "Song" && song.info.author == "Me" && song.info.genre == "House" && song.info.url == "https://x");
+    CHECK (song.info.comments == "line 1\nline 2");
 }

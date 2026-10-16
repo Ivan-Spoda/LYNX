@@ -32,6 +32,7 @@ enum : std::uint32_t
     evChannelNameOld = 0xC0,    // FL <= 11
     evPatternName = 0xC1,
     evTitle = 0xC2,
+    evComments = 0xC3,
     evSamplePath = 0xC4,
     evUrl = 0xC5,
     evVersion = 0xC7,
@@ -485,6 +486,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
 
             case evTitle: project.title = text (e); break;
+            case evComments: project.comments = text (e); break;
             case evArtist: project.artist = text (e); break;
             case evGenre: project.genre = text (e); break;
             case evUrl: project.url = text (e); break;

@@ -23,6 +23,7 @@
 #include "engine/FlStudio.h"
 #include "ui/HistoryPanel.h"
 #include "ui/MissingFilesDialog.h"
+#include "ui/SettingsDialog.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
@@ -1422,6 +1423,16 @@ private:
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 2), "-missing-found.png");
+            {
+                // the Settings pages, with credits like a project imported from FL would carry
+                offline.editSong ([] (lynx::Song& s) {
+                    s.info = { "Night Drive", "LYNX demo", "Synthwave", "https://lynx-share.com",
+                               "Made with LYNX.\nDrums and bass from the Channel Rack, pads from the Browser.", false };
+                }, false);
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::project), "-settings-project.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::info), "-settings-info.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::files), "-settings-files.png");
+            }
 
             if (! offline.getSong().automations.empty())
             {

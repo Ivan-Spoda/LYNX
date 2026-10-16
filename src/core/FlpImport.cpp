@@ -580,6 +580,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
+    song.info.title = project.title;
+    song.info.author = project.artist;
+    song.info.genre = project.genre;
+    song.info.url = project.url;
+    song.info.comments = project.comments;
+    std::replace (song.info.comments.begin(), song.info.comments.end(), '\r', '\n'); // (FL saves CR line breaks)
 
     // FL channels may have sparse indices; we map them to dense indices.
     std::map<int, int> channelMap;

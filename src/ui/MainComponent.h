@@ -106,6 +106,7 @@ private:
     // The "Missing files" window (ui/MissingFilesDialog.h) for the current project; `afterOpening`: shown by opening a
     // project (only when something is missing; the FL import report follows it), else from the menu (always).
     void showMissingFiles (bool afterOpening);
+    void openSettings (int page); // ui/SettingsDialog.h: 0 Project, 1 Info, 2 Files
     int scansSeen = 0; // background plugin scans already announced in the hint bar
     void showHelp();
 
