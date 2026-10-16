@@ -123,8 +123,11 @@ packet that oggio decodes (not investigated further).
 ## 7. Verification **[EXEC + model]**
 
 - `py/batch.py all`: all **57 demo states**, 8 random notes each (velocity, Final.Vol/Pan, cent offsets, releases),
-  random host blocks 100…1024, 3 s, with the plugin's own decoded samples: **all 57 bit-identical** (the reverb's
-  pre-delay buffer starts filled with 10⁻³⁰, which sets its idle self-noise — seen with per-sample peeks **[EXEC]**).
+  random host blocks 100…1024, 3 s, with the plugin's own decoded samples: **all 57 bit-identical** at 44.1 kHz; at
+  48 kHz (6 notes, another seed) all sounding output is bit-identical too, but 29 reverb programs differ in the reverb's
+  idle self-noise (≤ 2·10⁻³⁰) before the first note: that noise comes from the pre-delay buffer's contents, which in the
+  harness start at 10⁻³⁰ at 44.1 kHz (LYNX's choice) and at 0 at 48 kHz — they depend on what the plugin processed
+  before, so FL's own idle noise is not reproducible in general **[EXEC, per-sample peeks]**.
 - Crafted states (our own 16-bit samples in every zone; zone effects on, filter types 2–7, parallel routing):
   **bit-identical** (`py/craft.py`).
 - Tests: `directwave_crt_math_and_state` (CRT goldens from the DLL), `directwave_matches_fl_with_demo_programs` (three
