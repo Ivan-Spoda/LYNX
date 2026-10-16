@@ -1,8 +1,8 @@
-# REA round 73 — Newtone and Newtime (WORK IN PROGRESS, paused 2026-10-16)
+# Behavioural analysis of FL Studio 2026: round 73 (REA) — Newtone and Newtime
 
 > Clean-room, behavioural only: layouts and behaviour in our own words; no Image-Line/zplane code, pseudocode or data in
 > the repository. Markers: [DECOMP], [DATA], [EXEC], [model], "not confirmed". Scratch: `~/.claude/jobs/f8789b49/tmp/r73/`.
-> **Status: not landed; the C++ port is NOT build-verified yet.**
+> Date: 2026-10-16.
 
 Fruity Dance (also in this round's queue) was already done in round 68 (silent channel, state kept); nothing added here.
 
@@ -46,9 +46,26 @@ Fruity Dance (also in this round's queue) was already done in round 68 (silent c
 - Newtime, unwarped track, from 0: the élastique timeline stretcher is not transparent at ratio 1 (−5.4 dB vs source).
 - Pitch/time edits (zplane engines): not reproduced.
 
-## 5. Port (in branch feature/r73, NOT build-verified)
+## 5. Port
 `src/core/NewtoneFx.{h,cpp}` (state parser, edit detection, effect: pass-through + source sample added in slave mode
 while playing, linear resampling at other rates), `EffectKind::newtone/newtime` (+ `EffectSlot::samplePath`),
 `Effect::setPlaying` (RackRenderer passes the transport; parallel container forwards it; smart-disable exempts the
 two kinds), FlEffects (`effectFromFl`), FlpImport (source from record 3 via resolveFlPath, else XML FilePath; report),
-ProjectFile ("newtone"/"newtime", "sample"), mixer slot menu "Source sample", pt-BR strings. Tests not written yet.
+ProjectFile ("newtone"/"newtime", "sample"), mixer slot menu "Source sample" (shows / chooses / removes the sample; the
+slave switch is the slot's one parameter), pt-BR strings.
+
+Tests (`tests/tests.cpp`): `newtone_state` (synthetic states in the §2 layout: options, wrapper + XML with tracks,
+entities, edit detection, rejected broken states; the FL import keeps the state and maps the slave switch; with the
+Data dir, the installation's four Newtone/Newtime states), `newtone_engine` (pass-through when not slave / not playing,
+input + source sample sample-by-sample across blocks, seek on a jump, end of the sample, restart after a stop, pass-through
+without a sample), `newtone_rack_follows_transport` (the rack loads the sample through the sample provider, gives the
+effect the transport and does not smart-disable it on a silent insert).
+
+## 6. What LYNX does not reproduce
+- The zplane engines: Newtone's note edits (pitch, timing, formant, volume, drift, vibrato) and Newtime's warping; an
+  edited Newtone track or any Newtime track plays the original sample (reported by the import).
+- Newtone's pitch-mark alignment when playback starts mid-song (±~50 samples, §4) and its end-of-sample fade (~33 samples).
+- Project rates other than the sample's (FL's output is not a plain resampling; LYNX resamples linearly).
+- Stereo sources: L/R added to L/R — not confirmed by EXEC (only mono sources were measured; mono goes to both channels).
+- Host selection / own selection options (flags 0x8 / 0x10) and the engine's own transport (its play button).
+- Song time with tempo changes: LYNX converts ticks with the block's tempo (FL uses the absolute time).
