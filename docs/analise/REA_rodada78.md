@@ -116,8 +116,8 @@ without contraction (pragma in the `.cpp`), out of line. `core/DelphiRuntime.h` 
 
 ## 3. Test result
 
-`scripts/build-local.sh "/mnt/c/Program Files/Image-Line/FL Studio 2026/Data"`: see the landing line in the summary
-below (0 failures required); Windows build and `LYNX.exe --selftest` through `tmp/coord/land.sh`.
+`scripts/build-local.sh "/mnt/c/Program Files/Image-Line/FL Studio 2026/Data"`: **1 167 600 checks, 0 failures**
+(on main 763ec35 + this round); Windows build and `LYNX.exe --selftest` through `tmp/coord/land.sh`.
 
 ## 4. Open items
 
