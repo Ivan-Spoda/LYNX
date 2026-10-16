@@ -109,9 +109,18 @@ bool layOut (const std::vector<Item>& items, float width, int maxLines, std::vec
     lines.assign (1, {});
     float x = 0.0f;
 
-    for (auto item : items)
+    // a line only breaks after a word: key and mouse glyphs stay with what follows them ("[Ctrl][T] typing")
+    for (std::size_t i = 0; i < items.size();)
     {
-        const auto needed = (lines.back().empty() ? 0.0f : item.gap) + item.width;
+        auto end = i + 1;
+        while (end < items.size() && items[end - 1].kind != Item::Kind::word)
+            ++end;
+
+        float chunkWidth = 0.0f;
+        for (auto j = i; j < end; ++j)
+            chunkWidth += (j == i ? 0.0f : items[j].gap) + items[j].width;
+
+        const auto needed = (lines.back().empty() ? 0.0f : items[i].gap) + chunkWidth;
 
         if (! lines.back().empty() && x + needed > width)
         {
@@ -122,11 +131,16 @@ bool layOut (const std::vector<Item>& items, float width, int maxLines, std::vec
             x = 0.0f;
         }
 
-        if (lines.back().empty())
-            item.gap = 0.0f;
+        for (auto j = i; j < end; ++j)
+        {
+            auto item = items[j];
+            if (lines.back().empty())
+                item.gap = 0.0f;
+            x += item.gap + item.width;
+            lines.back().push_back (item);
+        }
 
-        x += item.gap + item.width;
-        lines.back().push_back (item);
+        i = end;
     }
 
     return x <= width;
