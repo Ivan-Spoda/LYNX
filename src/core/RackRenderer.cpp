@@ -464,7 +464,9 @@ void RackState::buildAutomationTables()
             case AutomationTargetKind::mixerPan: if (trackOk) mixerPanAuto[(std::size_t) t.index] = a; else used = false; break;
 
             case AutomationTargetKind::channelParam:
-                if (channelOk && song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin)
+                // VST plugins and the exact engines that take FL's parameter automation (FL Slayer: REA_rodada79)
+                if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;

@@ -11,6 +11,7 @@
 #include <map>
 #include <mutex>
 
+#include "core/FlVoiceProcessor.h" // flvp::panLaw (FL's ComputeLRVol law)
 #include "core/Sha256.h"
 
 // The engine switches the x87 rounding mode (§2.1): the compiler must not assume round-to-nearest.
@@ -88,8 +89,25 @@ inline ld fexp (ld x) noexcept { return std::exp (x); }
 inline int fistp (ld x) noexcept { return (int) std::nearbyint (x); }
 #endif
 
+#if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__) && ! defined(__clang__)
+// GCC (not Clang) narrows a float-to-long-double product stored back to float into an SSE operation, which rounds by
+// MXCSR (to nearest) instead of the x87 control word; the stores go through the FPU explicitly (REA_rodada79 §5)
+inline float F (ld x) noexcept
+{
+    float r;
+    asm ("fstps %0" : "=m"(r) : "t"(x) : "st");
+    return r;
+}
+inline double D (ld x) noexcept
+{
+    double r;
+    asm ("fstpl %0" : "=m"(r) : "t"(x) : "st");
+    return r;
+}
+#else
 inline float F (ld x) noexcept { return (float) x; }  // fstp dword (current rounding mode)
 inline double D (ld x) noexcept { return (double) x; } // fstp qword
+#endif
 inline int ftol (ld x) noexcept { return (int) x; }    // the C runtime's __ftol (truncation)
 inline float bitsF (std::uint32_t u) noexcept
 {
@@ -296,6 +314,9 @@ struct Engine
     // held keys of the solo modes (0x80 keys, minimum, maximum, count)
     std::array<std::int8_t, 0x84> heldKeys {};
     int heldCount = 0;
+    // the front-end's view (not engine state): the parameter integers and the pitch bend it last sent
+    std::array<int, 29> sentParams {};
+    int sentBend = 0x2000;
     int strumCount = 0, strumChunks = 0, glideTarget = 0;
     float glidePos = 0.0f, glideStep = 0.0f;
     std::uint32_t randState = 1; // the C runtime's per-thread rand() seed
@@ -2310,9 +2331,37 @@ int keyFromPitch (float finalPitchPlus6000) noexcept
     return (int) std::clamp (k, 0ll, 127ll);
 }
 
+// ProcessEvent 4 (MIDI pitch, cents) → the pitch bend the front-end sends: MulDiv(cents, 8192, 1200) + 8192 (64-bit
+// multiply, truncating divide), 0 below 1, at most 0x3fff (REA_rodada79 §2.2)
+int bendFromCents (int cents) noexcept
+{
+    auto v = (long long) cents * 8192 / 1200 + 0x2000;
+    if (v < 1)
+        v = 0;
+    return (int) std::min (v, 0x3fffll);
+}
+
+// FL's channel pan as ProcessEvent 2 sends it (the event's flags): (pan − 6400)/100 truncated, clamped to −64…64; LYNX
+// keeps the channel pan as (pan − 6400)/6400
+int midiPanFrom (double pan) noexcept
+{
+    const auto p = (long long) std::llround (pan * 6400.0);
+    return (int) std::clamp (p / 100, -64ll, 64ll);
+}
+
+// the front-end's output gains: host ComputeLRVol (slot 3: integer pan / 64, FL's cos/sin law) of the MIDI pan and of
+// twice the volume ProcessEvent 3 carries (the channel's gain as a float)
+void hostGainsFor (int pan, float channelGain, float& l, float& r) noexcept
+{
+    flvp::panLaw ((float) pan * 0.015625f, channelGain * 2.0f, l, r);
+}
+
 // ------------------------------------------------------------------------------------------------ LYNX instrument
-// FL Slayer as a LYNX instrument: the engine driven like the front-end drives it (§6). FL applies the channel's volume
-// and pan to the plugin's output (the plugin reads no per-voice levels), which LYNX does through render()'s gains.
+// FL Slayer as a LYNX instrument: the engine driven like the front-end drives it (§6 of round 68, round 79). FL sends
+// this plugin the channel's levels as MIDI events (its info flags carry 0x4000): pan and volume become the front-end's
+// output gains (FL does not scale the plugin's output itself), the channel pitch a pitch bend; the root note stays in
+// the key. Parameter automation and state edits reach the running engine as setParameter calls, like FL's
+// ProcessParam; only a new DLL or sample rate rebuilds it.
 class SlayerInstrument final : public Instrument
 {
 public:
@@ -2337,17 +2386,46 @@ public:
     {
         delete retired.exchange (nullptr);
         tempo.store (bpm > 0.0 ? bpm : 140.0);
-        channelCents.store (channel.sampler.pitch * 100.0f);
+        // channel pitch (knob + fine) → ProcessEvent 4; the root-note shift (kept in modelParams[0] by the importer)
+        // stays in Final.Pitch, i.e. in the key
+        const auto root = channel.modelParams.empty() || ! std::isfinite (channel.modelParams[0]) ? 0.0f : channel.modelParams[0];
+        keyCents.store ((float) std::lround (root * 100.0f));
+        bendCents.store ((int) std::lround ((channel.sampler.pitch - root) * 100.0f));
         if (channel.pluginState == state && channel.samplePath == dllPath)
             return;
+        std::array<int, 29> next {};
+        const auto nextUsable = parseState (channel.pluginState, next);
+        const auto sameDll = channel.samplePath == dllPath && data != nullptr;
         state = channel.pluginState;
+        if (sameDll && usable && nextUsable)
+        {
+            // an edit of the plugin's settings: FL's ProcessParam → setParameter on the running engine (no restart)
+            params = next;
+            for (std::size_t i = 0; i < 29; ++i)
+                uiParams[i].store (next[i]);
+            uiGeneration.fetch_add (1);
+            return;
+        }
+        params = next;
+        usable = nextUsable;
         dllPath = channel.samplePath;
-        usable = parseState (state, params);
         data = loadDll (dllPath);
+        for (std::size_t i = 0; i < 29; ++i)
+            uiParams[i].store (params[i]);
         delete incoming.exchange (build().release());
     }
 
     void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
+
+    // automation of a plugin parameter (0…1): ProcessParam with REC_FromMIDI → min + Round(value·(max − min))
+    void setParameter (int index, float value) noexcept override
+    {
+        take();
+        if (engine == nullptr || index < 0 || index >= 29 || ! std::isfinite (value))
+            return;
+        const auto v = (int) std::nearbyint ((double) std::clamp (value, 0.0f, 1.0f) * (double) paramMax[index]);
+        send (index, v);
+    }
 
     void noteOn (int key, float velocity) noexcept override
     {
@@ -2358,7 +2436,7 @@ public:
         // FL: Init.Vol = (11^(1.28·velocity) − 1)/10 (the channel's default velocity curve), Final.Pitch in cents
         const auto initVol = (std::pow (11.0, 1.28 * std::clamp ((double) velocity, 0.0, 1.0)) - 1.0) / 10.0;
         const int v = velocityFromInitVol (initVol);
-        const int midiKey = keyFromPitch ((float) ((k - 60) * 100) + nextCents + channelCents.load() + 6000.0f);
+        const int midiKey = keyFromPitch ((float) ((k - 60) * 100) + nextCents + keyCents.load() + 6000.0f);
         nextCents = 0.0f;
         if (sounding[(std::size_t) k] >= 0)
             engine->midi (0x80, sounding[(std::size_t) k], soundingVel[(std::size_t) k]);
@@ -2389,6 +2467,33 @@ public:
         if (engine == nullptr || n <= 0)
             return;
         engine->tempo = tempo.load();
+        // settings edited while playing (only the integers that changed, so automation is not overwritten)
+        const auto generation = uiGeneration.load();
+        if (generation != appliedGeneration)
+        {
+            appliedGeneration = generation;
+            for (std::size_t i = 0; i < 29; ++i)
+            {
+                const auto v = uiParams[i].load();
+                if (v != uiApplied[i])
+                {
+                    uiApplied[i] = v;
+                    send ((int) i, v);
+                }
+            }
+        }
+        // channel pitch: ProcessEvent 4 → a pitch bend, sent when it changes
+        const auto bend = bendFromCents (bendCents.load());
+        if (bend != engine->sentBend)
+        {
+            engine->sentBend = bend;
+            engine->midi (0xe0, bend & 0x7f, bend >> 7);
+        }
+        // channel volume and pan (LYNX's gains: g·√2·cos/sin((1 + pan)·π/4)) → ProcessEvent 3 / 2 → the front-end's gains
+        const auto vol = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
+        const auto pan = vol > 0.0 ? std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0 : 0.0;
+        float hostL = 0.0f, hostR = 0.0f;
+        hostGainsFor (midiPanFrom (pan), (float) vol, hostL, hostR);
         for (int done = 0; done < n;)
         {
             const auto m = std::min (n - done, (int) scratchL.size());
@@ -2397,14 +2502,26 @@ public:
             engine->process (scratchL.data(), scratchR.data(), m);
             for (int i = 0; i < m; ++i)
             {
-                left[done + i] += scratchL[(std::size_t) i] * hostL * gl;
-                right[done + i] += scratchR[(std::size_t) i] * hostR * gr;
+                left[done + i] += scratchL[(std::size_t) i] * hostL;
+                right[done + i] += scratchR[(std::size_t) i] * hostR;
             }
             done += m;
         }
     }
 
 private:
+    // ProcessParam with the update flag: setParameter(i, v/max) for the 28 engine parameters, MIDI CC 1 for the 29th
+    void send (int i, int v) noexcept
+    {
+        if (engine->sentParams[(std::size_t) i] == v)
+            return;
+        engine->sentParams[(std::size_t) i] = v;
+        if (i < 28)
+            engine->setParameter (i, (float) v / (float) paramMax[i]);
+        else
+            engine->midi (0xb0, 1, v);
+    }
+
     std::unique_ptr<Engine> build() const
     {
         if (! usable || data == nullptr)
@@ -2416,6 +2533,8 @@ private:
         e->resume();
         e->midi (0xe0, 0, 64);              // the front-end's centred pitch bend after loading
         e->midi (0xb0, 1, params[28]);      // parameter 28 (mod wheel)
+        e->sentParams = params;
+        e->sentBend = 0x2000;
         e->tempo = tempo.load();
         float l = 0.0f, r = 0.0f;
         e->process (&l, &r, 1);              // one sample in: the plugin has been running before the first note (§6.3)
@@ -2431,6 +2550,8 @@ private:
             retired.store (engine.release());
             engine.reset (s);
             sounding.fill (-1);
+            uiApplied = engine->sentParams;
+            appliedGeneration = uiGeneration.load();
         }
     }
 
@@ -2440,14 +2561,17 @@ private:
     bool usable = false;
     std::shared_ptr<const DllData> data;
     std::atomic<double> rate { 44100.0 }, tempo { 140.0 };
-    std::atomic<float> channelCents { 0.0f };
+    std::atomic<float> keyCents { 0.0f };
+    std::atomic<int> bendCents { 0 };
+    std::array<std::atomic<int>, 29> uiParams {};
+    std::atomic<int> uiGeneration { 0 };
+    int appliedGeneration = 0;
+    std::array<int, 29> uiApplied {};
     std::vector<std::uint8_t> state;
     std::string dllPath;
     std::array<int, 128> sounding = [] { std::array<int, 128> a {}; a.fill (-1); return a; }();
     std::array<int, 128> soundingVel {};
     float nextCents = 0.0f;
-    // the front-end mixes the engine's output with the host's ComputeLRVol(pan 0, volume 1): cos(π/4) on both sides
-    const float hostL = 0.70710677f, hostR = 0.70710677f;
     std::array<float, 512> scratchL {}, scratchR {};
 };
 } // namespace
@@ -2477,6 +2601,12 @@ namespace slayer
 {
 int midiVelocity (double initVol) noexcept { return velocityFromInitVol (initVol); }
 
+int pitchBend (int cents) noexcept { return bendFromCents (cents); }
+
+int midiPan (double pan) noexcept { return midiPanFrom (pan); }
+
+void hostGains (int pan, float channelGain, float& left, float& right) noexcept { hostGainsFor (pan, channelGain, left, right); }
+
 std::vector<float> renderReference (const std::vector<int>& params, const std::string& dll, const std::vector<RefNote>& notes,
                                     double sampleRate, int length, const RefOptions& options)
 {
@@ -2501,7 +2631,13 @@ std::vector<float> renderReference (const std::vector<int>& params, const std::s
     }
     for (const auto& m : options.midi)
         ev.push_back ({ m[0], m[1], m[2], m[3] });
-    std::stable_sort (ev.begin(), ev.end(), [] (const Ev& a, const Ev& b) { return a.at < b.at; });
+    // parameter changes (status −1: setParameter, or CC 1 for index 28) sorted before the MIDI of the same sample
+    for (const auto& p : options.params)
+        if (p[1] >= 0 && p[1] < 29)
+            ev.push_back ({ p[0], -1, p[1], p[2] });
+    std::stable_sort (ev.begin(), ev.end(), [] (const Ev& a, const Ev& b) {
+        return a.at != b.at ? a.at < b.at : (a.status == -1 && b.status != -1);
+    });
     std::vector<float> out ((std::size_t) length * 2, 0.0f);
     std::vector<float> l ((std::size_t) options.block), r ((std::size_t) options.block);
     std::size_t next = 0;
@@ -2510,7 +2646,12 @@ std::vector<float> renderReference (const std::vector<int>& params, const std::s
         int len = std::min (options.block, length - pos);
         while (next < ev.size() && ev[next].at <= pos)
         {
-            e->midi (ev[next].status, ev[next].d1, ev[next].d2);
+            if (ev[next].status == -1 && ev[next].d1 < 28)
+                e->setParameter (ev[next].d1, (float) ev[next].d2 / (float) paramMax[ev[next].d1]);
+            else if (ev[next].status == -1)
+                e->midi (0xb0, 1, ev[next].d2);
+            else
+                e->midi (ev[next].status, ev[next].d1, ev[next].d2);
             ++next;
         }
         if (next < ev.size() && ev[next].at < pos + len)
