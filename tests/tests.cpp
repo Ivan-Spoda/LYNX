@@ -51,6 +51,7 @@
 #include "core/Ogun.h"
 #include "core/BassDrum.h"
 #include "core/FruitKick.h"
+#include "core/IppCos.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/ThreeOsc.h"
@@ -11756,6 +11757,30 @@ TEST (fruitkick_engine)
         energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
     }
     CHECK (diff < 1e-6 && energy > 1e-2);
+}
+
+TEST (ipp_cos_and_end_fade)
+{
+    // ippsCos_32f_A11 of the installation's dsp_ippv2_x64.dll (REA_rodada74 §1): outputs the DLL gave on its two paths
+    const auto bits = [] (float v) { return ippcos::floatToBits (v); };
+    const auto f = ippcos::bitsToFloat;
+    CHECK (bits (ippcos::cosFma (0.1f)) == 0x3f7eaf8bu && bits (ippcos::cosFma (1.0f)) == 0x3f0a534cu);
+    CHECK (bits (ippcos::cosFma (2.0f)) == 0xbed51118u && bits (ippcos::cosFma (-3.0f)) == 0xbf7d6646u);
+    CHECK (bits (ippcos::cosFma (f (0x3e000007))) == 0x3f7df6f8u && bits (ippcos::cosNoFma (f (0x3e00007c))) == 0x3f7df6f5u);
+    CHECK (ippcos::cosFma (1e-9f) == 1.0f && ippcos::cosNoFma (0.0f) == 1.0f);
+    // the portable fused multiply-add rounds once: (1 + 2^-12)^2 = 1 + 2^-11 + 2^-24 is a float halfway case that a
+    // tiny addend (lost in a plain double sum) must decide
+    const float a = 1.0f + 0x1p-12f;
+    CHECK (ippcos::fusedMulAdd (a, a, 0x1p-60f) == 1.0f + 0x1p-11f + 0x1p-23f);
+    CHECK (ippcos::fusedMulAdd (a, a, -0x1p-60f) == 1.0f + 0x1p-11f && ippcos::fusedMulAdd (a, a, 0.0f) == 1.0f + 0x1p-11f);
+    CHECK (ippcos::fusedMulAdd (3.0f, 5.0f, -1.0f) == 14.0f);
+    // the end-fade table: within 1.5e-4 of the exact cosine, ends near zero
+    std::vector<float> t (441);
+    ippcos::endFadeTable (t.data(), 441);
+    double worst = 0.0;
+    for (int i = 0; i < 441; ++i)
+        worst = std::max (worst, std::abs ((double) t[(std::size_t) i] - 0.5 * (1.0 + std::cos ((i + 1) * 3.141592653589793 / 442.0))));
+    CHECK (worst < 1.5e-4 && t[0] > 0.9999f && t[440] < 1e-4f);
 }
 
 TEST (bassdrum_engine)

@@ -88,12 +88,10 @@ public:
         update();
         // end-fade table (FUN_0071e060, mode 3, 10 ms): 0.5·(1 + cos((i + 1)·π/(L + 1))), built by the constructor while
         // the plugin's rate object still holds 44 100 Hz, so L = 441 at every rate (EXEC); FL computes the cosine with
-        // IPP's ippsCos_32f_A11, LYNX exactly
+        // IPP's ippsCos_32f_A11, which LYNX restates (REA_rodada74 §1)
         const auto L = roundEven (10.0 * 0.001 * 44100.0);
         endTable.resize ((std::size_t) L);
-        const auto k = (float) (1.0 / (double) (L + 1) * 3.141592653589793);
-        for (std::int64_t i = 0; i < L; ++i)
-            endTable[(std::size_t) i] = ((float) std::cos ((double) (((float) i + 1.0f) * k)) + 1.0f) * 0.5f;
+        ippcos::endFadeTable (endTable.data(), (long) L);
     }
 
     // ProcessEvent 0 (tempo) / SetTimeSig (PPQ): the articulators' tick counts (FUN_00722d80)
