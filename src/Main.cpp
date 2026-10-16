@@ -19,6 +19,8 @@
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
+#include "ui/SetupWizard.h"
+#include "engine/FlStudio.h"
 #include "ui/HistoryPanel.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/ParametricEqEditor.h"
@@ -110,6 +112,64 @@ public:
             for (const auto& dir : programs.getChildFile ("Image-Line").findChildFiles (juce::File::findDirectories, false, "FL Studio*"))
                 report << "fl=" << dir.getFullPathName() << " packs=" << (int) dir.getChildFile ("Data").getChildFile ("Patches").getChildFile ("Packs").isDirectory() << "\n";
             juce::File (args[args.indexOf ("--paths") + 1].unquoted()).replaceWithText (report);
+            quit();
+            return;
+        }
+
+        if (args.contains ("--fldb"))
+        {
+            // diagnostics: LYNX.exe --fldb report.txt [project.flp]: the FL Studio installation, its plugin database,
+            // the suggested plugin folders and, for a project, how each of its plugins resolves (read-only)
+            const auto i = args.indexOf ("--fldb");
+            const auto fl = lynx::findFlStudio();
+            lynx::PluginHost host (false);
+            juce::String report;
+            report << "install=" << fl.installDir.getFullPathName() << "\nuserdata=" << fl.userData.getFullPathName() << "\n";
+            for (const auto& f : fl.vstFolders)
+                report << "flvstfolder=" << f << "\n";
+            report << "dbfiles=" << host.flPluginDatabaseFiles() << " entries=" << (int) host.flPluginDatabase().entries().size() << "\n";
+            for (const auto& e : host.flPluginDatabase().entries())
+                report << "  entry: " << juce::String::fromUTF8 (e.name.c_str()) << " | " << juce::String::fromUTF8 (e.path.c_str()) << " | role=" << e.role << "\n";
+            const auto suggested = host.suggestedFolders();
+            for (int k = 0; k < suggested.getNumPaths(); ++k)
+                report << "folder=" << suggested[k].getFullPathName() << "\n";
+            if (const juce::File project (args[i + 2].unquoted()); project.existsAsFile())
+            {
+                juce::MemoryBlock data;
+                project.loadFileAsData (data);
+                try
+                {
+                    for (const auto& use : lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() })))
+                    {
+                        juce::String how;
+                        const auto d = host.findForeign (use.plugin, use.instrument, &how);
+                        const auto* entry = host.flPluginDatabase().match (use.plugin, use.instrument);
+                        report << "plugin: " << juce::String::fromUTF8 (use.plugin.name.c_str()) << " -> "
+                               << (d ? d->fileOrIdentifier + " (" + how + ")" : juce::String ("not known"))
+                               << (entry != nullptr ? " | fl db: " + juce::String::fromUTF8 (entry->path.c_str()) : juce::String()) << "\n";
+                    }
+                    const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                    const auto candidates = host.filesToScanFor (uses);
+                    report << "scan_candidates=" << candidates.joinIntoString (";") << "\n";
+                    if (args.contains ("--scan"))
+                    {
+                        // the targeted scan an open would run (child processes; the user's plugin list is not touched)
+                        report << "scanned_new=" << host.scanFiles (candidates, {}) << "\n";
+                        for (const auto& use : uses)
+                        {
+                            juce::String how;
+                            const auto d = host.findForeign (use.plugin, use.instrument, &how);
+                            report << "after_scan: " << juce::String::fromUTF8 (use.plugin.name.c_str()) << " -> "
+                                   << (d ? d->fileOrIdentifier + " (" + how + ")" : juce::String ("not known")) << "\n";
+                        }
+                    }
+                }
+                catch (const flp::Error& e)
+                {
+                    report << "error=" << e.what() << "\n";
+                }
+            }
+            juce::File (args[i + 1].unquoted()).replaceWithText (report);
             quit();
             return;
         }
@@ -349,6 +409,9 @@ public:
                     splash->toFront (false);
                     splash->finish ([this] { splash = nullptr; });
                     openStartupFile();
+                    // first run: language, audio, plugin folders (FL Studio's included) and a background scan
+                    if (! lynx::setupWizardDone())
+                        mainWindow->showSetupWizard();
                 });
             });
         });
@@ -1354,6 +1417,7 @@ private:
             saveAlert (ui.makeConfirmDiscardWindow(), "-confirm.png");
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
+            saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
 
             if (! offline.getSong().automations.empty())
             {
@@ -1877,6 +1941,7 @@ private:
         }
 
         void openFile (const juce::File& file) { content->openFile (file); }
+        void showSetupWizard() { content->showSetupWizard(); }
         void confirmDiscard (std::function<void()> then) { content->confirmDiscard (std::move (then)); }
 
         void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }

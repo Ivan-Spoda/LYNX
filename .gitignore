@@ -5,3 +5,4 @@ out/
 *.user
 build-local/
 build-win/
+dist/
