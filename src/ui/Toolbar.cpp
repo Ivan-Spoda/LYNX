@@ -671,6 +671,192 @@ ui::Hint OutputMonitor::hintAt (juce::Point<int>)
     h.value = held <= 1.0e-5f ? juce::String ("-inf dB") : juce::String (juce::Decibels::gainToDecibels (held), 1) + " dB";
     return h;
 }
+
+// --- customize -------------------------------------------------------------------------------------
+
+CustomizePanel::CustomizePanel (const toolbarlayout::Layout& l) : layout (l)
+{
+    setWantsKeyboardFocus (true);
+    upButton.setButtonText (tr ("Move up"));
+    downButton.setButtonText (tr ("Move down"));
+    resetButton.setButtonText (tr ("Reset to default"));
+    upButton.onClick = [this] { move (-1); };
+    downButton.onClick = [this] { move (1); };
+    resetButton.onClick = [this] {
+        layout = toolbarlayout::Layout::makeDefault();
+        iconSizeBox.setSelectedId ((int) layout.iconSize + 1, juce::dontSendNotification);
+        scaleBox.setSelectedId (layout.uiScale, juce::dontSendNotification);
+        rebuild();
+        changed();
+    };
+
+    iconSizeBox.addItem (tr ("Small icons"), 1);
+    iconSizeBox.addItem (tr ("Medium icons"), 2);
+    iconSizeBox.addItem (tr ("Large icons"), 3);
+    iconSizeBox.setSelectedId ((int) layout.iconSize + 1, juce::dontSendNotification);
+    iconSizeBox.onChange = [this] {
+        layout.iconSize = (toolbarlayout::IconSize) (iconSizeBox.getSelectedId() - 1);
+        changed();
+    };
+
+    for (auto percent : toolbarlayout::uiScales)
+        scaleBox.addItem (juce::String (percent) + "%", percent);
+    if (scaleBox.indexOfItemId (layout.uiScale) < 0)
+        scaleBox.addItem (juce::String (layout.uiScale) + "%", layout.uiScale);
+    scaleBox.setSelectedId (layout.uiScale, juce::dontSendNotification);
+    scaleBox.onChange = [this] {
+        layout.uiScale = toolbarlayout::clampScale (scaleBox.getSelectedId());
+        changed();
+    };
+
+    for (auto* c : std::initializer_list<juce::Component*> { &upButton, &downButton, &resetButton, &iconSizeBox, &scaleBox })
+        addAndMakeVisible (c);
+
+    ui::setHint (iconSizeBox, tr ("Size of the toolbar icons and of the editors' tool icons (Piano Roll, Playlist)"));
+    ui::setHint (scaleBox, tr ("Scales the whole interface: text, icons and windows. Useful on high-resolution screens"));
+    rebuild();
+    setSize (460, 2 * 16 + 24 + toolbarlayout::groupCount * rowHeight + rowHeight + 16 + 2 * 34 + 12 + 30);
+}
+
+juce::Rectangle<int> CustomizePanel::listArea() const
+{
+    return getLocalBounds().reduced (16).withTrimmedTop (24).withHeight ((toolbarlayout::groupCount + 1) * rowHeight).withTrimmedRight (140);
+}
+
+void CustomizePanel::rebuild()
+{
+    checks.clear();
+
+    for (const auto& entry : layout.entries)
+    {
+        auto* check = checks.add (new juce::ToggleButton (tr (toolbarlayout::groupName (entry.group))));
+        check->setToggleState (entry.shown, juce::dontSendNotification);
+        check->setWantsKeyboardFocus (false);
+        const auto group = entry.group;
+        check->onClick = [this, check, group] {
+            layout.setShown (group, check->getToggleState());
+            select (group);
+            changed();
+        };
+        // the transport can be hidden, but it is the last group to drop when the window is narrow
+        addAndMakeVisible (check);
+    }
+
+    resized();
+    repaint();
+}
+
+void CustomizePanel::select (toolbarlayout::Group g)
+{
+    selected = g;
+    const auto at = layout.indexOf (g);
+    upButton.setEnabled (at > 0);
+    downButton.setEnabled (at >= 0 && at < (int) layout.entries.size() - 1);
+    repaint();
+}
+
+void CustomizePanel::changed()
+{
+    if (onChange)
+        onChange (layout);
+}
+
+void CustomizePanel::move (int delta)
+{
+    if (layout.move (selected, delta))
+    {
+        rebuild();
+        select (selected);
+        changed();
+    }
+}
+
+void CustomizePanel::resized()
+{
+    auto list = listArea();
+    list.removeFromTop (rowHeight); // the fixed first row: the menu and the hint bar
+
+    for (auto* check : checks)
+        check->setBounds (list.removeFromTop (rowHeight).reduced (8, 3));
+
+    auto side = getLocalBounds().reduced (16).withTrimmedTop (24 + rowHeight).withLeft (listArea().getRight() + 12);
+    upButton.setBounds (side.removeFromTop (28));
+    side.removeFromTop (6);
+    downButton.setBounds (side.removeFromTop (28));
+
+    auto bottom = getLocalBounds().reduced (16).withTop (listArea().getBottom() + 16);
+    auto row = bottom.removeFromTop (28);
+    row.removeFromLeft (110);
+    iconSizeBox.setBounds (row.removeFromLeft (140));
+    bottom.removeFromTop (6);
+    row = bottom.removeFromTop (28);
+    row.removeFromLeft (110);
+    scaleBox.setBounds (row.removeFromLeft (140));
+    bottom.removeFromTop (12);
+    resetButton.setBounds (bottom.removeFromTop (28).removeFromLeft (160));
+    select (selected);
+}
+
+void CustomizePanel::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    g.fillAll (colour::bg2);
+    auto area = getLocalBounds().reduced (16);
+    g.setFont (font (type::small, true));
+    g.setColour (colour::textSecondary);
+    g.drawText (tr ("Toolbar groups, left to right (uncheck to hide):"), area.removeFromTop (20), juce::Justification::centredLeft);
+
+    auto list = listArea();
+    g.setColour (colour::bg1);
+    g.fillRoundedRectangle (list.toFloat(), radius::md);
+
+    auto first = list.removeFromTop (rowHeight).reduced (8, 3);
+    g.setFont (font (type::body));
+    g.setColour (colour::textDisabled);
+    g.drawText (tr ("Menu and hint bar (always first)"), first.withTrimmedLeft (28), juce::Justification::centredLeft);
+
+    const auto at = layout.indexOf (selected);
+    if (at >= 0)
+    {
+        g.setColour (colour::accent.withAlpha (0.18f));
+        g.fillRoundedRectangle (list.withY (list.getY() + at * rowHeight).withHeight (rowHeight).reduced (2).toFloat(), radius::md);
+    }
+
+    auto bottom = getLocalBounds().reduced (16).withTop (listArea().getBottom() + 16);
+    g.setColour (colour::textSecondary);
+    g.drawText (tr ("Icon size"), bottom.removeFromTop (28).withWidth (104), juce::Justification::centredLeft);
+    bottom.removeFromTop (6);
+    g.drawText (tr ("UI scale"), bottom.removeFromTop (28).withWidth (104), juce::Justification::centredLeft);
+}
+
+void CustomizePanel::mouseDown (const juce::MouseEvent& e)
+{
+    auto list = listArea();
+    list.removeFromTop (rowHeight);
+
+    if (list.contains (e.getPosition()))
+    {
+        const auto row = (e.y - list.getY()) / rowHeight;
+        if (row >= 0 && row < (int) layout.entries.size())
+            select (layout.entries[(std::size_t) row].group);
+    }
+}
+
+bool CustomizePanel::keyPressed (const juce::KeyPress& key)
+{
+    const auto up = key.getKeyCode() == juce::KeyPress::upKey, down = key.getKeyCode() == juce::KeyPress::downKey;
+    if (! up && ! down)
+        return false;
+
+    if (key.getModifiers().isAltDown())
+        move (up ? -1 : 1);
+    else
+    {
+        const auto at = juce::jlimit (0, (int) layout.entries.size() - 1, layout.indexOf (selected) + (up ? -1 : 1));
+        select (layout.entries[(std::size_t) at].group);
+    }
+    return true;
+}
 } // namespace lynx::toolbar
 
 // The process memory comes from the OS; its headers go last (windows.h defines macros such as `small`).
