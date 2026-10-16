@@ -218,7 +218,9 @@ Round 27 §3.1 confirmed: `pan = PAN + 2·art₀`, `vol = VOL·art₁`; pan 0 �
 > **Merge note (2026-10-16):** round 70 (`docs/analise/REA_rodada70.md`, `core/FruityVocoder`) landed its own exact
 > Fruity Vocoder engine first. This round's vocoder port (`core/FruityVocoderFx`) was dropped when merging; the
 > findings below stay as analysis, and this round's two DLL goldens now run against the round-70 engine
-> (test `fruity_vocoder_round66_goldens`). The Delphi runtime math of §7 lives in `core/DelphiRuntime.h`.
+> (test `fruity_vocoder_round66_goldens`). Measured at the merge: the 8-band state (swap, per-band levels) is
+> identical on all 6 golden samples; the 32-band state (order 3, inverted bank, formant shift) differs on all 6, by up
+> to 0.0148 — **open item**: which engine (or which golden set-up) is off is not confirmed. The Delphi runtime math of §7 lives in `core/DelphiRuntime.h`.
 
 Confirms round 20 §4.1 and adds the operation order:
 
