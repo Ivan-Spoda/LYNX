@@ -1270,6 +1270,251 @@ struct AltSvf
     }
 };
 
+// "Low pass 24 Alt" (FUN_00717790 class): a four-pole state-space low pass in double, its transition matrix built
+// by squaring a one-step matrix twelve times, a saturating first state and a DC follower on the output
+struct Ladder4
+{
+    double fs = 44100.0;
+    double M[5][4] {}; // rows 0…3 act on the states, row 4 on the input
+    double s[2][4] {}, dc[2] {};
+    void design (float f, float r) noexcept // FUN_00717d30
+    {
+        if ((double) f > 20000.0)
+            f = 20000.0f;
+        auto a = ((double) f * 6.25) / (fs * 4096.0);
+        a = std::clamp (a, 0.0, 1.0);
+        const auto b = 1.0 - a;
+        const auto q = (double) - (float) ((double) r * 4.05);
+        for (auto& row : M)
+            std::fill (std::begin (row), std::end (row), 0.0);
+        M[0][0] = b, M[3][0] = q * a, M[4][0] = a, M[0][1] = b * a, M[1][1] = b, M[3][1] = q * a * a, M[4][1] = a * a;
+        M[0][2] = b * a * a, M[1][2] = b * a, M[2][2] = b, M[3][2] = q * a * a * a, M[4][2] = a * a * a;
+        M[0][3] = b * a * a * a, M[1][3] = b * a * a, M[2][3] = b * a, M[3][3] = b + q * a * a * a * a, M[4][3] = a * a * a * a;
+        for (int it = 0; it < 12; ++it)
+        {
+            double N[5][4];
+            for (int j = 0; j < 4; ++j)
+            {
+                for (int r2 = 0; r2 < 4; ++r2)
+                    N[r2][j] = ((M[r2][0] * M[0][j] + M[r2][1] * M[1][j]) + M[r2][2] * M[2][j]) + M[r2][3] * M[3][j];
+                N[4][j] = (((M[4][0] * M[0][j] + M[4][1] * M[1][j]) + M[4][2] * M[2][j]) + M[4][3] * M[3][j]) + M[4][j];
+            }
+            std::memcpy (M, N, sizeof (M));
+        }
+    }
+    float tick (int c, float x) noexcept // FUN_00717920
+    {
+        const auto u = (double) ((x + 0.349999994f) * 0.200000003f);
+        auto& t = s[c];
+        const double o0 = t[0], o1 = t[1], o2 = t[2], o3 = t[3];
+        t[0] = (((o0 * M[0][0] + o1 * M[1][0]) + o2 * M[2][0]) + o3 * M[3][0]) + u * M[4][0];
+        t[1] = (((o0 * M[0][1] + o1 * M[1][1]) + o2 * M[2][1]) + o3 * M[3][1]) + u * M[4][1];
+        t[2] = (((o0 * M[0][2] + o1 * M[1][2]) + o2 * M[2][2]) + o3 * M[3][2]) + u * M[4][2];
+        t[3] = (((o0 * M[0][3] + o1 * M[1][3]) + o2 * M[2][3]) + o3 * M[3][3]) + u * M[4][3];
+        const auto y = t[3] / (double) 0.200000003f;
+        t[0] = t[0] / (t[0] * t[0] + 1.0);
+        dc[c] = dc[c] + (y - dc[c]) * 0.005;
+        return (float) (y - dc[c]);
+    }
+};
+
+// "Vowel" (FUN_00718ea0 class): eight two-pole formant resonators per channel, their frequencies blended between
+// three vowel tables
+struct Vowel
+{
+    struct Res
+    {
+        float f = -1, q = -1, sr = -1, b0 = 0, a1 = 0, a2 = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        void design (float nf, float nq, float nsr) noexcept // FUN_00718d30
+        {
+            if (nf == f && nq == q && nsr == sr)
+                return;
+            f = nf, q = nq, sr = nsr;
+            const auto w = ((double) f * 6.28318530717959) / (double) sr;
+            const auto sn = std::sin (w), cs = std::cos (w);
+            b0 = (float) (sn / 2.0);
+            a1 = (float) (cs * 2.0);
+            a2 = (float) (1.0 - sn / ((double) q * 2.0));
+            const auto d = sn / ((double) q * 2.0) + 1.0;
+            b0 = (float) ((double) b0 / d);
+            a1 = (float) ((double) a1 / d);
+            a2 = (float) ((double) a2 / d);
+        }
+        float tick (float x) noexcept // FUN_00718cc0
+        {
+            const auto xo = x2, yo = y2;
+            x2 = x1, x1 = x, y2 = y1;
+            y1 = (b0 * (x - xo) + a1 * y1) - a2 * yo;
+            return y1;
+        }
+    };
+    static constexpr float tables[3][8] = { { 250, 700, 2500, 3500, 4200, 8500, 10000, 12000 },
+                                            { 700, 1250, 2500, 3500, 4200, 8500, 10000, 12000 },
+                                            { 250, 2500, 2700, 3500, 4200, 8500, 10000, 12000 } };
+    float sr = 44100.0f, pos = 0, res = 0;
+    Res l[8], r[8];
+    void tick (float& L, float& R) noexcept // FUN_00719100
+    {
+        const auto scale = (float) dPower (2.0, ((double) res - 0.5) * 1.7);
+        const auto q3 = (double) pos * 3.0;
+        auto idx = (int) q3;
+        const auto fr = (float) (q3 - (double) idx);
+        if (idx > 2)
+            idx = 0;
+        float wa = 0, wb = 0, wc = 0;
+        if (idx >= 0 && idx < 1)
+            wa = (float) (1.0 - (double) fr), wb = fr;
+        if (idx >= 1 && idx < 2)
+            wb = (float) (1.0 - (double) fr), wc = fr;
+        if (idx >= 2 && idx < 3)
+            wc = (float) (1.0 - (double) fr), wa = fr;
+        float al = 0, ar = 0;
+        for (int i = 0; i < 8; ++i)
+        {
+            const auto f = ((wa * tables[0][i] + wb * tables[1][i]) + wc * tables[2][i]) * scale;
+            l[i].design (f, 12.0f, sr);
+            r[i].design (f, 12.0f, sr);
+            const auto g = (float) (1.0 - (double) (float) ((double) idx / 8.0));
+            al = al + l[i].tick (L) * g;
+            ar = ar + r[i].tick (R) * g;
+        }
+        L = (float) ((double) L * (1.0 - (double) 1.0f) + (double) (1.0f * al));
+        R = (float) ((double) R * (1.0 - (double) 1.0f) + (double) (1.0f * ar));
+        L = (float) ((double) L * 0.5);
+        R = (float) ((double) R * 0.5);
+    }
+};
+
+// "Phaser 1/2/3" (FUN_007195b0 class): a chain of all-pass state-variable stages swept by a triangle LFO, a feedback
+// tap, a wet/dry blend and a one-pole high pass, with three fixed presets of its fourteen controls
+struct Phaser
+{
+    float sr = 44100.0f;
+    float mix = 0.5f, rateV = 0, cut = 0, fb = 0, res = 0, depth = 0, offset = 0, hpV = 0;
+    int outStage = 0, fbStage = 4, minStages = 4;
+    bool sync = false;
+    float inc = 0, phase = 0, q = 0, fbL = 0, fbR = 0;
+    Svf stL[6], stR[6];
+    OnePole hpL, hpR;
+    static float interp (const float* t, float x) noexcept // FUN_00719b80
+    {
+        const auto i = (int) (double) x;
+        const auto fr = x - (float) i;
+        return (float) ((double) t[i] * (1.0 - (double) fr) + (double) (t[i + 1] * fr));
+    }
+    void setRate (double rate) noexcept // FUN_0071a890
+    {
+        sr = (float) rate;
+        setRateCtl (rateV);
+        for (int k = 0; k < 6; ++k)
+            stL[k].setRate ((double) sr), stR[k].setRate ((double) sr);
+        hpL.setRate ((double) sr), hpR.setRate ((double) sr);
+        setHp (hpV);
+    }
+    void setRateCtl (float v) noexcept // FUN_0071a840
+    {
+        static constexpr float rates[10] = { 576.289978f, 26.9599991f, 8.88000011f, 4.0f, 1.84000003f, 0.879999995f, 0.400000006f, 0.147f, 0.0199999996f, 1.0f };
+        rateV = v;
+        const auto per = interp (rates, (float) ((double) v * 7.99999));
+        inc = (float) (1.0 / (double) (per * sr));
+    }
+    void setHp (float v) noexcept // FUN_0071a500
+    {
+        hpV = v;
+        const auto f = (float) ((double) (v * v * v * 990.0f) + 10.0);
+        hpL.design (true, f), hpR.design (true, f);
+    }
+    static int stages6 (float v) noexcept { return (int) std::nearbyint (std::clamp ((double) v, 0.0, 1.0) * 6.0); }
+    void set (int i, float v) noexcept // FUN_0071a650
+    {
+        switch (i)
+        {
+            case 0: mix = v; break;
+            case 1: setRateCtl (v); break;
+            case 2: cut = v; break;
+            case 3: outStage = std::clamp (stages6 (v) + 1, 1, 6) - 1; break;
+            case 4: fb = (float) ((double) -0.727999985f + (double) 0.727999985f * 2.0 * (double) v); break;
+            case 5: res = v; break;
+            case 6: depth = (float) ((double) v * 0.85); break;
+            case 9: offset = v; break;
+            case 11: setHp (v); break;
+            case 12: sync = (double) v >= 0.5; break;
+            case 13: fbStage = std::clamp (stages6 (v), 0, 5); break;
+            default: break;
+        }
+    }
+    void preset (int which) noexcept // FUN_0071ab70
+    {
+        static constexpr float p[3][14] = { { 1, 0, 0.462f, 0.436f, 0, 0.5f, 0, 0, 1, 0, 0.839f, 0.19f, 0, 0.63f },
+                                            { 1, 0, 0.5065f, 0.4166f, 1, 0.5f, 0.25f, 0, 1, 0, 0.5f, 0.19f, 0, 0.459f },
+                                            { 1, 0, 0.5f, 1, 0, 0.5f, 0, 0, 1, 0, 0.37f, 0, 1, 1 } };
+        for (int i = 0; i < 14; ++i)
+            set (i, p[which][i]);
+    }
+    Phaser()
+    {
+        // the class's own start: defaults of controls 0…4, then the wrapper's rate set-up, depth control 44100 and preset
+        static constexpr float d[5] = { 0.5f, 0.5f, 0.75f, 0.5f, 0.0f };
+        for (int i = 0; i < 5; ++i)
+            set (i, d[i]);
+        setHp (300.0f);
+    }
+    float stage (Svf* st, float& fbState, float x, int n) noexcept
+    {
+        float tap = 0.0f;
+        x = x + fbState * fb;
+        for (int k = 0; k < n; ++k)
+        {
+            x = st[k].tick (0, x);
+            if (k == outStage)
+                tap = x;
+            if (k == fbStage)
+                fbState = x;
+        }
+        return tap;
+    }
+    void tick (float& L, float& R, double bpm) noexcept // FUN_00719c70
+    {
+        static constexpr float qs[5] = { 3.0f, 1.60000002f, 0.832000017f, 0.5f, 0.349999994f };
+        q = interp (qs, (float) ((double) res * 3.9999));
+        if (sync)
+        {
+            // the synced length control (+0xec) is never set by the module: round(0·768) + 1 = 1/192 of a beat
+            const int len = (int) std::nearbyint (0.0 * 768.0) + 1;
+            phase = (float) ((double) phase + 1.0 / ((1.0 / (bpm / 60.0)) * ((double) (float) len / 192.0) * (double) sr));
+        }
+        else
+            phase = phase + inc;
+        phase = phase - (float) (long long) (double) phase;
+        auto t = phase + offset;
+        t = t - (float) (long long) (double) t;
+        const auto tri = (double) t < 0.5 ? (float) ((double) t * 2.0) : (float) (2.0 - (double) t * 2.0);
+        const int n = std::max (minStages, fbStage + 1);
+        auto sweep = [&] {
+            const auto c = (float) ((double) cut + (1.0 - (double) cut) * (double) tri * (double) depth);
+            auto f = dPower (2.0, (double) ((float) ((double) c * 0.925) * 10.0208330f)) * 28.5;
+            if (f > 22000.0)
+                f = 22000.0;
+            return (float) f;
+        };
+        const auto k = (float) (1.0 / (double) q);
+        const auto fl = sweep();
+        stL[0].design (8, fl, k, 1.0f);
+        for (int s2 = 1; s2 < n; ++s2)
+            stL[s2].a1 = stL[0].a1, stL[s2].a2 = stL[0].a2, stL[s2].a3 = stL[0].a3, stL[s2].m0 = stL[0].m0, stL[s2].m1 = stL[0].m1, stL[s2].m2 = stL[0].m2;
+        auto tap = stage (stL, fbL, L, n);
+        auto w = (float) ((double) L * (1.0 - (double) mix) + (double) (tap * mix));
+        L = hpL.tick (0, w);
+        const auto fr = sweep();
+        stR[0].design (8, fr, k, 1.0f);
+        for (int s2 = 1; s2 < n; ++s2)
+            stR[s2].a1 = stR[0].a1, stR[s2].a2 = stR[0].a2, stR[s2].a3 = stR[0].a3, stR[s2].m0 = stR[0].m0, stR[s2].m1 = stR[0].m1, stR[s2].m2 = stR[0].m2;
+        tap = stage (stR, fbR, R, n);
+        w = (float) ((double) R * (1.0 - (double) mix) + (double) (tap * mix));
+        R = hpR.tick (0, w);
+    }
+};
+
 struct Filter
 {
     int type = 0;
@@ -1287,6 +1532,9 @@ struct Filter
     CombLine combL, combR;
     float combCut = 0.5f, combGain = 0;
     AltSvf alt;
+    Ladder4 ladder;
+    Vowel vowel;
+    Phaser phasers[3];
 
     void setRate (double rate)
     {
@@ -1295,6 +1543,18 @@ struct Filter
         svf.setRate (rate), svfA.setRate (rate), svfB.setRate (rate);
         one.setRate (rate);
         alt.setRate (rate);
+        ladder.fs = rate;
+        vowel.sr = (float) rate;
+        for (int k = 0; k < 3; ++k)
+        {
+            auto& ph = phasers[k];
+            ph = Phaser {};
+            ph.setRate (44100.0);        // the wrapper's creation (FUN_0071a940): rate 44100,
+            ph.preset (0);               // its preset 0,
+            ph.set (6, 44100.0f);        // a "depth" of 44100 (overwritten by the preset below)
+            ph.preset (k);               // then the filter's preset for this phaser (FUN_0071ac50)
+            ph.setRate (rate);           // and the module's rate set-up (FUN_0071da10)
+        }
     }
     void setParam (int i, float v) noexcept // FUN_0071d940
     {
@@ -1436,6 +1696,54 @@ struct Filter
             y[2 * i] = l, y[2 * i + 1] = r;
         }
     }
+    void runLadder (const float* x, float* y, int n) noexcept
+    {
+        if (! smooth)
+            ladder.design (freq(), par[2] * 1.0f);
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                ladder.design (freq(), ent[2].cur * 1.0f);
+            }
+            y[2 * i] = ladder.tick (0, x[2 * i]);
+            y[2 * i + 1] = ladder.tick (1, x[2 * i + 1]);
+        }
+    }
+    void runVowel (const float* x, float* y, int n) noexcept
+    {
+        if (! smooth)
+            vowel.pos = par[1], vowel.res = par[2];
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                vowel.pos = ent[1].cur, vowel.res = ent[2].cur;
+            }
+            auto l = x[2 * i], r = x[2 * i + 1];
+            vowel.tick (l, r);
+            y[2 * i] = l, y[2 * i + 1] = r;
+        }
+    }
+    void runPhaser (int k, const float* x, float* y, int n) noexcept // FUN_0071b800
+    {
+        auto& ph = phasers[k];
+        if (! smooth)
+            ph.set (2, par[1]), ph.set (5, par[2]);
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                ph.set (2, ent[1].cur), ph.set (5, ent[2].cur);
+            }
+            auto l = x[2 * i], r = x[2 * i + 1];
+            ph.tick (l, r, 60.0);
+            y[2 * i] = l, y[2 * i + 1] = r;
+        }
+    }
     // FUN_0071cf80; returns false for the types LYNX does not run (the signal passes unchanged)
     bool process (const float* x, float* y, int n) noexcept
     {
@@ -1453,9 +1761,14 @@ struct Filter
             case 8: runAlt (1.0f, 0.0f, 0.0f, x, y, n); break;
             case 9: runAlt (0.0f, 1.0f, 0.0f, x, y, n); break;
             case 10: runAlt (0.0f, 0.0f, 1.0f, x, y, n); break;
+            case 11: runLadder (x, y, n); break;
             case 12: runSvf (4, dampLaw, false, x, y, n); break;
             case 13: runComb (true, x, y, n); break;
             case 14: runComb (false, x, y, n); break;
+            case 15: runVowel (x, y, n); break;
+            case 16: runPhaser (0, x, y, n); break;
+            case 17: runPhaser (1, x, y, n); break;
+            case 18: runPhaser (2, x, y, n); break;
             case 19: runSvf (6, gainLaw, true, x, y, n); break;
             case 20: runSvf (7, gainLaw, true, x, y, n); break;
             case 21: runSvf (8, dampLaw, false, x, y, n); break;
