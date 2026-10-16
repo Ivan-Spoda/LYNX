@@ -9,6 +9,7 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
+#include "core/Drumaxx.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
@@ -1172,6 +1173,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "drumaxx")
+            {
+                // FL's Drumaxx engine from the raw state (REA_rodada67 §6–§9); it needs no installation data. A state the
+                // engine can't read keeps the channel unsupported (there is no conversion to fall back to)
+                if (drumaxxStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::drumaxx;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "wasp" || name == "wasp xt")
             {
                 // FL 2026 has no 64-bit Wasp: its DLL is a placeholder that keeps the state and plays nothing (REA_rodada64 §5)
@@ -1438,7 +1450,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
                      || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
-                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::granulizer)
+                     || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::granulizer
+                     || def.instrument == InstrumentKind::drumaxx)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

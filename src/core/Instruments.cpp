@@ -12,6 +12,7 @@
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
+#include "core/Drumaxx.h"
 #include "core/Granulizer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
@@ -235,6 +236,7 @@ private:
             case InstrumentKind::beepmap:
             case InstrumentKind::sawer:
             case InstrumentKind::granulizer:
+            case InstrumentKind::drumaxx:
                 break;
         }
 
@@ -2075,6 +2077,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeSawerInstrument();
     if (kind == InstrumentKind::granulizer)
         return makeGranulizerInstrument (std::move (sample));
+    if (kind == InstrumentKind::drumaxx)
+        return makeDrumaxxInstrument();
 
     return std::make_unique<DrumInstrument> (kind);
 }

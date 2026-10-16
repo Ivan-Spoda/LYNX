@@ -61,7 +61,8 @@ enum class InstrumentKind : std::uint8_t
     plucked,    // FL's Plucked! (REA_rodada65 §1): the plugin's raw saved state (5 knobs) in ChannelDef::pluginState
     beepmap,    // FL's BeepMap (REA_rodada65 §2): the plugin's raw saved state (settings + bitmap) in ChannelDef::pluginState
     sawer,      // FL's Sawer (REA_rodada65 §3): raw saved state in pluginState, the user's Sawer\data.saw in samplePath
-    granulizer  // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
+    granulizer, // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
+    drumaxx     // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

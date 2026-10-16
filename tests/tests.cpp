@@ -36,6 +36,7 @@
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
 #include "core/Granulizer.h"
+#include "core/Drumaxx.h"
 #include "core/Wasp.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
@@ -11807,6 +11808,182 @@ TEST (granulizer_engine)
             CHECK (song.channels[0].samplePath == "C:\\FL\\Data\\Patches\\Packs\\Drums\\Kicks\\808 Kick.wav");
         }
         CHECK (report.converted["Fruity Granulizer"] == 1);
+    }
+}
+// --- REA round 67: Drumaxx (exact engine) -------------------------------------------------------------------------
+namespace
+{
+// our own deterministic 16-pad kit (LCG-chosen parameters), as r67/py/gold67d.py builds it for the DLL
+std::vector<std::uint8_t> drumaxxTestState (bool eq)
+{
+    std::uint32_t s = 20261015u;
+    auto u = [&s] {
+        s = s * 1664525u + 1013904223u;
+        return (float) ((double) (s >> 8) * (1.0 / 16777216.0));
+    };
+    // (a product rounded on its own: no fused multiply-add)
+    auto mul = [] (float a, float b) {
+        volatile float p = a * b;
+        return (float) p;
+    };
+    static const int targets[] = { 0, 9, 10, 16, 21, 23, 26 };
+    std::array<float, 720> P {};
+    for (int k = 0; k < 16; ++k)
+        for (int i = 0; i < 44; ++i)
+        {
+            auto v = u();
+            if (i == 0)
+                v = 0.5f + mul (v, 0.5f);
+            else if ((i >= 7 && i <= 18) || (i >= 20 && i <= 34))
+                v = 0.2f + mul (v, 0.6f);
+            else if (i == 2 || i == 3)
+                v = 0.0f;
+            else if (i == 4)
+                v = (float) (36 + k);
+            else if (i == 5)
+                v = v < 0.5f ? 0.0f : 1.0f;
+            else if (i == 6)
+                v = (float) (int) (v * 4.0f);
+            else if (i >= 35 && i <= 38)
+                v = (float) targets[(int) (v * 7.0f)];
+            P[(std::size_t) (44 * k + i)] = v;
+        }
+    for (int i = 0; i < 16; ++i)
+    {
+        auto v = u();
+        if (i == 1)
+            v = 0.3f + mul (v, 0.4f);
+        else if (i == 3)
+            v = eq ? 1.0f : 0.0f;
+        else if (i >= 4 && i <= 11)
+            v = 0.35f + mul (v, 0.3f);
+        else if (i == 12)
+            v = 1.0f;
+        else if (i == 13)
+            v = v * 0.1f;
+        else if (i == 0 || i == 15)
+            v = 0.0f;
+        P[(std::size_t) (704 + i)] = v;
+    }
+    std::vector<std::uint8_t> b;
+    auto put32 = [&b] (std::uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back ((std::uint8_t) (v >> (8 * i))); };
+    b.insert (b.end(), { 'S', 'S', 'L', 'F' });
+    put32 (21636u);
+    put32 (0x444d5333u); // engine stream version 3
+    const std::string name = "LYNX test kit";
+    b.insert (b.end(), name.begin(), name.end());
+    b.resize (b.size() + 256 - name.size(), 0);
+    const auto at = b.size();
+    b.resize (at + 720 * 4);
+    std::memcpy (b.data() + at, P.data(), 720 * 4);
+    for (int k = 0; k < 16; ++k)
+    {
+        b.resize (b.size() + 0x400, 0);
+        b.push_back (100), b.push_back (100); // pattern length, trigger key
+    }
+    b.resize (b.size() + 0x800, 0);
+    for (int k = 0; k < 16; ++k)
+        b.push_back (k >= 2 && k <= 4 ? 1 : 0); // pads 3…5 in cut group 1
+    b.resize (b.size() + 16, 0);                 // every pad on the master
+    return b;
+}
+} // namespace
+
+TEST (drumaxx_engine)
+{
+    const auto st = drumaxxTestState (true);
+    CHECK (st.size() == 21644u && lynx::drumaxxStateUsable (st) && lynx::drumaxxKitName (st) == "LYNX test kit");
+    CHECK (lynx::drumaxxParam (st, 4) == 36.0f && lynx::drumaxxParam (st, 44 * 15 + 4) == 51.0f && lynx::drumaxxParam (st, 0x2c3) == 1.0f);
+    {
+        auto edited = st;
+        lynx::drumaxxSetParam (edited, 0x2c1, 0.25f);
+        CHECK (lynx::drumaxxParam (edited, 0x2c1) == 0.25f && std::isnan (lynx::drumaxxParam (edited, 720)));
+        auto bad = st;
+        bad[8] = 'X';
+        CHECK (! lynx::drumaxxStateUsable (bad) && std::isnan (lynx::drumaxxParam (bad, 0)));
+    }
+
+    // goldens: LYNX's renders, bit-identical to Drumaxx_x64.dll + engine_x64.dll driven by the round-67 harness
+    using N = lynx::drumaxx::RefNote;
+    struct Golden { bool eq; int fs, block; std::vector<N> notes; double el, er; std::tuple<int, float, float> at[6]; };
+    auto check = [] (const Golden& g) {
+        const auto y = lynx::drumaxx::renderReference (drumaxxTestState (g.eq), g.notes, (double) g.fs, 20000, g.block);
+        CHECK (y.size() == 2 * 20000);
+        if (y.size() != 2 * 20000)
+            return;
+        double el = 0.0, er = 0.0;
+        for (std::size_t i = 0; i + 1 < y.size(); i += 2)
+            el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
+        CHECK (std::abs (el - g.el) <= 1e-6 * g.el && std::abs (er - g.er) <= 1e-6 * g.er);
+        for (const auto& [i, l, r] : g.at)
+            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-6f * std::max (1e-16f, std::abs (l))
+                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-6f * std::max (1e-16f, std::abs (r)));
+    };
+    // master EQ and limiter on: velocities, Final.Vol, pitch offsets, the cut group (pads 3…5)
+    check ({ true, 44100, 512,
+             { { 0, 36, 1.0, 1.0, 0.0 }, { 1500, 38, 0.7, 0.8, 0.0 }, { 3000, 37, 0.5, 1.0, -120.0 }, { 4000, 38, 1.0, 1.0, 0.0 },
+               { 5200, 42, 0.9, 1.0, 0.0 }, { 6000, 43, 0.6, 1.0, 35.0 }, { 7000, 44, 1.0, 0.5, 0.0 }, { 9000, 40, 0.8, 1.0, 0.0 },
+               { 11000, 45, 1.0, 1.0, 250.0 }, { 12500, 48, 0.4, 1.0, 0.0 }, { 14000, 51, 1.0, 1.0, 0.0 }, { 15000, 39, 1.0, 0.7, -40.0 } },
+             2698.372377185949, 3678.285731410973,
+             { { 100, 0.0f, 0.0f }, { 1000, -0.0034233136102557182f, -0.005708245560526848f }, { 2500, -0.41297006607055664f, -0.0276018138974905f },
+               { 4000, -0.04906991869211197f, -0.7206904292106628f }, { 7777, 0.7544509172439575f, 0.7584841847419739f },
+               { 15000, -0.13438990712165833f, -0.6798369884490967f } } });
+    // EQ off, 48 kHz in 333-sample blocks, two pads on the same sample
+    check ({ false, 48000, 333,
+             { { 0, 46, 1.0, 1.0, 0.0 }, { 800, 47, 0.9, 1.0, 0.0 }, { 2600, 41, 1.0, 1.0, -300.0 }, { 5000, 49, 0.75, 1.0, 0.0 },
+               { 7000, 50, 1.0, 0.9, 77.0 }, { 9000, 36, 1.0, 1.0, 0.0 }, { 9001, 42, 1.0, 1.0, 0.0 }, { 13000, 43, 0.3, 1.0, 0.0 } },
+             2241.008810618806, 1814.5219804412964,
+             { { 100, 0.0f, 0.0f }, { 1000, -0.32539352774620056f, -0.7439078688621521f }, { 2500, -0.1711389720439911f, -0.39125433564186096f },
+               { 4000, 0.15524788200855255f, 0.3445436358451843f }, { 7777, 0.5472834706306458f, 0.08737402409315109f },
+               { 15000, -0.03079034946858883f, -0.06140122935175896f } } });
+    // 96 kHz in 64-sample blocks, an octave down
+    check ({ true, 96000, 64,
+             { { 0, 36, 1.0, 1.0, 0.0 }, { 500, 44, 1.0, 1.0, 0.0 }, { 1000, 38, 0.85, 1.0, 12.0 }, { 6000, 37, 1.0, 1.0, 0.0 },
+               { 10000, 51, 1.0, 1.0, -1200.0 } },
+             3522.8420617665834, 5746.555795626526,
+             { { 100, 0.0f, 0.0f }, { 1000, -0.04133236035704613f, -0.09954667836427689f }, { 2500, 0.2800408899784088f, -0.9350972175598145f },
+               { 4000, 0.9537044167518616f, 0.8892703056335449f }, { 7777, 0.8376388549804688f, -0.14166420698165894f },
+               { 15000, -0.05926012247800827f, -0.5840796828269958f } } });
+
+    // the instrument: a pad sounds on its key and dies away; keys without a pad stay silent
+    {
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::drumaxx);
+        lynx::ChannelDef def;
+        def.instrument = lynx::InstrumentKind::drumaxx;
+        def.pluginState = st;
+        inst->configure (def, 140.0);
+        inst->prepare (44100.0);
+        std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        inst->noteOn (90, 1.0f);
+        inst->render (l.data(), r.data(), 512, 1.0f, 1.0f);
+        CHECK (inst->idle() && std::all_of (l.begin(), l.end(), [] (float v) { return v == 0.0f; }));
+        inst->noteOn (36, 0.8f);
+        inst->render (l.data(), r.data(), 512, 1.0f, 1.0f);
+        double e = 0.0;
+        for (auto v : l)
+            e += (double) v * v;
+        CHECK (! inst->idle() && e > 1e-3);
+        for (int k = 0; k < 200 && ! inst->idle(); ++k)
+            inst->render (l.data(), r.data(), 512, 1.0f, 1.0f);
+        CHECK (inst->idle());
+    }
+
+    // import: a Drumaxx channel plays on the exact engine with its raw state
+    {
+        FlpBuilder b;
+        b.ascii (0xC7, "25.2.5.5319");
+        b.u8 (0x40); b.u16 (0);
+        b.u8 (0x15); b.u8 (2);
+        b.utf16 (0xC9, u"Drumaxx");
+        b.data (0xD5, st);
+        lynx::FlpImportOptions options;
+        lynx::FlpImportReport report;
+        options.report = &report;
+        const auto song = lynx::importFlp (flp::parseProject (b.bytes), options);
+        CHECK (song.channels.size() == 1u);
+        if (song.channels.size() == 1u)
+            CHECK (song.channels[0].instrument == lynx::InstrumentKind::drumaxx && song.channels[0].pluginState == st);
+        CHECK (report.converted["Drumaxx"] == 1);
     }
 }
 #include "WaveAnalysisTests.inc"

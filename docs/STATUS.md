@@ -124,7 +124,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   (REA round 65 §3: PoiZone's framework, 6× oversampled filter, phaser and reverb; all 423 preset states bit-identical to
   FL's DLL with the effects off, as saved bit-identical except the reverb's −137…−155 dB residual); Fruity Granulizer on its engine (REA round 67: grains on the channel's sample with the library's 24-point windowed-sinc reader, grain
   envelope, stereo separation, randomness, wobble, freeze, loop, sample start, key modes, and the plugin voice processor;
-  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Sakura and Drumpad on physical models rebuilt from their
+  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Drumaxx on
+  its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
+  SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
+  limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
+  FL's DLLs on random notes); Sakura and Drumpad on physical models rebuilt from their
   engines (REA round 28), BooBass on its engine with the multisample read from the user's own FL installation
   (REA round 29; within −138 dB of the reference renders verified against FL's DLLs).
 - Third-party plugins in the Fruity Wrapper are matched to installed VST3/CLAP plugins (VST3 class ID, CLAP id
@@ -551,6 +555,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
   speed); the end fade uses the exact cosine; the sample's own loop points are not read (whole sample); one random seed
   per instrument.
+- Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
+  in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
+  separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
+  double sinh/pow are the C library's (last-bit double differences that changed no float sample in the tests); CPUs
+  without FMA take other CRT paths in FL (not checked).
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)

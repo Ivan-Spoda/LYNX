@@ -1,4 +1,4 @@
-# Behavioural analysis of FL Studio 2026: round 67 (REA) — Fruity Granulizer: the complete engine
+# Behavioural analysis of FL Studio 2026: round 67 (REA) — Fruity Granulizer and Drumaxx: the complete engines
 
 > **Nature of this document.** Same goal as rounds 47 (3x Osc) and 64 (SimSynth): describe a generator that LYNX did not
 > play at all, precisely enough to port it as an exact instrument. *Clean-room* reverse engineering, behavioural only.
@@ -268,6 +268,120 @@ The mono kernels compute the same with both channels equal. Note the cancellatio
   near-integer samples about −87 dB), the end-fade table (exact cosine, as 3x Osc), the sample's own loop points (whole
   sample), the Hermite/linear qualities, one random seed per instrument (FL: per process, from the clock).
 
+## 6. Drumaxx: target, state and parameters
+
+- **Target** (copies in `r67/bin/`): `Plugins/Fruity/Generators/Drumaxx/Drumaxx_x64.dll` (Delphi wrapper and editor,
+  SHA-256 `a4d71bbe4eeda64de1e0965cff48134903c751a1f79a75392c347dffcd5358c0`) and, next to it, `engine_x64.dll`
+  (C++, classes named `DMSynth` / `DMPadGenerator` in its strings, SHA-256
+  `e7fca7bf9843c07dde0adb770647f8f79df676b2e102b1d44ce9655971d56d94`, image base 0x180000000). The wrapper creates the
+  engine through its exports and forwards notes, parameters, the rate and the state; the whole sound engine is in
+  `engine_x64.dll` **[DECOMP + EXEC]**. Like the Granulizer it is **not** a 64-bit placeholder.
+- **Tools:** Ghidra headless project `~/ghproj/r67_de` (whole engine decompiled to `r67/out/de_all.c`, split per function
+  in `r67/out/dfn/`; signature-typed passes `de_sig.c`, `de_sig2.c` from our `r67/gh/scripts/SigDec.java`), `objdump -M
+  intel` (`de_all.s`, `d8b0.s`, `e3b0.s`, `c970.s`) for every float operation order.
+- **EXEC harness:** `r67/run/dm.c` → `dm.exe`, a copy of round 57's `tb.c` (same safety measures; the installation's
+  DLLs loaded unmodified). `on3=` sets Init.Vol directly; `arr=` peeks engine memory through the wrapper (+0x140 → the
+  wrapper object, +0x228 → `DMSynth`, +0x41c0 + 8·k → pad k). Probes calling single engine routines on our own inputs:
+  `sc.exe` (the CRT `sincosf`), `pp.exe` (the CRT `powf`), `callf.exe` (round 57). Drivers in `r67/py/`: `dmrun.py`,
+  `dmcmp.py` (C++ vs DLL), `dmbat.py` (all installation states), `dmpad.py`, `dmvar.py`, `dmprof.py`, `dmone.py`
+  (single cases), `gold67d.py` (test goldens).
+- **Data:** 137 Drumaxx states in the installation (133 distinct: presets, plugin database, the render test
+  `System/Render tests/Drumaxx.flp` with keys 36/42/38); no demo project uses the plugin **[DATA]**.
+
+### 6.1 State (`FUN_1800303a0`) **[DECOMP + DATA + EXEC]**
+
+`"SSLF"`, u32 size, then the engine stream: a tag (`DMS3`/`DMS4`/`DMS5` or `DMD3…DMD5`; every installation state is
+`DMS3` (130) or `DMS4` (7), 21 644 bytes), a 256-byte kit name, **720 floats** (16 pads × 44, then the master at
+0x2c0…0x2cf), 16 patterns of 0x402 bytes (steps, then a length byte and the pattern's **trigger key** at +0x401 — 100 in
+every installation state), 0x800 bytes (pad names), 16 cut-group bytes, 16 varint output buses (all 0 in the data).
+Tags 1–2 go through older loaders (not in the data; not ported). Version 3 rescales every pad's "EG Retrig" by 1/3
+(clamped to 0…1) after loading.
+
+### 6.2 Parameters **[DECOMP + EXEC]**
+
+Per pad (offset in the pad's 44): 0 Volume (gain v² + v²), 1 Pan (left 1 − p, right p), 2 Mute, 3 Solo, 4 Key (the
+note that plays the pad), 5 Noise Retrig, 6 EG Retrig (the engine reads **pad 1's** 5 and 6 for every pad), 7–10
+Mallet (level, decay, noise mix, noise seed), 11–17 Membrane (feedback, damping, tension, phase, material, size,
+shape), 18–19 LOW (frequency, resonance), 20–22 SOF (frequency, decay, level), 23–28 MID (frequency, level, Q, frequency
+modulation, level modulation, decay), 29–31 HIGH (frequency, gain, Q), 32 Lo-Fi, 33 Hold, 34 Pitch, 35–38 the four
+velocity-modulation targets (a parameter index − 6, 0 = none), 39–42 their values. A modulated parameter j is
+`(1 − vel)·P[j] + vel·V` where V is the value of the last target slot naming j (`FUN_180035700`). Master: 0x2c1 level
+(`10^(1.6·p)/4`), 0x2c3 EQ on, 0x2c4…0x2cb the 8 band gains (`(p − 0.5)·16` dB), 0x2cc limiter on, 0x2cd limiter
+drive (`10^(1.5·p)`), 0x2ce limiter release.
+
+The per-note derivations (`FUN_18002c970`) are ported literally (float/double exactly as the code converts): cut = f²,
+feedback = −f^0.3, size = trunc((1 − f)·512) ≤ 511, shape = trunc(128·f) in 1…128, mallet start `10^(−4(1−f))`, mallet
+decay `((500f²)f² + 1)·10⁻⁴` with f = 1 − p, lo-fi steps `trunc((1 − f)^5·65536 + 4)` (off below 0.01), hold
+`3f³ + 0.001` s, pitch `2^(2f − 1)`, LOW frequency `2^(11f + 2)` Hz and resonance `8f + 1`, HIGH `2^(4.1f + 8)` Hz with
+Q `2(1 − f) + 0.5` and gain `(f − 0.5)·36` dB, MID `2^(9f + 5)` Hz, level ±16 dB, level modulation ±24 dB, frequency
+modulation ±16, Q `4(1 − f) + 0.5`, envelope decay `((1000f²)f² + 1)·10⁻⁵`, EG retrig count trunc(3·p) (0…3), SOF decay
+`((250(f/2)²)f² + 1)·10⁻⁵`, SOF level `f^8/2`.
+
+## 7. Drumaxx: the pad generator **[DECOMP + objdump + EXEC]**
+
+- **Rate and resampling** (`FUN_18002e3b0`): every pad runs at **38 kHz** and is read at the host rate with linear
+  interpolation, step = (38000/fs)·pitch·2^(semitones/12) (the semitones are the note's Final.Pitch offset, clamped to
+  ±12), in double, by sub-blocks of at most 256 output samples; left/right gains glide by 0.001 per sample toward
+  `vol·(1 − pan)·Final.Vol`, `vol·pan·Final.Vol`.
+- **Excitation:** a mallet impulse decaying toward 10⁻⁷ by the mallet decay each sample, times `(noise − ½)·mix +
+  (1 − mix)` with noise from a 32-bit LCG (`×0xbb38435 + 0x3619636b`, top-to-float `·2⁻³²`). Each pad's initial seed
+  steps a process-wide LCG (`×0x1c3c718d + 0xf50d3da5`) 1000 times per pad at construction (`FUN_18002c5b0`); with
+  Noise Retrig the seed is reset to `trunc(p·(2³² − 1))` at every hit.
+- **Membrane:** 128 delay lines of 4 lanes, line k of length 512 − 4k, the lanes offset by one sample each (the wrap
+  shifts lanes 1–3, as the code does). Size/4 picks the first line and size + shape the last; each lane has a one-pole
+  low-pass (the damping) and feedback; the outputs are weighted by a 512-entry table built from tension (phase step),
+  phase and material (a power curve `|x|^e`, e from material) and summed in the code's lane order.
+- **Sections in order:** the SOF resonator (four one-pole stages with a soft clipper `x/(0.005|x| + 1)` in double and
+  a decaying feedback gain), the LOW high-pass (`FUN_18001bd70`, sine/cosine from the CRT's vector sine), the HIGH shelf,
+  the MID peak (re-designed every 6 samples from its envelope; the envelope restarts up to "EG Retrig" times when it
+  falls below 0.01), a clip to ±1, the hold/attack (`env += (1 − env)·0.1`) then release (`env −= env·0.001`) envelope,
+  the lo-fi quantiser `trunc(y·n)/n`. A pad stops after 25 ms below 10⁻⁴ (after 500 ms if it never rose above it).
+- **Biquads** (`FUN_18001bed0`): RBJ-style low shelf / peak / high shelf with A = `powf(10, g/20)`, ω limited to 3,
+  bandwidth through `sinh(ln2/2 · q · ω / sin ω)` (double), coefficients below 10⁻⁹ flushed to 0; direct form I.
+
+## 8. Drumaxx: host side, master and the C runtime's math **[DECOMP + EXEC]**
+
+- **Notes** (`FUN_180034e00`, `FUN_180005fa0`): the wrapper turns Init.Vol into a MIDI velocity
+  `trunc(127·ln(10·v + 1)/ln 21)`; velocity 0 is a note-off (it only stops a running pattern). Every unmuted pad
+  whose Key equals the note plays (Solo: only soloed pads); a hit chokes the other pads of its cut group. Final.Vol
+  scales the pad's target gains (`keyL = keyR`), **Final.Pan is ignored**, Final.Pitch − 100·(key − 60) gives the
+  semitone offset. A note equal to a pattern's trigger key starts that pattern (not modelled, §9).
+- **Master** (`FUN_180035840`, `FUN_180033910`): the 16 pads mix into an 8-band EQ (80·2^k Hz, Q 2, band 0 a low
+  shelf, band 7 a high shelf, the others peaks; processed band 7 down to band 0, per channel), then the limiter (gain,
+  a release curve `c²·c²` from the last overload, `c += release/fs`), then the output gain `level/2` reached by a
+  0.005-per-sample glide from 0 when the plugin is created (`FUN_180024870`, `FUN_180025510`). EQ and limiter states
+  reset when no pad is active.
+- **C runtime math.** Bit-exactness needed the engine's own CRT routines (the FMA paths, chosen by the CPU flag at
+  `0x180087544`, which this machine takes): `powf` (`0x180046690`: ln x in double from a 256-entry ln(1 + i/256) table
+  and a cubic, or near 1 from `s = u/(u + 2)` and an odd series; then `e^t` from k = round(64t/ln 2), a 2^(j/64) table
+  and a cubic; the near-1 branch falls into the unfused exp), `sinf`/`cosf` (`0x18005c0c0`/`0x18005b2e0`: argument
+  reduction with π/2 in two parts and double polynomials) and the vector sine behind `sincosf` (`0x18005a370`/
+  `0x1800599e0`). Our probes matched the ports on **200 000/200 000** `powf` pairs, 42 000/42 000 `sinf`/`cosf` and
+  300/300 vector-sine inputs **[EXEC]**. The tables in LYNX are the exact mathematical values rounded to nearest,
+  computed by us (`r67/pw/`), and equal the routine's. The double `sinh` (`0x18005c7b8`, lead/tail tables whose tails
+  are not the rounded remainders) and `pow` (`0x180044ff0`) stay the C library's: they differ from the CRT in the last
+  bit of a double in about 26 % / 0.2 % of the inputs, which never changed a float result in the tests below.
+
+## 9. Drumaxx: verification and LYNX port
+
+| Test | Result |
+|---|---|
+| LYNX's C++ (`drumaxxrender`) vs DLL, all 133 distinct installation states, random notes (2–8, random Init.Vol, Final.Vol, pitch offsets), 22.05…96 kHz, blocks 64…1000 (`dmbat.py`, three seeds, `out/dmbat6_*`, `dmbat7_*`, `dmbat8_*`) | **bit-identical in every case** **[EXEC + model]** |
+| The same with the master EQ and limiter off (`DM_NOEQ=1`, `out/dmbatq6_*`) | **bit-identical** |
+| Goldens of `tests.cpp` (our own synthetic kit, `gold67d.py`) | **bit-identical** to the DLL |
+
+LYNX port (`src/core/Drumaxx.{h,cpp}`, InstrumentKind `drumaxx`): the importer recognises "Drumaxx" and keeps the raw
+state in `pluginState` (an unreadable state leaves the channel unsupported); the instrument plays the pads on their
+keys with the channel volume as Final.Vol, the channel and note cents as the pitch offset and the note velocity mapped
+back to Init.Vol; the plugin's output gain starts settled (FL creates the plugin long before playback). The channel
+editor shows the master level and the 16 pad volumes.
+
+**Not modelled:** the pattern sequencer (patterns start on their trigger key — 100 in every installation state —
+with swing) and its note-off stop; the separate mixer-track outputs (every pad plays on the master; all installation
+states use the master); MIDI controllers; a demo-mode silence path present in the engine (never triggered in the EXEC
+runs); the CRT's non-FMA paths (a CPU without FMA takes other `powf`/`sinf`/`cosf` code in the DLL: not checked); the
+CRT's double `sinh`/`pow` (above); on Windows LYNX's `std::fma` must be a true fused operation.
+
 ## Evidence index
 
 | Address | What | Marker |
@@ -285,3 +399,10 @@ The mono kernels compute the same with both channels equal. Note the cancellatio
 | `FUN_0060b020`, `0x79cda0`, `0x79c294` | interpolation quality default (12) | DECOMP + EXEC |
 | `0x407c10`, `0x76c010`, `0x407bc9` | Delphi Random, RandSeed, Randomize at load | DECOMP + EXEC |
 | `dsp_ippv2_x64.dll` `ippsVectorSlope_64f`, `ippsSin_64f_A50` | IPP arithmetic | EXEC |
+| `engine_x64.dll` `FUN_1800303a0` | Drumaxx state stream | DECOMP + DATA + EXEC |
+| `FUN_18002c970`, `FUN_180035700` | pad parameter laws, velocity modulation | DECOMP + objdump + EXEC |
+| `FUN_18002d1a0`, `FUN_18002d8b0`, `FUN_18002e3b0`, `FUN_18002c5b0` | trigger, 38 kHz generator, resampler, seeds | DECOMP + objdump + EXEC |
+| `FUN_18001bd70`, `FUN_18001bed0` | LOW high-pass, shelf/peak designs | DECOMP + objdump + EXEC |
+| `FUN_180034e00`, `FUN_180005fa0`, `FUN_180035840`, `FUN_180033910`, `FUN_180024870` | notes, velocity, master EQ/limiter, rate, output gain | DECOMP + EXEC |
+| `0x180046690`, `0x18005c0c0`, `0x18005b2e0`, `0x18005a370`, `0x1800599e0`, `0x180087544` | CRT powf, sinf, cosf, vector sine, sincosf, FMA flag | objdump + EXEC |
+| `0x18005c7b8`, `0x180044ff0` | CRT sinh, pow (not ported) | objdump + EXEC |
