@@ -83,6 +83,7 @@ add_library(lynx_core STATIC
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
     src/core/FruityFilters.cpp
+    src/core/NewtoneFx.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp

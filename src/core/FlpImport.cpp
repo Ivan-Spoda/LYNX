@@ -40,6 +40,7 @@
 #include "core/FlSynths.h"
 #include "core/FlWrapper.h"
 #include "core/SynthPresets.h"
+#include "core/NewtoneFx.h"
 
 #include <algorithm>
 #include <cstring>
@@ -1873,6 +1874,35 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         if (options.report != nullptr)
                             for (const auto& note : v->notes)
                                 ++options.report->droppedEffects[note];
+                    }
+                }
+                else if (fx.kind == EffectKind::newtone || fx.kind == EffectKind::newtime)
+                {
+                    // the source sample: the path the host stored (record 3), else the engine's working copy (REA_rodada73 §2.3)
+                    if (const auto parsed = newtonefx::parse (slot.state))
+                    {
+                        std::vector<std::string> candidates;
+                        if (! parsed->sourcePath.empty())
+                            candidates.push_back (resolveFlPath (parsed->sourcePath, options.roots));
+                        for (const auto& t : parsed->tracks)
+                            candidates.push_back (t.filePath);
+                        for (const auto& path : candidates)
+                            if (! path.empty() && options.fileExists && options.fileExists (path))
+                            {
+                                fx.samplePath = path;
+                                break;
+                            }
+                        if (options.report != nullptr && ! parsed->tracks.empty())
+                        {
+                            if (fx.samplePath.empty())
+                                ++options.report->missingSamples;
+                            if (parsed->edited())
+                                ++options.report->droppedEffects[slot.plugin + " (edits not reproduced: plays the original sample)"];
+                            else if (fx.kind == EffectKind::newtime)
+                                ++options.report->droppedEffects["Newtime (time warping engine not reproduced: plays the original sample)"];
+                            else
+                                ++options.report->converted[slot.plugin];
+                        }
                     }
                 }
                 else if (slot.plugin == "Fruity Compressor" && slot.state.size() >= 0x24
