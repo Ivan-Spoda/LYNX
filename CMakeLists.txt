@@ -64,6 +64,8 @@ add_library(lynx_core STATIC
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
+    src/core/EquoFx.cpp
+    src/core/PitchShifterFl.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
@@ -74,6 +76,9 @@ add_library(lynx_core STATIC
     src/core/FlangusFastDist.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
+    src/core/Plucked.cpp
+    src/core/BeepMap.cpp
+    src/core/Sawer.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
 target_include_directories(lynx_core PUBLIC src)

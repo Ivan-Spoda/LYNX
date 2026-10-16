@@ -58,6 +58,9 @@ enum class InstrumentKind : std::uint8_t
     transistorbass, // FL's Transistor Bass (REA_rodada57 §2): raw saved state in pluginState, the user's engine_x64.dll in samplePath
     simsynth,   // FL's SimSynth engine (REA_rodada64 §1–4): the plugin's raw saved state (564 bytes) in ChannelDef::pluginState
     wasp,       // FL 2026's Wasp / Wasp XT (REA_rodada64 §5): a 64-bit placeholder that keeps its state and makes no sound
+    plucked,    // FL's Plucked! (REA_rodada65 §1): the plugin's raw saved state (5 knobs) in ChannelDef::pluginState
+    beepmap,    // FL's BeepMap (REA_rodada65 §2): the plugin's raw saved state (settings + bitmap) in ChannelDef::pluginState
+    sawer,      // FL's Sawer (REA_rodada65 §3): raw saved state in pluginState, the user's Sawer\data.saw in samplePath
     slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
     fruitydance // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
 };
@@ -327,7 +330,9 @@ enum class EffectKind : std::uint8_t
     fruityFlangus,  // FL's Fruity Flangus, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     fruityFlanger,  // FL's Fruity Flanger, exact (REA_rodada55, core/FlangusFastDist.h): controls / range
     luxeVerb,     // FL's LuxeVerb, exact (REA_rodada60, core/LuxeVerb.h): FL's 49 controls (raw − min) / range + 4 sync switches
-    convolver     // FL's Fruity Convolver, exact (REA_rodada60, core/ConvolverFx.h): FL's 4 controls as (raw − min) / range; impulse response, knobs and envelopes in EffectSlot::state
+    convolver,    // FL's Fruity Convolver, exact (REA_rodada60, core/ConvolverFx.h): FL's 4 controls as (raw − min) / range; impulse response, knobs and envelopes in EffectSlot::state
+    equo,         // FL's EQUO, exact (REA_rodada61, core/EquoFx.h): FL's state in EffectSlot::state, knobs (raw − min) / range
+    flPitchShifter // FL's Pitch Shifter, exact (REA_rodada61, core/PitchShifterFl.h): FL's 13 knobs (raw − min) / range + 3 options
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

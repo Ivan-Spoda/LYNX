@@ -5,6 +5,8 @@
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
 #include "core/MaximusFx.h"
+#include "core/EquoFx.h"
+#include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -1154,6 +1156,21 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
             return exact;
+    if (pluginName == "Pitch Shifter") // the exact engines (REA_rodada61); LYNX's generic pitch shifter otherwise
+        if (psfl::State ps; psfl::parsePitchShifter (state.data(), state.size(), ps))
+        {
+            auto slot = makeEffectSlot (EffectKind::flPitchShifter);
+            psfl::toParams (ps, slot.params);
+            return slot;
+        }
+    if (pluginName == "EQUO") // the exact engine (REA_rodada61); a flat parametric EQ otherwise
+        if (const auto s = equofx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::equo);
+            slot.state = state;
+            equofx::toParams (*s, slot.params);
+            return slot;
+        }
     if (pluginName == "Effector")
         return effector (state, bpm);
     if (pluginName == "Fruity Vocoder")
@@ -1355,6 +1372,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::spreader: return { "Spreader" };
         case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
         case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
+        case EffectKind::equo: return { "EQUO" };
+        case EffectKind::flPitchShifter: return { "Pitch Shifter" };
         default: return {};
     }
 }
@@ -1374,6 +1393,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
+    if (is ("EQUO") && k >= 0 && k < 5)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact choruses take FL's controls over their ranges
     if (chorusControls (pluginName) > k && k >= 0)
@@ -1450,6 +1472,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return std::nullopt;
     }
 
+    if (is ("Pitch Shifter") && k >= 0 && k < 13) // the exact effect takes FL's 13 knobs over their ranges (REA_rodada61)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("Pitch Shifter"))
     {
         if (k == 0) // pitch: −12..+12 st (in cents) -> our ±24 st

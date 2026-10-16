@@ -9,6 +9,9 @@
 #include "core/Harmor.h"
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
+#include "core/Plucked.h"
+#include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/Ogun.h"
 #include "core/Dx10.h"
 #include "core/Kepler.h"
@@ -1191,6 +1194,40 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "plucked!")
+            {
+                // FL's Karplus-Strong engine from the raw state (REA_rodada65 §1); there was no conversion before
+                if (pluckedStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::plucked;
+                    def.pluginState = c.pluginState;
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "beepmap")
+            {
+                // FL's image-synthesis engine from the raw state, bitmap included (REA_rodada65 §2)
+                if (beepMapStateUsable (c.pluginState))
+                {
+                    def.instrument = InstrumentKind::beepmap;
+                    def.pluginState = c.pluginState;
+                    def.modelParams = { (float) (project.header.ppq > 0 ? project.header.ppq : 96) };
+                    adoptedFromPlugin = true;
+                }
+            }
+            else if (name == "sawer")
+            {
+                // FL's engine from the raw state (REA_rodada65 §3) with its oscillator cycle read at run time from the
+                // user's Sawer\data.saw; there was no conversion before (state or file not usable: unsupported)
+                const auto saw = resolveFlPath ("%FLStudioFactoryData%\\Plugins\\Fruity\\Generators\\Sawer\\data.saw", options.roots);
+                if (sawerStateUsable (c.pluginState) && ! saw.empty() && options.fileExists && options.fileExists (saw))
+                {
+                    def.instrument = InstrumentKind::sawer;
+                    def.pluginState = c.pluginState;
+                    def.samplePath = saw;
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "kepler")
             {
                 // FL's engine from the raw state (REA_rodada46) with its LFO-shape and noise tables read at run time from the
@@ -1400,6 +1437,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::fruitkick || def.instrument == InstrumentKind::bassdrum || def.instrument == InstrumentKind::toxic
                      || def.instrument == InstrumentKind::autogun || def.instrument == InstrumentKind::transistorbass
                      || def.instrument == InstrumentKind::simsynth || def.instrument == InstrumentKind::wasp
+                     || def.instrument == InstrumentKind::plucked || def.instrument == InstrumentKind::beepmap
+                     || def.instrument == InstrumentKind::sawer
                      || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
@@ -1516,7 +1555,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Stereo Shaper" && fx.kind != EffectKind::stereoShaper)
                  || (plugin == "Fruity Stereo Enhancer" && fx.kind != EffectKind::stereoEnhancer)
                  || (plugin == "Transient Processor" && fx.kind != EffectKind::transientProcessor)
-                 || (plugin == "Spreader" && fx.kind != EffectKind::spreader))
+                 || (plugin == "Spreader" && fx.kind != EffectKind::spreader)
+                 || (plugin == "EQUO" && fx.kind != EffectKind::equo)
+                 || (plugin == "Pitch Shifter" && fx.kind != EffectKind::flPitchShifter))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)

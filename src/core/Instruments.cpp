@@ -9,6 +9,9 @@
 #include "core/MiniSynth.h"
 #include "core/SimSynth.h"
 #include "core/Wasp.h"
+#include "core/Plucked.h"
+#include "core/BeepMap.h"
+#include "core/Sawer.h"
 #include "core/Slayer.h"
 #include "core/Ogun.h"
 #include "core/TransistorBass.h"
@@ -228,6 +231,9 @@ private:
             case InstrumentKind::transistorbass:
             case InstrumentKind::simsynth:
             case InstrumentKind::wasp:
+            case InstrumentKind::plucked:
+            case InstrumentKind::beepmap:
+            case InstrumentKind::sawer:
             case InstrumentKind::slayer:
             case InstrumentKind::fruitydance:
                 break;
@@ -2062,6 +2068,12 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeSimSynthInstrument();
     if (kind == InstrumentKind::wasp || kind == InstrumentKind::fruitydance)
         return makeWaspInstrument(); // both make no sound and keep their state
+    if (kind == InstrumentKind::plucked)
+        return makePluckedInstrument();
+    if (kind == InstrumentKind::beepmap)
+        return makeBeepMapInstrument();
+    if (kind == InstrumentKind::sawer)
+        return makeSawerInstrument();
     if (kind == InstrumentKind::slayer)
         return makeSlayerInstrument();
 

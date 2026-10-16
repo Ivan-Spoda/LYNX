@@ -99,6 +99,9 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::transistorbass: return "transistorbass";
         case InstrumentKind::simsynth: return "simsynth";
         case InstrumentKind::wasp: return "wasp";
+        case InstrumentKind::plucked: return "plucked";
+        case InstrumentKind::beepmap: return "beepmap";
+        case InstrumentKind::sawer: return "sawer";
         case InstrumentKind::slayer: return "slayer";
         case InstrumentKind::fruitydance: return "fruitydance";
     }
@@ -114,7 +117,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::gms, InstrumentKind::morphine, InstrumentKind::ogun, InstrumentKind::minisynth, InstrumentKind::dx10, InstrumentKind::kepler, InstrumentKind::poizone,
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
-                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::slayer, InstrumentKind::fruitydance })
+                    InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::slayer, InstrumentKind::fruitydance })
         if (id == instrumentId (k))
             return k;
 
@@ -180,6 +183,8 @@ const char* effectId (EffectKind k)
         case EffectKind::fruityFlanger: return "fruityFlanger";
         case EffectKind::luxeVerb: return "luxeVerb";
         case EffectKind::convolver: return "convolver";
+        case EffectKind::equo: return "equo";
+        case EffectKind::flPitchShifter: return "flPitchShifter";
     }
     return "eq";
 }
@@ -326,7 +331,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus, EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive, EffectKind::grossBeat,
                     EffectKind::fruityChorus, EffectKind::hyperChorus, EffectKind::vintageChorus,
                     EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
-                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver })
+                    EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb, EffectKind::convolver,
+                    EffectKind::equo, EffectKind::flPitchShifter })
         if (id == effectId (k))
             return k;
 
