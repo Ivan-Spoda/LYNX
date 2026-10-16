@@ -163,6 +163,28 @@ Behaviours found only through the renders (**[EXEC]**):
 - Test `fl_native_sampler_voice_matches_fl_renders`: FL's int16 codes from `f0b` and `e6` at 48 frames each (±1), the
   velocity law and a hard-left note against FL's measured gains.
 
+## 8. WAV loop points **[EXEC: FL renders `l1`, `l1a…l3e`, `s0`]**
+
+- A sample whose WAV has a `smpl` loop (first loop; end frame inclusive) loops in FL while the note lasts, with
+  the defaults of FL's own `Sampler.flp` channel. Clearing bits of the sample-flag events 0x8A/0x8B/0x83 or of the
+  0xD1/0xD7/0xDD records did not stop the looping; which setting turns it off ("use loop points") is **not confirmed**
+  — LYNX loops whenever the file has a loop.
+- After the note-off, a looping voice without volume envelope keeps reading the loop and fades out with the 441-entry
+  end table (post-filter), so it is silent ≈ 10 ms after the note end; a voice without a loop plays on (§6).
+- LYNX: `SampleData::loopStart/loopEnd` read from `smpl` by `tools/WavReader.h` and by the app's loader
+  (`SampleLibrary`, JUCE's `Loop0Start/End` metadata); FL voices loop over `[loopStart, loopEnd)` and start the fade at
+  the note-off (`offFade`). Result: `l1` notes at the root key ±1 code; FL's `Sampler.flp` (C1…C7 over a looped sample)
+  ±1 code on the four lower notes. **Residual:** pitched notes show a short transient (≤ 4 samples, up to −44 dB below
+  the peak) right after each loop wrap — the exact tap/position rule of FL's kernel at the wrap is **not reproduced**.
+
+## 9. Pan-law mode 1 **[EXEC: FL render `p2`]**
+
+The project event 0x17 holds FL's pan law: 0 = the circular sin/cos law (§3), 2 = the triangular law of
+`FUN_006a39c0` (`vol·sin(π/4)` on the louder side, `(1 ∓ pan)·vol·sin(π/4)` on the other, x87). FL's render of `t1` with
+0x17 = 2 matches LYNX ±1 code; 0x17 = 1 renders exactly like 0 (circular). LYNX: `flp::Project::panLaw`,
+appended as the 90th value of `SamplerSettings::flChannel` (89-value projects keep the circular law). The pan law of
+the mixer and of the other generators is unchanged (**not checked**).
+
 ## Where I stopped / next steps
 
 - State (2026-10-16): branch feature/sampler76 (= origin/wip/sampler76) has the port, origin/main merged, the
@@ -170,8 +192,8 @@ Behaviours found only through the renders (**[EXEC]**):
   (log `tmp/r76/build3.log`) when the round was paused. Next: confirm 0 failures, Windows build, selftest, land
   (`tmp/coord/land.sh sampler76` under the merge lock).
 
-- WAV loop points (`smpl`) for the native sampler, and FL's looping/note-off behaviour (FL's `Sampler.flp` render test
-  is the reference).
 - Global LFOs (flag 0x20) of the native sampler are stepped per voice (FL keeps a global phase); the velocity/release
   cross-modulation table and layer parents are not ported.
-- The pan-law mode 1 (FLP value not traced) and other sample rates (end-fade length) are unverified.
+- Other sample rates (end-fade length, rate ratio) are unverified: FL's command-line render uses 44.1 kHz here.
+- FL's command-line render forwards to a running FL instance and then writes nothing; `fl.sh` waits until no
+  `FL64.exe` runs and retries.
