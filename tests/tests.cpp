@@ -1,6 +1,8 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
 #include <atomic>
+#include <chrono>
+#include <random>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -72,6 +74,8 @@
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
 #include "core/FlangusFastDist.h"
+#include "core/FruityVocoder.h"
+#include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
@@ -6075,6 +6079,111 @@ TEST (vocoder_follows_modulator)
         CHECK (l[i] == r[i] && std::isfinite (l[i]));    // mono output
 }
 
+TEST (fruity_vocoder_engine)
+{
+    // REA_rodada70: Fruity Vocoder, states of our own against the installation's DLL (goldens = the DLL's output for
+    // the same input, EXEC; all three bit-identical over the whole 4096 frames)
+    std::vector<float> inL (4096), inR (4096);
+    for (int i = 0; i < 4096; ++i)
+    {
+        inL[(std::size_t) i] = i < 3000 ? (float) (((i * 37) % 200) - 100) / 128.0f : 0.0f; // modulator, then silence
+        inR[(std::size_t) i] = (i * 13) % 64 < 32 ? 0.5f : -0.5f;                        // carrier
+    }
+    auto make = [] (int bands, int order, int listen, bool swap, std::vector<float> levels, std::array<int, 12> c) {
+        lynx::fvocoder::State s;
+        s.bands = bands;
+        s.order = order;
+        s.listen = listen;
+        s.swap = swap;
+        for (std::size_t k = 0; k < levels.size(); ++k)
+            s.levels[k] = levels[k];
+        s.c = c;
+        return s;
+    };
+    auto run = [&] (const lynx::fvocoder::State& s, double rate, int block, int holdAt) {
+        std::vector<float> l = inL, r = inR;
+        lynx::fvocoder::Engine e;
+        e.setState (s);
+        e.prepare (rate);
+        for (int i = 0; i < 4096;)
+        {
+            auto len = std::min (block, 4096 - i);
+            if (holdAt > i && holdAt < i + len)
+                len = holdAt - i;
+            if (i == holdAt)
+            {
+                auto t = e.state();
+                t.c[lynx::fvocoder::hold] = 1;
+                e.setState (t);
+            }
+            e.processStereo (l.data() + i, r.data() + i, len);
+            i += len;
+        }
+        return std::make_pair (l, r);
+    };
+    auto check = [] (const std::pair<std::vector<float>, std::vector<float>>& out, const std::vector<std::pair<int, float>>& golden) {
+        for (const auto& [i, g] : golden)
+            CHECK (out.first[(std::size_t) i] == g && out.second[(std::size_t) i] == g);
+    };
+    // 16 bands, order 2, edited band levels, modulator and carrier levels in the mix
+    const auto a = make (16, 2, 2, false, { 1.0f, 0.5f, 1.5f, 1.0f, 0.25f, 2.0f, 1.0f, 1.0f, 0.75f, 1.25f, 1.0f, 0.0f, 1.0f, 1.0f, 1.75f, 1.0f },
+                         { 0, 65536, 64, 0, 0, 50, 20, 100, 0, 20, 10, 128 });
+    const auto outA = run (a, 44100.0, 512, -1);
+    check (outA, { { 100, -0.23145467042922974f }, { 1000, 0.2901436686515808f }, { 2047, 0.03407000005245209f }, { 2500, 0.8314149379730225f },
+                   { 3000, 0.606562614440918f }, { 3500, 0.2637328505516052f }, { 4095, -0.001206810586154461f } });
+    // 64 bands, order 3, inverted synthesis bank shifted by −300 cents, 48 kHz in blocks of 300, Hold from frame 2048
+    const auto b = make (64, 3, 2, false, {}, { 2000, 60000, 90, 1, -300, 120, 15, 300, 0, 0, 5, 150 });
+    check (run (b, 48000.0, 300, 2048), { { 100, 0.005184958688914776f }, { 1000, -0.0008608861826360226f }, { 2047, -0.026466617360711098f },
+                                          { 2500, -0.009371745400130749f }, { 3000, -0.018949978053569794f }, { 3500, -0.02667868137359619f },
+                                          { 4095, -0.021947938948869705f } });
+    // 4 bands, order 1, swapped inputs, narrow 30000…50000 range with the linear scale, 22.05 kHz in blocks of 77
+    const auto c = make (4, 1, 2, true, { 1.0f, 0.8f, 1.2f, 1.0f }, { 30000, 50000, 0, 0, 700, 180, 300, 40, 0, 64, 0, 160 });
+    check (run (c, 22050.0, 77, -1), { { 100, 0.31434211134910583f }, { 1000, -1.953513264656067f }, { 2047, 1.4135023355484009f },
+                                       { 2500, 1.539392352104187f }, { 3000, -0.27189597487449646f }, { 3500, -0.11583124846220016f },
+                                       { 4095, -0.11583124846220016f } });
+
+    // FL's state imports into the LYNX slot (controls as parameters, the levels in the state) and the slot's effect
+    // (one 4096-frame call, split into 512-frame engine blocks) gives the same output
+    const auto bytes = lynx::fvocoder::serialise (a);
+    CHECK (bytes.size() == 17 + 16 * 4 + 12 * 4);
+    const auto slot = lynx::effectFromFl ("Fruity Vocoder", bytes);
+    CHECK (slot && slot->kind == lynx::EffectKind::vocoder && slot->state == bytes);
+    CHECK (slot && slot->params[0] == 0.4f && slot->params[1] == 0.5f && slot->params[2] == 1.0f && slot->params[15] == 0.8f);
+    if (slot)
+    {
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (44100.0);
+        std::vector<float> l = inL, r = inR;
+        fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+        CHECK (l == outA.first && r == outA.second);
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 5, slot->params[5], 120.0) == "16000 Hz");
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 10, slot->params[10], 120.0) == "20 ms");
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::vocoder, 15, slot->params[15], 120.0) == "1.00");
+    }
+    const auto parsed = lynx::fvocoder::parse (bytes);
+    CHECK (parsed && parsed->bands == 16 && parsed->levels[5] == 2.0f && parsed->c[lynx::fvocoder::release] == 100);
+    CHECK (! lynx::fvocoder::parse ({ 2, 0, 0, 0, 12, 0, 0, 0 })); // 12 bands is not a valid count
+}
+
+// Delphi run-time math (REA_rodada70 §2): values the plugin's own exp / ln / SinCos return (EXEC, called in place)
+TEST (delphi_math_matches_plugin_runtime)
+{
+    // arguments where the C library differs from the Delphi run-time in the last bit
+    CHECK (lynx::dmath::exp (0x1.f6e5c5a26a7f8p+3) == 0x1.98170c3deea30p+22);
+    CHECK (lynx::dmath::exp (-0x1.12fc91a51d906p+4) == 0x1.27108f934a58cp-25);
+    CHECK (lynx::dmath::exp (-0x1.2e9e4c229e93ap+4) == 0x1.a3bf2e4ee3f1ep-28);
+    CHECK (lynx::dmath::ln (0x1.76a77e2a09abep-1) == -0x1.3fd111c5297f8p-2);
+    CHECK (lynx::dmath::ln (0x1.da1feaa8547dfp+0) == 0x1.3b8abd2756774p-1);
+    CHECK (lynx::dmath::ln (0x1.a1e28772a0d78p-1) == -0x1.9ffcaa3a11e30p-3);
+    double s = 0.0, c = 0.0;
+    lynx::dmath::sinCos (0x1.91b4a19e65a9bp-1, s, c);
+    CHECK (s == 0x1.69be278761916p-1 && c == 0x1.6a559572e1ac9p-1);
+    lynx::dmath::sinCos (0x1.3284a93d70a8ap-1, s, c);
+    CHECK (s == 0x1.2088b313ea643p-1 && c == 0x1.a6f4d889fd91ap-1);
+    lynx::dmath::sinCos (0x1.f9b2f53d6ce02p+0, s, c);
+    CHECK (s == 0x1.d6a9b8f170994p-1 && c == -0x1.931701be7b5f3p-2);
+}
+
 // Vocodex (REA_rodada35): a synthetic state in FL's layout (version 8, 13 maps, 20 parameters, the 0x24 block,
 // 13 map-axis bytes, tone, notes)
 struct VocodexSpec
@@ -10975,10 +11084,28 @@ std::array<float, 43> miniSynthDefaults()
     return { 0.375f, 0.5f, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0.5f, 0, 0, 0.25f, 0.5f, 0, 1, 1, 0.07f, 0, 0, 0, 0, 0.7f, 0.5f, 1,
              0.5f, 0, 0.25f, 0.5f, 0.5f, 0, 0.11222222f, 0.4f, 0.1f, 1, 0.5f };
 }
+// per-process suffix for scratch files: several test binaries (one per worktree) may run at the same time, and a
+// fixed name let one process read a file another one was rewriting
+std::string processTempTag()
+{
+    static const std::string tag = std::to_string (std::random_device {}()) + "_"
+                                   + std::to_string (std::chrono::steady_clock::now().time_since_epoch().count());
+    static const struct Cleanup
+    {
+        ~Cleanup()
+        {
+            std::error_code ec;
+            std::filesystem::remove (std::filesystem::temp_directory_path (ec) / ("lynx_test_oscdata_" + tag + ".dat"), ec);
+            std::filesystem::remove_all (std::filesystem::temp_directory_path (ec) / ("lynx_bassdrum_test_" + tag), ec);
+        }
+    } cleanup;
+    (void) cleanup;
+    return tag;
+}
 // a synthetic oscdata.dat (amplitudes 0.3/k, phases −π/2 + 0.001·(k − 1)): the test does not need an FL installation
 std::string miniSynthTestOscdata()
 {
-    const auto path = (std::filesystem::temp_directory_path() / "lynx_test_oscdata.dat").string();
+    const auto path = (std::filesystem::temp_directory_path() / ("lynx_test_oscdata_" + processTempTag() + ".dat")).string();
     std::vector<float> d (2048);
     for (int h = 0; h < 1024; ++h)
         d[(std::size_t) h] = (float) (0.3 / (h + 1)), d[1024 + (std::size_t) h] = (float) (-1.5707963267948966 + 0.001 * h);
@@ -11185,7 +11312,7 @@ std::vector<std::uint8_t> fruitKickStateB()
 std::string bassDrumTestFolder()
 {
     // our own oscillator table and a pseudo-random 16-bit noise sample, laid out like FL's BassDrum folder
-    const auto dir = std::filesystem::temp_directory_path() / "lynx_bassdrum_test";
+    const auto dir = std::filesystem::temp_directory_path() / ("lynx_bassdrum_test_" + processTempTag());
     std::filesystem::create_directories (dir / "Noise Samples");
     auto wav = [] (const std::filesystem::path& path, const void* data, std::uint32_t bytes, std::uint16_t fmt, std::uint16_t bits) {
         std::ofstream o (path, std::ios::binary);

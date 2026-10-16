@@ -7,6 +7,7 @@
 #include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/Vocodex.h"
+#include "core/FruityVocoder.h"
 #include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
 #include "core/EquoFx.h"
@@ -1507,40 +1508,45 @@ private:
     float current = 0.5f;
 };
 
-// Vocoder (Fruity Vocoder, REA_rodada20 §4.1). Parameters (0..1): 0 bands (4 << round(5v)), 1 order
-// (1 + round(2v)), 2 listen (0 modulator, 1 carrier, 2 mix), 3 swap L/R, 4/5 FreqMin/Max (v·65536),
-// 6 FreqScale (v·128), 7 invert, 8 Formant ((v·2400 − 1200) cents), 9 width (5 + 195v %),
-// 10/11 attack/release (10 + 990v ms), 12 hold, 13/14/15 modulator/carrier/wet levels (v·160).
+// Vocoder = FL's Fruity Vocoder, exact engine (core/FruityVocoder.h, REA_rodada70; laws first read in REA_rodada20
+// §4.1). Parameters (0..1): 0 bands (4 << round(5v)), 1 order (1 + round(2v)), 2 listen (0 modulator, 1 carrier,
+// 2 mix), 3 swap L/R, then FL's twelve controls as (raw − min) / (max − min): 4/5 FreqMin/Max (0…65536), 6 FreqScale
+// (0…128), 7 invert, 8 Formant (−1200…1200 cents), 9 band width (5…200 %), 10/11 attack/release (10…1000 ms),
+// 12 hold, 13/14/15 modulator/carrier/wet levels (0…160); 16 LYNX's side-input mode. The per-band levels of the
+// analysis bank travel in EffectSlot::state (FL's saved state); they apply while the band count matches.
 namespace vocoder
 {
 int bands (float v) { return 4 << std::clamp ((int) std::lround (v * 5.0f), 0, 5); }
 int order (float v) { return 1 + std::clamp ((int) std::lround (v * 2.0f), 0, 2); }
-double freq (float v) { return 10.0 + 159.9 * (std::pow (101.0, std::clamp (v, 0.0f, 1.0f)) - 1.0); }
-double curve11 (double x) { return (std::pow (11.0, x) - 1.0) / 10.0; }
-double ms (float v) { return 10.0 + 990.0 * std::clamp (v, 0.0f, 1.0f); }
+int raw (const EffectParams& p, int control)
+{
+    const auto lo = fvocoder::controlMin (control), hi = fvocoder::controlMax (control);
+    return lo + (int) std::lround (std::clamp (p[(std::size_t) (4 + control)], 0.0f, 1.0f) * (float) (hi - lo));
+}
+int raw (float v, int control)
+{
+    const auto lo = fvocoder::controlMin (control), hi = fvocoder::controlMax (control);
+    return lo + (int) std::lround (std::clamp (v, 0.0f, 1.0f) * (float) (hi - lo));
+}
 } // namespace vocoder
 
 class Vocoder final : public Effect
 {
 public:
+    explicit Vocoder (const std::vector<std::uint8_t>& state)
+    {
+        if (auto s = fvocoder::parse (state))
+            saved = *s;
+        last.fill (-1.0f);
+    }
+
     void prepare (double sr) noexcept override
     {
-        sampleRate = sr;
-        last.fill (-1.0f);
+        engine.prepare (sr);
         reset();
     }
 
-    void reset() noexcept override
-    {
-        for (auto& b : bands)
-        {
-            for (auto& f : b.analysis)
-                f.reset();
-            for (auto& f : b.synthesis)
-                f.reset();
-            b.env = 0.0;
-        }
-    }
+    void reset() noexcept override { engine.reset(); }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
@@ -1552,57 +1558,44 @@ public:
                 changed = true;
             }
         if (changed)
-            configure (p);
+        {
+            auto s = engine.state();
+            s.bands = vocoder::bands (p[0]);
+            s.order = vocoder::order (p[1]);
+            s.listen = std::clamp ((int) std::lround (p[2] * 2.0f), 0, 2);
+            s.swap = p[3] > 0.5f;
+            for (int c = 0; c < fvocoder::controls; ++c)
+                s.c[(std::size_t) c] = vocoder::raw (p, c);
+            if (s.bands == saved.bands)
+                s.levels = saved.levels;
+            else
+                s.levels.fill (1.0f);
+            engine.setState (s);
+        }
 
-        const auto listen = std::clamp ((int) std::lround (p[2] * 2.0f), 0, 2);
-        const auto swap = p[3] > 0.5f, hold = p[12] > 0.5f;
-        // "Side inputs" (Vocodex): modulator = side input 1 or the own input, carrier = side input 2 or the own
+        // "Side inputs" (Vocodex-style): modulator = side input 1 or the own input, carrier = side input 2 or the own
         // input, each in mono (L + R)/2; a configured side input that is silent gives silence
         const auto separate = p[16] > 0.5f;
-        const float* modL = useSide[0] ? side[0][0] : nullptr;
-        const float* modR = useSide[0] ? side[0][1] : nullptr;
-        const float* carL = useSide[1] ? side[1][0] : nullptr;
-        const float* carR = useSide[1] ? side[1][1] : nullptr;
         const bool modSide = useSide[0], carSide = useSide[1];
         useSide = { false, false };
-        const auto gMod = listen == 0 ? 1.0 : listen == 1 ? 0.0 : vocoder::curve11 (p[13] * 160.0 / 128.0);
-        const auto gCar = listen == 1 ? 1.0 : listen == 0 ? 0.0 : vocoder::curve11 (p[14] * 160.0 / 128.0);
-        const auto wet = listen == 2 ? vocoder::curve11 (p[15] * 160.0 / 128.0) : 0.0;
-        const auto gain = wet * 1500.0 / bandwidthPercent;
-
-        for (int i = 0; i < n; ++i)
+        if (! separate)
         {
-            double mod = swap ? r[i] : l[i], car = swap ? l[i] : r[i];
-            if (separate)
+            engine.processStereo (l, r, n);
+            return;
+        }
+        for (int done = 0; done < n;)
+        {
+            const auto len = std::min (n - done, fvocoder::blockFrames);
+            for (int i = 0; i < len; ++i)
             {
-                const auto own = 0.5 * ((double) l[i] + r[i]);
-                mod = modSide ? (modL != nullptr ? 0.5 * ((double) modL[i] + modR[i]) : 0.0) : own;
-                car = carSide ? (carL != nullptr ? 0.5 * ((double) carL[i] + carR[i]) : 0.0) : own;
+                const auto k = (std::size_t) i, j = (std::size_t) (done + i);
+                const auto own = 0.5f * (l[j] + r[j]);
+                mod[k] = modSide ? (side[0][0] != nullptr ? 0.5f * (side[0][0][j] + side[0][1][j]) : 0.0f) : own;
+                car[k] = carSide ? (side[1][0] != nullptr ? 0.5f * (side[1][0][j] + side[1][1][j]) : 0.0f) : own;
             }
-            double sum = 0.0;
-            if (gain > 0.0)
-                for (int k = 0; k < activeBands; ++k)
-                {
-                    auto& b = bands[(std::size_t) k];
-                    if (! b.active)
-                        continue;
-                    if (! hold)
-                    {
-                        auto y = mod;
-                        for (int o = 0; o < filterOrder; ++o)
-                            y = b.analysis[(std::size_t) o].process ((float) y, 0);
-                        const auto x = std::abs (y) * gain;
-                        b.env = x + (b.env - x) * (x > b.env ? attackCoeff : releaseCoeff);
-                        if (b.env < 1e-12)
-                            b.env = 0.0;
-                    }
-                    auto c = car;
-                    for (int o = 0; o < filterOrder; ++o)
-                        c = b.synthesis[(std::size_t) o].process ((float) c, 0);
-                    sum += c * b.env;
-                }
-            const auto out = (float) (sum + mod * gMod + car * gCar);
-            l[i] = r[i] = out; // mono output on both sides
+            engine.process (mod.data(), car.data(), l + done, len);
+            std::copy (l + done, l + done + len, r + done);
+            done += len;
         }
     }
 
@@ -1619,71 +1612,12 @@ public:
     }
 
 private:
+    fvocoder::Engine engine;
+    fvocoder::State saved;
+    std::array<float, 16> last {};
     std::array<std::array<const float*, 2>, 2> side {};
     std::array<bool, 2> useSide { false, false };
-
-    struct Band
-    {
-        std::array<Biquad, 3> analysis, synthesis;
-        double env = 0.0;
-        bool active = false;
-    };
-
-    static void bandPass (Biquad& f, double hz, double octaves, double sr)
-    {
-        const auto w = 2.0 * 3.141592653589793 * hz / sr;
-        const auto sw = std::sin (w);
-        const auto alpha = sw * std::sinh (std::log (2.0) / 2.0 * octaves * w / sw);
-        f.set (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * std::cos (w), 1.0 - alpha);
-    }
-
-    void configure (const EffectParams& p)
-    {
-        activeBands = vocoder::bands (p[0]);
-        filterOrder = vocoder::order (p[1]);
-        auto fmin = vocoder::freq (p[4]), fmax = vocoder::freq (p[5]);
-        if (fmin >= fmax)
-            fmin = fmax - 1.0;
-        const auto scale = (double) ((int) (std::pow (10000.0, std::clamp (p[6], 0.0f, 1.0f)) - 1.0) + 1);
-        const auto invert = p[7] > 0.5f;
-        const auto formant = p[8] * 2400.0 - 1200.0;
-        bandwidthPercent = 5.0 + 195.0 * std::clamp (p[9], 0.0f, 1.0f);
-        attackCoeff = std::pow (0.01, 1.0 / (vocoder::ms (p[10]) * 0.001 * sampleRate));
-        releaseCoeff = std::pow (0.01, 1.0 / (vocoder::ms (p[11]) * 0.001 * sampleRate));
-
-        std::array<double, 129> edges {};
-        for (int i = 0; i <= activeBands; ++i)
-        {
-            const auto f = fmin + (fmax - fmin) * (std::pow (scale + 1.0, (double) i / activeBands) - 1.0) / scale;
-            edges[(std::size_t) i] = 1200.0 * std::log2 (std::max (1.0, f) / 440.0) + 5700.0;
-        }
-        auto hzOf = [] (double cents) { return 440.0 * std::pow (2.0, (cents - 5700.0) / 1200.0); };
-        const auto top = 20000.0 * sampleRate / 44100.0;
-        for (int k = 0; k < activeBands; ++k)
-        {
-            auto& b = bands[(std::size_t) k];
-            const auto lo = edges[(std::size_t) k], hi = edges[(std::size_t) k + 1];
-            const auto s = invert ? activeBands - 1 - k : k; // carrier bank (mirrored with Invert)
-            const auto slo = edges[(std::size_t) s] + formant, shi = edges[(std::size_t) s + 1] + formant;
-            const auto fa = hzOf ((lo + hi) / 2.0), fs = hzOf ((slo + shi) / 2.0);
-            b.active = fa >= 10.0 && fa < top && fs >= 10.0 && fs < top && fa < 0.49 * sampleRate && fs < 0.49 * sampleRate;
-            if (! b.active)
-                continue;
-            const auto octavesA = bandwidthPercent / 100.0 * filterOrder * (hi - lo) / 1200.0;
-            const auto octavesS = bandwidthPercent / 100.0 * filterOrder * (shi - slo) / 1200.0;
-            for (int o = 0; o < filterOrder; ++o)
-            {
-                bandPass (b.analysis[(std::size_t) o], fa, octavesA, sampleRate);
-                bandPass (b.synthesis[(std::size_t) o], fs, octavesS, sampleRate);
-            }
-        }
-    }
-
-    double sampleRate = 44100.0;
-    std::array<float, 16> last {};
-    std::array<Band, 128> bands {};
-    int activeBands = 16, filterOrder = 2;
-    double bandwidthPercent = 50.0, attackCoeff = 0.99, releaseCoeff = 0.999;
+    std::array<float, fvocoder::blockFrames> mod {}, car {};
 };
 
 // Pitch correction (FL's Pitcher; laws in REA_rodada15 §1, rodada19 §6 and rodada30 §2). Parameters: 0 Correction
@@ -2761,12 +2695,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 0: std::snprintf (text, sizeof (text), "%d", vocoder::bands (v)); break;
                 case 1: std::snprintf (text, sizeof (text), "%d", vocoder::order (v)); break;
                 case 2: return std::array<const char*, 3> { "modulator", "carrier", "mix" }[(std::size_t) std::clamp ((int) std::lround (v * 2.0f), 0, 2)];
-                case 3: case 7: case 12: return v > 0.5f ? "on" : "off";
-                case 4: case 5: std::snprintf (text, sizeof (text), "%.0f Hz", vocoder::freq (v)); break;
+                case 3: case 7: case 12: case 16: return v > 0.5f ? "on" : "off";
+                case 4: case 5: std::snprintf (text, sizeof (text), "%.0f Hz", (double) fvocoder::edgeHz (vocoder::raw (v, param - 4))); break;
                 case 8: std::snprintf (text, sizeof (text), "%+.0f ct", v * 2400.0f - 1200.0f); break;
                 case 9: std::snprintf (text, sizeof (text), "%.0f%%", 5.0f + 195.0f * v); break;
-                case 10: case 11: std::snprintf (text, sizeof (text), "%.0f ms", vocoder::ms (v)); break;
-                case 13: case 14: case 15: std::snprintf (text, sizeof (text), "%.2f", vocoder::curve11 (v * 160.0 / 128.0)); break;
+                case 10: case 11: std::snprintf (text, sizeof (text), "%d ms", vocoder::raw (v, param - 4)); break;
+                case 13: case 14: case 15: std::snprintf (text, sizeof (text), "%.2f", (double) fvocoder::mixLevel (vocoder::raw (v, param - 4))); break;
                 default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
             }
             return text;
@@ -2921,6 +2855,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return maximusfx::make (slot.state);
     if (slot.kind == EffectKind::multibandDelay)
         return mbdelay::make (slot.state);
+    if (slot.kind == EffectKind::vocoder)
+        return std::make_unique<Vocoder> (slot.state);
     if (slot.kind == EffectKind::equo)
         return equofx::make (slot.state);
     if (slot.kind == EffectKind::hardcore)
@@ -2970,7 +2906,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::crossover: return std::make_unique<Crossover>();
         case EffectKind::rhythmGain: return std::make_unique<RhythmGain>();
         case EffectKind::autoPan: return std::make_unique<AutoPan>();
-        case EffectKind::vocoder: return std::make_unique<Vocoder>();
+        case EffectKind::vocoder: return std::make_unique<Vocoder> (std::vector<std::uint8_t> {}); // use makeEffect (slot) for the band levels
         case EffectKind::squeeze: return std::make_unique<Squeeze>();
         case EffectKind::vintagePhaser: return makeVintagePhaser();
         case EffectKind::vocodex: return vocodex::make ({}); // without a state: passes the signal; use makeEffect (slot)
