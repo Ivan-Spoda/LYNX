@@ -52,7 +52,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   LP/BP/HP/BS filter with keytracking, cutoff and pitch envelopes, 4 LFOs, AM, FM with decaying index, ring
   modulation, kick pitch sweep, 3-band tone EQ, mono and portamento.
 - **Sampler:** multi-sample zones (key/velocity), slices, reverse, cut, time-stretch (resample or WSOLA), root
-  note, start offset, channel filter and envelopes; long audio streamed from a memory-mapped disk cache.
+  note, start offset, channel filter and envelopes; FL's own interpolators (24-point sinc while playing, 32-point when
+  exporting — FL's defaults; linear/6-point/sinc kernels bit-identical to FLEngine's, REA round 69); long audio
+  streamed from a memory-mapped disk cache.
 - **Built-in drums:** kick, snare, hat, clap.
 - **Effects:** EQ, 7-band parametric EQ, compressor (with sidechain), limiter (lookahead, PDC), delay, reverb,
   chorus, filter, distortion, lo-fi, Effector (12 algorithms), vocoder, pitch correction, volume gate, rhythmic
@@ -137,6 +139,17 @@ exports the 30 demo projects shipped with FL Studio 2026.
 Every conversion rule comes from the behavioural analysis in `docs/analise/REA_rodada*.md` (decompilation,
 the official manual and project data). Rounds 17–24 verified the earlier hypotheses and the code was fixed
 accordingly. Highlights of what is **confirmed and applied**:
+
+- **Sample players (REA round 69):** native sampler channels and audio clips read samples through FL's `TResampler`
+  rules — index→kernel table, the 2-point linear and 6-point kernels (x87 extended precision) and the windowed sinc
+  (IPP-seeded sine/cosine recurrences, SSE `rcpps`+Newton reciprocal), bit-identical to FLEngine's own kernels on
+  synthetic signals (except positions within ~10⁻⁹ of a frame with the cutoff lowered, where FL's result depends on
+  IPP's last-bit sine); FL's defaults (24-point sinc live, 32-point in the render dialog), speed formula
+  `exp(cents·ln2/1200)·ratio`, width/cutoff widening above speed 1, the copy path at speed 1.0, edge frames repeated,
+  loop wrapping and the end rule. The volume envelope of native sampler channels runs FL's articulator (the host's is
+  the plugins' `flvp` one: delay, hold, tensions, tick steps, linear ramp per tick). FPC: velocity index
+  `round(v·128)` and the "cycle" choice among overlapping layers (every demo pad that overlaps uses it). Slicex: master
+  volume through FL's L11 law.
 
 - **Effector:** its own effect (`core/Effector.cpp`) with all 12 algorithms and FL's 12 raw parameters; LFO
   locked to the song, Mod Rate/Tempo Reduce, input/output gain; exact Distort cascade, Lo-fi, Delay (Mod Rate
@@ -629,6 +642,12 @@ Confirmed empirically on the demo projects:
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items
+
+- Sample players (REA round 69 §7): DirectWave's zone filter (834 of 1 287 demo zones have a low-pass; cutoff law
+  `440·2^((127v)/12 − 5)` Hz known, the filter and the modulation matrix not decoded — zones play unfiltered); the host
+  sampler voice's velocity/pan laws and channel filter; FL's song-aligned tick phase for the sampler's volume envelope
+  (LYNX counts ticks from the note start, ≤ 1 tick apart); FPC's random layer modes and simultaneous layers (unused in
+  the demos).
 - Maximus's Master Mid mode and linear-phase
   split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
 - Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
