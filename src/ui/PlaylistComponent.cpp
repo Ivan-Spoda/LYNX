@@ -20,32 +20,86 @@ namespace lynx
 {
 namespace
 {
-constexpr float clipTitleHeight = 14.0f;
+constexpr float clipTitleHeight = 13.0f;
 
-// Text colour readable on a clip's title band.
+// --- clip look -------------------------------------------------------------------------------------
+// One recipe for every clip kind (studied from FL's Playlist, drawn with LYNX's own code and palette): a muted
+// header bar holding a small kind glyph and the name, a body in a deep tint of the clip colour, and the
+// content (waveform, notes, curve) in a light tint of it; a thin dark edge separates neighbours. Few elements,
+// one hue per clip, so a busy Playlist stays calm and every clip reads at a glance.
+
+enum class ClipGlyph { pattern, audio, automation };
+
+// Text colour readable on a clip's header bar.
 juce::Colour clipTitleText (juce::Colour band)
 {
-    return band.getPerceivedBrightness() > 0.62f ? theme::colour::bg0 : theme::colour::textPrimary;
+    return band.getPerceivedBrightness() > 0.62f ? theme::colour::bg0 : juce::Colours::white.withAlpha (0.92f);
 }
 
-// Clip body (dark tint of the clip colour) with a solid title band; returns the body below the band.
-juce::Rectangle<float> paintClipFrame (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour base, const juce::String& name)
+// the header keeps a hint of the clip colour, greyed so the names read and the bodies carry the colour
+juce::Colour clipHeaderColour (juce::Colour base) { return base.interpolatedWith (juce::Colour (0xff4b525a), 0.5f); }
+juce::Colour clipBodyColour (juce::Colour base) { return base.interpolatedWith (theme::colour::bg1, 0.64f); }
+juce::Colour clipContentColour (juce::Colour base) { return base.interpolatedWith (juce::Colours::white, 0.7f); }
+
+float clipHeaderHeight (juce::Rectangle<float> r) { return juce::jmin (clipTitleHeight, juce::jmax (0.0f, r.getHeight() - 8.0f)); }
+
+// The kind glyph at the header's left (the clip menu opens from it): LYNX's own small shapes.
+void paintClipGlyph (juce::Graphics& g, juce::Rectangle<float> box, ClipGlyph glyph, juce::Colour colour)
+{
+    g.setColour (colour);
+    const auto c = box.getCentre();
+    switch (glyph)
+    {
+        case ClipGlyph::pattern: // three note bars, stepped
+            for (int i = 0; i < 3; ++i)
+                g.fillRect (juce::Rectangle<float> (c.x - 4.0f + (float) i * 2.0f, c.y - 3.5f + (float) i * 3.0f, 5.0f, 1.5f));
+            break;
+        case ClipGlyph::audio: // a small mirrored waveform
+        {
+            const float heights[] = { 2.0f, 6.0f, 9.0f, 5.0f, 3.0f };
+            for (int i = 0; i < 5; ++i)
+                g.fillRect (juce::Rectangle<float> (c.x - 4.5f + (float) i * 2.0f, c.y - heights[i] * 0.5f, 1.2f, heights[i]));
+            break;
+        }
+        case ClipGlyph::automation: // a rising curve
+        {
+            juce::Path p;
+            p.startNewSubPath (c.x - 4.5f, c.y + 3.5f);
+            p.quadraticTo (c.x + 1.0f, c.y + 3.5f, c.x + 4.5f, c.y - 3.5f);
+            g.strokePath (p, juce::PathStrokeType (1.3f));
+            break;
+        }
+    }
+}
+
+// Clip body with the header bar, glyph and name; returns the body below the header.
+juce::Rectangle<float> paintClipFrame (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour base, const juce::String& name,
+                                       ClipGlyph glyph = ClipGlyph::pattern)
 {
     using namespace theme;
-    g.setColour (base.interpolatedWith (colour::bg1, 0.62f));
+    g.setColour (clipBodyColour (base));
     g.fillRoundedRectangle (r, radius::sm);
 
-    const auto title = r.withHeight (juce::jmin (clipTitleHeight, r.getHeight()));
-    juce::Path band;
-    band.addRoundedRectangle (title.getX(), title.getY(), title.getWidth(), title.getHeight(), radius::sm, radius::sm, true, true, false, false);
-    g.setColour (base);
-    g.fillPath (band);
-
-    if (r.getWidth() > 24.0f)
+    const auto title = r.withHeight (clipHeaderHeight (r));
+    if (title.getHeight() >= 4.0f)
     {
-        g.setColour (clipTitleText (base));
-        g.setFont (font (type::caption, true));
-        g.drawText (name, title.reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
+        juce::Path band;
+        band.addRoundedRectangle (title.getX(), title.getY(), title.getWidth(), title.getHeight(), radius::sm, radius::sm, true, true, false, false);
+        const auto header = clipHeaderColour (base);
+        g.setGradientFill (juce::ColourGradient (header.brighter (0.12f), 0.0f, title.getY(), header.darker (0.06f), 0.0f, title.getBottom(), false));
+        g.fillPath (band);
+        g.setColour (theme::colour::bg0.withAlpha (0.35f)); // the header's lower edge
+        g.fillRect (title.getX(), title.getBottom() - 1.0f, title.getWidth(), 1.0f);
+
+        if (r.getWidth() > 18.0f && title.getHeight() >= 9.0f)
+        {
+            auto text = title.withTrimmedLeft (3.0f).withTrimmedRight (2.0f);
+            if (r.getWidth() >= 40.0f) // room for the glyph (where the clip menu opens)
+                paintClipGlyph (g, text.removeFromLeft (13.0f), glyph, clipTitleText (header).withMultipliedAlpha (0.8f));
+            g.setColour (clipTitleText (header));
+            g.setFont (font (type::caption, true));
+            g.drawText (name, text.withTrimmedLeft (2.0f).toNearestInt(), juce::Justification::centredLeft, true);
+        }
     }
 
     return r.withTrimmedTop (title.getHeight());
@@ -61,7 +115,7 @@ void paintClipOutline (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour
     }
     else
     {
-        g.setColour (current ? colour::textPrimary.withAlpha (0.55f) : base.darker (0.3f));
+        g.setColour (current ? colour::textPrimary.withAlpha (0.55f) : colour::bg0.withAlpha (0.85f));
         g.drawRoundedRectangle (r.reduced (0.5f), radius::sm, current ? 1.2f : 1.0f);
     }
 }
@@ -522,10 +576,11 @@ void PlaylistComponent::paint (juce::Graphics& g)
             // body + name strip
             const auto clipBody = paintClipFrame (g, r, base, juce::String::fromUTF8 (song.patterns[(std::size_t) c.pattern].name.c_str()));
 
-            // note thumbnail
+            // note thumbnail: the pattern's notes as small rounded bars in a light tint of the clip colour,
+            // spread over the body's height by pitch (a few keys of padding so single notes don't hug the edges)
             const auto& notes = song.patterns[(std::size_t) c.pattern].notes;
 
-            if (! notes.empty() && r.getWidth() > 6)
+            if (! notes.empty() && r.getWidth() > 6 && clipBody.getHeight() >= 4.0f)
             {
                 int low = 127, high = 0;
                 for (const auto& n : notes)
@@ -534,19 +589,30 @@ void PlaylistComponent::paint (juce::Graphics& g)
                     high = juce::jmax (high, n.key);
                 }
 
-                const auto body = clipBody.reduced (2.0f, 3.0f);
-                const auto keySpan = (float) juce::jmax (1, high - low);
-                g.setColour (base.brighter (0.25f));
+                const auto body = clipBody.reduced (1.0f, clipBody.getHeight() >= 12.0f ? 3.0f : 1.0f);
+                const auto span = juce::jmax (6, high - low + 2); // a small pitch range stays centred
+                const auto bottomKey = (low + high) / 2.0f - span / 2.0f;
+                const auto rows = (float) span + 1.0f;
+                const auto noteHeight = juce::jlimit (1.5f, 2.5f, body.getHeight() / rows);
+                const auto patternLength = juce::jmax<std::int64_t> (1, song.patterns[(std::size_t) c.pattern].effectiveLength (song.beatsPerBar));
+                g.setColour (clipContentColour (base));
 
-                for (const auto& n : notes)
+                juce::Graphics::ScopedSaveState clip (g);
+                g.reduceClipRegion (body.toNearestInt());
+
+                // the pattern repeats along a clip longer than it (FL loops pattern clips that are stretched)
+                for (auto loopStart = c.start - c.offset % patternLength; loopStart < c.end(); loopStart += patternLength)
                 {
-                    if (n.start < c.offset || n.start >= c.offset + c.length)
-                        continue;
-
-                    const auto nx = (float) tickToX ((double) (c.start + n.start - c.offset));
-                    const auto nw = juce::jmax (1.5f, (float) (juce::jmin (n.length, c.end() - (c.start + n.start - c.offset)) * pixelsPerTick));
-                    const auto ny = body.getBottom() - (n.key - low) / keySpan * (body.getHeight() - 2.0f) - 2.0f;
-                    g.fillRect (nx, ny, nw, 2.0f);
+                    for (const auto& n : notes)
+                    {
+                        const auto at = loopStart + n.start;
+                        if (at + n.length <= c.start || at >= c.end())
+                            continue;
+                        const auto nx = (float) tickToX ((double) at);
+                        const auto nw = juce::jmax (2.0f, (float) (n.length * pixelsPerTick) - 1.0f);
+                        const auto ny = body.getBottom() - ((float) n.key - bottomKey + 0.5f) / rows * body.getHeight() - noteHeight * 0.5f;
+                        g.fillRoundedRectangle (nx, ny, nw, noteHeight, juce::jmin (1.0f, noteHeight * 0.5f));
+                    }
                 }
             }
 
@@ -756,59 +822,71 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
         return;
 
     const auto& channel = song.channels[(std::size_t) c.channel];
-    const auto colour = theme::colour::audioClip;
+    const auto colour = audioClipColour (channel);
     const auto name = juce::String::fromUTF8 (channel.name.c_str());
+    const auto body = paintClipFrame (g, r, colour, name, ClipGlyph::audio);
 
-    // waveform (ui/WaveformView): analysed in the background, drawn at any zoom with its band colours; it uses
-    // the clip's whole height (tracks are short) and the title band is laid over it, translucent
+    // the waveform (ui/WaveformView, analysed in the background): the clean style fills the body with the
+    // peak envelope mirrored around the centre, in a light tint of the clip colour
     const auto path = juce::String::fromUTF8 (channel.samplePath.c_str());
     const auto summary = ui::WaveformCache::getInstance()->find (path, [this, path] { return engine.getSampleLibrary().load (path); });
 
-    if (summary == nullptr)
-        paintClipFrame (g, r, colour, name);
-    else
+    if (summary != nullptr && body.getHeight() >= 3.0f)
     {
-        // a darker body than other clips: the waveform's colours carry the information
-        g.setColour (colour.interpolatedWith (theme::colour::bg0, 0.8f));
-        g.fillRoundedRectangle (r, theme::radius::sm);
-        const auto body = r.reduced (1.0f, 1.0f);
-        const auto framesPerTick = 60.0 / (song.bpm * ppq) * summary->sampleRate;
-        // r's left edge is the clip start, i.e. tick `offset` of the audio
-        const auto startFrame = ((double) c.offset + (double) (body.getX() - r.getX()) / pixelsPerTick) * framesPerTick;
-        ui::paintWaveform (g, body, *summary, startFrame, framesPerTick / pixelsPerTick,
-                           ui::currentWaveStyle (colour.brighter (0.9f), ui::normalisingGain (*summary)));
-
-        const auto title = r.withHeight (juce::jmin (clipTitleHeight, r.getHeight()));
-        juce::Path band;
-        band.addRoundedRectangle (title.getX(), title.getY(), title.getWidth(), title.getHeight(), theme::radius::sm, theme::radius::sm, true, true, false, false);
-        g.setColour (colour.withAlpha (0.55f));
-        g.fillPath (band);
-        if (r.getWidth() > 24.0f)
-        {
-            g.setColour (theme::colour::textPrimary);
-            g.setFont (theme::font (theme::type::caption, true));
-            g.drawText (name, title.reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
-        }
+        const auto wave = body.reduced (0.0f, body.getHeight() >= 14.0f ? 2.0f : 1.0f);
+        const auto total = (double) summary->frames;
+        const auto perTick = clipops::framesPerTick (channel.sampler, total, summary->sampleRate, song.bpm);
+        // r's left edge is the clip start, i.e. tick `offset` of the audio (counted from the file's end when
+        // the channel is reversed)
+        const auto startTick = (double) c.offset + (double) (wave.getX() - r.getX()) / pixelsPerTick;
+        const auto forward = ! channel.sampler.reverse;
+        const auto startFrame = forward ? startTick * perTick : total - startTick * perTick;
+        auto style = ui::currentWaveStyle (clipContentColour (colour), juce::jmin (ui::normalisingGain (*summary), 2.0f) * c.gain);
+        if (! style.spectral && c.gain > 1.0f) // louder clip gain: the shape may hit the top, which is honest
+            style.gain = juce::jmin (style.gain, 8.0f);
+        ui::paintWaveform (g, wave, *summary, startFrame, (forward ? perTick : -perTick) / pixelsPerTick, style);
     }
+
     paintClipOutline (g, r, colour, false, false);
 
-    // fades: ramps and handles at the top corners
+    // fades: a shaded ramp over the body and a handle at the header's corner
+    if (c.fadeIn > 0 || c.fadeOut > 0)
     {
         const auto inX = r.getX() + (float) (c.fadeIn * pixelsPerTick);
         const auto outX = r.getRight() - (float) (c.fadeOut * pixelsPerTick);
-        g.setColour (theme::colour::textPrimary.withAlpha (0.8f));
+        const auto shade = theme::colour::bg0.withAlpha (0.45f);
+        const auto line = clipContentColour (colour).withAlpha (0.9f);
 
         if (c.fadeIn > 0)
-            g.drawLine (r.getX(), r.getBottom(), inX, r.getY() + 14.0f, 1.2f);
-        if (c.fadeOut > 0)
-            g.drawLine (outX, r.getY() + 14.0f, r.getRight(), r.getBottom(), 1.2f);
-
-        if (r.getWidth() > 20.0f)
         {
-            g.fillRect (juce::Rectangle<float> (inX, r.getY() + 13.0f, 5.0f, 5.0f));
-            g.fillRect (juce::Rectangle<float> (outX - 5.0f, r.getY() + 13.0f, 5.0f, 5.0f));
+            juce::Path p;
+            p.startNewSubPath (body.getX(), body.getY());
+            p.lineTo (inX, body.getY());
+            p.lineTo (body.getX(), body.getBottom());
+            p.closeSubPath();
+            g.setColour (shade);
+            g.fillPath (p);
+            g.setColour (line);
+            g.drawLine (body.getX(), body.getBottom(), inX, body.getY(), 1.2f);
+        }
+        if (c.fadeOut > 0)
+        {
+            juce::Path p;
+            p.startNewSubPath (outX, body.getY());
+            p.lineTo (body.getRight(), body.getY());
+            p.lineTo (body.getRight(), body.getBottom());
+            p.closeSubPath();
+            g.setColour (shade);
+            g.fillPath (p);
+            g.setColour (line);
+            g.drawLine (outX, body.getY(), body.getRight(), body.getBottom(), 1.2f);
         }
     }
+}
+
+juce::Colour PlaylistComponent::audioClipColour (const ChannelDef& channel)
+{
+    return channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : theme::colour::audioClip;
 }
 
 void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, juce::Rectangle<float> r)
@@ -821,7 +899,7 @@ void PlaylistComponent::paintAutomationClip (juce::Graphics& g, const Clip& c, j
     const auto& automation = song.automations[(std::size_t) c.automation];
     const auto colour = automation.target.kind == AutomationTargetKind::none ? theme::colour::textDisabled
                                                                               : theme::colour::automation.withMultipliedSaturation (0.75f).withMultipliedBrightness (0.8f);
-    paintClipFrame (g, r, colour, juce::String::fromUTF8 (automation.name.c_str()));
+    paintClipFrame (g, r, colour, juce::String::fromUTF8 (automation.name.c_str()), ClipGlyph::automation);
     paintClipOutline (g, r, colour, false, false);
 
     // automation curve over the clip's range
@@ -2184,15 +2262,29 @@ void PlaylistComponent::editMarkerName (std::int64_t tick, int existing)
 
 void PlaylistComponent::showClipMenu (int index)
 {
+    auto menu = buildClipMenu (index, getMouseXYRelative().x);
+    if (menu.getNumItems() > 0)
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+juce::PopupMenu PlaylistComponent::getClipMenuForSnapshot (int index)
+{
+    if (index < 0 || index >= (int) engine.getSong().playlist.size())
+        return {};
+    const auto& c = engine.getSong().playlist[(std::size_t) index];
+    return buildClipMenu (index, (int) tickToX ((double) c.start + (double) c.length / 2.0));
+}
+
+juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
+{
     const auto& song = engine.getSong();
+    juce::PopupMenu menu;
     if (index < 0 || index >= (int) song.playlist.size())
-        return;
+        return menu;
 
     const auto clip = song.playlist[(std::size_t) index];
     const auto targets = isSelected (index) ? selection : std::vector<int> { index };
     const auto many = targets.size() > 1;
-    const auto mouseX = getMouseXYRelative().x;
-    juce::PopupMenu menu;
 
     // --- the source: name, colour, uniqueness -------------------------------------------------------
     juce::String sourceName;
@@ -2409,7 +2501,7 @@ void PlaylistComponent::showClipMenu (int index)
         deleteSelection();
     });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    return menu;
 }
 
 void PlaylistComponent::normalizeClips (const std::vector<int>& targets)

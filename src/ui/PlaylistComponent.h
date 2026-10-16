@@ -105,6 +105,7 @@ public:
     void setTimeSelectionForSnapshot (int fromBar, int toBar);
     // zoom (pixels per bar) and scroll (first bar, first track in view)
     void setViewForSnapshot (double pixelsPerBar, int firstBar, int firstTrack);
+    juce::PopupMenu getClipMenuForSnapshot (int index); // --snapshot: the clip menu of that clip
     // hovers the right edge of the first clip in view (grip, outline, menu button); returns its hint
     ui::Hint hoverForSnapshot();
 
@@ -116,6 +117,7 @@ public:
     static constexpr int scrollBarSize = 12;
 
     static juce::Colour patternColour (const Song& song, int pattern);
+    static juce::Colour audioClipColour (const ChannelDef& channel);
 
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
@@ -171,6 +173,7 @@ private:
     void copySelection();
     void pasteClips (std::int64_t at = -1);
     void normalizeClips (const std::vector<int>& targets);
+    juce::PopupMenu buildClipMenu (int index, int mouseX);
     void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);

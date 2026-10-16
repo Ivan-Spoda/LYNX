@@ -1624,10 +1624,72 @@ private:
                     lynx::ui::WaveformCache::stereo = true;
                     saveSnapshot (ui, prefix + "-playlist-audio-stereo.png");
                     lynx::ui::WaveformCache::stereo = false;
-                    lynx::ui::WaveformCache::spectral = false;
-                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
-                    saveSnapshot (ui, prefix + "-playlist-audio-classic.png");
                     lynx::ui::WaveformCache::spectral = true;
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-spectral.png");
+                    lynx::ui::WaveformCache::spectral = false;
+                    playlist.setViewForSnapshot (40.0, 0, 0);
+                    saveSnapshot (ui, prefix + "-playlist-audio-far.png");
+
+                    // LYNX_SNAPSHOT_AUDIO=a.wav;b.wav...: real audio as clips (default-height tracks, one tall,
+                    // a fade, a reversed copy), at three zoom levels
+                    if (const auto files = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_AUDIO", {}), ";", "");
+                        ! files.isEmpty())
+                    {
+                        const auto realTrack = firstTrack + 2;
+                        std::vector<juce::String> paths;
+                        for (const auto& f : files)
+                            if (juce::File (f.trim()).existsAsFile())
+                                paths.push_back (f.trim());
+
+                        offline.editSong ([&] (lynx::Song& s) {
+                            const auto bar = (std::int64_t) lynx::ppq * std::max (1, s.beatsPerBar);
+                            const std::uint32_t colours[] = { 0, 0xffd9a441, 0xff6fb36a, 0xffb06fd0, 0xff5fb7c9, 0xffd06f6f };
+                            for (std::size_t i = 0; i < paths.size(); ++i)
+                            {
+                                lynx::ChannelDef audio;
+                                audio.name = juce::File (paths[i]).getFileNameWithoutExtension().toStdString();
+                                audio.instrument = lynx::InstrumentKind::audioClip;
+                                audio.samplePath = paths[i].toStdString();
+                                audio.colour = colours[i % 6];
+                                audio.sampler.stretchBeats = i % 2 == 0 ? 16.0f : 0.0f; // fitted to 4 bars, or as recorded
+                                audio.sampler.keepPitch = true;
+                                s.channels.push_back (audio);
+                                lynx::Clip clip;
+                                clip.kind = lynx::ClipKind::audio;
+                                clip.channel = (int) s.channels.size() - 1;
+                                clip.track = realTrack + (int) i;
+                                clip.length = 4 * bar;
+                                clip.fadeIn = i == 1 ? bar / 2 : 0;
+                                s.playlist.push_back (clip);
+                                clip.start = 4 * bar;
+                                clip.fadeIn = 0;
+                                clip.fadeOut = i == 0 ? bar : 0;
+                                s.playlist.push_back (clip);
+                            }
+                            if ((int) s.playlistTracks.size() < realTrack + (int) paths.size())
+                                s.playlistTracks.resize ((std::size_t) realTrack + paths.size());
+                            if (! paths.empty())
+                                s.playlistTracks[(std::size_t) realTrack].height = 90;
+                        });
+                        offline.dispatchPendingMessages();
+                        for (const auto& path2 : paths)
+                            cache.find (path2, [&offline, path2] { return offline.getSampleLibrary().load (path2); });
+                        cache.waitUntilIdle (60000);
+                        playlist.setViewForSnapshot (160.0, 0, std::max (0, realTrack - 4));
+                        saveSnapshot (ui, prefix + "-playlist-real.png");
+                        playlist.setViewForSnapshot (700.0, 0, std::max (0, realTrack - 1));
+                        saveSnapshot (ui, prefix + "-playlist-real-zoom.png");
+                        playlist.setViewForSnapshot (2400.0, 0, std::max (0, realTrack - 1));
+                        saveSnapshot (ui, prefix + "-playlist-real-close.png");
+                        playlist.setViewForSnapshot (50.0, 0, std::max (0, realTrack - 4));
+                        saveSnapshot (ui, prefix + "-playlist-real-far.png");
+                        // the clip menu of the first real clip
+                        if (const auto menu = playlist.getClipMenuForSnapshot ((int) offline.getSong().playlist.size() - (int) paths.size() * 2); menu.getNumItems() > 0)
+                            saveMenus (juce::StringArray { "Audio clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-audio.png");
+                        if (const auto menu = playlist.getClipMenuForSnapshot (0); menu.getNumItems() > 0)
+                            saveMenus (juce::StringArray { "Pattern clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-pattern.png");
+                    }
                 }
 
                 saveWindow (lynx::makeChannelSettingsPanel (offline, samplerChannel), "-sampler-wave.png");
