@@ -165,6 +165,11 @@ Behaviours found only through the renders (**[EXEC]**):
 
 ## Where I stopped / next steps
 
+- State (2026-10-16): branch feature/sampler76 (= origin/wip/sampler76) has the port, origin/main merged, the
+  unit test `fl_native_sampler_voice_matches_fl_renders`; the last full build-local after the merge was still running
+  (log `tmp/r76/build3.log`) when the round was paused. Next: confirm 0 failures, Windows build, selftest, land
+  (`tmp/coord/land.sh sampler76` under the merge lock).
+
 - WAV loop points (`smpl`) for the native sampler, and FL's looping/note-off behaviour (FL's `Sampler.flp` render test
   is the reference).
 - Global LFOs (flag 0x20) of the native sampler are stepped per voice (FL keeps a global phase); the velocity/release
