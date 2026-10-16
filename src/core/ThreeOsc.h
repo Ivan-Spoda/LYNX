@@ -21,7 +21,7 @@
 // Differences from FL by design / not modelled (REA_rodada47 §5): the "HQ" oscillators (engine_x64.dll, band-limited
 // tables) play the plain tables; the custom wave is resampled with our own interpolation (FL's resampler not decoded);
 // FL's host "HQ render" oversampling mode is off (FL's realtime behaviour); the random seed is per instrument (in FL all
-// 3x Osc channels share one seed drawn at start-up); the processor's end-fade table uses the exact cosine.
+// 3x Osc channels share one seed drawn at start-up). The processor's end-fade table uses IPP's cosine (REA_rodada74).
 
 #include <cstdint>
 #include <memory>

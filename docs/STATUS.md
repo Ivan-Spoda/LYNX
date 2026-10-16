@@ -72,10 +72,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
-  Love Philter, Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
-  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder; Patcher graphs of any shape are
+  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
   reduced to series/parallel chains.
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
   phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
@@ -109,7 +109,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
   coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
-  DLL outside the 10 ms release fade — FL's IPP cosine, ≤ −83 dB — with FL's host waveshaper (its x87 live / file-render
+  DLL, release fades included (REA round 74: IPP's cosine restated, 441-entry fade at every rate), with FL's host waveshaper (its x87 live / file-render
   routines since REA round 55, checked against FLEngine's own) and DX10's shared voice processor, all 8 filter types checked; BassDrum bit-exact on 228/228 cases at 44.1 and 48 kHz with the engine's own
   CRT powf/sincosf, its table and noise samples read from the user's installation); Toxic Biohazard on its engine (REA
   round 45: bit-identical to FL's DLL on the 3 demo channels, voice and full effects chain, at 44.1/48/96 kHz, the
@@ -214,7 +214,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   overlapping notes with a key re-trigger (voice management, MONO KEY): 262/268 (REA round 31 §10).
   CPU: idle effects bypass themselves (exact), voices on the same tick grid are rendered in lockstep and the block
   reader runs in SSE2 — all bit-identical; "Overcome – Sytrus" (72 instances, several at 8× even live) plays in
-  0.46× real time on one thread, 0.17× on four.
+  0.46× real time on one thread, 0.17× on four. The channel settings panel shows the plugin's "Main settings" page
+  (REA round 74 §3): master level/LFO/pitch, the global volume and filter A/D/S/R, unison, Mod X/Y, PORTA and the
+  live/export oversampling and envelope accuracy, written into the saved state (FL's DLL reads the edited state).
 - **Harmless:** its own instrument (`core/Harmless.cpp`, REA round 32): the additive engine with up to 528 sine
   partials per voice record (self-oscillation, Sub 1/3/4, 524 harmonics; partial count and band limit per quality,
   10 ms amplitude glide), targets rebuilt every control block (88/44/8 samples at 44.1 kHz) in FL's order — colour ×
@@ -344,11 +346,17 @@ accordingly. Highlights of what is **confirmed and applied**:
   synthetic cases. Not modelled (unused by FL's data): release loops, unison (hidden parameters). LYNX creates the
   instance at its playing rate, so the rate-change quirks of REA round 39 §2.13 do not apply; FL's max-polyphony value
   at creation is not confirmed (LYNX uses 0 → 32 voices). A missing noise sample leaves the noise silent (reported).
-- **Love Philter:** articulator base, Mod X/Y → volume (with automation/links), filter types 4/5 (width in
-  octaves), 7 (all-pass) and 11 (Mango); pattern envelopes on volume (rhythmic envelope effect, in beats, looped,
-  song-locked, tension curves), pan LFO (auto-pan effect), cutoff and resonance envelope/LFO as live
-  modulation of the EQ (top-level live automation, or links inside the parallel container with several units);
-  FL's pan law (√2·cos/sin with the far side folded in), pan-LFO tension, pulse curves (type 5) as steps.
+- **Love Philter:** FL's exact engine as a mixer effect (`core/LovePhilter`, REA round 66): the whole state (8 units,
+  their 8 articulators with the selected pattern envelope, LFO and X/Y/follower maps, waveshaper curves), FL's
+  oversampling (×1…×16, doubled when exporting) through the half-band cascade, the control tick with its block ramps,
+  the twelve filter kernels (Chocolate SVF, Lime, the eight Vanilla biquads, Mango with drive) in their precision,
+  NEXT chaining, solo, the waveshaper, the input/unit-1 envelope follower, Mod X/Y smoothing, FL's pan law and CENTER;
+  pattern envelopes and LFOs are positioned at the song position when the transport starts or jumps. FL's controls
+  stay editable and automatable (48 of them: globals, cutoff/resonance/envelope amount/pan/volume per unit).
+  Bit-identical to the installation's DLL on all 86 states of the installation (39 demo slots + 47 presets) in live
+  and export modes, on Linux and Windows builds, with automation, transport positions and 22–96 kHz. The DLL's own
+  Delphi math runtime (exp, ln, sin, cos, power, tanh) is re-created (`core/DelphiRuntime.h`). The old parametric-EQ
+  conversion remains only for states the engine cannot read.
 - **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input listen to the source track (their exact engines below).
@@ -470,6 +478,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
   Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
   render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
+- **Newtone and Newtime:** imported as mixer effects that keep FL's state (`core/NewtoneFx`, REA round 73). Like FL,
+  they pass the insert's input through unchanged (bit-identical to the DLLs); with FL's "slave to host playback"
+  switch on (an editable LYNX parameter) they add their source sample from the song time while the song plays —
+  identical to Newtone's output for an unedited sample played from the song start at the sample's rate (−138 dB).
+  The source sample comes from the path FL stored (or the engine's working copy), or is chosen in the slot menu.
+  Not reproduced: the note/time edits and Newtime's time warping (zplane engines), Newtone's pitch-mark alignment when
+  playback starts mid-song, and its behaviour at other project rates (LYNX resamples linearly).
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -608,7 +623,7 @@ accordingly. Highlights of what is **confirmed and applied**:
   mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
   confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
   exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
-  speed); the end fade uses the exact cosine; the sample's own loop points are not read (whole sample); one random seed
+  speed); the sample's own loop points are not read (whole sample); one random seed
   per instrument.
 - Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
   in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
@@ -623,10 +638,9 @@ accordingly. Highlights of what is **confirmed and applied**:
 - 3x Osc (REA round 47 §5): HQ oscillators within −137…−168 dB of the DLL (LYNX builds the band-limited tables with a
   double FFT, FL with its own single-precision one; MSVC's sinf); the custom wave is resampled linearly (FL's resampler
   mode 6 not decoded); FL's host "HQ render" oversampling is not modelled; the random seed (start phases, noise steps)
-  is per instrument, FL's is drawn per session and shared by all 3x Osc channels; the end fade uses the exact cosine;
+  is per instrument, FL's is drawn per session and shared by all 3x Osc channels;
   channel records win over a stale state snapshot (inference).
-- Fruity DX10 (REA round 42 §4–5): the end-fade table uses the exact cosine (FL: IPP's 11-bit cosine; −129 dB worst
-  case); FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
+- Fruity DX10 (REA round 42 §4–5): FL's host restoring Final.Pitch before each tick (pitch articulator) and its exact sample placement of
   sequencer ticks are inferences (LYNX ticks on the song's PPQ grid while playing, free-running otherwise); global
   LFOs ignore song-position jumps; notes have no Mod X/Y; the filters are bit-exact only where long double is the x87
   format.
@@ -642,8 +656,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   resonant Vanilla HP); the polyphony limit was not exercised against the DLL. States older than version 17 still use
   the old 3-oscillator conversion. Export with the render settings is CPU-heavy: most demo patches run their voices
   8× oversampled when FL exports, and LYNX does the same.
-- Love Philter: Mango Hz inferred from its pole; the cutoff/resonance modulation reaches the EQ one block late
-  (control slot → live link); pulse curves with more than 10 cycles.
+- Love Philter: what FL sends when an export starts (a flush, which skips the first tick's ramps) is not observed; LYNX
+  starts like a freshly loaded plugin.
 - Pitcher: MIDI mode and Harmonize are implemented but LYNX effects receive no MIDI notes, so they behave as FL
   with nothing on the Pitcher's MIDI port (MIDI: no correction; Harmonize: dry voice / dry mix). The reported
   latency (9 / 257 samples) is the DSP's delay; FL's own PDC report is not confirmed.
@@ -695,6 +709,12 @@ Confirmed empirically on the demo projects:
   `LYNX.exe --sandboxtest plugin.vst3 report.txt`; `LYNX_SANDBOX_LOG=file` logs every step.
 - The VST3 SDK bundled with JUCE builds with Zig/MinGW; plugins are prepared at a fixed rate and re-created
   when the device rate changes; plugin latency feeds the PDC.
+- Plugin scanning runs in the background (progress in the hint bar), one child `LYNX.exe --scan-one` per file
+  (a crash or 30 s hang blacklists the file), incremental (unchanged listed files are skipped), cancellable, and
+  again a few seconds after each start for new plugins. Opening an `.flp` resolves its plugins from the list or FL
+  Studio's plugin database (the same files FL uses) and scans only the missing ones' files first
+  (`docs/FL_INTEGRATION.md`). First-run setup wizard: language, audio device, plugin folders (standard VST3/CLAP
+  plus FL Studio's), scan. Per-user installer (`scripts/make-installer.sh`, `docs/RELEASE.md`).
 
 ## Performance (export CPU, 2026-10-15)
 Where the exact-engine rounds made the export slower (per-effect timing and `perf` on `build-local/renderwav`):
@@ -734,6 +754,8 @@ which cannot change without changing output bits.
 ## Not yet verified by a human
 - Audio input recording (depends on the user's hardware; code reviewed, not tested).
 - CLAP plugin editor windows (audio hosting tested; windows not opened to avoid touching the user's screen).
+- The setup wizard's interaction (checked by an off-screen snapshot) and FL Studio's plugin-database file layout:
+  this PC's FL has no third-party plugins scanned, so `.nfo`/`.fst` parsing is tested with synthetic fixtures only.
 - Mouse/keyboard interactions are checked by code review and off-screen snapshots only.
 
 ## Open items

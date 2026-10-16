@@ -77,8 +77,8 @@ Ordered to get something usable as early as possible without ever breaking the a
 - [x] Gross Beat, Frequency Splitter, Effector (round 14); Effector rebuilt with all 12 algorithms (rounds 18–19)
 - [x] Controller links: Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface
 - [x] Patcher graphs of any shape (round 20)
-- [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs, cutoff/resonance modulation in every unit (rounds 16–20)
-- [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20)
+- [x] Love Philter: filters, Mod X/Y, pattern envelopes and LFOs, cutoff/resonance modulation in every unit (rounds 16–20); exact engine (round 66)
+- [x] Pitcher (pitch correction) and Fruity Vocoder (rounds 15, 19, 20; Fruity Vocoder exact engine: round 70)
 - [x] Sidechain links (round 22)
 - [x] Vocodex as the vocoder with two side inputs (round 20); exact engine (round 35), SG stage and internal Sytrus carrier (round 40)
 - [x] Maximus and Soundgoodizer on FL's exact Maximus engine (rounds 36, 40)

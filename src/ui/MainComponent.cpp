@@ -1,4 +1,6 @@
 #include "ui/MainComponent.h"
+#include "ui/SetupWizard.h"
+#include "core/FlPluginDb.h"
 
 #include "core/EditorPolish.h"
 
@@ -340,6 +342,14 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     setWantsKeyboardFocus (true);
     setSize (1180, 642);
     startTimerHz (30);
+
+    // new or updated plugins since the last run: an incremental scan in the background (unchanged files are
+    // skipped), a few seconds after start so it doesn't compete with loading; the first run asks in the wizard
+    if (persistent && setupWizardDone() && backgroundScanAtStart())
+        juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<MainComponent> (this)] {
+            if (safe != nullptr)
+                safe->engine.getPluginHost().startBackgroundScan();
+        });
 }
 
 MainComponent::~MainComponent()
@@ -1770,6 +1780,9 @@ juce::String MainComponent::idleHint() const
     if (engine.isCountingIn())
         return tr ("Recording: count-in...");
 
+    if (const auto scan = engine.getPluginHost().backgroundScan(); scan.running)
+        return tr ("Scanning for plugins in the background: {0}% {1}", { juce::String (juce::roundToInt (scan.progress * 100.0f)), scan.file });
+
     return tr ("Point at anything to see what it does here.  [F1] shortcuts  [F5]-[F9] windows  [Space] play/stop  "
                "[Ctrl][T] typing piano: {0}", { typingPiano ? tr ("on") : tr ("off") });
 }
@@ -1866,6 +1879,14 @@ void MainComponent::timerCallback()
 
         if (engine.isModified())
             autosave();
+    }
+
+    if (const auto scan = engine.getPluginHost().backgroundScan(); scan.finished != scansSeen)
+    {
+        scansSeen = scan.finished;
+        ui::postHint ({ scan.found == 1 ? tr ("Plugin scan finished: 1 new plugin.")
+                                        : tr ("Plugin scan finished: {0} new plugins.", { juce::String (scan.found) }), {}, false, false },
+                      6000);
     }
 
     auto& transport = engine.getTransport();
@@ -2041,6 +2062,38 @@ void MainComponent::openFile (const juce::File& file)
 
     if (file.hasFileExtension ("flp"))
     {
+        // the project's third-party plugins: known ones resolve from the plugin list or FL Studio's database; the
+        // rest get a targeted scan of just their files first (no question asked)
+        std::vector<FlpPluginUse> uses;
+        if (juce::MemoryBlock data; file.loadFileAsData (data))
+        {
+            try
+            {
+                uses = flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+            }
+            catch (const flp::Error&)
+            {
+            }
+        }
+        if (! uses.empty() && persistent) // (command-line modes open synchronously, without scanning)
+        {
+            findProjectPlugins (engine, std::move (uses), [safe = juce::Component::SafePointer<MainComponent> (this), file] {
+                if (safe != nullptr)
+                    safe->importFlp (file);
+            });
+            return;
+        }
+        importFlp (file);
+        return;
+    }
+
+    openLynxProject (file);
+}
+
+void MainComponent::importFlp (const juce::File& file)
+{
+    {
+        juce::String error;
         if (! engine.importFlpFile (file, error))
         {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
@@ -2054,9 +2107,12 @@ void MainComponent::openFile (const juce::File& file)
         updateTitle();
 
         showImportReport();
-        return;
     }
+}
 
+void MainComponent::openLynxProject (const juce::File& file)
+{
+    juce::String error;
     auto song = ProjectFile::load (file, error);
 
     if (! song)
@@ -2218,11 +2274,13 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     else if (index == 4)
     {
         menu.addItem (tr ("Audio settings..."), [this] { showAudioSettings(); });
-        menu.addItem (tr ("Scan for plugins (VST3 and CLAP)..."), [this] {
-            scanPluginsWithProgress (engine, [] (int found) {
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugins"),
-                                                        found == 1 ? tr ("1 new plugin found.") : tr ("{0} new plugins found.", { juce::String (found) }));
-            });
+        menu.addItem (tr ("Setup wizard (language, audio, plugin folders)..."), [this] { showSetupWizard(); });
+        const auto scanning = engine.getPluginHost().backgroundScan().running;
+        menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins (VST3 and CLAP)"), [this, scanning] {
+            if (scanning)
+                engine.getPluginHost().cancelBackgroundScan();
+            else
+                engine.getPluginHost().startBackgroundScan(); // progress in the hint bar; LYNX stays usable
         });
         menu.addItem (tr ("Run plugins in a separate process (protects LYNX from crashes)"), true, pluginSandboxEnabled(), [] {
             setPluginSandboxEnabled (! pluginSandboxEnabled());
@@ -2310,7 +2368,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Last FL Studio import report"), [this] {
             const auto& r = engine.getImportReport();
             if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
-                && engine.getMissingPlugins().isEmpty())
+                && engine.getMissingPlugins().isEmpty() && engine.getMatchedPlugins().isEmpty())
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"),
                                                         tr ("Nothing to report (no .flp imported in this session, or everything was converted)."));
             else
@@ -2518,6 +2576,14 @@ void MainComponent::showHelp()
         keepAboveMainWindow (*dialog);
 }
 
+void MainComponent::showSetupWizard()
+{
+    lynx::showSetupWizard (engine, [safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::String& language) {
+        if (safe != nullptr)
+            safe->showLanguageChoice (language);
+    });
+}
+
 void MainComponent::showImportReport()
 {
     // summary of what the .flp had that LYNX doesn't reproduce exactly (only when there is something to say)
@@ -2540,12 +2606,18 @@ void MainComponent::showImportReport()
         text << tr ("Approximated by the built-in synth:") << "\n" << list (r.approximated) << "\n\n";
     if (! r.unsupported.empty())
         text << tr ("No equivalent (played with a synth preset):") << "\n" << list (r.unsupported) << "\n\n";
+    if (const auto& matched = engine.getMatchedPlugins(); ! matched.isEmpty())
+        text << tr ("Plugins found on this PC:") << "\n  " << matched.joinIntoString ("\n  ") << "\n\n";
     if (! missing.isEmpty())
-        text << tr ("Plugins not found (Options > Scan for plugins):") << "\n  " << missing.joinIntoString ("\n  ") << "\n\n";
+        text << tr ("Plugins not installed on this PC (or in a folder LYNX doesn't scan; Options > Setup wizard):") << "\n  "
+             << missing.joinIntoString ("\n  ") << "\n\n";
     if (! r.droppedEffects.empty())
         text << tr ("Effects with no equivalent (left out):") << "\n" << list (r.droppedEffects) << "\n\n";
     if (r.missingSamples > 0)
         text << tr ("Samples missing on this machine: {0}", { juce::String (r.missingSamples) }) << "\n";
+    if (r.relocatedSamples > 0)
+        text << tr ("Samples found in another folder than the project says (FL Studio's folders or next to the project): {0}",
+                    { juce::String (r.relocatedSamples) }) << "\n";
 
     if (text.isNotEmpty())
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"), text.trimEnd());

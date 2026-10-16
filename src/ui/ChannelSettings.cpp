@@ -26,6 +26,7 @@
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
 #include "core/Slayer.h"
+#include "core/SytrusEngine.h"
 #include "core/SynthPresets.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -515,6 +516,7 @@ public:
         drumaxx = def.instrument == InstrumentKind::drumaxx;
         slayer = def.instrument == InstrumentKind::slayer;
         fruityDance = def.instrument == InstrumentKind::fruitydance;
+        sytrus = def.instrument == InstrumentKind::sytrus;
         // DrumSynth Live: the patch on the key selected in FL's editor (raw FL values)
         if (drumsynth)
         {
@@ -704,6 +706,25 @@ public:
                     auto& st = song.channels[(std::size_t) c].pluginState;
                     if (slayerStateUsable (st) && at + 4 <= st.size())
                         std::memcpy (st.data() + at, &v, 4);
+                });
+            };
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        };
+        // Sytrus: its "Main settings" page, raw FL integers inside the saved (zlib) state (REA_rodada74 §3)
+        auto addSytrus = [&] (int setting) {
+            const auto value = sytrus::settingValue (def.pluginState, setting);
+            if (! value)
+                return;
+            const auto& d = sytrus::settings()[(std::size_t) setting];
+            auto knob = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+            knob->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            knob->setRange (d.low, d.high, 1.0);
+            knob->setValue (std::clamp (*value, d.low, d.high), juce::dontSendNotification);
+            knob->setName (d.name);
+            knob->onValueChange = [this, setting, s = knob.get()] {
+                engine.editSong ([c = channel, setting, v = (int) s->getValue()] (Song& song) {
+                    sytrus::setSetting (song.channels[(std::size_t) c].pluginState, setting, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -1019,6 +1040,9 @@ public:
         else if (slayer)
             for (const auto& k : slayerKnobs)
                 addSlayer (k);
+        else if (sytrus)
+            for (int i = 0; i < (int) sytrus::settings().size(); ++i)
+                addSytrus (i);
         else if (toxic)
             for (const auto& k : toxicKnobs)
                 addFloat (k);
@@ -1048,7 +1072,8 @@ public:
         else
             for (const auto& [index, name] : drumpadKnobs)
                 add (index, name);
-        setSize (720, dx10 || threeOsc ? 500 : 384);
+        const auto rows = ((int) knobs.size() + 6) / 7; // the grid of resized()
+        setSize (720, std::max (dx10 || threeOsc ? 500 : 384, 46 + rows * 110 + 8));
     }
 
     void paint (juce::Graphics& g) override
@@ -1083,6 +1108,7 @@ public:
                     : granulizer ? tr ("Fruity Granulizer — FL's engine on the channel's sample")
                     : drumaxx ? tr ("Drumaxx — FL's physical drum engine (pads on their keys; patterns not played)")
                     : slayer ? tr ("FL Slayer — FL's engine with its effects, amp and cabinet (picks read from your FL installation; new settings restart the voices)")
+                    : sytrus ? tr ("Sytrus — FL's engine, main settings (operators, filters and effects keep the saved patch)")
                     : fruityDance ? tr ("Fruity Dance — a visual plugin: it makes no sound, the channel keeps its settings")
                     : boobass ? tr ("BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)")
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
@@ -1105,7 +1131,7 @@ private:
     int channel;
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
          fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, plucked = false, beepMap = false,
-         sawer = false, flKeys = false, granulizer = false, drumaxx = false, slayer = false, fruityDance = false, wavesFound = false;
+         sawer = false, flKeys = false, granulizer = false, drumaxx = false, slayer = false, fruityDance = false, sytrus = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
 };
@@ -1764,7 +1790,7 @@ public:
                  || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
                  || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
                  || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx
-                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance)
+                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance || kind == InstrumentKind::sytrus)
             setContentOwned (new ModelPanel (engine, channel), true);
         else
             setContentOwned (new SettingsPanel (engine, channel), true);
@@ -1865,6 +1891,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::drumaxx:
         case InstrumentKind::slayer:
         case InstrumentKind::fruitydance:
+        case InstrumentKind::sytrus:
             return true;
         default:
             return false;
@@ -1906,7 +1933,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
                  || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
                  || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx
-                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance)
+                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance || kind == InstrumentKind::sytrus)
         return std::make_unique<ModelPanel> (engine, channel);
 
     return std::make_unique<SettingsPanel> (engine, channel);

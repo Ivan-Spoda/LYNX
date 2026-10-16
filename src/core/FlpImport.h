@@ -16,6 +16,7 @@ struct FlPathRoots
     std::string factoryData; // %FLStudioFactoryData%  e.g. C:\Program Files\Image-Line\FL Studio 2026
     std::string data;        // %FLStudioData%         e.g. ...\FL Studio 2026\Data
     std::string userData;    // %FLStudioUserData%     e.g. Documents\Image-Line\FL Studio
+    std::string home;        // this user's profile (C:\Users\name): re-roots paths saved on another account/PC
 };
 
 std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots);
@@ -29,11 +30,13 @@ struct FlpImportReport
     std::map<std::string, int> unsupported;  // no equivalent: play with a synth preset chosen by name
     std::map<std::string, int> droppedEffects; // effects with no equivalent (removed from the mixer)
     int missingSamples = 0;
+    int relocatedSamples = 0; // found on this PC at another place than the project saved (core/FlPluginDb.h)
 };
 
 struct FlpImportOptions
 {
     FlPathRoots roots;
+    std::string projectFolder; // the .flp's folder: samples saved elsewhere are also looked for next to it
     std::function<bool (const std::string& path)> fileExists; // without this, no sample is used
 
     // Optional (Fruity Slicer/Slicex slices): bytes of a file, a sample's length in

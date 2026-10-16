@@ -26,6 +26,7 @@ add_library(lynx_core STATIC
     src/core/Slicer.cpp
     src/core/Templates.cpp
     src/core/FlWrapper.cpp
+    src/core/FlPluginDb.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -63,6 +64,7 @@ add_library(lynx_core STATIC
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp
+    src/core/LovePhilter.cpp
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
@@ -82,6 +84,7 @@ add_library(lynx_core STATIC
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
     src/core/FruityFilters.cpp
+    src/core/NewtoneFx.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
@@ -161,6 +164,7 @@ if(LYNX_BUILD_APP)
     src/engine/WavPackFormat.cpp
         src/engine/ProjectFile.cpp
         src/engine/PluginHost.cpp
+        src/engine/FlStudio.cpp
         src/engine/PluginSandbox.cpp
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
@@ -189,6 +193,7 @@ if(LYNX_BUILD_APP)
         src/ui/Workspace.cpp
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp
+        src/ui/SetupWizard.cpp
         src/ui/Splash.cpp)
 
     # main window chrome: hint bar and toolbar widgets

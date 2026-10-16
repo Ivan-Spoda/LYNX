@@ -1,5 +1,6 @@
 #include "core/Inflate.h"
 
+#include <algorithm>
 #include <array>
 
 namespace lynx
@@ -231,4 +232,34 @@ std::optional<std::vector<std::uint8_t>> inflateZlib (const std::uint8_t* data, 
 
     return out;
 }
+
+// zlib stream with stored (uncompressed) blocks
+std::vector<std::uint8_t> zlibStored (const std::vector<std::uint8_t>& data)
+{
+    std::vector<std::uint8_t> out { 0x78, 0x01 };
+    std::size_t i = 0;
+    do
+    {
+        const auto len = std::min<std::size_t> (65535, data.size() - i);
+        const bool last = i + len >= data.size();
+        out.push_back (last ? 1 : 0);
+        out.push_back ((std::uint8_t) (len & 0xff));
+        out.push_back ((std::uint8_t) (len >> 8));
+        out.push_back ((std::uint8_t) (~len & 0xff));
+        out.push_back ((std::uint8_t) ((~len >> 8) & 0xff));
+        out.insert (out.end(), data.begin() + (std::ptrdiff_t) i, data.begin() + (std::ptrdiff_t) (i + len));
+        i += len;
+    } while (i < data.size());
+    std::uint32_t a = 1, b = 0;
+    for (const auto c : data)
+    {
+        a = (a + c) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    const auto ad = (b << 16) | a;
+    for (int s = 24; s >= 0; s -= 8)
+        out.push_back ((std::uint8_t) (ad >> s));
+    return out;
+}
+
 } // namespace lynx

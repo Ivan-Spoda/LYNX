@@ -124,11 +124,10 @@ public:
         if (! fruitKickStateUsable (state))
             return false;
         P.init (state, fs);
-        const auto n = std::max (1L, rint64 (10.0 * 0.001 * fs));
-        fade.assign ((std::size_t) n, 0.0f);
-        const auto c = (float) ((1.0 / (double) (n + 1)) * kPi);
-        for (long i = 0; i < n; ++i)
-            fade[(std::size_t) i] = ((float) std::cos ((double) ((float) (i + 1) * c)) + 1.0f) * 0.5f;
+        // the end fade: 441 entries at every rate (built while the framework's rate object still holds 44 100 Hz, as
+        // in DX10) with IPP's cosine (REA_rodada74 §1-2)
+        const auto& table = flvp::endTable();
+        fade.assign (table.begin(), table.end());
         // envelope snapshot (version 1, ≥ 364 B) or the framework's defaults
         const auto defaults = flvp::defaultSnapshot();
         const bool snap = i32At (state, 0) == 1 && state.size() >= 32 + 364;
