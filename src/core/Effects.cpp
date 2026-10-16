@@ -11,6 +11,8 @@
 #include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
 #include "core/EquoFx.h"
+#include "core/DistructorFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
@@ -18,9 +20,11 @@
 #include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
 #include "core/FrequencySplitter.h"
+#include "core/HardcoreFx.h"
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
@@ -2160,6 +2164,24 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                        { "Carrier", 0.0f }, { "Wet", 0.8f }, { "Side inputs", 0.0f } } };
     static const EffectInfo vocodexInfo { "Vocodex", {} }; // everything comes from FL's raw state (EffectSlot::state)
     static const EffectInfo maximusInfo { "Maximus", {} }; // the engine's state travels in EffectSlot::state (core/MaximusFx.h)
+    // Distructor: each module's input volume, mix and output volume (FL's 0…10000 / 10000), the final clipper; the
+    // modules themselves come from FL's state (core/DistructorFx.h)
+    static const EffectInfo distructorInfo { "Distructor", { { "M1 In", 0.5f }, { "M1 Mix", 1.0f }, { "M1 Out", 0.5f },
+                                                             { "M2 In", 0.5f }, { "M2 Mix", 1.0f }, { "M2 Out", 0.5f },
+                                                             { "M3 In", 0.5f }, { "M3 Mix", 1.0f }, { "M3 Out", 0.5f },
+                                                             { "M4 In", 0.5f }, { "M4 Mix", 1.0f }, { "M4 Out", 0.5f },
+                                                             { "Clipper", 1.0f } } };
+    // Multiband Delay: FL's twelve global controls (raw − min) / range; the banks come from FL's state (core/MultibandDelayFx.h)
+    static const EffectInfo multibandDelayInfo = [] {
+        EffectParams p {};
+        mbdelay::toParams (mbdelay::State {}, p);
+        EffectInfo info { "Multiband Delay", {} };
+        const char* const names[mbdelay::numGlobals] = { "Delay scale", "Delay x0.1", "Feedback", "Smoothing", "Filter mode", "Keep pitch",
+                                                         "Morph", "Mix", "Harmonic scale", "Weighting", "High pass", "Saturation" };
+        for (int i = 0; i < mbdelay::numGlobals; ++i)
+            info.params.push_back ({ names[i], p[(std::size_t) i] });
+        return info;
+    }();
     // EQUO: FL's knobs (raw − min) / range and options; the bands come from FL's state (core/EquoFx.h)
     static const EffectInfo equoInfo { "EQUO", { { "Band shift", 0.5f }, { "Band mix", 1.0f }, { "Morph", 0.0f },
                                                  { "Smoothness", 170.0f / 1024.0f }, { "Volume", 0.5f },
@@ -2401,6 +2423,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::lovePhilter: return philter::info();
         case EffectKind::luxeVerb: return luxeVerbInfo;
         case EffectKind::convolver: return convolverInfo;
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
@@ -2410,10 +2433,13 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerInfo;
         case EffectKind::equo: return equoInfo;
         case EffectKind::flPitchShifter: return flPitchShifterInfo;
+        case EffectKind::multibandDelay: return multibandDelayInfo;
         case EffectKind::frequencySplitter: return fsplit::info();
         case EffectKind::fruityFastLP: return fastLPInfo;
         case EffectKind::fruityFreeFilter: return freeFilterInfo;
         case EffectKind::fruityFilter: return fruityFilterInfo;
+        case EffectKind::hardcore: return hardcore::info();
+        case EffectKind::distructor: return distructorInfo;
     }
     return eq;
 }
@@ -2741,6 +2767,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::frequencySplitter:
             return fsplit::paramText (param, v);
 
+        case EffectKind::hardcore:
+            return hardcore::paramText (param, v);
+
         case EffectKind::fruityPanOMatic:
             return flbasic::panOMaticParamText (param, v);
 
@@ -2751,6 +2780,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return flbasic::bloodOverdriveParamText (param, v);
         case EffectKind::equo:
             return equofx::paramText (param, v);
+
+        case EffectKind::distructor:
+            return distructor::paramText (param, v);
 
         case EffectKind::flPitchShifter:
             return psfl::paramText (param, v);
@@ -2763,12 +2795,17 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::fruityFilter:
             return flfilter::filterParamText (param, v);
+        case EffectKind::multibandDelay:
+            return mbdelay::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
         case EffectKind::fruityDelay3:
             return fldelay::delay3ParamText (param, v, bpm);
+
+        case EffectKind::lovePhilter:
+            return philter::paramText (param, v);
 
         case EffectKind::grossBeat:
         {
@@ -2821,10 +2858,16 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
         return maximusfx::make (slot.state);
+    if (slot.kind == EffectKind::multibandDelay)
+        return mbdelay::make (slot.state);
     if (slot.kind == EffectKind::vocoder)
         return std::make_unique<Vocoder> (slot.state);
     if (slot.kind == EffectKind::equo)
         return equofx::make (slot.state);
+    if (slot.kind == EffectKind::hardcore)
+        return hardcore::make (slot);
+    if (slot.kind == EffectKind::distructor)
+        return distructor::make (slot.state);
     if (slot.kind == EffectKind::fruityWaveShaper)
         return flshape::makeWaveShaper (slot.state);
     if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
@@ -2835,6 +2878,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::grossBeat)
         return grossbeat::make (slot.state);
+    if (slot.kind == EffectKind::lovePhilter)
+        return philter::make (slot);
     if (slot.kind == EffectKind::convolver)
         return makeConvolver (slot.state);
     if (slot.kind == EffectKind::fruityDelayBank)
@@ -2897,11 +2942,15 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::lovePhilter: return philter::make (EffectSlot {}); // without a state: passes the signal
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
         case EffectKind::flPitchShifter: return psfl::make();
         case EffectKind::frequencySplitter: return fsplit::make();
+        case EffectKind::hardcore: return hardcore::make (makeEffectSlot (EffectKind::hardcore)); // no cabinet impulses; use makeEffect (slot)
+        case EffectKind::distructor: return distructor::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::multibandDelay: return mbdelay::make ({}); // FL's default Multiband Delay; use makeEffect (slot)
         case EffectKind::pitchCorrect: return std::make_unique<PitchCorrect>();
         case EffectKind::fruityFastDist: return fastdistfx::make();
         case EffectKind::fruityFlangus: return flangusfx::make();

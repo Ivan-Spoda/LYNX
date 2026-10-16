@@ -64,15 +64,18 @@ add_library(lynx_core STATIC
     src/core/Vocodex.cpp
     src/core/MaximusFx.cpp
     src/core/GrossBeat.cpp
+    src/core/LovePhilter.cpp
     src/core/FruityDynamics.cpp
     src/core/ParametricEqFl.cpp
     src/core/ParametricEqLinear.cpp
     src/core/EquoFx.cpp
+    src/core/MultibandDelayFx.cpp
     src/core/PitchShifterFl.cpp
     src/core/FruityShapers.cpp
     src/core/FruityDelay.cpp
     src/core/StereoFx.cpp
     src/core/FrequencySplitter.cpp
+    src/core/DistructorFx.cpp
     src/core/ChorusFx.cpp
     src/core/FruityBasicFx.cpp
     src/core/FruityDelayBank.cpp
@@ -84,6 +87,7 @@ add_library(lynx_core STATIC
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
+    src/core/HardcoreFx.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/BeepMap.cpp

@@ -1,6 +1,8 @@
 #include "core/FlpImport.h"
 #include "core/FlPluginDb.h"
+#include "core/HardcoreFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
 #include "core/Harmless.h"
@@ -127,6 +129,8 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
+        { "Hardcore", EffectKind::hardcore },
+        { "Multiband Delay", EffectKind::delay },
     };
 
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")
@@ -1622,7 +1626,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Spreader" && fx.kind != EffectKind::spreader)
                  || (plugin == "EQUO" && fx.kind != EffectKind::equo)
                  || (plugin == "Pitch Shifter" && fx.kind != EffectKind::flPitchShifter)
-                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter))
+                 || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter)
+                 || (plugin == "Distructor" && fx.kind != EffectKind::distructor)
+                 || (plugin == "Multiband Delay" && fx.kind != EffectKind::multibandDelay))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
@@ -1643,6 +1649,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
                  || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+        else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
+                 && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))
+        {
+            if (hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet]) > 0.0f)
+                ++options.report->droppedEffects["Hardcore (cabinet impulse not found: cabinet off)"];
+        }
     };
 
     for (const auto& insert : project.mixer)
@@ -1657,7 +1669,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             // Patcher with a simple serial chain: the plugins inside become consecutive slots
             std::vector<flp::MixerInsert::Slot> expanded { original };
             // Fruity Love Philter: the units become parametric EQ + gain/pan (or a parallel container)
-            if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots)
+            // (only for states the exact engine cannot read: the others go through effectFromFl, REA_rodada66)
+            if (original.plugin == "Fruity Love Philter" && (int) track.effects.size() < maxEffectSlots
+                && philter::parse (original.state) == nullptr)
                 if (auto conversion = lovePhilterEffects (original.state))
                 {
                     const auto first = (int) track.effects.size();
@@ -2008,7 +2022,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 target.slot = found->second.first;
                 const auto& fx = song.mixer[(std::size_t) target.index].effects[(std::size_t) target.slot];
 
-                if (target.kind == AutomationTargetKind::effectParam && found->second.second == "Fruity Love Philter")
+                if (target.kind == AutomationTargetKind::effectParam && found->second.second == "Fruity Love Philter"
+                    && fx.kind != EffectKind::lovePhilter)
                 {
                     const auto map = lovePhilterMaps.find ({ id.track(), id.slot() });
                     const auto mapped = map != lovePhilterMaps.end() && map->second ? map->second (target.param) : std::nullopt;
@@ -2019,6 +2034,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         valueMap = std::get<2> (*mapped);
                     }
                     else
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::lovePhilter)
+                {
+                    // the exact Love Philter exposes 48 of FL's controls as (raw − min) / range (core/LovePhilter.h)
+                    target.param = philter::paramOfFlIndex (target.param);
+                    if (target.param < 0)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::luxeVerb)
