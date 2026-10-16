@@ -1567,7 +1567,7 @@ public:
             s.listen = std::clamp ((int) std::lround (p[2] * 2.0f), 0, 2);
             s.swap = p[3] > 0.5f;
             for (int c = 0; c < fvocoder::controls; ++c)
-                s.c[(std::size_t) c] = vocoder::raw (p, c);
+                s.c[(std::size_t) c] = fvocoder::rawFromKnob (p[(std::size_t) (4 + c)], c, saved.c[(std::size_t) c]);
             if (s.bands == saved.bands)
                 s.levels = saved.levels;
             else

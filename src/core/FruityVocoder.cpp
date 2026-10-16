@@ -4,6 +4,7 @@
 #include "core/Denormals.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstring>
 
@@ -50,6 +51,12 @@ struct X87Extended
 
 constexpr std::array<int, controls> minimum { 0, 0, 0, 0, -1200, 5, 10, 10, 0, 0, 0, 0 };
 constexpr std::array<int, controls> maximum { 65536, 65536, 128, 1, 1200, 200, 1000, 1000, 1, 160, 160, 160 };
+// The plugin keeps whatever raw value a saved state or ProcessParam gives it (no clamp to the knob ranges above,
+// REA_rodada78 §1). LYNX does the same inside these wider bounds, which only keep the arithmetic finite and defined
+// (a zero band width or time divides by zero, a huge scale overflows the integer rounding); invert and hold are
+// tests (> 0, != 0) and take any value.
+constexpr std::array<int, controls> guardMin { 0, 0, 0, INT_MIN, -120000, 1, 1, 1, INT_MIN, -1280, -1280, -1280 };
+constexpr std::array<int, controls> guardMax { 262144, 262144, 512, INT_MAX, 120000, 2000, 1000000, 1000000, INT_MAX, 1280, 1280, 1280 };
 
 const double ln2Per1200 = dmath::ln (2.0) / 1200.0; // cents ↔ ln
 const double halfLn2 = dmath::ln (2.0) / 2.0;
@@ -80,6 +87,13 @@ float hzOf (float cents) noexcept { return (float) (dmath::exp ((double) (cents 
 
 int controlMin (int c) noexcept { return c >= 0 && c < controls ? minimum[(std::size_t) c] : 0; }
 int controlMax (int c) noexcept { return c >= 0 && c < controls ? maximum[(std::size_t) c] : 0; }
+int rawFromKnob (float knob, int c, int savedRaw) noexcept
+{
+    const auto lo = controlMin (c), hi = controlMax (c);
+    const auto raw = lo + (int) std::lround (std::clamp (knob, 0.0f, 1.0f) * (float) (hi - lo));
+    return raw == std::clamp (savedRaw, lo, hi) ? savedRaw : raw;
+}
+
 int controlDefault (int c) noexcept { return c >= 0 && c < controls ? State().c[(std::size_t) c] : 0; }
 
 bool validBands (int n) noexcept
@@ -169,7 +183,7 @@ void Engine::setState (const State& s) noexcept
     st.order = std::clamp (s.order, 1, maxOrder);
     st.listen = std::clamp (s.listen, 0, 2);
     for (int c = 0; c < controls; ++c)
-        st.c[(std::size_t) c] = std::clamp (s.c[(std::size_t) c], minimum[(std::size_t) c], maximum[(std::size_t) c]);
+        st.c[(std::size_t) c] = std::clamp (s.c[(std::size_t) c], guardMin[(std::size_t) c], guardMax[(std::size_t) c]);
     if (clear)
         reset();
     configure();
