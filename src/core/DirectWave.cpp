@@ -1399,6 +1399,8 @@ struct Engine::Impl
         cents = cents + (float) bendRange * bend;
         cents = cents + v.cents;
         double speed = powCrt (2.0, (double) cents / 1200.0) * (double) z.rate / (double) sr;
+        if (! (speed < 32768.0)) // (absurd pitches: keep the 32.32 step defined)
+            speed = 32768.0;
         v.speed = speed;
         v.step = (std::int64_t) (speed * kOne32);
 
@@ -1448,9 +1450,13 @@ struct Engine::Impl
             const auto idx = (std::size_t) i + 256;
             if (zs->bits == 32)
             {
+                if ((std::size_t) ch >= zs->f32.size())
+                    return 0.0f;
                 const auto& a = zs->f32[(std::size_t) ch];
                 return idx < a.size() ? a[idx] : 0.0f;
             }
+            if ((std::size_t) ch >= zs->i16.size())
+                return 0.0f;
             const auto& a = zs->i16[(std::size_t) ch];
             return idx < a.size() ? (float) a[idx] * kInt16 : 0.0f;
         };
@@ -1460,9 +1466,13 @@ struct Engine::Impl
             const auto idx = (std::size_t) i + 256;
             if (zs->bits == 32)
             {
+                if ((std::size_t) ch >= zs->f32.size())
+                    return 0.0f;
                 const auto& a = zs->f32[(std::size_t) ch];
                 return idx < a.size() ? a[idx] : 0.0f;
             }
+            if ((std::size_t) ch >= zs->i16.size())
+                return 0.0f;
             const auto& a = zs->i16[(std::size_t) ch];
             return idx < a.size() ? (float) a[idx] : 0.0f;
         };
