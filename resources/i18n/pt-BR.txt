@@ -1446,3 +1446,4 @@ countries: br
 "Clear" = "Limpar"
 "Remove the events of the selection (or of the whole pattern)" = "Remove os eventos da seleção (ou do pattern inteiro)"
 "No events yet for {0}. Draw to add them; they play with the pattern." = "Ainda não há eventos para {0}. Desenhe para adicioná-los; eles tocam com o pattern."
+"Edit events: {0}" = "Editar eventos: {0}"

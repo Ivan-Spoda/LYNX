@@ -14629,6 +14629,12 @@ TEST (event_editor_lanes)
     eventedit::removeEmptyLanes (p);
     CHECK (p.events.size() == 1);
 
+    // undo label
+    auto before = Song::makeDefault();
+    auto after = before;
+    after.patterns[0].events.push_back ({ vol, { { 0, 0.5f } } });
+    CHECK (describeChangeText (before, after) == "Edit events: " + after.patterns[0].name);
+
     // channel removal re-targets the lanes like automations
     auto song = Song::makeDefault();
     song.patterns[0].events.push_back ({ { AutomationTargetKind::channelVolume, 3 }, { { 0, 0.5f } } });
