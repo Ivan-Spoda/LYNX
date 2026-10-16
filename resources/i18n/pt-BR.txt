@@ -1449,3 +1449,5 @@ countries: br
 "Open keys.json" = "Abrir keys.json"
 "Assign anyway" = "Atribuir mesmo assim"
 "Manage shortcuts" = "Gerenciar atalhos"
+"(open an output device first)" = "(abra um dispositivo de saída antes)"
+"(choose)" = "(escolha)"

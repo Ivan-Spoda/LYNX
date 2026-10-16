@@ -277,7 +277,7 @@ class AudioPage final : public ScrollingPage,
                         private juce::Timer
 {
 public:
-    AudioPage (AudioEngine& e, bool keep) : engine (e), devices (e.getDeviceManager()), persistent (keep)
+    AudioPage (AudioEngine& e) : engine (e), devices (e.getDeviceManager())
     {
         for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
@@ -296,12 +296,16 @@ public:
             l->setJustificationType (juce::Justification::centredLeft);
         }
         for (auto* b : { &driverBox, &outputBox, &inputBox, &rateBox, &bufferBox })
+        {
             styleCombo (*b);
+            b->setTextWhenNoChoicesAvailable (tr ("(open an output device first)"));
+            b->setTextWhenNothingSelected (tr ("(choose)"));
+        }
 
         driverBox.onChange = [this] {
             if (updating)
                 return;
-            const auto types = devices.getAvailableDeviceTypes();
+            auto& types = devices.getAvailableDeviceTypes();
             const auto index = driverBox.getSelectedId() - 1;
             if (juce::isPositiveAndBelow (index, types.size()))
                 devices.setCurrentAudioDeviceType (types[index]->getTypeName(), true);
@@ -365,7 +369,7 @@ private:
         inputBox.setBounds (r.row (inputLabel, 0));
         rateBox.setBounds (r.row (rateLabel, 160));
         bufferBox.setBounds (r.row (bufferLabel, 260));
-        bufferNote.setBounds (r.indented (30).translated (0, -6));
+        bufferNote.setBounds (r.indented (18).translated (0, -6));
         {
             auto row = r.indented();
             panelButton.setBounds (row.removeFromLeft (170));
@@ -399,7 +403,7 @@ private:
         const auto setup = devices.getAudioDeviceSetup();
 
         driverBox.clear (juce::dontSendNotification);
-        const auto& types = devices.getAvailableDeviceTypes();
+        auto& types = devices.getAvailableDeviceTypes();
         for (int i = 0; i < types.size(); ++i)
         {
             driverBox.addItem (types[i]->getTypeName(), i + 1);
@@ -413,6 +417,8 @@ private:
         inputBox.setSelectedId (1, juce::dontSendNotification);
         if (type != nullptr)
         {
+            if (type->getDeviceNames (false).isEmpty())
+                type->scanForDevices(); // (a driver type not opened yet this session)
             const auto outs = type->getDeviceNames (false);
             for (int i = 0; i < outs.size(); ++i)
             {
@@ -478,7 +484,7 @@ private:
         status.setColour (juce::Label::textColourId, theme::colour::textPrimary);
         const auto xruns = device->getXRunCount();
         load.setText (tr ("Audio CPU load: {0}%", { juce::String (juce::roundToInt (devices.getCpuUsage() * 100.0)) })
-                          + (xruns > 0 ? "   ·   " + tr ("{0} dropouts (buffer underruns) so far", { juce::String (xruns) }) : juce::String()),
+                          + (xruns > 0 ? juce::String::fromUTF8 ("   \xc2\xb7   ") + tr ("{0} dropouts (buffer underruns) so far", { juce::String (xruns) }) : juce::String()),
                       juce::dontSendNotification);
         load.setColour (juce::Label::textColourId, xruns > 0 ? theme::colour::warning : theme::colour::textSecondary);
     }
@@ -488,7 +494,6 @@ private:
 
     AudioEngine& engine;
     juce::AudioDeviceManager& devices;
-    bool persistent;
     bool updating = false;
     juce::String error;
     SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
@@ -605,8 +610,10 @@ public:
         styleNote (velocityNote, tr ("For notes from MIDI devices (the typing keyboard always plays at the Piano Roll's velocity)."));
 
         styleLabel (typeLabel, tr ("Controller type"));
+        typeLabel.setJustificationType (juce::Justification::topLeft);
         styleLabel (typeValue, tr ("Generic controller: link a knob or fader with a control's right-click menu > Link to MIDI controller."), false);
         typeValue.setMinimumHorizontalScale (1.0f);
+        typeValue.setJustificationType (juce::Justification::topLeft);
         styleToggle (pickup, tr ("Pickup (takeover mode)"));
         pickup.onClick = [this] {
             auto p = engine.getMidiPrefs();
@@ -616,6 +623,7 @@ public:
         styleNote (pickupNote, tr ("A controller moves a parameter only after reaching its current value, so nothing jumps."));
 
         styleLabel (linksLabel, tr ("Links in this project"));
+        linksLabel.setJustificationType (juce::Justification::topLeft);
         links.setModel (this);
         links.setRowHeight (24);
         links.setColour (juce::ListBox::backgroundColourId, theme::colour::bg0);
@@ -667,11 +675,16 @@ private:
         velocityNote.setBounds (r.indented (16).translated (0, -6));
 
         r.section (controllersTitle);
-        typeValue.setBounds (r.row (typeLabel, 0, 40));
+        {
+            auto row = r.row (typeLabel, 0, 36);
+            typeLabel.setBounds (typeLabel.getBounds().withTrimmedTop (6));
+            typeValue.setBounds (row.withTrimmedTop (6));
+        }
         pickup.setBounds (r.full (24));
         pickupNote.setBounds (r.full (16).translated (0, -6));
         {
             auto row = r.row (linksLabel, 0, 110);
+            linksLabel.setBounds (linksLabel.getBounds().withTrimmedTop (4));
             auto buttons = row.removeFromRight (120);
             row.removeFromRight (8);
             links.setBounds (row);
@@ -753,7 +766,7 @@ private:
         const auto& link = list[(std::size_t) row];
         g.setFont (theme::font (theme::type::body));
         g.setColour (theme::colour::info);
-        const auto source = "CC " + juce::String (link.cc) + (link.channel >= 0 ? " · " + tr ("ch. {0}", { juce::String (link.channel + 1) }) : juce::String());
+        const auto source = "CC " + juce::String (link.cc) + (link.channel >= 0 ? juce::String::fromUTF8 (" \xc2\xb7 ") + tr ("ch. {0}", { juce::String (link.channel + 1) }) : juce::String());
         g.drawText (source, 10, 0, 110, height, juce::Justification::centredLeft);
         g.setColour (theme::colour::textPrimary);
         g.drawText (describeAutomationTarget (engine, link.target), 124, 0, width - 134, height, juce::Justification::centredLeft, true);
@@ -794,7 +807,8 @@ std::unique_ptr<juce::Component> makeGeneralPage (AudioEngine& engine, const Set
 
 std::unique_ptr<juce::Component> makeAudioPage (AudioEngine& engine, bool persistent)
 {
-    return std::make_unique<AudioPage> (engine, persistent);
+    juce::ignoreUnused (persistent);
+    return std::make_unique<AudioPage> (engine);
 }
 
 std::unique_ptr<juce::Component> makeMidiPage (AudioEngine& engine, const SettingsHooks& hooks, bool persistent)

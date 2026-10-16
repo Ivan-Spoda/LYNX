@@ -58,7 +58,7 @@ class PluginManagerPanel final : public juce::Component,
 {
 public:
     PluginManagerPanel (AudioEngine& e, bool keep, std::function<void()> folders)
-        : engine (e), host (e.getPluginHost()), persistent (keep), onFolders (std::move (folders))
+        : host (e.getPluginHost()), persistent (keep), onFolders (std::move (folders))
     {
         search.setTextToShowWhenEmpty (tr ("Search name, vendor, format or file"), theme::colour::textDisabled);
         search.setFont (theme::font (theme::type::body));
@@ -118,6 +118,7 @@ public:
         addChildComponent (progress);
         scanStatus.setFont (theme::font (theme::type::small));
         scanStatus.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        scanStatus.setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (scanStatus);
 
         scanNew.onClick = [this] { startScan (false); };
@@ -166,8 +167,11 @@ public:
         stop.setBounds (bottom.removeFromLeft (80));
         area.removeFromBottom (8);
         auto status = area.removeFromBottom (22);
-        progress.setBounds (status.removeFromLeft (200).reduced (0, 5));
-        status.removeFromLeft (10);
+        if (progress.isVisible())
+        {
+            progress.setBounds (status.removeFromLeft (200).reduced (0, 5));
+            status.removeFromLeft (10);
+        }
         scanStatus.setBounds (status);
         area.removeFromBottom (6);
         table.setBounds (area);
@@ -414,7 +418,11 @@ private:
     {
         const auto state = persistent ? host.backgroundScan() : PluginHost::ScanState {};
         progressValue = state.progress;
-        progress.setVisible (state.running);
+        if (progress.isVisible() != state.running)
+        {
+            progress.setVisible (state.running);
+            resized();
+        }
         stop.setEnabled (state.running);
         scanNew.setEnabled (persistent && ! state.running);
         rescanAll.setEnabled (persistent && ! state.running);
@@ -442,7 +450,6 @@ private:
             reload(); // show what was found so far
     }
 
-    AudioEngine& engine;
     PluginHost& host;
     bool persistent;
     std::function<void()> onFolders;
