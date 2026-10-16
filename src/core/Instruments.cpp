@@ -1389,22 +1389,28 @@ public:
             sample = zones.front().sample;
     }
 
-    // the zone for the key/velocity; several covering the same note take turns (round-robin, like
-    // FPC's cycled layers); if none covers it, the one with the nearest root key
+    // the zone for the key/velocity; several covering the same note take turns like FPC's "cycle" layers (REA_rodada69
+    // §4: among the zones covering the note, in order, the one after the last chosen, wrapping); if none covers it, the
+    // one with the nearest root key. The velocity index is FL's round(velocity · 128), at most 127.
     const LoadedZone* zoneFor (int key, float velocity) noexcept
     {
         if (zones.empty())
             return nullptr;
 
-        const auto vel = (int) std::lround (std::clamp (velocity, 0.0f, 1.0f) * 127.0f);
+        const auto vel = std::min (127, (int) std::nearbyint (std::clamp (velocity, 0.0f, 1.0f) * 128.0f));
         const LoadedZone* nearest = nullptr;
-        const LoadedZone* matches[16] {};
-        int matchCount = 0;
+        int matches[16] {};
+        int matchCount = 0, lastAt = -1;
 
-        for (const auto& z : zones)
+        for (int i = 0; i < (int) zones.size(); ++i)
         {
+            const auto& z = zones[(std::size_t) i];
             if (key >= z.zone.lowKey && key <= z.zone.highKey && vel >= z.zone.lowVelocity && vel <= z.zone.highVelocity && matchCount < 16)
-                matches[matchCount++] = &z;
+            {
+                if (i == lastZone)
+                    lastAt = matchCount;
+                matches[matchCount++] = i;
+            }
 
             if (nearest == nullptr || std::abs (z.zone.rootKey - key) < std::abs (nearest->zone.rootKey - key))
                 nearest = &z;
@@ -1413,7 +1419,9 @@ public:
         if (matchCount == 0)
             return nearest;
 
-        return matches[(roundRobin++) % (unsigned) matchCount];
+        const auto pick = matchCount == 1 || lastAt + 1 >= matchCount ? 0 : lastAt + 1;
+        lastZone = matches[pick];
+        return &zones[(std::size_t) lastZone];
     }
 
     void prepare (double sr) noexcept override
@@ -1952,7 +1960,7 @@ public:
     void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
 
 private:
-    unsigned roundRobin = 0;        // turn of the next overlapping layer
+    int lastZone = -1;              // the zone the last note chose (overlapping layers cycle from it)
     double lastRate = 0.0; // read speed of the last note (where porta starts from)
     std::atomic<int> filterType { 0 };
     float filterCutoff = -1.0f, filterResonance = -1.0f; // values the coefficients were computed with

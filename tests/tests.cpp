@@ -2327,6 +2327,52 @@ TEST (fl_sampler_volume_envelope_steps_per_tick)
     CHECK (l[39999] == 0.0f && sampler->idle());
 }
 
+// FPC's "cycle" layers (REA_rodada69 §4): among the layers covering the velocity, in order, the one after the last
+// chosen, wrapping; FL's velocity index is round(v·128). Slicex's master volume uses FL's L11 law (§5).
+TEST (fl_fpc_cycle_layers_and_slicex_master_volume)
+{
+    auto level = [] (float v) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->sampleRate = 48000.0;
+        d->left.assign (4800, v);
+        return d;
+    };
+    // A covers 0…63, B 32…95, C 64…127 (all keys)
+    auto inst = lynx::makeZonedSampler ({ { { "a.wav", 60, 0, 127, 0, 63 }, level (0.1f) },
+                                          { { "b.wav", 60, 0, 127, 32, 95 }, level (0.2f) },
+                                          { { "c.wav", 60, 0, 127, 64, 127 }, level (0.3f) } });
+    inst->prepare (48000.0);
+    inst->configure (lynx::ChannelDef {}, 120.0);
+    auto play = [&] (float velocity) {
+        inst->allNotesOff();
+        std::vector<float> l (2000), r (2000);
+        inst->render (l.data(), r.data(), 2000, 1.0f, 1.0f);
+        std::fill (l.begin(), l.end(), 0.0f);
+        inst->noteOn (60, velocity);
+        inst->render (l.data(), r.data(), 10, 1.0f, 1.0f);
+        return l[5] / velocity;
+    };
+    auto which = [] (float x) { return (int) std::lround (x / 0.1f / std::cos (0.25f * 3.14159265f) / 1.41421356f); };
+    CHECK (which (play (64.0f / 128.0f)) == 2); // candidates B, C: first B
+    CHECK (which (play (64.0f / 128.0f)) == 3); // then C
+    CHECK (which (play (40.0f / 128.0f)) == 1); // candidates A, B: C is not among them → the first, A
+    CHECK (which (play (40.0f / 128.0f)) == 2); // then B
+    CHECK (which (play (64.0f / 128.0f)) == 3); // B was last → C
+
+    // Slicex state: version, 8 master values (volume 16000), options and UI state, deck A referencing a file
+    std::vector<std::uint8_t> state (4 + 32 + 47 + 12, 0);
+    const std::int32_t version = 0x00060003, volume = 16000;
+    std::memcpy (state.data(), &version, 4);
+    std::memcpy (state.data() + 4 + 8, &volume, 4);
+    state.push_back (1);
+    state.push_back (5);
+    for (char ch : std::string ("x.wav"))
+        state.push_back ((std::uint8_t) ch);
+    const auto sliced = lynx::slicex (state);
+    CHECK (sliced.has_value() && sliced->path == "x.wav");
+    CHECK (sliced && std::abs (sliced->gain - (float) ((std::pow (11.0, 1.25) - 1.0) / 10.0)) < 1e-5f);
+}
+
 TEST (sampler_plays_pitched_one_shot)
 {
     // 1000-frame ramp sample: the position can be measured from the amplitude

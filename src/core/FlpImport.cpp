@@ -667,7 +667,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope on: the note ends
 
             // FL's own articulator (delay, hold, tensions, tick steps; REA_rodada69 §3) from the record as stored
-            if (env.rawSize >= 68)
+            if (env.rawSize >= 68 && c.type == flp::ChannelType::sampler)
             {
                 def.sampler.flVolumeEnvelope.resize (18);
                 std::memcpy (def.sampler.flVolumeEnvelope.data(), env.raw.data(), 68);
@@ -808,6 +808,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::sampler;
                     def.samplePath = path;
                     def.sampler.pitch = std::clamp (def.sampler.pitch + sliced->pitchCents / 100.0f, -24.0f, 24.0f);
+
+                    // Slicex's master volume (REA_rodada69 §5): a single full-range zone carries the gain
+                    if (sliced->gain != 1.0f && ! path.empty())
+                    {
+                        SampleZone zone;
+                        zone.path = path;
+                        zone.gain = sliced->gain;
+                        def.zones = { zone };
+                    }
 
                     if (frames > 0)
                         for (auto p : positions)
