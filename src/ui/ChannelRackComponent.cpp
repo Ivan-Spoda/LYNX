@@ -63,6 +63,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::drumaxx: return "Drumaxx";
         case InstrumentKind::slayer: return "FL Slayer";
         case InstrumentKind::fruitydance: return "Fruity Dance";
+        case InstrumentKind::directwave: return "DirectWave";
     }
     return "?";
 }

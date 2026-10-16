@@ -8,7 +8,7 @@
 Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run well on any PC.</p>
 
 <p align="center">
-  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-0.1.3%20alpha-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Download LYNX for Windows"></a>
+  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-0.1.4%20alpha-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Download LYNX for Windows"></a>
 </p>
 
 <p align="center">
@@ -165,8 +165,8 @@ LYNX reads the `.flp` format directly and converts everything that has an equiva
 
 - **Structure:** channels, real samples (including the Ogg Vorbis WAVs and WavPack files shipped with FL), patterns, slide/porta notes, every arrangement, markers, time-signature changes, automation and controller links.
 - **Mixer:** routing, levels, sidechains, track EQ and native effects with their saved settings (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 3, Maximus, Gross Beat, Effector, Love Philter, Frequency Splitter, Patcher, Pitcher, Vocoder and more).
-- **Generators:** 3x Osc, FPC, DirectWave, FL Keys, Slicex, Fruity Slicer and Wave Traveller become samplers; **Sakura, Drumpad, BooBass, Fruity DrumSynth Live, GMS, Morphine and Toxic Biohazard run on engines rebuilt from FL's own** (checked against FL's DLLs; BooBass, DrumSynth, GMS, Morphine and Toxic Biohazard read their built-in sounds from *your* FL installation, never shipped with LYNX); **Sytrus, Harmless, Harmor and Ogun run on their own engines rebuilt from the plugin state**; Kepler, Autogun, MiniSynth, DX10, BassDrum and others run on the built-in synth, with timbres rebuilt from the curves and harmonic tables stored in the project.
-- **Exact native effects:** Effector (Filter, Flanger, Phaser), Fruity Squeeze, Vintage Phaser and Pitcher reproduce FL's algorithms; how each one was decoded is documented in [`docs/analise/`](docs/analise/).
+- **Generators on FL's own engines** (checked against FL's DLLs, most of them bit for bit): 3x Osc, SimSynth, MiniSynth, DX10, Kepler, PoiZone, Toxic Biohazard, Transistor Bass, Autogun, Plucked!, BeepMap, Sawer, Granulizer, Drumaxx, FL Slayer, FL Keys, Fruit Kick, Kick, BassDrum, Sakura, Drumpad, BooBass, Fruity DrumSynth Live, GMS, Morphine; Sytrus, Harmless, Harmor and Ogun on engines rebuilt from the plugin state. Built-in sounds and tables are read from *your* FL installation, never shipped with LYNX. FPC, DirectWave, Slicex, Fruity Slicer and Wave Traveller play as samplers through FL's own interpolators.
+- **Exact native effects:** Parametric EQ 2, EQUO, Limiter, Compressor, Multiband Compressor, Maximus, Soundgoodizer, Reeverb 2, LuxeVerb, Convolver, Delay 3, Delay Bank, the chorus family, Flangus, Flanger, Fast Dist, WaveShaper, Soft Clipper, Stereo Shaper/Enhancer, Transient Processor, Frequency Splitter, Fast LP, Free Filter, Fruity Filter, Pitch Shifter, Love Philter, Fruity Vocoder, Vocodex, Hardcore, Distructor, Multiband Delay, Gross Beat, Effector, Vintage Phaser, Pitcher and more reproduce FL's algorithms; how each one was decoded is documented in [`docs/analise/`](docs/analise/).
 - **Third-party plugins:** VST3/CLAP plugins inside the Fruity Wrapper are swapped for the same installed plugin, preset included.
 
 A report lists what was converted, what is approximated and what was left out. FLEX packs are encrypted and are never opened (the channel gets a synth patch chosen by preset name).

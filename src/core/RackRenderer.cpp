@@ -3,6 +3,7 @@
 #include "core/WorkerPool.h"
 #include "core/Denormals.h"
 #include "core/FlKeys.h"
+#include "core/DirectWave.h"
 #include "core/NewtoneFx.h"
 
 #include <algorithm>
@@ -98,6 +99,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind
             && (kind != InstrumentKind::granulizer || previous->song.channels[i].samplePath == channel.samplePath)
+            && (kind != InstrumentKind::directwave
+                || (previous->song.channels[i].zones == channel.zones && previous->song.channels[i].modelParams == channel.modelParams
+                    && previous->song.channels[i].pluginState == channel.pluginState && previous->sampleRate == sampleRate))
             && ((kind != InstrumentKind::sampler && kind != InstrumentKind::audioClip && kind != InstrumentKind::flkeys)
                 || (previous->song.channels[i].samplePath == channel.samplePath && previous->song.channels[i].zones == channel.zones
                     && previous->song.channels[i].modelParams == channel.modelParams
@@ -128,6 +132,26 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (kind == InstrumentKind::flkeys)
         {
             std::shared_ptr<Instrument> instrument = flkeys::makeFlKeysInstrument (flKeysWavetable (channel, samples));
+            instrument->prepare (sampleRate);
+            instrument->configure (channel, song.bpm);
+            state->instruments.push_back (std::move (instrument));
+            continue;
+        }
+
+        // DirectWave (REA_rodada72): the zones' samples as the plugin holds them
+        if (kind == InstrumentKind::directwave)
+        {
+            const auto formats = dw::decodeFormats (channel.modelParams);
+            std::vector<std::shared_ptr<const dw::ZoneSamples>> zs;
+            for (std::size_t z = 0; z < channel.zones.size(); ++z)
+            {
+                std::shared_ptr<const dw::ZoneSamples> s;
+                if (samples && ! channel.zones[z].path.empty())
+                    if (const auto data = samples (channel.zones[z].path))
+                        s = dw::zoneSamples (*data, z < formats.size() && formats[z]);
+                zs.push_back (std::move (s));
+            }
+            std::shared_ptr<Instrument> instrument = dw::makeDirectWaveInstrument (std::move (zs));
             instrument->prepare (sampleRate);
             instrument->configure (channel, song.bpm);
             state->instruments.push_back (std::move (instrument));
