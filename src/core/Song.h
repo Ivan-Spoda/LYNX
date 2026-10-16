@@ -613,12 +613,23 @@ struct Arrangement
     std::vector<Marker> markers;           // sorted by tick (stay here even for the current arrangement)
 };
 
+// The project's credits (FL's Settings › Info page): shown and edited in Settings › Info, kept in .lynx, imported from .flp.
+struct ProjectInfo
+{
+    std::string title, author, genre, url, comments;
+    bool showOnOpen = false; // open Settings › Info when the project is opened
+
+    bool empty() const noexcept { return title.empty() && author.empty() && genre.empty() && url.empty() && comments.empty() && ! showOnOpen; }
+    bool operator== (const ProjectInfo&) const = default;
+};
+
 struct Song
 {
     double bpm = 130.0;
     int beatsPerBar = 4;
     float swing = 0.0f; // 0..1: delays off-beat sixteenth notes (like the swing of FL's Channel Rack)
     float masterPitch = 0.0f; // cents, -1200..1200: shifts every note of the built-in instruments (the toolbar's master pitch)
+    ProjectInfo info;
     std::vector<ChannelDef> channels;
     std::vector<Pattern> patterns;
     int currentPattern = 0;

@@ -34,6 +34,8 @@
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
 #include "core/FlPluginDb.h"
+#include "core/MissingFiles.h"
+#include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
@@ -14079,4 +14081,158 @@ TEST (newtone_rack_follows_transport)
 }
 #include "HardcoreTests.inc"
 #include "DistructorTests.inc"
+
+// --- missing files (core/MissingFiles.h) ------------------------------------------------------------------------
+
+TEST (missing_files_names_and_scores)
+{
+    CHECK (lynx::pathFileName ("C:\\Samples\\Drums\\Kick 01.wav") == "Kick 01.wav");
+    CHECK (lynx::pathFileName ("/home/u/loops/beat.flac") == "beat.flac");
+    CHECK (lynx::pathFileName ("D:/mixed\\sep/x.wav/") == "x.wav");
+    CHECK (lynx::pathFileName ("plain.wav") == "plain.wav");
+    CHECK (lynx::relocationScore ("C:\\Old\\Drums\\Kicks\\kick.wav", "/new/Drums/Kicks/KICK.WAV") == 3);
+    CHECK (lynx::relocationScore ("C:\\Old\\Drums\\Kicks\\kick.wav", "/new/other/kick.wav") == 1);
+    CHECK (lynx::relocationScore ("C:\\Old\\kick.wav", "/new/kick2.wav") == 0);
+}
+
+TEST (missing_files_find_in_song)
+{
+    lynx::Song song;
+    lynx::ChannelDef a, b, c, d, e;
+    a.name = "Kick", a.instrument = lynx::InstrumentKind::sampler, a.samplePath = "C:\\gone\\kick.wav";
+    b.name = "Vox", b.instrument = lynx::InstrumentKind::audioClip, b.samplePath = "C:\\gone\\vox.wav";
+    c.name = "Here", c.instrument = lynx::InstrumentKind::sampler, c.samplePath = "C:\\here\\snare.wav";
+    d.name = "GMS", d.instrument = lynx::InstrumentKind::gms, d.samplePath = "C:\\FL\\gms waves"; // installation data: not listed
+    e.name = "Kick 2", e.instrument = lynx::InstrumentKind::sampler, e.samplePath = "c:/GONE/KICK.wav"; // same file, other spelling
+    lynx::SampleZone z;
+    z.path = "C:\\gone\\piano_c4.wav";
+    a.zones.push_back (z);
+    song.channels = { a, b, c, d, e };
+    song.mixer.resize (3);
+    lynx::EffectSlot fx;
+    fx.samplePath = "C:\\gone\\tune.wav";
+    lynx::EffectSlot parallel;
+    parallel.branches.push_back ({ { fx }, 1.0f });
+    song.mixer[2].effects.push_back (parallel);
+    song.mixer[2].name = "Lead";
+
+    const auto exists = [] (const std::string& p) { return p.find ("here") != std::string::npos || p.find ("FL") != std::string::npos; };
+    auto missing = lynx::findMissingSamples (song, exists);
+    CHECK (missing.size() == 4);
+    CHECK (missing.size() == 4 && missing[0].path == "C:\\gone\\kick.wav" && missing[0].usedBy.size() == 2 && missing[0].usedBy[1] == "Kick 2");
+    CHECK (missing.size() == 4 && missing[1].path == "C:\\gone\\piano_c4.wav" && missing[1].usedBy[0] == "Kick");
+    CHECK (missing.size() == 4 && missing[2].usedBy[0] == "Audio clip: Vox");
+    CHECK (missing.size() == 4 && missing[3].usedBy[0] == "Lead: effect");
+
+    // candidates from a search: the deeper path match wins; one stays missing
+    const std::vector<std::string> hits { "/lib/other/kick.wav", "/lib/gone/kick.wav", "/lib/x/vox.wav", "/lib/y/tune.wav" };
+    CHECK (lynx::relocateByName (missing, hits) == 3);
+    CHECK (missing[0].found == "/lib/gone/kick.wav");
+    CHECK (missing[1].found.empty());
+    missing[3].skipped = true; // skipped: not applied
+    const auto map = lynx::relocationMap (missing);
+    CHECK (map.size() == 2);
+    CHECK (lynx::applyRelocations (song, map) == 3); // both spellings of kick.wav + vox
+    CHECK (song.channels[0].samplePath == "/lib/gone/kick.wav" && song.channels[4].samplePath == "/lib/gone/kick.wav");
+    CHECK (song.channels[1].samplePath == "/lib/x/vox.wav");
+    CHECK (song.channels[2].samplePath == "C:\\here\\snare.wav");
+    CHECK (song.mixer[2].effects[0].branches[0].chain[0].samplePath == "C:\\gone\\tune.wav");
+    lynx::Song copy = song;
+    CHECK (lynx::applyRelocations (copy, { { "C:\\gone\\tune.wav", "/t.wav" } }) == 1 && copy.mixer[2].effects[0].branches[0].chain[0].samplePath == "/t.wav");
+}
+
+TEST (missing_files_folder_search)
+{
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / "lynx-missing-test";
+    fs::remove_all (root);
+    fs::create_directories (root / "a" / "deep" / "Kicks");
+    fs::create_directories (root / "b");
+    for (const auto& f : { root / "a" / "deep" / "Kicks" / "Kick.WAV", root / "b" / "kick.wav", root / "b" / "hat.wav", root / "b" / "unrelated.wav" })
+        std::ofstream (f) << "x";
+
+    std::vector<lynx::MissingFile> missing { { "C:\\Old\\Kicks\\kick.wav", { "Kick" }, {}, false }, { "C:\\Old\\hat.wav", { "Hat" }, {}, false },
+                                             { "C:\\Old\\ride.wav", { "Ride" }, {}, false } };
+    int listed = 0;
+    auto list = [&] (const std::string& folder, const std::function<bool (const std::string&, bool)>& onEntry) {
+        for (const auto& entry : fs::directory_iterator (folder))
+        {
+            ++listed;
+            if (! onEntry (entry.path().string(), entry.is_directory()))
+                return;
+        }
+    };
+    const auto hits = lynx::searchFolderForMissing (missing, root.string(), list);
+    CHECK (hits.size() == 3);
+    CHECK (lynx::relocateByName (missing, hits) == 2);
+    CHECK (missing[0].found.find ("Kicks") != std::string::npos); // the copy in a "Kicks" folder matches better
+    CHECK (missing[1].found.find ("hat.wav") != std::string::npos);
+    CHECK (missing[2].found.empty());
+
+    // a bounded walk stops early; a cancelled one finds nothing
+    CHECK (lynx::searchFolderForMissing (missing, root.string(), list, 2).size() <= 1);
+    CHECK (lynx::searchFolderForMissing (missing, root.string(), list, 0, [] { return true; }).empty());
+    // nothing left to find: no walk at all
+    missing[2].skipped = true;
+    listed = 0;
+    CHECK (lynx::searchFolderForMissing (missing, root.string(), list).empty() && listed == 0);
+    fs::remove_all (root);
+}
+
+TEST (missing_files_folder_list)
+{
+    const auto folders = lynx::parseFolderList ("C:\\A\r\n  C:\\B  \n\nc:\\a\nD:/x\n");
+    CHECK (folders.size() == 3 && folders[0] == "C:\\A" && folders[1] == "C:\\B" && folders[2] == "D:/x");
+    auto list = folders;
+    lynx::rememberFolder (list, "D:\\x");
+    CHECK (list.size() == 3 && list[0] == "D:\\x" && list[1] == "C:\\A");
+    lynx::rememberFolder (list, "E:\\new", 2);
+    CHECK (list.size() == 2 && list[0] == "E:\\new" && list[1] == "D:\\x");
+    CHECK (lynx::parseFolderList (lynx::folderListText (list)) == list);
+}
+
+TEST (missing_files_flp_report_and_relocation)
+{
+    // an .flp sampler whose sample is gone: listed with its channel; a relocation map makes the import use the copy
+    flp::Project project;
+    flp::Channel ch;
+    ch.index = 0;
+    ch.type = flp::ChannelType::sampler;
+    ch.name = "Snare";
+    ch.samplePath = "C:\\Producer\\Packs\\snare 7.wav";
+    project.channels.push_back (ch);
+
+    lynx::FlpImportOptions options;
+    options.fileExists = [] (const std::string& p) { return p == "/found/snare 7.wav"; };
+    lynx::FlpImportReport report;
+    options.report = &report;
+    auto song = lynx::importFlp (project, options);
+    CHECK (report.missingFiles.size() == 1);
+    CHECK (report.missingFiles.size() == 1 && report.missingFiles[0].path == "C:\\Producer\\Packs\\snare 7.wav" && report.missingFiles[0].usedBy[0] == "Snare");
+    CHECK (song.channels.size() == 1 && song.channels[0].samplePath.empty());
+
+    lynx::FlpImportReport again;
+    options.report = &again;
+    options.relocations = { { "C:\\Producer\\Packs\\snare 7.wav", "/found/snare 7.wav" } };
+    song = lynx::importFlp (project, options);
+    CHECK (again.missingFiles.empty());
+    CHECK (song.channels.size() == 1 && song.channels[0].samplePath == "/found/snare 7.wav" && song.channels[0].instrument == lynx::InstrumentKind::sampler);
+}
+
+TEST (project_info_history_and_flp_import)
+{
+    lynx::Song a;
+    auto b = a;
+    b.info.title = "Night Drive";
+    CHECK (lynx::describeChangeText (a, b) == "Project info");
+    auto c = a;
+    c.beatsPerBar = 3;
+    CHECK (lynx::describeChangeText (a, c) == "Time signature");
+
+    flp::Project project;
+    project.title = "Song", project.artist = "Me", project.genre = "House", project.url = "https://x", project.comments = "line 1\rline 2";
+    const auto song = lynx::importFlp (project);
+    CHECK (song.info.title == "Song" && song.info.author == "Me" && song.info.genre == "House" && song.info.url == "https://x");
+    CHECK (song.info.comments == "line 1\nline 2");
+}
 #include "UiFixTests.inc"

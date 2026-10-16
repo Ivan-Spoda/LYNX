@@ -477,6 +477,22 @@ juce::String toJson (const Song& song)
         root->setProperty ("swing", juce::roundToInt (song.swing * 1000.0f) / 1000.0);
     if (song.masterPitch != 0.0f)
         root->setProperty ("masterPitch", (double) song.masterPitch);
+    if (! song.info.empty())
+    {
+        auto info = std::make_unique<juce::DynamicObject>();
+        auto set = [&info] (const char* key, const std::string& value) {
+            if (! value.empty())
+                info->setProperty (key, juce::String::fromUTF8 (value.c_str()));
+        };
+        set ("title", song.info.title);
+        set ("author", song.info.author);
+        set ("genre", song.info.genre);
+        set ("url", song.info.url);
+        set ("comments", song.info.comments);
+        if (song.info.showOnOpen)
+            info->setProperty ("showOnOpen", true);
+        root->setProperty ("info", juce::var (info.release()));
+    }
     root->setProperty ("currentPattern", song.currentPattern);
 
     juce::Array<juce::var> channels;
@@ -873,6 +889,16 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.beatsPerBar = juce::jlimit (1, 32, (int) root.getProperty ("beatsPerBar", 4));
     song.swing = juce::jlimit (0.0f, 1.0f, (float) (double) root.getProperty ("swing", 0.0));
     song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
+    if (const auto info = root.getProperty ("info", {}); info.isObject())
+    {
+        auto get = [&info] (const char* key) { return info.getProperty (key, {}).toString().toStdString(); };
+        song.info.title = get ("title");
+        song.info.author = get ("author");
+        song.info.genre = get ("genre");
+        song.info.url = get ("url");
+        song.info.comments = get ("comments");
+        song.info.showOnOpen = (bool) info.getProperty ("showOnOpen", false);
+    }
     song.currentPattern = (int) root.getProperty ("currentPattern", 0);
 
     if (auto* channels = root["channels"].getArray())

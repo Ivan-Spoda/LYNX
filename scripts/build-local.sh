@@ -26,6 +26,8 @@ CORE="$CORE src/core/StartupSound.cpp"
 CORE="$CORE src/core/ThreeOsc.cpp"
 # FL Studio integration: plugin database and sample relocation (read-only)
 CORE="$CORE src/core/FlPluginDb.cpp"
+# missing files of an opened project: search and relocation (round 81)
+CORE="$CORE src/core/MissingFiles.cpp"
 # spectral waveforms (band analysis, multi-resolution peak cache)
 CORE="$CORE src/core/WaveAnalysis.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)

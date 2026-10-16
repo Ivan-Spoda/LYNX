@@ -33,6 +33,7 @@ public:
 
     void focusSearch();
     void addUserFolder(); // asks for a folder and adds it to the folder list
+    void reloadUserFolders() { rebuildRoots(); } // after the list changed elsewhere (Settings > Files)
     void setSearchForSnapshot (const juce::String& text);
     // For snapshots: selects (and "previews" without sound) the first audio file under the first folder,
     // and puts the mouse over the row after it.
