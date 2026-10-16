@@ -1,7 +1,7 @@
 #pragma once
 
-// Minimal WAV reader (PCM 8/16/24/32 and float 32) for the tools and tests.
-// The app uses JUCE's readers, which cover many more formats.
+// Minimal WAV reader (PCM 8/16/24/32 and float 32, WavPack, and FL's Ogg Vorbis: Ogg-in-WAV and .ogg, decoded as
+// the app decodes them, core/OggVorbis.h) for the tools and tests. The app uses JUCE's readers for the rest (FLAC…).
 
 #include <cstdint>
 #include <cstring>
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/Instruments.h"
+#include "core/OggVorbis.h"
 #include "core/WavPack.h"
 
 namespace lynx::tools
@@ -36,6 +37,20 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
         out->left = std::move (audio.channels[0]);
         if (audio.channels.size() > 1)
             out->right = std::move (audio.channels[1]);
+        return out;
+    }
+
+    // FL's Ogg Vorbis samples (WAV with an Ogg "data" chunk, or plain .ogg), like the app's SampleLibrary
+    if (oggvorbis::isOggWav (d.data(), d.size()) || oggvorbis::isOggStream (d.data(), d.size()))
+    {
+        oggvorbis::Decoded audio;
+        if (! oggvorbis::decode (d.data(), d.size(), audio) || audio.sampleRate <= 0 || audio.data.empty() || audio.data[0].empty())
+            return nullptr;
+        auto out = std::make_shared<SampleData>();
+        out->sampleRate = audio.sampleRate;
+        out->left = std::move (audio.data[0]);
+        if (audio.data.size() > 1)
+            out->right = std::move (audio.data[1]);
         return out;
     }
 

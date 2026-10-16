@@ -2205,7 +2205,7 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
     if (kind == InstrumentKind::toxic)
         return makeToxicInstrument();
     if (kind == InstrumentKind::threeosc)
-        return makeThreeOscInstrument();
+        return makeThreeOscInstrument (&offlineRendering);
     if (kind == InstrumentKind::autogun)
         return makeAutogunInstrument();
     if (kind == InstrumentKind::transistorbass)

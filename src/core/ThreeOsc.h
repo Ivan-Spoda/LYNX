@@ -52,7 +52,9 @@ std::pair<int, int> threeOscParamRange (int index) noexcept;
 // A custom wave (shape 6) from an audio file: mono, 16384 points over the whole file. Empty if unreadable.
 std::vector<float> threeOscCustomWave (const std::string& wavPath);
 
-std::unique_ptr<Instrument> makeThreeOscInstrument();
+// hostHq: when it returns true at prepare(), the oscillators render as in FL's "HQ render" host mode (FL's
+// exports and command-line renders; REA_rodada80 §3.3)
+std::unique_ptr<Instrument> makeThreeOscInstrument (bool (*hostHq)() noexcept = nullptr);
 
 namespace threeosc
 {
