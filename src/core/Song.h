@@ -65,7 +65,8 @@ enum class InstrumentKind : std::uint8_t
     granulizer, // FL's Fruity Granulizer engine (REA_rodada67): normalised state in pluginState, the channel's sample in samplePath
     drumaxx,    // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
     slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
-    fruitydance // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
+    fruitydance, // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
+    directwave  // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

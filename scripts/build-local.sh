@@ -34,6 +34,8 @@ CORE="$CORE src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp"
 CORE="$CORE src/core/FlResampler.cpp src/core/FlKeys.cpp"
 # FL's Hardcore (REA round 71)
 CORE="$CORE src/core/HardcoreFx.cpp"
+# FL's DirectWave (REA round 72)
+CORE="$CORE src/core/DirectWave.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

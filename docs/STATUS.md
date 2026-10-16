@@ -83,7 +83,11 @@ exports the 30 demo projects shipped with FL Studio 2026.
   DLL through our reference model on all 239 distinct non-HQ states of the installation at 44.1/48/96 kHz and on 43
   processor cases; HQ within −137 dB), FL Keys on its engine (REA round 69 §8: FL's wavetable loader and voice — 16.16
   linear reads, envelope, overdrive, muffle filter, treble, tremolo, stereo delay, MaxPoly 32 stealing; bit-identical to the
-  installation's DLL on all 11 demo states and on dense 150-note stress runs), FPC, DirectWave, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
+  installation's DLL on all 11 demo states and on dense 150-note stress runs), DirectWave on its engine (REA round 72: zone
+  choice and alternation groups, the 16-slot modulation matrix, envelopes and LFOs, 32.32 linear reads and loops, filter
+  types 1–7, zone effects, limiter, pan law, and the program's delay, chorus, plate reverb and shapers, with the
+  plugin's CRT math; bit-identical to the installation's DLL on all 57 demo programs with its own decoded samples),
+  FPC, Slicex/Fruity Slicer, Wave Traveller; DrumSynth Live on its
   engine (REA round 30: all 120 patches, one per key, morph, voice modes; recorded waves read from the user's own FL
   installation; within −138 dB of the reference model verified against FL's DLLs); Harmless on its additive engine
   (REA round 32: 528-partial bank, FL's full voice; within −151 dB of the reference model, which is within −60 dB of
@@ -760,9 +764,9 @@ which cannot change without changing output bits.
 
 ## Open items
 
-- Sample players (REA round 69 §9): DirectWave's zone filter (834 of 1 287 demo zones have a low-pass; cutoff law
-  `440·2^((127v)/12 − 5)` Hz known, the filter and the modulation matrix not decoded — zones play unfiltered); the host
-  sampler voice's velocity/pan laws and channel filter; FL's song-aligned tick phase for the sampler's volume envelope
+- Sample players (REA rounds 69 §9 and 72 §9): DirectWave's Ogg samples go through LYNX's libvorbis (within ~4·10⁻⁷ of
+  FL's oggio decode, not bit-equal), its HQ interpolation, time-stretch modes (§8); the host
+  sampler voice's velocity/pan laws and channel filter (decoded in part, round 72 §9, not applied); FL's song-aligned tick phase for the sampler's volume envelope
   (LYNX counts ticks from the note start, ≤ 1 tick apart); FPC's random layer modes and simultaneous layers (unused in
   the demos); Fruity Slicer's time-stretched slices (5 demo channels pre-stretch their loop by 0.6–5.5 % through a
   licensed stretch engine — LYNX plays the slices unstretched); FL Keys' resampling of "resample" wavetables (Roto

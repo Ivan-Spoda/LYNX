@@ -58,6 +58,7 @@
 #include "core/ThreeOsc.h"
 #include "core/FlResampler.h"
 #include "core/FlKeys.h"
+#include "core/DirectWave.h"
 #include "core/FlVoiceProcessor.h"
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
@@ -945,7 +946,7 @@ TEST (flp_real_files)
     std::map<std::string, std::pair<int, int>> generators; // GMS/Ogun/Autogun/Sakura/DrumSynth: channels, decoded
     int ogunTrumpet = 0; // Ogun channels whose spectrum matches the REA "Trumpet" reference
     int peqSlots = 0, peqShaped = 0, reverbs = 0, reverbsDryless = 0, reverbsLowCut = 0;
-    int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0;
+    int dwChannels = 0, dwZones = 0, fpcKits = 0, padChannels = 0, padNotes = 0, dwExact = 0;
     int harmlessCompWanted = 0, harmlessCompLoaded = 0; // Harmless rack compressors / presets read from the installation
     int maximusSlots = 0, maximusExact = 0, sgzSlots = 0, sgzExact = 0, vocodexSlots = 0, vocodexWithData = 0; // REA_rodada40
     int shaperSlots = 0, shaperExact = 0, clipperSlots = 0, clipperExact = 0; // REA_rodada51
@@ -1184,6 +1185,7 @@ TEST (flp_real_files)
                         CHECK (std::is_sorted (c.sampler.slices.begin(), c.sampler.slices.end()));
                         CHECK (c.sampler.slices.back() < 1.0f);
                     }
+                    dwExact += c.instrument == lynx::InstrumentKind::directwave ? 1 : 0;
                     if (! c.zones.empty() && c.name.find (" - ") == std::string::npos)
                     {
                         ++dwChannels;
@@ -2037,6 +2039,8 @@ TEST (flp_real_files)
     std::printf ("  DirectWave: %d channels, %d zones; FPC: %d projects, %d pad channels, %d pad notes\n", dwChannels, dwZones, fpcKits,
                  padChannels, padNotes);
     CHECK (dwZones > 1000 && padChannels > 250 && padNotes > 500);
+    std::printf ("  DirectWave on the exact engine (REA_rodada72): %d channels\n", dwExact);
+    CHECK (dwExact >= 57);
     std::printf ("  sliced channels (Slicer/Slicex): %d; embedded WAVs saved: %d\n", slicedChannels, embeddedSaved);
     CHECK (slicedChannels >= 25 && embeddedSaved >= 10); // without decoding Ogg here, some loops have no duration
     std::printf ("  FL Keys (Grand Piano, 30 zones): %d channels\n", flKeysChannels);
@@ -2492,6 +2496,101 @@ TEST (fl_keys_state_wti_and_loader)
     std::vector<float> l (256), r (256);
     inst->render (l.data(), r.data(), 256, 1.0f, 1.0f);
     CHECK (inst->idle() && l[100] == 0.0f);
+}
+
+
+TEST (directwave_crt_math_and_state)
+{
+    using namespace lynx::dw;
+    auto f = [] (std::uint32_t b) { float x; std::memcpy (&x, &b, 4); return x; };
+    auto u = [] (float x) { std::uint32_t b; std::memcpy (&b, &x, 4); return b; };
+    // the plugin's own run-time (r72/run/mt.exe on DirectWave_x64.dll): values where the libm result differs
+    CHECK (u (sinfCrt (f (0x40b1a97fu))) == 0xbf2af4bbu);
+    CHECK (u (sinfCrt (f (0xc0ad8469u))) == 0x3f4222f6u);
+    CHECK (u (sinfCrt (f (0xc016e8c7u))) == 0xbf34b32du);
+    CHECK (u (cosfCrt (f (0xc0af1cc0u))) == 0x3f305702u);
+    CHECK (u (cosfCrt (f (0x3f15cba3u))) == 0x3f556924u);
+    CHECK (u (cosfCrt (f (0xc0aeb047u))) == 0x3f2dddfeu);
+    CHECK (u (expfCrt (f (0xbfb679c0u))) == 0x3e7622a1u);
+    CHECK (encodeFormats ({ true, false }) == std::vector<float> ({ 1.0f, 2.0f, 1.0f, 0.0f }));
+    CHECK (decodeFormats ({ 1.0f, 2.0f, 1.0f, 0.0f }) == std::vector<bool> ({ true, false }));
+    CHECK (! parseState ({ 1, 2, 3 }).has_value());
+}
+
+TEST (directwave_matches_fl_with_demo_programs)
+{
+    // Demo programs (voices, mod matrix, filters, chorus, reverb, shaper) with our own 16-bit samples in every zone:
+    // FNV-1a 64 of DirectWave_x64.dll's output (r72/py/synth.py + cmp.py: 44.1 kHz, host blocks of 512, tempo 120)
+    if (realFlpDir.empty())
+        return;
+    using namespace lynx::dw;
+    auto readAll = [] (const std::filesystem::path& p) {
+        std::ifstream in (p, std::ios::binary);
+        return std::vector<std::uint8_t> { std::istreambuf_iterator<char> (in), {} };
+    };
+    auto stateOf = [&] (const std::string& file, const std::string& channel) {
+        const auto path = std::filesystem::path (realFlpDir) / file;
+        if (! std::filesystem::exists (path))
+            return std::vector<std::uint8_t>();
+        const auto p = flp::parseProject (readAll (path));
+        for (const auto& c : p.channels)
+            if (c.pluginName == "DirectWave" && c.name == channel)
+                return c.pluginState;
+        return std::vector<std::uint8_t>();
+    };
+    auto sampleValue = [] (int z, std::int64_t j) {
+        const auto v = (j * (13 + z * 7)) % 4096 - 2048;
+        const auto w = ((j * j + z * 31) % 997) - 498;
+        return (std::int16_t) std::clamp<std::int64_t> (v * 6 + w * 8, -32768, 32767);
+    };
+    std::vector<RefNote> notes;
+    auto note = [&] (int start, int key, double vel, double fv, double fp, double cents) {
+        RefNote n; n.start = start; n.key = key; n.velocity = vel; n.finalVol = fv; n.finalPan = fp; n.cents = cents;
+        notes.push_back (n);
+    };
+    note (0, 48, 0.8, 0.7, -0.3, 0); note (11025, 60, 0.5, 0.9, 0.4, 25); note (22050, 67, 1.0, 0.5, 0.0, 0);
+    note (44100, 36, 0.3, 0.8, 0.8, -40); note (80000, 72, 0.9, 0.6, -0.6, 0);
+    notes[0].release = 40000; notes[1].release = 70000; notes[2].release = 60000;
+    auto run = [&] (const std::string& file, const std::string& channel, std::uint64_t expected) {
+        const auto st = parseState (stateOf (file, channel));
+        if (! st)
+            return;
+        const auto* prog = playedProgram (*st);
+        CHECK (prog != nullptr);
+        if (prog == nullptr)
+            return;
+        std::vector<std::shared_ptr<const ZoneSamples>> zs;
+        for (int z = 0; z < (int) prog->zones.size(); ++z)
+        {
+            auto s = std::make_shared<ZoneSamples>();
+            s->bits = 16;
+            s->channels = 1;
+            s->frames = prog->zones[(std::size_t) z].frames;
+            std::vector<std::int16_t> v ((std::size_t) s->frames + 512, 0);
+            for (std::int64_t j = 0; j < s->frames; ++j)
+                v[(std::size_t) j + 256] = sampleValue (z, j);
+            s->i16.push_back (std::move (v));
+            zs.push_back (s);
+        }
+        EngineOptions o;
+        o.velocityAsInitVol = (st->flags & 2) != 0;
+        o.noGainClamp = (st->flags & 1) != 0;
+        const auto out = renderReference (*prog, zs, o, notes, 44100.0, 120000, 512, 1);
+        std::uint64_t h = 14695981039346656037ull;
+        for (const float x : out)
+        {
+            std::uint32_t b;
+            std::memcpy (&b, &x, 4);
+            for (int k = 0; k < 4; ++k)
+                h = (h ^ ((b >> (8 * k)) & 0xffu)) * 1099511628211ull;
+        }
+        CHECK (h == expected);
+        if (h != expected)
+            std::printf ("  DirectWave %s: %016llx\n", channel.c_str(), (unsigned long long) h);
+    };
+    run ("Demo projects/Visual/ZGameEditor Visualizer/Treben - Umziky - All the same.flp", "Gtr", 0xa1de3dd6be53d665ull);
+    run ("Demo projects/Visual/ZGameEditor Visualizer/Treben - Umziky - All the same.flp", "Rhodes", 0xcd458ec6a857f9c7ull);
+    run ("System/Render tests/Directwave.flp", "DW", 0x95b4c2e29b664dd1ull);
 }
 
 TEST (fl_keys_matches_fl_with_the_installation)

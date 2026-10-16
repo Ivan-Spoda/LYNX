@@ -91,6 +91,7 @@ add_library(lynx_core STATIC
     src/core/HardcoreFx.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
+    src/core/DirectWave.cpp
     src/core/BeepMap.cpp
     src/core/Sawer.cpp
     src/core/Inflate.cpp

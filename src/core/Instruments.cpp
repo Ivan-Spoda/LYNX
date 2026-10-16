@@ -1,4 +1,6 @@
 #include "core/Instruments.h"
+
+#include "core/DirectWave.h"
 #include "core/FlSynths.h"
 #include "core/FlResampler.h"
 #include "core/FlVoiceProcessor.h"
@@ -243,6 +245,7 @@ private:
             case InstrumentKind::drumaxx:
             case InstrumentKind::slayer:
             case InstrumentKind::fruitydance:
+            case InstrumentKind::directwave:
                 break;
         }
 
@@ -2223,6 +2226,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeDrumaxxInstrument();
     if (kind == InstrumentKind::slayer)
         return makeSlayerInstrument();
+    if (kind == InstrumentKind::directwave)
+        return dw::makeDirectWaveInstrument ({}); // samples come from RackRenderer
 
     return std::make_unique<DrumInstrument> (kind);
 }

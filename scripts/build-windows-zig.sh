@@ -106,6 +106,8 @@ APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
 APP_SOURCES+=(src/core/FlResampler.cpp src/core/FlKeys.cpp)
 # FL's Hardcore (REA round 71)
 APP_SOURCES+=(src/core/HardcoreFx.cpp)
+# FL's DirectWave (REA round 72)
+APP_SOURCES+=(src/core/DirectWave.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
