@@ -102,6 +102,74 @@ struct Stage
     }
 };
 
+// A chain of `count` stages over the block, the same as running them one after another (each stage's float output is
+// the next one's input), but sample by sample: the stages' recurrences overlap instead of running back to back.
+template <int count>
+void runChainN (Stage* st, float* buf, int n) noexcept
+{
+    // coefficient table per stage: [falling, rising] (both the attack for a single-coefficient stage), picked by
+    // index rather than by a branch on the signal
+    long double y[count];
+    double c[count][2];
+    for (int s = 0; s < count; ++s)
+    {
+        y[s] = st[s].state;
+        c[s][0] = st[s].single ? st[s].attack : st[s].release;
+        c[s][1] = st[s].attack;
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        float v = buf[i];
+        for (int s = 0; s < count; ++s)
+        {
+            const long double x = v;
+            const long double k = c[s][x >= y[s] ? 1 : 0];
+            y[s] = x + (y[s] - x) * k;
+            v = (float) y[s];
+        }
+        buf[i] = v;
+    }
+    for (int s = 0; s < count; ++s)
+        st[s].state = std::fabs (y[s]) > (long double) 5.960464477539063e-08f ? (double) y[s] : 0.0;
+}
+
+// A block whose samples all equal every stage's state (a gain curve resting at a constant gain) is a fixed point of
+// the chain: each step gives y = x + (x − x)·c = x, the float output is the input and the states stay as they are.
+bool chainAtRest (const Stage* st, int count, const float* buf, int n) noexcept
+{
+    if (n <= 0)
+        return false;
+    const float v = buf[0];
+    if (! (std::fabs ((long double) v) > (long double) 5.960464477539063e-08f)) // (the states would be flushed to 0)
+        return false;
+    for (int s = 0; s < count; ++s)
+        if (! ((long double) st[s].state == (long double) v))
+            return false;
+    const auto bits = fbits (v);
+    for (int i = 1; i < n; ++i)
+        if (fbits (buf[i]) != bits)
+            return false;
+    return true;
+}
+
+void runChain (Stage* st, int count, float* buf, int n) noexcept
+{
+    if (count > 0 && chainAtRest (st, count, buf, n))
+        return;
+    switch (count)
+    {
+        case 0: return;
+        case 1: st[0].run (buf, n); return;
+        case 2: runChainN<2> (st, buf, n); return;
+        case 3: runChainN<3> (st, buf, n); return;
+        case 4: runChainN<4> (st, buf, n); return;
+        default:
+            runChainN<4> (st, buf, n);
+            runChain (st + 4, count - 4, buf, n);
+            return;
+    }
+}
+
 // --- limiter peak window: running maximum over the window, kept on the bit patterns ---------------------------------
 
 struct PeakWindow
@@ -343,8 +411,7 @@ public:
         if (compOn)
         {
             rms.run (sideIn != nullptr ? sideIn : io, detect.data(), n);
-            for (int s = 0; s < compStages; ++s)
-                compCurve[(std::size_t) s].run (detect.data(), n);
+            runChain (compCurve.data(), compStages, detect.data(), n);
             const auto thr = fbits (compThreshold);
             for (int i = 0; i < n; ++i)
                 if (fbits (detect[(std::size_t) i]) > thr)
@@ -361,8 +428,7 @@ public:
                     delayPos = 0;
             }
 
-        for (int s = 0; s < releaseStages; ++s)
-            releaseCurve[(std::size_t) s].run (lv, n);
+        runChain (releaseCurve.data(), releaseStages, lv, n);
 
         const auto limitBits = fbits (limitLevel), gateBits = fbits (gateThreshold);
         for (int i = 0; i < n; ++i)
@@ -375,8 +441,7 @@ public:
             gateGain = r;
             lv[i] = r;
         }
-        for (int s = 0; s < gainStages; ++s)
-            gainCurve[(std::size_t) s].run (lv, n);
+        runChain (gainCurve.data(), gainStages, lv, n);
 
         for (int i = 0; i < n; ++i)
         {

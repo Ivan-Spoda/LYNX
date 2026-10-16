@@ -1157,6 +1157,7 @@ public:
     void prepare (double sr) noexcept override
     {
         take();
+        idleKnown = false;
         rate = sr;
         applySetup (sr);
         lastTicks = -1.0;
@@ -1189,6 +1190,7 @@ public:
     void noteOn (int key, float velocity) noexcept override
     {
         take();
+        idleKnown = false;
         const auto vel = std::clamp ((double) velocity, 0.0, 1.0);
         const auto initVol = (std::pow (11.0, 1.28 * vel) - 1.0) / 10.0;
         const auto k = std::clamp (key, 0, 127);
@@ -1202,17 +1204,28 @@ public:
     void noteOff (int key) noexcept override
     {
         take();
+        idleKnown = false;
         plugin.noteOff (key);
     }
 
     void allNotesOff() noexcept override
     {
+        idleKnown = false;
         for (int k = 0; k < 128; ++k)
             if (plugin.held[k].on)
                 plugin.noteOff (k);
     }
 
-    bool idle() const noexcept override { return plugin.idle() && quiet >= (int) rate; }
+    bool idle() const noexcept override
+    {
+        // the cheap test first; the plugin's scan of its 99 voices and 128 keys can only change through the calls
+        // that touch the plugin (they clear idleKnown), so its answer is kept until then
+        if (quiet < (int) rate)
+            return false;
+        if (! idleKnown)
+            idleCached = plugin.idle(), idleKnown = true;
+        return idleCached;
+    }
 
     void setSongPosition (double ticks) noexcept override
     {
@@ -1225,6 +1238,7 @@ public:
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
         take();
+        idleKnown = false;
         plugin.eng.bpm = tempo.load();
         const auto vol = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
         auto pan = vol > 0.0 ? std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0 : 0.0;
@@ -1290,6 +1304,7 @@ private:
     double rate = 44100.0, channelVol = 1.0, channelPan = 0.0, lastTicks = -1.0, songBeats = 0.0;
     bool playing = false;
     int quiet = 0;
+    mutable bool idleKnown = false, idleCached = false;
     float notePan[128] {};
     float nextPan = 0.0f, nextCents = 0.0f;
     float bufL[maxChunk] {}, bufR[maxChunk] {};
