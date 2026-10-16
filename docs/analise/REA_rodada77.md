@@ -115,6 +115,8 @@ With the plain loop including the "EOS of any serial" rule, every file has FL's 
   (the decoder's files plus the encoder-side files `block.c` links against), unmodified except
   `src/mdct.c` → `mdct_init`, where the angles are formed as `(double)((float)k * ((float)M_PI / (float)d))`
   (marked "LYNX modification"), and a hand-written `include/ogg/config_types.h` (replaces libogg's generated one).
+  JUCE links its own libvorbis with the same C symbol names, so every external symbol of this copy is renamed with a
+  `lynx_` prefix (`include/lynx_vorbis_prefix.h`, force-included when compiling the C files and included by `ogg.h`).
   BSD licences in `COPYING.libogg` / `COPYING.libvorbis`; listed in `THIRD_PARTY.md`. Compiled as C with
   `-ffp-contract=off` (no FMA contraction, so the operation order stays libvorbis').
 - `src/core/OggVorbis.{h,cpp}` (our own code): `isOggWav`, `isOggStream`, `decode` — FL's §2 loop over the whole
@@ -134,8 +136,8 @@ With the plain loop including the "EOS of any serial" rule, every file has FL's 
   sample class turns oggio's floats into 16-bit values with `round(x·32767)`, and LYNX's FL Keys is now exact on
   its Ogg wavetable too.
 - **DirectWave (round 72 §6/§8):** the plug-in keeps Ogg zones as oggio's floats; with the exact decoder LYNX's
-  zones now hold FL's samples (the "Ogg sample bits" item of round 72 §8 is closed). 56 of the 57 demo programs'
-  zone files are Ogg WAVs; many of them (e.g. *Rhodes*, *string accents*, *piano*) use files from §3.1's 295.
+  zones now hold FL's samples (the "Ogg sample bits" item of round 72 §8 is closed). 35 of the 57 demo
+  DirectWave states name at least one of §3.1's 295 files (file-name match over round 72's state blobs).
 - **Fruity Scratcher (round 71 §4):** its blockers were (a) FL's Vorbis decoder, (b) the host's conversion of the
   sample to 16-bit / 2 channels / 44.1 kHz, (c) the scaling of the `0xDF` pattern control events that move the platter
   in the render test. (a) is solved; for (b), `DL Breaker.wav` already is 2 channels at 44.1 kHz, so only the float →
@@ -146,6 +148,7 @@ With the plain loop including the "EOS of any serial" rule, every file has FL's 
 
 ## Where I stopped / next steps
 
-- Done: §1–§5; LYNX's decoder, app wiring, tool, test.
+- Done: §1–§5; LYNX's decoder, app wiring, tool, test; build-local 1 167 619 checks / 0 failures, Windows build OK,
+  the Windows-compiled decoder also matches FL on all 3 137 files (`hash_lynxwin.txt`).
 - Next: Fruity Scratcher's remaining blockers (§5); the app's waveform preview (`src/ui/WaveformView.cpp`) still
   reads Ogg WAVs through JUCE (display only).
