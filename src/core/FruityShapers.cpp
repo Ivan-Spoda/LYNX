@@ -59,8 +59,34 @@ inline long long x87Int (long double v) noexcept
     asm ("fistpll %0" : "=m"(r) : "t"(v) : "st");
     return r;
 }
+// exact conversions straight between memory and the x87 stack (a C++ conversion goes through an SSE register and a
+// temporary), and frndint: the value rounded to an integer in the current mode, as a long double
+inline long double x87Load (const float* p) noexcept
+{
+    long double r;
+    asm ("flds %1" : "=t"(r) : "m"(*p));
+    return r;
+}
+inline long double x87Load (const std::int16_t* p) noexcept
+{
+    long double r;
+    asm ("filds %1" : "=t"(r) : "m"(*p));
+    return r;
+}
+inline long double x87Round (long double v) noexcept
+{
+    long double r;
+    asm ("frndint" : "=t"(r) : "0"(v));
+    return r;
+}
+// (float) v in the current rounding mode, stored
+inline void x87Store (float* p, long double v) noexcept { asm ("fstps %0" : "=m"(*p) : "t"(v) : "st"); }
 #else
 inline long long x87Int (long double v) noexcept { return (long long) std::nearbyint (v); }
+inline long double x87Load (const float* p) noexcept { return *p; }
+inline long double x87Load (const std::int16_t* p) noexcept { return *p; }
+inline long double x87Round (long double v) noexcept { return std::nearbyint (v); }
+inline void x87Store (float* p, long double v) noexcept { *p = (float) v; }
 #endif
 
 inline float F (double v) noexcept { return (float) v; }
@@ -382,49 +408,74 @@ struct HalfBand
             if (std::abs (s[i]) < kEps)
                 s[i] = 0.0;
     }
-    void up (const float* x, float* y, int m) noexcept
+    // Both channels in one pass, on two-lane double vectors (lane 0 = left, lane 1 = right): each lane gets the
+    // channel's scalar steps (y = x[n−1] + (x − y[n−1])·a per all-pass), in the same order with one rounding each.
+    static void up2 (HalfBand& h0, HalfBand& h1, const float* x0, const float* x1, float* y0, float* y1, int m) noexcept
     {
+        V2 s[12];
+        load (h0, h1, s);
         for (int n = 0; n < m; ++n)
         {
-            const double v = x[n];
-            const double a1 = s[6] + (v - s[0]) * kA[0];
+            const V2 v = { (double) x0[n], (double) x1[n] };
+            const V2 a1 = s[6] + (v - s[0]) * kA[0];
             s[6] = v, s[0] = a1;
-            const double b1 = s[9] + (v - s[3]) * kB[0];
+            const V2 b1 = s[9] + (v - s[3]) * kB[0];
             s[9] = v, s[3] = b1;
-            const double a2 = s[7] + (s[0] - s[1]) * kA[1];
+            const V2 a2 = s[7] + (s[0] - s[1]) * kA[1];
             s[7] = s[0], s[1] = a2;
-            const double b2 = s[10] + (s[3] - s[4]) * kB[1];
+            const V2 b2 = s[10] + (s[3] - s[4]) * kB[1];
             s[10] = s[3], s[4] = b2;
-            const double a3 = s[8] + (s[1] - s[2]) * kA[2];
+            const V2 a3 = s[8] + (s[1] - s[2]) * kA[2];
             s[2] = a3;
-            const double b3 = s[11] + (s[4] - s[5]) * kB[2];
+            const V2 b3 = s[11] + (s[4] - s[5]) * kB[2];
             s[5] = b3;
             s[8] = s[1], s[11] = s[4];
-            y[2 * n] = (float) b3;
-            y[2 * n + 1] = (float) a3;
+            y0[2 * n] = (float) b3[0];
+            y0[2 * n + 1] = (float) a3[0];
+            y1[2 * n] = (float) b3[1];
+            y1[2 * n + 1] = (float) a3[1];
         }
-        flush();
+        store (s, h0, h1);
     }
-    void down (const float* x, float* y, int m) noexcept
+    static void down2 (HalfBand& h0, HalfBand& h1, const float* x0, const float* x1, float* y0, float* y1, int m) noexcept
     {
+        V2 s[12];
+        load (h0, h1, s);
         for (int n = 0; n < m; ++n)
         {
-            const double e = x[2 * n], o = x[2 * n + 1];
-            const double a1 = s[6] + (e - s[0]) * kA[0];
+            const V2 e = { (double) x0[2 * n], (double) x1[2 * n] }, o = { (double) x0[2 * n + 1], (double) x1[2 * n + 1] };
+            const V2 a1 = s[6] + (e - s[0]) * kA[0];
             s[6] = e, s[0] = a1;
-            const double b1 = s[9] + (o - s[3]) * kB[0];
+            const V2 b1 = s[9] + (o - s[3]) * kB[0];
             s[9] = o, s[3] = b1;
-            const double a2 = s[7] + (s[0] - s[1]) * kA[1];
+            const V2 a2 = s[7] + (s[0] - s[1]) * kA[1];
             s[7] = s[0], s[1] = a2;
-            const double b2 = s[10] + (s[3] - s[4]) * kB[1];
+            const V2 b2 = s[10] + (s[3] - s[4]) * kB[1];
             s[10] = s[3], s[4] = b2;
-            const double a3 = s[8] + (s[1] - s[2]) * kA[2];
+            const V2 a3 = s[8] + (s[1] - s[2]) * kA[2];
             s[8] = s[1], s[2] = a3;
-            const double b3 = s[11] + (s[4] - s[5]) * kB[2];
+            const V2 b3 = s[11] + (s[4] - s[5]) * kB[2];
             s[11] = s[4], s[5] = b3;
-            y[n] = (float) ((b3 + a3) * 0.5);
+            const V2 y = (b3 + a3) * 0.5;
+            y0[n] = (float) y[0];
+            y1[n] = (float) y[1];
         }
-        flush();
+        store (s, h0, h1);
+    }
+
+private:
+    using V2 = double __attribute__ ((vector_size (16)));
+    static void load (const HalfBand& h0, const HalfBand& h1, V2* s) noexcept
+    {
+        for (int i = 0; i < 12; ++i)
+            s[i] = V2 { h0.s[i], h1.s[i] };
+    }
+    static void store (const V2* s, HalfBand& h0, HalfBand& h1) noexcept
+    {
+        for (int i = 0; i < 12; ++i)
+            h0.s[i] = s[i][0], h1.s[i] = s[i][1];
+        h0.flush();
+        h1.flush();
     }
 };
 
@@ -439,9 +490,10 @@ struct KernelArgs
 
 constexpr ld kTwo31 = 2147483648.0L;
 
-[[gnu::noinline]] void kernelNearest (const float* x, float* y, int m, const KernelArgs& a) noexcept
+// The kernels' bodies run under a control word their caller set (X87Mode): the block entry points below set it once
+// per call; the smoothed path sets it once per block and calls the bodies sample by sample.
+[[gnu::always_inline]] inline void nearestBody (const float* x, float* y, int m, const KernelArgs& a) noexcept
 {
-    const X87Mode mode (false);
     const auto* T = a.T + 1;
     const ld A = a.dry, bK = (ld) a.wet * 3.0517578125e-05L;
     if (! a.unipolar)
@@ -470,9 +522,8 @@ constexpr ld kTwo31 = 2147483648.0L;
 }
 
 // the interpolating kernels run with the x87 rounding set toward zero: every product, sum and the float store
-[[gnu::noinline]] void kernelInterp (const float* x, float* y, int m, const KernelArgs& a) noexcept
+[[gnu::always_inline]] inline void interpBody (const float* x, float* y, int m, const KernelArgs& a) noexcept
 {
-    const X87Mode mode (true);
     const auto* T = a.T + 1;
     volatile float vdry = a.dry, vwet = a.wet, vpre = a.pre; // computed after the mode change
     const ld A = vdry, bK = (ld) vwet * 3.0517578125e-05L;
@@ -481,7 +532,7 @@ constexpr ld kTwo31 = 2147483648.0L;
         const ld preN = (ld) vpre * (ld) a.N;
         for (int k = 0; k < m; ++k)
         {
-            const ld X = x[k];
+            const ld X = x87Load (x + k);
             const ld v = X * preN;
             ld t;
             if (std::abs (v) >= kTwo31)
@@ -489,21 +540,21 @@ constexpr ld kTwo31 = 2147483648.0L;
             else
             {
                 const auto i = x87Int (v); // toward zero in this mode
-                const ld fr = v - (ld) i;
+                const ld fr = v - x87Round (v); // (ld) i: the same integer, without the round trip through memory
                 if (i >= 0)
                 {
                     const auto j = std::min<long long> (i, a.N);
-                    const ld t0 = T[j], t1 = T[j + 1];
+                    const ld t0 = x87Load (T + j), t1 = x87Load (T + j + 1);
                     t = t0 + (t1 - t0) * fr;
                 }
                 else
                 {
                     const auto j = std::min<long long> (-i, a.N);
-                    const ld t0 = T[j], t1 = T[j + 1];
+                    const ld t0 = x87Load (T + j), t1 = x87Load (T + j + 1);
                     t = -(t0 - (t1 - t0) * fr);
                 }
             }
-            y[k] = (float) (X * A + t * bK);
+            x87Store (y + k, X * A + t * bK);
         }
         return;
     }
@@ -527,6 +578,60 @@ constexpr ld kTwo31 = 2147483648.0L;
         i = std::clamp<long long> (i, -1, a.N);
         const ld t0 = T[i], t1 = T[i + 1];
         y[k] = (float) (X * A + (t0 + (t1 - t0) * fr) * bK);
+    }
+}
+
+[[gnu::noinline]] void kernelNearest (const float* x, float* y, int m, const KernelArgs& a) noexcept
+{
+    const X87Mode mode (false);
+    nearestBody (x, y, m, a);
+}
+
+[[gnu::noinline]] void kernelInterp (const float* x, float* y, int m, const KernelArgs& a) noexcept
+{
+    const X87Mode mode (true);
+    interpBody (x, y, m, a);
+}
+
+inline bool sameBits (float a, float b) noexcept
+{
+    std::uint32_t x, y;
+    std::memcpy (&x, &a, 4);
+    std::memcpy (&y, &b, 4);
+    return x == y;
+}
+
+// SMOOTH: the gains glide sample by sample (float steps, as in FL) and each sample of both channels goes through the
+// kernel with that sample's gains. The control word is set once for the block instead of once per sample and channel.
+template <bool interp>
+[[gnu::noinline]] void kernelSmoothed (float* x0, float* x1, int m, KernelArgs a, float (&sm)[3], float preGain, float wet,
+                                       float dry, float smoothC) noexcept
+{
+    const X87Mode mode (interp);
+    auto body = [&a] (float* x, int len) {
+        if constexpr (interp)
+            interpBody (x, x, len, a);
+        else
+            nearestBody (x, x, len, a);
+    };
+    for (int i = 0; i < m; ++i)
+    {
+        const float p = sm[0] + (preGain - sm[0]) * smoothC;
+        const float w = sm[1] + (wet - sm[1]) * smoothC;
+        const float d = sm[2] + (dry - sm[2]) * smoothC;
+        if (sameBits (p, sm[0]) && sameBits (w, sm[1]) && sameBits (d, sm[2]))
+        {
+            // the glide reached its fixed point (bit for bit): every later step gives these same gains, so the rest of
+            // the block is one constant-gain run (each sample's result depends only on its input and the gains)
+            a.pre = p, a.wet = w, a.dry = d;
+            body (x0 + i, m - i);
+            body (x1 + i, m - i);
+            return;
+        }
+        sm[0] = p, sm[1] = w, sm[2] = d;
+        a.pre = p, a.wet = w, a.dry = d;
+        body (x0 + i, 1);
+        body (x1 + i, 1);
     }
 }
 } // namespace
@@ -871,19 +976,20 @@ struct WaveShaperEngine::Impl
         float* io[2] = { L, R };
         float* buf[2] = { L, R };
         int m = n;
-        for (int c = 0; c < 2 && k > 0; ++c)
+        if (k > 0)
         {
-            const float* src = io[c];
+            const float* src[2] = { L, R };
             int len = n;
-            float* dst = nullptr;
             for (int s = k - 1; s >= 0; --s)
             {
-                dst = ((k - 1 - s) & 1) == 0 ? a[c].data() : b[c].data();
-                up[s][c].up (src, dst, len);
-                src = dst;
+                const bool toA = ((k - 1 - s) & 1) == 0;
+                float* dst0 = toA ? a[0].data() : b[0].data();
+                float* dst1 = toA ? a[1].data() : b[1].data();
+                HalfBand::up2 (up[s][0], up[s][1], src[0], src[1], dst0, dst1, len);
+                src[0] = dst0, src[1] = dst1;
                 len *= 2;
             }
-            buf[c] = dst;
+            buf[0] = (float*) src[0], buf[1] = (float*) src[1];
             m = len;
         }
         KernelArgs args;
@@ -904,26 +1010,22 @@ struct WaveShaperEngine::Impl
             for (int c = 0; c < 2; ++c)
                 run (buf[c], buf[c], m);
         }
+        else if (interp)
+            kernelSmoothed<true> (buf[0], buf[1], m, args, sm, preGain, wet, dry, smoothC);
         else
-            for (int i = 0; i < m; ++i)
-            {
-                sm[0] = sm[0] + (preGain - sm[0]) * smoothC;
-                sm[1] = sm[1] + (wet - sm[1]) * smoothC;
-                sm[2] = sm[2] + (dry - sm[2]) * smoothC;
-                args.pre = sm[0], args.wet = sm[1], args.dry = sm[2];
-                run (buf[0] + i, buf[0] + i, 1);
-                run (buf[1] + i, buf[1] + i, 1);
-            }
-        for (int c = 0; c < 2 && k > 0; ++c)
+            kernelSmoothed<false> (buf[0], buf[1], m, args, sm, preGain, wet, dry, smoothC);
+        if (k > 0)
         {
-            const float* src = buf[c];
+            const float* src[2] = { buf[0], buf[1] };
             int len = m;
             for (int s = k - 1; s >= 0; --s)
             {
-                float* dst = s == 0 ? io[c] : (src == a[c].data() ? b[c].data() : a[c].data());
+                float* dst[2];
+                for (int c = 0; c < 2; ++c)
+                    dst[c] = s == 0 ? io[c] : (src[c] == a[c].data() ? b[c].data() : a[c].data());
                 len /= 2;
-                down[s][c].down (src, dst, len);
-                src = dst;
+                HalfBand::down2 (down[s][0], down[s][1], src[0], src[1], dst[0], dst[1], len);
+                src[0] = dst[0], src[1] = dst[1];
             }
         }
         if (center)
