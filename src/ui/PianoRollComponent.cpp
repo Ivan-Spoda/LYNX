@@ -107,6 +107,9 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     ghostButton.setFlat (true);
     ghostButton.setTooltip (tr ("Ghost notes: show the other channels' notes (Alt+V) and, outlined, this channel's notes in the clips "
                                 "playing at the same time; double right-click one to edit its channel; Ctrl+Alt+V makes them editable"));
+    ui::setQuickTip (ghostButton, tr ("Ghost notes"), "Alt+V");
+    ui::setQuickTip (moreButton, tr ("Note tools"));
+    ui::setQuickTip (scaleSnapButton, tr ("Snap to scale"));
     ghostButton.onClick = [this] {
         showGhosts = ghostButton.getToggleState();
         repaint();

@@ -73,6 +73,8 @@ public:
         hintBar.setHint (hint, live);
     }
     juce::Rectangle<int> getToolbarBoundsForSnapshot() const { return { 0, 0, getWidth(), toolbarHeight }; }
+    // every visible control with a quick tip (toolbar and panel title bars), in this component's coordinates
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> getQuickTipsForSnapshot();
     // --snapshot: a toolbar layout (icon size, hidden/reordered groups) without saving it
     void setToolbarLayoutForSnapshot (const toolbarlayout::Layout& layout) { setToolbarLayout (layout, false); }
     juce::PopupMenu getToolbarMenuForSnapshot() { return makeToolbarMenu(); }
@@ -173,7 +175,7 @@ private:
     // toolbar, or Options > Toolbar; core/ToolbarLayout.h). Row height follows the icon size.
     toolbarlayout::Layout toolbarLayout = toolbarlayout::Layout::makeDefault();
     int rowHeight = toolbarlayout::rowHeight (toolbarlayout::IconSize::medium);
-    int toolbarHeight = 2 * rowHeight + 10;
+    int toolbarHeight = 2 * rowHeight + 8;
     void setToolbarLayout (const toolbarlayout::Layout& layout, bool save = true);
     juce::PopupMenu makeToolbarMenu();
     void showToolbarMenu();
@@ -251,7 +253,9 @@ private:
     IconButton pluginPickerButton { "pluginPicker", Icon::pluginPicker };
     GlobalGridBox gridBox; // global grid of the editors (see ui/EditorTools.h)
     std::vector<int> dividers; // x positions of the toolbar panel separators
-    juce::Rectangle<int> snapLabelArea, patternLabelArea, titleArea;
+    juce::Rectangle<int> snapLabelArea, patternLabelArea, titleArea, transportArea;
+    std::unique_ptr<ui::QuickTipWindow> quickTips; // the tool names under the mouse (ui/HintBar.h)
+    void setQuickTips();
     void showLanguageChoice (const juce::String& id);
 
     // the time display with the song position slider under it, master volume and pitch, meters

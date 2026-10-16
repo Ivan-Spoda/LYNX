@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -38,6 +39,32 @@ juce::String plainHint (const juce::String& markup);
 // Hints written before the markup existed say "drag (Ctrl: fine), wheel, Alt+click resets"; this swaps
 // such known phrases for their markup (applied by the bar to every hint).
 juce::String withMarkup (const juce::String& text);
+
+// Quick tips: a small dark bubble with a control's name (and its shortcut, if it has one) that appears
+// about 400 ms after the mouse rests on it, under the control. It only names the tool, so nobody is lost
+// among the icons; what the control does in detail stays in the hint bar. Only components given a name
+// with setQuickTip() show one (the toolbar and the panel title bars).
+void setQuickTip (juce::Component& c, const juce::String& name, const juce::String& shortcut = {});
+juce::String quickTipOf (const juce::Component& c); // "name\tshortcut" ("" when none)
+
+// The bubble: its size for a tip, and its drawing (shared by the window and the UI snapshots).
+juce::Rectangle<int> quickTipSize (const juce::String& tip);
+void paintQuickTip (juce::Graphics& g, juce::Rectangle<float> bubble, const juce::String& tip);
+// Where the bubble goes for a control at `target` (centred under it, above it near the bottom edge).
+juce::Rectangle<int> quickTipBounds (const juce::String& tip, juce::Rectangle<int> target, juce::Rectangle<int> area);
+
+// One per application: shows the quick tips of the components under the mouse, in every window.
+class QuickTipWindow final : public juce::TooltipWindow
+{
+public:
+    QuickTipWindow();
+    ~QuickTipWindow() override;
+    juce::String getTipFor (juce::Component& c) override;
+
+private:
+    struct Look;
+    std::unique_ptr<Look> look;
+};
 
 class HintBar final : public juce::Component
 {

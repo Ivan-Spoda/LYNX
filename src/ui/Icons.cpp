@@ -550,6 +550,13 @@ const Shape& get (Icon icon)
     return it->second;
 }
 
+float strokeWidth (float size)
+{
+    // a fine line that thickens only a little with the size: 1.25 px at 14 px, 1.4 px at 20 px, 1.6 px from
+    // 30 px (logical pixels; HiDPI screens draw it with proportionally more device pixels)
+    return juce::jlimit (1.2f, 1.6f, 1.0f + size * 0.019f);
+}
+
 void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colour colour)
 {
     if (icon == Icon::none || area.isEmpty())
@@ -569,9 +576,7 @@ void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> area, juce::Colo
         g.fillPath (shape.fill, transform);
 
     if (! shape.stroke.isEmpty())
-        g.strokePath (shape.stroke,
-                      juce::PathStrokeType (juce::jlimit (1.2f, 2.6f, 1.75f * scale), juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
-                      transform);
+        g.strokePath (shape.stroke, juce::PathStrokeType (strokeWidth (size), juce::PathStrokeType::curved, juce::PathStrokeType::rounded), transform);
 }
 } // namespace icons
 
@@ -692,9 +697,9 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     if (on || primary)
         bg = down ? colour::accentPressed : onColour.interpolatedWith (onColour.brighter (0.12f), h);
     else if (down)
-        bg = colour::bg6;
-    else
-        bg = flat ? colour::bg5.withAlpha (h) : colour::bg4.interpolatedWith (colour::bg5, h);
+        bg = flat ? colour::textPrimary.withAlpha (0.13f) : colour::bg6;
+    else // flat buttons get a light wash under the mouse instead of a solid surface
+        bg = flat ? colour::textPrimary.withAlpha (0.075f * h) : colour::bg4.interpolatedWith (colour::bg5, h);
 
     if (! enabled)
         bg = bg.withMultipliedAlpha (0.5f);

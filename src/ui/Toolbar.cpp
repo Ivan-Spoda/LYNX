@@ -198,7 +198,7 @@ void TimeDisplay::paint (juce::Graphics& g)
 {
     using namespace theme;
     const auto area = getLocalBounds();
-    g.setColour (colour::bg0);
+    g.setColour (colour::bg1);
     g.fillRoundedRectangle (area.toFloat(), radius::md);
 
     if (isMouseOver())
@@ -208,8 +208,8 @@ void TimeDisplay::paint (juce::Graphics& g)
     }
 
     g.setColour (colour::textPrimary);
-    g.setFont (monoFont (juce::jmin (19.0f, (float) area.getHeight() * 0.5f)));
-    g.drawText (shown.isEmpty() ? text() : shown, area.withTrimmedBottom (12), juce::Justification::centred, false);
+    g.setFont (monoFont (juce::jmin (17.0f, (float) area.getHeight() * 0.45f)));
+    g.drawText (shown.isEmpty() ? text() : shown, area.withTrimmedBottom (11), juce::Justification::centred, false);
     g.setColour (colour::textDisabled);
     g.setFont (font (type::caption - 1.0f));
     g.drawText (clockMode ? tr ("MIN : SEC : CS") : tr ("BAR : BEAT : STEP"), area.withTrimmedTop (area.getHeight() - 14).withTrimmedBottom (2),
