@@ -128,6 +128,36 @@ PPQ 96; the writers were not traced]**.
   {u32 tick, u16 parameter, u16 target, i32 value} (12 demo projects use it). The value scale is the parameter's own
   (e.g. 0..12800 for volumes) and the mixer target word is not decoded: **import not done** (not confirmed).
 
+## 10. What LYNX implements (our own code)
+
+- `src/core/PianoRollTools.{h,cpp}` (no JUCE, tested in `tests/tests.cpp` `prtools_*`): `parseScore` (FL `.fsc`: 24-byte
+  note records, and the 20-byte records of files written before FL 5 — 236 of the installation's score files — with
+  the < 5.3.0 colour shift, so FL's old chopping patterns keep their colour-4/12 meaning), `gridScore`; `quantize`,
+  `chop`, `flam`, `lfo`/`lfoCurve`, `claw`, `articulate` with FL's formulas above (ticks scaled from FL's PPQ to
+  LYNX's 960; levels as LYNX floats instead of FL bytes, so level rounding differs by < 1/128); chord progression
+  (`parseProgression` for FL's Roman-numeral preset syntax incl. ♭/♯, ∆, °, sus, add, 7/9/11/13, slash bass;
+  `toNumerals`, `generateProgression` — our own weighted table of diatonic moves, `writeProgression` with voice
+  leading, bass note and FL's rhythm cells); `riffMachine` (the 8-step chain of §7 over LYNX's tools; built-in
+  progression/chord shapes of our own when the installation's step patterns are missing).
+- `src/core/EventEdit.{h,cpp}` and `Song.h` `PatternEvents`: pattern event lanes (target + held values), draw/line/
+  erase/scale/randomise/LFO operations; `.lynx` saves them per pattern (`"events"`); channel/insert renumbering
+  follows them (`Song::forEachTarget`); undo label "Edit events".
+- Playback (`RackRenderer`): each lane takes an automation slot after the song's automations and binds like an
+  automation clip of its target (pattern events win over a clip of the same target). Pattern mode: the current
+  pattern's lanes at the looped position; song mode: inside a clip of the pattern its events, after it the value
+  it ended with, before the first clip the target's own value (position-only, like automation clips). Plugin
+  parameters driven by pattern events are also sent in pattern mode.
+- UI: `src/ui/NoteToolDialogs.*` (Quantize, Chop, Flam, LFO, Claw machine, Articulate, Riff machine, Chord
+  progression: live preview, Accept = one undo step; templates listed from the installation's
+  `Data/Patches/Scores/{Quantization,Chopping,Chopping/Riff machine step N}` and the chord tool's `presets.cpt` /
+  `rhythm_presets.cpt`); Piano Roll Tools menu. `src/ui/EventEditor.*`: Event editor window (target, Draw/Line/
+  Select, snap, Scale/Offset, Randomise, LFO, Clear), opened from the Piano Roll Tools menu ("Edit events...") and
+  every knob menu that offers "Create automation clip" ("Edit events in the pattern").
+
 ## Where I stopped / next steps
 
-- (in progress) core algorithms + dialogs, then the Event editor.
+- Not done: FL `.flp` pattern events (0xDF) import — value scales per parameter not decoded; FL's arpeggiator /
+  randomizer / limiter algorithms in the riff machine (LYNX's own tools are used); FL's chord progression model
+  (Markov data in `.pyc`) — LYNX's generator is its own; the quantizer "groove" templates' extra FL features
+  (template preview graph); articulator "Only with selection" (LYNX looks for the next note among the processed
+  notes only).
