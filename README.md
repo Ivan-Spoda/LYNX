@@ -33,7 +33,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 
 <p align="center">
   <img src="docs/img/workspace.png" alt="The LYNX workspace: browser, playlist, piano roll, channel rack and mixer" width="100%">
-  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.4 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
+  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.5 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
 </p>
 
 ---
@@ -70,6 +70,11 @@ FL Studio's behaviour was studied through behavioural reverse engineering and do
 </table>
 
 ## Features
+
+<p align="center">
+  <img src="docs/img/playlist.png" alt="The LYNX Playlist with pattern, automation and audio clips" width="100%">
+  <br><sub><strong>Playlist:</strong> pattern, automation and audio clips with a clip menu on right-click (split, chop, merge, reverse, normalize, fit to tempo and more).</sub>
+</p>
 
 <table>
 <tr>
