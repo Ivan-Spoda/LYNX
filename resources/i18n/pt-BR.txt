@@ -1258,3 +1258,5 @@ countries: br
 "Nothing: the slot was left out of the mixer" = "Nada: o slot ficou fora do Mixer"
 "Silence: the channel keeps the plugin's settings until it is installed" = "Silêncio: o canal guarda as configurações do plugin até ele ser instalado"
 "Bypassed: the slot keeps the plugin's settings until it is installed" = "Desativado: o slot guarda as configurações do plugin até ele ser instalado"
+"Install them, scan for plugins (Options menu), then open the project again." = "Instale-os, procure plugins (menu Opções) e abra o projeto de novo."
+"Already in use: nothing to do. Save the project to keep the new places." = "Já em uso: nada a fazer. Salve o projeto para manter os novos locais."

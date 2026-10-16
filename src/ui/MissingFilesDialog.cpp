@@ -201,12 +201,15 @@ public:
         auto actions = area.removeFromBottom (30);
         area.removeFromBottom (10);
         list.setBounds (area);
-        searchButton.setBounds (actions.removeFromLeft (150));
-        actions.removeFromLeft (8);
-        locateButton.setBounds (actions.removeFromLeft (110));
-        actions.removeFromLeft (8);
-        skipButton.setBounds (actions.removeFromLeft (110));
-        actions.removeFromLeft (12);
+        if (page == Page::samples)
+        {
+            searchButton.setBounds (actions.removeFromLeft (150));
+            actions.removeFromLeft (8);
+            locateButton.setBounds (actions.removeFromLeft (110));
+            actions.removeFromLeft (8);
+            skipButton.setBounds (actions.removeFromLeft (110));
+            actions.removeFromLeft (12);
+        }
         stopButton.setBounds (actions.removeFromRight (80));
         status.setBounds (actions);
     }
@@ -254,7 +257,10 @@ private:
         locateButton.setEnabled (! searching && list.getNumSelectedRows() > 0);
         skipButton.setEnabled (list.getNumSelectedRows() > 0);
         stopButton.setVisible (searching && samplesPage);
-        status.setVisible (samplesPage);
+        if (page == Page::plugins)
+            status.setText (info.plugins.empty() ? juce::String() : tr ("Install them, scan for plugins (Options menu), then open the project again."), juce::dontSendNotification);
+        else if (page == Page::found)
+            status.setText (info.autoRelocated.empty() ? juce::String() : tr ("Already in use: nothing to do. Save the project to keep the new places."), juce::dontSendNotification);
 
         applyButton.setButtonText (found > 0 ? tr ("Apply ({0})", { juce::String (found) }) : tr ("Apply"));
         applyButton.setEnabled (found > 0 && ! searching);
