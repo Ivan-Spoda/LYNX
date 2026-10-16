@@ -158,7 +158,11 @@ control-word switches, **not traced**; LYNX's shipped and tested builds are Clan
 
 ## 6. Verification
 
-(filled in below as the runs finish)
+| Set | Content | Result |
+|---|---|---|
+| automation during notes (`py/autom.py 7901 120`, `out/autom1.log`) | 120 random scenarios: preset, 1–3 notes, 1–6 changes of any parameter (mode, effect, amp, cabinet, strings, mod wheel…), optional pitch bend, 44.1/48 kHz, blocks 64…1000, tempo 120/140 | **120 / 120 bit-identical** [EXEC + model] |
+| GCC builds (`asan/`) | 12 golden presets, g++ `-O1 -fsanitize=address,undefined` with the `F`/`D` fix vs Clang | 12 / 12 bit-identical [model] |
+| tests | `slayer_engine` (instrument: MIDI-pan gains), new `slayer_host_levels_and_automation` (bend / pan / gain laws; channel pitch → bend, automation of the effect and the mod wheel and a settings edit during a note, against the reference renderer) | `build-local` with the FL data: 1 167 602 checks, 0 failures |
 
 ## 7. What LYNX still does not reproduce
 
@@ -186,4 +190,7 @@ control-word switches, **not traced**; LYNX's shipped and tested builds are Clan
 
 ## Where I stopped / next steps
 
-- (updated below)
+- Done: §2–§5 implemented and verified; landed into main (see the merge commit).
+- Next ideas: trace FL's automation call into ProcessParam (REC_FromMIDI scale, §3); route the master pitch through the
+  bend (§2.4); a layer's parent factor on ProcessEvent 3; the remaining plain-GCC difference (§5) if a GCC build is ever
+  shipped.
