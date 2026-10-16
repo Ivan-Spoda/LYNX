@@ -1,5 +1,7 @@
 #include "core/DistructorFx.h"
 
+#include "core/Effects.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -2522,6 +2524,10 @@ void Module::process (float* left, float* right, int n) noexcept
         left[i] = lr[(std::size_t) (2 * i)], right[i] = lr[(std::size_t) (2 * i + 1)];
 }
 void Module::processInterleaved (float* lr, int n) noexcept { impl->process (lr, n); }
+void Module::setGains (int in, int mix, int out) noexcept
+{
+    impl->st.p[36] = in, impl->st.p[37] = mix, impl->st.p[38] = out;
+}
 const ModuleState& Module::state() const noexcept { return impl->st; }
 
 // ------------------------------------------------------------------------------------------------ plugin
@@ -2554,6 +2560,13 @@ void Engine::set (const State& s)
     }
 }
 void Engine::reset() { set (impl->st); }
+void Engine::setControls (const float* p) noexcept
+{
+    auto raw = [] (float v) { return (int) std::lround (std::clamp ((double) v, 0.0, 1.0) * 10000.0); };
+    for (std::size_t m = 0; m < impl->mods.size() && m < (std::size_t) maxModules; ++m)
+        impl->mods[m]->setGains (raw (p[3 * m]), raw (p[3 * m + 1]), raw (p[3 * m + 2]));
+    impl->st.clip = p[12] >= 0.5f;
+}
 void Engine::process (float* left, float* right, int n) noexcept
 {
     if (n <= 0)
@@ -2577,5 +2590,161 @@ std::string moduleName (const ModuleState& m)
     static const char* types[] = { "Distortion", "Filter", "Chorus", "Amp/Cab" };
     return types[std::clamp (m.type, 0, 3)];
 }
+
+// ------------------------------------------------------------------------------------------------ slot blob
+namespace
+{
+constexpr std::uint8_t blobMagic[4] = { 'L', 'X', 'D', 'T' };
+std::uint32_t u32At (const std::vector<std::uint8_t>& b, std::size_t o) noexcept
+{
+    std::uint32_t v;
+    std::memcpy (&v, b.data() + o, 4);
+    return v;
+}
+} // namespace
+
+std::vector<std::uint8_t> packBlob (const std::vector<std::uint8_t>& flState, const std::map<int, std::vector<std::uint8_t>>& impulses)
+{
+    std::vector<std::uint8_t> v (blobMagic, blobMagic + 4);
+    putI32 (v, 1);
+    putI32 (v, (std::int32_t) flState.size());
+    v.insert (v.end(), flState.begin(), flState.end());
+    putI32 (v, (std::int32_t) impulses.size());
+    for (const auto& [idx, bytes] : impulses)
+    {
+        putI32 (v, idx);
+        putI32 (v, (std::int32_t) bytes.size());
+        v.insert (v.end(), bytes.begin(), bytes.end());
+    }
+    return v;
+}
+
+std::optional<State> parseBlob (const std::vector<std::uint8_t>& b)
+{
+    if (b.size() < 12 || std::memcmp (b.data(), blobMagic, 4) != 0)
+        return parse (b);
+    std::size_t o = 8;
+    const auto flLen = u32At (b, o);
+    o += 4;
+    if (o + flLen > b.size())
+        return std::nullopt;
+    auto s = parse (std::vector<std::uint8_t> (b.begin() + (std::ptrdiff_t) o, b.begin() + (std::ptrdiff_t) (o + flLen)));
+    if (! s)
+        return std::nullopt;
+    o += flLen;
+    if (o + 4 > b.size())
+        return s;
+    const auto count = u32At (b, o);
+    o += 4;
+    std::map<int, std::vector<std::uint8_t>> files;
+    for (std::uint32_t k = 0; k < count && o + 8 <= b.size(); ++k)
+    {
+        const auto idx = (int) u32At (b, o);
+        const auto len = u32At (b, o + 4);
+        o += 8;
+        if (o + len > b.size())
+            break;
+        files[idx].assign (b.begin() + (std::ptrdiff_t) o, b.begin() + (std::ptrdiff_t) (o + len));
+        o += len;
+    }
+    for (auto& m : s->modules)
+        if (m.type == (int) ModuleType::ampCab)
+            if (const auto it = files.find (m.impulse); it != files.end())
+                m.impulseFile = it->second;
+    return s;
+}
+
+std::vector<int> impulsesUsed (const State& s)
+{
+    std::vector<int> v;
+    for (const auto& m : s.modules)
+        if (m.type == (int) ModuleType::ampCab && impulseTable[std::clamp (m.impulse, 0, 58)].file != nullptr
+            && std::find (v.begin(), v.end(), m.impulse) == v.end())
+            v.push_back (m.impulse);
+    return v;
+}
+
+std::string impulsePath (int impulse)
+{
+    const auto* f = impulseTable[std::clamp (impulse, 0, 58)].file;
+    return f == nullptr ? std::string() : std::string ("Plugins\\Fruity\\Effects\\Distructor\\module\\impulses\\") + f;
+}
+
+void toParams (const State& s, float* params) noexcept
+{
+    for (int k = 0; k < effectParams; ++k)
+        params[k] = 0.0f;
+    for (std::size_t m = 0; m < s.modules.size() && m < (std::size_t) maxModules; ++m)
+        for (int j = 0; j < 3; ++j)
+            params[3 * m + (std::size_t) j] = (float) std::clamp ((double) s.modules[m].p[(std::size_t) (36 + j)] / 10000.0, 0.0, 1.0);
+    params[12] = s.clip ? 1.0f : 0.0f;
+}
+
+std::string paramText (int param, float v)
+{
+    char text[32];
+    if (param == 12)
+        return v >= 0.5f ? "On" : "Off";
+    if (param % 3 == 1)
+        std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (v * 100.0f));
+    else
+    {
+        const auto g = v * 2.0f; // 5000 = unity
+        if (g <= 0.0f)
+            return "-inf dB";
+        std::snprintf (text, sizeof (text), "%.1f dB", 20.0 * std::log10 ((double) g));
+    }
+    return text;
+}
+
+namespace
+{
+class DistructorEffect final : public Effect
+{
+public:
+    explicit DistructorEffect (const std::vector<std::uint8_t>& blob)
+    {
+        if (auto s = parseBlob (blob))
+            state = *s, valid = true;
+    }
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = sampleRate;
+        if (valid)
+        {
+            engine.prepare (sampleRate, 512);
+            engine.set (state);
+            haveParams = false;
+        }
+    }
+    void reset() noexcept override
+    {
+        if (valid)
+            engine.reset();
+    }
+    void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
+    {
+        if (! valid)
+            return; // not a Distructor state: the signal passes unchanged
+        if (! haveParams || ! std::equal (p.begin(), p.begin() + effectParams, last.begin()))
+        {
+            std::copy (p.begin(), p.begin() + effectParams, last.begin());
+            haveParams = true;
+            engine.setControls (p.data());
+        }
+        for (int i = 0; i < n; i += 512) // FL's blocks of at most 512 frames
+            engine.process (left + i, right + i, std::min (512, n - i));
+    }
+
+private:
+    State state;
+    bool valid = false, haveParams = false;
+    double rate = 44100.0;
+    std::array<float, effectParams> last {};
+    Engine engine;
+};
+} // namespace
+
+std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& blob) { return std::make_unique<DistructorEffect> (blob); }
 void setImpulseFolder (const std::string& folder) { impulseFolder() = folder; }
 } // namespace lynx::distructor
