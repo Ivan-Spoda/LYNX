@@ -1,5 +1,6 @@
 #include "core/FlpImport.h"
 #include "core/FlPluginDb.h"
+#include "core/FlVoiceProcessor.h"
 #include "core/HardcoreFx.h"
 #include "core/GrossBeat.h"
 #include "core/LovePhilter.h"
@@ -692,6 +693,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 std::memcpy (def.sampler.flVolumeEnvelope.data(), env.raw.data(), 68);
                 def.sampler.flVolumeEnvelope[17] = project.header.ppq > 0 ? project.header.ppq : 96;
             }
+        }
+
+        // FL's whole native sampler voice (REA_rodada76): the five articulator records as stored (a missing one keeps
+        // the plugins' default record), Mod X/Y, filter type, PPQ
+        if (c.type == flp::ChannelType::sampler && def.instrument == InstrumentKind::sampler)
+        {
+            const auto defaults = flvp::defaultSnapshot();
+            def.sampler.flChannel.assign (90, 0);
+            for (int k = 0; k < 5; ++k)
+            {
+                const auto& env = c.envelopes[(std::size_t) k];
+                const auto* src = env.rawSize >= 68 ? env.raw.data() : defaults.data() + 0x44 * k;
+                std::memcpy (def.sampler.flChannel.data() + 17 * k, src, 68);
+            }
+            def.sampler.flChannel[85] = c.modX;
+            def.sampler.flChannel[86] = c.modY;
+            def.sampler.flChannel[87] = c.filterType;
+            def.sampler.flChannel[88] = project.header.ppq > 0 ? project.header.ppq : 96;
+            def.sampler.flChannel[89] = project.panLaw;
         }
 
         // channel filter (Mod X/Y + type from 0xDB) applies to the sampler too

@@ -2367,6 +2367,133 @@ TEST (fl_sampler_volume_envelope_steps_per_tick)
     CHECK (l[39999] == 0.0f && sampler->idle());
 }
 
+// FL's native sampler voice (REA_rodada76): FL's own command-line renders of crafted projects (one sampler channel,
+// our noise sample, notes at ticks 0/192/384 of 96 PPQ at 120 BPM, 16-bit output) — the fast LP with resonance and a
+// note pan/velocity set; the 12 dB LP with volume, cutoff and pitch envelopes and their releases. FL's int16 codes at
+// a few frames; LYNX within one code. Also the velocity law and the pan law with the channel's levels inside the voice.
+TEST (fl_native_sampler_voice_matches_fl_renders)
+{
+    auto noise = std::make_shared<lynx::SampleData>();
+    noise->sampleRate = 44100.0;
+    {
+        std::uint32_t seed = 1;
+        for (int i = 0; i < 26460; ++i)
+        {
+            seed = (seed * 1103515245u + 12345u) & 0x7fffffffu;
+            noise->left.push_back ((float) (((double) seed / 2147483647.0 * 2.0 - 1.0) * 0.3));
+        }
+    }
+    struct Ev { int on, off; float vel, pan; };
+    auto render = [&] (std::vector<std::int32_t> recs, std::array<int, 3> filter, const std::vector<Ev>& notes,
+                       std::shared_ptr<lynx::SampleData> data, float chanGain) {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::sampler;
+        c.sampler.flChannel = recs;
+        c.sampler.flChannel.insert (c.sampler.flChannel.end(), { filter[0], filter[1], filter[2], 96 });
+        auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+        lynx::setOfflineRendering (true); // FL's render dialog: 32-point sinc (the pitch envelope interpolates)
+        inst->prepare (44100.0);
+        lynx::setOfflineRendering (false);
+        inst->configure (c, 120.0);
+        inst->setSongPosition (0.0);
+        std::vector<std::pair<int, int>> events; // (sample, index ≥ 0 on / < 0 off)
+        for (int i = 0; i < (int) notes.size(); ++i)
+            events.push_back ({ notes[(std::size_t) i].on, i }), events.push_back ({ notes[(std::size_t) i].off, -1 - i });
+        std::sort (events.begin(), events.end());
+        std::vector<float> l (120000), r (120000);
+        int at = 0;
+        for (const auto& [when, i] : events)
+        {
+            inst->render (l.data() + at, r.data() + at, when - at, chanGain, chanGain);
+            at = when;
+            if (i >= 0)
+            {
+                inst->setNextNoteExpression (notes[(std::size_t) i].pan, 0.0f, false);
+                inst->noteOn (60, notes[(std::size_t) i].vel);
+            }
+            else
+                inst->noteOff (60);
+        }
+        inst->render (l.data() + at, r.data() + at, 120000 - at, chanGain, chanGain);
+        return std::make_pair (l, r);
+    };
+    const std::vector<std::int32_t> plain = { 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0 };
+    auto records = [&] (std::vector<std::int32_t> vol, std::vector<std::int32_t> cut, std::vector<std::int32_t> pitch) {
+        std::vector<std::int32_t> all = plain;
+        for (const auto* r : std::initializer_list<const std::vector<std::int32_t>*> { &vol, &cut, &plain, &pitch })
+            all.insert (all.end(), r->begin(), r->end());
+        return all;
+    };
+    const auto volPlain = std::vector<std::int32_t> { 4, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, -101 };
+    const auto chan = lynx::channelGain (10000.0f / 12800.0f); // the rack's gain at pan 0 (panGains: gain·√2·cos(π/4))
+    const int at[] = { 5, 300, 2000, 9000, 11500, 15000, 22100, 26000 };
+    auto check = [&] (const std::pair<std::vector<float>, std::vector<float>>& out, const int* goldL, const int* goldR) {
+        int bad = 0;
+        for (int n = 0; n < 3; ++n)
+            for (int k = 0; k < 8; ++k)
+            {
+                const auto p = (std::size_t) (44100 * n + at[k]);
+                bad += std::abs ((int) std::lround (out.first[p] * 32767.0f) - goldL[8 * n + k]) > 1;
+                bad += std::abs ((int) std::lround (out.second[p] * 32767.0f) - goldR[8 * n + k]) > 1;
+            }
+        return bad;
+    };
+    {
+        // fast LP (Mod X 100, Mod Y 200); notes: len 96, (vel 80, pan 40) len 48, (vel 120, pan 90) len 144
+        const auto out = render (records (volPlain, plain, plain), { 100, 200, 0 },
+                                 { { 0, 22050, 100.0f / 128, 0.0f }, { 44100, 55125, 80.0f / 128, -24.0f / 64 }, { 88200, 121275, 120.0f / 128, 26.0f / 64 } },
+                                 noise, chan);
+        const int L[] = { -194, -789, 883, 803, 614, -557, -983, -1641, -141, -572, 640, 582, 445, -403, -712, -1189, -207, -841, 942, 856, 655, -593, -1048, -1750 };
+        const int R[] = { -194, -789, 883, 803, 614, -557, -983, -1641, -75, -305, 342, 311, 238, -216, -381, -636, -411, -1671, 1871, 1700, 1300, -1179, -2082, -3477 };
+        CHECK (check (out, L, R) == 0);
+    }
+    {
+        // 12 dB LP (Mod X 90, Mod Y 60), volume / cutoff / pitch envelopes; notes len 48, (vel 80, pan 30) len 48, len 30
+        const auto out = render (records ({ 4, 1, 100, 3000, 20000, 30000, 100, 6000, 0, 100, 20000, 0, 32950, 0, 0, 0, -101 },
+                                          { 0, 1, 100, 6000, 2000, 15000, 40, 8000, 100, 100, 20000, 0, 32950, 0, 0, 0, 0 },
+                                          { 0, 1, 100, 4000, 20000, 9000, 0, 20000, 600, 100, 20000, 0, 32950, 0, 0, 0, 0 }),
+                                 { 90, 60, 1 },
+                                 { { 0, 11025, 100.0f / 128, 0.0f }, { 44100, 55125, 80.0f / 128, -34.0f / 64 }, { 88200, 95091, 100.0f / 128, 0.0f } },
+                                 noise, chan);
+        const int L[] = { -1, -203, 29, -298, 97, 0, 0, 0, 0, -156, 22, -228, 74, 0, 0, 0, -1, -203, 29, -2, 0, 0, 0, 0 };
+        const int R[] = { -1, -203, 29, -298, 97, 0, 0, 0, 0, -60, 9, -88, 29, 0, 0, 0, -1, -203, 29, -2, 0, 0, 0, 0 };
+        CHECK (check (out, L, R) == 0);
+    }
+    {
+        // a sample with its own loop (WAV smpl 4410…8819): FL loops it while the note lasts and fades it out over 10 ms
+        // after the note-off (no volume envelope)
+        auto looped = std::make_shared<lynx::SampleData>();
+        looped->sampleRate = 44100.0;
+        for (int i = 0; i < 8820; ++i)
+            looped->left.push_back ((float) ((0.5 * (1.0 - 0.5 * i / 8820.0)) * std::sin (2.0 * 3.141592653589793 * 441.0 * i / 44100.0)));
+        looped->loopStart = 4410, looped->loopEnd = 8820;
+        const auto out = render (records (volPlain, plain, plain), { 256, 0, 0 },
+                                 { { 0, 22050, 100.0f / 128, 0.0f }, { 44100, 49612, 100.0f / 128, 0.0f } }, looped, chan);
+        const int pos[] = { 125, 4525, 8925, 13337, 17725, 22025, 22125, 22325, 22437, 49625, 49737, 50025 };
+        const int gold[] = { 6338, 4746, 3842, 4161, -1470, -989, -3577, -1174, -32, 4373, 2573, 42 };
+        int bad = 0;
+        for (int k = 0; k < 12; ++k)
+            bad += std::abs ((int) std::lround (out.first[(std::size_t) pos[k]] * 32767.0f) - gold[k]) > 1;
+        CHECK (bad == 0);
+    }
+    {
+        // a constant sample: velocity law (FL: vel 100 → 0.389608, 128 → 0.799753, 64 → 0.141805 at the default
+        // channel volume, pan centre) and a hard-left note (0.550997 / 0)
+        auto dc = std::make_shared<lynx::SampleData>();
+        dc->sampleRate = 44100.0;
+        dc->left.assign (20000, 0.5f);
+        auto level = [&] (float vel, float pan, bool right) {
+            const auto out = render (records (volPlain, plain, plain), { 256, 0, 0 }, { { 0, 10000, vel, pan } }, dc, chan);
+            return (right ? out.second : out.first)[5000] / 0.5f;
+        };
+        CHECK (std::abs (level (100.0f / 128, 0.0f, false) - 0.389608f) < 3e-5f);
+        CHECK (std::abs (level (1.0f, 0.0f, false) - 0.799753f) < 3e-5f);
+        CHECK (std::abs (level (64.0f / 128, 0.0f, false) - 0.141805f) < 3e-5f);
+        CHECK (std::abs (level (100.0f / 128, -1.0f, false) - 0.550997f) < 3e-5f);
+        CHECK (std::abs (level (100.0f / 128, -1.0f, true)) < 1e-6f);
+    }
+}
+
 // FPC's "cycle" layers (REA_rodada69 §4): among the layers covering the velocity, in order, the one after the last
 // chosen, wrapping; FL's velocity index is round(v·128). Slicex's master volume uses FL's L11 law (§5).
 TEST (fl_fpc_cycle_layers_and_slicex_master_volume)
