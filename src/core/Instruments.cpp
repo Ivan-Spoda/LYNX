@@ -1389,6 +1389,7 @@ struct SamplerVoice
     float gL = 0.0f, gR = 0.0f, sL = 0.0f, sR = 0.0f;
     float fcRun = 0.0f, fcSlope = 0.0f;
     std::int64_t tickIndex = 0;
+    double nextGap = 0.0;             // samples from this tick to the next one on the song's grid
     int endFade = -1;                 // ≥ 0: past the sample's end, the last frame fading out (FL's 10 ms end fade)
     float holdL = 0.0f, holdR = 0.0f; // the last frame read
 };
@@ -1676,6 +1677,7 @@ public:
             const auto spt = sampleRate / modulation.ticksPerSecond;
             target->tickIndex = (std::int64_t) std::nearbyint (songSample / spt);
             target->tickLeft = 0.0;
+            target->nextGap = std::max (1.0, (double) flvp::roundEven ((double) (target->tickIndex + 1) * spt) - songSample);
         }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
@@ -1731,12 +1733,14 @@ public:
                     modEnv[e].release (v.mod[e]);
 
         // FL's voice: the volume, cutoff, resonance and pitch articulators release (FLEngine FUN_00d241e0); without a
-        // volume envelope the sample plays on (one-shot)
+        // volume envelope the note-off changes nothing — the sample plays on and the other envelopes hold (EXEC: FL's
+        // renders, REA_rodada76 §6)
         for (auto& v : voices)
             if (v.active && v.key == key && v.flVoice && v.stage < 3)
             {
-                for (int k = 1; k < 5; ++k)
-                    v.flProc.arts[(std::size_t) k].release (modulation.fl.recs[(std::size_t) k]);
+                if (modulation.fl.recs[1].enabled != 0)
+                    for (int k = 1; k < 5; ++k)
+                        v.flProc.arts[(std::size_t) k].release (modulation.fl.recs[(std::size_t) k]);
                 v.stage = 3;
             }
 
@@ -2048,9 +2052,9 @@ public:
             if (v.tickLeft <= 0.0)
             {
                 flTick (v, chanVol, chanPan, perTick);
-                const auto next = v.tickIndex + 1;
-                v.tickLeft += (double) (flvp::roundEven ((double) next * spt) - flvp::roundEven ((double) v.tickIndex * spt));
-                v.tickIndex = next;
+                v.tickLeft += v.nextGap;
+                ++v.tickIndex;
+                v.nextGap = (double) (flvp::roundEven ((double) (v.tickIndex + 1) * spt) - flvp::roundEven ((double) v.tickIndex * spt));
                 if (! v.active)
                     break;
             }
@@ -2077,7 +2081,7 @@ public:
                 // FL's render, REA_rodada76 §6)
                 if (v.endFade < 0 && ((double) flrs::wholeFrames (v.position) > lastFrame || v.position < v.first))
                     v.endFade = 0;
-                float sl, sr;
+                float sl, sr, endGain = 1.0f;
                 if (v.endFade >= 0)
                 {
                     const auto& table = flvp::endTable();
@@ -2086,8 +2090,8 @@ public:
                         ended = true;
                         break;
                     }
-                    const auto t = table[(std::size_t) v.endFade++];
-                    sl = v.holdL * t, sr = v.holdR * t;
+                    endGain = table[(std::size_t) v.endFade++];
+                    sl = v.holdL, sr = v.holdR;
                 }
                 else
                 {
@@ -2106,7 +2110,7 @@ public:
                 }
                 flX[(std::size_t) (2 * m)] = sl;
                 flX[(std::size_t) (2 * m + 1)] = sr;
-                flG[(std::size_t) m] = gain;
+                flG[(std::size_t) m] = gain * endGain;
                 v.position += v.rate * v.pitchMul;
                 ++v.age;
                 if (v.glideLeft > 0)
