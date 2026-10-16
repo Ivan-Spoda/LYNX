@@ -7,6 +7,9 @@
 #include "core/FruityVocoder.h"
 #include "core/MaximusFx.h"
 #include "core/EquoFx.h"
+#include "core/HardcoreFx.h"
+#include "core/DistructorFx.h"
+#include "core/MultibandDelayFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/ParametricEqFl.h"
 #include "core/FruityDynamics.h"
@@ -928,8 +931,23 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (pluginName == "Vocodex" && data)
         if (auto v = vocodexEffect (state, data))
             return v->slot;
+    if (pluginName == "Distructor" && data) // the amp/cabinet impulses of the installation travel with the slot (REA_rodada71)
+        if (const auto s = distructor::parse (state))
+        {
+            std::map<int, std::vector<std::uint8_t>> files;
+            for (const auto i : distructor::impulsesUsed (*s))
+                if (auto bytes = data (distructor::impulsePath (i)); ! bytes.empty())
+                    files[i] = std::move (bytes);
+            auto slot = makeEffectSlot (EffectKind::distructor);
+            slot.state = distructor::packBlob (state, files);
+            distructor::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Fruity Convolver" && data) // impulse response file of the installation (REA_rodada60)
         if (auto exact = convolverFromFl (state, data))
+            return exact;
+    if (pluginName == "Hardcore" && data) // the exact engine with the installation's cabinet impulses (REA_rodada71)
+        if (auto exact = hardcore::fromFl (state, data))
             return exact;
     if (pluginName == "Soundgoodizer" && data)
         if (const auto path = soundgoodizerPresetPath (state); ! path.empty())
@@ -1180,12 +1198,31 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             psfl::toParams (ps, slot.params);
             return slot;
         }
+    if (pluginName == "Hardcore") // the exact engine without the cabinet impulses (REA_rodada71)
+        if (auto exact = hardcore::fromFl (state, {}))
+            return exact;
+    if (pluginName == "Distructor") // the exact modules (REA_rodada71); a generic distortion otherwise
+        if (const auto s = distructor::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::distructor);
+            slot.state = distructor::packBlob (state, {});
+            distructor::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "EQUO") // the exact engine (REA_rodada61); a flat parametric EQ otherwise
         if (const auto s = equofx::parse (state))
         {
             auto slot = makeEffectSlot (EffectKind::equo);
             slot.state = state;
             equofx::toParams (*s, slot.params);
+            return slot;
+        }
+    if (pluginName == "Multiband Delay") // the exact engine (REA_rodada71); LYNX's generic delay otherwise
+        if (const auto s = mbdelay::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::multibandDelay);
+            slot.state = state;
+            mbdelay::toParams (*s, slot.params);
             return slot;
         }
     if (pluginName == "Frequency Splitter") // FL's engine (REA_rodada62): its summed (main) output; shelves otherwise
@@ -1400,7 +1437,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityDelayBank: return { "Fruity Delay Bank" };
         case EffectKind::fruityMultiband: return { "Fruity Multiband Compressor" };
         case EffectKind::equo: return { "EQUO" };
+        case EffectKind::hardcore: return { "Hardcore" };
+        case EffectKind::distructor: return { "Distructor" };
         case EffectKind::flPitchShifter: return { "Pitch Shifter" };
+        case EffectKind::multibandDelay: return { "Multiband Delay" };
         default: return {};
     }
 }
@@ -1421,7 +1461,18 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
         || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // Hardcore's 50 parameters: FL sends 0…1 for all of them (the box types and the cabinet as raw numbers, REA_rodada71)
+    if (is ("Hardcore") && k >= 0 && k < hardcore::numParams)
+        return FlParamMap { k, [k] (float v) { return hardcore::toSlot (k, std::clamp (v, 0.0f, 1.0f)); } };
+    // Distructor: module m's controls 36…38 (FL parameter 49m + 36…38) → slot parameters 3m…3m+2
+    if (is ("Distructor") && k >= 0 && k < 4 * distructor::moduleParams && k % distructor::moduleParams >= 36
+        && k % distructor::moduleParams <= 38)
+        return FlParamMap { 3 * (k / distructor::moduleParams) + k % distructor::moduleParams - 36,
+                            [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
+    // Multiband Delay's twelve global controls (FL parameters 384…395) over their ranges; bank cells are not mapped
+    if (is ("Multiband Delay") && k >= 384 && k < 396)
+        return FlParamMap { k - 384, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     if (is ("EQUO") && k >= 0 && k < 5)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact Fast LP, Free Filter and Fruity Filter likewise (REA_rodada63; the Free Filter's CENTER and the
