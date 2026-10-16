@@ -2390,7 +2390,9 @@ TEST (fl_native_sampler_voice_matches_fl_renders)
         c.sampler.flChannel = recs;
         c.sampler.flChannel.insert (c.sampler.flChannel.end(), { filter[0], filter[1], filter[2], 96 });
         auto inst = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+        lynx::setOfflineRendering (true); // FL's render dialog: 32-point sinc (the pitch envelope interpolates)
         inst->prepare (44100.0);
+        lynx::setOfflineRendering (false);
         inst->configure (c, 120.0);
         inst->setSongPosition (0.0);
         std::vector<std::pair<int, int>> events; // (sample, index ≥ 0 on / < 0 off)
