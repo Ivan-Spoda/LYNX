@@ -11,12 +11,18 @@
 //
 // The channel keeps the plugin's raw saved state (record 0xD5, as FL wrote it) in ChannelDef::pluginState.
 //
-// Fallbacks (not decoded in round 34; harmorFallbacks() lists the ones a state needs): image/resynthesis data is
-// ignored (the part plays its timbres), arpeggio envelope points act as normal points, the noise resonance (type 109)
-// is skipped, the blur variant of misc +0x46 runs as the normal blur, phaser/harmonizer mask curves and timbre blend
-// modes ≠ 0 are ignored, non-neutral global envelope scales are ignored (the global attack skip still runs), unknown
-// filter/resonance/phaser shapes and clip modes > 4 switch that stage off, the harmonic-randomness module is absent
-// (never active in FL's data).
+// REA round 75 (REA_rodada75) adds image synthesis (the part's gain and frequency planes read along a time position:
+// speed, time offset with smoothing, loop / ping-pong / crossfade, interpolation curves, gain pixel scale and mix, the
+// frequency modes Oct/Hz/Wide Hz/Unison with the local mask, formant shift with the per-column pitch track and the
+// formant-mutation curve, the record ending with a one-shot image), arpeggio envelope markers (chord order, the
+// note playing each segment, the release that waits for the next marker), the noise resonance (type 109), the
+// "pluck replaces blur decay" option, phaser and harmonizer masks, timbre blend modes 1–5 (5: pluck blend), the global
+// envelope scales, the harmonic-randomness module and the per-block X/Y/Z smoothing.
+//
+// Fallbacks (harmorFallbacks() lists the ones a state needs): resynthesis-mode images (a sample analysed at load time)
+// and images with a per-column gain table (+0x100) are ignored (the part plays its timbres), unknown filter/resonance/
+// phaser shapes and clip modes > 4 switch that stage off, blend modes > 5 play as mode 0. FL's IPP vector functions
+// run at 11-bit accuracy at precision "Average" (Exp/Expm1/Div_32f_A11); LYNX computes them exactly.
 //
 // Effects rack (REA_rodada38): distortion, chorus, delay, reverb and the Maximus compressor in the state's unit order
 // (core/HarmlessFx.h, hlfx::HarmorRack), plugged into the engine's `harmor::FxHook` slot; the compressor needs Harmor's

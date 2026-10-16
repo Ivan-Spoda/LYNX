@@ -96,8 +96,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   of the DLL on 135 of 139 demo channels); Sytrus on its engine (REA round 31: the whole instance from the raw plugin
   state — operators, FM/RM matrix, articulators, unison, portamento, filters, effects chain; FL's render settings when
   exporting, its live ones when playing); Harmor on its additive engine (REA round 34: both parts, 520-partial bank,
-  module chain, articulators, and its effects rack from REA round 38; within −150 dB of the reference model on 88 of
-  the 89 demo channels it runs, 82 of 99 demo channels within −60 dB of FL's DLL with the whole rack on); Ogun on its
+  module chain, articulators, and its effects rack from REA round 38; image synthesis, arpeggio envelopes, noise
+  resonance and the other round-34 gaps from REA round 75; 97 of 99 demo channels within −60 dB of FL's DLL with the
+  rack off, the other two limited by FL's 11-bit IPP `exp`); Ogun on its
   inverse-FFT engine (REA round 37: the whole voice, articulators and plugin effects from the raw state; within float
   rounding of the reference model — which is within −60 dB of FL's DLL on 20 of 20 demo channels — on all 20 demo
   channels and 55 synthetic cases); GMS and Morphine on their engines (REA round 39: bit-identical to the reference
@@ -195,6 +196,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
   along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
   Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
+  **REA round 75:** image synthesis (the part's gain and frequency planes from the project: time position with speed,
+  offset and smoothing, one-shot / loop / ping-pong / crossfade, the seven interpolation curves, gain pixel scale and
+  mix, frequency modes Oct / Hz / Wide Hz / Unison with the local mask, formant shift with FL's per-column pitch track
+  and the formant-mutation curve, records ending with a one-shot image), arpeggio envelope markers (chord order, the
+  note playing each segment, the release waiting for the next marker), the noise resonance (type 109), "pluck
+  replaces blur decay", phaser and harmonizer masks, timbre blend modes 1–5, the global envelope scales, the
+  harmonic-randomness module, the per-block X/Y/Z smoothing. 97 of 99 demo channels within −60 dB of the DLL (88 within
+  −70, median −80.1 dB; round 34: 84); the 8 image channels −77.7…−99.6 dB (74: −57.4, see below); the new features
+  within −150 dB of the reference model and −65.9…−106.7 dB of the DLL on ~60 synthetic cases.
   **Effects rack** (REA round 38, `hlfx::HarmorRack` in `core/HarmlessFx.cpp`, plugged into `harmor::FxHook`): the six
   units in the state's order — distortion (types 1–10 and the quantiser, 2×/4×/8× half-band oversampling by precision,
   bias/drive/dry/wet ramps, 4th-order post low-pass, DC stage), the shared library's chorus, delay (modes, feedback ramp
@@ -540,20 +550,19 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Gross Beat (REA round 53 §8): MIDI control of the slots (keys, key-held, MIDI trigger option) — LYNX effects get no
   MIDI; the hidden parameter 8 (time offset, 65536 in every state) is ignored; curve type 10 (spline) runs as a line
   (in no selected slot); FL's "playing" and position-jump messages are inferred from LYNX's transport.
-- Harmor (REA round 34 open items; `harmorFallbacks()` lists what a state uses): image/resynthesis data is ignored
-  (the part plays its timbres; 8 demo channels carry images), arpeggio envelope points act as normal points (3 demo
-  channels), the Noise resonance (type 109) is skipped, the blur variant of misc +0x46 runs as the normal blur (its one
-  demo channel still lands at −85 dB), phaser/harmonizer mask curves, timbre blend modes ≠ 0 and non-neutral global
-  envelope scales are ignored, filter shapes 8/10–13/15/16 and unknown resonance/phaser types switch that stage off,
-  clip modes > 4 switch the clip off, the harmonic-randomness module is absent (never active in FL's data). In the
+- Harmor (`harmorFallbacks()` lists what a state uses): resynthesis-mode images (a sample analysed at load time) and
+  images with a per-column gain table are ignored (the part plays its timbres; none in the demos), filter shapes
+  8/10–13/15/16 and unknown resonance/phaser types switch that stage off, clip modes > 4 switch the clip off, blend
+  modes > 5 play as mode 0. At precision "Average" FL computes `exp`/`expm1`/division with IPP's 11-bit routines
+  (`*_A11`); LYNX computes them exactly — demos 74 and 78 (per-partial unison curve) stay at −57/−55 dB for that reason
+  (−77.5/−84.5 dB at precision 1, REA_rodada75 §5). In the
   rack, the distortion's shapers are exact functions where FL uses IPP's 11-bit `Tanh/Exp/Ln/Sqrt/Cbrt` at precision 0
   (−55…−72 dB against the DLL there, −82…−123 dB at precision 2; a full-drive type 6 also amplifies the voice
   residual by ~10 dB), and the compressor stays off when its preset file is not found (import report). FL seeds its Mersenne Twister from the clock, LYNX with a fixed value per
   instance: random unison, free/spectral phases and random maps are deterministic and differ from any FL render by
   design. Tempo-synced envelope/LFO rates, the phaser rate and the portamento time follow the song tempo (the
   reference was measured at 120 BPM). The polyphony limit is LYNX's (a pool of six notes' worth of records, 16–96;
-  the oldest are stolen). Two demo channels stay at −58/−55 dB against the DLL as in the model (last-ulp `exp` amplified by positive phase randomness;
-  an unexplained ~4 kHz residual).
+  the oldest are stolen).
 - Sakura: mod wheel, pitch bend and channel pressure are 0 as matrix sources (LYNX sends no CCs to it); the LFO steps
   once per LYNX render block; with the resonators on the output is within −72 dB of the reference (their float32
   feedback amplifies rounding); strings longer than 9 600 samples (notes below ~20 Hz) are shortened.
@@ -772,7 +781,7 @@ which cannot change without changing output bits.
   licensed stretch engine — LYNX plays the slices unstretched); FL Keys' resampling of "resample" wavetables (Roto
   Organ) when the host rate is not 44.1 kHz.
 - Maximus's Master Mid mode and linear-phase
-  split, Harmor's image synthesis, arpeggio envelopes and Noise resonance.
+  split; Harmor's resynthesis-mode images.
 - Workflow P2 leftovers (`docs/WORKFLOW_FL.md`): per-segment automation curve shapes, clip colour/name and track
   colour/height (need model fields), F2/F3 search stepping, instrument drops on mixer inserts, the automation
   record filter, and the remaining note tools (chop, quantise, articulate, flam, period slicing, LFO).
