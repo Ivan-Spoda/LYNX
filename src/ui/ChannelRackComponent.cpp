@@ -61,6 +61,8 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::flkeys: return "FL Keys";
         case InstrumentKind::granulizer: return "Fruity Granulizer";
         case InstrumentKind::drumaxx: return "Drumaxx";
+        case InstrumentKind::slayer: return "FL Slayer";
+        case InstrumentKind::fruitydance: return "Fruity Dance";
     }
     return "?";
 }
