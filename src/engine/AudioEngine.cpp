@@ -348,9 +348,16 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
 {
     if (record) // played notes (the PC keyboard) follow the scale snap; previews don't
     {
-        key = snapInputKey (key);
+        // the note-off stops the key its note-on started, even if the snap changed in between
+        const auto requested = key;
         if (on)
+        {
+            key = snapInputKey (key);
+            playedKeys.on (channel, requested, key);
             startOnInput();
+        }
+        else
+            key = playedKeys.off (channel, requested, snapInputKey (key));
     }
 
     NoteEvent e;
@@ -527,21 +534,43 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
     if (on)
         startOnInput();
 
-    NoteEvent e;
-    e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
-    e.key = snapInputKey (m.getNoteNumber());
-    e.velocity = on ? m.getFloatVelocity() : 0.0f;
-    const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
+    // a note-off goes to the channels and key its note-on reached (the selection or the scale snap may have
+    // changed while the key was down); a repeated note-on first stops what the previous one started
+    InputHeldNotes::Target targets[InputHeldNotes::maxTargets], stale[InputHeldNotes::maxTargets];
+    auto count = 0;
+    auto staleCount = 0;
 
-    // the primary selected channel, then the other selected ones
-    for (int i = -1; i < extra; ++i)
+    if (on)
     {
-        e.channel = i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load();
+        const auto key = snapInputKey (m.getNoteNumber());
+        const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
+
+        // the primary selected channel, then the other selected ones
+        for (int i = -1; i < extra && count < InputHeldNotes::maxTargets; ++i)
+            targets[count++] = { i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load(), key };
+
+        staleCount = midiHeld.noteOn (m.getNoteNumber(), targets, count, stale);
+    }
+    else
+        count = midiHeld.noteOff (m.getNoteNumber(), targets);
+
+    auto push = [this] (const InputHeldNotes::Target& t, bool noteOn, float velocity) {
+        NoteEvent e;
+        e.type = noteOn ? NoteEvent::Type::on : NoteEvent::Type::off;
+        e.channel = t.channel;
+        e.key = t.key;
+        e.velocity = velocity;
         midiEvents.push (e);
 
         if (transport.recording.load() && transport.playing.load())
-            midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, on });
-    }
+            midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, noteOn });
+    };
+
+    for (int i = 0; i < staleCount; ++i)
+        push (stale[i], false, 0.0f);
+
+    for (int i = 0; i < count; ++i)
+        push (targets[i], on, on ? m.getFloatVelocity() : 0.0f);
 }
 
 void AudioEngine::enableAllMidiInputs()

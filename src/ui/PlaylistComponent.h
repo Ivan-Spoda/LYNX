@@ -56,9 +56,12 @@ public:
 
     explicit PlaylistComponent (AudioEngine& engine);
     ~PlaylistComponent() override;
+    void visibilityChanged() override;
 
     std::function<void()> onOpenPattern;
     std::function<void()> onOpenPianoRoll;
+    std::function<void (int pattern)> onRenamePattern;  // clip menu: Rename and color (pattern clips)
+    std::function<void (int channel)> onOpenInSampler;  // clip menu: the audio clip's file in a new Sampler channel
 
     // Double-click on a pattern clip opens it in: 0 = the Piano Roll when it has piano-roll notes, else the
     // Channel Rack; 1 = always the Channel Rack; 2 = always the Piano Roll. Alt+double-click opens the other one.
@@ -102,6 +105,7 @@ public:
     void setTimeSelectionForSnapshot (int fromBar, int toBar);
     // zoom (pixels per bar) and scroll (first bar, first track in view)
     void setViewForSnapshot (double pixelsPerBar, int firstBar, int firstTrack);
+    juce::PopupMenu getClipMenuForSnapshot (int index); // --snapshot: the clip menu of that clip
     // hovers the right edge of the first clip in view (grip, outline, menu button); returns its hint
     ui::Hint hoverForSnapshot();
 
@@ -113,6 +117,7 @@ public:
     static constexpr int scrollBarSize = 12;
 
     static juce::Colour patternColour (const Song& song, int pattern);
+    static juce::Colour audioClipColour (const ChannelDef& channel);
 
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
@@ -166,7 +171,9 @@ private:
     void editMarkerName (std::int64_t tick, int existing); // existing = index, or -1 to create
     void deleteSelection();
     void copySelection();
-    void pasteClips();
+    void pasteClips (std::int64_t at = -1);
+    void normalizeClips (const std::vector<int>& targets);
+    juce::PopupMenu buildClipMenu (int index, int mouseX);
     void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);

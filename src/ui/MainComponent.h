@@ -287,7 +287,7 @@ private:
     juce::File currentFile;
     juce::String importedSuffix; // " (imported from FL Studio)" in the title until saved as .lynx
     juce::String projectName; // suggested name for export (also from an imported .flp)
-    std::map<int, std::vector<int>> heldKeys; // PC keyboard keys playing notes (keyCode -> channels)
+    HeldNotes heldKeys; // notes the typing piano is playing (tag: the key code)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
