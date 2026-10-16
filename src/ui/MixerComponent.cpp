@@ -1389,6 +1389,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::fruityPanOMatic, EffectKind::fruityBalance, EffectKind::fruityBloodOverdrive,
                                       EffectKind::fruityDelayBank, EffectKind::fruityMultiband,
                                       EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::luxeVerb,
+                                      EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
                                       EffectKind::hardcore };
 } // namespace
 

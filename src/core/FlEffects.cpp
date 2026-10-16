@@ -12,6 +12,7 @@
 #include "core/FruityDynamics.h"
 #include "core/FruityShapers.h"
 #include "core/FruityBasicFx.h"
+#include "core/FruityFilters.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
 #include "core/FrequencySplitter.h"
@@ -1001,6 +1002,34 @@ std::optional<EffectSlot> fruityShaperExact (const std::string& pluginName, cons
     return std::nullopt;
 }
 
+std::optional<EffectSlot> fruityFilterExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
+{
+    // FL's own Fruity Fast LP / Free Filter / Filter engines from the saved state (REA_rodada63); the generic filter
+    // approximations remain for states that cannot be read
+    if (pluginName == "Fruity Fast LP")
+        if (const auto s = flfilter::parseFastLP (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFastLP);
+            flfilter::fastLPToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Free Filter")
+        if (const auto s = flfilter::parseFreeFilter (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFreeFilter);
+            flfilter::freeFilterToParams (*s, slot.params.data());
+            return slot;
+        }
+    if (pluginName == "Fruity Filter")
+        if (const auto s = flfilter::parseFilter (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityFilter);
+            flfilter::filterToParams (*s, slot.params.data());
+            return slot;
+        }
+    return std::nullopt;
+}
+
 std::optional<EffectSlot> fruityBasicExact (const std::string& pluginName, const std::vector<std::uint8_t>& state)
 {
     // FL's own Fruity PanOMatic / Balance / Blood Overdrive engines from the saved state (REA_rodada58); the utility
@@ -1119,6 +1148,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     if (auto exact = fruityDynamicsExact (pluginName, state))
         return exact;
     if (auto exact = fruityBasicExact (pluginName, state))
+        return exact;
+    if (auto exact = fruityFilterExact (pluginName, state))
         return exact;
     if (auto exact = fruityShaperExact (pluginName, state))
         return exact;
@@ -1371,6 +1402,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
         case EffectKind::fruityFlangus: return { "Fruity Flangus" };
         case EffectKind::fruityFlanger: return { "Fruity Flanger" };
+        case EffectKind::fruityFastLP: return { "Fruity Fast LP" };
+        case EffectKind::fruityFreeFilter: return { "Fruity Free Filter" };
+        case EffectKind::fruityFilter: return { "Fruity Filter" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
@@ -1415,6 +1449,12 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
         return FlParamMap { k, [k] (float v) { return hardcore::toSlot (k, std::clamp (v, 0.0f, 1.0f)); } };
     // EQUO's five knobs (shift, mix, morph, smoothness, volume) over their ranges; band automation is not mapped
     if (is ("EQUO") && k >= 0 && k < 5)
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Fast LP, Free Filter and Fruity Filter likewise (REA_rodada63; the Free Filter's CENTER and the
+    // Filter's CENTER are buttons, not parameters)
+    if ((is ("Fruity Fast LP") && k >= 0 && k < flfilter::fastLPParams)
+        || (is ("Fruity Free Filter") && k >= 0 && k < 4)
+        || (is ("Fruity Filter") && k >= 0 && k < 6))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // the exact choruses take FL's controls over their ranges
     if (chorusControls (pluginName) > k && k >= 0)
