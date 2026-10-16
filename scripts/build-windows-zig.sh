@@ -87,7 +87,7 @@ APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp sr
 # Windows file association (.lynx) and its icon
 APP_SOURCES+=(src/platform/FileTypes.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
-APP_SOURCES+=(src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
+APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
 APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
