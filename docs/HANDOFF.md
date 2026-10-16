@@ -28,6 +28,6 @@ Resume a branch: `git worktree add -b feature/<x> ../lynx-wt-<x> origin/wip/<x>`
 
 ## Open items worth knowing
 - Exact-engine export costs more CPU (FL's render settings): the 30-demo export total went from ~342 s to ~380–570 s.
-- Harmor: image/resynthesis, arpeggio-envelope points and noise resonance are approximated (82/99 demo states within
-  −60 dB with the rack).
+- Harmor: resynthesis-mode images are not modelled (image synthesis, arpeggio markers and noise resonance are, REA
+  round 75: 97/99 demo states within −60 dB of the DLL; the other two limited by FL's 11-bit IPP `exp`).
 - Performance-mode projects are exported with every clip playing from the start.
