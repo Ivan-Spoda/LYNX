@@ -11117,7 +11117,7 @@ TEST (threeosc_engine)
     // saw / square / triangle-ish mix with pans, stereo detune and phase, random start phases (seed 12345)
     lynx::threeosc::RefOptions plain;
     plain.seed = 12345;
-    check ({ blob, plain, 44100, 681.6493225566775, 1509.7243534586487,
+    check ({ blob, plain, 44100, 681.6491972612481, 1509.7245664533937,
              { { 100, 0.0674247071146965f, -0.13440212607383728f }, { 1000, 0.12890009582042694f, 0.446039617061615f },
                { 2500, -0.007686644792556763f, 0.3574123680591583f }, { 5000, 0.08792756497859955f, 0.4948147237300873f },
                { 9000, 1.2136793475613885e-17f, 0.3116455078125f }, { 16383, 5.7305530145831346e-18f, 0.4134995639324188f } } });
@@ -11125,7 +11125,7 @@ TEST (threeosc_engine)
     const std::int32_t Pam[21] = { 0, 2, 0, 0, 0, 0, 30, 0, 3, 7, 0, 0, 0, 77, 0, 5, -12, 0, 0, 0, 0 };
     lynx::threeosc::RefOptions odd;
     odd.block = 333, odd.maxPoly = 1, odd.seed = 777;
-    check ({ make (Pam, { 1, 0, 1 }, 1, neutral), odd, 48000, 453.2728551610344, 1996.4554357771258,
+    check ({ make (Pam, { 1, 0, 1 }, 1, neutral), odd, 48000, 453.27241060751771, 1996.4548848690094,
              { { 100, -0.2589033246040344f, -0.310184121131897f }, { 1000, 0.22021546959877014f, 0.3591070771217346f },
                { 2500, -0.5378497242927551f, -0.15602676570415497f }, { 5000, 1.2423200626807308e-17f, 0.3293072581291199f },
                { 9000, 2.5857780099332177e-17f, 0.42474493384361267f }, { 16383, 2.941168384618868e-17f, 0.3569665551185608f } } });
@@ -11763,11 +11763,12 @@ TEST (fruitkick_engine)
     const std::vector<lynx::fruitkick::RefNote> notes = { { 0, 60, 1.0, 0.0, 0.0, -1 }, { 3000, 72, 0.5, 0.3, 0.0, 9000 } };
     const auto ya = lynx::fruitkick::renderReference (A, notes, 44100.0, 20000);
     CHECK (ya.size() == 40000u);
-    // (A uses the distortion: values since REA_rodada55 with FL's x87 live host waveshaper, checked against FLEngine's own)
+    // (A uses the distortion: values since REA_rodada55 with FL's x87 live host waveshaper, checked against FLEngine's own;
+    // the release fade since REA_rodada74 with IPP's cosine, checked against the DLL)
     CHECK (matchesGolden (ya, { { 10, 0.803601742f, 0.803601742f }, { 700, 0.185467482f, 0.185467482f }, { 2900, -0.63492614f, -0.63492614f },
-                                { 3100, 0.339092523f, 0.544403195f }, { 5000, -0.0974622667f, -0.150664076f }, { 9100, 0.124627575f, 0.0544180274f },
-                                { 9400, -0.146492869f, -0.144876853f }, { 15000, 0.009439799f, 0.009439799f } },
-                          0.284267678986));
+                                { 3100, 0.339092523f, 0.544403195f }, { 5000, -0.0974622667f, -0.150664076f }, { 9100, 0.124622017f, 0.0544089526f },
+                                { 9400, -0.146487325f, -0.144867823f }, { 15000, 0.009439799f, 0.009439799f } },
+                          0.284267665614));
     std::vector<int> ticks;
     for (int t = 115; t < 20000; t += 230)
         ticks.push_back (t);
@@ -11811,7 +11812,8 @@ TEST (ipp_cos_and_end_fade)
     const auto f = ippcos::bitsToFloat;
     CHECK (bits (ippcos::cosFma (0.1f)) == 0x3f7eaf8bu && bits (ippcos::cosFma (1.0f)) == 0x3f0a534cu);
     CHECK (bits (ippcos::cosFma (2.0f)) == 0xbed51118u && bits (ippcos::cosFma (-3.0f)) == 0xbf7d6646u);
-    CHECK (bits (ippcos::cosFma (f (0x3e000007))) == 0x3f7df6f8u && bits (ippcos::cosNoFma (f (0x3e00007c))) == 0x3f7df6f5u);
+    CHECK (bits (ippcos::cosFma (f (0x3e000007))) == 0x3f7df6f9u && bits (ippcos::cosNoFma (f (0x3e000007))) == 0x3f7df6f8u);
+    CHECK (bits (ippcos::cosFma (f (0x3e00007c))) == 0x3f7df6f4u && bits (ippcos::cosNoFma (f (0x3e00007c))) == 0x3f7df6f5u);
     CHECK (ippcos::cosFma (1e-9f) == 1.0f && ippcos::cosNoFma (0.0f) == 1.0f);
     // the portable fused multiply-add rounds once: (1 + 2^-12)^2 = 1 + 2^-11 + 2^-24 is a float halfway case that a
     // tiny addend (lost in a plain double sum) must decide
@@ -12551,7 +12553,7 @@ TEST (granulizer_engine)
              { { 0, 55, 1.0, 0.2, -37.0, 12000 }, { 5000, 67, 0.5, 0.0, 0.0, -1 } }, 959.5011214226065, 1294.4823684530272,
              { { 100, 0.02567935362458229f, 0.010721667669713497f }, { 1000, 0.3007732629776001f, 0.08214527368545532f },
                { 2500, 0.435413658618927f, 0.09068503230810165f }, { 4000, -0.24611327052116394f, -0.20149046182632446f },
-               { 7777, -0.008478119969367981f, 0.31221628189086914f }, { 12000, 0.20371171832084656f, 0.32494625449180603f } } });
+               { 7777, -0.008478119969367981f, 0.31221628189086914f }, { 12000, 0.203709632f, 0.324944794f } } });
     // key mode 1 (the sample spread over two octaves), freeze, hard stereo separation; 48 kHz sample at 96 kHz, 64-sample blocks
     check ({ granulizerTestState ({ 300, 0, 800, 700, 0, 180, 0, 64, 0, 1, 2000, 100 }, 1), 2, 96000, 48000, o3,
              { { 0, 62, 0.9, 0.0, 0.0, -1 }, { 4000, 50, 0.7, 0.0, 11.0, -1 } }, 366.79556669810813, 0.00825590391720353,
