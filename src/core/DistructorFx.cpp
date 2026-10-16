@@ -1019,6 +1019,361 @@ struct Distortion
     }
 };
 
+// ------------------------------------------------------------------------------------------------ filter
+// the module's trapezoidal state-variable filter (FUN_00716690 design, FUN_00716500 tick), one state per channel
+struct Svf
+{
+    float piOverFs = (float) (3.141592653589793 / 44100.0);
+    float a1 = 0, a2 = 0, a3 = 0, m0 = 0, m1 = 0, m2 = 0;
+    float ic1[2] {}, ic2[2] {};
+    void setRate (double rate) noexcept { piOverFs = (float) (3.141592653589793 / rate); }
+    void coef (float g, float k) noexcept
+    {
+        a1 = 1.0f / (g * (g + k) + 1.0f);
+        a2 = g * a1;
+        a3 = g * a2;
+    }
+    // mode: 0 low pass, 1 high pass, 2 band pass, 3 notch, 4 peak, 6 low shelf, 7 high shelf, 8 all pass
+    void design (int mode, float f, float k, float gain) noexcept
+    {
+        const auto w = f * piOverFs;
+        switch (mode)
+        {
+            case 0: coef ((float) std::tan ((double) w), k), m0 = 0, m1 = 0, m2 = gain; break;
+            case 1: coef ((float) std::tan ((double) w), k), m0 = gain, m1 = -k * gain, m2 = -gain; break;
+            case 2: coef ((float) std::tan ((double) w), k), m0 = 0, m1 = gain, m2 = 0; break;
+            case 3: coef ((float) std::tan ((double) w), k), m0 = gain, m1 = -k * gain, m2 = 0; break;
+            case 4: coef ((float) std::tan ((double) w), k), m0 = gain, m1 = -k * gain, m2 = gain * -2.0f; break;
+            case 6:
+            {
+                const auto A = (float) dPower (10.0, (double) (gain / 40.0f));
+                const auto t = (float) std::tan ((double) w);
+                const auto g = (float) ((double) t / std::sqrt ((double) A));
+                coef (g, k);
+                m0 = 1.0f, m1 = k * (A - 1.0f), m2 = A * A - 1.0f;
+                break;
+            }
+            case 7:
+            {
+                const auto A = (float) dPower (10.0, (double) (gain / 40.0f));
+                const auto t = (float) std::tan ((double) w);
+                const auto g = (float) ((double) t * std::sqrt ((double) A));
+                coef (g, k);
+                m0 = A * A, m1 = k * (1.0f - A) * A, m2 = 1.0f - A * A;
+                break;
+            }
+            case 8: coef ((float) std::tan ((double) w), k), m0 = 1.0f, m1 = (float) ((double) k * -2.0), m2 = 0; break;
+            default: break;
+        }
+    }
+    float tick (int c, float x) noexcept
+    {
+        const auto v3 = x - ic2[c];
+        const auto v1 = a1 * ic1[c] + a2 * v3;
+        const auto v2 = (ic2[c] + a2 * ic1[c]) + a3 * v3;
+        ic1[c] = v1 * 2.0f - ic1[c];
+        ic2[c] = v2 * 2.0f - ic2[c];
+        return (m0 * x + m1 * v1) + m2 * v2;
+    }
+};
+
+// the one-pole low/high pass (FUN_007183c0 / FUN_00718300 design, FUN_007184d0 tick)
+struct OnePole
+{
+    float piOverFs = 0, b0 = 0, b1 = 0, a = 0;
+    float y[2] {}, x1[2] {};
+    void setRate (double rate) noexcept { piOverFs = (float) ((1.0 / rate) * 3.141592653589793); }
+    void design (bool high, float f) noexcept
+    {
+        const auto g = (float) std::tan ((double) (f * piOverFs));
+        const auto d = g + 1.0f;
+        if (high)
+        {
+            b0 = (float) (1.0 / (double) d);
+            b1 = -b0;
+        }
+        else
+            b0 = b1 = g / d;
+        a = (float) (-((double) g - 1.0) / (double) d);
+    }
+    float tick (int c, float x) noexcept
+    {
+        const auto v = (x * b0 + x1[c] * b1) + y[c] * a;
+        y[c] = v, x1[c] = x;
+        return v;
+    }
+};
+
+// the comb filters' delay lines (FUN_007185e0: 16384 floats, linear interpolation)
+struct CombLine
+{
+    std::vector<float> buf = std::vector<float> (16384, 0.0f);
+    int w = 0;
+    float read (float d) const noexcept
+    {
+        const auto i = (int) (double) d;
+        const auto fr = d - (float) i;
+        const auto a = buf[(std::size_t) ((w - i) & 16383)], b = buf[(std::size_t) ((w - i - 1) & 16383)];
+        const auto t = (double) (b * fr);
+        return (float) ((double) a * (1.0 - (double) fr) + t);
+    }
+    void write (float v) noexcept
+    {
+        buf[(std::size_t) w] = v;
+        w = (w + 1) & 16383;
+    }
+};
+
+// the "Alt" filters (FUN_00716ec0 class): a ×4 oversampled state-variable loop with a soft clipper in its feedback
+struct AltSvf
+{
+    float invFs = 0, step = 0.03125f, res = 0, f = 0, fCur = 0, fStep = 0, drive = 4.0f, clipAmt = 0;
+    float wLp = 1, wBp = 1, wHp = 1;
+    float x1[2] {}, hp[2] {}, bp[2] {}, lp[2] {};
+    void setRate (double rate) noexcept
+    {
+        invFs = (float) (1.0 / (double) (float) rate);
+        step = 0.03125f;
+    }
+    void design (float freq, float r, bool jump) noexcept // FUN_007176b0
+    {
+        res = (float) ((double) r * 0.5);
+        f = (float) ((double) freq * 6.283 * (double) invFs * 0.25);
+        drive = (float) ((double) clipAmt * 4.0 + 4.0);
+        if (jump)
+            fCur = f;
+        fStep = (f - fCur) * step;
+    }
+    static float clip (float x) noexcept // FUN_00717570
+    {
+        if ((double) x > 2.0)
+            return 1.0f;
+        if ((double) x < -2.0)
+            return -1.0f;
+        const auto y = (float) ((double) x * 0.5);
+        return (float) ((double) y * (2.0 - std::fabs ((double) y)));
+    }
+    float tick (int c, float x) noexcept // FUN_00717090
+    {
+        const auto g = fCur;
+        const auto xp = x1[c];
+        const auto d4 = (double) xp * 0.75, d7 = (double) x * 0.25;
+        const auto d5 = (double) xp * 0.5, d8 = (double) x * 0.5;
+        const auto d6 = (double) xp * 0.25, d9 = (double) x * 0.75;
+        x1[c] = x;
+        auto& h = hp[c];
+        auto& b = bp[c];
+        auto& l = lp[c];
+        auto sub = [&] (float in) {
+            h = (in - l) - b;
+            const auto s = clip (b * drive);
+            h = h + res * s;
+            b = b + g * h;
+            l = l + g * b;
+        };
+        sub (xp);
+        sub ((float) (d4 + d7));
+        sub ((float) (d5 + d8));
+        sub ((float) (d6 + d9));
+        return (l * wLp + h * wHp) + b * wBp;
+    }
+};
+
+struct Filter
+{
+    int type = 0;
+    bool smooth = true;
+    double fs = 44100.0;
+    float par[5] { 0.0f, 0.5f, 0.5f, 0.0f, 0.0f }; // +0x60: [1] cutoff, [2] resonance
+    struct Ent
+    {
+        bool on = false;
+        float target = 0, cur = 0;
+    } ent[3];
+    double smoothK = 0;
+    Svf svf, svfA, svfB;
+    OnePole one;
+    CombLine combL, combR;
+    float combCut = 0.5f, combGain = 0;
+    AltSvf alt;
+
+    void setRate (double rate)
+    {
+        fs = rate;
+        smoothK = 1.0 - dPower (1.0 - 0.9, 1.0 / (0.01 * (rate / 1.0)));
+        svf.setRate (rate), svfA.setRate (rate), svfB.setRate (rate);
+        one.setRate (rate);
+        alt.setRate (rate);
+    }
+    void setParam (int i, float v) noexcept // FUN_0071d940
+    {
+        par[i] = v;
+        if (i == 1 || i == 2)
+        {
+            auto& e = ent[i];
+            if (e.on)
+                e.target = v;
+            else
+                e.on = true, e.target = e.cur = v;
+        }
+    }
+    void stepSmoothers() noexcept // FUN_00715400
+    {
+        for (auto& e : ent)
+            if (e.on && e.cur != e.target)
+            {
+                e.cur = (float) ((double) e.cur + (double) (e.target - e.cur) * smoothK);
+                if (std::fabs ((double) (e.cur - e.target)) < 0.0001)
+                    e.cur = e.target;
+            }
+    }
+    float cutValue() const noexcept { return smooth ? ent[1].cur : par[1]; }
+    float freq() const noexcept // FUN_0071b740
+    {
+        return (float) (dPower (2.0, (double) (cutValue() * 10.0f)) * 20.0);
+    }
+    static float dampLaw (float r) noexcept { return (float) (1.0 - (double) r * 0.99); }   // FUN_0071b6e0
+    static float notchLaw (float r) noexcept { return (float) (1.0 - (double) r * 0.792); } // FUN_0071b710
+    static float gainLaw (float r) noexcept { return (float) ((double) r * 40.0 + -20.0); } // FUN_0071b6b0
+
+    void runSvf (int mode, float (*law) (float), bool shelf, const float* x, float* y, int n) noexcept // FUN_0071b910
+    {
+        auto design = [&] {
+            const auto v = law (par[2]);
+            if (shelf)
+                svf.design (mode, freq(), 1.0f, v);
+            else
+                svf.design (mode, freq(), v, 1.0f);
+        };
+        if (! smooth)
+            design();
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                design();
+            }
+            y[2 * i] = svf.tick (0, x[2 * i]);
+            y[2 * i + 1] = svf.tick (1, x[2 * i + 1]);
+        }
+    }
+    void runOnePole (bool low, const float* x, float* y, int n) noexcept // FUN_0071bcb0
+    {
+        if (! smooth)
+            one.design (! low, freq());
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                one.design (! low, freq());
+            }
+            y[2 * i] = one.tick (0, x[2 * i]);
+            y[2 * i + 1] = one.tick (1, x[2 * i + 1]);
+        }
+    }
+    void runFourPole (int mode, const float* x, float* y, int n) noexcept // FUN_0071be70
+    {
+        auto design = [&] (float r) {
+            auto q = (float) (1.0 / (double) dampLaw (r));
+            q = (float) std::sqrt ((double) q);
+            const auto k = (float) (1.0 / (double) q);
+            const auto f = freq();
+            svfA.design (mode, f, (float) ((double) k * 2.0), 1.0f);
+            svfB.design (mode, f, (float) ((double) k * 2.0), 1.0f);
+        };
+        if (! smooth)
+            design (par[2]);
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                design (ent[2].cur);
+            }
+            const auto l = svfA.tick (0, x[2 * i]);
+            const auto r = svfA.tick (1, x[2 * i + 1]);
+            y[2 * i] = svfB.tick (0, l);
+            y[2 * i + 1] = svfB.tick (1, r);
+        }
+    }
+    void runAlt (float wl, float wb, float wh, const float* x, float* y, int n) noexcept // FUN_0071c6e0
+    {
+        alt.wLp = wl, alt.wBp = wb, alt.wHp = wh;
+        if (! smooth)
+            alt.design (freq(), par[2] * 1.0f, true);
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                alt.design (freq(), ent[2].cur * 1.0f, true);
+            }
+            y[2 * i] = alt.tick (0, x[2 * i]);
+            y[2 * i + 1] = alt.tick (1, x[2 * i + 1]);
+        }
+    }
+    void runComb (bool feedForward, const float* x, float* y, int n) noexcept // FUN_0071cd00
+    {
+        auto setCoef = [&] (float c, float r) { combCut = c, combGain = (float) ((double) r * 0.95); };
+        if (! smooth)
+            setCoef (par[1], par[2]);
+        for (int i = 0; i < n; ++i)
+        {
+            if (smooth)
+            {
+                stepSmoothers();
+                setCoef (ent[1].cur, ent[2].cur);
+            }
+            const auto d = (float) ((double) combCut * fs * (double) 0.05f + 1.0);
+            auto l = x[2 * i], r = x[2 * i + 1];
+            if (! feedForward)
+            {
+                l = l + combL.read (d) * combGain;
+                r = r + combR.read (d) * combGain;
+                combL.write (l);
+                combR.write (r);
+            }
+            else
+            {
+                combL.write (l);
+                combR.write (r);
+                l = l + combL.read (d) * combGain;
+                r = r + combR.read (d) * combGain;
+            }
+            y[2 * i] = l, y[2 * i + 1] = r;
+        }
+    }
+    // FUN_0071cf80; returns false for the types LYNX does not run (the signal passes unchanged)
+    bool process (const float* x, float* y, int n) noexcept
+    {
+        std::memcpy (y, x, sizeof (float) * 2 * (std::size_t) n);
+        switch (type)
+        {
+            case 0: runOnePole (true, x, y, n); break;
+            case 1: runOnePole (false, x, y, n); break;
+            case 2: runSvf (0, dampLaw, false, x, y, n); break;
+            case 3: runSvf (1, dampLaw, false, x, y, n); break;
+            case 4: runSvf (2, dampLaw, false, x, y, n); break;
+            case 5: runFourPole (0, x, y, n); break;
+            case 6: runFourPole (1, x, y, n); break;
+            case 7: runSvf (3, notchLaw, false, x, y, n); break;
+            case 8: runAlt (1.0f, 0.0f, 0.0f, x, y, n); break;
+            case 9: runAlt (0.0f, 1.0f, 0.0f, x, y, n); break;
+            case 10: runAlt (0.0f, 0.0f, 1.0f, x, y, n); break;
+            case 12: runSvf (4, dampLaw, false, x, y, n); break;
+            case 13: runComb (true, x, y, n); break;
+            case 14: runComb (false, x, y, n); break;
+            case 19: runSvf (6, gainLaw, true, x, y, n); break;
+            case 20: runSvf (7, gainLaw, true, x, y, n); break;
+            case 21: runSvf (8, dampLaw, false, x, y, n); break;
+            default: return false;
+        }
+        return true;
+    }
+};
+
 // ------------------------------------------------------------------------------------------------ DC blocker
 struct DcBlocker // FUN_005fbdf0 (x87)
 {
@@ -1158,6 +1513,7 @@ struct Module::Impl
     ModuleState st;
     double fs = 44100.0;
     Distortion dist;
+    Filter filt;
     DcBlocker dc;
     std::vector<HalfbandStage> upSt, downSt;
     std::vector<float> s1, s2, s3, hi, tmp;
@@ -1176,6 +1532,13 @@ struct Module::Impl
         for (int i = 0; i < 36; ++i)
             dist.p[(std::size_t) i] = st.p[(std::size_t) i];
         dist.setAlgorithm (st.algorithm);
+        filt = Filter {};
+        filt.setRate (fs * factor());
+        filt.setParam (1, 0.5f), filt.setParam (2, 0.5f); // the processor's own initial controls
+        filt.type = st.filterType;
+        filt.smooth = st.smoothFilter;
+        filt.setParam (1, (float) ((double) st.p[39] / 10000.0));
+        filt.setParam (2, (float) ((double) st.p[40] / 10000.0));
     }
     void process (float* x, int n)
     {
@@ -1210,6 +1573,8 @@ struct Module::Impl
         std::memcpy (s2.data(), s1.data(), sizeof (float) * 2 * (std::size_t) m);
         if (st.type == 0)
             dist.process (s1.data(), w, m);
+        else if (st.type == 1)
+            filt.process (s1.data(), w, m);
         const auto dryG = (float) (1.0 - mix), wetG = (float) mix;
         for (int i = 0; i < 2 * m; ++i)
         {
