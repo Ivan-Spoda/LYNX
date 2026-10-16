@@ -1261,6 +1261,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     def.instrument = InstrumentKind::slayer;
                     def.pluginState = c.pluginState;
                     def.samplePath = dll;
+                    // the root-note shift stays in the key; the rest of the channel pitch reaches FL Slayer as a pitch
+                    // bend (ProcessEvent 4, REA_rodada79 §2.2)
+                    def.modelParams = { c.rootNote >= 0 && c.rootNote <= 127 ? (float) (60 - c.rootNote) : 0.0f };
                     adoptedFromPlugin = true;
                 }
             }
