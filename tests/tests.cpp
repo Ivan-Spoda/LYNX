@@ -60,6 +60,7 @@
 #include "core/ParametricEqFl.h"
 #include "core/FruityBasicFx.h"
 #include "core/EquoFx.h"
+#include "core/DistructorFx.h"
 #include "core/PitchShifterFl.h"
 #include "core/FruityDelay.h"
 #include "core/StereoFx.h"
@@ -1950,9 +1951,10 @@ TEST (flp_real_files)
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
     // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
     CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    // (Patcher graphs can add Distructor nodes of their own to the imported mixer)
     std::printf ("  Distructor: %d of %d slots on the exact engine (%d cabinet impulses read from the installation)\n",
                  distructorExact, distructorSlots, distructorImpulses);
-    CHECK (distructorExact == distructorSlots && distructorSlots >= 4 && distructorImpulses >= 1); // REA_rodada71
+    CHECK (distructorExact >= distructorSlots && distructorSlots >= 4 && distructorImpulses >= 1); // REA_rodada71
     std::printf ("  EQUO: %d of %d slots on the exact engine\n", equoExact, equoSlots);
     CHECK (equoExact == equoSlots && equoSlots >= 10); // REA_rodada61
     std::printf ("  Pitch Shifter: %d of %d slots on the exact engine\n", pitchShifterExact, pitchShifterSlots);
