@@ -588,7 +588,7 @@ public:
             add (*c);
         styleNote (inputsNote, tr ("Each input device can be turned off, listen to one MIDI channel only and play a fixed channel of the "
                                    "Channel Rack instead of the selected ones."));
-        styleLabel (noDevices, tr ("No MIDI input devices found. Connect one and press Refresh."));
+        styleLabel (noDevices, tr ("No MIDI input devices found. Connect one and refresh the list."));
         refresh.onClick = [this] { rebuildInputs(); };
 
         styleLabel (velocityLabel, tr ("Velocity"));
