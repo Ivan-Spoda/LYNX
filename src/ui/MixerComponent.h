@@ -179,6 +179,11 @@ private:
     juce::Rectangle<int> gateStepsBounds() const;
     void setGateStep (juce::Point<int> p);
     void showGatePatterns();
+    static constexpr int bandLevelParam = -4; // drawing the Fruity Vocoder's band levels
+    bool vocoderSelected() const;
+    juce::Rectangle<int> bandLevelsBounds() const;
+    void setBandLevel (juce::Point<int> p);
+    void showBandLevelMenu();
     int knobAt (juce::Point<int> p) const;
     const std::vector<EffectSlot>* slots() const;
     void showAddMenu (int slot);

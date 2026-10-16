@@ -1,6 +1,7 @@
 #include "ui/MixerComponent.h"
 
 #include "core/FlEffects.h"
+#include "core/FruityVocoder.h"
 #include "core/MixerOps.h"
 #include "ui/AutomationUi.h"
 #include "ui/BrowserComponent.h"
@@ -1467,6 +1468,8 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
         param -= 32;
         top = gateStepsBounds().getBottom() + 22;
     }
+    if (vocoderSelected()) // the band levels above the knobs
+        top = bandLevelsBounds().getBottom() + 22;
 
     return { 8 + (param % columns) * w, top + (param / columns) * rowHeight, w, rowHeight - 4 };
 }
@@ -1490,6 +1493,80 @@ void EffectsPanel::setGateStep (juce::Point<int> p)
     engine.editSong ([t = track, slot = selectedSlot, step, value] (Song& song) {
         song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) step] = value;
     });
+}
+
+bool EffectsPanel::vocoderSelected() const
+{
+    const auto* s = slots();
+    return s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::vocoder;
+}
+
+juce::Rectangle<int> EffectsPanel::bandLevelsBounds() const
+{
+    return { 10, panelHeader + maxEffectSlots * slotHeight + 40, getWidth() - 20, 70 };
+}
+
+namespace
+{
+// the Fruity Vocoder's state for the slot's current band count (levels kept while the count matches, as FL does)
+fvocoder::State vocoderState (const EffectSlot& slot)
+{
+    auto s = fvocoder::parse (slot.state).value_or (fvocoder::State());
+    const auto bands = 4 << std::clamp ((int) std::lround (slot.params[0] * 5.0f), 0, 5);
+    if (s.bands != bands)
+    {
+        s.bands = bands;
+        s.levels.fill (1.0f);
+    }
+    s.order = 1 + std::clamp ((int) std::lround (slot.params[1] * 2.0f), 0, 2);
+    s.listen = std::clamp ((int) std::lround (slot.params[2] * 2.0f), 0, 2);
+    s.swap = slot.params[3] > 0.5f;
+    for (int c = 0; c < fvocoder::controls; ++c)
+    {
+        const auto lo = fvocoder::controlMin (c), hi = fvocoder::controlMax (c);
+        s.c[(std::size_t) c] = lo + (int) std::lround (std::clamp (slot.params[(std::size_t) (4 + c)], 0.0f, 1.0f) * (float) (hi - lo));
+    }
+    return s;
+}
+
+constexpr float maxBandLevel = 2.0f; // the strip spans 0…2 (1 = unchanged)
+} // namespace
+
+void EffectsPanel::setBandLevel (juce::Point<int> p)
+{
+    const auto* s = slots();
+    if (s == nullptr || ! vocoderSelected())
+        return;
+    const auto st = vocoderState ((*s)[(std::size_t) selectedSlot]);
+    const auto area = bandLevelsBounds();
+    const auto band = juce::jlimit (0, st.bands - 1, (int) ((p.x - area.getX()) * st.bands / juce::jmax (1, area.getWidth())));
+    auto level = juce::jlimit (0.0f, maxBandLevel, maxBandLevel * (float) (area.getBottom() - p.y) / (float) area.getHeight());
+    if (std::abs (level - 1.0f) < 0.04f)
+        level = 1.0f; // snaps to the unchanged level
+    engine.editSong ([t = track, slot = selectedSlot, band, level] (Song& song) {
+        auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) slot];
+        auto state = vocoderState (fx);
+        state.levels[(std::size_t) band] = level;
+        fx.state = fvocoder::serialise (state);
+    });
+}
+
+void EffectsPanel::showBandLevelMenu()
+{
+    juce::PopupMenu menu;
+    auto apply = [this] (float (*level) (int, int)) {
+        engine.editSong ([t = track, slot = selectedSlot, level] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) slot];
+            auto state = vocoderState (fx);
+            for (int k = 0; k < state.bands; ++k)
+                state.levels[(std::size_t) k] = level (k, state.bands);
+            fx.state = fvocoder::serialise (state);
+        });
+    };
+    menu.addItem (tr ("Reset band levels"), [apply] { apply ([] (int, int) { return 1.0f; }); });
+    menu.addItem (tr ("Brighter (tilt up)"), [apply] { apply ([] (int k, int n) { return 0.5f + (float) k / (float) std::max (1, n - 1); }); });
+    menu.addItem (tr ("Darker (tilt down)"), [apply] { apply ([] (int k, int n) { return 1.5f - (float) k / (float) std::max (1, n - 1); }); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
 void EffectsPanel::showGatePatterns()
@@ -1695,10 +1772,33 @@ void EffectsPanel::paint (juce::Graphics& g)
 
     const auto& info = effectInfo (slot.kind);
     const auto gate = slot.kind == EffectKind::volumeGate;
+    const auto vocoder = slot.kind == EffectKind::vocoder;
     g.setColour (colour::textPrimary);
     g.setFont (font (type::title, true));
-    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : knobBounds (0).getY()) - 28, getWidth() - 20, 20,
-                juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : knobBounds (0).getY()) - 28,
+                getWidth() - 20, 20, juce::Justification::centredLeft);
+
+    if (vocoder) // the analysis bands' levels, low to high (FL's band level strip)
+    {
+        const auto st = vocoderState (slot);
+        const auto area = bandLevelsBounds().toFloat();
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (area, radius::sm);
+        const auto w = area.getWidth() / (float) st.bands;
+        const auto unity = area.getBottom() - area.getHeight() / maxBandLevel;
+        for (int k = 0; k < st.bands; ++k)
+        {
+            const auto h = area.getHeight() * juce::jlimit (0.0f, 1.0f, st.levels[(std::size_t) k] / maxBandLevel);
+            g.setColour ((slot.enabled ? colour::accent : colour::textDisabled).withAlpha (k % 2 == 0 ? 1.0f : 0.8f));
+            g.fillRect (area.getX() + (float) k * w + (w > 4.0f ? 1.0f : 0.0f), area.getBottom() - h, juce::jmax (1.0f, w - (w > 4.0f ? 2.0f : 0.0f)), h);
+        }
+        g.setColour (colour::gridBar);
+        g.drawHorizontalLine ((int) unity, area.getX(), area.getRight());
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawFittedText (tr ("Band levels: draw them; right-click = presets"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
+    }
 
     if (gate) // 32 steps = 1 bar of 4 beats
     {
@@ -1817,6 +1917,18 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
     {
         ParametricEqWindows::open (engine, track, selectedSlot);
+        return;
+    }
+
+    if (vocoderSelected() && bandLevelsBounds().contains (e.getPosition()))
+    {
+        if (e.mods.isPopupMenu())
+            showBandLevelMenu();
+        else
+        {
+            dragParam = bandLevelParam;
+            setBandLevel (e.getPosition());
+        }
         return;
     }
 
@@ -2017,6 +2129,12 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
     if (dragParam == gateStepParam)
     {
         setGateStep (e.getPosition());
+        return;
+    }
+
+    if (dragParam == bandLevelParam)
+    {
+        setBandLevel (e.getPosition());
         return;
     }
 
