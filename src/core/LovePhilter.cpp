@@ -16,7 +16,7 @@
 #include <cstdio>
 #endif
 
-#include "core/DelphiRuntime.h"
+#include "core/DelphiMath.h"
 #include "core/Inflate.h"
 #include "core/Instruments.h"
 
@@ -105,8 +105,8 @@ struct X87Mode
     explicit X87Mode (bool) noexcept {}
 };
 inline long long x87Int (long double v) noexcept { return (long long) std::nearbyint (v); }
-inline long double x87Cos (long double v) noexcept { return delphi::cos (v); }
-inline long double x87Sin (long double v) noexcept { return delphi::sin (v); }
+inline long double x87Cos (long double v) noexcept { return dmath::cos (v); }
+inline long double x87Sin (long double v) noexcept { return dmath::sin (v); }
 #endif
 
 // x87 flush of the plugin's integrators: |x| ≤ 2^-24 → 0
@@ -125,14 +125,14 @@ float curve11 (int raw) noexcept
     const float x = (float) raw * 0.0078125f;
     if (x == 1.0f)
         return 1.0f;
-    return F ((delphi::exp ((double) (x * kLn11f)) - 1.0) * (double) 0.1f);
+    return F ((dmath::exp ((double) (x * kLn11f)) - 1.0) * (double) 0.1f);
 }
 float scurve11 (int raw) noexcept
 {
     const float x = (float) raw * 0.0078125f;
     float a = std::abs (x);
     if (a != 1.0f)
-        a = F ((delphi::exp ((double) (a * kLn11f)) - 1.0) * (double) 0.1f);
+        a = F ((dmath::exp ((double) (a * kLn11f)) - 1.0) * (double) 0.1f);
     const float s = x == 0.0f ? 0.0f : (std::signbit (x) ? -1.0f : 1.0f);
     return a * s;
 }
@@ -376,7 +376,7 @@ struct Curve
         if (p.mode > 7 || ((0x78u >> p.mode) & 1u) == 0)
             return -1;
         const double a = (double) F (1.0 - std::abs ((double) p.t) * 0.6);
-        auto n = (int) rnd ((double) F (delphi::exp (a * delphi::ln (1000001.0)) - 1.0) * 0.001);
+        auto n = (int) rnd ((double) F (dmath::exp (a * dmath::ln (1000001.0)) - 1.0) * 0.001);
         if (p.mode == 3 && p.t >= 0.0f)
             ++n;
         return n;
@@ -531,13 +531,13 @@ struct Curve
             }
             else if (m < 2)
             {
-                const auto e1 = F (delphi::exp ((double) std::abs (t) * delphi::ln (1000001.0)) - 1.0);
+                const auto e1 = F (dmath::exp ((double) std::abs (t) * dmath::ln (1000001.0)) - 1.0);
                 const float sg = t > 0.0f ? 1.0f : (t < 0.0f ? -1.0f : 0.0f);
                 p.k = e1 * sg;
                 if (p.k != 0.0f)
                 {
                     p.ilk = F (1.0 / std::abs ((double) p.k));
-                    p.L = F (delphi::ln (std::abs ((double) p.k) + 1.0));
+                    p.L = F (dmath::ln (std::abs ((double) p.k) + 1.0));
                 }
             }
             else if (m == 3)
@@ -636,8 +636,8 @@ struct Curve
         if (p.k == 0.0f)
             return x;
         if (p.k > 0.0f)
-            return 1.0 - (delphi::exp ((1.0 - x) * (double) p.L) - 1.0) * (double) p.ilk;
-        return (delphi::exp (x * (double) p.L) - 1.0) * (double) p.ilk;
+            return 1.0 - (dmath::exp ((1.0 - x) * (double) p.L) - 1.0) * (double) p.ilk;
+        return (dmath::exp (x * (double) p.L) - 1.0) * (double) p.ilk;
     }
 
     // fraction (0…1) of the segment ending at point i at phase ph
@@ -675,7 +675,7 @@ struct Curve
             case 6:
             {
                 if (p.sign < 0)
-                    return F ((delphi::sin ((ph * p4 + 0.75) * p5) + 1.0) * 0.5);
+                    return F ((dmath::sin ((ph * p4 + 0.75) * p5) + 1.0) * 0.5);
                 const auto v = ph * p4 - 0.5;
                 const auto i2 = (int) rnd (v - 0.5);
                 return F (std::abs ((v - (double) i2) * 2.0 - 1.0));
@@ -703,7 +703,7 @@ struct Curve
             case 9:
             {
                 const auto hp = (double) 1.5707963705062866;
-                const auto dd = p.sign > 0 ? delphi::sin (ph * hp) : 1.0 - delphi::cos (ph * hp);
+                const auto dd = p.sign > 0 ? dmath::sin (ph * hp) : 1.0 - dmath::cos (ph * hp);
                 return F (ph - (ph - dd) * p4);
             }
             case 10:
@@ -922,13 +922,13 @@ struct LfoWave
     void build (int tension, int skew, int pw, bool unipolar)
     {
         const float at = (float) std::abs (tension) * 0.0078125f;
-        const double a = (double) F (delphi::exp ((double) at * delphi::ln (21.0)) - 1.0) * 0.05;
+        const double a = (double) F (dmath::exp ((double) at * dmath::ln (21.0)) - 1.0) * 0.05;
         const float sg = tension == 0 ? 0.0f : (tension < 0 ? -1.0f : 1.0f);
-        k = sg * F (delphi::exp ((double) F (a) * delphi::ln (9.999999843067494e17)) - 1.0);
+        k = sg * F (dmath::exp ((double) F (a) * dmath::ln (9.999999843067494e17)) - 1.0);
         if (k != 0.0f)
         {
             ik = F (1.0 / std::abs ((double) k));
-            L = F (delphi::ln (std::abs ((double) k) + 1.0));
+            L = F (dmath::ln (std::abs ((double) k) + 1.0));
         }
         const float sk = (float) skew * 0.00390625f;
         const float pwf = (float) pw * 0.0078125f;
@@ -962,8 +962,8 @@ struct LfoWave
         if (k == 0.0f)
             return x;
         if (k > 0.0f)
-            return 1.0 - (delphi::exp ((1.0 - x) * (double) L) - 1.0) * (double) ik;
-        return (delphi::exp (x * (double) L) - 1.0) * (double) ik;
+            return 1.0 - (dmath::exp ((1.0 - x) * (double) L) - 1.0) * (double) ik;
+        return (dmath::exp (x * (double) L) - 1.0) * (double) ik;
     }
 
     float value (u32 u) const noexcept
@@ -1233,8 +1233,8 @@ void biquadDesign (Stage& s, int code, double A, double alpha, double sn, double
     }
 }
 
-// the plugin runtime's math (core/DelphiRuntime.h): Power for doubles and singles
-inline double powD (double x, double y) noexcept { return delphi::power (x, y); }
+// the plugin runtime's math (core/DelphiMath.h): Power for doubles and singles
+inline double powD (double x, double y) noexcept { return dmath::power (x, y); }
 float powf32 (float x, float y) noexcept
 {
     if (y == 0.0f)
@@ -1242,11 +1242,11 @@ float powf32 (float x, float y) noexcept
     if (x == 0.0f && y > 0.0f)
         return 0.0f;
     if (std::trunc (y) == y)
-        return (float) delphi::intPower ((double) x, (long long) rnd ((double) y));
-    return (float) delphi::exp ((double) y * delphi::ln ((double) x));
+        return (float) dmath::intPower ((double) x, (long long) rnd ((double) y));
+    return (float) dmath::exp ((double) y * dmath::ln ((double) x));
 }
-inline double sinhD (double x) noexcept { return delphi::sinh (x); }
-inline double tanhD (double x) noexcept { return delphi::tanh (x); }
+inline double sinhD (double x) noexcept { return dmath::sinh (x); }
+inline double tanhD (double x) noexcept { return dmath::tanh (x); }
 
 // ---------------------------------------------------------------------------------------- articulator runtime
 struct ArtRt
@@ -1593,9 +1593,9 @@ struct Engine::Impl
         for (int k = 0; k < 2; ++k)
         {
             const double x = (double) s.g[(std::size_t) (3 + k)] * 6.103515625e-05;
-            double t = delphi::exp ((double) F (x) * delphi::ln (81.0));
+            double t = dmath::exp ((double) F (x) * dmath::ln (81.0));
             t = (double) F (t - 1.0) * perMs;
-            follCoef[(std::size_t) k] = t > 0.0 ? F (delphi::exp (delphi::ln (0.01) / t)) : 0.0f;
+            follCoef[(std::size_t) k] = t > 0.0 ? F (dmath::exp (dmath::ln (0.01) / t)) : 0.0f;
         }
     }
 
@@ -1611,7 +1611,7 @@ struct Engine::Impl
                 // LFO rate per tick from the speed knob (the frozen flag zeroes the running increment)
                 const auto& sa = s.u[(std::size_t) (&un - u.data())].art[(std::size_t) (&a - un.art.data())];
                 const double x = (double) sa.lfoKnobs[0] * 1.52587890625e-05;
-                double inc = (double) F (delphi::exp ((double) F (x) * delphi::ln (10001.0)) - 1.0) * 6871947.6736 * a.lfoEnv.scale;
+                double inc = (double) F (dmath::exp ((double) F (x) * dmath::ln (10001.0)) - 1.0) * 6871947.6736 * a.lfoEnv.scale;
                 if (805306368.0 < inc)
                     inc = 805306368.0;
                 a.lfoIncPos = (double) (u32) rnd (inc);
@@ -1633,7 +1633,7 @@ struct Engine::Impl
         const double t0 = (double) (v * fsInt) / 44100.0;
         tickN = (int) std::max<long long> (4, rnd (t0 / 4.0) * 4);
         tau = (double) (tickN * v) / (t0 * 96.0);
-        smoothCoef = F (delphi::exp (delphi::ln (0.01) * tau / 96.0));
+        smoothCoef = F (dmath::exp (dmath::ln (0.01) * tau / 96.0));
         timeScales();
         follCoefs();
         dcA = F (1.0070234999999998 / (double) fs);
@@ -1768,7 +1768,7 @@ struct Engine::Impl
         auto alpha = [&] (double x) { return (double) powf32 ((float) x, un.n == 1 ? 0.5f : 0.75f); };
         auto clampW = [] (double w) { return w <= 2.849517146113191 ? (w < 0.0 ? 0.0 : w) : 2.849517146113191; };
         auto curveX = [&] (double base, double mult) {
-            return (double) F (delphi::exp ((double) c * delphi::ln (base)) - 1.0) * mult;
+            return (double) F (dmath::exp ((double) c * dmath::ln (base)) - 1.0) * mult;
         };
         if (t == 0)
         {
@@ -1778,7 +1778,7 @@ struct Engine::Impl
             for (int i = un.n; i >= 0; --i)
             {
                 const double w = (x + 0.005) * kd;
-                const double f = (w <= 0.625 ? delphi::sin (w) : delphi::sin (0.625)) * 2.0;
+                const double f = (w <= 0.625 ? dmath::sin (w) : dmath::sin (0.625)) * 2.0;
                 un.st[(std::size_t) i].f = F (f);
                 if (un.alt)
                     x = alpha (x);
@@ -1807,7 +1807,7 @@ struct Engine::Impl
             {
                 q = 50.0;
                 if (r < 1.0)
-                    q = (double) F (delphi::exp ((double) F (r) * delphi::ln (1001.0)) - 1.0) * 0.049 + 1.0;
+                    q = (double) F (dmath::exp ((double) F (r) * dmath::ln (1001.0)) - 1.0) * 0.049 + 1.0;
             }
             if (un.n > 0)
                 q = (double) powf32 ((float) q, un.qExp);
@@ -1816,7 +1816,7 @@ struct Engine::Impl
             {
                 auto& stg = un.st[(std::size_t) i];
                 double w = (x + 0.007) * kk;
-                const double cs = delphi::cos (w <= 1.2566370614359172 ? w : 1.2566370614359172);
+                const double cs = dmath::cos (w <= 1.2566370614359172 ? w : 1.2566370614359172);
                 stg.f = F (2.0 - cs * 2.0);
                 const double tm = cs - 1.0;
                 const double sq = std::sqrt ((-tm) * tm * tm);
@@ -1856,7 +1856,7 @@ struct Engine::Impl
                 {
                     Q = 50.0;
                     if (r < 1.0)
-                        Q = (double) F (delphi::exp ((double) F (r) * delphi::ln (2001.0)) - 1.0) * 0.024950001388788223 + 0.1;
+                        Q = (double) F (dmath::exp ((double) F (r) * dmath::ln (2001.0)) - 1.0) * 0.024950001388788223 + 0.1;
                 }
                 if (un.n > 0)
                     Q = (double) powf32 ((float) Q, un.qExp);
@@ -1869,7 +1869,7 @@ struct Engine::Impl
                 {
                     par = 12.0;
                     if (r < 1.0)
-                        par = (double) F (delphi::exp ((double) F (r) * delphi::ln (101.0)) - 1.0) * 0.11989999562501907 + 0.01;
+                        par = (double) F (dmath::exp ((double) F (r) * dmath::ln (101.0)) - 1.0) * 0.11989999562501907 + 0.01;
                 }
             }
             else if (t == 8 || t == 10)
@@ -1880,7 +1880,7 @@ struct Engine::Impl
                 {
                     Sl = 1.0;
                     if (rr < 1.0)
-                        Sl = (double) F (delphi::exp ((double) F (rr) * delphi::ln (3.0)) - 1.0) * 0.44999998807907104 + 0.1;
+                        Sl = (double) F (dmath::exp ((double) F (rr) * dmath::ln (3.0)) - 1.0) * 0.44999998807907104 + 0.1;
                 }
                 A = (double) un.gain[0];
                 if (un.n > 0)
@@ -1896,7 +1896,7 @@ struct Engine::Impl
                 {
                     bw = 100.0;
                     if (rr < 1.0)
-                        bw = (double) F (delphi::exp ((double) F (rr) * delphi::ln (2001.0)) - 1.0) * 0.049949999898672104 + 0.1;
+                        bw = (double) F (dmath::exp ((double) F (rr) * dmath::ln (2001.0)) - 1.0) * 0.049949999898672104 + 0.1;
                 }
                 A = (double) un.gain[0];
                 if (un.n > 0)
@@ -1907,7 +1907,7 @@ struct Engine::Impl
             {
                 auto& stg = un.st[(std::size_t) i];
                 const double w = clampW ((x + off) * kk);
-                const double sn = delphi::sin (w), cs = delphi::cos (w);
+                const double sn = dmath::sin (w), cs = dmath::cos (w);
                 stg.code = codes[t];
                 if (t == 3 || t == 6 || t == 7)
                     biquadDesign (stg, stg.code, 0.0, sn * par, sn, cs);
@@ -1931,7 +1931,7 @@ struct Engine::Impl
             if (0.0 < (double) c)
                 x = std::min (curveX (201.0, 0.014949999749660492), 3.0);
             const float G = un.gain[0];
-            const double g7 = (double) F (delphi::exp ((double) G * delphi::ln (251.0)) - 1.0) * 0.12;
+            const double g7 = (double) F (dmath::exp ((double) G * dmath::ln (251.0)) - 1.0) * 0.12;
             const double inv = 0.001 <= g7 ? 1.0 / g7 : 1.0;
             double R = 0.0;
             if (0.0 < r)
@@ -1953,7 +1953,7 @@ struct Engine::Impl
                 if (0.65 < w)
                     w = 0.65;
                 const double w2 = w * w;
-                const double e = delphi::exp (-kPi * (((w * 1.873 * w2 + w2 * 0.4955) - w * 0.649) + 0.9988) * w);
+                const double e = dmath::exp (-kPi * (((w * 1.873 * w2 + w2 * 0.4955) - w * 0.649) + 0.9988) * w);
                 stg.coef = 1.0 - e;
                 stg.q = F (-R * ((w2 * -3.9364 + w * 1.8409) + 0.9968));
                 if (0.001 <= g7)
@@ -2352,7 +2352,7 @@ struct Engine::Impl
                 if (t >= 8)
                 {
                     const double x = (double) s.u[(std::size_t) un.index].p[3] * 0.015625;
-                    const double e = delphi::exp ((double) F (x) * delphi::ln (8.0));
+                    const double e = dmath::exp ((double) F (x) * dmath::ln (8.0));
                     un.gain[0] = F ((double) F (e - 1.0) * 0.125 + 0.125);
                 }
                 coefs (un);

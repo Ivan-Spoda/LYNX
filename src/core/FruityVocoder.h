@@ -44,6 +44,10 @@ enum Control
 int controlMin (int c) noexcept;
 int controlMax (int c) noexcept;
 int controlDefault (int c) noexcept;
+// The raw control a 0…1 knob (the LYNX slot parameter, (raw − min)/(max − min) within the knob range) stands for.
+// FL's state may hold raw values outside the knob range, and the plugin uses them as they are (REA_rodada78 §1): while
+// the knob still shows the saved value (clamped to its range), the saved raw value is kept.
+int rawFromKnob (float knob, int control, int savedRaw) noexcept;
 
 struct State
 {
