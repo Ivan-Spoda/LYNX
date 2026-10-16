@@ -452,6 +452,7 @@ countries: br
 "Toxic Biohazard — FL's engine with its effects (waves read from your FL installation)" = "Toxic Biohazard — motor do FL com seus efeitos (ondas lidas da sua instalação do FL)"
 "3x Osc — FL's engine (custom wave from the channel's sample)" = "3x Osc — motor do FL (onda personalizada a partir do sample do canal)"
 "Plucked! — FL's plucked-string engine" = "Plucked! — motor de corda dedilhada do FL"
+"FL Keys — FL's engine (wavetable read from your FL installation)" = "FL Keys — motor do FL (wavetable lida da sua instalação do FL)"
 "BeepMap — FL's engine (plays the bitmap saved with the channel)" = "BeepMap — motor do FL (toca o bitmap salvo com o canal)"
 "Sawer — FL's engine with its effects (oscillator cycle read from your FL installation)" = "Sawer — motor do FL com seus efeitos (ciclo de oscilador lido da sua instalação do FL)"
 "BooBass — FL's engine, its sound read from your FL installation (knobs: 3-band EQ)" = "BooBass — motor do FL, som lido da sua instalação do FL (knobs: EQ de 3 bandas)"
