@@ -49,6 +49,8 @@
 #include "core/Dx10.h"
 #include "core/Kepler.h"
 #include "core/ThreeOsc.h"
+#include "core/FlResampler.h"
+#include "core/FlVoiceProcessor.h"
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
@@ -2227,6 +2229,73 @@ TEST (live_queue_is_fifo_and_bounded)
     while (q.push (e))
         ++pushed;
     CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // one slot stays free to tell full from empty
+}
+
+// FL's sampler interpolators (REA_rodada69 §1): outputs of FLEngine's own kernels (EXEC, r69/py/gold.py) on a synthetic
+// 16-bit stereo signal; the port must give the same bits (linear, 6-point, 24-point sinc, 32-point sinc at speed 1.37,
+// 16-point sinc widened to 24 points with the cutoff at π/9.5 at speed 9.5)
+TEST (fl_sampler_interpolators_match_fl)
+{
+    std::vector<float> l, r;
+    std::uint32_t x = 12345;
+    for (int k = 0; k < 2 * 144; ++k)
+    {
+        x = x * 1103515245u + 12345u;
+        const auto v = (float) (std::int16_t) (std::uint16_t) (x >> 16) / 32768.0f;
+        (k % 2 == 0 ? l : r).push_back (v);
+    }
+    const int pad = 40;
+    const std::pair<int, double> positions[] = { { 20, 0.0 }, { 21, 0.25 }, { 22, 0.5 }, { 23, 0.71828 }, { 30, 0.999 }, { 31, 1e-7 }, { 40, 0.3333 }, { 41, 0.875 } };
+    struct Case { int quality; double speed; std::uint32_t bits[16]; };
+    const Case cases[] = {
+        { 1, 1.0, { 0x3ec1a000, 0x3d774000, 0x3ca1e000, 0x3ec39900, 0xbf2d4600, 0xbe096800, 0xbea0cd17, 0x3f433097, 0x3f2796da, 0xbd9fbd17, 0x3f27a3ff, 0xbda03ff2, 0x3dace746, 0x3eba19c4, 0x3e477a00, 0x3f0f2a80 } },
+        { 2, 1.0, { 0x3ec1a000, 0x3d773fff, 0x3d34885d, 0x3eedeaa0, 0xbf49e298, 0xbea52fc4, 0xbeba55fc, 0x3f7c58da, 0x3f27c5c2, 0xbda139af, 0x3f27a3ff, 0xbda03ffa, 0x3dd8e7b1, 0x3ee872c1, 0x3e05b2d5, 0x3f144c4f } },
+        { 4, 1.0, { 0x3ec19fff, 0x3d773fff, 0x3d889c32, 0x3ef6b184, 0xbf57cf0d, 0xbf0abecd, 0xbea14a13, 0x3f94f11b, 0x3f27edc4, 0xbda10d8c, 0x3f27a3fd, 0xbda03ffa, 0x3e5baf41, 0x3edb298c, 0x3dd76cbf, 0x3ef9d212 } },
+        { 5, 1.37, { 0x3f19d373, 0x3ea9b6a3, 0xbdcbe56e, 0x3e2af6c6, 0xbf476f7a, 0xbe566a13, 0xbe9f166a, 0x3f52b5ad, 0x3f27ad16, 0xbce48792, 0x3f27960a, 0xbce01ebe, 0x3e1b96be, 0x3e163fd8, 0x3f042e42, 0x3ec4be83 } },
+        { 3, 9.5, { 0xbd97308e, 0x3dd8783c, 0xbd911374, 0x3e162a41, 0xbd8a959e, 0x3e38b220, 0xbd7e6785, 0x3e58895c, 0xbd380c4f, 0x3e7e3008, 0xbd380e4e, 0x3e7e2696, 0x3d00c6d0, 0xbd627d87, 0x3e308cb8, 0xbcece918 } },
+    };
+    const lynx::flvp::X87Extended precision;
+    for (const auto& c : cases)
+    {
+        lynx::flrs::Kernel k;
+        k.setQuality (c.quality);
+        k.setSpeed (c.speed);
+        int same = 0;
+        for (int p = 0; p < 8; ++p)
+        {
+            const auto lo = pad + positions[p].first - k.halfWidth + 1;
+            float a, b;
+            lynx::flrs::interpolate (k, l.data() + lo, r.data() + lo, positions[p].second, a, b);
+            std::uint32_t ba, bb;
+            std::memcpy (&ba, &a, 4);
+            std::memcpy (&bb, &b, 4);
+            same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+        }
+        CHECK (same == 16);
+    }
+    CHECK (lynx::flrs::halfWidthFor (4) == 12 && lynx::flrs::halfWidthFor (5) == 16 && lynx::flrs::halfWidthFor (9) == 256);
+    CHECK (lynx::flrs::speedFor (0.0f, 1.0) == 1.0 && std::abs (lynx::flrs::speedFor (1200.0f, 0.5) - 1.0) < 1e-12);
+}
+
+// The sampler at the original rate copies the sample (FL's copy path), and plays until the read position passes the
+// last frame
+TEST (fl_sampler_copies_at_original_rate)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    for (int i = 0; i < 300; ++i)
+        data->left.push_back (std::sin (0.05f * (float) i) * 0.5f);
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    sampler->noteOn (60, 1.0f);
+    std::vector<float> l (400), r (400);
+    sampler->render (l.data(), r.data(), 400, 1.0f, 1.0f);
+    const auto panL = std::cos ((0.0f + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f; // the sampler's centre pan gain
+    int exact = 0;
+    for (int i = 0; i < 300; ++i)
+        exact += l[(std::size_t) i] == data->left[(std::size_t) i] * panL ? 1 : 0;
+    CHECK (exact == 300);
+    CHECK (l[300] == 0.0f);
 }
 
 TEST (sampler_plays_pitched_one_shot)
