@@ -1185,3 +1185,7 @@ countries: br
 "Menu and hint bar (always first)" = "Menu e barra de dicas (sempre primeiro)"
 "Size of the toolbar icons and of the editors' tool icons (Piano Roll, Playlist)" = "Tamanho dos ícones da barra e das ferramentas dos editores (Piano Roll, Playlist)"
 "Scales the whole interface: text, icons and windows. Useful on high-resolution screens" = "Escala toda a interface: textos, ícones e janelas. Útil em telas de alta resolução"
+"No sample" = "Nenhum sample"
+"Choose a sample..." = "Escolher um sample..."
+"Remove the sample" = "Remover o sample"
+"Source sample" = "Sample de origem"
