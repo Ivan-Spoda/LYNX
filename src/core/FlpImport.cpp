@@ -587,10 +587,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     std::optional<std::string> drumSynthDll; // the user's DrumSynth Live engine DLL, once checked ("" = not usable)
 
     // a sample on this PC: where the project says, else re-rooted from another PC's folders or next to the project
-    auto locateSample = [&] (const std::string& flPath) {
-        const auto found = locateFlSample (flPath, options.roots, options.projectFolder, options.fileExists);
-        if (! found.empty() && found != resolveFlPath (flPath, options.roots) && options.report != nullptr)
+    // (`sampleUser` names what uses the sample, for the missing-files list; `record` false for paths only probed)
+    std::string sampleUser;
+    auto locateSample = [&] (const std::string& flPath, bool record = true) {
+        auto found = locateFlSample (flPath, options.roots, options.projectFolder, options.fileExists);
+        const auto saved = resolveFlPath (flPath, options.roots);
+        if (found.empty())
+        {
+            if (const auto chosen = relocatedPath (options.relocations, saved); ! chosen.empty() && options.fileExists && options.fileExists (chosen))
+                return chosen;
+            if (record && options.report != nullptr)
+                addMissingFile (options.report->missingFiles, saved, sampleUser);
+        }
+        else if (found != saved && options.report != nullptr)
+        {
             ++options.report->relocatedSamples;
+            if (record && std::none_of (options.report->relocatedFiles.begin(), options.report->relocatedFiles.end(),
+                                        [&] (const auto& r) { return r.first == saved; }))
+                options.report->relocatedFiles.push_back ({ saved, found });
+        }
         return found;
     };
 
@@ -604,6 +619,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         ChannelDef def;
         def.name = c.name.empty() ? "Channel " + std::to_string (c.index + 1) : c.name;
+        sampleUser = (c.type == flp::ChannelType::audioClip ? "Audio clip: " : "") + def.name;
         def.instrument = guessInstrument (def.name, c.type);
 
         // FL synthesizer that becomes the internal synth: a preset matching the name (in FLEX, the name
@@ -757,6 +773,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         // FL generators with samples (REA_rodada9): DirectWave becomes a multi-sample sampler; FPC is
         // split into one channel per pad at the end of the import (notes go to the pad by key)
         auto existing = [&] (std::string path) { return locateSample (path); };
+        auto installed = [&] (std::string path) { return locateSample (path, false); }; // FL's own data (FL Keys wavetables)
 
         // DirectWave: the exact engine (REA_rodada72); the multi-sample sampler stays as the fallback
         bool directWaveExact = false;
@@ -852,7 +869,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         bool flKeysExact = false;
         if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())
             flKeysExact = flkeys::importChannel (def, c.pluginState, options.roots.factoryData + "\\Plugins\\Fruity\\Generators\\FL Keys\\Wavtables",
-                                                 options.readFile, existing, options.saveEmbedded);
+                                                 options.readFile, installed, options.saveEmbedded);
         if (c.pluginName == "FL Keys" && ! flKeysExact && options.readFile && ! options.roots.factoryData.empty())
             if (const auto set = flKeysSet (c.pluginState))
             {
@@ -870,7 +887,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 std::vector<SampleZone> zones;
                 for (auto z : flKeysZones (wti, folder, rawData, options.saveEmbedded))
-                    if (z.path = existing (z.path); ! z.path.empty())
+                    if (z.path = installed (z.path); ! z.path.empty())
                         zones.push_back (std::move (z));
 
                 if (! zones.empty())
@@ -919,7 +936,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
             else if (const auto sound = drumSynthLiveSound (c.pluginState))
                 for (const auto& candidate : drumSampleCandidates (*sound))
-                    if (auto path = existing (candidate); ! path.empty())
+                    if (auto path = locateSample (candidate, false); ! path.empty())
                     {
                         def.instrument = InstrumentKind::sampler;
                         def.samplePath = std::move (path);
@@ -1907,10 +1924,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 fx.samplePath = path;
                                 break;
                             }
+                        for (const auto& path : candidates) // located by the user (the "Missing files" window)
+                            if (const auto chosen = relocatedPath (options.relocations, path);
+                                fx.samplePath.empty() && ! chosen.empty() && options.fileExists && options.fileExists (chosen))
+                                fx.samplePath = chosen;
                         if (options.report != nullptr && ! parsed->tracks.empty())
                         {
                             if (fx.samplePath.empty())
+                            {
                                 ++options.report->missingSamples;
+                                if (! candidates.empty() && ! candidates.front().empty())
+                                    addMissingFile (options.report->missingFiles, candidates.front(),
+                                                    (insert.name.empty() ? "Insert " + std::to_string (insert.index) : insert.name) + ": " + slot.plugin);
+                            }
                             if (parsed->edited())
                                 ++options.report->droppedEffects[slot.plugin + " (edits not reproduced: plays the original sample)"];
                             else if (fx.kind == EffectKind::newtime)

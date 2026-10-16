@@ -5,6 +5,7 @@
 #include "core/EditorPolish.h"
 
 #include "ui/HistoryPanel.h"
+#include "ui/MissingFilesDialog.h"
 #include "ui/QuickAddPalette.h"
 #include "ui/ToolWindow.h"
 #include "ui/WindowOwner.h"
@@ -2101,12 +2102,13 @@ void MainComponent::importFlp (const juce::File& file)
         }
 
         currentFile = juce::File(); // imported: "Save" asks where to write the .lynx
+        importedFlpFile = file;
         projectName = file.getFileNameWithoutExtension();
         rememberRecent (file);
         importedSuffix = " " + tr ("(imported from FL Studio)");
         updateTitle();
 
-        showImportReport();
+        showMissingFiles (true);
     }
 }
 
@@ -2125,10 +2127,87 @@ void MainComponent::openLynxProject (const juce::File& file)
     engine.rewind();
     engine.setSong (std::move (*song));
     currentFile = file;
+    importedFlpFile = juce::File();
     projectName = file.getFileNameWithoutExtension();
     importedSuffix = {};
     rememberRecent (file);
     updateTitle();
+
+    if (persistent)
+        showMissingFiles (true);
+}
+
+void MainComponent::showMissingFiles (bool afterOpening)
+{
+    MissingFilesInfo info;
+    info.projectName = projectName;
+    const auto fromFlp = importedFlpFile.existsAsFile() && currentFile == juce::File();
+    const auto exists = [] (const std::string& path) { return juce::File::isAbsolutePath (juce::String::fromUTF8 (path.c_str())) && juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+
+    if (fromFlp)
+    {
+        // the import dropped the samples it couldn't find: its report keeps them (minus the ones located since)
+        const auto& report = engine.getImportReport();
+        for (const auto& m : report.missingFiles)
+            info.files.push_back (m);
+        info.plugins = engine.getMissingPluginDetails();
+        info.autoRelocated = report.relocatedFiles;
+        info.searchFolders.add (importedFlpFile.getParentDirectory().getFullPathName());
+    }
+    else
+    {
+        const auto& song = engine.getSong();
+        info.files = findMissingSamples (song, exists);
+        auto& host = engine.getPluginHost();
+        auto addPlugin = [&info] (const PluginRef& ref, const std::string& user, const char* replacement) {
+            const auto name = ref.name.empty() ? ref.id : ref.name;
+            auto it = std::find_if (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == name; });
+            if (it == info.plugins.end())
+                it = info.plugins.insert (info.plugins.end(), MissingPlugin { name, {}, replacement });
+            if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
+                it->usedBy.push_back (user);
+        };
+        for (const auto& c : song.channels)
+            if (c.instrument == InstrumentKind::plugin && ! c.plugin.id.empty() && host.find (juce::String::fromUTF8 (c.plugin.id.c_str())) == nullptr)
+                addPlugin (c.plugin, c.name, "Silence: the channel keeps the plugin's settings until it is installed");
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (const auto& fx : song.mixer[t].effects)
+                if (fx.kind == EffectKind::plugin && ! fx.plugin.id.empty() && host.find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
+                    addPlugin (fx.plugin, song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name,
+                               "Bypassed: the slot keeps the plugin's settings until it is installed");
+        if (currentFile.existsAsFile())
+            info.searchFolders.add (currentFile.getParentDirectory().getFullPathName());
+    }
+
+    if (afterOpening && info.files.empty() && info.plugins.empty())
+    {
+        if (fromFlp)
+            showImportReport();
+        return;
+    }
+
+    auto safe = juce::Component::SafePointer<MainComponent> (this);
+    const auto flp = fromFlp ? importedFlpFile : juce::File();
+    showMissingFilesDialog (
+        std::move (info),
+        [safe, flp] (const std::map<std::string, std::string>& relocations) {
+            if (safe == nullptr)
+                return;
+            if (flp != juce::File())
+            {
+                // FL import: imported again with the located samples (the channels become samplers, slices are read...)
+                juce::String error;
+                if (! safe->engine.importFlpFile (flp, error, relocations, true))
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
+            }
+            else
+                safe->engine.editSong ([&relocations] (Song& s) { applyRelocations (s, relocations); });
+            safe->updateTitle();
+        },
+        [safe, afterOpening, fromFlp] {
+            if (safe != nullptr && afterOpening && fromFlp)
+                safe->showImportReport();
+        });
 }
 
 void MainComponent::exportAudio()
@@ -2365,6 +2444,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     else
     {
         menu.addItem (tr ("Shortcuts") + shortcutText ("help.shortcuts"), [this] { showHelp(); });
+        menu.addItem (tr ("Missing files..."), [this] { showMissingFiles (false); });
         menu.addItem (tr ("Last FL Studio import report"), [this] {
             const auto& r = engine.getImportReport();
             if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0

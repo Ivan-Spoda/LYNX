@@ -103,6 +103,9 @@ private:
     void showImportReport();
     void importFlp (const juce::File& file);
     void openLynxProject (const juce::File& file);
+    // The "Missing files" window (ui/MissingFilesDialog.h) for the current project; `afterOpening`: shown by opening a
+    // project (only when something is missing; the FL import report follows it), else from the menu (always).
+    void showMissingFiles (bool afterOpening);
     int scansSeen = 0; // background plugin scans already announced in the hint bar
     void showHelp();
 
@@ -281,6 +284,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
+    juce::File importedFlpFile; // the .flp the current project was imported from (until another project is opened)
     juce::String importedSuffix; // " (imported from FL Studio)" in the title until saved as .lynx
     juce::String projectName; // suggested name for export (also from an imported .flp)
     std::map<int, std::vector<int>> heldKeys; // PC keyboard keys playing notes (keyCode -> channels)

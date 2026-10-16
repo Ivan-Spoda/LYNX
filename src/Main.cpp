@@ -22,6 +22,7 @@
 #include "ui/SetupWizard.h"
 #include "engine/FlStudio.h"
 #include "ui/HistoryPanel.h"
+#include "ui/MissingFilesDialog.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
@@ -1418,6 +1419,9 @@ private:
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 2), "-missing-found.png");
 
             if (! offline.getSong().automations.empty())
             {

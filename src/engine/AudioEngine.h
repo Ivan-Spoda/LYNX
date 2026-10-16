@@ -50,6 +50,8 @@ public:
     const juce::StringArray& getMatchedPlugins() const noexcept { return matchedPlugins; }
     // What the last imported .flp converted, approximated or left out.
     const FlpImportReport& getImportReport() const noexcept { return importReport; }
+    // The last imported .flp's plugins that were not found, with what uses them and what LYNX put in their place.
+    const std::vector<MissingPlugin>& getMissingPluginDetails() const noexcept { return missingPluginDetails; }
 
     // Live instances (to open the plugin window). nullptr if not a plugin.
     std::shared_ptr<Instrument> getChannelInstrument (int channel) const;
@@ -156,8 +158,10 @@ public:
     void setChannelSelection (std::vector<int> channels, int primary);
 
     // Imports a .flp, locating the FL installation to find the samples.
-    // Returns false and fills `error` on failure.
-    bool importFlpFile (const juce::File& file, juce::String& error);
+    // Returns false and fills `error` on failure. `relocations` (saved sample path → file to use) are the samples
+    // the user located; with `asEdit` the result replaces the song as one undoable step instead of a new project.
+    bool importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations = {},
+                        bool asEdit = false);
 
     // Renders without an audio device. Writes to `output` if not nullptr.
     // After `seconds`, continues for up to `tailSeconds` while there is still sound.
@@ -276,6 +280,7 @@ private:
     PluginHost plugins;
     juce::StringArray missingPlugins, matchedPlugins;
     FlpImportReport importReport;
+    std::vector<MissingPlugin> missingPluginDetails;
     RenderStats lastRenderStats;
     class ChannelRackProcessor* rackProcessor = nullptr; // graph node (owner: the graph)
 

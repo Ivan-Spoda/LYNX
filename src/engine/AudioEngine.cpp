@@ -822,7 +822,7 @@ void AudioEngine::publishSelection()
     extraLiveCount.store (extra);
 }
 
-bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
+bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations, bool asEdit)
 {
     juce::MemoryBlock data;
 
@@ -867,12 +867,51 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
 
         importReport = {};
         options.report = &importReport;
+        options.relocations = relocations;
         auto imported = importFlp (project, options);
+
+        // the project's third-party plugins, to say which channel/insert used each one that is missing
+        struct Use
+        {
+            std::string name, user;
+            bool instrument;
+        };
+        std::vector<Use> uses;
+        for (const auto& c : imported.channels)
+            if (c.plugin.foreign.format != ForeignPlugin::Format::none)
+                uses.push_back ({ c.plugin.foreign.name, c.name, true });
+        for (std::size_t t = 0; t < imported.mixer.size(); ++t)
+            for (const auto& fx : imported.mixer[t].effects)
+                if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
+                    uses.push_back ({ fx.plugin.foreign.name, imported.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t))
+                                                                                            : imported.mixer[t].name,
+                                      false });
+
         juce::StringArray missing;
         juce::StringArray matched;
         plugins.adoptFlPlugins (imported, &missing, &matched);
         missingPlugins = missing;
         matchedPlugins = matched;
+        missingPluginDetails.clear();
+        for (const auto& name : missing)
+        {
+            MissingPlugin m;
+            m.name = name.toStdString();
+            for (const auto& u : uses)
+                if (u.name == m.name)
+                {
+                    if (std::find (m.usedBy.begin(), m.usedBy.end(), u.user) == m.usedBy.end())
+                        m.usedBy.push_back (u.user);
+                    m.replacement = u.instrument ? "Built-in synth (a preset chosen by the channel name)" : "Nothing: the slot was left out of the mixer";
+                }
+            missingPluginDetails.push_back (std::move (m));
+        }
+
+        if (asEdit)
+        {
+            editSong ([&imported] (Song& s) { s = std::move (imported); });
+            return true;
+        }
 
         stop();
         rewind();
