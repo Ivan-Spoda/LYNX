@@ -29,6 +29,7 @@
   | `Plugins/Fruity/Generators/Slicex/Slicex_x64.dll` | `401b5ece958913d8fd00bd6cd8defd66c4b624a0702ade13992fc1ff1569857b` | Slicex (Delphi, own copy of `DSP_Resample`) |
   | `Plugins/Fruity/Generators/Fruity Slicer/Fruity Slicer_x64.dll` | `7616d1f88febef330916b5f45e51ba758a7f2666b80718fab321fda546312ed6` | Fruity Slicer (Delphi, own copy of `DSP_Resample`) |
   | `Plugins/Fruity/Generators/DirectWave/DirectWave_x64.dll` | `3432775dd4e06b333fb04f210d834fb02d91932d702a3699b4c180501a746570` | DirectWave (C++/MSVC) |
+  | `Plugins/Fruity/Generators/FL Keys/FL Keys_x64.dll` | `56ca12091eb0fc767507095d0bf1aed1d8bf27c42d5e7ab6569cc699ed67822e` | FL Keys (Delphi, `TTestPlug` VMT `0x71eef0`) |
 
 - **Tools:** Ghidra 12.1.4 headless (project `~/ghproj/r69`, programs imported without auto-analysis, script
   `gh/scripts/DecAt.java` that creates the function at an address before decompiling it; `gh/g.sh`, `gh/gp.sh`);
@@ -41,6 +42,12 @@
   `kern.exe cpu` runs FLEngine's CPU probe (`0x63a330`) and prints its feature record.
 - **Models:** `cpp/model69.c` (C reference of the three kernel families), `cpp/rscheck.cpp` (LYNX's port run on the
   same inputs), drivers `py/kt.py` (matrix), `py/nearone.py`, `py/gold.py` (test goldens).
+- **FL Keys (§8):** Ghidra project `~/ghproj/r69` program `keys` (`keys/k1.c`…`k10.c`), `keys/keys.asm`. EXEC harness
+  `keys/run/fk.c` → `fk.exe` (a copy of round 65's `pl.c`: the installation's DLL unmodified through
+  `CreatePlugInstance`, `SaveRestoreState`, `TriggerVoice`, `Voice_Release`, `Gen_Render`; it answers the locate
+  interface's file search with the four shipped wavetables, runs the plugin's own wavetable loader `0x713920`
+  synchronously — the plugin starts it in a thread — and can dump the loaded wavetable). Reference model
+  `keys/model/fkm.c`; drivers `keys/kcmp.py`, `kcmp2.py`/`kcmp3.py` (LYNX's port through `tools/flkeysrender.cpp`).
 
 ---
 
@@ -259,7 +266,119 @@ velocity index. Random modes and simultaneous layers: **not reproduced** (no dem
 - No demo zone uses pan ≠ centre, a sample offset, time-stretch or differing amplitude envelopes inside a program
   (DATA), so those gaps do not change the demos.
 
-## 7. Open items
+## 7. Fruity Slicer **[DECOMP `FUN_00766c40`, `FUN_00768230` (TriggerVoice), `FUN_0076aa20`, `FUN_00766300`; DATA `py/slicer69.py`]**
+
+- State fields refined (round 9 §3.1): `+0x0C` (`P+0x128`) is the **pitch shift** in cents and `+0x10` (`P+0x12C`) the
+  **stretch amount**: the slices are pre-processed when the state loads (`FUN_0076aa20`) with a length factor
+  `2^(v/10000)` (`FUN_00766300`: `Exp(Ln 2 · v/10000)`). With method 0/1 ("fill gaps") and a stretch, each slice is
+  copied to its scaled position (positions `round(pos·factor)`, the sample `round(len·factor)` long, short slices under
+  150 samples without fades); with method ≥ 2 or a pitch shift, every slice goes through a time-stretch/pitch-shift
+  engine (`FUN_007520c0`: mode from a table indexed by the method, pitch `2^(cents/1200)`) — a licensed library whose
+  output LYNX cannot reproduce **(not reproduced)**.
+- Demos (10 channels): pitch 0 everywhere; stretch 0 ×4, 83, 167, 766 ×3 (all method 4); the 364-byte v16 voice block
+  holds the defaults in every demo (no envelope, no filter). So 5 demo channels play slices stretched by 0.6–5.5 % in FL;
+  LYNX plays them at their original length (each slice ends up to 5.5 % early, the attack and pitch are the same).
+- TriggerVoice: slice index `round(note pitch/100)` through the 125-entry key table, the voice gets `(60 − note)·100`
+  cents (the slice keeps its pitch), the voice reads the (pre-processed) sample up to the next slice or the end ("play to
+  end"); levels through the plugin voice processor with the default block. LYNX's sampler path (one zone per slice at the
+  sample's pitch) matches this for the demos.
+
+## 8. FL Keys **[DECOMP + EXEC]**
+
+### 8.1 State and knobs **[DECOMP `FUN_0071f860`, `FUN_007200b0`; EXEC]**
+
+`0xD5` = `u32` version (1; FL reads versions below 2), the wavetable name (`u8` length + bytes, e.g. "Grand Piano",
+"mda Piano"), then 15 × `i32` knob values. Each knob is normalised as `(v − min)/(max − min)` in single precision; the
+ranges come from the plugin's wheel controls (EXEC): decay, release, hardness, velocity→hardness −1000…1000; muffle
+0…1000; velocity→muffle 0…2000; velocity sensitivity −1000…1000; stereo 0…2000; tune −1000…1000; detune 0…500;
+stretch −500…500; treble, pan/tremolo −1000…1000; LFO rate 0…65536; overdrive 0…1000. Derived values
+(`FUN_00721230`, `p_i` the normalised knobs, `iFs = 1/fs` as float): key offset `round(12·p2 − 6)`; velocity→hardness
+`0.12·p3`; velocity→muffle `5·p5²`; treble gain `4·p11² − 1` and shelf coefficient 0.2720044 (p11 > ½) or 0.1071875;
+tremolo depths `2·p12 − 1` on the left and the same with the sign flipped below ½ on the right; LFO step
+`iFs·6.283·exp(9.22·p13 − 4.61)`; velocity sensitivity `1 + 2·p6` (minus `0.75 − 3·p6` below ¼); tune `2·p8 − 1`;
+detune `0.077·p9²`; stretch `(p10 − ½)·0.000434`; overdrive `1.8·p14`; stereo width `p7²`, note gain `1 − 0.53·p7²`,
+spread `min(0.04·p7, 0.03)`. Constructor defaults: note gain base 0.2, muffle base 160, **MaxPoly 32**.
+
+### 8.2 Wavetables **[DECOMP `FUN_00713920`, `FUN_00715440`, `FUN_00715350`, `FUN_007160b0`, `FUN_00716470`; EXEC dumps]**
+
+The `.wti` is an INI file (sections and keys in any case; booleans true only for "true"). `[info]`: `samples`,
+`filetype` (raw/riff), `samplefile`, `path`, `samplerate` (default 44100; only used to compute the step, see 8.6),
+`velocityfactor` (the envelope's start value, default 1), `releasehighnotes`, `resample` (default true), `canloop`
+(default true); `[velocitylayers]` `count` (default 1) and the lowest velocity of each layer (layer 0 forced to 0);
+`[sampleN]` `name`, `root` (missing: the previous one, first 60), `high` (missing: 0), `pos`, `end`, `loop`,
+`canloop`.
+
+- **Raw** (mda Piano, Rhodes): the sample file is read as 16-bit samples; keygroup `k` covers `[pos, end]`; then every
+  keygroup's part is copied one after another into a new buffer, each followed by a guard sample equal to the sample
+  `loop − 1` before its end (keygroups sharing the previous keygroup's start keep that keygroup's original start).
+- **Riff** (Grand Piano, Roto Organ): each named file is decoded to 16 bits through FL's sample class (Ogg-in-WAV through
+  `oggio.dll`; with `resample` the sample is resampled to the host rate) and appended with one extra frame; the WAV's
+  loop (smpl) defaults the keygroup's end (`loop end`, clamped to the last frame; no loop: the whole file) and loop
+  length (`end − start + 1`); `pos`/`end` count from the file's start; the guard frame after the end repeats the frame
+  `loop` before the end; a keygroup without a name reuses the previous file, a repeated file name copies the earlier
+  keygroup's record.
+- Finally every keygroup is clamped into the data and a keygroup that may not loop gets `loop = end`, i.e. it stops at
+  its end.
+
+LYNX's loader (`flkeys::parseWti` + `buildWavetable`) builds byte-identical data and keygroups for mda Piano, Rhodes
+and Roto Organ (44.1 kHz) compared with the plugin's own dumps **[EXEC]** (Roto Organ differs only in two extra frames
+FL leaves uninitialised and never reads). Grand Piano's Ogg samples decoded by LYNX's libvorbis and converted with
+`round(x·32767)` (the rule that matches FL's 16-bit buffer; `x·32768` matches 98.25 %) equal FL's values on
+**20 079 958 of 20 081 840 (99.991 %)**, the rest ±1 LSB at rounding ties; three files decode 2 048 frames longer in
+libvorbis than in FL (silent tails) **[EXEC]**.
+
+### 8.3 Note on **[DECOMP `FUN_00721660`]**
+
+Note = `(Final.Pitch + 6000)·0.01` clamped to 0…127; velocity `round(100·log11(10·Init.Vol + 1))` (at most 127,
+`1/ln 11` held as a float); detune term from `k = round((note − 60)²)`: `tune + detune·((k mod 13) − 6.5)`, plus
+`stretch·k` above note 60; key offset plus `round(velHard·(vel − 40))` above velocity 40; the keygroup is the first
+(stepping by the number of layers) whose `high + offset` reaches the note, then one more per layer threshold below the
+velocity; step `round(65536·samplerate·iFs·exp((tune + note − root)·ln2/12))` (16.16). Envelope starts at
+`velocityfactor`; decay per sample `exp(−iFs·exp(0.033·n − 0.6 − d'))` (n the note clamped to 44…108, `d' = 2·p0`
+adjusted below ½) or 1 (no decay) when the decay knob is at its minimum; muffle `f = max(p4²·160 + 50 + velMuffle·(vel −
+64), 0.4·note + 55)` capped at 210, coefficient `f²·iFs`; per-note gains `w ± w·spread·(n − 60)` with `w = 0.2·note
+gain`. With 32 voices in the list, the sounding voice with the lowest envelope is ended first.
+
+### 8.4 Render **[DECOMP `FUN_00722360`, asm]**
+
+Per host block: a voice whose Final.Pitch changed recomputes its step (`FUN_00722e20`, keeping its first keygroup
+search on the original note and layer 0); gain `Power(max(Final.Vol, 0), velocity sensitivity)` through the host's
+ComputeLRVol (FL's pan law). Per sample and voice: 16.16 position step; past the end the voice loops back by `loop` or
+stops when `loop ≥ end`; the interpolated sample is built as the bits of a float (`s0·128 + (frac>>9)·(s1 − s0) +
+0x40400000`, i.e. 3 + s·2⁻²²) minus 3, times the envelope (double); the envelope is multiplied by the decay; overdrive
+`x − od·x²` for positive x (with a soft correction when it turns negative); one-pole muffle `y += c·(x + x₋₁ − y)`;
+summed with the voice gains. Stereo wavetables run the same per channel. Then for the mix: treble shelf
+`x + g·(x − lp)`, the tremolo/auto-pan LFO (a sine/cosine pair rotated by the LFO step), and the stereo delay
+(`l + r` into a 128-sample ring, `width·delayed` added to the left and taken from the right). At the block end voices
+whose envelope is below 10⁻⁴ (compared as integers) end; the host removes ended voices from the list, which moves the
+list's last voice into the gap (`FUN_005de9f0`), and with no voice left Gen_Render does nothing (the LFO and the delay
+stop). Release (`FUN_00722140`): decay `exp(−iFs·exp(0.017·n + 2 − 2·p1))` below note 94, `exp(−iFs·exp(0.01·n + 6 −
+5·p1))` from note 94 up or for every note when `releasehighnotes` is set.
+
+### 8.5 Verification **[EXEC + model]**
+
+`keys/kcmp.py` (C model on the plugin's own loaded data) and `kcmp2.py`/`kcmp3.py` (LYNX's port, its own loader for raw
+and PCM wavetables, FL's dump for Grand Piano), host pan law x87, `hostkill`:
+
+- all **11 FL Keys states of the demo projects** (8 Grand Piano, 3 mda Piano), 40 random notes over 250 000 frames:
+  **500 000/500 000 output samples bit-identical each**;
+- crafted states covering every knob (overdrive, tremolo/LFO, treble, stereo, tune/detune/stretch, velocity layers,
+  Rhodes, Roto Organ), 44.1/48 kHz, blocks 100–512: bit-identical; a dense 150-note run (voice stealing, notes ending
+  in loops and at sample ends) on seven wavetable/state pairs: **800 000/800 000 bit-identical each**.
+
+### 8.6 LYNX port **[model]**
+
+`src/core/FlKeys.{h,cpp}` (`InstrumentKind::flkeys`): the importer reads the `.wti` from the user's installation,
+stores the wavetable description in `modelParams`, the files in `zones` (raw files as a 16-bit WAV saved with the
+project) and the state in `pluginState`; the rack builds FL's data once per wavetable (shared between channels) from
+the decoded files. Levels as the other FL voice generators (Init.Vol `(11^(1.28·vel) − 1)/10`, Final.Vol/Pan from the
+channel). Knobs editable in the channel settings. Tests `fl_keys_state_wti_and_loader` and
+`fl_keys_matches_fl_with_the_installation` (FNV-1a hashes of FL's output for mda Piano, Rhodes and Roto Organ).
+Not reproduced: the "resample" wavetables at host rates other than 44.1 kHz (only Roto Organ; FL then plays it ~1.5
+semitones flat at 48 kHz, since the step keeps the file's rate — EXEC); FL counts the end of a voice, the LFO and the
+denormal flush per host block, LYNX per block of at most 512 samples.
+
+## 9. Open items
 
 - DirectWave's voice filter and modulation matrix (§6).
 - The host sampler voice's velocity/pan laws and filter (§2); FL's song-aligned tick phase for the envelopes (§3).
@@ -267,6 +386,8 @@ velocity index. Random modes and simultaneous layers: **not reproduced** (no dem
 - The double-precision kernel table and the zero-padding flag (§1.1, §1.6).
 - Whether FPC/Slicex/Fruity Slicer switch their interpolation when FL renders (§1.2): LYNX plays their channels through
   the sampler's settings (24-point live, 32-point when exporting).
+- Fruity Slicer's pre-stretched / pitch-shifted slices (§7): a licensed stretch engine.
+- FL Keys: resampling of "resample" wavetables to the host rate; Ogg decoding differences (§8.2, §8.6).
 
 ## Evidence index
 
@@ -283,5 +404,10 @@ velocity index. Random modes and simultaneous layers: **not reproduced** (no dem
 | FPC `FUN_008698a0`, `FUN_0086b480`, `FUN_00869db0` | velocity index, layer choice | DECOMP |
 | Slicex `FUN_0087a8a0`, `FUN_0087e4f0`, `FUN_0087efe0`, `FUN_008874a0`, `0x8843d5` | state, master gain law and use | DECOMP |
 | DirectWave `FUN_180027740`, `FUN_180010f30` | parameter text, cutoff law | DECOMP |
+| Fruity Slicer `FUN_0076aa20`, `FUN_00766300`, `FUN_00768230`, `FUN_007520c0` | slice pre-stretch, factor, trigger, stretch engine | DECOMP |
+| FL Keys `FUN_0071f860`, `FUN_007200b0`, `FUN_00721230` | state, knob normalisation, derived values | DECOMP |
+| FL Keys `FUN_00713920`, `FUN_00715440`, `FUN_00715350`, `FUN_007160b0`, `FUN_00716470` | wavetable loader, riff/raw files, repacking, clamping | DECOMP + EXEC |
+| FL Keys `FUN_00721660`, `FUN_00722360`, `FUN_00722e20`, `FUN_00722140`, `FUN_00722300`, `FUN_005de9f0`, `FUN_0071f170` | trigger, render, retune, release, kill, list removal, Power | DECOMP |
+| `keys/run/fk.exe` on FL Keys | output, wavetable dumps, knob ranges, MaxPoly | EXEC |
 | `run/kern.exe` on FLEngine | kernel outputs, CPU record | EXEC |
 | 165 `.flp` | usage counts, FPC layers, Slicex regions, DirectWave zones | DATA |

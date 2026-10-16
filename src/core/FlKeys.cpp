@@ -219,7 +219,7 @@ std::string fileNameOf (const std::string& path)
 
 std::optional<FlKeysTable> parseWti (const std::string& text, std::vector<std::string>& fileNames)
 {
-    // FUN_00713920 (REA_rodada69 §7.2)
+    // FUN_00713920 (REA_rodada69 §8.2)
     const Ini ini (text);
     fileNames.clear();
     FlKeysTable t;

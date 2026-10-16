@@ -828,7 +828,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
         }
 
-        // FL Keys: FL's engine on the wavetable (.wti) that ships with FL (REA_rodada69 §7); the zoned sampler is the
+        // FL Keys: FL's engine on the wavetable (.wti) that ships with FL (REA_rodada69 §8); the zoned sampler is the
         // fallback when the wavetable cannot be read
         bool flKeysExact = false;
         if (c.pluginName == "FL Keys" && options.readFile && ! options.roots.factoryData.empty())

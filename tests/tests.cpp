@@ -50,6 +50,7 @@
 #include "core/Kepler.h"
 #include "core/ThreeOsc.h"
 #include "core/FlResampler.h"
+#include "core/FlKeys.h"
 #include "core/FlVoiceProcessor.h"
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
@@ -2372,6 +2373,185 @@ TEST (fl_fpc_cycle_layers_and_slicex_master_volume)
     const auto sliced = lynx::slicex (state);
     CHECK (sliced.has_value() && sliced->path == "x.wav");
     CHECK (sliced && std::abs (sliced->gain - (float) ((std::pow (11.0, 1.25) - 1.0) / 10.0)) < 1e-5f);
+}
+
+TEST (fl_keys_state_wti_and_loader)
+{
+    using namespace lynx::flkeys;
+    // state: u32 1, the wavetable name, 15 int32 knobs
+    State st;
+    st.wavetable = "Grand Piano";
+    for (int i = 0; i < 15; ++i)
+        st.knobs[(std::size_t) i] = 10 * i - 50;
+    const auto bytes = writeState (st);
+    CHECK (bytes.size() == 4 + 1 + 11 + 60);
+    const auto back = parseState (bytes);
+    CHECK (back && back->wavetable == "Grand Piano" && back->knobs == st.knobs);
+
+    // one WAV per keygroup: the file's own loop gives the default end and loop; a keygroup without a file reuses
+    // the previous one; a repeated file name copies the earlier keygroup; each file is followed by a guard frame
+    // that repeats the frame `loop` before the end (REA_rodada69 §8.2)
+    std::vector<std::string> names;
+    auto riff = parseWti ("[info]\nsamples=3\nfiletype=riff\npath=W\nvelocityfactor=2\nsamplerate=22050\n"
+                          "[sample0]\nname=a.wav\nroot=40\nhigh=50\n[sample1]\nroot=51\nhigh=999\npos=2\nend=5\nloop=3\n"
+                          "[sample2]\nname=A.WAV\nroot=60\nhigh=70\n", names);
+    CHECK (riff && names.size() == 1 && names[0] == "W\\a.wav");
+    CHECK (riff && riff->keygroups.size() == 3 && riff->keygroups[2].duplicateOf == 0 && riff->thresholds == std::vector<int> { 0 });
+    if (riff)
+    {
+        riff->files[0].loopStart = 4, riff->files[0].loopEnd = 8;
+        FileSamples a;
+        for (int i = 0; i < 10; ++i)
+            a.samples.push_back ((std::int16_t) (100 * (i + 1)));
+        const auto decoded = FlKeysTable::decode (riff->encode());
+        CHECK (decoded.has_value());
+        const auto w = buildWavetable (*decoded, { a });
+        CHECK (w != nullptr);
+        if (w != nullptr)
+        {
+            auto same = [] (const Keygroup& k, Keygroup e) { return k.root == e.root && k.high == e.high && k.pos == e.pos && k.end == e.end && k.loop == e.loop; };
+            CHECK (same (w->keygroups[0], { 40, 50, 0, 8, 5 }));
+            CHECK (same (w->keygroups[1], { 51, 999, 2, 5, 3 }));
+            CHECK (same (w->keygroups[2], { 60, 70, 0, 8, 5 }));
+            CHECK (w->data[9] == 400 && w->data[10] == 0 && w->data[8] == 900);
+            CHECK (w->sampleRate == 22050.0f && w->velocityFactor == 2.0f && ! w->stereo);
+        }
+    }
+
+    // one raw file: every keygroup's part is copied one after another with a guard sample; "canloop=false" makes the
+    // loop as long as the keygroup's end, so the voice stops there
+    auto raw = parseWti ("[info]\nsamples=2\nsamplefile=x.dat\nfiletype=raw\n[sample0]\nroot=36\nhigh=47\npos=0\nend=3\nloop=2\n"
+                         "[sample1]\nroot=48\nhigh=999\npos=4\nend=7\nloop=4\ncanloop=false\n", names);
+    CHECK (raw && raw->raw && names.size() == 1 && names[0] == "x.dat");
+    if (raw)
+    {
+        FileSamples x;
+        for (int i = 0; i < 10; ++i)
+            x.samples.push_back ((std::int16_t) (10 * (i + 1)));
+        const auto w = buildWavetable (*raw, { x });
+        CHECK (w != nullptr);
+        if (w != nullptr)
+        {
+            CHECK (w->keygroups[0].pos == 0 && w->keygroups[0].end == 3 && w->keygroups[0].loop == 2);
+            CHECK (w->keygroups[1].pos == 5 && w->keygroups[1].end == 8 && w->keygroups[1].loop == 8);
+            const std::vector<std::int16_t> expected { 10, 20, 30, 40, 30, 50, 60, 70, 80, 50, 0, 0 };
+            CHECK (std::equal (expected.begin(), expected.end(), w->data.begin()));
+
+            // a held note on the non-looping keygroup ends by itself; 33 notes leave 32 sounding (FL's MaxPoly)
+            State s2;
+            s2.knobs = { -1000, 0, 0, -1000, 500, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+            RefNote n;
+            n.key = 60;
+            const auto out = renderReference (*w, s2, { n }, 44100.0, 4096, 512, true);
+            double early = 0, late = 0;
+            for (int i = 0; i < 64; ++i)
+                early += std::fabs (out[(std::size_t) (2 * i)]);
+            for (int i = 2048; i < 4096; ++i)
+                late += std::fabs (out[(std::size_t) (2 * i)]);
+            CHECK (early > 0.0 && late == 0.0);
+        }
+    }
+
+    // instrument front-end without a wavetable: silent and idle
+    auto inst = makeFlKeysInstrument (nullptr);
+    inst->prepare (44100.0);
+    inst->noteOn (60, 0.78f);
+    std::vector<float> l (256), r (256);
+    inst->render (l.data(), r.data(), 256, 1.0f, 1.0f);
+    CHECK (inst->idle() && l[100] == 0.0f);
+}
+
+TEST (fl_keys_matches_fl_with_the_installation)
+{
+    // FL Keys' own output (r69/keys/kcmp3.py: the installation's DLL, FL's x87 host pan law, blocks of 512 at
+    // 44.1 kHz): FNV-1a 64 of the interleaved float bits of 24 000 frames
+    if (realFlpDir.empty())
+        return;
+    using namespace lynx::flkeys;
+    const auto folder = std::filesystem::path (realFlpDir).parent_path() / "Plugins" / "Fruity" / "Generators" / "FL Keys" / "Wavtables";
+    if (! std::filesystem::exists (folder / "mda Piano.wti"))
+        return;
+    auto readAll = [] (const std::filesystem::path& p) {
+        std::ifstream f (p, std::ios::binary);
+        return std::vector<std::uint8_t> { std::istreambuf_iterator<char> (f), {} };
+    };
+    auto pcm = [] (const std::vector<std::uint8_t>& w) {
+        FileSamples f;
+        std::uint16_t channels = 1;
+        for (std::size_t pos = 12; pos + 8 <= w.size();)
+        {
+            std::uint32_t size = 0;
+            std::memcpy (&size, w.data() + pos + 4, 4);
+            if (std::memcmp (w.data() + pos, "fmt ", 4) == 0)
+                std::memcpy (&channels, w.data() + pos + 10, 2);
+            else if (std::memcmp (w.data() + pos, "data", 4) == 0)
+            {
+                f.samples.resize (std::min<std::size_t> (size, w.size() - pos - 8) / 2);
+                std::memcpy (f.samples.data(), w.data() + pos + 8, f.samples.size() * 2);
+                f.channels = channels;
+            }
+            pos += 8 + size + (size & 1);
+        }
+        return f;
+    };
+    auto run = [&] (const std::string& name, std::array<int, 15> knobs, std::uint64_t expected) {
+        const auto wti = readAll (folder / (name + ".wti"));
+        std::vector<std::string> names;
+        auto table = parseWti (std::string (wti.begin(), wti.end()), names);
+        CHECK (table.has_value());
+        if (! table)
+            return;
+        std::vector<FileSamples> files;
+        for (std::size_t i = 0; i < names.size(); ++i)
+        {
+            auto rel = names[i];
+            std::replace (rel.begin(), rel.end(), '\\', '/');
+            const auto bytes = readAll (folder / rel);
+            if (table->raw)
+            {
+                FileSamples f;
+                f.samples.resize (bytes.size() / 2);
+                std::memcpy (f.samples.data(), bytes.data(), f.samples.size() * 2);
+                files.push_back (std::move (f));
+            }
+            else
+            {
+                table->files[i] = wavFileInfo (bytes);
+                files.push_back (pcm (bytes));
+            }
+        }
+        const auto w = buildWavetable (*table, files);
+        CHECK (w != nullptr);
+        if (w == nullptr)
+            return;
+        State s;
+        s.wavetable = name;
+        s.knobs = knobs;
+        auto note = [] (int start, int key, double iv, double fv, double fp, double cents) {
+            RefNote n;
+            n.start = start, n.key = key, n.initVol = iv, n.finalVol = fv, n.finalPan = fp, n.cents = cents;
+            return n;
+        };
+        std::vector<RefNote> notes { note (0, 60, 1, 0.78, 0, 0), note (700, 72, 0.6, 0.5, -0.3, 0), note (1500, 30, 0.2, 0.9, 0.5, 25),
+                                     note (2100, 100, 1.3, 0.7, 1, -40), note (2500, 48, 0.05, 0.8, -1, 0), note (16000, 96, 0.9, 0.8, 0, 0) };
+        // (floats as the harness parses them)
+        for (auto& n : notes)
+            n.initVol = (float) n.initVol, n.finalVol = (float) n.finalVol, n.finalPan = (float) n.finalPan;
+        notes[0].release = 9000, notes[2].release = 12000, notes[3].release = 15000, notes[5].release = 20000;
+        const auto out = renderReference (*w, s, notes, 44100.0, 24000, 512, true);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (auto v : out)
+        {
+            std::uint32_t b;
+            std::memcpy (&b, &v, 4);
+            for (int k = 0; k < 4; ++k)
+                h = (h ^ ((b >> (8 * k)) & 0xff)) * 0x100000001b3ull;
+        }
+        CHECK (h == expected);
+    };
+    run ("mda Piano", { 1000, 138, 388, -1000, 716, 0, -1000, 256, 0, 0, 0, 0, 0, 0, 0 }, 0x78268ec007f31309ull);
+    run ("Rhodes", { 200, 300, 500, 800, 300, 1500, 300, 1500, 300, 400, 400, 800, 900, 30000, 700 }, 0xcc91c93d917f1d31ull);
+    run ("Roto Organ", { 1000, 1000, 1000, 1000, 0, 0, -1000, 0, 1000, 0, 500, 1000, 1000, 0, 300 }, 0x99eb13e87640a1c6ull);
 }
 
 TEST (sampler_plays_pitched_one_shot)

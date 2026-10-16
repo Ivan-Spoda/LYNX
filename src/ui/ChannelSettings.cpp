@@ -863,7 +863,7 @@ public:
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
         };
-        // FL Keys: the 15 int32 knobs of the saved state (REA_rodada69 §7.1)
+        // FL Keys: the 15 int32 knobs of the saved state (REA_rodada69 §8.1)
         auto addFlKeys = [&] (int index) {
             const auto state = flkeys::parseState (def.pluginState);
             if (! state)

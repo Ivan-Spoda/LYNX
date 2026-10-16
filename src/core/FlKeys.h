@@ -1,6 +1,6 @@
 #pragma once
 
-// FL Studio's FL Keys rebuilt as decoded in docs/analise/REA_rodada69.md §7 (clean-room; a port of our own round-69
+// FL Studio's FL Keys rebuilt as decoded in docs/analise/REA_rodada69.md §8 (clean-room; a port of our own round-69
 // reference model r69/keys/model/fkm.c, which renders bit-identically to the installation's FL Keys_x64.dll on the
 // same wavetable data).
 //
@@ -15,7 +15,7 @@
 // ChannelDef::pluginState, the wavetable's files in ChannelDef::zones (in the order FL reads them) and the wavetable
 // description in ChannelDef::modelParams (see FlKeysTable).
 //
-// Not reproduced (REA_rodada69 §7.6): wavetables with "resample" (Roto Organ) are not resampled to the host rate when
+// Not reproduced (REA_rodada69 §8.6): wavetables with "resample" (Roto Organ) are not resampled to the host rate when
 // it differs from 44.1 kHz, as FL does; Ogg-compressed samples (Grand Piano) depend on the decoder (LYNX's libvorbis
 // rounds 0.01 % of the values to the other neighbour); FL counts its tremolo LFO, its denormal flush and the end of a
 // voice per host block, LYNX per 512-sample block.
@@ -85,7 +85,7 @@ struct FlKeysTable
 std::optional<FlKeysTable> parseWti (const std::string& text, std::vector<std::string>& fileNames);
 
 // A keygroup WAV's loop (smpl chunk, first loop) and the conversion its decoded samples need: 32767 for FL's
-// Ogg-compressed WAVs (format 0x674F…0x6751, REA_rodada69 §7.3), 32768 for PCM.
+// Ogg-compressed WAVs (format 0x674F…0x6751, REA_rodada69 §8.2), 32768 for PCM.
 WtFile wavFileInfo (const std::vector<std::uint8_t>& wav);
 
 // Fills an imported channel (FlpImport): `state` is the 0xD5 record, `wavetables` the FL Keys\Wavtables folder.
