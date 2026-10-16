@@ -26,6 +26,7 @@ add_library(lynx_core STATIC
     src/core/Slicer.cpp
     src/core/Templates.cpp
     src/core/FlWrapper.cpp
+    src/core/FlPluginDb.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -163,6 +164,7 @@ if(LYNX_BUILD_APP)
     src/engine/WavPackFormat.cpp
         src/engine/ProjectFile.cpp
         src/engine/PluginHost.cpp
+        src/engine/FlStudio.cpp
         src/engine/PluginSandbox.cpp
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
@@ -191,6 +193,7 @@ if(LYNX_BUILD_APP)
         src/ui/Workspace.cpp
         src/ui/ValueControl.cpp
         src/ui/Dialogs.cpp
+        src/ui/SetupWizard.cpp
         src/ui/Splash.cpp)
 
     # main window chrome: hint bar and toolbar widgets

@@ -33,6 +33,7 @@
 #include "core/Inflate.h"
 #include "core/WavPack.h"
 #include "core/FlWrapper.h"
+#include "core/FlPluginDb.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
 #include "core/MiniSynth.h"
@@ -12439,6 +12440,178 @@ TEST (fruity_delay_engines)
     }
 }
 #include "UiRackMixerTests.inc"
+
+// ---------------------------------------------------------------------------
+// FL Studio integration (core/FlPluginDb.h): synthetic plugin-database fixtures, no Image-Line files
+
+namespace
+{
+std::vector<std::uint8_t> testWrapperBlob (std::uint32_t type, const std::string& name, const std::string& path,
+                                           const std::vector<std::uint8_t>& classId = {}, const std::string& clapId = {})
+{
+    std::vector<std::uint8_t> b;
+    auto u32 = [&b] (std::uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back ((std::uint8_t) (v >> (8 * i))); };
+    auto record = [&] (std::uint32_t id, const std::vector<std::uint8_t>& payload) {
+        u32 (id);
+        u32 ((std::uint32_t) payload.size());
+        u32 (0);
+        b.insert (b.end(), payload.begin(), payload.end());
+    };
+    u32 (12);
+    record (0x32, { (std::uint8_t) type, 0, 0, 0 });
+    if (! classId.empty())
+        record (0x34, classId);
+    if (! clapId.empty())
+        record (0x3A, std::vector<std::uint8_t> (clapId.begin(), clapId.end()));
+    record (0x36, std::vector<std::uint8_t> (name.begin(), name.end()));
+    record (0x37, std::vector<std::uint8_t> (path.begin(), path.end()));
+    return b;
+}
+} // namespace
+
+TEST (fl_plugin_db_nfo_parsing)
+{
+    const std::string nfo = "ps_name=Vital\r\n"
+                            "ps_file_name_0=C:\\Program Files\\Common Files\\VST3\\Vital.vst3\r\n"
+                            "ps_file_vendorname_0=Vital Audio\r\n"
+                            "ps_file_type_0=2\r\n"
+                            "ps_file_name_1=C:\\VSTPlugins\\Vital_x64.dll\r\n"
+                            "ps_file_type_1=2\r\n"
+                            "ps_file_magic_1=Vita\r\n"
+                            "ps_file_name_2=not a plugin\r\n"
+                            "garbage line without equals\r\n";
+    const auto entries = lynx::parseFlPluginNfo (nfo, "D:\\FL\\Presets\\Plugin database\\Installed\\Generators\\VST3\\Vital.nfo");
+    CHECK (entries.size() == 2);
+    if (entries.size() == 2)
+    {
+        CHECK (entries[0].name == "Vital" && entries[0].vendor == "Vital Audio" && entries[0].role == 2);
+        CHECK (entries[0].format == lynx::ForeignPlugin::Format::vst3);
+        CHECK (entries[1].format == lynx::ForeignPlugin::Format::vst2 && entries[1].vst2Id == 0x56697461u);
+    }
+
+    // no type field: the role comes from the Effects / Generators folder; an ID in GUID form is read
+    const auto fx = lynx::parseFlPluginNfo ("ps_name=Fancy Comp\nps_file_filename_0=C:/CLAP/Fancy Comp.clap\n"
+                                            "ps_file_guid_0={01234567-89AB-CDEF-0123-456789ABCDEF}\n",
+                                            "C:\\x\\Installed\\Effects\\CLAP\\Fancy Comp.nfo");
+    CHECK (fx.size() == 1 && fx[0].role == 1 && fx[0].format == lynx::ForeignPlugin::Format::clap && fx[0].hasClassId
+           && fx[0].classId[0] == 0x01 && fx[0].classId[15] == 0xEF);
+    CHECK (lynx::parseFlPluginNfo ("Tip=All of the plugins found in your system.").empty());
+
+    CHECK (lynx::pluginNameKey ("Serum_x64") == "serum");
+    CHECK (lynx::pluginNameKey ("Vital.VST3") == "vital");
+    CHECK (lynx::pluginNameKey ("Pro-Q 3") == "proq3");
+    CHECK (lynx::pluginFormatFromPath ("a\\b.CLAP") == lynx::ForeignPlugin::Format::clap);
+}
+
+TEST (fl_plugin_db_fst_parsing_and_matching)
+{
+    std::vector<std::uint8_t> cid;
+    for (int i = 0; i < 16; ++i)
+        cid.push_back ((std::uint8_t) (0x10 + i));
+
+    // an .fst of the database: an FL preset whose 0xD5 holds the wrapper record
+    FlpBuilder fst;
+    fst.ascii (0xC9, "Fruity Wrapper");
+    fst.data (0xD5, testWrapperBlob (8, "Surge XT", "E:\\Plugins\\VST3\\Surge XT.vst3", cid));
+    lynx::FlPluginDbEntry e;
+    CHECK (lynx::parseFlPluginFst (fst.bytes, e));
+    CHECK (e.name == "Surge XT" && e.format == lynx::ForeignPlugin::Format::vst3 && e.hasClassId && e.classId[0] == 0x10);
+    lynx::FlPluginDbEntry bad;
+    CHECK (! lynx::parseFlPluginFst (std::vector<std::uint8_t> { 'F', 'L', 'h', 'd' }, bad));
+
+    lynx::FlPluginDb db;
+    db.add (e);
+    // the .nfo of the same plugin fills in vendor and role
+    for (const auto& n : lynx::parseFlPluginNfo ("ps_name=Surge XT\nps_file_name_0=E:/Plugins/VST3/Surge XT.vst3\n"
+                                                 "ps_file_vendorname_0=Surge Synth Team\nps_file_type_0=2\n"))
+        db.add (n);
+    db.add ({ "Clapper", "", "E:\\Plugins\\CLAP\\Clapper.clap", "", lynx::ForeignPlugin::Format::clap, 1, {}, false, "org.clapper", 0 });
+    db.add ({ "Big Verb", "", "E:\\Old VST\\BigVerb_x64.dll", "", lynx::ForeignPlugin::Format::vst2, 1, {}, false, "", 0x42566262u });
+    db.add ({ "Bundle", "", "F:\\VST3\\Bundle.vst3\\Contents\\x86_64-win\\Bundle.vst3", "", lynx::ForeignPlugin::Format::vst3, 2, {}, false, "", 0 });
+    CHECK (db.entries().size() == 4);
+    CHECK (db.entries()[0].vendor == "Surge Synth Team" && db.entries()[0].role == 2);
+
+    // by VST3 class ID even when the project saved another path and name
+    lynx::ForeignPlugin p;
+    p.format = lynx::ForeignPlugin::Format::vst3;
+    p.hasClassId = true;
+    std::copy (cid.begin(), cid.end(), p.classId.begin());
+    p.name = "Renamed";
+    p.path = "C:\\Other PC\\Surge.vst3";
+    CHECK (db.match (p, true) == &db.entries()[0]);
+    // by CLAP id, by VST2 id
+    lynx::ForeignPlugin c;
+    c.format = lynx::ForeignPlugin::Format::clap;
+    c.clapId = "org.clapper";
+    CHECK (db.match (c, false) == &db.entries()[1]);
+    lynx::ForeignPlugin v;
+    v.format = lynx::ForeignPlugin::Format::vst2;
+    v.vst2Id = 0x42566262u;
+    CHECK (db.match (v, false) == &db.entries()[2]);
+    // by name (architecture suffix ignored), only in the same role
+    lynx::ForeignPlugin byName;
+    byName.format = lynx::ForeignPlugin::Format::vst2;
+    byName.name = "BigVerb x64";
+    CHECK (db.match (byName, false) == &db.entries()[2]);
+    CHECK (db.match (byName, true) == nullptr);
+    lynx::ForeignPlugin unknown;
+    unknown.format = lynx::ForeignPlugin::Format::vst3;
+    unknown.name = "Nothing Like It";
+    CHECK (db.match (unknown, true) == nullptr);
+
+    // folders: the bundle's parent, deduplicated
+    const auto folders = db.pluginFolders();
+    CHECK (folders.size() == 4);
+    CHECK (std::find (folders.begin(), folders.end(), "F:\\VST3") != folders.end());
+    CHECK (std::find (folders.begin(), folders.end(), "E:\\Plugins\\VST3") != folders.end());
+
+    // targeted scan picks: same file, or same name key
+    CHECK (lynx::pluginFileMatches ("E:/Plugins/VST3/Surge XT.vst3", p, &db.entries()[0]));
+    CHECK (lynx::pluginFileMatches ("C:\\Program Files\\Common Files\\VST3\\BigVerb.vst3", byName, nullptr));
+    CHECK (! lynx::pluginFileMatches ("C:\\VST3\\Other.vst3", byName, nullptr));
+
+    // the plugins an .flp uses: wrapper channels and mixer slots
+    flp::Project project;
+    flp::Channel ch;
+    ch.pluginName = "Fruity Wrapper";
+    ch.pluginState = testWrapperBlob (8, "Surge XT", "C:\\VST3\\Surge XT.vst3", cid);
+    project.channels.push_back (ch);
+    ch.pluginName = "3x Osc";
+    project.channels.push_back (ch);
+    flp::MixerInsert insert;
+    insert.slots.push_back ({ 0, "Fruity Wrapper", testWrapperBlob (12, "Clapper", "C:\\CLAP\\Clapper.clap", {}, "org.clapper") });
+    insert.slots.push_back ({ 1, "Fruity Wrapper", testWrapperBlob (3, "DX thing", "C:\\dx.dll") }); // DirectX: not hosted
+    project.mixer.push_back (insert);
+    const auto uses = lynx::flpForeignPlugins (project);
+    CHECK (uses.size() == 2);
+    CHECK (uses.size() == 2 && uses[0].instrument && ! uses[1].instrument && uses[1].plugin.clapId == "org.clapper");
+}
+
+TEST (fl_sample_relocation)
+{
+    std::set<std::string> files { "D:\\Docs\\Image-Line\\FL Studio\\Audio\\Recorded\\take.wav", "C:\\Program Files\\FL 2026\\Data\\Patches\\kick.wav",
+                                  "C:\\Users\\me\\Music\\loop.wav", "E:\\Songs\\Track\\Samples\\snare.wav", "E:\\Songs\\Track\\hat.wav" };
+    auto exists = [&] (const std::string& p) { return files.count (p) > 0; };
+    lynx::FlPathRoots roots;
+    roots.userData = "D:\\Docs\\Image-Line\\FL Studio";
+    roots.factoryData = "C:\\Program Files\\FL 2026";
+    roots.home = "C:\\Users\\me";
+    const std::string project = "E:\\Songs\\Track";
+
+    // variable resolved, file in place
+    CHECK (lynx::locateFlSample ("%FLStudioFactoryData%\\Data\\Patches\\kick.wav", roots, project, exists) == "C:\\Program Files\\FL 2026\\Data\\Patches\\kick.wav");
+    // another PC's FL user data / FL install / user profile
+    CHECK (lynx::locateFlSample ("C:\\Users\\bob\\Documents\\Image-Line\\FL Studio\\Audio\\Recorded\\take.wav", roots, project, exists)
+           == "D:\\Docs\\Image-Line\\FL Studio\\Audio\\Recorded\\take.wav");
+    CHECK (lynx::locateFlSample ("C:\\Program Files (x86)\\Image-Line\\FL Studio 20\\Data\\Patches\\kick.wav", roots, project, exists)
+           == "C:\\Program Files\\FL 2026\\Data\\Patches\\kick.wav");
+    CHECK (lynx::locateFlSample ("C:/Users/bob/Music/loop.wav", roots, project, exists) == "C:\\Users\\me\\Music\\loop.wav");
+    // next to the project, also in a sub-folder named in the original path
+    CHECK (lynx::locateFlSample ("Z:\\Old\\Samples\\snare.wav", roots, project, exists) == "E:\\Songs\\Track\\Samples\\snare.wav");
+    CHECK (lynx::locateFlSample ("Z:\\Old\\Stuff\\hat.wav", roots, project, exists) == "E:\\Songs\\Track\\hat.wav");
+    CHECK (lynx::locateFlSample ("Z:\\nowhere.wav", roots, project, exists).empty());
+    CHECK (lynx::locateFlSample ("", roots, project, exists).empty());
+}
 
 // --- REA round 64: SimSynth (exact engine) and Wasp / Wasp XT (FL 2026's silent placeholder) ---------------------
 namespace

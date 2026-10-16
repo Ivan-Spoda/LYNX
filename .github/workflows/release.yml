@@ -6,7 +6,8 @@
 #
 #   build    (ubuntu)   cross-compiles LYNX.exe with Zig 0.14.1 + JUCE 8.0.4 (scripts/build-windows-zig.sh)
 #   sign     (ubuntu)   SignPath signing request; skipped until the repository variable SIGNPATH_ENABLED is 'true'
-#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip and SHA256SUMS,
+#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip, the per-user
+#                       installer (NSIS, resources/installer/LYNX.nsi) and SHA256SUMS,
 #                       and on a tag push attaches them to the GitHub release
 name: Release
 
@@ -166,7 +167,7 @@ jobs:
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0 -or -not (Select-String -Path selftest.txt -Pattern '^result=OK' -Quiet)) { throw "self-test failed (exit $($p.ExitCode))" }
 
-      - name: Portable package
+      - name: Portable package and installer
         shell: pwsh
         run: |
           $name = "LYNX-$env:LABEL-windows-x64"
@@ -177,6 +178,19 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Path "pkg\$name" -DestinationPath "dist\$name.zip"
           Copy-Item bin\LYNX.exe dist\
+          # per-user installer (NSIS is preinstalled on GitHub's Windows images)
+          $nsis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $nsis) { $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress; $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          & $nsis -V2 -INPUTCHARSET UTF8 "-DVERSION=$env:VERSION" "-DSTAGE=$PWD\pkg\$name" "-DOUTFILE=$PWD\dist\LYNX-$env:LABEL-setup-x64.exe" `
+            "-DICON=$PWD\resources\LYNX.ico" resources\installer\LYNX.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
+          # the installer installs and uninstalls cleanly (per user, into a scratch folder)
+          $inst = "$env:RUNNER_TEMP\lynx-inst"
+          Start-Process "dist\LYNX-$env:LABEL-setup-x64.exe" -ArgumentList '/S', "/D=$inst" -Wait
+          if (-not (Test-Path "$inst\LYNX.exe")) { throw "installer did not install LYNX.exe" }
+          Start-Process "$inst\Uninstall.exe" -ArgumentList '/S', "_?=$inst" -Wait
+          if (Test-Path "$inst\LYNX.exe") { throw "uninstaller left LYNX.exe" }
           Push-Location dist
           Get-ChildItem -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS.txt
           Get-Content SHA256SUMS.txt

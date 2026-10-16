@@ -1,4 +1,5 @@
 #include "engine/AudioEngine.h"
+#include "engine/FlStudio.h"
 
 #include <map>
 
@@ -22,28 +23,22 @@ namespace lynx
 {
 using IONode = juce::AudioProcessorGraph::AudioGraphIOProcessor;
 
-// Finds the most recent FL Studio installation to resolve %FLStudio...%.
+// The FL Studio installation (registry, else the usual folders) to resolve %FLStudio...%.
 FlPathRoots findFlStudioRoots()
 {
     FlPathRoots roots;
-    const auto imageLine = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Image-Line");
-    juce::File best;
+    const auto fl = findFlStudio();
 
-    for (const auto& dir : imageLine.findChildFiles (juce::File::findDirectories, false, "FL Studio*"))
-        if (dir.getChildFile ("Data").isDirectory() && dir.getFileName() > best.getFileName())
-            best = dir;
-
-    if (best.exists())
+    if (fl.installDir.isDirectory())
     {
-        roots.factoryData = best.getFullPathName().toStdString();
-        roots.data = best.getChildFile ("Data").getFullPathName().toStdString();
+        roots.factoryData = fl.installDir.getFullPathName().toStdString();
+        roots.data = fl.installDir.getChildFile ("Data").getFullPathName().toStdString();
     }
 
-    const auto user = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Image-Line/FL Studio");
+    if (fl.userData.isDirectory())
+        roots.userData = fl.userData.getFullPathName().toStdString();
 
-    if (user.isDirectory())
-        roots.userData = user.getFullPathName().toStdString();
-
+    roots.home = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getFullPathName().toStdString();
     return roots;
 }
 
@@ -843,6 +838,7 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
 
         FlpImportOptions options;
         options.roots = findFlStudioRoots();
+        options.projectFolder = file.getParentDirectory().getFullPathName().toStdString();
         options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
         options.readFile = [] (const std::string& path) {
             juce::MemoryBlock data;
@@ -873,8 +869,10 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
         options.report = &importReport;
         auto imported = importFlp (project, options);
         juce::StringArray missing;
-        plugins.adoptFlPlugins (imported, &missing);
+        juce::StringArray matched;
+        plugins.adoptFlPlugins (imported, &missing, &matched);
         missingPlugins = missing;
+        matchedPlugins = matched;
 
         stop();
         rewind();

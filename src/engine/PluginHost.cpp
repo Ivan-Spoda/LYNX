@@ -4,6 +4,8 @@
 
 #include "engine/ClapFormat.h"
 #include "engine/PluginSandbox.h"
+#include "engine/FlStudio.h"
+#include "ui/I18n.h"
 
 namespace lynx
 {
@@ -142,14 +144,56 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 
 // ---------------------------------------------------------------------------
 
+// Background scan: a thread that runs PluginHost::scan and publishes its progress in PluginHost::state.
+class PluginHost::BackgroundScan final : public juce::Thread
+{
+public:
+    BackgroundScan (PluginHost& h, juce::FileSearchPath p)
+        : juce::Thread ("LYNX plugin scan"),
+          host (h),
+          paths (std::move (p))
+    {
+    }
+
+    ~BackgroundScan() override
+    {
+        host.stopScan = true;
+        stopThread (15000); // (listing a large folder can take a moment; a running child is killed at once)
+    }
+
+    void run() override
+    {
+        const auto found = host.scan (paths, [this] (float progress, const juce::String& file) {
+            const std::scoped_lock lock (host.stateLock);
+            host.state.progress = progress;
+            host.state.file = juce::File::createFileWithoutCheckingPath (file).getFileName();
+            return ! threadShouldExit();
+        });
+        const std::scoped_lock lock (host.stateLock);
+        host.state.running = false;
+        host.state.found = found;
+        host.state.progress = 1.0f;
+        host.state.file = {};
+        ++host.state.finished;
+    }
+
+private:
+    PluginHost& host;
+    juce::FileSearchPath paths;
+};
+
 PluginHost::PluginHost (bool keep)
     : persistent (keep)
 {
     addPluginFormats (formats);
-
     if (persistent)
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
             known.recreateFromXml (*xml);
+}
+
+PluginHost::~PluginHost()
+{
+    background = nullptr; // stops the scan (the child being examined is killed)
 }
 
 juce::File PluginHost::settingsFolder()
@@ -162,7 +206,6 @@ juce::File PluginHost::settingsFolder()
 juce::FileSearchPath PluginHost::defaultSearchPath()
 {
     juce::FileSearchPath paths;
-
     // Same locations JUCE/Steinberg use by default on Windows.
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/VST3"));
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
@@ -171,69 +214,178 @@ juce::FileSearchPath PluginHost::defaultSearchPath()
     return paths;
 }
 
+juce::FileSearchPath PluginHost::suggestedFolders()
+{
+    juce::FileSearchPath paths;
+    auto add = [&paths] (const juce::File& folder) {
+        if (folder.isDirectory())
+            paths.addIfNotAlreadyThere (folder);
+    };
+    // the standard folders even before they exist (plugins installed later land there)
+    for (int i = 0; i < defaultSearchPath().getNumPaths(); ++i)
+        paths.addIfNotAlreadyThere (defaultSearchPath()[i]);
+    const auto fl = findFlStudio();
+    for (const auto& folder : fl.vstFolders)
+        add (juce::File (folder));
+    for (const auto& folder : flPluginDatabase().pluginFolders())
+    {
+        const auto path = juce::String::fromUTF8 (folder.c_str());
+        if (juce::File::isAbsolutePath (path))
+            add (juce::File (path));
+    }
+    return paths;
+}
+
+juce::FileSearchPath PluginHost::pluginFolders() const
+{
+    const auto file = settingsFolder().getChildFile ("plugin-folders.txt");
+    if (persistent && file.existsAsFile())
+    {
+        juce::FileSearchPath paths;
+        juce::StringArray lines;
+        lines.addLines (file.loadFileAsString());
+        for (const auto& line : lines)
+            if (line.trim().isNotEmpty() && juce::File::isAbsolutePath (line.trim()))
+                paths.add (juce::File (line.trim()));
+        return paths;
+    }
+    return const_cast<PluginHost*> (this)->suggestedFolders();
+}
+
+void PluginHost::setPluginFolders (const juce::FileSearchPath& folders)
+{
+    if (! persistent)
+        return;
+    juce::StringArray lines;
+    for (int i = 0; i < folders.getNumPaths(); ++i)
+        lines.add (folders[i].getFullPathName());
+    settingsFolder().getChildFile ("plugin-folders.txt").replaceWithText (lines.joinIntoString ("\n") + "\n");
+}
+
+const FlPluginDb& PluginHost::flPluginDatabase()
+{
+    const std::scoped_lock lock (flDbLock);
+    if (! flDbLoaded)
+    {
+        flDb = readFlPluginDatabase (findFlStudio(), &flDbFiles);
+        flDbLoaded = true;
+    }
+    return flDb;
+}
+
 void PluginHost::save()
 {
     if (! persistent)
         return;
-
+    const std::scoped_lock lock (saveLock);
     if (auto xml = known.createXml())
         xml->writeTo (settingsFolder().getChildFile ("plugins.xml"));
 }
 
-int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress)
+bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& file)
 {
-    const auto before = known.getNumTypes();
+    // a result file of our own: several LYNX processes (and scans) may run at once
+    const auto result = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("lynx-scan-" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()) + ".xml");
     const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
-    const auto result = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-scan.xml");
-
-    for (auto* format : formats.getFormats())
+    juce::ChildProcess child;
+    auto ok = child.start (juce::StringArray { exe.getFullPathName(), "--scan-one", format.getName(), file, result.getFullPathName() }, 0);
+    if (ok)
     {
-        if (! format->canScanForPlugins())
-            continue;
-
-        const auto files = format->searchPathsForPlugins (paths, true, false);
-
-        for (int i = 0; i < files.size(); ++i)
+        // wait in short steps so a cancelled scan (or LYNX closing) doesn't wait for a slow plugin
+        const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) scanTimeoutMs;
+        while (child.isRunning() && ! stopScan && juce::Time::getMillisecondCounter() < deadline)
+            child.waitForProcessToFinish (100);
+        if (child.isRunning())
         {
-            const auto& file = files[i];
-
-            if (progress && ! progress ((float) i / (float) juce::jmax (1, files.size()), file))
-                break;
-
-            if (known.isListingUpToDate (file, *format) || known.getBlacklistedFiles().contains (file))
-                continue;
-
-            result.deleteFile();
-            juce::ChildProcess child;
-            auto ok = child.start (juce::StringArray { exe.getFullPathName(), "--scan-one", format->getName(), file, result.getFullPathName() },
-                                   0);
-
-            if (ok && ! child.waitForProcessToFinish (scanTimeoutMs))
+            child.kill();
+            if (stopScan) // not the plugin's fault: try it again next time
             {
-                child.kill(); // hung: blacklist
-                ok = false;
+                result.deleteFile();
+                return false;
             }
-
-            ok = ok && child.getExitCode() == 0;
-
-            if (auto xml = ok ? juce::XmlDocument::parse (result) : nullptr)
-            {
-                for (auto* e : xml->getChildIterator())
-                {
-                    juce::PluginDescription d;
-
-                    if (d.loadFromXml (*e))
-                        known.addType (d);
-                }
-            }
-            else if (! ok)
-                known.addToBlacklist (file);
+            ok = false; // hung: blacklist
         }
     }
-
+    ok = ok && child.getExitCode() == 0;
+    if (auto xml = ok ? juce::XmlDocument::parse (result) : nullptr)
+    {
+        for (auto* e : xml->getChildIterator())
+        {
+            juce::PluginDescription d;
+            if (d.loadFromXml (*e))
+                known.addType (d);
+        }
+    }
+    else if (! ok)
+        known.addToBlacklist (file);
     result.deleteFile();
+    return true;
+}
+
+int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress)
+{
+    juce::StringArray files;
+    for (auto* format : formats.getFormats())
+        if (format->canScanForPlugins())
+            files.addArray (format->searchPathsForPlugins (paths, true, false));
+    return scanFiles (files, progress);
+}
+
+int PluginHost::scanFiles (const juce::StringArray& files, const std::function<bool (float, const juce::String&)>& progress)
+{
+    const std::scoped_lock lock (scanLock);
+    stopScan = false;
+    const auto before = known.getNumTypes();
+    for (int i = 0; i < files.size() && ! stopScan; ++i)
+    {
+        const auto& file = files[i];
+        if (progress && ! progress ((float) i / (float) juce::jmax (1, files.size()), file))
+            break;
+        if (known.getBlacklistedFiles().contains (file))
+            continue;
+        for (auto* format : formats.getFormats())
+        {
+            if (! format->canScanForPlugins() || ! format->fileMightContainThisPluginType (file))
+                continue;
+            if (! known.isListingUpToDate (file, *format))
+                scanOne (*format, file);
+            break;
+        }
+    }
     save();
     return known.getNumTypes() - before;
+}
+
+void PluginHost::startBackgroundScan (const juce::FileSearchPath& paths)
+{
+    if (backgroundScan().running)
+        return;
+    background = nullptr; // the previous, finished thread
+    {
+        const std::scoped_lock lock (stateLock);
+        state.running = true;
+        state.progress = 0.0f;
+        state.found = 0;
+        state.file = {};
+    }
+    background = std::make_unique<BackgroundScan> (*this, paths);
+    background->startThread (juce::Thread::Priority::low);
+}
+
+PluginHost::ScanState PluginHost::backgroundScan() const
+{
+    const std::scoped_lock lock (stateLock);
+    return state;
+}
+
+void PluginHost::cancelBackgroundScan()
+{
+    if (background != nullptr)
+    {
+        stopScan = true;
+        background->signalThreadShouldExit();
+    }
 }
 
 int PluginHost::scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output)
@@ -241,16 +393,12 @@ int PluginHost::scanOneFile (const juce::String& formatName, const juce::String&
     juce::AudioPluginFormatManager manager;
     addPluginFormats (manager);
     juce::OwnedArray<juce::PluginDescription> found;
-
     for (auto* format : manager.getFormats())
         if (format->getName() == formatName)
             format->findAllTypesForFile (found, file);
-
     juce::XmlElement xml ("PLUGINS");
-
     for (auto* d : found)
         xml.addChildElement (d->createXml().release());
-
     xml.writeTo (output);
     return found.size();
 }
@@ -306,57 +454,111 @@ juce::String plainName (const juce::String& s)
 }
 } // namespace
 
-const juce::PluginDescription* PluginHost::findForeign (const ForeignPlugin& plugin, bool instrument) const
+std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlugin& plugin, bool instrument, juce::String* how)
 {
-    const auto& types = known.getTypes();
+    const auto types = known.getTypes(); // a copy: a background scan may add types meanwhile
+    auto found = [how] (const juce::PluginDescription& d, const char* reason) {
+        if (how != nullptr)
+            *how = reason;
+        return std::optional<juce::PluginDescription> (d);
+    };
     const auto fileName = plainName (juce::File::createFileWithoutCheckingPath (
         juce::String::fromUTF8 (plugin.path.c_str()).replaceCharacter ('\\', '/')).getFileNameWithoutExtension());
     const auto name = plainName (juce::String::fromUTF8 (plugin.name.c_str()));
-
     // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
         if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
             && (d.deprecatedUid == vst3Hash (plugin.classId) || d.uniqueId == vst3NormalisedHash (plugin.classId)))
-            return &d;
-
+            return found (d, TR_NOOP ("same VST3 class ID"));
         if (plugin.format == ForeignPlugin::Format::clap && ! plugin.clapId.empty() && d.pluginFormatName == ClapPluginFormat::formatName
             && d.uniqueId == juce::String::fromUTF8 (plugin.clapId.c_str()).hashCode())
-            return &d;
+            return found (d, TR_NOOP ("same CLAP id"));
     }
-
-    // 2) fallback, since FL swaps VST2 <-> VST3: same name (plugin or file), same role
-    if (name.isEmpty() && fileName.isEmpty())
+    // 2) the file FL Studio uses for it on this PC (its plugin database), or the very file the project saved
+    auto sameFile = [&] (const std::string& path) -> const juce::PluginDescription* {
+        const auto p = juce::String::fromUTF8 (path.c_str()).replaceCharacter ('/', '\\');
+        if (p.isEmpty() || ! juce::File::isAbsolutePath (p))
+            return nullptr;
+        const juce::File file (p);
+        for (const auto& d : types)
+            if (d.isInstrument == instrument && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == file)
+                return &d;
         return nullptr;
-
+    };
+    if (const auto* entry = flPluginDatabase().match (plugin, instrument))
+        if (const auto* d = sameFile (entry->path))
+            return found (*d, TR_NOOP ("FL Studio's plugin database"));
+    if (const auto* d = sameFile (plugin.path))
+        return found (*d, TR_NOOP ("same file as in the project"));
+    // 3) fallback, since FL swaps VST2 <-> VST3: same name (plugin or file), same role
+    if (name.isEmpty() && fileName.isEmpty())
+        return std::nullopt;
     // a plugin installed in several formats: prefer the one FL used (VST3 → VST3, CLAP → CLAP), whose state carries over
     const auto sameFormat = plugin.format == ForeignPlugin::Format::vst3   ? juce::String ("VST3")
                             : plugin.format == ForeignPlugin::Format::clap ? juce::String (ClapPluginFormat::formatName)
                                                                            : juce::String();
-    const juce::PluginDescription* byName = nullptr;
-
+    std::optional<juce::PluginDescription> byName;
     for (const auto& d : types)
     {
         if (d.isInstrument != instrument)
             continue;
-
         const auto candidate = plainName (d.name);
-        const auto candidateFile = plainName (juce::File (d.fileOrIdentifier).getFileNameWithoutExtension());
-
+        const auto candidateFile = plainName (juce::File::createFileWithoutCheckingPath (d.fileOrIdentifier).getFileNameWithoutExtension());
         if ((name.isNotEmpty() && (candidate == name || candidateFile == name))
             || (fileName.isNotEmpty() && (candidate == fileName || candidateFile == fileName)))
         {
             if (d.pluginFormatName == sameFormat)
-                return &d;
-            if (byName == nullptr)
-                byName = &d;
+                return found (d, TR_NOOP ("same name"));
+            if (! byName)
+                byName = d;
         }
     }
-
+    if (byName && how != nullptr)
+        *how = TR_NOOP ("same name, other format");
     return byName;
 }
 
-int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
+juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& uses)
+{
+    juce::StringArray files;
+    std::vector<std::pair<const FlpPluginUse*, const FlPluginDbEntry*>> needed;
+    for (const auto& use : uses)
+        if (! findForeign (use.plugin, use.instrument))
+            needed.push_back ({ &use, flPluginDatabase().match (use.plugin, use.instrument) });
+    if (needed.empty())
+        return files;
+
+    auto hosted = [] (const juce::String& path) { return path.endsWithIgnoreCase (".vst3") || path.endsWithIgnoreCase (".clap"); };
+    auto addExisting = [&] (const std::string& path) {
+        const auto p = juce::String::fromUTF8 (path.c_str()).replaceCharacter ('/', '\\');
+        if (p.isNotEmpty() && juce::File::isAbsolutePath (p) && hosted (p) && juce::File (p).exists())
+            files.addIfNotAlreadyThere (juce::File (p).getFullPathName(), true);
+    };
+    for (const auto& [use, entry] : needed)
+    {
+        addExisting (use->plugin.path);
+        if (entry != nullptr)
+            addExisting (entry->path);
+    }
+    // same-named plugin files in the scan folders (listing only: nothing is loaded here)
+    const auto folders = pluginFolders();
+    for (auto* format : formats.getFormats())
+        if (format->canScanForPlugins())
+            for (const auto& file : format->searchPathsForPlugins (folders, true, false))
+                for (const auto& [use, entry] : needed)
+                    if (pluginFileMatches (file.toStdString(), use->plugin, entry))
+                        files.addIfNotAlreadyThere (file, true);
+    // known to crash or hang: nothing to learn
+    juce::StringArray worth;
+    for (const auto& file : files)
+        if (! known.getBlacklistedFiles().contains (file))
+            worth.add (file);
+    worth.removeRange (32, worth.size()); // a project rarely needs more; the rest waits for the background scan
+    return worth;
+}
+
+int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::StringArray* matched)
 {
     int found = 0;
 
@@ -387,9 +589,10 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
     };
 
     auto adopt = [&] (PluginRef& ref, bool instrument) {
-        const auto* d = findForeign (ref.foreign, instrument);
+        juce::String how;
+        const auto d = findForeign (ref.foreign, instrument, &how);
 
-        if (d == nullptr)
+        if (! d)
         {
             if (missing != nullptr)
                 missing->addIfNotAlreadyThere (juce::String::fromUTF8 (ref.foreign.name.c_str()));
@@ -397,6 +600,8 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
             return false;
         }
 
+        if (matched != nullptr)
+            matched->addIfNotAlreadyThere (juce::String::fromUTF8 (ref.foreign.name.c_str()) + " -> " + d->fileOrIdentifier + " (" + tr (how) + ")");
         ref.id = d->createIdentifierString().toStdString();
         ref.name = d->name.toStdString();
         ref.state = convertState (ref.foreign, *d);
@@ -443,7 +648,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
         if (adopt (channel.plugin, true))
         {
             channel.instrument = InstrumentKind::plugin;
-            if (const auto* d = findForeign (foreign, true))
+            if (const auto d = findForeign (foreign, true))
                 remapVst3Slots (foreign, *d, [c] (const AutomationTarget& t) { return t.kind == AutomationTargetKind::channelParam && t.index == c; });
         }
     }
@@ -458,7 +663,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing) const
             const auto foreign = fx.plugin.foreign;
             if (! adopt (fx.plugin, false))
                 song.removeEffectSlot (track, slot);
-            else if (const auto* d = findForeign (foreign, false))
+            else if (const auto d = findForeign (foreign, false))
                 remapVst3Slots (foreign, *d, [track, slot] (const AutomationTarget& t) {
                     return t.kind == AutomationTargetKind::effectParam && t.index == track && t.slot == slot;
                 });
