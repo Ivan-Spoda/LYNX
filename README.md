@@ -32,8 +32,8 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 </p>
 
 <p align="center">
-  <img src="docs/img/playlist.png" alt="The LYNX Playlist with patterns, automation and markers" width="100%">
-  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>): intro, drop and outro in the Playlist.</sub>
+  <img src="docs/img/workspace.png" alt="The LYNX workspace: browser, playlist, piano roll, channel rack and mixer" width="100%">
+  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.4 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
 </p>
 
 ---
@@ -57,7 +57,7 @@ Step-sequencer Channel Rack, patterns, Piano Roll, Playlist with arrangements, M
 <td width="25%" valign="top">
 
 ### 📂 Opens `.flp`
-Imports FL Studio projects: channels, samples, patterns, arrangement, automation, mixer and 40+ native plugins converted.
+Imports FL Studio projects: channels, samples, patterns, arrangement, automation, mixer and 60+ native plugins converted, most of them bit-exact.
 
 </td>
 <td width="25%" valign="top">
@@ -164,8 +164,8 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 LYNX reads the `.flp` format directly and converts everything that has an equivalent:
 
 - **Structure:** channels, real samples (including the Ogg Vorbis WAVs and WavPack files shipped with FL), patterns, slide/porta notes, every arrangement, markers, time-signature changes, automation and controller links.
-- **Mixer:** routing, levels, sidechains, track EQ and native effects with their saved settings (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 3, Maximus, Gross Beat, Effector, Love Philter, Frequency Splitter, Patcher, Pitcher, Vocoder and more).
-- **Generators on FL's own engines** (checked against FL's DLLs, most of them bit for bit): 3x Osc, SimSynth, MiniSynth, DX10, Kepler, PoiZone, Toxic Biohazard, Transistor Bass, Autogun, Plucked!, BeepMap, Sawer, Granulizer, Drumaxx, FL Slayer, FL Keys, Fruit Kick, Kick, BassDrum, Sakura, Drumpad, BooBass, Fruity DrumSynth Live, GMS, Morphine; Sytrus, Harmless, Harmor and Ogun on engines rebuilt from the plugin state. Built-in sounds and tables are read from *your* FL installation, never shipped with LYNX. FPC, DirectWave, Slicex, Fruity Slicer and Wave Traveller play as samplers through FL's own interpolators.
+- **Mixer:** routing, levels, sidechains, track EQ and native effects with their saved settings (Parametric EQ 2, Limiter, Compressor, Reeverb 2, Delay 3, Maximus, Gross Beat, Effector, Love Philter, Frequency Splitter, Patcher, Pitcher, Vocoder, Newtone/Newtime and more).
+- **Generators on FL's own engines** (checked against FL's DLLs, most of them bit for bit): 3x Osc, SimSynth, MiniSynth, DX10, Kepler, PoiZone, Toxic Biohazard, Transistor Bass, Autogun, Plucked!, BeepMap, Sawer, Granulizer, Drumaxx, FL Slayer, FL Keys, Fruit Kick, Kick, BassDrum, Sakura, Drumpad, BooBass, Fruity DrumSynth Live, GMS, Morphine; Sytrus, Harmless, Harmor (including image synthesis) and Ogun on engines rebuilt from the plugin state. Built-in sounds and tables are read from *your* FL installation, never shipped with LYNX. DirectWave runs on its own exact engine (filters, modulation matrix and effects); FPC, Slicex, Fruity Slicer and Wave Traveller play as samplers through FL's own interpolators.
 - **Exact native effects:** Parametric EQ 2, EQUO, Limiter, Compressor, Multiband Compressor, Maximus, Soundgoodizer, Reeverb 2, LuxeVerb, Convolver, Delay 3, Delay Bank, the chorus family, Flangus, Flanger, Fast Dist, WaveShaper, Soft Clipper, Stereo Shaper/Enhancer, Transient Processor, Frequency Splitter, Fast LP, Free Filter, Fruity Filter, Pitch Shifter, Love Philter, Fruity Vocoder, Vocodex, Hardcore, Distructor, Multiband Delay, Gross Beat, Effector, Vintage Phaser, Pitcher and more reproduce FL's algorithms; how each one was decoded is documented in [`docs/analise/`](docs/analise/).
 - **Third-party plugins:** VST3/CLAP plugins inside the Fruity Wrapper are swapped for the same installed plugin, preset included.
 
