@@ -70,7 +70,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter, Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
@@ -426,6 +426,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   are editable LYNX parameters and take FL's automation. Bit-identical to the three DLLs on every installation state
   (54 PanOMatic, 10 Balance, 19 Blood Overdrive) plus synthetic states, at 22.05/44.1/48/96 kHz, several block sizes,
   four signals and control changes during playback.
+- **Fruity Fast LP, Fruity Free Filter and Fruity Filter:** FL's exact engines as mixer effects
+  (`core/FruityFilters`, REA round 63) from the saved controls, editable/automatable as LYNX parameters. Fast LP: its
+  two-state resonant low-pass in x87 precision with the per-call cutoff glide; Free Filter: the seven RBJ-style types
+  designed at a fixed 44.1 kHz, x87 direct form I, CENTER DC remover; Fruity Filter: the Chamberlin SVF (×2 cascade),
+  per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
+  Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
+  render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):
@@ -508,6 +515,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   from the GMS findings (inference).
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
+- Fruity Fast LP / Free Filter / Filter (REA round 63 §7): FL's render-call size for mixer effects is not confirmed
+  (LYNX uses calls of at most 512 frames; the glides and end-of-call guards are per call). Low Lifter and Emphasis keep
+  their approximations (parametric EQ without the harmonics generator; limiter) — not ported yet.
 - Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
   calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
   2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
