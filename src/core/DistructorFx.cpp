@@ -144,7 +144,7 @@ struct X87Precision
     explicit X87Precision (unsigned short) noexcept {}
 };
 #endif
-unsigned short x87Pc = std::getenv ("DISTRUCTOR_PC") ? (unsigned short) std::atoi (std::getenv ("DISTRUCTOR_PC")) : 0x200; // 53-bit
+constexpr unsigned short x87Pc = 0x200; // 53-bit
 
 // ------------------------------------------------------------------------------------------------ smoother
 // a block-rate one-pole glide of up to four values (L, R used): each sample d ← d·k, value = target + d
