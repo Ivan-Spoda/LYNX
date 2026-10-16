@@ -166,6 +166,8 @@ block that follows (offset 970 for state versions ≥ 17):
   (no LYNX caller passes such arguments).
 - The AVX-512 kernel is read, not run (no AVX-512 CPU here). Which index FL's process picks on CPUs that report AVX2
   but not FMA (none exist in practice) is not confirmed.
+- The goldens of the Fruit Kick, 3x Osc and Granulizer tests now include IPP's cosine of the FMA path; on a CPU
+  without AVX2 (the other path) their release-fade samples would differ in the last bits.
 - Fruit Kick: FL's exact sample placement of the sequencer ticks (round 43 §3) remains an inference.
 - Sytrus: oversampling orders 5–6 and the remaining switches of the main page (§3).
 
