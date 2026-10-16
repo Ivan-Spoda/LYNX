@@ -1,6 +1,8 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
 #include <atomic>
+#include <chrono>
+#include <random>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -10881,10 +10883,28 @@ std::array<float, 43> miniSynthDefaults()
     return { 0.375f, 0.5f, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0.5f, 0, 0, 0.25f, 0.5f, 0, 1, 1, 0.07f, 0, 0, 0, 0, 0.7f, 0.5f, 1,
              0.5f, 0, 0.25f, 0.5f, 0.5f, 0, 0.11222222f, 0.4f, 0.1f, 1, 0.5f };
 }
+// per-process suffix for scratch files: several test binaries (one per worktree) may run at the same time, and a
+// fixed name let one process read a file another one was rewriting
+std::string processTempTag()
+{
+    static const std::string tag = std::to_string (std::random_device {}()) + "_"
+                                   + std::to_string (std::chrono::steady_clock::now().time_since_epoch().count());
+    static const struct Cleanup
+    {
+        ~Cleanup()
+        {
+            std::error_code ec;
+            std::filesystem::remove (std::filesystem::temp_directory_path (ec) / ("lynx_test_oscdata_" + tag + ".dat"), ec);
+            std::filesystem::remove_all (std::filesystem::temp_directory_path (ec) / ("lynx_bassdrum_test_" + tag), ec);
+        }
+    } cleanup;
+    (void) cleanup;
+    return tag;
+}
 // a synthetic oscdata.dat (amplitudes 0.3/k, phases −π/2 + 0.001·(k − 1)): the test does not need an FL installation
 std::string miniSynthTestOscdata()
 {
-    const auto path = (std::filesystem::temp_directory_path() / "lynx_test_oscdata.dat").string();
+    const auto path = (std::filesystem::temp_directory_path() / ("lynx_test_oscdata_" + processTempTag() + ".dat")).string();
     std::vector<float> d (2048);
     for (int h = 0; h < 1024; ++h)
         d[(std::size_t) h] = (float) (0.3 / (h + 1)), d[1024 + (std::size_t) h] = (float) (-1.5707963267948966 + 0.001 * h);
@@ -11091,7 +11111,7 @@ std::vector<std::uint8_t> fruitKickStateB()
 std::string bassDrumTestFolder()
 {
     // our own oscillator table and a pseudo-random 16-bit noise sample, laid out like FL's BassDrum folder
-    const auto dir = std::filesystem::temp_directory_path() / "lynx_bassdrum_test";
+    const auto dir = std::filesystem::temp_directory_path() / ("lynx_bassdrum_test_" + processTempTag());
     std::filesystem::create_directories (dir / "Noise Samples");
     auto wav = [] (const std::filesystem::path& path, const void* data, std::uint32_t bytes, std::uint16_t fmt, std::uint16_t bits) {
         std::ofstream o (path, std::ios::binary);
