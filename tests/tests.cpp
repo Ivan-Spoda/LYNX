@@ -2417,7 +2417,7 @@ TEST (fl_native_sampler_voice_matches_fl_renders)
     const std::vector<std::int32_t> plain = { 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0 };
     auto records = [&] (std::vector<std::int32_t> vol, std::vector<std::int32_t> cut, std::vector<std::int32_t> pitch) {
         std::vector<std::int32_t> all = plain;
-        for (const auto* r : { &vol, &cut, &plain, &pitch })
+        for (const auto* r : std::initializer_list<const std::vector<std::int32_t>*> { &vol, &cut, &plain, &pitch })
             all.insert (all.end(), r->begin(), r->end());
         return all;
     };
