@@ -1,6 +1,7 @@
 #include "core/FruityVocoder.h"
 
 #include "core/DelphiMath.h"
+#include "core/Denormals.h"
 
 #include <algorithm>
 #include <cmath>
@@ -353,6 +354,7 @@ void Engine::block (const float* mod, const float* car, float* out, int n) noexc
 
 void Engine::process (const float* mod, const float* car, float* out, int n) noexcept
 {
+    const ScopedFlushDenormals ftz; // the plugin runs with flush-to-zero and denormals-are-zero
     for (int done = 0; done < n;)
     {
         const auto len = std::min (blockFrames, n - done);
@@ -363,6 +365,7 @@ void Engine::process (const float* mod, const float* car, float* out, int n) noe
 
 void Engine::processStereo (float* left, float* right, int n) noexcept
 {
+    const ScopedFlushDenormals ftz;
     for (int done = 0; done < n;)
     {
         const auto len = std::min (blockFrames, n - done);
