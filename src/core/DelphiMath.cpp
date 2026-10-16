@@ -5,6 +5,14 @@
 #include <cstring>
 #include <limits>
 
+// The plugin's operation order and roundings are reproduced exactly: no fused multiply-adds (the native-CPU builds
+// would contract them otherwise).
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize ("fp-contract=off")
+#endif
+
 namespace lynx::dmath
 {
 namespace

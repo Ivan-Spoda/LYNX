@@ -7,6 +7,14 @@
 #include <cmath>
 #include <cstring>
 
+// The plugin's operation order and roundings are reproduced exactly: no fused multiply-adds (the native-CPU builds
+// would contract them otherwise).
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize ("fp-contract=off")
+#endif
+
 // Fruity Vocoder, exact engine (docs/analise/REA_rodada70.md). Precision notes, all observed in the plugin:
 // - the set-up mixes float and double exactly as written below (every cast is deliberate);
 // - the biquads run in double with float buffers between the cascaded stages; at the end of every block each state

@@ -151,6 +151,8 @@ follower and the product sums were checked at 53 and 24 bits too and only 64 bit
   output buffer after the block — **not confirmed**, and it can only zero an envelope already below 2⁻²⁴ one sample
   earlier.
 - **`core/DelphiMath`** (`dmath::exp`, `ln`, `sinCos`, `sinh`): §2, reusable by other Delphi plugins.
+- Both files switch floating-point contraction off: the core test build (zig c++, native CPU) fused multiply-adds and
+  missed the goldens until then; g++ and zig builds now give the same bits.
 - **`EffectKind::vocoder`** keeps its parameter layout (bands, order, listen, swap, the twelve controls as
   `(raw − min)/(max − min)`, LYNX's side-input mode); the import (`FlEffects.cpp`) now keeps FL's state in
   `EffectSlot::state`, and the per-band levels apply while the slot's band count matches the state's (FL resets them on a
@@ -162,7 +164,8 @@ follower and the product sums were checked at 53 and 24 bits too and only 64 bit
 
 ## 6. Verification **[EXEC]**
 
-LYNX's engine (`cpp/fvcmp`, the app's sources, g++ -O2, FTZ/DAZ) against the DLL:
+LYNX's engine (`cpp/fvcmp`, the app's sources, g++ -O2, FTZ/DAZ; the goldens and the math replica also with zig c++ for
+the native CPU) against the DLL:
 
 | Check | Cases | Result |
 |---|---|---|
