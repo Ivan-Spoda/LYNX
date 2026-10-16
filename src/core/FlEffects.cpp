@@ -21,6 +21,7 @@
 #include "core/FrequencySplitter.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
@@ -1202,6 +1203,9 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             return exact;
     if (pluginName == "Gross Beat") // FL's own engine from the saved slots (REA_rodada53); the volume gate otherwise
         if (auto exact = grossbeat::slotFromFl (state))
+            return exact;
+    if (pluginName == "Fruity Love Philter") // FL's own engine (REA_rodada66); lovePhilterEffects' conversion otherwise
+        if (auto exact = philter::slotFromFl (state))
             return exact;
     if (pluginName == "Pitch Shifter") // the exact engines (REA_rodada61); LYNX's generic pitch shifter otherwise
         if (psfl::State ps; psfl::parsePitchShifter (state.data(), state.size(), ps))

@@ -347,6 +347,7 @@ enum class EffectKind : std::uint8_t
     hardcore,     // FL's Hardcore, exact (REA_rodada71, core/HardcoreFx.h): FL's 50 parameters (cabinet / 20, types / 11); impulses in EffectSlot::state
     distructor,   // FL's Distructor, exact (REA_rodada71, core/DistructorFx.h): FL's state (+ cabinet impulses) in EffectSlot::state, module gains / 10000 + clipper
     multibandDelay, // FL's Multiband Delay, exact (REA_rodada71, core/MultibandDelayFx.h): FL's state in EffectSlot::state, 12 globals (raw − min) / range
+    lovePhilter,   // FL's Fruity Love Philter, exact (REA_rodada66, core/LovePhilter.h): FL's state in EffectSlot::state, 48 controls
     newtone,      // FL's Newtone (REA_rodada73, core/NewtoneFx.h): pass-through; in slave mode adds its source sample at the song time
     newtime       // FL's Newtime (REA_rodada73, core/NewtoneFx.h): the same contract (its time warping is not reproduced)
 };

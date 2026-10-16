@@ -25,6 +25,7 @@
 #include "core/StereoFx.h"
 #include "core/ChorusFx.h"
 #include "core/GrossBeat.h"
+#include "core/LovePhilter.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
@@ -2433,6 +2434,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::info();
         case EffectKind::vintageChorus: return vintagechorusfx::info();
         case EffectKind::grossBeat: return grossBeatInfo;
+        case EffectKind::lovePhilter: return philter::info();
         case EffectKind::luxeVerb: return luxeVerbInfo;
         case EffectKind::convolver: return convolverInfo;
         case EffectKind::fruityDelayBank: return fruityDelayBankInfo;
@@ -2819,6 +2821,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::fruityDelay3:
             return fldelay::delay3ParamText (param, v, bpm);
 
+        case EffectKind::lovePhilter:
+            return philter::paramText (param, v);
+
         case EffectKind::grossBeat:
         {
             const auto raw = grossbeat::rawFromParam (param, v);
@@ -2890,6 +2895,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return vintagechorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::grossBeat)
         return grossbeat::make (slot.state);
+    if (slot.kind == EffectKind::lovePhilter)
+        return philter::make (slot);
     if (slot.kind == EffectKind::convolver)
         return makeConvolver (slot.state);
     if (slot.kind == EffectKind::fruityDelayBank)
@@ -2952,6 +2959,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hyperChorus: return hyperchorusfx::make();
         case EffectKind::vintageChorus: return vintagechorusfx::make();
         case EffectKind::grossBeat: return grossbeat::make ({}); // without a state: passes the signal; use makeEffect (slot)
+        case EffectKind::lovePhilter: return philter::make (EffectSlot {}); // without a state: passes the signal
         case EffectKind::fruityDelayBank: return fldbank::make ({}); // a new FL instance; use makeEffect (slot) for a state
         case EffectKind::fruityMultiband: return flmb::make();
         case EffectKind::equo: return equofx::make ({}); // FL's default EQUO; use makeEffect (slot)
