@@ -30,8 +30,8 @@
 // Voices that DX10 or the processor flag as finished are removed at the end of the block, as FL's host does on the
 // plugin's kill request.
 //
-// Differences from FL by design / not modelled (REA_rodada42 §4): the end-fade table is computed with the exact cosine
-// (FL uses IPP's 11-bit cosine: −129 dB worst case); global LFOs ignore song-position jumps; LYNX notes have no Mod X/Y.
+// Differences from FL by design / not modelled (REA_rodada42 §4): global LFOs ignore song-position jumps; LYNX notes
+// have no Mod X/Y. (The end-fade table uses IPP's cosine since REA_rodada74.)
 
 #include <cstdint>
 #include <memory>

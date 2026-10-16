@@ -28,7 +28,6 @@ Resume a branch: `git worktree add -b feature/<x> ../lynx-wt-<x> origin/wip/<x>`
 
 ## Open items worth knowing
 - Exact-engine export costs more CPU (FL's render settings): the 30-demo export total went from ~342 s to ~380–570 s.
-- Sytrus channels have no settings panel yet (the channel button opens nothing for them).
 - Harmor: image/resynthesis, arpeggio-envelope points and noise resonance are approximated (82/99 demo states within
   −60 dB with the rack).
 - Performance-mode projects are exported with every clip playing from the start.

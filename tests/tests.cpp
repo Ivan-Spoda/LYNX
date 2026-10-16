@@ -10483,6 +10483,51 @@ TEST (sytrus_instrument)
     CHECK (tail.back() == 0.0f);
 }
 
+TEST (sytrus_main_settings)
+{
+    // the channel settings panel's controls (REA_rodada74 §3): FL's "Main settings" ints inside the zlib state
+    SytrusTestPatch t;
+    t.cell (0, 0, 8, 256);
+    t.main[173] = 3;
+    const auto blob = t.blob();
+    const auto& S = lynx::sytrus::settings();
+    auto find = [&] (const char* name) {
+        for (int i = 0; i < (int) S.size(); ++i)
+            if (std::string (S[(std::size_t) i].name) == name)
+                return i;
+        return -1;
+    };
+    const int master = find ("Master level"), unison = find ("Unison"), porta = find ("Porta"), live = find ("Live oversampling");
+    CHECK (master >= 0 && unison >= 0 && porta >= 0 && live >= 0 && S.size() == 25u);
+    CHECK (lynx::sytrus::settingValue (blob, master) == 128 && lynx::sytrus::settingValue (blob, unison) == 3);
+    CHECK (lynx::sytrus::settingValue (blob, porta) == 0 && lynx::sytrus::settingValue (blob, find ("Mod X")) == 256);
+    CHECK (! lynx::sytrus::settingValue (blob, -1) && ! lynx::sytrus::settingValue (blob, (int) S.size()));
+    auto broken = blob;
+    broken.resize (broken.size() / 2);
+    CHECK (! lynx::sytrus::settingValue (broken, master) && ! lynx::sytrus::setSetting (broken, master, 64));
+
+    // master level 64: gain (11^(64/128) − 1)/10 instead of 1 (REA_rodada11 §1.3); the state stays readable
+    auto quiet = blob;
+    CHECK (lynx::sytrus::setSetting (quiet, master, 64) && lynx::sytrus::stateUsable (quiet));
+    CHECK (lynx::sytrus::settingValue (quiet, master) == 64 && lynx::sytrus::settingValue (quiet, unison) == 3);
+    CHECK (quiet[0] == blob[0] && quiet[1] == blob[1]); // version word kept
+    const auto [l1, r1] = sytrusRender (blob, false, 4096, { { 60, 0, -1 } });
+    const auto [l2, r2] = sytrusRender (quiet, false, 4096, { { 60, 0, -1 } });
+    const auto g = (std::sqrt (11.0) - 1.0) / 10.0;
+    double worst = 0.0;
+    for (int k = 0; k < 4096; ++k)
+        worst = std::max (worst, std::abs ((double) l2[(std::size_t) k] - g * l1[(std::size_t) k]));
+    CHECK (worst < 1e-5);
+    (void) r1, (void) r2;
+
+    // clamped to the control's range; PORTA is the flag byte the engine reads
+    auto edited = blob;
+    CHECK (lynx::sytrus::setSetting (edited, unison, 42) && lynx::sytrus::settingValue (edited, unison) == 9);
+    CHECK (lynx::sytrus::setSetting (edited, porta, 1) && lynx::sytrus::settingValue (edited, porta) == 1);
+    CHECK (lynx::sytrus::setSetting (edited, live, 2) && lynx::sytrus::settingValue (edited, live) == 2);
+    CHECK (lynx::sytrus::parsePatch (edited) != nullptr);
+}
+
 TEST (harmor_effects_rack)
 {
     // REA_rodada38: the rack runs in the state's unit order and the records' FX send joins it at unit 4 — with the FX

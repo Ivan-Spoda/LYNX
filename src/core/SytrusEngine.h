@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "core/Instruments.h"
@@ -31,6 +32,20 @@ std::shared_ptr<const Patch> parsePatch (const std::vector<std::uint8_t>& state)
 
 // true if parsePatch would succeed (cheap: no wavetables are built)
 bool stateUsable (const std::vector<std::uint8_t>& state);
+
+// The "Main settings" page of Sytrus (REA_rodada74 §3): master level / LFO / pitch, the global volume and filter
+// envelope scales, unison, Mod X/Y, PORTA and the quality settings (oversampling order and envelope accuracy, live and
+// export). `index` is the main-block int (offset / 4; −1 = the PORTA flag byte), low…high the plugin control's range.
+struct Setting
+{
+    const char* name;
+    int index, low, high;
+};
+const std::vector<Setting>& settings();
+// the raw value of settings()[setting] in a state, or nothing if the state cannot be read
+std::optional<int> settingValue (const std::vector<std::uint8_t>& state, int setting);
+// writes it (clamped to the control's range) and re-stores the state; false if the state cannot be read
+bool setSetting (std::vector<std::uint8_t>& state, int setting, int value);
 
 // Note of the engine (per FL note).
 struct NoteParams

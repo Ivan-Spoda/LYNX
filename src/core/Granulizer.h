@@ -18,8 +18,8 @@
 // Not modelled (REA_rodada67 §5): the slice modes (regions from the sample, "auto slicing") and the slice key mode;
 // tempo sync (the host's beat count, Dispatcher 0x13); other interpolation qualities sent by FL's host (Dispatcher 1;
 // FL's value not confirmed); rcpps (a CPU-specific approximate reciprocal in the sinc kernel) is replaced by the exact
-// reciprocal; the sines of the kernel use the C library instead of IPP's ippsSin_64f_A50; the processor's end-fade table
-// uses the exact cosine; one random seed per instrument (FL: one per process).
+// reciprocal; the sines of the kernel use the C library instead of IPP's ippsSin_64f_A50; one random seed per
+// instrument (FL: one per process).
 
 #include <cstdint>
 #include <memory>
