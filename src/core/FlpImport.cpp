@@ -665,6 +665,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.decay = std::clamp (seconds (env.decay), 0.0f, 10.0f);
             def.sampler.sustain = std::clamp (env.sustain / 128.0f, 0.0f, 1.0f);
             def.sampler.release = std::clamp (std::max (seconds (env.release), 0.002f), 0.0f, 4.0f); // envelope on: the note ends
+
+            // FL's own articulator (delay, hold, tensions, tick steps; REA_rodada69 §3) from the record as stored
+            if (env.rawSize >= 68)
+            {
+                def.sampler.flVolumeEnvelope.resize (18);
+                std::memcpy (def.sampler.flVolumeEnvelope.data(), env.raw.data(), 68);
+                def.sampler.flVolumeEnvelope[17] = project.header.ppq > 0 ? project.header.ppq : 96;
+            }
         }
 
         // channel filter (Mod X/Y + type from 0xDB) applies to the sampler too

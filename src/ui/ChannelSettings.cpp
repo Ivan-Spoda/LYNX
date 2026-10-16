@@ -1175,6 +1175,13 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
+        {
+            // an ADSR edited by hand replaces FL's imported volume envelope
+            const auto& old = current()->sampler;
+            auto moved = [] (float a, float b) { return std::abs (a - b) > 1.0e-4f; };
+            if (moved (s.attack, old.attack) || moved (s.decay, old.decay) || moved (s.sustain, old.sustain) || moved (s.release, old.release))
+                s.flVolumeEnvelope.clear();
+        }
         if (s == current()->sampler)
             return;
 

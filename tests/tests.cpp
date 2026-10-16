@@ -2298,6 +2298,35 @@ TEST (fl_sampler_copies_at_original_rate)
     CHECK (l[300] == 0.0f);
 }
 
+// FL's volume envelope on the sampler (REA_rodada69 §3): the articulator is stepped once per sequencer tick and the level
+// ramps linearly to each tick's value; 96 PPQ at 120 BPM and 48 kHz = 250 samples per tick, attack 20000 = 89 ticks
+TEST (fl_sampler_volume_envelope_steps_per_tick)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    data->left.assign (96000, 0.5f);
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sampler;
+    c.sampler.flVolumeEnvelope = { 0, 1, 100, 20000, 0, 30000, 128, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, 0, 96 };
+    sampler->configure (c, 120.0);
+    sampler->noteOn (60, 1.0f);
+    std::vector<float> l (40000), r (40000);
+    sampler->render (l.data(), r.data(), 40000, 1.0f, 1.0f);
+    const auto panL = std::cos ((0.0f + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f;
+    auto level = [&] (int n) { return l[(std::size_t) n] / (0.5f * panL); };
+    CHECK (std::abs (level (1000) - 1000.0f / 22500.0f) < 2e-5f);
+    CHECK (std::abs (level (10125) - 10125.0f / 22500.0f) < 2e-5f);
+    CHECK (std::abs (level (39000) - 1.0f) < 1e-6f); // the attack ended after 90 ticks; sustain 128 = 1.0
+    // release: 20000 = 89 ticks, linear (tension 0), from the current level
+    sampler->noteOff (60);
+    std::fill (l.begin(), l.end(), 0.0f);
+    sampler->render (l.data(), r.data(), 40000, 1.0f, 1.0f);
+    CHECK (std::abs (level (2500) - (1.0f - 10.0f / 90.0f)) < 1e-3f);
+    CHECK (l[39999] == 0.0f && sampler->idle());
+}
+
 TEST (sampler_plays_pitched_one_shot)
 {
     // 1000-frame ramp sample: the position can be measured from the amplitude

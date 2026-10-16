@@ -598,6 +598,13 @@ juce::String toJson (const Song& song)
             if (c.sampler.portaBeats != SamplerSettings {}.portaBeats)
                 sampler->setProperty ("portaTime", c.sampler.portaBeats);
             sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
+            if (! c.sampler.flVolumeEnvelope.empty())
+            {
+                juce::Array<juce::var> env;
+                for (auto v : c.sampler.flVolumeEnvelope)
+                    env.add ((int) v);
+                sampler->setProperty ("flVolumeEnvelope", env);
+            }
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             writeLfos (*sampler, c.sampler.lfo);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -1001,6 +1008,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 def.sampler.cut = (bool) s.getProperty ("cut", false);
                 def.sampler.porta = (bool) s.getProperty ("porta", false);
                 def.sampler.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SamplerSettings {}.portaBeats));
+
+                if (auto* env = s["flVolumeEnvelope"].getArray(); env != nullptr && env->size() == 18)
+                    for (const auto& v : *env)
+                        def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
 
                 if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {

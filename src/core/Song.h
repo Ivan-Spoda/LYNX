@@ -148,6 +148,10 @@ struct SamplerSettings
     ModEnvelope filterEnv;     // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;      // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget
+    // FL's volume envelope as the channel stored it (REA_rodada69 §3): the 17 values of its 0xDA volume record followed
+    // by the project's PPQ. When present it replaces attack/decay/sustain/release (delay, hold, tensions, FL's tick
+    // stepping); editing the ADSR by hand clears it.
+    std::vector<std::int32_t> flVolumeEnvelope;
 
     bool operator== (const SamplerSettings&) const = default;
 };

@@ -1341,6 +1341,10 @@ struct SamplerVoice
     bool reversed = false;
     int loops = 0;         // times the zone loop has wrapped (FL lets taps before the loop start wrap only then)
     flrs::Kernel kernel;
+    bool flEnvelope = false; // FL's volume articulator drives the level (the ADSR stays at 1)
+    flvp::Art volumeArt;
+    double tickLeft = 0.0;   // samples until the next sequencer tick
+    float flLevel = 0.0f, flStep = 0.0f; // the level ramps linearly to each tick's value over the tick (FL)
     float velocity = 0.0f;
     float fade = 1.0f;     // < 1 when the voice was stolen (declick)
     bool stolen = false;
@@ -1441,7 +1445,17 @@ public:
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         filterType.store (std::clamp (s.filterType, 0, 3));
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
-        envelopeMailbox.write ({ { s.filterEnv, s.pitchEnv }, s.lfo });
+        {
+            Modulation m { { s.filterEnv, s.pitchEnv }, s.lfo };
+            if (s.flVolumeEnvelope.size() == 18)
+            {
+                const auto ppq = std::clamp ((int) s.flVolumeEnvelope[17], 24, 3840);
+                m.flVolume = true;
+                m.volume.build (s.flVolumeEnvelope.data(), ppq, std::max (1.0, songBpm));
+                m.ticksPerSecond = (double) ppq * std::max (1.0, songBpm) / 60.0;
+            }
+            envelopeMailbox.write (m);
+        }
         SliceTable table;
         table.count = (int) std::min<std::size_t> (s.slices.size(), table.starts.size());
         for (int i = 0; i < table.count; ++i)
@@ -1469,6 +1483,9 @@ public:
     {
         const auto* zone = clipMode ? nullptr : zoneFor (key, velocity);
         const auto* data = zone != nullptr ? zone->sample.get() : sample.get();
+
+        if (envelopeMailbox.read (modulation))
+            updateModulation();
 
         if (data == nullptr || data->frames() < 2)
             return;
@@ -1577,6 +1594,20 @@ public:
         target->env = attackSeconds > 0.0f ? 0.0f : 1.0f;
         target->envStep = attackSeconds > 0.0f ? (float) (1.0 / (attackSeconds * sampleRate)) : 0.0f;
         target->stage = attackSeconds > 0.0f ? 0 : 1;
+
+        // FL's volume articulator: starts at its initial level and is stepped on the voice's first block (FLEngine
+        // FUN_00d24ae0 steps a new voice at once, then once per sequencer tick)
+        target->flEnvelope = ! clipMode && modulation.flVolume && modulation.ticksPerSecond > 0.0;
+        if (target->flEnvelope)
+        {
+            target->env = 1.0f;
+            target->envStep = 0.0f;
+            target->stage = 1;
+            target->volumeArt.init (modulation.volume);
+            target->flLevel = target->volumeArt.val;
+            target->flStep = 0.0f;
+            target->tickLeft = 0.0;
+        }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
 
@@ -1630,6 +1661,14 @@ public:
                 for (std::size_t e = 0; e < 2; ++e)
                     modEnv[e].release (v.mod[e]);
 
+        // FL's volume articulator enters its release stage from the current level
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.flEnvelope && v.stage < 3)
+            {
+                v.volumeArt.release (modulation.volume);
+                v.stage = 3; // released (stops "while held" loops); the ADSR level stays at 1
+            }
+
         // with release, the released note decays; without release the sample plays in full (one-shot)
         const auto seconds = release.load();
 
@@ -1638,7 +1677,7 @@ public:
 
         // linear release from the current level (like FL)
         for (auto& v : voices)
-            if (v.active && v.key == key && v.stage < 3)
+            if (v.active && v.key == key && v.stage < 3 && ! v.flEnvelope)
             {
                 v.stage = 3;
                 v.envStep = -(float) (std::max (v.env, 0.001f) / (seconds * sampleRate));
@@ -1702,6 +1741,23 @@ public:
                     break;
                 }
 
+                if (v.flEnvelope)
+                {
+                    if (v.tickLeft <= 0.0)
+                    {
+                        // a sequencer tick: step the articulator; the level ramps to its value over round(tick) samples
+                        v.volumeArt.step (modulation.volume);
+                        const auto perTick = sampleRate / modulation.ticksPerSecond;
+                        v.flStep = (v.volumeArt.val - v.flLevel) / (float) std::max (1.0, std::nearbyint (perTick));
+                        v.tickLeft += perTick;
+                    }
+                    if (v.volumeArt.state == 9 && v.flLevel <= 0.0f && v.flStep <= 0.0f)
+                    {
+                        v.active = false;
+                        break;
+                    }
+                }
+
                 float sl, sr;
                 readFrame (v, l, r, lastFrame, looping, sl, sr);
 
@@ -1746,6 +1802,15 @@ public:
                 }
 
                 auto gain = v.velocity * v.fade * v.env * v.lfoGain * v.zoneGain;
+
+                if (v.flEnvelope)
+                {
+                    gain *= std::max (0.0f, v.flLevel);
+                    const auto next = v.flLevel + v.flStep;
+                    // the ramp stops at the tick's value
+                    v.flLevel = (v.flStep > 0.0f && next > v.volumeArt.val) || (v.flStep < 0.0f && next < v.volumeArt.val) ? v.volumeArt.val : next;
+                    v.tickLeft -= 1.0;
+                }
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
@@ -1896,6 +1961,9 @@ private:
     {
         std::array<ModEnvelope, 2> envelopes {};
         std::array<ChannelLfo, lfoTargets> lfo {};
+        bool flVolume = false;     // FL's volume articulator replaces the ADSR
+        flvp::Rec volume {};       // its settings (FLEngine FUN_009ce9e0 = the plugins' FUN_0071ff00, REA_rodada69 §3)
+        double ticksPerSecond = 0; // FL steps it once per sequencer tick
     };
     SettingsMailbox<Modulation> envelopeMailbox;
     Modulation modulation;
