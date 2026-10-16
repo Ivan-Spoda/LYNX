@@ -220,7 +220,10 @@ Round 27 §3.1 confirmed: `pan = PAN + 2·art₀`, `vol = VOL·art₁`; pan 0 �
 > findings below stay as analysis, and this round's two DLL goldens now run against the round-70 engine
 > (test `fruity_vocoder_round66_goldens`). Measured at the merge: the 8-band state (swap, per-band levels) is
 > identical on all 6 golden samples; the 32-band state (order 3, inverted bank, formant shift) differs on all 6, by up
-> to 0.0148 — **open item**: which engine (or which golden set-up) is off is not confirmed. The Delphi runtime math of §7 lives in `core/DelphiRuntime.h`.
+> to 0.0148. **Resolved in round 78** (`REA_rodada78.md` §1): the golden is right (the DLL's output); the state's attack
+> is 5 ms, below the knob range, and the plugin uses it unclamped while round 70's engine clamped it to 10 ms. The
+> test is a hard exact check again. The Delphi runtime math of §7 now lives in `core/DelphiMath` (merged with round
+> 70's replica in round 78; `core/DelphiRuntime.h` is gone).
 
 Confirms round 20 §4.1 and adds the operation order:
 
@@ -263,7 +266,7 @@ for 6 of the 86 states to differ (−147…−201 dB) between a Linux and a Wind
 
 **EXEC (`py/t_dm.py`, `cpp/dm.cpp`):** Exp 150 000, Ln 180 000, Sin/Cos 135 000 each, SinCos 135 000, ExpM1 75 000,
 Tanh 90 000, Sinh 75 000, Power 60 000 random arguments over the plugins' ranges: all bit-identical, in both DLLs (the
-Vocoder's copies are the same routines). LYNX's `core/DelphiRuntime.h` holds the re-creation; arguments outside the handled
+Vocoder's copies are the same routines). LYNX's `core/DelphiMath` holds the re-creation (`core/DelphiRuntime.h` until round 78); arguments outside the handled
 ranges (overflow, subnormals, trigonometric arguments ≥ 4194304) fall back to the C library.
 
 ---
@@ -291,7 +294,7 @@ ranges (overflow, subnormals, trigonometric arguments ≥ 4194304) fall back to 
   (`offlineRendering()`), as every exact engine does.
 - (dropped at merge, see §6) `core/FruityVocoderFx.{h,cpp}`: the vocoder (§6), `EffectKind::fruityVocoder`, FL's twelve controls as slot
   parameters (automation imported).
-- `core/DelphiRuntime.h`: §7.
+- `core/DelphiRuntime.h`: §7 (merged into `core/DelphiMath` in round 78).
 - Import: `effectFromFl` routes both plugins to the exact engines (inside Patcher graphs too); the Love Philter
   conversion of rounds 16–20 and the generic vocoder remain only for states the engines cannot read.
 
