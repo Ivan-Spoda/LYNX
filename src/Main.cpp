@@ -1741,7 +1741,7 @@ private:
                                 act (names[2], 0, lynx::tr ("Reverse"));
                                 check ("Make unique", act (names[3], 1, lynx::tr ("Make unique")) && offline.getSong().channels.size() == channelsBefore + 1
                                                           && channelOf (names[3] + " #2") != nullptr);
-                                check ("Fit to tempo, resample", act (names[1], 0, lynx::tr ("Fit to tempo, resample").upToFirstOccurrenceOf ("(", false, false))
+                                check ("Fit to tempo, resample", act (names[1], 0, lynx::tr ("Fit to tempo, resample ({0})", { juce::String() }).upToFirstOccurrenceOf ("(", false, false))
                                                                      && channelOf (names[1])->sampler.stretchBeats > 0.0f && ! channelOf (names[1])->sampler.keepPitch);
                                 const auto gainBefore = offline.getSong().playlist[(std::size_t) clipOf (names[0], 1)].gain;
                                 check ("Normalize", act (names[0], 1, lynx::tr ("Normalize"))
