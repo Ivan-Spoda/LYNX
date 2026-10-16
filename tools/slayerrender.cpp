@@ -1,6 +1,6 @@
 // Renders FL Slayer parameters with LYNX's engine exactly like the round-68 EXEC harness drives the DLL (verification
 // harness, REA_rodada68 §7): slayerrender <dll> <out.f32> <length> <rate> p0,p1,…,p28 [blk=N] [tempo=T]
-//   [note=start,key,velocity,release ...]. Writes interleaved stereo float32 (raw engine output).
+//   [note=start,key,velocity,release ...] [midi=s,st,d1,d2] [param=s,index,integer]. Writes interleaved stereo float32 (raw engine output).
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -39,6 +39,12 @@ int main (int argc, char** argv)
             std::array<int, 4> m {};
             if (std::sscanf (a.c_str() + 5, "%d,%d,%d,%d", &m[0], &m[1], &m[2], &m[3]) == 4)
                 opt.midi.push_back (m);
+        }
+        else if (a.rfind ("param=", 0) == 0)
+        {
+            std::array<int, 3> q {};
+            if (std::sscanf (a.c_str() + 6, "%d,%d,%d", &q[0], &q[1], &q[2]) == 3)
+                opt.params.push_back (q);
         }
         else if (a.rfind ("peek=", 0) == 0)
             opt.peek.push_back ((int) std::strtol (a.c_str() + 5, nullptr, 16));

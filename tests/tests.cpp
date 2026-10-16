@@ -13506,8 +13506,9 @@ TEST (slayer_engine)
     }
     CHECK (checked == 12);
 
-    // the instrument: the engine primed with one sample, FL's velocity curve, the front-end's host gain cos(π/4), the
-    // channel gains on top; a note with velocity 0.8 is the reference note one sample later
+    // the instrument: the engine primed with one sample, FL's velocity curve, the front-end's gains from the channel's
+    // MIDI pan / volume (REA_rodada79 §2: twice the channel gain through the host's integer-pan law); a note with
+    // velocity 0.8 is the reference note one sample later
     const auto st = slayerPreset ("BASS Ebass 2");
     lynx::ChannelDef c;
     c.instrument = lynx::InstrumentKind::slayer;
@@ -13527,11 +13528,16 @@ TEST (slayer_engine)
     }
     const int vel = lynx::slayer::midiVelocity ((std::pow (11.0, 1.28 * 0.8) - 1.0) / 10.0);
     const auto ref = lynx::slayer::renderReference (lynx::slayerStateParams (st), dll, { { 1, 60, vel, 1 + 20 * 512 } }, 44100.0, 16385);
+    // LYNX's channel gains 0.5 / 0.25 = gain 0.395…, pan −0.4097 → MIDI pan −26
+    const auto chanVol = (float) std::sqrt ((0.25 + 0.0625) * 0.5);
+    float hl = 0.0f, hr = 0.0f;
+    lynx::slayer::hostGains (lynx::slayer::midiPan (std::atan2 (0.25, 0.5) * (4.0 / 3.141592653589793) - 1.0), chanVol, hl, hr);
+    CHECK (lynx::slayer::midiPan (std::atan2 (0.25, 0.5) * (4.0 / 3.141592653589793) - 1.0) == -26);
     double diff = 0.0, energy = 0.0;
     for (int i = 0; i < 16384; ++i)
     {
-        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * 0.70710677f * 0.5f),
-                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * 0.70710677f * 0.25f) });
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * hl),
+                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * hr) });
         energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
     }
     CHECK (diff == 0.0 && energy > 1.0 && vel == 102);
@@ -13554,6 +13560,74 @@ TEST (slayer_engine)
             }
     std::printf ("  FL Slayer presets: %d, %d sounding\n", presets, sounding);
     CHECK (presets == 64 && sounding == 64);
+}
+
+// FL Slayer's host levels and live parameters (REA_rodada79): channel pan / volume / pitch arrive as MIDI events
+// (ProcessEvent 2/3/4), automation and settings edits as setParameter calls on the running engine
+TEST (slayer_host_levels_and_automation)
+{
+    using namespace lynx::slayer;
+    CHECK (pitchBend (0) == 8192 && pitchBend (100) == 8874 && pitchBend (-100) == 7510 && pitchBend (1200) == 0x3fff
+           && pitchBend (-1200) == 0 && pitchBend (-1199) == 7 && pitchBend (5000) == 0x3fff);
+    CHECK (midiPan (0.0) == 0 && midiPan (1.0) == 64 && midiPan (-1.0) == -64 && midiPan (-0.5) == -32
+           && midiPan (99.0 / 6400.0) == 0 && midiPan (-199.0 / 6400.0) == -1 && midiPan (2.0) == 64);
+    float l0 = 0.0f, r0 = 0.0f, l1 = 0.0f, r1 = 0.0f;
+    hostGains (0, 0.5f, l0, r0);   // the front-end's own start values (volume 1 after the ×2, centre)
+    hostGains (64, 1.0f, l1, r1);
+    CHECK (l0 == 0.70710677f && r0 == 0.70710677f && std::abs (l1) < 1e-15f && r1 == 2.0f);
+
+    const auto dll = slayerDll();
+    if (dll.empty() || ! lynx::slayerDllUsable (dll))
+        return;
+    const auto st = slayerPreset ("DIST Dire Straits");
+    const auto params = lynx::slayerStateParams (st);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::slayer;
+    c.pluginState = st;
+    c.samplePath = dll;
+    c.sampler.pitch = 1.5f;      // channel pitch +150 cents → bend 9216; no root shift
+    c.modelParams = { 0.0f };
+    auto inst = lynx::makeInstrument (lynx::InstrumentKind::slayer);
+    inst->configure (c, 120.0);
+    inst->prepare (44100.0);
+    const int blocks = 40, n = 512;
+    std::vector<float> l ((std::size_t) (blocks * n), 0.0f), r ((std::size_t) (blocks * n), 0.0f);
+    auto edited = st;
+    const std::int32_t newDrive = 60000; // parameter 13 (amp drive), edited in the settings at block 25
+    std::memcpy (edited.data() + 4 + 4 * 13, &newDrive, 4);
+    for (int b = 0; b < blocks; ++b)
+    {
+        if (b == 0)
+            inst->noteOn (52, 0.8f);
+        if (b == 10)
+            inst->setParameter (20, 9.0f / 15.0f);   // automation: effect 9 (chorus)
+        if (b == 18)
+            inst->setParameter (28, 0.5f);           // automation: the mod wheel → CC 1 64
+        if (b == 25)
+        {
+            c.pluginState = edited;
+            inst->configure (c, 120.0);
+        }
+        inst->render (l.data() + n * b, r.data() + n * b, n, 1.0f, 1.0f);
+    }
+    lynx::slayer::RefOptions opt;
+    opt.midi.push_back ({ 1, 0xe0, 9216 & 0x7f, 9216 >> 7 });
+    opt.params = { { 1 + 10 * n, 20, 9 }, { 1 + 18 * n, 28, 64 }, { 1 + 25 * n, 13, newDrive } };
+    const int vel = lynx::slayer::midiVelocity ((std::pow (11.0, 1.28 * 0.8) - 1.0) / 10.0);
+    const auto ref = lynx::slayer::renderReference (params, dll, { { 1, 52, vel, -1 } }, 44100.0, blocks * n + 1, opt);
+    float hl = 0.0f, hr = 0.0f;
+    hostGains (0, 1.0f, hl, hr);
+    double diff = 0.0, energy = 0.0;
+    for (int i = 0; i < blocks * n; ++i)
+    {
+        diff = std::max ({ diff, (double) std::abs (l[(std::size_t) i] - ref[2 * (std::size_t) (i + 1)] * hl),
+                           (double) std::abs (r[(std::size_t) i] - ref[2 * (std::size_t) (i + 1) + 1] * hr) });
+        energy += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    }
+    CHECK (diff == 0.0 && energy > 1.0);
+    // the changes really change the sound: the same render without them differs
+    const auto plain = lynx::slayer::renderReference (params, dll, { { 1, 52, vel, -1 } }, 44100.0, blocks * n + 1);
+    CHECK (plain != ref);
 }
 
 TEST (slayer_and_fruity_dance_import)
