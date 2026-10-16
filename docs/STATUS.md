@@ -756,7 +756,7 @@ which cannot change without changing output bits.
 ## Open items
 
 - Sample players (REA rounds 69 §9 and 72 §9): DirectWave's Ogg samples go through LYNX's libvorbis (within ~4·10⁻⁷ of
-  FL's oggio decode, not bit-equal), its HQ interpolation, time-stretch modes and reverb idle noise floor (§8); the host
+  FL's oggio decode, not bit-equal), its HQ interpolation, time-stretch modes (§8); the host
   sampler voice's velocity/pan laws and channel filter (decoded in part, round 72 §9, not applied); FL's song-aligned tick phase for the sampler's volume envelope
   (LYNX counts ticks from the note start, ≤ 1 tick apart); FPC's random layer modes and simultaneous layers (unused in
   the demos); Fruity Slicer's time-stretched slices (5 demo channels pre-stretch their loop by 0.6–5.5 % through a

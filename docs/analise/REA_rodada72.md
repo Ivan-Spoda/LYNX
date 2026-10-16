@@ -123,9 +123,8 @@ packet that oggio decodes (not investigated further).
 ## 7. Verification **[EXEC + model]**
 
 - `py/batch.py all`: all **57 demo states**, 8 random notes each (velocity, Final.Vol/Pan, cent offsets, releases),
-  random host blocks 100…1024, 3 s, with the plugin's own decoded samples: **all 57 bit-identical while sound plays**;
-  29 programs with the reverb differ only in the reverb's idle self-noise (values ≤ 2.3·10⁻³⁰, i.e. −620 dB) during the
-  silence before the first note — **not reproduced** (a one-sample offset of the 10⁻³⁰ anti-denormal path, not found).
+  random host blocks 100…1024, 3 s, with the plugin's own decoded samples: **all 57 bit-identical** (the reverb's
+  pre-delay buffer starts filled with 10⁻³⁰, which sets its idle self-noise — seen with per-sample peeks **[EXEC]**).
 - Crafted states (our own 16-bit samples in every zone; zone effects on, filter types 2–7, parallel routing):
   **bit-identical** (`py/craft.py`).
 - Tests: `directwave_crt_math_and_state` (CRT goldens from the DLL), `directwave_matches_fl_with_demo_programs` (three
@@ -142,7 +141,7 @@ packet that oggio decodes (not investigated further).
   The old multi-sample-sampler conversion stays as the fallback.
 - Not reproduced: alternation probabilities below 1 (operating-system randomness), the HQ (sinc) interpolation and
   the 8-sample control blocks (plugin settings, off by default), the time-stretch modes (`0x1F9`), MIDI slots other
-  than 0, the polyphony limit, the reverb idle noise above, Ogg sample bits (§6). LYNX renders in blocks of ≤ 256 of its
+  than 0, the polyphony limit, Ogg sample bits (§6). LYNX renders in blocks of ≤ 256 of its
   own, so control-block boundaries follow LYNX's blocks, not FL's.
 
 ## 9. FLEngine items of round 69 §9 (sampler)
