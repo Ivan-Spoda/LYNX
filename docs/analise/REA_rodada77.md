@@ -126,6 +126,26 @@ With the plain loop including the "EOS of any serial" rule, every file has FL's 
 - Test `ogg_vorbis_decodes_like_fl`: header detection, an invalid file, and (with the FL Data directory) four files
   against FL's hashes — a plain one, a multiplexed one, an early-EOS one and an FL Keys wavetable.
 
+## 5. Consequences for other ports **[EXEC + model]**
+
+- **FL Keys (round 69 §8.2):** FL's loaded Grand Piano wavetable (round 69's EXEC dump `r69/keys/out/wt_gp.bin`)
+  against LYNX's decode of the 30 keygroup files converted with `round(x·32767)` (`fkcheck.py`): **20 081 840 / 20 081 840
+  values equal** (round 69 had 99.991 % and three files 2 048 frames too long — the early-EOS case of §3.1). So FL's
+  sample class turns oggio's floats into 16-bit values with `round(x·32767)`, and LYNX's FL Keys is now exact on
+  its Ogg wavetable too.
+- **DirectWave (round 72 §6/§8):** the plug-in keeps Ogg zones as oggio's floats; with the exact decoder LYNX's
+  zones now hold FL's samples (the "Ogg sample bits" item of round 72 §8 is closed). 56 of the 57 demo programs'
+  zone files are Ogg WAVs; many of them (e.g. *Rhodes*, *string accents*, *piano*) use files from §3.1's 295.
+- **Fruity Scratcher (round 71 §4):** its blockers were (a) FL's Vorbis decoder, (b) the host's conversion of the
+  sample to 16-bit / 2 channels / 44.1 kHz, (c) the scaling of the `0xDF` pattern control events that move the platter
+  in the render test. (a) is solved; for (b), `DL Breaker.wav` already is 2 channels at 44.1 kHz, so only the float →
+  16-bit step remains, and FL Keys' sample-class result suggests `round(x·32767)` — but the Scratcher's host call
+  (`+0x68` load / `+0x70` data) was not traced to that code in FLEngine, so **not confirmed**; (c) is untouched. The
+  Scratcher therefore stays unported; next step: trace FLEngine's handler of the plug-in host's sample-load call and
+  the `0xDF` event → parameter path, then an EXEC run of the Scratcher with the render test's events.
+
 ## Where I stopped / next steps
 
-(updated below as the round progresses)
+- Done: §1–§5; LYNX's decoder, app wiring, tool, test.
+- Next: Fruity Scratcher's remaining blockers (§5); the app's waveform preview (`src/ui/WaveformView.cpp`) still
+  reads Ogg WAVs through JUCE (display only).
