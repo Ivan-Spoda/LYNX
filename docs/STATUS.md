@@ -673,6 +673,41 @@ Confirmed empirically on the demo projects:
 - The VST3 SDK bundled with JUCE builds with Zig/MinGW; plugins are prepared at a fixed rate and re-created
   when the device rate changes; plugin latency feeds the PDC.
 
+## Performance (export CPU, 2026-10-15)
+Where the exact-engine rounds made the export slower (per-effect timing and `perf` on `build-local/renderwav`):
+LollieVox: Fruity WaveShaper (render mode forces 16× oversampling; SMOOTH ran the x87 kernel one sample at a time
+with two control-word changes per sample and channel) was ~25 % of the render, Fruity Limiter (x87 one-pole chains)
+~8 %, Reeverb 2 ~4 %; Exoplanet: WaveShaper, Fruity Limiter, Reeverb/Reeverb 2 and MiniSynth's `idle()` (a 99-voice
+scan on every block); Future House: Reeverb 2. Chorus (r59) and 3x Osc (r47) cost ≤ 1 % on these demos.
+
+Bit-identical changes (`feature/perf`): WaveShaper half-bands on two-lane double vectors, one control-word change per
+block, a constant-gain run once the SMOOTH glide reaches its fixed point, direct x87 loads/stores and `frndint` in the
+kernel (≈ 2.5× faster); Fruity Limiter curve stages run sample-interleaved and a resting gain chain is skipped
+(≈ 1.15×); Reeverb 2 loop on local state and no modulation sine at zero depth; MiniSynth `idle()` cached.
+
+Checks: the 30 demos rendered by old and new `build-local/renderwav` (`LYNX_RAW=` float dump and the WAV) are
+byte-identical; `build-local.sh` 0 failures. Note: the per-file object build and `build-local.sh`'s one-command build
+give different (each self-consistent) bits, so compare like with like.
+
+User CPU seconds of a whole-song `renderwav` (old main `6f03348` and this branch run side by side on a loaded
+12-thread machine; wall-clock `render_ms` is noisier than CPU time):
+
+| Demo | old CPU s | new CPU s | old render_ms | new render_ms |
+|---|---|---|---|---|
+| LollieVox & Lezina J - I'll Be Your Madonna | 105.7 | 89.6 (−15 %) | 136008 | 122837 |
+| Eric Kauffmann & NrgMind - Exoplanet | 230.0 | 222.5 (−3 %) | 479690 | 469316 |
+| Asher Postman - Future House | 9.7 | 9.8 | 75488 | 77389 |
+| DEDZII - NIGHT TERROR | 83.1 | 82.1 | 246018 | 220134 |
+| Atthar … - Right Night feeling | 122.9 | 122.8 | 572121 | 567457 |
+| Electric Loop - The Ogun Dream | 110.8 | 110.8 | 110819 | 110528 |
+| Astes - Bien Duro | 67.3 | 66.8 | 405254 | 401997 |
+| All 30 demos | 1118.0 | 1087.9 (−2.7 %) | | |
+
+Against `2d12823` (before the exact-engine rounds), same run: LollieVox 74.3 → 105.1 → 92.2 s, Exoplanet
+172.0 → 220.4 → 214.8 s, Future House 9.8 → 10.3 → 10.7 s (2d12823 → 5464b71 → this branch). What remains is the
+exact engines' own arithmetic (x87 extended-precision kernels, 16× oversampling, per-sample `exp`/`log10`/`sin`),
+which cannot change without changing output bits.
+
 ## Not yet verified by a human
 - Audio input recording (depends on the user's hardware; code reviewed, not tested).
 - CLAP plugin editor windows (audio hosting tested; windows not opened to avoid touching the user's screen).
