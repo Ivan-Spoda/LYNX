@@ -1237,7 +1237,7 @@ countries: br
 "Typing keyboard to piano" = "Teclado do PC como piano"
 "Tempo (BPM)" = "Andamento (BPM)"
 "Song time" = "Tempo da música"
-"Snap" = "Snap"
+"Snap" = "Grade"
 "Pattern options" = "Opções do pattern"
 "Playlist" = "Playlist"
 "Mixer" = "Mixer"
