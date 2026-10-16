@@ -70,6 +70,8 @@ public:
             s.setRange (lo, hi, step);
             s.setTextValueSuffix (suffix);
             s.setDoubleClickReturnValue (true, def);
+            s.setColour (juce::Slider::trackColourId, theme::colour::bg4); // a quiet bar: the number is what matters here
+            s.setColour (juce::Slider::textBoxOutlineColourId, theme::colour::borderStrong);
             addAndMakeVisible (s);
         };
         setup (tempo, 10.0, 999.0, 0.001, " BPM", 130.0);
@@ -319,8 +321,8 @@ class FolderList final : public juce::Component,
 {
 public:
     FolderList (juce::String heading, juce::String note, std::function<juce::StringArray()> loadFn,
-                std::function<void (const juce::StringArray&)> saveFn)
-        : title (std::move (heading)), load (std::move (loadFn)), save (std::move (saveFn))
+                std::function<void (const juce::StringArray&)> saveFn, bool checkFolders = true)
+        : title (std::move (heading)), load (std::move (loadFn)), save (std::move (saveFn)), check (checkFolders)
     {
         addAndMakeVisible (title);
         styleLabel (noteLabel, note);
@@ -372,10 +374,10 @@ private:
             g.setColour (theme::colour::accentMuted);
             g.fillRect (0, 0, width, height);
         }
-        const juce::File folder (folders[row]);
+        const auto exists = ! check || juce::File (folders[row]).isDirectory();
         g.setFont (theme::font (theme::type::body));
-        g.setColour (folder.isDirectory() ? theme::colour::textPrimary : theme::colour::warning);
-        g.drawText (folders[row] + (folder.isDirectory() ? juce::String() : "  (" + tr ("not found") + ")"), 10, 0, width - 20, height,
+        g.setColour (exists ? theme::colour::textPrimary : theme::colour::warning);
+        g.drawText (folders[row] + (exists ? juce::String() : "  (" + tr ("not found") + ")"), 10, 0, width - 20, height,
                     juce::Justification::centredLeft, true);
     }
 
@@ -416,6 +418,7 @@ private:
     juce::Label noteLabel;
     std::function<juce::StringArray()> load;
     std::function<void (const juce::StringArray&)> save;
+    bool check = true;
     juce::StringArray folders;
     juce::ListBox list;
     juce::TextButton addButton { tr ("Add...") }, removeButton { tr ("Remove") };
@@ -453,7 +456,7 @@ public:
                 for (const auto& f : list)
                     folders.push_back (f.toStdString());
                 saveSearchFolders (folders);
-            });
+            }, persistent);
 
         browserFolders = std::make_unique<FolderList> (
             tr ("Browser folders"), tr ("Shown in the Browser's folder list; also searched for missing samples."),
@@ -464,7 +467,7 @@ public:
                 PluginHost::settingsFolder().getChildFile ("browser-folders.txt").replaceWithText (list.joinIntoString ("\n"));
                 if (browserChanged)
                     browserChanged();
-            });
+            }, persistent);
 
         pluginFolders = std::make_unique<FolderList> (
             tr ("Plugin folders"), tr ("Scanned for VST3 and CLAP plugins (Options > Scan for plugins)."),
@@ -485,7 +488,7 @@ public:
                 for (const auto& f : list)
                     path.add (juce::File (f));
                 host.setPluginFolders (path);
-            });
+            }, persistent);
 
         addAndMakeVisible (*searchFolders);
         addAndMakeVisible (*browserFolders);
