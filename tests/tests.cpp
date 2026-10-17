@@ -4880,7 +4880,11 @@ TEST (mixer_mute_fades_instead_of_clicking)
     r.process (on.get(), false, 0.0, 256, l.data(), rr.data(), &live);
     CHECK (std::abs (l[255] - 0.5f) < 1e-3f);
     r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
-    CHECK (l[0] > 0.45f && l[128] > 0.2f && l[128] < 0.3f && std::abs (l[255]) < 1e-6f); // ramp down to zero
+    // the fader glides down by 0.001 per sample, as FL's (REA_rodada85 §3): 1000 samples from 1 to 0
+    CHECK (l[0] > 0.49f && std::abs (l[128] - 0.5f * (1.0f - 0.129f)) < 1e-3f && std::abs (l[255] - 0.5f * (1.0f - 0.256f)) < 1e-3f);
+    for (int b = 0; b < 3; ++b)
+        r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
+    CHECK (std::abs (l[255]) < 1e-6f); // down to zero after 1000 samples
     r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
     CHECK (std::abs (l[0]) < 1e-9f);
 }
