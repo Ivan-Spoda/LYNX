@@ -1420,7 +1420,7 @@ void MainComponent::armSelectedInsertForAudio()
     const auto& mixer = engine.getSong().mixer;
 
     // the selected insert, else the first one with an input, else a free one
-    auto target = this->mixer.getSelectedTrack();
+    auto target = this->mixer.getStripsForSnapshot().getSelectedTrack();
     for (int t = 1; target <= 0 && t < (int) mixer.size(); ++t)
         if (mixer[(std::size_t) t].inputChannel >= 0)
             target = t;

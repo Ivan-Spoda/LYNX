@@ -382,7 +382,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (bar, 1.0f);
                 const auto level = inputLevels[(std::size_t) t];
                 const auto fill = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 60.0f) / 60.0f);
-                g.setColour (level >= 0.99f ? colour::record : colour::success);
+                g.setColour (level >= 0.99f ? colour::record : colour::meterLow);
                 g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), 1.0f);
             }
         }
@@ -1741,7 +1741,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.setColour (armed ? colour::record.brighter (0.3f) : hoverInput == 1 ? colour::textSecondary : colour::borderStrong);
         g.drawEllipse (dot, 1.0f);
 
-        const auto box = inputBoxBounds().toFloat();
+        auto box = inputBoxBounds().toFloat();
         g.setColour (hoverInput == 2 ? colour::bg4 : colour::bg3);
         g.fillRoundedRectangle (box, radius::sm);
         g.setColour (hoverInput == 2 ? colour::borderStrong : colour::border);
@@ -1757,7 +1757,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             {
                 const auto db = juce::Decibels::gainToDecibels (inputLevel[(std::size_t) side], -60.0f);
                 const auto fill = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
-                g.setColour (inputLevel[(std::size_t) side] >= 0.99f ? colour::record : colour::success);
+                g.setColour (inputLevel[(std::size_t) side] >= 0.99f ? colour::record : colour::meterLow);
                 g.fillRect (bar.withHeight (1.5f).translated (0.0f, side * 1.5f).withWidth (bar.getWidth() * fill));
             }
         }
