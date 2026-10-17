@@ -31,8 +31,10 @@ namespace lynx
 //  - the clip under the mouse is outlined, its edges show grips and its title strip a menu button; the
 //    cursor and the hint bar tell what a click would do (core/EditorGestures.h)
 //  - right click on a clip's name strip (or its menu button) opens its menu (split, make unique, etc.)
-//  - track header: LED mutes the track (Ctrl+click or right-click on it: solo); right click elsewhere opens
-//    the track menu; double click renames; Shift+wheel moves the track up / down
+//  - track header (FL's layout: name, group arrow, LED on the right): click selects the track, the LED mutes it
+//    (Ctrl+click or right-click on it: solo), the arrow of a group header folds / unfolds its group; right
+//    click elsewhere opens the track menu (FL's order); double click opens the source of the track's first
+//    clip; Shift+wheel moves the track up / down. Grouped tracks are indented under their header (REA round 104)
 //  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V, Ctrl+B (repeats the
 //    time selection when there is one), Ctrl+Ins / Ctrl+Del insert / remove the time selection, Esc
 class PlaylistComponent final : public juce::Component,
@@ -116,6 +118,8 @@ public:
     static constexpr int rulerTop = toolbarHeight + overviewHeight;
     static constexpr int headerHeight = rulerTop + timelineHeight;
     static constexpr int trackHeight = 38; // the default row height (each track can be resized: P18)
+    static constexpr int foldedHeight = 7; // a member of a collapsed group: a thin row of clip bars (as FL)
+    static constexpr int groupIndent = 8;  // grouped tracks' headers are indented under their group header
     static constexpr int scrollBarSize = 12;
 
     static juce::Colour patternColour (const Song& song, int pattern);
@@ -191,6 +195,11 @@ private:
     void renameArrangement();
     void renameTrack (int track);
     void showTrackMenu (int track);
+    void openClipSource (int clip, bool other); // double click: the clip's pattern / automation (Alt: the other editor)
+    juce::Rectangle<int> trackLed (int track) const;   // the mute LED on the right of a header
+    juce::Rectangle<int> trackArrow (int track) const; // a group header's fold arrow (empty for other tracks)
+    void editTrack (int track, std::function<void (PlaylistTrack&)> change);
+    int currentTrack = -1; // the track selected by a click on its header (FL marks it next to the LED)
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true }; // hBar is hidden: the overview strip scrolls sideways
@@ -245,11 +254,12 @@ private:
     {
         int clip = -1, track = -1;
         gesture::Target target = gesture::Target::empty;
-        bool header = false, led = false;
+        bool header = false, led = false, arrow = false;
         int divider = -1; // the track whose bottom edge in the headers is under the mouse (resizes it)
         bool operator== (const Hover& o) const
         {
-            return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led && divider == o.divider;
+            return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led && arrow == o.arrow
+                   && divider == o.divider;
         }
     };
     Hover hover;
@@ -278,9 +288,11 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaylistComponent)
 };
-// Playlist "Picker" (as in FL): list of patterns with their colors; clicking chooses the
-// pattern the Playlist pencil paints; double click opens it in the Channel Rack.
+// Playlist "Picker" (as in FL): three tabs at the top (patterns, audio clips, automation clips) and the list
+// of that kind; clicking chooses what the Playlist pencil paints, double click opens a pattern; right click on
+// a pattern opens the pattern menu; "+" at the bottom of the pattern list adds a pattern (REA round 104).
 class PatternPicker final : public juce::Component,
+                            public ui::HintSource,
                             private juce::ChangeListener
 {
 public:
@@ -291,9 +303,18 @@ public:
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
 
     std::function<void()> onOpenPattern;
+    std::function<void()> onPatternMenu; // right click on a pattern (it is the current one by then)
+    std::function<void()> onNewPattern;  // the "+" under the pattern list
     static constexpr int width = 150;
+
+    // the kind listed: 0 = patterns, 1 = audio clips, 2 = automation clips
+    void setView (int newView);
+    int getView() const noexcept { return view; }
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -301,17 +322,24 @@ private:
     struct Row
     {
         ClipKind kind;
-        int index;            // pattern, audio or automation channel; -1 = section title
+        int index;            // pattern, audio or automation channel
         juce::String name;
         juce::Colour colour;
     };
     std::vector<Row> rows() const;
     int rowAt (int y) const;
+    juce::Rectangle<int> tabBounds (int tab) const;
+    juce::Rectangle<int> addBounds() const; // the "+" (pattern view only)
+    int listBottom() const;
 
     AudioEngine& engine;
     PlaylistComponent& playlist;
+    int view = 0;
+    ClipKind seenBrush = ClipKind::pattern; // the list follows the pencil's kind when it changes elsewhere
     int scroll = 0; // in rows
-    static constexpr int rowHeight = 22, headerHeight = 24;
+    int hoverTab = -1, hoverRow = -1;
+    bool hoverAdd = false;
+    static constexpr int rowHeight = 28, headerHeight = 26, footerHeight = 22;
 };
 
 // The Playlist tab: the Picker on the left and the Playlist (does not own them).
