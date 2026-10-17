@@ -15068,6 +15068,7 @@ TEST (flp_pattern_events_import)
 }
 
 #include "PrefsTests.inc"
+#include "InputTests.inc"
 
 TEST (level_audit_demo_imports_round89)
 {

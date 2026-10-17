@@ -17,6 +17,7 @@
 #include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
+#include "core/LiveInput.h"
 #include "core/Meters.h"
 #include "core/Pdc.h"
 #include "core/Scheduler.h"
@@ -159,6 +160,10 @@ public:
     // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
+    // External audio input (REA_rodada88): inserts with an input source hear it (per their monitor mode) and
+    // meter it. The caller fills `input` before each process() call on the same thread. Set before playback.
+    void setLiveInput (LiveInput* input) noexcept { liveInput = input; }
+
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
     void prepare (double sampleRate, int maxBlockSize = 2048);
@@ -235,6 +240,9 @@ private:
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
     double chunkStartTick = 0.0, chunkTps = 1.0;            // of the chunk being rendered (for the arpeggiator)
     WorkerPool* workers = nullptr;
+    LiveInput* liveInput = nullptr;
+    int liveInputOffset = 0; // of the chunk within the process() block
+    void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
     std::atomic<bool> profiling { false };
     std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
     std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();
