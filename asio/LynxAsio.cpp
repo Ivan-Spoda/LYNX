@@ -990,6 +990,7 @@ private:
     };
     GapNote gapNotes[8] {};
     double lastDrainMs = 0.0, maxCaptureGapMs = 0.0;
+    long long nextCapturePosition = -1, lostFrames = 0;
     bool inputSettled = false;
     int packetsThisDrain = 0;
 
@@ -1184,8 +1185,21 @@ private:
             BYTE* data = nullptr;
             UINT32 frames = 0;
             DWORD flags = 0;
-            if (FAILED (captureService->GetBuffer (&data, &frames, &flags, nullptr, nullptr)))
+            UINT64 devicePosition = 0, captureTime = 0;
+            if (FAILED (captureService->GetBuffer (&data, &frames, &flags, &devicePosition, &captureTime)))
                 break;
+            // Frames the device lost (it was late, or we were) are replaced by silence of the same length, so the
+            // recording stays in time with the playback; the device position says how many.
+            if (nextCapturePosition >= 0 && (long long) devicePosition > nextCapturePosition)
+            {
+                const auto lost = (long long) devicePosition - nextCapturePosition;
+                if (lost < (long long) sampleRate) // not a reset of the position
+                {
+                    inFifo.pushSilence ((int) lost);
+                    lostFrames += lost;
+                }
+            }
+            nextCapturePosition = (long long) devicePosition + frames;
             scratch.resize ((size_t) frames * (size_t) captureFormat.channels);
             if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0)
                 std::fill (scratch.begin(), scratch.end(), 0.0f);
@@ -1200,7 +1214,10 @@ private:
             ++packetsThisDrain;
             if (traced < 240 && now() - startMs >= 1000.0 * (traced + 1))
                 trace[traced++] = { (float) inFifo.averageFill(), (float) ((inFifo.ratio() - 1.0) * 1.0e6), (int) inFifo.underflows, (int) captureGaps };
-            inFifo.push (scratch.data(), (int) frames, now() / 1000.0);
+            // stamped with when its last frame was recorded (the capture time is in 100 ns units of the
+            // performance counter), so the level estimate does not move with the delivery jitter
+            const double recorded = captureTime != 0 ? captureTime * 1.0e-7 + frames / sampleRate : now() / 1000.0;
+            inFifo.push (scratch.data(), (int) frames, recorded);
             captureService->ReleaseBuffer (frames);
         }
         if (packetsThisDrain > 0)
@@ -1317,6 +1334,8 @@ private:
         traced = 0;
         inputSettled = false;
         lastDrainMs = maxCaptureGapMs = 0.0;
+        nextCapturePosition = -1;
+        lostFrames = 0;
         lastEventMs = maxGapMs = maxBurstMs = 0.0;
         startMs = nowMs();
     }
@@ -1356,10 +1375,10 @@ private:
                  events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs);
         if (captureClient != nullptr)
             logLine ("input: %lld capture events, FIFO level %.0f (target %d, now %d), clock ratio %+.1f ppm (range %+.1f..%+.1f), "
-                     "underflows %lld (+%lld while starting), overflows %lld, device gaps %lld, longest wait for a packet %.2f ms",
+                     "underflows %lld (+%lld while starting), overflows %lld, device gaps %lld (%lld frames replaced), longest wait for a packet %.2f ms",
                      captureEvents, inFifo.averageFill(), inputTarget, inFifo.target(), (inFifo.ratio() - 1.0) * 1.0e6, (inFifo.minRatio - 1.0) * 1.0e6,
                      (inFifo.maxRatio - 1.0) * 1.0e6, (long long) inFifo.underflows - inputShortBefore, inputShortBefore,
-                     (long long) inFifo.overflows, captureGaps, maxCaptureGapMs);
+                     (long long) inFifo.overflows, captureGaps, lostFrames, maxCaptureGapMs);
         if (captureClient != nullptr && traced > 0)
         {
             std::string line = "input per second (level/ppm/underflows/gaps):";

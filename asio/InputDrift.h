@@ -153,7 +153,7 @@ public:
     {
         double level = fill();
         if (now >= 0.0 && lastPushTime >= 0.0)
-            level += std::clamp ((now - lastPushTime) * sampleRate, 0.0, 1.5 * lastPacket);
+            level += std::clamp ((now - lastPushTime) * sampleRate, 0.0, 4.0 * lastPacket);
         const auto shift = (std::int64_t) std::llround (level - targetFill);
         if (shift > 0)
             readIndex += std::min<std::int64_t> (shift, writeIndex - readIndex - half - 1);
@@ -187,7 +187,7 @@ private:
         // integral term absorbs a constant clock difference.
         double level = fill();
         if (now >= 0.0 && lastPushTime >= 0.0)
-            level += std::clamp ((now - lastPushTime) * sampleRate, 0.0, 1.5 * lastPacket);
+            level += std::clamp ((now - lastPushTime) * sampleRate, 0.0, 4.0 * lastPacket);
         const double a = std::min (1.0, frames / (0.5 * sampleRate));
         smoothedFill += a * (level - smoothedFill);
         const double err = smoothedFill - targetFill;

@@ -58,6 +58,7 @@ enum class DriverKind
     wasapiExclusive,
     directSound,
     asio,
+    lynxAsio, // LYNX ASIO loaded by LYNX itself, without registration (REA round 106)
     other
 };
 DriverKind driverKind (const std::string& typeName);
