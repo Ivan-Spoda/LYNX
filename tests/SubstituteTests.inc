@@ -199,11 +199,11 @@ TEST (substitute_vst2_ids_names_and_float_params)
     lynx::PluginIdentity proq;
     proq.format = lynx::ForeignPlugin::Format::vst3;
     proq.name = "Pro-Q 3";
-    CHECK (lynx::findPluginSubstitute (proq, false) != nullptr && lynx::findPluginSubstitute (proq, false)->effect == lynx::EffectKind::parametricEq);
+    CHECK (lynx::findPluginSubstitute (proq, false) != nullptr && lynx::findPluginSubstitute (proq, false)->effect == lynx::EffectKind::facetEq);
     lynx::PluginIdentity prol;
     prol.format = lynx::ForeignPlugin::Format::vst2;
     prol.path = "C:\\VstPlugins\\FabFilter\\FabFilter Pro-L 2 x64.dll";
-    CHECK (lynx::findPluginSubstitute (prol, false) != nullptr && lynx::findPluginSubstitute (prol, false)->effect == lynx::EffectKind::limiter);
+    CHECK (lynx::findPluginSubstitute (prol, false) != nullptr && lynx::findPluginSubstitute (prol, false)->effect == lynx::EffectKind::apexLimiter);
     lynx::PluginIdentity unknown;
     unknown.name = "Serum";
     CHECK (lynx::findPluginSubstitute (unknown, false) == nullptr);
@@ -265,4 +265,15 @@ TEST (substitute_foreign_text_round_trip_is_byte_identical)
     std::vector<std::uint8_t> bytes;
     CHECK (lynx::base64Decode ("aGVsbG8=", bytes) && std::string (bytes.begin(), bytes.end()) == "hello");
     CHECK (lynx::base64Encode ((const std::uint8_t*) "hello", 5) == "aGVsbG8=");
+}
+
+TEST (substitute_table_reaches_the_newest_effects)
+{
+    // effectKindNamed walks the enum up to its last value: a kind appended later must still be nameable in the table
+    for (const auto kind : { lynx::EffectKind::facetEq, lynx::EffectKind::apexLimiter })
+    {
+        int errors = -1;
+        const auto t = lynx::parseSubstituteTable (std::string ("[k]\nnames = X\nlynx = ") + lynx::effectInfo (kind).name + "\n", &errors);
+        CHECK (errors == 0 && t.size() == 1 && t[0].effect == kind);
+    }
 }

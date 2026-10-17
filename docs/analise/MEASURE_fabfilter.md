@@ -575,7 +575,8 @@ ceiling. Release to within 1 dB after an 8 dB, 1 s burst (release 150 ms): Clean
 Safe 1.63 s.
 
 Both are in the mixer's effect list right after the existing EQ / limiter, saved as `facetEq` / `apexLimiter` in
-`.lynx` projects. They were not registered in the subst98 substitution mapping (that round has not landed).
+`.lynx` projects. Plugin substitutes (round 98): a missing FabFilter Pro-Q now opens as Facet EQ and Pro-L as Apex Limiter (default
+settings; their states are not translated).
 
 ## 11. Where I stopped / next steps
 
