@@ -1724,3 +1724,4 @@ countries: br
 "Record into the audio editor..." = "Gravar no editor de áudio..."
 "Audio editor..." = "Editor de áudio..."
 "Audio editor (record this insert)..." = "Editor de áudio (gravar este insert)..."
+"Press Record to capture {0}" = "Aperte Gravar para capturar {0}"

@@ -1794,7 +1794,11 @@ private:
     }
 
 public:
-    void setRecordSource (int s) { recordSource = s; }
+    void setRecordSource (int s)
+    {
+        recordSource = s;
+        setStatus (tr ("Press Record to capture {0}", { sourceName (s) }), false);
+    }
 
 private:
     // --- output ---------------------------------------------------------------------------------------------

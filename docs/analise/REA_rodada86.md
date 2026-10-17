@@ -70,8 +70,63 @@ wave view), a horizontal time scroller, a vertical level scroller and a global b
 
 ## 4. What LYNX implements (round 86)
 
-See §5 (filled in as the work lands).
+Core (`src/core/AudioEdit.{h,cpp}`, JUCE-free, tests `tests/AudioEditTests.inc`): a `Document` (audio 1-2 channels,
+markers/regions, loop, title) and every edit as a function on a frame range, keeping markers, regions and the loop
+attached to the audio (deleting drops markers inside and clips regions; inserting/stretching shifts or scales them):
+
+| Edison | LYNX | Notes |
+|---|---|---|
+| Cut / Copy / Paste insert / replace / mix | `cut`, `copy`, `insert`, `pasteReplace`, `pasteMix` | pasted audio is converted to the document's channels and rate (`conform`) |
+| Clear / Delete / Trim / Insert silence / Delete part after loop | `clear`, `erase`, `trim`, `insertSilence`, `deleteAfterLoop` | |
+| Fade in / out (curve) | `fadeIn`, `fadeOut` with `Curve` linear / smooth (S) / slow start / fast start | LYNX's own curve set |
+| Declick in / out | `declickIn`, `declickOut` | 4 ms smooth fade |
+| Normalize | `normalize (targetDb)` | peak normalisation |
+| Amp | `amp (gain, pan)` | far side unity, near side linear (LYNX's own law) |
+| Reverse / Reverse polarity / Center | `reverse`, `invert`, `removeDc` | markers inside a reversed range are mirrored |
+| Time stretch / pitch shift (Resample method) | `changeSpeed` | windowed-sinc (Blackman, 16 zero crossings, band-limited when shortening) |
+| Time stretch / pitch shift (stretch methods) | `timeStretch`, `pitchShift` | LYNX's WSOLA (`core/TimeStretch`) — FL's élastique is not available; pitch = stretch + resample back |
+| Sample properties › sample rate + Resample | `resample (rate)` | same duration and pitch, markers scaled |
+| Channels: swap / left→mono / right→mono / mono | `swapChannels`, `toMono`, `toStereo` | |
+| Regions: add marker / region / set loop / delete | `addMarker`, `addRegion`, `setLoop`, `removeMarkers` | |
+| Snap to zero-crossing | `nearestZeroCrossing` | |
+| Auto-slice (dull / medium / sharp) | `detectOnsets (sensitivity)` | own energy-flux detector; grid slicing in the UI |
+| Undo / undo history | `History` (whole states, labels, memory bound) | |
+| Spectrum view | `spectrogram` | own radix-2 FFT, Hann window, 0 dBFS = full-scale sine |
+| Save (WAV) with regions/loop | `encodeWav` / `decodeWav` / `decodeWavMarkers` | 16/24-bit int, 32-bit float; `cue ` + `LIST/adtl` (`labl`, `ltxt`) + `smpl` |
+
+Recording (`src/core/AudioCapture.h`): a lock-free ring the audio thread fills from one source — the sound card
+input (`AudioEngine` device callback), the Master or a mixer insert (`RackRenderer`, after the fader; a silent insert
+pushes silence so the timing holds). `MeterBank::capture` holds it; nothing is pushed while no source is chosen.
+Start modes as Edison's: immediately, when the input is heard (−40 dBFS), when the song plays (stops with it).
+
+Window (`src/ui/AudioEditor.{h,cpp}`, a resizable tool window, one per source):
+
+- Toolbar: menu (File / Edit / Tools / Regions / View / Record), undo, redo, undo history, record + "what and when
+  to record", play/stop (Space; the selection, the loop or from the cursor), loop, waveform/spectrogram (S), snap to
+  zero crossings, zoom out full, save, Send (Playlist audio clip / new Sampler channel / replace the source channel's
+  sample).
+- Quick tools row: Cut, Copy, Paste, Delete, Trim, Silence, Fade in, Fade out + curve, Normalize, Amp…, Reverse,
+  Invert, Center, Stretch…, Resample…, Marker, Region, Set loop. Tool windows (Amp, Time stretch / pitch shift,
+  Resample, Insert silence, Normalize to) have Preview / Accept / Cancel like Edison's tool forms.
+- View: ruler (time format auto / m:s / samples / bar:beat:tick) with marker flags, region bands and the loop bar
+  (drag markers and loop ends), level scale (L/R, −6 dB guides), the waveform in the clean clip style (one filled
+  min/max shape in a light tint of the audio colour; exact samples when zoomed in, a line and dots past one sample
+  per pixel), or a spectrogram (log or linear frequency, 256…4096 bands, LYNX's own colour map: canvas → deep red
+  → accent red → amber → white); overview strip; info bar (rate, channels, length, selection, peak, status).
+- Mouse/keys: drag selects (Shift extends), double-click selects the region or the stretch between markers, Ctrl+wheel
+  zooms, wheel scrolls; Ctrl+Z/Y/X/C/V/A/S, Del, Esc, Home/End, R, L, S, M, F, +/−. Audio files can be dropped in.
+- Opens from: Playlist audio clip menu ("Edit in the audio editor"), Channel Rack sampler menu ("Edit the sample in
+  the audio editor"), Browser file menu, mixer slot / add-slot menu ("Audio editor (record this insert)"), Edit menu
+  ("Audio editor…") and the record menu ("Record into the audio editor…").
+- Output: edited audio is written as a new WAV in `Music\LYNX\Edits` (a new name each time, so no cache shows stale
+  audio) before it goes to the project; Save as WAV writes where the user chooses (16/24/32f) and tells the sample
+  library to forget the old decode.
+
+Not done (Edison features left out): envelope (amp/scratch envelope tools), spectral tools (blur, EQ, convolution
+reverb, denoise, match spectrum, vocal denoise, deverb), noise gating, drum(loop) stretch, claw machine, loop tuner,
+beat/pitch detection, trigger-note assignment, scripting, dual view, drag-out of a selection, MP3/OGG export,
+"slave playback to host" (the editor plays through the preview output), unsaved-changes prompt on close.
 
 ## Where I stopped / next steps
 
-- (in progress)
+- (in progress) Windows build, snapshots and LOOK.
