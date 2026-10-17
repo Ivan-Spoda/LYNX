@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 
+#include "core/MissingFiles.h"
 #include "core/Song.h"
 #include "flp/Flp.h"
 
@@ -31,6 +32,8 @@ struct FlpImportReport
     std::map<std::string, int> droppedEffects; // effects with no equivalent (removed from the mixer)
     int missingSamples = 0;
     int relocatedSamples = 0; // found on this PC at another place than the project saved (core/FlPluginDb.h)
+    std::vector<MissingFile> missingFiles; // the samples not found, with the channels/effects that use them (core/MissingFiles.h)
+    std::vector<std::pair<std::string, std::string>> relocatedFiles; // saved path → the copy found elsewhere on this PC
 };
 
 struct FlpImportOptions
@@ -46,6 +49,9 @@ struct FlpImportOptions
     std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
 
     FlpImportReport* report = nullptr; // optional
+
+    // Samples the user located (the "Missing files" window): saved path (FL's variables resolved) → file to use instead.
+    std::map<std::string, std::string> relocations;
 
     bool threeOscAsSynth = false; // 3x Osc → the built-in synth conversion instead of FL's engine (the synth's preset menu)
 };

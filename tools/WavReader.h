@@ -64,6 +64,7 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
     std::uint32_t rate = 0;
     const std::uint8_t* data = nullptr;
     std::size_t dataSize = 0;
+    std::int64_t loopStart = -1, loopEnd = -1;
 
     for (std::size_t pos = 12; pos + 8 <= d.size();)
     {
@@ -79,6 +80,11 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
 
             if (format == 0xFFFE && size >= 26) // WAVE_FORMAT_EXTENSIBLE: subformat in the first 2 bytes of the GUID
                 format = u16 (body + 24);
+        }
+        else if (std::memcmp (&d[pos], "smpl", 4) == 0 && size >= 60 && body + 60 <= d.size() && u32 (body + 28) > 0)
+        {
+            loopStart = u32 (body + 44); // first loop: start and end frames (end inclusive)
+            loopEnd = (std::int64_t) u32 (body + 48) + 1;
         }
         else if (std::memcmp (&d[pos], "data", 4) == 0)
         {
@@ -96,6 +102,8 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
     const auto frames = dataSize / (bytesPerSample * channels);
     auto sample = std::make_shared<SampleData>();
     sample->sampleRate = rate;
+    if (loopStart >= 0 && loopEnd > loopStart && loopEnd <= (std::int64_t) frames)
+        sample->loopStart = loopStart, sample->loopEnd = loopEnd;
     sample->left.resize (frames);
 
     if (channels > 1)

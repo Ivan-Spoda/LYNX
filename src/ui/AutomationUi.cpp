@@ -7,6 +7,7 @@
 #include "engine/Text.h"
 #include "core/EditorGestures.h"
 #include "ui/EditorTools.h"
+#include "ui/EventEditor.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -703,6 +704,8 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
     menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
+    if (target.kind != AutomationTargetKind::tempo)
+        menu.addItem (tr ("Edit events in the pattern"), [&engine, target] { openEventEditor (engine, target); });
     menu.addItem (tr ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
     });

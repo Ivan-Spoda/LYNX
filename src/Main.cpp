@@ -22,7 +22,13 @@
 #include "ui/SetupWizard.h"
 #include "engine/FlStudio.h"
 #include "ui/HistoryPanel.h"
+#include "ui/MissingFilesDialog.h"
+#include "ui/SettingsDialog.h"
+#include "ui/PluginManager.h"
+#include "ui/ShortcutManager.h"
 #include "ui/NoteToolDialogs.h"
+#include "ui/EventEditor.h"
+#include "core/EventEdit.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
@@ -1308,6 +1314,9 @@ private:
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-custom-1600.png");
                 }
                 ui.setToolbarLayoutForSnapshot (lynx::toolbarlayout::Layout::makeDefault());
+                // quick tips: the toolbar and title bars with a few name bubbles, and every tip on one sheet
+                offline.dispatchPendingMessages();
+                saveQuickTips (ui, prefix);
                 ui.setBounds (size);
                 offline.dispatchPendingMessages();
             }
@@ -1418,6 +1427,24 @@ private:
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
+            saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 2), "-missing-found.png");
+            {
+                // the Settings pages, with credits like a project imported from FL would carry
+                offline.editSong ([] (lynx::Song& s) {
+                    s.info = { "Night Drive", "LYNX demo", "Synthwave", "https://lynx-share.com",
+                               "Made with LYNX.\nDrums and bass from the Channel Rack, pads from the Browser.", false };
+                }, false);
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::project), "-settings-project.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::info), "-settings-info.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::files), "-settings-files.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::general), "-settings-general.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::audio), "-settings-audio.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::midi), "-settings-midi.png");
+                saveWindow (lynx::makePluginManagerPanel (offline, false), "-plugin-manager.png");
+                saveWindow (lynx::makeShortcutManagerPanel (false), "-shortcuts.png");
+            }
 
             if (! offline.getSong().automations.empty())
             {
@@ -1490,9 +1517,32 @@ private:
                                                                          { lynx::NoteTool::flip, "-tool-flip.png" },
                                                                          { lynx::NoteTool::randomise, "-tool-randomise.png" },
                                                                          { lynx::NoteTool::scaleLevels, "-tool-scalelevels.png" },
-                                                                         { lynx::NoteTool::limit, "-tool-limit.png" } };
+                                                                         { lynx::NoteTool::limit, "-tool-limit.png" },
+                                                                         { lynx::NoteTool::quantize, "-tool-quantize.png" },
+                                                                         { lynx::NoteTool::chop, "-tool-chop.png" },
+                                                                         { lynx::NoteTool::flam, "-tool-flam.png" },
+                                                                         { lynx::NoteTool::lfo, "-tool-lfo.png" },
+                                                                         { lynx::NoteTool::claw, "-tool-claw.png" },
+                                                                         { lynx::NoteTool::articulate, "-tool-articulate.png" },
+                                                                         { lynx::NoteTool::riffMachine, "-tool-riff.png" },
+                                                                         { lynx::NoteTool::chordProgression, "-tool-chords.png" } };
                 for (const auto& [tool, name] : tools)
                     saveWindow (lynx::makeNoteToolPanel (offline, tool, roll.noteIndicesForSnapshot(), roll.gridForSnapshot()), name);
+            }
+
+            // round 83: the event editor, with sample events on the selected channel's volume (removed afterwards)
+            {
+                const lynx::AutomationTarget volume { lynx::AutomationTargetKind::channelVolume, offline.getSelectedChannel() };
+                const auto before = offline.getSong().patterns[(std::size_t) offline.getSong().currentPattern].events;
+                offline.editSong ([&] (lynx::Song& s) {
+                    auto& lane = lynx::eventedit::laneFor (s.patterns[(std::size_t) s.currentPattern], volume);
+                    lynx::eventedit::line (lane, 0, lynx::ppq * 2, 0.2f, 0.9f, lynx::ticksPerStep);
+                    lynx::prtools::LfoOptions lfo;
+                    lfo.startSpeed = 7 * 4096; // one beat
+                    lynx::eventedit::applyLfo (lane, lynx::ppq * 2, lynx::ppq * 4, lfo, lynx::ticksPerStep);
+                }, false);
+                saveWindow (lynx::makeEventEditor (offline, volume), "-eventeditor.png");
+                offline.editSong ([&] (lynx::Song& s) { s.patterns[(std::size_t) s.currentPattern].events = before; }, false);
             }
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
@@ -1624,10 +1674,141 @@ private:
                     lynx::ui::WaveformCache::stereo = true;
                     saveSnapshot (ui, prefix + "-playlist-audio-stereo.png");
                     lynx::ui::WaveformCache::stereo = false;
-                    lynx::ui::WaveformCache::spectral = false;
-                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
-                    saveSnapshot (ui, prefix + "-playlist-audio-classic.png");
                     lynx::ui::WaveformCache::spectral = true;
+                    playlist.setViewForSnapshot (180.0, 0, std::max (0, firstTrack - 3));
+                    saveSnapshot (ui, prefix + "-playlist-audio-spectral.png");
+                    lynx::ui::WaveformCache::spectral = false;
+                    playlist.setViewForSnapshot (40.0, 0, 0);
+                    saveSnapshot (ui, prefix + "-playlist-audio-far.png");
+
+                    // LYNX_SNAPSHOT_AUDIO=a.wav;b.wav...: real audio as clips (default-height tracks, one tall,
+                    // a fade, a reversed copy), at three zoom levels
+                    if (const auto files = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_AUDIO", {}), ";", "");
+                        ! files.isEmpty())
+                    {
+                        const auto realTrack = firstTrack + 2;
+                        std::vector<juce::String> paths;
+                        for (const auto& f : files)
+                            if (juce::File (f.trim()).existsAsFile())
+                                paths.push_back (f.trim());
+
+                        offline.editSong ([&] (lynx::Song& s) {
+                            const auto bar = (std::int64_t) lynx::ppq * std::max (1, s.beatsPerBar);
+                            const std::uint32_t colours[] = { 0, 0xffd9a441, 0xff6fb36a, 0xffb06fd0, 0xff5fb7c9, 0xffd06f6f };
+                            for (std::size_t i = 0; i < paths.size(); ++i)
+                            {
+                                lynx::ChannelDef audio;
+                                audio.name = juce::File (paths[i]).getFileNameWithoutExtension().toStdString();
+                                audio.instrument = lynx::InstrumentKind::audioClip;
+                                audio.samplePath = paths[i].toStdString();
+                                audio.colour = colours[i % 6];
+                                audio.sampler.stretchBeats = i % 2 == 0 ? 16.0f : 0.0f; // fitted to 4 bars, or as recorded
+                                audio.sampler.keepPitch = true;
+                                s.channels.push_back (audio);
+                                lynx::Clip clip;
+                                clip.kind = lynx::ClipKind::audio;
+                                clip.channel = (int) s.channels.size() - 1;
+                                clip.track = realTrack + (int) i;
+                                clip.length = 4 * bar;
+                                clip.fadeIn = i == 1 ? bar / 2 : 0;
+                                s.playlist.push_back (clip);
+                                clip.start = 4 * bar;
+                                clip.fadeIn = 0;
+                                clip.fadeOut = i == 0 ? bar : 0;
+                                s.playlist.push_back (clip);
+                            }
+                            if ((int) s.playlistTracks.size() < realTrack + (int) paths.size())
+                                s.playlistTracks.resize ((std::size_t) realTrack + paths.size());
+                            if (! paths.empty())
+                                s.playlistTracks[(std::size_t) realTrack].height = 90;
+                        });
+                        offline.dispatchPendingMessages();
+                        for (const auto& path2 : paths)
+                            cache.find (path2, [&offline, path2] { return offline.getSampleLibrary().load (path2); });
+                        cache.waitUntilIdle (60000);
+                        playlist.setViewForSnapshot (160.0, 0, std::max (0, realTrack - 4));
+                        saveSnapshot (ui, prefix + "-playlist-real.png");
+                        playlist.setViewForSnapshot (700.0, 0, std::max (0, realTrack - 1));
+                        saveSnapshot (ui, prefix + "-playlist-real-zoom.png");
+                        playlist.setViewForSnapshot (2400.0, 0, std::max (0, realTrack - 1));
+                        saveSnapshot (ui, prefix + "-playlist-real-close.png");
+                        playlist.setViewForSnapshot (50.0, 0, std::max (0, realTrack - 4));
+                        saveSnapshot (ui, prefix + "-playlist-real-far.png");
+                        // the clip menu of the first real clip
+                        if (const auto menu = playlist.getClipMenuForSnapshot ((int) offline.getSong().playlist.size() - (int) paths.size() * 2); menu.getNumItems() > 0)
+                            saveMenus (juce::StringArray { "Audio clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-audio.png");
+                        if (const auto menu = playlist.getClipMenuForSnapshot (0); menu.getNumItems() > 0)
+                            saveMenus (juce::StringArray { "Pattern clip" }, std::vector<juce::PopupMenu> { menu }, prefix + "-clip-menu-pattern.png");
+
+                        // the clip menu's actions, run through the menu itself; results in -clip-actions.txt
+                        {
+                            juce::StringArray log;
+                            auto clipOf = [&offline] (const std::string& channelName, int nth) {
+                                const auto& sg = offline.getSong();
+                                for (int i = 0; i < (int) sg.playlist.size(); ++i)
+                                {
+                                    const auto& c = sg.playlist[(std::size_t) i];
+                                    if (c.kind == lynx::ClipKind::audio && c.channel >= 0 && sg.channels[(std::size_t) c.channel].name == channelName && nth-- == 0)
+                                        return i;
+                                }
+                                return -1;
+                            };
+                            std::function<bool (const juce::PopupMenu&, const juce::String&)> run = [&run] (const juce::PopupMenu& m, const juce::String& text) {
+                                for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+                                {
+                                    auto& item = it.getItem();
+                                    if (item.subMenu != nullptr && run (*item.subMenu, text))
+                                        return true;
+                                    if (item.text.startsWith (text) && item.isEnabled && item.action)
+                                    {
+                                        item.action();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            auto act = [&] (const std::string& name, int nth, const juce::String& text) {
+                                const auto clip = clipOf (name, nth);
+                                const auto ok = clip >= 0 && run (playlist.getClipMenuForSnapshot (clip), text);
+                                offline.dispatchPendingMessages();
+                                return ok;
+                            };
+                            auto channelOf = [&] (const std::string& name) -> const lynx::ChannelDef* {
+                                for (const auto& c : offline.getSong().channels)
+                                    if (c.name == name)
+                                        return &c;
+                                return nullptr;
+                            };
+                            auto check = [&log] (const juce::String& what, bool ok) { log.add ((ok ? "OK    " : "FAIL  ") + what); };
+                            const auto names = [&] { std::vector<std::string> n; for (auto& p2 : paths) n.push_back (juce::File (p2).getFileNameWithoutExtension().toStdString()); return n; }();
+                            if (names.size() >= 4)
+                            {
+                                const auto channelsBefore = offline.getSong().channels.size();
+                                check ("Reverse", act (names[2], 0, lynx::tr ("Reverse")) && channelOf (names[2])->sampler.reverse);
+                                offline.undo();
+                                offline.dispatchPendingMessages();
+                                check ("Reverse undone", ! channelOf (names[2])->sampler.reverse);
+                                act (names[2], 0, lynx::tr ("Reverse"));
+                                check ("Make unique", act (names[3], 1, lynx::tr ("Make unique")) && offline.getSong().channels.size() == channelsBefore + 1
+                                                          && channelOf (names[3] + " #2") != nullptr);
+                                check ("Fit to tempo, resample", act (names[1], 0, lynx::tr ("Fit to tempo, resample ({0})", { juce::String() }).upToFirstOccurrenceOf ("(", false, false))
+                                                                     && channelOf (names[1])->sampler.stretchBeats > 0.0f && ! channelOf (names[1])->sampler.keepPitch);
+                                const auto gainBefore = offline.getSong().playlist[(std::size_t) clipOf (names[0], 1)].gain;
+                                check ("Normalize", act (names[0], 1, lynx::tr ("Normalize"))
+                                                        && offline.getSong().playlist[(std::size_t) clipOf (names[0], 1)].gain != gainBefore);
+                                const auto clipsBefore = offline.getSong().playlist.size();
+                                check ("Split here", act (names[3], 0, lynx::tr ("Split here")) && offline.getSong().playlist.size() == clipsBefore + 1);
+                                check ("Mute", act (names[0], 0, lynx::tr ("Mute")) && offline.getSong().playlist[(std::size_t) clipOf (names[0], 0)].muted);
+                                check ("Copy + Paste here", act (names[0], 0, lynx::tr ("Copy")) && act (names[0], 1, lynx::tr ("Paste here"))
+                                                                && offline.getSong().playlist.size() == clipsBefore + 2);
+                                check ("Delete", act (names[0], 2, lynx::tr ("Delete")) && offline.getSong().playlist.size() == clipsBefore + 1);
+                                check ("Chop to grid", act (names[3], 0, lynx::tr ("Chop to grid")) && offline.getSong().playlist.size() > clipsBefore + 1);
+                            }
+                            playlist.setViewForSnapshot (160.0, 0, std::max (0, realTrack - 4));
+                            saveSnapshot (ui, prefix + "-playlist-real-actions.png");
+                            juce::File (prefix + "-clip-actions.txt").replaceWithText (log.joinIntoString ("\n") + "\n");
+                        }
+                    }
                 }
 
                 saveWindow (lynx::makeChannelSettingsPanel (offline, samplerChannel), "-sampler-wave.png");
@@ -1897,6 +2078,68 @@ private:
         juce::PNGImageFormat png;
         if (auto out = file.createOutputStream())
             png.writeImageToStream (c.createComponentSnapshot (area), *out);
+    }
+
+    static void savePng (const juce::Image& image, const juce::String& path)
+    {
+        const juce::File file (path);
+        file.deleteFile();
+        juce::PNGImageFormat png;
+        if (auto out = file.createOutputStream())
+            png.writeImageToStream (image, *out);
+    }
+
+    // -toolbar-tips.png: the top of the window with the bubbles of a few controls as they appear under the
+    // mouse; -tips-sheet.png: every quick tip of the window, to check names, shortcuts and translations
+    static void saveQuickTips (lynx::MainComponent& ui, const juce::String& prefix)
+    {
+        const auto tips = ui.getQuickTipsForSnapshot();
+        const auto top = juce::Rectangle<int> (0, 0, ui.getWidth(), juce::jmin (ui.getHeight(), ui.getToolbarBoundsForSnapshot().getHeight() + 72));
+        auto image = ui.createComponentSnapshot (top);
+        {
+            juce::Graphics g (image);
+            const juce::String shown[] = { lynx::tr ("Pattern mode"), lynx::tr ("Play"), lynx::tr ("Metronome"), lynx::tr ("Mixer"), lynx::tr ("Save project"),
+                                           lynx::tr ("Window options"), lynx::tr ("Close") };
+            std::vector<juce::Rectangle<int>> used;
+            for (const auto& [area, tip] : tips)
+            {
+                const auto name = tip.upToFirstOccurrenceOf ("\t", false, false);
+                if (std::find (std::begin (shown), std::end (shown), name) == std::end (shown))
+                    continue;
+                const auto bubble = lynx::ui::quickTipBounds (tip, area, top);
+                if (std::any_of (used.begin(), used.end(), [&] (const auto& r) { return r.intersects (bubble); }))
+                    continue;
+                used.push_back (bubble);
+                g.setColour (juce::Colours::white.withAlpha (0.075f)); // the hovered control
+                g.fillRoundedRectangle (area.toFloat().reduced (0.5f), lynx::theme::radius::md);
+                lynx::ui::paintQuickTip (g, bubble.toFloat(), tip);
+            }
+        }
+        savePng (image, prefix + "-toolbar-tips.png");
+
+        // the sheet: bubbles in rows
+        const int width = 900;
+        int x = 12, y = 12;
+        std::vector<std::pair<juce::Rectangle<int>, juce::String>> placed;
+        for (const auto& [area, tip] : tips)
+        {
+            auto r = lynx::ui::quickTipSize (tip);
+            if (x + r.getWidth() > width - 12)
+            {
+                x = 12;
+                y += r.getHeight() + 10;
+            }
+            placed.emplace_back (r.withPosition (x, y), tip);
+            x += r.getWidth() + 10;
+        }
+        juce::Image sheet (juce::Image::ARGB, width, y + 20 + 12, true);
+        {
+            juce::Graphics g (sheet);
+            g.fillAll (lynx::theme::colour::bg3);
+            for (const auto& [r, tip] : placed)
+                lynx::ui::paintQuickTip (g, r.toFloat(), tip);
+        }
+        savePng (sheet, prefix + "-tips-sheet.png");
     }
 
     static void saveSnapshot (juce::Component& c, const juce::String& path)

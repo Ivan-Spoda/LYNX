@@ -217,7 +217,7 @@ private:
         for (const auto& f : folderList)
             paths.add (juce::File (f));
         engine.getPluginHost().setPluginFolders (paths);
-        scanAtStartFile().replaceWithText (scanAtStart.getToggleState() ? "1" : "0");
+        setBackgroundScanAtStart (scanAtStart.getToggleState());
     }
 
     void finishSetup()
@@ -324,5 +324,10 @@ void markSetupWizardDone()
 bool backgroundScanAtStart()
 {
     return scanAtStartFile().loadFileAsString().trim() != "0";
+}
+
+void setBackgroundScanAtStart (bool on)
+{
+    scanAtStartFile().replaceWithText (on ? "1" : "0");
 }
 } // namespace lynx

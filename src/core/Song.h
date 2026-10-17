@@ -158,6 +158,13 @@ struct SamplerSettings
     // by the project's PPQ. When present it replaces attack/decay/sustain/release (delay, hold, tensions, FL's tick
     // stepping); editing the ADSR by hand clears it.
     std::vector<std::int32_t> flVolumeEnvelope;
+    // FL's native sampler channel as the project stored it (REA_rodada76): the five 0xDA articulator records (pan,
+    // volume, cutoff, resonance, pitch; 17 values each), Mod X, Mod Y and the filter type (0xDB), then the project's
+    // PPQ, the project's pan law (FLP event 0x17; 2 = triangular) — 90 values (89: circular). When present the sampler runs FL's voice: the velocity and pan laws with the channel's volume and
+    // pan inside the voice, the articulators stepped on the song's tick grid with FL's gain ramps, and the channel filter
+    // (core/FlVoiceProcessor.h); ADSR, cutoff/resonance/type, the modulation envelopes and LFOs above are then unused.
+    // Editing the envelope or the filter by hand clears it.
+    std::vector<std::int32_t> flChannel;
 
     bool operator== (const SamplerSettings&) const = default;
 };
@@ -452,27 +459,6 @@ struct Note
 // is odd move, with triangular weight by distance to the grid; half a step at swing 1.
 std::int64_t swingDelay (std::int64_t start, float swing, float channelMix = 1.0f) noexcept;
 
-struct Pattern
-{
-    std::string name;
-    std::vector<Note> notes;  // sorted by start (kept by sortNotes)
-    std::int64_t lengthTicks = 0; // 0 = automatic (rounds up to bars)
-    std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automatic (by index)
-
-    void sortNotes();
-    std::int64_t effectiveLength (int beatsPerBar) const noexcept;
-
-    bool hasStep (int channel, int step) const noexcept;
-    void toggleStep (int channel, int step);
-};
-
-enum class ClipKind : std::uint8_t
-{
-    pattern,
-    audio,
-    automation
-};
-
 // What an automation clip controls. Values always 0..1 (like the model's knobs).
 enum class AutomationTargetKind : std::uint8_t
 {
@@ -503,6 +489,46 @@ struct AutomationTarget
         return kind == o.kind && index == o.index && slot == o.slot && param == o.param;
     }
 };
+
+// Event editor (round 83): a pattern's own parameter events, like FL's pattern events (.flp 0xDF). Each event
+// holds its value (0..1, like automation) until the next one; while the pattern plays they drive the target.
+struct PatternEvent
+{
+    std::int64_t tick = 0; // from the start of the pattern
+    float value = 0.5f;    // 0..1
+};
+
+struct PatternEvents
+{
+    AutomationTarget target;
+    std::vector<PatternEvent> events; // sorted by tick, one per tick
+
+    // Value at `tick` (held from the previous event; before the first = the first value).
+    float valueAt (double tick) const noexcept;
+};
+
+struct Pattern
+{
+    std::string name;
+    std::vector<Note> notes;  // sorted by start (kept by sortNotes)
+    std::int64_t lengthTicks = 0; // 0 = automatic (rounds up to bars)
+    std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automatic (by index)
+    std::vector<PatternEvents> events; // event editor lanes (one per target)
+
+    void sortNotes();
+    std::int64_t effectiveLength (int beatsPerBar) const noexcept;
+
+    bool hasStep (int channel, int step) const noexcept;
+    void toggleStep (int channel, int step);
+};
+
+enum class ClipKind : std::uint8_t
+{
+    pattern,
+    audio,
+    automation
+};
+
 
 struct AutomationPoint
 {
@@ -606,12 +632,23 @@ struct Arrangement
     std::vector<Marker> markers;           // sorted by tick (stay here even for the current arrangement)
 };
 
+// The project's credits (FL's Settings › Info page): shown and edited in Settings › Info, kept in .lynx, imported from .flp.
+struct ProjectInfo
+{
+    std::string title, author, genre, url, comments;
+    bool showOnOpen = false; // open Settings › Info when the project is opened
+
+    bool empty() const noexcept { return title.empty() && author.empty() && genre.empty() && url.empty() && comments.empty() && ! showOnOpen; }
+    bool operator== (const ProjectInfo&) const = default;
+};
+
 struct Song
 {
     double bpm = 130.0;
     int beatsPerBar = 4;
     float swing = 0.0f; // 0..1: delays off-beat sixteenth notes (like the swing of FL's Channel Rack)
     float masterPitch = 0.0f; // cents, -1200..1200: shifts every note of the built-in instruments (the toolbar's master pitch)
+    ProjectInfo info;
     std::vector<ChannelDef> channels;
     std::vector<Pattern> patterns;
     int currentPattern = 0;
@@ -635,6 +672,9 @@ struct Song
             fn (a.target);
         for (auto& l : midiLinks)
             fn (l.target);
+        for (auto& p : patterns)
+            for (auto& lane : p.events)
+                fn (lane.target);
     }
     void removeDeadMidiLinks();
 

@@ -56,6 +56,8 @@ struct SampleData
 {
     std::vector<float> left, right; // empty right = mono
     double sampleRate = 44100.0;
+    // the file's own loop (WAV smpl chunk, first loop): frames [loopStart, loopEnd), −1 = none
+    std::int64_t loopStart = -1, loopEnd = -1;
 
     const float* mappedLeft = nullptr;
     const float* mappedRight = nullptr; // nullptr = mono

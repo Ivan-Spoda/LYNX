@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LYNX VERSION 0.1.4 LANGUAGES C CXX)
+project(LYNX VERSION 0.1.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,8 @@ add_library(lynx_core STATIC
     src/core/Templates.cpp
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
+    src/core/MissingFiles.cpp
+    src/core/Preferences.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -109,6 +111,8 @@ target_sources(lynx_core PRIVATE
 # workflow P2 (note tools, mixer operations, history labels, browser search)
 target_sources(lynx_core PRIVATE
     src/core/NoteTools.cpp
+    src/core/PianoRollTools.cpp
+    src/core/EventEdit.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/SearchQuery.cpp)
@@ -221,8 +225,14 @@ if(LYNX_BUILD_APP)
     # workflow P2: note tool dialogs, tool windows, undo history, quick-add palette
     target_sources(LYNX PRIVATE
         src/ui/NoteToolDialogs.cpp
+        src/ui/EventEditor.cpp
         src/ui/ToolWindow.cpp
         src/ui/HistoryPanel.cpp
+        src/ui/MissingFilesDialog.cpp
+        src/ui/SettingsDialog.cpp
+        src/ui/SettingsPages.cpp
+        src/ui/PluginManager.cpp
+        src/ui/ShortcutManager.cpp
         src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)

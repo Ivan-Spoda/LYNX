@@ -2,6 +2,7 @@
 // Usage: renderwav project.flp output.wav [pattern-index] [loops]
 // Without an index, picks the pattern with the most notes.
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +71,9 @@ int main (int argc, char** argv)
                                                        : "/mnt/c/Program Files/Image-Line/FL Studio 2026";
     auto toLocal = [] (std::string p) {
         std::replace (p.begin(), p.end(), '\\', '/');
+        // absolute Windows paths ("C:/...") → the WSL mount ("/mnt/c/...")
+        if (p.size() > 2 && p[1] == ':' && p[2] == '/' && std::isalpha ((unsigned char) p[0]))
+            p = "/mnt/" + std::string (1, (char) std::tolower ((unsigned char) p[0])) + p.substr (2);
         return p;
     };
 

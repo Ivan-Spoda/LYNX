@@ -73,6 +73,8 @@ public:
         hintBar.setHint (hint, live);
     }
     juce::Rectangle<int> getToolbarBoundsForSnapshot() const { return { 0, 0, getWidth(), toolbarHeight }; }
+    // every visible control with a quick tip (toolbar and panel title bars), in this component's coordinates
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> getQuickTipsForSnapshot();
     // --snapshot: a toolbar layout (icon size, hidden/reordered groups) without saving it
     void setToolbarLayoutForSnapshot (const toolbarlayout::Layout& layout) { setToolbarLayout (layout, false); }
     juce::PopupMenu getToolbarMenuForSnapshot() { return makeToolbarMenu(); }
@@ -103,6 +105,12 @@ private:
     void showImportReport();
     void importFlp (const juce::File& file);
     void openLynxProject (const juce::File& file);
+    // The "Missing files" window (ui/MissingFilesDialog.h) for the current project; `afterOpening`: shown by opening a
+    // project (only when something is missing; the FL import report follows it), else from the menu (always).
+    void showMissingFiles (bool afterOpening);
+    void openSettings (int page); // ui/SettingsDialog.h SettingsPage: 0 Project, 1 Info, 2 Files, 3 General, 4 Audio, 5 MIDI
+    void showPluginManager();
+    void showShortcutManager();
     int scansSeen = 0; // background plugin scans already announced in the hint bar
     void showHelp();
 
@@ -117,7 +125,6 @@ private:
     bool runAction (const std::string& id);
     keys::Context focusContext() const;
     void loadKeyMap();
-    void editKeyMap();
     keys::KeyMap keyMap;
     bool typingPiano = false; // off by default so single-letter editor tools work (the manual does not state a default)
     void setTypingPiano (bool on);
@@ -173,7 +180,7 @@ private:
     // toolbar, or Options > Toolbar; core/ToolbarLayout.h). Row height follows the icon size.
     toolbarlayout::Layout toolbarLayout = toolbarlayout::Layout::makeDefault();
     int rowHeight = toolbarlayout::rowHeight (toolbarlayout::IconSize::medium);
-    int toolbarHeight = 2 * rowHeight + 10;
+    int toolbarHeight = 2 * rowHeight + 8;
     void setToolbarLayout (const toolbarlayout::Layout& layout, bool save = true);
     juce::PopupMenu makeToolbarMenu();
     void showToolbarMenu();
@@ -187,6 +194,7 @@ private:
     void updateTitle();
     void autosave();
     int autosaveTicks = 0;
+    int autosaveMinutes = 2, autosaveKeep = 10; // Settings › General › Backup
     bool lastModified = false;
     void openPianoRoll();
     void toggleMode();
@@ -251,7 +259,9 @@ private:
     IconButton pluginPickerButton { "pluginPicker", Icon::pluginPicker };
     GlobalGridBox gridBox; // global grid of the editors (see ui/EditorTools.h)
     std::vector<int> dividers; // x positions of the toolbar panel separators
-    juce::Rectangle<int> snapLabelArea, patternLabelArea, titleArea;
+    juce::Rectangle<int> snapLabelArea, patternLabelArea, titleArea, transportArea;
+    std::unique_ptr<ui::QuickTipWindow> quickTips; // the tool names under the mouse (ui/HintBar.h)
+    void setQuickTips();
     void showLanguageChoice (const juce::String& id);
 
     // the time display with the song position slider under it, master volume and pitch, meters
@@ -281,9 +291,10 @@ private:
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;
+    juce::File importedFlpFile; // the .flp the current project was imported from (until another project is opened)
     juce::String importedSuffix; // " (imported from FL Studio)" in the title until saved as .lynx
     juce::String projectName; // suggested name for export (also from an imported .flp)
-    std::map<int, std::vector<int>> heldKeys; // PC keyboard keys playing notes (keyCode -> channels)
+    HeldNotes heldKeys; // notes the typing piano is playing (tag: the key code)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

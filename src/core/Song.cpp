@@ -1,6 +1,7 @@
 #include "core/Song.h"
 
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -680,6 +681,16 @@ float Automation::mapLive (float v) const noexcept
     const auto i = std::min ((std::size_t) x, curve.size() - 2);
     const auto f = x - (float) i;
     return std::clamp (curve[i] + (curve[i + 1] - curve[i]) * f, 0.0f, 1.0f);
+}
+
+float PatternEvents::valueAt (double tick) const noexcept
+{
+    if (events.empty())
+        return 0.5f;
+
+    // the last event at or before `tick`
+    auto it = std::upper_bound (events.begin(), events.end(), tick, [] (double t, const PatternEvent& e) { return t < (double) e.tick; });
+    return it == events.begin() ? events.front().value : std::prev (it)->value;
 }
 
 float Automation::valueAt (double tick) const noexcept

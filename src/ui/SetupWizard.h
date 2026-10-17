@@ -24,4 +24,5 @@ void markSetupWizardDone();
 
 // "Scan for new plugins at every start" (on by default; set in the wizard).
 bool backgroundScanAtStart();
+void setBackgroundScanAtStart (bool on);
 } // namespace lynx

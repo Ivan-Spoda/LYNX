@@ -1381,12 +1381,35 @@ struct SamplerVoice
     SvfCoefficients filter;         // this voice's (only with a cutoff envelope)
     double pitchMul = 1.0;
     int controlCountdown = 0;
+    // FL's native sampler voice (REA_rodada76): the channel's articulators and filter (flvp), the note's initial
+    // volume and pan, the stereo gains ramping between ticks, the fast LP's running coefficient, the song tick index
+    bool flVoice = false;
+    flvp::Proc flProc;
+    float initVol = 1.0f, notePan = 0.0f;
+    float gL = 0.0f, gR = 0.0f, sL = 0.0f, sR = 0.0f;
+    float fcRun = 0.0f, fcSlope = 0.0f;
+    std::int64_t tickIndex = 0;
+    double nextGap = 0.0;             // samples from this tick to the next one on the song's grid
+    int endFade = -1;                 // ≥ 0: past the sample's end, the last frame fading out (FL's 10 ms end fade)
+    int offFade = -1;                 // ≥ 0: a looping voice fading out after its note-off (the same table)
+    float holdL = 0.0f, holdR = 0.0f; // the last frame read
 };
+
+// FL's note velocity → initial volume (FLEngine FUN_00d29aa0, REA_rodada76 §1): x = byte·0.01; 1 at x = 1, else
+// (exp(x·ln 11) − 1)·0.1 — velocity 100 is unity, 128 ≈ 2.05
+inline float flInitVolume (float velocity) noexcept
+{
+    static const float ln11 = (float) std::log (11.0);
+    const auto x = (float) std::nearbyint (std::clamp (velocity, 0.0f, 1.0f) * 128.0f) * 0.01f;
+    if (x == 1.0f)
+        return 1.0f;
+    return (float) ((std::exp ((double) (x * ln11)) - 1.0) * (double) 0.1f);
+}
 
 class SamplerInstrument final : public Instrument
 {
 public:
-    // clipMode: Playlist audio clip (no transposition, stops on noteOff)
+    // clipMode: Playlist audio clip (no transposition, stops on noteOff; it follows Reverse and the stretch)
     SamplerInstrument (std::shared_ptr<const SampleData> s, bool clip) : sample (std::move (s)), clipMode (clip) {}
 
     // multi-sample: called before the instrument goes to the audio thread
@@ -1466,7 +1489,21 @@ public:
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
         {
             Modulation m { { s.filterEnv, s.pitchEnv }, s.lfo };
-            if (s.flVolumeEnvelope.size() == 18)
+            if (s.flChannel.size() == 89 || s.flChannel.size() == 90)
+            {
+                // FL's channel articulators and filter in the plugins' 364-byte snapshot layout (REA_rodada76 §4)
+                std::array<std::uint8_t, flvp::snapshotSize> snap {};
+                std::memcpy (snap.data(), s.flChannel.data(), 85 * 4);
+                std::memcpy (snap.data() + 0x15c, &s.flChannel[85], 4);
+                std::memcpy (snap.data() + 0x160, &s.flChannel[86], 4);
+                std::memcpy (snap.data() + 0x168, &s.flChannel[87], 4);
+                const auto ppq = std::clamp ((int) s.flChannel[88], 24, 3840);
+                m.flNative = true;
+                m.flTriangular = s.flChannel.size() == 90 && s.flChannel[89] == 2;
+                m.fl.build (snap.data(), ppq, std::max (1.0, songBpm));
+                m.ticksPerSecond = (double) ppq * std::max (1.0, songBpm) / 60.0;
+            }
+            else if (s.flVolumeEnvelope.size() == 18)
             {
                 const auto ppq = std::clamp ((int) s.flVolumeEnvelope[17], 24, 3840);
                 m.flVolume = true;
@@ -1510,7 +1547,7 @@ public:
             return;
 
         sliceMailbox.read (slices);
-        const auto backwards = ! clipMode && reverse.load();
+        const auto backwards = reverse.load(); // audio clips too (the clip menu's Reverse)
         const auto total = (double) (data->frames() - 1);
         // sample region (the start acts as "start offset"); audio clips use the whole file. `last` is the region's
         // last frame: FL plays until the read position passes it, interpolating with that frame repeated.
@@ -1627,6 +1664,31 @@ public:
             target->flStep = 0.0f;
             target->tickLeft = 0.0;
         }
+        // FL's native sampler voice (REA_rodada76): the articulators start, the first render block steps them at once,
+        // the following steps fall on the song's tick grid (the tick this note starts on, then round(k · spt))
+        target->flVoice = ! clipMode && modulation.flNative && modulation.ticksPerSecond > 0.0;
+        if (target->flVoice)
+        {
+            target->flEnvelope = false;
+            target->env = 1.0f;
+            target->envStep = 0.0f;
+            target->stage = 1;
+            target->flProc.init (modulation.fl);
+            target->initVol = flInitVolume (velocity);
+            target->notePan = nextPan;
+            const auto spt = sampleRate / modulation.ticksPerSecond;
+            target->tickIndex = (std::int64_t) std::nearbyint (songSample / spt);
+            target->tickLeft = 0.0;
+            target->nextGap = std::max (1.0, (double) flvp::roundEven ((double) (target->tickIndex + 1) * spt) - songSample);
+            // the file's own loop (WAV smpl): FL plays it while the note lasts (REA_rodada76 §8)
+            if (zone == nullptr && ! backwards && data->loopStart >= 0 && data->loopEnd > data->loopStart + 1
+                && (double) data->loopStart >= first && (double) data->loopEnd <= last + 1.0)
+            {
+                target->loopStart = (double) data->loopStart;
+                target->loopEnd = (double) data->loopEnd;
+                target->loopWhileHeld = false;
+            }
+        }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
 
@@ -1680,6 +1742,20 @@ public:
                 for (std::size_t e = 0; e < 2; ++e)
                     modEnv[e].release (v.mod[e]);
 
+        // FL's voice: the volume, cutoff, resonance and pitch articulators release (FLEngine FUN_00d241e0); without a
+        // volume envelope the note-off changes nothing — the sample plays on and the other envelopes hold (EXEC: FL's
+        // renders, REA_rodada76 §6)
+        for (auto& v : voices)
+            if (v.active && v.key == key && v.flVoice && v.stage < 3)
+            {
+                if (modulation.fl.recs[1].enabled != 0)
+                    for (int k = 1; k < 5; ++k)
+                        v.flProc.arts[(std::size_t) k].release (modulation.fl.recs[(std::size_t) k]);
+                else if (v.loopEnd > v.loopStart && v.offFade < 0)
+                    v.offFade = 0; // a looping sample without volume envelope fades out in 10 ms (EXEC, §8)
+                v.stage = 3;
+            }
+
         // FL's volume articulator enters its release stage from the current level
         for (auto& v : voices)
             if (v.active && v.key == key && v.flEnvelope && v.stage < 3)
@@ -1696,7 +1772,7 @@ public:
 
         // linear release from the current level (like FL)
         for (auto& v : voices)
-            if (v.active && v.key == key && v.stage < 3 && ! v.flEnvelope)
+            if (v.active && v.key == key && v.stage < 3 && ! v.flEnvelope && ! v.flVoice)
             {
                 v.stage = 3;
                 v.envStep = -(float) (std::max (v.env, 0.001f) / (seconds * sampleRate));
@@ -1712,11 +1788,32 @@ public:
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
     {
+        const struct Advance
+        {
+            double& at;
+            int n;
+            ~Advance() { at += n; }
+        } advance { songSample, n };
+
         if (sample == nullptr && zones.empty())
             return;
 
         if (envelopeMailbox.read (modulation))
             updateModulation();
+
+        // FL's native sampler voices: the channel's volume and pan act inside each voice (REA_rodada76 §3), so they are
+        // recovered from the rack's gains (panGains: gain·√2·cos/sin of (1 + pan)·π/4)
+        if (modulation.flNative)
+        {
+            const auto chanVol = (float) std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
+            auto chanPan = chanVol > 0.0f ? (float) (std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0) : 0.0f;
+            if (std::fabs (chanPan) < 1.0e-6f)
+                chanPan = 0.0f;
+            const flvp::X87Extended precision;
+            for (auto& v : voices)
+                if (v.active && v.data != nullptr && v.flVoice)
+                    renderFl (v, left, right, n, chanVol, chanPan);
+        }
 
         // channel filter (TPT SVF, same as the synth); off when open, without resonance and without modulation
         const auto fc = cutoff.load(), res = resonance.load();
@@ -1736,7 +1833,7 @@ public:
 
         for (auto& v : voices)
         {
-            if (! v.active || v.data == nullptr)
+            if (! v.active || v.data == nullptr || v.flVoice)
                 continue;
 
             const auto* l = v.data->leftData();
@@ -1898,6 +1995,216 @@ public:
         }
     }
 
+    // One sequencer tick of FL's sampler voice (FLEngine FUN_00d24ae0 / FUN_00d24500 / FUN_00d24650, REA_rodada76
+    // §3–§4): the articulators step; the target gains are the pan law of (note pan + channel pan + pan articulator,
+    // initial volume · channel volume · volume articulator); the filter coefficients follow Final.FCut/FRes plus the
+    // cutoff/resonance articulators; gains and the fast LP's coefficient ramp towards their targets over round(spt)
+    // samples, at most 0.001·44100/fs per sample.
+    void flTick (SamplerVoice& v, float chanVol, float chanPan, int perTick) noexcept
+    {
+        const auto& S = modulation.fl;
+        auto& pr = v.flProc;
+        // global LFOs (flag 0x20): one phase for the whole channel, advanced on every song tick — at tick k it is
+        // (k + 1)·increment (EXEC: FL's render of a global volume LFO, REA_rodada76 §10)
+        if (S.hasGlobal)
+            for (auto& r : modulation.fl.recs)
+                if ((r.flags & 0x20) != 0)
+                    r.globalPhase = (std::uint32_t) ((std::uint64_t) (v.tickIndex + 1) * (std::uint64_t) r.lfoInc);
+        pr.control (S);
+        const auto finalVol = v.initVol * chanVol, finalPan = v.notePan + chanPan;
+        float tL, tR;
+        if (modulation.flTriangular)
+        {
+            // FL's pan-law mode 1 (FLEngine FUN_006a39c0, x87): vol·sin(π/4) on the louder side, (1 ∓ pan)·that on the
+            // other (EXEC: FL's render with the project's pan law 2, REA_rodada76 §9)
+            const auto pan = std::min (std::max (finalPan + pr.pan, -1.0f), 1.0f);
+            const auto vol = finalVol * pr.vol * 0.70710677f;
+            using ld = long double;
+            if (std::signbit (pan))
+                tL = vol, tR = (float) (((ld) 1 + (ld) pan) * (ld) vol);
+            else
+                tR = vol, tL = (float) (((ld) 1 - (ld) pan) * (ld) vol);
+        }
+        else
+            flvp::panLaw (finalPan + pr.pan, finalVol * pr.vol, tL, tR);
+        v.pitchMul = pr.pitch != 0.0f ? std::exp2 ((double) pr.pitch / 1200.0) : 1.0;
+
+        const auto first = pr.first;
+        const auto cx = ((float) S.modX * 0.00390625f + 0.0f) + pr.cut;
+        const auto cy = ((float) S.modY * 0.00390625f + 0.0f) + pr.res;
+        if (pr.kind == 0)
+        {
+            flvp::coefFast (cx, cy, pr.fc, pr.fq, S.rateRatio);
+            if (flvp::bitsOf (pr.fc) != 0x3f800000 || flvp::bitsOf (pr.fq) != 0)
+                pr.active = true;
+            if (! pr.active || first > 0)
+                v.fcRun = pr.fc, v.fcSlope = 0.0f;
+            else
+                v.fcSlope = flvp::rampStep (pr.fc, v.fcRun, perTick, S.rampLimit);
+        }
+        else if (pr.kind >= 1 && pr.kind <= 4)
+            flvp::coefBiquad (pr.kind, cx, cy, pr.fc, pr.fq, pr.b, S.rateRatio);
+        else if (pr.kind == 6)
+            flvp::coefSvf (cx, cy, pr.fc, pr.fq, S.rateRatio);
+
+        // the first block: with the volume articulator past its attack the gains start at their (unscaled) target,
+        // else they ramp up from 0
+        auto prevL = v.gL, prevR = v.gR;
+        if (first > 1)
+            prevL = tL, prevR = tR;
+        pr.first = 0;
+        if (pr.active && pr.kind >= 1 && pr.kind <= 4 && pr.stage2 != 0)
+        {
+            const auto g = (float) (1.0 - (double) pr.fq * (3.2 - (double) pr.fc) * 0.046875);
+            tL = tL * g, tR = tR * g;
+        }
+        v.sL = flvp::rampStep (tL, prevL, perTick, S.rampLimit);
+        v.sR = flvp::rampStep (tR, prevR, perTick, S.rampLimit);
+        v.gL = prevL, v.gR = prevR;
+
+        // the volume envelope has ended and the level is down: the voice is done
+        if (pr.arts[1].state == 9 && tL == 0.0f && tR == 0.0f && std::fabs (prevL) < 1.0e-7f && std::fabs (prevR) < 1.0e-7f)
+            v.active = false;
+    }
+
+    // FL's sampler voice over n samples: split at the song's ticks, the sample read through FL's interpolators, the
+    // channel filter on the stereo block, the gains ramped per sample (the channel's volume and pan are inside)
+    void renderFl (SamplerVoice& v, float* left, float* right, int n, float chanVol, float chanPan) noexcept
+    {
+        const auto spt = sampleRate / modulation.ticksPerSecond;
+        const auto perTick = (int) std::max<std::int64_t> (1, flvp::roundEven (spt));
+        const auto* l = v.data->leftData();
+        const auto* r = v.data->rightData();
+        const auto lastFrame = std::min ((double) (v.data->frames() - 1), v.last);
+        auto& pr = v.flProc;
+
+        for (int pos = 0; pos < n && v.active;)
+        {
+            if (v.tickLeft <= 0.0)
+            {
+                flTick (v, chanVol, chanPan, perTick);
+                v.tickLeft += v.nextGap;
+                ++v.tickIndex;
+                v.nextGap = (double) (flvp::roundEven ((double) (v.tickIndex + 1) * spt) - flvp::roundEven ((double) v.tickIndex * spt));
+                if (! v.active)
+                    break;
+            }
+            auto seg = std::min ({ n - pos, (int) std::ceil (v.tickLeft), flBlock });
+
+            // read the segment (loop wrap, region end, declick of stolen voices, clip fades)
+            auto ended = false;
+            int m = 0;
+            for (; m < seg; ++m)
+            {
+                const auto looping = v.loopEnd > v.loopStart && (! v.loopWhileHeld || v.stage < 3);
+                if (looping && v.position >= v.loopEnd)
+                {
+                    while (v.position >= v.loopEnd)
+                        v.position = (v.position - v.loopEnd) + v.loopStart;
+                    ++v.loops;
+                }
+                if (v.stolen && v.fade <= 0.0f)
+                {
+                    ended = true;
+                    break;
+                }
+                // past the region's end FL holds the last frame and fades it out with the 441-entry end table (EXEC:
+                // FL's render, REA_rodada76 §6)
+                if (v.endFade < 0 && ((double) flrs::wholeFrames (v.position) > lastFrame || v.position < v.first))
+                    v.endFade = 0;
+                float sl, sr, endGain = 1.0f;
+                if (v.endFade >= 0)
+                {
+                    const auto& table = flvp::endTable();
+                    if (v.endFade >= (int) table.size())
+                    {
+                        ended = true;
+                        break;
+                    }
+                    endGain = table[(std::size_t) v.endFade++];
+                    sl = v.holdL, sr = v.holdR;
+                }
+                else
+                {
+                    readFrame (v, l, r, lastFrame, looping, sl, sr);
+                    v.holdL = sl, v.holdR = sr;
+                }
+                auto gain = v.fade * v.zoneGain;
+                if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
+                {
+                    if (v.fadeIn > 0.0f && v.clipElapsed < v.fadeIn)
+                        gain *= v.clipElapsed / v.fadeIn;
+                    if (v.fadeOut > 0.0f && v.clipRemaining < v.fadeOut)
+                        gain *= std::max (0.0f, v.clipRemaining) / v.fadeOut;
+                    v.clipElapsed += 1.0f;
+                    v.clipRemaining -= 1.0f;
+                }
+                flX[(std::size_t) (2 * m)] = sl;
+                flX[(std::size_t) (2 * m + 1)] = sr;
+                if (v.offFade >= 0)
+                {
+                    const auto& table = flvp::endTable();
+                    if (v.offFade >= (int) table.size())
+                    {
+                        ended = true;
+                        break;
+                    }
+                    endGain *= table[(std::size_t) v.offFade++];
+                }
+                flG[(std::size_t) m] = gain * endGain;
+                v.position += v.rate * v.pitchMul;
+                ++v.age;
+                if (v.glideLeft > 0)
+                {
+                    v.rate *= v.glideRatio;
+                    --v.glideLeft;
+                }
+                if (v.stolen)
+                    v.fade -= fadeStep;
+            }
+            seg = m;
+
+            // the channel filter (FLEngine FUN_00d247a0)
+            const float* y = flX.data();
+            if (pr.active && seg > 0)
+            {
+                if (pr.kind == 0)
+                {
+                    flvp::renderFast (pr.fst, pr.fq, flX.data(), flY.data(), seg, v.fcRun, v.fcSlope);
+                    v.fcRun = v.fcRun + (float) seg * v.fcSlope;
+                    y = flY.data();
+                }
+                else if (pr.kind >= 1 && pr.kind <= 4)
+                {
+                    flvp::renderBiquad (pr.st1, pr.b, flX.data(), flY.data(), seg);
+                    if (pr.stage2 != 0)
+                        flvp::renderBiquad (pr.st2, pr.b, flY.data(), flY.data(), seg);
+                    y = flY.data();
+                }
+                else if (pr.kind == 6)
+                {
+                    flvp::renderSvf (pr.st1, pr.fc, pr.fq, flX.data(), flY.data(), seg);
+                    if (pr.stage2 != 0)
+                        flvp::renderSvf (pr.st2, pr.fc, pr.fq + (1.0f - pr.fq) * 0.25f, flY.data(), flY.data(), seg);
+                    y = flY.data();
+                }
+            }
+
+            for (int i = 0; i < seg; ++i)
+            {
+                const auto g = flG[(std::size_t) i];
+                left[pos + i] += y[2 * i] * ((v.gL + (float) i * v.sL) * g);
+                right[pos + i] += y[2 * i + 1] * ((v.gR + (float) i * v.sR) * g);
+            }
+            v.gL = v.gL + v.sL * (float) seg;
+            v.gR = v.gR + v.sR * (float) seg;
+            v.tickLeft -= seg;
+            pos += seg;
+            if (ended)
+                v.active = false;
+        }
+    }
+
     // FL's sampler read (REA_rodada69 §1): the kernel's taps around the read position, frames outside the region
     // repeating its first/last frame, taps past the loop end wrapping to the loop start (and, once the voice has
     // looped, taps before the loop start wrapping to its end), a reversed voice reading the region backwards
@@ -1958,6 +2265,9 @@ private:
     std::array<SamplerVoice, 16> voices {};
     int quality = flrs::liveQuality;        // FL's interpolation index (prepare)
     std::array<float, 1024> tapL {}, tapR {}; // kernel taps gathered near the region edges and loops
+    static constexpr int flBlock = 512;       // FL voices: longest segment rendered at once
+    std::array<float, 2 * flBlock> flX {}, flY {};
+    std::array<float, flBlock> flG {};
     std::atomic<float> pitch { 0.0f }, attack { 0.0f }, decay { 0.0f }, sustain { 1.0f }, release { 0.0f }, stretchBeats { 0.0f };
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
@@ -1968,9 +2278,16 @@ private:
     double songTicks = 0.0;         // song position in the block (global LFO)
 
 public:
-    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
+    void setSongPosition (double ticks) noexcept override
+    {
+        songTicks = ticks;
+        // the song's sample position (FL's ticks fall at round(k · samples per tick) from the song start)
+        const auto tps = (double) ppq * bpm.load() / (60.0 * sampleRate);
+        songSample = tps > 0.0 ? std::nearbyint (ticks / tps) : 0.0;
+    }
 
 private:
+    double songSample = 0.0;        // sample position of the next render call in the song
     int lastZone = -1;              // the zone the last note chose (overlapping layers cycle from it)
     double lastRate = 0.0; // read speed of the last note (where porta starts from)
     std::atomic<int> filterType { 0 };
@@ -1983,6 +2300,9 @@ private:
         bool flVolume = false;     // FL's volume articulator replaces the ADSR
         flvp::Rec volume {};       // its settings (FLEngine FUN_009ce9e0 = the plugins' FUN_0071ff00, REA_rodada69 §3)
         double ticksPerSecond = 0; // FL steps it once per sequencer tick
+        bool flNative = false;     // FL's whole sampler voice (SamplerSettings::flChannel)
+        bool flTriangular = false; // the project's triangular pan law
+        flvp::Settings fl {};
     };
     SettingsMailbox<Modulation> envelopeMailbox;
     Modulation modulation;
@@ -1992,6 +2312,8 @@ private:
     void updateModulation() noexcept
     {
         anyLfo = false;
+        if (modulation.flNative)
+            modulation.fl.setRate (sampleRate); // FLEngine FUN_006a0230: ratio 44100/fs, ramp limit ratio·0.001
 
         for (std::size_t e = 0; e < 2; ++e)
             modEnv[e] = ModCoefficients::make (modulation.envelopes[e], sampleRate);

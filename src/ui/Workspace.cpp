@@ -2,6 +2,7 @@
 
 #include "engine/PluginHost.h"
 #include "ui/EditorTools.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -42,6 +43,7 @@ public:
         for (auto* b : { &menuButton, &dockButton, &maximiseButton, &closeButton })
         {
             b->setFlat (true);
+            b->setIconSizing (0.62f, 14.0f); // fine glyphs, like the toolbar
             b->setWantsKeyboardFocus (false);
             b->setMouseClickGrabsKeyboardFocus (false);
             addAndMakeVisible (b);
@@ -55,6 +57,9 @@ public:
         maximiseButton.onClick = [this] { owner.toggleMaximised (panel); };
         closeButton.onClick = [this] { owner.hide (panel); };
         closeButton.setTooltip (tr ("Close the panel (its F-key shows it again)"));
+        ui::setQuickTip (menuButton, tr ("Window options"));
+        ui::setQuickTip (dockButton, tr ("Dock"));
+        ui::setQuickTip (closeButton, tr ("Close"));
         setWantsKeyboardFocus (false);
         setMouseClickGrabsKeyboardFocus (false);
         refreshButtons();
@@ -123,6 +128,7 @@ public:
         maximiseButton.setIcon (owner.isMaximised (panel) ? Icon::restore : Icon::maximise);
         maximiseButton.setTooltip (owner.isMaximised (panel) ? tr ("Restore the panel size (double-click the title)")
                                                               : tr ("Maximize the panel (double-click the title)"));
+        ui::setQuickTip (maximiseButton, owner.isMaximised (panel) ? tr ("Restore") : tr ("Maximize"));
         resized();
     }
 

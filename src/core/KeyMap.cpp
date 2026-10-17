@@ -526,4 +526,52 @@ std::vector<std::pair<std::string, std::string>> KeyMap::conflicts() const
 
     return out;
 }
+std::vector<std::string> KeyMap::actionsWith (const Chord& chord, Context context, const std::string& except) const
+{
+    std::vector<std::string> out;
+    const auto& list = actions();
+
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (list[i].context == context && except != list[i].id
+            && std::find (chords[i].begin(), chords[i].end(), chord) != chords[i].end())
+            out.push_back (list[i].id);
+
+    return out;
+}
+
+bool KeyMap::isDefault (const std::string& actionId) const
+{
+    const auto& list = actions();
+
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (actionId == list[i].id)
+            return chords[i] == list[i].defaults;
+
+    return true;
+}
+
+std::string KeyMap::overridesJson() const
+{
+    std::string out = "{\n";
+    const auto& list = actions();
+    bool first = true;
+
+    for (std::size_t i = 0; i < list.size(); ++i)
+    {
+        if (chords[i] == list[i].defaults)
+            continue;
+
+        out += first ? "" : ",\n";
+        first = false;
+        out += "  \"" + std::string (list[i].id) + "\": [";
+
+        for (std::size_t k = 0; k < chords[i].size(); ++k)
+            out += (k > 0 ? ", \"" : "\"") + toString (chords[i][k]) + "\"";
+
+        out += "]";
+    }
+
+    return out + (first ? "}\n" : "\n}\n");
+}
+
 } // namespace lynx::keys

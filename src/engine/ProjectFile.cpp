@@ -477,6 +477,22 @@ juce::String toJson (const Song& song)
         root->setProperty ("swing", juce::roundToInt (song.swing * 1000.0f) / 1000.0);
     if (song.masterPitch != 0.0f)
         root->setProperty ("masterPitch", (double) song.masterPitch);
+    if (! song.info.empty())
+    {
+        auto info = std::make_unique<juce::DynamicObject>();
+        auto set = [&info] (const char* key, const std::string& value) {
+            if (! value.empty())
+                info->setProperty (key, juce::String::fromUTF8 (value.c_str()));
+        };
+        set ("title", song.info.title);
+        set ("author", song.info.author);
+        set ("genre", song.info.genre);
+        set ("url", song.info.url);
+        set ("comments", song.info.comments);
+        if (song.info.showOnOpen)
+            info->setProperty ("showOnOpen", true);
+        root->setProperty ("info", juce::var (info.release()));
+    }
     root->setProperty ("currentPattern", song.currentPattern);
 
     juce::Array<juce::var> channels;
@@ -629,6 +645,13 @@ juce::String toJson (const Song& song)
                     env.add ((int) v);
                 sampler->setProperty ("flVolumeEnvelope", env);
             }
+            if (! c.sampler.flChannel.empty())
+            {
+                juce::Array<juce::var> fl;
+                for (auto v : c.sampler.flChannel)
+                    fl.add ((int) v);
+                sampler->setProperty ("flChannel", fl);
+            }
             writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
             writeLfos (*sampler, c.sampler.lfo);
             o->setProperty ("samplerSettings", juce::var (sampler.release()));
@@ -681,6 +704,25 @@ juce::String toJson (const Song& song)
         }
 
         o->setProperty ("notes", notes);
+
+        // event editor lanes: [kind, index, slot, param] + [[tick, value], ...]
+        juce::Array<juce::var> lanes;
+        for (const auto& lane : p.events)
+        {
+            if (lane.events.empty() || lane.target.kind == AutomationTargetKind::none)
+                continue;
+
+            auto l = std::make_unique<juce::DynamicObject>();
+            l->setProperty ("target", juce::Array<juce::var> { targetKindName (lane.target.kind), lane.target.index, lane.target.slot, lane.target.param });
+            juce::Array<juce::var> events;
+            for (const auto& e : lane.events)
+                events.add (juce::Array<juce::var> { (juce::int64) e.tick, juce::roundToInt (e.value * 10000.0f) / 10000.0 });
+            l->setProperty ("events", events);
+            lanes.add (juce::var (l.release()));
+        }
+        if (! lanes.isEmpty())
+            o->setProperty ("events", lanes);
+
         patterns.add (juce::var (o.release()));
     }
 
@@ -866,6 +908,16 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.beatsPerBar = juce::jlimit (1, 32, (int) root.getProperty ("beatsPerBar", 4));
     song.swing = juce::jlimit (0.0f, 1.0f, (float) (double) root.getProperty ("swing", 0.0));
     song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
+    if (const auto info = root.getProperty ("info", {}); info.isObject())
+    {
+        auto get = [&info] (const char* key) { return info.getProperty (key, {}).toString().toStdString(); };
+        song.info.title = get ("title");
+        song.info.author = get ("author");
+        song.info.genre = get ("genre");
+        song.info.url = get ("url");
+        song.info.comments = get ("comments");
+        song.info.showOnOpen = (bool) info.getProperty ("showOnOpen", false);
+    }
     song.currentPattern = (int) root.getProperty ("currentPattern", 0);
 
     if (auto* channels = root["channels"].getArray())
@@ -1037,6 +1089,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     for (const auto& v : *env)
                         def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
 
+                if (auto* fl = s["flChannel"].getArray(); fl != nullptr && (fl->size() == 89 || fl->size() == 90))
+                    for (const auto& v : *fl)
+                        def.sampler.flChannel.push_back ((std::int32_t) (int) v);
+
                 if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
                 {
                     def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
@@ -1095,6 +1151,22 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 }
 
             pattern.sortNotes();
+
+            if (auto* lanes = p["events"].getArray())
+                for (const auto& l : *lanes)
+                {
+                    PatternEvents lane;
+                    if (const auto& t = l["target"]; t.isArray() && t.size() == 4)
+                        lane.target = { targetKindFromName (t[0].toString()), (int) t[1], (int) t[2], (int) t[3] };
+                    if (auto* events = l["events"].getArray())
+                        for (const auto& e : *events)
+                            if (e.isArray() && e.size() >= 2)
+                                lane.events.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) e[0]), juce::jlimit (0.0f, 1.0f, (float) (double) e[1]) });
+                    std::stable_sort (lane.events.begin(), lane.events.end(), [] (const PatternEvent& a, const PatternEvent& b) { return a.tick < b.tick; });
+                    if (lane.target.kind != AutomationTargetKind::none && ! lane.events.empty())
+                        pattern.events.push_back (std::move (lane));
+                }
+
             song.patterns.push_back (std::move (pattern));
         }
 

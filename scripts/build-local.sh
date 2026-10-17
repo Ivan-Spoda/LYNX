@@ -19,13 +19,17 @@ mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
 CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp"
 # workflow P2 (note tools, mixer operations, history labels, browser search)
-CORE="$CORE src/core/NoteTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp"
+CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp"
 # start-up sound (procedural)
 CORE="$CORE src/core/StartupSound.cpp"
 # FL's 3x Osc engine (REA round 47)
 CORE="$CORE src/core/ThreeOsc.cpp"
 # FL Studio integration: plugin database and sample relocation (read-only)
 CORE="$CORE src/core/FlPluginDb.cpp"
+# missing files of an opened project: search and relocation (round 81)
+CORE="$CORE src/core/MissingFiles.cpp"
+# settings pages, plugin manager and shortcut manager logic (round 82)
+CORE="$CORE src/core/Preferences.cpp"
 # spectral waveforms (band analysis, multi-resolution peak cache)
 CORE="$CORE src/core/WaveAnalysis.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)

@@ -4,6 +4,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/HeldNotes.h"
+
 #include "core/RackOps.h"
 #include "engine/AudioEngine.h"
 #include "ui/ValueControl.h"
@@ -34,6 +36,7 @@ class ChannelRackComponent final : public juce::Component,
 public:
     explicit ChannelRackComponent (AudioEngine& engine);
     ~ChannelRackComponent() override;
+    void visibilityChanged() override;
 
     std::function<void()> onOpenPianoRoll;
     std::function<void (int)> onOpenMixerInsert; // double-click on a route box: show the Mixer at that insert
@@ -177,7 +180,7 @@ private:
     Area knobDrag = Area::none;
     int knobRow = -1;
     ui::ValueDrag drag;
-    int auditionRow = -1;      // Ctrl+click on the name: the note that is sounding
+    HeldNotes previews;        // Ctrl+click audition and step-click previews: they stop on mouse up
     int openEditorRow = -1;    // the editor opened last by a click on a channel button
     int selectionAnchor = 0;
 

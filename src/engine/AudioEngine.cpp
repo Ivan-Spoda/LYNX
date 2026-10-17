@@ -71,7 +71,25 @@ int workerCount()
     const auto cores = (int) std::thread::hardware_concurrency();
     return juce::jlimit (0, 7, cores - 2);
 }
+juce::File midiSettingsFile() { return PluginHost::settingsFolder().getChildFile ("midi-settings.txt"); }
+juce::File audioDeviceFile() { return PluginHost::settingsFolder().getChildFile ("audio-device.xml"); }
 } // namespace
+
+// Saves the audio device setup whenever it changes (Settings › Audio, the setup wizard, a driver's own panel), so
+// the next start opens the same device.
+struct AudioEngine::DeviceStateSaver final : public juce::ChangeListener
+{
+    explicit DeviceStateSaver (AudioEngine& e) : engine (e) { engine.deviceManager.addChangeListener (this); }
+    ~DeviceStateSaver() override { engine.deviceManager.removeChangeListener (this); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { engine.saveAudioDeviceState(); }
+    AudioEngine& engine;
+};
+
+void AudioEngine::saveAudioDeviceState()
+{
+    if (auto xml = deviceManager.createStateXml())
+        xml->writeTo (audioDeviceFile());
+}
 
 AudioEngine::AudioEngine (bool openAudioDevice)
     : workers (std::make_unique<WorkerPool> (workerCount(), raiseAudioThreadPriority)),
@@ -84,9 +102,13 @@ AudioEngine::AudioEngine (bool openAudioDevice)
     {
         player.setProcessor (&graph);
 
-        // 0 inputs, 2 outputs, no saved state yet, use the default device.
-        deviceManager.initialise (0, 2, nullptr, true);
+        // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
+        const auto saved = juce::XmlDocument::parse (audioDeviceFile());
+        if (deviceManager.initialise (0, 2, saved.get(), true).isNotEmpty() && saved != nullptr)
+            deviceManager.initialise (0, 2, nullptr, true);
         deviceManager.addAudioCallback (this);
+        deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
+        midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
 
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
@@ -110,6 +132,7 @@ AudioEngine::~AudioEngine()
     recordThread.stopThread (2000);
     prefetcher = nullptr;
     midiDevicesChanged = {};
+    deviceStateSaver = nullptr;
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     player.setProcessor (nullptr);
@@ -348,9 +371,16 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
 {
     if (record) // played notes (the PC keyboard) follow the scale snap; previews don't
     {
-        key = snapInputKey (key);
+        // the note-off stops the key its note-on started, even if the snap changed in between
+        const auto requested = key;
         if (on)
+        {
+            key = snapInputKey (key);
+            playedKeys.on (channel, requested, key);
             startOnInput();
+        }
+        else
+            key = playedKeys.off (channel, requested, snapInputKey (key));
     }
 
     NoteEvent e;
@@ -510,9 +540,20 @@ void AudioEngine::finishAudioTake()
     });
 }
 
-void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
+void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& m)
 {
-    // MIDI thread: queues and atomics only
+    // MIDI thread: queues and atomics only (and a short copy of the device settings)
+    prefs::MidiInputPrefs device;
+    auto velocityCurve = prefs::VelocityCurve::linear;
+    {
+        const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
+        device = midiPrefsShared.input (source != nullptr ? source->getName().toStdString() : std::string());
+        velocityCurve = midiPrefsShared.velocity;
+    }
+
+    if (! device.enabled || (device.midiChannel != 0 && m.getChannel() != device.midiChannel))
+        return;
+
     if (m.isController())
     {
         controllerQueue.push ({ m.getControllerNumber(), m.getChannel() - 1, m.getControllerValue() });
@@ -527,28 +568,80 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
     if (on)
         startOnInput();
 
-    NoteEvent e;
-    e.type = on ? NoteEvent::Type::on : NoteEvent::Type::off;
-    e.key = snapInputKey (m.getNoteNumber());
-    e.velocity = on ? m.getFloatVelocity() : 0.0f;
-    const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
+    // a note-off goes to the channels and key its note-on reached (the selection or the scale snap may have
+    // changed while the key was down); a repeated note-on first stops what the previous one started
+    InputHeldNotes::Target targets[InputHeldNotes::maxTargets], stale[InputHeldNotes::maxTargets];
+    auto count = 0;
+    auto staleCount = 0;
 
-    // the primary selected channel, then the other selected ones
-    for (int i = -1; i < extra; ++i)
+    if (on)
     {
-        e.channel = i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load();
+        const auto key = snapInputKey (m.getNoteNumber());
+        const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
+
+        // the primary selected channel, then the other selected ones (or the device's own channel)
+        if (device.target >= 0)
+            targets[count++] = { device.target, key };
+        else
+            for (int i = -1; i < extra && count < InputHeldNotes::maxTargets; ++i)
+                targets[count++] = { i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load(), key };
+
+        staleCount = midiHeld.noteOn (m.getNoteNumber(), targets, count, stale);
+    }
+    else
+        count = midiHeld.noteOff (m.getNoteNumber(), targets);
+
+    auto push = [this] (const InputHeldNotes::Target& t, bool noteOn, float velocity) {
+        NoteEvent e;
+        e.type = noteOn ? NoteEvent::Type::on : NoteEvent::Type::off;
+        e.channel = t.channel;
+        e.key = t.key;
+        e.velocity = velocity;
         midiEvents.push (e);
 
         if (transport.recording.load() && transport.playing.load())
-            midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, on });
-    }
+            midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, noteOn });
+    };
+
+    for (int i = 0; i < staleCount; ++i)
+        push (stale[i], false, 0.0f);
+
+    for (int i = 0; i < count; ++i)
+        push (targets[i], on, on ? prefs::mapVelocity (m.getFloatVelocity(), velocityCurve) : 0.0f);
 }
 
 void AudioEngine::enableAllMidiInputs()
 {
+    // (a device turned off in the MIDI settings is closed, so other programs can use it)
     for (const auto& device : juce::MidiInput::getAvailableDevices())
-        if (! deviceManager.isMidiInputDeviceEnabled (device.identifier))
-            deviceManager.setMidiInputDeviceEnabled (device.identifier, true);
+    {
+        const auto on = midiPrefs.input (device.name.toStdString()).enabled;
+        if (deviceManager.isMidiInputDeviceEnabled (device.identifier) != on)
+            deviceManager.setMidiInputDeviceEnabled (device.identifier, on);
+    }
+}
+
+void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
+{
+    midiPrefs = p;
+    {
+        const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
+        midiPrefsShared = p;
+    }
+    if (! p.pickup)
+        pickups.clear();
+    if (prefetcher != nullptr) // (only with an audio device: the real app)
+        enableAllMidiInputs();
+    if (save)
+        midiSettingsFile().replaceWithText (juce::String (p.toText()));
+    sendChangeMessage();
+}
+
+void AudioEngine::setUndoLevels (int levels)
+{
+    maxUndoSteps = (std::size_t) prefs::clampUndoLevels (levels);
+    while (undoStack.size() > maxUndoSteps)
+        undoStack.pop_front();
 }
 
 juce::StringArray AudioEngine::getActiveMidiInputs() const
@@ -822,7 +915,7 @@ void AudioEngine::publishSelection()
     extraLiveCount.store (extra);
 }
 
-bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
+bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations, bool asEdit)
 {
     juce::MemoryBlock data;
 
@@ -867,12 +960,51 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error)
 
         importReport = {};
         options.report = &importReport;
+        options.relocations = relocations;
         auto imported = importFlp (project, options);
+
+        // the project's third-party plugins, to say which channel/insert used each one that is missing
+        struct Use
+        {
+            std::string name, user;
+            bool instrument;
+        };
+        std::vector<Use> uses;
+        for (const auto& c : imported.channels)
+            if (c.plugin.foreign.format != ForeignPlugin::Format::none)
+                uses.push_back ({ c.plugin.foreign.name, c.name, true });
+        for (std::size_t t = 0; t < imported.mixer.size(); ++t)
+            for (const auto& fx : imported.mixer[t].effects)
+                if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
+                    uses.push_back ({ fx.plugin.foreign.name, imported.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t))
+                                                                                            : imported.mixer[t].name,
+                                      false });
+
         juce::StringArray missing;
         juce::StringArray matched;
         plugins.adoptFlPlugins (imported, &missing, &matched);
         missingPlugins = missing;
         matchedPlugins = matched;
+        missingPluginDetails.clear();
+        for (const auto& name : missing)
+        {
+            MissingPlugin m;
+            m.name = name.toStdString();
+            for (const auto& u : uses)
+                if (u.name == m.name)
+                {
+                    if (std::find (m.usedBy.begin(), m.usedBy.end(), u.user) == m.usedBy.end())
+                        m.usedBy.push_back (u.user);
+                    m.replacement = u.instrument ? "Built-in synth (a preset chosen by the channel name)" : "Nothing: the slot was left out of the mixer";
+                }
+            missingPluginDetails.push_back (std::move (m));
+        }
+
+        if (asEdit)
+        {
+            editSong ([&imported] (Song& s) { s = std::move (imported); });
+            return true;
+        }
 
         stop();
         rewind();
@@ -990,7 +1122,19 @@ void AudioEngine::applyControllers()
     for (const auto& [key, value] : latest)
         for (const auto& link : song.midiLinks)
             if (link.cc == key.first && (link.channel < 0 || link.channel == key.second))
-                changes.push_back ({ link.target, value / 127.0f });
+            {
+                const auto v = value / 127.0f;
+                const auto& t = link.target;
+                // takeover: only parameters the song holds (a plugin's own parameters have no value to compare here)
+                const auto songHeld = t.kind != AutomationTargetKind::channelParam && t.kind != AutomationTargetKind::effectParam;
+                if (midiPrefs.pickup && songHeld)
+                {
+                    auto& state = pickups[{ key.first, key.second, (int) t.kind, t.index, t.slot, t.param }];
+                    if (! prefs::pickupUpdate (state, song.targetValue (t), v))
+                        continue;
+                }
+                changes.push_back ({ t, v });
+            }
 
     std::vector<std::pair<AutomationTarget, float>> pluginChanges;
 

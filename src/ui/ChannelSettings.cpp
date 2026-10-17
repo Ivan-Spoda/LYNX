@@ -1327,8 +1327,12 @@ private:
             // an ADSR edited by hand replaces FL's imported volume envelope
             const auto& old = current()->sampler;
             auto moved = [] (float a, float b) { return std::abs (a - b) > 1.0e-4f; };
-            if (moved (s.attack, old.attack) || moved (s.decay, old.decay) || moved (s.sustain, old.sustain) || moved (s.release, old.release))
+            const auto adsr = moved (s.attack, old.attack) || moved (s.decay, old.decay) || moved (s.sustain, old.sustain) || moved (s.release, old.release);
+            if (adsr)
                 s.flVolumeEnvelope.clear();
+            // so does an edited envelope or filter for FL's whole sampler voice (REA_rodada76)
+            if (adsr || moved (s.cutoff, old.cutoff) || moved (s.resonance, old.resonance) || s.filterType != old.filterType)
+                s.flChannel.clear();
         }
         if (s == current()->sampler)
             return;
