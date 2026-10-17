@@ -94,6 +94,10 @@ Section "!$(SecApp)" SecMain
     File "${STAGE}\THIRD_PARTY.md"
     File /nonfatal "${STAGE}\PRIVACY.md"
     File /nonfatal "${STAGE}\Demo.lynx"
+    ; LYNX ASIO (REA round 97): LYNX loads it directly; the .bat files register it for other programs (administrator)
+    File /nonfatal "${STAGE}\lynx-asio.dll"
+    File /nonfatal "${STAGE}\Register LYNX ASIO.bat"
+    File /nonfatal "${STAGE}\Unregister LYNX ASIO.bat"
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
     CreateShortCut "$SMPROGRAMS\LYNX.lnk" "$INSTDIR\LYNX.exe" "" "$INSTDIR\LYNX.exe" 0
@@ -150,6 +154,15 @@ Section "Uninstall"
     Delete "$INSTDIR\THIRD_PARTY.md"
     Delete "$INSTDIR\PRIVACY.md"
     Delete "$INSTDIR\Demo.lynx"
+    ; LYNX ASIO registered for other programs: unregister it first (Windows asks for administrator rights)
+    ReadRegStr $0 HKLM "SOFTWARE\ASIO\LYNX ASIO" "CLSID"
+    ${If} $0 != ""
+    ${AndIf} ${FileExists} "$INSTDIR\lynx-asio.dll"
+        ExecShellWait "runas" "$WINDIR\Sysnative\regsvr32.exe" '/u /s "$INSTDIR\lynx-asio.dll"'
+    ${EndIf}
+    Delete "$INSTDIR\lynx-asio.dll"
+    Delete "$INSTDIR\Register LYNX ASIO.bat"
+    Delete "$INSTDIR\Unregister LYNX ASIO.bat"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"
     Delete "$SMPROGRAMS\LYNX.lnk"
