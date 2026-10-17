@@ -1534,6 +1534,8 @@ private:
 
             auto kinds = lynx::plugui::flLayoutKinds();
             kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
+            for (const auto own : lynx::plugui::ownLayoutKinds()) // LYNX's own panels (mixing suite, round 96)
+                kinds.push_back (own);
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
             for (const auto kind : kinds)
@@ -1577,6 +1579,13 @@ private:
                     fx.state = lynx::maximusfx::pack (blob);
                     name = "Soundgoodizer";
                 }
+
+                if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
+                                                        { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                if (kind == lynx::EffectKind::ember)
+                    fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "Drive")] = 0.5f;
 
                 lynx::Song song;
                 song.mixer.resize (2);

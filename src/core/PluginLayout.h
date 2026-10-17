@@ -89,6 +89,9 @@ bool hasFlLayout (EffectKind kind);
 // The kinds that have an FL arrangement (in the order of docs/analise/UI_STUDY_plugins93.md).
 const std::vector<EffectKind>& flLayoutKinds();
 
+// LYNX's own effects with a designed panel (not an FL arrangement: `fl` is ""), e.g. the mixing suite of round 96.
+const std::vector<EffectKind>& ownLayoutKinds();
+
 // Generators: FL's arrangement of the channel's plugin page (nullptr = the plain grid of knobs). Value items name
 // the knobs of the channel settings' model panel (their juce::Slider names); values are 0..1 over the knob's range.
 const Layout* instrumentLayout (InstrumentKind kind);

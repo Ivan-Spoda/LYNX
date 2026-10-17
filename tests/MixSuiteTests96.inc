@@ -424,3 +424,57 @@ TEST (mixsuite96_registry)
         std::printf ("  %s: %d parameters, latency %d\n", info.name, (int) info.params.size(), before);
     }
 }
+
+TEST (mixsuite_panels_place_every_parameter)
+{
+    using namespace lynx;
+    // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
+    // and never overlap, and the dynamics effects show their live gain-reduction meter
+    CHECK (plugui::ownLayoutKinds().size() == 5);
+    for (const auto kind : plugui::ownLayoutKinds())
+    {
+        const auto& l = plugui::layoutFor (kind);
+        CHECK (! plugui::hasFlLayout (kind));
+        const auto count = (int) effectInfo (kind).params.size();
+        std::vector<int> placed ((std::size_t) count, 0);
+        std::vector<const plugui::LayoutItem*> controls;
+        int meters = 0;
+        for (const auto& item : l.items)
+        {
+            CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
+            if (item.param != nullptr && item.type != plugui::Item::display)
+            {
+                const auto p = plugui::paramIndex (kind, item.param);
+                CHECK (p >= 0);
+                if (p >= 0)
+                    ++placed[(std::size_t) p];
+            }
+            if (item.type == plugui::Item::tabs || item.type == plugui::Item::radio)
+                CHECK (item.values.empty() || item.values.size() == plugui::optionLabels (item).size());
+            if (item.type == plugui::Item::display && std::strcmp (item.display, "grmeter") == 0)
+                ++meters;
+            if (item.type != plugui::Item::section && item.type != plugui::Item::label)
+                controls.push_back (&item);
+        }
+        for (int p = 0; p < count; ++p)
+            if (placed[(std::size_t) p] != 1)
+            {
+                std::printf ("  %s: parameter '%s' has %d controls\n", effectInfo (kind).name, effectInfo (kind).params[(std::size_t) p].name, placed[(std::size_t) p]);
+                CHECK (false);
+            }
+        for (std::size_t a = 0; a < controls.size(); ++a)
+            for (std::size_t b = a + 1; b < controls.size(); ++b)
+            {
+                const auto& i = *controls[a];
+                const auto& j = *controls[b];
+                const auto overlap = i.x + 0.5f < j.x + j.w && j.x + 0.5f < i.x + i.w && i.y + 0.5f < j.y + j.h && j.y + 0.5f < i.y + i.h;
+                if (overlap)
+                {
+                    std::printf ("  %s: '%s' overlaps '%s'\n", effectInfo (kind).name, i.param != nullptr ? i.param : i.display,
+                                 j.param != nullptr ? j.param : j.display);
+                    CHECK (false);
+                }
+            }
+        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2 : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser) ? 1 : 0));
+    }
+}
