@@ -119,6 +119,10 @@ public:
     static juce::Colour patternColour (const Song& song, int pattern);
     static juce::Colour audioClipColour (const ChannelDef& channel);
 
+    // A project was just opened: scroll to the start and, when the song is longer than the view, zoom out
+    // to show all of it (FL opens a project with the arrangement in view). Waits for a size if not laid out.
+    void showSongAfterOpen();
+
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
                       trackResize, preview };
@@ -195,6 +199,7 @@ private:
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px per 4-beat bar
     double scrollTicks = 0.0;
     int scrollY = 0;
+    bool fitSongPending = false;
 
     Drag drag = Drag::none;
     int dragClip = -1;

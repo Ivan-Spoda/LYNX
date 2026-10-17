@@ -717,6 +717,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 {
                     PlaylistTrackInfo t;
                     t.index = (int) readLE<std::uint32_t> (e.data, 0) - 1;
+                    const auto c = readLE<std::uint32_t> (e.data, 4);
+                    t.colour = ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
                     t.enabled = e.data[12] != 0;
                     arrangement().tracks.push_back (t);
                 }

@@ -1562,3 +1562,4 @@ countries: br
 "Manage shortcuts" = "Gerenciar atalhos"
 "(open an output device first)" = "(abra um dispositivo de saída antes)"
 "(choose)" = "(escolha)"
+"Piano Roll notes: [LMB] opens them in the Piano Roll" = "Notas do Piano Roll: [LMB] abre no Piano Roll"

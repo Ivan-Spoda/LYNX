@@ -205,7 +205,8 @@ ChangeLabel describeChange (const Song& before, const Song& after)
         return label (TR_NOOP ("Playlist tracks"));
 
     for (std::size_t i = 0; i < after.playlistTracks.size(); ++i)
-        if (before.playlistTracks[i].name != after.playlistTracks[i].name || before.playlistTracks[i].muted != after.playlistTracks[i].muted)
+        if (before.playlistTracks[i].name != after.playlistTracks[i].name || before.playlistTracks[i].muted != after.playlistTracks[i].muted
+            || before.playlistTracks[i].colour != after.playlistTracks[i].colour)
             return label (TR_NOOP ("Playlist tracks"));
 
     for (std::size_t i = 0; i < after.playlistTracks.size(); ++i)

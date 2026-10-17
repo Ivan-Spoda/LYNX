@@ -1065,7 +1065,9 @@ void MainComponent::fitChannelRack (bool width)
 {
     rack.updateSize();
     const auto scrollbar = rackViewport.getScrollBarThickness();
-    const auto maxWidth = juce::jmax (300, workspace.getWidth() - 2 * 16 - 260);
+    // compact like FL's rack: at most two bars of steps are shown, longer patterns scroll sideways, so the
+    // rack does not cover the Playlist after a project with long patterns is opened
+    const auto maxWidth = juce::jmin (juce::jmax (300, workspace.getWidth() - 2 * 16 - 260), rack.widthForSteps (32));
     const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
     const auto needsHorizontal = rack.getWidth() > contentWidth;
     workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
@@ -2182,6 +2184,7 @@ void MainComponent::importFlp (const juce::File& file)
         rememberRecent (file);
         importedSuffix = " " + tr ("(imported from FL Studio)");
         updateTitle();
+        playlist.showSongAfterOpen();
 
         showMissingFiles (true);
     }
@@ -2207,6 +2210,7 @@ void MainComponent::openLynxProject (const juce::File& file)
     importedSuffix = {};
     rememberRecent (file);
     updateTitle();
+    playlist.showSongAfterOpen();
 
     if (persistent)
     {

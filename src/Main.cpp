@@ -491,6 +491,8 @@ private:
         original.playlist.push_back (automationClip);
         original.loopStart = 960;
         original.loopEnd = 7680;
+        original.playlistTracks.resize (3);
+        original.playlistTracks[2].colour = 0xFF2A6FDB; // a track colour (round 90)
         juce::String error;
 
         if (demoProjectPath.isNotEmpty()) // sample project for checking the UI with --snapshot
@@ -507,6 +509,8 @@ private:
                                && reloaded->automations[0].points.size() == 2 && reloaded->automations[0].points[0].tension == 0.5f
                                && reloaded->automations[0].points[1].tick == 3840
                                && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
+                               && reloaded->playlistTracks.size() == 3 && reloaded->playlistTracks[2].colour == 0xFF2A6FDB
+                               && reloaded->playlistTracks[1].colour == 0
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
