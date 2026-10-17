@@ -967,6 +967,44 @@ Layout fruityBalance()
     return l;
 }
 
+Layout fruitySqueeze()
+{
+    // SQUARIZE (amount), PUNCHER (preserve, impact, relation, amount) on plates; FILTER (on, type, freq, res, pre / post);
+    // MIX and GAIN faders
+    Layout l;
+    l.fl = "Fruity Squeeze";
+    l.width = 282;
+    l.height = 223;
+    auto& v = l.items;
+    v.push_back (section (2, 2, 105, 52, nullptr, boxed));
+    v.push_back (label (10, 6, 90, 16, TR_NOOP ("Squarize"), alignLeft));
+    const auto row = [&v] (float y, const char* param, const char* caption) {
+        v.push_back (label (13, y - 9, 60, 17, caption, boxed));
+        v.push_back (knob (87, y, 24, param, nullptr, 0, noCaption));
+    };
+    row (39, "Steps", TR_NOOP ("Amount"));
+    v.push_back (section (2, 58, 105, 162, nullptr, boxed));
+    v.push_back (label (10, 62, 90, 16, TR_NOOP ("Puncher"), alignLeft));
+    row (100, "Preserve", TR_NOOP ("Preserve"));
+    row (133, "Impact", TR_NOOP ("Impact"));
+    row (165, "Relation", TR_NOOP ("Relation"));
+    row (198, "Amount", TR_NOOP ("Amount"));
+    v.push_back (section (110, 2, 100, 164, nullptr, boxed));
+    v.push_back (toggle (116, 6, 90, 16, "Filter", TR_NOOP ("Filter")));
+    v.push_back (section (116, 30, 88, 19, nullptr, boxed | raised));
+    v.push_back (value (116, 30, 88, 19, "Filter type", 0));
+    v.push_back (label (116, 66, 40, 14, TR_NOOP ("Freq.")));
+    v.push_back (knob (136, 102, 34, "Cutoff", nullptr, 0, noCaption));
+    v.push_back (label (162, 66, 40, 14, TR_NOOP ("Res.")));
+    v.push_back (knob (182, 102, 34, "Resonance", nullptr, 0, noCaption));
+    v.push_back (tabs (117, 137, 88, 18, "Filter post", TR_NOOP ("Pre|Pos")));
+    v.push_back (section (213, 2, 67, 164, nullptr, boxed));
+    v.push_back (slider (Item::vslider, 219, 12, 20, 148, "Mix", TR_NOOP ("Mix")));
+    v.push_back (slider (Item::vslider, 251, 12, 20, 148, "Volume", TR_NOOP ("Gain")));
+    v.push_back (label (112, 170, 168, 48, "Fruity Squeeze", dim));
+    return l;
+}
+
 Layout fruityDelay2()
 {
     // INPUT (pan, volume) | FEEDBACK (normal / invert / ping-pong, volume, cutoff) | TIME (time, offset) | DRY (volume)
@@ -1248,7 +1286,8 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::fruityFlangus, EffectKind::fruitySoftClipper,
                                                  EffectKind::fruityBloodOverdrive, EffectKind::fruityPanOMatic, EffectKind::stereoShaper,
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
-                                                 EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance };
+                                                 EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
+                                                 EffectKind::squeeze };
     return kinds;
 }
 
@@ -1290,6 +1329,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::vintageChorus: l = vintageChorus(); break;
         case EffectKind::hyperChorus: l = hyperChorus(); break;
         case EffectKind::fruityBalance: l = fruityBalance(); break;
+        case EffectKind::squeeze: l = fruitySqueeze(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;
