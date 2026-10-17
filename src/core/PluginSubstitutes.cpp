@@ -263,7 +263,7 @@ map = xml:Ducking -> Ducking
 # the 17 modes (index floor (24 v)) onto Echoform's 12 characters: Tape, HiFi, BBD, Digital, Ghost (shifter), Pitch,
 # RevPitch (reverse), BBDuck (bucket), Clarity (clean), DuckTape (tape), PitchDuck (pitch), LoFi, Quartz (clean),
 # PhaserDDL (phaser), RichPitch (detune), ChromeTape (tape), Analog; the "duck" variants' built-in ducking is not kept
-map = xml:Mode -> Mode | steps 0:0.041667 0.0625:0.208333 0.1042:0.291667 0.1458:0.458333 0.1875:0.708333 0.2292:0.791667 0.2708:0.875 0.3125:0.291667 0.3542:0.541667 0.3958:0.041667 0.4375:0.791667 0.4792:0.125 0.5208:0.541667 0.5625:0.625 0.6042:0.958333 0.6458:0.041667 0.6875:0.375 0.7292:0.041667
+map = xml:Mode -> Mode | steps 0:0.041667 0.0828:0.208333 0.1245:0.291667 0.1662:0.458333 0.2078:0.708333 0.2495:0.791667 0.2912:0.875 0.3328:0.291667 0.3745:0.541667 0.4162:0.041667 0.4578:0.791667 0.4995:0.125 0.5412:0.541667 0.5828:0.625 0.6245:0.958333 0.6662:0.041667 0.7078:0.375 0.7495:0.041667
 
 [valhalla-freqecho]
 product = ValhallaFreqEcho
