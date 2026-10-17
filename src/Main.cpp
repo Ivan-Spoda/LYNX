@@ -1625,7 +1625,15 @@ private:
                                                         { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
                 if (kind == lynx::EffectKind::ember)
+                {
                     fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "Drive")] = 0.5f;
+                    fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "Bands")] = 1.0f; // round 108: the band rows
+                    fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "B3 drive")] = 0.6f;
+                }
+                if (kind == lynx::EffectKind::crestCompressor) // round 108: a curve with a knee and a side-chain low cut
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Threshold", 0.55f }, { "Knee", 0.15f },
+                                                        { "SC1 shape", 0.5f }, { "SC1 freq.", 0.3f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
 
                 lynx::Song song;
                 song.mixer.resize (2);
