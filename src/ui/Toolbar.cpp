@@ -418,6 +418,17 @@ void PerformanceMeter::setValues (double cpu01, std::int64_t memoryBytes, int po
     repaint();
 }
 
+void PerformanceMeter::setRealtime (std::uint64_t over, std::uint64_t late, double peak, const juce::StringArray& units)
+{
+    if (over > overDeadline || late > lateCalls)
+        lastGlitchAt = juce::jmax<juce::uint32> (1, juce::Time::getMillisecondCounter());
+    overDeadline = over;
+    lateCalls = late;
+    peakLoad = peak;
+    heaviest = units;
+    repaint();
+}
+
 void PerformanceMeter::paint (juce::Graphics& g)
 {
     using namespace theme;
@@ -440,6 +451,19 @@ void PerformanceMeter::paint (juce::Graphics& g)
     g.setColour (load < 0.6f ? colour::meterLow : load < 0.85f ? colour::meterMid : colour::meterClip);
     if (load > 0.0f)
         g.fillRoundedRectangle (bar.withWidth (juce::jmax (2.0f, bar.getWidth() * load)), 2.0f);
+    // the highest callback load since the last update (a thin mark), and a red edge for a few seconds after a
+    // callback missed its deadline (an audible crackle)
+    if (peakLoad > 0.0)
+    {
+        const auto x = bar.getX() + bar.getWidth() * (float) juce::jlimit (0.0, 1.0, peakLoad);
+        g.setColour (peakLoad < 0.85 ? colour::textSecondary : colour::meterClip);
+        g.fillRect (juce::Rectangle<float> (x - 1.0f, bar.getY(), 2.0f, bar.getHeight()));
+    }
+    if (lastGlitchAt != 0 && juce::Time::getMillisecondCounter() - lastGlitchAt < 5000)
+    {
+        g.setColour (colour::meterClip);
+        g.drawRoundedRectangle (bar.expanded (1.0f), 2.0f, 1.0f);
+    }
 
     // memory and polyphony
     auto left = row2.removeFromLeft (row2.getWidth() * 58 / 100);
@@ -465,7 +489,12 @@ ui::Hint PerformanceMeter::hintAt (juce::Point<int> p)
     if (p.y < getHeight() / 2)
     {
         h.text = tr ("CPU: how much of the audio deadline the processing takes; near 100% the sound breaks up");
-        h.value = juce::String (cpu * 100.0, 1) + "%";
+        if (overDeadline > 0 || lateCalls > 0)
+            h.text << "  " << tr ("{0} audio blocks missed the deadline (crackles), the device called late {1} times; log: audio-glitches.log",
+                                  { juce::String ((juce::int64) overDeadline), juce::String ((juce::int64) lateCalls) });
+        if (! heaviest.isEmpty())
+            h.text << "  " << tr ("Heaviest: {0}", { heaviest.joinIntoString (", ") });
+        h.value = juce::String (cpu * 100.0, 1) + "%" + (peakLoad > 0.0 ? "  (" + tr ("peak {0}%", { juce::String (juce::roundToInt (peakLoad * 100.0)) }) + ")" : juce::String());
     }
     else if (p.x < getWidth() * 58 / 100)
     {

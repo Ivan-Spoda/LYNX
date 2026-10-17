@@ -105,12 +105,19 @@ class PerformanceMeter final : public juce::Component,
 {
 public:
     void setValues (double cpu01, std::int64_t memoryBytes, int polyphony);
+    // Real-time health (REA round 87): callbacks that missed their deadline (the crackles), the highest load since
+    // the last update and the heaviest channels / effects ("name 12%").
+    void setRealtime (std::uint64_t overDeadline, std::uint64_t lateCalls, double peakLoad, const juce::StringArray& heaviest);
     void paint (juce::Graphics& g) override;
     ui::Hint hintAt (juce::Point<int> position) override;
 
     static std::int64_t processMemoryBytes(); // working set of this process (0 if unknown)
 
 private:
+    std::uint64_t overDeadline = 0, lateCalls = 0;
+    double peakLoad = 0.0;
+    juce::StringArray heaviest;
+    juce::uint32 lastGlitchAt = 0; // ms counter of the last new over-deadline callback (0 = none)
     double cpu = 0.0, cpuSmoothed = 0.0;
     std::int64_t memory = 0;
     int voices = 0, peakVoices = 0;
