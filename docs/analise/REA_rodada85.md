@@ -46,6 +46,11 @@ in tmp/r85, not in the repo):
   every change of a track's gain, so automation clips and knob moves glide the same way.
 - Channel volume / pan events go through the channel's existing smoothing (not changed in this round).
 
+Result (FL's 16-bit render vs LYNX, same projects): channel volume and channel pan events match FL to the LSB on
+99.87 % of the frames (the rest is the song's end, where LYNX's renderwav keeps a tail FL's does not); Master volume /
+pan events match on 98.3 % / 98.6 %: the glides have FL's slope and end within about one sample of FL's, but near
+zero gain (a fall to 800 / 16000) FL's glide slows down while LYNX's stays linear — not confirmed why.
+
 ## 4. Tests
 `flp_pattern_events_import` (synthetic `.flp`: 0xDF records on Master volume and channel pan, a duplicate tick, an
 unknown plugin parameter, 0xD8 Master pan); `event_editor_playback` (round 83) still passes with the per-sample
