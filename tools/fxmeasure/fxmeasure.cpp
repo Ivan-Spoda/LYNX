@@ -66,6 +66,9 @@ struct Host
         if (plugin == nullptr) return false;
         plugin->releaseResources();
         auto layout = plugin->getBusesLayout();
+        // some plugins (Valhalla) come up with their main buses disabled: ask for stereo in / out
+        if (! layout.inputBuses.isEmpty() && layout.inputBuses[0].size() == 0) layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (! layout.outputBuses.isEmpty() && layout.outputBuses[0].size() == 0) layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
         for (int b = 1; b < layout.inputBuses.size(); ++b)
             if (sidechain) layout.inputBuses.getReference (b) = juce::AudioChannelSet::stereo();
             else layout.inputBuses.getReference (b) = juce::AudioChannelSet::disabled();
