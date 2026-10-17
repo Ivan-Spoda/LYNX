@@ -14,6 +14,7 @@
 #include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
+#include "ui/DynamicsDisplays.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/ParametricEqEditor.h"
@@ -69,8 +70,8 @@ public:
                 page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
         const auto& l = activeLayout();
-        for (const auto& item : l.items) // live meters (the mixing suite's gain reduction): refreshed at 30 Hz
-            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0)
+        for (const auto& item : l.items) // live meters (the mixing suite's gain reduction, round 108's graphs): 30 Hz
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
                 break;
@@ -767,6 +768,8 @@ public:
         const juce::String id (item.display != nullptr ? item.display : "");
         const auto curveColour = fx.enabled ? colour::accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
+        if (dynui::paint (g, id, r, s, fx, [this] (int k) { return liveMeter (k); }, dynHistory)) // the dynamics suite
+            return;
 
         auto grid = [&] (int columns, int rows) {
             g.setColour (colour::gridBeat);
@@ -1908,9 +1911,15 @@ private:
 
     void timerCallback() override
     {
+        bool history = false;
         for (const auto& item : activeLayout().items)
-            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0 && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || dynui::isLive (item.display)) && visible (item))
+            {
+                history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
+            }
+        if (history)
+            dynHistory.push (liveMeter (0), liveMeter (2), liveMeter (3));
     }
 
     AudioEngine& engine;
@@ -1926,6 +1935,7 @@ private:
     float sgStart = 0.0f;
     std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)
     juce::Point<float> eqDragOffset;
+    dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
 };
 
 // --- the window ------------------------------------------------------------------------------------

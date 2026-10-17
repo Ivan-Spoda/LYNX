@@ -329,8 +329,8 @@ float characterCurve (Character c, float x) noexcept
     {
         case Character::warm:
         {
-            // clean up to about +8 dBFS, then an asymmetric soft limit (the positive side gives later): even + odd
-            constexpr float tp = 2.5f, tn = 2.0f, sp = 3.0f, sn = 2.5f;
+            // clean up to about +9 dBFS, then an asymmetric soft limit (the negative side gives first): even + odd
+            constexpr float tp = 6.5f, tn = 3.0f, sp = 2.0f, sn = 1.5f;
             if (x > tp)
                 return tp + sp * std::tanh ((x - tp) / sp);
             if (x < -tn)
@@ -346,10 +346,13 @@ float characterCurve (Character c, float x) noexcept
         }
         case Character::bright:
         {
-            // an even, rectifier-like term (second harmonic from very low levels) and a soft limit near +12 dBFS
-            constexpr float s = 0.05f;
-            const auto even = 0.007f * s * (std::sqrt (1.0f + (x / s) * (x / s)) - 1.0f);
-            return 4.0f * std::tanh ((x + even) / 4.0f);
+            // an even, rectifier-like term (second harmonic from low levels) and a gentle, slightly asymmetric limit
+            constexpr float s = 0.1f;
+            const auto u = x + 0.007f * s * (std::sqrt (1.0f + (x / s) * (x / s)) - 1.0f);
+            const auto limit = u >= 0.0f ? 7.75f : 5.5f;
+            const auto a = std::abs (u / limit);
+            const auto d = 1.0f + a * std::sqrt (a);
+            return u / std::cbrt (d * d); // u / (1 + |u/L|^1.5)^(1/1.5)
         }
         case Character::off:
         default: return x;
@@ -363,6 +366,8 @@ class Compressor final : public Effect
 public:
     explicit Compressor (const EffectParams* initial)
     {
+        for (auto& d : gainDelay)
+            d.assign ((std::size_t) gainCapacity, 1.0f);
         if (initial != nullptr)
             configure (*initial);
     }
@@ -379,22 +384,23 @@ public:
     void reset() noexcept override
     {
         audioDelay.reset();
+        dryLa.reset();
         dryDelay.reset();
-        for (auto& g : gainDelay)
-            g.reset();
+        for (auto& d : gainDelay)
+            std::fill (d.begin(), d.end(), 1.0f);
+        gainPos = 0;
         for (auto& o : os)
+            o.reset();
+        for (auto& o : osSide)
             o.reset();
         for (auto& b : scEq)
             for (auto& s : b)
                 s.reset();
-        env = { -120.0, -120.0 };
-        holdLeft = { 0, 0 };
-        sustain = { 0.0, 0.0 };
-        dc.reset();
-        prevGain = { 1.0f, 1.0f };
+        for (auto& d : det)
+            d = {};
         for (auto& pk : peaks)
             pk.fill (0.0f);
-        peakPos = { 0, 0 };
+        dc.reset();
     }
 
     int latencySamples() const noexcept override { return latency.load (std::memory_order_relaxed); }
@@ -410,13 +416,32 @@ public:
     {
         lastParams = p;
         configure (p);
+        designScEq (p);
         for (int off = 0; off < n; off += maxBlock)
             chunk (l + off, r + off, std::min (maxBlock, n - off), p, off);
         scL = scR = nullptr;
     }
 
 private:
-    static constexpr int maxBlock = 1024;
+    static constexpr int maxBlock = 1024, maxFactor = 8;
+    static constexpr int gainCapacity = 1 << 17; // the side chain's lead at up to 8x the rate (20 ms at 768 kHz)
+    static constexpr int peakWindow = 4096;
+
+    // the detector of one channel
+    struct Detector
+    {
+        double env = -120.0, sustain = 0.0;
+        int holdLeft = 0, peakPos = 0;
+    };
+
+    // per-chunk settings at the rate the detector runs at
+    struct Ctx
+    {
+        Style st;
+        double thr, rat, kn, rng, aA, relMs, rate, slowCoef;
+        int holdSamples, window;
+        bool autoRel;
+    };
 
     // latency = the chosen maximum look-ahead (+ the oversampler when on), as the reference does (§2: 960 samples
     // for "maximum 20 ms" whatever the look-ahead knob says)
@@ -431,9 +456,11 @@ private:
         laSamples = (int) std::lround (la * 0.001 * sr);
         const auto osLat = osFactor > 1 ? mixsuite::Oversampler::latency() : 0;
         audioDelay.setLength (laSamples);
+        dryLa.setLength (laSamples);
         dryDelay.setLength (osLat);
-        for (auto& o : os)
-            o.setFactor (std::max (2, osFactor));
+        for (auto* set : { &os, &osSide })
+            for (auto& o : *set)
+                o.setFactor (std::max (2, osFactor));
         latency.store (laSamples + osLat, std::memory_order_relaxed);
     }
 
@@ -458,49 +485,122 @@ private:
         scEqOn = any;
     }
 
+    Ctx context (const EffectParams& p, double rate) const noexcept
+    {
+        Ctx c;
+        c.st = styleOf (p[style]);
+        const auto& sd = styleDefs[(int) c.st];
+        c.thr = thresholdDb (p[threshold]);
+        c.rat = ratioOf (p[ratio]);
+        c.kn = kneeDb (p[knee]);
+        c.rng = std::max (0.01, rangeDb (p[range]));
+        c.aA = coef (std::max (0.002, attackMs (p[attack]) * sd.attackScale), rate);
+        c.relMs = std::max (0.5, releaseTau (sd, releaseMs (p[release])));
+        c.autoRel = on (p[autoRelease]) && sd.curve != Curve::twoWay;
+        c.rate = rate;
+        c.slowCoef = coef (1000.0, rate);
+        c.holdSamples = (int) (holdMs (p[hold]) * 0.001 * rate);
+        c.window = sd.windowMs > 0.0 ? std::clamp ((int) (sd.windowMs * 0.001 * rate), 1, peakWindow) : 0;
+        return c;
+    }
+
+    // one detector step: the level → the gain (dB) the compressor applies now
+    double detect (int c, double level, const Ctx& x) noexcept
+    {
+        auto& d = det[(std::size_t) c];
+        if (x.window > 0) // the peak of the last `window` samples
+        {
+            auto& ring = peaks[(std::size_t) c];
+            ring[(std::size_t) (d.peakPos % x.window)] = (float) level;
+            d.peakPos = (d.peakPos + 1) % x.window;
+            for (int k = 0; k < x.window; ++k)
+                level = std::max (level, (double) ring[(std::size_t) k]);
+        }
+        const auto in = std::max (-120.0, 20.0 * std::log10 (level + 1e-12));
+        if (in > d.env)
+        {
+            d.env = x.aA * d.env + (1.0 - x.aA) * in;
+            d.holdLeft = x.holdSamples;
+        }
+        else if (d.holdLeft > 0)
+            --d.holdLeft;
+        else
+        {
+            auto ms = x.relMs;
+            if (x.autoRel) // program-dependent: short peaks recover faster than sustained reduction
+            {
+                const auto now = -curveGain (x.st, d.env, x.thr, x.rat, x.kn, x.rng);
+                const auto fraction = now > 0.1 ? std::clamp (d.sustain / now, 0.0, 1.0) : 1.0;
+                ms *= 0.35 + 0.65 * fraction;
+            }
+            const auto aR = coef (ms, x.rate);
+            d.env = aR * d.env + (1.0 - aR) * in;
+        }
+        const auto g = curveGain (x.st, d.env, x.thr, x.rat, x.kn, x.rng);
+        d.sustain = x.slowCoef * d.sustain + (1.0 - x.slowCoef) * std::max (0.0, -g);
+        return g;
+    }
+
+    // the gains of a run of side-chain samples (per channel, or linked), through the look-ahead's gain delay
+    double gains (const float* a, const float* b, int count, double link, int lag, const Ctx& x, float* outL, float* outR) noexcept
+    {
+        double maxGr = 0.0;
+        const bool both = link >= 0.999;
+        for (int i = 0; i < count; ++i)
+        {
+            const auto la = std::abs (a[i]), lb = std::abs (b[i]);
+            const auto m = (double) std::max (la, lb);
+            float g[2];
+            const auto g0 = detect (0, link * m + (1.0 - link) * la, x);
+            g[0] = (float) dbToGain (g0);
+            maxGr = std::max (maxGr, -g0);
+            if (both)
+                g[1] = g[0];
+            else
+            {
+                const auto g1 = detect (1, link * m + (1.0 - link) * lb, x);
+                g[1] = (float) dbToGain (g1);
+                maxGr = std::max (maxGr, -g1);
+            }
+            for (int c = 0; c < 2; ++c)
+            {
+                auto& line = gainDelay[(std::size_t) c];
+                line[(std::size_t) gainPos] = g[c];
+                const auto rd = (gainPos - lag + gainCapacity) % gainCapacity;
+                (c == 0 ? outL : outR)[i] = line[(std::size_t) rd];
+            }
+            gainPos = (gainPos + 1) % gainCapacity;
+        }
+        return maxGr;
+    }
+
     void chunk (float* l, float* r, int n, const EffectParams& p, int offset) noexcept
     {
         const auto inPeak = blockPeak (l, r, n);
-        const auto st = styleOf (p[style]);
-        const auto& sd = styleDefs[(int) st];
-        const auto thr = thresholdDb (p[threshold]);
-        const auto rat = ratioOf (p[ratio]);
-        const auto kn = kneeDb (p[knee]);
-        const auto rng = std::max (0.01, rangeDb (p[range]));
-        const auto attMs = std::max (0.002, attackMs (p[attack]) * sd.attackScale);
-        const auto relKnob = releaseMs (p[release]);
-        const auto relMs = std::max (0.5, releaseTau (sd, relKnob));
-        const bool autoRel = on (p[autoRelease]) && sd.curve != Curve::twoWay;
-        const auto window = sd.windowMs > 0.0 ? std::clamp ((int) (sd.windowMs * 0.001 * sr), 1, peakWindow) : 0;
-        const auto aA = coef (attMs, sr);
-        const auto holdSamples = (int) (holdMs (p[hold]) * 0.001 * sr);
-        const auto la = std::min (lookaheadMs (p[lookahead]), latencyMs);
-        const auto gainLag = std::max (0, laSamples - (int) std::lround (la * 0.001 * sr));
-        for (auto& g : gainDelay)
-            g.setLength (gainLag);
         const auto ch = characterOf (p[character]);
         const bool pre = on (p[characterPre]);
         const auto drv = (float) dbToGain (driveDb (p[drive]));
         const auto scGain = (float) dbToGain (scLevelDb (p[scLevel]));
         const bool external = on (p[scExternal]) && scL != nullptr && scR != nullptr;
         const auto link = (double) std::clamp (p[stereoLink], 0.0f, 1.0f);
-        const bool listen = on (p[scListen]);
         const auto inGain = (float) dbToGain (trimDb (p[input]));
         const auto outGain = (float) dbToGain (trimDb (p[output]));
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+        const auto st = styleOf (p[style]);
         float makeup = 1.0f;
-        if (on (p[autoGain]) && sd.curve != Curve::upward)
-            makeup = (float) dbToGain (std::min (rng, -0.5 * curveGain (st, 0.0, thr, rat, kn, rng)));
-        designScEq (p);
-        const auto slowCoef = coef (1000.0, sr);
-        double maxGr = 0.0;
+        if (on (p[autoGain]) && styleDefs[(int) st].curve != Curve::upward)
+        {
+            const auto rng = std::max (0.01, rangeDb (p[range]));
+            makeup = (float) dbToGain (std::min (rng, -0.5 * curveGain (st, 0.0, thresholdDb (p[threshold]), ratioOf (p[ratio]), kneeDb (p[knee]), rng)));
+        }
+        const auto la = std::min (lookaheadMs (p[lookahead]), latencyMs);
+        const auto factor = osFactor > 1 ? osFactor : 1;
+        const auto lag = std::clamp ((int) std::lround ((latencyMs - la) * 0.001 * sr * factor), 0, gainCapacity - 1);
 
+        // the side chain (base rate) and the audio through the look-ahead delay
         for (int i = 0; i < n; ++i)
         {
             float a = l[i] * inGain, b = r[i] * inGain;
-            const float da = a, db = b; // dry (before the look-ahead delay)
-
-            // side chain
             float sa, sb;
             if (external)
             {
@@ -527,91 +627,60 @@ private:
                         sa = f.process (sa, 0);
                         sb = f.process (sb, 1);
                     }
-            if (listen)
-            {
-                scOut[(std::size_t) i] = 0.5f * (sa + sb);
-                continue;
-            }
-
-            const auto m = std::max (std::abs (sa), std::abs (sb));
-            const double lv[2] { link * m + (1.0 - link) * std::abs (sa), link * m + (1.0 - link) * std::abs (sb) };
-            const bool both = link >= 0.999;
-            float gch[2] {};
-            for (int c = 0; c < 2; ++c)
-            {
-                if (both && c == 1)
-                {
-                    gch[1] = gch[0];
-                    break;
-                }
-                auto level = lv[c];
-                if (window > 0) // the peak of the last `window` samples
-                {
-                    auto& ring = peaks[(std::size_t) c];
-                    ring[(std::size_t) peakPos[(std::size_t) c]] = (float) level;
-                    peakPos[(std::size_t) c] = (peakPos[(std::size_t) c] + 1) % window;
-                    for (int k = 0; k < window; ++k)
-                        level = std::max (level, (double) ring[(std::size_t) k]);
-                }
-                const auto x = std::max (-120.0, 20.0 * std::log10 (level + 1e-12));
-                auto& e = env[(std::size_t) c];
-                if (x > e)
-                {
-                    e = aA * e + (1.0 - aA) * x;
-                    holdLeft[(std::size_t) c] = holdSamples;
-                }
-                else if (holdLeft[(std::size_t) c] > 0)
-                    --holdLeft[(std::size_t) c];
-                else
-                {
-                    auto ms = relMs;
-                    if (autoRel) // program-dependent: short peaks recover faster than sustained reduction
-                    {
-                        const auto now = -curveGain (st, e, thr, rat, kn, rng);
-                        const auto fraction = now > 0.1 ? std::clamp (sustain[(std::size_t) c] / now, 0.0, 1.0) : 1.0;
-                        ms *= 0.35 + 0.65 * fraction;
-                    }
-                    const auto aR = coef (ms, sr);
-                    e = aR * e + (1.0 - aR) * x;
-                }
-                const auto g = curveGain (st, e, thr, rat, kn, rng);
-                sustain[(std::size_t) c] = slowCoef * sustain[(std::size_t) c] + (1.0 - slowCoef) * std::max (0.0, -g);
-                maxGr = std::max (maxGr, -g);
-                gch[c] = (float) dbToGain (g);
-            }
-
-            // the audio (and its gain) through the look-ahead delay
+            sideL[(std::size_t) i] = sa;
+            sideR[(std::size_t) i] = sb;
+            dl[(std::size_t) i] = a;
+            dr[(std::size_t) i] = b;
             audioDelay.process (a, b);
             wl[(std::size_t) i] = a;
             wr[(std::size_t) i] = b;
-            gl[(std::size_t) i] = gainDelay[0].process (gch[0]) * makeup;
-            gr[(std::size_t) i] = gainDelay[1].process (gch[1]) * makeup;
-            dl[(std::size_t) i] = da;
-            dr[(std::size_t) i] = db;
         }
 
-        if (listen)
+        if (on (p[scListen])) // the detector's signal
         {
             for (int i = 0; i < n; ++i)
-                l[i] = r[i] = scOut[(std::size_t) i];
+                l[i] = r[i] = 0.5f * (sideL[(std::size_t) i] + sideR[(std::size_t) i]);
             meters.set (0, 0.0f);
             meters.set (2, inPeak);
             meters.set (3, blockPeak (l, r, n));
             return;
         }
 
-        // gain (and the character) on the delayed audio, oversampled when asked
-        if (osFactor > 1)
+        double maxGr = 0.0;
+        if (factor == 1)
         {
-            runOversampled (0, wl.data(), gl.data(), n, ch, pre, drv);
-            runOversampled (1, wr.data(), gr.data(), n, ch, pre, drv);
-        }
-        else
+            maxGr = gains (sideL.data(), sideR.data(), n, link, lag, context (p, sr), gl.data(), gr.data());
             for (int i = 0; i < n; ++i)
             {
-                wl[(std::size_t) i] = stage (wl[(std::size_t) i], gl[(std::size_t) i], ch, pre, drv);
-                wr[(std::size_t) i] = stage (wr[(std::size_t) i], gr[(std::size_t) i], ch, pre, drv);
+                wl[(std::size_t) i] = stage (wl[(std::size_t) i], gl[(std::size_t) i] * makeup, ch, pre, drv);
+                wr[(std::size_t) i] = stage (wr[(std::size_t) i], gr[(std::size_t) i] * makeup, ch, pre, drv);
             }
+        }
+        else
+        {
+            // oversampled: the side chain is upsampled (the same path as the audio, so both stay aligned), the
+            // detector and the gain run at the high rate, and the gain multiplies the upsampled audio
+            const auto m = n * factor;
+            for (int c = 0; c < 2; ++c)
+            {
+                auto* src = c == 0 ? sideL.data() : sideR.data();
+                auto* dst = c == 0 ? upL.data() : upR.data();
+                int k = 0;
+                osSide[(std::size_t) c].process (src, n, [&] (float v) noexcept {
+                    dst[std::min (k++, m - 1)] = v;
+                    return 0.0f;
+                });
+            }
+            maxGr = gains (upL.data(), upR.data(), m, link, lag, context (p, sr * factor), upGl.data(), upGr.data());
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto* g = c == 0 ? upGl.data() : upGr.data();
+                int k = 0;
+                os[(std::size_t) c].process (c == 0 ? wl.data() : wr.data(), n, [&] (float v) noexcept {
+                    return stage (v, g[std::min (k++, m - 1)] * makeup, ch, pre, drv);
+                });
+            }
+        }
 
         for (int i = 0; i < n; ++i)
         {
@@ -622,21 +691,14 @@ private:
                 b = dc.process (b, 1);
             }
             float da = dl[(std::size_t) i], db = dr[(std::size_t) i];
-            audioDelayDry (da, db);
+            dryLa.process (da, db);
+            dryDelay.process (da, db);
             l[i] = (da + (a - da) * mx) * outGain;
             r[i] = (db + (b - db) * mx) * outGain;
         }
         meters.set (0, (float) std::clamp (maxGr / 30.0, 0.0, 1.0));
         meters.set (2, inPeak);
         meters.set (3, blockPeak (l, r, n));
-    }
-
-    // the dry path gets the same delay as the wet one (look-ahead, then the oversampler)
-    void audioDelayDry (float& a, float& b) noexcept
-    {
-        dryLa.setLength (laSamples);
-        dryLa.process (a, b);
-        dryDelay.process (a, b);
     }
 
     static float stage (float x, float g, Character ch, bool pre, float drv) noexcept
@@ -646,22 +708,6 @@ private:
         if (pre)
             return characterCurve (ch, x * drv) / drv * g;
         return characterCurve (ch, x * g * drv) / drv;
-    }
-
-    void runOversampled (int c, float* x, const float* g, int n, Character ch, bool pre, float drv) noexcept
-    {
-        const int factor = osFactor;
-        int calls = 0;
-        auto& prev = prevGain[(std::size_t) c];
-        os[(std::size_t) c].process (x, n, [&] (float v) noexcept {
-            const int i = calls / factor, k = calls % factor;
-            ++calls;
-            const auto target = g[std::min (i, n - 1)];
-            const auto gi = prev + (target - prev) * (float) (k + 1) / (float) factor;
-            if (k == factor - 1)
-                prev = target;
-            return stage (v, gi, ch, pre, drv);
-        });
     }
 
     double sr = 48000.0, latencyMs = -1.0;
@@ -675,21 +721,19 @@ private:
         return p;
     }();
     StereoDelay audioDelay, dryLa, dryDelay;
-    std::array<MonoDelay, 2> gainDelay;
-    std::array<mixsuite::Oversampler, 2> os;
+    std::array<std::vector<float>, 2> gainDelay;
+    int gainPos = 0;
+    std::array<mixsuite::Oversampler, 2> os, osSide;
     std::array<std::array<Biquad, facet::maxSections>, scBands> scEq;
     std::array<int, scBands> scCount {};
     bool scEqOn = false;
-    std::array<double, 2> env { -120.0, -120.0 }, sustain {};
-    std::array<int, 2> holdLeft {};
-    std::array<float, 2> prevGain { 1.0f, 1.0f };
-    static constexpr int peakWindow = 512;
+    std::array<Detector, 2> det {};
     std::array<std::array<float, peakWindow>, 2> peaks {};
-    std::array<int, 2> peakPos {};
     DcBlock dc;
     const float* scL = nullptr;
     const float* scR = nullptr;
-    std::array<float, maxBlock> wl {}, wr {}, gl {}, gr {}, dl {}, dr {}, scOut {};
+    std::array<float, maxBlock> wl {}, wr {}, gl {}, gr {}, dl {}, dr {}, sideL {}, sideR {};
+    std::array<float, maxBlock * maxFactor> upL {}, upR {}, upGl {}, upGr {};
     LiveMeters meters;
 };
 } // namespace

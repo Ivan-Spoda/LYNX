@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
 
 #include "core/WorkerPool.h"
@@ -1102,7 +1103,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         if (! slots[i].enabled || wet <= 0.0f)
         {
-            if (mixsuite::isSuiteKind (slots[i].kind))
+            if ((mixsuite::isSuiteKind (slots[i].kind) || dyn::isDynKind (slots[i].kind)))
                 clearMeters();
             continue;
         }
@@ -1130,7 +1131,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 sd.silentSamples = 0;
             else if (sd.silentSamples >= hold)
             {
-                if (mixsuite::isSuiteKind (slots[i].kind))
+                if ((mixsuite::isSuiteKind (slots[i].kind) || dyn::isDynKind (slots[i].kind)))
                     clearMeters();
                 continue;
             }
@@ -1188,7 +1189,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         }
 
         // live meters for the editor (the mixing suite's gain reduction)
-        if (mixsuite::isSuiteKind (slots[i].kind) && key < (std::size_t) maxMixerTracks * maxEffectSlots)
+        if ((mixsuite::isSuiteKind (slots[i].kind) || dyn::isDynKind (slots[i].kind)) && key < (std::size_t) maxMixerTracks * maxEffectSlots)
             for (int o = 0; o < ProcessTimes::meterOutputs; ++o)
                 times->effectMeters[key * ProcessTimes::meterOutputs + (std::size_t) o].store (effects[i]->controlOutput (o), std::memory_order_relaxed);
 

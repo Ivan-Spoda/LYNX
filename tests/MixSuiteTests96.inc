@@ -430,7 +430,7 @@ TEST (mixsuite_panels_place_every_parameter)
     using namespace lynx;
     // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
     // and never overlap, and the dynamics effects show their live gain-reduction meter
-    CHECK (plugui::ownLayoutKinds().size() == 5);
+    CHECK (plugui::ownLayoutKinds().size() == 8); // + round 108: Crest Compressor, Prism Multiband, Sentry Gate
     for (const auto kind : plugui::ownLayoutKinds())
     {
         const auto& l = plugui::layoutFor (kind);
@@ -475,7 +475,9 @@ TEST (mixsuite_panels_place_every_parameter)
                     CHECK (false);
                 }
             }
-        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2 : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser) ? 1 : 0));
+        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2
+                          : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser || kind == EffectKind::crestCompressor
+                             || kind == EffectKind::sentryGate) ? 1 : 0));
     }
 }
 

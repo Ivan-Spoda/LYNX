@@ -1597,6 +1597,210 @@ Layout emberLayout()
     v.push_back (dial (480, 148, 30, "Output", TR_NOOP ("Output"), bipolar));
     v.push_back (toggle (216, 200, 104, 20, "Auto gain", TR_NOOP ("Auto gain")));
     v.push_back (tabs (340, 200, 168, 20, "Oversampling", TR_NOOP ("2x|4x|8x"), { 0.0f, 0.5f, 1.0f }));
+
+    // multiband mode (round 108): crossovers and a style / drive / mix / level row per band (band 1 = the controls
+    // above); the band rows only show with more than one band
+    l.height = 440;
+    v.push_back (section (4, 234, 512, 202, TR_NOOP ("Bands")));
+    v.push_back (display (12, 254, 236, 64, "emberbands"));
+    v.push_back (tabs (12, 324, 236, 20, "Bands", TR_NOOP ("1 band|2|3|4")));
+    v.push_back (tabs (12, 350, 236, 20, "Crossover slope", TR_NOOP ("12 dB/oct|24 dB/oct|48 dB/oct"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (dial (50, 392, 22, "Crossover 1", TR_NOOP ("Low")));
+    v.push_back (dial (130, 392, 22, "Crossover 2", TR_NOOP ("Mid")));
+    v.push_back (dial (210, 392, 22, "Crossover 3", TR_NOOP ("High")));
+    static const char* heads[4] { TR_NOOP ("Style"), TR_NOOP ("Drive"), TR_NOOP ("Mix"), TR_NOOP ("Level") };
+    for (int c = 0; c < 4; ++c)
+    {
+        auto h = label (300.0f + 56.0f * (float) c - 26.0f, 254, 52, 14, heads[c]);
+        h.whenParam = "Bands";
+        h.whenMin = 0.17f;
+        v.push_back (h);
+    }
+    static const char* rows[4][4] { { nullptr, nullptr, "B1 mix", "B1 level" },
+                                    { "B2 style", "B2 drive", "B2 mix", "B2 level" },
+                                    { "B3 style", "B3 drive", "B3 mix", "B3 level" },
+                                    { "B4 style", "B4 drive", "B4 mix", "B4 level" } };
+    static const char* rowNames[4] { TR_NOOP ("B1"), TR_NOOP ("B2"), TR_NOOP ("B3"), TR_NOOP ("B4") };
+    for (int b = 0; b < 4; ++b)
+    {
+        const auto cy = 290.0f + 38.0f * (float) b;
+        auto name = label (256, cy - 8.0f, 24, 16, rowNames[b]);
+        name.whenParam = "Bands";
+        name.whenMin = b == 0 ? 0.17f : 0.17f + 0.333f * (float) (b - 1);
+        name.colour = b;
+        v.push_back (name);
+        for (int c = 0; c < 4; ++c)
+        {
+            if (rows[b][c] == nullptr)
+                continue;
+            auto k = knob (300.0f + 56.0f * (float) c, cy, 22, rows[b][c], nullptr, cy + 11.0f, noCaption | (c == 3 ? bipolar : 0), c == 0 ? 4 : 0);
+            k.whenParam = "Bands";
+            k.whenMin = name.whenMin;
+            v.push_back (k);
+        }
+    }
+    return l;
+}
+
+// --- LYNX originals: the dynamics suite (REA round 108) --------------------------------------------------------
+
+Layout crestCompressor()
+{
+    Layout l;
+    l.width = 780;
+    l.height = 582;
+    auto& v = l.items;
+    // the transfer curve (live input dot) and the automatic switches
+    v.push_back (section (4, 4, 224, 262, TR_NOOP ("Curve")));
+    v.push_back (display (12, 24, 208, 206, "crestcurve"));
+    v.push_back (toggle (12, 238, 100, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    v.push_back (toggle (116, 238, 104, 20, "Auto release", TR_NOOP ("Auto release")));
+
+    // the main controls
+    v.push_back (section (232, 4, 300, 262, TR_NOOP ("Compressor")));
+    v.push_back (dial (276, 62, 44, "Threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (350, 62, 44, "Ratio", TR_NOOP ("Ratio"), big));
+    v.push_back (dial (420, 62, 36, "Knee", TR_NOOP ("Knee")));
+    v.push_back (dial (488, 62, 36, "Range", TR_NOOP ("Range")));
+    v.push_back (dial (276, 150, 36, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (350, 150, 36, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (420, 150, 36, "Hold", TR_NOOP ("Hold")));
+    v.push_back (dial (488, 150, 36, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (label (240, 212, 284, 14, TR_NOOP ("Maximum lookahead (latency)")));
+    v.push_back (tabs (240, 230, 284, 22, "Max lookahead", TR_NOOP ("Off|1 ms|2 ms|5 ms|10 ms|20 ms")));
+
+    // live: scrolling gain reduction over the input / output levels, the meter, the levels and the trims
+    v.push_back (section (536, 4, 240, 262, TR_NOOP ("Live")));
+    v.push_back (display (544, 24, 224, 122, "grhistory"));
+    v.push_back (meter (544, 152, 224, 14, 0, TR_NOOP ("Reduction")));
+    v.push_back (display (544, 172, 224, 26, "levels"));
+    v.push_back (dial (580, 222, 24, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (656, 222, 24, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (732, 222, 24, "Output", TR_NOOP ("Output"), bipolar));
+
+    // style
+    v.push_back (section (4, 270, 224, 160, TR_NOOP ("Style")));
+    auto styles = radio (12, 290, 208, 132, "Style",
+                         TR_NOOP ("Clean|Allround|Punch|Upward|Two-way|Vari-mu|Classic|Opto|Vocal|Bus|Pumping"));
+    styles.columns = 2;
+    v.push_back (styles);
+
+    // character and oversampling
+    v.push_back (section (232, 270, 180, 160, TR_NOOP ("Character")));
+    v.push_back (tabs (240, 290, 164, 20, "Character", TR_NOOP ("Off|Warm|Crisp|Bright")));
+    v.push_back (tabs (240, 316, 164, 20, "Character pre", TR_NOOP ("Post|Pre")));
+    v.push_back (tabs (240, 342, 164, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
+    v.push_back (dial (322, 386, 24, "Drive", TR_NOOP ("Drive"), bipolar));
+
+    // side chain
+    v.push_back (section (416, 270, 360, 160, TR_NOOP ("Side chain")));
+    v.push_back (dial (464, 318, 34, "SC level", TR_NOOP ("SC level"), bipolar));
+    v.push_back (dial (552, 318, 34, "Stereo link", TR_NOOP ("Stereo link")));
+    v.push_back (toggle (626, 296, 140, 20, "External SC", TR_NOOP ("External input")));
+    v.push_back (toggle (626, 324, 140, 20, "SC listen", TR_NOOP ("Listen")));
+
+    // side-chain EQ: its curve and three bands (shape, frequency, gain, Q, slope)
+    v.push_back (section (4, 434, 772, 144, TR_NOOP ("Side-chain EQ")));
+    v.push_back (display (12, 454, 236, 116, "crestsceq"));
+    static const char* bandTitles[3] { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3") };
+    static const char* fields[3][5] { { "SC1 shape", "SC1 freq.", "SC1 gain", "SC1 Q", "SC1 slope" },
+                                      { "SC2 shape", "SC2 freq.", "SC2 gain", "SC2 Q", "SC2 slope" },
+                                      { "SC3 shape", "SC3 freq.", "SC3 gain", "SC3 Q", "SC3 slope" } };
+    static const char* captions[5] { TR_NOOP ("Shape"), TR_NOOP ("Freq"), TR_NOOP ("Gain"), TR_NOOP ("Q"), TR_NOOP ("Slope") };
+    for (int b = 0; b < 3; ++b)
+    {
+        const auto x0 = 256.0f + 172.0f * (float) b;
+        v.push_back (label (x0, 452, 166, 14, bandTitles[b], boxed));
+        for (int f = 0; f < 5; ++f)
+        {
+            const auto cx = x0 + 17.0f + 33.0f * (float) f;
+            auto k = knob (cx, 500, 24, fields[b][f], captions[f], 532, f == 2 ? bipolar : 0, f == 0 ? 9 : (f == 4 ? 9 : 0));
+            v.push_back (k);
+        }
+    }
+    return l;
+}
+
+Layout prismMultiband()
+{
+    Layout l;
+    l.width = 820;
+    l.height = 530;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 812, 192, TR_NOOP ("Bands")));
+    v.push_back (display (12, 24, 796, 128, "prismbands"));
+    v.push_back (tabs (12, 170, 180, 20, "Slope", TR_NOOP ("12 dB/oct|24 dB/oct|48 dB/oct")));
+    v.push_back (dial (300, 168, 20, "Crossover 1", TR_NOOP ("Crossover 1"), noCaption));
+    v.push_back (dial (440, 168, 20, "Crossover 2", TR_NOOP ("Crossover 2"), noCaption));
+    v.push_back (dial (580, 168, 20, "Crossover 3", TR_NOOP ("Crossover 3"), noCaption));
+    v.push_back (label (216, 170, 70, 18, TR_NOOP ("Crossovers")));
+
+    static const char* titles[4] { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4") };
+    static const char* names[4][10] {
+        { "B1 threshold", "B1 ratio", "B1 range", "B1 expand", "B1 knee", "B1 attack", "B1 release", "B1 level", "B1 on", "B1 solo" },
+        { "B2 threshold", "B2 ratio", "B2 range", "B2 expand", "B2 knee", "B2 attack", "B2 release", "B2 level", "B2 on", "B2 solo" },
+        { "B3 threshold", "B3 ratio", "B3 range", "B3 expand", "B3 knee", "B3 attack", "B3 release", "B3 level", "B3 on", "B3 solo" },
+        { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" } };
+    for (int b = 0; b < 4; ++b)
+    {
+        const auto x = 4.0f + 204.0f * (float) b;
+        auto sec = section (x, 200, 200, 254, titles[b]);
+        sec.colour = b;
+        v.push_back (sec);
+        v.push_back (toggle (x + 8, 220, 44, 20, names[b][8], TR_NOOP ("On")));
+        v.push_back (toggle (x + 56, 220, 48, 20, names[b][9], TR_NOOP ("Solo")));
+        v.push_back (tabs (x + 108, 220, 84, 20, names[b][3], TR_NOOP ("Comp|Exp")));
+        v.push_back (dial (x + 36, 272, 32, names[b][0], TR_NOOP ("Thres")));
+        v.push_back (dial (x + 100, 272, 32, names[b][1], TR_NOOP ("Ratio")));
+        v.push_back (dial (x + 164, 272, 32, names[b][2], TR_NOOP ("Range"), bipolar));
+        v.push_back (dial (x + 36, 342, 28, names[b][4], TR_NOOP ("Knee")));
+        v.push_back (dial (x + 100, 342, 28, names[b][5], TR_NOOP ("Attack")));
+        v.push_back (dial (x + 164, 342, 28, names[b][6], TR_NOOP ("Release")));
+        v.push_back (dial (x + 100, 406, 28, names[b][7], TR_NOOP ("Level"), bipolar));
+    }
+    v.push_back (section (4, 458, 812, 68, TR_NOOP ("Master")));
+    v.push_back (dial (120, 482, 24, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (dial (300, 482, 24, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (480, 482, 24, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (660, 482, 24, "Output", TR_NOOP ("Output"), bipolar));
+    return l;
+}
+
+Layout sentryGate()
+{
+    Layout l;
+    l.width = 640;
+    l.height = 380;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 232, 270, TR_NOOP ("Gate")));
+    v.push_back (display (12, 24, 216, 166, "sentrycurve"));
+    v.push_back (display (12, 196, 216, 42, "grhistory"));
+    v.push_back (meter (12, 244, 216, 14, 0, TR_NOOP ("Reduction")));
+
+    v.push_back (section (240, 4, 396, 270, TR_NOOP ("Controls")));
+    v.push_back (dial (290, 62, 44, "Threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (380, 62, 36, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (466, 62, 36, "Range", TR_NOOP ("Range")));
+    v.push_back (dial (552, 62, 36, "Knee", TR_NOOP ("Knee")));
+    v.push_back (dial (290, 152, 36, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (380, 152, 36, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (466, 152, 36, "Hold", TR_NOOP ("Hold")));
+    v.push_back (dial (552, 152, 36, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (toggle (250, 236, 120, 22, "Lookahead on", TR_NOOP ("Lookahead on")));
+    v.push_back (toggle (376, 236, 128, 22, "External SC", TR_NOOP ("External input")));
+    v.push_back (toggle (510, 236, 118, 22, "SC listen", TR_NOOP ("Listen")));
+
+    v.push_back (section (4, 278, 232, 98, TR_NOOP ("Style")));
+    auto styles = radio (12, 298, 216, 70, "Style", TR_NOOP ("Classic|Clean|Vocal|Guitar|Upward"));
+    styles.columns = 2;
+    v.push_back (styles);
+
+    v.push_back (section (240, 278, 396, 98, TR_NOOP ("Side chain and output")));
+    static const std::pair<const char*, const char*> knobs[6] { { "High pass", TR_NOOP ("High pass") }, { "Low pass", TR_NOOP ("Low pass") },
+                                                                { "Up threshold", TR_NOOP ("Up thres") }, { "Up ratio", TR_NOOP ("Up ratio") },
+                                                                { "Dry", TR_NOOP ("Dry") }, { "Output", TR_NOOP ("Output") } };
+    for (int k = 0; k < 6; ++k)
+        v.push_back (dial (276.0f + 64.0f * (float) k, 314, 26, knobs[k].first, knobs[k].second, k == 5 ? bipolar : 0));
     return l;
 }
 
@@ -1645,7 +1849,8 @@ const std::vector<EffectKind>& flLayoutKinds()
 const std::vector<EffectKind>& ownLayoutKinds()
 {
     static const std::vector<EffectKind> kinds { EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser,
-                                                 EffectKind::aether, EffectKind::ember };
+                                                 EffectKind::aether, EffectKind::ember, EffectKind::crestCompressor,
+                                                 EffectKind::prismMultiband, EffectKind::sentryGate };
     return kinds;
 }
 
@@ -1696,6 +1901,9 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
+        case EffectKind::crestCompressor: l = crestCompressor(); break;
+        case EffectKind::prismMultiband: l = prismMultiband(); break;
+        case EffectKind::sentryGate: l = sentryGate(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

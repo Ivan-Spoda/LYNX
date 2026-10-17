@@ -224,6 +224,7 @@ if(LYNX_BUILD_APP)
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
         src/ui/PluginEditors.cpp
+        src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ChannelSettings.cpp

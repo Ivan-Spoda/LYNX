@@ -157,7 +157,18 @@ double exciterHz (float v) noexcept;   // 1 .. 12 kHz
 // ---- Ember (saturator) ----
 namespace ember
 {
-enum Param { drive, style, tone, lowCut, highCut, mix, output, autoGain, quality, count };
+enum Param
+{
+    drive, style, tone, lowCut, highCut, mix, output, autoGain, quality,
+    // multiband mode (round 108): with bands > 1 the drive / style above are band 1's; the tone, cuts, mix, output,
+    // auto gain and oversampling stay global
+    bands, xover1, xover2, xover3, xoverSlope, band1Mix, band1Level,
+    band2Style, band2Drive, band2Mix, band2Level,
+    band3Style, band3Drive, band3Mix, band3Level,
+    band4Style, band4Drive, band4Mix, band4Level,
+    count
+};
+constexpr int maxBands = 4;
 enum class Style { tube, tape, transistor, fuzz };
 constexpr int styles = 4;
 Style styleOf (float v) noexcept;
@@ -167,6 +178,13 @@ double lowCutHz (float v) noexcept;    // 0 = off, else 20 .. 500 Hz (before the
 double highCutHz (float v) noexcept;   // 1 = off, else 2 .. 20 kHz (after the drive)
 int oversampling (float v) noexcept;   // 2, 4 or 8
 float shape (Style s, float x) noexcept; // the transfer curve (no drive, no DC removal)
+int bandCount (float v) noexcept;      // 1 .. 4
+double crossoverHz (float v) noexcept; // 30 Hz .. 18 kHz (log)
+float crossoverValue (double hz) noexcept;
+int slopeDbOct (float v) noexcept;     // 12, 24 or 48 (Linkwitz-Riley)
+double bandLevelDb (float v) noexcept; // ±18 dB
+// a band's style / drive / mix / level parameters (band 0 = the global Style and Drive, band1Mix / band1Level)
+int bandParam (int band, int field) noexcept; // field: 0 style, 1 drive, 2 mix, 3 level
 } // namespace ember
 
 const EffectInfo& ridgeInfo();

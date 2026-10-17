@@ -6,3 +6,4 @@ out/
 build-local/
 build-win/
 dist/
+__pycache__/

@@ -145,9 +145,10 @@ struct ProcessTimes
     std::array<std::atomic<std::uint64_t>, maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
     std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
     std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
-    // Live meters of the effects that have them (the mixing suite's gain reduction, REA round 96), always published:
+    // Live meters of the effects that have them (the mixing suite's gain reduction, REA round 96; the dynamics suite's
+    // band gains and levels, round 108), always published:
     // [(track * maxEffectSlots + slot) * meterOutputs + output] = Effect::controlOutput (output) after the last block.
-    static constexpr int meterOutputs = 2;
+    static constexpr int meterOutputs = 8;
     std::array<std::atomic<float>, (std::size_t) maxMixerTracks * maxEffectSlots * meterOutputs> effectMeters {};
 
     static std::uint64_t now() noexcept
