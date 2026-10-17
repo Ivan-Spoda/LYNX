@@ -2,12 +2,14 @@
 
 #include <cstring>
 #include <map>
+#include <array>
 #include <optional>
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FruityShapers.h"
 #include "core/GrossBeat.h"
+#include "core/MaximusFx.h"
 #include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
@@ -48,6 +50,9 @@ public:
         {
             kind = fx->kind;
             layout = &plugui::layoutFor (kind);
+            if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
+                if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
+                    layout = &plugui::soundgoodizerLayout();
         }
 
         page = initialPage;
@@ -124,7 +129,8 @@ public:
             const auto& item = items[(std::size_t) i];
             if (! visible (item) || item.type == Item::section || item.type == Item::label)
                 continue;
-            if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"))
+            if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"
+                                                                    || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
@@ -243,7 +249,7 @@ public:
         g.setColour (fx.enabled ? colour::ledOn : colour::ledOff);
         g.fillEllipse (led);
         auto text = area.withLeft (led.getRight() + 8.0f).withRight (presetBox().getX() - 6.0f);
-        const auto name = utf8 (effectInfo (kind).name);
+        const auto name = layout == &plugui::soundgoodizerLayout() ? juce::String ("Soundgoodizer") : utf8 (effectInfo (kind).name);
         g.setFont (font (type::body, true));
         g.setColour (colour::textPrimary);
         const auto nameWidth = juce::jmin (text.getWidth(), juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), name) + 2.0f);
@@ -780,6 +786,11 @@ public:
                 return y * post;
             }, inner, false);
         }
+        else if (id == "sgamount" || id == "sgpresets")
+        {
+            paintSoundgoodizer (g, id, r, fx);
+            return;
+        }
         else if (id == "xy") // a pad: `param` across, `param2` up (drag the point)
         {
             grid (4, 4);
@@ -1116,6 +1127,106 @@ public:
         ui::showValueTip (*this, juce::Rectangle<int> (6, 6).withCentre (e.getPosition()), peqview::bandText (fx->params, eqSelected));
     }
 
+    // --- Soundgoodizer: Amount and the preset A–D live in the slot's state ---------------------------------
+
+    std::optional<maximusfx::Blob> soundgoodizerBlob() const
+    {
+        const auto* fx = current();
+        return fx != nullptr ? maximusfx::unpack (fx->state) : std::nullopt;
+    }
+
+    float soundgoodizerAmount() const
+    {
+        const auto blob = soundgoodizerBlob();
+        return blob && blob->mix >= 0 ? (float) blob->mix / 1000.0f : 0.6f;
+    }
+
+    void writeSoundgoodizer (const maximusfx::Blob& blob)
+    {
+        engine.editSong ([t = track, sl = slot, bytes = maximusfx::pack (blob)] (Song& song) {
+            song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
+        });
+    }
+
+    void setSoundgoodizerAmount (float v)
+    {
+        if (auto blob = soundgoodizerBlob())
+        {
+            blob->mix = juce::roundToInt (v * 1000.0f);
+            writeSoundgoodizer (*blob);
+        }
+    }
+
+    const std::vector<std::uint8_t>& soundgoodizerPresetBytes (int preset)
+    {
+        auto& bytes = sgPresets[(std::size_t) preset];
+        if (bytes.empty())
+        {
+            const auto roots = findFlStudioRoots();
+            juce::MemoryBlock data;
+            if (! roots.factoryData.empty()
+                && juce::File (juce::String::fromUTF8 (roots.factoryData.c_str()))
+                       .getChildFile ("Plugins/Fruity/Effects/Soundgoodizer/Data/Presets")
+                       .getChildFile (maximusfx::soundgoodizerPresetFile (preset))
+                       .loadFileAsData (data))
+            {
+                const auto* b = static_cast<const std::uint8_t*> (data.getData());
+                bytes.assign (b, b + data.getSize());
+            }
+        }
+        return bytes;
+    }
+
+    int soundgoodizerPreset()
+    {
+        const auto blob = soundgoodizerBlob();
+        for (int p = 0; blob && p < 4; ++p)
+            if (const auto& bytes = soundgoodizerPresetBytes (p); ! bytes.empty() && bytes == blob->state)
+                return p;
+        return -1;
+    }
+
+    void setSoundgoodizerPreset (int preset)
+    {
+        auto blob = soundgoodizerBlob();
+        const auto& bytes = soundgoodizerPresetBytes (preset);
+        if (! blob || bytes.empty())
+            return;
+        blob->state = bytes;
+        writeSoundgoodizer (*blob);
+    }
+
+    void paintSoundgoodizer (juce::Graphics& g, const juce::String& id, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        if (id == "sgamount")
+        {
+            const auto amount = soundgoodizerAmount();
+            drawKnob (g, r, amount, false, fx.enabled ? colour::accent : colour::textDisabled, sgDragging);
+            const auto body = r.reduced (r.getWidth() * 0.16f);
+            g.setGradientFill (juce::ColourGradient (colour::bg6, body.getCentreX(), body.getY(), colour::bg4, body.getCentreX(), body.getBottom(), false));
+            g.fillEllipse (body);
+            g.setColour (colour::borderStrong);
+            g.drawEllipse (body, 1.0f);
+            g.setColour (colour::textPrimary);
+            g.setFont (font (juce::jmax (10.0f, 18.0f * s), true));
+            g.drawText (juce::String (amount * 100.0f, 0) + "%", body, juce::Justification::centred, false);
+            return;
+        }
+        const auto chosen = soundgoodizerPreset();
+        for (int p = 0; p < 4; ++p)
+        {
+            const auto cell = juce::Rectangle<float> (r.getX() + r.getWidth() * (float) p / 4.0f, r.getY(), r.getWidth() / 4.0f, r.getHeight());
+            const auto led = juce::Rectangle<float> (8.0f * s, 8.0f * s).withCentre ({ cell.getCentreX(), cell.getY() + 8.0f * s });
+            g.setColour (p == chosen ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::ledOff);
+            g.fillEllipse (led);
+            g.setColour (p == chosen ? colour::textPrimary : colour::textSecondary);
+            g.setFont (font (juce::jmax (10.0f, 20.0f * s), true));
+            g.drawText (juce::String::charToString ((juce::juce_wchar) ('A' + p)), cell.withTrimmedTop (16.0f * s), juce::Justification::centred, false);
+        }
+    }
+
     // a pad sets two parameters at once
     void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
     {
@@ -1195,6 +1306,20 @@ public:
             return;
         }
 
+        if (item.type == Item::display && juce::String (item.display) == "sgpresets")
+        {
+            const auto r = rectOf (item);
+            setSoundgoodizerPreset (juce::jlimit (0, 3, (int) ((e.position.x - r.getX()) / r.getWidth() * 4.0f)));
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "sgamount")
+        {
+            dragItem = index;
+            sgDragging = true;
+            sgStart = soundgoodizerAmount();
+            ui::showValueTip (*this, rectOf (item).toNearestInt(), juce::String (sgStart * 100.0f, 0) + "%");
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "xy")
         {
             dragItem = index;
@@ -1299,6 +1424,13 @@ public:
             eqMouseDrag (e);
             return;
         }
+        if (sgDragging && dragItem >= 0)
+        {
+            const auto v = juce::jlimit (0.0f, 1.0f, sgStart - (float) e.getDistanceFromDragStartY() / (e.mods.isCtrlDown() ? 800.0f : 200.0f));
+            setSoundgoodizerAmount (v);
+            ui::showValueTip (*this, rectOf (activeLayout().items[(std::size_t) dragItem]).toNearestInt(), juce::String (v * 100.0f, 0) + "%");
+            return;
+        }
         if (xyDragging && dragItem >= 0)
         {
             xyMouse (e, activeLayout().items[(std::size_t) dragItem]);
@@ -1324,9 +1456,9 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
-        if (xyDragging)
+        if (xyDragging || sgDragging)
         {
-            xyDragging = false;
+            xyDragging = sgDragging = false;
             dragItem = -1;
             ui::hideValueTip();
         }
@@ -1414,6 +1546,12 @@ public:
         if (index < 0)
             return {};
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (item.type == Item::display && juce::String (item.display) == "sgamount")
+            return { tr ("Amount: drag up or down (Ctrl: fine)"), juce::String (soundgoodizerAmount() * 100.0f, 0) + "%", false, false };
+        if (item.type == Item::display && juce::String (item.display) == "sgpresets")
+            return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "xy")
+            return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display)
             return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))
@@ -1546,7 +1684,9 @@ private:
     ui::ValueDrag drag;
     juce::String presetName;
     int eqSelected = -1;
-    bool eqDragging = false, xyDragging = false;
+    bool eqDragging = false, xyDragging = false, sgDragging = false;
+    float sgStart = 0.0f;
+    std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)
     juce::Point<float> eqDragOffset;
 };
 

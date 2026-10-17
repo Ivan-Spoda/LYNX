@@ -3,6 +3,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
+#include "core/MaximusFx.h"
 #include "flp/Flp.h"
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
@@ -1297,7 +1298,8 @@ private:
             const auto presets = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Effects");
 
             auto kinds = lynx::plugui::flLayoutKinds();
-            kinds.insert (kinds.end(), { lynx::EffectKind::fruityBalance, lynx::EffectKind::grossBeat, lynx::EffectKind::fruityDelay2 });
+            kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
+            const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
             for (const auto kind : kinds)
             {
@@ -1307,6 +1309,9 @@ private:
                 {
                     const auto dir = presets.getChildFile (juce::String::fromUTF8 (plugin.c_str()));
                     auto file = dir.getChildFile ("Default.fst");
+                    if (! file.existsAsFile()) // plugins without presets: their entry of FL's plugin database
+                        for (const auto& f : database.findChildFiles (juce::File::findFiles, true, juce::String::fromUTF8 (plugin.c_str()) + ".fst"))
+                            file = f;
                     if (! file.existsAsFile())
                     {
                         auto files = dir.findChildFiles (juce::File::findFiles, true, "*.fst");
@@ -1322,6 +1327,20 @@ private:
                     }
                     name = juce::String::fromUTF8 (plugin.c_str());
                     break;
+                }
+
+                if (kind == lynx::EffectKind::maximus) // Soundgoodizer: preset A of the installation, Amount 60 %
+                {
+                    juce::MemoryBlock data;
+                    juce::File (juce::String::fromUTF8 (roots.factoryData.c_str())).getChildFile ("Plugins/Fruity/Effects/Soundgoodizer/Data/Presets/a.dat").loadFileAsData (data);
+                    lynx::maximusfx::Blob blob;
+                    blob.build = lynx::hlfx::MaximusBuild::soundgoodizer;
+                    blob.mix = 600;
+                    const auto* b = static_cast<const std::uint8_t*> (data.getData());
+                    blob.state.assign (b, b + data.getSize());
+                    fx = lynx::makeEffectSlot (kind);
+                    fx.state = lynx::maximusfx::pack (blob);
+                    name = "Soundgoodizer";
                 }
 
                 lynx::Song song;
@@ -1352,10 +1371,11 @@ private:
 
             // generators in FL's arrangement: the channel's plugin page with the FL preset's settings
             const auto generators = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Generators");
-            for (const auto& [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" } })
+            for (const auto& [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" }, { "BooBass", "" }, { "Sytrus", "Default.fst" } })
             {
                 juce::MemoryBlock data;
-                auto file = generators.getChildFile (folder).getChildFile (preset);
+                auto file = juce::String (preset).isEmpty() ? database.getSiblingFile ("Generators").getChildFile ("Misc").getChildFile (juce::String (folder) + ".fst")
+                                                            : generators.getChildFile (folder).getChildFile (preset);
                 if (! file.existsAsFile())
                 {
                     auto files = generators.getChildFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst");
@@ -1388,6 +1408,11 @@ private:
                     };
                     auto song = lynx::importFlp (project, options);
                     // the page only needs the plugin's saved state (FL Keys' sample zones need the installed wavetables)
+                    if (! song.channels.empty() && project.channels.front().pluginName == "BooBass" && song.channels.front().instrument != lynx::InstrumentKind::boobass)
+                    {
+                        song.channels.front().instrument = lynx::InstrumentKind::boobass; // (its sound needs the engine DLL; the page does not)
+                        song.channels.front().modelParams.assign (3, 32768.0f);
+                    }
                     if (! song.channels.empty() && project.channels.front().pluginName == "FL Keys")
                     {
                         song.channels.front().instrument = lynx::InstrumentKind::flkeys;

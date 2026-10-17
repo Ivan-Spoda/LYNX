@@ -1108,10 +1108,16 @@ public:
     {
         if (layout == nullptr)
             return nullptr;
-        for (const auto& item : layout->items)
+        const plugui::LayoutItem* any = nullptr;
+        for (const auto& item : layout->items) // the knob / fader of the parameter first (a pad may share it)
             if (item.param != nullptr && name == item.param)
-                return &item;
-        return nullptr;
+            {
+                if (item.type == plugui::Item::knob || item.type == plugui::Item::vslider)
+                    return &item;
+                if (any == nullptr && item.type != plugui::Item::display)
+                    any = &item;
+            }
+        return any;
     }
 
     juce::Slider* knobFor (const char* name) const
@@ -1279,9 +1285,39 @@ public:
                         }
                     }
                     break;
+                case plugui::Item::stepper:
+                    if (k != nullptr)
+                    {
+                        auto box = r;
+                        if (item.label != nullptr)
+                            caption (item.label, box.removeFromTop (12.0f * f), false, juce::Justification::centred);
+                        g.setColour (colour::bg0);
+                        g.fillRoundedRectangle (box, radius::sm * f);
+                        g.setColour (colour::textPrimary);
+                        g.setFont (font (juce::jmax (9.0f, 12.0f * f), true));
+                        // oversampling orders read as FL shows them (0 → 1x … 3 → 8x)
+                        const auto text = juce::String (item.param).containsIgnoreCase ("oversampling") ? juce::String (1 << juce::jlimit (0, 8, (int) k->getValue())) + "x"
+                                                                                                       : juce::String ((int) k->getValue());
+                        g.drawText (text, box.withTrimmedRight (8.0f * f), juce::Justification::centred, false);
+                        g.setColour (colour::textSecondary);
+                        g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb4"), box.withTrimmedLeft (box.getWidth() - 10.0f * f).withHeight (box.getHeight() * 0.5f), juce::Justification::centred, false);
+                        g.drawText (juce::String::fromUTF8 ("\xe2\x96\xbe"), box.withTrimmedLeft (box.getWidth() - 10.0f * f).withTrimmedTop (box.getHeight() * 0.5f), juce::Justification::centred, false);
+                    }
+                    break;
                 case plugui::Item::display:
                     g.setColour (colour::bg0);
                     g.fillRoundedRectangle (r, radius::sm * f);
+                    if (juce::String (item.display) == "xy")
+                        if (auto* kx = knobFor (item.param); kx != nullptr)
+                            if (auto* ky = knobFor (item.param2); ky != nullptr)
+                            {
+                                g.setColour (colour::gridBeat);
+                                g.drawVerticalLine ((int) r.getCentreX(), r.getY(), r.getBottom());
+                                g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
+                                const juce::Point<float> pt { r.getX() + r.getWidth() * normalised (*kx), r.getBottom() - r.getHeight() * normalised (*ky) };
+                                g.setColour (colour::accent);
+                                g.drawEllipse (juce::Rectangle<float> (10.0f * f, 10.0f * f).withCentre (pt), 2.0f);
+                            }
                     if (juce::String (item.display) == "flkeysname")
                         if (const auto st = flkeys::parseState (def.pluginState))
                         {
@@ -1316,6 +1352,20 @@ public:
         }
     }
 
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (xyItem == nullptr)
+            return;
+        const auto r = layoutRect (*xyItem);
+        if (auto* kx = knobFor (xyItem->param))
+            setNormalised (*kx, juce::jlimit (0.0f, 1.0f, (e.position.x - r.getX()) / r.getWidth()));
+        if (auto* ky = knobFor (xyItem->param2))
+            setNormalised (*ky, juce::jlimit (0.0f, 1.0f, (r.getBottom() - e.position.y) / r.getHeight()));
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { xyItem = nullptr; }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (layout == nullptr)
@@ -1325,7 +1375,19 @@ public:
             auto* k = knobFor (item.param);
             if (k == nullptr || ! layoutRect (item).contains (e.position))
                 continue;
-            if (item.type == plugui::Item::toggle)
+            if (item.type == plugui::Item::display && juce::String (item.display) == "xy")
+            {
+                xyItem = &item;
+                mouseDrag (e);
+                return;
+            }
+            if (item.type == plugui::Item::stepper)
+            {
+                const auto r = layoutRect (item);
+                const auto up = e.position.y < r.getY() + (item.label != nullptr ? 12.0f * layoutFactor() : 0.0f) + (r.getHeight() - (item.label != nullptr ? 12.0f * layoutFactor() : 0.0f)) * 0.5f;
+                k->setValue (k->getValue() + (up ? 1.0 : -1.0), juce::sendNotificationSync);
+            }
+            else if (item.type == plugui::Item::toggle)
                 setNormalised (*k, normalised (*k) >= 0.5f ? 0.0f : 1.0f);
             else if (item.type == plugui::Item::radio)
             {
@@ -1408,6 +1470,7 @@ private:
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
     const plugui::Layout* layout = nullptr;
+    const plugui::LayoutItem* xyItem = nullptr; // the pad being dragged
 };
 
 class SettingsPanel final : public juce::Component,

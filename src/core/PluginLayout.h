@@ -94,6 +94,9 @@ const std::vector<EffectKind>& flLayoutKinds();
 const Layout* instrumentLayout (InstrumentKind kind);
 const std::vector<InstrumentKind>& instrumentLayoutKinds();
 
+// Soundgoodizer slots (EffectKind::maximus with the Soundgoodizer build): its own page, edited in the slot's state.
+const Layout& soundgoodizerLayout();
+
 // Parameter index of `name` in effectInfo(kind) (−1 = no such parameter).
 int paramIndex (EffectKind kind, const char* name);
 

@@ -948,6 +948,25 @@ Layout hyperChorus()
     return l;
 }
 
+Layout fruityBalance()
+{
+    // Balance and Volume knobs (captions above, values under them) around the level meter
+    Layout l;
+    l.fl = "Fruity Balance";
+    l.width = 232;
+    l.height = 150;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 232, 150, nullptr, boxed));
+    v.push_back (label (8, 18, 80, 20, TR_NOOP ("Balance")));
+    v.push_back (knob (48, 77, 46, "Balance", nullptr, 0, noCaption | bipolar));
+    v.push_back (value (8, 112, 80, 20, "Balance", 0));
+    v.push_back (display (90, 16, 40, 118, "meter"));
+    v.push_back (label (130, 18, 80, 20, TR_NOOP ("Volume")));
+    v.push_back (knob (170, 77, 46, "Volume", nullptr, 0, noCaption));
+    v.push_back (value (130, 112, 80, 20, "Volume", 0));
+    return l;
+}
+
 Layout fruityDelay2()
 {
     // INPUT (pan, volume) | FEEDBACK (normal / invert / ping-pong, volume, cutoff) | TIME (time, offset) | DRY (volume)
@@ -1054,6 +1073,96 @@ Layout flKeys()
     return l;
 }
 
+Layout booBass()
+{
+    // BASS, MID and TREBLE stepping down along the instrument's body
+    Layout l;
+    l.fl = "BooBass";
+    l.width = 343;
+    l.height = 154;
+    auto& v = l.items;
+    v.push_back (label (180, 0, 160, 34, "BooBass", dim));
+    v.push_back (section (40, 36, 300, 116, nullptr, boxed));
+    v.push_back (knob (79, 74, 40, "Bass", TR_NOOP ("Bass"), 107));
+    v.push_back (knob (151, 92, 40, "Mid", TR_NOOP ("Mid"), 128));
+    v.push_back (knob (222, 102, 40, "Treble", TR_NOOP ("Treble"), 138));
+    return l;
+}
+
+Layout sytrusMain()
+{
+    // Sytrus' MAIN page: master faders, volume and filter envelopes, unison, the modulation X/Y pad, quality and porta.
+    // The operator, filter and effect pages and the FM / RM matrix keep the saved patch (not editable in LYNX).
+    Layout l;
+    l.fl = "Sytrus";
+    l.width = 850;
+    l.height = 346;
+    auto& v = l.items;
+    v.push_back (label (8, 4, 80, 22, TR_NOOP ("Main"), boxed));
+    const auto fader = [&v] (float cx, const char* param, const char* caption, bool bipolarFader) {
+        v.push_back (slider (Item::vslider, cx - 9, 54, 18, 70, param, nullptr, noCaption | (bipolarFader ? bipolar : 0)));
+        v.push_back (label (cx - 16, 38, 32, 13, caption));
+    };
+    v.push_back (section (12, 34, 136, 98, nullptr, boxed));
+    fader (38, "Master level", TR_NOOP ("Vol"), false);
+    fader (81, "Master LFO", TR_NOOP ("LFO"), true);
+    fader (124, "Master pitch", TR_NOOP ("Pitch"), true);
+    v.push_back (section (152, 34, 98, 98, nullptr, boxed));
+    fader (165, "Vol attack", "A", false);
+    fader (189, "Vol decay", "D", false);
+    fader (213, "Vol sustain", "S", true);
+    fader (237, "Vol release", "R", false);
+    v.push_back (label (156, 122, 80, 10, TR_NOOP ("Vol"), dim | alignLeft));
+    v.push_back (section (256, 34, 98, 98, nullptr, boxed));
+    fader (269, "Flt attack", "A", false);
+    fader (293, "Flt decay", "D", false);
+    fader (317, "Flt sustain", "S", true);
+    fader (341, "Flt release", "R", false);
+    v.push_back (label (260, 122, 80, 10, TR_NOOP ("Filter"), dim | alignLeft));
+    v.push_back (section (360, 34, 180, 98, nullptr, boxed));
+    v.push_back (stepper (366, 38, 30, 34, "Unison", TR_NOOP ("Ord"), 8));
+    fader (410, "Uni pan", TR_NOOP ("Pn"), false);
+    fader (434, "Uni volume", TR_NOOP ("Vl"), false);
+    fader (458, "Uni pitch", TR_NOOP ("Pt"), false);
+    fader (481, "Uni sub", TR_NOOP ("Sb"), false);
+    fader (504, "Uni phase", TR_NOOP ("Ph"), false);
+    fader (527, "Uni env var", TR_NOOP ("En"), false);
+    v.push_back (label (470, 122, 66, 10, TR_NOOP ("Unison"), dim));
+    v.push_back (section (12, 138, 168, 160, TR_NOOP ("Modulation")));
+    v.push_back (display (18, 160, 128, 130, "xy", "Mod X", "Mod Y"));
+    v.push_back (knob (164, 185, 24, "Mod X", "X", 205));
+    v.push_back (knob (164, 232, 24, "Mod Y", "Y", 252));
+    v.push_back (section (362, 138, 178, 86, TR_NOOP ("Quality")));
+    v.push_back (label (462, 156, 34, 12, TR_NOOP ("Draft")));
+    v.push_back (label (500, 156, 34, 12, TR_NOOP ("Render")));
+    v.push_back (label (368, 174, 92, 16, TR_NOOP ("HQ envelopes"), alignLeft));
+    v.push_back (toggle (470, 175, 16, 14, "Live env accuracy", nullptr));
+    v.push_back (toggle (508, 175, 16, 14, "Export env accuracy", nullptr));
+    v.push_back (label (368, 198, 92, 16, TR_NOOP ("Oversampling"), alignLeft));
+    v.push_back (stepper (462, 196, 32, 22, "Live oversampling", nullptr, 4));
+    v.push_back (stepper (500, 196, 32, 22, "Export oversampling", nullptr, 4));
+    v.push_back (toggle (450, 270, 70, 16, "Porta", TR_NOOP ("Porta")));
+    v.push_back (section (553, 34, 294, 260, nullptr, boxed));
+    v.push_back (label (560, 150, 280, 16, TR_NOOP ("Operators, filters, effects and the matrix"), dim));
+    v.push_back (label (560, 168, 280, 16, TR_NOOP ("keep the saved patch"), dim));
+    v.push_back (label (560, 300, 286, 40, "Sytrus", dim));
+    return l;
+}
+
+Layout soundgoodizer()
+{
+    // one big Amount knob and the four presets A–D (the slot's state, core/MaximusFx.h)
+    Layout l;
+    l.fl = "Soundgoodizer";
+    l.width = 215;
+    l.height = 300;
+    auto& v = l.items;
+    v.push_back (label (10, 6, 195, 36, "Soundgoodizer", dim));
+    v.push_back (display (28, 64, 152, 152, "sgamount"));
+    v.push_back (display (14, 228, 186, 50, "sgpresets"));
+    return l;
+}
+
 // --- generated layouts ------------------------------------------------------------------------------
 
 Layout generated (EffectKind kind)
@@ -1092,7 +1201,7 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::fruityFlangus, EffectKind::fruitySoftClipper,
                                                  EffectKind::fruityBloodOverdrive, EffectKind::fruityPanOMatic, EffectKind::stereoShaper,
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
-                                                 EffectKind::vintageChorus, EffectKind::hyperChorus };
+                                                 EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance };
     return kinds;
 }
 
@@ -1133,6 +1242,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::fruityWaveShaper: l = fruityWaveShaper(); break;
         case EffectKind::vintageChorus: l = vintageChorus(); break;
         case EffectKind::hyperChorus: l = hyperChorus(); break;
+        case EffectKind::fruityBalance: l = fruityBalance(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;
@@ -1140,19 +1250,27 @@ const Layout& layoutFor (EffectKind kind)
 
 const Layout* instrumentLayout (InstrumentKind kind)
 {
-    static const Layout osc = threeOsc(), keys = flKeys();
+    static const Layout osc = threeOsc(), keys = flKeys(), boo = booBass(), sytrus = sytrusMain();
     switch (kind)
     {
         case InstrumentKind::threeosc: return &osc;
         case InstrumentKind::flkeys: return &keys;
+        case InstrumentKind::boobass: return &boo;
+        case InstrumentKind::sytrus: return &sytrus;
         default: return nullptr;
     }
 }
 
 const std::vector<InstrumentKind>& instrumentLayoutKinds()
 {
-    static const std::vector<InstrumentKind> kinds { InstrumentKind::threeosc, InstrumentKind::flkeys };
+    static const std::vector<InstrumentKind> kinds { InstrumentKind::threeosc, InstrumentKind::flkeys, InstrumentKind::boobass, InstrumentKind::sytrus };
     return kinds;
+}
+
+const Layout& soundgoodizerLayout()
+{
+    static const Layout l = soundgoodizer();
+    return l;
 }
 
 bool hasFlLayout (EffectKind kind)

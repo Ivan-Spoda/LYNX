@@ -1909,3 +1909,6 @@ countries: br
 "LFO phase dif" = "Dif. de fase LFO"
 "Delay lines" = "Linhas de delay"
 "Invert wet" = "Inverter molhado"
+"Amount: drag up or down (Ctrl: fine)" = "Quantidade: arraste para cima ou para baixo (Ctrl: fino)"
+"Soundgoodizer preset A to D (read from your FL installation)" = "Preset A a D do Soundgoodizer (lido da sua instalação do FL)"
+"Drag the point: both values at once" = "Arraste o ponto: os dois valores de uma vez"
