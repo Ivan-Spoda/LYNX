@@ -58,6 +58,9 @@ timing.
 
 ## Where I stopped / next steps
 
+- Landing (coordinator): merged with round 88's live input; a muted insert now fades out over the same 0.001-per-sample
+  glide (up to 1000 samples), the input test waits for it. Not confirmed whether FL's mute glides too.
+
 - The run was cut by a power loss right after the timing / glide change; the coordinator committed it, added the
   test and this doc from the round's notes and logs.
 - Not done: value ranges of the other plugins' parameters (each port knows its own ranges; add them to
