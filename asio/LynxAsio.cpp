@@ -909,6 +909,8 @@ private:
     bool openRender (IMMDevice* d)
     {
         const bool exclusive = streamExclusive = exclusiveActive(); // fixed for this stream (the panel may change the settings)
+        devicePeriod = 0;
+        renderFrames = 0;
         if (FAILED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &renderClient)))
             return setError ("Could not open the playback device."), false;
 
