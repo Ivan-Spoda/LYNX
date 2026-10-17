@@ -109,7 +109,9 @@ matches by name).
 | Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | — |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
-Not mapped yet (no LYNX module plays their role): Auto-Tune, NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
+| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |
+
+Not mapped yet (no LYNX module plays their role): NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
 Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
 De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 

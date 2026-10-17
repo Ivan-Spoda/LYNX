@@ -968,6 +968,51 @@ Layout fruityBalance()
     return l;
 }
 
+Layout lynxTune()
+{
+    // LYNX Tune (own design, REA round 95; not an FL plugin): PITCH (key, scale, voice range, A4 reference) ·
+    // CORRECTION (retune — the main control —, humanize, tracking) · FORMANT (preserve, shift) · OUTPUT (transpose,
+    // mix, low latency, MIDI source); the twelve target-note switches along the bottom, like a keyboard octave
+    Layout l;
+    l.width = 600;
+    l.height = 236;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 190, 160, TR_NOOP ("PITCH")));
+    LayoutItem key;
+    key.type = Item::menu;
+    key.x = 10, key.y = 30, key.w = 80, key.h = 22;
+    key.param = "Key";
+    key.label = TR_NOOP ("Key");
+    key.options = "C|C#|D|D#|E|F|F#|G|G#|A|A#|B";
+    v.push_back (key);
+    LayoutItem scale;
+    scale.type = Item::menu;
+    scale.x = 98, scale.y = 30, scale.w = 84, scale.h = 22;
+    scale.param = "Scale";
+    scale.label = TR_NOOP ("Scale");
+    scale.options = TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom");
+    v.push_back (scale);
+    v.push_back (radio (10, 62, 96, 88, "Range", TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument")));
+    v.push_back (knob (148, 100, 40, "Reference", TR_NOOP ("A4"), 136, showValue));
+    v.push_back (section (194, 0, 210, 160, TR_NOOP ("CORRECTION")));
+    v.push_back (knob (250, 84, 72, "Retune", TR_NOOP ("RETUNE"), 140, big | showValue));
+    v.push_back (knob (334, 64, 38, "Humanize", TR_NOOP ("HUMANIZE"), 98, showValue));
+    v.push_back (knob (334, 122, 30, "Tracking", TR_NOOP ("TRACKING"), 150, 0));
+    v.push_back (section (408, 0, 90, 160, TR_NOOP ("FORMANT")));
+    v.push_back (toggle (416, 30, 76, 20, "Formant preserve", TR_NOOP ("Preserve")));
+    v.push_back (knob (453, 96, 40, "Formant shift", TR_NOOP ("SHIFT"), 136, bipolar | showValue));
+    v.push_back (section (502, 0, 98, 160, TR_NOOP ("OUTPUT")));
+    v.push_back (stepper (510, 30, 82, 22, "Transpose", TR_NOOP ("Transpose"), 25));
+    v.push_back (knob (551, 92, 34, "Mix", TR_NOOP ("MIX"), 124, showValue));
+    v.push_back (toggle (510, 136, 82, 18, "Low latency", TR_NOOP ("Low latency")));
+    v.push_back (section (0, 164, 600, 72, TR_NOOP ("TARGET NOTES")));
+    static const char* const notes[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    for (int k = 0; k < 12; ++k)
+        v.push_back (toggle (8.0f + 40.0f * (float) k, 194, 36, 22, notes[k], notes[k]));
+    v.push_back (stepper (500, 192, 92, 24, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    return l;
+}
+
 Layout fruitySqueeze()
 {
     // SQUARIZE (amount), PUNCHER (preserve, impact, relation, amount) on plates; FILTER (on, type, freq, res, pre / post);
@@ -1650,6 +1695,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
+        case EffectKind::lynxTune: l = lynxTune(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

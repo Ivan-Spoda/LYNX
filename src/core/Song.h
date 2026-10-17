@@ -364,7 +364,8 @@ enum class EffectKind : std::uint8_t
     glowLeveler,  // LYNX's optical leveler (REA_rodada96, core/MixSuite.h)
     hushDeEsser,  // LYNX's de-esser (REA_rodada96, core/MixSuite.h)
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
-    ember         // LYNX's saturator (REA_rodada96, core/MixSuite.h)
+    ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
+    lynxTune      // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

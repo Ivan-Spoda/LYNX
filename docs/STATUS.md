@@ -76,7 +76,7 @@ exports the 30 demo projects shipped with FL Studio 2026.
   controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
-  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
+  Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode; Newtone edits rendered by LYNX's engine), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
   Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
@@ -509,8 +509,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   switch on (an editable LYNX parameter) they add their source sample from the song time while the song plays —
   identical to Newtone's output for an unedited sample played from the song start at the sample's rate (−138 dB).
   The source sample comes from the path FL stored (or the engine's working copy), or is chosen in the slot menu.
-  Not reproduced: the note/time edits and Newtime's time warping (zplane engines), Newtone's pitch-mark alignment when
-  playback starts mid-song, and its behaviour at other project rates (LYNX resamples linearly).
+  Newtone's note edits are rendered by LYNX's own engine (REA round 95: pitch offsets with FL's note transitions, drift,
+  vibrato, formant factor, volume / fade-in, timing and ownership, disabled notes; YIN analysis + TD-PSOLA; close, per
+  note within ~0.01 st of FL's render). Not reproduced: Newtime's time warping, Newtone's tremolo / ramps and the
+  whole-sample re-alignment FL gives later notes after an edit, its pitch-mark alignment when playback starts mid-song,
+  and its behaviour at other project rates (LYNX resamples linearly).
+- **LYNX Tune** (own design, REA round 95): real-time vocal pitch corrector on any insert — key / scale / note switches,
+  retune, humanize, formant preserve / shift, transpose, A4 reference, voice range, low-latency mode, MIDI target notes
+  from a Channel Rack channel (`Effect::setHeldNotes`); YIN + TD-PSOLA from the literature only (`core/VocalPitch`,
+  `core/LynxTune`).
 - **Fruity Delay 2 and Fruity Delay 3:** FL's exact engines as mixer effects (`core/FruityDelay`, REA round 52),
   FL's raw controls as editable parameters. Delay 2: time in 1/192 beat, input pan/volume ramps, stereo offset,
   normal/swapped/ping-pong loop with its one-pole cutoff in x87 precision. Delay 3 (the hosted third-party engine):

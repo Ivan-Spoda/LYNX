@@ -237,7 +237,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             else if ((kind == EffectKind::newtone || kind == EffectKind::newtime))
             {
                 // Newtone / Newtime: their source sample (loaded off the audio thread), REA_rodada73
-                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr);
+                // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
+                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr,
+                                          slots[i].state);
                 effect->prepare (sampleRate);
             }
             else
@@ -963,8 +965,12 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
             position = e.sampleOffset;
         }
 
+        auto& held = heldNotes[(std::size_t) i];
+        const auto bit = std::uint64_t { 1 } << (e.key & 63);
         if (e.type == NoteEvent::Type::on)
         {
+            if (e.key >= 0 && e.key < 128)
+                held[(std::size_t) (e.key >> 6)] |= bit;
             if (! c.muted)
             {
                 instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
@@ -982,9 +988,14 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         else if (e.type == NoteEvent::Type::choke)
         {
             instrument.allNotesOff(); // short fade, like FL's "cut"
+            held = {};
         }
         else
+        {
             instrument.noteOff (e.key);
+            if (e.key >= 0 && e.key < 128)
+                held[(std::size_t) (e.key >> 6)] &= ~bit;
+        }
     }
 
     if (position < n)
@@ -1150,6 +1161,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
+            effects[i]->setHeldNotes (heldNotes.data(), maxChannels);
             setSidechain (state, slots[i], *effects[i], track);
             timed (key, [&] { effects[i]->process (l, r, n, params, bpm); });
         }
@@ -1157,6 +1169,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         {
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
+            effects[i]->setHeldNotes (heldNotes.data(), maxChannels);
             setSidechain (state, slots[i], *effects[i], track);
             timed (key, [&] { effects[i]->process (l, r, n, slots[i].params, bpm); });
         }
@@ -1233,6 +1246,7 @@ void RackRenderer::process (const RackState* state,
     {
         for (auto& instrument : state->instruments)
             instrument->allNotesOff();
+        heldNotes.fill ({});
 
         for (auto& arp : state->arpeggiators)
             if (arp != nullptr)
@@ -1272,6 +1286,7 @@ void RackRenderer::process (const RackState* state,
                 for (auto& instrument : state->instruments)
                     if (instrument != nullptr)
                         instrument->allNotesOff();
+                heldNotes.fill ({});
                 continue;
             }
 
@@ -1280,10 +1295,21 @@ void RackRenderer::process (const RackState* state,
 
             auto& instrument = *state->instruments[(std::size_t) e.channel];
 
+            auto& held = heldNotes[(std::size_t) std::min (e.channel, maxChannels - 1)];
+            const auto bit = std::uint64_t { 1 } << (e.key & 63);
+            const auto inRange = e.key >= 0 && e.key < 128;
             if (e.type == NoteEvent::Type::on)
+            {
                 instrument.noteOn (e.key, e.velocity);
+                if (inRange)
+                    held[(std::size_t) (e.key >> 6)] |= bit;
+            }
             else
+            {
                 instrument.noteOff (e.key);
+                if (inRange)
+                    held[(std::size_t) (e.key >> 6)] &= ~bit;
+            }
         }
     }
 

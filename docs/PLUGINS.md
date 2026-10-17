@@ -142,7 +142,8 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Vocodex † | Vocodex | Import | Near-exact | −136…−145 dB (internal Sytrus carrier −112 dB) |
 | Vintage Phaser | Vintage Phaser | Import | Near-exact | within −121 dB |
 | Pitch correction | Pitcher | Insert | Close | bit-exact with the reference model; MIDI mode / Harmonize get no MIDI in LYNX |
-| Newtone / Newtime | Newtone, Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; note/time edits not reproduced |
+| Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, formant, volume, timing, disabled notes) rendered by LYNX's own pitch engine; tremolo / ramps and FL's sample re-alignment after edits missing |
+| Newtime | Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; time warping not reproduced |
 | Utility | Fruity Send, Transporter | Insert | Approximate | mapped to a utility stage |
 | EQ | Fruity 7 Band EQ, Fruity Bass Boost | Insert | Approximate | settings mapped to LYNX's EQs |
 | Delay | Fruity Delay (v1) | Insert | Approximate | |
@@ -187,6 +188,20 @@ oversample where they are nonlinear and never allocate on the audio thread.
 Product names in the table are trademarks of their owners (Solid State Logic, Waves Audio, Universal Audio,
 FabFilter, Slate Digital, Maag Audio, Soundtoys and the owners of the Teletronix name); they are used only to say
 which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by any of them.
+
+## LYNX originals: vocal pitch
+
+| LYNX engine | In the role of | What it is |
+|---|---|---|
+| LYNX Tune | automatic vocal pitch correctors, e.g. Antares Auto-Tune, Waves Tune Real-Time | real-time pitch correction on every mixer insert (*Insert*): key and scale (13 scales + custom), per-note switches on a keyboard strip, retune speed (0 ms = the hard "robot" effect … 400 ms), humanize (lets held notes keep their vibrato), formant preserve and formant shift, transpose, A4 reference 430–450 Hz, voice range, low-latency mode (≈ 16 ms instead of ≈ 25 ms for alto / tenor), MIDI target notes (the notes held on a Channel Rack channel — played live or from a pattern — become the targets), mix |
+
+LYNX Tune is LYNX's own design, written only from published DSP: YIN pitch detection (de Cheveigné & Kawahara, 2002)
+and TD-PSOLA pitch shifting (Moulines & Charpentier, 1990), which keeps the formants in place. No third-party plugin was
+opened, run or analysed to make it, and no preset, name, graphic or manual text of one is used
+([`docs/analise/REA_rodada95.md`](analise/REA_rodada95.md)). Accuracy on synthetic vowels: within 3 cents of the target
+note with instant retune; it never allocates on the audio thread and reports its latency to PDC. Antares and Auto-Tune
+are trademarks of Antares Audio Technologies, Waves Tune of Waves Audio; they are named only to say which role LYNX Tune
+plays. LYNX is not affiliated with, endorsed or sponsored by them.
 
 ---
 

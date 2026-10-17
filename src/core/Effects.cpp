@@ -1,5 +1,6 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/LynxTune.h"
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
@@ -1859,6 +1860,13 @@ public:
                 c.effect->setPlaying (playing);
     }
 
+    void setHeldNotes (const NoteMask* channels, int count) noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->setHeldNotes (channels, count);
+    }
+
     void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
     {
         for (int done = 0; done < n; done += capacity)
@@ -2463,6 +2471,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::hushDeEsser: return mixsuite::hushInfo();
         case EffectKind::aether: return mixsuite::aetherInfo();
         case EffectKind::ember: return mixsuite::emberInfo();
+        case EffectKind::lynxTune: return lynxtune::info();
     }
     return eq;
 }
@@ -2836,6 +2845,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::aether:
         case EffectKind::ember:
             return mixsuite::paramText (kind, param, v);
+        case EffectKind::lynxTune:
+            return lynxtune::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3005,6 +3016,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::hushDeEsser:
         case EffectKind::aether:
         case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
+        case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

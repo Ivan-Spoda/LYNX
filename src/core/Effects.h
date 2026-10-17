@@ -5,6 +5,7 @@
 // process() never allocate and can run on the audio thread.
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -68,6 +69,9 @@ std::string widthText (const EffectParams& params, int band); // Q (LYNX) or ban
 double responseDb (const EffectParams& params, double sampleRate, double hz);
 } // namespace peq
 
+// Notes held on a Channel Rack channel: bit k of word k / 64 = MIDI key k
+using NoteMask = std::array<std::uint64_t, 2>;
+
 class Effect
 {
 public:
@@ -91,6 +95,9 @@ public:
     virtual void setSidechain (const float* /*left*/, const float* /*right*/) noexcept {}
     // Second side input (Vocodex carrier), same rules; only called when the slot has `sidechain2`.
     virtual void setSidechain2 (const float* /*left*/, const float* /*right*/) noexcept {}
+    // The notes held on every Channel Rack channel (`count` masks, by channel index) during the next process(); the
+    // pointer stays valid until the next call. Effects that follow notes (LYNX Tune's MIDI targets) keep it.
+    virtual void setHeldNotes (const NoteMask* /*channels*/, int /*count*/) noexcept {}
     // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };

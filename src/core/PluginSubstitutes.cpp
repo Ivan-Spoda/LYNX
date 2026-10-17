@@ -243,6 +243,24 @@ lynx = Auto-pan
 # [DATA] VST2 unique ID from real projects
 vst2 = StPn
 names = PanMan
+
+# ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
+[antares-auto-tune]
+product = Auto-Tune Pro
+vendor = Antares
+lynx = LYNX Tune
+# [DATA] VST3 class ID from FL wrapper records of real projects (round 98); its settings are not translated
+vst3 = 415453563854413175746f2d54756e65
+names = Auto-Tune Pro; Auto-Tune Pro X; Auto-Tune Artist; Auto-Tune Access; Auto-Tune EFX+; Auto-Tune Hybrid; Auto-Tune
+mix = 1
+
+[waves-tune]
+product = Waves Tune Real-Time
+vendor = Waves
+lynx = LYNX Tune
+waves = WavesTune Real-Time; Waves Tune Real-Time; WavesTune
+names = WavesTune Real-Time; Waves Tune Real-Time
+mix = 1
 )TABLE";
 
 std::string lowerAscii (std::string s)
@@ -296,7 +314,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::ember; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::lynxTune; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
