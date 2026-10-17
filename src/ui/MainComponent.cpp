@@ -2348,6 +2348,10 @@ void MainComponent::showMissingFiles (bool afterOpening)
                 if (fx.kind == EffectKind::plugin && ! fx.plugin.id.empty() && host.find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
                     addPlugin (fx.plugin, song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name,
                                "Bypassed: the slot keeps the plugin's settings until it is installed");
+        // installed, but failed to load: they play silence / are bypassed
+        for (const auto& line : host.getLoadFailures())
+            if (std::none_of (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == line.toStdString(); }))
+                info.plugins.push_back ({ line.toStdString(), {}, "Silence: the plugin is installed but did not load" });
         if (currentFile.existsAsFile())
             info.searchFolders.add (currentFile.getParentDirectory().getFullPathName());
     }
@@ -2535,7 +2539,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addSeparator();
         menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
         const auto scanning = engine.getPluginHost().backgroundScan().running;
-        menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins (VST3 and CLAP)"), [this, scanning] {
+        menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins (VST, VST3 and CLAP)"), [this, scanning] {
             if (scanning)
                 engine.getPluginHost().cancelBackgroundScan();
             else
@@ -2565,7 +2569,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Last FL Studio import report"), [this] {
             const auto& r = engine.getImportReport();
             if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
-                && engine.getMissingPlugins().isEmpty() && engine.getMatchedPlugins().isEmpty())
+                && engine.getMissingPlugins().isEmpty() && engine.getMatchedPlugins().isEmpty() && engine.getPluginsWithoutState().isEmpty()
+                && engine.getPluginHost().getLoadFailures().isEmpty())
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"),
                                                         tr ("Nothing to report (no .flp imported in this session, or everything was converted)."));
             else
@@ -2808,6 +2813,11 @@ void MainComponent::showImportReport()
     if (! missing.isEmpty())
         text << tr ("Plugins not installed on this PC (or in a folder LYNX doesn't scan; Options > Setup wizard):") << "\n  "
              << missing.joinIntoString ("\n  ") << "\n\n";
+    if (const auto& lost = engine.getPluginsWithoutState(); ! lost.isEmpty())
+        text << tr ("Plugins found but playing their default settings (the project saved them for the other format, VST2/VST3):") << "\n  "
+             << lost.joinIntoString ("\n  ") << "\n\n";
+    if (const auto failed = engine.getPluginHost().getLoadFailures(); ! failed.isEmpty())
+        text << tr ("Plugins installed but not loaded (silent):") << "\n  " << failed.joinIntoString ("\n  ") << "\n\n";
     if (! r.droppedEffects.empty())
         text << tr ("Effects with no equivalent (left out):") << "\n" << list (r.droppedEffects) << "\n\n";
     if (r.missingSamples > 0)

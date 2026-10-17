@@ -31,6 +31,6 @@ private:
                                PluginCreationCallback) override;
 };
 
-// Adds the LYNX formats (JUCE's + CLAP) to a manager.
+// Adds the LYNX formats (JUCE's VST3 + CLAP + our VST2 host) to a manager.
 void addPluginFormats (juce::AudioPluginFormatManager& manager);
 } // namespace lynx

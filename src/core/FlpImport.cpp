@@ -1573,6 +1573,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "harmless" && def.instrument == InstrumentKind::harmless)
                      || (plugin == "harmor" && def.instrument == InstrumentKind::harmor))
                 ++r.converted[c.pluginName];
+            else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
+                ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
@@ -1880,8 +1882,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
                     const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
 
-                    if (options.report != nullptr && slot.plugin != "Fruity Wrapper" && ! harmless)
-                        ++options.report->droppedEffects[slot.plugin];
+                    if (options.report != nullptr && ! harmless)
+                        ++options.report->droppedEffects[slot.plugin == "Fruity Wrapper" ? std::string ("Fruity Wrapper (plugin state not readable)")
+                                                                                          : slot.plugin];
                     continue;
                 }
 

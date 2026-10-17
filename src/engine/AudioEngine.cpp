@@ -4,6 +4,7 @@
 #include <map>
 
 #include "engine/Text.h"
+#include "ui/I18n.h"
 
 #include "core/FlpImport.h"
 #include "core/Instruments.h"
@@ -982,9 +983,11 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
 
         juce::StringArray missing;
         juce::StringArray matched;
-        plugins.adoptFlPlugins (imported, &missing, &matched);
+        juce::StringArray withoutState;
+        plugins.adoptFlPlugins (imported, &missing, &matched, &withoutState);
         missingPlugins = missing;
         matchedPlugins = matched;
+        pluginsWithoutState = withoutState;
         missingPluginDetails.clear();
         for (const auto& name : missing)
         {
@@ -999,16 +1002,23 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
                 }
             missingPluginDetails.push_back (std::move (m));
         }
+        // found, but the project's settings are in the other format (VST2 <-> VST3): they play their default sound
+        for (const auto& line : withoutState)
+            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Its default settings: the project saved them for the other format (VST2/VST3)") });
 
+        plugins.clearLoadFailures();
         if (asEdit)
-        {
             editSong ([&imported] (Song& s) { s = std::move (imported); });
-            return true;
+        else
+        {
+            stop();
+            rewind();
+            setSong (std::move (imported));
         }
 
-        stop();
-        rewind();
-        setSong (std::move (imported));
+        // installed but failed to load (the rack was just built): silence / bypass, said as loudly as a missing one
+        for (const auto& line : plugins.getLoadFailures())
+            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Silence: the plugin is installed but did not load") });
         return true;
     }
     catch (const flp::Error& e)

@@ -2474,6 +2474,12 @@ std::atomic<bool> offlineRenderingFlag { false };
 void setOfflineRendering (bool on) noexcept { offlineRenderingFlag.store (on); }
 bool offlineRendering() noexcept { return offlineRenderingFlag.load(); }
 
+HostTimeline& hostTimeline() noexcept
+{
+    static HostTimeline timeline;
+    return timeline;
+}
+
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
     if (kind == InstrumentKind::controller)

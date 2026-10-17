@@ -936,7 +936,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, wrappedVst2 = 0, wrappedVst2State = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
@@ -1320,6 +1320,14 @@ TEST (flp_real_files)
                 ++wrapped;
                 lynx::ForeignPlugin f;
                 wrappedParsed += lynx::parseFlWrapper (state, f) && f.format != lynx::ForeignPlugin::Format::none && ! f.name.empty();
+                if (f.format == lynx::ForeignPlugin::Format::vst2)
+                {
+                    // VST2 state (REA_rodada89 §2): every one decodes and writes back to the same bytes
+                    ++wrappedVst2;
+                    lynx::FlVst2State st;
+                    if (lynx::parseFlVst2State (f.state, st) && st.version == -9 && lynx::writeFlVst2State (st) == f.state)
+                        ++wrappedVst2State;
+                }
             };
             for (const auto& c : p.channels)
                 countWrapper (c.pluginName, c.pluginState);
@@ -2039,7 +2047,8 @@ TEST (flp_real_files)
     std::printf ("  %d FL effect presets, %d read\n", fxPresets, fxDecoded);
     CHECK (fxDecoded == fxPresets);
     CHECK (wrappedParsed == wrapped);
-    std::printf ("  %d plugins in Fruity Wrapper, %d read\n", wrapped, wrappedParsed);
+    CHECK (wrappedVst2State == wrappedVst2);
+    std::printf ("  %d plugins in Fruity Wrapper, %d read; %d VST2 states, %d decoded\n", wrapped, wrappedParsed, wrappedVst2, wrappedVst2State);
     std::printf ("  %d markers, %d time signature changes, %d tracks with EQ\n", markers, signatures, trackEqs);
     std::printf ("  %d parametric EQs (%d with FL settings), %d reverbs (%d without dry)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
     std::printf ("  DirectWave: %d channels, %d zones; FPC: %d projects, %d pad channels, %d pad notes\n", dwChannels, dwZones, fpcKits,
@@ -3586,6 +3595,53 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     const auto positions = lynx::flVst3SlotPositions (saved, { 5u, 700u, 9u });
     CHECK (positions == (std::vector<int> { 1, -1, -1, 0, 2 }));
     CHECK (lynx::flVst3SlotPositions ({}, { 5u, 6u }) == (std::vector<int> { 0, 1 })); // new instance: slot = position
+
+    // VST2 state (REA_rodada89 §2): chunk and raw-parameter layouts, current (−9) and older versions
+    {
+        lynx::FlVst2State st;
+        st.flags = 8;
+        st.currentProgram = 3;
+        st.chunk = bytes ("BANKCHUNK");
+        const auto withChunk = lynx::writeFlVst2State (st);
+        lynx::FlVst2State back;
+        CHECK (lynx::parseFlVst2State (withChunk, back));
+        CHECK (back.version == -9 && back.flags == 8 && back.currentProgram == 3 && back.chunk == bytes ("BANKCHUNK") && back.params.empty());
+        CHECK (! back.chunkIsProgram());
+
+        lynx::FlVst2State raw;
+        raw.flags = 1;
+        raw.params = { 0.25f, 0.5f, 1.0f };
+        raw.programNames = { "Init" };
+        const auto withParams = lynx::writeFlVst2State (raw);
+        CHECK (withParams.size() == 4 + 1 + 4 + 8 + 4 + 4 + 12 + 4 + 25);
+        CHECK (lynx::parseFlVst2State (withParams, back));
+        CHECK (back.chunk.empty() && back.params == raw.params && back.allPrograms() && back.programNames == std::vector<std::string> { "Init" });
+
+        // version −5: no flags, i32 size, then i32 program; −6 without "all programs": the chunk is one program
+        std::vector<std::uint8_t> v5;
+        for (auto v : { 0xFFFFFFFBu, 4u, 7u })
+            u32 (v5, v);
+        for (auto c : bytes ("ABCD"))
+            v5.push_back (c);
+        CHECK (lynx::parseFlVst2State (v5, back) && back.version == -5 && back.currentProgram == 7 && back.chunk == bytes ("ABCD"));
+        std::vector<std::uint8_t> v6;
+        u32 (v6, 0xFFFFFFFAu);
+        v6.push_back (0);
+        for (auto v : { 2u, 0u })
+            u32 (v6, v);
+        v6.push_back ('x');
+        v6.push_back ('y');
+        CHECK (lynx::parseFlVst2State (v6, back) && back.chunkIsProgram() && back.chunk == bytes ("xy"));
+
+        // nothing to restore (123456), unknown old layouts, truncated chunks
+        std::vector<std::uint8_t> marker;
+        u32 (marker, 123456u);
+        CHECK (! lynx::parseFlVst2State (marker, back));
+        auto cut = withChunk;
+        cut.pop_back();
+        CHECK (! lynx::parseFlVst2State (cut, back));
+        CHECK (! lynx::parseFlVst2State ({}, back));
+    }
 
     // version out of range or no type: not a usable wrapper
     blob[0] = 13;

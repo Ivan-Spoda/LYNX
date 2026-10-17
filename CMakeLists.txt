@@ -186,6 +186,7 @@ if(LYNX_BUILD_APP)
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
         src/engine/ClapFormat.cpp
+        src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
