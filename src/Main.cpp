@@ -561,6 +561,8 @@ private:
         original.playlist.push_back (automationClip);
         original.loopStart = 960;
         original.loopEnd = 7680;
+        original.playlistTracks.resize (3);
+        original.playlistTracks[2].colour = 0xFF2A6FDB; // a track colour (round 90)
         juce::String error;
 
         if (demoProjectPath.isNotEmpty()) // sample project for checking the UI with --snapshot
@@ -577,6 +579,8 @@ private:
                                && reloaded->automations[0].points.size() == 2 && reloaded->automations[0].points[0].tension == 0.5f
                                && reloaded->automations[0].points[1].tick == 3840
                                && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
+                               && reloaded->playlistTracks.size() == 3 && reloaded->playlistTracks[2].colour == 0xFF2A6FDB
+                               && reloaded->playlistTracks[1].colour == 0
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
@@ -1563,6 +1567,26 @@ private:
 
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
+            {
+                // a pattern with piano-roll notes: those rows show a miniature instead of steps (round 90)
+                int found = -1;
+                const auto before = offline.getSong().currentPattern;
+                {
+                    const auto& song = offline.getSong();
+                    for (int p = 0; p < (int) song.patterns.size() && found < 0; ++p)
+                        for (int c = 0; c < (int) song.channels.size() && found < 0; ++c)
+                            if (lynx::showsNotePreview (song.patterns[(std::size_t) p], c))
+                                found = p;
+                }
+                if (found >= 0)
+                {
+                    offline.editSong ([found] (lynx::Song& s) { s.currentPattern = found; }, false);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-rack-preview.png");
+                    offline.editSong ([before] (lynx::Song& s) { s.currentPattern = before; }, false);
+                    offline.dispatchPendingMessages();
+                }
+            }
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
             if (const auto strip = ui.getToolStripAreaForSnapshot (false); ! strip.isEmpty())
