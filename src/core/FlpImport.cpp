@@ -1796,6 +1796,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
+                 || (plugin == "Fruity Send" && fx.kind != EffectKind::fruitySend)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast LP" && fx.kind != EffectKind::fruityFastLP)

@@ -2532,3 +2532,4 @@ countries: br
 "Noise gain" = "Ruído"
 "Feedback mix" = "Mix do feedback"
 "1x|1/2x" = "1x|1/2x"
+"Send to" = "Enviar para"

@@ -987,6 +987,31 @@ Layout fruityBalance()
     return l;
 }
 
+Layout fruitySend()
+{
+    // one row: DRY, the SEND TO box (the destination insert, a menu of the mixer's inserts), PAN and VOLUME
+    // (FL Studio 2026, 263 × 89; REA_rodada105_send §4)
+    Layout l;
+    l.fl = "Fruity Send";
+    l.width = 263;
+    l.height = 89;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 263, 89, nullptr, boxed));
+    v.push_back (knob (37, 30, 46, "Dry", TR_NOOP ("Dry"), 72));
+    LayoutItem to;
+    to.type = Item::menu;
+    to.x = 78, to.y = 17, to.w = 48, to.h = 28;
+    to.param = "Send to";
+    to.label = TR_NOOP ("Send to");
+    to.options = "None|Insert 1"; // (not shown: the editor lists the song's inserts by name)
+    to.values = { 0.0f, 1.0f / (float) (maxMixerTracks - 1) };
+    v.push_back (to);
+    v.push_back (label (70, 52, 64, 14, TR_NOOP ("Send to")));
+    v.push_back (knob (158, 30, 46, "Pan", TR_NOOP ("Pan"), 72, bipolar));
+    v.push_back (knob (226, 30, 46, "Volume", TR_NOOP ("Volume"), 72));
+    return l;
+}
+
 Layout lynxTune()
 {
     // LYNX Tune (own design, REA round 95; not an FL plugin): PITCH (key, scale, voice range, A4 reference) ·
@@ -2097,7 +2122,8 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  // round 105
                                                  EffectKind::vocoder, EffectKind::frequencySplitter, EffectKind::fruityDelayBank,
                                                  EffectKind::equo, EffectKind::multibandDelay, EffectKind::convolver,
-                                                 EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex };
+                                                 EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex,
+                                                 EffectKind::fruitySend };
     return kinds;
 }
 
@@ -2178,6 +2204,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::spiralEcho: l = spiralLayout(); break;
         case EffectKind::orbit: l = orbitLayout(); break;
         case EffectKind::latticeMod: l = latticeLayout(); break;
+        case EffectKind::fruitySend: l = fruitySend(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;
