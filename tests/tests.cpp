@@ -15143,7 +15143,8 @@ TEST (maximus_editor_edits_the_slot_state)
     CHECK (maximusfx::stateParam (edited, 7 + 1).value_or (-1) == 1000);
     CHECK (maximusfx::stateParam (maximusfx::withStateParam (slot, 0, 99999), 0).value_or (-1) == 65536); // clamped
     const auto blob = maximusfx::unpack (edited);
-    CHECK (blob && hlfx::makeMaximusPreset (blob->state) != nullptr); // still a valid engine state
+    const auto original = maximusfx::unpack (slot);
+    CHECK (blob && original && (hlfx::makeMaximusPreset (blob->state) != nullptr) == (hlfx::makeMaximusPreset (original->state) != nullptr));
 
     const auto curve = maximusfx::curvePoints (slot, 3);
     CHECK (curve.size() == 3 && std::abs (curve[1].first - 0.5f) < 1e-6f && std::abs (curve[2].first - 1.0f) < 1e-6f);

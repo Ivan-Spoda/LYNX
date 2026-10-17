@@ -1922,7 +1922,6 @@ countries: br
 "Normal|Invert|P.pong" = "Normal|Inverter|Pingue-p."
 "Off|Pan|Vol" = "Desl.|Pan|Vol"
 "Ofs" = "Desl."
-"On" = "Lig."
 "Ord" = "Ordem"
 "Overdrive" = "Overdrive"
 "Oversample" = "Sobreamostragem"
