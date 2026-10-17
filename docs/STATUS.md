@@ -734,6 +734,12 @@ Confirmed empirically on the demo projects:
   machine "Realtek ASIO" ends the process while loading (exit code 116) — Steinberg's own SDK host sample does the
   same, so it is the driver. In the Zig/MinGW build a driver that crashes while opening/closing is not contained
   (JUCE's `__try` guard needs MSVC; the CMake/MSVC build keeps it).
+- **LYNX ASIO** (own universal ASIO driver over WASAPI, REA rounds 97 and 106): shared or exclusive mode, playback
+  and recording with drift-compensated full duplex (adaptive sinc resampler on the input), lost capture frames
+  replaced in time, control panel with device in/out, buffer, mode, margin and a latency readout; 64-bit
+  `lynx-asio.dll` and 32-bit `lynx-asio32.dll` ("Register LYNX ASIO.bat" registers both for other programs).
+  Without registration LYNX lists it as "LYNX ASIO (built in)". Measured on a USB codec: exclusive 144 samples,
+  output 6 ms / input 19 ms, real project + recording without glitches (`--rtstress ... --record take.wav`).
 
 ## Plugin hosting
 - Optional separate-process plugins: each plugin runs in a child `LYNX.exe --lynx-plugin-host`. Audio

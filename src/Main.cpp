@@ -111,15 +111,16 @@ public:
         if (args.contains ("--rtstress"))
         {
             // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--type "driver type"] [--device "output"]
-            // [--no-window]: the real app (window, audio device) plays the project and reports the callbacks that missed their
-            // deadline (REA round 87); --type/--device pick another driver for this run only (round 97)
+            // [--no-window] [--record take.wav]: the real app (window, audio device) plays the project and reports the callbacks
+            // that missed their deadline (REA round 87); --type/--device pick another driver for this run only (round 97);
+            // --record also records the input during the run, like Rec + Play, and moves the take to take.wav (round 106)
             const auto i = args.indexOf ("--rtstress");
             const auto seconds = args[i + 3].getDoubleValue();
             const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
             const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
             runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer,
-                               option ("--type"), option ("--device"));
+                               option ("--type"), option ("--device"), option ("--record"));
             return;
         }
 
@@ -1342,7 +1343,7 @@ private:
     // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
     // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
     void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize,
-                            const juce::String& deviceType, const juce::String& deviceName)
+                            const juce::String& deviceType, const juce::String& deviceName, const juce::String& recordTo = {})
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
@@ -1390,19 +1391,27 @@ private:
             return;
         }
 
+        if (recordTo.isNotEmpty())
+            engine->setAudioRecordingArmed (true); // opens the input of the driver
+
         // let the window draw the project, then play from the start with fresh statistics
-        juce::Timer::callAfterDelay (1500, [this, project, report, seconds, loadMs] {
+        juce::Timer::callAfterDelay (1500, [this, project, report, seconds, loadMs, recordTo] {
             if (engine == nullptr)
                 return;
             engine->stop();
             engine->rewind();
             engine->getRtStats().reset();
             engine->takeUiPulse();
+            if (recordTo.isNotEmpty())
+                engine->setRecording (true);
             engine->play();
-            juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs] {
+            juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs, recordTo] {
                 if (engine == nullptr)
                     return;
                 engine->stop();
+                juce::String recording;
+                if (recordTo.isNotEmpty())
+                    recording = finishStressTake (juce::File (recordTo), seconds);
                 const auto s = engine->getRtStats().snapshot();
                 juce::String text;
                 text << "project: " << project.getFullPathName() << "\n"
@@ -1419,6 +1428,7 @@ private:
                     if (s.histogram[b] > 0)
                         text << " " << (int) (b * 10) << (b + 1 == s.histogram.size() ? juce::String ("+") : "-" + juce::String ((int) (b * 10 + 10))) << "%:" << (juce::int64) s.histogram[b];
                 text << "\n";
+                text << recording;
                 text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
                 report.replaceWithText (text);
                 restoreSavedDeviceState();
@@ -1426,6 +1436,42 @@ private:
                 quit();
             });
         });
+    }
+
+    // --rtstress --record: stops recording (the take becomes a clip of the song, as in the app), moves the take's WAV to
+    // `target` and describes it: length against the time played, channels, peak, the latencies the driver reported.
+    juce::String finishStressTake (const juce::File& target, double seconds)
+    {
+        juce::String text;
+        auto* device = engine->getDeviceManager().getCurrentAudioDevice();
+        text << "  recording: input " << (device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0) << " channel(s)";
+        if (device != nullptr)
+            text << ", input latency " << device->getInputLatencyInSamples() << " + output latency " << device->getOutputLatencyInSamples() << " samples";
+        engine->setRecording (false); // closes the take: a clip of the song
+        juce::File take;
+        for (const auto& c : engine->getSong().channels)
+            if (c.instrument == lynx::InstrumentKind::audioClip)
+                take = juce::File (juce::String::fromUTF8 (c.samplePath.c_str()));
+        if (! take.existsAsFile())
+            return text + "\n  recording: no take (" + engine->getLastRecordingError() + ")\n";
+        target.deleteFile();
+        if (! take.moveFileTo (target))
+            take.copyFileTo (target);
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (target)); reader != nullptr)
+        {
+            juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
+            reader->read (&audio, 0, (int) reader->lengthInSamples, 0, true, true);
+            const auto peak = audio.getMagnitude (0, audio.getNumSamples());
+            const auto length = (double) reader->lengthInSamples / reader->sampleRate;
+            text << "\n  recording: take " << juce::String (length, 3) << " s of " << juce::String (seconds, 0) << " s played, "
+                 << (int) reader->numChannels << " ch @ " << (int) reader->sampleRate << " Hz, peak "
+                 << juce::String (juce::Decibels::gainToDecibels (peak, -150.0f), 1) << " dBFS -> " << target.getFullPathName() << "\n";
+        }
+        else
+            text << "\n  recording: take unreadable (" << target.getFullPathName() << ")\n";
+        return text;
     }
 
     // LYNX.exe --render project.(flp|lynx) output.wav [seconds]

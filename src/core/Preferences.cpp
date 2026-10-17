@@ -144,6 +144,8 @@ DriverKind driverKind (const std::string& typeName)
         return DriverKind::directSound;
     if (typeName == "ASIO")
         return DriverKind::asio;
+    if (typeName == "LYNX ASIO")
+        return DriverKind::lynxAsio;
     return DriverKind::other;
 }
 

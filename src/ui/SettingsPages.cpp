@@ -530,6 +530,7 @@ private:
             case prefs::DriverKind::wasapiExclusive:  return tr ("Windows Audio (exclusive, lowest latency)");
             case prefs::DriverKind::directSound:      return tr ("DirectSound (legacy)");
             case prefs::DriverKind::asio:             return "ASIO";
+            case prefs::DriverKind::lynxAsio:         return tr ("LYNX ASIO (built in)");
             case prefs::DriverKind::other:            break;
         }
         return typeName;
@@ -557,6 +558,9 @@ private:
                 return tr ("Old Windows audio path with high latency. Use it only when the others fail.");
             case prefs::DriverKind::asio:
                 return tr ("Low-latency drivers. LYNX ASIO, FL Studio ASIO and ASIO4ALL work with any device; a manufacturer's ASIO driver works with its own device.");
+            case prefs::DriverKind::lynxAsio:
+                return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
+                           "For other programs, run \"Register LYNX ASIO\" in LYNX's folder once.");
             case prefs::DriverKind::other:
                 break;
         }

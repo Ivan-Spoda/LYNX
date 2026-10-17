@@ -11,6 +11,7 @@
 #include "core/Dither.h"
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
+#include "engine/DllAsioDevice.h"
 #include "engine/Metronome.h"
 #include "core/NoteTools.h"
 #include "engine/PreviewPlayer.h"
@@ -124,6 +125,13 @@ AudioEngine::AudioEngine (bool openAudioDevice)
     if (openAudioDevice)
     {
         player.setProcessor (&graph);
+
+        // LYNX ASIO without installation: lynx-asio.dll next to LYNX.exe, when it is not registered (REA round 106)
+        if (auto lynxAsio = makeBuiltInLynxAsioType())
+        {
+            deviceManager.getAvailableDeviceTypes(); // the standard types first
+            deviceManager.addAudioDeviceType (std::move (lynxAsio));
+        }
 
         // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
         const auto saved = juce::XmlDocument::parse (audioDeviceFile());
