@@ -14,6 +14,7 @@
 
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -1644,6 +1645,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
                       false, false, [] {});
         menu.addItem (tr ("Sampler settings (pitch, envelope, reverse)..."),
                       [this, channel] { openChannelSettings (engine, channel); });
+        menu.addItem (tr ("Edit the sample in the audio editor..."), ! c.samplePath.empty(), false, [this, channel] { openAudioEditorForChannel (engine, channel); });
 
         if (c.sampler.slices.empty())
             menu.addItem (tr ("Slice sample (slicer): one slice per key and a pattern with the loop"), [this, channel] { sliceChannel (channel); });

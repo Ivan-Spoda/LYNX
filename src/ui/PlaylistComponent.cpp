@@ -16,6 +16,7 @@
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -2565,6 +2566,7 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
             if (onOpenInSampler)
                 onOpenInSampler (ch);
         });
+        menu.addItem (tr ("Edit in the audio editor..."), sample != nullptr, false, [this, ch = clip.channel] { openAudioEditorForChannel (engine, ch); });
         menu.addItem (tr ("Show the file in Explorer"), juce::File (path).existsAsFile(), false, [path] { juce::File (path).revealToUser(); });
     }
 
