@@ -171,6 +171,26 @@ LYNX's native engines are clean-room re-implementations of FL Studio's native pl
 original running unmodified. The full list — every engine, what it is compatible with, its status and what is still
 missing — is in [`docs/PLUGINS.md`](docs/PLUGINS.md).
 
+**Featured** — the plugins FL Studio users reach for most, all at *Exact* or *Near-exact* quality in LYNX:
+
+| LYNX engine | Inspired by / compatible with | Status |
+|---|---|---|
+| 3x Osc engine | 3x Osc (FL Studio) | Exact |
+| FL Keys engine | FL Keys (FL Studio) | Exact |
+| Gross Beat | Gross Beat (FL Studio) | Exact |
+| Fruity Limiter | Fruity Limiter (FL Studio) | Near-exact |
+| Parametric EQ | Fruity Parametric EQ 2 (FL Studio) | Near-exact |
+| Soundgoodizer | Soundgoodizer (FL Studio) | Near-exact |
+| Maximus | Maximus (FL Studio) | Near-exact |
+| Fruity Delay 3 | Fruity Delay 3 (FL Studio) | Exact |
+| Reeverb 2 | Fruity Reeverb 2 (FL Studio) | Exact |
+| Fruity Compressor | Fruity Compressor (FL Studio) | Exact |
+
+What each one does, how you get it (any insert or from an `.flp`) and the whole list are in
+[`docs/PLUGINS.md`](docs/PLUGINS.md#featured).
+
+**All built-in plugins:**
+
 | | Exact | Near-exact | Close | Approximate | Placeholder |
 |---|---:|---:|---:|---:|---:|
 | **Generators** (3x Osc, DX10, Sytrus, Harmor, FL Keys, DirectWave, …) | 12 | 10 | 7 | 1 | 2 |
