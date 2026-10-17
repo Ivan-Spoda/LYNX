@@ -150,22 +150,155 @@ int ChannelRackComponent::numSteps() const
     return juce::jlimit (16, 512, steps);
 }
 
+bool ChannelRackComponent::isShown (int row) const
+{
+    const auto& channels = engine.getSong().channels;
+    return filterGroup < 0 || row < 0 || row >= (int) channels.size() || channels[(std::size_t) row].group == filterGroup;
+}
+
+int ChannelRackComponent::visibleIndex (int row) const
+{
+    if (filterGroup < 0)
+        return row;
+
+    int index = 0;
+    for (int r = 0; r < row && r < (int) engine.getSong().channels.size(); ++r)
+        index += isShown (r) ? 1 : 0;
+    return index + juce::jmax (0, row - (int) engine.getSong().channels.size());
+}
+
+int ChannelRackComponent::shownCount() const
+{
+    return visibleIndex ((int) engine.getSong().channels.size());
+}
+
+void ChannelRackComponent::setFilterGroup (int group)
+{
+    const auto groups = (int) engine.getSong().channelGroups.size();
+    group = group >= 0 && group < groups ? group : -1;
+
+    if (group == filterGroup)
+        return;
+
+    filterGroup = group;
+    updateSize();
+    repaint();
+
+    if (onFilterChanged)
+        onFilterChanged();
+}
+
+juce::String ChannelRackComponent::filterName() const
+{
+    const auto& groups = engine.getSong().channelGroups;
+    return filterGroup >= 0 && filterGroup < (int) groups.size() ? juce::String::fromUTF8 (groups[(std::size_t) filterGroup].c_str()) : tr ("All");
+}
+
+void ChannelRackComponent::showFilterMenu (juce::Component* target)
+{
+    const auto& song = engine.getSong();
+    juce::PopupMenu menu;
+    menu.addItem (tr ("All"), true, filterGroup < 0, [this] { setFilterGroup (-1); });
+
+    if (! song.channelGroups.empty())
+        menu.addSeparator();
+
+    for (int g = 0; g < (int) song.channelGroups.size(); ++g)
+        menu.addItem (juce::String::fromUTF8 (song.channelGroups[(std::size_t) g].c_str()), true, filterGroup == g, [this, g] { setFilterGroup (g); });
+
+    menu.addSeparator();
+    menu.addItem (tr ("Group selected...") + "\tAlt+G", [this] { groupSelected(); });
+    {
+        juce::PopupMenu move;
+        move.addItem (tr ("(no group)"), [this] { moveSelectedToGroup (-1); });
+        for (int g = 0; g < (int) song.channelGroups.size(); ++g)
+            move.addItem (juce::String::fromUTF8 (song.channelGroups[(std::size_t) g].c_str()), [this, g] { moveSelectedToGroup (g); });
+        menu.addSubMenu (tr ("Move selected channels to"), move, ! engine.getSelectedChannels().empty());
+    }
+    menu.addItem (tr ("Rename this group..."), filterGroup >= 0, false, [this] {
+        const auto group = filterGroup;
+        auto* window = new juce::AlertWindow (tr ("Filter group name"), {}, juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", filterName());
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, group, window] (int result) {
+                                     const auto name = window->getTextEditorContents ("name").trim().toStdString();
+                                     if (result != 1 || name.empty())
+                                         return;
+                                     engine.editSong ([group, name] (Song& s) {
+                                         if (group < (int) s.channelGroups.size())
+                                             s.channelGroups[(std::size_t) group] = name;
+                                     });
+                                     if (onFilterChanged)
+                                         onFilterChanged();
+                                 }),
+                                 true);
+    });
+    menu.addItem (tr ("Delete this group (keeps its channels)"), filterGroup >= 0, false, [this] {
+        const auto group = filterGroup;
+        setFilterGroup (-1);
+        engine.editSong ([group] (Song& s) {
+            if (group >= (int) s.channelGroups.size())
+                return;
+            s.channelGroups.erase (s.channelGroups.begin() + group);
+            for (auto& c : s.channels)
+                c.group = c.group == group ? -1 : c.group > group ? c.group - 1 : c.group;
+        });
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target));
+}
+
+void ChannelRackComponent::moveSelectedToGroup (int group)
+{
+    engine.editSong ([group, rows = engine.getSelectedChannels()] (Song& s) {
+        for (auto r : rows)
+            if (r >= 0 && r < (int) s.channels.size())
+                s.channels[(std::size_t) r].group = group >= 0 && group < (int) s.channelGroups.size() ? group : -1;
+    });
+    updateSize();
+    repaint();
+}
+
+void ChannelRackComponent::groupSelected()
+{
+    // FL: Alt+G asks for the "Filter group name"; the selected channels move into the new group, which is shown
+    auto* window = new juce::AlertWindow (tr ("Filter group name"), {}, juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("name", tr ("Group {0}", { juce::String ((int) engine.getSong().channelGroups.size() + 1) }));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window] (int result) {
+                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
+                                 if (result != 1 || name.empty())
+                                     return;
+                                 const auto group = (int) engine.getSong().channelGroups.size();
+                                 engine.editSong ([name, rows = engine.getSelectedChannels()] (Song& s) {
+                                     s.channelGroups.push_back (name);
+                                     for (auto r : rows)
+                                         if (r >= 0 && r < (int) s.channels.size())
+                                             s.channels[(std::size_t) r].group = (int) s.channelGroups.size() - 1;
+                                 });
+                                 setFilterGroup (group);
+                             }),
+                             true);
+}
+
 void ChannelRackComponent::updateSize()
 {
-    const auto rows = (int) engine.getSong().channels.size() + 1; // +1 = "add channel" row
+    const auto rows = shownCount() + 1; // +1 = "add channel" row
     setSize (gridLeft() + numSteps() * stepWidth + 8, rows * rowHeight + 8 + (graphRow() >= 0 ? laneHeight : 0));
 }
 
 int ChannelRackComponent::graphRow() const
 {
     const auto count = (int) engine.getSong().channels.size();
-    return graphLanes && count > 0 ? juce::jlimit (0, count - 1, engine.getSelectedChannel()) : -1;
+    const auto row = graphLanes && count > 0 ? juce::jlimit (0, count - 1, engine.getSelectedChannel()) : -1;
+    return row >= 0 && isShown (row) ? row : -1;
 }
 
 int ChannelRackComponent::rowY (int row) const
 {
     const auto lane = graphRow();
-    return 4 + row * rowHeight + (lane >= 0 && row > lane ? laneHeight : 0);
+    return 4 + visibleIndex (row) * rowHeight + (lane >= 0 && row > lane ? laneHeight : 0);
 }
 
 int ChannelRackComponent::rowAtY (int y) const
@@ -182,7 +315,18 @@ int ChannelRackComponent::rowAtY (int y) const
             y -= laneHeight;
     }
 
-    return (y - 4) / rowHeight;
+    const auto index = (y - 4) / rowHeight;
+
+    if (filterGroup < 0)
+        return index;
+
+    // the index-th shown row (the "add channel" row after the last one)
+    const auto count = (int) engine.getSong().channels.size();
+    int seen = 0;
+    for (int r = 0; r < count; ++r)
+        if (isShown (r) && seen++ == index)
+            return r;
+    return count + (index - seen);
 }
 
 juce::Rectangle<int> ChannelRackComponent::laneBounds() const
@@ -269,7 +413,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
     {
         const auto y = rowY (row);
 
-        if (y > clip.getBottom() || y + rowHeight < clip.getY())
+        if (! isShown (row) || y > clip.getBottom() || y + rowHeight < clip.getY())
             continue;
 
         const auto& channel = song.channels[(std::size_t) row];
@@ -346,7 +490,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         {
             const auto y = rowY (row);
 
-            if (y > column.getBottom() || y + rowHeight < column.getY())
+            if (! isShown (row) || y > column.getBottom() || y + rowHeight < column.getY())
                 continue;
 
             const auto& channel = song.channels[(std::size_t) row];
@@ -978,6 +1122,9 @@ void ChannelRackComponent::toggleGraphLanes()
     graphLanes = ! graphLanes;
     updateSize();
     repaint();
+
+    if (onFilterChanged) // the title's graph switch follows
+        onFilterChanged();
 }
 
 // --- fills, rotation and organisation ------------------------------------------------------------
@@ -1029,6 +1176,8 @@ void ChannelRackComponent::selectUnused()
 int ChannelRackComponent::addChannel (ChannelDef c, bool openEditor)
 {
     int index = 0;
+    if (filterGroup >= 0 && c.group < 0) // a new channel joins the group shown (FL)
+        c.group = filterGroup;
     engine.editSong ([&] (Song& s) {
         c.mixerTrack = s.nextFreeInsert();
         s.channels.push_back (c);
@@ -1636,13 +1785,79 @@ void ChannelRackComponent::showChannelMenu (int channel)
     });
     instruments.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 
+    // FL's layout (REA round 104): two columns, the channel on the left (editors, name and colour, sample,
+    // insert / replace / clone / delete) and its steps on the right (clipboard, fills, rotation); LYNX's own
+    // items (settings windows, arpeggiator, organisation) follow in their place
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
+    const auto selected = (int) engine.getSelectedChannels().size();
+    const auto count = (int) engine.getSong().channels.size();
 
+    menu.addItem (tr ("Piano Roll") + "\tF7", [this] {
+        if (onOpenPianoRoll)
+            onOpenPianoRoll();
+    });
+    menu.addItem (tr ("Graph editor") + "\tCtrl+K", true, graphLanes, [this] { toggleGraphLanes(); });
+    menu.addSeparator();
+    menu.addItem (tr ("Rename and color...") + "\tF2", [this, channel] { rename (channel); });
+    {
+        juce::PopupMenu colours;
+        colours.addItem (tr ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
+
+        for (auto colour : lynxPalette())
+        {
+            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+            juce::Graphics (swatch).fillAll (juce::Colour (colour));
+            juce::PopupMenu::Item item;
+            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.image = std::make_unique<juce::DrawableImage> (swatch);
+            item.isTicked = c.colour == colour;
+            item.action = [this, channel, colour] { engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; }); };
+            colours.addItem (std::move (item));
+        }
+
+        menu.addSubMenu (tr ("Change color"), colours);
+    }
+    menu.addItem (tr ("Random color"), [this, channel] {
+        const auto& palette = lynxPalette();
+        const auto colour = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];
+        engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; });
+    });
+    menu.addSeparator();
+    menu.addItem (tr ("Load sample..."), c.instrument != InstrumentKind::audioClip, false, [this, channel] { chooseSample (channel); });
+    {
+        // "Cut itself": a new note cuts the channel's own sounding note (its cut group and "cut by" are its own)
+        const auto self = 1000 + channel;
+        const auto cutsItself = c.cutGroup != 0 && c.cutGroup == c.cutBy;
+        menu.addItem (tr ("Cut itself"), true, cutsItself, [this, channel, self, cutsItself] {
+            engine.editSong ([channel, self, cutsItself] (Song& s) {
+                auto& ch = s.channels[(std::size_t) channel];
+                ch.cutGroup = ch.cutBy = cutsItself ? 0 : self;
+            });
+        });
+    }
+    menu.addSeparator();
+    {
+        juce::PopupMenu insert;
+        addInstrumentItems (insert, channel);
+        menu.addSubMenu (tr ("Insert"), insert);
+    }
+    menu.addSubMenu (tr ("Replace"), instruments);
+    menu.addItem (selected > 1 ? tr ("Clone {0} channels", { juce::String (selected) }) : tr ("Clone") + "\tAlt+C", [this] { cloneSelected(); });
+
+    if (selected > 1)
+        menu.addItem (tr ("Delete {0} channels", { juce::String (selected) }) + "\tAlt+Del", selected < count, false, [this] { deleteSelected(); });
+    else
+        menu.addItem (tr ("Delete...") + "\tAlt+Del", count > 1, false, [this, channel] {
+            closeEditor (channel);
+            engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
+            openEditorRow = -1;
+        });
+
+    // LYNX: the channel's settings windows and its arpeggiator
+    menu.addSeparator();
     if (c.instrument == InstrumentKind::sampler)
     {
-        menu.addItem (tr ("Sample: {0}", { juce::File (juce::String::fromUTF8 (c.samplePath.c_str())).getFileName() }),
-                      false, false, [] {});
         menu.addItem (tr ("Sampler settings (pitch, envelope, reverse)..."),
                       [this, channel] { openChannelSettings (engine, channel); });
         menu.addItem (tr ("Edit the sample in the audio editor..."), ! c.samplePath.empty(), false, [this, channel] { openAudioEditorForChannel (engine, channel); });
@@ -1666,12 +1881,6 @@ void ChannelRackComponent::showChannelMenu (int channel)
         if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
             addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::channelParam, channel, 0, 0 });
     }
-
-    menu.addItem (tr ("Piano Roll"), [this] {
-        if (onOpenPianoRoll)
-            onOpenPianoRoll();
-    });
-    menu.addSubMenu (tr ("Instrument"), instruments);
     {
         // channel arpeggiator
         const auto arp = c.arp;
@@ -1708,41 +1917,51 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addSubMenu (arp.enabled() ? tr ("Arpeggiator (on)") : tr ("Arpeggiator"), arpMenu);
     }
 
-    menu.addItem (tr ("Rename and color...") + "\tF2", [this, channel] { rename (channel); });
+    // --- second column: the channel's steps in the current pattern ---
+    menu.addColumnBreak();
     {
-        juce::PopupMenu colours;
-        colours.addItem (tr ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
-
-        for (auto colour : lynxPalette())
-        {
-            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (colour));
-            juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-            item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.isTicked = c.colour == colour;
-            item.action = [this, channel, colour] { engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; }); };
-            colours.addItem (std::move (item));
-        }
-
-        menu.addSubMenu (tr ("Color"), colours);
+        auto notesOf = [this, channel] {
+            std::vector<Note> out;
+            const auto& song = engine.getSong();
+            for (const auto& n : song.patterns[(std::size_t) song.currentPattern].notes)
+                if (n.channel == channel)
+                    out.push_back (n);
+            return out;
+        };
+        auto clear = [channel] (Song& s) {
+            auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
+            notes.erase (std::remove_if (notes.begin(), notes.end(), [channel] (const Note& n) { return n.channel == channel; }), notes.end());
+        };
+        const auto hasNotes = ! notesOf().empty();
+        menu.addItem (tr ("Cut"), hasNotes, false, [this, notesOf, clear] {
+            stepClipboard = notesOf();
+            engine.editSong (clear);
+        });
+        menu.addItem (tr ("Copy"), hasNotes, false, [notesOf] { stepClipboard = notesOf(); });
+        menu.addItem (tr ("Paste"), ! stepClipboard.empty(), false, [this, channel, clear] {
+            engine.editSong ([channel, clear, notes = stepClipboard] (Song& s) {
+                clear (s);
+                auto& target = s.patterns[(std::size_t) s.currentPattern].notes;
+                for (auto n : notes)
+                {
+                    n.channel = channel;
+                    target.push_back (n);
+                }
+                std::stable_sort (target.begin(), target.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
+            });
+        });
     }
-    {
-        juce::PopupMenu steps;
-        steps.addItem (tr ("Fill every 2 steps"), [this] { fillSelected (2); });
-        steps.addItem (tr ("Fill every 4 steps"), [this] { fillSelected (4); });
-        steps.addItem (tr ("Fill every 8 steps"), [this] { fillSelected (8); });
-        steps.addItem (tr ("Euclidean fill..."), [this, channel] { showEuclideanFill (channel); });
-        steps.addSeparator();
-        steps.addItem (tr ("Rotate left") + "\tCtrl+Shift+Left", [this] { rotateSelected (-1); });
-        steps.addItem (tr ("Rotate right") + "\tCtrl+Shift+Right", [this] { rotateSelected (1); });
-        steps.addSeparator();
-        steps.addItem (tr ("Graph lanes (velocity, pan, pitch...)") + "\tCtrl+K", true, graphLanes, [this] { toggleGraphLanes(); });
-        steps.addSeparator();
-        steps.addItem (tr ("Swing mix ({0})...", { juce::String (juce::roundToInt (c.swingMix * 100.0f)) + "%" }),
-                       [this, channel] { setSwingMixOfSelected (channel); });
-        menu.addSubMenu (tr ("Steps"), steps);
-    }
+    menu.addSeparator();
+    menu.addItem (tr ("Fill each 2 steps"), [this] { fillSelected (2); });
+    menu.addItem (tr ("Fill each 4 steps"), [this] { fillSelected (4); });
+    menu.addItem (tr ("Fill each 8 steps"), [this] { fillSelected (8); });
+    menu.addItem (tr ("Advanced fill..."), [this, channel] { showEuclideanFill (channel); });
+    menu.addSeparator();
+    menu.addItem (tr ("Rotate left") + "\tShift+Ctrl+Left", [this] { rotateSelected (-1); });
+    menu.addItem (tr ("Rotate right") + "\tShift+Ctrl+Right", [this] { rotateSelected (1); });
+    menu.addSeparator();
+    menu.addItem (tr ("Swing mix ({0})...", { juce::String (juce::roundToInt (c.swingMix * 100.0f)) + "%" }),
+                  [this, channel] { setSwingMixOfSelected (channel); });
     menu.addItem (tr ("Clear notes in this pattern"), [this, channel] {
         engine.editSong ([channel] (Song& s) {
             auto& notes = s.patterns[(std::size_t) s.currentPattern].notes;
@@ -1751,16 +1970,8 @@ void ChannelRackComponent::showChannelMenu (int channel)
         });
     });
 
-    // organisation (acts on the selection)
-    const auto selected = (int) engine.getSelectedChannels().size();
-    const auto count = (int) engine.getSong().channels.size();
+    // organisation (acts on the selection; FL keeps these in the rack's options menu)
     menu.addSeparator();
-    menu.addItem (selected > 1 ? tr ("Clone {0} channels", { juce::String (selected) }) : tr ("Clone channel"), [this] { cloneSelected(); });
-    {
-        juce::PopupMenu insert;
-        addInstrumentItems (insert, channel);
-        menu.addSubMenu (tr ("Insert channel here"), insert);
-    }
     menu.addItem (tr ("Move up") + "\tAlt+Up", engine.getSelectedChannels().front() > 0, false, [this] { moveSelected (-1); });
     menu.addItem (tr ("Move down") + "\tAlt+Down", engine.getSelectedChannels().back() < count - 1, false, [this] { moveSelected (1); });
     menu.addItem (tr ("Send to free mixer inserts") + "\tCtrl+L", [this] { sendSelectedToInserts(); });
@@ -1773,16 +1984,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addSubMenu (tr ("Sort channels"), sort);
     }
     menu.addItem (tr ("Select unused channels"), [this] { selectUnused(); });
-    menu.addSeparator();
-
-    if (selected > 1)
-        menu.addItem (tr ("Delete {0} channels", { juce::String (selected) }) + "\tAlt+Del", selected < count, false, [this] { deleteSelected(); });
-    else
-        menu.addItem (tr ("Delete channel") + "\tAlt+Del", count > 1, false, [this, channel] {
-            closeEditor (channel);
-            engine.editSong ([channel] (Song& s) { s.removeChannel (channel); });
-            openEditorRow = -1;
-        });
+    menu.addItem (tr ("Group selected...") + "\tAlt+G", [this] { groupSelected(); });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
@@ -1792,6 +1994,8 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
     // a new channel of `kind`, at the end (insertAt < 0) or at a row
     auto add = [this, insertAt] (ChannelDef c) {
         int index = 0;
+        if (filterGroup >= 0 && c.group < 0)
+            c.group = filterGroup;
         engine.editSong ([&] (Song& s) {
             c.mixerTrack = s.nextFreeInsert();
             index = insertAt < 0 ? (s.channels.push_back (c), (int) s.channels.size() - 1) : insertChannel (s, insertAt, c);

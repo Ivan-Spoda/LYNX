@@ -138,10 +138,13 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerStrips)
 };
 
-// Effects panel for the selected track: 10 slots and the knobs of the chosen slot.
-//  - click an empty slot: choose an effect; click an occupied one: edit its knobs
-//  - slot LED: on/off (bypass); right-click: replace, move, delete
-//  - knob to the right of the slot: dry/wet (drag; double-click resets to 100%)
+// Effects panel for the selected track, in FL's layout (REA round 104): the audio input row, 10 slots, the
+// knobs of the chosen slot (LYNX), then the insert's built-in 3-band EQ and its audio output target.
+//  - click an empty slot ("Slot N"): choose an effect; click an occupied one: edit its knobs; double click: its window
+//  - the arrow on the left of a slot (or right-click): the slot's options (add / replace, move, delete...)
+//  - on the right of a slot: the mix knob (drag; double-click resets to 100%) and the LED (on/off, bypass)
+//  - EQ: drag a band's handle in the graph (frequency and gain; wheel: width), its fader (gain) or its knobs
+//    (frequency, width)
 class EffectsPanel final : public juce::Component,
                            public ui::HintSource,
                            public juce::DragAndDropTarget,
@@ -197,6 +200,26 @@ private:
     juce::Rectangle<int> slotBounds (int slot) const;
     juce::Rectangle<int> mixBounds (int slot) const; // dry/wet knob on the slot's row
     static constexpr int mixParam = -2;
+    // FL's layout (REA round 104)
+    juce::Rectangle<int> arrowBounds (int slot) const; // the slot's options arrow
+    juce::Rectangle<int> ledBounds (int slot) const;   // the slot's on/off LED
+    int bottomTop() const;                             // top of the EQ + output section
+    juce::Rectangle<int> eqGraphBounds() const;
+    juce::Rectangle<int> eqFaderBounds (int band) const;
+    juce::Rectangle<int> eqKnobBounds (int band, int what) const; // what: 1 = frequency, 2 = width
+    juce::Rectangle<int> outputBounds() const;
+    juce::Point<float> eqHandle (int band) const;      // where a band's handle sits in the graph
+    int eqControlAt (juce::Point<int> p) const;        // an EQ control under p (eqParamBase/eqPointBase codes), or 0
+    void paintEq (juce::Graphics& g);
+    void setEqFromGraph (int band, juce::Point<int> p);
+    void showOutputMenu();
+    juce::String outputName() const;
+    static constexpr int eqParamBase = -100; // eqParamBase - band * 3 - what (0 gain, 1 frequency, 2 width), stored 0..1
+    static constexpr int eqPointBase = -200; // eqPointBase - band: dragging the band's handle in the graph
+    static bool isEqParam (int p) noexcept { return p <= eqParamBase && p > eqParamBase - 9; }
+    static bool isEqPoint (int p) noexcept { return p <= eqPointBase && p > eqPointBase - 3; }
+    int hoverEq = 0;
+    bool hoverOutput = false, hoverArrow = false;
     static constexpr int gateStepParam = -3; // drawing the volume gate steps
     juce::Rectangle<int> knobBounds (int param) const;
     bool gateSelected() const;
