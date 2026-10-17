@@ -1286,6 +1286,13 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // Zoom tool: right-click zooms out around the point (a click zooms in, a drag zooms to the range)
+    if (tool == EditTool::zoom && e.mods.isRightButtonDown() && ! e.mods.isAltDown())
+    {
+        zoomOut (e.x);
+        return;
+    }
+
     // Alt+right-click on a clip: hear it while the button is held
     if (e.mods.isRightButtonDown() && e.mods.isAltDown() && hit >= 0)
     {
@@ -1307,8 +1314,9 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        // on the name strip: clip menu; on the body: delete (press and hold on empty space: Knife)
-        if (hit >= 0 && e.y < trackToY (engine.getSong().playlist[(std::size_t) hit].track) + 15)
+        // on the clip menu icon (top left): the clip menu; anywhere else on a clip: delete, as in FL
+        // (press and hold on empty space: Knife)
+        if (hit >= 0 && clipMenuButton (hit).contains (e.getPosition()))
         {
             showClipMenu (hit);
             return;
@@ -1963,7 +1971,7 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
         if (rubberBand.getWidth() > 4)
             zoomToTicks (xToTick (rubberBand.getX()), xToTick (rubberBand.getRight()));
         else
-            zoomOut (e.x);
+            zoomIn (e.x); // a click zooms in around the point (right-click zooms out)
     }
 
     if (drag == Drag::select && rubberBand.isEmpty() && dragClip >= 0)
@@ -2063,6 +2071,15 @@ void PlaylistComponent::zoomToTicks (double from, double to)
 
     pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), gridArea().getWidth() / (to - from));
     scrollTicks = juce::jmax (0.0, from);
+    updateScrollBars();
+    repaint();
+}
+
+void PlaylistComponent::zoomIn (int anchorX)
+{
+    const auto anchor = xToTick (anchorX);
+    pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), pixelsPerTick * 2.0);
+    scrollTicks = juce::jmax (0.0, anchor - (anchorX - headerWidth) / pixelsPerTick);
     updateScrollBars();
     repaint();
 }
@@ -3090,7 +3107,12 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (h.clip >= 0)
     {
-        if (h.target == gesture::Target::item && ! m.ctrl)
+        const auto onHeader = p.y < clipBounds (h.clip).getY() + (int) clipTitleHeight;
+        if (h.target == gesture::Target::clipMenu)
+            hint.text = tr ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select source...)");
+        else if (onHeader && ! m.ctrl)
+            hint.text << "  " << tr ("The icon at the top left opens the clip menu (make unique, rename...)");
+        else if (h.target == gesture::Target::item && ! m.ctrl)
             hint.text << "  " << tr ("[Shift][V] + drag: a unique copy  [Alt][RMB] hold: hear it");
         const auto& c = song.playlist[(std::size_t) h.clip];
         hint.hasMenu = true;
