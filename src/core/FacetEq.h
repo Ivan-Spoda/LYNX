@@ -106,6 +106,8 @@ double analogDb (const EffectParams& params, int band, double hz, double extraDb
 // Response of the whole EQ (dB) at hz: the digital sections in zero-latency mode, the analog prototype in the FIR
 // modes. `dynamicDb` (optional, 8 values) are the bands' live dynamic gains.
 double responseDb (const EffectParams& params, double sampleRate, double hz, const float* dynamicDb = nullptr) noexcept;
+// One band's response (dB) at `n` frequencies at once (designed once; for the editor's curves), same rules
+void bandCurveDb (const EffectParams& params, int band, double sampleRate, const double* hz, int n, double* outDb, double extraDb = 0.0) noexcept;
 // One band's own response (dB) at hz, same rules
 double bandResponseDb (const EffectParams& params, int band, double sampleRate, double hz, double extraDb = 0.0) noexcept;
 

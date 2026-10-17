@@ -21,4 +21,6 @@ void closeAll();
 
 // The editor alone at `scale` (1 = FL's size; for --snapshot / --plugui).
 std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, int track, int slot, float scale = 1.0f, int page = 0);
+// --plugui: live displays (LYNX Tune's pitch graph) draw a synthetic signal instead of waiting for audio
+void setNativeEditorDemo (bool on);
 } // namespace lynx

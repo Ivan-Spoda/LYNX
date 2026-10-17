@@ -1010,6 +1010,13 @@ Layout lynxTune()
     for (int k = 0; k < 12; ++k)
         v.push_back (toggle (8.0f + 40.0f * (float) k, 194, 36, 22, notes[k], notes[k]));
     v.push_back (stepper (500, 192, 92, 24, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    // round 103: the live pitch display on top (detected pitch, target note, correction, scrolling pitch graph)
+    constexpr float top = 170.0f;
+    for (auto& item : v)
+        item.y += top;
+    l.height += (int) top;
+    v.insert (v.begin(), section (0, 0, 600, top - 4.0f, TR_NOOP ("LIVE PITCH")));
+    v.insert (v.begin() + 1, display (6, 22, 588, top - 30.0f, "pitchgraph"));
     return l;
 }
 

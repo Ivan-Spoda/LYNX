@@ -221,6 +221,7 @@ if(LYNX_BUILD_APP)
         src/ui/PluginWindow.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
+        src/ui/FacetEqEditor.cpp
         src/ui/PluginEditors.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp

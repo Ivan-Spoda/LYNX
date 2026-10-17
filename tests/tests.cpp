@@ -15473,3 +15473,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 }
 #include "FabMeasureTests99.inc"
 #include "LynxTuneTests95.inc"
+#include "FacetTests103.inc"

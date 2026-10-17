@@ -887,6 +887,32 @@ double bandResponseDb (const EffectParams& params, int band, double sampleRate, 
     return 20.0 * std::log10 (std::max (m, 1e-15));
 }
 
+void bandCurveDb (const EffectParams& params, int band, double sampleRate, const double* f, int n, double* out, double extraDb) noexcept
+{
+    if (phase (params[(std::size_t) phaseParam]) != Phase::zeroLatency)
+    {
+        Analog a[maxSections];
+        const int c = analogSections (params, band, a, extraDb);
+        const double f0 = hz (params[(std::size_t) param (band, 1)]);
+        for (int i = 0; i < n; ++i)
+        {
+            double m = 1.0;
+            for (int k = 0; k < c; ++k) m *= mag2 (a[k], f[i] / f0);
+            out[i] = 10.0 * std::log10 (std::max (m, 1e-30));
+        }
+        return;
+    }
+    std::array<Section, maxSections> s;
+    const int c = design (params, band, sampleRate, s, extraDb);
+    for (int i = 0; i < n; ++i)
+    {
+        const double w = 2.0 * pi * std::min (f[i], 0.5 * sampleRate) / sampleRate;
+        double m = 1.0;
+        for (int k = 0; k < c; ++k) m *= std::abs (evalDigital (s[(std::size_t) k], w));
+        out[i] = 20.0 * std::log10 (std::max (m, 1e-15));
+    }
+}
+
 double responseDb (const EffectParams& params, double sampleRate, double f, const float* dynamicDb) noexcept
 {
     double db = outputDb (params[(std::size_t) outputParam]);
