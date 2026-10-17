@@ -110,6 +110,13 @@
 #include "core/ValueMath.h"
 #include "core/Workspace.h"
 #include "core/StartupSound.h"
+#include "core/ExportOptions.h"
+#include "core/Mp3Encoder.h"
+#include "core/PluginMonitor.h"
+#include "core/PlaylistOps.h"
+#include "core/TouchKeyboard.h"
+#include "core/HeldNotes.h"
+#include "core/Templates.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
 
@@ -14691,3 +14698,4 @@ TEST (event_editor_playback)
 }
 #include "PrefsTests.inc"
 #include "UiLook90Tests.inc"
+#include "DialogsTests84.inc"
