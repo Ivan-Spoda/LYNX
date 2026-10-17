@@ -255,7 +255,14 @@ All six entries map every parameter from the XML attributes: identities, `steps`
 
 ## Where I stopped
 
-- Measuring done (§0–§6). Engines, wiring (EffectKind, project file ids, mixer list, layouts, substitutes table with
-  curve / steps maps, pt-BR strings), tests (tests/LynxVerbTests100.inc), PLUGINS.md / PLUGIN_FALLBACK.md / website
-  data written. Epoch Verb fitted; Atrium / Foil Plate / Nebula / Halo / Horizon second fit pass running
-  (tmp/valh100/py/fit2_*.txt). Then: build-local (0 failures), land.
+- Landed: measurements (§0–§6), the six engines with fitted tables, substitutes translating every saved Valhalla value,
+  editors following the references' layout logic (§7b), tests (tests/LynxVerbTests100.inc: laws, broadband decay vs the
+  references ±15–20 %, onsets, equal-power mix, stability at every extreme and at 44.1 / 96 kHz, translations, map
+  syntax), PLUGINS.md / PLUGIN_FALLBACK.md / inspired-by.json / website data.
+- Fit residuals worth another pass: Atrium's 250 Hz dip (−5 dB vs the reference) and its band-limited types (−20 dB
+  at 16 kHz instead of −60); Nebula's density-50 % decay (the reference is not monotonic in density) and its ×8
+  shapes at long delays (lines capped at 4.2 s); Halo's feedback lengthening (≈ −25 % at 0.75–0.9) and its mode lists
+  (not confirmed); Horizon's echo modes (our interpretation, not measured); Epoch's slow-attack build-up shapes and
+  the gated mode's envelope.
+- Not done: an Atrium early/late tab switch like the reference (both groups are shown side by side); the references'
+  one-line control description under the panel (LYNX shows hints in its hint bar).
