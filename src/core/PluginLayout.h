@@ -97,8 +97,12 @@ const std::vector<InstrumentKind>& instrumentLayoutKinds();
 // Soundgoodizer slots (EffectKind::maximus with the Soundgoodizer build): its own page, edited in the slot's state.
 const Layout& soundgoodizerLayout();
 
-// Parameter index of `name` in effectInfo(kind) (−1 = no such parameter).
+// Parameter index of `name` in effectInfo(kind) (−1 = no such parameter). For kinds whose controls live in the slot's
+// state (usesStateParams: Maximus), the index of core/MaximusFx.h's stateParams instead.
 int paramIndex (EffectKind kind, const char* name);
+bool usesStateParams (EffectKind kind) noexcept;
+int paramCount (EffectKind kind);
+const char* paramName (EffectKind kind, int index);
 
 // Options of a radio / tabs item and the value each one sets.
 std::vector<std::string> optionLabels (const LayoutItem& item);

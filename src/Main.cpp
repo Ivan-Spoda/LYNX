@@ -1560,7 +1560,7 @@ private:
                 offline.setSong (std::move (song));
                 offline.dispatchPendingMessages();
 
-                const auto pages = juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
+                const auto pages = name == "Soundgoodizer" ? 1 : juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
                 for (int page = 0; page < pages; ++page)
                 {
                     auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, page);

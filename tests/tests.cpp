@@ -15062,7 +15062,7 @@ TEST (plugin_layouts_name_real_parameters)
         const auto& info = effectInfo (kind);
         CHECK (plugui::hasFlLayout (kind));
         CHECK (l.width > 100 && l.height > 60);
-        std::vector<bool> placed (info.params.size(), false);
+        std::vector<bool> placed ((std::size_t) plugui::paramCount (kind), false);
 
         for (const auto& item : l.items)
         {
@@ -15108,10 +15108,47 @@ TEST (plugin_layouts_name_real_parameters)
         for (std::size_t p = 0; p < placed.size(); ++p)
             if (! placed[p])
             {
-                std::printf ("  %s: parameter '%s' has no control\n", info.name, info.params[p].name);
+                std::printf ("  %s: parameter '%s' has no control\n", info.name, plugui::paramName (kind, (int) p));
                 CHECK (false);
             }
     }
+}
+
+TEST (maximus_editor_edits_the_slot_state)
+{
+    using namespace lynx;
+    // the Maximus page edits the 59 parameters stored in the slot's state (REA_rodada8 §1.2)
+    std::array<std::array<int, 13>, 4> bands {};
+    for (auto& b : bands)
+        b = { 0, 1000, 1000, 0, 0, 1000, 1115, 0, 2, 5000, 3, 2882, 0 };
+    std::array<std::vector<std::array<double, 4>>, 8> envs;
+    for (auto& e : envs)
+        e = { { 0.0, 0.0, 0.0, 2 }, { 0.5, 0.5, 0.0, 2 }, { 0.5, 0.5, 0.0, 2 } };
+    const auto state = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, 32768 }, bands, envs, 0);
+    const auto slot = maximusfx::pack ({ hlfx::MaximusBuild::shared, -1, state });
+
+    CHECK (maximusfx::stateParams().size() == 59);
+    CHECK (plugui::paramIndex (EffectKind::maximus, "Master release") == 7 + 13 * 3 + 9);
+    CHECK (maximusfx::stateParam (slot, 0).value_or (-1) == 19800);
+    CHECK (maximusfx::stateParam (slot, 7 + 13 + 9).value_or (-1) == 5000);
+    CHECK (maximusfx::stateParamText (0, 19800) == "200 Hz");
+    CHECK (maximusfx::stateParamText (2, 48065) == "3000 Hz");
+    CHECK (maximusfx::stateParamText (8, 1000) == "+0.0 dB");
+    CHECK (maximusfx::stateParamText (7 + 6, 0) == "Default");
+    CHECK (maximusfx::stateParamText (7 + 13 * 3 + 6, 1115) == "2.00 ms");
+    CHECK (maximusfx::stateParamText (6, -1) == "Off");
+
+    const auto edited = maximusfx::withStateParam (slot, 7 + 13 + 1, 2000); // mid pre gain → +18 dB
+    CHECK (maximusfx::stateParam (edited, 7 + 13 + 1).value_or (-1) == 2000);
+    CHECK (maximusfx::stateParam (edited, 7 + 1).value_or (-1) == 1000);
+    CHECK (maximusfx::stateParam (maximusfx::withStateParam (slot, 0, 99999), 0).value_or (-1) == 65536); // clamped
+    const auto blob = maximusfx::unpack (edited);
+    CHECK (blob && hlfx::makeMaximusPreset (blob->state) != nullptr); // still a valid engine state
+
+    const auto curve = maximusfx::curvePoints (slot, 3);
+    CHECK (curve.size() == 3 && std::abs (curve[1].first - 0.5f) < 1e-6f && std::abs (curve[2].first - 1.0f) < 1e-6f);
+    CHECK (maximusfx::selectedBand (slot) >= 0);
+    CHECK (plugui::hasFlLayout (EffectKind::maximus));
 }
 
 TEST (plugin_layout_options_match_the_engine_values)

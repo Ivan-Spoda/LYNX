@@ -71,6 +71,8 @@ title row of the selected effect's knobs.
 | Sytrus MAIN page | 850 × 346 | VOL / LFO / PITCH faders, VOL and FILTER ADSR faders, UNISON (order, pan, volume, pitch, sub, phase, envelope variation), MODULATION X/Y pad and knobs, QUALITY (HQ envelopes and oversampling, draft / render), PORTA; the operator / filter / FX pages and the FM / RM matrix are not editable in LYNX and say so |
 | Harmor (channel page) | 1000 × 600 | the controls LYNX edits at their FL places on the part page (timbre mix, blur, tremolo, harmonizer, unison order and pitch, vibrato, part volume, filter 1 freq / res, pluck, phaser mix) and the global section (volume, part A / B); FL's section titles for orientation |
 | Fruity Squeeze | 282 × 223 | SQUARIZE amount and PUNCHER (preserve, impact, relation, amount) on plates; FILTER (on, type, freq, res, pre / pos); MIX and GAIN faders. SQUARIZE AMOUNT is mapped to the engine's `Steps` control — **not confirmed** |
+| Maximus | 633 × 391 | band curve (the selected band's drawn curve) and the bands view on top; LOW / MID / HIGH / MASTER selector; per band: mode (on / comp off / muted / off), PRE / POST gain, stereo separation, saturation THRES / CEIL, ATT, REL, SUSTAIN, two CURVE steppers, PEAK / RMS, REL 2; LMH DEL, LMH MIX; crossover LOW / HIGH frequency with 12 / 24 dB slopes; LOW CUT. Edits the 59 parameters of the slot's Maximus state (REA_rodada8 §1.2); the curve points, SOLO, LIN and the monitor options are not editable |
+| Vintage Phaser | 754 × 214 | PHASING (min / max faders, HQ, manual, feedback) · MODULATION (start phase, type, L/R phase, tension, speed + T) · DELAY (on, mix, stereo, big time + T, feedback, LP, HP, keep pitch) · LEVELS (noise, noise gate, mono input, mix); the engine's other controls (manual freq., rates, depth scale, pull-down, drive, colour, HP filters, engine V2, invert feedback) on an ADVANCED page — where FL shows them is **not confirmed** |
 
 Mapping notes:
 - 3x Osc's shape buttons follow FL's order (sine, square, rounded, custom on the first row; triangle, saw, noise on the
@@ -85,9 +87,43 @@ Mapping notes:
 - Switches that FL keeps out of the panel (Fruity Limiter's exact ceiling, Fruity Compressor's look-ahead) are in the
   presets bar's options menu.
 
+## 3. Adding or changing a plugin page (notes for other plugin agents)
+
+Everything below is reusable as is; a new page is data in `src/core/PluginLayout.cpp` plus, only when FL draws
+something special, a display in `src/ui/PluginEditors.cpp`.
+
+1. **Capture FL.** Take `flock ~/.cache/lynx-fl.lock` (release it as soon as the captures are done, other agents use
+   FL too), open the plugin's `Default.fst` (or first preset) with `tmp/r93/grab.sh <name> <fst>` (uses
+   `fl.sh` and `/mnt/c/Users/kauan/lynx-test/flref/cap.ps1`), keep the PNG in `tmp/<round>/flref` (never in the repo).
+   Measure at 2× with `tmp/r93/py/grid.py` (draws a ruler in FL pixels). Body origin = top-left under FL's wrapper
+   title: subtract about 2 px in x and 25–27 px in y from the window capture. One design unit = one FL pixel at 100 %.
+2. **Write the layout** as a function `Layout <plugin>()` with the builders at the top of `PluginLayout.cpp`:
+   `section`, `label`, `knob (cx, cy, diameter, param, caption, captionY, style)`, `slider (Item::vslider|hslider …)`,
+   `radio`, `tabs`, `pageTabs`, `toggle` (`boxed` = a lit letter button such as FL's **T**), `stepper`, `value`,
+   `display`, and the modifiers `onPage (item, page)` and `when (item, param, lo, hi)` (shown only while another
+   parameter is in a range). Generic FL "Fruity" panels: `fruityGrid` + `fruityCell` / `fruityHalfCell`.
+   Register it in `layoutFor` and in `flLayoutKinds()` (generators: `instrumentLayout` / `instrumentLayoutKinds`).
+3. **Name parameters, not indices.** `param` is the `EffectInfo` name of the effect's parameter (`paramIndex`).
+   Effects whose controls live in the slot's state instead of `EffectSlot::params` declare it in
+   `plugui::usesStateParams` and expose a table like `maximusfx::stateParams()` (name, raw min / max / default),
+   `stateParam`, `withStateParam` and `stateParamText`; the editor then reads and writes the state (Maximus is the
+   example; such controls are not automatable).
+4. **Every parameter must have a control.** The test `plugin_layouts_name_real_parameters` fails when a parameter of
+   an FL-arranged effect has no control and no entry in `menuSwitches` (on / off switches FL keeps in a menu: they go
+   to the presets bar's options menu) or `editedElsewhere`. When FL keeps controls out of its panel and their place is
+   not known, put them on a second page (`pages` + `pageTabs`, e.g. Vintage Phaser's ADVANCED) and say so.
+5. **Captions** are English inside `TR_NOOP(...)`; every new caption and every `"A|B|C"` option string needs a line
+   in `resources/i18n/pt-BR.txt`, then `python3 -I tools/make_i18n.py` (tests check both).
+6. **Look at it.** `LYNX.exe --plugui <folder>` writes one PNG per page of every FL-arranged editor from FL's default
+   preset; `tmp/r93/shots.sh <changed sources>` rebuilds (`tmp/r93/qbuild.sh`), renders and writes FL | LYNX
+   side-by-side images to `tmp/r93/compare` (add the pair to `py/compare.py`).
+7. **Interactions come for free:** drag (Ctrl fine), wheel, Alt/middle/double-click reset, right-click menu (type in,
+   automation clip, MIDI link), value tips, hint bar, presets bar with the installation's FL presets, bypass, reset.
+   Vertical `tabs` (taller than wide) draw as a column with band colours (Maximus' band selector).
+
 ## Where I stopped / next steps
-- Landed in batches: every arrangement in the table above.
-- Not done: Maximus (its bands live in the saved state: no editable parameters yet; generated page), Fruity Send and
-  Fruity Phaser (mapped to LYNX's generic utility / chorus, not FL's controls), Newtone (pass-through placeholder), Delay
-  Bank, Vintage Phaser, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
+- Landed in batches 1–3 (merge of feature/plugui93, 2026-10-17); batch 4 below.
+- Batch 4 (2026-10-17): Maximus (state-backed controls), Vintage Phaser; the layout notes (§3).
+- Not done: Fruity Send and Fruity Phaser (mapped to LYNX's generic utility / chorus, not FL's controls: they need an
+  engine with FL's parameters first), Newtone (pass-through placeholder), Delay Bank, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
   Effector (captures of most in `tmp/r93/flref`; they keep the generated grid of knobs).

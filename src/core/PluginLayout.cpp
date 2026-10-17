@@ -8,6 +8,7 @@
 #include <string>
 
 #include "core/Effects.h"
+#include "core/MaximusFx.h"
 
 // (the i18n test scans the sources for TR_NOOP: captions below are translated by the editor)
 #ifndef TR_NOOP
@@ -1234,6 +1235,153 @@ Layout harmorMain()
     return l;
 }
 
+Layout maximus()
+{
+    // FL Studio 2026 Maximus (measured on its window, body origin under the wrapper title): the selected band's
+    // compression curve at the top-left and the bands view across the rest of the top; under them the band selector
+    // (LOW / MID / HIGH / MASTER), the band's mode switch, PRE / POST gain, stereo separation, THRES / CEIL saturation
+    // inset, the envelope (ATT, REL, SUSTAIN, the two CURVE steppers, PEAK / RMS, REL 2); LMH DEL / LMH MIX; the
+    // crossover (LOW / HIGH frequency, 12 / 24 dB slopes) and LOW CUT. The values live in the slot's Maximus state
+    // (core/MaximusFx.h stateParams: "Low mode", "Master pre gain", ...).
+    Layout l;
+    l.fl = "Maximus";
+    l.width = 633;
+    l.height = 391;
+    l.pages = { TR_NOOP ("Low"), TR_NOOP ("Mid"), TR_NOOP ("High"), TR_NOOP ("Master") };
+    auto& v = l.items;
+    v.push_back (display (8, 4, 181, 181, "maxcurve"));
+    v.push_back (display (192, 4, 433, 181, "maxbands"));
+    v.push_back (section (2, 205, 248, 183, nullptr, boxed));
+    v.push_back (section (252, 205, 176, 183, nullptr, boxed));
+    v.push_back (section (430, 205, 67, 183, nullptr, boxed));
+    v.push_back (section (499, 205, 132, 183, nullptr, boxed));
+    auto bandSelector = pageTabs (4, 209, 70, 99, TR_NOOP ("Low|Mid|High|Master"));
+    v.push_back (bandSelector);
+    v.push_back (section (142, 294, 106, 74, nullptr, boxed | raised));
+
+    static const char* bandNames[4] { "Low", "Mid", "High", "Master" };
+    static std::vector<std::string> names; // "<Band> <control>" (core/MaximusFx.h), kept for the items' pointers
+    if (names.empty())
+    {
+        static const char* controls[13] { "mode", "pre gain", "post gain", "stereo separation", "saturation threshold",
+                                          "saturation ceiling", "attack", "release 2", "attack curve", "release",
+                                          "release curve", "sustain", "envelope mode" };
+        names.reserve (52);
+        for (const auto* b : bandNames)
+            for (const auto* c : controls)
+                names.push_back (std::string (b) + " " + c);
+    }
+    for (int b = 0; b < 4; ++b)
+    {
+        auto n = [&] (int j) { return names[(std::size_t) (13 * b + j)].c_str(); };
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (radio (81, 216, 64, 60, n (0), TR_NOOP ("On|Comp off|Muted|Off")));
+        add (knob (169.5f, 243, 42, n (1), TR_NOOP ("Pre"), 272));
+        add (knob (223, 243, 42, n (2), TR_NOOP ("Post"), 272));
+        add (label (185, 266, 24, 13, TR_NOOP ("Gain"), boxed));
+        add (knob (105.5f, 323, 38, n (3), TR_NOOP ("Sep"), 349, bipolar));
+        add (knob (168.5f, 322, 36, n (4), TR_NOOP ("Thres"), 349, bipolar));
+        add (knob (223, 322, 36, n (5), TR_NOOP ("Ceil"), 349));
+        add (label (186, 343, 22, 13, TR_NOOP ("Sat"), boxed));
+        add (knob (280.5f, 243, 42, n (6), TR_NOOP ("Att"), 272));
+        add (knob (343.5f, 243, 42, n (9), TR_NOOP ("Rel"), 272));
+        add (knob (395.5f, 243, 42, n (11), TR_NOOP ("Sustain"), 272));
+        add (label (300, 266, 24, 13, TR_NOOP ("Env"), boxed));
+        add (stepper (268, 292, 27, 22, n (8), nullptr, 7));
+        add (label (296, 297, 34, 13, TR_NOOP ("Curve")));
+        add (stepper (331, 292, 27, 22, n (10), nullptr, 7));
+        add (radio (368, 292, 46, 30, n (12), TR_NOOP ("Peak|RMS")));
+        add (knob (281, 353, 34, n (7), TR_NOOP ("Rel 2"), 377));
+    }
+    v.push_back (knob (463, 243, 42, "LMH lookahead delay", TR_NOOP ("LMH del"), 272));
+    v.push_back (knob (463, 323, 42, "LMH mix", TR_NOOP ("LMH mix"), 349));
+    v.push_back (knob (534, 243, 42, "Low band frequency", TR_NOOP ("Low"), 272));
+    v.push_back (knob (593, 243, 42, "High band frequency", TR_NOOP ("High"), 272));
+    v.push_back (label (551, 266, 25, 13, TR_NOOP ("Freq"), boxed));
+    v.push_back (radio (503, 292, 42, 28, "Low band slope", "12dB|24dB"));
+    v.push_back (radio (584, 292, 42, 28, "High band slope", "12dB|24dB"));
+    v.push_back (knob (538, 349, 34, "Low cut", TR_NOOP ("Low cut"), 377));
+    return l;
+}
+
+Layout vintagePhaser()
+{
+    // PHASING (MIN, MAX faders, HQ, MANUAL, FEEDBACK fader) | MODULATION (START PHASE, TYPE switch, L/R PHASE,
+    // TENSION, SPEED fader with T) | DELAY (on LED; MIX, STEREO, big TIME with T; FEEDBACK, LP, HP, KEEP PITCH) |
+    // LEVELS (NOISE, NOISE GATE, MONO INPUT, MIX fader). The engine's remaining controls (FL keeps them out of the
+    // panel; where FL shows them is not confirmed) are on a second page.
+    Layout l;
+    l.fl = "Vintage Phaser";
+    l.width = 754;
+    l.height = 214;
+    l.pages = { TR_NOOP ("Main"), TR_NOOP ("Advanced") };
+    auto& v = l.items;
+    v.push_back (pageTabs (13, 14, 120, 20, TR_NOOP ("Main|Advanced")));
+    v.push_back (label (420, 6, 326, 34, "Vintage Phaser", dim));
+    auto main = [&] (LayoutItem i) { v.push_back (onPage (std::move (i), 0)); };
+    auto fader = [&] (float x, const char* param, const char* caption) {
+        main (slider (Item::vslider, x - 10, 72, 20, 104, param, nullptr, noCaption));
+        main (label (x - 24, 180, 48, 12, caption));
+    };
+    main (section (13, 45, 162, 165, TR_NOOP ("Phasing")));
+    fader (38, "Min freq.", TR_NOOP ("Min"));
+    fader (71, "Max freq.", TR_NOOP ("Max"));
+    main (toggle (95, 132, 20, 12, "HQ", nullptr));
+    main (label (88, 146, 34, 11, TR_NOOP ("HQ")));
+    main (toggle (95, 164, 20, 12, "Manual", nullptr));
+    main (label (82, 180, 46, 12, TR_NOOP ("Manual")));
+    fader (143, "Feedback", TR_NOOP ("Feedback"));
+
+    main (section (181, 45, 209, 165, TR_NOOP ("Modulation")));
+    main (knob (220, 92, 30, "Start phase", TR_NOOP ("Start phase"), 124));
+    main (radio (256, 76, 52, 30, "Sine", TR_NOOP ("Triangle|Sine")));
+    main (label (252, 112, 50, 12, TR_NOOP ("Type")));
+    main (knob (220, 157, 30, "L/R phase", TR_NOOP ("L/R phase"), 186));
+    main (knob (281, 157, 30, "Tension", TR_NOOP ("Tension"), 186));
+    fader (348, "LFO speed", TR_NOOP ("Speed"));
+    main (toggle (364, 180, 14, 12, "Tempo sync", "T", boxed));
+
+    main (section (396, 45, 217, 165, TR_NOOP ("Delay")));
+    main (toggle (582, 49, 20, 10, "Delay", nullptr));
+    main (knob (428, 92, 30, "Delay mix", TR_NOOP ("Mix"), 124));
+    main (knob (472, 92, 30, "Delay stereo", TR_NOOP ("Stereo"), 124, bipolar));
+    main (knob (548, 100, 44, "Delay time", TR_NOOP ("Time"), 136, big));
+    main (toggle (576, 130, 14, 12, "Delay sync", "T", boxed));
+    main (knob (428, 157, 30, "Delay fdbk", TR_NOOP ("Feedback"), 186));
+    main (knob (472, 157, 30, "Delay LP", TR_NOOP ("LP"), 186));
+    main (knob (527, 157, 30, "Delay HP", TR_NOOP ("HP"), 186));
+    main (toggle (562, 164, 20, 12, "Keep pitch", nullptr));
+    main (label (550, 180, 56, 12, TR_NOOP ("Keep pitch")));
+
+    main (section (619, 45, 119, 165, TR_NOOP ("Levels")));
+    main (knob (654, 90, 28, "Noise", TR_NOOP ("Noise"), 120));
+    main (toggle (644, 134, 20, 12, "Gate", nullptr));
+    main (label (626, 148, 56, 11, TR_NOOP ("Noise gate")));
+    main (toggle (644, 164, 20, 12, "Mono input", nullptr));
+    main (label (626, 180, 56, 12, TR_NOOP ("Mono input")));
+    fader (708, "Mix", TR_NOOP ("Mix"));
+
+    // second page: the engine's other controls
+    auto adv = [&] (int k, const char* param, const char* caption, std::uint16_t style = 0) {
+        const auto cx = 50.0f + 92.0f * (float) (k % 8), cy = 82.0f + 70.0f * (float) (k / 8);
+        v.push_back (onPage (knob (cx, cy, 34, param, caption, cy + 26, style | showValue), 1));
+    };
+    v.push_back (onPage (section (13, 45, 725, 165, nullptr, boxed), 1));
+    adv (0, "Manual freq.", TR_NOOP ("Manual freq."));
+    adv (1, "Rate 1", TR_NOOP ("Rate 1"));
+    adv (2, "Rate 2", TR_NOOP ("Rate 2"));
+    adv (3, "Depth scale", TR_NOOP ("Depth scale"));
+    adv (4, "Pull-down", TR_NOOP ("Pull-down"));
+    adv (5, "Drive", TR_NOOP ("Drive"), bipolar);
+    adv (6, "Colour gain", TR_NOOP ("Colour gain"));
+    adv (7, "Colour freq.", TR_NOOP ("Colour freq."));
+    adv (8, "Input HP", TR_NOOP ("Input HP"));
+    adv (9, "Fdbk HP", TR_NOOP ("Feedback HP"));
+    v.push_back (onPage (toggle (230, 140, 110, 14, "Engine V2", TR_NOOP ("Engine V2")), 1));
+    v.push_back (onPage (toggle (230, 166, 110, 14, "Invert fdbk", TR_NOOP ("Invert feedback")), 1));
+    return l;
+}
+
 Layout soundgoodizer()
 {
     // one big Amount knob and the four presets A–D (the slot's state, core/MaximusFx.h)
@@ -1287,7 +1435,8 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::fruityBloodOverdrive, EffectKind::fruityPanOMatic, EffectKind::stereoShaper,
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
                                                  EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
-                                                 EffectKind::squeeze };
+                                                 EffectKind::squeeze, EffectKind::maximus,
+                                                 EffectKind::vintagePhaser };
     return kinds;
 }
 
@@ -1330,6 +1479,8 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hyperChorus: l = hyperChorus(); break;
         case EffectKind::fruityBalance: l = fruityBalance(); break;
         case EffectKind::squeeze: l = fruitySqueeze(); break;
+        case EffectKind::maximus: l = maximus(); break;
+        case EffectKind::vintagePhaser: l = vintagePhaser(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;
@@ -1366,10 +1517,29 @@ bool hasFlLayout (EffectKind kind)
     return *layoutFor (kind).fl != 0;
 }
 
+bool usesStateParams (EffectKind kind) noexcept
+{
+    return kind == EffectKind::maximus;
+}
+
+int paramCount (EffectKind kind)
+{
+    return usesStateParams (kind) ? (int) maximusfx::stateParams().size() : (int) effectInfo (kind).params.size();
+}
+
+const char* paramName (EffectKind kind, int index)
+{
+    if (index < 0 || index >= paramCount (kind))
+        return "";
+    return usesStateParams (kind) ? maximusfx::stateParams()[(std::size_t) index].name : effectInfo (kind).params[(std::size_t) index].name;
+}
+
 int paramIndex (EffectKind kind, const char* name)
 {
     if (name == nullptr)
         return -1;
+    if (usesStateParams (kind))
+        return maximusfx::stateParamIndex (name);
     const auto& params = effectInfo (kind).params;
     for (int i = 0; i < (int) params.size(); ++i)
         if (std::strcmp (params[(std::size_t) i].name, name) == 0)

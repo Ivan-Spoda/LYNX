@@ -34,6 +34,12 @@ bool hasStyle (const LayoutItem& item, std::uint16_t flag) noexcept
     return (item.style & flag) != 0;
 }
 
+// a row of tabs drawn as a column (taller than wide: Maximus' band selector)
+bool isVertical (const LayoutItem& item) noexcept
+{
+    return item.type == Item::tabs && item.h > item.w * 1.2f;
+}
+
 // --- the editor ----------------------------------------------------------------------------------
 
 class NativeEffectEditor final : public juce::Component,
@@ -56,6 +62,9 @@ public:
         }
 
         page = initialPage;
+        if (stateBacked() && initialPage == 0)
+            if (const auto* fx = current())
+                page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
         const auto& l = activeLayout();
         setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight));
@@ -144,14 +153,49 @@ public:
 
     // --- values --------------------------------------------------------------------------------------
 
+    // Maximus: the controls edit the parameters stored in the slot's state (core/MaximusFx.h), not EffectSlot::params
+    bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
+
+    static float stateNormalised (int param, int raw)
+    {
+        const auto& p = maximusfx::stateParams()[(std::size_t) param];
+        return p.maximum > p.minimum ? (float) (raw - p.minimum) / (float) (p.maximum - p.minimum) : 0.0f;
+    }
+
+    static int stateRaw (int param, float value)
+    {
+        const auto& p = maximusfx::stateParams()[(std::size_t) param];
+        return p.minimum + juce::roundToInt (juce::jlimit (0.0f, 1.0f, value) * (float) (p.maximum - p.minimum));
+    }
+
     float valueOf (int param) const
     {
         const auto* fx = current();
+        if (stateBacked())
+        {
+            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
+                return 0.0f;
+            const auto raw = maximusfx::stateParam (fx->state, param);
+            return stateNormalised (param, raw.value_or (maximusfx::stateParams()[(std::size_t) param].defaultValue));
+        }
         return fx != nullptr && param >= 0 && param < maxEffectParams ? fx->params[(std::size_t) param] : 0.0f;
     }
 
     void setValue (int param, float value)
     {
+        if (stateBacked())
+        {
+            const auto* fx = current();
+            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
+                return;
+            const auto raw = stateRaw (param, value);
+            if (maximusfx::stateParam (fx->state, param) == raw)
+                return;
+            engine.editSong ([t = track, s = slot, bytes = maximusfx::withStateParam (fx->state, param, raw)] (Song& song) {
+                song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes;
+            });
+            return;
+        }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
             return;
         engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
@@ -164,6 +208,8 @@ public:
         const auto* fx = current();
         if (fx == nullptr || param < 0)
             return {};
+        if (stateBacked())
+            return param < plugui::paramCount (kind) ? utf8 (maximusfx::stateParamText (param, stateRaw (param, value)).c_str()) : juce::String();
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
     }
 
@@ -181,6 +227,24 @@ public:
         ui::ValueSpec spec;
         const auto param = paramOf (item);
         const auto& info = effectInfo (kind);
+
+        if (stateBacked())
+        {
+            // not automatable (the values live in the state): drag, wheel, reset and type-in only
+            if (param < 0 || param >= plugui::paramCount (kind))
+                return spec;
+            const auto& p = maximusfx::stateParams()[(std::size_t) param];
+            spec.name = trackName() + " - " + utf8 (info.name) + " - " + utf8 (p.name);
+            spec.defaultValue = stateNormalised (param, p.defaultValue);
+            spec.pixelsForRange = item.type == Item::hslider ? juce::jmax (60.0, (double) rectOf (item).getWidth()) : 180.0;
+            if (item.steps > 0)
+                spec.interval = 1.0 / item.steps;
+            else if (p.maximum - p.minimum <= 8)
+                spec.interval = 1.0 / (p.maximum - p.minimum);
+            spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
+            spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
+            return spec;
+        }
 
         if (param < 0 || param >= (int) info.params.size())
             return spec;
@@ -487,18 +551,28 @@ public:
                 const auto labels = plugui::optionLabels (item);
                 const auto texts = optionTexts (item);
                 const auto chosen = hasStyle (item, plugui::pageTabs) ? page : plugui::optionAt (item, value);
-                const auto w = r.getWidth() / (float) juce::jmax (1, (int) labels.size());
+                const auto vertical = isVertical (item);
+                const auto count = (float) juce::jmax (1, (int) labels.size());
+                const auto w = vertical ? r.getWidth() : r.getWidth() / count;
+                const auto h = vertical ? r.getHeight() / count : r.getHeight();
                 g.setColour (colour::bg0);
                 g.fillRoundedRectangle (r, radius::sm);
                 for (int o = 0; o < (int) labels.size(); ++o)
                 {
-                    const auto cell = juce::Rectangle<float> (r.getX() + w * (float) o, r.getY(), w, r.getHeight()).reduced (1.0f);
+                    const auto cell = (vertical ? juce::Rectangle<float> (r.getX(), r.getY() + h * (float) o, w, h)
+                                                : juce::Rectangle<float> (r.getX() + w * (float) o, r.getY(), w, h)).reduced (1.0f);
+                    if (vertical) // a band selector (Maximus): the band's colour on the left edge
+                    {
+                        g.setColour (peqview::bandColour (o).withAlpha (o == chosen ? 1.0f : 0.45f));
+                        g.fillRect (cell.withWidth (juce::jmax (2.0f, 3.0f * s)));
+                    }
                     if (o == chosen)
                     {
                         g.setColour (colour::bg6);
-                        g.fillRoundedRectangle (cell, radius::sm);
+                        g.fillRoundedRectangle (vertical ? cell.withTrimmedLeft (juce::jmax (2.0f, 3.0f * s)) : cell, radius::sm);
                         g.setColour (colour::accent);
-                        g.fillRect (cell.withTop (cell.getBottom() - juce::jmax (1.5f, 2.0f * s)).reduced (3.0f * s, 0.0f));
+                        if (! vertical)
+                            g.fillRect (cell.withTop (cell.getBottom() - juce::jmax (1.5f, 2.0f * s)).reduced (3.0f * s, 0.0f));
                     }
                     g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
@@ -852,6 +926,76 @@ public:
                 g.setColour (curveColour.withAlpha (0.75f - 0.11f * (float) i));
                 g.drawRoundedRectangle (box, 4.0f * s, juce::jmax (1.0f, 1.5f * s));
             }
+        }
+        else if (id == "maxcurve") // Maximus: the selected band's drawn compression curve (input → output, 0.5 = 0 dBFS)
+        {
+            grid (4, 4);
+            const auto band = juce::jlimit (0, 3, page);
+            const auto c = fx.enabled ? peqview::bandColour (band) : colour::textDisabled;
+            g.setColour (colour::gridBar);
+            g.drawLine ({ inner.getBottomLeft(), inner.getTopRight() }, 1.0f);
+            g.drawVerticalLine ((int) inner.getCentreX(), inner.getY(), inner.getBottom());
+            g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
+            const auto pts = maximusfx::curvePoints (fx.state, band);
+            if (pts.size() >= 2)
+            {
+                juce::Path p;
+                auto at = [&] (const std::pair<float, float>& q) { return juce::Point<float> (inner.getX() + inner.getWidth() * q.first, inner.getBottom() - inner.getHeight() * q.second); };
+                p.startNewSubPath (at (pts.front()));
+                for (std::size_t i = 1; i < pts.size(); ++i)
+                    p.lineTo (at (pts[i]));
+                auto fill = p;
+                fill.lineTo (at (pts.back()).withY (inner.getBottom()));
+                fill.lineTo (at (pts.front()).withY (inner.getBottom()));
+                fill.closeSubPath();
+                g.setColour (c.withAlpha (0.14f));
+                g.fillPath (fill);
+                g.setColour (c);
+                g.strokePath (p, juce::PathStrokeType (juce::jmax (1.5f, 2.0f * s)));
+                for (const auto& q : pts)
+                    g.fillEllipse (juce::Rectangle<float> (5.0f * s, 5.0f * s).withCentre (at (q)));
+            }
+            g.setColour (colour::textSecondary);
+            g.setFont (font (juce::jmax (8.0f, 9.0f * s)));
+            g.drawText (tr ("Out"), inner.withHeight (12.0f * s).toNearestInt(), juce::Justification::topLeft, false);
+            g.drawText (tr ("In"), inner.withTop (inner.getBottom() - 12.0f * s).toNearestInt(), juce::Justification::bottomRight, false);
+        }
+        else if (id == "maxbands") // Maximus: the three bands over 20 Hz…20 kHz with their crossovers and the low cut
+        {
+            const auto raw = [&] (int p) { return maximusfx::stateParam (fx.state, p).value_or (maximusfx::stateParams()[(std::size_t) p].defaultValue); };
+            const auto xOf = [&] (double hz) { return inner.getX() + inner.getWidth() * (float) (std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0) / std::log (1000.0)); };
+            auto lo = 30.0 * std::pow (533.33, raw (0) / 65536.0), hi = 30.0 * std::pow (533.33, raw (2) / 65536.0);
+            if (lo > hi)
+                std::swap (lo, hi);
+            const float edges[4] { inner.getX(), xOf (lo), xOf (hi), inner.getRight() };
+            static const char* names[3] { "Low", "Mid", "High" };
+            for (int b = 0; b < 3; ++b)
+            {
+                const auto mode = raw (7 + 13 * b);
+                const auto area = juce::Rectangle<float> (edges[b], inner.getY(), edges[b + 1] - edges[b], inner.getHeight());
+                const auto c = peqview::bandColour (b);
+                g.setColour (c.withAlpha (! fx.enabled || mode >= 2 ? 0.05f : (b == page ? 0.24f : 0.12f)));
+                g.fillRect (area);
+                g.setColour (b == page ? colour::textPrimary : colour::textSecondary);
+                g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
+                g.drawFittedText (caps (tr (names[b])) + (mode == 2 ? " · " + tr ("Muted") : mode == 3 ? " · " + tr ("Off") : juce::String()),
+                                  area.reduced (2.0f * s).withHeight (14.0f * s).toNearestInt(), juce::Justification::centred, 1, 0.6f);
+            }
+            g.setColour (colour::textSecondary);
+            for (int k = 1; k <= 2; ++k)
+                g.drawVerticalLine ((int) edges[k], inner.getY(), inner.getBottom());
+            if (raw (6) >= 0) // low cut
+            {
+                const auto x = xOf (5.0 * std::pow (16.0, raw (6) / 65536.0));
+                g.setColour (colour::accent.withAlpha (0.6f));
+                g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
+            }
+            g.setColour (colour::textDisabled);
+            g.setFont (font (juce::jmax (8.0f, 9.0f * s)));
+            for (const auto hz : { 100.0, 1000.0, 10000.0 })
+                g.drawText (hz >= 1000.0 ? juce::String ((int) (hz / 1000.0)) + "k" : juce::String ((int) hz),
+                            juce::Rectangle<float> (30.0f * s, 12.0f * s).withCentre ({ xOf (hz), inner.getBottom() - 6.0f * s }).toNearestInt(),
+                            juce::Justification::centred, false);
         }
         else if (id == "eq")
         {
@@ -1300,7 +1444,8 @@ public:
         if (hasStyle (item, plugui::pageTabs))
         {
             const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
-            page = juce::jlimit (0, n - 1, (int) ((e.position.x - r.getX()) / r.getWidth() * (float) n));
+            const auto along = isVertical (item) ? (e.position.y - r.getY()) / r.getHeight() : (e.position.x - r.getX()) / r.getWidth();
+            page = juce::jlimit (0, n - 1, (int) (along * (float) n));
             hoverItem = -1;
             repaint();
             return;
@@ -1378,7 +1523,7 @@ public:
             case Item::tabs:
             {
                 const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
-                auto o = item.type == Item::radio ? (int) ((e.position.y - r.getY()) / r.getHeight() * (float) n)
+                auto o = item.type == Item::radio || isVertical (item) ? (int) ((e.position.y - r.getY()) / r.getHeight() * (float) n)
                                                   : (int) ((e.position.x - r.getX()) / r.getWidth() * (float) n);
                 if (item.type == Item::radio && item.columns > 0)
                     for (int k = 0; k < n; ++k)
@@ -1644,6 +1789,17 @@ public:
         menu.addItem (tr ("Reset to defaults"), [this] {
             const auto& info = effectInfo (kind);
             presetName = {};
+            if (stateBacked())
+            {
+                if (const auto* fx = current())
+                {
+                    auto bytes = fx->state;
+                    for (int p = 0; p < plugui::paramCount (kind); ++p)
+                        bytes = maximusfx::withStateParam (bytes, p, maximusfx::stateParams()[(std::size_t) p].defaultValue);
+                    engine.editSong ([t = track, s = slot, bytes] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes; });
+                }
+                return;
+            }
             engine.editSong ([t = track, s = slot, info] (Song& song) {
                 auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) s].params;
                 for (std::size_t i = 0; i < info.params.size() && i < params.size(); ++i)
