@@ -33,7 +33,7 @@ CORE="$CORE src/core/PluginSubstitutes.cpp"
 # settings pages, plugin manager and shortcut manager logic (round 82)
 CORE="$CORE src/core/Preferences.cpp"
 # layouts of the native plugin editors (round 93)
-CORE="$CORE src/core/PluginLayout.cpp"
+CORE="$CORE src/core/PluginLayout.cpp src/core/StateParams.cpp"
 # spectral waveforms (band analysis, multi-resolution peak cache)
 CORE="$CORE src/core/WaveAnalysis.cpp"
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)

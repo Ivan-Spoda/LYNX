@@ -15,6 +15,11 @@
 #include "core/ParametricEqFl.h"
 #include "core/VocalPitch.h"
 #include "core/PluginLayout.h"
+#include "core/StateParams.h"
+#include "core/ConvolverFx.h"
+#include "core/EquoFx.h"
+#include "core/MultibandDelayFx.h"
+#include "core/Vocodex.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
@@ -69,7 +74,9 @@ public:
         }
 
         page = initialPage;
-        if (stateBacked() && initialPage == 0)
+        if (kind == EffectKind::equo && initialPage == 0)
+            page = 3; // bank 1, volume (FL opens EQUO on its first bank)
+        if (kind == EffectKind::maximus && stateBacked() && initialPage == 0)
             if (const auto* fx = current())
                 page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
@@ -127,7 +134,7 @@ public:
     bool visible (const LayoutItem& item) const
     {
         const auto* fx = current();
-        return fx != nullptr && plugui::isShown (kind, item, page, fx->params);
+        return fx != nullptr && plugui::isShown (kind, item, page, fx->params, &fx->state);
     }
 
     // the knob's circle inside its cell (the caption takes the rest)
@@ -153,7 +160,8 @@ public:
             if (! visible (item) || item.type == Item::section || item.type == Item::label)
                 continue;
             if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"
-                                                                    || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"))
+                                                                    || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
+                                                                    || isBars (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
@@ -167,46 +175,33 @@ public:
 
     // --- values --------------------------------------------------------------------------------------
 
-    // Maximus: the controls edit the parameters stored in the slot's state (core/MaximusFx.h), not EffectSlot::params
+    // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
+    // edit those bytes instead of EffectSlot::params
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
-
-    static float stateNormalised (int param, int raw)
-    {
-        const auto& p = maximusfx::stateParams()[(std::size_t) param];
-        return p.maximum > p.minimum ? (float) (raw - p.minimum) / (float) (p.maximum - p.minimum) : 0.0f;
-    }
-
-    static int stateRaw (int param, float value)
-    {
-        const auto& p = maximusfx::stateParams()[(std::size_t) param];
-        return p.minimum + juce::roundToInt (juce::jlimit (0.0f, 1.0f, value) * (float) (p.maximum - p.minimum));
-    }
+    bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
+    const stateparams::Table& stateTable() const { return *stateparams::tableFor (kind); }
 
     float valueOf (int param) const
     {
         const auto* fx = current();
-        if (stateBacked())
-        {
-            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
-                return 0.0f;
-            const auto raw = maximusfx::stateParam (fx->state, param);
-            return stateNormalised (param, raw.value_or (maximusfx::stateParams()[(std::size_t) param].defaultValue));
-        }
+        if (isStateParam (param))
+            return fx != nullptr ? plugui::stateValue01 (kind, param, fx->state) : 0.0f;
         return fx != nullptr && param >= 0 && param < maxEffectParams ? fx->params[(std::size_t) param] : 0.0f;
     }
 
     void setValue (int param, float value)
     {
-        if (stateBacked())
+        if (isStateParam (param))
         {
             const auto* fx = current();
-            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
+            if (fx == nullptr)
                 return;
-            const auto raw = stateRaw (param, value);
-            if (maximusfx::stateParam (fx->state, param) == raw)
+            const auto s = plugui::stateIndex (kind, param);
+            const auto raw = plugui::stateRaw (kind, param, value);
+            if (stateTable().get (fx->state, s) == raw)
                 return;
-            engine.editSong ([t = track, s = slot, bytes = maximusfx::withStateParam (fx->state, param, raw)] (Song& song) {
-                song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes;
+            engine.editSong ([t = track, sl = slot, bytes = stateTable().with (fx->state, s, raw)] (Song& song) {
+                song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
             });
             return;
         }
@@ -222,8 +217,8 @@ public:
         const auto* fx = current();
         if (fx == nullptr || param < 0)
             return {};
-        if (stateBacked())
-            return param < plugui::paramCount (kind) ? utf8 (maximusfx::stateParamText (param, stateRaw (param, value)).c_str()) : juce::String();
+        if (isStateParam (param))
+            return utf8 (stateTable().text (fx->state, plugui::stateIndex (kind, param), plugui::stateRaw (kind, param, value)).c_str());
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
     }
 
@@ -242,19 +237,19 @@ public:
         const auto param = paramOf (item);
         const auto& info = effectInfo (kind);
 
-        if (stateBacked())
+        if (isStateParam (param))
         {
             // not automatable (the values live in the state): drag, wheel, reset and type-in only
-            if (param < 0 || param >= plugui::paramCount (kind))
-                return spec;
-            const auto& p = maximusfx::stateParams()[(std::size_t) param];
-            spec.name = trackName() + " - " + utf8 (info.name) + " - " + utf8 (p.name);
-            spec.defaultValue = stateNormalised (param, p.defaultValue);
-            spec.pixelsForRange = item.type == Item::hslider ? juce::jmax (60.0, (double) rectOf (item).getWidth()) : 180.0;
+            const auto& p = stateTable().params[(std::size_t) plugui::stateIndex (kind, param)];
+            spec.name = trackName() + " - " + utf8 (info.name) + " - " + utf8 (p.name.c_str());
+            spec.defaultValue = p.maximum > p.minimum ? (double) (p.defaultValue - p.minimum) / (double) (p.maximum - p.minimum) : 0.0;
+            spec.pixelsForRange = item.type == Item::hslider ? juce::jmax (60.0, (double) rectOf (item).getWidth())
+                                  : item.type == Item::vslider ? juce::jmax (60.0, (double) rectOf (item).getHeight())
+                                                               : 180.0;
             if (item.steps > 0)
                 spec.interval = 1.0 / item.steps;
-            else if (p.maximum - p.minimum <= 8)
-                spec.interval = 1.0 / (p.maximum - p.minimum);
+            else if (p.maximum - p.minimum <= 16)
+                spec.interval = 1.0 / juce::jmax (1, p.maximum - p.minimum);
             spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
             spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
             return spec;
@@ -420,6 +415,11 @@ public:
                 break;
 
             case Item::value:
+                if (hasStyle (item, plugui::boxed)) // a read-out plate (FL's value boxes)
+                {
+                    g.setColour (colour::bg0);
+                    g.fillRoundedRectangle (r, radius::sm * s);
+                }
                 g.setColour (hot ? colour::accent : (fx.enabled ? colour::textPrimary : colour::textDisabled));
                 g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
                 g.drawFittedText (valueText (param, value), r.toNearestInt(),
@@ -564,7 +564,8 @@ public:
             {
                 const auto labels = plugui::optionLabels (item);
                 const auto texts = optionTexts (item);
-                const auto chosen = hasStyle (item, plugui::pageTabs) ? page : plugui::optionAt (item, value);
+                const auto chosen = hasStyle (item, plugui::pageTabs) ? (item.steps > 0 ? (page / item.steps) % juce::jmax (1, (int) labels.size()) : page)
+                                                                      : plugui::optionAt (item, value);
                 const auto vertical = isVertical (item);
                 const auto count = (float) juce::jmax (1, (int) labels.size());
                 const auto w = vertical ? r.getWidth() : r.getWidth() / count;
@@ -598,7 +599,7 @@ public:
 
             case Item::toggle:
             {
-                const auto on = value >= 0.5f;
+                const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted);
                 if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
                 {
                     g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : (hot ? colour::bg6 : colour::bg5));
@@ -1266,6 +1267,9 @@ public:
                 return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, mixsuite::ember::shape (style, (x * 2.0f - 1.0f) * drive) * norm);
             }, inner, false);
         }
+        else if (paintFxDisplay (g, id, item, inner, fx))
+        {
+        }
         else // a plain well with the plugin's name (FL's scopes / animations are not reproduced)
         {
             g.setColour (colour::bg2);
@@ -1280,6 +1284,8 @@ public:
             g.drawText (caps (tr (item.label)), inner.withHeight (12.0f * s), juce::Justification::topLeft);
         }
     }
+
+#include "ui/PluginEditorsFx.inc"
 
     // --- Gross Beat: the selected slots' envelopes ------------------------------------------------------
 
@@ -1675,7 +1681,11 @@ public:
         {
             const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
             const auto along = isVertical (item) ? (e.position.y - r.getY()) / r.getHeight() : (e.position.x - r.getX()) / r.getWidth();
-            page = juce::jlimit (0, n - 1, (int) (along * (float) n));
+            const auto o = juce::jlimit (0, n - 1, (int) (along * (float) n));
+            if (item.steps > 0) // one digit of the page (EQUO: target ×1, bank ×3)
+                page += (o - (page / item.steps) % n) * item.steps;
+            else
+                page = o;
             hoverItem = -1;
             repaint();
             return;
@@ -1700,6 +1710,13 @@ public:
             dragItem = index;
             xyDragging = true;
             xyMouse (e, item);
+            return;
+        }
+        if (isBars (item))
+        {
+            dragItem = index;
+            barsDragging = true;
+            barsMouse (e, item, true);
             return;
         }
         if (item.type == Item::display) // the EQ graph
@@ -1811,6 +1828,11 @@ public:
             xyMouse (e, activeLayout().items[(std::size_t) dragItem]);
             return;
         }
+        if (barsDragging && dragItem >= 0)
+        {
+            barsMouse (e, activeLayout().items[(std::size_t) dragItem], false);
+            return;
+        }
         if (dragItem < 0 || ! drag.isActive())
             return;
         const auto& item = activeLayout().items[(std::size_t) dragItem];
@@ -1831,9 +1853,9 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
-        if (xyDragging || sgDragging)
+        if (xyDragging || sgDragging || barsDragging)
         {
-            xyDragging = sgDragging = false;
+            xyDragging = sgDragging = barsDragging = false;
             dragItem = -1;
             ui::hideValueTip();
         }
@@ -2019,21 +2041,19 @@ public:
         menu.addItem (tr ("Reset to defaults"), [this] {
             const auto& info = effectInfo (kind);
             presetName = {};
+            auto bytes = current() != nullptr ? current()->state : std::vector<std::uint8_t> {};
             if (stateBacked())
             {
-                if (const auto* fx = current())
-                {
-                    auto bytes = fx->state;
-                    for (int p = 0; p < plugui::paramCount (kind); ++p)
-                        bytes = maximusfx::withStateParam (bytes, p, maximusfx::stateParams()[(std::size_t) p].defaultValue);
-                    engine.editSong ([t = track, s = slot, bytes] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes; });
-                }
-                return;
+                const auto& table = stateTable();
+                for (int p = 0; p < (int) table.params.size(); ++p)
+                    bytes = table.with (bytes, p, table.params[(std::size_t) p].defaultValue);
             }
-            engine.editSong ([t = track, s = slot, info] (Song& song) {
-                auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) s].params;
-                for (std::size_t i = 0; i < info.params.size() && i < params.size(); ++i)
-                    params[i] = info.params[i].defaultValue;
+            engine.editSong ([t = track, s = slot, info, bytes, state = stateBacked()] (Song& song) {
+                auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) s];
+                for (std::size_t i = 0; i < info.params.size() && i < fx.params.size(); ++i)
+                    fx.params[i] = info.params[i].defaultValue;
+                if (state)
+                    fx.state = bytes;
             });
         });
         // switches that FL keeps out of the panel (in its own menus): on / off here

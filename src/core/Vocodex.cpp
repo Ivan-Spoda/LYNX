@@ -626,6 +626,7 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& d)
     }
     if (o + 20 * 4 + 0x24 > d.size())
         return std::nullopt;
+    s.paramsAt = o;
     for (auto& p : s.params)
         p = i32 (o), o += 4;
     s.holdMode = std::clamp (i32 (o), 0, 1);
