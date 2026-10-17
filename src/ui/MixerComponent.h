@@ -189,6 +189,8 @@ private:
     void showAddMenu (int slot);
     void showSlotMenu (int slot);
     juce::Rectangle<int> pluginButtonBounds() const;
+    void openEditor (int slot);
+    juce::Rectangle<int> editorButtonBounds() const;
     void openPluginWindow (int slot);
     juce::Rectangle<int> fxSwitchBounds() const; // all effects on/off; right-click opens/closes their windows
     void toggleAllWindows();

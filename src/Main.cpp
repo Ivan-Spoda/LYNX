@@ -1,6 +1,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/Effects.h"
+#include "core/FlEffects.h"
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
@@ -34,6 +35,8 @@
 #include "ui/EventEditor.h"
 #include "core/EventEdit.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/PluginEditors.h"
+#include "core/PluginLayout.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
@@ -305,6 +308,15 @@ public:
         {
             const auto i = args.indexOf ("--plugintest");
             runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
+        if (args.contains ("--plugui"))
+        {
+            // LYNX.exe --plugui <folder>: the native effect editors at FL's size (one PNG per editor and page), each
+            // loaded with the FL plugin's Default preset when the FL installation has one
+            const auto i = args.indexOf ("--plugui");
+            runPluginEditorSnapshots (args[i + 1].unquoted());
             return;
         }
 
@@ -1272,6 +1284,73 @@ private:
 
     // LYNX.exe --snapshot prefix [project]: draws the window off-screen and writes
     // prefix-rack.png, -pianoroll.png and -playlist.png (to check the UI without touching the screen).
+    void runPluginEditorSnapshots (const juce::String& folder)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        {
+            const juce::File out (folder);
+            out.createDirectory();
+            lynx::AudioEngine offline (false);
+            const auto roots = lynx::findFlStudioRoots();
+            const auto presets = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Effects");
+
+            auto kinds = lynx::plugui::flLayoutKinds();
+            kinds.insert (kinds.end(), { lynx::EffectKind::fruityBalance, lynx::EffectKind::grossBeat, lynx::EffectKind::fruityDelay2 });
+
+            for (const auto kind : kinds)
+            {
+                auto fx = lynx::makeEffectSlot (kind);
+                juce::String name (lynx::effectInfo (kind).name);
+                for (const auto& plugin : lynx::flPluginsForEffect (kind))
+                {
+                    const auto dir = presets.getChildFile (juce::String::fromUTF8 (plugin.c_str()));
+                    auto file = dir.getChildFile ("Default.fst");
+                    if (! file.existsAsFile())
+                    {
+                        auto files = dir.findChildFiles (juce::File::findFiles, true, "*.fst");
+                        std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getFullPathName().compareNatural (b.getFullPathName()) < 0; });
+                        file = files.isEmpty() ? juce::File() : files[0];
+                    }
+                    juce::MemoryBlock data;
+                    if (file.existsAsFile() && file.loadFileAsData (data))
+                    {
+                        const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                        if (auto loaded = lynx::effectFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), 130.0); loaded && loaded->kind == kind)
+                            fx = *loaded;
+                    }
+                    name = juce::String::fromUTF8 (plugin.c_str());
+                    break;
+                }
+
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+
+                const auto pages = juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
+                for (int page = 0; page < pages; ++page)
+                {
+                    auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, page);
+                    juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        editor->paintEntireComponent (g, false);
+                    }
+                    const auto file = out.getChildFile (name + (page > 0 ? "-p" + juce::String (page + 1) : juce::String()) + ".png");
+                    file.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = file.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                }
+            }
+        }
+        quit();
+    }
+
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
