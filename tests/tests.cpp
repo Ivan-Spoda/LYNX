@@ -6314,6 +6314,75 @@ TEST (workflow_control_math)
     CHECK (! tap.tap (9000.0) && tap.count() == 1); // a long pause starts over
 }
 
+TEST (flp_fl11_mixer_slots_and_disabled_channels)
+{
+    // REA_rodada80 §3: FL <= 11 files close an effect slot without 0x62 (the slot is the 0xD4 record's second
+    // i32); the channel's 0x00 byte is its Channel Rack switch
+    if (realFlpDir.empty())
+        return;
+    auto load = [] (const std::filesystem::path& p) {
+        std::ifstream in (p, std::ios::binary);
+        std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        return bytes;
+    };
+    const auto base = std::filesystem::path (realFlpDir);
+    if (const auto b = load (base / "System" / "Render tests" / "Fruity Phase Inverter.flp"); ! b.empty())
+    {
+        const auto project = flp::parseProject (b);
+        CHECK (project.mixer.size() > 2 && project.mixer[1].slots.size() == 1);
+        if (project.mixer.size() > 2 && project.mixer[1].slots.size() == 1)
+            CHECK (project.mixer[1].slots[0].index == 0 && project.mixer[1].slots[0].plugin == "Fruity Wrapper"
+                   && ! project.mixer[1].slots[0].state.empty());
+    }
+    if (const auto b = load (base / "Demo projects" / "Performance mode" / "nucleon - Steptime.flp"); ! b.empty())
+    {
+        const auto project = flp::parseProject (b);
+        CHECK (project.mixer.size() > 4 && project.mixer[3].slots.size() == 4);
+        if (project.mixer.size() > 4 && project.mixer[3].slots.size() == 4)
+            for (int i = 0; i < 4; ++i)
+                CHECK (project.mixer[3].slots[(std::size_t) i].index == i);
+        const char* names[] = { "Fruity Delay Bank", "Fruity Reeverb 2", "Maximus", "Fruity Parametric EQ 2" };
+        if (project.mixer.size() > 4 && project.mixer[3].slots.size() == 4)
+            for (int i = 0; i < 4; ++i)
+                CHECK (project.mixer[3].slots[(std::size_t) i].plugin == names[i]);
+    }
+    if (const auto b = load (base / "Demo projects" / "Product demos" / "Synth_dfr - Overcome - Sytrus.flp"); ! b.empty())
+    {
+        const auto project = flp::parseProject (b);
+        int disabled = 0;
+        for (const auto& c : project.channels)
+            disabled += ! c.enabled;
+        CHECK (disabled == 2);
+        const auto song = lynx::importFlp (project);
+        int muted = 0;
+        for (const auto& c : song.channels)
+            muted += c.muted;
+        CHECK (muted == 2);
+    }
+}
+
+TEST (three_osc_host_hq_render_box_filters_aliasing_shapes)
+{
+    // REA_rodada80 §3.3 (3x Osc FUN_0073a000): in FL's HQ render a saw is the sum of k = max(inc >> 22, 1) phase-shifted
+    // copies at gain g/k; a sine is not oversampled
+    static bool hostHq = false;
+    auto render = [] (bool hq) {
+        hostHq = hq;
+        auto inst = lynx::makeThreeOscInstrument ([]() noexcept { return hostHq; });
+        inst->prepare (44100.0);
+        inst->noteOn (96, 0.78f);
+        std::vector<float> l (4096), r (4096);
+        inst->render (l.data(), r.data(), 4096, 1.0f, 1.0f);
+        return l;
+    };
+    const auto live = render (false), hq = render (true);
+    double diff = 0.0, energy = 0.0;
+    for (std::size_t i = 0; i < live.size(); ++i)
+        diff += std::abs (live[i] - hq[i]), energy += std::abs (live[i]);
+    CHECK (energy > 1.0);  // the default 3x Osc patch sounds
+    CHECK (diff > 1.0e-3); // and its (non-sine) oscillators render differently in the host's HQ mode
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1)

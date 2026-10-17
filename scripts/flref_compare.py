@@ -8,13 +8,16 @@ Usage:
                                                                residual (LYNX - FL) after alignment
 
 Metrics (after the alignment search, over the overlapping part):
-  lag       samples LYNX is late (+) / early (-) relative to FL (cross-correlation of the mono sums, +-2 s)
+  lag       samples LYNX is late (+) / early (-) relative to FL (cross-correlation of the mono sums, +-4096)
   peak_db   20log10(peak LYNX / peak FL)
   rms_db    20log10(rms LYNX / rms FL)
   esr_db    error-to-signal ratio 20log10(rms(L-F)/rms(F)); <= -40 dB is close, >= 0 dB is unrelated
   gesr_db   the same after the best single gain (a pure level error has a low gesr_db)
   worst_s   the 1-second window with the largest error (seconds into FL's render) and its local esr
   match40/60  % of the audible 50 ms windows whose local ESR is <= -40 / -60 dB (int16 quantization allows ~-80)
+  env_corr  correlation of the 50 ms level envelopes (dB, mono) over FL's audible windows: phase-blind timing/level
+  spec_db   mean |level difference| over third-octave bands 31 Hz…16 kHz of the long-term spectra (first 5 minutes)
+            (env_corr and spec_db stay meaningful for whole songs, where any phase drift makes esr_db ~0 dB)
   bands     level difference (dB) in low (<200 Hz), mid (200 Hz–4 kHz), high (>4 kHz) bands
 LYNX raw files are renderwav's LYNX_RAW output (float32, left block then right block); FL wavs are 16-bit PCM.
 """
@@ -63,7 +66,7 @@ def rms(x):
     return float(np.sqrt(np.mean(x * x))) if len(x) else 0.0
 
 
-def find_lag(f, l, maxlag=2 * SR, span=40 * SR):
+def find_lag(f, l, maxlag=4096, span=40 * SR):
     """Lag (LYNX later = +) maximizing the cross-correlation of the mono sums over the first `span` samples."""
     fm = f[:span].sum(axis=1)
     lm = l[:span + maxlag].sum(axis=1)
@@ -96,6 +99,32 @@ def band_levels(x):
     s = np.abs(np.fft.rfft(m)) ** 2
     fr = np.fft.rfftfreq(len(m), 1.0 / SR)
     return [float(np.sum(s[(fr >= lo) & (fr < hi)])) for lo, hi in ((20, 200), (200, 4000), (4000, 22050))]
+
+
+def third_octaves(x):
+    m = x.sum(axis=1)[:300 * SR]
+    nf = 1 << 15
+    nseg = max(1, len(m) // nf)
+    s = np.zeros(nf // 2 + 1)
+    win = np.hanning(nf)
+    for i in range(nseg):
+        seg = m[i * nf:(i + 1) * nf]
+        if len(seg) < nf:
+            seg = np.pad(seg, (0, nf - len(seg)))
+        s += np.abs(np.fft.rfft(seg * win)) ** 2
+    fr = np.fft.rfftfreq(nf, 1.0 / SR)
+    centres = 1000.0 * 2.0 ** (np.arange(-15, 13) / 3.0)  # 31 Hz … 16 kHz
+    return np.array([np.sum(s[(fr >= c * 2 ** (-1 / 6)) & (fr < c * 2 ** (1 / 6))]) for c in centres])
+
+
+def spec_distance(fa, la):
+    bf, bl = third_octaves(fa), third_octaves(la)
+    ref = bf.max()
+    use = bf > ref * 1e-6  # bands within 60 dB of FL's loudest
+    if not use.any():
+        return 0.0
+    d = 10 * np.log10(np.maximum(bl[use], 1e-30) / bf[use])
+    return float(np.mean(np.abs(np.clip(d, -60, 60))))
 
 
 def compare(flpath, lypath):
@@ -144,6 +173,12 @@ def compare(flpath, lypath):
             loc = ew2[aud] / fw2[aud]
             r['match40'] = round(100.0 * float(np.mean(loc <= 0.01)), 1)
             r['match60'] = round(100.0 * float(np.mean(loc <= 0.001)), 1)
+    if n2 > 0 and aud.any():
+        ef = 20 * np.log10(np.maximum(fw2, 1e-6))
+        el = 20 * np.log10(np.maximum(np.sqrt(np.mean((la[:n2 * w2] ** 2).reshape(n2, -1), axis=1)), 1e-6))
+        if np.std(ef[aud]) > 0 and np.std(el[aud]) > 0:
+            r['env_corr'] = round(float(np.corrcoef(ef[aud], el[aud])[0, 1]), 3)
+    r['spec_db'] = round(spec_distance(fa, la), 2)
     bf, bl = band_levels(fa), band_levels(la)
     r['bands'] = [round(10 * np.log10(max(b, 1e-20) / max(a, 1e-20)), 1) for a, b in zip(bf, bl)]
     return r
@@ -225,35 +260,50 @@ def batch(fldir, lydir, report):
 
 
 def write_report(rows, report):
-    rows = sorted(rows, key=score, reverse=True)
-    ok = [r for r in rows if not r.get('missing') and r.get('silent') != 'both']
-    def bucket(lo, hi):
-        return sum(1 for r in ok if r.get('silent') == '' and lo <= r['esr_db'] < hi)
+    """Two tables: single-plugin render tests ranked by esr_db, everything else ranked by spec_db (phase-blind)."""
+    def nm(r):
+        return r['group'].replace('Demo_projects-', '').replace('System-Render_tests', 'RT') + '/' + r['name']
+
+    done = [r for r in rows if not r.get('missing')]
+    rt = [r for r in done if r['group'] == 'System-Render_tests' and r.get('silent') != 'both']
+    songs = [r for r in done if r['group'] != 'System-Render_tests' and r.get('silent') != 'both']
+
+    def bucket(rs, lo, hi):
+        return sum(1 for r in rs if r.get('silent') == '' and lo <= r['esr_db'] < hi)
+
     lines = ['# FL reference renders vs LYNX — scoreboard', '',
-             '%d projects; %d compared (%d silent in both, %d missing/failed).' % (
-                 len(rows), len(ok), sum(1 for r in rows if r.get('silent') == 'both'),
+             '%d projects; %d compared, %d silent in both (empty templates etc.), %d missing.' % (
+                 len(rows), len(rt) + len(songs), sum(1 for r in done if r.get('silent') == 'both'),
                  sum(1 for r in rows if r.get('missing'))), '',
-             '| ESR bucket | projects |', '|---|---|',
-             '| <= -60 dB (near exact) | %d |' % bucket(-1e9, -60),
-             '| -60 … -40 dB | %d |' % bucket(-60, -40),
-             '| -40 … -20 dB | %d |' % bucket(-40, -20),
-             '| -20 … -6 dB | %d |' % bucket(-20, -6),
-             '| > -6 dB (different) | %d |' % bucket(-6, 1e9),
-             '| silent in one only | %d |' % sum(1 for r in ok if r.get('silent') in ('fl', 'lynx')), '',
-             '| # | project | lag | peak dB | RMS dB | ESR dB | gain-ESR dB | match -40/-60 % | worst s (ESR) | bands L/M/H dB | note |',
-             '|---|---|---|---|---|---|---|---|---|---|---|']
-    for i, r in enumerate(rows, 1):
-        nm = r['group'].replace('Demo_projects-', '').replace('System-Render_tests', 'RT') + '/' + r['name']
-        if r.get('missing'):
-            lines.append('| %d | %s | | | | | | | | | missing %s |' % (i, nm, r.get('error', '')))
-            continue
+             '| ESR bucket | render tests | other projects |', '|---|---|---|']
+    for label, lo, hi in (('<= -60 dB (exact to int16)', -1e9, -60), ('-60 … -40 dB', -60, -40), ('-40 … -20 dB', -40, -20),
+                          ('-20 … -6 dB', -20, -6), ('> -6 dB', -6, 1e9)):
+        lines.append('| %s | %d | %d |' % (label, bucket(rt, lo, hi), bucket(songs, lo, hi)))
+    lines.append('| silent in one only | %d | %d |' % (sum(1 for r in rt if r.get('silent')), sum(1 for r in songs if r.get('silent'))))
+    lines += ['', '## Render tests (single plugin), worst first', '',
+              '| # | project | lag | peak dB | RMS dB | ESR dB | gain-ESR dB | match -40/-60 % | worst s (ESR) | bands L/M/H dB | note |',
+              '|---|---|---|---|---|---|---|---|---|---|---|']
+    for i, r in enumerate(sorted(rt, key=score, reverse=True), 1):
         note = ('silent: ' + r['silent']) if r.get('silent') else ''
-        if r.get('nan'):
-            note += ' NaN'
         lines.append('| %d | %s | %d | %+.2f | %+.2f | %.1f | %.1f | %s/%s | %s (%s) | %s | %s |' % (
-            i, nm, r['lag'], r['peak_db'], r['rms_db'], r['esr_db'], r['gesr_db'], r.get('match40', ''),
-            r.get('match60', ''), r.get('worst_s', ''),
-            r.get('worst_esr_db', ''), '/'.join('%+.1f' % b for b in r['bands']), note))
+            i, nm(r), r['lag'], r['peak_db'], r['rms_db'], r['esr_db'], r['gesr_db'], r.get('match40', ''),
+            r.get('match60', ''), r.get('worst_s', ''), r.get('worst_esr_db', ''),
+            '/'.join('%+.1f' % b for b in r['bands']), note))
+
+    def skey(r):
+        return 1000.0 if r.get('silent') else r.get('spec_db', 0.0)
+
+    lines += ['', '## Songs, demos and templates, worst first (by third-octave spectrum distance)', '',
+              '| # | project | FL s | LYNX s | RMS dB | spec dB | env corr | ESR dB | lag | bands L/M/H dB | note |',
+              '|---|---|---|---|---|---|---|---|---|---|---|']
+    for i, r in enumerate(sorted(songs, key=skey, reverse=True), 1):
+        note = ('silent: ' + r['silent']) if r.get('silent') else ''
+        lines.append('| %d | %s | %.1f | %.1f | %+.2f | %.2f | %s | %.1f | %d | %s | %s |' % (
+            i, nm(r), r['fl_s'], r['lynx_s'], r['rms_db'], r.get('spec_db', 0.0), r.get('env_corr', ''), r['esr_db'],
+            r['lag'], '/'.join('%+.1f' % b for b in r['bands']), note))
+    for r in rows:
+        if r.get('missing'):
+            lines.append('- missing: %s %s' % (nm(r), r.get('error', '')))
     open(report, 'w').write('\n'.join(lines) + '\n')
 
 
