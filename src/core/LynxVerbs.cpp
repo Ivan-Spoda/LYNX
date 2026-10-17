@@ -1364,7 +1364,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
             switch (param)
             {
                 case 1: return fmt ("%+.1f st", haloShiftSemis (v));
-                case 5: return hz (1000.0 * v);
+                case 5: return hz (10.0 + 990.0 * v); // the reference reads 10 Hz at 0 (its editor)
                 case 6: return hz (100.0 + 14900.0 * v);
                 case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
                 case 9: return haloModes[choice (v, 3)].name;
