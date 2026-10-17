@@ -1449,7 +1449,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     }
 
     if (meters != nullptr)
+    {
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
+        meters->capture.push (0, left, right, numSamples);
+    }
 }
 
 // Track stereo separation, phase and channel swap (before the fader, like FL).
@@ -1581,7 +1584,11 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
     lastR = gr;
 
     if (silent && fromL == 0.0f && fromR == 0.0f)
+    {
+        if (meters != nullptr)
+            meters->capture.pushSilence (t, n);
         return; // stays inactive: nobody pulls anything from it
+    }
 
     runEffects (state, t, n);
 
@@ -1600,6 +1607,9 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
     trackActive[(std::size_t) t] = 1;
 
     if (meters != nullptr)
+    {
         meters->accumulate (t, peakOf (l, n), peakOf (r, n));
+        meters->capture.push (t, l, r, n);
+    }
 }
 } // namespace lynx

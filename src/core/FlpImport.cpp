@@ -684,6 +684,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.instrument = InstrumentKind::audioClip; // no file: stays silent, but the clip remains in the playlist
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
+        def.muted = ! c.enabled; // switched off in FL's Channel Rack: its notes don't play (REA_rodada80 §3.1)
 
         if (c.colour != 0)
             def.colour = 0xFF000000u | c.colour;
@@ -2460,16 +2461,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         song.selectArrangement (fullest);
 
-        // Playlist track names and mute (from the open arrangement)
+        // Playlist track names, mute and colour (from the open arrangement); FL's default grey = no colour
         if (fullest < (int) importedTracks.size())
             for (const auto& t : *importedTracks[(std::size_t) fullest])
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled))
+            {
+                const auto coloured = (t.colour & 0xFFFFFF) != 0x485156;
+
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
 
-                    song.playlistTracks[(std::size_t) t.index] = { t.name, ! t.enabled };
+                    song.playlistTracks[(std::size_t) t.index] = { t.name, ! t.enabled, 0, coloured ? 0xFF000000u | t.colour : 0u };
                 }
+            }
     }
 
     if (! song.playlist.empty())

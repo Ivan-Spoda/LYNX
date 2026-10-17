@@ -16,6 +16,7 @@
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -135,6 +136,19 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
         bar->setAutoHide (false);
         addAndMakeVisible (bar);
     }
+
+    // the overview strip is the horizontal scroller (FL's Playlist has its preview bar on top)
+    hBar.setVisible (false);
+    overview.paintContent = [this] (juce::Graphics& g, juce::Rectangle<float> area, double total) { paintOverview (g, area, total); };
+    overview.onChange = [this] (double start, double length) {
+        const auto width = (double) gridArea().getWidth();
+        pixelsPerTick = juce::jlimit (4.0 / (4 * ppq), 800.0 / (4 * ppq), width / juce::jmax (1.0, length));
+        scrollTicks = juce::jmax (0.0, start);
+        updateScrollBars();
+        repaint();
+    };
+    overview.onShowAll = [this] { zoomAll(); };
+    addAndMakeVisible (overview);
 
     grid::fillEditorBox (snapBox);
     snapBox.setTooltip (tr ("Playlist grid: follows the global grid in the toolbar, or its own; hold Alt while dragging to ignore it"));
@@ -281,7 +295,7 @@ juce::Colour PlaylistComponent::patternColour (const Song& song, int pattern)
 juce::Rectangle<int> PlaylistComponent::gridArea() const
 {
     return getLocalBounds().withTrimmedLeft (headerWidth).withTrimmedTop (headerHeight)
-        .withTrimmedRight (scrollBarSize).withTrimmedBottom (scrollBarSize);
+        .withTrimmedRight (scrollBarSize);
 }
 
 double PlaylistComponent::tickToX (double tick) const { return headerWidth + (tick - scrollTicks) * pixelsPerTick; }
@@ -435,6 +449,8 @@ void PlaylistComponent::updateScrollBars()
     vBar.setCurrentRange (scrollY, grid.getHeight(), juce::dontSendNotification);
     scrollTicks = hBar.getCurrentRangeStart();
     scrollY = (int) vBar.getCurrentRangeStart();
+    overview.minLength = grid.getWidth() / (800.0 / (4 * ppq));
+    overview.setRange (total, scrollTicks, grid.getWidth() / pixelsPerTick);
 }
 
 void PlaylistComponent::setTitleBarInsets (int left, int right)
@@ -453,9 +469,33 @@ void PlaylistComponent::resized()
     arrangementBox.setBounds (4 + titleInsetLeft, 3, juce::jmin (150, getWidth() / 5), h);
     tools.setBounds (arrangementBox.getRight() + 8, 3, tools.getIdealWidth (h), h);
     snapBox.setBounds (tools.getRight() + 8, 3, 128, h);
-    hBar.setBounds (headerWidth, getHeight() - scrollBarSize, getWidth() - headerWidth - scrollBarSize, scrollBarSize);
-    vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight - scrollBarSize);
+    overview.setBounds (headerWidth, toolbarHeight, getWidth() - headerWidth - scrollBarSize, overviewHeight);
+    vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight);
     updateScrollBars();
+
+    if (fitSongPending)
+        showSongAfterOpen();
+}
+
+void PlaylistComponent::showSongAfterOpen()
+{
+    const auto width = gridArea().getWidth();
+    fitSongPending = width < 100;
+
+    if (fitSongPending)
+        return;
+
+    scrollY = 0;
+    scrollTicks = 0.0;
+    const auto length = (double) engine.getSong().songLength();
+
+    if (length > width / pixelsPerTick)
+        zoomAll(); // (also updates the scroll bars)
+    else
+    {
+        updateScrollBars();
+        repaint();
+    }
 }
 
 void PlaylistComponent::paint (juce::Graphics& g)
@@ -467,6 +507,19 @@ void PlaylistComponent::paint (juce::Graphics& g)
     const auto grid = gridArea();
     const auto bar = (std::int64_t) ppq * song.beatsPerBar;
     const auto tracks = numTracks();
+
+    // the overview follows the clips (edits, undo, arrangement switches) and the view
+    {
+        auto signature = song.playlist.size() * 1000003u + (std::size_t) song.currentArrangement;
+        for (const auto& c : song.playlist)
+            signature = signature * 31u + (std::size_t) (c.start * 131 + c.length * 7 + c.track * 257 + c.pattern + (c.muted ? 1 : 0));
+        if (signature != overviewSignature)
+        {
+            overviewSignature = signature;
+            overview.repaint();
+        }
+        updateScrollBars();
+    }
 
     using namespace theme;
     g.fillAll (colour::bg1);
@@ -680,7 +733,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
     // --- ruler (drawn in its own coordinates, below the toolbar) -----------------
     {
         juce::Graphics::ScopedSaveState state (g);
-        g.setOrigin (0, toolbarHeight);
+        g.setOrigin (0, rulerTop);
         const auto ruler = juce::Rectangle<int> (headerWidth, 0, grid.getWidth(), timelineHeight);
         g.setColour (colour::bg2);
         g.fillRect (ruler);
@@ -769,6 +822,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
             const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
             const auto hovered = hover.header && hover.track == t;
             auto plate = muted ? colour::bg2 : colour::bg3;
+            const auto trackColour = t < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) t].colour : 0u;
+            if (trackColour != 0) // the track's colour (FL projects colour their track headers by group)
+                plate = plate.interpolatedWith (tame (juce::Colour (trackColour)), muted ? 0.22f : 0.5f);
             if (hovered)
                 plate = plate.interpolatedWith (colour::bg5, 0.6f);
             g.setColour (plate);
@@ -798,11 +854,49 @@ void PlaylistComponent::paint (juce::Graphics& g)
     g.setColour (colour::bg3);
     g.fillRect (0, 0, getWidth(), toolbarHeight);
     g.setColour (colour::bg2);
-    g.fillRect (0, toolbarHeight, headerWidth, timelineHeight);
+    g.fillRect (0, toolbarHeight, headerWidth, headerHeight - toolbarHeight);
     g.setColour (colour::border);
     g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
     g.fillRect (0, headerHeight - 1, headerWidth, 1);
     g.fillRect (headerWidth - 1, toolbarHeight, 1, getHeight() - toolbarHeight);
+}
+
+void PlaylistComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float> area, double total)
+{
+    // every clip of the arrangement in miniature (its colour, its track's row), bar lines, the song's end
+    using namespace theme;
+    const auto& song = engine.getSong();
+    const auto scale = area.getWidth() / juce::jmax (1.0, total);
+    const auto bar = (double) ppq * juce::jmax (1, song.beatsPerBar);
+
+    g.setColour (colour::bg2);
+    g.fillRect (area.withWidth (juce::jmin (area.getWidth(), (float) (song.songLength() * scale))));
+
+    const auto every = bar * scale < 3.0 ? 16 : bar * scale < 6.0 ? 4 : 1;
+    g.setColour (colour::gridBar.withAlpha (0.5f));
+    for (int b = every; b * bar < total; b += every)
+        g.fillRect ((float) (area.getX() + b * bar * scale), area.getY(), 1.0f, area.getHeight());
+
+    int rows = 1;
+    for (const auto& c : song.playlist)
+        rows = juce::jmax (rows, c.track + 1);
+
+    const auto inner = area.reduced (0.0f, 1.0f);
+    const auto rowHeight = inner.getHeight() / (float) rows;
+
+    for (const auto& c : song.playlist)
+    {
+        auto base = colour::automation;
+        if (c.kind == ClipKind::pattern && c.pattern >= 0 && c.pattern < (int) song.patterns.size())
+            base = tame (patternColour (song, c.pattern));
+        else if (c.kind == ClipKind::audio && c.channel >= 0 && c.channel < (int) song.channels.size())
+            base = tame (audioClipColour (song.channels[(std::size_t) c.channel]));
+
+        const auto y = inner.getY() + rowHeight * (float) c.track;
+        g.setColour (c.muted ? base.withAlpha (0.35f) : base);
+        g.fillRect ((float) (area.getX() + c.start * scale), y, juce::jmax (1.0f, (float) (c.length * scale) - 0.5f),
+                    juce::jmax (1.0f, rowHeight - (rowHeight >= 3.0f ? 0.5f : 0.0f)));
+    }
 }
 
 void PlaylistComponent::paintOverChildren (juce::Graphics& g)
@@ -1211,7 +1305,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     }
 
     // ruler: click = position; Ctrl+drag = time selection (Ctrl+click or double click clears it)
-    if (e.y >= toolbarHeight && e.y < headerHeight && e.x >= headerWidth)
+    if (e.y >= rulerTop && e.y < headerHeight && e.x >= headerWidth)
     {
         if (e.mods.isPopupMenu())
         {
@@ -2126,7 +2220,7 @@ void PlaylistComponent::showTrackMenu (int track)
     menu.addSectionHeader (track < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) track].name.empty()
                                ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) track].name.c_str())
                                : tr ("Track {0}", { juce::String (track + 1) }));
-    menu.addItem (tr ("Rename..."), [this, track] { renameTrack (track); });
+    menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
     menu.addItem (muted ? tr ("Unmute") : tr ("Mute"), [this, track] {
         engine.editSong ([track] (Song& s) {
             if ((int) s.playlistTracks.size() <= track)
@@ -2185,22 +2279,17 @@ void PlaylistComponent::renameTrack (int track)
 {
     const auto& tracks = engine.getSong().playlistTracks;
     const auto current = track < (int) tracks.size() ? juce::String::fromUTF8 (tracks[(std::size_t) track].name.c_str()) : juce::String();
-    auto* window = new juce::AlertWindow (tr ("Rename track"), {}, juce::MessageBoxIconType::NoIcon);
-    window->addTextEditor ("name", current.isNotEmpty() ? current : tr ("Track {0}", { juce::String (track + 1) }));
-    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, track, window] (int result) {
-                                 if (result != 1)
-                                     return;
-
-                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
-                                 engine.editSong ([track, name] (Song& s) {
+    const auto colour = track < (int) tracks.size() ? tracks[(std::size_t) track].colour : 0u;
+    showNameAndColourDialog (tr ("Rename track"), current.isNotEmpty() ? current : tr ("Track {0}", { juce::String (track + 1) }), colour,
+                             [this, track] (const juce::String& newName, std::uint32_t newColour) {
+                                 const auto name = newName.trim().toStdString();
+                                 engine.editSong ([track, name, newColour] (Song& s) {
                                      if ((int) s.playlistTracks.size() <= track)
                                          s.playlistTracks.resize ((std::size_t) track + 1);
                                      s.playlistTracks[(std::size_t) track].name = name;
+                                     s.playlistTracks[(std::size_t) track].colour = newColour;
                                  });
-                             }),
-                             true);
+                             });
 }
 
 void PlaylistComponent::showRulerMenu (int x)
@@ -2477,6 +2566,7 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
             if (onOpenInSampler)
                 onOpenInSampler (ch);
         });
+        menu.addItem (tr ("Edit in the audio editor..."), sample != nullptr, false, [this, ch = clip.channel] { openAudioEditorForChannel (engine, ch); });
         menu.addItem (tr ("Show the file in Explorer"), juce::File (path).existsAsFile(), false, [path] { juce::File (path).revealToUser(); });
     }
 
@@ -3058,7 +3148,7 @@ void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
         const auto tool = tools.getTool();
         cursor = gesture::cursorFor (gesture::leftAction (tool, hover.target, m, true), tool);
     }
-    else if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= headerWidth)
+    else if (p.y >= rulerTop && p.y < headerHeight && p.x >= headerWidth)
         cursor = mods.isCtrlDown() ? gesture::Cursor::select : gesture::Cursor::point;
 
     setMouseCursor (editorCursor (cursor));
@@ -3092,7 +3182,7 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
         return hint;
     }
 
-    if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= headerWidth)
+    if (p.y >= rulerTop && p.y < headerHeight && p.x >= headerWidth)
     {
         hint.text = tr ("Ruler: [LMB] song position  [Ctrl][LMB] drag: time selection (loop)  [Shift][LMB] drag in it: move  [2xLMB] clear  [RMB] markers");
         hint.hasMenu = true;

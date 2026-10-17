@@ -29,6 +29,7 @@
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
 #include "ui/EditorTools.h"
+#include "ui/AudioEditor.h"
 #include "ui/ExportDialog.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
@@ -1079,7 +1080,9 @@ void MainComponent::fitChannelRack (bool width)
 {
     rack.updateSize();
     const auto scrollbar = rackViewport.getScrollBarThickness();
-    const auto maxWidth = juce::jmax (300, workspace.getWidth() - 2 * 16 - 260);
+    // compact like FL's rack: at most two bars of steps are shown, longer patterns scroll sideways, so the
+    // rack does not cover the Playlist after a project with long patterns is opened
+    const auto maxWidth = juce::jmin (juce::jmax (300, workspace.getWidth() - 2 * 16 - 260), rack.widthForSteps (32));
     const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
     const auto needsHorizontal = rack.getWidth() > contentWidth;
     workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
@@ -1404,6 +1407,13 @@ void MainComponent::toggleRecording()
     showRecordChoiceDialog ([safe] (int choice, bool dontAsk) {
         if (safe == nullptr)
             return;
+        if (choice == recordChoiceAudioEditor)
+        {
+            openAudioEditorRecording (safe->engine);
+            if (! safe->engine.getTransport().playing.load())
+                safe->engine.play();
+            return;
+        }
         auto o = safe->engine.getRecordOptions();
         o.recordNotes = choice != recordChoiceAudio;
         o.recordAudio = choice != recordChoiceNotes;
@@ -1456,6 +1466,7 @@ void MainComponent::showRecordMenu()
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordAudio = ! r.recordAudio; }); });
     menu.addItem (tr ("Ask what to record when recording starts"), true, o.askWhatToRecord,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.askWhatToRecord = ! r.askWhatToRecord; }); });
+    menu.addItem (tr ("Record into the audio editor..."), [this] { openAudioEditor (engine); });
     menu.addSeparator();
     menu.addItem (tr ("Arm the selected mixer insert for audio (choose its input)..."), [this] { armSelectedInsertForAudio(); });
     menu.addItem (tr ("Audio settings (input device)..."), [this] { openSettings ((int) SettingsPage::audio); });
@@ -2312,6 +2323,7 @@ void MainComponent::importFlp (const juce::File& file)
         rememberRecent (file);
         importedSuffix = " " + tr ("(imported from FL Studio)");
         updateTitle();
+        playlist.showSongAfterOpen();
 
         showMissingFiles (true);
     }
@@ -2337,6 +2349,7 @@ void MainComponent::openLynxProject (const juce::File& file)
     importedSuffix = {};
     rememberRecent (file);
     updateTitle();
+    playlist.showSongAfterOpen();
 
     if (persistent)
     {
@@ -2618,6 +2631,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { engine.undo(); });
         menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { engine.redo(); });
         menu.addItem (tr ("Undo history...") + shortcutText ("edit.history"), [this] { showHistory(); });
+        menu.addItem (tr ("Audio editor..."), [this] { openAudioEditor (engine); });
         menu.addSeparator();
         menu.addItem (tr ("Quick-add palette...") + shortcutText ("panel.quickAdd"), [this] { showQuickAdd(); });
         menu.addItem (tr ("Search the Browser") + shortcutText ("browser.search"), [this] {

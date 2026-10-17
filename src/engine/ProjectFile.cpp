@@ -788,6 +788,15 @@ juce::String toJson (const Song& song)
 
         if (! heights.isEmpty())
             root->setProperty ("playlistTrackHeights", heights);
+
+        juce::Array<juce::var> colours; // [index, 0xRRGGBB]
+
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (song.playlistTracks[i].colour != 0)
+                colours.add (juce::Array<juce::var> { (int) i, (int) (song.playlistTracks[i].colour & 0xFFFFFF) });
+
+        if (! colours.isEmpty())
+            root->setProperty ("playlistTrackColours", colours);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -1239,6 +1248,18 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                     song.playlistTracks.resize (index + 1);
 
                 song.playlistTracks[index].height = juce::jlimit (0, 400, (int) t[1]);
+            }
+
+    if (auto* colours = root["playlistTrackColours"].getArray())
+        for (const auto& t : *colours)
+            if (t.isArray() && t.size() == 2 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                song.playlistTracks[index].colour = 0xFF000000u | ((std::uint32_t) (int) t[1] & 0xFFFFFFu);
             }
 
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())

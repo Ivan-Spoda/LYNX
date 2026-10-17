@@ -216,6 +216,27 @@ int patternSteps (const Song& song, const Pattern& pattern) noexcept
     return std::clamp ((int) (pattern.effectiveLength (song.beatsPerBar) / ticksPerStep), 16, 512);
 }
 
+bool showsNotePreview (const Pattern& pattern, int channel) noexcept
+{
+    return std::any_of (pattern.notes.begin(), pattern.notes.end(), [channel] (const Note& n) {
+        return n.channel == channel && (n.start % ticksPerStep != 0 || n.length > ticksPerStep || n.key != 60 || n.slide || n.porta);
+    });
+}
+
+std::pair<int, int> channelKeyRange (const Pattern& pattern, int channel) noexcept
+{
+    auto low = 128, high = -1;
+
+    for (const auto& n : pattern.notes)
+        if (n.channel == channel)
+        {
+            low = std::min (low, n.key);
+            high = std::max (high, n.key);
+        }
+
+    return high < 0 ? std::pair { 60, 60 } : std::pair { low, high };
+}
+
 std::vector<bool> euclideanRhythm (int pulses, int steps, int rotation)
 {
     if (steps <= 0)

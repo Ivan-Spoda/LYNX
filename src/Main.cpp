@@ -1,9 +1,15 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/Effects.h"
+#include "core/FlEffects.h"
+#include "core/FlpImport.h"
+#include "core/MaximusFx.h"
+#include "core/Harmor.h"
+#include "flp/Flp.h"
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
+#include "engine/DllAsioDevice.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
 #include "engine/PluginHost.h"
@@ -32,8 +38,11 @@
 #include "ui/ShortcutManager.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/EventEditor.h"
+#include "ui/AudioEditor.h"
 #include "core/EventEdit.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/PluginEditors.h"
+#include "core/PluginLayout.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
@@ -98,13 +107,16 @@ public:
 
         if (args.contains ("--rtstress"))
         {
-            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--no-window]: the real app (window, audio device)
-            // plays the project and reports the callbacks that missed their deadline (REA round 87)
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--type "driver type"] [--device "output"]
+            // [--no-window]: the real app (window, audio device) plays the project and reports the callbacks that missed their
+            // deadline (REA round 87); --type/--device pick another driver for this run only (round 97)
             const auto i = args.indexOf ("--rtstress");
             const auto seconds = args[i + 3].getDoubleValue();
             const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
-            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer);
+            const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
+            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer,
+                               option ("--type"), option ("--device"));
             return;
         }
 
@@ -301,7 +313,9 @@ public:
                         step ("  in" + juce::String (c + 1) + "=" + names[c]);
                     inputs.setRange (0, juce::jmin (64, names.size()), true);
                 }
-                const auto error = device->open (inputs, outputs, rate, device->getDefaultBufferSize());
+                // --buffer N: ask for that block size (REA round 97 latency survey); default: the driver's default
+                const auto wantedBlock = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
+                const auto error = device->open (inputs, outputs, rate, wantedBlock > 0 ? wantedBlock : device->getDefaultBufferSize());
                 if (error.isNotEmpty())
                     step ("error=" + error);
                 else
@@ -371,6 +385,15 @@ public:
         {
             const auto i = args.indexOf ("--plugintest");
             runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
+        if (args.contains ("--plugui"))
+        {
+            // LYNX.exe --plugui <folder>: the native effect editors at FL's size (one PNG per editor and page), each
+            // loaded with the FL plugin's Default preset when the FL installation has one
+            const auto i = args.indexOf ("--plugui");
+            runPluginEditorSnapshots (args[i + 1].unquoted());
             return;
         }
 
@@ -497,6 +520,7 @@ public:
     {
         engine = std::make_unique<lynx::AudioEngine>();
         crashEngine = engine.get();
+        addDriverFileDeviceType();
 
         if (startupOptions.sound)
             engine->previewSample (lynx::makeStartupSample());
@@ -561,6 +585,8 @@ private:
         original.playlist.push_back (automationClip);
         original.loopStart = 960;
         original.loopEnd = 7680;
+        original.playlistTracks.resize (3);
+        original.playlistTracks[2].colour = 0xFF2A6FDB; // a track colour (round 90)
         juce::String error;
 
         if (demoProjectPath.isNotEmpty()) // sample project for checking the UI with --snapshot
@@ -577,6 +603,8 @@ private:
                                && reloaded->automations[0].points.size() == 2 && reloaded->automations[0].points[0].tension == 0.5f
                                && reloaded->automations[0].points[1].tick == 3840
                                && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
+                               && reloaded->playlistTracks.size() == 3 && reloaded->playlistTracks[2].colour == 0xFF2A6FDB
+                               && reloaded->playlistTracks[1].colour == 0
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
@@ -1266,16 +1294,29 @@ private:
 
     // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
     // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
-    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize)
+    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize,
+                            const juce::String& deviceType, const juce::String& deviceName)
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
         crashEngine = engine.get();
-        if (bufferSize > 0)
+        // the user's saved device stays as it was: this run's choices are undone before quitting
+        savedDeviceState = engine->getDeviceManager().createStateXml();
+        auto& devices = engine->getDeviceManager();
+        const auto driverFile = addDriverFileDeviceType();
+        const auto type = deviceType.isEmpty() && driverFile ? juce::String (lynx::dllAsioTypeName) : deviceType;
+        if (type.isNotEmpty() && devices.getCurrentAudioDeviceType() != type)
+            devices.setCurrentAudioDeviceType (type, true);
+        if (bufferSize > 0 || deviceName.isNotEmpty())
         {
-            auto setup = engine->getDeviceManager().getAudioDeviceSetup();
-            setup.bufferSize = bufferSize;
-            engine->getDeviceManager().setAudioDeviceSetup (setup, true);
+            auto setup = devices.getAudioDeviceSetup();
+            if (bufferSize > 0)
+                setup.bufferSize = bufferSize;
+            if (deviceName.isNotEmpty())
+                setup.outputDeviceName = deviceName;
+            const auto error = devices.setAudioDeviceSetup (setup, true);
+            if (error.isNotEmpty())
+                report.replaceWithText ("device error: " + error + "\n");
         }
         createMainWindow();
         if (! juce::JUCEApplication::getCommandLineParameters().contains ("--no-window")) // --no-window: is it the UI?
@@ -1296,6 +1337,7 @@ private:
         if (! ok)
         {
             report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            restoreSavedDeviceState();
             setApplicationReturnValue (1);
             quit();
             return;
@@ -1332,6 +1374,7 @@ private:
                 text << "\n";
                 text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
                 report.replaceWithText (text);
+                restoreSavedDeviceState();
                 setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
                 quit();
             });
@@ -1480,6 +1523,187 @@ private:
 
     // LYNX.exe --snapshot prefix [project]: draws the window off-screen and writes
     // prefix-rack.png, -pianoroll.png and -playlist.png (to check the UI without touching the screen).
+    void runPluginEditorSnapshots (const juce::String& folder)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        {
+            const juce::File out (folder);
+            out.createDirectory();
+            lynx::AudioEngine offline (false);
+            const auto roots = lynx::findFlStudioRoots();
+            const auto presets = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Effects");
+
+            auto kinds = lynx::plugui::flLayoutKinds();
+            kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
+            const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
+
+            for (const auto kind : kinds)
+            {
+                auto fx = lynx::makeEffectSlot (kind);
+                juce::String name (lynx::effectInfo (kind).name);
+                for (const auto& plugin : lynx::flPluginsForEffect (kind))
+                {
+                    const auto dir = presets.getChildFile (juce::String::fromUTF8 (plugin.c_str()));
+                    auto file = dir.getChildFile ("Default.fst");
+                    if (! file.existsAsFile()) // plugins without presets: their entry of FL's plugin database
+                        for (const auto& f : database.findChildFiles (juce::File::findFiles, true, juce::String::fromUTF8 (plugin.c_str()) + ".fst"))
+                            file = f;
+                    if (! file.existsAsFile())
+                    {
+                        auto files = dir.findChildFiles (juce::File::findFiles, true, "*.fst");
+                        std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getFullPathName().compareNatural (b.getFullPathName()) < 0; });
+                        file = files.isEmpty() ? juce::File() : files[0];
+                    }
+                    juce::MemoryBlock data;
+                    if (file.existsAsFile() && file.loadFileAsData (data))
+                    {
+                        const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                        if (auto loaded = lynx::effectFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), 130.0); loaded && loaded->kind == kind)
+                            fx = *loaded;
+                    }
+                    name = juce::String::fromUTF8 (plugin.c_str());
+                    break;
+                }
+
+                if (kind == lynx::EffectKind::maximus) // Soundgoodizer: preset A of the installation, Amount 60 %
+                {
+                    juce::MemoryBlock data;
+                    juce::File (juce::String::fromUTF8 (roots.factoryData.c_str())).getChildFile ("Plugins/Fruity/Effects/Soundgoodizer/Data/Presets/a.dat").loadFileAsData (data);
+                    lynx::maximusfx::Blob blob;
+                    blob.build = lynx::hlfx::MaximusBuild::soundgoodizer;
+                    blob.mix = 600;
+                    const auto* b = static_cast<const std::uint8_t*> (data.getData());
+                    blob.state.assign (b, b + data.getSize());
+                    fx = lynx::makeEffectSlot (kind);
+                    fx.state = lynx::maximusfx::pack (blob);
+                    name = "Soundgoodizer";
+                }
+
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+
+                const auto pages = name == "Soundgoodizer" ? 1 : juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
+                for (int page = 0; page < pages; ++page)
+                {
+                    auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, page);
+                    juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        editor->paintEntireComponent (g, false);
+                    }
+                    const auto file = out.getChildFile (name + (page > 0 ? "-p" + juce::String (page + 1) : juce::String()) + ".png");
+                    file.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = file.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                }
+            }
+
+            // generators in FL's arrangement: the channel's plugin page with the FL preset's settings
+            const auto generators = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Generators");
+            for (auto [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" }, { "BooBass", "" }, { "Sytrus", "Default.fst" }, { "Harmor", "Default.fst" } })
+            {
+                juce::MemoryBlock data;
+                if (juce::String (folder) == "Harmor") // the first preset whose state the engine reads
+                {
+                    auto files = generators.getChildFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst");
+                    files.sort();
+                    for (const auto& f : files)
+                    {
+                        juce::MemoryBlock block;
+                        if (! f.loadFileAsData (block))
+                            continue;
+                        const auto* b = static_cast<const std::uint8_t*> (block.getData());
+                        try
+                        {
+                            const auto p = flp::parseProject (std::vector<std::uint8_t> (b, b + block.getSize()), true);
+                            if (! p.channels.empty() && lynx::harmorStateUsable (p.channels.front().pluginState))
+                            {
+                                preset = nullptr;
+                                data = block;
+                                break;
+                            }
+                        }
+                        catch (const std::exception&)
+                        {
+                        }
+                    }
+                }
+                auto file = preset == nullptr ? juce::File() : juce::String (preset).isEmpty() ? database.getSiblingFile ("Generators").getChildFile ("Misc").getChildFile (juce::String (folder) + ".fst")
+                                                            : generators.getChildFile (folder).getChildFile (preset);
+                if (! file.existsAsFile())
+                {
+                    auto files = generators.getChildFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst");
+                    files.sort();
+                    file = files.isEmpty() ? juce::File() : files[0];
+                }
+                if (data.isEmpty() && ! file.loadFileAsData (data))
+                    continue;
+                try
+                {
+                    const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                    auto project = flp::parseProject (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), true);
+                    if (project.channels.empty())
+                        continue;
+                    project.channels.front().type = flp::ChannelType::native;
+                    lynx::FlpImportOptions options;
+                    options.roots = roots;
+                    options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+                    options.readFile = [] (const std::string& path) {
+                        juce::MemoryBlock block;
+                        juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (block);
+                        const auto* b = static_cast<const std::uint8_t*> (block.getData());
+                        return std::vector<std::uint8_t> (b, b + block.getSize());
+                    };
+                    options.saveEmbedded = [out] (const std::vector<std::uint8_t>& wav, const std::string& name) {
+                        const auto f = out.getChildFile ("samples").getNonexistentChildFile (juce::String::fromUTF8 (name.c_str()), ".wav");
+                        f.getParentDirectory().createDirectory();
+                        f.replaceWithData (wav.data(), wav.size());
+                        return f.getFullPathName().toStdString();
+                    };
+                    auto song = lynx::importFlp (project, options);
+                    // the page only needs the plugin's saved state (FL Keys' sample zones need the installed wavetables)
+                    if (! song.channels.empty() && project.channels.front().pluginName == "BooBass" && song.channels.front().instrument != lynx::InstrumentKind::boobass)
+                    {
+                        song.channels.front().instrument = lynx::InstrumentKind::boobass; // (its sound needs the engine DLL; the page does not)
+                        song.channels.front().modelParams.assign (3, 32768.0f);
+                    }
+                    if (! song.channels.empty() && project.channels.front().pluginName == "FL Keys")
+                    {
+                        song.channels.front().instrument = lynx::InstrumentKind::flkeys;
+                        song.channels.front().pluginState = project.channels.front().pluginState;
+                    }
+                    offline.setSong (std::move (song));
+                    offline.dispatchPendingMessages();
+                    if (offline.getSong().channels.empty())
+                        continue;
+                    auto panel = lynx::makeChannelSettingsPanel (offline, 0);
+                    juce::Image image (juce::Image::ARGB, panel->getWidth(), panel->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        panel->paintEntireComponent (g, false);
+                    }
+                    const auto out2 = out.getChildFile (juce::String (folder) + ".png");
+                    out2.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = out2.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                }
+                catch (const std::exception&)
+                {
+                }
+            }
+        }
+        quit();
+    }
+
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -1514,6 +1738,14 @@ private:
                     offline.dispatchPendingMessages();
                     saveSnapshot (ui, prefix + "-desktop-" + juce::String (w) + ".png");
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + juce::String (w) + ".png");
+
+                    if (w == 1920) // the rack scrolled to its last steps: the controls column stays in view (round 90)
+                    {
+                        ui.scrollRackForSnapshot (100000);
+                        offline.dispatchPendingMessages();
+                        saveSnapshot (ui, prefix + "-desktop-rack-scrolled.png");
+                        ui.scrollRackForSnapshot (0);
+                    }
                 }
                 // the toolbar with small and large icons, and a customized one (groups hidden and reordered)
                 ui.setSize (1600, 900);
@@ -1563,6 +1795,26 @@ private:
 
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
+            {
+                // a pattern with piano-roll notes: those rows show a miniature instead of steps (round 90)
+                int found = -1;
+                const auto before = offline.getSong().currentPattern;
+                {
+                    const auto& song = offline.getSong();
+                    for (int p = 0; p < (int) song.patterns.size() && found < 0; ++p)
+                        for (int c = 0; c < (int) song.channels.size() && found < 0; ++c)
+                            if (lynx::showsNotePreview (song.patterns[(std::size_t) p], c))
+                                found = p;
+                }
+                if (found >= 0)
+                {
+                    offline.editSong ([found] (lynx::Song& s) { s.currentPattern = found; }, false);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-rack-preview.png");
+                    offline.editSong ([before] (lynx::Song& s) { s.currentPattern = before; }, false);
+                    offline.dispatchPendingMessages();
+                }
+            }
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
             if (const auto strip = ui.getToolStripAreaForSnapshot (false); ! strip.isEmpty())
@@ -1792,6 +2044,42 @@ private:
                 }, false);
                 saveWindow (lynx::makeEventEditor (offline, volume), "-eventeditor.png");
                 offline.editSong ([&] (lynx::Song& s) { s.patterns[(std::size_t) s.currentPattern].events = before; }, false);
+            }
+
+            // round 86: the audio editor with a synthetic drum loop (markers, a region, a loop), waveform and spectrogram,
+            // and its menu items (-audioeditor-menu.txt)
+            {
+                namespace ae = lynx::audioedit;
+                ae::Document d;
+                d.title = "Drum loop";
+                d.audio.sampleRate = 44100.0;
+                const auto frames = (std::size_t) (44100 * 2);
+                d.audio.channels.assign (2, std::vector<float> (frames, 0.0f));
+                std::uint32_t seed = 7;
+                for (int hit = 0; hit < 8; ++hit)
+                {
+                    const auto at = (std::size_t) hit * frames / 8;
+                    const auto kick = hit % 2 == 0;
+                    double phase = 0.0;
+                    for (std::size_t i = 0; i < 12000 && at + i < frames; ++i)
+                    {
+                        seed = seed * 1664525u + 1013904223u;
+                        const auto noise = (float) (seed >> 8) / 16777216.0f - 0.5f;
+                        const auto t = (double) i / 44100.0;
+                        phase += 2.0 * 3.141592653589793 * (kick ? 45.0 + 160.0 * std::exp (-t * 30.0) : 190.0) / 44100.0;
+                        const auto body = (float) std::sin (phase) * (float) std::exp (-t * (kick ? 9.0 : 22.0));
+                        const auto v = kick ? 0.85f * body : 0.35f * body + 0.6f * noise * (float) std::exp (-t * 18.0);
+                        d.audio.channels[0][at + i] += v;
+                        d.audio.channels[1][at + i] += kick ? v : v * 0.8f + 0.1f * noise * (float) std::exp (-t * 30.0);
+                    }
+                }
+                ae::addMarker (d, (std::int64_t) frames / 8, "Snare");
+                ae::addRegion (d, { (std::int64_t) frames / 2, (std::int64_t) frames * 3 / 4 }, "Fill");
+                ae::setLoop (d, { 0, (std::int64_t) frames });
+                auto wave = lynx::makeAudioEditorForSnapshot (offline, d, false);
+                juce::File (prefix + "-audioeditor-menu.txt").replaceWithText (lynx::audioEditorMenuForSnapshot (*wave).joinIntoString ("\n") + "\n");
+                saveWindow (std::move (wave), "-audioeditor.png");
+                saveWindow (lynx::makeAudioEditorForSnapshot (offline, d, true), "-audioeditor-spectrum.png");
             }
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
@@ -2452,6 +2740,32 @@ private:
 
     lynx::theme::LookAndFeel lookAndFeel;
     std::unique_ptr<lynx::AudioEngine> engine;
+    std::unique_ptr<juce::XmlElement> savedDeviceState; // --rtstress: the user's device before this run's --type/--buffer
+
+    // Hidden test mode --asiodll "<driver.dll>[|{CLSID}]" (REA round 97): an ASIO driver loaded straight from its file,
+    // without registering it, listed as the driver type "ASIO driver file". True when one was added.
+    bool addDriverFileDeviceType()
+    {
+        const auto args = juce::JUCEApplication::getCommandLineParameterArray();
+        const auto i = args.indexOf ("--asiodll");
+        if (i < 0 || i + 1 >= args.size() || engine == nullptr)
+            return false;
+        auto& devices = engine->getDeviceManager();
+        devices.getAvailableDeviceTypes(); // creates the standard types first
+        for (auto* t : devices.getAvailableDeviceTypes())
+            if (t->getTypeName() == lynx::dllAsioTypeName)
+                return true;
+        auto type = lynx::makeDllAsioDeviceType (args[i + 1].unquoted());
+        if (type == nullptr)
+            return false;
+        devices.addAudioDeviceType (std::move (type));
+        return true;
+    }
+    void restoreSavedDeviceState()
+    {
+        if (engine != nullptr)
+            engine->restoreAudioDeviceState (savedDeviceState.get());
+    }
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<lynx::SplashScreen> splash;
     lynx::StartupOptions startupOptions;

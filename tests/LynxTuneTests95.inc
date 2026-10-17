@@ -540,3 +540,24 @@ TEST (newtone_engine_edits_round95)
     CHECK (std::abs (r95::cents (r95::measureHz (l, len + 6000, 4096, fs), 246.94 * std::exp2 (2.0 / 12.0))) < 3.0);
     CHECK (std::equal (src.left.begin(), src.left.begin() + len, l.begin()));
 }
+
+TEST (lynx_tune_editor_layout_round95)
+{
+    // LYNX Tune's own page in the plugin-window layout system: every parameter has a control inside the body
+    const auto& l = lynx::plugui::layoutFor (lynx::EffectKind::lynxTune);
+    std::vector<bool> placed ((std::size_t) lynx::lynxtune::count, false);
+    bool inside = true;
+    for (const auto& item : l.items)
+    {
+        inside = inside && item.x >= 0 && item.y >= 0 && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f;
+        if (lynx::plugui::isValueControl (item.type))
+        {
+            const auto p = lynx::plugui::paramIndex (lynx::EffectKind::lynxTune, item.param);
+            CHECK (p >= 0);
+            if (p >= 0)
+                placed[(std::size_t) p] = true;
+        }
+    }
+    CHECK (inside);
+    CHECK (std::all_of (placed.begin(), placed.end(), [] (bool b) { return b; }));
+}

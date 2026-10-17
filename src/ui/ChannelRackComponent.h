@@ -97,6 +97,9 @@ public:
 
     void updateSize();
 
+    // Width that shows the controls and at most `maxSteps` steps (the panel scrolls for longer patterns).
+    int widthForSteps (int maxSteps) const { return gridLeft() + juce::jmin (numSteps(), maxSteps) * stepWidth + 8; }
+
     // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
     void showAddChannelMenu (int insertAt = -1);
 
@@ -115,6 +118,8 @@ private:
     void timerCallback() override;
 
     Area areaAt (int x, int y, int& row) const;
+    void moved() override;
+    int stickyX = 0; // how far the viewport scrolled the rack sideways (the controls column stays in view)
     int numSteps() const;
     int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }
@@ -126,6 +131,7 @@ private:
     juce::Rectangle<int> laneBounds() const;
     juce::Rectangle<int> levelButtonBounds (int level) const;
     void paintLane (juce::Graphics& g);
+    void paintNotePreview (juce::Graphics& g, int row, const Pattern& pattern, std::uint32_t channelColour);
     void setLaneValue (int step, float value);
     void applyLane (const juce::MouseEvent& e);
     float laneValueAt (int y) const;
