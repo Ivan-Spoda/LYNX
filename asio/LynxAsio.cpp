@@ -991,7 +991,7 @@ private:
     GapNote gapNotes[8] {};
     double lastDrainMs = 0.0, maxCaptureGapMs = 0.0;
     long long nextCapturePosition = -1, lostFrames = 0;
-    bool inputSettled = false;
+    int settledSteps = 0;
     int packetsThisDrain = 0;
 
     // Opens an exclusive event-driven stream of `period` frames (re-initialised with the aligned size when the
@@ -1237,9 +1237,11 @@ private:
         const int b = blockSize;
         if (captureService != nullptr)
         {
-            if (! inputSettled && now() - startMs > 300.0)
+            // devices deliver irregularly while they start: the level is set to the target at 0.3 s and once more
+            // at 1.5 s (before anyone records), then only the drift control moves it
+            if (settledSteps < 2 && now() - startMs > (settledSteps == 0 ? 300.0 : 1500.0))
             {
-                inputSettled = true;
+                ++settledSteps;
                 inFifo.recenter (now() / 1000.0);
             }
             const int raises = inFifo.raises();
@@ -1332,7 +1334,7 @@ private:
         bufferIndex = 0;
         events = hostBlocks = lateEvents = inputShortBefore = slowBursts = captureEvents = captureGaps = 0;
         traced = 0;
-        inputSettled = false;
+        settledSteps = 0;
         lastDrainMs = maxCaptureGapMs = 0.0;
         nextCapturePosition = -1;
         lostFrames = 0;
