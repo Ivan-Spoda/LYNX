@@ -1605,6 +1605,7 @@ countries: br
 "Choose each mixer insert's input in the Mixer (the input box above its effect slots), arm it, then Rec + Play. This switch records the first two input channels into a new insert when nothing is armed." = "Escolha a entrada de cada insert no Mixer (a caixa de entrada acima dos slots de efeito), arme-o e use Rec + Play. Esta chave grava os dois primeiros canais de entrada num insert novo quando nada está armado."
 "Input channels: none open. Choose an input device above to record a microphone or an instrument." = "Canais de entrada: nenhum aberto. Escolha um dispositivo de entrada acima para gravar um microfone ou um instrumento."
 "Input channels ({0}): {1}" = "Canais de entrada ({0}): {1}"
+"Piano Roll notes: [LMB] opens them in the Piano Roll" = "Notas do Piano Roll: [LMB] abre no Piano Roll"
 
 # Round 89: VST2 hosting, plugins that won't sound as in FL Studio
 "same VST2 ID" = "mesmo ID VST2"

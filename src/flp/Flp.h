@@ -240,6 +240,7 @@ struct PlaylistTrackInfo
     int index = 0;        // 0 = first track
     std::string name;
     bool enabled = true;  // false = track muted
+    std::uint32_t colour = 0x485156; // 0xRRGGBB (stored as 0x00BBGGRR); 0x485156 = FL's default grey
 };
 
 // Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by

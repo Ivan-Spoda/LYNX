@@ -15047,6 +15047,7 @@ TEST (level_audit_demo_imports_round89)
         CHECK (compressors >= 10 && withSettings >= 8);
     }
 }
+#include "UiLook90Tests.inc"
 #include "DialogsTests84.inc"
 
 // --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------

@@ -300,9 +300,15 @@ void ChannelRackComponent::paint (juce::Graphics& g)
                     juce::Justification::centred);
         g.setFont (theme::font (theme::type::body));
 
-        // name button: neutral surface with the channel colour (from the .flp or user-picked) as a strip
-        g.setColour (row == primary ? bg6 : hovered (Area::name) ? bg5 : bg4);
-        g.fillRoundedRectangle (nameArea, theme::radius::md);
+        // name button: tinted with the channel colour (from the .flp or user-picked), so channels are found by
+        // colour as in FL; kept dark and toned down (LYNX look), with the colour strip at its left
+        {
+            auto plate = row == primary ? bg6 : hovered (Area::name) ? bg5 : bg4;
+            if (channel.colour != 0)
+                plate = plate.interpolatedWith (theme::tame (juce::Colour (channel.colour)), row == primary ? 0.42f : 0.32f);
+            g.setColour (plate);
+            g.fillRoundedRectangle (nameArea, theme::radius::md);
+        }
 
         if (row == primary)
         {
@@ -328,6 +334,12 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             g.setFont (theme::font (theme::type::small));
             g.drawText (tr ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
             g.setFont (theme::font (theme::type::body));
+            continue;
+        }
+
+        if (showsNotePreview (pattern, row)) // piano-roll notes: a miniature instead of the step buttons
+        {
+            paintNotePreview (g, row, pattern, channel.colour);
             continue;
         }
 
@@ -377,6 +389,47 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         g.setColour (playhead.withAlpha (0.28f));
         g.fillRoundedRectangle (juce::Rectangle<float> ((float) (gridLeft() + playheadStep * stepWidth), 2.0f, (float) stepWidth - 2.0f,
                                                         (float) addY - 2.0f), theme::radius::sm);
+    }
+}
+
+// The miniature of a channel's piano-roll notes across its step area (FL shows one once a channel has notes
+// that steps can't show); the notes keep their time and length, pitch maps onto the row's height.
+void ChannelRackComponent::paintNotePreview (juce::Graphics& g, int row, const Pattern& pattern, std::uint32_t channelColour)
+{
+    using namespace theme::colour;
+    const auto steps = numSteps();
+    const auto area = juce::Rectangle<float> ((float) gridLeft() + 1.0f, (float) rowY (row) + 4.0f, (float) (steps * stepWidth) - 3.0f,
+                                              (float) rowHeight - 8.0f);
+    const auto hoveredHere = hoverArea == Area::grid && hoverRow == row;
+    g.setColour (hoveredHere ? bg4 : bg1);
+    g.fillRoundedRectangle (area, theme::radius::sm);
+
+    for (int beat = 4; beat < steps; beat += 4) // beat lines, bars a little stronger
+    {
+        g.setColour (beat % 16 == 0 ? border.brighter (0.2f) : border);
+        g.fillRect (area.getX() + (float) (beat * stepWidth) - 1.5f, area.getY() + 2.0f, 1.0f, area.getHeight() - 4.0f);
+    }
+
+    const auto [low, high] = channelKeyRange (pattern, row);
+    const auto span = juce::jmax (high - low, 6); // a single key sits mid-row, not on an edge
+    const auto lowKey = low - (span - (high - low)) / 2;
+    const auto inner = area.reduced (1.0f, 3.0f);
+    const auto noteHeight = juce::jlimit (3.0f, 5.0f, inner.getHeight() / (float) (span + 1));
+    const auto ticks = (float) (steps * ticksPerStep);
+    const auto tint = channelColour != 0 ? theme::tame (juce::Colour (channelColour)).brighter (0.6f) : stepNote;
+
+    for (const auto& n : pattern.notes)
+    {
+        if (n.channel != row)
+            continue;
+
+        const auto x = inner.getX() + inner.getWidth() * (float) n.start / ticks;
+        if (x > inner.getRight())
+            break;
+        const auto w = juce::jmax (2.0f, inner.getWidth() * (float) n.length / ticks - 1.0f);
+        const auto y = inner.getBottom() - noteHeight - (inner.getHeight() - noteHeight) * (float) (n.key - lowKey) / (float) span;
+        g.setColour (n.muted ? textDisabled : tint);
+        g.fillRect (juce::Rectangle<float> (x, y, juce::jmin (w, inner.getRight() - x), noteHeight));
     }
 }
 
@@ -1246,6 +1299,18 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
             const auto step = (e.x - gridLeft()) / stepWidth;
             const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
 
+            if (showsNotePreview (pattern, row)) // the miniature opens the Piano Roll (steps would break the melody)
+            {
+                if (! e.mods.isPopupMenu())
+                {
+                    selectionAnchor = row;
+                    selectRows ({ row }, row);
+                    if (onOpenPianoRoll)
+                        onOpenPianoRoll();
+                }
+                return;
+            }
+
             if (e.mods.isRightButtonDown())
                 paintMode = PaintMode::remove;
             else
@@ -1438,7 +1503,10 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection");
             break;
         case Area::grid:
-            h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
+            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row))
+                h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
+            else
+                h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
             break;
         case Area::addRow:
             h.text = tr ("Add a channel (or drop audio files on the rack)");
@@ -1466,7 +1534,8 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
         return;
 
     if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < gridLeft()
-        || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip)
+        || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip
+        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row)) // drag-paint skips note rows
         return;
 
     if (row == lastPaintedRow && step == lastPaintedStep)
