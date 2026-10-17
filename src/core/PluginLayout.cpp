@@ -107,9 +107,10 @@ LayoutItem pageTabs (float x, float y, float w, float h, const char* options)
     return i;
 }
 
-LayoutItem toggle (float x, float y, float w, float h, const char* param, const char* caption)
+LayoutItem toggle (float x, float y, float w, float h, const char* param, const char* caption, std::uint16_t style = 0)
 {
     LayoutItem i;
+    i.style = style;
     i.type = Item::toggle;
     i.x = x, i.y = y, i.w = w, i.h = h;
     i.param = param;
@@ -216,10 +217,11 @@ Layout fruityLimiter()
     l.pages = { TR_NOOP ("Limit"), TR_NOOP ("Comp") };
     auto& v = l.items;
     v.push_back (display (7, 2, 623, 158, "limiter"));
-    v.push_back (section (32, 161, 255, 145, TR_NOOP ("Loudness")));
-    v.push_back (section (287, 161, 178, 145, TR_NOOP ("Envelope")));
-    v.push_back (section (465, 161, 165, 145, TR_NOOP ("Noise gate")));
-    v.push_back (section (117, 180, 345, 120, nullptr, boxed));
+    v.push_back (section (2, 161, 629, 143, nullptr, boxed));
+    v.push_back (section (32, 161, 255, 16, TR_NOOP ("Loudness")));
+    v.push_back (section (288, 161, 176, 16, TR_NOOP ("Envelope")));
+    v.push_back (section (465, 161, 166, 16, TR_NOOP ("Noise gate")));
+    v.push_back (section (117, 180, 345, 120, nullptr, boxed | raised));
     v.push_back (knob (34, 205, 44, "Gain", TR_NOOP ("Gain"), 240));
     v.push_back (knob (88, 205, 44, "Saturation", TR_NOOP ("Sat"), 240));
     v.push_back (pageTabs (119, 277, 82, 20, TR_NOOP ("Limit|Comp")));
@@ -235,14 +237,17 @@ Layout fruityLimiter()
     v.push_back (onPage (stepper (302, 259, 28, 30, "Attack curve", TR_NOOP ("Curve"), 7), 0));
     v.push_back (onPage (stepper (358, 259, 28, 30, "Release curve", TR_NOOP ("Curve"), 7), 0));
 
+    l.menuSwitches = { "Exact ceiling" };
+
     // COMP page
     v.push_back (onPage (knob (148, 205, 44, "Comp. threshold", TR_NOOP ("Thres"), 240), 1));
     v.push_back (onPage (knob (202, 205, 44, "Knee", TR_NOOP ("Knee"), 240, bipolar), 1));
     v.push_back (onPage (knob (256, 205, 44, "Ratio", TR_NOOP ("Ratio"), 240, bipolar), 1));
     v.push_back (onPage (knob (316, 205, 44, "Comp. attack", TR_NOOP ("Att"), 240), 1));
     v.push_back (onPage (knob (372, 205, 44, "Comp. release", TR_NOOP ("Rel"), 240), 1));
-    v.push_back (onPage (knob (432, 205, 44, "RMS window", TR_NOOP ("RMS"), 240), 1));
-    v.push_back (onPage (stepper (358, 259, 28, 30, "Comp. curve", TR_NOOP ("Curve"), 7), 1));
+    // FL captions the compressor's detector window SUSTAIN too (the limiter's is its peak window)
+    v.push_back (onPage (knob (432, 205, 44, "RMS window", TR_NOOP ("Sustain"), 240), 1));
+    v.push_back (onPage (stepper (302, 259, 28, 30, "Comp. curve", TR_NOOP ("Curve"), 7), 1));
     return l;
 }
 
@@ -256,6 +261,7 @@ Layout fruityCompressor()
     fruityCell (v, 0, 1, "Attack", TR_NOOP ("Attack"));
     fruityCell (v, 1, 1, "Release", TR_NOOP ("Release"));
     fruityCell (v, 2, 1, "Type", TR_NOOP ("Type"), Cell::value, 7);
+    l.menuSwitches = { "Look-ahead" };
     return l;
 }
 
@@ -369,28 +375,28 @@ Layout fruityDelay3()
     v.push_back (slider (Item::vslider, 17, 26, 30, 160, "Send", TR_NOOP ("Wet")));
 
     v.push_back (section (62, 2, 193, 110, TR_NOOP ("Delay time")));
-    v.push_back (knob (97, 62, 56, "Time", TR_NOOP ("Time"), 130, big));
-    v.push_back (toggle (142, 62, 80, 14, "Tempo sync", TR_NOOP ("Tempo sync")));
-    v.push_back (toggle (142, 81, 80, 14, "Keep pitch", TR_NOOP ("Keep pitch")));
-    v.push_back (slider (Item::hslider, 145, 104, 60, 30, "Time smoothing", TR_NOOP ("Smoothing")));
-    v.push_back (knob (233, 82, 34, "Time R / pan", TR_NOOP ("Offset"), 130, bipolar));
+    v.push_back (knob (95, 58, 56, "Time", TR_NOOP ("Time"), 104, big));
+    v.push_back (toggle (142, 37, 80, 14, "Tempo sync", TR_NOOP ("Tempo sync")));
+    v.push_back (toggle (142, 55, 80, 14, "Keep pitch", TR_NOOP ("Keep pitch")));
+    v.push_back (slider (Item::hslider, 145, 80, 60, 30, "Time smoothing", TR_NOOP ("Smoothing")));
+    v.push_back (knob (233, 82, 34, "Time R / pan", TR_NOOP ("Offset"), 104, bipolar));
 
     v.push_back (section (257, 2, 121, 110, TR_NOOP ("Delay model")));
-    v.push_back (radio (265, 58, 60, 60, "Delay type", TR_NOOP ("Mono|Stereo|Ping pong|Off"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
-    v.push_back (knob (356, 86, 34, "Stereo spread", TR_NOOP ("Stereo"), 130));
+    v.push_back (radio (268, 36, 62, 52, "Delay type", TR_NOOP ("Mono|Stereo|Ping pong|Off"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
+    v.push_back (knob (356, 80, 34, "Stereo spread", TR_NOOP ("Stereo"), 104));
 
     v.push_back (section (380, 2, 305, 110, TR_NOOP ("Feedback")));
-    v.push_back (knob (418, 87, 56, "Feedback", TR_NOOP ("Level"), 130, big));
-    v.push_back (knob (469, 86, 34, "Cutoff", TR_NOOP ("Cutoff"), 130));
-    v.push_back (knob (516, 86, 34, "Resonance", TR_NOOP ("Res"), 130));
-    v.push_back (radio (555, 58, 36, 60, "Filter mode", TR_NOOP ("LP|HP|BP|Off"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
-    v.push_back (knob (620, 86, 34, "Rate reduce", TR_NOOP ("Smp rate"), 130));
-    v.push_back (knob (666, 86, 34, "Bit reduce", TR_NOOP ("Bits"), 130));
+    v.push_back (knob (418, 70, 56, "Feedback", TR_NOOP ("Level"), 104, big));
+    v.push_back (knob (469, 80, 34, "Cutoff", TR_NOOP ("Cutoff"), 104));
+    v.push_back (knob (516, 80, 34, "Resonance", TR_NOOP ("Res"), 104));
+    v.push_back (radio (557, 36, 40, 52, "Filter mode", TR_NOOP ("LP|HP|BP|Off"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
+    v.push_back (knob (620, 80, 34, "Rate reduce", TR_NOOP ("Smp rate"), 104));
+    v.push_back (knob (666, 80, 34, "Bit reduce", TR_NOOP ("Bits"), 104));
 
     v.push_back (section (688, 2, 62, 216, TR_NOOP ("Output")));
-    v.push_back (knob (719, 52, 34, "Wet", TR_NOOP ("Wet"), 80));
-    v.push_back (knob (719, 114, 34, "Colour", TR_NOOP ("Tone"), 142, bipolar));
-    v.push_back (knob (719, 176, 34, "Dry", TR_NOOP ("Dry"), 204));
+    v.push_back (knob (719, 48, 34, "Wet", TR_NOOP ("Wet"), 80));
+    v.push_back (knob (719, 110, 34, "Colour", TR_NOOP ("Tone"), 142, bipolar));
+    v.push_back (knob (719, 172, 34, "Dry", TR_NOOP ("Dry"), 204));
 
     v.push_back (section (62, 114, 193, 104, TR_NOOP ("Modulation")));
     v.push_back (knob (94, 172, 44, "Mod rate", TR_NOOP ("Rate"), 206, big));
@@ -402,11 +408,11 @@ Layout fruityDelay3()
     v.push_back (knob (343, 172, 34, "Diffusion spread", TR_NOOP ("Spread"), 206));
 
     v.push_back (section (380, 114, 305, 104, TR_NOOP ("Feedback distortion")));
-    v.push_back (radio (390, 176, 44, 32, "Saturation type", TR_NOOP ("Limit|Sat")));
+    v.push_back (radio (392, 160, 44, 28, "Saturation type", TR_NOOP ("Limit|Sat")));
     v.push_back (knob (476, 172, 34, "Distortion", TR_NOOP ("Level"), 206));
     v.push_back (knob (524, 172, 34, "Hardness", TR_NOOP ("Knee"), 206));
     v.push_back (knob (572, 172, 34, "Symmetry", TR_NOOP ("Symmetry"), 206, bipolar));
-    v.push_back (display (614, 140, 68, 72, "shaper", "Hardness"));
+    v.push_back (display (614, 140, 68, 72, "shaper", "Distortion"));
     return l;
 }
 
@@ -432,6 +438,11 @@ Layout fruityMultiband()
     v.push_back (knob (203, 121, 34, "Mid upper crossover", nullptr, 0, noCaption));
     v.push_back (knob (254, 121, 34, "High crossover", nullptr, 0, noCaption));
 
+    constexpr int bandColours[] = { 0, 2, 5 }; // low / mid / high: the editor's red, yellow and blue band colours
+    v[8].colour = bandColours[0];  // crossover knobs: the band each one bounds from below
+    v[9].colour = bandColours[1];
+    v[10].colour = bandColours[1];
+    v[11].colour = bandColours[2];
     struct Band { const char* title; const char *mode, *threshold, *ratio, *knee, *attack, *release, *gain; };
     const Band bands[] = { { TR_NOOP ("Low band"), "Low mode", "Low threshold", "Low ratio", "Low knee", "Low attack", "Low release", "Low gain" },
                            { TR_NOOP ("Mid band"), "Mid mode", "Mid threshold", "Mid ratio", "Mid knee", "Mid attack", "Mid release", "Mid gain" },
@@ -443,12 +454,15 @@ Layout fruityMultiband()
         v.push_back (section (x, 7, 130, 16, nullptr, boxed));
         v.push_back (tabs (x + 2, 8, 48, 14, band.mode, "A|M|B", { 0.0f, 0.5f, 1.0f }));
         v.push_back (label (x + 52, 8, 76, 14, band.title));
+        const auto first = v.size();
         v.push_back (knob (x + 19, 58, 32, band.threshold, TR_NOOP ("Thres"), 84));
         v.push_back (knob (x + 65, 58, 32, band.ratio, TR_NOOP ("Ratio"), 84));
         v.push_back (knob (x + 111, 58, 32, band.knee, TR_NOOP ("Knee"), 84));
         v.push_back (knob (x + 19, 120, 32, band.attack, TR_NOOP ("Att"), 144));
         v.push_back (knob (x + 65, 120, 32, band.release, TR_NOOP ("Rel"), 144));
         v.push_back (knob (x + 111, 120, 32, band.gain, TR_NOOP ("Gain"), 144, bipolar));
+        for (auto k = first; k < v.size(); ++k)
+            v[k].colour = bandColours[b];
         v.push_back (display (x + 140, 7, 24, 128, "meter"));
     }
     return l;
@@ -519,7 +533,7 @@ Layout luxeVerb()
     tile (422, 82, "Character", TR_NOOP ("Character"), 108);
     v.push_back (when (knob (244, 174, 34, "Pre-delay", TR_NOOP ("P. delay"), 200, valueAbove), "Pre-delay sync", 0.0f, 0.5f));
     v.push_back (when (knob (244, 174, 34, "Pre-delay (sync)", TR_NOOP ("P. delay"), 200, valueAbove), "Pre-delay sync", 0.5f, 1.0f));
-    v.push_back (toggle (256, 194, 18, 12, "Pre-delay sync", nullptr));
+    v.push_back (toggle (262, 194, 11, 11, "Pre-delay sync", "T", boxed));
     tile (303, 174, "Mod amount", TR_NOOP ("Mod amp"), 200);
     tile (363, 174, "Mod frequency", TR_NOOP ("Mod freq"), 200);
     v.push_back (radio (397, 130, 56, 54, "Freeze mode", TR_NOOP ("Normal|Freeze|Sustain")));
@@ -542,27 +556,28 @@ Layout luxeVerb()
         // (the synced delays replace the free ones while T is on)
         v.push_back (ff (when (knob (664, 82, 34, "Feed-forward delay 1 (sync)", TR_NOOP ("Delay 1"), 108, valueAbove), "Feed-forward delay 1 sync", 0.5f, 1.0f)));
         v.push_back (ff (when (knob (664, 174, 34, "Feed-forward delay 2 (sync)", TR_NOOP ("Delay 2"), 200, valueAbove), "Feed-forward delay 2 sync", 0.5f, 1.0f)));
-        v.push_back (ff (toggle (676, 102, 18, 12, "Feed-forward delay 1 sync", nullptr)));
-        v.push_back (ff (toggle (676, 194, 18, 12, "Feed-forward delay 2 sync", nullptr)));
+        v.push_back (ff (toggle (683, 102, 11, 11, "Feed-forward delay 1 sync", "T", boxed)));
+        v.push_back (ff (toggle (683, 194, 11, 11, "Feed-forward delay 2 sync", "T", boxed)));
     }
-    // feedback shifter
+    // feedback shifter: cuts, pitch shift and gain faders, delay, reverb mix
     {
         const auto fb = [] (LayoutItem i) { return when (std::move (i), "Pitch type", 0.0f, 0.5f); };
-        v.push_back (fb (value (476, 46, 38, 13, "Feedback reverb mix", 0)));
-        v.push_back (fb (slider (Item::vslider, 483, 62, 24, 145, "Feedback reverb mix", TR_NOOP ("Reverb mix"))));
-        v.push_back (fb (knob (552, 82, 34, "Feedback pitch", TR_NOOP ("Pitch"), 108, valueAbove | bipolar)));
-        v.push_back (fb (knob (607, 82, 34, "Feedback gain", TR_NOOP ("Gain"), 108, valueAbove)));
-        v.push_back (fb (when (knob (664, 82, 34, "Feedback delay", TR_NOOP ("Delay"), 108, valueAbove), "Feedback delay sync", 0.0f, 0.5f)));
-        v.push_back (fb (when (knob (664, 82, 34, "Feedback delay (sync)", TR_NOOP ("Delay"), 108, valueAbove), "Feedback delay sync", 0.5f, 1.0f)));
-        v.push_back (fb (toggle (676, 102, 18, 12, "Feedback delay sync", nullptr)));
-        v.push_back (fb (knob (552, 174, 34, "Feedback low cut", TR_NOOP ("Low cut"), 200, valueAbove)));
-        v.push_back (fb (knob (607, 174, 34, "Feedback high cut", TR_NOOP ("High cut"), 200, valueAbove)));
+        v.push_back (fb (knob (496, 82, 34, "Feedback high cut", TR_NOOP ("High cut"), 108, valueAbove)));
+        v.push_back (fb (knob (496, 174, 34, "Feedback low cut", TR_NOOP ("Low cut"), 200, valueAbove)));
+        v.push_back (fb (value (534, 46, 38, 13, "Feedback pitch", 0)));
+        v.push_back (fb (slider (Item::vslider, 541, 62, 24, 145, "Feedback pitch", TR_NOOP ("Pitch shift"), bipolar)));
+        v.push_back (fb (value (589, 46, 38, 13, "Feedback gain", 0)));
+        v.push_back (fb (slider (Item::vslider, 596, 62, 24, 145, "Feedback gain", TR_NOOP ("Gain"))));
+        v.push_back (fb (when (knob (665, 82, 34, "Feedback delay", TR_NOOP ("Delay"), 108, valueAbove), "Feedback delay sync", 0.0f, 0.5f)));
+        v.push_back (fb (when (knob (665, 82, 34, "Feedback delay (sync)", TR_NOOP ("Delay"), 108, valueAbove), "Feedback delay sync", 0.5f, 1.0f)));
+        v.push_back (fb (toggle (683, 102, 11, 11, "Feedback delay sync", "T", boxed)));
+        v.push_back (fb (knob (665, 174, 34, "Feedback reverb mix", TR_NOOP ("Reverb mix"), 200, valueAbove)));
     }
 
     v.push_back (section (706, 14, 234, 200, TR_NOOP ("Output")));
     fader (736, "Dry level", TR_NOOP ("Dry"));
     fader (791, "Wet level", TR_NOOP ("Wet"));
-    v.push_back (toggle (803, 194, 18, 12, "Limiter", nullptr));
+    v.push_back (toggle (802, 194, 11, 11, "Limiter", "L", boxed));
     tile (847, 82, "Peak frequency", TR_NOOP ("Peak freq"), 108);
     tile (907, 82, "Peak gain", TR_NOOP ("Peak gain"), 108, bipolar);
     tile (847, 174, "Peak Q", TR_NOOP ("Peak Q"), 200);
@@ -579,6 +594,54 @@ Layout luxeVerb()
     tile (150, 399, "Envelope decay", TR_NOOP ("Decay"), 425);
     tile (207, 399, "Envelope smoothing", TR_NOOP ("Smooth"), 425);
     v.push_back (display (298, 262, 636, 184, "envelope", "Decay"));
+    return l;
+}
+
+Layout parametricEq2()
+{
+    // the response curve (octave and band-name rows above, frequencies below, dB scale at its right), the output
+    // fader, then one column per band: type button, gain fader, FREQ and BW knobs
+    Layout l;
+    l.fl = "Fruity Parametric EQ 2";
+    l.width = 707;
+    l.height = 356;
+    auto& v = l.items;
+    v.push_back (display (8, 4, 524, 292, "eq"));
+    v.push_back (slider (Item::vslider, 532, 22, 16, 270, "Output", nullptr, noCaption | bipolar));
+    v.push_back (label (510, 310, 38, 12, TR_NOOP ("Freq"), dim));
+    v.push_back (label (510, 334, 38, 12, TR_NOOP ("BW"), dim));
+    static const char* const names[peq::bands][5] = {
+        { "B1 type", "B1 freq.", "B1 gain", "B1 Q", "B1 slope" }, { "B2 type", "B2 freq.", "B2 gain", "B2 Q", "B2 slope" },
+        { "B3 type", "B3 freq.", "B3 gain", "B3 Q", "B3 slope" }, { "B4 type", "B4 freq.", "B4 gain", "B4 Q", "B4 slope" },
+        { "B5 type", "B5 freq.", "B5 gain", "B5 Q", "B5 slope" }, { "B6 type", "B6 freq.", "B6 gain", "B6 Q", "B6 slope" },
+        { "B7 type", "B7 freq.", "B7 gain", "B7 Q", "B7 slope" } };
+    std::vector<float> typeValues;
+    for (int t = 0; t < peq::bandTypes; ++t)
+        typeValues.push_back (peq::typeValue ((peq::BandType) t));
+    for (int b = 0; b < peq::bands; ++b)
+    {
+        const auto x = 552.0f + 21.0f * (float) b;
+        LayoutItem type;
+        type.type = Item::menu;
+        type.x = x, type.y = 4, type.w = 16, type.h = 24;
+        type.param = names[b][0];
+        type.options = TR_NOOP ("Off|Peak|Low shelf|High shelf|Low cut|High cut|Band-pass|Notch");
+        type.values = typeValues;
+        type.colour = b;
+        v.push_back (type);
+        auto gain = slider (Item::vslider, x, 30, 16, 262, names[b][2], nullptr, noCaption | bipolar);
+        gain.colour = b;
+        v.push_back (gain);
+        auto freq = knob (x + 8, 316, 19, names[b][1], nullptr, 0, noCaption);
+        freq.colour = b;
+        v.push_back (freq);
+        auto width = knob (x + 8, 340, 19, names[b][3], nullptr, 0, noCaption);
+        width.colour = b;
+        v.push_back (width);
+    }
+    v.push_back (display (8, 300, 492, 52, "eqinfo"));
+    for (int b = 0; b < peq::bands; ++b)
+        l.editedElsewhere.push_back (names[b][4]); // the band menu (right-click a handle or the type button)
     return l;
 }
 
@@ -615,7 +678,7 @@ const std::vector<EffectKind>& flLayoutKinds()
     static const std::vector<EffectKind> kinds { EffectKind::fruityLimiter, EffectKind::fruityDelay3, EffectKind::fruityMultiband,
                                                  EffectKind::reeverb2, EffectKind::luxeVerb, EffectKind::fruityCompressor,
                                                  EffectKind::fruityFilter, EffectKind::fruityFastDist, EffectKind::fruityChorus,
-                                                 EffectKind::fruityFlanger, EffectKind::stereoEnhancer };
+                                                 EffectKind::fruityFlanger, EffectKind::stereoEnhancer, EffectKind::parametricEq };
     return kinds;
 }
 
@@ -642,6 +705,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::fruityMultiband: l = fruityMultiband(); break;
         case EffectKind::reeverb2: l = reeverb2(); break;
         case EffectKind::luxeVerb: l = luxeVerb(); break;
+        case EffectKind::parametricEq: l = parametricEq2(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

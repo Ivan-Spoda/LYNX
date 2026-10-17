@@ -46,6 +46,7 @@
 #include "core/Granulizer.h"
 #include "core/Drumaxx.h"
 #include "core/Wasp.h"
+#include "core/PluginLayout.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
@@ -14698,3 +14699,121 @@ TEST (event_editor_playback)
 }
 #include "PrefsTests.inc"
 #include "DialogsTests84.inc"
+
+// --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------
+
+TEST (plugin_layouts_name_real_parameters)
+{
+    using namespace lynx;
+    // every value control edits a parameter of its effect, inside the body; FL arrangements place (or list in a menu)
+    // every parameter of the effect
+    for (const auto kind : plugui::flLayoutKinds())
+    {
+        const auto& l = plugui::layoutFor (kind);
+        const auto& info = effectInfo (kind);
+        CHECK (plugui::hasFlLayout (kind));
+        CHECK (l.width > 100 && l.height > 60);
+        std::vector<bool> placed (info.params.size(), false);
+
+        for (const auto& item : l.items)
+        {
+            CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
+            if (item.param != nullptr)
+            {
+                const auto p = plugui::paramIndex (kind, item.param);
+                CHECK (p >= 0);
+                if (p >= 0)
+                    placed[(std::size_t) p] = true;
+            }
+            if (item.type == plugui::Item::radio || item.type == plugui::Item::tabs || item.type == plugui::Item::menu)
+            {
+                const auto labels = plugui::optionLabels (item);
+                CHECK (labels.size() >= 2);
+                CHECK (item.values.empty() || item.values.size() == labels.size());
+            }
+            for (const auto* when : { item.whenParam, item.when2Param })
+                CHECK (when == nullptr || plugui::paramIndex (kind, when) >= 0);
+        }
+        for (const auto* name : l.menuSwitches)
+        {
+            const auto p = plugui::paramIndex (kind, name);
+            CHECK (p >= 0);
+            if (p >= 0)
+                placed[(std::size_t) p] = true;
+        }
+        for (const auto* name : l.editedElsewhere)
+        {
+            const auto p = plugui::paramIndex (kind, name);
+            CHECK (p >= 0);
+            if (p >= 0)
+                placed[(std::size_t) p] = true;
+        }
+        for (std::size_t p = 0; p < placed.size(); ++p)
+            if (! placed[p])
+            {
+                std::printf ("  %s: parameter '%s' has no control\n", info.name, info.params[p].name);
+                CHECK (false);
+            }
+    }
+}
+
+TEST (plugin_layout_options_match_the_engine_values)
+{
+    using namespace lynx;
+    // the switches show FL's captions for the engine's own values
+    const auto text = [] (EffectKind kind, const char* param, int option) {
+        for (const auto& item : plugui::layoutFor (kind).items)
+            if (item.param != nullptr && std::strcmp (item.param, param) == 0 && item.options != nullptr)
+                return formatEffectParam (kind, plugui::paramIndex (kind, param), plugui::optionValue (item, option), 120.0);
+        return std::string ("?");
+    };
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 0) == "Fake stereo");
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 2) == "Ping pong");
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 3) == "Off");
+    CHECK (text (EffectKind::fruityDelay3, "Filter mode", 1) == "High pass");
+    CHECK (text (EffectKind::fruityDelay3, "Saturation type", 1) == "Saturate");
+    CHECK (text (EffectKind::fruityMultiband, "Low mode", 1) == "off");
+    CHECK (text (EffectKind::fruityMultiband, "High mode", 2) == "bypass");
+    CHECK (text (EffectKind::luxeVerb, "Pitch type", 1) == "feed-forward");
+    CHECK (text (EffectKind::luxeVerb, "Freeze mode", 2) == "sustain");
+    CHECK (text (EffectKind::stereoEnhancer, "Invert", 2) == "invert R");
+    CHECK (text (EffectKind::parametricEq, "B3 type", 4) == formatEffectParam (EffectKind::parametricEq, peq::param (2, 0), peq::typeValue (peq::BandType::lowCut), 120.0));
+
+    // the option nearest to a value; pages and conditions
+    plugui::LayoutItem radio;
+    radio.type = plugui::Item::radio;
+    radio.options = "A|B|C|D";
+    CHECK (plugui::optionLabels (radio).size() == 4);
+    CHECK (plugui::optionAt (radio, 0.30f) == 1);
+    CHECK (plugui::optionAt (radio, 0.95f) == 3);
+    CHECK (std::abs (plugui::optionValue (radio, 2) - 2.0f / 3.0f) < 1e-6f);
+
+    const auto& lux = plugui::layoutFor (EffectKind::luxeVerb);
+    auto params = makeEffectSlot (EffectKind::luxeVerb).params;
+    const auto pitchType = plugui::paramIndex (EffectKind::luxeVerb, "Pitch type");
+    int feedForward = 0, feedback = 0;
+    for (float v : { 0.0f, 1.0f })
+    {
+        params[(std::size_t) pitchType] = v;
+        for (const auto& item : lux.items)
+            if (item.param != nullptr && std::strcmp (item.param, "Feed-forward pitch 1") == 0 && plugui::isShown (EffectKind::luxeVerb, item, 0, params))
+                ++feedForward;
+            else if (item.param != nullptr && std::strcmp (item.param, "Feedback pitch") == 0 && plugui::isShown (EffectKind::luxeVerb, item, 0, params))
+                ++feedback;
+    }
+    CHECK (feedForward == 1); // only in feed-forward mode
+    CHECK (feedback == 2);    // value plate + fader, only in feedback mode
+
+    const auto& limiter = plugui::layoutFor (EffectKind::fruityLimiter);
+    CHECK (limiter.pages.size() == 2);
+    int ceilingShown = 0;
+    for (int page = 0; page < 2; ++page)
+        for (const auto& item : limiter.items)
+            if (item.param != nullptr && std::strcmp (item.param, "Ceiling") == 0 && plugui::isShown (EffectKind::fruityLimiter, item, page, params))
+                ++ceilingShown;
+    CHECK (ceilingShown == 1); // LIMIT page only
+
+    // every other effect still gets a (generated) window
+    CHECK (! plugui::hasFlLayout (EffectKind::fruitySoftClipper));
+    CHECK (! plugui::layoutFor (EffectKind::fruitySoftClipper).items.empty());
+}

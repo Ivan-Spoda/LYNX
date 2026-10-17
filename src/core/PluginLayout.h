@@ -31,6 +31,7 @@ enum class Item : std::uint8_t
     stepper,  // a number box with small up/down arrows (drag, wheel or click the arrows)
     display,  // a custom graph drawn by the editor (`display` names it)
     value,    // the parameter's value as text (FL's read-outs next to a knob)
+    menu,     // a button that opens a list of choices (`options` / `values`), showing the current one's mark
 };
 
 // style flags
@@ -46,6 +47,7 @@ enum : std::uint16_t
     pageTabs = 1 << 7,    // tabs that switch the editor's page instead of editing a parameter
     boxed = 1 << 8,       // label: drawn as a header box (FL's caption plates); section: a plain cell without a title strip
     alignLeft = 1 << 9,   // value / label text aligned left
+    raised = 1 << 10,     // section: a lighter inset panel inside another one
 };
 
 struct LayoutItem
@@ -64,6 +66,7 @@ struct LayoutItem
     float whenMin = 0.0f, whenMax = 1.0f;
     const char* when2Param = nullptr;  // a second condition
     float when2Min = 0.0f, when2Max = 1.0f;
+    int colour = -1;                   // ≥ 0: one of the editor's band colours (EQ bands, multiband bands)
 };
 
 struct Layout
@@ -72,6 +75,8 @@ struct Layout
     int width = 0, height = 0;
     std::vector<LayoutItem> items;
     std::vector<const char*> pages {}; // page names when the plugin has pages (tabs with `pageTabs`)
+    std::vector<const char*> menuSwitches {}; // on / off parameters FL keeps in a menu: listed in the options menu
+    std::vector<const char*> editedElsewhere {}; // parameters edited from another control's menu (EQ band slopes)
 };
 
 // The editor layout of an effect: FL's arrangement for the plugins studied so far, otherwise a generated grid

@@ -4,6 +4,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -119,6 +120,8 @@ public:
             const auto& item = items[(std::size_t) i];
             if (! visible (item) || item.type == Item::section || item.type == Item::label)
                 continue;
+            if (item.type == Item::display && rectOf (item).contains (p) && juce::String (item.display) == "eq")
+                return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
             if (rectOf (item).contains (p))
@@ -265,7 +268,12 @@ public:
         g.fillPath (p);
     }
 
-    juce::Colour arcColour (const EffectSlot& fx) const { return fx.enabled ? theme::colour::knobArc : theme::colour::textDisabled; }
+    juce::Colour arcColour (const EffectSlot& fx, int colourIndex = -1) const
+    {
+        if (! fx.enabled)
+            return theme::colour::textDisabled;
+        return colourIndex >= 0 ? peqview::bandColour (colourIndex) : theme::colour::knobArc;
+    }
 
     void caption (juce::Graphics& g, const LayoutItem& item, juce::Rectangle<float> r, juce::Justification j = juce::Justification::centred)
     {
@@ -290,7 +298,7 @@ public:
         {
             case Item::section:
             {
-                g.setColour (colour::bg2);
+                g.setColour (hasStyle (item, plugui::raised) ? colour::bg3 : colour::bg2);
                 g.fillRoundedRectangle (r, radius::md * s);
                 if (item.label != nullptr && *item.label != 0 && ! hasStyle (item, plugui::boxed))
                 {
@@ -324,7 +332,7 @@ public:
             case Item::knob:
             {
                 const auto circle = knobCircle (item);
-                drawKnob (g, circle, value, hasStyle (item, plugui::bipolar), arcColour (fx), hot);
+                drawKnob (g, circle, value, hasStyle (item, plugui::bipolar), arcColour (fx, item.colour), hot && item.colour < 0);
                 auto below = r.withTop (circle.getBottom() + 1.0f * s);
                 if (hasStyle (item, plugui::valueAbove))
                 {
@@ -359,7 +367,7 @@ public:
                     if (hasStyle (item, plugui::captionLeft))
                         caption (g, item, area.removeFromLeft (area.getWidth() * 0.4f), juce::Justification::centredLeft);
                     else if (vertical)
-                        caption (g, item, area.removeFromBottom (13.0f * s));
+                        caption (g, item, area.removeFromBottom (13.0f * s).expanded (18.0f * s, 0.0f));
                     else
                         caption (g, item, area.removeFromBottom (12.0f * s));
                 }
@@ -385,7 +393,7 @@ public:
                     fill = { juce::jmin (x, from), trackRect.getY(), std::abs (from - x), trackRect.getHeight() };
                     thumb = { x, trackRect.getCentreY() };
                 }
-                g.setColour (hot ? colour::accent : arcColour (fx));
+                g.setColour (hot && item.colour < 0 ? colour::accent : arcColour (fx, item.colour));
                 g.fillRoundedRectangle (fill, thick * 0.5f);
                 const auto thumbRect = vertical ? juce::Rectangle<float> (juce::jmin (area.getWidth(), 20.0f * s), 9.0f * s).withCentre (thumb)
                                                 : juce::Rectangle<float> (9.0f * s, juce::jmin (area.getHeight(), 16.0f * s)).withCentre (thumb);
@@ -446,6 +454,16 @@ public:
             case Item::toggle:
             {
                 const auto on = value >= 0.5f;
+                if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
+                {
+                    g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : (hot ? colour::bg6 : colour::bg5));
+                    g.fillRoundedRectangle (r, radius::sm);
+                    g.setColour (on ? colour::onAccent : colour::textSecondary);
+                    g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
+                    if (item.label != nullptr)
+                        g.drawText (tr (item.label), r, juce::Justification::centred, false);
+                    break;
+                }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
                 g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::bg0);
                 g.fillRoundedRectangle (box, box.getHeight() * 0.5f);
@@ -481,7 +499,46 @@ public:
             case Item::display:
                 paintDisplay (g, item, r, fx);
                 break;
+
+            case Item::menu:
+            {
+                const auto c = item.colour >= 0 ? peqview::bandColour (item.colour) : colour::bg5;
+                const auto chosen = plugui::optionAt (item, value);
+                const auto off = chosen == 0 && kind == EffectKind::parametricEq;
+                g.setColour ((fx.enabled && ! off ? c : c.withSaturation (0.0f).darker (0.6f)).withAlpha (hot ? 1.0f : 0.85f));
+                g.fillRoundedRectangle (r, radius::sm * s);
+                g.setColour (colour::bg0);
+                if (kind == EffectKind::parametricEq)
+                    drawBandShape (g, r.reduced (2.0f * s, 4.0f * s), chosen);
+                else
+                {
+                    g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+                    const auto labels = plugui::optionLabels (item);
+                    if (chosen < (int) labels.size())
+                        g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), r.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                }
+                break;
+            }
         }
+    }
+
+    // a small drawing of an EQ band's response (peak, shelves, cuts, band-pass, notch)
+    static void drawBandShape (juce::Graphics& g, juce::Rectangle<float> r, int type)
+    {
+        juce::Path p;
+        const auto x0 = r.getX(), x1 = r.getRight(), xm = r.getCentreX(), y0 = r.getY(), y1 = r.getBottom(), ym = r.getCentreY();
+        switch (type)
+        {
+            case 1: p.startNewSubPath (x0, ym); p.quadraticTo (xm, y0 - (y1 - y0) * 0.3f, x1, ym); break;            // peak
+            case 2: p.startNewSubPath (x0, y0); p.lineTo (xm - 2, y0); p.lineTo (xm + 2, ym); p.lineTo (x1, ym); break; // low shelf
+            case 3: p.startNewSubPath (x0, ym); p.lineTo (xm - 2, ym); p.lineTo (xm + 2, y0); p.lineTo (x1, y0); break; // high shelf
+            case 4: p.startNewSubPath (x0 + 2, y1); p.quadraticTo (xm - 1, y0, x1, y0); break;                          // low cut
+            case 5: p.startNewSubPath (x0, y0); p.quadraticTo (xm + 1, y0, x1 - 2, y1); break;                          // high cut
+            case 6: p.startNewSubPath (x0, y1); p.quadraticTo (xm, y0 - (y1 - y0) * 0.6f, x1, y1); break;                // band-pass
+            case 7: p.startNewSubPath (x0, y0); p.quadraticTo (xm, y1 + (y1 - y0) * 0.6f, x1, y0); break;                // notch
+            default: p.startNewSubPath (x0, ym); p.lineTo (x1, ym); break;                                             // off
+        }
+        g.strokePath (p, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     static void drawSmallArrow (juce::Graphics& g, juce::Rectangle<float> r, bool up)
@@ -556,18 +613,24 @@ public:
             g.setColour (colour::gridBar);
             g.drawHorizontalLine ((int) (inner.getBottom() - inner.getHeight() * t), inner.getX(), inner.getRight());
         }
-        else if (id == "shaper") // a soft/hard transfer shape from a hardness / threshold control
+        else if (id == "shaper") // the feedback saturation: drive from the level, knee and symmetry
         {
             grid (4, 4);
-            const auto k = 0.2f + 6.0f * param01 (item.param != nullptr ? item.param : "Hardness");
-            strokeCurve ([k] (float x) { const auto u = x * 2.0f - 1.0f; return 0.5f + 0.5f * std::tanh (k * u) / std::tanh (k); }, inner, false);
+            const auto drive = 1.0f + 5.0f * param01 (item.param != nullptr ? item.param : "Distortion");
+            const auto knee = 0.5f + 3.0f * param01 ("Hardness");
+            const auto bias = (param01 ("Symmetry") - 0.5f) * 0.6f;
+            strokeCurve ([drive, knee, bias] (float x) {
+                const auto u = (x * 2.0f - 1.0f) * drive + bias;
+                const auto y = u / std::pow (1.0f + std::pow (std::abs (u), knee * 2.0f), 1.0f / (knee * 2.0f));
+                return 0.5f + 0.5f * y;
+            }, inner, false);
         }
         else if (id == "multiband")
         {
             // the three bands between the crossovers
             grid (8, 4);
             const auto low = param01 ("Low crossover"), high = param01 ("High crossover");
-            const juce::Colour bandColours[] = { juce::Colour (0xfff2767b), juce::Colour (0xffe8cf6a), juce::Colour (0xff7aa9f5) };
+            const juce::Colour bandColours[] = { peqview::bandColour (0), peqview::bandColour (2), peqview::bandColour (5) };
             const float edges[] = { 0.0f, juce::jlimit (0.05f, 0.95f, low), juce::jlimit (0.05f, 0.95f, juce::jmax (low + 0.02f, high)), 1.0f };
             for (int b = 0; b < 3; ++b)
             {
@@ -596,7 +659,12 @@ public:
             grid (4, 4);
             const auto t = juce::jlimit (0.02f, 1.0f, param01 (item.param != nullptr ? item.param : "Threshold"));
             const auto soft = param01 ("Type") >= 0.5f;
-            strokeCurve ([t, soft] (float x) { return soft ? t * std::tanh (x / t) : juce::jmin (x, t); }, inner, false);
+            const auto pre = 1.0f + 30.0f * param01 ("Pre amp") * param01 ("Pre amp");
+            const auto post = 0.25f + 0.75f * param01 ("Post gain");
+            strokeCurve ([t, soft, pre, post] (float x) {
+                const auto u = x * pre;
+                return post * (soft ? t * std::tanh (u / t) : juce::jmin (u, t));
+            }, inner, false);
         }
         else if (id == "room") // nested walls: the room size and the decay
         {
@@ -612,7 +680,26 @@ public:
         }
         else if (id == "eq")
         {
-            drawParametricEqCurve (g, r, fx.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), fx.enabled);
+            paintEq (g, r, fx);
+            return;
+        }
+        else if (id == "eqinfo") // the selected band, or how to use the graph
+        {
+            g.setColour (colour::bg1);
+            g.fillRect (r);
+            g.setFont (font (juce::jmax (9.0f, 11.0f * s)));
+            if (eqSelected >= 0)
+            {
+                g.setColour (peqview::bandColour (eqSelected));
+                g.drawFittedText (peqview::bandText (fx.params, eqSelected), r.reduced (4.0f * s, 0.0f).toNearestInt(), juce::Justification::centredLeft, 2, 0.8f);
+            }
+            else
+            {
+                g.setColour (colour::textSecondary);
+                g.drawFittedText (tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"),
+                                  r.reduced (4.0f * s, 0.0f).toNearestInt(), juce::Justification::centredLeft, 2, 0.8f);
+            }
+            return;
         }
         else if (id == "filter")
         {
@@ -636,8 +723,132 @@ public:
         {
             g.setColour (colour::textDisabled);
             g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
-            g.drawText (caps (tr (item.label)), inner.removeFromTop (12.0f * s), juce::Justification::topLeft);
+            g.drawText (caps (tr (item.label)), inner.withHeight (12.0f * s), juce::Justification::topLeft);
         }
+    }
+
+    // --- the parametric EQ's graph (FL's Parametric EQ 2 arrangement) -----------------------------------
+
+    static constexpr double eqRange = 18.0; // FL's graph spans ±18 dB
+
+    // rows above the graph (octaves, band names), frequencies under it, dB scale at its right
+    juce::Rectangle<float> eqGraph (juce::Rectangle<float> r) const
+    {
+        const auto s = scale();
+        return r.withTrimmedTop (29.0f * s).withTrimmedBottom (16.0f * s).withTrimmedRight (22.0f * s);
+    }
+
+    void paintEq (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        const auto graph = eqGraph (r);
+        g.setFont (font (juce::jmax (7.5f, 9.0f * s), true));
+
+        // octave marks (C1…C9) and the usual band names, on plates like FL's
+        const auto octaveRow = juce::Rectangle<float> (graph.getX(), r.getY() + 1.0f * s, graph.getWidth(), 11.0f * s);
+        for (int o = 1; o <= 9; ++o)
+        {
+            const auto x = peqview::xForHz (graph, 32.703 * std::pow (2.0, o - 1));
+            const auto next = peqview::xForHz (graph, 32.703 * std::pow (2.0, o));
+            const auto plate = juce::Rectangle<float> (x, octaveRow.getY(), juce::jmin (next, graph.getRight()) - x - 1.0f, octaveRow.getHeight());
+            g.setColour (colour::bg2);
+            g.fillRect (plate);
+            g.setColour (colour::textDisabled);
+            g.drawText ("C" + juce::String (o), plate.withTrimmedLeft (2.0f), juce::Justification::centredLeft, false);
+        }
+        struct Range { double lo, hi; const char* name; };
+        static const Range ranges[] = { { 20, 60, TR_NOOP ("Sub") }, { 60, 250, TR_NOOP ("Bass") }, { 250, 500, TR_NOOP ("Low mid") },
+                                        { 500, 2000, TR_NOOP ("Mid") }, { 2000, 4000, TR_NOOP ("High mid") }, { 4000, 6000, TR_NOOP ("Prs") },
+                                        { 6000, 20000, TR_NOOP ("Treble") } };
+        for (const auto& range : ranges)
+        {
+            const auto x0 = peqview::xForHz (graph, range.lo), x1 = peqview::xForHz (graph, range.hi);
+            const auto plate = juce::Rectangle<float> (x0, r.getY() + 15.0f * s, x1 - x0 - 1.0f, 11.0f * s);
+            g.setColour (colour::bg3);
+            g.fillRect (plate);
+            g.setColour (colour::textSecondary);
+            g.drawFittedText (caps (tr (range.name)), plate.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+        }
+
+        drawParametricEqCurve (g, graph, fx.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), fx.enabled, eqSelected, eqRange, false);
+
+        // frequencies under the graph, dB at its right
+        g.setColour (colour::textDisabled);
+        for (auto [hz, text] : { std::pair { 20.0, "20" }, { 50.0, "50" }, { 100.0, "100" }, { 200.0, "200" }, { 500.0, "500" },
+                                 { 1000.0, "1k" }, { 2000.0, "2k" }, { 5000.0, "5k" }, { 10000.0, "10k" } })
+            g.drawText (text, juce::Rectangle<float> (peqview::xForHz (graph, hz) + 2.0f, graph.getBottom() + 2.0f * s, 40.0f * s, 11.0f * s),
+                        juce::Justification::centredLeft, false);
+        for (int db = -18; db <= 18; db += 6)
+            g.drawText ((db > 0 ? "+" : "") + juce::String (db),
+                        juce::Rectangle<float> (graph.getRight() + 1.0f, peqview::yForDb (graph, db, eqRange) - 6.0f * s, 21.0f * s, 12.0f * s),
+                        juce::Justification::centredRight, false);
+
+        // the band handles
+        for (int b = 0; b < peq::bands; ++b)
+        {
+            if (peq::type (fx.params[(std::size_t) peq::param (b, 0)]) == peq::BandType::off)
+                continue;
+            const auto centre = peqview::handlePosition (graph, fx.params, b, eqRange);
+            const auto d = juce::jmax (12.0f, 16.0f * s);
+            const auto h = juce::Rectangle<float> (d, d).withCentre (centre);
+            const auto c = peqview::bandColour (b);
+            if (b == eqSelected)
+            {
+                g.setColour (c.withAlpha (0.25f));
+                g.fillEllipse (h.expanded (4.0f));
+            }
+            g.setColour (colour::bg0.withAlpha (0.7f));
+            g.fillEllipse (h);
+            g.setColour (c.withAlpha (fx.enabled ? 1.0f : 0.4f));
+            g.drawEllipse (h.reduced (1.0f), juce::jmax (1.5f, 2.0f * s));
+            g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
+            g.drawText (juce::String (b + 1), h, juce::Justification::centred);
+        }
+    }
+
+    void setParams (const std::vector<std::pair<int, float>>& changes)
+    {
+        if (current() == nullptr)
+            return;
+        engine.editSong ([t = track, sl = slot, changes] (Song& song) {
+            auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
+            for (auto [p, v] : changes)
+                params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
+        });
+    }
+
+    bool eqMouseDown (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        const auto* fx = current();
+        const auto graph = eqGraph (rectOf (item));
+        const auto band = peqview::bandAt (graph, fx->params, e.position, eqRange);
+        eqSelected = band;
+        repaint();
+        if (band < 0)
+            return true;
+        if (e.mods.isPopupMenu())
+        {
+            peqview::showBandMenu (*this, fx->params, band, [this] (std::vector<std::pair<int, float>> changes) { setParams (changes); });
+            return true;
+        }
+        eqDragOffset = peqview::handlePosition (graph, fx->params, band, eqRange) - e.position;
+        eqDragging = true;
+        return true;
+    }
+
+    void eqMouseDrag (const juce::MouseEvent& e)
+    {
+        const auto* fx = current();
+        if (fx == nullptr || eqSelected < 0 || dragItem < 0)
+            return;
+        const auto graph = eqGraph (rectOf (activeLayout().items[(std::size_t) dragItem]));
+        const auto p = e.position + eqDragOffset;
+        std::vector<std::pair<int, float>> changes { { peq::param (eqSelected, 1), peq::hzValue (peqview::hzForX (graph, p.x)) } };
+        if (peqview::hasGain (fx->params, eqSelected))
+            changes.push_back ({ peq::param (eqSelected, 2), peq::gainValue (peqview::dbForY (graph, p.y, eqRange)) });
+        setParams (changes);
+        ui::showValueTip (*this, juce::Rectangle<int> (6, 6).withCentre (e.getPosition()), peqview::bandText (fx->params, eqSelected));
     }
 
     // --- mouse -----------------------------------------------------------------------------------------
@@ -708,11 +919,37 @@ public:
             return;
         }
 
+        if (item.type == Item::display) // the EQ graph
+        {
+            if (eqMouseDown (e, item) && eqDragging)
+                dragItem = index;
+            return;
+        }
+
         const auto param = paramOf (item);
         if (param < 0)
             return;
 
         const auto spec = specFor (item);
+
+        if (item.type == Item::menu && ! ui::isResetClick (e))
+        {
+            if (kind == EffectKind::parametricEq && item.colour >= 0)
+            {
+                eqSelected = item.colour;
+                repaint();
+                peqview::showBandMenu (*this, current()->params, item.colour, [this] (std::vector<std::pair<int, float>> changes) { setParams (changes); });
+                return;
+            }
+            juce::PopupMenu menu;
+            const auto labels = plugui::optionLabels (item);
+            const auto chosen = plugui::optionAt (item, valueOf (param));
+            for (int o = 0; o < (int) labels.size(); ++o)
+                menu.addItem (tr (juce::String::fromUTF8 (labels[(std::size_t) o].c_str())), true, o == chosen,
+                              [this, param, v = plugui::optionValue (item, o)] { setValue (param, v); });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
+            return;
+        }
 
         if (e.mods.isPopupMenu())
         {
@@ -755,6 +992,7 @@ public:
             case Item::vslider:
             case Item::knob:
             case Item::value:
+            case Item::menu:
             case Item::section:
             case Item::label:
             case Item::display:
@@ -769,6 +1007,11 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (eqDragging)
+        {
+            eqMouseDrag (e);
+            return;
+        }
         if (dragItem < 0 || ! drag.isActive())
             return;
         const auto& item = activeLayout().items[(std::size_t) dragItem];
@@ -788,6 +1031,7 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        eqDragging = false;
         if (dragItem >= 0)
         {
             drag.end();
@@ -803,7 +1047,14 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
-        if (item.type == Item::radio || item.type == Item::tabs || item.type == Item::toggle || paramOf (item) < 0)
+        if (item.type == Item::display) // EQ graph: the band under the mouse back to 0 dB
+        {
+            if (const auto* fx = current(); fx != nullptr)
+                if (const auto b = peqview::bandAt (eqGraph (rectOf (item)), fx->params, e.position, eqRange); b >= 0)
+                    setParams ({ { peq::param (b, 2), 0.5f } });
+            return;
+        }
+        if (item.type == Item::radio || item.type == Item::tabs || item.type == Item::toggle || item.type == Item::menu || paramOf (item) < 0)
             return;
         const auto spec = specFor (item);
         setValue (paramOf (item), (float) spec.defaultValue);
@@ -815,6 +1066,23 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (item.type == Item::display) // EQ graph: Q / bandwidth of the band under the mouse (or the selected one)
+        {
+            const auto* fx = current();
+            if (fx == nullptr)
+                return;
+            auto b = peqview::bandAt (eqGraph (rectOf (item)), fx->params, e.position, eqRange);
+            if (b < 0)
+                b = eqSelected;
+            if (b < 0)
+                return;
+            eqSelected = b;
+            const auto q = fx->params[(std::size_t) peq::param (b, 3)];
+            // wheel up = narrower; FL's width grows the other way
+            const auto step = peq::flLaw (fx->params) ? -wheel.deltaY * 0.15f : wheel.deltaY * 0.15f;
+            setParams ({ { peq::param (b, 3), q + step } });
+            return;
+        }
         const auto param = paramOf (item);
         if (param < 0)
             return;
@@ -848,6 +1116,8 @@ public:
         if (index < 0)
             return {};
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (item.type == Item::display)
+            return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))
             return { tr ("Page: switch the controls shown"), {}, false, false };
         const auto spec = specFor (item);
@@ -945,24 +1215,16 @@ public:
             });
         });
         // switches that FL keeps out of the panel (in its own menus): on / off here
+        if (! activeLayout().menuSwitches.empty())
         {
-            const auto& info = effectInfo (kind);
-            std::vector<bool> placed (info.params.size(), false);
-            for (const auto& item : activeLayout().items)
-                if (const auto p = paramOf (item); p >= 0 && p < (int) placed.size())
-                    placed[(std::size_t) p] = true;
-            bool first = true;
-            for (int p = 0; *activeLayout().fl != 0 && p < (int) placed.size(); ++p)
-                if (! placed[(std::size_t) p])
+            menu.addSeparator();
+            for (const auto* name : activeLayout().menuSwitches)
+                if (const auto p = plugui::paramIndex (kind, name); p >= 0)
                 {
-                    if (first)
-                        menu.addSeparator();
-                    first = false;
                     const auto on = valueOf (p) >= 0.5f;
-                    menu.addItem (utf8 (info.params[(std::size_t) p].name), true, on, [this, p, on] { setValue (p, on ? 0.0f : 1.0f); });
+                    menu.addItem (utf8 (name), true, on, [this, p, on] { setValue (p, on ? 0.0f : 1.0f); });
                 }
-            if (! first)
-                menu.addSeparator();
+            menu.addSeparator();
         }
         const auto* fx = current();
         menu.addItem (tr ("Bypass"), true, fx != nullptr && ! fx->enabled, [this] {
@@ -985,6 +1247,9 @@ private:
     int hoverItem = -1, hoverHeader = 0, dragItem = -1;
     ui::ValueDrag drag;
     juce::String presetName;
+    int eqSelected = -1;
+    bool eqDragging = false;
+    juce::Point<float> eqDragOffset;
 };
 
 // --- the window ------------------------------------------------------------------------------------
