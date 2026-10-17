@@ -55,25 +55,31 @@ Zero latency 0; natural phase 320 samples at 48 kHz (analog magnitude and phase)
   > 0.05 dB) and cross-faded over one convolution block.
 - Solo: the band's region alone (the detector filter on the input), delayed by the mode's latency.
 
-## 4. Facet EQ editor (src/ui/FacetEqEditor.*) — own design
-Opened from the mixer slot (double-click / "Open Facet EQ" with a curve thumbnail in the insert panel), resizable.
-- Header: bypass LED, name, **phase mode** (Zero latency / Natural phase / Linear phase segmented, latency read-out),
-  analyser mode (off / pre / post / pre + post, click cycles), dynamics **detector** (EQ input / sidechain, with the
-  "Sidechain from" track list), gain scale and output (drag, wheel, right-click = type / automation / MIDI link).
-- Graph (10 Hz – 30 kHz, ±12/24/30/6 dB — click the dB scale): the live spectrum of the slot's input (grey) and
-  output (red) behind the curves (8192-point FFT of the analyser tap, max per column, 4.5 dB/oct display tilt, fast
-  rise / 45 dB/s fall), each band's own curve in its colour (selected band filled), the dynamic span of dynamic bands
-  (static ↔ static + range, shaded) with the live position, and the sum in white with a red glow.
-- Nodes: drag = frequency + gain (Ctrl fine, Shift frequency only, Alt gain only), wheel = Q, double-click on the
-  graph = new band (bell at the clicked gain; cuts at the extremes), double-click on a node or Delete = remove,
-  right-click = shapes, slope, dynamic range presets, solo, reset gain, remove; Alt-click = gain 0; the diamond under a
-  dynamic node drags the range; S = solo.
-- Bottom strip: band chips 1–8 (click an unused one to switch it on), shape and slope menus, Remove / Solo, FREQ,
-  GAIN, Q knobs, "Dynamic" switch with RANGE and THRESHOLD knobs, global ATTACK / RELEASE.
-- Solo is a listening aid: it is cleared (not undoable) when the editor closes.
-- Analyser tap: `ProcessTimes::analyzer` — the editor in use claims the slot key, the audio thread writes the slot's
-  input and output (mono mid) into two 16384-sample rings. Live dynamic gains: `ProcessTimes::effectMeters`
-  (meterOutputs raised from 2 to 8; published for the mixing suite, Facet EQ and LYNX Tune).
+## 4. Facet EQ editor (src/ui/FacetEqEditor.*) — own drawing, the reference's ergonomics
+Reference study (user request, UI rule): the official Pro-Q 4 trial was opened in a small VST3 GUI host
+(tmp/r103/host/proqview.cpp, a copy of tools/fxmeasure with a `show` command that plays a test loop through the
+plugin while its editor is on screen) and screenshotted in several states (default, bands added, selected band, hover
+read-out, right-click menus, dynamic band, analyser, bottom bar); shots in tmp/facet103/ref (not in git). Observed
+layout logic, reproduced in LYNX's own colours, fonts and knobs (no graphics, logos or trade dress copied):
+- the whole window is the graph: curves over the pre / post analyser, gain labels and analyser dBFS labels in two
+  columns on the right, a gain-range button at the top right (LYNX: 3 / 6 / 12 / 30 dB), frequency labels along the
+  bottom or a piano-key scale (toggle at the bottom left);
+- nodes coloured per band, the sum as one strong curve (LYNX: white with a red glow), each band's own curve faint;
+  dynamic bands show their range as a second curve with a handle (LYNX: shaded span + square handle);
+- hovering a node shows a small read-out (frequency, gain, Q) with solo and remove buttons;
+- selecting a band opens a floating panel over the bottom of the graph: shape + slope, FREQ, a large GAIN, the dynamic
+  controls, Q, previous / next band, close; clicking the empty graph closes it;
+- double-click on the graph = new band; drag = frequency + gain, Shift = one direction, Ctrl = fine; wheel = Q;
+  Alt-click = delete; right-click on a node = band menu (shape, slope, dynamic, solo, invert gain, delete), on the
+  graph = all-band menu (invert gains, remove all);
+- the bottom bar holds the global settings: processing mode (with latency), analyser mode, detector / sidechain,
+  gain scale, output.
+Not reproduced: spectrum grab, mid/side placement, per-band enable, band copy / paste, preset bar, level meters.
+Analyser tap: `ProcessTimes::analyzer` — the editor in use claims the slot key, the audio thread writes the slot's
+input and output (mono mid) into two 16384-sample rings (8192-point FFT, max per column, 4.5 dB/oct display tilt).
+Live dynamic gains: `ProcessTimes::effectMeters` (meterOutputs raised from 2 to 8; published for the mixing suite,
+Facet EQ and LYNX Tune). Solo is a listening aid, cleared (not undoable) when the editor closes. The mixer insert
+panel shows "Open Facet EQ" and a curve thumbnail; "Sidechain from" is in the slot menu.
 
 ## 5. LYNX Tune live pitch display
 A "LIVE PITCH" section on top of LYNX Tune's page (layout +170 px): the detected note (large), cents and Hz; the target

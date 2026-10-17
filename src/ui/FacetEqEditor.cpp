@@ -37,6 +37,7 @@ juce::Colour bandColour (int band)
 const char* const shapeNames[] = { TR_NOOP ("Off"), TR_NOOP ("Bell"), TR_NOOP ("Low shelf"), TR_NOOP ("High shelf"), TR_NOOP ("Low cut"),
                                    TR_NOOP ("High cut"), TR_NOOP ("Notch"), TR_NOOP ("Band pass"), TR_NOOP ("Tilt shelf") };
 const char* const phaseNames[] = { TR_NOOP ("Zero latency"), TR_NOOP ("Natural phase"), TR_NOOP ("Linear phase") };
+const char* const analyzerShort[] = { TR_NOOP ("Off"), TR_NOOP ("Pre"), TR_NOOP ("Post"), TR_NOOP ("Pre + Post") };
 const char* const analyzerNames[] = { TR_NOOP ("Analyzer off"), TR_NOOP ("Analyzer: pre"), TR_NOOP ("Analyzer: post"), TR_NOOP ("Analyzer: pre + post") };
 
 juce::String noteName (double hz)
@@ -76,7 +77,12 @@ public:
         engine.addChangeListener (this);
         setWantsKeyboardFocus (true);
         setSize (960, 560);
-        if (demo) updateSpectrum();
+        if (demo)
+        {
+            for (int b = bands; --b >= 0;) // show a dynamic band, if any
+                if (current() != nullptr && isDynamic (current()->params, b)) { selected = b; break; }
+            updateSpectrum();
+        }
         claimTap();
         startTimerHz (30);
     }
@@ -104,10 +110,27 @@ public:
 
     // --- geometry ------------------------------------------------------------------------------------
 
-    juce::Rectangle<float> headerArea() const { return { 0.0f, 0.0f, (float) getWidth(), 38.0f }; }
-    juce::Rectangle<float> panelArea() const { return { 0.0f, (float) getHeight() - 126.0f, (float) getWidth(), 126.0f }; }
-    juce::Rectangle<float> graphArea() const { return { 10.0f, 46.0f, (float) getWidth() - 20.0f, panelArea().getY() - 54.0f }; }
-    juce::Rectangle<float> plotArea() const { return graphArea().reduced (1.0f).withTrimmedRight (34.0f).withTrimmedBottom (16.0f); }
+    // the whole window is the graph (curves over the analyser); a slim title bar on top, the global bar at the bottom,
+    // and the selected band's controls float over the bottom of the graph
+    juce::Rectangle<float> headerArea() const { return { 0.0f, 0.0f, (float) getWidth(), 30.0f }; }
+    juce::Rectangle<float> barArea() const { return { 0.0f, (float) getHeight() - 30.0f, (float) getWidth(), 30.0f }; }
+    juce::Rectangle<float> graphArea() const { return { 0.0f, 30.0f, (float) getWidth(), barArea().getY() - 30.0f }; }
+    juce::Rectangle<float> plotArea() const { return graphArea().withTrimmedRight (64.0f).withTrimmedBottom (20.0f).withTrimmedTop (6.0f); }
+    juce::Rectangle<float> panelArea() const
+    {
+        const auto w = hasGain (bandShape (selected)) ? 690.0f : 368.0f;
+        constexpr float h = 118.0f;
+        return { juce::jmax (4.0f, plotArea().getCentreX() - w / 2.0f), plotArea().getBottom() - h - 4.0f, w, h };
+    }
+    bool panelShown() const { return bandOn (selected); }
+    // the small read-out box next to a hovered node (frequency, gain, Q, solo, remove)
+    juce::Rectangle<float> tipArea (int b) const
+    {
+        const auto n = nodePosition (b);
+        auto r = juce::Rectangle<float> (n.x - 62.0f, n.y - 74.0f, 124.0f, 58.0f);
+        if (r.getY() < plotArea().getY()) r.setY (n.y + 16.0f);
+        return r.constrainedWithin (plotArea());
+    }
 
     float xForHz (double f) const
     {
@@ -194,71 +217,70 @@ public:
 
     // --- controls of the bottom strip and the header -------------------------------------------------
 
-    enum class Ctl { none, chip, shapeMenu, freq, gain, q, slopeMenu, range, threshold, solo, dynamic, remove, attack, release,
-                     phase, analyzer, detector, output, scale, scaleDb };
+    enum class Ctl { none, shapeMenu, freq, gain, q, slopeMenu, range, threshold, solo, dynamic, remove, attack, release,
+                     phase, analyzer, detector, output, scale, scaleDb, prevBand, nextBand, close, piano, tipSolo, tipRemove };
     struct Control { Ctl type; juce::Rectangle<float> r; int param = -1; int index = 0; };
 
     std::vector<Control> controls() const
     {
         std::vector<Control> out;
-        const auto h = headerArea();
-        // header: phase mode (segmented), analyser, detector, output and gain scale on the right
-        auto x = 150.0f;
-        for (int m = 0; m < phaseCount; ++m)
-        {
-            out.push_back ({ Ctl::phase, { x, h.getCentreY() - 12.0f, 96.0f, 24.0f }, phaseParam, m });
-            x += 97.0f;
-        }
-        x += 8.0f;
-        out.push_back ({ Ctl::analyzer, { x, h.getCentreY() - 12.0f, 150.0f, 24.0f }, analyzerParam });
-        x += 156.0f;
-        out.push_back ({ Ctl::detector, { x, h.getCentreY() - 12.0f, 130.0f, 24.0f }, detectorParam });
-        auto right = h.getRight() - 10.0f;
-        out.push_back ({ Ctl::output, { right - 92.0f, h.getCentreY() - 12.0f, 92.0f, 24.0f }, outputParam });
-        right -= 98.0f;
-        out.push_back ({ Ctl::scale, { right - 84.0f, h.getCentreY() - 12.0f, 84.0f, 24.0f }, scaleParam });
-        // the graph's dB scale (click: ±6 / 12 / 24 / 30)
-        const auto g = graphArea();
-        out.push_back ({ Ctl::scaleDb, { g.getRight() - 34.0f, g.getY(), 34.0f, g.getHeight() - 16.0f } });
+        // the bottom bar: piano / frequency scale, processing mode, analyser, detector … gain scale and output on the right
+        const auto bar = barArea();
+        const auto cy = bar.getCentreY();
+        out.push_back ({ Ctl::piano, { 8.0f, cy - 10.0f, 26.0f, 20.0f } });
+        out.push_back ({ Ctl::phase, { 44.0f, cy - 11.0f, 150.0f, 22.0f }, phaseParam });
+        out.push_back ({ Ctl::analyzer, { 202.0f, cy - 11.0f, 170.0f, 22.0f }, analyzerParam });
+        out.push_back ({ Ctl::detector, { 380.0f, cy - 11.0f, 150.0f, 22.0f }, detectorParam });
+        out.push_back ({ Ctl::output, { bar.getRight() - 100.0f, cy - 11.0f, 92.0f, 22.0f }, outputParam });
+        out.push_back ({ Ctl::scale, { bar.getRight() - 190.0f, cy - 11.0f, 84.0f, 22.0f }, scaleParam });
+        // the graph's dB range (top right: ±3 / 6 / 12 / 30)
+        const auto plot = plotArea();
+        out.push_back ({ Ctl::scaleDb, { plot.getRight() + 6.0f, plot.getY() + 2.0f, 50.0f, 18.0f } });
 
-        // bottom strip
-        const auto p = panelArea().reduced (12.0f, 10.0f);
-        for (int b = 0; b < bands; ++b)
-            out.push_back ({ Ctl::chip, { p.getX() + (float) (b % 4) * 30.0f, p.getY() + 4.0f + (float) (b / 4) * 30.0f, 26.0f, 26.0f }, -1, b });
-        if (selected >= 0 && bandOn (selected))
+        // the hovered node's read-out: solo and remove
+        if (tipBand >= 0 && bandOn (tipBand) && dragging == Drag::none)
         {
+            const auto t = tipArea (tipBand);
+            out.push_back ({ Ctl::tipSolo, { t.getRight() - 42.0f, t.getY() + 4.0f, 18.0f, 18.0f }, -1, tipBand });
+            out.push_back ({ Ctl::tipRemove, { t.getRight() - 22.0f, t.getY() + 4.0f, 18.0f, 18.0f }, -1, tipBand });
+        }
+
+        // the floating band panel: shape | FREQ | GAIN | dynamics | Q | band navigation, solo, remove
+        if (panelShown())
+        {
+            const auto p = panelArea();
             const auto b = selected;
-            auto cx = p.getX() + 134.0f;
-            out.push_back ({ Ctl::shapeMenu, { cx, p.getY() + 4.0f, 104.0f, 24.0f }, param (b, 0) });
             const auto sh = bandShape (b);
+            const auto y = p.getY();
+            auto x = p.getX();
+            out.push_back ({ Ctl::shapeMenu, { x + 12.0f, y + 30.0f, 108.0f, 26.0f }, param (b, 0) });
             if (sh == Shape::lowCut || sh == Shape::highCut || sh == Shape::lowShelf || sh == Shape::highShelf || sh == Shape::tiltShelf)
-                out.push_back ({ Ctl::slopeMenu, { cx, p.getY() + 34.0f, 104.0f, 24.0f }, param (b, 4) });
-            out.push_back ({ Ctl::remove, { cx, p.getY() + 64.0f, 50.0f, 24.0f } });
-            out.push_back ({ Ctl::solo, { cx + 54.0f, p.getY() + 64.0f, 50.0f, 24.0f }, soloParam });
-            cx += 118.0f;
-            const auto knob = [&] (Ctl type, int prm) {
-                out.push_back ({ type, { cx, p.getY(), 66.0f, p.getHeight() }, prm });
-                cx += 70.0f;
-            };
-            knob (Ctl::freq, param (b, 1));
-            if (hasGain (sh)) knob (Ctl::gain, param (b, 2));
-            knob (Ctl::q, param (b, 3));
+                out.push_back ({ Ctl::slopeMenu, { x + 12.0f, y + 62.0f, 108.0f, 22.0f }, param (b, 4) });
+            x += 126.0f;
+            out.push_back ({ Ctl::freq, { x, y + 8.0f, 70.0f, 104.0f }, param (b, 1) });
+            x += 72.0f;
             if (hasGain (sh))
             {
-                cx += 14.0f;
-                out.push_back ({ Ctl::dynamic, { cx, p.getY() + 4.0f, 84.0f, 24.0f }, rangeParam0 + b });
-                cx += 92.0f;
+                out.push_back ({ Ctl::gain, { x, y + 2.0f, 96.0f, 112.0f }, param (b, 2) });
+                x += 104.0f;
+                out.push_back ({ Ctl::dynamic, { x + 4.0f, y + 8.0f, 86.0f, 20.0f }, rangeParam0 + b });
                 if (isDynamic (current()->params, b))
                 {
-                    knob (Ctl::range, rangeParam0 + b);
-                    knob (Ctl::threshold, thresholdParam0 + b);
+                    out.push_back ({ Ctl::range, { x - 2.0f, y + 34.0f, 56.0f, 80.0f }, rangeParam0 + b });
+                    out.push_back ({ Ctl::threshold, { x + 54.0f, y + 34.0f, 56.0f, 80.0f }, thresholdParam0 + b });
+                    out.push_back ({ Ctl::attack, { x + 110.0f, y + 34.0f, 52.0f, 80.0f }, attackParam });
+                    out.push_back ({ Ctl::release, { x + 162.0f, y + 34.0f, 52.0f, 80.0f }, releaseParam });
                 }
+                x += 218.0f;
             }
+            out.push_back ({ Ctl::q, { x, y + 8.0f, 70.0f, 104.0f }, param (b, 3) });
+            x += 78.0f;
+            out.push_back ({ Ctl::prevBand, { x + 2.0f, y + 6.0f, 20.0f, 20.0f } });
+            out.push_back ({ Ctl::nextBand, { x + 44.0f, y + 6.0f, 20.0f, 20.0f } });
+            out.push_back ({ Ctl::close, { x + 66.0f, y + 6.0f, 20.0f, 20.0f } });
+            out.push_back ({ Ctl::solo, { x + 4.0f, y + 44.0f, 80.0f, 24.0f }, soloParam });
+            out.push_back ({ Ctl::remove, { x + 4.0f, y + 76.0f, 80.0f, 24.0f } });
         }
-        // global dynamics timing (right)
-        auto rx = p.getRight() - 140.0f;
-        out.push_back ({ Ctl::attack, { rx, p.getY(), 66.0f, p.getHeight() }, attackParam });
-        out.push_back ({ Ctl::release, { rx + 70.0f, p.getY(), 66.0f, p.getHeight() }, releaseParam });
         return out;
     }
 
@@ -272,8 +294,8 @@ public:
 
     juce::Rectangle<float> knobCircle (const Control& c) const
     {
-        const auto d = juce::jmin (c.r.getWidth() - 14.0f, c.r.getHeight() - 44.0f);
-        return { c.r.getCentreX() - d / 2.0f, c.r.getY() + 18.0f, d, d };
+        const auto d = juce::jmin (c.r.getWidth() - 12.0f, c.r.getHeight() - 44.0f);
+        return { c.r.getCentreX() - d / 2.0f, c.r.getY() + 4.0f, d, d };
     }
 
     juce::String trackName() const
@@ -428,6 +450,44 @@ public:
 
     // --- mouse ---------------------------------------------------------------------------------------
 
+    void showPhaseMenu()
+    {
+        juce::PopupMenu menu;
+        const auto m = (int) phase (param01 (phaseParam));
+        for (int k = 0; k < phaseCount; ++k)
+            menu.addItem (tr (phaseNames[k]) + (k == 0 ? juce::String() : "  (" + tr ("latency {0} samples", { juce::String (latencyFor ((Phase) k, displayRate())) }) + ")"),
+                          true, m == k, [this, k] { set ({ { phaseParam, phaseValue ((Phase) k) } }); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    // right-click on the graph away from the nodes: every band at once
+    void showGraphMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addItem (tr ("Invert all gains"), [this] {
+            std::vector<std::pair<int, float>> c;
+            for (int b = 0; b < bands; ++b)
+                if (bandOn (b)) c.push_back ({ param (b, 2), 1.0f - param01 (param (b, 2)) });
+            set (c);
+        });
+        menu.addItem (tr ("Remove all bands"), [this] {
+            std::vector<std::pair<int, float>> c { { soloParam, 0.0f } };
+            for (int b = 0; b < bands; ++b) { c.push_back ({ param (b, 0), 0.0f }); c.push_back ({ rangeParam0 + b, 0.5f }); }
+            set (c);
+            selected = -1;
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void stepBand (int dir)
+    {
+        for (int k = 1; k <= bands; ++k)
+        {
+            const auto b = ((selected < 0 ? 0 : selected) + dir * k + bands * 2) % bands;
+            if (bandOn (b)) { selected = b; repaint(); return; }
+        }
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         const auto p = e.position;
@@ -442,36 +502,29 @@ public:
             {
                 if (type == Ctl::analyzer) { showAnalyzerMenu(); return; }
                 if (type == Ctl::detector) { showDetectorMenu(); return; }
-                if (prm >= 0 && type != Ctl::phase && type != Ctl::solo && type != Ctl::dynamic && type != Ctl::shapeMenu && type != Ctl::slopeMenu)
+                if (type == Ctl::phase) { showPhaseMenu(); return; }
+                if (prm >= 0 && type != Ctl::solo && type != Ctl::dynamic && type != Ctl::shapeMenu && type != Ctl::slopeMenu)
                     ui::showValueMenu (*this, &engine, specFor (prm), param01 (prm), [this, prm] (double v) { set ({ { prm, (float) v } }); });
-                else if (type == Ctl::chip && bandOn (index))
-                    showBandMenu (index);
                 return;
             }
             switch (type)
             {
-                case Ctl::chip:
-                    if (bandOn (index)) selected = index;
-                    else
-                    {
-                        // an unused band: switch it on as a bell at its default frequency
-                        set ({ { param (index, 0), shapeValue (Shape::bell) }, { param (index, 2), 0.5f } });
-                        selected = index;
-                    }
-                    repaint();
-                    return;
                 case Ctl::shapeMenu: showShapeMenu (selected); return;
                 case Ctl::slopeMenu: showSlopeMenu (selected); return;
                 case Ctl::remove: removeBand (selected); return;
                 case Ctl::solo: toggleSolo (selected); return;
+                case Ctl::tipSolo: toggleSolo (index); return;
+                case Ctl::tipRemove: removeBand (index); tipBand = -1; return;
+                case Ctl::prevBand: stepBand (-1); return;
+                case Ctl::nextBand: stepBand (1); return;
+                case Ctl::close: selected = -1; repaint(); return;
+                case Ctl::piano: piano = ! piano; repaint(); return;
                 case Ctl::dynamic: set ({ { prm, isDynamic (current()->params, selected) ? 0.5f : rangeValue (-6.0) } }); return;
-                case Ctl::phase: set ({ { phaseParam, phaseValue ((Phase) index) } }); return;
-                case Ctl::analyzer:
-                    set ({ { analyzerParam, analyzerValue ((Analyzer) (((int) analyzer (param01 (analyzerParam)) + 1) % 4)) } }, false);
-                    return;
+                case Ctl::phase: showPhaseMenu(); return;
+                case Ctl::analyzer: showAnalyzerMenu(); return;
                 case Ctl::detector: showDetectorMenu(); return;
                 case Ctl::scaleDb:
-                    rangeDb = rangeDb >= 30.0 ? 6.0 : rangeDb >= 24.0 ? 30.0 : rangeDb >= 12.0 ? 24.0 : 12.0;
+                    rangeDb = rangeDb >= 30.0 ? 3.0 : rangeDb >= 12.0 ? 30.0 : rangeDb >= 6.0 ? 12.0 : 6.0;
                     repaint();
                     return;
                 default: break;
@@ -491,6 +544,7 @@ public:
             return;
         }
 
+        if (panelShown() && panelArea().contains (p)) return; // the panel's background
         if (! plotArea().contains (p)) return;
         if (const auto rb = rangeHandleAt (p); rb >= 0 && ! e.mods.isPopupMenu())
         {
@@ -503,12 +557,18 @@ public:
         {
             selected = b;
             if (e.mods.isPopupMenu()) { showBandMenu (b); return; }
-            if (ui::isResetClick (e)) { set ({ { param (b, 2), 0.5f } }); return; }
+            if (e.mods.isAltDown()) { removeBand (b); return; } // Alt-click deletes, as in the common EQs
+            if (e.mods.isMiddleButtonDown()) { set ({ { param (b, 2), 0.5f } }); return; }
             dragging = Drag::node;
             dragBand = b;
             dragOffset = nodePosition (b) - p;
+            dragStart = p;
             repaint();
+            return;
         }
+        if (e.mods.isPopupMenu()) { showGraphMenu(); return; }
+        selected = -1; // a click on the empty graph closes the band panel
+        repaint();
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -529,8 +589,11 @@ public:
             const auto fine = e.mods.isCtrlDown() || e.mods.isCommandDown();
             if (fine) // fine: a quarter of the mouse movement
                 p = nodePosition (b) + (p - nodePosition (b)) * 0.25f;
-            if (! e.mods.isAltDown()) c.push_back ({ param (b, 1), hzValue (hzForX (p.x)) });
-            if (hasGain (bandShape (b)) && ! e.mods.isShiftDown())
+            const auto d = e.position - dragStart;
+            const auto lockX = e.mods.isShiftDown() && std::abs (d.y) > std::abs (d.x); // Shift: only the main direction
+            const auto lockY = e.mods.isShiftDown() && ! lockX;
+            if (! lockX) c.push_back ({ param (b, 1), hzValue (hzForX (p.x)) });
+            if (hasGain (bandShape (b)) && ! lockY)
             {
                 const auto scale = juce::jmax (0.01, gainScale (param01 (scaleParam)));
                 c.push_back ({ param (b, 2), gainValue (juce::jlimit (-30.0, 30.0, dbForY (p.y) / scale)) });
@@ -593,6 +656,9 @@ public:
         mouse = e.position;
         const auto h = nodeAt (e.position);
         if (h != hover) hover = h;
+        // the read-out box stays while the mouse is on its node or inside the box (to reach solo / remove)
+        if (h >= 0) tipBand = h;
+        else if (tipBand >= 0 && ! (bandOn (tipBand) && tipArea (tipBand).expanded (4.0f).contains (e.position))) tipBand = -1;
         repaint();
     }
 
@@ -600,6 +666,7 @@ public:
     {
         mouse = { -1.0f, -1.0f };
         hover = -1;
+        tipBand = -1;
         repaint();
     }
 
@@ -635,11 +702,15 @@ public:
         {
             switch (c->type)
             {
-                case Ctl::chip: h.text = tr ("Band {0}: click to select (an unused band is switched on); right-click: band menu", { juce::String (c->index + 1) }); h.hasMenu = true; return h;
-                case Ctl::phase: h.text = tr ("Processing: zero latency (minimum phase), natural phase (the analog curve's phase) or linear phase (no phase shift); the latency is reported to PDC"); return h;
-                case Ctl::analyzer: h.text = tr ("Spectrum analyzer: click to switch off / pre / post / pre + post"); h.hasMenu = true; return h;
+                case Ctl::phase: h.text = tr ("Processing: zero latency (minimum phase), natural phase (the analog curve's phase) or linear phase (no phase shift); the latency is reported to PDC"); h.hasMenu = true; return h;
+                case Ctl::analyzer: h.text = tr ("Spectrum analyzer: off, pre, post or pre + post"); h.hasMenu = true; return h;
+                case Ctl::piano: h.text = tr ("Frequency scale: numbers or a piano keyboard"); return h;
+                case Ctl::prevBand: case Ctl::nextBand: h.text = tr ("Previous / next band"); return h;
+                case Ctl::close: h.text = tr ("Close the band panel (click on the empty graph does the same)"); return h;
+                case Ctl::tipSolo: h.text = tr ("Solo: hear only this band's region (S)"); return h;
+                case Ctl::tipRemove: h.text = tr ("Remove the band (Delete)"); return h;
                 case Ctl::detector: h.text = tr ("What the dynamic bands listen to: the EQ's input or a sidechain track"); h.hasMenu = true; return h;
-                case Ctl::scaleDb: h.text = tr ("Graph scale: click to switch between 12, 24, 30 and 6 dB"); return h;
+                case Ctl::scaleDb: h.text = tr ("Graph scale: click to switch between 3, 6, 12 and 30 dB"); return h;
                 case Ctl::remove: h.text = tr ("Remove the band (Delete)"); return h;
                 case Ctl::solo: h.text = tr ("Solo: hear only this band's region (S)"); return h;
                 case Ctl::dynamic: h.text = tr ("Dynamic EQ: the band's gain moves by up to its range when its region goes over the threshold"); return h;
@@ -655,7 +726,7 @@ public:
         {
             if (const auto b = nodeAt (p); b >= 0)
                 h.text = tr ("Band {0}", { juce::String (b + 1) }) + ": " + bandSummary (b) + " - "
-                         + tr ("drag = frequency and gain (Ctrl fine, Shift frequency only, Alt gain only); wheel = Q; double-click = remove; right-click = menu");
+                         + tr ("drag = frequency and gain (Ctrl fine, Shift one direction only); wheel = Q; Alt-click or double-click = remove; right-click = menu");
             else if (rangeHandleAt (p) >= 0)
                 h.text = tr ("Dynamic range: drag up or down");
             else
@@ -670,7 +741,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
-        g.fillAll (colour::bg1);
+        g.fillAll (colour::bg0);
         const auto* fx = current();
         if (fx == nullptr)
         {
@@ -680,61 +751,86 @@ public:
             return;
         }
         auto all = controls();
-        paintHeader (g, *fx, all);
         paintGraph (g, *fx);
-        paintPanel (g, *fx, all);
+        paintHeader (g, *fx);
+        paintBar (g, *fx, all);
+        if (panelShown()) paintPanel (g, *fx, all);
+        if (tipBand >= 0 && bandOn (tipBand) && dragging == Drag::none) paintTip (g, *fx, tipBand);
     }
 
-    void paintHeader (juce::Graphics& g, const EffectSlot& fx, const std::vector<Control>& all)
+    void paintHeader (juce::Graphics& g, const EffectSlot& fx)
     {
         using namespace theme;
         const auto h = headerArea();
-        g.setColour (colour::bg3);
+        g.setColour (colour::bg2);
         g.fillRect (h);
         g.setColour (colour::border);
         g.drawHorizontalLine ((int) h.getBottom() - 1, 0.0f, h.getRight());
         g.setColour (fx.enabled ? colour::ledOn : colour::ledOff);
-        g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ 16.0f, h.getCentreY() }));
+        g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ 14.0f, h.getCentreY() }));
         g.setColour (colour::textPrimary);
         g.setFont (font (type::title, true));
-        g.drawText ("Facet EQ", juce::Rectangle<float> (28.0f, 0.0f, 90.0f, h.getHeight()), juce::Justification::centredLeft);
+        g.drawText ("Facet EQ", juce::Rectangle<float> (26.0f, 0.0f, 90.0f, h.getHeight()), juce::Justification::centredLeft);
         g.setColour (colour::accent);
-        g.fillRect (juce::Rectangle<float> (28.0f, h.getBottom() - 4.0f, 70.0f, 2.0f));
+        g.fillRect (juce::Rectangle<float> (26.0f, h.getBottom() - 3.0f, 72.0f, 2.0f));
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::small));
+        g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (120.0f, 0.0f, 300.0f, h.getHeight()),
+                    juce::Justification::centredLeft, true);
+        // the hint for the graph's gestures, on the right of the title bar
+        g.setColour (colour::textDisabled);
+        g.setFont (font (type::caption));
+        g.drawText (tr ("Double-click: new band  -  drag: frequency / gain  -  wheel: Q  -  right-click: menu"),
+                    h.withTrimmedLeft (420.0f).withTrimmedRight (12.0f), juce::Justification::centredRight, true);
+    }
 
-        const auto mode = (int) phase (param01 (phaseParam));
+    void paintBar (juce::Graphics& g, const EffectSlot& fx, const std::vector<Control>& all)
+    {
+        using namespace theme;
+        const auto bar = barArea();
+        g.setColour (colour::bg2);
+        g.fillRect (bar);
+        g.setColour (colour::border);
+        g.drawHorizontalLine ((int) bar.getY(), 0.0f, bar.getRight());
         for (const auto& c : all)
         {
-            if (c.type == Ctl::phase)
+            const auto hover = c.r.contains (mouse);
+            if (c.type == Ctl::piano)
             {
-                const auto on = c.index == mode;
-                g.setColour (on ? colour::accentMuted : colour::bg4);
-                g.fillRoundedRectangle (c.r, radius::md);
-                g.setColour (on ? colour::accent : colour::borderStrong);
-                g.drawRoundedRectangle (c.r.reduced (0.5f), radius::md, 1.0f);
-                g.setColour (on ? colour::textPrimary : colour::textSecondary);
-                g.setFont (font (type::small, on));
-                g.drawText (tr (phaseNames[c.index]), c.r, juce::Justification::centred);
+                g.setColour (piano ? colour::accent : (hover ? colour::textPrimary : colour::textSecondary));
+                const auto k = c.r.reduced (4.0f, 4.0f);
+                for (int i = 0; i < 4; ++i)
+                    g.drawRect (juce::Rectangle<float> (k.getX() + k.getWidth() * (float) i / 4.0f, k.getY(), k.getWidth() / 4.0f, k.getHeight()), 1.0f);
+                for (int i = 1; i < 4; ++i)
+                    g.fillRect (juce::Rectangle<float> (k.getX() + k.getWidth() * (float) i / 4.0f - 1.5f, k.getY(), 3.0f, k.getHeight() * 0.55f));
             }
-            else if (c.type == Ctl::analyzer || c.type == Ctl::detector)
+            else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector)
             {
-                g.setColour (colour::bg4);
-                g.fillRoundedRectangle (c.r, radius::md);
-                g.setColour (colour::textSecondary);
-                g.setFont (font (type::small));
-                juce::String text;
-                if (c.type == Ctl::analyzer) text = tr (analyzerNames[(int) analyzer (param01 (analyzerParam))]);
+                juce::String caption, value;
+                if (c.type == Ctl::phase) { caption = tr ("Processing:"); value = tr (phaseNames[(int) phase (param01 (phaseParam))]); }
+                else if (c.type == Ctl::analyzer) { caption = tr ("Analyzer:"); value = tr (analyzerShort[(int) analyzer (param01 (analyzerParam))]); }
                 else
                 {
+                    caption = tr ("Detector:");
                     const auto side = sidechainDetector (param01 (detectorParam));
-                    text = side ? tr ("Detector: sidechain") : tr ("Detector: input");
-                    if (side && fx.sidechain > 0 && fx.sidechain < (int) engine.getSong().mixer.size())
-                        text << " " << juce::String (fx.sidechain);
+                    value = side ? tr ("Sidechain") : tr ("Input");
+                    if (side && fx.sidechain > 0 && fx.sidechain < (int) engine.getSong().mixer.size()) value << " " << juce::String (fx.sidechain);
                 }
-                g.drawText (text, c.r.reduced (8.0f, 0.0f), juce::Justification::centredLeft, true);
+                if (hover)
+                {
+                    g.setColour (colour::bg4);
+                    g.fillRoundedRectangle (c.r, radius::md);
+                }
+                g.setFont (font (type::small));
+                g.setColour (colour::textDisabled);
+                const auto cw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), caption) + 6.0f;
+                g.drawText (caption, c.r.withWidth (cw).translated (6.0f, 0.0f), juce::Justification::centredLeft);
+                g.setColour (colour::textPrimary);
+                g.drawText (value + juce::String::fromUTF8 (" \xe2\x96\xbe"), c.r.withTrimmedLeft (cw + 6.0f), juce::Justification::centredLeft, true);
             }
             else if (c.type == Ctl::output || c.type == Ctl::scale)
             {
-                g.setColour (colour::bg0);
+                g.setColour (hover ? colour::bg4 : colour::bg1);
                 g.fillRoundedRectangle (c.r, radius::md);
                 g.setColour (colour::textDisabled);
                 g.setFont (font (type::caption));
@@ -744,13 +840,49 @@ public:
                 g.drawText (valueText (c.param), c.r.reduced (6.0f, 0.0f), juce::Justification::centredRight);
             }
         }
-        // latency read-out of the mode (PDC compensates it)
-        const auto lat = latencyFor ((Phase) mode, displayRate());
-        g.setColour (colour::textDisabled);
-        g.setFont (font (type::caption));
+        // latency of the processing mode (PDC compensates it)
+        const auto lat = latencyFor (phase (param01 (phaseParam)), displayRate());
         if (lat > 0)
-            g.drawText (tr ("latency {0} samples", { juce::String (lat) }), juce::Rectangle<float> (150.0f, h.getBottom() - 10.0f, 3.0f * 97.0f, 10.0f),
-                        juce::Justification::centredRight);
+        {
+            g.setColour (colour::textDisabled);
+            g.setFont (font (type::caption));
+            g.drawText (tr ("latency {0} samples", { juce::String (lat) }), juce::Rectangle<float> (540.0f, bar.getY(), 160.0f, bar.getHeight()),
+                        juce::Justification::centredLeft, true);
+        }
+    }
+
+    // the read-out box of a hovered node
+    void paintTip (juce::Graphics& g, const EffectSlot& fx, int b)
+    {
+        using namespace theme;
+        const auto r = tipArea (b);
+        g.setColour (colour::bg3.withAlpha (0.94f));
+        g.fillRoundedRectangle (r, radius::lg);
+        g.setColour (bandColour (b).withAlpha (0.8f));
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::lg, 1.0f);
+        g.setFont (font (type::small, true));
+        g.setColour (colour::textPrimary);
+        auto t = r.reduced (8.0f, 4.0f);
+        g.drawText (hzText (hz (param01 (param (b, 1)))), t.removeFromTop (17.0f).withTrimmedRight (40.0f), juce::Justification::centredLeft);
+        g.setFont (font (type::small));
+        g.drawText (hasGain (bandShape (b)) ? valueText (param (b, 2)) : tr (shapeNames[(int) bandShape (b)]), t.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.setColour (colour::textSecondary);
+        g.drawText ("Q " + valueText (param (b, 3)), t.removeFromTop (16.0f), juce::Justification::centredLeft);
+        // solo (headphones) and remove (×)
+        const auto solo = juce::Rectangle<float> (r.getRight() - 42.0f, r.getY() + 4.0f, 18.0f, 18.0f);
+        const auto rm = juce::Rectangle<float> (r.getRight() - 22.0f, r.getY() + 4.0f, 18.0f, 18.0f);
+        const auto soloOn = soloBand (fx.params[(std::size_t) soloParam]) == b;
+        g.setColour (soloOn ? colour::warning : (solo.contains (mouse) ? colour::textPrimary : colour::textSecondary));
+        juce::Path phones;
+        const auto pc = solo.reduced (3.0f);
+        phones.addCentredArc (pc.getCentreX(), pc.getCentreY() + 1.0f, pc.getWidth() * 0.45f, pc.getHeight() * 0.45f, 0.0f,
+                              -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
+        g.strokePath (phones, juce::PathStrokeType (1.5f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (pc.getX() - 0.5f, pc.getCentreY(), 3.5f, 6.0f), 1.0f);
+        g.fillRoundedRectangle (juce::Rectangle<float> (pc.getRight() - 3.0f, pc.getCentreY(), 3.5f, 6.0f), 1.0f);
+        g.setColour (rm.contains (mouse) ? colour::accent : colour::textSecondary);
+        g.drawLine (rm.getX() + 5.0f, rm.getY() + 5.0f, rm.getRight() - 5.0f, rm.getBottom() - 5.0f, 1.5f);
+        g.drawLine (rm.getRight() - 5.0f, rm.getY() + 5.0f, rm.getX() + 5.0f, rm.getBottom() - 5.0f, 1.5f);
     }
 
     double displayRate() const
@@ -765,31 +897,70 @@ public:
         using namespace theme;
         const auto area = graphArea();
         const auto plot = plotArea();
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (area, radius::lg);
-        g.setColour (colour::border);
-        g.drawRoundedRectangle (area.reduced (0.5f), radius::lg, 1.0f);
+        g.setGradientFill (juce::ColourGradient (colour::bg1, 0.0f, area.getY(), colour::bg0, 0.0f, area.getBottom(), false));
+        g.fillRect (area);
 
-        // grid
+        // grid: frequencies (numbers or a piano keyboard along the bottom)
         g.setFont (font (type::caption));
-        for (double f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
+        for (double f : { 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 2000.0,
+                          3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000.0, 9000.0, 10000.0, 20000.0 })
         {
+            const auto major = f == 20.0 || f == 50.0 || f == 100.0 || f == 200.0 || f == 500.0 || f == 1000.0 || f == 2000.0 || f == 5000.0 || f == 10000.0 || f == 20000.0;
             const auto x = xForHz (f);
-            g.setColour (colour::gridBeat);
+            g.setColour (major ? colour::gridBeat.brighter (0.15f) : colour::gridStep);
             g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
-            g.setColour (colour::textDisabled);
-            g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), juce::Rectangle<float> (x - 20.0f, plot.getBottom() + 2.0f, 40.0f, 12.0f),
-                        juce::Justification::centred);
+            if (major && ! piano)
+            {
+                g.setColour (colour::textDisabled);
+                g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f),
+                            juce::Rectangle<float> (x - 20.0f, plot.getBottom() + 3.0f, 40.0f, 14.0f), juce::Justification::centred);
+            }
         }
-        const auto step = rangeDb <= 6.0 ? 2.0 : rangeDb <= 12.0 ? 3.0 : 6.0;
+        if (piano) // one key per semitone; C labelled
+        {
+            const auto strip = juce::Rectangle<float> (plot.getX(), plot.getBottom() + 2.0f, plot.getWidth(), 16.0f);
+            for (int n = 12; n < 136; ++n)
+            {
+                const auto f0 = 440.0 * std::pow (2.0, (n - 69.5) / 12.0), f1 = 440.0 * std::pow (2.0, (n - 68.5) / 12.0);
+                const auto x0 = xForHz (f0), x1 = xForHz (f1);
+                if (x1 < strip.getX() || x0 > strip.getRight()) continue;
+                const auto pc = n % 12;
+                const auto black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+                g.setColour (black ? colour::keyBlack : colour::keyWhite.withAlpha (0.75f));
+                g.fillRect (juce::Rectangle<float> (x0, strip.getY(), juce::jmax (1.0f, x1 - x0 - 0.5f), strip.getHeight()));
+                if (pc == 0 && x1 - x0 > 2.0f)
+                {
+                    g.setColour (colour::bg0);
+                    g.drawText ("C" + juce::String (n / 12 - 1), juce::Rectangle<float> (x0 - 2.0f, strip.getY(), 30.0f, strip.getHeight()), juce::Justification::centredLeft);
+                }
+            }
+        }
+        // gain lines with their labels (warm), the analyser's dBFS beside them (grey)
+        const auto step = rangeDb <= 3.0 ? 1.0 : rangeDb <= 6.0 ? 2.0 : rangeDb <= 12.0 ? 3.0 : 6.0;
         for (double db = -rangeDb; db <= rangeDb + 0.01; db += step)
         {
             const auto y = yForDb (db);
             g.setColour (std::abs (db) < 0.01 ? colour::gridBar : colour::gridBeat);
             g.drawHorizontalLine ((int) y, plot.getX(), plot.getRight());
-            g.setColour (std::abs (db) < 0.01 ? colour::textSecondary : colour::textDisabled);
-            g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db), juce::Rectangle<float> (plot.getRight() + 2.0f, y - 6.0f, 30.0f, 12.0f),
-                        juce::Justification::centredLeft);
+            g.setColour (std::abs (db) < 0.01 ? colour::textPrimary : colour::accentHover.withAlpha (0.85f));
+            if (y > plot.getY() + 22.0f)
+                g.drawText ((db > 0 ? "+" : "") + juce::String (db, step < 1.5 && std::abs (db - std::round (db)) > 0.01 ? 1 : 0),
+                        juce::Rectangle<float> (plot.getRight() + 4.0f, y - 7.0f, 28.0f, 14.0f), juce::Justification::centredRight);
+        }
+        g.setColour (colour::textDisabled);
+        for (double db = -10.0; db >= specBottom + 5.0; db -= 10.0)
+        {
+            const auto y = yForSpectrum (db);
+            if (y > plot.getY() + 24.0f)
+                g.drawText (juce::String ((int) db), juce::Rectangle<float> (plot.getRight() + 34.0f, y - 7.0f, 28.0f, 14.0f), juce::Justification::centredRight);
+        }
+        {
+            const auto r = juce::Rectangle<float> (plot.getRight() + 6.0f, plot.getY() + 2.0f, 50.0f, 18.0f);
+            g.setColour (r.contains (mouse) ? colour::bg5 : colour::bg4);
+            g.fillRoundedRectangle (r, radius::md);
+            g.setColour (colour::accentHover);
+            g.setFont (font (type::small, true));
+            g.drawText (juce::String ((int) rangeDb) + " dB", r, juce::Justification::centred);
         }
 
         // analyser (behind the curves)
@@ -824,7 +995,7 @@ public:
             if (mode == Analyzer::post || mode == Analyzer::both)
             {
                 const auto p = spectrumPath (specPost, true);
-                g.setGradientFill (juce::ColourGradient (colour::accent.withAlpha (0.20f), 0.0f, plot.getY(), colour::accent.withAlpha (0.02f), 0.0f, plot.getBottom(), false));
+                g.setGradientFill (juce::ColourGradient (colour::accent.withAlpha (0.13f), 0.0f, plot.getY(), colour::accent.withAlpha (0.01f), 0.0f, plot.getBottom(), false));
                 g.fillPath (p);
                 g.setColour (colour::accent.withAlpha (0.55f));
                 g.strokePath (spectrumPath (specPost, false), juce::PathStrokeType (1.0f));
@@ -965,18 +1136,23 @@ public:
         }
     }
 
+    // the selected band's floating panel (over the bottom of the graph)
     void paintPanel (juce::Graphics& g, const EffectSlot& fx, const std::vector<Control>& all)
     {
         using namespace theme;
         const auto panel = panelArea();
-        g.setColour (colour::bg2);
-        g.fillRect (panel);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) panel.getY(), 0.0f, panel.getRight());
+        const auto colourB = bandColour (selected);
+        juce::DropShadow (juce::Colours::black.withAlpha (0.6f), 14, { 0, 4 }).drawForRectangle (g, panel.toNearestInt());
+        g.setColour (colour::bg2.withAlpha (0.97f));
+        g.fillRoundedRectangle (panel, 10.0f);
+        g.setColour (colourB.withAlpha (0.55f));
+        g.drawRoundedRectangle (panel.reduced (0.5f), 10.0f, 1.2f);
+        g.setColour (colourB);
+        g.fillRoundedRectangle (juce::Rectangle<float> (panel.getX() + 14.0f, panel.getY() - 1.0f, 46.0f, 3.0f), 1.5f);
         const auto solo = soloBand (fx.params[(std::size_t) soloParam]);
 
         auto drawButton = [&] (juce::Rectangle<float> r, const juce::String& text, bool on, juce::Colour onColour) {
-            g.setColour (on ? onColour.withAlpha (0.25f) : colour::bg4);
+            g.setColour (on ? onColour.withAlpha (0.25f) : (r.contains (mouse) ? colour::bg5 : colour::bg4));
             g.fillRoundedRectangle (r, radius::md);
             g.setColour (on ? onColour : colour::borderStrong);
             g.drawRoundedRectangle (r.reduced (0.5f), radius::md, 1.0f);
@@ -984,41 +1160,52 @@ public:
             g.setFont (font (type::small, on));
             g.drawText (text, r.reduced (6.0f, 0.0f), juce::Justification::centred, true);
         };
+        auto drawArrow = [&] (juce::Rectangle<float> r, bool left) {
+            juce::Path a;
+            const auto c = r.getCentre();
+            if (left) a.addTriangle (c.x + 3.0f, c.y - 5.0f, c.x + 3.0f, c.y + 5.0f, c.x - 3.0f, c.y);
+            else a.addTriangle (c.x - 3.0f, c.y - 5.0f, c.x - 3.0f, c.y + 5.0f, c.x + 3.0f, c.y);
+            g.setColour (r.contains (mouse) ? colour::textPrimary : colour::textSecondary);
+            g.fillPath (a);
+        };
+
+        // band number and its colour
+        g.setColour (colourB);
+        g.fillEllipse (juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ panel.getX() + 22.0f, panel.getY() + 16.0f }));
+        g.setColour (colour::bg0);
+        g.setFont (font (type::caption, true));
+        g.drawText (juce::String (selected + 1), juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ panel.getX() + 22.0f, panel.getY() + 16.0f }), juce::Justification::centred);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::small));
+        g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (panel.getX() + 36.0f, panel.getY() + 6.0f, 90.0f, 20.0f), juce::Justification::centredLeft);
 
         for (const auto& c : all)
         {
             switch (c.type)
             {
-                case Ctl::chip:
-                {
-                    const auto on = bandOn (c.index);
-                    const auto colour = bandColour (c.index);
-                    g.setColour (on ? colour.withAlpha (c.index == selected ? 1.0f : 0.55f) : colour::bg4);
-                    g.fillRoundedRectangle (c.r, radius::md);
-                    if (c.index == selected)
-                    {
-                        g.setColour (colour::textPrimary);
-                        g.drawRoundedRectangle (c.r.expanded (1.5f), radius::md, 1.5f);
-                    }
-                    g.setColour (on ? colour::bg0 : colour::textDisabled);
-                    g.setFont (font (type::small, true));
-                    g.drawText (juce::String (c.index + 1), c.r, juce::Justification::centred);
-                    if (solo == c.index)
-                    {
-                        g.setColour (colour::warning);
-                        g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (c.r.getTopRight().translated (-4.0f, 4.0f)));
-                    }
-                    break;
-                }
                 case Ctl::shapeMenu:
-                    drawButton (c.r, tr (shapeNames[(int) bandShape (selected)]) + juce::String::fromUTF8 (" \xe2\x96\xbe"), false, colour::accent);
+                    drawButton (c.r, tr (shapeNames[(int) bandShape (selected)]) + juce::String::fromUTF8 (" \xe2\x96\xbe"), true, colourB);
                     break;
                 case Ctl::slopeMenu:
-                    drawButton (c.r, juce::String (slopeDb (param01 (c.param))) + " dB/oct" + juce::String::fromUTF8 (" \xe2\x96\xbe"), false, colour::accent);
+                    drawButton (c.r, juce::String (slopeDb (param01 (c.param))) + " dB/oct" + juce::String::fromUTF8 (" \xe2\x96\xbe"), false, colourB);
                     break;
                 case Ctl::remove: drawButton (c.r, tr ("Remove"), false, colour::accent); break;
                 case Ctl::solo: drawButton (c.r, tr ("Solo"), solo == selected, colour::warning); break;
-                case Ctl::dynamic: drawButton (c.r, tr ("Dynamic"), isDynamic (fx.params, selected), colour::accent); break;
+                case Ctl::dynamic: drawButton (c.r, tr ("Dynamic"), isDynamic (fx.params, selected), colourB); break;
+                case Ctl::prevBand: drawArrow (c.r, true); break;
+                case Ctl::nextBand: drawArrow (c.r, false); break;
+                case Ctl::close:
+                {
+                    g.setColour (c.r.contains (mouse) ? colour::textPrimary : colour::textSecondary);
+                    const auto r = c.r.reduced (5.0f);
+                    g.drawLine (r.getX(), r.getY(), r.getRight(), r.getBottom(), 1.5f);
+                    g.drawLine (r.getRight(), r.getY(), r.getX(), r.getBottom(), 1.5f);
+                    // the band number between the arrows
+                    g.setColour (colour::textPrimary);
+                    g.setFont (font (type::small, true));
+                    g.drawText (juce::String (selected + 1), c.r.translated (-44.0f, 0.0f).withWidth (22.0f), juce::Justification::centred);
+                    break;
+                }
                 case Ctl::freq: case Ctl::gain: case Ctl::q: case Ctl::range: case Ctl::threshold: case Ctl::attack: case Ctl::release:
                 {
                     static const std::map<Ctl, const char*> captions { { Ctl::freq, TR_NOOP ("FREQ") }, { Ctl::gain, TR_NOOP ("GAIN") }, { Ctl::q, "Q" },
@@ -1026,30 +1213,43 @@ public:
                                                                        { Ctl::attack, TR_NOOP ("ATTACK") }, { Ctl::release, TR_NOOP ("RELEASE") } };
                     const auto bipolar = c.type == Ctl::gain || c.type == Ctl::range;
                     const auto active = dragging == Drag::control && dragParam == c.param;
-                    const auto arc = c.type == Ctl::attack || c.type == Ctl::release ? colour::knobArc : bandColour (selected);
+                    const auto global = c.type == Ctl::attack || c.type == Ctl::release;
+                    const auto knob = knobCircle (c);
+                    drawKnob (g, knob, param01 (c.param), bipolar, active ? colour::accent : (global ? colour::knobArc : colourB), c.r.contains (mouse));
+                    if (c.type == Ctl::gain && isDynamic (fx.params, selected))
+                    {
+                        // the dynamic range as an outer arc from the gain, and the live position as a dot
+                        const auto scale = (float) (juce::MathConstants<float>::pi * 1.5f);
+                        const auto start = -juce::MathConstants<float>::pi * 0.75f;
+                        const auto g0 = param01 (param (selected, 2));
+                        const auto g1 = juce::jlimit (0.0f, 1.0f, gainValue (gainDb (g0) + rangeDb_ (selected)));
+                        const auto rr = knob.getWidth() * 0.5f + 4.0f;
+                        juce::Path arc;
+                        arc.addCentredArc (knob.getCentreX(), knob.getCentreY(), rr, rr, 0.0f, start + scale * juce::jmin (g0, g1), start + scale * juce::jmax (g0, g1), true);
+                        g.setColour (colourB.withAlpha (0.8f));
+                        g.strokePath (arc, juce::PathStrokeType (2.0f));
+                        const auto live = juce::jlimit (0.0f, 1.0f, gainValue (gainDb (g0) + liveDynamic (selected)));
+                        const auto ang = start + scale * live;
+                        g.setColour (colour::textPrimary);
+                        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ knob.getCentreX() + rr * std::sin (ang), knob.getCentreY() - rr * std::cos (ang) }));
+                    }
                     g.setColour (colour::textDisabled);
                     g.setFont (font (type::caption, true));
-                    g.drawText (tr (captions.at (c.type)), c.r.withHeight (14.0f), juce::Justification::centred);
-                    drawKnob (g, knobCircle (c), param01 (c.param), bipolar, active ? colour::accent : arc, c.r.contains (mouse));
+                    g.drawText (tr (captions.at (c.type)), c.r.withY (c.r.getBottom() - 34.0f).withHeight (14.0f), juce::Justification::centred);
                     g.setColour (colour::textPrimary);
                     g.setFont (font (type::small));
-                    g.drawText (valueText (c.param), c.r.withTop (c.r.getBottom() - 18.0f), juce::Justification::centred, true);
+                    g.drawText (valueText (c.param), c.r.withTop (c.r.getBottom() - 20.0f), juce::Justification::centred, true);
                     break;
                 }
                 default: break;
             }
         }
-        // captions
-        g.setColour (colour::textDisabled);
-        g.setFont (font (type::caption, true));
-        const auto p = panel.reduced (12.0f, 10.0f);
-        g.drawText (tr ("BANDS"), juce::Rectangle<float> (p.getX(), p.getBottom() - 16.0f, 120.0f, 14.0f), juce::Justification::centredLeft);
-        if (! bandOn (selected))
+        if (hasGain (bandShape (selected)) && ! isDynamic (fx.params, selected))
         {
             g.setColour (colour::textDisabled);
-            g.setFont (font (type::body));
-            g.drawText (tr ("Select a band, or double-click the graph to add one"), juce::Rectangle<float> (p.getX() + 134.0f, p.getY(), 420.0f, p.getHeight()),
-                        juce::Justification::centredLeft);
+            g.setFont (font (type::caption));
+            g.drawFittedText (tr ("Dynamic EQ: the gain follows the level of the band's region (threshold, range)"),
+                              juce::Rectangle<float> (panel.getX() + 306.0f, panel.getY() + 40.0f, 200.0f, 60.0f).toNearestInt(), juce::Justification::centredLeft, 3);
         }
     }
 
@@ -1149,10 +1349,11 @@ private:
     AudioEngine& engine;
     int track, slot;
     bool demo = false;
-    int selected = -1, hover = -1, dragBand = -1, dragParam = -1;
-    double rangeDb = 24.0;
+    int selected = -1, hover = -1, tipBand = -1, dragBand = -1, dragParam = -1;
+    bool piano = false;
+    double rangeDb = 12.0;
     Drag dragging = Drag::none;
-    juce::Point<float> dragOffset, mouse { -1.0f, -1.0f };
+    juce::Point<float> dragOffset, dragStart, mouse { -1.0f, -1.0f };
     juce::Rectangle<float> dragRect;
     ui::ValueDrag valueDrag;
     juce::dsp::FFT fft;
