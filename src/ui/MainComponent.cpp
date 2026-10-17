@@ -26,6 +26,7 @@
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
 #include "ui/EditorTools.h"
+#include "ui/AudioEditor.h"
 #include "ui/ExportDialog.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
@@ -1382,6 +1383,7 @@ void MainComponent::showRecordMenu()
         if (engine.getLastRecordingError().isNotEmpty())
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio input"), engine.getLastRecordingError());
     });
+    menu.addItem (tr ("Record into the audio editor..."), [this] { openAudioEditor (engine); });
     menu.addSeparator();
     menu.addItem (tr ("Open recordings folder"), [] {
         juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
@@ -2482,6 +2484,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { engine.undo(); });
         menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { engine.redo(); });
         menu.addItem (tr ("Undo history...") + shortcutText ("edit.history"), [this] { showHistory(); });
+        menu.addItem (tr ("Audio editor..."), [this] { openAudioEditor (engine); });
         menu.addSeparator();
         menu.addItem (tr ("Quick-add palette...") + shortcutText ("panel.quickAdd"), [this] { showQuickAdd(); });
         menu.addItem (tr ("Search the Browser") + shortcutText ("browser.search"), [this] {

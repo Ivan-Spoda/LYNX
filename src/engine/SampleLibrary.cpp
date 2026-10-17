@@ -317,7 +317,8 @@ void prefetchSample (const SampleData& data, double fromSeconds, double toSecond
 void SampleLibrary::forget (const juce::String& path)
 {
     cache.erase (path);
-    stretchedCache.erase (path);
+    for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
+        it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
 }
 
 std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)

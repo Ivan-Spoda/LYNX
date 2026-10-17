@@ -28,6 +28,7 @@
 #include "ui/ShortcutManager.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/EventEditor.h"
+#include "ui/AudioEditor.h"
 #include "core/EventEdit.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Splash.h"
@@ -1543,6 +1544,42 @@ private:
                 }, false);
                 saveWindow (lynx::makeEventEditor (offline, volume), "-eventeditor.png");
                 offline.editSong ([&] (lynx::Song& s) { s.patterns[(std::size_t) s.currentPattern].events = before; }, false);
+            }
+
+            // round 86: the audio editor with a synthetic drum loop (markers, a region, a loop), waveform and spectrogram,
+            // and its menu items (-audioeditor-menu.txt)
+            {
+                namespace ae = lynx::audioedit;
+                ae::Document d;
+                d.title = "Drum loop";
+                d.audio.sampleRate = 44100.0;
+                const auto frames = (std::size_t) (44100 * 2);
+                d.audio.channels.assign (2, std::vector<float> (frames, 0.0f));
+                std::uint32_t seed = 7;
+                for (int hit = 0; hit < 8; ++hit)
+                {
+                    const auto at = (std::size_t) hit * frames / 8;
+                    const auto kick = hit % 2 == 0;
+                    double phase = 0.0;
+                    for (std::size_t i = 0; i < 12000 && at + i < frames; ++i)
+                    {
+                        seed = seed * 1664525u + 1013904223u;
+                        const auto noise = (float) (seed >> 8) / 16777216.0f - 0.5f;
+                        const auto t = (double) i / 44100.0;
+                        phase += 2.0 * 3.141592653589793 * (kick ? 45.0 + 160.0 * std::exp (-t * 30.0) : 190.0) / 44100.0;
+                        const auto body = (float) std::sin (phase) * (float) std::exp (-t * (kick ? 9.0 : 22.0));
+                        const auto v = kick ? 0.85f * body : 0.35f * body + 0.6f * noise * (float) std::exp (-t * 18.0);
+                        d.audio.channels[0][at + i] += v;
+                        d.audio.channels[1][at + i] += kick ? v : v * 0.8f + 0.1f * noise * (float) std::exp (-t * 30.0);
+                    }
+                }
+                ae::addMarker (d, (std::int64_t) frames / 8, "Snare");
+                ae::addRegion (d, { (std::int64_t) frames / 2, (std::int64_t) frames * 3 / 4 }, "Fill");
+                ae::setLoop (d, { 0, (std::int64_t) frames });
+                auto wave = lynx::makeAudioEditorForSnapshot (offline, d, false);
+                juce::File (prefix + "-audioeditor-menu.txt").replaceWithText (lynx::audioEditorMenuForSnapshot (*wave).joinIntoString ("\n") + "\n");
+                saveWindow (std::move (wave), "-audioeditor.png");
+                saveWindow (lynx::makeAudioEditorForSnapshot (offline, d, true), "-audioeditor-spectrum.png");
             }
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window

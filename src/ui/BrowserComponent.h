@@ -76,6 +76,7 @@ private:
     void openFile (const juce::File& file); // what a double-click does
     void fileSelected (const juce::File& file, bool preview);
     void showFolderMenu (const juce::File& folder);
+    void showFileMenu (const juce::File& file);
     FileTree& activeList() const;
     juce::File previewedFile; // the sample last sent to the preview player
     bool isPreviewPlaying() const;

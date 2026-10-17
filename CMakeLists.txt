@@ -227,6 +227,7 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
+        src/ui/AudioEditor.cpp
         src/ui/ToolWindow.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp
