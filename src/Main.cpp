@@ -1183,7 +1183,7 @@ private:
         quit();
     }
 
-    // LYNX.exe --export project.(flp|lynx) output.(wav|flac|ogg) [--pattern] [--insert N]
+    // LYNX.exe --export project.(flp|lynx) output.(wav|flac|ogg|mp3) [--pattern] [--insert N]
     // Same path as "Export" in the UI: the whole song (or the current pattern) with its tail.
     void runExport (const juce::String& inputPath, const juce::String& outputPath, bool patternOnly, int insert)
     {
@@ -1223,7 +1223,14 @@ private:
                     loader.editSong ([] (lynx::Song& s) { s.automations.clear(); }, false);
 
                 const auto loaded = juce::Time::getMillisecondCounterHiRes();
-                lynx::ExportJob job (insert > 0 ? lynx::makeBounceSong (loader.getSong(), insert) : loader.getSong(), settings, output);
+                // .mp3: the Export window's MP3 (320 kbps); everything else as before
+                auto options = settings.toOptions();
+                if (output.hasFileExtension ("mp3"))
+                {
+                    options.format = lynx::exportopts::Format::mp3;
+                    options.mp3Kbps = 320;
+                }
+                lynx::ExportJob job (insert > 0 ? lynx::makeBounceSong (loader.getSong(), insert) : loader.getSong(), options, output);
                 const auto prepared = juce::Time::getMillisecondCounterHiRes();
                 int lastPercent = -1;
                 ok = job.run ([&lastPercent] (double p) {

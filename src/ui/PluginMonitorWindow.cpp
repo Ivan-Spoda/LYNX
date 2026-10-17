@@ -16,7 +16,7 @@ using namespace settingsui;
 
 juce::String percent (double v)
 {
-    return v < 0.05 ? juce::String ("-") : juce::String (v, v < 10.0 ? 1 : 0) + "%";
+    return v < 0.05 ? juce::String ("-") : v < 10.0 ? juce::String (v, 1) + "%" : juce::String (juce::roundToInt (v)) + "%";
 }
 
 juce::Colour loadColour (double v)
@@ -179,7 +179,7 @@ public:
             startTimerHz (4);
         }
         timerCallback();
-        setSize (640, 380);
+        setSize (720, 380);
     }
 
     ~PluginMonitorPanel() override
@@ -221,13 +221,14 @@ public:
         auto area = getLocalBounds().reduced (14, 12);
         auto top = area.removeFromTop (28);
         findLabel.setBounds (top.removeFromLeft (44));
-        find.setBounds (top.removeFromLeft (220));
+        find.setBounds (top.removeFromLeft (200));
         top.removeFromLeft (12);
         pluginsOnly.setBounds (top.removeFromLeft (120));
         reset.setBounds (top.removeFromRight (80));
         top.removeFromRight (8);
-        resetOnPlay.setBounds (top.removeFromRight (120));
-        freeze.setBounds (top.removeFromRight (80));
+        resetOnPlay.setBounds (top.removeFromRight (124));
+        top.removeFromRight (6);
+        freeze.setBounds (top.removeFromRight (84));
         area.removeFromTop (10);
         auto bottom = area.removeFromBottom (20);
         total.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2));

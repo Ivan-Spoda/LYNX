@@ -238,7 +238,7 @@ public:
             templates.selectRow (2);
         }
         templateChosen();
-        setSize (700, 520);
+        setSize (700, 540);
     }
 
     void resized() override
@@ -290,9 +290,10 @@ public:
             auto r = area.removeFromTop (rowHeight);
             tempoLabel.setBounds (r.removeFromLeft (labelWidth));
             tempo.setBounds (r.removeFromLeft (150));
-            r.removeFromLeft (16);
-            meterLabel.setBounds (r.removeFromLeft (100));
-            meter.setBounds (r);
+            area.removeFromTop (gap);
+            r = area.removeFromTop (rowHeight);
+            meterLabel.setBounds (r.removeFromLeft (labelWidth));
+            meter.setBounds (r.removeFromLeft (150));
             area.removeFromTop (gap + 4);
         }
 

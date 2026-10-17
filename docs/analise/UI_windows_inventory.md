@@ -36,9 +36,9 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | TBrowserForm "FL Studio Browser", TSampleListForm "Browser" | browser | exists | BrowserComponent |
 | TPluginForm | plugin wrapper window | exists | PluginWindow (+ LYNX's own editors) |
 | TFLHintBarForm | hint bar | exists | HintBar |
-| TToolbarForm / TTouchKeybForm "Touch keyboard" | on-screen keyboard | missing | typing keyboard as piano exists, no on-screen keys |
+| TToolbarForm / TTouchKeybForm "Touch keyboard" | on-screen keyboard | **exists (round 84)** | View › Touch keyboard: velocity by touch position or fixed, multi-touch, glide, octave shift, key sizes; no pads mode |
 | TPythonForm "Script output" | Python scripting console | n/a | LYNX has no scripting |
-| TPluginMonitorForm "Plugin performance monitor" | CPU per plugin | missing | |
+| TPluginMonitorForm "Plugin performance monitor" | CPU per plugin | **exists (round 84)** | Options › Plugin performance monitor: now/average/peak per instrument and effect slot, rack load, find, freeze, reset on play |
 | TGraphEditorForm | event graph (channel/mixer automation editor) | partial | automation clip editor (AutomationUi) |
 
 ## Settings ("Settings" = TMIDIForm, one window with pages)
@@ -61,11 +61,11 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 |---|---|---|
 | TMissingPluginsForm + "%d sample(s) required by this project could not be located." | **exists (round 81)** | Missing files window: samples (search folder, locate, skip, remembered folders), plugins with replacements, auto-relocated list |
 | TInfoForm "Song info" (shown on opening) | exists (round 81) | Settings › Info opens with the project when "Show this page when the project is opened" is on |
-| TNewProjForm "New project" (PPQ, time signature, name/location, info) | partial | File › New + templates menu; no dialog |
+| TNewProjForm "New project" (PPQ, time signature, name/location, info) | **exists (round 84)** | New project window: templates (built-in + user folder), name/folder, tempo/time signature, info; no PPQ choice |
 | TProjectRenameForm "Rename project" | missing | |
-| TRenderForm / TWAVRenderForm "WAV rendering" | exists | Export dialog: WAV 16/24/32f, FLAC, OGG, sample rate, tail, stems |
-| TMEMP3OptionsForm "MP3 export" | missing | no MP3 encoder |
-| TMEOggOptionsForm "Ogg Vorbis export" | partial | OGG export, no quality options |
+| TRenderForm / TWAVRenderForm "WAV rendering" | **exists (round 84)** | Export window: WAV/MP3/OGG/FLAC, depth, bitrate, FLAC level, rate, channels, dither, tail cut/leave/wrap, loops, song/pattern/selection, stems per insert or channel, normalize, master effects, PDC trim |
+| TMEMP3OptionsForm "MP3 export" | **exists (round 84)** | MP3 in the Export window (LAME, 96–320 kbps) |
+| TMEOggOptionsForm "Ogg Vorbis export" | **exists (round 84)** | OGG bitrate 64–500 kbps in the Export window |
 | TExportScoreForm "Export as score sheet" | missing | |
 | TMIDIImportForm "Import MIDI data" | partial | .mid opens as a project / into a channel, no options dialog |
 | TDWPRenderForm "DirectWave Instrument rendering" | n/a | |
@@ -75,8 +75,8 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | TTapTempoForm "Tempo tapper" | exists | tempo menu › Tap tempo |
 | TAddMarkerSettingsForm "Marker settings" | partial | add/rename marker menu items |
 | TPRTimeSigForm "Time signature change" | partial | playlist signature menu |
-| TPLClipPropForm "Clip properties" | missing | (playlist is another agent's area) |
-| TPLMergeArrangementForm "Merge arrangement" | missing | arrangements exist |
+| TPLClipPropForm "Clip properties" | **exists (round 84)** | clip menu › Properties...: source/name/colour, track, start/length/offset, mute; audio gain, fades, pitch, stretch; group mute/gain |
+| TPLMergeArrangementForm "Merge arrangement" | **exists (round 84)** | Arrangements window: list, show/new/duplicate/rename/remove/reorder, merge insert/merge/replace at start/playback/end |
 | TPRNotePropForm "Note properties" | exists | Note inspector in the Piano Roll |
 | TEventEditForm "Piano roll - " (event editor) | missing | automation editor covers automation clips only |
 | TEnvMapForm "Mapping" (velocity/controller curves) | missing | |
@@ -121,6 +121,8 @@ denoiser, Sample properties: **missing** (LYNX has no audio editor; channel samp
 normalise, region and stretch). These belong to an "Audio editor" feature, not to single windows.
 
 ## Queue (not done in round 81), priority order
+
+Round 84 did items 7, 8, 9, the export part of 10 (MP3, OGG quality, dither) and the New project dialog of 11.
 
 Round 82 did items 1 (General + Audio; not pan law / data folder), 2, 4 (inputs; not outputs/sync) and 6.
 

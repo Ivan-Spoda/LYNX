@@ -196,7 +196,7 @@ public:
             keys.repaint();
         };
         addAndMakeVisible (labels);
-        target.setFont (theme::font (theme::type::small));
+        target.setFont (theme::font (theme::type::body));
         target.setColour (juce::Label::textColourId, theme::colour::textSecondary);
         target.setJustificationType (juce::Justification::centredRight);
         addAndMakeVisible (target);

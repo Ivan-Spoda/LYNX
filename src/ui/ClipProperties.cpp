@@ -120,6 +120,9 @@ public:
         addAndMakeVisible (source);
         label (trackLabel, tr ("Track"));
         slider (track, 1, 500, 1, {});
+        track.setSliderStyle (juce::Slider::IncDecButtons);
+        track.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 60, 22);
+        track.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
 
         label (startLabel, tr ("Start"));
         editor (start);
@@ -161,7 +164,7 @@ public:
         groupGainMode.setSelectedItemIndex (0, juce::dontSendNotification);
         addAndMakeVisible (groupGainMode);
         groupGain.setSliderStyle (juce::Slider::LinearHorizontal);
-        groupGain.setTextBoxStyle (juce::Slider::TextBoxRight, false, 74, 22);
+        groupGain.setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, 22);
         groupGain.setRange (-24.0, 12.0, 0.1);
         groupGain.setTextValueSuffix (" dB");
         addAndMakeVisible (groupGain);
@@ -176,7 +179,7 @@ public:
 
         engine.addChangeListener (this);
         load();
-        setSize (440, height());
+        setSize (460, height());
     }
 
     ~ClipPropertiesPanel() override { engine.removeChangeListener (this); }
@@ -207,7 +210,12 @@ public:
         row (nameLabel, name);
         row (colourLabel, colours);
         row (sourceLabel, source);
-        row (trackLabel, track);
+        {
+            auto r = area.removeFromTop (rowHeight);
+            trackLabel.setBounds (r.removeFromLeft (labelWidth));
+            track.setBounds (r.removeFromLeft (130));
+            area.removeFromTop (gap);
+        }
         title (timeTitle);
         {
             auto r = area.removeFromTop (rowHeight);
@@ -243,7 +251,7 @@ public:
             row (groupMuteLabel, groupMute);
             auto r = area.removeFromTop (rowHeight);
             groupGainLabel.setBounds (r.removeFromLeft (labelWidth));
-            groupGainMode.setBounds (r.removeFromLeft (112));
+            groupGainMode.setBounds (r.removeFromLeft (120));
             r.removeFromLeft (6);
             groupApply.setBounds (r.removeFromRight (70));
             r.removeFromRight (6);
@@ -256,11 +264,12 @@ private:
 
     int height() const
     {
-        auto h = 12 + 30 * 3 + 32 * 6 + 12 + 30 + 12; // titles, rows, buttons
+        // margins + buttons, then 30 per section title and 32 per row
+        auto h = 24 + 30 + 14 + 2 * 30 + 6 * 32;
         if (isAudio())
-            h += 30 + 32 * 5 + 28;
+            h += 30 + 5 * 32 + 28;
         if (selection.size() > 1)
-            h += 30 + 32 * 2;
+            h += 30 + 2 * 32;
         return h;
     }
 
@@ -500,7 +509,7 @@ public:
         engine.addChangeListener (this);
         refresh();
         list.selectRow (engine.getSong().currentArrangement);
-        setSize (500, 430);
+        setSize (520, 480);
     }
 
     ~ArrangementsPanel() override { engine.removeChangeListener (this); }
