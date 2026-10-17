@@ -401,6 +401,146 @@ void GlobalGridBox::changeListenerCallback (juce::ChangeBroadcaster*)
     setSelectedId (EditorGlobals::get().getGridOption() + 1, juce::dontSendNotification);
 }
 
+// --- overview strip ------------------------------------------------------------------------
+
+OverviewBar::OverviewBar()
+{
+    setOpaque (true);
+    ui::setHint (*this, tr ("Overview: [LMB] drag the window to scroll, drag its edges to zoom, click elsewhere to jump there  "
+                            "[2xLMB] show everything"));
+}
+
+void OverviewBar::setRange (double newTotal, double newStart, double newLength)
+{
+    newTotal = juce::jmax (1.0, newTotal);
+
+    if (newTotal != total || newStart != start || newLength != length)
+    {
+        total = newTotal;
+        start = newStart;
+        length = newLength;
+        repaint();
+    }
+}
+
+juce::Rectangle<float> OverviewBar::windowArea() const
+{
+    const auto w = (double) getWidth();
+    const auto x0 = (float) (start / total * w), x1 = (float) ((start + length) / total * w);
+    return { x0, 0.0f, juce::jmax (3.0f, x1 - x0), (float) getHeight() - 1.0f };
+}
+
+gesture::OverviewGrab OverviewBar::grabAt (int x) const
+{
+    return gesture::overviewGrabAt (x, getWidth(), total, { start, length });
+}
+
+void OverviewBar::updateCursor (gesture::OverviewGrab g)
+{
+    using G = gesture::OverviewGrab;
+    setMouseCursor (g == G::left || g == G::right ? juce::MouseCursor::LeftRightResizeCursor
+                    : g == G::move               ? juce::MouseCursor::DraggingHandCursor
+                                                 : juce::MouseCursor::PointingHandCursor);
+
+    if (g != hoverGrab)
+    {
+        hoverGrab = g;
+        repaint();
+    }
+}
+
+void OverviewBar::paint (juce::Graphics& g)
+{
+    using namespace theme::colour;
+    const auto area = getLocalBounds().toFloat();
+    g.fillAll (bg0);
+
+    if (paintContent)
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (getLocalBounds().withTrimmedBottom (1));
+        paintContent (g, area.withTrimmedBottom (1.0f), total);
+    }
+
+    // outside the window: dimmed; the window: a light frame, its edges lit while hovered or dragged
+    const auto win = windowArea();
+    g.setColour (bg0.withAlpha (0.5f));
+    g.fillRect (area.withRight (win.getX()));
+    g.fillRect (area.withLeft (win.getRight()));
+    g.setColour (textPrimary.withAlpha (hoverGrab == gesture::OverviewGrab::move || dragging ? 0.08f : 0.04f));
+    g.fillRect (win);
+    g.setColour (textSecondary.withAlpha (0.55f));
+    g.drawRect (win, 1.0f);
+
+    const auto lit = dragging ? grab : hoverGrab;
+    g.setColour (accent);
+    if (lit == gesture::OverviewGrab::left)
+        g.fillRect (win.withWidth (2.0f));
+    if (lit == gesture::OverviewGrab::right)
+        g.fillRect (win.withLeft (win.getRight() - 2.0f));
+
+    g.setColour (border);
+    g.fillRect (area.withTop (area.getBottom() - 1.0f));
+}
+
+void OverviewBar::mouseMove (const juce::MouseEvent& e)
+{
+    updateCursor (grabAt (e.x));
+}
+
+void OverviewBar::mouseExit (const juce::MouseEvent&)
+{
+    if (! dragging && hoverGrab != gesture::OverviewGrab::none)
+    {
+        hoverGrab = gesture::OverviewGrab::none;
+        repaint();
+    }
+}
+
+void OverviewBar::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isLeftButtonDown())
+        return;
+
+    grab = grabAt (e.x);
+    grabFrom = { start, length };
+    dragging = true;
+
+    if (grab == gesture::OverviewGrab::none) // jump: centre the window on the click, then drag it
+    {
+        grabFrom = gesture::overviewCentredOn (e.x / juce::jmax (1.0, (double) getWidth()) * total, grabFrom, total);
+        if (onChange)
+            onChange (grabFrom.start, grabFrom.length);
+    }
+
+    repaint();
+}
+
+void OverviewBar::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging)
+        return;
+
+    const auto w = gesture::overviewDrag (grab, grabFrom, e.getDistanceFromDragStartX(), getWidth(), total, minLength);
+
+    if (onChange)
+        onChange (w.start, w.length);
+}
+
+void OverviewBar::mouseUp (const juce::MouseEvent& e)
+{
+    dragging = false;
+    grab = gesture::OverviewGrab::none;
+    updateCursor (grabAt (e.x));
+    repaint();
+}
+
+void OverviewBar::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onShowAll)
+        onShowAll();
+}
+
 // --- Note inspector ------------------------------------------------------------------------
 
 namespace

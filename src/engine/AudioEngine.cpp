@@ -104,6 +104,15 @@ void AudioEngine::saveAudioDeviceState()
         xml->writeTo (audioDeviceFile());
 }
 
+void AudioEngine::restoreAudioDeviceState (const juce::XmlElement* state)
+{
+    deviceStateSaver = nullptr;
+    if (state != nullptr)
+        state->writeTo (audioDeviceFile());
+    else
+        audioDeviceFile().deleteFile();
+}
+
 AudioEngine::AudioEngine (bool openAudioDevice)
     : workers (std::make_unique<WorkerPool> (workerCount(), raiseAudioThreadPriority)),
       song (Song::makeDefault())
@@ -398,10 +407,15 @@ int AudioEngine::snapInputKey (int key) const noexcept
     return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
 }
 
-void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample)
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool loop, float gain)
 {
     if (preview != nullptr)
-        preview->play (std::move (sample));
+        preview->play (std::move (sample), loop, gain);
+}
+
+double AudioEngine::getPreviewPosition() const noexcept
+{
+    return preview != nullptr ? preview->getPlayPosition() : -1.0;
 }
 
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
@@ -1602,6 +1616,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
     // With the loop region on, the block is split at the loop end and the position jumps back to
     // its start (the nodes see a jump and release their notes, as in FL).
+    // the audio editor's input recording (nothing happens unless it chose the input)
+    meters.capture.push (AudioCapture::input, numInputChannels > 0 ? inputChannelData[0] : nullptr, numInputChannels > 1 ? inputChannelData[1] : nullptr,
+                         numSamples);
+
     std::array<const float*, 64> inputs {};
     std::array<float*, 64> outputs {};
     numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());

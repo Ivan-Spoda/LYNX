@@ -66,8 +66,9 @@ public:
     void setScaleSnap (bool on);
     bool hasScale() const { return scaleIndex() > 0; } // a scale is chosen in the toolbar
 
-    // Centers the view on the channel's notes (called on open).
-    void scrollToNotes();
+    // Centers the view on the channel's notes and, with `fitPattern`, zooms to show the whole pattern
+    // (called on open).
+    void scrollToNotes (bool fitPattern = true);
 
     // For tests/snapshots: selects all of the channel's notes.
     void selectAll();
@@ -82,8 +83,10 @@ public:
 
     static constexpr int keyboardWidth = 72;
     static constexpr int toolbarHeight = 28;
+    static constexpr int overviewHeight = 16; // the overview strip under the toolbar (round 90)
     static constexpr int timelineHeight = 22;
-    static constexpr int headerHeight = toolbarHeight + timelineHeight;
+    static constexpr int rulerTop = toolbarHeight + overviewHeight;
+    static constexpr int headerHeight = rulerTop + timelineHeight;
     static constexpr int velocityHeight = 72;
     int rowHeight = 14; // vertical zoom (Ctrl+Alt+wheel): 6..32 px per key
     static constexpr int scrollBarSize = 12;
@@ -158,7 +161,10 @@ private:
     void nudge (std::int64_t ticks, int keys);
 
     AudioEngine& engine;
-    juce::ScrollBar hBar { false }, vBar { true };
+    juce::ScrollBar hBar { false }, vBar { true }; // hBar is hidden: the overview strip scrolls sideways
+    OverviewBar overview;
+    void paintOverview (juce::Graphics& g, juce::Rectangle<float> area, double total);
+    std::size_t overviewSignature = 0; // the notes drawn in the overview (repaints it when they change)
     ToolStrip tools { false };
     int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
     ChannelBox channelBox;
