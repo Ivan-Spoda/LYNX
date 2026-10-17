@@ -25,6 +25,8 @@
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
 //   editor <out.png> [ms]             open the plugin's own editor in a window, wait, save a picture of it (UI study)
 //   echo <text>
+//   editor <ms> [x y]                 show the plugin's own editor in a window at (x, y) for ms milliseconds (for screenshots
+//                                     taken from outside, e.g. with a screen-capture script); prints its screen bounds
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
@@ -68,6 +70,9 @@ struct Host
         if (plugin == nullptr) return false;
         plugin->releaseResources();
         auto layout = plugin->getBusesLayout();
+        // some plugins (Valhalla) come up with their main buses disabled: ask for stereo in / out
+        if (! layout.inputBuses.isEmpty() && layout.inputBuses[0].size() == 0) layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (! layout.outputBuses.isEmpty() && layout.outputBuses[0].size() == 0) layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
         for (int b = 1; b < layout.inputBuses.size(); ++b)
             if (sidechain) layout.inputBuses.getReference (b) = juce::AudioChannelSet::stereo();
             else layout.inputBuses.getReference (b) = juce::AudioChannelSet::disabled();
@@ -330,6 +335,25 @@ struct Host
             pump (0);
             if (cmd == "pump") { pump (a[1].getIntValue()); continue; }
             if (cmd == "echo") { log (line.fromFirstOccurrenceOf (" ", false, false)); continue; }
+            if (cmd == "editor")
+            {
+                if (plugin == nullptr) { log ("error: no plugin"); continue; }
+                std::unique_ptr<juce::AudioProcessorEditor> ed (plugin->createEditorIfNeeded());
+                if (ed == nullptr) { log ("error: no editor"); continue; }
+                juce::DocumentWindow win ("fxmeasure editor", juce::Colours::black, 0, true);
+                win.setUsingNativeTitleBar (false);
+                win.setTitleBarHeight (0);
+                win.setContentNonOwned (ed.get(), true);
+                win.setTopLeftPosition (a.size() > 3 ? a[2].getIntValue() : 100, a.size() > 3 ? a[3].getIntValue() : 100);
+                win.setVisible (true);
+                win.toFront (true);
+                const auto b = ed->getScreenBounds();
+                log ("editor " + juce::String (b.getX()) + " " + juce::String (b.getY()) + " " + juce::String (b.getWidth()) + " " + juce::String (b.getHeight()));
+                pump (a[1].getIntValue());
+                win.clearContentComponent();
+                ed.reset();
+                continue;
+            }
             if (cmd == "load")
             {
                 if (a.size() > 2) rate = a[2].getDoubleValue();

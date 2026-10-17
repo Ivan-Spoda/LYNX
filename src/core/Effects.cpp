@@ -1,5 +1,6 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 #include "core/LynxVerbs.h"
 
@@ -2515,6 +2516,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::nebula:
         case EffectKind::halo:
         case EffectKind::horizon: return verbs::info (kind);
+        case EffectKind::echoform: return echosuite::echoformInfo();
+        case EffectKind::spiralEcho: return echosuite::spiralInfo();
+        case EffectKind::orbit: return echosuite::orbitInfo();
+        case EffectKind::latticeMod: return echosuite::latticeInfo();
     }
     return eq;
 }
@@ -2902,6 +2907,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::halo:
         case EffectKind::horizon:
             return verbs::paramText (kind, param, v, bpm);
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod:
+            return echosuite::paramText (kind, param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3081,6 +3091,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::nebula:
         case EffectKind::halo:
         case EffectKind::horizon: return verbs::make (kind); // LYNX's own reverbs (REA_rodada100)
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod: return echosuite::make (kind); // LYNX's delay / modulation suite (REA_rodada101)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
