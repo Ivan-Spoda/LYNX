@@ -97,14 +97,16 @@ matches by name).
 | Valhalla Supermassive / Shimmer, FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
-| Waves L1/L2/L3/L4, FabFilter Pro-L | Limiter | Waves name, names | — |
+| Waves L1/L2/L3/L4 | Limiter | Waves name | — |
+| FabFilter Pro-L | Apex Limiter (round 99) | names | — |
 | Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
-| Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB) | VST3 class ID [DATA], Waves name | — |
-| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral) | VST3 class ID [DATA], Waves name, names | — |
-| Waves Q10, REQ, SSLEQ, FabFilter Pro-Q | Parametric EQ (flat) | Waves names, names | — |
-| Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default) | Waves name, names | — |
-| Slate Digital Fresh Air | Aether (neutral) | name | — |
-| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain) | names | — |
+| Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB; round 96) | VST3 class ID [DATA], Waves name | — |
+| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
+| Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
+| FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
+| Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | Waves name, names | — |
+| Slate Digital Fresh Air | Aether (neutral; round 96) | name | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | — |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
 Not mapped yet (no LYNX module plays their role): Auto-Tune, NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,

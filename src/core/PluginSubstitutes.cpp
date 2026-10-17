@@ -132,7 +132,7 @@ waves = L1; L2; L3; L3-16; L3-LL Multi; L4
 [fabfilter-pro-l]
 product = FabFilter Pro-L
 vendor = FabFilter
-lynx = Limiter
+lynx = Apex Limiter
 names = FabFilter Pro-L; FabFilter Pro-L 2; Pro-L; Pro-L 2
 
 # ---------------------------------------------------------------- compressors -> Compressor
@@ -192,7 +192,7 @@ waves = Q10; REQ; SSLEQ
 [fabfilter-pro-q]
 product = FabFilter Pro-Q
 vendor = FabFilter
-lynx = Parametric EQ
+lynx = Facet EQ
 names = FabFilter Pro-Q 2; FabFilter Pro-Q 3; FabFilter Pro-Q 4; Pro-Q 2; Pro-Q 3; Pro-Q 4
 
 # ---------------------------------------------------------------- vocal tools -> LYNX's mixing suite (round 96)
@@ -296,7 +296,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::ember; ++k) // (the last EffectKind)
+    for (int k = 0; k <= (int) EffectKind::ember; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
