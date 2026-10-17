@@ -42,6 +42,9 @@ public:
     // Meters (for the UI); export turns them off to avoid wasting CPU.
     void setMetering (bool on) noexcept { metering.store (on); }
 
+    // The renderer (its per-unit CPU profile, REA round 87).
+    RackRenderer& getRenderer() noexcept { return renderer; }
+
 private:
     std::atomic<bool> metering { true };
     Transport& transport;

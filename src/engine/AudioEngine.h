@@ -13,6 +13,7 @@
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
+#include "core/RtStats.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/SnapshotExchange.h"
@@ -213,6 +214,26 @@ public:
     void copyScope (float* destination, int count) const noexcept;
     static constexpr int scopeSize = 2048;
 
+    // Real-time health of the audio callback (REA round 87): callbacks over their deadline, late device calls, load.
+    const RtStats& getRtStats() const noexcept { return rtStats; }
+    RtStats& getRtStats() noexcept { return rtStats; }
+
+    // What takes the most audio CPU: channels and insert effects, as a share of real time over the last ~2 s of
+    // playback, heaviest first. UI thread.
+    struct UnitLoad
+    {
+        juce::String name;
+        double load = 0.0;      // CPU time / audio time (summed over the worker threads)
+        double longestMs = 0.0; // the longest single call in the window
+    };
+    const std::vector<UnitLoad>& getHeaviestUnits() const noexcept { return heaviestUnits; }
+
+    // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
+    juce::String describeRealtime (bool withUnits = true) const;
+
+    // %APPDATA%\LYNX\audio-glitches.log: a line each time callbacks run over their deadline (at most every 2 s).
+    static juce::File glitchLogFile();
+
     // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
 
@@ -236,6 +257,15 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
+    void chooseSafeBufferSize();
+    void updateRealtimeStats(); // timer: unit loads over a window, glitch log
+    RtStats rtStats;
+    std::vector<UnitLoad> heaviestUnits;
+    std::vector<std::uint64_t> lastChannelNs, lastEffectNs;
+    std::uint64_t lastProcessedSamples = 0;
+    int realtimeTicks = 0;
+    std::uint64_t loggedOver = 0, loggedLate = 0;
+    double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     void publishSong();
 

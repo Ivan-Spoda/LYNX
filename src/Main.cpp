@@ -92,6 +92,18 @@ public:
             return;
         }
 
+        if (args.contains ("--rtstress"))
+        {
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N]: the real app (window, audio device)
+            // plays the project and reports the callbacks that missed their deadline (REA round 87)
+            const auto i = args.indexOf ("--rtstress");
+            const auto seconds = args[i + 3].getDoubleValue();
+            const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer);
+            return;
+        }
+
         if (args.contains ("--selftest"))
         {
             const auto i = args.indexOf ("--selftest");
@@ -1124,6 +1136,75 @@ private:
         juce::File (reportPath).replaceWithText (report);
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
+    }
+
+    // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
+    // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
+    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize)
+    {
+        startupOptions = lynx::StartupOptions::load();
+        engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+        if (bufferSize > 0)
+        {
+            auto setup = engine->getDeviceManager().getAudioDeviceSetup();
+            setup.bufferSize = bufferSize;
+            engine->getDeviceManager().setAudioDeviceSetup (setup, true);
+        }
+        createMainWindow();
+        mainWindow->reveal();
+
+        juce::String error;
+        auto ok = false;
+        const auto loadStart = juce::Time::getMillisecondCounterHiRes();
+        if (project.hasFileExtension ("flp"))
+            ok = engine->importFlpFile (project, error);
+        else if (auto song = lynx::ProjectFile::load (project, error))
+        {
+            engine->setSong (std::move (*song));
+            ok = true;
+        }
+        const auto loadMs = juce::Time::getMillisecondCounterHiRes() - loadStart;
+
+        if (! ok)
+        {
+            report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+
+        // let the window draw the project, then play from the start with fresh statistics
+        juce::Timer::callAfterDelay (1500, [this, project, report, seconds, loadMs] {
+            if (engine == nullptr)
+                return;
+            engine->stop();
+            engine->rewind();
+            engine->getRtStats().reset();
+            engine->play();
+            juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs] {
+                if (engine == nullptr)
+                    return;
+                engine->stop();
+                const auto s = engine->getRtStats().snapshot();
+                juce::String text;
+                text << "project: " << project.getFullPathName() << "\n"
+                     << "LYNX " << getApplicationVersion() << ", " << juce::SystemStats::getOperatingSystemName() << ", "
+                     << juce::SystemStats::getNumCpus() << " logical CPUs (" << juce::SystemStats::getNumPhysicalCpus() << " cores), "
+                     << juce::SystemStats::getCpuModel() << "\n"
+                     << "load " << juce::String (loadMs / 1000.0, 1) << " s, played " << juce::String (seconds, 0) << " s\n"
+                     << engine->describeRealtime();
+                text << "  load histogram (share of the deadline: callbacks):";
+                for (std::size_t b = 0; b < s.histogram.size(); ++b)
+                    if (s.histogram[b] > 0)
+                        text << " " << (int) (b * 10) << (b + 1 == s.histogram.size() ? juce::String ("+") : "-" + juce::String ((int) (b * 10 + 10))) << "%:" << (juce::int64) s.histogram[b];
+                text << "\n";
+                text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
+                report.replaceWithText (text);
+                setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
+                quit();
+            });
+        });
     }
 
     // LYNX.exe --render project.(flp|lynx) output.wav [seconds]

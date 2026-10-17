@@ -2009,6 +2009,12 @@ void MainComponent::timerCallback()
         const auto held = (int) heldKeys.size();
         const auto notes = playing ? songstats::soundingNotes (engine.getSong(), transport.positionTicks.load()) : 0;
         perfMeter.setValues (engine.getDeviceManager().getCpuUsage(), toolbar::PerformanceMeter::processMemoryBytes(), notes + held);
+        const auto rt = engine.getRtStats().snapshot();
+        juce::StringArray heaviest;
+        for (const auto& u : engine.getHeaviestUnits())
+            if (heaviest.size() < 3 && u.load >= 0.01)
+                heaviest.add (u.name + " " + juce::String (juce::roundToInt (u.load * 100.0)) + "%");
+        perfMeter.setRealtime (rt.overBudget, rt.lateCalls, engine.getRtStats().takeWindowMaxLoad(), heaviest);
     }
 
     // If a dialog stole focus, give it back so the PC keyboard keeps playing (unless a detached panel has it).
