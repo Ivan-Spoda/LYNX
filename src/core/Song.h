@@ -395,6 +395,12 @@ struct EffectSlot
     std::vector<EffectLink> links;                // used when kind == parallel
     std::vector<std::uint8_t> state;              // FL's raw plugin state, for exact effects built from it (vocodex, maximus)
     std::string samplePath;                       // audio file the effect plays (Newtone/Newtime source sample); "" = none
+    // When set (id or foreign), this built-in effect is a LYNX substitute for that missing third-party plugin
+    // (core/PluginSubstitutes.h): the original reference is kept byte for byte, saved with the project, and the slot
+    // goes back to it once the plugin is installed.
+    PluginRef substituteFor;
+
+    bool isSubstitute() const noexcept { return ! substituteFor.id.empty() || substituteFor.foreign.format != ForeignPlugin::Format::none; }
 };
 
 // Send from one track to another (post-fader), like FL's routing between inserts.

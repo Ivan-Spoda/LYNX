@@ -28,6 +28,7 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
     src/core/MissingFiles.cpp
+    src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
