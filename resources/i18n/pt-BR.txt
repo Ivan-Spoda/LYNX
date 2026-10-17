@@ -2304,7 +2304,6 @@ countries: br
 "ATTACK" = "ATAQUE"
 "RELEASE" = "RELEASE"
 "BANDS" = "BANDAS"
-"DYNAMICS" = "DINÂMICA"
 "Select a band, or double-click the graph to add one" = "Selecione uma banda ou dê um duplo clique no gráfico para adicionar uma"
 "Open Facet EQ" = "Abrir o Facet EQ"
 "Target" = "Alvo"

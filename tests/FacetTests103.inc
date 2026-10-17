@@ -143,7 +143,7 @@ TEST (facet_eq_sidechain_detector_round103)
     // a sidechain outside the band does not trigger it
     auto e3 = make (&p);
     e3->prepare (48000.0);
-    CHECK (std::abs (facet103::toneDb (*e3, p, 1000.0, 0.003, 1.0, nullptr, 0.5, 8000.0)) < 1.5);
+    CHECK (std::abs (facet103::toneDb (*e3, p, 1000.0, 0.003, 1.0, nullptr, 0.05, 8000.0)) < 0.3); // −26 dB three octaves away: under the threshold
 }
 
 TEST (facet_eq_phase_modes_round103)

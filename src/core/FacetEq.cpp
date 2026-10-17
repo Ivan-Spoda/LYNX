@@ -209,18 +209,7 @@ cd evalDigital (const Section& s, double w) noexcept
     return (s.b0 + s.b1 * z1 + s.b2 * z2) / (1.0 + s.a1 * z1 + s.a2 * z2);
 }
 
-// the analog response (complex) of one band at hz, with its dynamic movement
-cd analogBand (const EffectParams& p, int b, double f, double extraDb) noexcept
-{
-    Analog a[maxSections];
-    const int n = analogSections (p, b, a, extraDb);
-    const double w = f / hz (p[(std::size_t) param (b, 1)]);
-    cd h (1.0, 0.0);
-    for (int k = 0; k < n; ++k) h *= evalAnalog (a[k], w);
-    return h;
-}
-
-// the factor of the sine-rate grid of a phase mode: 1 up to 48 kHz, 2 up to 96 kHz, 4 above
+// the FIR grid factor of a phase mode: 1 up to 48 kHz, 2 up to 96 kHz, 4 above
 int rateFactor (double sr) noexcept { return sr <= 50000.0 ? 1 : sr <= 100000.0 ? 2 : 4; }
 constexpr int naturalBlock = 128, naturalDelay = 192, linearBlock = 512, firTaps = 8192;
 

@@ -824,7 +824,7 @@ public:
             if (mode == Analyzer::post || mode == Analyzer::both)
             {
                 const auto p = spectrumPath (specPost, true);
-                g.setGradientFill (juce::ColourGradient (colour::accent.withAlpha (0.30f), 0.0f, plot.getY(), colour::accent.withAlpha (0.04f), 0.0f, plot.getBottom(), false));
+                g.setGradientFill (juce::ColourGradient (colour::accent.withAlpha (0.20f), 0.0f, plot.getY(), colour::accent.withAlpha (0.02f), 0.0f, plot.getBottom(), false));
                 g.fillPath (p);
                 g.setColour (colour::accent.withAlpha (0.55f));
                 g.strokePath (spectrumPath (specPost, false), juce::PathStrokeType (1.0f));
@@ -1044,7 +1044,6 @@ public:
         g.setFont (font (type::caption, true));
         const auto p = panel.reduced (12.0f, 10.0f);
         g.drawText (tr ("BANDS"), juce::Rectangle<float> (p.getX(), p.getBottom() - 16.0f, 120.0f, 14.0f), juce::Justification::centredLeft);
-        g.drawText (tr ("DYNAMICS"), juce::Rectangle<float> (p.getRight() - 140.0f, p.getBottom() + 0.0f, 136.0f, 10.0f), juce::Justification::centred);
         if (! bandOn (selected))
         {
             g.setColour (colour::textDisabled);
@@ -1091,7 +1090,7 @@ private:
             {
                 const auto f = hzForX (plotArea().getX() + plotArea().getWidth() * (float) i / (float) (columns - 1));
                 // a mix's typical spectrum: pink-ish slope, a kick bump, a presence region, roll-off
-                const auto db = -30.0 - 9.0 * std::log2 (juce::jmax (20.0, f) / 1000.0) * 0.5 + 9.0 * std::exp (-std::pow (std::log2 (f / 60.0), 2.0))
+                const auto db = -40.0 - 9.0 * std::log2 (juce::jmax (20.0, f) / 1000.0) * 0.5 + 9.0 * std::exp (-std::pow (std::log2 (f / 60.0), 2.0))
                                 + 4.0 * std::sin (f * 0.0021) - (f > 14000.0 ? (f - 14000.0) * 0.004 : 0.0) + tiltDb (f);
                 specPre[(std::size_t) i] = (float) db;
                 const auto* fx = current();

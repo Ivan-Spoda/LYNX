@@ -742,7 +742,7 @@ public:
                 const auto t = (float) i / 30.0f;
                 const auto phrase = std::fmod (t, 2.7f);
                 const auto base = t < 2.7f ? 64.0f : t < 5.4f ? 67.0f : 69.0f;
-                const auto sung = phrase > 2.4f ? 0.0f : base - 0.6f * std::exp (-phrase * 5.0f) + 0.35f * std::sin (t * 34.0f) * juce::jmin (1.0f, phrase) + 0.18f;
+                const auto sung = phrase < 0.15f ? 0.0f : base - 0.6f * std::exp (-phrase * 5.0f) + 0.35f * std::sin (t * 20.0f) * juce::jmin (1.0f, phrase) + 0.18f;
                 const auto shift = sung > 0.0f ? (base - sung) * (1.0f - std::exp (-phrase * 12.0f)) : 0.0f;
                 history.push_back ({ sung, sung > 0.0f ? base : 0.0f, shift });
             }
