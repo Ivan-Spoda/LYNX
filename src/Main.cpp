@@ -691,9 +691,9 @@ private:
             // only the LYNX reference is substituted here (an .flp record is the import's job); do the .flp one directly
             const auto flpSubstituted = lynx::substituteEffectSlot (fx[0], lynx::pluginIdentity (vv));
             const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
-            substituteOk = flpSubstituted && fx[0].kind == lynx::EffectKind::reeverb2
+            substituteOk = flpSubstituted && fx[0].kind == lynx::EffectKind::epochVerb
                            && (! substitutesOn || (changed == 1 && fx[1].kind == lynx::EffectKind::facetEq && fx[1].substituteFor == lynxRef))
-                           && back && back->mixer[1].effects.size() == 2 && back->mixer[1].effects[0].kind == lynx::EffectKind::reeverb2
+                           && back && back->mixer[1].effects.size() == 2 && back->mixer[1].effects[0].kind == lynx::EffectKind::epochVerb
                            && back->mixer[1].effects[0].substituteFor == flpRef && back->mixer[1].effects[0].substituteFor.foreign.state == vv.state
                            && back->mixer[1].effects[1].kind == fx[1].kind && back->mixer[1].effects[1].substituteFor == fx[1].substituteFor;
         }
