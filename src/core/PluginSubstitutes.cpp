@@ -314,7 +314,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::lynxTune; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::sentryGate; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)

@@ -35,6 +35,7 @@
 #include "core/Biquad.h"
 #include "core/FacetEq.h"
 #include "core/ApexLimiter.h"
+#include "core/DynamicsSuite.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2472,6 +2473,9 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::aether: return mixsuite::aetherInfo();
         case EffectKind::ember: return mixsuite::emberInfo();
         case EffectKind::lynxTune: return lynxtune::info();
+        case EffectKind::crestCompressor: return dyn::crestInfo();
+        case EffectKind::prismMultiband: return dyn::prismInfo();
+        case EffectKind::sentryGate: return dyn::sentryInfo();
     }
     return eq;
 }
@@ -2847,6 +2851,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return mixsuite::paramText (kind, param, v);
         case EffectKind::lynxTune:
             return lynxtune::paramText (param, v);
+        case EffectKind::crestCompressor:
+        case EffectKind::prismMultiband:
+        case EffectKind::sentryGate:
+            return dyn::paramText (kind, param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -2924,6 +2932,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::frequencySplitter)
         return fsplit::make (slot.params);
+    if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
+        return dyn::make (slot.kind, &slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)
@@ -3017,6 +3027,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::aether:
         case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
+        case EffectKind::crestCompressor:
+        case EffectKind::prismMultiband:
+        case EffectKind::sentryGate: return dyn::make (kind); // LYNX's dynamics suite (REA_rodada108)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

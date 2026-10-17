@@ -98,6 +98,8 @@ add_library(lynx_core STATIC
     src/core/HardcoreFx.cpp
     src/core/FacetEq.cpp
     src/core/ApexLimiter.cpp
+    src/core/DynamicsSuite.cpp
+    src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/DirectWave.cpp
