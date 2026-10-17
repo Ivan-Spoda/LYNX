@@ -1443,6 +1443,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::reverb:
         case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
         case EffectKind::luxeVerb: return { "LuxeVerb" };
+        case EffectKind::maximus: return { "Maximus" }; // (a Soundgoodizer slot has its own presets A–D)
         case EffectKind::convolver: return { "Fruity Convolver" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelay2: return { "Fruity Delay 2" };
