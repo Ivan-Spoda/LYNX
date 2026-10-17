@@ -148,3 +148,52 @@ TEST (compressor_substitutes_keep_the_level)
     CHECK (lynx::substituteEffectSlot (slot, id));
     CHECK (slot.kind == lynx::EffectKind::compressor && slot.params[5] >= 0.5f);
 }
+
+TEST (overlapping_audio_clips_of_one_channel_both_play)
+{
+    // REA_rodada107 §5: her vocal comps are cut into clips of the same take that overlap by a few ticks (FL's automatic
+    // crossfade). The end of the first clip stopped every voice of the channel, so the second clip went silent for its
+    // whole length (2 s of vocal missing in "kwe" at 59 s). Each clip's end now stops only its own voice.
+    lynx::Song s;
+    s.bpm = 120.0;
+    s.mode = lynx::PlayMode::song;
+    s.mixer = lynx::Song::defaultMixer (1);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::audioClip;
+    c.samplePath = "dc";
+    c.volume = 1.0f;
+    c.mixerTrack = 1;
+    s.channels.push_back (c);
+    s.patterns.emplace_back();
+    lynx::Clip a;
+    a.kind = lynx::ClipKind::audio;
+    a.channel = 0;
+    a.start = 0;
+    a.length = lynx::ppq * 2;           // 1 s
+    lynx::Clip b = a;
+    b.start = lynx::ppq * 2 - lynx::ppq / 8; // starts just before the first one ends
+    b.length = lynx::ppq * 2;
+    b.offset = lynx::ppq;
+    s.playlist = { a, b };
+
+    auto provider = [] (const std::string&) {
+        auto d = std::make_shared<lynx::SampleData>();
+        d->left.assign (48000 * 4, 1.0f);
+        return std::shared_ptr<const lynx::SampleData> (d);
+    };
+    auto state = lynx::RackState::build (s, nullptr, 48000.0, provider);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> all, l (512), rr (512);
+    const auto tps = lynx::ticksPerSample (s.bpm, 48000.0);
+    for (double tick = 0.0; tick < lynx::ppq * 4.0; tick += 512 * tps)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data());
+        all.insert (all.end(), l.begin(), l.end());
+    }
+    const auto unity = 1.0f / lynx::channelGain (10000.0f / 12800.0f);
+    CHECK (std::abs (all[24000] - unity) < 0.02f);            // first clip
+    CHECK (std::abs (all[48000 + 24000] - unity) < 0.02f);    // second clip, after the first one's end
+    CHECK (std::abs (all[48000 + 40000] - unity) < 0.02f);
+    CHECK (lynx::audioClipKey (0) >= 128 && lynx::audioClipKey (1) != lynx::audioClipKey (0));
+}
