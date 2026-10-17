@@ -1191,9 +1191,21 @@ void AudioEngine::timerCallback()
 
     // Plugins are prepared at a fixed rate; if the device changed rate, recreate them.
     // A plugin whose latency changed (preset change, lookahead) requests a new PDC plan.
-    if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5
-        || lastPublishedShape.currentLatencies() != lastPublishedShape.latencies)
+    const auto rateChanged = std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5;
+    const auto latencies = lastPublishedShape.currentLatencies();
+    if (rateChanged || latencies != lastPublishedShape.latencies)
+    {
+        // (diagnostics: which unit's latency moved)
+        if (! rateChanged)
+            for (std::size_t i = 0; i < latencies.size() && i < lastPublishedShape.latencies.size(); ++i)
+                if (latencies[i] != lastPublishedShape.latencies[i])
+                {
+                    lastLatencyChange = juce::String ((int) i) + ": " + juce::String (lastPublishedShape.latencies[i]) + " -> " + juce::String (latencies[i]);
+                    break;
+                }
+        ++latencyRepublishes;
         publishSong();
+    }
 }
 
 void AudioEngine::chooseSafeBufferSize()
@@ -1218,10 +1230,19 @@ juce::File AudioEngine::glitchLogFile() { return PluginHost::settingsFolder().ge
 
 void AudioEngine::updateRealtimeStats()
 {
-    // every ~2 s: the share of real time each channel / insert effect took in that window
-    if (rackProcessor != nullptr && ++realtimeTicks >= 60)
+    // the message thread's pulse: this 30 Hz timer arriving late means the UI is saturated
     {
-        realtimeTicks = 0;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (lastUiPulseMs > 0.0)
+            uiPulse.maxGapMs = juce::jmax (uiPulse.maxGapMs, now - lastUiPulseMs);
+        lastUiPulseMs = now;
+        ++uiPulse.calls;
+    }
+
+    // every ~2 s: the share of real time each channel / insert effect took in that window
+    if (rackProcessor != nullptr && juce::Time::getMillisecondCounterHiRes() - lastUnitsWindowMs >= 2000.0)
+    {
+        lastUnitsWindowMs = juce::Time::getMillisecondCounterHiRes();
         auto& renderer = rackProcessor->getRenderer();
         const auto& units = renderer.unitTimes();
         const auto processed = units.processedSamples.load (std::memory_order_relaxed);
@@ -1300,6 +1321,10 @@ juce::String AudioEngine::describeRealtime (bool withUnits) const
     text << "  callbacks " << (juce::int64) s.callbacks << ": over deadline " << (juce::int64) s.overBudget << ", 80-100% " << (juce::int64) s.nearBudget
          << ", late device calls " << (juce::int64) s.lateCalls << ", average load " << juce::String (s.averageLoad * 100.0, 1) << "%, max "
          << juce::String (s.maxLoad * 100.0, 0) << "%, workers " << (workers != nullptr ? workers->workers() : 0) << "\n";
+    if (latencyRepublishes > 0)
+        text << "  latency changes re-planned PDC " << latencyRepublishes << " times (last: unit " << lastLatencyChange << ")\n";
+    if (withUnits && heaviestUnits.empty())
+        text << "  heaviest: not measured yet\n";
     if (withUnits && ! heaviestUnits.empty())
     {
         text << "  heaviest:";

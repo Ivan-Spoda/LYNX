@@ -212,7 +212,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
             if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
-                && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::parallel // the container is rebuilt
+                && previous->song.mixer[t].effects[i].kind == kind
+                && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].state == slots[i].state
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
@@ -591,6 +592,48 @@ bool anyAbove (const float* l, const float* r, int n, float level) noexcept
     return false;
 }
 } // namespace
+
+namespace
+{
+// A Patcher-style container bakes its children (kinds, states, parameters, routing) in when it is built, so it can be
+// reused only if all of that is unchanged. (It used to be rebuilt on every edit: its children's tails and delay lines
+// restarted, and a fresh linear-phase child reporting its latency only after the first block made the engine re-plan
+// PDC and rebuild it again, over and over — REA round 87.)
+bool sameSlotSetup (const EffectSlot& a, const EffectSlot& b);
+
+bool sameBranches (const EffectSlot& a, const EffectSlot& b)
+{
+    if (a.branches.size() != b.branches.size() || a.links.size() != b.links.size())
+        return false;
+    for (std::size_t i = 0; i < a.branches.size(); ++i)
+    {
+        const auto& x = a.branches[i];
+        const auto& y = b.branches[i];
+        if (x.gain != y.gain || x.chain.size() != y.chain.size())
+            return false;
+        for (std::size_t k = 0; k < x.chain.size(); ++k)
+            if (! sameSlotSetup (x.chain[k], y.chain[k]))
+                return false;
+    }
+    for (std::size_t i = 0; i < a.links.size(); ++i)
+    {
+        const auto& x = a.links[i];
+        const auto& y = b.links[i];
+        if (x.branch != y.branch || x.source != y.source || x.target != y.target || x.param != y.param || x.curve != y.curve)
+            return false;
+    }
+    return true;
+}
+
+bool sameSlotSetup (const EffectSlot& a, const EffectSlot& b)
+{
+    return a.kind == b.kind && a.enabled == b.enabled && a.params == b.params && a.mix == b.mix && a.plugin.id == b.plugin.id
+           && a.sidechain == b.sidechain && a.sidechain2 == b.sidechain2 && a.state == b.state && a.samplePath == b.samplePath
+           && sameBranches (a, b);
+}
+} // namespace
+
+bool sameContainer (const EffectSlot& a, const EffectSlot& b) { return sameBranches (a, b); }
 
 namespace
 {

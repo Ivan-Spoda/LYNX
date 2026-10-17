@@ -94,7 +94,7 @@ public:
 
         if (args.contains ("--rtstress"))
         {
-            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N]: the real app (window, audio device)
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--no-window]: the real app (window, audio device)
             // plays the project and reports the callbacks that missed their deadline (REA round 87)
             const auto i = args.indexOf ("--rtstress");
             const auto seconds = args[i + 3].getDoubleValue();
@@ -1152,7 +1152,8 @@ private:
             engine->getDeviceManager().setAudioDeviceSetup (setup, true);
         }
         createMainWindow();
-        mainWindow->reveal();
+        if (! juce::JUCEApplication::getCommandLineParameters().contains ("--no-window")) // --no-window: is it the UI?
+            mainWindow->reveal();
 
         juce::String error;
         auto ok = false;
@@ -1181,6 +1182,7 @@ private:
             engine->stop();
             engine->rewind();
             engine->getRtStats().reset();
+            engine->takeUiPulse();
             engine->play();
             juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs] {
                 if (engine == nullptr)
@@ -1194,6 +1196,9 @@ private:
                      << juce::SystemStats::getCpuModel() << "\n"
                      << "load " << juce::String (loadMs / 1000.0, 1) << " s, played " << juce::String (seconds, 0) << " s\n"
                      << engine->describeRealtime();
+                const auto pulse = engine->takeUiPulse();
+                text << "  UI: the 30 Hz engine timer ran " << pulse.calls << " times (" << juce::String (pulse.calls / seconds, 1)
+                     << "/s), longest gap " << juce::String (pulse.maxGapMs, 0) << " ms" << (mainWindow == nullptr || ! mainWindow->isVisible() ? " (window hidden)" : "") << "\n";
                 text << "  load histogram (share of the deadline: callbacks):";
                 for (std::size_t b = 0; b < s.histogram.size(); ++b)
                     if (s.histogram[b] > 0)

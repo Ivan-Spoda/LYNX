@@ -228,6 +228,14 @@ public:
     };
     const std::vector<UnitLoad>& getHeaviestUnits() const noexcept { return heaviestUnits; }
 
+    // How regularly the message thread runs the engine's 30 Hz timer (a saturated UI delays it). UI thread.
+    struct UiPulse
+    {
+        int calls = 0;
+        double maxGapMs = 0.0;
+    };
+    UiPulse takeUiPulse() noexcept { return std::exchange (uiPulse, {}); }
+
     // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
     juce::String describeRealtime (bool withUnits = true) const;
 
@@ -263,7 +271,10 @@ private:
     std::vector<UnitLoad> heaviestUnits;
     std::vector<std::uint64_t> lastChannelNs, lastEffectNs;
     std::uint64_t lastProcessedSamples = 0;
-    int realtimeTicks = 0;
+    double lastUnitsWindowMs = 0.0, lastUiPulseMs = 0.0;
+    UiPulse uiPulse;
+    int latencyRepublishes = 0;   // PDC re-plans because a unit's latency changed (diagnostics)
+    juce::String lastLatencyChange;
     std::uint64_t loggedOver = 0, loggedLate = 0;
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)

@@ -213,6 +213,8 @@ int main (int argc, char** argv)
     renderer.setProfiling (profile);
 
     std::vector<float> left (totalSamples), right (totalSamples);
+    // the units whose latency is only known after their first block (the app then re-plans PDC once)
+    const auto latenciesBefore = state->currentLatencies();
     const auto started = std::chrono::steady_clock::now();
     double tick = 0.0;
     const double budgetMs = 1000.0 * blockSize / sampleRate;
@@ -244,6 +246,15 @@ int main (int argc, char** argv)
             std::this_thread::sleep_until (started + std::chrono::microseconds ((long long) ((pos + (std::size_t) n) * 1.0e6 / sampleRate)));
     }
 
+    {
+        const auto after = state->currentLatencies();
+        std::size_t index = song.channels.size();
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (std::size_t k = 0; k < state->effects[t].size(); ++k, ++index)
+                if (index < after.size() && after[index] != latenciesBefore[index])
+                    std::printf ("latency changed after the first block: insert %zu slot %zu %s: %d -> %d\n", t, k + 1,
+                                 lynx::effectInfo (song.mixer[t].effects[k].kind).name, latenciesBefore[index], after[index]);
+    }
     std::printf ("render: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count());
     {
         auto report = [&] (const char* what, std::vector<double> v) {

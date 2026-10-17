@@ -131,6 +131,9 @@ struct RackState
 
 class WorkerPool;
 
+// Whether a parallel container slot (FL's Patcher) can keep its built effect: same branches, children and links.
+bool sameContainer (const EffectSlot& a, const EffectSlot& b);
+
 class RackRenderer
 {
 public:

@@ -7394,6 +7394,37 @@ TEST (linear_phase_convolver_matches_direct_convolution)
     CHECK (peak == 192);
 }
 
+TEST (patcher_container_is_reused_across_snapshots)
+{
+    // an unchanged Patcher keeps its built effect (its children's tails, delay lines and PDC stay put), and a
+    // linear-phase Frequency Splitter reports its latency before its first block (REA round 87: it used to be
+    // rebuilt on every snapshot and its latency appeared one block late, re-planning PDC in a loop)
+    auto song = lynx::Song::makeDefault();
+    if (song.mixer.size() < 2)
+        song.mixer.resize (2);
+    lynx::EffectSlot splitter;
+    splitter.kind = lynx::EffectKind::frequencySplitter;
+    splitter.params = lynx::makeEffectSlot (lynx::EffectKind::frequencySplitter).params;
+    splitter.params[4] = 0.6f; // linear-phase mode
+    splitter.params[6] = 0.0f; // quality 0
+    lynx::EffectSlot patcher;
+    patcher.kind = lynx::EffectKind::parallel;
+    patcher.branches.push_back ({ { splitter }, 1.0f });
+    patcher.branches.push_back ({ {}, 0.5f });
+    song.mixer[1].effects = { patcher };
+    const auto a = lynx::RackState::build (song, nullptr, 44100.0);
+    const auto b = lynx::RackState::build (song, a.get(), 44100.0);
+    CHECK (a->effects[1][0] == b->effects[1][0]);
+    CHECK (a->effects[1][0]->latencySamples() == 384); // 3/4 of the 512-point FFT, before any block
+    CHECK (a->latencies == a->currentLatencies());
+    song.mixer[1].effects[0].branches[0].chain[0].params[0] = 0.25f; // a child's parameter changed: rebuilt
+    const auto c = lynx::RackState::build (song, b.get(), 44100.0);
+    CHECK (c->effects[1][0] != b->effects[1][0]);
+    song.mixer[1].effects[0].branches[1].gain = 0.75f;
+    const auto d = lynx::RackState::build (song, c.get(), 44100.0);
+    CHECK (d->effects[1][0] != c->effects[1][0]);
+}
+
 TEST (ladder_filter_follows_toxic_law)
 {
     // the 4-pole ladder: −24 dB/oct far above the cutoff (vs −12 for the SVF), resonance raises the corner, and
