@@ -70,6 +70,7 @@ title row of the selected effect's knobs.
 | BooBass (channel page) | 343 × 154 | BASS, MID, TREBLE stepping down along the body |
 | Sytrus MAIN page | 850 × 346 | VOL / LFO / PITCH faders, VOL and FILTER ADSR faders, UNISON (order, pan, volume, pitch, sub, phase, envelope variation), MODULATION X/Y pad and knobs, QUALITY (HQ envelopes and oversampling, draft / render), PORTA; the operator / filter / FX pages and the FM / RM matrix are not editable in LYNX and say so |
 | Harmor (channel page) | 1000 × 600 | the controls LYNX edits at their FL places on the part page (timbre mix, blur, tremolo, harmonizer, unison order and pitch, vibrato, part volume, filter 1 freq / res, pluck, phaser mix) and the global section (volume, part A / B); FL's section titles for orientation |
+| Fruity Squeeze | 282 × 223 | SQUARIZE amount and PUNCHER (preserve, impact, relation, amount) on plates; FILTER (on, type, freq, res, pre / pos); MIX and GAIN faders. SQUARIZE AMOUNT is mapped to the engine's `Steps` control — **not confirmed** |
 
 Mapping notes:
 - 3x Osc's shape buttons follow FL's order (sine, square, rounded, custom on the first row; triangle, saw, noise on the
@@ -88,5 +89,5 @@ Mapping notes:
 - Landed in batches: every arrangement in the table above.
 - Not done: Maximus (its bands live in the saved state: no editable parameters yet; generated page), Fruity Send and
   Fruity Phaser (mapped to LYNX's generic utility / chorus, not FL's controls), Newtone (pass-through placeholder), Delay
-  Bank, Vintage Phaser, Squeeze, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
+  Bank, Vintage Phaser, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
   Effector (captures of most in `tmp/r93/flref`; they keep the generated grid of knobs).
