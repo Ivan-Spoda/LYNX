@@ -132,6 +132,32 @@ double bufferLatencyMs (int bufferSamples, double sampleRate)
     return sampleRate > 0.0 ? 1000.0 * bufferSamples / sampleRate : 0.0;
 }
 
+DriverKind driverKind (const std::string& typeName)
+{
+    if (typeName == "Windows Audio")
+        return DriverKind::wasapiShared;
+    if (typeName == "Windows Audio (Low Latency Mode)")
+        return DriverKind::wasapiLowLatency;
+    if (typeName == "Windows Audio (Exclusive Mode)")
+        return DriverKind::wasapiExclusive;
+    if (typeName == "DirectSound")
+        return DriverKind::directSound;
+    if (typeName == "ASIO")
+        return DriverKind::asio;
+    return DriverKind::other;
+}
+
+std::vector<int> usableBufferSizes (DriverKind kind, const std::vector<int>& offered, int devicePeriod)
+{
+    if (kind != DriverKind::wasapiShared || devicePeriod <= 0)
+        return offered;
+    std::vector<int> kept;
+    for (const auto size : offered)
+        if (size >= devicePeriod)
+            kept.push_back (size);
+    return kept.empty() ? offered : kept;
+}
+
 int safeBufferSize (const std::vector<int>& available, int current, double sampleRate)
 {
     const int target = sampleRate > 50000.0 ? (sampleRate > 100000.0 ? 2048 : 1024) : 512;

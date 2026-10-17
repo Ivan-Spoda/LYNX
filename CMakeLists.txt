@@ -30,6 +30,7 @@ add_library(lynx_core STATIC
     src/core/MissingFiles.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/PluginLayout.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -201,6 +202,7 @@ if(LYNX_BUILD_APP)
         src/engine/PluginSandbox.cpp
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
+        src/engine/DllAsioDevice.cpp
         src/engine/ClapFormat.cpp
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
@@ -213,6 +215,7 @@ if(LYNX_BUILD_APP)
         src/ui/PluginWindow.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
+        src/ui/PluginEditors.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ChannelSettings.cpp
@@ -277,4 +280,12 @@ if(LYNX_BUILD_APP)
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags
             juce::juce_recommended_warning_flags)
+endif()
+
+# LYNX ASIO: universal ASIO driver on WASAPI (REA round 97), an in-process COM DLL registered with regsvr32
+if(WIN32)
+    add_library(lynx-asio SHARED asio/LynxAsio.cpp asio/lynx-asio.def)
+    target_include_directories(lynx-asio PRIVATE third_party/asiosdk/common)
+    target_compile_definitions(lynx-asio PRIVATE UNICODE _UNICODE)
+    target_link_libraries(lynx-asio PRIVATE ole32 uuid avrt user32 gdi32 advapi32)
 endif()

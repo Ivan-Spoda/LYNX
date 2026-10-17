@@ -119,6 +119,18 @@ ChannelRackComponent::~ChannelRackComponent()
     engine.removeChangeListener (this);
 }
 
+void ChannelRackComponent::moved()
+{
+    // the viewport scrolled the rack sideways: the controls column follows the visible left edge
+    const auto x = juce::jmax (0, -getX());
+
+    if (x != stickyX)
+    {
+        stickyX = x;
+        repaint();
+    }
+}
+
 void ChannelRackComponent::visibilityChanged()
 {
     if (! isShowing())
@@ -193,6 +205,9 @@ ChannelRackComponent::Area ChannelRackComponent::areaAt (int x, int y, int& row)
     const auto channels = (int) engine.getSong().channels.size();
     row = rowAtY (y);
 
+    if (x < stickyX + gridLeft()) // the controls column (painted at the visible left edge)
+        x -= stickyX;
+
     if (row < 0 || row > channels)
         return Area::none;
 
@@ -258,7 +273,6 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
         const auto& channel = song.channels[(std::size_t) row];
         const auto selected = std::binary_search (selection.begin(), selection.end(), row);
-        const auto nameArea = juce::Rectangle<float> ((float) nameLeft(), (float) y + 3, (float) nameWidth, (float) rowHeight - 6);
 
         if (selected) // selected rows are subtly lifted
         {
@@ -266,68 +280,18 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             g.fillRect (0, y + 1, getWidth(), rowHeight - 2);
         }
 
-        const auto hovered = [this, row] (Area a) { return hoverRow == row && hoverArea == a; };
-        const auto led = juce::Rectangle<float> (9.0f, (float) y + rowHeight / 2.0f - 4.5f, 9.0f, 9.0f);
-        g.setColour (theme::muteLed (channel.muted));
-        g.fillEllipse (led);
-
-        if (hovered (Area::mute)) // hover ring
-        {
-            g.setColour (textSecondary.withAlpha (0.8f));
-            g.drawEllipse (led.expanded (2.5f), 1.0f);
-        }
-
-        const auto touched = knobDrag != Area::none && knobRow == row;
-        theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f), (channel.pan + 1.0f) / 2.0f, true,
-                         touched && knobDrag == Area::pan ? accent : info, hovered (Area::pan) || (touched && knobDrag == Area::pan));
-        theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f), channel.volume, false,
-                         touched && knobDrag == Area::volume ? accent : knobArc, hovered (Area::volume) || (touched && knobDrag == Area::volume));
-
-        // small box with the mixer insert ("-" = straight to Master)
-        const auto routeArea = controlBounds (Area::route, row).toFloat();
-        g.setColour (hovered (Area::route) || (touched && knobDrag == Area::route) ? bg4 : bg0);
-        g.fillRoundedRectangle (routeArea, theme::radius::sm);
-
-        if (hovered (Area::route))
-        {
-            g.setColour (borderStrong);
-            g.drawRoundedRectangle (routeArea.reduced (0.5f), theme::radius::sm, 1.0f);
-        }
-
-        g.setColour (channel.mixerTrack > 0 ? textPrimary : textDisabled);
-        g.setFont (theme::font (theme::type::caption, true));
-        g.drawText (channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
-                    juce::Justification::centred);
-        g.setFont (theme::font (theme::type::body));
-
-        // name button: neutral surface with the channel colour (from the .flp or user-picked) as a strip
-        g.setColour (row == primary ? bg6 : hovered (Area::name) ? bg5 : bg4);
-        g.fillRoundedRectangle (nameArea, theme::radius::md);
-
-        if (row == primary)
-        {
-            g.setColour (accent);
-            g.drawRoundedRectangle (nameArea.reduced (0.5f), theme::radius::md, 1.0f);
-        }
-
-        g.setColour (channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : bg6.brighter (0.2f));
-        g.fillRoundedRectangle (nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f);
-
-        g.setColour (channel.muted ? textDisabled : textPrimary);
-        g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
-                    juce::Justification::centredLeft, true);
-
-        // selector: a slim pill, lit when the row is selected
-        const auto pill = juce::Rectangle<float> ((float) selectLeft() + 3.0f, (float) y + 7.0f, (float) selectWidth - 6.0f, (float) rowHeight - 14.0f);
-        g.setColour (selected ? (hovered (Area::select) ? accentHover : accent) : hovered (Area::select) ? textDisabled : ledOff);
-        g.fillRoundedRectangle (pill, 3.0f);
-
         if (channel.instrument == InstrumentKind::audioClip)
         {
             g.setColour (textDisabled);
             g.setFont (theme::font (theme::type::small));
             g.drawText (tr ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
             g.setFont (theme::font (theme::type::body));
+            continue;
+        }
+
+        if (showsNotePreview (pattern, row)) // piano-roll notes: a miniature instead of the step buttons
+        {
+            paintNotePreview (g, row, pattern, channel.colour);
             continue;
         }
 
@@ -356,27 +320,168 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
     paintLane (g);
     const auto addY = rowY ((int) song.channels.size());
-    {
-        const auto addArea = juce::Rectangle<float> ((float) nameLeft(), (float) addY + 3, (float) nameWidth, (float) rowHeight - 6);
-        const float dash[] = { 3.0f, 3.0f };
-        juce::Path outline, dashed;
-        outline.addRoundedRectangle (addArea.reduced (0.5f), theme::radius::md);
-        juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dash, 2);
-        const auto addHovered = hoverArea == Area::addRow;
-        g.setColour (addHovered ? textSecondary : borderStrong);
-        g.fillPath (dashed);
-        g.setColour (addHovered ? textPrimary : textSecondary);
-        g.setFont (theme::font (theme::type::small));
-        g.drawText (tr ("+ add channel"), addArea.toNearestInt(), juce::Justification::centred);
-        g.setColour (textDisabled);
-        g.drawText (tr ("or drop an audio file here"), gridLeft() + 4, addY, 400, rowHeight, juce::Justification::centredLeft);
-    }
+    g.setColour (textDisabled);
+    g.setFont (theme::font (theme::type::small));
+    g.drawText (tr ("or drop an audio file here"), gridLeft() + 4, addY, 400, rowHeight, juce::Justification::centredLeft);
 
     if (playheadStep >= 0 && playheadStep < steps)
     {
         g.setColour (playhead.withAlpha (0.28f));
         g.fillRoundedRectangle (juce::Rectangle<float> ((float) (gridLeft() + playheadStep * stepWidth), 2.0f, (float) stepWidth - 2.0f,
                                                         (float) addY - 2.0f), theme::radius::sm);
+    }
+
+    // the controls column stays put while the steps scroll sideways (FL's rack keeps the channel buttons in
+    // view): the viewport moves the whole rack, so the column is painted again at the visible left edge
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (stickyX, 0, gridLeft(), getHeight());
+        g.setOrigin (stickyX, 0);
+        g.setColour (bg2);
+        g.fillRect (0, 0, gridLeft(), getHeight());
+        const auto column = g.getClipBounds();
+
+        for (int row = 0; row < (int) song.channels.size(); ++row)
+        {
+            const auto y = rowY (row);
+
+            if (y > column.getBottom() || y + rowHeight < column.getY())
+                continue;
+
+            const auto& channel = song.channels[(std::size_t) row];
+            const auto selected = std::binary_search (selection.begin(), selection.end(), row);
+            const auto nameArea = juce::Rectangle<float> ((float) nameLeft(), (float) y + 3, (float) nameWidth, (float) rowHeight - 6);
+
+            if (selected) // selected rows are subtly lifted
+            {
+                g.setColour (bg3);
+                g.fillRect (0, y + 1, getWidth(), rowHeight - 2);
+            }
+
+            const auto hovered = [this, row] (Area a) { return hoverRow == row && hoverArea == a; };
+            const auto led = juce::Rectangle<float> (9.0f, (float) y + rowHeight / 2.0f - 4.5f, 9.0f, 9.0f);
+            g.setColour (theme::muteLed (channel.muted));
+            g.fillEllipse (led);
+
+            if (hovered (Area::mute)) // hover ring
+            {
+                g.setColour (textSecondary.withAlpha (0.8f));
+                g.drawEllipse (led.expanded (2.5f), 1.0f);
+            }
+
+            const auto touched = knobDrag != Area::none && knobRow == row;
+            theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f), (channel.pan + 1.0f) / 2.0f, true,
+                             touched && knobDrag == Area::pan ? accent : info, hovered (Area::pan) || (touched && knobDrag == Area::pan));
+            theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f), channel.volume, false,
+                             touched && knobDrag == Area::volume ? accent : knobArc, hovered (Area::volume) || (touched && knobDrag == Area::volume));
+
+            // small box with the mixer insert ("-" = straight to Master)
+            const auto routeArea = controlBounds (Area::route, row).toFloat();
+            g.setColour (hovered (Area::route) || (touched && knobDrag == Area::route) ? bg4 : bg0);
+            g.fillRoundedRectangle (routeArea, theme::radius::sm);
+
+            if (hovered (Area::route))
+            {
+                g.setColour (borderStrong);
+                g.drawRoundedRectangle (routeArea.reduced (0.5f), theme::radius::sm, 1.0f);
+            }
+
+            g.setColour (channel.mixerTrack > 0 ? textPrimary : textDisabled);
+            g.setFont (theme::font (theme::type::caption, true));
+            g.drawText (channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
+                        juce::Justification::centred);
+            g.setFont (theme::font (theme::type::body));
+
+            // name button: tinted with the channel colour (from the .flp or user-picked), so channels are found by
+            // colour as in FL; kept dark and toned down (LYNX look), with the colour strip at its left
+            {
+                auto plate = row == primary ? bg6 : hovered (Area::name) ? bg5 : bg4;
+                if (channel.colour != 0)
+                    plate = plate.interpolatedWith (theme::tame (juce::Colour (channel.colour)), row == primary ? 0.42f : 0.32f);
+                g.setColour (plate);
+                g.fillRoundedRectangle (nameArea, theme::radius::md);
+            }
+
+            if (row == primary)
+            {
+                g.setColour (accent);
+                g.drawRoundedRectangle (nameArea.reduced (0.5f), theme::radius::md, 1.0f);
+            }
+
+            g.setColour (channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : bg6.brighter (0.2f));
+            g.fillRoundedRectangle (nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f);
+
+            g.setColour (channel.muted ? textDisabled : textPrimary);
+            g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
+                        juce::Justification::centredLeft, true);
+
+            // selector: a slim pill, lit when the row is selected
+            const auto pill = juce::Rectangle<float> ((float) selectLeft() + 3.0f, (float) y + 7.0f, (float) selectWidth - 6.0f, (float) rowHeight - 14.0f);
+            g.setColour (selected ? (hovered (Area::select) ? accentHover : accent) : hovered (Area::select) ? textDisabled : ledOff);
+            g.fillRoundedRectangle (pill, 3.0f);
+        }
+
+        paintLane (g);
+        {
+            const auto addArea = juce::Rectangle<float> ((float) nameLeft(), (float) addY + 3, (float) nameWidth, (float) rowHeight - 6);
+            const float dash[] = { 3.0f, 3.0f };
+            juce::Path outline, dashed;
+            outline.addRoundedRectangle (addArea.reduced (0.5f), theme::radius::md);
+            juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dash, 2);
+            const auto addHovered = hoverArea == Area::addRow;
+            g.setColour (addHovered ? textSecondary : borderStrong);
+            g.fillPath (dashed);
+            g.setColour (addHovered ? textPrimary : textSecondary);
+            g.setFont (theme::font (theme::type::small));
+            g.drawText (tr ("+ add channel"), addArea.toNearestInt(), juce::Justification::centred);
+        }
+
+        if (stickyX > 0) // steps pass under the column: a hairline marks its edge
+        {
+            g.setColour (border);
+            g.fillRect (gridLeft() - 1, 0, 1, getHeight());
+        }
+    }
+}
+
+// The miniature of a channel's piano-roll notes across its step area (FL shows one once a channel has notes
+// that steps can't show); the notes keep their time and length, pitch maps onto the row's height.
+void ChannelRackComponent::paintNotePreview (juce::Graphics& g, int row, const Pattern& pattern, std::uint32_t channelColour)
+{
+    using namespace theme::colour;
+    const auto steps = numSteps();
+    const auto area = juce::Rectangle<float> ((float) gridLeft() + 1.0f, (float) rowY (row) + 4.0f, (float) (steps * stepWidth) - 3.0f,
+                                              (float) rowHeight - 8.0f);
+    const auto hoveredHere = hoverArea == Area::grid && hoverRow == row;
+    g.setColour (hoveredHere ? bg4 : bg1);
+    g.fillRoundedRectangle (area, theme::radius::sm);
+
+    for (int beat = 4; beat < steps; beat += 4) // beat lines, bars a little stronger
+    {
+        g.setColour (beat % 16 == 0 ? border.brighter (0.2f) : border);
+        g.fillRect (area.getX() + (float) (beat * stepWidth) - 1.5f, area.getY() + 2.0f, 1.0f, area.getHeight() - 4.0f);
+    }
+
+    const auto [low, high] = channelKeyRange (pattern, row);
+    const auto span = juce::jmax (high - low, 6); // a single key sits mid-row, not on an edge
+    const auto lowKey = low - (span - (high - low)) / 2;
+    const auto inner = area.reduced (1.0f, 3.0f);
+    const auto noteHeight = juce::jlimit (3.0f, 5.0f, inner.getHeight() / (float) (span + 1));
+    const auto ticks = (float) (steps * ticksPerStep);
+    const auto tint = channelColour != 0 ? theme::tame (juce::Colour (channelColour)).brighter (0.6f) : stepNote;
+
+    for (const auto& n : pattern.notes)
+    {
+        if (n.channel != row)
+            continue;
+
+        const auto x = inner.getX() + inner.getWidth() * (float) n.start / ticks;
+        if (x > inner.getRight())
+            break;
+        const auto w = juce::jmax (2.0f, inner.getWidth() * (float) n.length / ticks - 1.0f);
+        const auto y = inner.getBottom() - noteHeight - (inner.getHeight() - noteHeight) * (float) (n.key - lowKey) / (float) span;
+        g.setColour (n.muted ? textDisabled : tint);
+        g.fillRect (juce::Rectangle<float> (x, y, juce::jmin (w, inner.getRight() - x), noteHeight));
     }
 }
 
@@ -467,10 +572,12 @@ void ChannelRackComponent::showTip (Area area, int row, bool transient)
     const auto text = spec.text (valueOf (area, row));
     ui::postHint (ui::valueHint (spec, valueOf (area, row), ui::valueGestures()));
 
+    const auto bounds = area == Area::lane ? controlBounds (area, row) : controlBounds (area, row).translated (stickyX, 0);
+
     if (transient)
-        ui::flashValueTip (*this, controlBounds (area, row), text);
+        ui::flashValueTip (*this, bounds, text);
     else
-        ui::showValueTip (*this, controlBounds (area, row), text);
+        ui::showValueTip (*this, bounds, text);
 }
 
 void ChannelRackComponent::setHover (Area area, int row, int step)
@@ -1112,7 +1219,7 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
 
         case Area::laneLevels:
             for (int l = 0; l < notetools::levelCount; ++l)
-                if (levelButtonBounds (l).contains (e.getPosition()))
+                if (levelButtonBounds (l).contains (e.getPosition().translated (-stickyX, 0)))
                 {
                     graphLevel = l;
                     repaint();
@@ -1245,6 +1352,18 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
         {
             const auto step = (e.x - gridLeft()) / stepWidth;
             const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
+
+            if (showsNotePreview (pattern, row)) // the miniature opens the Piano Roll (steps would break the melody)
+            {
+                if (! e.mods.isPopupMenu())
+                {
+                    selectionAnchor = row;
+                    selectRows ({ row }, row);
+                    if (onOpenPianoRoll)
+                        onOpenPianoRoll();
+                }
+                return;
+            }
 
             if (e.mods.isRightButtonDown())
                 paintMode = PaintMode::remove;
@@ -1438,7 +1557,10 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection");
             break;
         case Area::grid:
-            h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
+            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row))
+                h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
+            else
+                h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
             break;
         case Area::addRow:
             h.text = tr ("Add a channel (or drop audio files on the rack)");
@@ -1465,8 +1587,9 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
     if (laneBounds().contains (e.getPosition()))
         return;
 
-    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < gridLeft()
-        || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip)
+    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < stickyX + gridLeft()
+        || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip
+        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row)) // drag-paint skips note rows
         return;
 
     if (row == lastPaintedRow && step == lastPaintedStep)

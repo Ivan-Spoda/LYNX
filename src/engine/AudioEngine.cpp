@@ -104,6 +104,15 @@ void AudioEngine::saveAudioDeviceState()
         xml->writeTo (audioDeviceFile());
 }
 
+void AudioEngine::restoreAudioDeviceState (const juce::XmlElement* state)
+{
+    deviceStateSaver = nullptr;
+    if (state != nullptr)
+        state->writeTo (audioDeviceFile());
+    else
+        audioDeviceFile().deleteFile();
+}
+
 AudioEngine::AudioEngine (bool openAudioDevice)
     : workers (std::make_unique<WorkerPool> (workerCount(), raiseAudioThreadPriority)),
       song (Song::makeDefault())
