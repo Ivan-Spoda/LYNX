@@ -48,6 +48,7 @@
 #include "core/Granulizer.h"
 #include "core/Drumaxx.h"
 #include "core/Wasp.h"
+#include "core/PluginLayout.h"
 #include "core/Plucked.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
@@ -7621,6 +7622,24 @@ TEST (safe_default_buffer_size)
     CHECK (lynx::prefs::safeBufferSize ({}, 0, 44100.0) == 0);
 }
 
+TEST (driver_kind_and_shared_mode_buffer_sizes)
+{
+    // REA round 97: classic shared WASAPI mixes in whole engine periods, so sizes below it are not offered
+    using lynx::prefs::DriverKind;
+    CHECK (lynx::prefs::driverKind ("Windows Audio") == DriverKind::wasapiShared);
+    CHECK (lynx::prefs::driverKind ("Windows Audio (Exclusive Mode)") == DriverKind::wasapiExclusive);
+    CHECK (lynx::prefs::driverKind ("Windows Audio (Low Latency Mode)") == DriverKind::wasapiLowLatency);
+    CHECK (lynx::prefs::driverKind ("ASIO") == DriverKind::asio);
+    CHECK (lynx::prefs::driverKind ("DirectSound") == DriverKind::directSound);
+    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::other);
+    const std::vector<int> offered { 144, 192, 256, 480, 512, 1024 };
+    CHECK ((lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 480) == std::vector<int> { 480, 512, 1024 }));
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiExclusive, offered, 480) == offered);   // the device's real periods
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiLowLatency, offered, 480) == offered);  // engine periods
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, { 64, 128 }, 480) == (std::vector<int> { 64, 128 })); // never empty
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 0) == offered);
+}
+
 TEST (linear_phase_convolver_matches_direct_convolution)
 {
     // the block FFT convolver (cached twiddles, REA round 87) equals the direct convolution with its kernel
@@ -15150,4 +15169,168 @@ TEST (level_audit_demo_imports_round89)
 }
 #include "UiLook90Tests.inc"
 #include "DialogsTests84.inc"
+
+// --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------
+
+TEST (plugin_layouts_name_real_parameters)
+{
+    using namespace lynx;
+    // every value control edits a parameter of its effect, inside the body; FL arrangements place (or list in a menu)
+    // every parameter of the effect
+    for (const auto kind : plugui::flLayoutKinds())
+    {
+        const auto& l = plugui::layoutFor (kind);
+        const auto& info = effectInfo (kind);
+        CHECK (plugui::hasFlLayout (kind));
+        CHECK (l.width > 100 && l.height > 60);
+        std::vector<bool> placed ((std::size_t) plugui::paramCount (kind), false);
+
+        for (const auto& item : l.items)
+        {
+            CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
+            if (item.param != nullptr)
+            {
+                const auto p = plugui::paramIndex (kind, item.param);
+                CHECK (p >= 0);
+                if (p >= 0)
+                    placed[(std::size_t) p] = true;
+            }
+            if (item.type == plugui::Item::radio || item.type == plugui::Item::tabs || item.type == plugui::Item::menu)
+            {
+                const auto labels = plugui::optionLabels (item);
+                CHECK (labels.size() >= 2);
+                CHECK (item.values.empty() || item.values.size() == labels.size());
+            }
+            if (item.type == plugui::Item::knob && item.h + 0.5f < item.w) // (a caption above its knob would hide it)
+            {
+                std::printf ("  %s: knob '%s' is shorter than it is wide\n", info.name, item.param != nullptr ? item.param : "");
+                CHECK (false);
+            }
+            CHECK (item.param2 == nullptr || plugui::paramIndex (kind, item.param2) >= 0);
+            if (item.param2 != nullptr && plugui::paramIndex (kind, item.param2) >= 0)
+                placed[(std::size_t) plugui::paramIndex (kind, item.param2)] = true;
+            for (const auto* when : { item.whenParam, item.when2Param })
+                CHECK (when == nullptr || plugui::paramIndex (kind, when) >= 0);
+        }
+        for (const auto* name : l.menuSwitches)
+        {
+            const auto p = plugui::paramIndex (kind, name);
+            CHECK (p >= 0);
+            if (p >= 0)
+                placed[(std::size_t) p] = true;
+        }
+        for (const auto* name : l.editedElsewhere)
+        {
+            const auto p = plugui::paramIndex (kind, name);
+            CHECK (p >= 0);
+            if (p >= 0)
+                placed[(std::size_t) p] = true;
+        }
+        for (std::size_t p = 0; p < placed.size(); ++p)
+            if (! placed[p])
+            {
+                std::printf ("  %s: parameter '%s' has no control\n", info.name, plugui::paramName (kind, (int) p));
+                CHECK (false);
+            }
+    }
+}
+
+TEST (maximus_editor_edits_the_slot_state)
+{
+    using namespace lynx;
+    // the Maximus page edits the 59 parameters stored in the slot's state (REA_rodada8 §1.2)
+    std::array<std::array<int, 13>, 4> bands {};
+    for (auto& b : bands)
+        b = { 0, 1000, 1000, 0, 0, 1000, 1115, 0, 2, 5000, 3, 2882, 0 };
+    std::array<std::vector<std::array<double, 4>>, 8> envs;
+    for (auto& e : envs)
+        e = { { 0.0, 0.0, 0.0, 2 }, { 0.5, 0.5, 0.0, 2 }, { 0.5, 0.5, 0.0, 2 } };
+    const auto state = maximusTestState ({ 19800, 1, 48065, 1, 1115, 1000, 32768 }, bands, envs, 0);
+    const auto slot = maximusfx::pack ({ hlfx::MaximusBuild::shared, -1, state });
+
+    CHECK (maximusfx::stateParams().size() == 59);
+    CHECK (plugui::paramIndex (EffectKind::maximus, "Master release") == 7 + 13 * 3 + 9);
+    CHECK (maximusfx::stateParam (slot, 0).value_or (-1) == 19800);
+    CHECK (maximusfx::stateParam (slot, 7 + 13 + 9).value_or (-1) == 5000);
+    CHECK (maximusfx::stateParamText (0, 19800) == "200 Hz");
+    CHECK (maximusfx::stateParamText (2, 48065) == "3000 Hz");
+    CHECK (maximusfx::stateParamText (8, 1000) == "+0.0 dB");
+    CHECK (maximusfx::stateParamText (7 + 6, 0) == "Default");
+    CHECK (maximusfx::stateParamText (7 + 13 * 3 + 6, 1115) == "2.00 ms");
+    CHECK (maximusfx::stateParamText (6, -1) == "Off");
+
+    const auto edited = maximusfx::withStateParam (slot, 7 + 13 + 1, 2000); // mid pre gain → +18 dB
+    CHECK (maximusfx::stateParam (edited, 7 + 13 + 1).value_or (-1) == 2000);
+    CHECK (maximusfx::stateParam (edited, 7 + 1).value_or (-1) == 1000);
+    CHECK (maximusfx::stateParam (maximusfx::withStateParam (slot, 0, 99999), 0).value_or (-1) == 65536); // clamped
+    const auto blob = maximusfx::unpack (edited);
+    const auto original = maximusfx::unpack (slot);
+    CHECK (blob && original && (hlfx::makeMaximusPreset (blob->state) != nullptr) == (hlfx::makeMaximusPreset (original->state) != nullptr));
+
+    const auto curve = maximusfx::curvePoints (slot, 3);
+    CHECK (curve.size() == 3 && std::abs (curve[1].first - 0.5f) < 1e-6f && std::abs (curve[2].first - 1.0f) < 1e-6f);
+    CHECK (maximusfx::selectedBand (slot) >= 0);
+    CHECK (plugui::hasFlLayout (EffectKind::maximus));
+}
+
+TEST (plugin_layout_options_match_the_engine_values)
+{
+    using namespace lynx;
+    // the switches show FL's captions for the engine's own values
+    const auto text = [] (EffectKind kind, const char* param, int option) {
+        for (const auto& item : plugui::layoutFor (kind).items)
+            if (item.param != nullptr && std::strcmp (item.param, param) == 0 && item.options != nullptr)
+                return formatEffectParam (kind, plugui::paramIndex (kind, param), plugui::optionValue (item, option), 120.0);
+        return std::string ("?");
+    };
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 0) == "Fake stereo");
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 2) == "Ping pong");
+    CHECK (text (EffectKind::fruityDelay3, "Delay type", 3) == "Off");
+    CHECK (text (EffectKind::fruityDelay3, "Filter mode", 1) == "High pass");
+    CHECK (text (EffectKind::fruityDelay3, "Saturation type", 1) == "Saturate");
+    CHECK (text (EffectKind::fruityMultiband, "Low mode", 1) == "off");
+    CHECK (text (EffectKind::fruityMultiband, "High mode", 2) == "bypass");
+    CHECK (text (EffectKind::luxeVerb, "Pitch type", 1) == "feed-forward");
+    CHECK (text (EffectKind::luxeVerb, "Freeze mode", 2) == "sustain");
+    CHECK (text (EffectKind::stereoEnhancer, "Invert", 2) == "invert R");
+    CHECK (text (EffectKind::parametricEq, "B3 type", 4) == formatEffectParam (EffectKind::parametricEq, peq::param (2, 0), peq::typeValue (peq::BandType::lowCut), 120.0));
+
+    // the option nearest to a value; pages and conditions
+    plugui::LayoutItem radio;
+    radio.type = plugui::Item::radio;
+    radio.options = "A|B|C|D";
+    CHECK (plugui::optionLabels (radio).size() == 4);
+    CHECK (plugui::optionAt (radio, 0.30f) == 1);
+    CHECK (plugui::optionAt (radio, 0.95f) == 3);
+    CHECK (std::abs (plugui::optionValue (radio, 2) - 2.0f / 3.0f) < 1e-6f);
+
+    const auto& lux = plugui::layoutFor (EffectKind::luxeVerb);
+    auto params = makeEffectSlot (EffectKind::luxeVerb).params;
+    const auto pitchType = plugui::paramIndex (EffectKind::luxeVerb, "Pitch type");
+    int feedForward = 0, feedback = 0;
+    for (float v : { 0.0f, 1.0f })
+    {
+        params[(std::size_t) pitchType] = v;
+        for (const auto& item : lux.items)
+            if (item.param != nullptr && std::strcmp (item.param, "Feed-forward pitch 1") == 0 && plugui::isShown (EffectKind::luxeVerb, item, 0, params))
+                ++feedForward;
+            else if (item.param != nullptr && std::strcmp (item.param, "Feedback pitch") == 0 && plugui::isShown (EffectKind::luxeVerb, item, 0, params))
+                ++feedback;
+    }
+    CHECK (feedForward == 1); // only in feed-forward mode
+    CHECK (feedback == 2);    // value plate + fader, only in feedback mode
+
+    const auto& limiter = plugui::layoutFor (EffectKind::fruityLimiter);
+    CHECK (limiter.pages.size() == 2);
+    int ceilingShown = 0;
+    for (int page = 0; page < 2; ++page)
+        for (const auto& item : limiter.items)
+            if (item.param != nullptr && std::strcmp (item.param, "Ceiling") == 0 && plugui::isShown (EffectKind::fruityLimiter, item, page, params))
+                ++ceilingShown;
+    CHECK (ceilingShown == 1); // LIMIT page only
+
+    // every other effect still gets a (generated) window
+    CHECK (! plugui::hasFlLayout (EffectKind::distortion));
+    CHECK (! plugui::layoutFor (EffectKind::distortion).items.empty());
+}
 #include "FabMeasureTests99.inc"
