@@ -622,11 +622,12 @@ const PLUGINS = [
  ['EQ','Fruity 7 Band EQ, Fruity Bass Boost','e','a'],['Delay','Fruity Delay (v1)','e','a'],['Chorus','Fruity Phaser','e','a'],['Utility','Fruity Center, Phase Inverter, Send, Transporter','e','a'],
  ['Frequency shifter','Frequency Shifter','e','a'],['Limiter','Emphasis','e','a'],['Parametric EQ','Low Lifter','e','a'],
  ['Ridge Strip','channel strips','e','o'],['Glow Leveler','opto compressors','e','o'],['Hush De-esser','de-essers','e','o'],
- ['Aether','air EQ / exciters','e','o'],['Ember Saturator','analog saturation','e','o']
+ ['Aether','air EQ / exciters','e','o'],['Ember Saturator','analog saturation','e','o'],
+ ['Echoform','ValhallaDelay','e','o'],['Spiral Echo','ValhallaFreqEcho','e','o'],['Orbit','ValhallaSpaceModulator','e','o'],['Lattice Mod','ValhallaUberMod','e','o']
 ];
 // Featured strip above the full list. To feature another engine (e.g. a future LYNX engine inspired by a
 // third-party plugin), add an entry: by = the original's maker, fl = the original plugin, t = g/e,
-// s = x/n (only Exact / Near-exact are featured), how = insert (any mixer insert) / flp (created from .flp).
+// s = x/n (FL engines: only Exact / Near-exact are featured) or o (a LYNX original inspired by a third-party plugin), how = insert (any mixer insert) / flp (created from .flp).
 const FEATURED = [
  {n:'3x Osc engine',fl:'3x Osc',by:'FL Studio',t:'g',s:'x',how:'flp',
   en:'Three-oscillator subtractive synth, FL\'s classic starting point.',pt:'Synth subtrativo de três osciladores, o clássico ponto de partida do FL.'},
@@ -647,7 +648,9 @@ const FEATURED = [
  {n:'Reeverb 2',fl:'Fruity Reeverb 2',by:'FL Studio',t:'e',s:'x',how:'insert',
   en:'Algorithmic reverb, from small rooms to huge halls.',pt:'Reverb algorítmico, de salas pequenas a halls enormes.'},
  {n:'Fruity Compressor',fl:'Fruity Compressor',by:'FL Studio',t:'e',s:'x',how:'insert',
-  en:'The classic FL compressor, sidechain included.',pt:'O compressor clássico do FL, com sidechain.'}
+  en:'The classic FL compressor, sidechain included.',pt:'O compressor clássico do FL, com sidechain.'},
+ {n:'Echoform',fl:'ValhallaDelay',by:'Valhalla DSP',t:'e',s:'o',how:'insert',
+  en:'Multi-mode echo: tape, bucket brigade, analog, digital, shifter, pitch, reverse. Opens ValhallaDelay settings.',pt:'Eco multimodo: fita, BBD, analógico, digital, deslocador, altura, reverso. Abre os ajustes do ValhallaDelay.'}
 ];
 function renderFeatured(){
   const pt = lang==='pt', d = pt ? PT : EN, esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');

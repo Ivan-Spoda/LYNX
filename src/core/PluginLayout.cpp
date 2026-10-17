@@ -1600,6 +1600,176 @@ Layout emberLayout()
     return l;
 }
 
+// --- LYNX originals: the delay / modulation suite (REA round 101) --------------------------------------------------
+
+// option values of a parameter read as floor (v · n): the middle of each step
+std::vector<float> stepCentres (int n, int first = 0, int count = -1)
+{
+    std::vector<float> v;
+    for (int k = first; k < (count < 0 ? n : first + count); ++k)
+        v.push_back (((float) k + 0.5f) / (float) n);
+    return v;
+}
+
+LayoutItem stepped (LayoutItem i, int steps)
+{
+    i.steps = steps;
+    return i;
+}
+
+Layout echoformLayout()
+{
+    Layout l;
+    l.width = 780;
+    l.height = 372;
+    auto& v = l.items;
+    // time: the echo train on top, the two sides, the style
+    v.push_back (section (4, 4, 300, 364, TR_NOOP ("Time")));
+    v.push_back (display (12, 26, 284, 70, "echotrain"));
+    v.push_back (tabs (12, 102, 284, 20, "Style", TR_NOOP ("Single|Dual|Ratio|Ping-pong|Quad"), stepCentres (5)));
+    v.push_back (label (12, 130, 136, 14, TR_NOOP ("Left"), boxed));
+    v.push_back (label (160, 130, 136, 14, TR_NOOP ("Right"), boxed));
+    v.push_back (tabs (12, 150, 136, 20, "Sync L", TR_NOOP ("ms|Note|Dot|Trip"), { 0.25f, 0.5f, 0.75f, 1.0f }));
+    v.push_back (tabs (160, 150, 136, 20, "Sync R", TR_NOOP ("ms|Note|Dot|Trip"), { 0.25f, 0.5f, 0.75f, 1.0f }));
+    v.push_back (dial (50, 206, 42, "Time L", TR_NOOP ("Time")));
+    v.push_back (stepped (dial (112, 206, 34, "Note L", TR_NOOP ("Note")), 9));
+    v.push_back (dial (198, 206, 42, "Time R", TR_NOOP ("Time")));
+    v.push_back (stepped (dial (260, 206, 34, "Note R", TR_NOOP ("Note")), 9));
+    v.push_back (dial (52, 300, 32, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (126, 300, 32, "Spread", TR_NOOP ("Spread"), bipolar));
+    v.push_back (dial (200, 300, 32, "Spacing", TR_NOOP ("Spacing"), bipolar));
+    v.push_back (dial (266, 300, 32, "Width", TR_NOOP ("Width"), bipolar));
+
+    // character
+    v.push_back (section (308, 4, 200, 364, TR_NOOP ("Character")));
+    auto modes = radio (316, 26, 184, 150, "Mode", TR_NOOP ("Tape|Hi-Fi tape|Bucket|Analog|Digital|Clean|Shifter|Pitch|Reverse|Lo-Fi|Phaser|Detune"),
+                        stepCentres (12));
+    modes.columns = 2;
+    v.push_back (modes);
+    v.push_back (dial (360, 222, 34, "Age", TR_NOOP ("Age")));
+    v.push_back (dial (456, 222, 34, "Drive", TR_NOOP ("Drive")));
+    v.push_back (dial (360, 302, 30, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (456, 302, 30, "High cut", TR_NOOP ("High cut")));
+
+    // feedback, modulation, shift / pitch, output
+    v.push_back (section (512, 4, 264, 364, TR_NOOP ("Feedback")));
+    v.push_back (dial (556, 62, 50, "Feedback", TR_NOOP ("Feedback"), big));
+    v.push_back (dial (640, 56, 30, "Diffusion", TR_NOOP ("Diffusion")));
+    v.push_back (dial (716, 56, 30, "Diffusion size", TR_NOOP ("Size")));
+    v.push_back (label (520, 120, 248, 14, TR_NOOP ("Modulation"), boxed));
+    v.push_back (dial (550, 160, 28, "Mod rate", TR_NOOP ("Rate")));
+    v.push_back (dial (612, 160, 28, "Mod depth", TR_NOOP ("Depth")));
+    v.push_back (dial (674, 160, 28, "Wow", TR_NOOP ("Wow")));
+    v.push_back (dial (736, 160, 28, "Flutter", TR_NOOP ("Flutter")));
+    v.push_back (label (520, 214, 248, 14, TR_NOOP ("Shift / pitch"), boxed));
+    v.push_back (dial (550, 254, 28, "Shift", TR_NOOP ("Shift"), bipolar));
+    v.push_back (dial (612, 254, 28, "Shift detune", TR_NOOP ("Detune"), bipolar));
+    v.push_back (dial (674, 254, 28, "Pitch", TR_NOOP ("Pitch"), bipolar));
+    v.push_back (dial (736, 254, 28, "Pitch detune", TR_NOOP ("Detune"), bipolar));
+    v.push_back (dial (580, 324, 30, "Ducking", TR_NOOP ("Ducking")));
+    v.push_back (dial (700, 320, 38, "Mix", TR_NOOP ("Mix")));
+    return l;
+}
+
+Layout spiralLayout()
+{
+    Layout l;
+    l.width = 520;
+    l.height = 236;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 200, 228, TR_NOOP ("Spiral")));
+    v.push_back (display (12, 26, 184, 116, "spiral"));
+    v.push_back (tabs (12, 150, 184, 22, "Stereo", TR_NOOP ("Mono|Stereo")));
+    v.push_back (dial (104, 196, 30, "Mix", TR_NOOP ("Mix")));
+    v.push_back (section (208, 4, 308, 228, TR_NOOP ("Echo")));
+    v.push_back (dial (262, 76, 62, "Shift", TR_NOOP ("Shift"), (std::uint16_t) (big | bipolar)));
+    v.push_back (dial (366, 64, 40, "Delay", TR_NOOP ("Delay")));
+    v.push_back (stepped (dial (456, 64, 40, "Sync", TR_NOOP ("Sync")), 23));
+    v.push_back (dial (262, 176, 34, "Feedback", TR_NOOP ("Feedback")));
+    v.push_back (dial (366, 176, 34, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (456, 176, 34, "High cut", TR_NOOP ("High cut")));
+    return l;
+}
+
+Layout orbitLayout()
+{
+    Layout l;
+    l.width = 500;
+    l.height = 236;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 220, 228, TR_NOOP ("Mode")));
+    std::vector<float> modeValues;
+    for (int k = 1; k <= 11; ++k)
+        modeValues.push_back ((float) k / 11.0f);
+    auto modes = radio (12, 26, 204, 198, "Mode", TR_NOOP ("Rise|Rise / fall|Through-zero +|Through-zero −|Tri chorus|Octo chorus|Doubler|Drift rise|Drift rise / fall|Ensemble|Symphonic"),
+                        modeValues);
+    modes.columns = 1;
+    v.push_back (modes);
+    v.push_back (section (228, 4, 268, 228, TR_NOOP ("Orbit")));
+    v.push_back (dial (288, 76, 60, "Rate", TR_NOOP ("Rate"), (std::uint16_t) (big | bipolar)));
+    v.push_back (dial (380, 70, 44, "Depth", TR_NOOP ("Depth")));
+    v.push_back (dial (456, 70, 36, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (300, 176, 36, "Feedback", TR_NOOP ("Feedback"), bipolar));
+    v.push_back (dial (400, 176, 36, "Manual", TR_NOOP ("Manual"), bipolar));
+    return l;
+}
+
+Layout latticeLayout()
+{
+    Layout l;
+    l.width = 800;
+    l.height = 330;
+    auto& v = l.items;
+    // taps
+    v.push_back (section (4, 4, 264, 322, TR_NOOP ("Taps")));
+    v.push_back (display (12, 26, 248, 70, "lattice"));
+    v.push_back (tabs (12, 102, 248, 20, "Taps", TR_NOOP ("1|2|3|4|8|16"),
+                       { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 9.5f / 24.0f }));
+    v.push_back (dial (46, 160, 38, "Delay", TR_NOOP ("Delay")));
+    v.push_back (stepped (dial (110, 160, 30, "Sync", TR_NOOP ("Sync")), 17));
+    v.push_back (dial (170, 160, 30, "Feedback", TR_NOOP ("Feedback")));
+    v.push_back (dial (228, 160, 30, "Rotate", TR_NOOP ("Rotate")));
+    v.push_back (dial (40, 250, 28, "Spread", TR_NOOP ("Spread")));
+    v.push_back (dial (96, 250, 28, "Slope", TR_NOOP ("Slope"), bipolar));
+    v.push_back (dial (152, 250, 28, "Skew", TR_NOOP ("Skew"), bipolar));
+    v.push_back (dial (208, 250, 28, "Random", TR_NOOP ("Random")));
+    v.push_back (dial (40, 300, 22, "Tap gain", TR_NOOP ("Tap gain"), (std::uint16_t) (bipolar | noCaption)));
+    v.push_back (toggle (80, 292, 90, 20, "Half speed", TR_NOOP ("Half speed")));
+
+    // modulation
+    v.push_back (section (272, 4, 196, 322, TR_NOOP ("Modulation")));
+    v.push_back (dial (370, 58, 46, "Depth", TR_NOOP ("Depth"), big));
+    v.push_back (dial (312, 140, 28, "Detune rate", TR_NOOP ("Detune rate")));
+    v.push_back (dial (370, 140, 28, "Detune depth", TR_NOOP ("Detune")));
+    v.push_back (dial (428, 140, 28, "Over-mod", TR_NOOP ("Over-mod")));
+    v.push_back (dial (312, 220, 28, "Vibrato rate", TR_NOOP ("Vibrato rate")));
+    v.push_back (dial (370, 220, 28, "Vibrato depth", TR_NOOP ("Vibrato")));
+    v.push_back (dial (428, 220, 28, "Smoothing", TR_NOOP ("Smoothing")));
+
+    // diffusion / drive
+    v.push_back (section (472, 4, 160, 322, TR_NOOP ("Diffusion / drive")));
+    v.push_back (toggle (480, 26, 70, 20, "Diffusion on", TR_NOOP ("Diffuse")));
+    v.push_back (dial (504, 82, 26, "Diffusion", TR_NOOP ("Amount")));
+    v.push_back (dial (560, 82, 26, "Diffusion size", TR_NOOP ("Size")));
+    v.push_back (dial (504, 142, 24, "Diffusion rate", TR_NOOP ("Rate")));
+    v.push_back (dial (560, 142, 24, "Diffusion depth", TR_NOOP ("Depth")));
+    v.push_back (toggle (480, 186, 66, 20, "Drive on", TR_NOOP ("Drive")));
+    v.push_back (tabs (552, 186, 72, 20, "Drive post", TR_NOOP ("Pre|Post")));
+    v.push_back (dial (500, 244, 24, "Drive in", TR_NOOP ("In")));
+    v.push_back (dial (552, 244, 24, "Drive out", TR_NOOP ("Out")));
+    v.push_back (dial (604, 244, 24, "Noise", TR_NOOP ("Noise")));
+
+    // tone / output
+    v.push_back (section (636, 4, 160, 322, TR_NOOP ("Tone")));
+    v.push_back (dial (676, 56, 28, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (752, 56, 28, "High cut", TR_NOOP ("High cut")));
+    v.push_back (tabs (646, 108, 140, 20, "Colour", TR_NOOP ("Bright|Dark")));
+    v.push_back (dial (676, 172, 28, "Crossover", TR_NOOP ("Crossover")));
+    v.push_back (dial (752, 172, 28, "Width", TR_NOOP ("Width")));
+    v.push_back (dial (716, 264, 42, "Mix", TR_NOOP ("Mix"), big));
+    return l;
+}
+
 Layout generated (EffectKind kind)
 {
     // knobs in rows of up to 6 (FL's wrapper shows unknown plugins as a list of knobs too)
@@ -1645,7 +1815,8 @@ const std::vector<EffectKind>& flLayoutKinds()
 const std::vector<EffectKind>& ownLayoutKinds()
 {
     static const std::vector<EffectKind> kinds { EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser,
-                                                 EffectKind::aether, EffectKind::ember };
+                                                 EffectKind::aether, EffectKind::ember, EffectKind::echoform, EffectKind::spiralEcho,
+                                                 EffectKind::orbit, EffectKind::latticeMod };
     return kinds;
 }
 
@@ -1696,6 +1867,10 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
+        case EffectKind::echoform: l = echoformLayout(); break;
+        case EffectKind::spiralEcho: l = spiralLayout(); break;
+        case EffectKind::orbit: l = orbitLayout(); break;
+        case EffectKind::latticeMod: l = latticeLayout(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

@@ -69,12 +69,15 @@ preset = Dry=0; Wet=0.8                 # LYNX parameter (by name) = normalised 
 mix = 0.25                              # the substitute's slot dry/wet
 vst2params = 12                         # VST2 parameters per program (to read "all programs" states)
 map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
+map = xml:Mode -> Mode | steps 0.04 0.12 0.21   # an enumeration: step floor (value · N) of the source -> that output value
+map = xml:Time -> Time | pwl 0 0 0.5 0.2 1 1    # a piecewise-linear law (x ascending), clamped at the ends
 ```
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
 attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
 active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
-the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter.
+the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter; `steps` and `pwl` give
+enumerations and non-linear laws.
 
 Matching order: VST2 ID, VST3 class ID, CLAP id, Waves sub-plugin name, then names (a WaveShell's own name never
 matches by name).
@@ -96,7 +99,11 @@ matches by name).
 | ValhallaRoom, ValhallaPlate, Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (same preset) | name / Waves name | — |
 | Valhalla Supermassive / Shimmer, FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
-| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| ValhallaDelay | Echoform (round 101) | VST3 class ID [derived], name | every setting but Era / taps / repeat-swell: mix, style, sync, times, feedback, filters, modulation, shift, pitch, ducking; the 17 modes onto Echoform's 12 characters |
+| ValhallaFreqEcho | Spiral Echo (round 101) | VST3 class ID [derived], name | all 8 settings |
+| ValhallaSpaceModulator | Orbit (round 101) | VST3 class ID [derived], name | all 6 settings |
+| ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
 | Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
@@ -116,5 +123,7 @@ Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 
 De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 
 [DATA] = read from FL wrapper records of real projects (identifiers and state layouts only; no plugin code was read).
+[derived] = Steinberg's VST2-compatible VST3 UID ("VST" + the VST2 ID read from the plugin's own state header + the first nine letters of
+its lower-case name, in FL's byte order); the rule reproduces ValhallaVintageVerb's [DATA] ID exactly.
 Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
 Waves parameter is translated yet. Soundtoys states are encoded (not translated).

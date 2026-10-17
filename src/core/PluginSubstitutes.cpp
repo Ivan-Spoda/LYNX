@@ -110,11 +110,123 @@ vendor = Soundtoys
 lynx = Fruity Delay 3
 names = PrimalTap; Little PrimalTap; LittlePrimalTap
 
+# Valhalla delay / modulation plugins -> LYNX's delay / modulation suite (round 101). Their saved state is a JUCE
+# XML block holding every parameter as its normalised value [DATA, EXEC]; the LYNX effects use the same value laws,
+# measured black-box on the official demos (docs/analise/REA_rodada101.md §2-§6), so most settings map one to one.
+# [derived] VST3 class IDs: Steinberg's VST2-compatible UID ("VST" + the VST2 ID found in the state's FBCh header +
+# the first 9 letters of the lower-case name), in FL's byte order; the same rule reproduces ValhallaVintageVerb's ID
+# read from real projects.
 [valhalla-delay]
 product = ValhallaDelay
 vendor = Valhalla DSP
-lynx = Fruity Delay 3
-names = ValhallaDelay; ValhallaFreqEcho
+lynx = Echoform
+vst3 = 64545356614c7679616c68616c6c6164
+names = ValhallaDelay
+mix = 1
+map = xml:Mix -> Mix
+map = xml:DelayStyle -> Style
+map = xml:DelayLSync -> Sync L
+map = xml:DelayLNote -> Note L
+map = xml:DelayL_Ms -> Time L
+map = xml:DelayRSync -> Sync R
+map = xml:DelayRNote -> Note R
+map = xml:DelayR_Ms -> Time R
+map = xml:DelaySpread -> Spread
+map = xml:DelaySpacing -> Spacing
+map = xml:DelayRatio -> Ratio
+map = xml:Feedback -> Feedback
+map = xml:Width -> Width
+map = xml:DriveIn -> Drive
+map = xml:Age -> Age
+map = xml:Diffusion -> Diffusion
+map = xml:DiffSize -> Diffusion size
+map = xml:LowCut -> Low cut
+map = xml:HighCut -> High cut
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:Wow -> Wow
+map = xml:Flutter -> Flutter
+map = xml:FreqShift -> Shift
+map = xml:FreqDetune -> Shift detune
+map = xml:PitchShift -> Pitch
+map = xml:PitchDetune -> Pitch detune
+map = xml:Ducking -> Ducking
+# the 17 modes (index floor (24 v)) onto Echoform's 12 characters: Tape, HiFi, BBD, Digital, Ghost (shifter), Pitch,
+# RevPitch (reverse), BBDuck (bucket), Clarity (clean), DuckTape (tape), PitchDuck (pitch), LoFi, Quartz (clean),
+# PhaserDDL (phaser), RichPitch (detune), ChromeTape (tape), Analog; the "duck" variants' built-in ducking is not kept
+map = xml:Mode -> Mode | steps 0.041667 0.041667 0.125 0.208333 0.375 0.541667 0.625 0.708333 0.208333 0.458333 0.041667 0.625 0.791667 0.458333 0.875 0.958333 0.041667 0.291667 0.041667 0.041667 0.041667 0.041667 0.041667 0.041667
+
+[valhalla-freqecho]
+product = ValhallaFreqEcho
+vendor = Valhalla DSP
+lynx = Spiral Echo
+vst3 = 4654535645717668616c68616c6c6166
+names = ValhallaFreqEcho
+mix = 1
+map = xml:wetDryMix -> Mix
+map = xml:shift -> Shift
+map = xml:delay -> Delay
+map = xml:sync -> Sync
+map = xml:feedback -> Feedback
+map = xml:lowCut -> Low cut
+map = xml:highCut -> High cut
+map = xml:stereo -> Stereo
+
+[valhalla-spacemodulator]
+product = ValhallaSpaceModulator
+vendor = Valhalla DSP
+lynx = Orbit
+vst3 = 535453564d707664616c68616c6c6173
+names = ValhallaSpaceModulator
+mix = 1
+map = xml:wetDry -> Mix
+map = xml:rate -> Rate
+map = xml:depth -> Depth
+map = xml:feedback -> Feedback
+map = xml:manual -> Manual
+map = xml:Mode -> Mode
+
+[valhalla-ubermod]
+product = ValhallaUberMod
+vendor = Valhalla DSP
+lynx = Lattice Mod
+vst3 = 7554535665627672616c68616c6c6175
+names = ValhallaUberMod
+mix = 1
+map = xml:Mix -> Mix
+map = xml:Depth -> Depth
+map = xml:StereoWidth -> Width
+map = xml:Delay -> Delay
+map = xml:Feedback -> Feedback
+map = xml:Spread -> Spread
+map = xml:Slope -> Slope
+map = xml:Skew -> Skew
+map = xml:Random -> Random
+map = xml:TapGain -> Tap gain
+map = xml:Diffusion -> Diffusion
+map = xml:DiffSize -> Diffusion size
+map = xml:DiffModRate -> Diffusion rate
+map = xml:DiffModDepth -> Diffusion depth
+map = xml:LowCut -> Low cut
+map = xml:HighCut -> High cut
+map = xml:SpatialXover -> Crossover
+map = xml:DetuneRate -> Detune rate
+map = xml:DetuneDepth -> Detune depth
+map = xml:VibratoRate -> Vibrato rate
+map = xml:VibratoDepth -> Vibrato depth
+map = xml:OverMod -> Over-mod
+map = xml:DriveInGain -> Drive in
+map = xml:DriveOutGain -> Drive out
+map = xml:DriveNoiseGain -> Noise
+map = xml:FeedbackRotate -> Rotate
+map = xml:SmoothingTime -> Smoothing
+map = xml:ColorMode -> Colour
+map = xml:type -> Taps
+map = xml:DiffEnable -> Diffusion on
+map = xml:Drive -> Drive on
+map = xml:DrivePrePost -> Drive post
+map = xml:Speed -> Half speed
+# not translated (meaning not confirmed): DelaySync (0-17: which note each step is), InputPan (0-8)
 
 [fabfilter-timeless]
 product = FabFilter Timeless
@@ -314,7 +426,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::lynxTune; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::latticeMod; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -435,13 +547,40 @@ bool parseMap (const std::string& text, EffectKind kind, SubstituteParamMap& out
 
     if (! range.empty())
     {
+        auto tokens = splitList (range, ' ');
+        tokens.erase (std::remove (tokens.begin(), tokens.end(), std::string()), tokens.end());
+        std::string law;
+        if (! tokens.empty() && (lowerAscii (tokens.front()) == "steps" || lowerAscii (tokens.front()) == "pwl"))
+        {
+            law = lowerAscii (tokens.front());
+            tokens.erase (tokens.begin());
+        }
         std::vector<float> v;
-        for (const auto& token : splitList (range, ' '))
+        for (const auto& token : tokens)
         {
             float f = 0;
             if (! parseFloat (token, f))
                 return false;
             v.push_back (f);
+        }
+        if (law == "steps")
+        {
+            if (v.empty())
+                return false;
+            out.steps = v;
+            return true;
+        }
+        if (law == "pwl")
+        {
+            if (v.size() < 4 || v.size() % 2 != 0)
+                return false;
+            for (std::size_t i = 0; i < v.size(); i += 2)
+            {
+                if (! out.points.empty() && v[i] <= out.points.back().first)
+                    return false;
+                out.points.push_back ({ v[i], v[i + 1] });
+            }
+            return true;
         }
         if (v.size() != 4 || v[0] == v[1])
             return false;
@@ -526,6 +665,25 @@ std::string wavesParametersText (const std::vector<std::uint8_t>& state)
 
 float mapValue (const SubstituteParamMap& m, double value)
 {
+    if (! m.steps.empty())
+    {
+        const auto n = (int) m.steps.size();
+        const auto index = std::clamp ((int) std::floor (std::clamp (value, 0.0, 1.0) * n + 1e-3), 0, n - 1);
+        return m.steps[(std::size_t) index];
+    }
+    if (! m.points.empty())
+    {
+        if (value <= (double) m.points.front().first)
+            return m.points.front().second;
+        for (std::size_t i = 1; i < m.points.size(); ++i)
+            if (value <= (double) m.points[i].first)
+            {
+                const auto [x0, y0] = m.points[i - 1];
+                const auto [x1, y1] = m.points[i];
+                return (float) ((double) y0 + ((double) y1 - (double) y0) * (value - (double) x0) / ((double) x1 - (double) x0));
+            }
+        return m.points.back().second;
+    }
     auto u = (value - (double) m.inLo) / ((double) m.inHi - (double) m.inLo);
     u = std::clamp (u, 0.0, 1.0);
     return (float) ((double) m.outLo + u * ((double) m.outHi - (double) m.outLo));

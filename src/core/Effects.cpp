@@ -1,5 +1,6 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 
 #include "core/Effector.h"
@@ -2472,6 +2473,10 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::aether: return mixsuite::aetherInfo();
         case EffectKind::ember: return mixsuite::emberInfo();
         case EffectKind::lynxTune: return lynxtune::info();
+        case EffectKind::echoform: return echosuite::echoformInfo();
+        case EffectKind::spiralEcho: return echosuite::spiralInfo();
+        case EffectKind::orbit: return echosuite::orbitInfo();
+        case EffectKind::latticeMod: return echosuite::latticeInfo();
     }
     return eq;
 }
@@ -2847,6 +2852,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return mixsuite::paramText (kind, param, v);
         case EffectKind::lynxTune:
             return lynxtune::paramText (param, v);
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod:
+            return echosuite::paramText (kind, param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3017,6 +3027,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::aether:
         case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod: return echosuite::make (kind); // LYNX's delay / modulation suite (REA_rodada101)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

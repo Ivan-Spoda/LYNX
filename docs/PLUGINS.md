@@ -12,7 +12,7 @@ samples, impulses or tables, LYNX reads them at run time from **your own** FL St
 
 ## Featured
 
-The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or **Near-exact** quality.
+The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or **Near-exact** quality, plus LYNX originals inspired by popular third-party plugins.
 (Sytrus and Harmor are not featured yet: both are *Close* — see [Generators](#generators).)
 
 <!-- Featured list: add a row for any engine that reaches Exact/Near-exact. Engines inspired by third-party plugins
@@ -29,6 +29,7 @@ The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or
 | Fruity Delay 3 | Fruity Delay 3 (FL Studio) | Effect | Exact | Insert | analog-style delay with modulation, diffusion and feedback filtering |
 | Reeverb 2 | Fruity Reeverb 2 (FL Studio) | Effect | Exact | Insert | algorithmic reverb, small rooms to huge halls |
 | Fruity Compressor | Fruity Compressor (FL Studio) | Effect | Exact | Insert | the classic FL compressor, sidechain included |
+| Echoform | ValhallaDelay (Valhalla DSP) | Effect | LYNX original | Insert, and in place of a missing ValhallaDelay | multi-mode echo — tape, bucket brigade, analog, digital, shifter, pitch, reverse, lo-fi … — with its saved settings translated ([below](#lynx-originals-delay-and-modulation)) |
 
 ## Status legend
 
@@ -202,6 +203,35 @@ opened, run or analysed to make it, and no preset, name, graphic or manual text 
 note with instant retune; it never allocates on the audio thread and reports its latency to PDC. Antares and Auto-Tune
 are trademarks of Antares Audio Technologies, Waves Tune of Waves Audio; they are named only to say which role LYNX Tune
 plays. LYNX is not affiliated with, endorsed or sponsored by them.
+
+## LYNX originals: delay and modulation
+
+Four effects of LYNX's own design (REA round 101, [`docs/analise/REA_rodada101.md`](analise/REA_rodada101.md)),
+inspired by the delay / modulation plugins producers use most. They are written from published DSP literature
+(fractional delay lines, the Hilbert-transform frequency shifter, delay-line pitch shifting, barber-pole and
+through-zero flanging, tape and bucket-brigade echo descriptions from AES / DAFx papers and textbooks). The
+reference plugins — the official demos, installed by the user — were only **measured from the outside**, the way a
+DAW hosts them (parameter names and value laws, test signals in, audio out); nothing in them was decompiled or
+copied. Their parameters follow the measured value laws, so when a project uses one of the originals on a machine
+that does not have it, the LYNX effect stands in **with the saved settings translated** (the original's state stays in
+the project byte for byte and is used again once the plugin is installed — see [`PLUGIN_FALLBACK.md`](PLUGIN_FALLBACK.md)).
+
+| LYNX engine | Inspired by | What it is |
+|---|---|---|
+| Echoform | ValhallaDelay | 12 characters: tape (head bump, roll-off that falls with the delay time, wow / flutter, saturation), hi-fi tape, bucket brigade (1.6 kHz, noise with age), analog (3.4 kHz), digital (8 kHz, age = bit / rate reduction), clean (age = low-pass), frequency shifter (every repeat moves by the shift), pitch (±24 st, L / R detune), reverse, lo-fi, phaser, detune; single / dual / ratio / ping-pong / quad styles; ms or tempo sync (straight, dotted, triplet); feedback to 200 % (bounded); diffusion; low / high cut; LFO; ducking; width; equal-power mix |
+| Spiral Echo | ValhallaFreqEcho | frequency-shifting echo: shift ±1 kHz added on every repeat (right side opposite in stereo), 0.01–1000 ms or 23 tempo divisions, feedback (loop gain 1.5 × the knob, soft-limited), one-pole low / high cut in the loop |
+| Orbit | ValhallaSpaceModulator | modulation machine: barber-pole rise and rise / fall, through-zero flange + / −, tri and octo choruses, doubler, drift variants, ensemble, symphonic; rate ±10 Hz, depth to 50 ms, manual offset, signed feedback, equal-power mix |
+| Lattice Mod | ValhallaUberMod | multitap modulated delay: 1–16 taps spread over the delay, slope / skew / random, detune (slow random) and vibrato per tap with over-mod, rotating stereo feedback, modulated diffusion, drive with noise, low / high cut, dark colour, spatial crossover, width, half speed |
+
+Measured and reproduced (details and residuals in the round's document): echo times and tempo sync to the sample,
+the feedback laws (Echoform: loop gain = knob / 100 %; Spiral Echo: 1.5 × knob; Lattice: = knob), the mix laws
+(equal power, Spiral Echo linear), each character's band limit, harmonics and noise, wow / flutter depth and rates,
+the shifter / pitch amounts, Lattice's tap layout and gains. Not reproduced: the originals' exact diffusion, ducking
+and "era" voicings, ValhallaDelay's "duck" variants' built-in ducking, UberMod's tempo-sync table.
+
+Valhalla, ValhallaDelay, ValhallaFreqEcho, ValhallaSpaceModulator and ValhallaUberMod are trademarks of Valhalla DSP,
+LLC; they are named only to say which plugin each LYNX effect is inspired by and stands in for. LYNX is not affiliated
+with, endorsed or sponsored by Valhalla DSP.
 
 ---
 

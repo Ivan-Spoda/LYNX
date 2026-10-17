@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/Song.h"
@@ -44,6 +45,10 @@ struct SubstituteParamMap
     bool toSlotMix = false;
     // linear map, clamped: in [inLo, inHi] -> out [outLo, outHi] (0..1 normalised parameter)
     float inLo = 0.0f, inHi = 1.0f, outLo = 0.0f, outHi = 1.0f;
+    // "| steps v0 v1 …": an enumeration — the source's step floor (value · N) (N = count) gives the output value
+    std::vector<float> steps;
+    // "| pwl x0 y0 x1 y1 …": a piecewise-linear law (x ascending), clamped at the ends
+    std::vector<std::pair<float, float>> points;
 };
 
 struct SubstituteEntry
