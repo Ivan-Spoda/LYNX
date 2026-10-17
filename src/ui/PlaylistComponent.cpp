@@ -1,3 +1,4 @@
+#include "ui/ClipProperties.h"
 #include "ui/PlaylistComponent.h"
 
 #include "core/ClipOps.h"
@@ -167,7 +168,8 @@ enum ArrangementAction
     newArrangement = 1001,
     cloneArrangement,
     renameArrangementAction,
-    removeArrangementAction
+    removeArrangementAction,
+    manageArrangements
 };
 } // namespace
 
@@ -196,6 +198,8 @@ void PlaylistComponent::refreshArrangementBox()
         arrangementBox.addItem (tr ("Clone this one"), cloneArrangement);
         arrangementBox.addItem (tr ("Rename..."), renameArrangementAction);
         arrangementBox.addItem (tr ("Remove this one"), removeArrangementAction);
+        arrangementBox.addSeparator();
+        arrangementBox.addItem (tr ("Arrangements and merging..."), manageArrangements);
         arrangementBox.setItemEnabled (removeArrangementAction, names.size() > 1);
     }
 
@@ -227,6 +231,9 @@ void PlaylistComponent::arrangementChosen()
             break;
         case renameArrangementAction:
             renameArrangement();
+            break;
+        case manageArrangements:
+            showArrangements (engine);
             break;
         case removeArrangementAction:
             engine.editSong ([] (Song& s) { s.removeArrangement (s.currentArrangement); });
@@ -2296,6 +2303,12 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
     else if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) song.automations.size())
         sourceName = juce::String::fromUTF8 (song.automations[(std::size_t) clip.automation].name.c_str());
     menu.addSectionHeader (sourceName);
+    menu.addItem (tr ("Properties..."), [this, index, targets] {
+        showClipProperties (engine, index, targets, [safe = juce::Component::SafePointer<PlaylistComponent> (this)] {
+            if (safe != nullptr)
+                safe->sortClips();
+        });
+    });
 
     if (clip.kind == ClipKind::pattern && onRenamePattern)
         menu.addItem (tr ("Rename and color..."), [this, p = clip.pattern] { onRenamePattern (p); });
