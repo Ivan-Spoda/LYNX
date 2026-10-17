@@ -113,6 +113,7 @@ target_sources(lynx_core PRIVATE
     src/core/NoteTools.cpp
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
+    src/core/AudioEdit.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/SearchQuery.cpp)
