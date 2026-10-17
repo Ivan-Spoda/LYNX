@@ -1348,6 +1348,26 @@ private:
 
             ui.selectTabForSnapshot (0);
             saveSnapshot (ui, prefix + "-rack.png");
+            {
+                // a pattern with piano-roll notes: those rows show a miniature instead of steps (round 90)
+                int found = -1;
+                const auto before = offline.getSong().currentPattern;
+                {
+                    const auto& song = offline.getSong();
+                    for (int p = 0; p < (int) song.patterns.size() && found < 0; ++p)
+                        for (int c = 0; c < (int) song.channels.size() && found < 0; ++c)
+                            if (lynx::showsNotePreview (song.patterns[(std::size_t) p], c))
+                                found = p;
+                }
+                if (found >= 0)
+                {
+                    offline.editSong ([found] (lynx::Song& s) { s.currentPattern = found; }, false);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-rack-preview.png");
+                    offline.editSong ([before] (lynx::Song& s) { s.currentPattern = before; }, false);
+                    offline.dispatchPendingMessages();
+                }
+            }
             ui.selectTabForSnapshot (1);
             saveSnapshot (ui, prefix + "-pianoroll.png");
             if (const auto strip = ui.getToolStripAreaForSnapshot (false); ! strip.isEmpty())
