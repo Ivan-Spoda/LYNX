@@ -1,6 +1,7 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
 #include "core/LynxTune.h"
+#include "core/LynxVerbs.h"
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
@@ -2484,6 +2485,12 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::ember: return mixsuite::emberInfo();
         case EffectKind::lynxTune: return lynxtune::info();
         case EffectKind::fruityPhaser: return fruityPhaserInfo;
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon: return verbs::info (kind);
         case EffectKind::crestCompressor: return dyn::crestInfo();
         case EffectKind::prismMultiband: return dyn::prismInfo();
         case EffectKind::sentryGate: return dyn::sentryInfo();
@@ -2866,6 +2873,13 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return lynxtune::paramText (param, v);
         case EffectKind::fruityPhaser:
             return phaserfx::paramText (param, v);
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon:
+            return verbs::paramText (kind, param, v, bpm);
         case EffectKind::crestCompressor:
         case EffectKind::prismMultiband:
         case EffectKind::sentryGate:
@@ -2947,6 +2961,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::frequencySplitter)
         return fsplit::make (slot.params);
+    if (slot.kind == EffectKind::facetEq) // its phase mode (latency) known before the first block
+        return facet::make (&slot.params);
     if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
         return dyn::make (slot.kind, &slot.params);
     if (slot.kind == EffectKind::hyperChorus)
@@ -3043,6 +3059,12 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
         case EffectKind::fruityPhaser: return phaserfx::make(); // FL's Fruity Phaser, exact (REA_rodada105_phaser)
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon: return verbs::make (kind); // LYNX's own reverbs (REA_rodada100)
         case EffectKind::crestCompressor:
         case EffectKind::prismMultiband:
         case EffectKind::sentryGate: return dyn::make (kind); // LYNX's dynamics suite (REA_rodada108)

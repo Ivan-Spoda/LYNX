@@ -145,11 +145,24 @@ struct ProcessTimes
     std::array<std::atomic<std::uint64_t>, maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
     std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
     std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
-    // Live meters of the effects that have them (the mixing suite's gain reduction, REA round 96; the dynamics suite's
-    // band gains and levels, round 108), always published:
+    // Live meters of the effects that have them (the mixing suite's gain reduction, REA round 96; LYNX Tune's pitch and
+    // Facet EQ's dynamic gains, round 103; the dynamics suite's band gains and levels, round 108), always published:
     // [(track * maxEffectSlots + slot) * meterOutputs + output] = Effect::controlOutput (output) after the last block.
     static constexpr int meterOutputs = 8;
     std::array<std::atomic<float>, (std::size_t) maxMixerTracks * maxEffectSlots * meterOutputs> effectMeters {};
+
+    // Audio of one effect slot for an editor's spectrum analyser (Facet EQ, round 103): the editor sets `key`
+    // (track * maxEffectSlots + slot, −1 = none); the audio thread then writes the slot's input (pre) and output
+    // (post), as mono mid samples, into the rings and advances `written`. Reads may tear; the analyser tolerates it.
+    struct AnalyzerTap
+    {
+        static constexpr int size = 16384; // power of two
+        std::atomic<int> key { -1 };
+        std::atomic<std::uint32_t> written { 0 };
+        std::atomic<double> sampleRate { 48000.0 };
+        std::array<std::atomic<float>, size> pre {}, post {};
+    };
+    AnalyzerTap analyzer;
 
     static std::uint64_t now() noexcept
     {

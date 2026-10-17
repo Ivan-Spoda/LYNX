@@ -23,12 +23,13 @@
 //   latency                           print the reported latency in samples
 //   savestate <file> / loadstate <file>
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
-//   editor <out.png> [ms] [x y]       open the plugin's editor (optionally click at x, y of the window) in a window, let it draw (default 1500 ms), save a PNG
-//                                     of the window (PrintWindow, so it works while covered), close it
+//   editor <out.png> [ms] [x y]       open the plugin's own editor in a window, let it draw (default 1500 ms), optionally
+//                                     click at (x, y) as a user would (a trial's "Evaluate"), save a PNG (PrintWindow)
 //   echo <text>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 #include <cstdio>
 #include <cstdlib>
 #include <windows.h>
@@ -71,6 +72,19 @@ struct Host
         for (int b = 1; b < layout.inputBuses.size(); ++b)
             if (sidechain) layout.inputBuses.getReference (b) = juce::AudioChannelSet::stereo();
             else layout.inputBuses.getReference (b) = juce::AudioChannelSet::disabled();
+        // some plugins (JUCE-based ones among them) report their main buses disabled until a host asks for a layout:
+        // ask for stereo in / stereo out, then mono in / stereo out
+        if (layout.getMainInputChannels() == 0 && layout.inputBuses.size() > 0)
+            layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (layout.getMainOutputChannels() == 0 && layout.outputBuses.size() > 0)
+            layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (! plugin->checkBusesLayoutSupported (layout) && layout.inputBuses.size() > 0)
+        {
+            auto mono = layout;
+            mono.inputBuses.getReference (0) = juce::AudioChannelSet::mono();
+            if (plugin->checkBusesLayoutSupported (mono))
+                layout = mono;
+        }
         if (! plugin->setBusesLayout (layout))
         {
             // fall back to enabling the buses one by one

@@ -69,13 +69,17 @@ preset = Dry=0; Wet=0.8                 # LYNX parameter (by name) = normalised 
 mix = 0.25                              # the substitute's slot dry/wet
 vst2params = 12                         # VST2 parameters per program (to read "all programs" states)
 map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
+map = xml:ReverbMode -> Mode | steps 0:0 0.0828:0.0476   # enumerations: breakpoints (round 100)
+map = xml:decay -> Decay | curve 0:0 0.019:0.5 1:1      # other laws: piecewise-linear points
 translate = pro-c3                      # a built-in state translator (round 108): pro-c3, pro-mb, pro-g, saturn2
 ```
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
 attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
-active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
-the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter.
+active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (lower case: the slot's dry/wet) or a parameter name of
+the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter. Instead of the
+range, `| curve x:y x:y …` maps through piecewise-linear points (clamped at the ends) and `| steps x:y …` gives the y
+of the last point whose x ≤ the value (enumerations); x must ascend.
 `translate` names a built-in translator (src/core/FabFilterStates.cpp) for states whose layout was learned from our own
 black-box observation (round 108: the FabFilter component states, "FFBS" / "FabF" + one float per VST3 parameter);
 it runs after the maps and only when the state's header and parameter count match the observed layout.
@@ -96,9 +100,14 @@ matches by name).
 
 | Third-party product | LYNX substitute | Identified by | Translated |
 |---|---|---|---|
-| ValhallaVintageVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | VST3 class ID [DATA], name | Mix → slot dry/wet |
-| ValhallaRoom, ValhallaPlate, Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (same preset) | name / Waves name | — |
-| Valhalla Supermassive / Shimmer, FabFilter Pro-R | LuxeVerb (default) | name | — |
+| ValhallaVintageVerb | Epoch Verb (round 100) | VST3 class ID [DATA], name | every parameter (measured laws, mode / colour breakpoints) |
+| ValhallaRoom | Atrium (round 100) | name | every parameter (decay through a curve onto Atrium's law) |
+| ValhallaPlate | Foil Plate (round 100) | name | every parameter |
+| Valhalla Supermassive | Nebula (round 100) | name | every parameter except Clear (a button) |
+| ValhallaShimmer | Halo (round 100) | name | every parameter (bare `parameterN` attributes; mode lists partly not confirmed) |
+| ValhallaFutureVerb | Horizon (round 100) | name | every parameter |
+| Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | name / Waves name | — |
+| FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |

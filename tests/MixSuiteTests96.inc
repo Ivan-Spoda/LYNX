@@ -430,7 +430,7 @@ TEST (mixsuite_panels_place_every_parameter)
     using namespace lynx;
     // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
     // and never overlap, and the dynamics effects show their live gain-reduction meter
-    CHECK (plugui::ownLayoutKinds().size() == 8); // + round 108: Crest Compressor, Prism Multiband, Sentry Gate
+    CHECK (plugui::ownLayoutKinds().size() == 14); // the mixing suite, the reverbs of round 100, the dynamics of round 108
     for (const auto kind : plugui::ownLayoutKinds())
     {
         const auto& l = plugui::layoutFor (kind);
@@ -442,7 +442,7 @@ TEST (mixsuite_panels_place_every_parameter)
         for (const auto& item : l.items)
         {
             CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
-            if (item.param != nullptr && item.type != plugui::Item::display)
+            if (item.param != nullptr && item.type != plugui::Item::display && item.type != plugui::Item::value) // read-outs don't edit
             {
                 const auto p = plugui::paramIndex (kind, item.param);
                 CHECK (p >= 0);
