@@ -444,18 +444,20 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
     out->left.assign ((std::size_t) length, 0.0f);
     if (stereo)
         out->right.assign ((std::size_t) length, 0.0f);
-    std::vector<float>* dst[2] { &out->left, &out->right };
+    float* const dst[2] { out->left.data(), stereo ? out->right.data() : out->left.data() };
     const auto channels = stereo ? 2 : 1;
 
     // TD-PSOLA of note k over output samples [a, b): grains at synthesis marks one target period apart, each taken
     // from the analysis mark nearest the mapped source time; then the note's gain
-    std::vector<float> acc[2];
+    std::vector<float> accL, accR;
     auto render = [&] (std::size_t k, std::int64_t a, std::int64_t b) {
         const auto& p = notes[k];
         const auto margin = (std::int64_t) std::ceil (2.0 * fs / 60.0) + 4;
         const auto from = a - margin, to = b + margin;
-        for (int c = 0; c < channels; ++c)
-            acc[c].assign ((std::size_t) (to - from), 0.0f);
+        accL.assign ((std::size_t) (to - from), 0.0f);
+        if (channels == 2)
+            accR.assign ((std::size_t) (to - from), 0.0f);
+        float* const sum[2] { accL.data(), channels == 2 ? accR.data() : accL.data() };
         const auto formant = std::clamp (p.formant * track.globalFormant, 0.25, 4.0);
         auto ts = (double) from;
         while (ts < (double) to)
@@ -481,8 +483,10 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
             else
                 ha = hs = unvoicedHop;
             const auto gain = (float) (f / r);
-            const auto o0 = (std::int64_t) std::ceil (ts - hs), o1 = (std::int64_t) std::floor (ts + hs);
-            for (auto o = std::max (o0, from); o <= std::min (o1, to - 1); ++o)
+            // bounds clamped as doubles before the conversion (the grain never reaches outside [from, to))
+            const auto o0 = (std::int64_t) std::max ((double) from, std::ceil (ts - hs));
+            const auto o1 = (std::int64_t) std::min ((double) (to - 1), std::floor (ts + hs));
+            for (auto o = o0; o <= o1; ++o)
             {
                 const auto u = ((double) o - ts) / hs;
                 if (u <= -1.0 || u >= 1.0)
@@ -490,7 +494,7 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
                 const auto w = gain * (float) (0.5 + 0.5 * std::cos (3.141592653589793 * u));
                 const auto at = ta + ((double) o - ts) * f;
                 for (int c = 0; c < channels; ++c)
-                    acc[c][(std::size_t) (o - from)] += w * readAt (in[c], at);
+                    sum[c][o - from] += w * readAt (in[c], at);
             }
             ts += voiced ? ha / r : ha;
         }
@@ -505,8 +509,8 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
                 g *= p.fadeOutGain + (1.0 - p.fadeOutGain) * until / p.fadeOutTime;
             for (int c = 0; c < channels; ++c)
             {
-                const auto v = (float) g * acc[c][(std::size_t) (t - from)];
-                (*dst[c])[(std::size_t) t] = std::isfinite (v) ? v : 0.0f;
+                const auto v = (float) g * sum[c][t - from];
+                dst[c][(std::size_t) t] = std::isfinite (v) ? v : 0.0f;
             }
         }
     };
@@ -525,7 +529,7 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
         };
         for (auto t = a; t < b; ++t)
             for (int c = 0; c < channels; ++c)
-                (*dst[c])[(std::size_t) t] = plainAt (c, t);
+                dst[c][(std::size_t) t] = plainAt (c, t);
 
         std::vector<std::pair<std::int64_t, std::int64_t>> ranges;
         if (p.edited (track.globalFormant))
@@ -557,12 +561,12 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
                 {
                     if (x > a || x == p.curStart)
                     {
-                        auto& v = (*dst[c])[(std::size_t) (x + i)];
+                        auto& v = dst[c][(std::size_t) (x + i)];
                         v = plainAt (c, x + i) + w * (v - plainAt (c, x + i));
                     }
                     if (y < b)
                     {
-                        auto& v = (*dst[c])[(std::size_t) (y - 1 - i)];
+                        auto& v = dst[c][(std::size_t) (y - 1 - i)];
                         v = plainAt (c, y - 1 - i) + w * (v - plainAt (c, y - 1 - i));
                     }
                 }

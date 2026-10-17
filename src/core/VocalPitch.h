@@ -162,7 +162,7 @@ private:
     double nextMark = 0.0;       // next analysis mark (absolute)
     double nextSynth = 0.0;      // next synthesis mark (absolute, output timeline = input timeline)
     double period = 0.0, ratio = 1.0, formant = 1.0;
-    bool voiced = false, peakAlign = true;
+    bool voiced = false, peakAlign = true, lastVoiced = false;
     std::array<Mark, maxMarks> marks {};
     int markHead = 0, markCount = 0;
     std::vector<float> in[2], acc[2], env; // input history, output accumulators, a low-passed copy for peak search

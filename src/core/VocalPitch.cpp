@@ -237,9 +237,10 @@ void PitchDetector::analyse() noexcept
         const auto lo = std::max (2, (int) std::floor (period) - dec - 1);
         const auto hi = (int) std::ceil (period) + dec + 1;
         const auto wf = std::min (window * dec, 2048);
-        if (wf + hi + 4 < maxFull && written > wf + hi + 1)
+        if (wf + hi + 4 < maxFull && written > wf + hi + centre + 1)
         {
-            const auto start = written - wf - hi - 1;
+            // centred like the YIN window (so a gliding pitch is read at the same instant)
+            const auto start = std::min (written - centre - (wf + (std::int64_t) period) / 2, written - wf - hi - 1);
             auto y = [&] (std::int64_t j) { return full[(std::size_t) ((start + j) & fm)]; };
             std::array<double, 64> d {};
             const auto count = std::min (hi - lo + 1, 64);
@@ -342,6 +343,7 @@ void Psola::reset() noexcept
     markHead = markCount = 0;
     period = 0.0;
     voiced = false;
+    lastVoiced = false;
     ratio = formant = 1.0;
 }
 
@@ -494,10 +496,13 @@ void Psola::process (const float* x, float* y, int channels) noexcept
         const auto r = isVoiced ? (double) mk->ratio : 1.0;
         const auto ha = isVoiced ? (double) mk->period : (double) unvoicedHop; // analysis half-length
         const auto hs = ha / f;                                                // synthesis half-length
+        // a voiced onset starts on its mark: the voice is not displaced in time from the input
+        if (isVoiced && ! lastVoiced && mk->pos - hs > (double) e - 1.0)
+            nextSynth = mk->pos;
         const auto ts = nextSynth;
 
         if (ts - hs > (double) e)
-            break; // this grain starts later
+            break; // this grain starts later (a voiced onset may have moved it ahead)
 
         // unvoiced: read around the synthesis time itself (plain overlap-add, transparent); voiced: around the mark
         const auto ta = isVoiced ? mk->pos : ts;
@@ -520,10 +525,12 @@ void Psola::process (const float* x, float* y, int channels) noexcept
         }
         // unshifted voiced grains (within 1.7 cents) drift toward their marks, so a voice already on its note comes
         // out as the input itself (delayed), not displaced by up to half a period
+        // (gently: at most 0.15 % of a period per grain, ~2.6 cents)
         auto hop = isVoiced ? ha / r : ha;
         if (isVoiced && std::abs (r - 1.0) < 1e-3 && std::abs (f - 1.0) < 1e-3)
-            hop += 0.25 * std::clamp (ta - ts, -0.5 * ha, 0.5 * ha);
+            hop += std::clamp (0.5 * (ta - ts), -0.0015 * ha, 0.0015 * ha);
         nextSynth = ts + hop;
+        lastVoiced = isVoiced;
     }
 
     for (int c = 0; c < channels; ++c)
