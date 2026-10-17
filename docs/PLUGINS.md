@@ -171,6 +171,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Fruity Blood Overdrive | Fruity Blood Overdrive | Insert | Exact | |
 | Fruity PanOMatic | Fruity PanOMatic | Insert | Exact | starts settled (FL fades in a fresh instance) |
 | Fruity Balance | Fruity Balance | Insert | Exact | |
+| Fruity Send | Fruity Send | Insert | Exact | sends mid-chain to another insert in the same block; FL renders matched within 16-bit rounding |
 | Stereo Shaper | Fruity Stereo Shaper | Insert | Exact | |
 | Stereo Enhancer | Fruity Stereo Enhancer | Insert | Exact | |
 | Transient Processor | Transient Processor | Insert | Exact | |
@@ -196,7 +197,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Pitch correction | Pitcher | Insert | Close | bit-exact with the reference model; MIDI mode / Harmonize get no MIDI in LYNX |
 | Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, formant, volume, timing, disabled notes) rendered by LYNX's own pitch engine; tremolo / ramps and FL's sample re-alignment after edits missing |
 | Newtime | Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; time warping not reproduced |
-| Utility | Fruity Send, Transporter | Insert | Approximate | mapped to a utility stage |
+| Utility | Transporter | Insert | Approximate | mapped to a utility stage |
 | EQ | Fruity 7 Band EQ, Fruity Bass Boost | Insert | Approximate | settings mapped to LYNX's EQs |
 | Delay | Fruity Delay (v1) | Insert | Approximate | |
 | Chorus | Fruity Phaser | Insert | Approximate | |
