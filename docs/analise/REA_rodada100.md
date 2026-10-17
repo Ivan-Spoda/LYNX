@@ -221,6 +221,32 @@ shelf, high / low cut, pre-delay and mix as in §1. Not reproduced: the build-up
 earlier by up to 30 %), Nonlin's exact gate envelope (plateau to ~1.1 s instead of a rise to 0.7 s), the exact early
 pattern of each mode, the colour modes' converter character beyond a band limit.
 
+## 7b. Editors (UI rule)
+
+The official demos' own editors were opened in the measurement host (`fxmeasure editor <png>`: the plugin's editor
+in a plain window, captured with PrintWindow; pictures kept in tmp/valh100/ref, never in git) and their layout logic
+studied [EXEC]:
+- VintageVerb: Mix and PreDelay knobs stacked on the left, a large Decay knob, then titled boxes DAMPING (HighFreq,
+  HighShelf / BassFreq, BassMult as 2 × 2), SHAPE (Size, Attack), DIFF (Early, Late), MOD (Rate, Depth), EQ (HighCut,
+  LowCut); MODE and COLOR menus along the bottom, a one-line description of the hovered control under them.
+- Room: six vertical faders on the left (Mix, Predelay, Decay, Lo Cut, Hi Cut, Depth = early/late balance) and an
+  EARLY / LATE tab pair switching the knob grid on the right; Reverb Mode menu under the faders.
+- Plate: Mix / PreDelay, a very large Decay knob, Size / Width, EQ box (LowFreq, HighFreq / LowGain, HighGain), MOD box
+  (Rate, Depth); Mode menu below.
+- Supermassive: Mix / Width, a box with two large knobs Delay and Warp and the sync selector (Msec / note) plus Clear
+  under them, Feedback / Density, MOD (Rate, Depth), EQ (High, Low); Mode menu below.
+- Shimmer: one row of nine knobs (mix, shift, feedback, diffusion, size, low cut, high cut, mod rate, mod depth) and three
+  mode selectors below (reverb mode, pitch mode, color mode). Its read-outs confirmed shift = ±12 and the low cut
+  starting at 10 Hz.
+- FutureVerb: Mix / Width, an ECHO box (big Delay with the sync selector, Feedback, Level, Drive, Spread), a REVERB box
+  (big Decay with the Echo→Rev routing switch, Size, Level, Early/Late, Density), MOD and EQ boxes; ECHO MODE, REVERB
+  MODE and COLOR selectors along the bottom.
+- The demos state "reverb fades out every 45 seconds" in their header — matching §0.
+
+LYNX's editors (core/PluginLayout.cpp) keep that grouping and order with LYNX's own drawing (knobs, section boxes,
+menus, colours, fonts); Atrium shows the early and late knob groups side by side instead of behind tabs. No graphics,
+logos or colours were taken.
+
 ## 8. Translation (core/PluginSubstitutes.cpp)
 
 All six entries map every parameter from the XML attributes: identities, `steps` maps for the enumerations

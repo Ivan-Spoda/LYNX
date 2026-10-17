@@ -442,7 +442,7 @@ TEST (mixsuite_panels_place_every_parameter)
         for (const auto& item : l.items)
         {
             CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
-            if (item.param != nullptr && item.type != plugui::Item::display)
+            if (item.param != nullptr && item.type != plugui::Item::display && item.type != plugui::Item::value) // read-outs don't edit
             {
                 const auto p = plugui::paramIndex (kind, item.param);
                 CHECK (p >= 0);
