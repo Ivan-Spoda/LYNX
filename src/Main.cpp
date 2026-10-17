@@ -12,6 +12,10 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
+#include "ui/ClipProperties.h"
+#include "ui/NewProjectDialog.h"
+#include "ui/PluginMonitorWindow.h"
+#include "ui/TouchKeyboard.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
@@ -1393,6 +1397,8 @@ private:
             };
 
             saveWindow (lynx::makeExportPanel (offline), "-export.png");
+            saveWindow (lynx::makeExportPanel (offline, 1), "-export-mp3.png");
+            saveWindow (lynx::makeExportPanel (offline, 3), "-export-flac-stems.png");
             saveSplashFrames (prefix);
             saveIconSheet (prefix + "-icons.png", 1.0f);
             saveIconSheet (prefix + "-icons-150.png", 1.5f);
@@ -1442,6 +1448,33 @@ private:
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::midi), "-settings-midi.png");
                 saveWindow (lynx::makePluginManagerPanel (offline, false), "-plugin-manager.png");
                 saveWindow (lynx::makeShortcutManagerPanel (false), "-shortcuts.png");
+            }
+            {
+                // round 84: New project, Clip properties, Arrangements, Plugin performance monitor, Touch keyboard
+                saveWindow (lynx::makeNewProjectPanel(), "-new-project.png");
+                const auto& clips = offline.getSong().playlist;
+                for (int i = 0; i < (int) clips.size(); ++i)
+                    if (clips[(std::size_t) i].kind == lynx::ClipKind::pattern)
+                    {
+                        saveWindow (lynx::makeClipPropertiesPanel (offline, i, { i, (i + 1) % (int) clips.size() }), "-clip-properties.png");
+                        break;
+                    }
+                for (int i = 0; i < (int) clips.size(); ++i)
+                    if (clips[(std::size_t) i].kind == lynx::ClipKind::audio)
+                    {
+                        saveWindow (lynx::makeClipPropertiesPanel (offline, i, { i }), "-clip-properties-audio.png");
+                        break;
+                    }
+                if (offline.getSong().arrangements.size() < 2)
+                    offline.editSong ([] (lynx::Song& s) {
+                        const auto current = s.currentArrangement;
+                        s.addArrangement ("Radio edit", true);
+                        s.addArrangement ("Intro loop");
+                        s.selectArrangement (current);
+                    }, false);
+                saveWindow (lynx::makeArrangementsPanel (offline), "-arrangements.png");
+                saveWindow (lynx::makePluginMonitorPanel (offline), "-plugin-monitor.png");
+                saveWindow (lynx::makeTouchKeyboardPanel (offline), "-touch-keyboard.png");
             }
 
             if (! offline.getSong().automations.empty())

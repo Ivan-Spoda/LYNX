@@ -32,7 +32,7 @@ struct Rect
 
 struct Layout
 {
-    int lowest = 48;         // the leftmost key, always a C (48 = C3 in LYNX's naming, middle C = 60)
+    int lowest = 48;         // the leftmost key, always a C (48 = C4 as LYNX names keys: octave = key / 12)
     int whiteKeys = 21;      // white keys shown (3 octaves)
     float width = 700.0f, height = 120.0f;
     float blackLength = 0.62f; // black keys' length, part of the height

@@ -1,6 +1,7 @@
 #include "core/PlaylistOps.h"
 
 #include <algorithm>
+#include <cstdio>
 
 namespace lynx::clipprops
 {
@@ -139,6 +140,59 @@ void changeGain (Song& song, const std::vector<int>& clips, float value, bool re
             g = std::clamp (relative ? g * value : value, 0.0f, 4.0f);
         }
 }
+
+namespace
+{
+std::string bbt (std::int64_t ticks, int beatsPerBar, int base)
+{
+    const auto beat = (std::int64_t) ppq;
+    const auto bar = beat * std::max (1, beatsPerBar);
+    const auto t = std::max<std::int64_t> (0, ticks);
+    char text[48];
+    std::snprintf (text, sizeof (text), "%lld:%lld:%03lld", (long long) (t / bar + base), (long long) ((t % bar) / beat + base), (long long) (t % beat));
+    return text;
+}
+
+std::int64_t parseBbt (const std::string& text, int beatsPerBar, int base)
+{
+    long long parts[3] = { 0, base, 0 };
+    int count = 0;
+    std::string token;
+    auto flush = [&] {
+        if (token.empty() || count >= 3)
+            return false;
+        for (auto c : token)
+            if (c < '0' || c > '9')
+                return false;
+        parts[count++] = std::stoll (token);
+        token.clear();
+        return true;
+    };
+    for (auto c : text)
+    {
+        if (c == ' ')
+            continue;
+        if (c == ':' || c == '.')
+        {
+            if (! flush())
+                return -1;
+        }
+        else
+            token += c;
+    }
+    if (! flush())
+        return -1;
+    if (parts[0] < base || parts[1] < base || parts[1] - base >= std::max (1, beatsPerBar) || parts[2] >= ppq)
+        return -1;
+    const auto beat = (std::int64_t) ppq;
+    return (parts[0] - base) * beat * std::max (1, beatsPerBar) + (parts[1] - base) * beat + parts[2];
+}
+} // namespace
+
+std::string formatPosition (std::int64_t ticks, int beatsPerBar) { return bbt (ticks, beatsPerBar, 1); }
+std::string formatLength (std::int64_t ticks, int beatsPerBar) { return bbt (ticks, beatsPerBar, 0); }
+std::int64_t parsePosition (const std::string& text, int beatsPerBar) { return parseBbt (text, beatsPerBar, 1); }
+std::int64_t parseLength (const std::string& text, int beatsPerBar) { return parseBbt (text, beatsPerBar, 0); }
 
 std::vector<std::pair<int, std::string>> sourcesFor (const Song& song, ClipKind kind)
 {
