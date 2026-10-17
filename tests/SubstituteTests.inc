@@ -183,7 +183,7 @@ TEST (substitute_waves_shell_by_plugin_name)
     named.format = lynx::ForeignPlugin::Format::vst3;
     named.name = "SSLChannel Stereo";
     named.state = wavesComponent ("SSLChannel", "0");
-    CHECK (lynx::findPluginSubstitute (named, false) != nullptr && lynx::findPluginSubstitute (named, false)->effect == lynx::EffectKind::parametricEq);
+    CHECK (lynx::findPluginSubstitute (named, false) != nullptr && lynx::findPluginSubstitute (named, false)->effect == lynx::EffectKind::ridgeStrip);
 }
 
 TEST (substitute_vst2_ids_names_and_float_params)

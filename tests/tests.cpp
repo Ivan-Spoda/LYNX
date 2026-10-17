@@ -23,6 +23,7 @@
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/Effector.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
@@ -15305,6 +15306,7 @@ TEST (level_audit_demo_imports_round89)
 #include "UiLook90Tests.inc"
 #include "DialogsTests84.inc"
 #include "SubstituteTests.inc"
+#include "MixSuiteTests96.inc"
 
 // --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------
 

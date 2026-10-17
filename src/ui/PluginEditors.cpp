@@ -10,6 +10,7 @@
 #include "core/FruityShapers.h"
 #include "core/GrossBeat.h"
 #include "core/MaximusFx.h"
+#include "core/MixSuite.h"
 #include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
@@ -44,7 +45,8 @@ bool isVertical (const LayoutItem& item) noexcept
 
 class NativeEffectEditor final : public juce::Component,
                                  public ui::HintSource,
-                                 private juce::ChangeListener
+                                 private juce::ChangeListener,
+                                 private juce::Timer
 {
 public:
     NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage)
@@ -67,11 +69,18 @@ public:
                 page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
         const auto& l = activeLayout();
+        for (const auto& item : l.items) // live meters (the mixing suite's gain reduction): refreshed at 30 Hz
+            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0)
+            {
+                startTimerHz (30);
+                break;
+            }
         setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight));
     }
 
     ~NativeEffectEditor() override
     {
+        stopTimer();
         engine.removeChangeListener (this);
         ui::hideValueTip();
     }
@@ -712,6 +721,14 @@ public:
 
     float param01 (const char* name) const { return valueOf (plugui::paramIndex (kind, name)); }
 
+    // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
+    float liveMeter (int output) const
+    {
+        const auto* times = engine.getProcessTimes();
+        const auto key = (std::size_t) (track * maxEffectSlots + slot) * ProcessTimes::meterOutputs + (std::size_t) juce::jlimit (0, ProcessTimes::meterOutputs - 1, output);
+        return times != nullptr && key < times->effectMeters.size() ? times->effectMeters[key].load (std::memory_order_relaxed) : 0.0f;
+    }
+
     // the captions of a radio's options (Gross Beat: the slot names saved in the state)
     std::vector<juce::String> optionTexts (const LayoutItem& item) const
     {
@@ -1035,6 +1052,64 @@ public:
                 const auto bump = reso * 0.35f * std::exp (-d * d);
                 return 0.6f + bump - (x > cutoff ? (x - cutoff) * 2.2f : 0.0f);
             }, inner, true);
+        }
+        else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
+        {
+            const auto amount = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps));
+            const auto bar = r.reduced (1.5f * s);
+            g.setColour (colour::gridBeat);
+            for (int db = 3; db < 30; db += 3)
+                g.drawVerticalLine ((int) (bar.getRight() - bar.getWidth() * (float) db / 30.0f), bar.getY(), bar.getBottom());
+            g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.85f));
+            g.fillRoundedRectangle (bar.withLeft (bar.getRight() - bar.getWidth() * amount), radius::sm);
+            if (item.label != nullptr && *item.label != 0)
+            {
+                g.setColour (colour::textSecondary);
+                g.setFont (font (juce::jmax (7.0f, juce::jmin (10.0f * s, bar.getHeight() * 0.95f)), true));
+                g.drawText (caps (tr (item.label)) + "  " + juce::String (amount * 30.0f, 1) + " dB", bar.reduced (3.0f * s, 0.0f),
+                            juce::Justification::centredLeft, false);
+            }
+            return;
+        }
+        else if (id == "ridgeeq") // the strip's EQ + filters (20 Hz .. 20 kHz, ±20 dB)
+        {
+            grid (10, 4);
+            const auto params = fx.params;
+            strokeCurve ([&params] (float x) {
+                const auto hz = 20.0 * std::pow (1000.0, (double) x);
+                return 0.5f + (float) mixsuite::ridge::responseDb (params, 48000.0, hz) / 40.0f;
+            }, inner, false);
+        }
+        else if (id == "ridgecomp") // compressor's static curve (−60 .. 0 dB in and out)
+        {
+            grid (6, 4);
+            const auto params = fx.params;
+            strokeCurve ([&params] (float x) {
+                return 1.0f + (float) mixsuite::ridge::compressorCurveDb (params, (double) (x - 1.0f) * 60.0) / 60.0f;
+            }, inner, true);
+        }
+        else if (id == "hushband") // the detector's filter (high-pass or band) at the frequency, 1 .. 20 kHz
+        {
+            grid (8, 4);
+            const auto f0 = mixsuite::hush::hz (param01 ("Frequency"));
+            const auto band = param01 ("Band detector") >= 0.5f;
+            strokeCurve ([f0, band] (float x) {
+                const auto u = 1000.0 * std::pow (20.0, (double) x) / f0;
+                const auto u2 = u * u;
+                const auto mag = band ? (u / 1.4) / std::sqrt ((1.0 - u2) * (1.0 - u2) + u2 / (1.4 * 1.4))
+                                      : u2 / std::sqrt ((1.0 - u2) * (1.0 - u2) + 2.0 * u2);
+                return 0.9f + (float) (20.0 * std::log10 (std::max (1e-6, mag))) / 40.0f;
+            }, inner, true);
+        }
+        else if (id == "embercurve") // the style's transfer curve at the drive (x = ±1: the peaks of a −12 dBFS sine)
+        {
+            grid (4, 4);
+            const auto style = mixsuite::ember::styleOf (param01 ("Style"));
+            const auto drive = 0.25f * (float) std::pow (10.0, mixsuite::ember::driveDb (param01 ("Drive")) / 20.0);
+            const auto norm = 1.0f / juce::jmax (0.05f, std::abs (mixsuite::ember::shape (style, drive)));
+            strokeCurve ([style, drive, norm] (float x) {
+                return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, mixsuite::ember::shape (style, (x * 2.0f - 1.0f) * drive) * norm);
+            }, inner, false);
         }
         else // a plain well with the plugin's name (FL's scopes / animations are not reproduced)
         {
@@ -1830,6 +1905,13 @@ public:
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+
+    void timerCallback() override
+    {
+        for (const auto& item : activeLayout().items)
+            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0 && visible (item))
+                repaint (rectOf (item).getSmallestIntegerContainer());
+    }
 
     AudioEngine& engine;
     int track, slot;

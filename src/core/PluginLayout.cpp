@@ -1398,6 +1398,163 @@ Layout soundgoodizer()
 
 // --- generated layouts ------------------------------------------------------------------------------
 
+// --- LYNX originals: the mixing suite (REA round 96). Not FL arrangements: LYNX's own panels, laid out with the
+// same conventions (titled sections, knobs with captions and read-outs, the graph on top, switches as tabs). -------
+
+// a knob with its caption and its value under it (`d` wide, centred at cx, cy)
+LayoutItem dial (float cx, float cy, float d, const char* param, const char* caption, std::uint16_t style = 0)
+{
+    return knob (cx, cy, d, param, caption, cy + d * 0.5f + 20.0f, (std::uint16_t) (style | showValue));
+}
+
+// a live meter of the effect's control output `output` (0 = gain reduction, 1 = second gain reduction)
+LayoutItem meter (float x, float y, float w, float h, int output, const char* caption)
+{
+    auto i = display (x, y, w, h, "grmeter");
+    i.steps = output;
+    i.label = caption;
+    return i;
+}
+
+Layout ridgeStrip()
+{
+    Layout l;
+    l.width = 700;
+    l.height = 360;
+    auto& v = l.items;
+    // filters
+    v.push_back (section (4, 4, 104, 352, TR_NOOP ("Filters")));
+    v.push_back (dial (56, 62, 40, "HPF", TR_NOOP ("High-pass")));
+    v.push_back (dial (56, 150, 40, "LPF", TR_NOOP ("Low-pass")));
+    v.push_back (toggle (12, 214, 92, 20, "Filters to SC", TR_NOOP ("To sidechain")));
+
+    // equalizer: the curve on top, one column per band (LF … HF, low to high as on the graph)
+    v.push_back (section (112, 4, 340, 352, TR_NOOP ("Equalizer")));
+    v.push_back (display (118, 24, 328, 96, "ridgeeq"));
+    const char* bands[] = { TR_NOOP ("LF"), TR_NOOP ("LMF"), TR_NOOP ("HMF"), TR_NOOP ("HF") };
+    const char* gains[] = { "LF gain", "LMF gain", "HMF gain", "HF gain" };
+    const char* freqs[] = { "LF freq.", "LMF freq.", "HMF freq.", "HF freq." };
+    for (int b = 0; b < 4; ++b)
+    {
+        const auto cx = 158.0f + 82.0f * (float) b;
+        v.push_back (label (cx - 36.0f, 124, 72, 14, bands[b], boxed));
+        v.push_back (dial (cx, 162, 38, gains[b], TR_NOOP ("Gain"), bipolar));
+        v.push_back (dial (cx, 230, 32, freqs[b], TR_NOOP ("Freq")));
+        if (b == 1 || b == 2)
+            v.push_back (dial (cx, 290, 28, b == 1 ? "LMF Q" : "HMF Q", TR_NOOP ("Q")));
+        else
+            v.push_back (toggle (cx - 30.0f, 282, 62, 20, b == 0 ? "LF bell" : "HF bell", TR_NOOP ("Bell")));
+    }
+    v.push_back (tabs (118, 330, 130, 20, "EQ curve", TR_NOOP ("Brown|Black")));
+    v.push_back (toggle (360, 330, 88, 20, "EQ on", TR_NOOP ("EQ in")));
+
+    // dynamics: static curve, the two gain-reduction meters, compressor and gate
+    v.push_back (section (456, 4, 160, 352, TR_NOOP ("Dynamics")));
+    v.push_back (display (462, 24, 148, 66, "ridgecomp"));
+    v.push_back (meter (462, 94, 148, 10, 0, TR_NOOP ("Comp")));
+    v.push_back (meter (462, 108, 148, 10, 1, TR_NOOP ("Gate")));
+    v.push_back (label (462, 122, 148, 14, TR_NOOP ("Compressor"), boxed));
+    v.push_back (dial (488, 158, 30, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (536, 158, 30, "Comp. threshold", TR_NOOP ("Thres")));
+    v.push_back (dial (584, 158, 30, "Comp. release", TR_NOOP ("Release")));
+    v.push_back (dial (488, 214, 24, "Comp. mix", TR_NOOP ("Mix")));
+    v.push_back (toggle (512, 208, 100, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (label (462, 252, 148, 14, TR_NOOP ("Gate / expander"), boxed));
+    v.push_back (dial (488, 286, 30, "Gate range", TR_NOOP ("Range")));
+    v.push_back (dial (536, 286, 30, "Gate threshold", TR_NOOP ("Thres")));
+    v.push_back (dial (584, 286, 30, "Gate release", TR_NOOP ("Release")));
+    v.push_back (toggle (462, 334, 70, 20, "Gate fast", TR_NOOP ("Fast")));
+    v.push_back (toggle (536, 334, 76, 20, "Expander", TR_NOOP ("Expand")));
+
+    // master: trims, order, phase, dynamics in
+    v.push_back (section (620, 4, 76, 352, TR_NOOP ("Master")));
+    v.push_back (dial (658, 58, 34, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (658, 134, 34, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (tabs (628, 190, 60, 76, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (toggle (626, 278, 68, 20, "Dynamics on", TR_NOOP ("Dyn in")));
+    v.push_back (toggle (626, 306, 68, 20, "Phase", TR_NOOP ("Phase")));
+    return l;
+}
+
+Layout glowLeveler()
+{
+    Layout l;
+    l.width = 420;
+    l.height = 220;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 412, 212, TR_NOOP ("Optical leveler")));
+    v.push_back (meter (16, 28, 388, 20, 0, TR_NOOP ("Gain reduction")));
+    v.push_back (dial (90, 112, 64, "Gain", TR_NOOP ("Gain"), big));
+    v.push_back (dial (330, 112, 64, "Peak reduction", TR_NOOP ("Peak reduction"), big));
+    v.push_back (tabs (166, 62, 88, 22, "Limit", TR_NOOP ("Compress|Limit")));
+    v.push_back (dial (186, 128, 32, "Emphasis", TR_NOOP ("Emphasis")));
+    v.push_back (dial (236, 128, 32, "Mix", TR_NOOP ("Mix")));
+    return l;
+}
+
+Layout hushDeEsser()
+{
+    Layout l;
+    l.width = 460;
+    l.height = 200;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 452, 192, TR_NOOP ("De-esser")));
+    v.push_back (display (12, 26, 200, 78, "hushband"));
+    v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
+    v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
+    v.push_back (tabs (114, 130, 98, 20, "Band detector", TR_NOOP ("High|Band")));
+    v.push_back (toggle (12, 162, 84, 20, "Listen", TR_NOOP ("Listen")));
+    v.push_back (toggle (100, 162, 112, 20, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (dial (262, 58, 46, "Frequency", TR_NOOP ("Frequency"), big));
+    v.push_back (dial (338, 58, 46, "Threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (412, 58, 40, "Range", TR_NOOP ("Range")));
+    v.push_back (dial (300, 142, 32, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (376, 142, 32, "Output", TR_NOOP ("Output"), bipolar));
+    return l;
+}
+
+Layout aetherLayout()
+{
+    Layout l;
+    l.width = 380;
+    l.height = 262;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 182, 192, TR_NOOP ("Air")));
+    v.push_back (dial (95, 68, 58, "Air", TR_NOOP ("Air"), big));
+    v.push_back (dial (95, 150, 32, "Air freq.", TR_NOOP ("Freq")));
+    v.push_back (section (190, 4, 186, 192, TR_NOOP ("Exciter")));
+    v.push_back (dial (283, 68, 58, "Harmonics", TR_NOOP ("Harmonics"), big));
+    v.push_back (dial (236, 150, 32, "Exciter freq.", TR_NOOP ("Freq")));
+    v.push_back (dial (330, 150, 32, "Character", TR_NOOP ("Even / odd"), bipolar));
+    v.push_back (section (4, 200, 372, 58, nullptr, boxed));
+    v.push_back (dial (140, 218, 24, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (240, 218, 24, "Output", TR_NOOP ("Output"), bipolar));
+    return l;
+}
+
+Layout emberLayout()
+{
+    Layout l;
+    l.width = 520;
+    l.height = 230;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 200, 222, TR_NOOP ("Style")));
+    v.push_back (display (12, 26, 184, 110, "embercurve"));
+    auto styles = radio (12, 144, 184, 76, "Style", TR_NOOP ("Tube|Tape|Transistor|Fuzz"));
+    styles.columns = 2;
+    v.push_back (styles);
+    v.push_back (section (208, 4, 308, 222, TR_NOOP ("Drive")));
+    v.push_back (dial (266, 86, 70, "Drive", TR_NOOP ("Drive"), big));
+    v.push_back (dial (380, 60, 36, "Tone", TR_NOOP ("Tone"), bipolar));
+    v.push_back (dial (460, 60, 36, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (340, 148, 30, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (410, 148, 30, "High cut", TR_NOOP ("High cut")));
+    v.push_back (dial (480, 148, 30, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (toggle (216, 200, 104, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    v.push_back (tabs (340, 200, 168, 20, "Oversampling", TR_NOOP ("2x|4x|8x"), { 0.0f, 0.5f, 1.0f }));
+    return l;
+}
+
 Layout generated (EffectKind kind)
 {
     // knobs in rows of up to 6 (FL's wrapper shows unknown plugins as a list of knobs too)
@@ -1437,6 +1594,13 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
                                                  EffectKind::squeeze, EffectKind::maximus,
                                                  EffectKind::vintagePhaser };
+    return kinds;
+}
+
+const std::vector<EffectKind>& ownLayoutKinds()
+{
+    static const std::vector<EffectKind> kinds { EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser,
+                                                 EffectKind::aether, EffectKind::ember };
     return kinds;
 }
 
@@ -1481,6 +1645,11 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::squeeze: l = fruitySqueeze(); break;
         case EffectKind::maximus: l = maximus(); break;
         case EffectKind::vintagePhaser: l = vintagePhaser(); break;
+        case EffectKind::ridgeStrip: l = ridgeStrip(); break;
+        case EffectKind::glowLeveler: l = glowLeveler(); break;
+        case EffectKind::hushDeEsser: l = hushDeEsser(); break;
+        case EffectKind::aether: l = aetherLayout(); break;
+        case EffectKind::ember: l = emberLayout(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

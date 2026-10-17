@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/MixSuite.h"
 
 #include "core/WorkerPool.h"
 #include "core/Denormals.h"
@@ -1081,8 +1082,19 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                              ? std::clamp (automated (state.effectMixAuto[(std::size_t) track][i], slots[i].mix), 0.0f, 1.0f)
                              : slots[i].mix;
 
+        auto clearMeters = [this, track, i] {
+            const auto at = ((std::size_t) track * maxEffectSlots + i) * ProcessTimes::meterOutputs;
+            if (at + ProcessTimes::meterOutputs <= times->effectMeters.size())
+                for (int o = 0; o < ProcessTimes::meterOutputs; ++o)
+                    times->effectMeters[at + (std::size_t) o].store (0.0f, std::memory_order_relaxed);
+        };
+
         if (! slots[i].enabled || wet <= 0.0f)
+        {
+            if (mixsuite::isSuiteKind (slots[i].kind))
+                clearMeters();
             continue;
+        }
 
         // smart disable (like FL): an effect with silent input and output is skipped (plugins
         // after 4 s; built-ins after 1 s, which is well beyond their tail)
@@ -1106,7 +1118,11 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             if (audible == 1)
                 sd.silentSamples = 0;
             else if (sd.silentSamples >= hold)
+            {
+                if (mixsuite::isSuiteKind (slots[i].kind))
+                    clearMeters();
                 continue;
+            }
             else
                 sd.silentSamples += n;
         }
@@ -1157,6 +1173,11 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 r[k] = dr[k] + (r[k] - dr[k]) * wet;
             }
         }
+
+        // live meters for the editor (the mixing suite's gain reduction)
+        if (mixsuite::isSuiteKind (slots[i].kind) && key < (std::size_t) maxMixerTracks * maxEffectSlots)
+            for (int o = 0; o < ProcessTimes::meterOutputs; ++o)
+                times->effectMeters[key * ProcessTimes::meterOutputs + (std::size_t) o].store (effects[i]->controlOutput (o), std::memory_order_relaxed);
 
         // the effect changed the signal: measure again (it is the next slot's input)
         audible = anyAbove (l, r, n, silenceLevel) ? 1 : 0;

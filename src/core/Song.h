@@ -359,7 +359,12 @@ enum class EffectKind : std::uint8_t
     newtone,      // FL's Newtone (REA_rodada73, core/NewtoneFx.h): pass-through; in slave mode adds its source sample at the song time
     newtime,      // FL's Newtime (REA_rodada73, core/NewtoneFx.h): the same contract (its time warping is not reproduced)
     facetEq,      // LYNX's Facet EQ (MEASURE_fabfilter §9, core/FacetEq.h): 8 matched analog-prototype bands, 42 controls
-    apexLimiter   // LYNX's Apex Limiter (MEASURE_fabfilter §9, core/ApexLimiter.h): look-ahead true-peak limiter, 7 controls
+    apexLimiter,  // LYNX's Apex Limiter (MEASURE_fabfilter §9, core/ApexLimiter.h): look-ahead true-peak limiter, 7 controls
+    ridgeStrip,   // LYNX's channel strip (REA_rodada96, core/MixSuite.h): filters, 4-band EQ, compressor, gate / expander
+    glowLeveler,  // LYNX's optical leveler (REA_rodada96, core/MixSuite.h)
+    hushDeEsser,  // LYNX's de-esser (REA_rodada96, core/MixSuite.h)
+    aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
+    ember         // LYNX's saturator (REA_rodada96, core/MixSuite.h)
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
