@@ -551,6 +551,26 @@ void panGains (float pan, float gain, float& left, float& right) noexcept
     right = gain * std::sin (angle) * 1.41421356f;
 }
 
+// FL's mixer fader and pan: each side's gain moves toward its target by at most 0.001 per sample (a linear glide;
+// measured on FL's renders of pattern events on a track's volume and pan, REA_rodada85 §3). Returns the gain reached.
+float glideGain (const float* in, float* out, int n, float from, float to) noexcept
+{
+    constexpr float step = 0.001f;
+    auto g = from;
+    int i = 0;
+
+    for (; i < n && g != to; ++i)
+    {
+        g = to > g ? std::min (to, g + step) : std::max (to, g - step);
+        out[i] = in[i] * g;
+    }
+
+    for (; i < n; ++i)
+        out[i] = in[i] * g;
+
+    return g;
+}
+
 float peakOf (const float* data, int n) noexcept
 {
     float peak = 0.0f;
@@ -1248,12 +1268,21 @@ void RackRenderer::process (const RackState* state,
     // pieces so values move smoothly.
     const auto chunk = std::min (blockCapacity, state->hasAutomation ? 128 : chunkCapacity);
 
-    for (int done = 0; done < numSamples; done += chunk)
+    for (int done = 0; done < numSamples;)
     {
-        const auto n = std::min (chunk, numSamples - done);
+        auto n = std::min (chunk, numSamples - done);
+
+        // pattern events take effect at their own sample, as in FL (REA_rodada85 §3): a chunk ends where one falls
+        if (playing && ! state->eventLanes.empty() && tps > 0.0)
+        {
+            const auto ahead = ticksToNextEvent (*state, startTick + done * tps);
+            if (ahead < (double) n * tps)
+                n = std::max (1, (int) std::ceil (ahead / tps - 1.0e-9));
+        }
         liveInputOffset = done;
         processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
         resumeAudio = false;
+        done += n;
     }
 
     if (timing)
@@ -1261,6 +1290,59 @@ void RackRenderer::process (const RackState* state,
         times->wallNs.fetch_add (ProcessTimes::now() - wallStart, std::memory_order_relaxed);
         times->audioNs.fetch_add ((std::uint64_t) ((double) numSamples / sampleRate * 1.0e9), std::memory_order_relaxed);
     }
+}
+
+double RackRenderer::ticksToNextEvent (const RackState& state, double tick) noexcept
+{
+    const auto& song = state.song;
+    auto best = std::numeric_limits<double>::infinity();
+    // first event tick of `events` strictly after `t` (events sorted by tick)
+    auto after = [] (const PatternEvents& events, double t) {
+        auto it = std::upper_bound (events.events.begin(), events.events.end(), t,
+                                    [] (double x, const PatternEvent& e) { return x < (double) e.tick; });
+        return it == events.events.end() ? std::numeric_limits<double>::infinity() : (double) it->tick;
+    };
+
+    if (song.mode != PlayMode::song)
+    {
+        const auto current = song.currentPattern;
+        if (current < 0 || current >= (int) song.patterns.size())
+            return best;
+        const auto& pattern = song.patterns[(std::size_t) current];
+        const auto length = (double) std::max<std::int64_t> (1, pattern.effectiveLength (song.beatsPerBar));
+        const auto t = std::fmod (std::max (0.0, tick), length);
+        for (const auto& lane : state.eventLanes)
+            if (lane.pattern == current)
+            {
+                const auto& events = pattern.events[(std::size_t) lane.lane];
+                best = std::min (best, after (events, t) - t);
+                if (! events.events.empty()) // the loop restarts at the first event's value
+                    best = std::min (best, length - t);
+            }
+        return best;
+    }
+
+    const auto length = (double) std::max<std::int64_t> (1, state.schedule.songLength);
+    const auto t = std::fmod (std::max (0.0, tick), length);
+
+    for (const auto& lane : state.eventLanes)
+    {
+        const auto& events = song.patterns[(std::size_t) lane.pattern].events[(std::size_t) lane.lane];
+        for (auto i : state.patternClips[(std::size_t) lane.pattern])
+        {
+            const auto& c = song.playlist[(std::size_t) i];
+            if ((double) c.end() <= t)
+                continue;
+            if ((double) c.start > t)
+            {
+                best = std::min (best, (double) c.start - t);
+                break;
+            }
+            const auto next = after (events, t - (double) c.start + (double) c.offset) - (double) c.offset + (double) c.start;
+            best = std::min (best, std::min (next, (double) c.end()) - t);
+        }
+    }
+    return best;
 }
 
 void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
@@ -1271,8 +1353,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
 
-    if (state.hasAutomation)
-        updateAutomation (state, startTick);
+    if (state.hasAutomation) // (a hair later: a chunk that starts on a pattern event's sample takes its value)
+        updateAutomation (state, startTick + 1.0e-6);
 
     chunkStartTick = startTick;
     chunkTps = ticksPerSample (bpm, sampleRate);
@@ -1410,17 +1492,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     auto& lastR = lastTrackGain[1];
     const auto fromL = std::isnan (lastL) ? gl : lastL;
     const auto fromR = std::isnan (lastR) ? gr : lastR;
-    lastL = gl;
-    lastR = gr;
-    const auto stepL = (gl - fromL) / (float) numSamples, stepR = (gr - fromR) / (float) numSamples;
     const auto* masterL = trackBuffer (0, 0);
     const auto* masterR = trackBuffer (0, 1);
-
-    for (int i = 0; i < numSamples; ++i)
-    {
-        left[i] = masterL[i] * (fromL + stepL * (float) (i + 1));
-        right[i] = masterR[i] * (fromR + stepR * (float) (i + 1));
-    }
+    lastL = glideGain (masterL, left, numSamples, fromL, gl);
+    lastR = glideGain (masterR, right, numSamples, fromR, gr);
 
     if (meters != nullptr)
     {
@@ -1554,8 +1629,6 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
     auto& lastR = lastTrackGain[(std::size_t) t * 2 + 1];
     const auto fromL = std::isnan (lastL) ? gl : lastL;
     const auto fromR = std::isnan (lastR) ? gr : lastR;
-    lastL = gl;
-    lastR = gr;
 
     if (silent && fromL == 0.0f && fromR == 0.0f)
     {
@@ -1570,13 +1643,8 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
     auto* r = trackBuffer (t, 1);
     applyTrackEq (track, t, l, r, n);
     applyStereo (track, l, r, n);
-    const auto stepL = (gl - fromL) / (float) n, stepR = (gr - fromR) / (float) n;
-
-    for (int i = 0; i < n; ++i)
-    {
-        l[i] *= fromL + stepL * (float) (i + 1);
-        r[i] *= fromR + stepR * (float) (i + 1);
-    }
+    lastL = glideGain (l, l, n, fromL, gl);
+    lastR = glideGain (r, r, n, fromR, gr);
 
     trackActive[(std::size_t) t] = 1;
 
