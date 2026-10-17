@@ -4,6 +4,7 @@
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
+#include "engine/DllAsioDevice.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
 #include "engine/PluginHost.h"
@@ -502,6 +503,7 @@ public:
     {
         engine = std::make_unique<lynx::AudioEngine>();
         crashEngine = engine.get();
+        addDriverFileDeviceType();
 
         if (startupOptions.sound)
             engine->previewSample (lynx::makeStartupSample());
@@ -1280,8 +1282,10 @@ private:
         // the user's saved device stays as it was: this run's choices are undone before quitting
         savedDeviceState = engine->getDeviceManager().createStateXml();
         auto& devices = engine->getDeviceManager();
-        if (deviceType.isNotEmpty() && devices.getCurrentAudioDeviceType() != deviceType)
-            devices.setCurrentAudioDeviceType (deviceType, true);
+        const auto driverFile = addDriverFileDeviceType();
+        const auto type = deviceType.isEmpty() && driverFile ? juce::String (lynx::dllAsioTypeName) : deviceType;
+        if (type.isNotEmpty() && devices.getCurrentAudioDeviceType() != type)
+            devices.setCurrentAudioDeviceType (type, true);
         if (bufferSize > 0 || deviceName.isNotEmpty())
         {
             auto setup = devices.getAudioDeviceSetup();
@@ -2471,6 +2475,26 @@ private:
     lynx::theme::LookAndFeel lookAndFeel;
     std::unique_ptr<lynx::AudioEngine> engine;
     std::unique_ptr<juce::XmlElement> savedDeviceState; // --rtstress: the user's device before this run's --type/--buffer
+
+    // Hidden test mode --asiodll "<driver.dll>[|{CLSID}]" (REA round 97): an ASIO driver loaded straight from its file,
+    // without registering it, listed as the driver type "ASIO driver file". True when one was added.
+    bool addDriverFileDeviceType()
+    {
+        const auto args = juce::JUCEApplication::getCommandLineParameterArray();
+        const auto i = args.indexOf ("--asiodll");
+        if (i < 0 || i + 1 >= args.size() || engine == nullptr)
+            return false;
+        auto& devices = engine->getDeviceManager();
+        devices.getAvailableDeviceTypes(); // creates the standard types first
+        for (auto* t : devices.getAvailableDeviceTypes())
+            if (t->getTypeName() == lynx::dllAsioTypeName)
+                return true;
+        auto type = lynx::makeDllAsioDeviceType (args[i + 1].unquoted());
+        if (type == nullptr)
+            return false;
+        devices.addAudioDeviceType (std::move (type));
+        return true;
+    }
     void restoreSavedDeviceState()
     {
         if (engine != nullptr)

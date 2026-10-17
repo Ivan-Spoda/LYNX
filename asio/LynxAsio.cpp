@@ -639,7 +639,7 @@ public:
         // waiting in the FIFO; input: one capture period plus the block
         const int queued = deviceQueue > 0 ? deviceQueue : (settings.mode == Mode::exclusive ? block : sharedTarget (render.sharedPeriod));
         *out = queued + block;
-        *in = (capture.ok ? capture.sharedPeriod : render.sharedPeriod) + block;
+        *in = (capture.ok ? capture.classicPeriod + block : 0) + block;
         return ASE_OK;
     }
 
@@ -896,14 +896,15 @@ private:
     StreamFormat renderFormat, captureFormat;
     UINT32 renderFrames = 0;   // the render buffer
     int devicePeriod = 0;      // frames between two device events
+    int capturePeriod = 480;   // frames between two capture packets
     Fifo outFifo, inFifo;
     std::vector<float> scratch, blockIn, blockOut;
     int bufferIndex = 0;
     long long position = 0;
 
     // statistics (LYNX_ASIO_LOG)
-    long long events = 0, hostBlocks = 0, lateEvents = 0, inputShort = 0, slowBursts = 0;
-    double lastEventMs = 0.0, maxGapMs = 0.0, maxBurstMs = 0.0;
+    long long events = 0, hostBlocks = 0, lateEvents = 0, inputShort = 0, inputShortBefore = 0, slowBursts = 0;
+    double startMs = 0.0, lastEventMs = 0.0, maxGapMs = 0.0, maxBurstMs = 0.0;
 
     bool openRender (IMMDevice* d)
     {
@@ -998,7 +999,12 @@ private:
                 logLine ("capture: could not open");
             }
             else
-                logLine ("capture: shared float32 %d ch @ %.0f Hz", capture.channels, sampleRate);
+            {
+                REFERENCE_TIME def = 0, mn = 0;
+                captureClient->GetDevicePeriod (&def, &mn);
+                capturePeriod = std::max (32, refTimeToFrames (def, sampleRate));
+                logLine ("capture: shared float32 %d ch @ %.0f Hz, period %d", capture.channels, sampleRate, capturePeriod);
+            }
         }
         d->Release();
     }
@@ -1041,8 +1047,8 @@ private:
             inFifo.push (scratch.data(), (int) frames);
             captureService->ReleaseBuffer (frames);
         }
-        // keep the input close: at most a period and two blocks behind
-        const int keep = devicePeriod + 2 * blockSize;
+        // keep the input close: captured packets come once per capture period, so up to two periods and two blocks
+        const int keep = 2 * capturePeriod + 2 * blockSize;
         if (inFifo.count > keep)
             inFifo.drop (inFifo.count - keep);
     }
@@ -1119,9 +1125,9 @@ private:
     {
         const int ch = renderFormat.channels;
         outFifo.reset (ch, (int) renderFrames + 2 * blockSize + 64);
-        inFifo.reset (captureClient != nullptr ? captureFormat.channels : 0, devicePeriod + 4 * blockSize + 64);
-        if (captureClient != nullptr)
-            inFifo.pushSilence (std::min (devicePeriod, inFifo.capacity)); // absorbs the phase between the two streams
+        inFifo.reset (captureClient != nullptr ? captureFormat.channels : 0, 3 * capturePeriod + 4 * blockSize + 64);
+        if (captureClient != nullptr) // one capture period and a block of silence absorb the packets' timing
+            inFifo.pushSilence (capturePeriod + blockSize);
         blockIn.assign ((size_t) (blockSize * std::max (1, inFifo.channels)), 0.0f);
         blockOut.assign ((size_t) (blockSize * ch), 0.0f);
         // the first buffer: silence, so the stream starts without a gap
@@ -1130,14 +1136,15 @@ private:
         if (SUCCEEDED (renderService->GetBuffer ((UINT32) first, &data)))
             renderService->ReleaseBuffer ((UINT32) first, AUDCLNT_BUFFERFLAGS_SILENT);
         bufferIndex = 0;
-        events = hostBlocks = lateEvents = inputShort = slowBursts = 0;
+        events = hostBlocks = lateEvents = inputShort = inputShortBefore = slowBursts = 0;
         lastEventMs = maxGapMs = maxBurstMs = 0.0;
+        startMs = nowMs();
     }
 
     void onDeviceEvent()
     {
         const double now = nowMs();
-        if (lastEventMs > 0.0)
+        if (lastEventMs > 0.0 && now - startMs > 200.0) // the device's first periods are irregular: not counted
         {
             const double gap = now - lastEventMs;
             maxGapMs = std::max (maxGapMs, gap);
@@ -1146,6 +1153,8 @@ private:
         }
         lastEventMs = now;
         ++events;
+        if (now - startMs < 200.0)
+            inputShortBefore = inputShort;
         drainCapture();
         if (streamExclusive)
             feedDevice ((int) renderFrames);
@@ -1207,7 +1216,8 @@ private:
                         if (captureClient != nullptr)
                             captureClient->Stop();
                         logLine ("stats: %lld device events, %lld host blocks, late events %lld (max gap %.2f ms), slow bursts %lld (max %.2f ms), "
-                                 "input short %lld", events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs, inputShort);
+                                 "input short %lld (+%lld while starting)", events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs,
+                                 inputShort - inputShortBefore, inputShortBefore);
                         if (task != nullptr)
                             AvRevertMmThreadCharacteristics (task);
                         task = nullptr;
