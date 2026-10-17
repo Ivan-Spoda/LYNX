@@ -939,6 +939,14 @@ void AudioEngine::setSong (Song newSong)
     selectedChannel = 0;
     selectedChannels = { 0 };
     modified = false;
+
+    // arming isn't saved: a new project starts disarmed; its inserts' audio inputs open the device input
+    for (const auto t : std::vector<int> (armedInserts))
+        setInsertArmed (t, false);
+    if (prefetcher != nullptr && ! hasAudioInput()
+        && std::any_of (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& t) { return t.inputChannel >= 0; }))
+        openAudioInput();
+
     publishSong();
 }
 
