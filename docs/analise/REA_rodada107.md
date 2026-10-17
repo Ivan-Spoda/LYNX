@@ -68,13 +68,41 @@ not translated) took another 4.4 dB off the vocal (LYNX k3 → k4 renders). The 
 (slow in/out power match, ±12 dB) and the compressor substitutes (Renaissance Compressor, other Waves compressors,
 Pro-C) turn it on: they shape dynamics but keep the level.
 
-## 5. Other differences seen (not the vocal level)
+## 5. Cause 4: overlapping clips of one vocal take silenced each other
+
+[DATA] Her comps cut one take into several clips of the same channel that overlap by a few ticks with FL's automatic
+crossfade (fade-in/out 86.5 ms), e.g. `kwe` items at ticks 12096–12336 and 12318–12720 of channel 5. [EXEC] FL plays
+both; LYNX was silent from 59.3 s to 61.0 s: the scheduler sends every audio clip of a channel with the same key and the
+audio-clip sampler stopped ALL its voices on any clip end, so the first clip's end killed the second clip. Fix: an
+audio clip's events carry its own key (`audioClipKey (playlist index)`, above the MIDI range) and a clip end fades only
+that clip's voice (other callers, key < 128, still stop everything).
+
+## 6. Notes on the references
+
+- FL's command-line render on her laptop runs in the SSH (non-interactive) session, where the Waves plugins pass the
+  audio through unchanged (renders with only Auto-Tune and with the whole chain differ by −69 dB). So FL references
+  with the Waves chain are not valid there; the routing/level findings above were measured without plugins in the
+  vocal path. LYNX hosting the Waves plugins in the same session does process them.
+- FL's "Problems loading the project" dialog is a hidden window in that session; `okdlg2.ps1` (tmp/r107) closes it
+  with WM_CLOSE.
+
+## 7. Other differences seen (not the vocal level)
 
 - `kwe`: the beat stems' last clips (start offset 77 s into 106 s stems, 73.3 → 88.6 s) stop at 78 s in LYNX, play to
-  the end in FL (FL −12.7 dB in 80–89 s without vocals, LYNX silent). Channel has 0xD7 TIME 140, mode 1, and the wav has
-  `acid`/`smpl` chunks. Not investigated yet.
+  the end in FL (FL −12.7 dB in 80–89 s without vocals, LYNX silent). Channel has 0xD7 TIME 140 (→ stretchBeats 0.73),
+  mode 1, and the wav has `acid`/`smpl` chunks. Not investigated yet.
 - `game over` / `luisa sonsa`: only 1–2 playlist tracks are enabled (byte 12 of 0xEE); her other tracks are muted in
   the file (only her mixdown / the beat play). LYNX does the same as the file says.
+- Insert faders: FL moved +4.0 / +1.3 dB where LYNX's fader curve says +3.7 / +1.0 dB (two measurements). Open.
+
+## 8. Result on `kwe` (vocal takes only, dB RMS per 10 s window, 50–89 s)
+
+    variant                         FL (her laptop)              LYNX before                  LYNX now (renderwav)
+    vocal inserts emptied           -22.1 -14.4 -13.5 -14.8      -40.8 -25.9 -25.2 -26.5      -22.1 -14.4 -13.5 -15.3
+    + FX insert emptied             -18.1 -10.6  -9.8 -10.8      -36.9 -22.0 -21.5 -22.5      -18.1 -10.5  -9.8 -11.3
+    straight to Master              -24.6 -16.2 -16.0 -17.2      -32.3 -16.5 -16.6 -17.6      -24.6 -16.2 -16.0 -17.6
+
+Every window within 0.1 dB except the last one (0.4–0.5 dB, the song's end).
 
 ## Where I stopped / next steps
 - Verifying all fixes on her laptop (kwe, game over, luisa) against FL; then land.
