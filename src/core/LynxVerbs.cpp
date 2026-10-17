@@ -1088,7 +1088,7 @@ public:
 protected:
     void configure (const EffectParams& p, double, Settings& s, float& mix) const noexcept override
     {
-        const auto& m = horizonReverbs[choice (p[21], horizon::reverbModeCount)];
+        const auto& m = horizonReverbs[choice (p[22], horizon::reverbModeCount)];
         mix = p[0];
         const auto size = (double) p[12];
         s.shape = m.shape;
@@ -1103,7 +1103,7 @@ protected:
         s.lateLevel = 0.5 + earlyLate;
         s.inDiffusion = 0.4 + 0.6 * p[15];
         s.loopDiffusion = 0.1 + 0.8 * p[15];
-        s.gateSec = choice (p[21], horizon::reverbModeCount) == 7 ? 0.5 * decay + 0.05 : 0.0;
+        s.gateSec = choice (p[22], horizon::reverbModeCount) == 7 ? 0.5 * decay + 0.05 : 0.0;
         s.modRateHz = skewLaw (p[17], 0.01, 10.0, 2.328);
         s.modDepthMs = 1.0 * p[18] / std::sqrt (std::max (0.1, s.modRateHz));
         s.outLowCut = skewLaw (p[19], 20.0, 1000.0, 1.807);
@@ -1128,7 +1128,7 @@ protected:
         const auto spread = (double) p[6];
         const auto drive = std::pow (10.0, 24.0 * p[7] / 20.0);
         const auto detune = (-30.0 + 60.0 * p[8]) / 100.0; // semitones
-        const auto mode = choice (p[22], horizon::echoModeCount);
+        const auto mode = choice (p[21], horizon::echoModeCount);
         double ratio = 1.0, ratio2 = 1.0;
         bool shift = false, dual = false;
         double cut = 18000.0, wowDepth = 0.0;

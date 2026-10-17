@@ -229,5 +229,7 @@ All six entries map every parameter from the XML attributes: identities, `steps`
 
 ## Where I stopped
 
-- Measuring done (§0–§6). Engines + wiring + layouts + translations + tests written; fits of Atrium / Foil / Nebula /
-  Horizon in progress.
+- Measuring done (§0–§6). Engines, wiring (EffectKind, project file ids, mixer list, layouts, substitutes table with
+  curve / steps maps, pt-BR strings), tests (tests/LynxVerbTests100.inc), PLUGINS.md / PLUGIN_FALLBACK.md / website
+  data written. Epoch Verb fitted; Atrium / Foil Plate / Nebula / Halo / Horizon second fit pass running
+  (tmp/valh100/py/fit2_*.txt). Then: build-local (0 failures), land.
