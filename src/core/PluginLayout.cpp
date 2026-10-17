@@ -9,6 +9,8 @@
 
 #include "core/Effects.h"
 #include "core/MaximusFx.h"
+#include "core/MultibandDelayFx.h"
+#include "core/StateParams.h"
 
 // (the i18n test scans the sources for TR_NOOP: captions below are translated by the editor)
 #ifndef TR_NOOP
@@ -1490,6 +1492,8 @@ Layout soundgoodizer()
     return l;
 }
 
+#include "core/PluginLayoutFx.inc"
+
 // --- generated layouts ------------------------------------------------------------------------------
 
 // --- LYNX originals: the mixing suite (REA round 96). Not FL arrangements: LYNX's own panels, laid out with the
@@ -1906,7 +1910,12 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
                                                  EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
                                                  EffectKind::squeeze, EffectKind::maximus,
-                                                 EffectKind::vintagePhaser, EffectKind::fruityPhaser, EffectKind::fruitySend };
+                                                 EffectKind::vintagePhaser, EffectKind::fruityPhaser,
+                                                 // round 105
+                                                 EffectKind::vocoder, EffectKind::frequencySplitter, EffectKind::fruityDelayBank,
+                                                 EffectKind::equo, EffectKind::multibandDelay, EffectKind::convolver,
+                                                 EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex,
+                                                 EffectKind::fruitySend };
     return kinds;
 }
 
@@ -1960,6 +1969,16 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::maximus: l = maximus(); break;
         case EffectKind::vintagePhaser: l = vintagePhaser(); break;
         case EffectKind::fruityPhaser: l = fruityPhaser(); break;
+        case EffectKind::vocoder: l = fruityVocoder(); break;
+        case EffectKind::frequencySplitter: l = frequencySplitterLayout(); break;
+        case EffectKind::fruityDelayBank: l = fruityDelayBankLayout(); break;
+        case EffectKind::equo: l = equoLayout(); break;
+        case EffectKind::multibandDelay: l = multibandDelayLayout(); break;
+        case EffectKind::convolver: l = convolverLayout(); break;
+        case EffectKind::flPitchShifter: l = pitchShifterLayout(); break;
+        case EffectKind::effector: l = effectorLayout(); break;
+        case EffectKind::hardcore: l = hardcoreLayout(); break;
+        case EffectKind::vocodex: l = vocodexLayout(); break;
         case EffectKind::ridgeStrip: l = ridgeStrip(); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
@@ -2011,32 +2030,63 @@ bool hasFlLayout (EffectKind kind)
 
 bool usesStateParams (EffectKind kind) noexcept
 {
-    return kind == EffectKind::maximus;
+    return stateparams::tableFor (kind) != nullptr;
 }
 
 int paramCount (EffectKind kind)
 {
-    return usesStateParams (kind) ? (int) maximusfx::stateParams().size() : (int) effectInfo (kind).params.size();
+    const auto* table = stateparams::tableFor (kind);
+    return (int) effectInfo (kind).params.size() + (table != nullptr ? (int) table->params.size() : 0);
+}
+
+int stateIndex (EffectKind kind, int param)
+{
+    const auto plain = (int) effectInfo (kind).params.size();
+    const auto* table = stateparams::tableFor (kind);
+    return table != nullptr && param >= plain && param < plain + (int) table->params.size() ? param - plain : -1;
 }
 
 const char* paramName (EffectKind kind, int index)
 {
     if (index < 0 || index >= paramCount (kind))
         return "";
-    return usesStateParams (kind) ? maximusfx::stateParams()[(std::size_t) index].name : effectInfo (kind).params[(std::size_t) index].name;
+    if (const auto s = stateIndex (kind, index); s >= 0)
+        return stateparams::tableFor (kind)->name (s);
+    return effectInfo (kind).params[(std::size_t) index].name;
 }
 
 int paramIndex (EffectKind kind, const char* name)
 {
     if (name == nullptr)
         return -1;
-    if (usesStateParams (kind))
-        return maximusfx::stateParamIndex (name);
     const auto& params = effectInfo (kind).params;
     for (int i = 0; i < (int) params.size(); ++i)
         if (std::strcmp (params[(std::size_t) i].name, name) == 0)
             return i;
+    if (const auto* table = stateparams::tableFor (kind))
+        if (const auto s = table->index (name); s >= 0)
+            return (int) params.size() + s;
     return -1;
+}
+
+float stateValue01 (EffectKind kind, int param, const std::vector<std::uint8_t>& state)
+{
+    const auto s = stateIndex (kind, param);
+    if (s < 0)
+        return 0.0f;
+    const auto* table = stateparams::tableFor (kind);
+    const auto& p = table->params[(std::size_t) s];
+    const auto raw = table->get (state, s).value_or (p.defaultValue);
+    return p.maximum > p.minimum ? (float) ((double) (std::clamp (raw, p.minimum, p.maximum) - p.minimum) / (double) (p.maximum - p.minimum)) : 0.0f;
+}
+
+int stateRaw (EffectKind kind, int param, float value01)
+{
+    const auto s = stateIndex (kind, param);
+    if (s < 0)
+        return 0;
+    const auto& p = stateparams::tableFor (kind)->params[(std::size_t) s];
+    return p.minimum + (int) std::lround ((double) std::clamp (value01, 0.0f, 1.0f) * (double) (p.maximum - p.minimum));
 }
 
 std::vector<std::string> optionLabels (const LayoutItem& item)
@@ -2081,7 +2131,7 @@ int optionAt (const LayoutItem& item, float value)
     return best;
 }
 
-bool isShown (EffectKind kind, const LayoutItem& item, int page, const EffectParams& params)
+bool isShown (EffectKind kind, const LayoutItem& item, int page, const EffectParams& params, const std::vector<std::uint8_t>* state)
 {
     if (item.page >= 0 && item.page != page)
         return false;
@@ -2089,7 +2139,8 @@ bool isShown (EffectKind kind, const LayoutItem& item, int page, const EffectPar
         if (param == nullptr)
             return true;
         const auto i = paramIndex (kind, param);
-        const auto v = i >= 0 && i < (int) params.size() ? params[(std::size_t) i] : 0.0f;
+        const auto v = stateIndex (kind, i) >= 0 ? (state != nullptr ? stateValue01 (kind, i, *state) : 0.0f)
+                       : i >= 0 && i < (int) params.size() ? params[(std::size_t) i] : 0.0f;
         return v >= lo && (v < hi || hi >= 1.0f); // [lo, hi), the top end included at 1
     };
     return inRange (item.whenParam, item.whenMin, item.whenMax) && inRange (item.when2Param, item.when2Min, item.when2Max);

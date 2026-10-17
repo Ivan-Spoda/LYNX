@@ -6233,7 +6233,7 @@ std::map<std::string, std::string> sourceKeys (const std::filesystem::path& srcD
     for (const auto& entry : std::filesystem::recursive_directory_iterator (srcDir))
     {
         const auto ext = entry.path().extension().string();
-        if (! entry.is_regular_file() || (ext != ".cpp" && ext != ".h"))
+        if (! entry.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".inc"))
             continue;
 
         // drop // comment lines (they may quote tr ("...") as an example)
@@ -15440,6 +15440,7 @@ TEST (level_audit_demo_imports_round89)
 #include "DialogsTests84.inc"
 #include "SubstituteTests.inc"
 #include "MixSuiteTests96.inc"
+#include "PanelsTests105.inc"
 
 // --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------
 
@@ -15608,4 +15609,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "LynxTuneTests95.inc"
 #include "LynxVerbTests100.inc"
 #include "FacetTests103.inc"
+#include "VocalLevel107Tests.inc"
 #include "FruitySendTests105.inc"

@@ -166,10 +166,21 @@ class Compressor final : public Effect
 {
 public:
     void prepare (double sr) noexcept override { sampleRate = sr; reset(); }
-    void reset() noexcept override { envelopeDb = 0.0f; }
+    void reset() noexcept override
+    {
+        envelopeDb = 0.0f;
+        inPower = outPower = 0.0f;
+        autoGain = 1.0f;
+    }
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
+        // "Auto gain" (round 107): the long-term level stays where it was (slow in/out power match, ±12 dB), so the
+        // compressor shapes the dynamics without making the track quieter. Used where its settings are a guess (a
+        // substitute for a missing plugin, whose own makeup gain is unknown).
+        const auto levelMatch = params[5] >= 0.5f;
+        const auto powerCoeff = (float) std::exp (-1.0 / (1.5 * sampleRate));
+        const auto gainCoeff = (float) std::exp (-1.0 / (0.05 * sampleRate));
         const auto threshold = compThresholdDb (params[0]);
         const auto ratio = compRatio (params[1]);
         const auto attack = (float) std::exp (-1.0 / (compAttackMs (params[2]) * 0.001 * sampleRate));
@@ -194,7 +205,20 @@ public:
             if (envelopeDb < 1.0e-4f)
                 envelopeDb = 0.0f; // no audible reduction: skip the pow
 
-            const auto gain = envelopeDb > 0.0f ? dbToGain (-envelopeDb) * makeup : makeup;
+            auto gain = envelopeDb > 0.0f ? dbToGain (-envelopeDb) * makeup : makeup;
+
+            if (levelMatch)
+            {
+                const auto in = 0.5f * (l[i] * l[i] + r[i] * r[i]);
+                inPower = in + powerCoeff * (inPower - in);
+                const auto out = in * gain * gain;
+                outPower = out + powerCoeff * (outPower - out);
+                // follow only while there is signal (silence keeps the last match)
+                const auto target = inPower > 1.0e-8f && outPower > 1.0e-12f ? std::clamp (std::sqrt (inPower / outPower), 0.25f, 4.0f) : autoGain;
+                autoGain = target + gainCoeff * (autoGain - target);
+                gain *= autoGain;
+            }
+
             l[i] *= gain;
             r[i] *= gain;
         }
@@ -210,6 +234,7 @@ public:
 private:
     double sampleRate = 44100.0;
     float envelopeDb = 0.0f;
+    float inPower = 0.0f, outPower = 0.0f, autoGain = 1.0f;
     const float* sideL = nullptr;
     const float* sideR = nullptr;
     bool useSidechain = false;
@@ -2136,7 +2161,7 @@ std::string widthText (const EffectParams& params, int band)
 const EffectInfo& effectInfo (EffectKind kind)
 {
     static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
-    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f } } };
+    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2533,6 +2558,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 1: std::snprintf (text, sizeof (text), "%.1f:1", compRatio (v)); break;
                 case 2: std::snprintf (text, sizeof (text), "%.1f ms", compAttackMs (v)); break;
                 case 3: std::snprintf (text, sizeof (text), "%.0f ms", compReleaseMs (v)); break;
+                case 5: return v >= 0.5f ? "on" : "off";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;

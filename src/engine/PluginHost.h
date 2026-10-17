@@ -127,7 +127,7 @@ public:
     // Scan child mode: describes a file's plugins into `output` (XML). Returns the number found.
     static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
 
-    static constexpr int scanTimeoutMs = 30000;
+    // (the parent waits core/PluginScanPolicy.h's time for each file; the child first reports a VST3's class count)
 
     // Adds a specific file (e.g. a .vst3 outside the default folders).
     int addPluginFile (const juce::File& file);

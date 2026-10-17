@@ -91,7 +91,8 @@ ui::ValueSpec stereoSpec (const juce::String& name)
 
 ui::ValueSpec sendSpec (const juce::String& name)
 {
-    auto spec = ui::percentSpec (name, 1.0);
+    // FL's send knob: the fader curve (0 dB at 80 %, +5.6 dB at the top); the value is the knob position
+    auto spec = ui::faderSpec (name, unityFader);
     spec.pixelsForRange = 120.0;
     return spec;
 }
@@ -548,7 +549,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 if (on && t > 0)
                     for (const auto& send : song.mixer[(std::size_t) selected].sends)
                         if (send.target == t)
-                            drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), send.level, false,
+                            drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), faderPosition (send.level), false,
                                       dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
             }
             else if (feedsSelected) // this insert sends into the selected one
@@ -690,7 +691,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
         if (ui::isResetClick (e))
         {
-            setValue (Part::send, t, 1.0);
+            setValue (Part::send, t, unityFader); // 0 dB
             showTip (Part::send, t, true);
             return;
         }
@@ -914,7 +915,7 @@ double MixerStrips::valueOf (Part part, int t) const
         if (selected > 0 && selected < (int) song.mixer.size())
             for (const auto& send : song.mixer[(std::size_t) selected].sends)
                 if (send.target == t)
-                    return send.level;
+                    return faderPosition (send.level);
         return 0.0;
     }
 
@@ -929,7 +930,7 @@ void MixerStrips::setValue (Part part, int t, double value)
     if (part == Part::send)
     {
         const auto from = selected;
-        engine.editSong ([from, t, v = (float) value] (Song& s) { s.setRoute (from, t, true, v); });
+        engine.editSong ([from, t, v = faderGain ((float) value)] (Song& s) { s.setRoute (from, t, true, v); });
         return;
     }
 

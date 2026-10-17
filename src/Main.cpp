@@ -1487,6 +1487,23 @@ private:
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
 
+            // --find-plugins: first the targeted scan opening the project in the app runs (its plugins not known yet)
+            if (input.hasFileExtension ("flp") && juce::JUCEApplication::getCommandLineParameters().contains ("--find-plugins"))
+            {
+                juce::MemoryBlock data;
+                if (input.loadFileAsData (data))
+                    try
+                    {
+                        const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                        auto& host = loader.getPluginHost();
+                        report << "scanned=" << host.filesToScanFor (uses).joinIntoString (";") << "\n";
+                        host.scanFiles (host.filesToScanFor (uses), {});
+                    }
+                    catch (const flp::Error&)
+                    {
+                    }
+            }
+
             if (input.hasFileExtension ("flp"))
                 ok = loader.importFlpFile (input, error);
             else if (auto song = lynx::ProjectFile::load (input, error))
@@ -1542,6 +1559,32 @@ private:
                        << "unsupported=" << joined (importReport.unsupported) << "\n"
                        << "dropped_effects=" << joined (importReport.droppedEffects) << "\n"
                        << "missing_samples=" << importReport.missingSamples << "\n";
+                // third-party plugins: how each was found, or what plays in its place (diagnostics for level differences)
+                for (const auto& line : loader.getMatchedPlugins())
+                    report << "plugin_found=" << line << "\n";
+                for (const auto& m : loader.getMissingPluginDetails())
+                    report << "plugin_missing=" << juce::String::fromUTF8 (m.name.c_str()) << " -> "
+                           << juce::String::fromUTF8 (m.replacement.c_str()).replace ("{0}", juce::String::fromUTF8 (m.replacementArg.c_str())) << "\n";
+                {
+                    const auto& song = loader.getSong();
+                    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+                    {
+                        const auto& track = song.mixer[t];
+                        if (track.effects.empty() && track.sends.empty())
+                            continue;
+                        report << "insert " << (int) t << " vol=" << juce::String (track.volume / lynx::unityFader, 3)
+                               << (track.muted ? " muted" : "") << (track.toMaster ? "" : " noMaster");
+                        for (const auto& s : track.sends)
+                            report << " send>" << s.target << "@" << juce::String (s.level, 3);
+                        report << " |";
+                        for (const auto& fx : track.effects)
+                            report << " [" << (fx.kind == lynx::EffectKind::plugin ? juce::String::fromUTF8 (fx.plugin.name.c_str())
+                                                                                 : juce::String::fromUTF8 (lynx::effectInfo (fx.kind).name))
+                                   << (fx.isSubstitute() ? " (substitute)" : "") << (fx.enabled ? "" : " off")
+                                   << (fx.mix < 0.999f ? " mix=" + juce::String (fx.mix, 2) : juce::String()) << "]";
+                        report << "\n";
+                    }
+                }
                 report << "open_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "prepare_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"

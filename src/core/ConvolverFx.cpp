@@ -757,6 +757,7 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& d)
     }
     if (d.size() < o + 4)
         return std::nullopt;
+    s.flagsAt = o;
     for (int k = 0; k < 4; ++k)
         s.flags[(std::size_t) k] = d[o + (std::size_t) k];
     o += 4;
@@ -770,6 +771,8 @@ std::optional<State> parseState (const std::vector<std::uint8_t>& d)
     const int nk = s.version >= 11 ? 5 : 4;
     if (d.size() < o + 4 * (std::size_t) nk)
         return std::nullopt;
+    s.knobsAt = o;
+    s.knobCount = nk;
     for (int k = 0; k < nk; ++k)
         s.knobs[(std::size_t) k] = i32 (d, o + 4 * (std::size_t) k);
     if (nk == 4)

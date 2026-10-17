@@ -255,9 +255,9 @@ void Song::setRoute (int from, int to, bool enabled, float level)
     }
 
     if (it != t.sends.end())
-        it->level = std::clamp (level, 0.0f, 1.0f);
+        it->level = std::clamp (level, 0.0f, maxFaderGain);
     else if (canRoute (from, to))
-        t.sends.push_back ({ to, std::clamp (level, 0.0f, 1.0f) });
+        t.sends.push_back ({ to, std::clamp (level, 0.0f, maxFaderGain) });
 }
 
 std::vector<int> Song::mixerOrder() const
@@ -808,6 +808,13 @@ float faderGain (float position) noexcept
     return (std::pow (11.0f, v) - 1.0f) / 10.0f;
 }
 
+float faderPosition (float gain) noexcept
+{
+    if (! (gain > 0.0f))
+        return 0.0f;
+    return std::clamp ((float) (std::log (10.0 * (double) gain + 1.0) / std::log (11.0) / 1.25), 0.0f, 1.0f);
+}
+
 Song makeExportSong (const Song& song, bool wholeSong, std::int64_t tailTicks, std::int64_t& musicLength)
 {
     Song out = song;
@@ -884,6 +891,7 @@ int applyBounce (Song& song, int track, const std::string& samplePath, std::int6
     MixerTrack copy;
     copy.name = original.name + " (audio)";
     copy.toMaster = original.toMaster;
+    copy.masterLevel = original.masterLevel;
     copy.sends = original.sends;
     original.muted = true;
     song.mixer.push_back (copy);

@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <map>
+#include <sstream>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -33,6 +34,7 @@
 
 #include "WavReader.h"
 #include "core/FlpImport.h"
+#include "core/PluginSubstitutes.h"
 #include "core/RackRenderer.h"
 #include "core/WorkerPool.h"
 
@@ -130,6 +132,27 @@ int main (int argc, char** argv)
     {
         std::fprintf (stderr, "error: %s\n", e.what());
         return 1;
+    }
+
+    // LYNX_SUBSTITUTES=1: third-party effects become their LYNX substitutes, as in the app when none is installed
+    // (otherwise they stay unresolved, i.e. silent pass-through); LYNX_DISABLE="t.k t.k": those insert slots off
+    if (const char* e = std::getenv ("LYNX_SUBSTITUTES"); e != nullptr && std::atoi (e) != 0)
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (auto& fx : song.mixer[t].effects)
+                if (fx.kind == lynx::EffectKind::plugin && fx.plugin.foreign.format != lynx::ForeignPlugin::Format::none
+                    && lynx::substituteEffectSlot (fx, lynx::pluginIdentity (fx.plugin.foreign)))
+                    std::printf ("insert %d: %s -> %s\n", (int) t, lynx::substituteOriginalName (fx).c_str(), lynx::effectInfo (fx.kind).name);
+    if (const char* e = std::getenv ("LYNX_DISABLE"))
+    {
+        std::istringstream list (e);
+        std::string item;
+        while (list >> item)
+            if (const auto dot = item.find ('.'); dot != std::string::npos)
+            {
+                const auto t = (std::size_t) std::atoi (item.substr (0, dot).c_str()), k = (std::size_t) std::atoi (item.substr (dot + 1).c_str());
+                if (t < song.mixer.size() && k < song.mixer[t].effects.size())
+                    song.mixer[t].effects[k].enabled = false;
+            }
     }
 
     // "song" instead of the index: the whole song (playlist), like the app's export
