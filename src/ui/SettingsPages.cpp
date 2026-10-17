@@ -92,7 +92,7 @@ public:
                                                                  &wavesLabel, &wavesBox, &stereoWaves, &splash, &startupSound, &scanAtStart,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups,
-                                                                 &sandbox, &sandboxNote, &managePlugins, &manageShortcuts, &shortcutsNote })
+                                                                 &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote })
             add (*c);
 
         styleLabel (languageLabel, tr ("Language"));
@@ -174,6 +174,9 @@ public:
         toggle (sandbox, tr ("Run plugins in a separate process (protects LYNX from crashes)"), options.pluginSandbox,
                 [this] (bool on) { options.pluginSandbox = on; });
         styleNote (sandboxNote, tr ("Applies to plugins opened from now on; reopen the project to move the others."));
+        toggle (substitutes, tr ("Substitute missing plugins with LYNX equivalents"), options.pluginSubstitutes,
+                [this] (bool on) { options.pluginSubstitutes = on; });
+        styleNote (substitutesNote, tr ("A project keeps the original plugin and uses it again once it is installed."));
         managePlugins.onClick = [this] {
             if (hooks.managePlugins)
                 hooks.managePlugins();
@@ -222,6 +225,8 @@ private:
         r.section (pluginsTitle);
         sandbox.setBounds (r.full (24));
         sandboxNote.setBounds (r.full (16).translated (0, -6));
+        substitutes.setBounds (r.full (24));
+        substitutesNote.setBounds (r.full (16).translated (0, -6));
         {
             auto row = r.full();
             managePlugins.setBounds (row.removeFromLeft (180));
@@ -263,9 +268,9 @@ private:
     GeneralOptions options;
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
-    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, shortcutsNote;
+    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote;
     juce::ComboBox languageBox, scaleBox, wavesBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox;
+    juce::ToggleButton stereoWaves, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
 

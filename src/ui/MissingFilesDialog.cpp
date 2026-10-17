@@ -340,7 +340,9 @@ private:
             for (const auto& u : p.usedBy)
                 users.add (u8 (u));
             right = users.joinIntoString (", ");
-            detail = tr ("Replaced by: {0}", { tr (u8 (p.replacement)) });
+            detail = tr ("Replaced by: {0}", { p.replacementArg.empty() ? tr (u8 (p.replacement)) : tr (p.replacement.c_str(), { u8 (p.replacementArg) }) });
+            if (! p.replacementArg.empty())
+                dot = theme::colour::info; // something plays in its place
             detailColour = theme::colour::textSecondary;
         }
         else

@@ -118,6 +118,7 @@
 #include "core/ExportOptions.h"
 #include "core/Mp3Encoder.h"
 #include "core/PluginMonitor.h"
+#include "core/PluginSubstitutes.h"
 #include "core/PlaylistOps.h"
 #include "core/TouchKeyboard.h"
 #include "core/HeldNotes.h"
@@ -15303,6 +15304,7 @@ TEST (level_audit_demo_imports_round89)
 }
 #include "UiLook90Tests.inc"
 #include "DialogsTests84.inc"
+#include "SubstituteTests.inc"
 
 // --- native plugin editors (round 93): FL's arrangements ---------------------------------------------------------
 

@@ -1,6 +1,7 @@
 #include "ui/QuickAddPalette.h"
 
 #include "core/Effects.h"
+#include "core/PluginSubstitutes.h"
 #include "core/SearchQuery.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
@@ -126,6 +127,12 @@ public:
 
         for (auto kind : addableEffects())
             effects.all.push_back ({ juce::String::fromUTF8 (effectInfo (kind).name), tr ("built-in"), [this, kind] { targets.addEffect (makeEffectSlot (kind)); } });
+        // LYNX equivalents of well-known third-party effects (the substitutes table): findable by the product's name
+        for (const auto& entry : pluginSubstitutes())
+            if (! entry.instrument)
+                effects.all.push_back ({ tr ("{0} (LYNX equivalent of {1})", { juce::String::fromUTF8 (effectInfo (entry.effect).name), juce::String::fromUTF8 (entry.product.c_str()) }),
+                                         tr ("built-in") + " " + juce::String::fromUTF8 (entry.vendor.c_str()),
+                                         [this, entry] { targets.addEffect (makeSubstituteSlot (entry)); } });
 
         // plugins: favourites (Plugin manager) first, each group by name
         auto types = engine.getPluginHost().getKnownPlugins().getTypes();

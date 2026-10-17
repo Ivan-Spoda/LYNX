@@ -2340,6 +2340,9 @@ void MainComponent::openLynxProject (const juce::File& file)
         return;
     }
 
+    // missing plugins get their LYNX substitute; substitutes whose original is installed now go back to it
+    engine.getPluginHost().applySubstitutes (*song);
+
     engine.stop();
     engine.rewind();
     engine.setSong (std::move (*song));
@@ -2386,6 +2389,7 @@ void MainComponent::openSettings (int page)
         o.autosaveMinutes = safe->autosaveMinutes;
         o.autosaveKeep = safe->autosaveKeep;
         o.pluginSandbox = pluginSandboxEnabled();
+        o.pluginSubstitutes = pluginSubstitutesEnabled();
         return o;
     };
     hooks.setGeneral = [safe] (const GeneralOptions& o) {
@@ -2410,6 +2414,8 @@ void MainComponent::openSettings (int page)
             setBackgroundScanAtStart (o.scanAtStart);
         if (o.pluginSandbox != pluginSandboxEnabled())
             setPluginSandboxEnabled (o.pluginSandbox);
+        if (o.pluginSubstitutes != pluginSubstitutesEnabled())
+            setPluginSubstitutesEnabled (o.pluginSubstitutes);
         ChannelRackComponent::keepEditorsOpen = o.keepEditorsOpen;
         EditorGlobals::get().rememberSeek = o.rememberSeek;
         PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, o.editPatternsIn);
@@ -2491,6 +2497,21 @@ void MainComponent::showMissingFiles (bool afterOpening)
                 if (fx.kind == EffectKind::plugin && ! fx.plugin.id.empty() && host.find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
                     addPlugin (fx.plugin, song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name,
                                "Bypassed: the slot keeps the plugin's settings until it is installed");
+        // played by a LYNX substitute until the original is installed
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (const auto& fx : song.mixer[t].effects)
+                if (fx.isSubstitute())
+                {
+                    const auto name = substituteOriginalName (fx);
+                    auto it = std::find_if (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == name; });
+                    if (it == info.plugins.end())
+                        it = info.plugins.insert (info.plugins.end(),
+                                                  MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
+                                                                  effectInfo (fx.kind).name });
+                    const auto user = song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name;
+                    if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
+                        it->usedBy.push_back (user);
+                }
         // installed, but failed to load: they play silence / are bypassed
         for (const auto& line : host.getLoadFailures())
             if (std::none_of (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == line.toStdString(); }))
