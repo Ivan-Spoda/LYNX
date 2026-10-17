@@ -25,6 +25,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
+#include "core/FruityPhaser.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1205,6 +1206,13 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             flangerfx::toParams (*s, slot.params.data());
             return slot;
         }
+    if (pluginName == "Fruity Phaser") // the exact engine (REA_rodada105_phaser); LYNX's generic chorus otherwise
+        if (const auto s = phaserfx::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruityPhaser);
+            phaserfx::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Maximus") // FL's own engine from the saved state (REA_rodada36/38); the approximation otherwise
         if (auto exact = maximusExact (state))
             return exact;
@@ -1441,6 +1449,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
         case EffectKind::fruityFlangus: return { "Fruity Flangus" };
         case EffectKind::fruityFlanger: return { "Fruity Flanger" };
+        case EffectKind::fruityPhaser: return { "Fruity Phaser" };
         case EffectKind::fruityFastLP: return { "Fruity Fast LP" };
         case EffectKind::fruityFreeFilter: return { "Fruity Free Filter" };
         case EffectKind::fruityFilter: return { "Fruity Filter" };
@@ -1533,6 +1542,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     // the exact Fast Dist / Flangus / Flanger take FL's controls over their ranges
     if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdistfx::params) || (is ("Fruity Flangus") && k >= 0 && k < flangusfx::params)
         || (is ("Fruity Flanger") && k >= 0 && k < flangerfx::params))
+        return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the exact Fruity Phaser likewise (its nine controls; FL normalises them over their ranges)
+    if (is ("Fruity Phaser") && k >= 0 && k < phaserfx::params)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
 
     if (is ("Fruity Parametric EQ 2"))

@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/FruityPhaser.h"
 #include "core/FlPluginDb.h"
 #include "core/FlVoiceProcessor.h"
 #include "core/HardcoreFx.h"
@@ -605,11 +606,26 @@ namespace
 // Old FL saved its own Fruity effects as VST2 plugins inside Fruity Wrapper: the wrapper keeps their parameters as
 // 0…1 floats (REA_rodada89 §2). Fruity Compressor's 6 controls map linearly onto its native ranges — an untouched
 // instance's floats land exactly on the native defaults [DATA, RawFL demo] — so its native state (layout v1:
-// 6 × i32) is rebuilt; the lookahead flag has no VST2 parameter (off, not confirmed). Other effects: defaults.
+// 6 × i32) is rebuilt; the lookahead flag has no VST2 parameter (off, not confirmed). Fruity Phaser likewise (round
+// 105). Other effects: defaults.
 std::vector<std::uint8_t> wrappedFruityState (const ForeignPlugin& plugin)
 {
     std::vector<std::uint8_t> native;
     FlVst2State state;
+    // Fruity Phaser (REA_rodada105_phaser): the nine floats over the native ranges, except the stage count, which the
+    // old plugin kept over 0…23 stages (FL's render test: an untouched instance saves 8/23 for the native 8 stages =
+    // raw 7) [DATA; only the defaults were seen, the other values' mapping is not confirmed]
+    if (plugin.name == "Fruity Phaser" && parseFlVst2State (plugin.state, state) && state.params.size() >= (std::size_t) phaserfx::params)
+    {
+        phaserfx::State s {};
+        for (int k = 0; k < phaserfx::params; ++k)
+        {
+            const auto v = (double) std::clamp (state.params[(std::size_t) k], 0.0f, 1.0f);
+            s[(std::size_t) k] = k == 5 ? std::clamp ((int) std::lround (v * 23.0) - 1, 0, phaserfx::rawMax[5])
+                                        : (int) std::lround (v * phaserfx::rawMax[(std::size_t) k]);
+        }
+        return phaserfx::serialize (s);
+    }
     if (plugin.name != "Fruity Compressor" || ! parseFlVst2State (plugin.state, state) || state.params.size() < fldyn::compressorControls)
         return native;
     auto put = [&native] (std::int32_t v) {
@@ -1786,7 +1802,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
-                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
+                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger)
+                 || (plugin == "Fruity Phaser" && fx.kind != EffectKind::fruityPhaser))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
                  && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))
