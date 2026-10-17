@@ -40,6 +40,11 @@ int clampUndoLevels (int levels); // 10..1000
 // The latency one buffer adds, in milliseconds.
 double bufferLatencyMs (int bufferSamples, double sampleRate);
 
+// The buffer a fresh install starts with (REA round 87): about 10.7 ms (512 samples at 44.1/48 kHz, 1024 at 88.2/96 kHz)
+// so heavy projects do not crackle out of the box. The smallest offered size at or above that; the current size if it
+// is already larger; the largest offered one if none reaches it. 0 when nothing is offered.
+int safeBufferSize (const std::vector<int>& available, int current, double sampleRate);
+
 // --- MIDI (MIDI page) -------------------------------------------------------------------------------------------
 // How a played note's velocity reaches the instrument.
 enum class VelocityCurve

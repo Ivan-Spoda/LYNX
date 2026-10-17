@@ -4,6 +4,7 @@
 #include <map>
 
 #include "engine/Text.h"
+#include "ui/I18n.h"
 
 #include "core/FlpImport.h"
 #include "core/Instruments.h"
@@ -54,9 +55,21 @@ void raiseAudioThreadPriority()
             return reinterpret_cast<AvSet> (reinterpret_cast<void*> (GetProcAddress (avrt, "AvSetMmThreadCharacteristicsW")));
         return nullptr;
     }();
+    // FL's audio worker threads also raise their MMCSS priority to "high" (FLEngine_x64.dll, REA round 87)
+    using AvPriority = int (__stdcall*) (void*, int);
+    static const auto avPriority = [] () -> AvPriority {
+        if (auto* avrt = LoadLibraryW (L"avrt.dll"))
+            return reinterpret_cast<AvPriority> (reinterpret_cast<void*> (GetProcAddress (avrt, "AvSetMmThreadPriority")));
+        return nullptr;
+    }();
     unsigned long task = 0;
 
-    if (avSet == nullptr || avSet (L"Pro Audio", &task) == nullptr)
+    if (auto* handle = avSet != nullptr ? avSet (L"Pro Audio", &task) : nullptr)
+    {
+        if (avPriority != nullptr)
+            avPriority (handle, 1 /* AVRT_PRIORITY_HIGH */);
+    }
+    else
         SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
    #endif
 }
@@ -104,9 +117,17 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 
         // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
         const auto saved = juce::XmlDocument::parse (audioDeviceFile());
+        auto fresh = saved == nullptr;
         if (deviceManager.initialise (0, 2, saved.get(), true).isNotEmpty() && saved != nullptr)
+        {
             deviceManager.initialise (0, 2, nullptr, true);
+            fresh = true;
+        }
+        if (fresh)
+            chooseSafeBufferSize(); // no saved setup: a buffer with room for heavy projects (Settings › Audio changes it)
         deviceManager.addAudioCallback (this);
+        if (rackProcessor != nullptr)
+            rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
 
@@ -990,9 +1011,11 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
 
         juce::StringArray missing;
         juce::StringArray matched;
-        plugins.adoptFlPlugins (imported, &missing, &matched);
+        juce::StringArray withoutState;
+        plugins.adoptFlPlugins (imported, &missing, &matched, &withoutState);
         missingPlugins = missing;
         matchedPlugins = matched;
+        pluginsWithoutState = withoutState;
         missingPluginDetails.clear();
         for (const auto& name : missing)
         {
@@ -1007,16 +1030,23 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
                 }
             missingPluginDetails.push_back (std::move (m));
         }
+        // found, but the project's settings are in the other format (VST2 <-> VST3): they play their default sound
+        for (const auto& line : withoutState)
+            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Its default settings: the project saved them for the other format (VST2/VST3)") });
 
+        plugins.clearLoadFailures();
         if (asEdit)
-        {
             editSong ([&imported] (Song& s) { s = std::move (imported); });
-            return true;
+        else
+        {
+            stop();
+            rewind();
+            setSong (std::move (imported));
         }
 
-        stop();
-        rewind();
-        setSong (std::move (imported));
+        // installed but failed to load (the rack was just built): silence / bypass, said as loudly as a missing one
+        for (const auto& line : plugins.getLoadFailures())
+            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Silence: the plugin is installed but did not load") });
         return true;
     }
     catch (const flp::Error& e)
@@ -1172,15 +1202,156 @@ void AudioEngine::applyControllers()
 
 void AudioEngine::timerCallback()
 {
+    updateRealtimeStats();
     applyControllers();
     updateRecording();
     rackExchange.collectGarbage();
 
     // Plugins are prepared at a fixed rate; if the device changed rate, recreate them.
     // A plugin whose latency changed (preset change, lookahead) requests a new PDC plan.
-    if (std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5
-        || lastPublishedShape.currentLatencies() != lastPublishedShape.latencies)
+    const auto rateChanged = std::abs (transport.sampleRate.load() - lastPublishedShape.sampleRate) > 0.5;
+    const auto latencies = lastPublishedShape.currentLatencies();
+    if (rateChanged || latencies != lastPublishedShape.latencies)
+    {
+        // (diagnostics: which unit's latency moved)
+        if (! rateChanged)
+            for (std::size_t i = 0; i < latencies.size() && i < lastPublishedShape.latencies.size(); ++i)
+                if (latencies[i] != lastPublishedShape.latencies[i])
+                {
+                    lastLatencyChange = juce::String ((int) i) + ": " + juce::String (lastPublishedShape.latencies[i]) + " -> " + juce::String (latencies[i]);
+                    break;
+                }
+        ++latencyRepublishes;
         publishSong();
+    }
+}
+
+void AudioEngine::chooseSafeBufferSize()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return;
+    std::vector<int> sizes;
+    for (auto b : device->getAvailableBufferSizes())
+        sizes.push_back (b);
+    const auto current = device->getCurrentBufferSizeSamples();
+    const auto target = prefs::safeBufferSize (sizes, current, device->getCurrentSampleRate());
+    if (target > 0 && target != current)
+    {
+        auto setup = deviceManager.getAudioDeviceSetup();
+        setup.bufferSize = target;
+        deviceManager.setAudioDeviceSetup (setup, true);
+    }
+}
+
+juce::File AudioEngine::glitchLogFile() { return PluginHost::settingsFolder().getChildFile ("audio-glitches.log"); }
+
+void AudioEngine::updateRealtimeStats()
+{
+    // the message thread's pulse: this 30 Hz timer arriving late means the UI is saturated
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (lastUiPulseMs > 0.0)
+            uiPulse.maxGapMs = juce::jmax (uiPulse.maxGapMs, now - lastUiPulseMs);
+        lastUiPulseMs = now;
+        ++uiPulse.calls;
+    }
+
+    // every ~2 s: the share of real time each channel / insert effect took in that window
+    if (rackProcessor != nullptr && juce::Time::getMillisecondCounterHiRes() - lastUnitsWindowMs >= 2000.0)
+    {
+        lastUnitsWindowMs = juce::Time::getMillisecondCounterHiRes();
+        auto& renderer = rackProcessor->getRenderer();
+        const auto& units = renderer.unitTimes();
+        const auto processed = units.processedSamples.load (std::memory_order_relaxed);
+        const auto rate = juce::jmax (1.0, transport.sampleRate.load());
+        const auto audioNs = (double) (processed - std::min (processed, lastProcessedSamples)) / rate * 1.0e9;
+        lastProcessedSamples = processed;
+        lastChannelNs.resize (units.channelNs.size(), 0);
+        lastEffectNs.resize (units.effectNs.size(), 0);
+        std::vector<UnitLoad> loads;
+
+        auto take = [&] (const std::atomic<std::uint64_t>& total, std::uint64_t& last, std::atomic<std::uint64_t>& longest, auto&& name) {
+            const auto now = total.load (std::memory_order_relaxed);
+            const auto delta = now - std::min (now, last);
+            last = now;
+            const auto longestNs = const_cast<std::atomic<std::uint64_t>&> (longest).exchange (0, std::memory_order_relaxed);
+            if (delta > 0 && audioNs > 0.0)
+                loads.push_back ({ name(), (double) delta / audioNs, (double) longestNs * 1.0e-6 });
+        };
+        auto& mutableUnits = const_cast<RackRenderer::UnitTimes&> (units);
+        for (std::size_t c = 0; c < units.channelNs.size(); ++c)
+            take (units.channelNs[c], lastChannelNs[c], mutableUnits.channelMaxNs[c], [&] {
+                return c < song.channels.size() ? juce::String::fromUTF8 (song.channels[c].name.c_str()) : "Channel " + juce::String ((int) c + 1);
+            });
+        for (std::size_t k = 0; k < units.effectNs.size(); ++k)
+            take (units.effectNs[k], lastEffectNs[k], mutableUnits.effectMaxNs[k], [&] {
+                const auto t = k / (std::size_t) maxEffectSlots, slot = k % (std::size_t) maxEffectSlots;
+                juce::String effect;
+                if (t < song.mixer.size() && slot < song.mixer[t].effects.size())
+                {
+                    const auto& fx = song.mixer[t].effects[slot];
+                    effect = juce::String::fromUTF8 (fx.plugin.name.empty() ? effectInfo (fx.kind).name : fx.plugin.name.c_str());
+                }
+                const auto track = t == 0 ? juce::String ("Master") : (t < song.mixer.size() && ! song.mixer[t].name.empty() ? juce::String::fromUTF8 (song.mixer[t].name.c_str())
+                                                                                                               : "Insert " + juce::String ((int) t));
+                return track + " / " + juce::String ((int) slot + 1) + " " + effect;
+            });
+        std::sort (loads.begin(), loads.end(), [] (const UnitLoad& a, const UnitLoad& b) { return a.load > b.load; });
+        if (loads.size() > 8)
+            loads.resize (8);
+        if (audioNs > 0.0)
+            heaviestUnits = std::move (loads);
+    }
+
+    // a line in the glitch log when callbacks ran over their deadline or the device called late
+    const auto stats = rtStats.snapshot();
+    if ((stats.overBudget > loggedOver || stats.lateCalls > loggedLate) && juce::Time::getMillisecondCounterHiRes() - lastLogMs > 2000.0)
+    {
+        const auto file = glitchLogFile();
+        if (file.getSize() > 1024 * 1024)
+            file.moveFileTo (file.withFileExtension ("old.log"));
+        const auto bar = transport.positionTicks.load() / (double) (ppq * juce::jmax (1, song.beatsPerBar)) + 1.0;
+        file.appendText (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  over deadline +" + juce::String ((juce::int64) (stats.overBudget - loggedOver))
+                             + ", late calls +" + juce::String ((juce::int64) (stats.lateCalls - loggedLate)) + ", at bar " + juce::String (bar, 2)
+                             + (transport.playing.load() ? "" : " (stopped)") + "\n" + describeRealtime() + "\n",
+                         false, false, "\r\n");
+        loggedOver = stats.overBudget;
+        loggedLate = stats.lateCalls;
+        lastLogMs = juce::Time::getMillisecondCounterHiRes();
+    }
+}
+
+juce::String AudioEngine::describeRealtime (bool withUnits) const
+{
+    juce::String text;
+    if (auto* device = const_cast<juce::AudioDeviceManager&> (deviceManager).getCurrentAudioDevice())
+    {
+        const auto rate = device->getCurrentSampleRate();
+        const auto buffer = device->getCurrentBufferSizeSamples();
+        text << "  device: " << device->getTypeName() << " / " << device->getName() << ", " << (int) rate << " Hz, buffer " << buffer
+             << " samples (deadline " << juce::String (prefs::bufferLatencyMs (buffer, rate), 2) << " ms), output latency "
+             << device->getOutputLatencyInSamples() << " samples, driver dropouts " << device->getXRunCount() << "\n";
+    }
+    else
+        text << "  device: none\n";
+    const auto s = rtStats.snapshot();
+    text << "  callbacks " << (juce::int64) s.callbacks << ": over deadline " << (juce::int64) s.overBudget << ", 80-100% " << (juce::int64) s.nearBudget
+         << ", late device calls " << (juce::int64) s.lateCalls << ", average load " << juce::String (s.averageLoad * 100.0, 1) << "%, max "
+         << juce::String (s.maxLoad * 100.0, 0) << "%, workers " << (workers != nullptr ? workers->workers() : 0) << "\n";
+    if (latencyRepublishes > 0)
+        text << "  latency changes re-planned PDC " << latencyRepublishes << " times (last: unit " << lastLatencyChange << ")\n";
+    if (withUnits && heaviestUnits.empty())
+        text << "  heaviest: not measured yet\n";
+    if (withUnits && ! heaviestUnits.empty())
+    {
+        text << "  heaviest:";
+        for (std::size_t i = 0; i < heaviestUnits.size() && i < 5; ++i)
+            text << (i > 0 ? ";" : "") << " " << heaviestUnits[i].name << " " << juce::String (heaviestUnits[i].load * 100.0, 1) << "% (peak "
+                 << juce::String (heaviestUnits[i].longestMs, 1) << " ms)";
+        text << "\n";
+    }
+    return text;
 }
 
 std::shared_ptr<Instrument> AudioEngine::getChannelInstrument (int channel) const
@@ -1224,6 +1395,21 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
                                                     int numSamples,
                                                     const juce::AudioIODeviceCallbackContext& context)
 {
+    // real-time health: how long this callback took against its deadline (the buffer's duration)
+    const auto callbackStart = juce::Time::getMillisecondCounterHiRes();
+    struct Measure
+    {
+        ~Measure()
+        {
+            const auto rate = engine.transport.sampleRate.load (std::memory_order_relaxed);
+            if (rate > 0.0)
+                engine.rtStats.record (start, juce::Time::getMillisecondCounterHiRes() - start, 1000.0 * samples / rate);
+        }
+        AudioEngine& engine;
+        double start;
+        int samples;
+    } measure { *this, callbackStart, numSamples };
+
     if (transport.rewindRequested.exchange (false))
         transport.positionTicks.store (0.0);
 
@@ -1338,6 +1524,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
+    rtStats.deviceRestarted();
     transport.sampleRate.store (device->getCurrentSampleRate());
     player.audioDeviceAboutToStart (device);
 }

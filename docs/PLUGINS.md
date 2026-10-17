@@ -10,6 +10,26 @@ FL Studio's plugin names are used below only to say which plugin each LYNX engin
 by. No Image-Line code, audio or wave data is part of LYNX: where an engine needs a plugin's built-in waves,
 samples, impulses or tables, LYNX reads them at run time from **your own** FL Studio installation (marked †).
 
+## Featured
+
+The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or **Near-exact** quality.
+(Sytrus and Harmor are not featured yet: both are *Close* — see [Generators](#generators).)
+
+<!-- Featured list: add a row for any engine that reaches Exact/Near-exact. Engines inspired by third-party plugins
+     go here too, with their maker in the "Inspired by" column. Keep the website's FEATURED list in sync. -->
+| LYNX engine | Inspired by / compatible with | Type | Status | How you get it | What it is |
+|---|---|---|---|---|---|
+| 3x Osc engine | 3x Osc (FL Studio) | Generator | Exact | Import | three-oscillator subtractive synth, FL's classic starting point |
+| FL Keys engine † | FL Keys (FL Studio) | Generator | Exact | Import | light sampled piano, electric piano and keys |
+| Gross Beat | Gross Beat (FL Studio) | Effect | Exact | Import | time and volume slicing: stutters, gates, tape stops |
+| Fruity Limiter | Fruity Limiter (FL Studio) | Effect | Near-exact | Insert | limiter, compressor and noise gate in one |
+| Parametric EQ | Fruity Parametric EQ 2 (FL Studio) | Effect | Near-exact | Insert | seven-band parametric EQ, linear-phase mode included |
+| Soundgoodizer † | Soundgoodizer (FL Studio) | Effect | Near-exact | Import | one-knob loudness and punch, four characters |
+| Maximus † | Maximus (FL Studio) | Effect | Near-exact | Import | multiband mastering maximizer and limiter |
+| Fruity Delay 3 | Fruity Delay 3 (FL Studio) | Effect | Exact | Insert | analog-style delay with modulation, diffusion and feedback filtering |
+| Reeverb 2 | Fruity Reeverb 2 (FL Studio) | Effect | Exact | Insert | algorithmic reverb, small rooms to huge halls |
+| Fruity Compressor | Fruity Compressor (FL Studio) | Effect | Exact | Insert | the classic FL compressor, sidechain included |
+
 ## Status legend
 
 | Status | Meaning |
