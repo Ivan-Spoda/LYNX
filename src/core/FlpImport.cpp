@@ -1785,7 +1785,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
-                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger))
+                 || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger)
+                 || (plugin == "Fruity Phaser" && fx.kind != EffectKind::fruityPhaser))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
                  && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))

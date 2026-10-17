@@ -53,6 +53,13 @@ float sweepHz (float sweep01, bool large) noexcept
     return (float) (((a - 1.0) / (b - 1.0)) * (large ? 10.0 : 2.0));
 }
 
+std::string sweepText (float sweep01, bool large)
+{
+    char text[32];
+    std::snprintf (text, sizeof (text), "%.3f Hz", (double) sweepHz (norm (rawFrom (sweep01, rawMax[0]), rawMax[0]), large));
+    return text;
+}
+
 std::optional<State> parse (const std::vector<std::uint8_t>& state)
 {
     if (state.size() < 4 + 4 * (std::size_t) params || i32At (state, 0) >= 2)
@@ -102,7 +109,7 @@ std::string paramText (int param, float value01)
     const float x = norm (raw, rawMax[(std::size_t) p]);
     switch (p)
     {
-        case 0: std::snprintf (text, sizeof (text), "%.3f Hz", (double) sweepHz (x, false)); return text; // small range
+        case 0: return sweepText (x, false); // the small range (formatEffectParam with the slot's values knows the switch)
         case 3: return x > 0.5f ? "large" : "small";
         case 4: std::snprintf (text, sizeof (text), "%.0f°", (double) x * 180.0); return text;
         case 5: std::snprintf (text, sizeof (text), "%d", std::clamp (raw + 1, 3, maxStages)); return text;

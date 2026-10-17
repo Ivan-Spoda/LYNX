@@ -37,6 +37,7 @@ std::string paramText (int param, float value01);
 
 // LFO rate in Hz of a sweep control (0…1) in the small (false) or large (true) frequency range
 float sweepHz (float sweep01, bool large) noexcept;
+std::string sweepText (float sweep01, bool large);
 
 // The plugin object: FL's control changes, sample rate, reset and the render (interleaved stereo).
 class Engine
