@@ -15609,3 +15609,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "LynxTuneTests95.inc"
 #include "LynxVerbTests100.inc"
 #include "FacetTests103.inc"
+#include "VocalLevel107Tests.inc"
