@@ -1100,7 +1100,9 @@ public:
                 k->setPopupDisplayEnabled (true, true, this);
                 k->setTooltip (k->getName());
             }
-            setSize ((int) std::ceil (layoutScale * (float) layout->width) + 16, (int) std::ceil (layoutScale * (float) layout->height) + layoutTop + 8);
+            // FL's size × 1.25, at most about 1200 × 760 (big pages such as Harmor's fit a laptop screen)
+            const auto f = juce::jmin (layoutScale, 1200.0f / (float) layout->width, 720.0f / (float) layout->height);
+            setSize ((int) std::ceil (f * (float) layout->width) + 16, (int) std::ceil (f * (float) layout->height) + layoutTop + 8);
         }
     }
 
