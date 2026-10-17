@@ -14731,6 +14731,9 @@ TEST (plugin_layouts_name_real_parameters)
                 CHECK (labels.size() >= 2);
                 CHECK (item.values.empty() || item.values.size() == labels.size());
             }
+            CHECK (item.param2 == nullptr || plugui::paramIndex (kind, item.param2) >= 0);
+            if (item.param2 != nullptr && plugui::paramIndex (kind, item.param2) >= 0)
+                placed[(std::size_t) plugui::paramIndex (kind, item.param2)] = true;
             for (const auto* when : { item.whenParam, item.when2Param })
                 CHECK (when == nullptr || plugui::paramIndex (kind, when) >= 0);
         }
@@ -14814,6 +14817,6 @@ TEST (plugin_layout_options_match_the_engine_values)
     CHECK (ceilingShown == 1); // LIMIT page only
 
     // every other effect still gets a (generated) window
-    CHECK (! plugui::hasFlLayout (EffectKind::fruitySoftClipper));
-    CHECK (! plugui::layoutFor (EffectKind::fruitySoftClipper).items.empty());
+    CHECK (! plugui::hasFlLayout (EffectKind::distortion));
+    CHECK (! plugui::layoutFor (EffectKind::distortion).items.empty());
 }

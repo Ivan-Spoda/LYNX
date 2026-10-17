@@ -6,6 +6,7 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/FruityShapers.h"
 #include "core/GrossBeat.h"
 #include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
@@ -123,7 +124,7 @@ public:
             const auto& item = items[(std::size_t) i];
             if (! visible (item) || item.type == Item::section || item.type == Item::label)
                 continue;
-            if (item.type == Item::display && rectOf (item).contains (p) && juce::String (item.display) == "eq")
+            if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
@@ -317,6 +318,15 @@ public:
             }
 
             case Item::label:
+                if (hasStyle (item, plugui::dim) && ! hasStyle (item, plugui::boxed) && item.h > 30.0f && item.label != nullptr)
+                {
+                    // the plugin's name, big and quiet (FL's logos are not reproduced)
+                    g.setColour (colour::bg4);
+                    g.setFont (font (r.getHeight() * 0.62f, true));
+                    g.drawFittedText (item.label, r.toNearestInt(),
+                                      hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
+                    break;
+                }
                 if (hasStyle (item, plugui::boxed))
                 {
                     g.setColour (colour::bg3);
@@ -336,6 +346,22 @@ public:
             {
                 const auto circle = knobCircle (item);
                 drawKnob (g, circle, value, hasStyle (item, plugui::bipolar), arcColour (fx, item.colour), hot && item.colour < 0);
+                if (circle.getWidth() > 56.0f) // big knobs: a body that fills the ring (the theme's body stops at 22 px)
+                {
+                    const auto size = circle.getWidth() - 2.0f;
+                    const auto thickness = juce::jlimit (2.0f, 4.0f, size * 0.09f);
+                    const auto radius = size * 0.5f - thickness * 2.2f;
+                    const auto centre = circle.getCentre();
+                    const auto body = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
+                    g.setGradientFill (juce::ColourGradient (hot ? colour::bg6 : colour::bg5, centre.x, body.getY(), colour::bg4, centre.x, body.getBottom(), false));
+                    g.fillEllipse (body);
+                    g.setColour (colour::borderStrong);
+                    g.drawEllipse (body, 1.0f);
+                    const auto angle = -juce::MathConstants<float>::pi * 0.75f + juce::MathConstants<float>::pi * 1.5f * juce::jlimit (0.0f, 1.0f, value);
+                    const juce::Point<float> dir { std::sin (angle), -std::cos (angle) };
+                    g.setColour (hot ? colour::accent : colour::textPrimary);
+                    g.drawLine ({ centre + dir * (radius * 0.55f), centre + dir * (radius * 0.88f) }, juce::jmax (2.0f, size * 0.035f));
+                }
                 auto below = r.withTop (circle.getBottom() + 1.0f * s);
                 if (hasStyle (item, plugui::valueAbove))
                 {
@@ -430,7 +456,8 @@ public:
                             g.drawRect (cell, 1.0f);
                         }
                         g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
-                        g.drawFittedText (texts[(std::size_t) o], cell.reduced (2.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                        if (! drawWaveGlyph (g, cell.reduced (cell.getWidth() * 0.25f, cell.getHeight() * 0.28f), juce::String::fromUTF8 (labels[(std::size_t) o].c_str())))
+                            g.drawFittedText (texts[(std::size_t) o], cell.reduced (2.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
                     }
                     break;
                 }
@@ -563,6 +590,30 @@ public:
             default: p.startNewSubPath (x0, ym); p.lineTo (x1, ym); break;                                             // off
         }
         g.strokePath (p, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    // a small drawing of an LFO / oscillator wave named in English (false: not a wave name)
+    static bool drawWaveGlyph (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& name)
+    {
+        if (name != "Sine" && name != "Triangle" && name != "Square" && name != "Saw")
+            return false;
+        juce::Path p;
+        constexpr int n = 32;
+        for (int i = 0; i <= n; ++i)
+        {
+            const auto t = (float) i / (float) n;
+            const auto y = name == "Sine" ? std::sin (t * juce::MathConstants<float>::twoPi)
+                           : name == "Triangle" ? (t < 0.25f ? 4.0f * t : (t < 0.75f ? 2.0f - 4.0f * t : 4.0f * t - 4.0f))
+                           : name == "Square" ? (t < 0.5f ? 1.0f : -1.0f)
+                                              : 2.0f * t - 1.0f;
+            const juce::Point<float> pt { r.getX() + r.getWidth() * t, r.getCentreY() - r.getHeight() * 0.5f * y };
+            if (i == 0)
+                p.startNewSubPath (pt);
+            else
+                p.lineTo (pt);
+        }
+        g.strokePath (p, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        return true;
     }
 
     static void drawSmallArrow (juce::Graphics& g, juce::Rectangle<float> r, bool up)
@@ -718,6 +769,66 @@ public:
                 const auto u = x * pre;
                 return post * (soft ? t * std::tanh (u / t) : juce::jmin (u, t));
             }, inner, false);
+        }
+        else if (id == "softclip") // linear up to the threshold, then a soft knee into the ceiling
+        {
+            grid (4, 4);
+            const auto t = juce::jlimit (0.05f, 0.98f, 0.3f + 0.7f * param01 ("Threshold"));
+            const auto post = 0.4f + 0.6f * param01 ("Post");
+            strokeCurve ([t, post] (float x) {
+                const auto y = x <= t ? x : t + (1.0f - t) * std::tanh ((x - t) / (1.0f - t));
+                return y * post;
+            }, inner, false);
+        }
+        else if (id == "xy") // a pad: `param` across, `param2` up (drag the point)
+        {
+            grid (4, 4);
+            const auto x = inner.getX() + inner.getWidth() * param01 (item.param);
+            const auto y = inner.getBottom() - inner.getHeight() * param01 (item.param2);
+            g.setColour (curveColour);
+            g.drawEllipse (juce::Rectangle<float> (10.0f * s, 10.0f * s).withCentre ({ x, y }), juce::jmax (1.5f, 2.0f * s));
+        }
+        else if (id == "voices") // the chorus voices spread across the stereo field (a static picture)
+        {
+            g.setColour (colour::gridBeat);
+            g.drawVerticalLine ((int) inner.getCentreX(), inner.getY(), inner.getBottom());
+            const auto spread = 0.2f + 0.8f * param01 ("Movement");
+            for (int i = 0; i < 8; ++i)
+            {
+                const auto t = (float) i / 7.0f;
+                const auto x = inner.getCentreX() + (t - 0.5f) * inner.getWidth() * spread;
+                g.setColour (curveColour.withAlpha (0.35f + 0.5f * (1.0f - std::abs (t - 0.5f))));
+                g.fillRoundedRectangle (juce::Rectangle<float> (3.0f * s, inner.getHeight() * (0.3f + 0.4f * std::abs (std::sin ((float) i * 1.7f)))).withCentre ({ x, inner.getCentreY() }), 1.5f);
+            }
+        }
+        else if (id == "panpad") // pan (x) and volume (y) as a crosshair
+        {
+            grid (6, 6);
+            const auto x = inner.getX() + inner.getWidth() * param01 ("Pan");
+            const auto y = inner.getBottom() - inner.getHeight() * param01 ("Volume");
+            g.setColour (curveColour);
+            g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
+            g.drawHorizontalLine ((int) y, inner.getX(), inner.getRight());
+            g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ x, y }));
+        }
+        else if (id == "waveshaper") // the saved shaping curve (FL's point editor is not reproduced)
+        {
+            grid (8, 8);
+            std::vector<std::int16_t> table;
+            auto unipolar = false;
+            if (const auto st = flshape::parseWaveShaper (fx.state))
+            {
+                unipolar = st->unipolar;
+                table = flshape::shaperTable (st->points, st->unipolar);
+            }
+            if (table.size() > 4)
+                strokeCurve ([&table, unipolar] (float x) {
+                    const auto i = juce::jlimit<std::size_t> (1, table.size() - 2, (std::size_t) (1.0f + x * (float) (table.size() - 3)));
+                    const auto v = (float) table[i] / 32767.0f;
+                    return unipolar ? v : 0.5f + 0.5f * v;
+                }, inner, false);
+            else
+                strokeCurve ([] (float x) { return x; }, inner, false);
         }
         else if (id == "room") // nested walls: the room size and the decay
         {
@@ -967,7 +1078,8 @@ public:
         engine.editSong ([t = track, sl = slot, changes] (Song& song) {
             auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
             for (auto [p, v] : changes)
-                params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
+                if (p >= 0 && p < maxEffectParams)
+                    params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
         });
     }
 
@@ -1002,6 +1114,17 @@ public:
             changes.push_back ({ peq::param (eqSelected, 2), peq::gainValue (peqview::dbForY (graph, p.y, eqRange)) });
         setParams (changes);
         ui::showValueTip (*this, juce::Rectangle<int> (6, 6).withCentre (e.getPosition()), peqview::bandText (fx->params, eqSelected));
+    }
+
+    // a pad sets two parameters at once
+    void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        const auto inner = rectOf (item).reduced (6.0f * scale());
+        const auto px = plugui::paramIndex (kind, item.param), py = plugui::paramIndex (kind, item.param2);
+        const auto x = juce::jlimit (0.0f, 1.0f, (e.position.x - inner.getX()) / inner.getWidth());
+        const auto y = juce::jlimit (0.0f, 1.0f, (inner.getBottom() - e.position.y) / inner.getHeight());
+        setParams ({ { px, x }, { py, y } });
+        ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (px, x) + " / " + valueText (py, y));
     }
 
     // --- mouse -----------------------------------------------------------------------------------------
@@ -1072,6 +1195,13 @@ public:
             return;
         }
 
+        if (item.type == Item::display && juce::String (item.display) == "xy")
+        {
+            dragItem = index;
+            xyDragging = true;
+            xyMouse (e, item);
+            return;
+        }
         if (item.type == Item::display) // the EQ graph
         {
             if (eqMouseDown (e, item) && eqDragging)
@@ -1169,6 +1299,11 @@ public:
             eqMouseDrag (e);
             return;
         }
+        if (xyDragging && dragItem >= 0)
+        {
+            xyMouse (e, activeLayout().items[(std::size_t) dragItem]);
+            return;
+        }
         if (dragItem < 0 || ! drag.isActive())
             return;
         const auto& item = activeLayout().items[(std::size_t) dragItem];
@@ -1189,6 +1324,12 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
+        if (xyDragging)
+        {
+            xyDragging = false;
+            dragItem = -1;
+            ui::hideValueTip();
+        }
         if (dragItem >= 0)
         {
             drag.end();
@@ -1405,7 +1546,7 @@ private:
     ui::ValueDrag drag;
     juce::String presetName;
     int eqSelected = -1;
-    bool eqDragging = false;
+    bool eqDragging = false, xyDragging = false;
     juce::Point<float> eqDragOffset;
 };
 

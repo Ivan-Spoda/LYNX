@@ -68,6 +68,7 @@ struct LayoutItem
     float when2Min = 0.0f, when2Max = 1.0f;
     int colour = -1;                   // ≥ 0: one of the editor's band colours (EQ bands, multiband bands)
     int columns = 0;                   // radio: options in a grid of this many columns (0 = one column)
+    const char* param2 = nullptr;      // display "xy": the parameter on the vertical axis (`param` is the horizontal one)
 };
 
 struct Layout
