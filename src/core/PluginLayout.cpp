@@ -5,6 +5,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
 
 #include "core/Effects.h"
 
@@ -645,6 +646,127 @@ Layout parametricEq2()
     return l;
 }
 
+Layout grossBeat()
+{
+    // left: the time panel (mix knob), HOLD, the time slots, the volume slots, ATT / REL / TNS, the volume panel; right:
+    // the envelope of the selected slots and the slot's settings under it
+    Layout l;
+    l.fl = "Gross Beat";
+    l.width = 840;
+    l.height = 563;
+    auto& v = l.items;
+    static const std::string slots = [] {
+        std::string out;
+        for (int i = 1; i <= 36; ++i)
+            out += (i > 1 ? "|" : "") + std::string ("Slot ") + std::to_string (i);
+        return out;
+    }();
+    v.push_back (section (0, 0, 268, 563, nullptr, boxed));
+    v.push_back (section (6, 7, 128, 46, nullptr, boxed | raised));
+    v.push_back (knob (31, 30, 40, "Time mix", nullptr, 0, noCaption));
+    v.push_back (label (56, 20, 70, 20, TR_NOOP ("Time"), alignLeft));
+    v.push_back (display (189, 12, 72, 72, "gbjog"));
+    v.push_back (toggle (113, 62, 62, 28, "Hold", TR_NOOP ("Hold"), boxed));
+    auto timeSlots = radio (13, 103, 246, 162, "Time slot", slots.c_str());
+    timeSlots.columns = 4;
+    v.push_back (timeSlots);
+    auto volumeSlots = radio (13, 276, 246, 162, "Volume slot", slots.c_str());
+    volumeSlots.columns = 4;
+    volumeSlots.colour = 1;
+    v.push_back (volumeSlots);
+    v.push_back (knob (80, 467, 38, "Attack", TR_NOOP ("Att"), 492));
+    v.push_back (knob (130, 467, 38, "Release", TR_NOOP ("Rel"), 492));
+    v.push_back (knob (186, 467, 38, "Tension", TR_NOOP ("Tns"), 492, bipolar));
+    v.push_back (section (6, 509, 128, 46, nullptr, boxed | raised));
+    v.push_back (knob (31, 531, 40, "Volume mix", nullptr, 0, noCaption));
+    v.push_back (label (56, 521, 70, 20, TR_NOOP ("Volume"), alignLeft));
+    v.push_back (display (272, 4, 556, 530, "grossbeat"));
+    v.push_back (display (272, 537, 556, 22, "gbinfo"));
+    return l;
+}
+
+// --- generators (the channel's plugin page): items name the knobs of ChannelSettings' model panel ------------
+
+Layout threeOsc()
+{
+    // three oscillator rows: shape buttons (sine, square, rounded, custom / triangle, saw, noise) and the invert switch,
+    // PHASE OFS and DETUNE faders, COARSE, FINE, pan and (oscillators 2 and 3) volume; AM OSC 3, HQ and PHASE RAND below
+    Layout l;
+    l.fl = "3x Osc";
+    l.width = 560;
+    l.height = 390;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 560, 310, nullptr, boxed));
+    static const char* const names[3][7] = { { "Osc 1 shape", "Osc 1 phase", "Osc 1 detune", "Osc 1 coarse", "Osc 1 fine", "Osc 1 pan", nullptr },
+                                             { "Osc 2 shape", "Osc 2 phase", "Osc 2 detune", "Osc 2 coarse", "Osc 2 fine", "Osc 2 pan", "Osc 2 mix" },
+                                             { "Osc 3 shape", "Osc 3 phase", "Osc 3 detune", "Osc 3 coarse", "Osc 3 fine", "Osc 3 pan", "Osc 3 mix" } };
+    static const char* const inverts[3] = { "Invert 1", "Invert 2", "Invert 3" };
+    static const char* const numbers[3] = { "1", "2", "3" };
+    for (int o = 0; o < 3; ++o)
+    {
+        const auto dy = 107.5f * (float) o;
+        const auto captions = o < 2; // FL writes the captions between the rows
+        v.push_back (label (2, 20 + dy, 30, 36, numbers[o], dim));
+        // shape buttons in FL's order; the values are the engine's shapes 0…6 over 0..1
+        auto shape = radio (37, 9 + dy, 152, 76, names[o][0], "Sine|Square|Rounded|Custom|Triangle|Saw|Noise",
+                            { 0.0f, 2.0f / 6.0f, 4.0f / 6.0f, 1.0f, 1.0f / 6.0f, 3.0f / 6.0f, 5.0f / 6.0f });
+        shape.columns = 4;
+        v.push_back (shape);
+        v.push_back (toggle (153, 52 + dy, 32, 28, inverts[o], "+/-", boxed));
+        v.push_back (slider (Item::vslider, 222, 6 + dy, 20, 82, names[o][1], nullptr, noCaption | bipolar));
+        v.push_back (slider (Item::vslider, 252, 6 + dy, 20, 82, names[o][2], nullptr, noCaption | bipolar));
+        if (captions)
+        {
+            v.push_back (label (190, 95 + dy, 58, 14, TR_NOOP ("Phase ofs"), dim));
+            v.push_back (label (250, 95 + dy, 40, 14, TR_NOOP ("Detune"), dim));
+        }
+        v.push_back (knob (338, 48 + dy, 46, names[o][3], captions ? TR_NOOP ("Coarse") : nullptr, 102 + dy, captions ? 0 : noCaption));
+        v.push_back (knob (401, 48 + dy, 34, names[o][4], captions ? TR_NOOP ("Fine") : nullptr, 102 + dy, captions ? 0 : noCaption));
+        v.push_back (knob (465, 48 + dy, 34, names[o][5], captions ? TR_NOOP ("Pan") : nullptr, 102 + dy, bipolar | (captions ? 0 : noCaption)));
+        if (names[o][6] != nullptr)
+            v.push_back (knob (523, 48 + dy, 46, names[o][6], o == 1 ? TR_NOOP ("Vol") : nullptr, 102 + dy, o == 1 ? 0 : noCaption));
+    }
+    v.push_back (section (0, 312, 560, 78, nullptr, boxed | raised));
+    v.push_back (toggle (14, 342, 72, 16, "Osc 3 AM", TR_NOOP ("AM osc 3")));
+    v.push_back (toggle (94, 342, 44, 16, "HQ", TR_NOOP ("HQ")));
+    v.push_back (knob (165, 350, 44, "Phase rand", nullptr, 0, noCaption));
+    v.push_back (label (192, 342, 80, 16, TR_NOOP ("Phase rand"), alignLeft));
+    v.push_back (label (380, 326, 170, 50, "3x Osc", dim));
+    return l;
+}
+
+Layout flKeys()
+{
+    // ENVIRONMENT, MISC, VELOCITY and TUNING over two rows of knobs; the sample set's name at the top right
+    Layout l;
+    l.fl = "FL Keys";
+    l.width = 480;
+    l.height = 186;
+    auto& v = l.items;
+    v.push_back (label (8, 2, 200, 34, "FL Keys", dim));
+    v.push_back (display (333, 9, 141, 18, "flkeysname"));
+    v.push_back (section (12, 37, 110, 145, TR_NOOP ("Environment")));
+    v.push_back (section (132, 37, 111, 145, TR_NOOP ("Misc")));
+    v.push_back (section (253, 37, 159, 145, TR_NOOP ("Velocity")));
+    v.push_back (section (422, 37, 52, 145, TR_NOOP ("Tuning")));
+    v.push_back (knob (37, 87, 34, "Decay", TR_NOOP ("Decay"), 110, bipolar));
+    v.push_back (knob (95, 87, 34, "Release", TR_NOOP ("Release"), 110, bipolar));
+    v.push_back (knob (37, 149, 34, "Pan/Trem", TR_NOOP ("Pan"), 172, bipolar));
+    v.push_back (knob (95, 149, 34, "Stereo", TR_NOOP ("Stereo"), 172));
+    v.push_back (knob (158, 87, 34, "Overdrive", TR_NOOP ("Overdrive"), 110));
+    v.push_back (knob (216, 87, 34, "LFO rate", TR_NOOP ("LFO"), 110));
+    v.push_back (knob (158, 149, 34, "Treble", TR_NOOP ("Treble"), 172, bipolar));
+    v.push_back (knob (216, 149, 34, "Stretch", TR_NOOP ("Stretch"), 172, bipolar));
+    v.push_back (knob (278, 87, 34, "Vel > Muffle", TR_NOOP ("Vel"), 110));
+    v.push_back (knob (336, 87, 34, "Muffle", TR_NOOP ("Muffle"), 110));
+    v.push_back (knob (278, 149, 34, "Vel > Hard", TR_NOOP ("Vel"), 172, bipolar));
+    v.push_back (knob (336, 149, 34, "Hardness", TR_NOOP ("Hardness"), 172, bipolar));
+    v.push_back (knob (394, 149, 34, "Vel sens", TR_NOOP ("Sens"), 172, bipolar));
+    v.push_back (knob (447, 87, 34, "Tune", TR_NOOP ("Tune"), 110, bipolar));
+    v.push_back (knob (447, 149, 34, "Detune", TR_NOOP ("Detune"), 172));
+    return l;
+}
+
 // --- generated layouts ------------------------------------------------------------------------------
 
 Layout generated (EffectKind kind)
@@ -678,7 +800,8 @@ const std::vector<EffectKind>& flLayoutKinds()
     static const std::vector<EffectKind> kinds { EffectKind::fruityLimiter, EffectKind::fruityDelay3, EffectKind::fruityMultiband,
                                                  EffectKind::reeverb2, EffectKind::luxeVerb, EffectKind::fruityCompressor,
                                                  EffectKind::fruityFilter, EffectKind::fruityFastDist, EffectKind::fruityChorus,
-                                                 EffectKind::fruityFlanger, EffectKind::stereoEnhancer, EffectKind::parametricEq };
+                                                 EffectKind::fruityFlanger, EffectKind::stereoEnhancer, EffectKind::parametricEq,
+                                                 EffectKind::grossBeat };
     return kinds;
 }
 
@@ -706,9 +829,27 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::reeverb2: l = reeverb2(); break;
         case EffectKind::luxeVerb: l = luxeVerb(); break;
         case EffectKind::parametricEq: l = parametricEq2(); break;
+        case EffectKind::grossBeat: l = grossBeat(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;
+}
+
+const Layout* instrumentLayout (InstrumentKind kind)
+{
+    static const Layout osc = threeOsc(), keys = flKeys();
+    switch (kind)
+    {
+        case InstrumentKind::threeosc: return &osc;
+        case InstrumentKind::flkeys: return &keys;
+        default: return nullptr;
+    }
+}
+
+const std::vector<InstrumentKind>& instrumentLayoutKinds()
+{
+    static const std::vector<InstrumentKind> kinds { InstrumentKind::threeosc, InstrumentKind::flkeys };
+    return kinds;
 }
 
 bool hasFlLayout (EffectKind kind)

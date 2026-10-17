@@ -1,9 +1,12 @@
 #include "ui/PluginEditors.h"
 
+#include <cstring>
 #include <map>
+#include <optional>
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/GrossBeat.h"
 #include "core/ParametricEqFl.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
@@ -411,6 +414,26 @@ public:
             {
                 const auto labels = plugui::optionLabels (item);
                 const auto chosen = plugui::optionAt (item, value);
+                const auto texts = optionTexts (item);
+                if (item.columns > 0) // a grid of named cells (Gross Beat's slots)
+                {
+                    const auto accent = item.colour >= 0 ? colour::info : colour::accent;
+                    g.setFont (font (juce::jmax (8.0f, 10.0f * s)));
+                    for (int o = 0; o < (int) texts.size(); ++o)
+                    {
+                        const auto cell = gridCell (item, o, (int) texts.size()).reduced (0.5f);
+                        g.setColour (o == chosen ? accent.withAlpha (0.22f) : ((o / item.columns) % 2 == 0 ? colour::bg0 : colour::bg1));
+                        g.fillRect (cell);
+                        if (o == chosen)
+                        {
+                            g.setColour (fx.enabled ? accent : colour::textSecondary);
+                            g.drawRect (cell, 1.0f);
+                        }
+                        g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
+                        g.drawFittedText (texts[(std::size_t) o], cell.reduced (2.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                    }
+                    break;
+                }
                 const auto rowH = r.getHeight() / (float) juce::jmax (1, (int) labels.size());
                 for (int o = 0; o < (int) labels.size(); ++o)
                 {
@@ -420,7 +443,7 @@ public:
                     g.fillEllipse (dot);
                     g.setColour (o == chosen ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
                     g.setFont (font (juce::jmax (8.0f, 9.5f * s)));
-                    g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) o].c_str())), row.withTrimmedLeft (12.0f * s).toNearestInt(),
+                    g.drawFittedText (texts[(std::size_t) o], row.withTrimmedLeft (12.0f * s).toNearestInt(),
                                       juce::Justification::centredLeft, 1, 0.7f);
                 }
                 break;
@@ -429,6 +452,7 @@ public:
             case Item::tabs:
             {
                 const auto labels = plugui::optionLabels (item);
+                const auto texts = optionTexts (item);
                 const auto chosen = hasStyle (item, plugui::pageTabs) ? page : plugui::optionAt (item, value);
                 const auto w = r.getWidth() / (float) juce::jmax (1, (int) labels.size());
                 g.setColour (colour::bg0);
@@ -445,7 +469,7 @@ public:
                     }
                     g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
-                    g.drawFittedText (caps (tr (juce::String::fromUTF8 (labels[(std::size_t) o].c_str()))), cell.toNearestInt(),
+                    g.drawFittedText (caps (texts[(std::size_t) o]), cell.toNearestInt(),
                                       juce::Justification::centred, 1, 0.7f);
                 }
                 break;
@@ -461,7 +485,7 @@ public:
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
-                        g.drawText (tr (item.label), r, juce::Justification::centred, false);
+                        g.drawText (caps (tr (item.label)), r, juce::Justification::centred, false);
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
@@ -556,6 +580,35 @@ public:
     // --- displays (graphs drawn from the parameters; FL's live analysers are not reproduced) -------------
 
     float param01 (const char* name) const { return valueOf (plugui::paramIndex (kind, name)); }
+
+    // the captions of a radio's options (Gross Beat: the slot names saved in the state)
+    std::vector<juce::String> optionTexts (const LayoutItem& item) const
+    {
+        std::vector<juce::String> out;
+        const auto labels = plugui::optionLabels (item);
+        // the whole list is one translation ("Mono|Stereo|Ping pong|Off"); single words are translated alone
+        const auto whole = juce::StringArray::fromTokens (tr (juce::String::fromUTF8 (item.options != nullptr ? item.options : "")), "|", "");
+        for (std::size_t o = 0; o < labels.size(); ++o)
+            out.push_back (whole.size() == (int) labels.size() ? whole[(int) o] : tr (juce::String::fromUTF8 (labels[o].c_str())));
+        if (kind == EffectKind::grossBeat && item.columns > 0)
+            if (const auto* fx = current())
+            {
+                const auto names = grossbeat::slotNames (fx->state, std::strcmp (item.param, "Volume slot") == 0);
+                for (std::size_t i = 0; i < names.size() && i < out.size(); ++i)
+                    if (! names[i].empty())
+                        out[i] = juce::String::fromUTF8 (names[i].c_str());
+            }
+        return out;
+    }
+
+    // the cell of option `o` in a radio grid
+    juce::Rectangle<float> gridCell (const LayoutItem& item, int o, int count) const
+    {
+        const auto r = rectOf (item);
+        const auto rows = (count + item.columns - 1) / item.columns;
+        const auto w = r.getWidth() / (float) item.columns, h = r.getHeight() / (float) juce::jmax (1, rows);
+        return { r.getX() + w * (float) (o % item.columns), r.getY() + h * (float) (o / item.columns), w, h };
+    }
 
     void paintDisplay (juce::Graphics& g, const LayoutItem& item, juce::Rectangle<float> r, const EffectSlot& fx)
     {
@@ -683,6 +736,11 @@ public:
             paintEq (g, r, fx);
             return;
         }
+        else if (id == "grossbeat" || id == "gbinfo" || id == "gbjog")
+        {
+            paintGrossBeat (g, id, r, fx);
+            return;
+        }
         else if (id == "eqinfo") // the selected band, or how to use the graph
         {
             g.setColour (colour::bg1);
@@ -725,6 +783,101 @@ public:
             g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
             g.drawText (caps (tr (item.label)), inner.withHeight (12.0f * s), juce::Justification::topLeft);
         }
+    }
+
+    // --- Gross Beat: the selected slots' envelopes ------------------------------------------------------
+
+    void paintGrossBeat (juce::Graphics& g, const juce::String& id, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        std::vector<std::uint8_t> flState;
+        int ppq = 96;
+        std::optional<grossbeat::State> state;
+        if (grossbeat::unpack (fx.state, flState, ppq))
+            state = grossbeat::parseState (flState.data(), flState.size());
+        const auto timeSlot = grossbeat::rawFromParam (0, param01 ("Time slot"));
+        const auto volumeSlot = grossbeat::rawFromParam (1, param01 ("Volume slot"));
+
+        if (id == "gbjog") // a dial with the beat positions (FL's scratch indicator)
+        {
+            const auto c = r.getCentre();
+            const auto radius = juce::jmin (r.getWidth(), r.getHeight()) * 0.4f;
+            g.setColour (colour::bg3);
+            g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c));
+            for (int i = 0; i < 12; ++i)
+            {
+                const auto a = juce::MathConstants<float>::twoPi * (float) i / 12.0f;
+                g.setColour (i == 0 ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::textDisabled);
+                g.fillEllipse (juce::Rectangle<float> (4.0f * s, 4.0f * s).withCentre ({ c.x + std::sin (a) * radius * 0.85f, c.y - std::cos (a) * radius * 0.85f }));
+            }
+            return;
+        }
+
+        if (id == "gbinfo")
+        {
+            juce::String text = tr ("Time: {0}", { "Slot " + juce::String (timeSlot + 1) });
+            if (state)
+            {
+                const auto& slot = state->slots[(std::size_t) timeSlot];
+                if (! slot.name.empty())
+                    text = tr ("Time: {0}", { juce::String::fromUTF8 (slot.name.c_str()) });
+                static const char* const syncs[] = { "off", "1/4 beat", "1/2 beat", "1 beat", "2 beats", "4 beats" };
+                const auto sync = [] (int v) { return juce::String (syncs[juce::jlimit (0, 5, v)]); };
+                text << "     " << tr ("Hold: {0}", { slot.hold > 0 ? juce::String (slot.hold) : tr ("Off") }) << "   "
+                     << tr ("Trig sync: {0}", { sync (slot.triggerSync) }) << "   " << tr ("Pos sync: {0}", { sync (slot.positionSync) });
+            }
+            g.setColour (colour::textSecondary);
+            g.setFont (font (juce::jmax (9.0f, 11.0f * s)));
+            g.drawFittedText (text, r.reduced (6.0f * s, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+            return;
+        }
+
+        // the editor area: beat grid, then the time slot's envelope (accent) and the volume slot's (blue)
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (r, radius::md * s);
+        const auto inner = r.reduced (8.0f * s);
+        g.setColour (colour::gridBeat);
+        for (int i = 1; i < 16; ++i)
+            g.drawVerticalLine ((int) (inner.getX() + inner.getWidth() * (float) i / 16.0f), inner.getY(), inner.getBottom());
+        g.setColour (colour::gridBar);
+        for (int i = 1; i < 4; ++i)
+            g.drawVerticalLine ((int) (inner.getX() + inner.getWidth() * (float) i / 4.0f), inner.getY(), inner.getBottom());
+        for (int i = 1; i < 8; ++i)
+            g.drawHorizontalLine ((int) (inner.getY() + inner.getHeight() * (float) i / 8.0f), inner.getX(), inner.getRight());
+        const auto drawSlot = [&] (const grossbeat::Slot& slot, juce::Colour c, bool time) {
+            if (slot.points.empty()) // an empty slot does nothing: time plays straight on, volume stays at full
+            {
+                g.setColour (c.withAlpha (0.5f));
+                if (time)
+                    g.drawLine (inner.getX(), inner.getY(), inner.getRight(), inner.getY() + inner.getHeight() * 0.5f, juce::jmax (1.0f, 1.5f * s));
+                else
+                    g.drawHorizontalLine ((int) inner.getY() + 1, inner.getX(), inner.getRight());
+                return;
+            }
+            double length = 0.0;
+            for (const auto& p : slot.points)
+                length += p.dx;
+            length = juce::jmax (length, 1.0e-6);
+            juce::Path path;
+            double x = 0.0;
+            for (std::size_t i = 0; i < slot.points.size(); ++i)
+            {
+                x += slot.points[i].dx;
+                const juce::Point<float> pt { inner.getX() + inner.getWidth() * (float) (x / length),
+                                              inner.getBottom() - inner.getHeight() * juce::jlimit (0.0f, 1.0f, slot.points[i].y) };
+                if (i == 0)
+                    path.startNewSubPath (pt);
+                else
+                    path.lineTo (pt);
+                g.setColour (c);
+                g.fillEllipse (juce::Rectangle<float> (5.0f * s, 5.0f * s).withCentre (pt));
+            }
+            g.setColour (c);
+            g.strokePath (path, juce::PathStrokeType (juce::jmax (1.5f, 2.0f * s)));
+        };
+        drawSlot (state ? state->slots[(std::size_t) (grossbeat::slotsPerKind + volumeSlot)] : grossbeat::Slot {}, colour::info.withAlpha (fx.enabled ? 0.9f : 0.3f), false);
+        drawSlot (state ? state->slots[(std::size_t) timeSlot] : grossbeat::Slot {}, (fx.enabled ? colour::accent : colour::textDisabled), true);
     }
 
     // --- the parametric EQ's graph (FL's Parametric EQ 2 arrangement) -----------------------------------
@@ -945,7 +1098,7 @@ public:
             const auto labels = plugui::optionLabels (item);
             const auto chosen = plugui::optionAt (item, valueOf (param));
             for (int o = 0; o < (int) labels.size(); ++o)
-                menu.addItem (tr (juce::String::fromUTF8 (labels[(std::size_t) o].c_str())), true, o == chosen,
+                menu.addItem (optionTexts (item)[(std::size_t) o], true, o == chosen,
                               [this, param, v = plugui::optionValue (item, o)] { setValue (param, v); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
             return;
@@ -970,8 +1123,12 @@ public:
             case Item::tabs:
             {
                 const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
-                const auto o = item.type == Item::radio ? (int) ((e.position.y - r.getY()) / r.getHeight() * (float) n)
-                                                        : (int) ((e.position.x - r.getX()) / r.getWidth() * (float) n);
+                auto o = item.type == Item::radio ? (int) ((e.position.y - r.getY()) / r.getHeight() * (float) n)
+                                                  : (int) ((e.position.x - r.getX()) / r.getWidth() * (float) n);
+                if (item.type == Item::radio && item.columns > 0)
+                    for (int k = 0; k < n; ++k)
+                        if (gridCell (item, k, n).contains (e.position))
+                            o = k;
                 setValue (param, plugui::optionValue (item, juce::jlimit (0, n - 1, o)));
                 return;
             }

@@ -67,6 +67,7 @@ struct LayoutItem
     const char* when2Param = nullptr;  // a second condition
     float when2Min = 0.0f, when2Max = 1.0f;
     int colour = -1;                   // ≥ 0: one of the editor's band colours (EQ bands, multiband bands)
+    int columns = 0;                   // radio: options in a grid of this many columns (0 = one column)
 };
 
 struct Layout
@@ -86,6 +87,11 @@ bool hasFlLayout (EffectKind kind);
 
 // The kinds that have an FL arrangement (in the order of docs/analise/UI_STUDY_plugins93.md).
 const std::vector<EffectKind>& flLayoutKinds();
+
+// Generators: FL's arrangement of the channel's plugin page (nullptr = the plain grid of knobs). Value items name
+// the knobs of the channel settings' model panel (their juce::Slider names); values are 0..1 over the knob's range.
+const Layout* instrumentLayout (InstrumentKind kind);
+const std::vector<InstrumentKind>& instrumentLayoutKinds();
 
 // Parameter index of `name` in effectInfo(kind) (−1 = no such parameter).
 int paramIndex (EffectKind kind, const char* name);

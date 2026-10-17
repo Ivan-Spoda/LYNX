@@ -1846,3 +1846,8 @@ countries: br
 "Wet" = "Molhado"
 "Width" = "Largura"
 "X 2" = "X 2"
+"Time: {0}" = "Tempo: {0}"
+"Hold: {0}" = "Hold: {0}"
+"Trig sync: {0}" = "Sinc. do disparo: {0}"
+"Pos sync: {0}" = "Sinc. da posição: {0}"
+"Tns" = "Tensão"

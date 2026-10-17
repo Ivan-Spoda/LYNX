@@ -28,6 +28,7 @@
 #include "core/Slayer.h"
 #include "core/SytrusEngine.h"
 #include "core/SynthPresets.h"
+#include "core/PluginLayout.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -1074,13 +1075,274 @@ public:
                 add (index, name);
         const auto rows = ((int) knobs.size() + 6) / 7; // the grid of resized()
         setSize (720, std::max (dx10 || threeOsc ? 500 : 384, 46 + rows * 110 + 8));
+
+        // FL's arrangement of the plugin's page (core/PluginLayout.cpp): the knobs at FL's places, faders and
+        // switches drawn by the panel
+        layout = plugui::instrumentLayout (def.instrument);
+        if (layout != nullptr)
+        {
+            for (auto& k : knobs)
+            {
+                const auto* item = itemFor (k->getName());
+                if (item == nullptr || (item->type != plugui::Item::knob && item->type != plugui::Item::vslider))
+                {
+                    k->setVisible (false); // edited by a switch of the panel (or not shown by FL)
+                    continue;
+                }
+                k->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+                if (item->type == plugui::Item::vslider)
+                    k->setSliderStyle (juce::Slider::LinearVertical);
+                k->setPopupDisplayEnabled (true, true, this);
+                k->setTooltip (k->getName());
+            }
+            setSize ((int) std::ceil (layoutScale * (float) layout->width) + 16, (int) std::ceil (layoutScale * (float) layout->height) + layoutTop + 8);
+        }
+    }
+
+    // --- FL's arrangement ------------------------------------------------------------------------------
+
+    static constexpr float layoutScale = 1.25f;
+    static constexpr int layoutTop = 34;
+
+    const plugui::LayoutItem* itemFor (const juce::String& name) const
+    {
+        if (layout == nullptr)
+            return nullptr;
+        for (const auto& item : layout->items)
+            if (item.param != nullptr && name == item.param)
+                return &item;
+        return nullptr;
+    }
+
+    juce::Slider* knobFor (const char* name) const
+    {
+        for (const auto& k : knobs)
+            if (name != nullptr && k->getName() == name)
+                return k.get();
+        return nullptr;
+    }
+
+    float layoutFactor() const
+    {
+        if (layout == nullptr)
+            return 1.0f;
+        return juce::jmax (0.4f, juce::jmin ((float) (getWidth() - 16) / (float) layout->width, (float) (getHeight() - layoutTop - 8) / (float) layout->height));
+    }
+
+    juce::Rectangle<float> layoutRect (const plugui::LayoutItem& item) const
+    {
+        const auto f = layoutFactor();
+        return { 8.0f + item.x * f, (float) layoutTop + item.y * f, item.w * f, item.h * f };
+    }
+
+    static float normalised (const juce::Slider& k)
+    {
+        const auto range = k.getMaximum() - k.getMinimum();
+        return range > 0.0 ? (float) ((k.getValue() - k.getMinimum()) / range) : 0.0f;
+    }
+
+    static void setNormalised (juce::Slider& k, float v)
+    {
+        k.setValue (k.getMinimum() + (double) v * (k.getMaximum() - k.getMinimum()), juce::sendNotificationSync);
+    }
+
+    // the radio's option cell (grids fill row by row)
+    juce::Rectangle<float> optionCell (const plugui::LayoutItem& item, int o, int count) const
+    {
+        const auto r = layoutRect (item);
+        const auto columns = juce::jmax (1, item.columns);
+        const auto rows = (count + columns - 1) / columns;
+        const auto w = r.getWidth() / (float) columns, h = r.getHeight() / (float) juce::jmax (1, rows);
+        return { r.getX() + w * (float) (o % columns), r.getY() + h * (float) (o / columns), w, h };
+    }
+
+    // a small drawing of an oscillator shape (3x Osc's shape buttons)
+    static void drawShape (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& name)
+    {
+        juce::Path p;
+        const auto x0 = r.getX(), w = r.getWidth(), yc = r.getCentreY(), a = r.getHeight() * 0.5f;
+        const auto n = 48;
+        for (int i = 0; i <= n; ++i)
+        {
+            const auto t = (float) i / (float) n;
+            float y = 0.0f;
+            if (name == "Sine") y = std::sin (t * juce::MathConstants<float>::twoPi);
+            else if (name == "Square") y = t < 0.5f ? 1.0f : -1.0f;
+            else if (name == "Rounded") y = t < 0.46f ? 1.0f - 2.0f * std::pow (0.997f, t * 16384.0f) : (t < 0.83f ? 1.0f : -1.0f);
+            else if (name == "Triangle") y = t < 0.25f ? 4.0f * t : (t < 0.75f ? 2.0f - 4.0f * t : 4.0f * t - 4.0f);
+            else if (name == "Saw") y = 2.0f * t - 1.0f;
+            else if (name == "Noise") y = std::sin ((float) i * 12.9898f) * std::cos ((float) i * 4.1414f) * 1.6f;
+            else /* custom */ y = std::sin (t * juce::MathConstants<float>::twoPi * 3.0f) * std::exp (-std::abs (t - 0.5f) * 5.0f);
+            y = juce::jlimit (-1.0f, 1.0f, y);
+            const juce::Point<float> pt { x0 + w * t, yc - a * y };
+            if (i == 0)
+                p.startNewSubPath (pt);
+            else
+                p.lineTo (pt);
+        }
+        g.strokePath (p, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void paintLayout (juce::Graphics& g)
+    {
+        using namespace theme;
+        const auto f = layoutFactor();
+        const auto& def = engine.getSong().channels[(std::size_t) channel];
+        const auto caption = [&] (const char* text, juce::Rectangle<float> r, bool dimmed, juce::Justification j) {
+            if (text == nullptr || *text == 0)
+                return;
+            g.setColour (dimmed ? colour::textDisabled : colour::textSecondary);
+            g.setFont (font (juce::jmax (8.0f, 9.5f * f), true));
+            g.drawFittedText (caps (tr (text)), r.toNearestInt(), j, 1, 0.7f);
+        };
+
+        for (const auto& item : layout->items)
+        {
+            const auto r = layoutRect (item);
+            const auto dimmed = (item.style & plugui::dim) != 0;
+            auto* k = knobFor (item.param);
+            switch (item.type)
+            {
+                case plugui::Item::section:
+                    g.setColour ((item.style & plugui::raised) != 0 ? colour::bg3 : colour::bg1);
+                    g.fillRoundedRectangle (r, radius::md * f);
+                    if (item.label != nullptr && (item.style & plugui::boxed) == 0)
+                    {
+                        auto head = r.withHeight (16.0f * f);
+                        g.setColour (colour::bg3);
+                        g.fillRoundedRectangle (head, radius::md * f);
+                        g.setColour (colour::textSecondary);
+                        g.setFont (font (juce::jmax (8.0f, 10.5f * f), true));
+                        g.drawFittedText (caps (tr (item.label)), head.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+                    }
+                    break;
+                case plugui::Item::label:
+                    if (item.label != nullptr && juce::String (item.label).length() <= 2 && dimmed) // big dim numbers (3x Osc rows)
+                    {
+                        g.setColour (colour::bg4);
+                        g.setFont (font (r.getHeight() * 0.9f, true));
+                        g.drawText (item.label, r, juce::Justification::centred, false);
+                    }
+                    else if (dimmed && (item.style & plugui::alignLeft) == 0 && r.getHeight() > 30.0f * f) // the plugin's name
+                    {
+                        g.setColour (colour::bg4);
+                        g.setFont (font (r.getHeight() * 0.6f, true));
+                        g.drawFittedText (item.label, r.toNearestInt(), juce::Justification::centredRight, 1, 0.8f);
+                    }
+                    else
+                        caption (item.label, r, dimmed, (item.style & plugui::alignLeft) != 0 ? juce::Justification::centredLeft : juce::Justification::centred);
+                    break;
+                case plugui::Item::knob:
+                    if ((item.style & plugui::noCaption) == 0)
+                        caption (item.label, r.withTop (r.getBottom() - 12.0f * f), dimmed, juce::Justification::centred);
+                    break;
+                case plugui::Item::vslider:
+                    break;
+                case plugui::Item::radio:
+                    if (k != nullptr)
+                    {
+                        const auto labels = plugui::optionLabels (item);
+                        const auto chosen = plugui::optionAt (item, normalised (*k));
+                        for (int o = 0; o < (int) labels.size(); ++o)
+                        {
+                            const auto cell = optionCell (item, o, (int) labels.size()).reduced (3.0f * f);
+                            g.setColour (o == chosen ? colour::bg5 : colour::bg2);
+                            g.fillRoundedRectangle (cell, radius::md * f);
+                            g.setColour (o == chosen ? colour::accent : colour::textSecondary);
+                            if (item.columns > 0)
+                                drawShape (g, cell.reduced (cell.getWidth() * 0.22f, cell.getHeight() * 0.3f), labels[(std::size_t) o]);
+                            else
+                                g.drawFittedText (tr (labels[(std::size_t) o]), cell.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+                        }
+                    }
+                    break;
+                case plugui::Item::toggle:
+                    if (k != nullptr)
+                    {
+                        const auto on = normalised (*k) >= 0.5f;
+                        if ((item.style & plugui::boxed) != 0)
+                        {
+                            const auto box = r.reduced (3.0f * f);
+                            g.setColour (on ? colour::accent : colour::bg2);
+                            g.fillRoundedRectangle (box, radius::md * f);
+                            g.setColour (on ? colour::onAccent : colour::textSecondary);
+                            g.setFont (font (juce::jmax (8.0f, 11.0f * f), true));
+                            g.drawText (item.label != nullptr ? item.label : "", box, juce::Justification::centred, false);
+                        }
+                        else
+                        {
+                            const auto dot = juce::Rectangle<float> (10.0f * f, 10.0f * f).withCentre ({ r.getX() + 6.0f * f, r.getCentreY() });
+                            g.setColour (on ? colour::accent : colour::ledOff);
+                            g.fillEllipse (dot);
+                            caption (item.label, r.withTrimmedLeft (14.0f * f), false, juce::Justification::centredLeft);
+                        }
+                    }
+                    break;
+                case plugui::Item::display:
+                    g.setColour (colour::bg0);
+                    g.fillRoundedRectangle (r, radius::sm * f);
+                    if (juce::String (item.display) == "flkeysname")
+                        if (const auto st = flkeys::parseState (def.pluginState))
+                        {
+                            g.setColour (colour::textPrimary);
+                            g.setFont (font (juce::jmax (9.0f, 11.0f * f)));
+                            g.drawFittedText (juce::String::fromUTF8 (st->wavetable.c_str()), r.reduced (6.0f * f, 0.0f).toNearestInt(),
+                                              juce::Justification::centredLeft, 1, 0.8f);
+                        }
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    void resizeLayout()
+    {
+        for (auto& k : knobs)
+        {
+            const auto* item = itemFor (k->getName());
+            if (item == nullptr || ! k->isVisible())
+                continue;
+            auto r = layoutRect (*item);
+            if (item->type == plugui::Item::knob)
+            {
+                if ((item->style & plugui::noCaption) == 0)
+                    r.removeFromBottom (14.0f * layoutFactor());
+                const auto d = juce::jmin (r.getWidth(), r.getHeight());
+                r = r.withSizeKeepingCentre (d, d).withY (r.getY());
+            }
+            k->setBounds (r.toNearestInt());
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (layout == nullptr)
+            return;
+        for (const auto& item : layout->items)
+        {
+            auto* k = knobFor (item.param);
+            if (k == nullptr || ! layoutRect (item).contains (e.position))
+                continue;
+            if (item.type == plugui::Item::toggle)
+                setNormalised (*k, normalised (*k) >= 0.5f ? 0.0f : 1.0f);
+            else if (item.type == plugui::Item::radio)
+            {
+                const auto count = (int) plugui::optionLabels (item).size();
+                for (int o = 0; o < count; ++o)
+                    if (optionCell (item, o, count).contains (e.position))
+                        setNormalised (*k, plugui::optionValue (item, o));
+            }
+            repaint();
+            return;
+        }
     }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (theme::colour::bg2);
         g.setColour (theme::colour::textPrimary);
-        g.setFont (theme::font (theme::type::title));
+        g.setFont (theme::font (layout != nullptr ? theme::type::body : theme::type::title));
         g.drawText (drumsynth ? tr ("DrumSynth Live — FL's engine, patch on key {0}", { juce::String (editorKey) })
                                     + (wavesFound ? tr (" (next hit; recorded waves from your FL installation)")
                                                   : tr (" (next hit; recorded waves not found: silent)"))
@@ -1114,6 +1376,11 @@ public:
                     : sakura ? tr ("Sakura — physical strings (FL's engine; new parameters apply to the next note)")
                              : tr ("Drumpad — physical drum (FL's engine; new parameters apply to the next hit)"),
                     10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
+        if (layout != nullptr)
+        {
+            paintLayout (g);
+            return;
+        }
         g.setFont (theme::font (theme::type::small));
         for (const auto& k : knobs)
             g.drawText (k->getName(), k->getBounds().withHeight (14).translated (0, -14), juce::Justification::centred);
@@ -1121,6 +1388,11 @@ public:
 
     void resized() override
     {
+        if (layout != nullptr)
+        {
+            resizeLayout();
+            return;
+        }
         constexpr int columns = 7, w = 96, h = 92;
         for (std::size_t i = 0; i < knobs.size(); ++i)
             knobs[i]->setBounds (12 + (int) (i % columns) * (w + 4), 46 + (int) (i / columns) * (h + 18), w, h);
@@ -1134,6 +1406,7 @@ private:
          sawer = false, flKeys = false, granulizer = false, drumaxx = false, slayer = false, fruityDance = false, sytrus = false, wavesFound = false;
     int editorKey = 60;
     std::vector<std::unique_ptr<juce::Slider>> knobs;
+    const plugui::Layout* layout = nullptr;
 };
 
 class SettingsPanel final : public juce::Component,

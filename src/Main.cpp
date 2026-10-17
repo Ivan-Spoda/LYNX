@@ -2,6 +2,8 @@
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/FlpImport.h"
+#include "flp/Flp.h"
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
@@ -1345,6 +1347,71 @@ private:
                     juce::PNGImageFormat png;
                     if (auto stream = file.createOutputStream())
                         png.writeImageToStream (image, *stream);
+                }
+            }
+
+            // generators in FL's arrangement: the channel's plugin page with the FL preset's settings
+            const auto generators = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Generators");
+            for (const auto& [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" } })
+            {
+                juce::MemoryBlock data;
+                auto file = generators.getChildFile (folder).getChildFile (preset);
+                if (! file.existsAsFile())
+                {
+                    auto files = generators.getChildFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst");
+                    files.sort();
+                    file = files.isEmpty() ? juce::File() : files[0];
+                }
+                if (! file.loadFileAsData (data))
+                    continue;
+                try
+                {
+                    const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                    auto project = flp::parseProject (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), true);
+                    if (project.channels.empty())
+                        continue;
+                    project.channels.front().type = flp::ChannelType::native;
+                    lynx::FlpImportOptions options;
+                    options.roots = roots;
+                    options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+                    options.readFile = [] (const std::string& path) {
+                        juce::MemoryBlock block;
+                        juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (block);
+                        const auto* b = static_cast<const std::uint8_t*> (block.getData());
+                        return std::vector<std::uint8_t> (b, b + block.getSize());
+                    };
+                    options.saveEmbedded = [out] (const std::vector<std::uint8_t>& wav, const std::string& name) {
+                        const auto f = out.getChildFile ("samples").getNonexistentChildFile (juce::String::fromUTF8 (name.c_str()), ".wav");
+                        f.getParentDirectory().createDirectory();
+                        f.replaceWithData (wav.data(), wav.size());
+                        return f.getFullPathName().toStdString();
+                    };
+                    auto song = lynx::importFlp (project, options);
+                    // the page only needs the plugin's saved state (FL Keys' sample zones need the installed wavetables)
+                    if (! song.channels.empty() && project.channels.front().pluginName == "FL Keys")
+                    {
+                        song.channels.front().instrument = lynx::InstrumentKind::flkeys;
+                        song.channels.front().pluginState = project.channels.front().pluginState;
+                    }
+                    offline.setSong (std::move (song));
+                    offline.dispatchPendingMessages();
+                    if (offline.getSong().channels.empty())
+                        continue;
+                    auto panel = lynx::makeChannelSettingsPanel (offline, 0);
+                    juce::Image image (juce::Image::ARGB, panel->getWidth(), panel->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        panel->paintEntireComponent (g, false);
+                    }
+                    const auto out2 = out.getChildFile (juce::String (folder) + ".png");
+                    out2.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = out2.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                }
+                catch (const std::exception&)
+                {
                 }
             }
         }
