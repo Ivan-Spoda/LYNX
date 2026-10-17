@@ -366,6 +366,7 @@ enum class EffectKind : std::uint8_t
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
     ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
     lynxTune,     // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    fruityPhaser, // FL's Fruity Phaser, exact (REA_rodada105_phaser, core/FruityPhaser.h): FL's 9 controls / max
     crestCompressor, // LYNX's Crest Compressor (REA_rodada108, core/DynamicsSuite.h): styles, side-chain EQ, character, oversampling
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
     sentryGate       // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
