@@ -1820,11 +1820,27 @@ void EffectsPanel::paint (juce::Graphics& g)
                 g.drawEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 6, 12, 12, 1.0f);
             }
             g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
+            // a LYNX substitute shows the plugin it stands in for, with a "LYNX" badge
+            const auto substitute = slot.isSubstitute();
             auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
+                        : substitute                    ? juce::String::fromUTF8 (substituteOriginalName (slot).c_str())
                                                         : juce::String::fromUTF8 (effectInfo (slot.kind).name);
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
                 name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
-            g.drawText (juce::String (i + 1) + ". " + name, r.withTrimmedLeft (24).withTrimmedRight (28), juce::Justification::centredLeft);
+            auto textArea = r.withTrimmedLeft (24).withTrimmedRight (28);
+            if (substitute)
+            {
+                const auto badge = textArea.removeFromRight (34).withSizeKeepingCentre (32, 14).toFloat();
+                g.setColour (colour::info.withAlpha (slot.enabled ? 0.25f : 0.12f));
+                g.fillRoundedRectangle (badge, 3.0f);
+                g.setColour (slot.enabled ? colour::info : colour::textDisabled);
+                const auto keep = g.getCurrentFont();
+                g.setFont (font (type::caption, true));
+                g.drawText ("LYNX", badge, juce::Justification::centred);
+                g.setFont (keep);
+                g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
+            }
+            g.drawText (juce::String (i + 1) + ". " + name, textArea, juce::Justification::centredLeft);
 
             // slot's dry/wet knob
             const auto mixActive = (hoverParam == mixParam && hoverSlot == i) || (dragParam == mixParam && selectedSlot == i);
@@ -1910,8 +1926,16 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto vocoder = slot.kind == EffectKind::vocoder;
     g.setColour (colour::textPrimary);
     g.setFont (font (type::title, true));
-    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : knobBounds (0).getY()) - 28,
-                getWidth() - 20, 20, juce::Justification::centredLeft);
+    const auto titleY = (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : knobBounds (0).getY()) - 28;
+    g.drawText (juce::String::fromUTF8 (info.name), 10, titleY, getWidth() - 20, 20, juce::Justification::centredLeft);
+    if (slot.isSubstitute()) // which missing plugin this stands in for (the project keeps it)
+    {
+        const auto titleWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), juce::String::fromUTF8 (info.name));
+        g.setColour (colour::info);
+        g.setFont (font (type::caption));
+        g.drawText (tr ("LYNX substitute for {0}", { juce::String::fromUTF8 (substituteOriginalName (slot).c_str()) }), 10 + titleWidth + 10, titleY,
+                    juce::jmax (0, getWidth() - 30 - titleWidth), 20, juce::Justification::centredLeft, true);
+    }
 
     if (vocoder) // the analysis bands' levels, low to high (FL's band level strip)
     {
@@ -2549,6 +2573,23 @@ void EffectsPanel::showAddMenu (int)
             selectedSlot = (int) slots()->size() - 1;
             repaint();
         });
+
+    // LYNX equivalents of well-known third-party effects, with the same default preset a substitute gets
+    juce::PopupMenu equivalents;
+    for (const auto& entry : pluginSubstitutes())
+        if (! entry.instrument)
+            equivalents.addItem (juce::String::fromUTF8 (entry.product.c_str()) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + juce::String::fromUTF8 (effectInfo (entry.effect).name),
+                                 [this, entry] {
+                                     engine.editSong ([t = track, entry] (Song& song) {
+                                         auto& effects = song.mixer[(std::size_t) t].effects;
+                                         if ((int) effects.size() < maxEffectSlots)
+                                             effects.push_back (makeSubstituteSlot (entry));
+                                     });
+                                     selectedSlot = (int) slots()->size() - 1;
+                                     repaint();
+                                 });
+    if (equivalents.getNumItems() > 0)
+        menu.addSubMenu (tr ("LYNX equivalents"), equivalents);
 
     juce::PopupMenu plugins;
     addPluginItems (plugins, engine, false, [this] (PluginRef ref) {

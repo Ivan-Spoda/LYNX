@@ -28,7 +28,8 @@ struct MissingPlugin
 {
     std::string name;
     std::vector<std::string> usedBy;
-    std::string replacement; // English, for display ("Built-in synth", "Removed from the mixer"...)
+    std::string replacement; // English, for display ("Built-in synth", "Removed from the mixer"...); may hold "{0}"
+    std::string replacementArg; // what "{0}" stands for (a LYNX substitute's effect name), not translated
 };
 
 // The last component of a path saved on Windows or elsewhere ('\\' and '/' both separate).
