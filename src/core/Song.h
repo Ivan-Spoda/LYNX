@@ -366,10 +366,11 @@ enum class EffectKind : std::uint8_t
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
     ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
     lynxTune,     // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    fruityPhaser, // FL's Fruity Phaser, exact (REA_rodada105_phaser, core/FruityPhaser.h): FL's 9 controls / max
     echoform,     // LYNX's multi-mode echo (REA_rodada101, core/EchoSuite.h), 29 controls
     spiralEcho,   // LYNX's frequency-shifting echo (REA_rodada101, core/EchoSuite.h), 8 controls
     orbit,        // LYNX's modulation machine: flangers / choruses / doubler (REA_rodada101, core/EchoSuite.h), 6 controls
-    latticeMod    // LYNX's multitap modulated delay (REA_rodada101, core/EchoSuite.h), 35 controls
+    latticeMod    // LYNX's multitap modulated delay (REA_rodada101, core/EchoSuite.h), 34 controls
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

@@ -319,6 +319,23 @@ Layout fruityFlanger()
     return l;
 }
 
+Layout fruityPhaser()
+{
+    // FL's generic panel, three rows of three (round 105: FL 2026 capture of the Default preset)
+    auto l = fruityGrid ("Fruity Phaser", 3);
+    auto& v = l.items;
+    fruityCell (v, 0, 0, "Sweep freq.", TR_NOOP ("Sweep freq."));
+    fruityCell (v, 1, 0, "Min depth", TR_NOOP ("Min depth"));
+    fruityCell (v, 2, 0, "Max depth", TR_NOOP ("Max depth"));
+    fruityCell (v, 0, 1, "Freq. range", TR_NOOP ("Freq. range"), Cell::value, 1);
+    fruityCell (v, 1, 1, "Stereo", TR_NOOP ("Stereo"));
+    fruityCell (v, 2, 1, "Stages", TR_NOOP ("Nr. stages"), Cell::value, 22);
+    fruityCell (v, 0, 2, "Feedback", TR_NOOP ("Feedback"));
+    fruityCell (v, 1, 2, "Dry-wet", TR_NOOP ("Dry-wet"));
+    fruityCell (v, 2, 2, "Out gain", TR_NOOP ("Out gain"));
+    return l;
+}
+
 Layout fruityFastDist()
 {
     // four knobs and the A/B switch on the left panel, the transfer curve on the right
@@ -1846,7 +1863,7 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
                                                  EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
                                                  EffectKind::squeeze, EffectKind::maximus,
-                                                 EffectKind::vintagePhaser };
+                                                 EffectKind::vintagePhaser, EffectKind::fruityPhaser };
     return kinds;
 }
 
@@ -1899,6 +1916,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::squeeze: l = fruitySqueeze(); break;
         case EffectKind::maximus: l = maximus(); break;
         case EffectKind::vintagePhaser: l = vintagePhaser(); break;
+        case EffectKind::fruityPhaser: l = fruityPhaser(); break;
         case EffectKind::ridgeStrip: l = ridgeStrip(); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
