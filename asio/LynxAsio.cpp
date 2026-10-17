@@ -1213,8 +1213,12 @@ private:
                     if (streaming)
                     {
                         renderClient->Stop();
+                        renderClient->Reset(); // a later start begins with an empty queue
                         if (captureClient != nullptr)
+                        {
                             captureClient->Stop();
+                            captureClient->Reset();
+                        }
                         logLine ("stats: %lld device events, %lld host blocks, late events %lld (max gap %.2f ms), slow bursts %lld (max %.2f ms), "
                                  "input short %lld (+%lld while starting)", events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs,
                                  inputShort - inputShortBefore, inputShortBefore);
