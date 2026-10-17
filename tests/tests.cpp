@@ -7622,6 +7622,24 @@ TEST (safe_default_buffer_size)
     CHECK (lynx::prefs::safeBufferSize ({}, 0, 44100.0) == 0);
 }
 
+TEST (driver_kind_and_shared_mode_buffer_sizes)
+{
+    // REA round 97: classic shared WASAPI mixes in whole engine periods, so sizes below it are not offered
+    using lynx::prefs::DriverKind;
+    CHECK (lynx::prefs::driverKind ("Windows Audio") == DriverKind::wasapiShared);
+    CHECK (lynx::prefs::driverKind ("Windows Audio (Exclusive Mode)") == DriverKind::wasapiExclusive);
+    CHECK (lynx::prefs::driverKind ("Windows Audio (Low Latency Mode)") == DriverKind::wasapiLowLatency);
+    CHECK (lynx::prefs::driverKind ("ASIO") == DriverKind::asio);
+    CHECK (lynx::prefs::driverKind ("DirectSound") == DriverKind::directSound);
+    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::other);
+    const std::vector<int> offered { 144, 192, 256, 480, 512, 1024 };
+    CHECK ((lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 480) == std::vector<int> { 480, 512, 1024 }));
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiExclusive, offered, 480) == offered);   // the device's real periods
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiLowLatency, offered, 480) == offered);  // engine periods
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, { 64, 128 }, 480) == (std::vector<int> { 64, 128 })); // never empty
+    CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 0) == offered);
+}
+
 TEST (linear_phase_convolver_matches_direct_convolution)
 {
     // the block FFT convolver (cached twiddles, REA round 87) equals the direct convolution with its kernel

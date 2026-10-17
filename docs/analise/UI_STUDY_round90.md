@@ -35,7 +35,9 @@ dark, flat, red-accent look. No FL artwork, icons or code were copied. FL captur
 | 8 | Rack title | Channel filter group ("All") selector, swing knob, graph/keyboard view buttons | Pattern name and swing knob | open (filter groups need the FLP filter data) |
 | 9 | Mixer side panel | Always 10 numbered slots with mix knob and LED, built-in 3-band insert EQ, input and output selectors | Effect list (click to add) with the selected effect's controls below; mix knob per slot | open: insert EQ panel and output selector; input selector belongs to round 88 |
 | 10 | Mixer strip names | Vertical names, compact window (~480 px tall) | Horizontal truncated names, very tall faders when maximised | open (layout choice) |
-| 11 | Piano Roll | Overview strip with a note preview under the title; the view opens fitted to the pattern | No overview strip; opens at the default zoom | open |
+| 11 | Piano Roll | Overview strip with a note preview under the title; the view opens fitted to the pattern | No overview strip; opens at the default zoom | **Fixed** (batch 2): overview strip above the ruler (notes in the channel colour, visible window outlined: drag scrolls, edges zoom, click jumps, double-click shows everything) replaces the bottom scroll bar; opening fits the pattern (at least one bar) |
+| 13 | Channel Rack | Channel buttons stay in view while the steps scroll sideways | The whole rack scrolled (names left the view) | **Fixed** (batch 2) |
+| 12 | Playlist | The same overview strip above the ruler (clips in their colours, one row per track) is the horizontal scroller; no bottom scroll bar | Bottom scroll bar only | **Fixed** (batch 2): same strip as the Piano Roll |
 
 Not compared in depth: Browser (FL 2026 docks it left, LYNX too), plugin wrappers (LYNX draws its own editors).
 
@@ -55,6 +57,11 @@ Not compared in depth: Browser (FL 2026 docks it left, LYNX too), plugin wrapper
   (FL's default grey 0x485156 = no colour); .lynx `playlistTrackColours` list ([index, 0xRRGGBB]; older versions
   ignore it); undo history names the change "Playlist tracks".
 - **Mixer** (`ui/MixerComponent.cpp`): strips tinted with the insert colour (selected strips a little more).
+- **Overview strip** (batch 2; `ui/EditorTools.*` `OverviewBar`, gestures in `core/EditorGestures.h`
+  `overviewGrabAt` / `overviewDrag` / `overviewCentredOn`): one widget for the Piano Roll and the Playlist, placed
+  between the toolbar and the ruler (`overviewHeight` 16 px, `rulerTop`); the editors' horizontal scroll bars are
+  hidden (they still hold the range). Piano Roll: `scrollToNotes (fitPattern)` fits the pattern on open
+  (4..64 px per step). Test `uilook90_overview_strip_gestures`.
 - Tests: `uilook90_rack_note_preview_rule`, `uilook90_flp_track_colours` (Thief: DRUMS 0xFF770E0B, BASSES
   0xFF16296C, default tracks uncoloured); the selftest's project round trip checks a track colour.
 
@@ -64,6 +71,9 @@ Shots (outside the repo): FL `lynx-test/uilook90/flref/01..07-*.png`; LYNX befor
 
 ## Where I stopped / next steps
 
-- Done: items 1-5. Next candidates: 6 (track groups: decode the 0xEE group fields), 8 (rack filter groups),
-  9 (mixer side panel: insert EQ section, output selector), 11 (Piano Roll overview strip, open fitted to the
-  pattern), a fixed name column while the rack's steps scroll sideways (today the whole rack scrolls).
+- Batch 1 (items 1-5) landed in e0a8b3f. Batch 2 (items 11-12: overview strip on the Piano Roll and the Playlist,
+  Piano Roll fitted to the pattern on open, Channel Rack controls column that stays in view while the steps
+  scroll sideways = `ChannelRackComponent::stickyX`/`moved()`) built, tested and snapshot-checked
+  (`lynx-test/uilook90/after4`: `s-pianoroll`, `s-playlist`, `s-desktop-1920`, `s-desktop-rack-scrolled`).
+- Next candidates: 6 (track groups: decode the 0xEE group fields), 8 (rack filter groups), 9 (mixer side panel:
+  insert EQ section, output selector), 10 (mixer strip names/compact height).
