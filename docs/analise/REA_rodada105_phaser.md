@@ -103,13 +103,22 @@ OUT GAIN), measured on the FL 2026 capture of the Default preset (`tmp/r93/flref
   feedback up to 0.95) with a 2·10⁻⁵ relative tolerance (compilers / libm), the texts, the import and its round trip;
   the real-projects test checks that every Fruity Phaser mixer slot of the installation imports on the exact engine.
 
+- **FL's own command-line render** (`FL64.exe /R /Ewav`, under the FL lock) of `System/Render tests/Fruity Phaser.flp`
+  (an FL 11 project: a 3x Osc into the phaser, saved inside the old Fruity Wrapper as a VST2 with nine 0…1 floats —
+  the defaults; LYNX now rebuilds the native state from them, the stage count as `round(v·23) − 1`, [DATA, defaults
+  only]) vs LYNX's `renderwav` of the same project: level within 0.45 dB RMS / 0.18 dB peak, envelope correlation
+  1.00, spectrum within 1.6 dB. Sample-wise the residual is −10.9 dB, but it is already in the source: running the
+  model on LYNX's dry render (the same project with the phaser removed) reproduces LYNX's wet render to −132 dB, and
+  sweeping the LFO's start phase over 64 values, phase 0 at the song start fits FL's render best (`py/fit.py`). So the
+  phaser itself starts as FL's does; the difference is the 3x Osc source of this project.
+
 ## 6. Open items
 
 - FL's block size inside a real FL render is not modelled: the right LFO is re-aligned to the left one at the start of
   every render call, which is exact for any block size (the offset is constant), so this only matters through the
   LFO increment's rounding being per call — identical in both.
-- FL's own command-line render of `System/Render tests/Fruity Phaser.flp` (FL 11 project, phaser inside the old Fruity
-  Wrapper container): see "Where I stopped".
+- The old wrapped-VST2 phaser: only the default floats were seen; the mapping of other values (especially the stage
+  count) is not confirmed.
 
 ## Where I stopped
 
