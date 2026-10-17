@@ -588,6 +588,7 @@ void PianoRollComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float
     auto colour = accent;
     if (channel < (int) song.channels.size() && song.channels[(std::size_t) channel].colour != 0)
         colour = theme::tame (juce::Colour (song.channels[(std::size_t) channel].colour));
+    colour = colour.interpolatedWith (textPrimary, 0.35f); // reads on the dark strip at any channel colour
 
     for (const auto& n : pattern.notes)
     {

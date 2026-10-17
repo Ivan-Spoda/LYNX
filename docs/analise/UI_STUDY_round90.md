@@ -36,6 +36,7 @@ dark, flat, red-accent look. No FL artwork, icons or code were copied. FL captur
 | 9 | Mixer side panel | Always 10 numbered slots with mix knob and LED, built-in 3-band insert EQ, input and output selectors | Effect list (click to add) with the selected effect's controls below; mix knob per slot | open: insert EQ panel and output selector; input selector belongs to round 88 |
 | 10 | Mixer strip names | Vertical names, compact window (~480 px tall) | Horizontal truncated names, very tall faders when maximised | open (layout choice) |
 | 11 | Piano Roll | Overview strip with a note preview under the title; the view opens fitted to the pattern | No overview strip; opens at the default zoom | **Fixed** (batch 2): overview strip above the ruler (notes in the channel colour, visible window outlined: drag scrolls, edges zoom, click jumps, double-click shows everything) replaces the bottom scroll bar; opening fits the pattern (at least one bar) |
+| 13 | Channel Rack | Channel buttons stay in view while the steps scroll sideways | The whole rack scrolled (names left the view) | **Fixed** (batch 2) |
 | 12 | Playlist | The same overview strip above the ruler (clips in their colours, one row per track) is the horizontal scroller; no bottom scroll bar | Bottom scroll bar only | **Fixed** (batch 2): same strip as the Piano Roll |
 
 Not compared in depth: Browser (FL 2026 docks it left, LYNX too), plugin wrappers (LYNX draws its own editors).
@@ -70,11 +71,9 @@ Shots (outside the repo): FL `lynx-test/uilook90/flref/01..07-*.png`; LYNX befor
 
 ## Where I stopped / next steps
 
-- Batch 1 (items 1-5, commits up to 1ee5267) was landing via `land.sh uilook90` when the session was stopped
-  (2026-10-17 ~03:15); check `git log origin/main` for "Merge branch 'feature/uilook90'".
-- Batch 2 (items 11-12 overview strip, Piano Roll fit-on-open, Channel Rack controls column that stays in view
-  while the steps scroll sideways = `ChannelRackComponent::stickyX`/`moved()`, snapshot `-desktop-rack-scrolled`)
-  is committed as WIP but **not yet compiled or tested**: next step = build-local + Windows build, fix errors,
-  snapshots (tmp/r90/snap.sh after3), compare with FL captures, then land.
-- Later candidates: 6 (track groups: decode the 0xEE group fields), 8 (rack filter groups), 9 (mixer side panel:
+- Batch 1 (items 1-5) landed in e0a8b3f. Batch 2 (items 11-12: overview strip on the Piano Roll and the Playlist,
+  Piano Roll fitted to the pattern on open, Channel Rack controls column that stays in view while the steps
+  scroll sideways = `ChannelRackComponent::stickyX`/`moved()`) built, tested and snapshot-checked
+  (`lynx-test/uilook90/after4`: `s-pianoroll`, `s-playlist`, `s-desktop-1920`, `s-desktop-rack-scrolled`).
+- Next candidates: 6 (track groups: decode the 0xEE group fields), 8 (rack filter groups), 9 (mixer side panel:
   insert EQ section, output selector), 10 (mixer strip names/compact height).
