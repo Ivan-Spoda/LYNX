@@ -1,3 +1,4 @@
+#include "core/StateHandoff.h"
 #include "core/MultibandDelayFx.h"
 
 #include "core/Effects.h"
@@ -1078,8 +1079,24 @@ public:
 
     void reset() noexcept override { engine.suspend(); }
 
+    // the editor changed band cells or the selected bank: the running engine takes the new cell values
+    bool acceptState (const std::vector<std::uint8_t>& bytes) noexcept override
+    {
+        const auto s = parse (bytes);
+        return s && incoming.offer (*s);
+    }
+
     void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
     {
+        if (incoming.take (next))
+        {
+            for (int i = 0; i < 384; ++i)
+                if (const auto v = engineValue (next, i); v != engineValue (state, i))
+                    engine.setParameter (i, v);
+            for (int i = 0; i < 384; ++i)
+                state.raw[(std::size_t) i] = next.raw[(std::size_t) i];
+            state.targetSel = next.targetSel, state.bank = next.bank, state.mode = next.mode;
+        }
         if (! haveParams || p != lastParams)
         {
             lastParams = p, haveParams = true;
@@ -1098,7 +1115,8 @@ public:
     int latencySamples() const noexcept override { return engine.latencySamples(); }
 
 private:
-    State state;
+    State state, next;
+    StateHandoff<State> incoming;
     bool haveParams = false;
     EffectParams lastParams {};
     Engine engine;

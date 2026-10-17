@@ -40,6 +40,8 @@
 #include "ui/EventEditor.h"
 #include "ui/AudioEditor.h"
 #include "core/EventEdit.h"
+#include "core/FacetEq.h"
+#include "ui/FacetEqEditor.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
 #include "core/PluginLayout.h"
@@ -690,9 +692,9 @@ private:
             // only the LYNX reference is substituted here (an .flp record is the import's job); do the .flp one directly
             const auto flpSubstituted = lynx::substituteEffectSlot (fx[0], lynx::pluginIdentity (vv));
             const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
-            substituteOk = flpSubstituted && fx[0].kind == lynx::EffectKind::reeverb2
+            substituteOk = flpSubstituted && fx[0].kind == lynx::EffectKind::epochVerb
                            && (! substitutesOn || (changed == 1 && fx[1].kind == lynx::EffectKind::facetEq && fx[1].substituteFor == lynxRef))
-                           && back && back->mixer[1].effects.size() == 2 && back->mixer[1].effects[0].kind == lynx::EffectKind::reeverb2
+                           && back && back->mixer[1].effects.size() == 2 && back->mixer[1].effects[0].kind == lynx::EffectKind::epochVerb
                            && back->mixer[1].effects[0].substituteFor == flpRef && back->mixer[1].effects[0].substituteFor.foreign.state == vv.state
                            && back->mixer[1].effects[1].kind == fx[1].kind && back->mixer[1].effects[1].substituteFor == fx[1].substituteFor;
         }
@@ -1531,6 +1533,23 @@ private:
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
 
+            // --find-plugins: first the targeted scan opening the project in the app runs (its plugins not known yet)
+            if (input.hasFileExtension ("flp") && juce::JUCEApplication::getCommandLineParameters().contains ("--find-plugins"))
+            {
+                juce::MemoryBlock data;
+                if (input.loadFileAsData (data))
+                    try
+                    {
+                        const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                        auto& host = loader.getPluginHost();
+                        report << "scanned=" << host.filesToScanFor (uses).joinIntoString (";") << "\n";
+                        host.scanFiles (host.filesToScanFor (uses), {});
+                    }
+                    catch (const flp::Error&)
+                    {
+                    }
+            }
+
             if (input.hasFileExtension ("flp"))
                 ok = loader.importFlpFile (input, error);
             else if (auto song = lynx::ProjectFile::load (input, error))
@@ -1586,6 +1605,32 @@ private:
                        << "unsupported=" << joined (importReport.unsupported) << "\n"
                        << "dropped_effects=" << joined (importReport.droppedEffects) << "\n"
                        << "missing_samples=" << importReport.missingSamples << "\n";
+                // third-party plugins: how each was found, or what plays in its place (diagnostics for level differences)
+                for (const auto& line : loader.getMatchedPlugins())
+                    report << "plugin_found=" << line << "\n";
+                for (const auto& m : loader.getMissingPluginDetails())
+                    report << "plugin_missing=" << juce::String::fromUTF8 (m.name.c_str()) << " -> "
+                           << juce::String::fromUTF8 (m.replacement.c_str()).replace ("{0}", juce::String::fromUTF8 (m.replacementArg.c_str())) << "\n";
+                {
+                    const auto& song = loader.getSong();
+                    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+                    {
+                        const auto& track = song.mixer[t];
+                        if (track.effects.empty() && track.sends.empty())
+                            continue;
+                        report << "insert " << (int) t << " vol=" << juce::String (track.volume / lynx::unityFader, 3)
+                               << (track.muted ? " muted" : "") << (track.toMaster ? "" : " noMaster");
+                        for (const auto& s : track.sends)
+                            report << " send>" << s.target << "@" << juce::String (s.level, 3);
+                        report << " |";
+                        for (const auto& fx : track.effects)
+                            report << " [" << (fx.kind == lynx::EffectKind::plugin ? juce::String::fromUTF8 (fx.plugin.name.c_str())
+                                                                                 : juce::String::fromUTF8 (lynx::effectInfo (fx.kind).name))
+                                   << (fx.isSubstitute() ? " (substitute)" : "") << (fx.enabled ? "" : " off")
+                                   << (fx.mix < 0.999f ? " mix=" + juce::String (fx.mix, 2) : juce::String()) << "]";
+                        report << "\n";
+                    }
+                }
                 report << "open_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "prepare_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
@@ -1697,6 +1742,52 @@ private:
                     if (auto stream = file.createOutputStream())
                         png.writeImageToStream (image, *stream);
                 }
+            }
+
+            // LYNX's own editors with live displays (round 103): Facet EQ (a mixing curve, one dynamic band, demo analyser)
+            // and LYNX Tune (demo pitch phrase)
+            {
+                lynx::setNativeEditorDemo (true);
+                using namespace lynx::facet;
+                auto eq = lynx::makeEffectSlot (lynx::EffectKind::facetEq);
+                const struct { Shape s; double f, g, q; int slope; double range; } bandsDemo[] = {
+                    { Shape::lowCut, 32, 0, 1, 24, 0 }, { Shape::bell, 110, 3, 1.2, 12, 0 }, { Shape::bell, 380, -3.5, 1.6, 12, 0 },
+                    { Shape::bell, 3200, 0, 2.5, 12, -6 }, { Shape::highShelf, 9000, 2.5, 0.8, 12, 0 }
+                };
+                for (int b = 0; b < 5; ++b)
+                {
+                    eq.params[(std::size_t) param (b, 0)] = shapeValue (bandsDemo[b].s);
+                    eq.params[(std::size_t) param (b, 1)] = hzValue (bandsDemo[b].f);
+                    eq.params[(std::size_t) param (b, 2)] = gainValue (bandsDemo[b].g);
+                    eq.params[(std::size_t) param (b, 3)] = qValue (bandsDemo[b].q);
+                    eq.params[(std::size_t) param (b, 4)] = slopeValue (bandsDemo[b].slope);
+                    eq.params[(std::size_t) (rangeParam0 + b)] = rangeValue (bandsDemo[b].range);
+                }
+                eq.params[(std::size_t) phaseParam] = phaseValue (Phase::natural);
+                const auto own = [&] (const lynx::EffectSlot& fx, const juce::String& file, bool facetEditor) {
+                    lynx::Song song;
+                    song.mixer.resize (2);
+                    song.mixer[0].name = "Master";
+                    song.mixer[1].name = "Vocal";
+                    song.mixer[1].effects.push_back (fx);
+                    offline.setSong (std::move (song));
+                    offline.dispatchPendingMessages();
+                    auto editor = facetEditor ? lynx::makeFacetEqEditor (offline, 1, 0, true) : lynx::makeNativeEffectEditor (offline, 1, 0, 1.25f, 0);
+                    juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        editor->paintEntireComponent (g, false);
+                    }
+                    const auto f = out.getChildFile (file);
+                    f.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = f.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                };
+                own (eq, "Facet EQ.png", true);
+                own (lynx::makeEffectSlot (lynx::EffectKind::lynxTune), "LYNX Tune.png", false);
+                lynx::setNativeEditorDemo (false);
             }
 
             // generators in FL's arrangement: the channel's plugin page with the FL preset's settings

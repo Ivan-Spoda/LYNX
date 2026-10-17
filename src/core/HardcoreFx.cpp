@@ -1375,7 +1375,8 @@ std::string paramName (int i)
         std::snprintf (b, sizeof (b), "Box %d pedal", i - pBoxType + 1);
         return b;
     }
-    return "(unused)";
+    std::snprintf (b, sizeof (b), "(unused %d)", i); // FL's parameters 12, 38 and 44 do nothing
+    return b;
 }
 
 std::string paramText (int i, float v01)

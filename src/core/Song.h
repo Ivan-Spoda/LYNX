@@ -20,6 +20,11 @@ constexpr float unityFader = 0.8f;    // fader position that gives 0 dB, as in F
 // FL mixer fader curve: g = (11^v - 1) / 10 with v = position * 1.25 (0 dB at 0.8;
 // +5.6 dB at maximum). docs/analise/REA_rodada2.md §2.2.
 float faderGain (float position) noexcept;
+// Its inverse: the fader position (0..1) that gives `gain` (0 for gain <= 0, 1 for maxFaderGain and above).
+float faderPosition (float gain) noexcept;
+// Gain at the top of the fader: +5.6 dB. FL's insert-to-insert and insert-to-Master route levels use the same curve
+// and range (0..16000, 12800 = 0 dB; REA_rodada107 §3), so a send can reach it too.
+constexpr float maxFaderGain = 1.9031f;
 
 // Channel volume with the same curve, but 1.0 = 0 dB (FL's default, 0.78, gives -5.2 dB).
 // docs/analise/REA_rodada3.md §2.
@@ -366,7 +371,13 @@ enum class EffectKind : std::uint8_t
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
     ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
     lynxTune,     // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
-    fruityPhaser  // FL's Fruity Phaser, exact (REA_rodada105_phaser, core/FruityPhaser.h): FL's 9 controls / max
+    fruityPhaser, // FL's Fruity Phaser, exact (REA_rodada105_phaser, core/FruityPhaser.h): FL's 9 controls / max
+    epochVerb,    // LYNX's Epoch Verb (REA_rodada100, core/LynxVerbs.h): multi-mode vintage-digital reverb, 17 controls
+    atrium,       // LYNX's Atrium (REA_rodada100, core/LynxVerbs.h): room reverb, early + late sections, 22 controls
+    foilPlate,    // LYNX's Foil Plate (REA_rodada100, core/LynxVerbs.h): plate reverb, 12 controls
+    nebula,       // LYNX's Nebula (REA_rodada100, core/LynxVerbs.h): delay-reverb network, 13 controls
+    halo,         // LYNX's Halo (REA_rodada100, core/LynxVerbs.h): shimmer reverb, 12 controls
+    horizon       // LYNX's Horizon (REA_rodada100, core/LynxVerbs.h): echo + reverb, 24 controls
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
@@ -416,7 +427,7 @@ struct EffectSlot
 struct MixerSend
 {
     int target = 0;      // destination track (> 0; Master is `toMaster`)
-    float level = 1.0f;  // 0..1 (linear gain)
+    float level = 1.0f;  // linear gain, 0..maxFaderGain (FL's send knob: the fader curve, 0 dB at 80%, +5.6 dB at 100%)
 
     bool operator== (const MixerSend& o) const noexcept { return target == o.target && level == o.level; }
 };
@@ -457,6 +468,7 @@ struct MixerTrack
     bool solo = false;
     std::vector<EffectSlot> effects; // up to maxEffectSlots, processed in order
     bool toMaster = true;            // inserts: output to Master (besides the sends)
+    float masterLevel = 1.0f;        // level of that route to Master (linear gain, 0..maxFaderGain; FL's route knob)
     float stereo = 0.0f;             // separation: -1 = widest, 0 = normal, +1 = mono (as in FL)
     std::uint32_t colour = 0;        // 0xFFRRGGBB; 0 = theme default
     bool invertPhase = false;

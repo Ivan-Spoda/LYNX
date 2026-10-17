@@ -98,6 +98,10 @@ public:
     // The notes held on every Channel Rack channel (`count` masks, by channel index) during the next process(); the
     // pointer stays valid until the next call. Effects that follow notes (LYNX Tune's MIDI targets) keep it.
     virtual void setHeldNotes (const NoteMask* /*channels*/, int /*count*/) noexcept {}
+    // Only the slot's state changed (an editor edited a control stored there, core/StateParams.h). Called off the audio
+    // thread on the running effect: true = it takes the new state itself, applied at the start of a later process(),
+    // so its delay lines and filters keep running; false (the default) = the slot's effect is built again.
+    virtual bool acceptState (const std::vector<std::uint8_t>& /*state*/) noexcept { return false; }
     // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };

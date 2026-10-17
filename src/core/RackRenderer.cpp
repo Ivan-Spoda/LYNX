@@ -215,10 +215,11 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
                 && previous->song.mixer[t].effects[i].kind == kind
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
-                && previous->song.mixer[t].effects[i].state == slots[i].state
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
-                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate)))
+                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate))
+                && (previous->song.mixer[t].effects[i].state == slots[i].state
+                    || (previous->sampleRate == sampleRate && previous->effects[t][i] != nullptr && previous->effects[t][i]->acceptState (slots[i].state))))
             {
                 state->effects[t].push_back (previous->effects[t][i]);
                 continue;
@@ -312,7 +313,7 @@ void RackState::buildMixerGraph()
             depth[(std::size_t) listener] = std::max (depth[(std::size_t) listener], depth[(std::size_t) t] + 1);
 
         if (track.toMaster)
-            mixerInputs[0].push_back ({ t, 0, 1.0f });
+            mixerInputs[0].push_back ({ t, 0, track.masterLevel });
 
         for (std::size_t k = 0; k < track.sends.size(); ++k)
         {
@@ -1045,6 +1046,12 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
     }
 }
 
+// effects whose controlOutput() an editor shows live
+static bool hasLiveMeters (EffectKind kind) noexcept
+{
+    return mixsuite::isSuiteKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq;
+}
+
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept
 {
     // the source was already processed in this pass (earlier layer); silent = no signal in the detector
@@ -1102,7 +1109,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         if (! slots[i].enabled || wet <= 0.0f)
         {
-            if (mixsuite::isSuiteKind (slots[i].kind))
+            if (hasLiveMeters (slots[i].kind))
                 clearMeters();
             continue;
         }
@@ -1130,12 +1137,22 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 sd.silentSamples = 0;
             else if (sd.silentSamples >= hold)
             {
-                if (mixsuite::isSuiteKind (slots[i].kind))
+                if (hasLiveMeters (slots[i].kind))
                     clearMeters();
                 continue;
             }
             else
                 sd.silentSamples += n;
+        }
+
+        // the editor's spectrum analyser listens to this slot: its input
+        const auto tapped = times->analyzer.key.load (std::memory_order_relaxed) == (int) key;
+        if (tapped)
+        {
+            auto& tap = times->analyzer;
+            const auto w = tap.written.load (std::memory_order_relaxed);
+            for (int k = 0; k < n; ++k)
+                tap.pre[(std::size_t) ((w + (std::uint32_t) k) & (ProcessTimes::AnalyzerTap::size - 1))].store (0.5f * (l[k] + r[k]), std::memory_order_relaxed);
         }
 
         // dry/wet: keep the dry signal to mix later
@@ -1187,8 +1204,19 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             }
         }
 
-        // live meters for the editor (the mixing suite's gain reduction)
-        if (mixsuite::isSuiteKind (slots[i].kind) && key < (std::size_t) maxMixerTracks * maxEffectSlots)
+        // ... and its output
+        if (tapped)
+        {
+            auto& tap = times->analyzer;
+            const auto w = tap.written.load (std::memory_order_relaxed);
+            for (int k = 0; k < n; ++k)
+                tap.post[(std::size_t) ((w + (std::uint32_t) k) & (ProcessTimes::AnalyzerTap::size - 1))].store (0.5f * (l[k] + r[k]), std::memory_order_relaxed);
+            tap.sampleRate.store (sampleRate, std::memory_order_relaxed);
+            tap.written.store (w + (std::uint32_t) n, std::memory_order_release);
+        }
+
+        // live meters for the editor (the mixing suite's gain reduction, LYNX Tune's pitch, Facet EQ's dynamic gains)
+        if (hasLiveMeters (slots[i].kind) && key < (std::size_t) maxMixerTracks * maxEffectSlots)
             for (int o = 0; o < ProcessTimes::meterOutputs; ++o)
                 times->effectMeters[key * ProcessTimes::meterOutputs + (std::size_t) o].store (effects[i]->controlOutput (o), std::memory_order_relaxed);
 

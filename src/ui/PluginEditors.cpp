@@ -9,13 +9,21 @@
 #include "core/FlEffects.h"
 #include "core/FruityShapers.h"
 #include "core/GrossBeat.h"
+#include "core/LynxTune.h"
 #include "core/MaximusFx.h"
 #include "core/MixSuite.h"
 #include "core/ParametricEqFl.h"
+#include "core/VocalPitch.h"
 #include "core/PluginLayout.h"
+#include "core/StateParams.h"
+#include "core/ConvolverFx.h"
+#include "core/EquoFx.h"
+#include "core/MultibandDelayFx.h"
+#include "core/Vocodex.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
+#include "ui/FacetEqEditor.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -25,6 +33,8 @@ namespace lynx
 {
 namespace
 {
+bool demoDisplays = false; // --plugui: live displays show a synthetic signal
+
 using plugui::Item;
 using plugui::LayoutItem;
 
@@ -64,13 +74,15 @@ public:
         }
 
         page = initialPage;
-        if (stateBacked() && initialPage == 0)
+        if (kind == EffectKind::equo && initialPage == 0)
+            page = 3; // bank 1, volume (FL opens EQUO on its first bank)
+        if (kind == EffectKind::maximus && stateBacked() && initialPage == 0)
             if (const auto* fx = current())
                 page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters (the mixing suite's gain reduction): refreshed at 30 Hz
-            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0)
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0))
             {
                 startTimerHz (30);
                 break;
@@ -122,7 +134,7 @@ public:
     bool visible (const LayoutItem& item) const
     {
         const auto* fx = current();
-        return fx != nullptr && plugui::isShown (kind, item, page, fx->params);
+        return fx != nullptr && plugui::isShown (kind, item, page, fx->params, &fx->state);
     }
 
     // the knob's circle inside its cell (the caption takes the rest)
@@ -148,7 +160,8 @@ public:
             if (! visible (item) || item.type == Item::section || item.type == Item::label)
                 continue;
             if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"
-                                                                    || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"))
+                                                                    || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
+                                                                    || isBars (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
@@ -162,46 +175,33 @@ public:
 
     // --- values --------------------------------------------------------------------------------------
 
-    // Maximus: the controls edit the parameters stored in the slot's state (core/MaximusFx.h), not EffectSlot::params
+    // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
+    // edit those bytes instead of EffectSlot::params
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
-
-    static float stateNormalised (int param, int raw)
-    {
-        const auto& p = maximusfx::stateParams()[(std::size_t) param];
-        return p.maximum > p.minimum ? (float) (raw - p.minimum) / (float) (p.maximum - p.minimum) : 0.0f;
-    }
-
-    static int stateRaw (int param, float value)
-    {
-        const auto& p = maximusfx::stateParams()[(std::size_t) param];
-        return p.minimum + juce::roundToInt (juce::jlimit (0.0f, 1.0f, value) * (float) (p.maximum - p.minimum));
-    }
+    bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
+    const stateparams::Table& stateTable() const { return *stateparams::tableFor (kind); }
 
     float valueOf (int param) const
     {
         const auto* fx = current();
-        if (stateBacked())
-        {
-            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
-                return 0.0f;
-            const auto raw = maximusfx::stateParam (fx->state, param);
-            return stateNormalised (param, raw.value_or (maximusfx::stateParams()[(std::size_t) param].defaultValue));
-        }
+        if (isStateParam (param))
+            return fx != nullptr ? plugui::stateValue01 (kind, param, fx->state) : 0.0f;
         return fx != nullptr && param >= 0 && param < maxEffectParams ? fx->params[(std::size_t) param] : 0.0f;
     }
 
     void setValue (int param, float value)
     {
-        if (stateBacked())
+        if (isStateParam (param))
         {
             const auto* fx = current();
-            if (fx == nullptr || param < 0 || param >= plugui::paramCount (kind))
+            if (fx == nullptr)
                 return;
-            const auto raw = stateRaw (param, value);
-            if (maximusfx::stateParam (fx->state, param) == raw)
+            const auto s = plugui::stateIndex (kind, param);
+            const auto raw = plugui::stateRaw (kind, param, value);
+            if (stateTable().get (fx->state, s) == raw)
                 return;
-            engine.editSong ([t = track, s = slot, bytes = maximusfx::withStateParam (fx->state, param, raw)] (Song& song) {
-                song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes;
+            engine.editSong ([t = track, sl = slot, bytes = stateTable().with (fx->state, s, raw)] (Song& song) {
+                song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
             });
             return;
         }
@@ -217,8 +217,8 @@ public:
         const auto* fx = current();
         if (fx == nullptr || param < 0)
             return {};
-        if (stateBacked())
-            return param < plugui::paramCount (kind) ? utf8 (maximusfx::stateParamText (param, stateRaw (param, value)).c_str()) : juce::String();
+        if (isStateParam (param))
+            return utf8 (stateTable().text (fx->state, plugui::stateIndex (kind, param), plugui::stateRaw (kind, param, value)).c_str());
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
     }
 
@@ -237,19 +237,19 @@ public:
         const auto param = paramOf (item);
         const auto& info = effectInfo (kind);
 
-        if (stateBacked())
+        if (isStateParam (param))
         {
             // not automatable (the values live in the state): drag, wheel, reset and type-in only
-            if (param < 0 || param >= plugui::paramCount (kind))
-                return spec;
-            const auto& p = maximusfx::stateParams()[(std::size_t) param];
-            spec.name = trackName() + " - " + utf8 (info.name) + " - " + utf8 (p.name);
-            spec.defaultValue = stateNormalised (param, p.defaultValue);
-            spec.pixelsForRange = item.type == Item::hslider ? juce::jmax (60.0, (double) rectOf (item).getWidth()) : 180.0;
+            const auto& p = stateTable().params[(std::size_t) plugui::stateIndex (kind, param)];
+            spec.name = trackName() + " - " + utf8 (info.name) + " - " + utf8 (p.name.c_str());
+            spec.defaultValue = p.maximum > p.minimum ? (double) (p.defaultValue - p.minimum) / (double) (p.maximum - p.minimum) : 0.0;
+            spec.pixelsForRange = item.type == Item::hslider ? juce::jmax (60.0, (double) rectOf (item).getWidth())
+                                  : item.type == Item::vslider ? juce::jmax (60.0, (double) rectOf (item).getHeight())
+                                                               : 180.0;
             if (item.steps > 0)
                 spec.interval = 1.0 / item.steps;
-            else if (p.maximum - p.minimum <= 8)
-                spec.interval = 1.0 / (p.maximum - p.minimum);
+            else if (p.maximum - p.minimum <= 16)
+                spec.interval = 1.0 / juce::jmax (1, p.maximum - p.minimum);
             spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
             spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
             return spec;
@@ -415,6 +415,11 @@ public:
                 break;
 
             case Item::value:
+                if (hasStyle (item, plugui::boxed)) // a read-out plate (FL's value boxes)
+                {
+                    g.setColour (colour::bg0);
+                    g.fillRoundedRectangle (r, radius::sm * s);
+                }
                 g.setColour (hot ? colour::accent : (fx.enabled ? colour::textPrimary : colour::textDisabled));
                 g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
                 g.drawFittedText (valueText (param, value), r.toNearestInt(),
@@ -559,7 +564,8 @@ public:
             {
                 const auto labels = plugui::optionLabels (item);
                 const auto texts = optionTexts (item);
-                const auto chosen = hasStyle (item, plugui::pageTabs) ? page : plugui::optionAt (item, value);
+                const auto chosen = hasStyle (item, plugui::pageTabs) ? (item.steps > 0 ? (page / item.steps) % juce::jmax (1, (int) labels.size()) : page)
+                                                                      : plugui::optionAt (item, value);
                 const auto vertical = isVertical (item);
                 const auto count = (float) juce::jmax (1, (int) labels.size());
                 const auto w = vertical ? r.getWidth() : r.getWidth() / count;
@@ -593,7 +599,7 @@ public:
 
             case Item::toggle:
             {
-                const auto on = value >= 0.5f;
+                const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted);
                 if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
                 {
                     g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : (hot ? colour::bg6 : colour::bg5));
@@ -720,6 +726,151 @@ public:
     // --- displays (graphs drawn from the parameters; FL's live analysers are not reproduced) -------------
 
     float param01 (const char* name) const { return valueOf (plugui::paramIndex (kind, name)); }
+
+    // LYNX Tune's live display: the read-out on the left (note, cents, Hz, target, correction meter), the last 8 s of
+    // sung (white) and corrected (accent) pitch on the right over the key's note lines
+    void paintPitchDisplay (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        auto noteText = [] (int n) { return juce::String (names[((n % 12) + 12) % 12]) + juce::String (n / 12 - 1); };
+
+        std::vector<PitchPoint> history = pitchHistory;
+        if (demoDisplays && history.empty()) // a sung phrase with vibrato and scoops, corrected toward the scale
+            for (std::size_t i = 0; i < pitchHistoryLength; ++i)
+            {
+                const auto t = (float) i / 30.0f;
+                const auto phrase = std::fmod (t, 2.7f);
+                const auto base = t < 2.7f ? 64.0f : t < 5.4f ? 67.0f : 69.0f;
+                const auto sung = phrase < 0.15f ? 0.0f : base - 0.6f * std::exp (-phrase * 5.0f) + 0.35f * std::sin (t * 20.0f) * juce::jmin (1.0f, phrase) + 0.18f;
+                const auto shift = sung > 0.0f ? (base - sung) * (1.0f - std::exp (-phrase * 12.0f)) : 0.0f;
+                history.push_back ({ sung, sung > 0.0f ? base : 0.0f, shift });
+            }
+
+        const auto last = history.empty() ? PitchPoint { 0.0f, 0.0f, 0.0f } : history.back();
+        const auto voiced = last.sung > 0.5f;
+        const auto ref = lynxtune::referenceHz (fx.params[(std::size_t) lynxtune::reference]);
+
+        // --- read-out
+        auto left = r.removeFromLeft (juce::jmin (176.0f * s, r.getWidth() * 0.34f)).reduced (8.0f * s, 6.0f * s);
+        const auto noteArea = left.removeFromTop (left.getHeight() * 0.42f);
+        g.setFont (font (juce::jmax (12.0f, 34.0f * s), true));
+        g.setColour (voiced ? colour::textPrimary : colour::textDisabled);
+        const auto nearest = (int) std::lround (last.sung);
+        g.drawText (voiced ? noteText (nearest) : juce::String ("--"), noteArea.withTrimmedRight (noteArea.getWidth() * 0.4f), juce::Justification::centredLeft);
+        g.setFont (font (juce::jmax (8.0f, 12.0f * s)));
+        g.setColour (colour::textSecondary);
+        if (voiced)
+        {
+            const auto cents = (int) std::lround ((last.sung - (float) nearest) * 100.0f);
+            const auto hzNow = ref * std::exp2 ((last.sung - 69.0f) / 12.0f);
+            const auto side = noteArea.withTrimmedLeft (noteArea.getWidth() * 0.6f);
+            g.drawText ((cents > 0 ? "+" : "") + juce::String (cents) + " c", side.withHeight (side.getHeight() * 0.5f), juce::Justification::bottomLeft);
+            g.drawText (juce::String (hzNow, 1) + " Hz", side.withTrimmedTop (side.getHeight() * 0.5f), juce::Justification::topLeft);
+        }
+        auto row = [&] (const juce::String& caption, const juce::String& value, juce::Colour c) {
+            auto line = left.removeFromTop (juce::jmax (12.0f, 18.0f * s));
+            g.setColour (colour::textDisabled);
+            g.setFont (font (juce::jmax (7.0f, 10.0f * s), true));
+            g.drawText (caption, line, juce::Justification::centredLeft);
+            g.setColour (c);
+            g.setFont (font (juce::jmax (8.0f, 12.0f * s), true));
+            g.drawText (value, line, juce::Justification::centredRight);
+        };
+        row (caps (tr ("Target")), voiced && last.target > 0.5f ? noteText ((int) std::lround (last.target)) : juce::String ("--"), colour::accent);
+        const auto corrCents = (int) std::lround (last.shift * 100.0f);
+        row (caps (tr ("Correction")), voiced ? (corrCents > 0 ? "+" : "") + juce::String (corrCents) + " c" : juce::String ("--"), colour::textPrimary);
+        // the correction meter: ±100 cents from the centre
+        auto bar = left.removeFromTop (juce::jmax (6.0f, 9.0f * s)).reduced (0.0f, 1.0f);
+        g.setColour (colour::bg3);
+        g.fillRoundedRectangle (bar, radius::sm);
+        g.setColour (colour::gridBar);
+        g.drawVerticalLine ((int) bar.getCentreX(), bar.getY() - 2.0f, bar.getBottom() + 2.0f);
+        if (voiced)
+        {
+            const auto amount = juce::jlimit (-1.0f, 1.0f, last.shift);
+            const auto x0 = bar.getCentreX(), x1 = bar.getCentreX() + bar.getWidth() * 0.5f * amount;
+            g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.9f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (juce::jmin (x0, x1), bar.getY(), std::abs (x1 - x0) + 1.0f, bar.getHeight()), radius::sm);
+        }
+
+        // --- graph
+        auto graph = r.reduced (6.0f * s, 6.0f * s);
+        g.setColour (colour::bg1);
+        g.fillRoundedRectangle (graph, radius::sm * s);
+        // vertical range: ±7 semitones around the recent pitch (follows the voice)
+        float centre = 0.0f;
+        int count = 0;
+        for (auto i = history.size() > 60 ? history.size() - 60 : 0; i < history.size(); ++i)
+            if (history[i].sung > 0.5f) { centre += history[i].sung; ++count; }
+        centre = count > 0 ? std::round (centre / (float) count) : (displayCentre > 0.0f ? displayCentre : 60.0f);
+        displayCentre = displayCentre <= 0.0f ? centre : displayCentre + 0.15f * (centre - displayCentre);
+        const auto span = 7.5f;
+        auto yFor = [&] (float note) { return graph.getCentreY() - (note - displayCentre) / span * graph.getHeight() * 0.5f; };
+        // note lanes: the scale's notes brighter, C labelled
+        const auto mask = vocal::scaleMask ((vocal::Scale) lynxtune::scaleIndex (fx.params[(std::size_t) lynxtune::scale]),
+                                            lynxtune::keyIndex (fx.params[(std::size_t) lynxtune::key]), 0xfff);
+        g.saveState();
+        g.reduceClipRegion (graph.toNearestInt());
+        g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+        for (int n = (int) std::floor (displayCentre - span) - 1; n <= (int) std::ceil (displayCentre + span) + 1; ++n)
+        {
+            const auto inScale = ((mask >> (((n % 12) + 12) % 12)) & 1) != 0;
+            const auto on = fx.params[(std::size_t) (lynxtune::noteC + ((n % 12) + 12) % 12)] >= 0.5f;
+            const auto y = yFor ((float) n);
+            g.setColour (inScale && on ? colour::gridBar : colour::gridStep);
+            g.drawHorizontalLine ((int) y, graph.getX(), graph.getRight());
+            if (inScale && on)
+            {
+                g.setColour (colour::textDisabled);
+                g.drawText (noteText (n), juce::Rectangle<float> (graph.getX() + 3.0f, y - 7.0f, 30.0f * s, 12.0f), juce::Justification::centredLeft);
+            }
+        }
+        // the curves, newest on the right
+        const auto stepX = graph.getWidth() / (float) (pitchHistoryLength - 1);
+        const auto x0 = graph.getRight() - stepX * (float) (history.size() - 1);
+        for (int which = 0; which < 2; ++which)
+        {
+            juce::Path p;
+            bool open = false;
+            for (std::size_t i = 0; i < history.size(); ++i)
+            {
+                const auto& h = history[i];
+                if (h.sung <= 0.5f) { open = false; continue; }
+                const auto x = x0 + stepX * (float) i;
+                const auto y = yFor (which == 0 ? h.sung : h.sung + h.shift);
+                if (! open) p.startNewSubPath (x, y);
+                else p.lineTo (x, y);
+                open = true;
+            }
+            if (which == 0)
+            {
+                g.setColour (colour::textSecondary.withAlpha (0.8f));
+                g.strokePath (p, juce::PathStrokeType (1.2f * s));
+            }
+            else
+            {
+                g.setColour (colour::accent.withAlpha (0.25f));
+                g.strokePath (p, juce::PathStrokeType (5.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                g.setColour (fx.enabled ? colour::accent : colour::textDisabled);
+                g.strokePath (p, juce::PathStrokeType (2.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+        }
+        g.restoreState();
+        if (history.empty() || std::none_of (history.begin(), history.end(), [] (const PitchPoint& h) { return h.sung > 0.5f; }))
+        {
+            g.setColour (colour::textDisabled);
+            g.setFont (font (juce::jmax (8.0f, 12.0f * s)));
+            g.drawText (tr ("Play a voice or an instrument through the insert to see its pitch"), graph, juce::Justification::centred, true);
+        }
+        // legend
+        g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+        g.setColour (colour::textSecondary);
+        g.drawText (tr ("input"), graph.removeFromTop (14.0f * s).removeFromRight (120.0f * s).withTrimmedRight (6.0f), juce::Justification::centredLeft);
+        g.setColour (colour::accent);
+        g.drawText (tr ("corrected"), graph.withHeight (14.0f * s).withY (graph.getY() - 14.0f * s).removeFromRight (64.0f * s), juce::Justification::centredLeft);
+    }
 
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
     float liveMeter (int output) const
@@ -1053,6 +1204,11 @@ public:
                 return 0.6f + bump - (x > cutoff ? (x - cutoff) * 2.2f : 0.0f);
             }, inner, true);
         }
+        else if (id == "pitchgraph") // LYNX Tune: detected pitch, target, correction and the scrolling pitch graph
+        {
+            paintPitchDisplay (g, r, fx);
+            return;
+        }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
         {
             const auto amount = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps));
@@ -1111,6 +1267,9 @@ public:
                 return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, mixsuite::ember::shape (style, (x * 2.0f - 1.0f) * drive) * norm);
             }, inner, false);
         }
+        else if (paintFxDisplay (g, id, item, inner, fx))
+        {
+        }
         else // a plain well with the plugin's name (FL's scopes / animations are not reproduced)
         {
             g.setColour (colour::bg2);
@@ -1125,6 +1284,8 @@ public:
             g.drawText (caps (tr (item.label)), inner.withHeight (12.0f * s), juce::Justification::topLeft);
         }
     }
+
+#include "ui/PluginEditorsFx.inc"
 
     // --- Gross Beat: the selected slots' envelopes ------------------------------------------------------
 
@@ -1520,7 +1681,11 @@ public:
         {
             const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
             const auto along = isVertical (item) ? (e.position.y - r.getY()) / r.getHeight() : (e.position.x - r.getX()) / r.getWidth();
-            page = juce::jlimit (0, n - 1, (int) (along * (float) n));
+            const auto o = juce::jlimit (0, n - 1, (int) (along * (float) n));
+            if (item.steps > 0) // one digit of the page (EQUO: target ×1, bank ×3)
+                page += (o - (page / item.steps) % n) * item.steps;
+            else
+                page = o;
             hoverItem = -1;
             repaint();
             return;
@@ -1545,6 +1710,13 @@ public:
             dragItem = index;
             xyDragging = true;
             xyMouse (e, item);
+            return;
+        }
+        if (isBars (item))
+        {
+            dragItem = index;
+            barsDragging = true;
+            barsMouse (e, item, true);
             return;
         }
         if (item.type == Item::display) // the EQ graph
@@ -1656,6 +1828,11 @@ public:
             xyMouse (e, activeLayout().items[(std::size_t) dragItem]);
             return;
         }
+        if (barsDragging && dragItem >= 0)
+        {
+            barsMouse (e, activeLayout().items[(std::size_t) dragItem], false);
+            return;
+        }
         if (dragItem < 0 || ! drag.isActive())
             return;
         const auto& item = activeLayout().items[(std::size_t) dragItem];
@@ -1676,9 +1853,9 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
-        if (xyDragging || sgDragging)
+        if (xyDragging || sgDragging || barsDragging)
         {
-            xyDragging = sgDragging = false;
+            xyDragging = sgDragging = barsDragging = false;
             dragItem = -1;
             ui::hideValueTip();
         }
@@ -1864,21 +2041,19 @@ public:
         menu.addItem (tr ("Reset to defaults"), [this] {
             const auto& info = effectInfo (kind);
             presetName = {};
+            auto bytes = current() != nullptr ? current()->state : std::vector<std::uint8_t> {};
             if (stateBacked())
             {
-                if (const auto* fx = current())
-                {
-                    auto bytes = fx->state;
-                    for (int p = 0; p < plugui::paramCount (kind); ++p)
-                        bytes = maximusfx::withStateParam (bytes, p, maximusfx::stateParams()[(std::size_t) p].defaultValue);
-                    engine.editSong ([t = track, s = slot, bytes] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) s].state = bytes; });
-                }
-                return;
+                const auto& table = stateTable();
+                for (int p = 0; p < (int) table.params.size(); ++p)
+                    bytes = table.with (bytes, p, table.params[(std::size_t) p].defaultValue);
             }
-            engine.editSong ([t = track, s = slot, info] (Song& song) {
-                auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) s].params;
-                for (std::size_t i = 0; i < info.params.size() && i < params.size(); ++i)
-                    params[i] = info.params[i].defaultValue;
+            engine.editSong ([t = track, s = slot, info, bytes, state = stateBacked()] (Song& song) {
+                auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) s];
+                for (std::size_t i = 0; i < info.params.size() && i < fx.params.size(); ++i)
+                    fx.params[i] = info.params[i].defaultValue;
+                if (state)
+                    fx.state = bytes;
             });
         });
         // switches that FL keeps out of the panel (in its own menus): on / off here
@@ -1909,8 +2084,18 @@ private:
     void timerCallback() override
     {
         for (const auto& item : activeLayout().items)
+        {
+            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "pitchgraph") == 0 && visible (item))
+            {
+                // LYNX Tune's pitch history (30 points a second)
+                pitchHistory.push_back ({ liveMeter (0) * 127.0f, liveMeter (1) * 127.0f, (liveMeter (2) - 0.5f) * 4.0f });
+                if (pitchHistory.size() > pitchHistoryLength)
+                    pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
+                repaint (rectOf (item).getSmallestIntegerContainer());
+            }
             if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0 && visible (item))
                 repaint (rectOf (item).getSmallestIntegerContainer());
+        }
     }
 
     AudioEngine& engine;
@@ -1923,6 +2108,10 @@ private:
     juce::String presetName;
     int eqSelected = -1;
     bool eqDragging = false, xyDragging = false, sgDragging = false;
+    struct PitchPoint { float sung, target, shift; }; // MIDI note numbers (0 = none) and the applied correction in semitones
+    static constexpr std::size_t pitchHistoryLength = 240; // 8 s
+    std::vector<PitchPoint> pitchHistory;
+    float displayCentre = 0.0f;
     float sgStart = 0.0f;
     std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)
     juce::Point<float> eqDragOffset;
@@ -1972,6 +2161,11 @@ void NativeEffectWindow::closeButtonPressed()
 }
 } // namespace
 
+void setNativeEditorDemo (bool on)
+{
+    demoDisplays = on;
+}
+
 std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, int track, int slot, float scale, int page)
 {
     return std::make_unique<NativeEffectEditor> (engine, track, slot, scale, page);
@@ -1998,6 +2192,11 @@ void open (AudioEngine& engine, int track, int slot)
         ParametricEqWindows::open (engine, track, slot);
         return;
     }
+    if (kind == EffectKind::facetEq) // its own editor (analyser, nodes, dynamics; REA round 103)
+    {
+        FacetEqWindows::open (engine, track, slot);
+        return;
+    }
 
     auto& open = windows();
     const auto key = std::make_pair (track, slot);
@@ -2021,6 +2220,7 @@ void open (AudioEngine& engine, int track, int slot)
 void closeAll()
 {
     windows().clear();
+    FacetEqWindows::closeAll();
 }
 } // namespace NativeEffectWindows
 } // namespace lynx

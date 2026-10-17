@@ -31,6 +31,7 @@ add_library(lynx_core STATIC
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
     src/core/PluginLayout.cpp
+    src/core/StateParams.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp
@@ -93,6 +94,7 @@ add_library(lynx_core STATIC
     src/core/MixSuite.cpp
     src/core/VocalPitch.cpp
     src/core/LynxTune.cpp
+    src/core/LynxVerbs.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
@@ -222,6 +224,7 @@ if(LYNX_BUILD_APP)
         src/ui/PluginWindow.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
+        src/ui/FacetEqEditor.cpp
         src/ui/PluginEditors.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp

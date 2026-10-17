@@ -48,6 +48,7 @@ enum : std::uint16_t
     boxed = 1 << 8,       // label: drawn as a header box (FL's caption plates); section: a plain cell without a title strip
     alignLeft = 1 << 9,   // value / label text aligned left
     raised = 1 << 10,     // section: a lighter inset panel inside another one
+    inverted = 1 << 11,   // toggle: lit while the value is off (FL's white "enabled" LEDs over mute switches)
 };
 
 struct LayoutItem
@@ -100,12 +101,18 @@ const std::vector<InstrumentKind>& instrumentLayoutKinds();
 // Soundgoodizer slots (EffectKind::maximus with the Soundgoodizer build): its own page, edited in the slot's state.
 const Layout& soundgoodizerLayout();
 
-// Parameter index of `name` in effectInfo(kind) (−1 = no such parameter). For kinds whose controls live in the slot's
-// state (usesStateParams: Maximus), the index of core/MaximusFx.h's stateParams instead.
+// Parameter index of `name`: first the effect's own parameters (effectInfo (kind)), then, for kinds with controls in
+// the slot's state (core/StateParams.h: Maximus, Fruity Delay Bank, Multiband Delay, EQUO, Fruity Convolver), those
+// controls numbered on after them (−1 = no such parameter).
 int paramIndex (EffectKind kind, const char* name);
 bool usesStateParams (EffectKind kind) noexcept;
 int paramCount (EffectKind kind);
 const char* paramName (EffectKind kind, int index);
+// The state control of parameter `param` (index into stateparams::tableFor (kind)), −1 = a plain parameter
+int stateIndex (EffectKind kind, int param);
+// A state control's value over its raw range (0…1) in a slot state, and the raw value of a 0…1 position
+float stateValue01 (EffectKind kind, int param, const std::vector<std::uint8_t>& state);
+int stateRaw (EffectKind kind, int param, float value01);
 
 // Options of a radio / tabs item and the value each one sets.
 std::vector<std::string> optionLabels (const LayoutItem& item);
@@ -116,5 +123,5 @@ int optionAt (const LayoutItem& item, float value);
 bool isValueControl (Item type) noexcept;
 
 // Is the item shown on `page` with these parameter values? (pages and the conditions on other parameters)
-bool isShown (EffectKind kind, const LayoutItem& item, int page, const EffectParams& params);
+bool isShown (EffectKind kind, const LayoutItem& item, int page, const EffectParams& params, const std::vector<std::uint8_t>* state = nullptr);
 } // namespace lynx::plugui
