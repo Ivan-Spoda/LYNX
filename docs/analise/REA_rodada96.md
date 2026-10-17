@@ -129,17 +129,16 @@ transistor x/(1 + x⁴)^¼, fuzz (near-hard positive clip at 0.6, tanh(1.5x)/1.5
 The editor windows use the plugin layout system of round 93 (`src/core/PluginLayout.*`, generated grids until the
 arrangements below land); pt-BR strings for every caption.
 
+## 5. Verification
+- build-local with the FL Data dir after merging main 90f0cce: 1169845 checks, 0 failures.
+- `--rtstress` (Windows build, Ryzen 5 3600, WASAPI 48 kHz / 480 samples), demo project with all five effects at
+  their defaults on mixer tracks 1-8 (40 instances), 20 s: 2000 callbacks, 0 over the deadline, 0 late device calls,
+  average load 13.0 %, max 34.8 %; heaviest unit an Ember Saturator at 2.2 % (peak 0.1 ms). [TEST]
+
 ## Where I stopped / next steps
-- Done: the five engines, tests (all measurable responses above), registry / project file / mixer list / build
-  lists, docs/PLUGINS.md section, website plugin list (status "LYNX original").
-- 2026-10-17: merged origin/main (90f0cce) into the branch. The first build-local after the merge aborted in the
-  compiler with no message (zig cache likely corrupted by the power loss); ~/.cache/zig-vocal96 was deleted and a
-  rebuild started, then stopped on the user's request. Not re-verified after the merge yet.
-- Stress project with all five effects (defaults) on mixer tracks 1-8: C:/Users/kauan/lynx-test/vocal96/Mix96.lynx,
-  for `LYNX.exe --rtstress Mix96.lynx rt.txt 30` (not run yet).
-- Next: build-local with the FL Data dir (0 failures), Windows build, --rtstress on Mix96.lynx, then
-  tmp/coord/land.sh vocal96 (batch 1: engines). Batch 2: editor arrangements (sections, read-outs, GR meter, pt-BR
-  captions) need round 93's layout system (src/core/PluginLayout.*, feature/plugui93), still not on main. Batch 1 adds
-  no tr() strings (engines live in src/core; effect parameter names are not translated on main).
-- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed yet: register
-  the suite there / fit to measurements once they land.
+- Batch 1 (engines, tests, docs, website list) landed via tmp/coord/land.sh vocal96.
+- Batch 2 (not done): editor arrangements (sections, value read-outs, GR meter, pt-BR captions) on round 93's layout
+  system (src/core/PluginLayout.*, feature/plugui93), which is not on main yet; until then the five effects use
+  LYNX's generic knob editor. Batch 1 adds no tr() strings (engines live in src/core).
+- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed: register the
+  suite there / fit de-esser and saturator to the measurements once they land.
