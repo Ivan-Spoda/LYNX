@@ -89,6 +89,7 @@ struct Channel
     std::string pluginName;      // internal name of the generator (e.g. "FLEX")
     std::string samplePath;
     int mixerTrack = -1;
+    bool enabled = true;         // 0x00: the channel's enabled switch in the Channel Rack (false: its notes don't play)
     std::vector<AutomationPoint> automation; // channels of type automationClip
 
     // event 0xDB (channel "levels"): pan 0..12800 (6400 = center), volume 0..12800
@@ -274,7 +275,7 @@ struct MixerInsert
 
     struct Slot
     {
-        int index = 0;      // 0..9
+        int index = 0;      // 0..9 (0x62; files without it, FL <= 11: the slot field of the plugin's 0xD4)
         std::string plugin; // internal name (0xC9), e.g. "Fruity Limiter"
         std::vector<std::uint8_t> state; // the plugin's 0xD5 (e.g. Fruity Wrapper blob)
     };
