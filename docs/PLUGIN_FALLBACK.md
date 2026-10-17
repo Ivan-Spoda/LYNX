@@ -75,7 +75,7 @@ map = xml:Time -> Time | pwl 0 0 0.5 0.2 1 1    # a piecewise-linear law (x asce
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
 attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
-active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
+active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` in lower case (the slot's dry/wet; `Mix` names a parameter) or a parameter name of
 the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter; `steps` and `pwl` give
 enumerations and non-linear laws.
 

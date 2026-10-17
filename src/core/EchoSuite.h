@@ -81,7 +81,7 @@ enum Param { mix, shift, delay, sync, feedback, lowCut, highCut, stereo, paramCo
 double shiftHz (float v) noexcept;   // ±1000 Hz, |x|^5
 double delayMs (float v) noexcept;   // 0.01 .. 1000 ms (centre 100 ms)
 float delayValue (double ms) noexcept;
-int syncIndex (float v) noexcept;    // 0 off, 1..8 straight 1/64..2/1, 9..15 dotted 1/64..1/1, 16..23 triplet 1/64..2/1
+int syncIndex (float v) noexcept;    // floor (23 v): 0 off, 1..8 straight 1/64..2/1, 9..15 dotted 1/64..1/1, 16..23 triplet 1/64..2/1
 double syncBeats (int index) noexcept; // quarter notes (0 for "off")
 double loopGain (float v) noexcept;  // 1.5 × feedback
 double lowCutHz (float v) noexcept;  // 20 .. 3000

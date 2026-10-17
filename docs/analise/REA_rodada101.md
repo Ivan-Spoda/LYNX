@@ -142,8 +142,9 @@ at ≈ 0.5 × the shown frequency is within 1.5 dB].
   1100 …); mono: both the same.
 - Filters in the echo path: LowCut = 1st-order high-pass (200 Hz: −2.0 dB at 250 Hz, −5.4 at 125, −10.3 at 63);
   HighCut = 1st-order low-pass (5000 Hz: −2.1 at 4k, −5.8 at 8k).
-- **Sync** (120 BPM), index = round(23v): 0 off (ms), 1–8 straight 1/64 … 2/1, 9–15 dotted 1/64. … 1/1., 16–23
-  triplets 1/64T … 2/1T (e.g. index 5 = 1/8 = 250 ms, 13 = 1/4. = 750 ms, 20 = 1/4T = 333.3 ms).
+- **Sync** (120 BPM), index = floor(23v) computed in float (k/23 lands on k or k − 1): 0 off (ms), 1–8 straight
+  1/64 … 2/1, 9–15 dotted 1/64. … 1/1., 16–23 triplets 1/64T … 2/1T (index 4 = 1/8 = 250 ms, 13 = 1/4. = 750 ms,
+  20 = 1/4T = 333.3 ms).
 
 ## 5. ValhallaSpaceModulator [EXEC]
 
@@ -171,11 +172,53 @@ Impulse train (one per 50 ms), wet only, rate 0.5 Hz, depth 10 ms, manual 0:
 - Modulation (Depth = master): DetuneDepth 100 → slow random ±, 18 c rms at ≈ 0.3 Hz, L and R opposite; VibratoDepth
   100 → 6 Hz sine (VibratoRate), 123 c rms; both linear in Depth.
 
-## 7. LYNX equivalents
+## 7. LYNX equivalents (src/core/EchoSuite.{h,cpp})
 
-(implementation in progress — see "Where I stopped")
+Four new `EffectKind`s (appended: `echoform`, `spiralEcho`, `orbit`, `latticeMod`), on every insert, with LYNX-style
+panels (`PluginLayout.cpp`: echo-train / tap-layout / spiral graphs in `PluginEditors.cpp`), pt-BR strings, and
+substitute entries that translate the saved XML (`PluginSubstitutes.cpp`). Delay lines are allocated in `prepare()`
+(Echoform: 20.6 s per side), nothing allocates in `process()`, latency 0. The parameter laws are the measured ones
+(§2), so the substitutes' maps are one to one; enumerations that differ use the new `| steps …` map law (ValhallaDelay's
+17 modes → Echoform's 12 characters), and `| pwl …` is available for non-linear laws.
+
+DSP (our own, from the literature): 4-point Hermite fractional delay lines; one-pole and 8th-order Butterworth
+(cookbook sections) filters; tanh shapers with a bias for even harmonics, fitted to §3.3's harmonic levels
+(tape k 0.95 / b 0.11, hi-fi 0.55 / 0.17, analog 1.525 / 0, digital 0.375 / 0); the 90° allpass pair (Niemitalo's
+published IIR) for single-sideband shifting; a two-tap crossfaded delay-line pitch shifter (50 ms window, its half-window
+delay taken off the echo time); reversed grains read backwards with Hann crossfades; Schroeder allpass diffusers;
+cosine-interpolated random LFOs (wow 4 Hz segments, flutter 18 + 26 Hz) and sine LFOs.
+
+LYNX vs the measurements [EXEC on both sides, same scripts; LYNX through a dev driver]:
+
+| quantity | reference | LYNX |
+|---|---|---|
+| Echoform echo at 100 ms (digital) | 4811 samples | 4806 (+6 group delay of the 8 kHz filter) |
+| sync 1/4 · 1/4. · 1/4T at 120 BPM | 24011 · 36012 · 16011 | 24007 · 36007 · 16007 |
+| loop gain per pass, feedback 20 / 50 / 80 / 100 % | −14.2 / −6.3 / −2.2 / −0.3 dB | −14.0 / −6.1 / −2.0 / −0.05 dB |
+| mix 25 % / 50 % (dry · wet) | −0.69 · −8.74 / −3.01 · −3.41 dB | −0.69 · −8.45 / −3.01 · −3.12 dB |
+| tape 100 ms at 31 Hz / 1 k / 8 k / 20 k | −6.8 / −2.2 / −6.2 / −16.7 dB | −7.3 / −2.5 / −6.2 / −15.3 dB (after the gain fix) |
+| bucket at 1.5 k / 2 k / 3 k | −2.3 / −12 / −57 dB | ≈ −4 / −13.8 / −63 dB |
+| digital at 8 k / 10 k | −5.8 / −34 dB | −4.8 / −22 dB |
+| wow · flutter · both 50 % (c rms) | 14 · 14 · 8.5 | 12.5–16.5 · 14–15 · 10 |
+| LFO 2 Hz at 100 % / 50 % depth (c, fundamental) | 127 / 32 | 125 / 31 |
+| shifter +31.25 Hz; detune +1.01 Hz | 1031.25; L +1.01 R −1.01 | 1031.25; L +1.01 R −1.01 |
+| pitch +6 st; detune +50 c | 1414.4 Hz; L 1029.3 R 971.5 | 1414.2 Hz; L 1029.3 R 971.5 |
+| Spiral Echo loop gain 10 / 25 / 50 / 60 % | −16.4 / −8.5 / −2.5 / −1.0 dB | −16.6 / −8.6 / −2.6 / −1.0 dB |
+| Spiral Echo shift +100 Hz, stereo, 4 repeats | L 1100 1200 1300 1400, R 900 1000 1100 1200 | the same |
+| Spiral Echo filters 200 Hz / 5 kHz at 31 Hz … 16 kHz | −16.0 −10.3 −5.4 −2.0 −0.6 −0.2 −0.6 −2.1 −5.8 −9.3 −12.6 | −16.2 −10.5 −5.6 −2.3 −0.8 −0.4 −0.8 −2.2 −5.2 −7.5 −9.0 |
+| Orbit: mix 50 % dry; feedback −50 % | −3.0 dB; second echo × −0.22 | −3.0 dB; × −0.25 |
+| Lattice taps (N = 2, 4, 16), gain | 75/100, 62.5…100, 53.1…100 ms; −1/√N | same positions; −1/√N |
+| Lattice feedback 50 % | −6.02 dB/pass | −6.06 dB/pass |
+
+Stereo in Spiral Echo follows the measurement: the loop always shifts upwards by the shift, and the right output takes
+each repeat with the opposite shift (so it trails the left by two shifts). Known differences (by design or not
+measured): Orbit's
+voice shapes are our own designs inside the measured delay ranges; Lattice's tap polarity alternation (type 9.5) and
+`type` ≥ 10, the reference's diffusion network, ducking curve, "era" voicing and the duck variants are not modelled.
 
 ## Where I stopped
 
-- Measurements of §3–§6 done (scripts `tmp/r101/py`, data `tmp/r101/data`). Next: LYNX effects (Echoform, Spiral
-  Echo, Orbit Modulator, Lattice Mod), substitutes with parameter translation, tests, PLUGINS.md.
+- Done: measurements §1–§6, Echoform / Spiral Echo / Orbit / Lattice Mod, substitutes with translation, tests
+  (`tests/EchoSuiteTests101.inc`), PLUGINS.md / PLUGIN_FALLBACK.md / website lists.
+- Next: land (build-local + Windows build + selftest); later: Orbit voice shapes against
+  finer captures, Lattice polarity patterns.

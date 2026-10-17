@@ -540,7 +540,7 @@ bool parseMap (const std::string& text, EffectKind kind, SubstituteParamMap& out
     else
         return false;
 
-    if (lowerAscii (target) == "mix")
+    if (target == "mix") // lower-case: the slot's dry/wet; any other spelling names a parameter (Echoform's "Mix")
         out.toSlotMix = true;
     else if ((out.target = paramNamed (kind, target)) < 0)
         return false;

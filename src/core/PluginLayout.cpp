@@ -1680,7 +1680,7 @@ Layout spiralLayout()
     v.push_back (section (4, 4, 200, 228, TR_NOOP ("Spiral")));
     v.push_back (display (12, 26, 184, 116, "spiral"));
     v.push_back (tabs (12, 150, 184, 22, "Stereo", TR_NOOP ("Mono|Stereo")));
-    v.push_back (dial (104, 196, 30, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (104, 188, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (section (208, 4, 308, 228, TR_NOOP ("Echo")));
     v.push_back (dial (262, 76, 62, "Shift", TR_NOOP ("Shift"), (std::uint16_t) (big | bipolar)));
     v.push_back (dial (366, 64, 40, "Delay", TR_NOOP ("Delay")));
@@ -1733,8 +1733,8 @@ Layout latticeLayout()
     v.push_back (dial (96, 250, 28, "Slope", TR_NOOP ("Slope"), bipolar));
     v.push_back (dial (152, 250, 28, "Skew", TR_NOOP ("Skew"), bipolar));
     v.push_back (dial (208, 250, 28, "Random", TR_NOOP ("Random")));
-    v.push_back (dial (40, 300, 22, "Tap gain", TR_NOOP ("Tap gain"), (std::uint16_t) (bipolar | noCaption)));
-    v.push_back (toggle (80, 292, 90, 20, "Half speed", TR_NOOP ("Half speed")));
+    v.push_back (dial (40, 306, 22, "Tap gain", TR_NOOP ("Tap gain"), (std::uint16_t) (bipolar | noCaption)));
+    v.push_back (toggle (80, 298, 90, 20, "Half speed", TR_NOOP ("Half speed")));
 
     // modulation
     v.push_back (section (272, 4, 196, 322, TR_NOOP ("Modulation")));

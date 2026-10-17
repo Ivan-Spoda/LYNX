@@ -211,12 +211,20 @@ struct Shifter
     double phase = 0.0;
     float process (float x, double hz, double sr) noexcept
     {
+        float up = 0.0f, down = 0.0f;
+        both (x, hz, sr, up, down);
+        return up;
+    }
+    // the input shifted by +hz and by −hz (the two sidebands of the same analytic signal)
+    void both (float x, double hz, double sr, float& up, float& down) noexcept
+    {
         float re = 0.0f, im = 0.0f;
         h.analytic (x, re, im);
         const auto c = (float) std::cos (twoPi * phase), s = (float) std::sin (twoPi * phase);
         phase += hz / sr;
         phase -= std::floor (phase);
-        return re * c + im * s;
+        up = re * c + im * s;
+        down = re * c - im * s;
     }
     void reset() noexcept
     {
@@ -827,7 +835,7 @@ namespace spiral
 double shiftHz (float v) noexcept { return 1000.0 * signedPow (bipolar (v), 5.0); }
 double delayMs (float v) noexcept { return 0.01 + 999.99 * std::pow ((double) clamp01 (v), 3.322); }
 float delayValue (double ms) noexcept { return (float) std::pow (std::clamp ((ms - 0.01) / 999.99, 0.0, 1.0), 1.0 / 3.322); }
-int syncIndex (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 23.0f), 0, 23); }
+int syncIndex (float v) noexcept { return std::clamp ((int) std::floor (clamp01 (v) * 23.0f), 0, 23); } // as measured: floor (23 v) in float
 
 double syncBeats (int index) noexcept
 {
@@ -893,10 +901,13 @@ public:
             {
                 auto& s = ch[(std::size_t) c];
                 const auto x = *io[c];
+                // every pass around the loop shifts by +hz; in stereo the right output is the same repeat taken
+                // with the opposite shift (measured: L 1100 1200 1300 …, R 900 1000 1100 … for +100 Hz)
                 const auto y = s.line.at (d);
-                const auto z = s.shifter.process (s.hi.lp (s.lo.hp (y)), c == 1 && stereoMode ? -hz : hz, sr);
-                s.line.push (x + g * std::tanh (z)); // the loop is bounded by a soft limiter
-                *io[c] = dry * x + wet * z;
+                float up = 0.0f, down = 0.0f;
+                s.shifter.both (s.hi.lp (s.lo.hp (y)), hz, sr, up, down);
+                s.line.push (x + g * std::tanh (up)); // the loop is bounded by a soft limiter
+                *io[c] = dry * x + wet * (c == 1 && stereoMode ? down : up);
             }
         }
     }

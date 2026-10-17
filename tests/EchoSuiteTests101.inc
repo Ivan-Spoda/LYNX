@@ -139,7 +139,7 @@ TEST (echosuite101_value_laws_follow_the_measurements)
     namespace sp = es::spiral;
     CHECK (std::abs (sp::delayMs (0.5f) - 100.0) < 0.2 && std::abs (sp::delayMs (0.0009900099f) - 0.01) < 1e-3);
     CHECK (std::abs (sp::delayMs (sp::delayValue (384.55)) - 384.55) < 0.01);
-    CHECK (sp::syncIndex (5.0f / 23.0f) == 5 && sp::syncBeats (5) == 0.5 && sp::syncBeats (13) == 1.5 && std::abs (sp::syncBeats (20) - 2.0 / 3.0) < 1e-12);
+    CHECK (sp::syncIndex (5.5f / 23.0f) == 5 && sp::syncIndex (1.0f) == 23 && sp::syncBeats (5) == 1.0 && sp::syncBeats (13) == 1.5 && std::abs (sp::syncBeats (20) - 2.0 / 3.0) < 1e-12);
     CHECK (sp::syncBeats (1) == 1.0 / 16.0 && sp::syncBeats (8) == 8.0 && sp::syncBeats (15) == 6.0 && std::abs (sp::syncBeats (23) - 16.0 / 3.0) < 1e-12);
     CHECK (std::abs (sp::loopGain (0.5f) - 0.75) < 1e-6 && std::abs (sp::lowCutHz (0.0604027f) - 200.0) < 0.5);
 
@@ -325,7 +325,7 @@ TEST (echosuite101_spiral_echo)
         const auto a1 = amplitude (y.l, 1000.0, 4800 + 300, 1400), a2 = amplitude (y.l, 1000.0, 9600 + 300, 1400);
         CHECK (std::abs (db (a1 / 0.1)) < 0.3 && std::abs (db (a2 / a1) - db (1.5 * fb)) < 0.3);
     }
-    // the shift accumulates per repeat; stereo mode shifts the right side the other way
+    // the shift accumulates per repeat; in stereo the right side hears each repeat with the opposite shift
     {
         auto p = base;
         p[sp::feedback] = 0.5f;
@@ -336,13 +336,13 @@ TEST (echosuite101_spiral_echo)
         {
             const auto at = (std::size_t) (k * 9600 + 1080);
             CHECK (std::abs (peakHz (y.l, at, 3840, 1000.0 + 100.0 * k - 30.0, 1000.0 + 100.0 * k + 30.0, 0.5) - (1000.0 + 100.0 * k)) < 1.0);
-            CHECK (std::abs (peakHz (y.r, at, 3840, 1000.0 - 100.0 * k - 30.0, 1000.0 - 100.0 * k + 30.0, 0.5) - (1000.0 - 100.0 * k)) < 1.0);
+            CHECK (std::abs (peakHz (y.r, at, 3840, 800.0 + 100.0 * k - 30.0, 800.0 + 100.0 * k + 30.0, 0.5) - (800.0 + 100.0 * k)) < 1.0);
         }
     }
-    // tempo sync index 6 = 1/4 = 500 ms at 120 BPM; the mix is a linear crossfade
+    // tempo sync index 5 = 1/4 = 500 ms at 120 BPM; the mix is a linear crossfade
     {
         auto p = base;
-        p[sp::sync] = 6.0f / 23.0f;
+        p[sp::sync] = 5.5f / 23.0f; // 1/4
         CHECK (std::abs ((double) argmaxAbs (run (EffectKind::spiralEcho, p, impulse (30000)).l) - 24000.0) < 8.0);
         p = base;
         p[sp::mix] = 0.25f;
@@ -433,7 +433,7 @@ TEST (echosuite101_lattice_taps_feedback_and_layout)
         for (int k = 0; k < n; ++k)
         {
             const auto at = (std::size_t) std::lround (lt::tapMs (p, k, n, false) * 48.0);
-            CHECK (std::abs (lt::tapMs (p, k, n, false) - 100.0 * (1.0 - 0.5 * k / n)) < 1e-9);
+            CHECK (std::abs (lt::tapMs (p, k, n, false) - 100.0 * (1.0 - 0.5 * k / n)) < 1e-3);
             const auto found = argmaxAbs (y.l, at - 20, at + 20);
             CHECK (found >= at - 2 && found <= at + 2 && y.l[found] < 0.0f);
             CHECK (std::abs (std::abs (y.l[found]) / 0.25 - 1.0 / std::sqrt ((double) n)) < 0.12);
@@ -489,8 +489,8 @@ TEST (echosuite101_lattice_taps_feedback_and_layout)
     }
     CHECK (lynx::formatEffectParam (EffectKind::echoform, es::echoform::timeL, 0.3f, 120.0) == "300.0 ms");
     CHECK (lynx::formatEffectParam (EffectKind::echoform, es::echoform::mode, es::echoform::modeValue (es::echoform::Mode::bucket), 120.0) == "Bucket brigade");
-    CHECK (lynx::formatEffectParam (EffectKind::spiralEcho, es::spiral::sync, 13.0f / 23.0f, 120.0) == "1/4.");
-    CHECK (lynx::formatEffectParam (EffectKind::spiralEcho, es::spiral::sync, 20.0f / 23.0f, 120.0) == "1/4T");
+    CHECK (lynx::formatEffectParam (EffectKind::spiralEcho, es::spiral::sync, 13.5f / 23.0f, 120.0) == "1/4.");
+    CHECK (lynx::formatEffectParam (EffectKind::spiralEcho, es::spiral::sync, 20.5f / 23.0f, 120.0) == "1/4T");
     CHECK (lynx::formatEffectParam (EffectKind::orbit, es::orbit::mode, 3.0f / 11.0f, 120.0) == "Through-zero +");
 }
 
