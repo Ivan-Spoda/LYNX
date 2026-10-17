@@ -45,9 +45,10 @@ struct SubstituteParamMap
     bool toSlotMix = false;
     // linear map, clamped: in [inLo, inHi] -> out [outLo, outHi] (0..1 normalised parameter)
     float inLo = 0.0f, inHi = 1.0f, outLo = 0.0f, outHi = 1.0f;
-    // "| steps v0 v1 …": an enumeration — the source's step floor (value · N) (N = count) gives the output value
-    std::vector<float> steps;
-    // "| pwl x0 y0 x1 y1 …": a piecewise-linear law (x ascending), clamped at the ends
+    // or a point list ("| curve x:y x:y …": piecewise linear, clamped at the ends; "| steps x:y …": the y of the last
+    // point whose x ≤ the value — enumerations), x ascending
+    enum class Shape : std::uint8_t { linear, curve, steps };
+    Shape shape = Shape::linear;
     std::vector<std::pair<float, float>> points;
 };
 

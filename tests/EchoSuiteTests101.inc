@@ -591,15 +591,15 @@ TEST (echosuite101_substitutes_translate_valhalla_states)
     CHECK (lt::tapCount (u.params[lt::taps]) == 4 && std::abs (lt::delayMs (u.params[lt::delay]) - 250.0) < 1e-3);
     CHECK (u.params[lt::diffOn] == 1.0f && u.params[lt::colour] == 1.0f && u.params[lt::sync] == 0.0f); // DelaySync not translated
 
-    // by name (no class ID), and the map laws of the table: steps / piecewise linear
+    // by name (no class ID), and the map laws of the table: steps / curve
     lynx::ForeignPlugin byName;
     byName.format = lynx::ForeignPlugin::Format::vst2;
     byName.name = "ValhallaUberMod";
     const auto* e = lynx::findPluginSubstitute (lynx::pluginIdentity (byName), false);
     CHECK (e != nullptr && e->effect == lynx::EffectKind::latticeMod);
     int errors = -1;
-    const auto t = lynx::parseSubstituteTable ("[x]\nlynx = Echoform\nnames = X\nmap = xml:A -> Mode | steps 0.1 0.2 0.3\n"
-                                               "map = xml:B -> Feedback | pwl 0 0 0.5 0.1 1 1\nmap = xml:C -> Mix | pwl 1 0 0.5 1\n"
+    const auto t = lynx::parseSubstituteTable ("[x]\nlynx = Echoform\nnames = X\nmap = xml:A -> Mode | steps 0:0.1 0.33:0.2 0.66:0.3\n"
+                                               "map = xml:B -> Feedback | curve 0:0 0.5:0.1 1:1\nmap = xml:C -> Mix | curve 1:0 0.5:1\n"
                                                "map = xml:D -> Mix | steps\n",
                                                &errors);
     CHECK (errors == 2 && t.size() == 1 && t[0].params.size() == 2);

@@ -94,6 +94,7 @@ add_library(lynx_core STATIC
     src/core/EchoSuite.cpp
     src/core/VocalPitch.cpp
     src/core/LynxTune.cpp
+    src/core/LynxVerbs.cpp
     src/core/FlPatcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
@@ -223,6 +224,7 @@ if(LYNX_BUILD_APP)
         src/ui/PluginWindow.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
+        src/ui/FacetEqEditor.cpp
         src/ui/PluginEditors.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
