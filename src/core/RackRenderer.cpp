@@ -1251,6 +1251,7 @@ void RackRenderer::process (const RackState* state,
     for (int done = 0; done < numSamples; done += chunk)
     {
         const auto n = std::min (chunk, numSamples - done);
+        liveInputOffset = done;
         processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
         resumeAudio = false;
     }
@@ -1367,6 +1368,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         }
     }
 
+    if (liveInput != nullptr && liveInput->numChannels > 0)
+        mixLiveInput (state, playing, numSamples);
+
     // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
     //    outputs of the tracks that send to it (without writing into others' buffers)
     trackActive.fill (0);
@@ -1454,6 +1458,41 @@ void RackRenderer::applyStereo (const MixerTrack& track, float* l, float* r, int
             l[i] = -l[i];
             r[i] = -r[i];
         }
+}
+
+void RackRenderer::mixLiveInput (const RackState& state, bool playing, int n) noexcept
+{
+    const auto& mixer = state.song.mixer;
+    const auto recording = liveInput->recording.load (std::memory_order_relaxed);
+
+    for (int t = 1; t < (int) mixer.size() && t < maxMixerTracks; ++t)
+    {
+        const auto& track = mixer[(std::size_t) t];
+        const auto [first, count] = inputChannelsOf (track, liveInput->numChannels);
+
+        if (count == 0)
+            continue;
+
+        const auto* a = liveInput->channel (first, liveInputOffset);
+        const auto* b = count > 1 ? liveInput->channel (first + 1, liveInputOffset) : a;
+
+        if (a == nullptr || b == nullptr)
+            continue;
+
+        liveInput->meters.accumulate (t, peakOf (a, n), peakOf (b, n));
+
+        if (! inputMonitored (track.monitor, liveInput->armed[(std::size_t) t].load (std::memory_order_relaxed), playing, recording))
+            continue;
+
+        auto* dl = trackBuffer (t, 0);
+        auto* dr = trackBuffer (t, 1);
+
+        for (int i = 0; i < n; ++i)
+        {
+            dl[i] += a[i];
+            dr[i] += b[i];
+        }
+    }
 }
 
 void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept

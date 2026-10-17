@@ -1654,11 +1654,12 @@ private:
         }
         if (recordSource == AudioCapture::input)
         {
-            if (const auto error = engine.openAudioInput(); error.isNotEmpty())
-            {
-                setStatus (error, true);
-                return;
-            }
+            if (! engine.hasAudioInput())
+                if (const auto result = engine.openAudioInput(); result.issue != AudioEngine::InputIssue::none)
+                {
+                    setStatus (result.detail.isNotEmpty() ? result.detail : tr ("No active audio input (Settings > Audio)"), true);
+                    return;
+                }
             device = engine.getDeviceManager().getCurrentAudioDevice();
             if (device == nullptr || device->getActiveInputChannels().countNumberOfSetBits() == 0)
             {

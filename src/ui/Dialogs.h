@@ -13,6 +13,17 @@ namespace lynx
 void showNameAndColourDialog (const juce::String& title, const juce::String& name, std::uint32_t colour,
                               std::function<void (const juce::String&, std::uint32_t)> onDone);
 
+// The record button's question (FL's "Recording - What would you like to record?", REA_rodada88): audio into
+// the Playlist, notes, or everything. `onChoice(choice, dontAskAgain)`: 1 = audio, 2 = notes, 3 = everything.
+enum RecordChoice
+{
+    recordChoiceAudio = 1,
+    recordChoiceNotes = 2,
+    recordChoiceEverything = 3
+};
+void showRecordChoiceDialog (std::function<void (int, bool)> onChoice);
+std::unique_ptr<juce::AlertWindow> makeRecordChoiceDialog();
+
 // The dialog itself, for --snapshot mode.
 std::unique_ptr<juce::AlertWindow> makeNameAndColourDialog (const juce::String& title, const juce::String& name, std::uint32_t colour);
 } // namespace lynx

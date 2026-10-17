@@ -15000,6 +15000,7 @@ TEST (event_editor_playback)
 }
 #include "PrefsTests.inc"
 #include "AudioEditTests.inc"
+#include "InputTests.inc"
 
 TEST (level_audit_demo_imports_round89)
 {
