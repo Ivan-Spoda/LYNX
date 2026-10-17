@@ -86,7 +86,7 @@ TEST (fruity_send_state_import_and_texts)
     // a state too short for the four values keeps the old approximation (dry level only)
     const auto shortState = effectFromFl ("Fruity Send", std::vector<std::uint8_t> (12, 0), 120.0);
     CHECK (shortState && shortState->kind == EffectKind::utility);
-    CHECK (paramIndex (EffectKind::fruitySend, "Send to") == 3);
+    CHECK (plugui::paramIndex (EffectKind::fruitySend, "Send to") == 3);
     CHECK (plugui::hasFlLayout (EffectKind::fruitySend));
 }
 
