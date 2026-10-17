@@ -108,6 +108,22 @@ hint bar says so when the mouse is over the header ("The icon at the top left op
 rename...)") or the icon ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select
 source...)").
 
+## 3. Verification
+
+- [EXEC] `tests/InputTests.inc`: source lists (pairs then monos, odd channel counts, single-channel devices), names
+  of stored sources, the four monitoring modes, `inputChannelsOf`, and the renderer: an insert's stereo input
+  reaches the Master at unity, a monitoring-off insert is metered but silent, auto monitoring follows arm /
+  playback / recording, a muted insert stays silent, no input open = nothing.
+- [EXEC] `LYNX.exe --devicetest <type> <device> report "*"` on this machine (USB Audio CODEC + FL Studio ASIO):
+  Windows Audio — input "Microfone (USB Audio CODEC )", 2 channels "Input channel 1/2", 99 callbacks, input peak
+  -43 dB (room noise); DirectSound — "Driver de captura de som primário", channels Left/Right, -43 dB;
+  ASIO "FL Studio ASIO" — In 1 / In 2, active, callbacks OK. `--devices` lists the input devices of each driver.
+- [EXEC] Snapshots (`--snapshot`): `-mixer-input.png` (insert 3 armed with input "In 1 - In 2": the side
+  panel's input row), `-record-dialog.png`, `-settings-audio.png` (input channel line). Shots in tmp/r88 only.
+- Not tested live: a real take through the new per-insert writers with a microphone (needs a person at the
+  machine); the code path is the one of the old single take, run once per armed insert.
+
 ## Where I stopped / next steps
 
-- Implementation written (core, engine, UI, CLI, docs); next: build-local + Windows build, snapshots, devicetest, land.
+- Done; landing via tmp/coord/land.sh input88. Open: FL's other record positions (post FX/EQ/fader/track), FLP import
+  of insert inputs, per-insert input latency, Edison-like audio editor target, automation/clips recording filters.
