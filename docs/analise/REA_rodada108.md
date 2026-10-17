@@ -180,6 +180,8 @@ pt-BR strings for every new caption.
 
 ## 8. Where I stopped / next steps
 
+- Status: the round LANDED on main (2026-10-17, merged with rounds 101-107: Echoform suite, Facet EQ, panels, vocal
+  level, playlist groups); the Pro-C substitute keeps round 107's `Auto gain=1` preset on top of the Pro-C 3 translator.
 - Done: measurements (§1 / MEASURE §12), the three engines, Ember multiband, translators, substitutes, panels,
   tests (tests/DynamicsTests108.inc), pt-BR, docs/PLUGINS.md.
 - Not done / ideas: the reference's release tails (closer to exponential in gain), Classic's two-stage attack,

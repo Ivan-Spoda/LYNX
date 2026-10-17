@@ -379,6 +379,10 @@ enum class EffectKind : std::uint8_t
     nebula,       // LYNX's Nebula (REA_rodada100, core/LynxVerbs.h): delay-reverb network, 13 controls
     halo,         // LYNX's Halo (REA_rodada100, core/LynxVerbs.h): shimmer reverb, 12 controls
     horizon,      // LYNX's Horizon (REA_rodada100, core/LynxVerbs.h): echo + reverb, 24 controls
+    echoform,     // LYNX's multi-mode echo (REA_rodada101, core/EchoSuite.h), 29 controls
+    spiralEcho,   // LYNX's frequency-shifting echo (REA_rodada101, core/EchoSuite.h), 8 controls
+    orbit,        // LYNX's modulation machine: flangers / choruses / doubler (REA_rodada101, core/EchoSuite.h), 6 controls
+    latticeMod,   // LYNX's multitap modulated delay (REA_rodada101, core/EchoSuite.h), 34 controls
     crestCompressor, // LYNX's Crest Compressor (REA_rodada108, core/DynamicsSuite.h): styles, side-chain EQ, character, oversampling
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
     sentryGate       // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander

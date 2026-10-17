@@ -109,7 +109,11 @@ matches by name).
 | Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | name / Waves name | — |
 | FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
-| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| ValhallaDelay | Echoform (round 101) | VST3 class ID [derived], name | every setting but Era / taps / repeat-swell: mix, style, sync, times, feedback, filters, modulation, shift, pitch, ducking; the 17 modes onto Echoform's 12 characters |
+| ValhallaFreqEcho | Spiral Echo (round 101) | VST3 class ID [derived], name | all 8 settings |
+| ValhallaSpaceModulator | Orbit (round 101) | VST3 class ID [derived], name | all 6 settings |
+| ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
 | Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor | VST3 class ID [DATA], Waves names | — |
@@ -132,5 +136,7 @@ Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 
 De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 
 [DATA] = read from FL wrapper records of real projects (identifiers and state layouts only; no plugin code was read).
+[derived] = Steinberg's VST2-compatible VST3 UID ("VST" + the VST2 ID read from the plugin's own state header + the first nine letters of
+its lower-case name, in FL's byte order); the rule reproduces ValhallaVintageVerb's [DATA] ID exactly.
 Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
 Waves parameter is translated yet. Soundtoys states are encoded (not translated).
