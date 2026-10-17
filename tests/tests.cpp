@@ -6,6 +6,7 @@
 #include <thread>
 #include <random>
 #include <cctype>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,10 @@
 #include <string>
 #include <tuple>
 #include <vector>
+
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
@@ -2444,9 +2449,40 @@ TEST (live_queue_is_fifo_and_bounded)
     CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // one slot stays free to tell full from empty
 }
 
+// Whether this CPU's RCPPS (the ~12-bit reciprocal estimate, whose table is implementation-defined: Intel and AMD
+// differ) gives the same bits as the CPU that the FL golden data was captured on (AMD Zen 2): a hash of the estimate for
+// every float mantissa in [1, 2) (the estimate does not depend on the exponent in the normal range)
+static bool rcpLikeReferenceCpu()
+{
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+    std::uint64_t h = 1469598103934665603ull;
+    for (std::uint32_t m = 0; m < (1u << 23); m += 4)
+    {
+        alignas (16) float f[4];
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            const std::uint32_t bits = 0x3f800000u | (m + j);
+            std::memcpy (&f[j], &bits, 4);
+        }
+        _mm_store_ps (f, _mm_rcp_ps (_mm_load_ps (f)));
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            std::uint32_t bits;
+            std::memcpy (&bits, &f[j], 4);
+            h = (h ^ bits) * 1099511628211ull;
+        }
+    }
+    return h == 0xb5de670652cb0383ull;
+#else
+    return false;
+#endif
+}
+
 // FL's sampler interpolators (REA_rodada69 §1): outputs of FLEngine's own kernels (EXEC, r69/py/gold.py) on a synthetic
 // 16-bit stereo signal; the port must give the same bits (linear, 6-point, 24-point sinc, 32-point sinc at speed 1.37,
 // 16-point sinc widened to 24 points with the cutoff at π/9.5 at speed 9.5)
+// The sinc kernels take 1/x from RCPPS plus one Newton step, as FL does, so FL's own bits depend on the CPU: they are
+// required where RCPPS matches the capture machine's; elsewhere (Intel CPUs) within a few float ulps.
 TEST (fl_sampler_interpolators_match_fl)
 {
     std::vector<float> l, r;
@@ -2468,6 +2504,7 @@ TEST (fl_sampler_interpolators_match_fl)
         { 3, 9.5, { 0xbd97308e, 0x3dd8783c, 0xbd911374, 0x3e162a41, 0xbd8a959e, 0x3e38b220, 0xbd7e6785, 0x3e58895c, 0xbd380c4f, 0x3e7e3008, 0xbd380e4e, 0x3e7e2696, 0x3d00c6d0, 0xbd627d87, 0x3e308cb8, 0xbcece918 } },
     };
     const lynx::flvp::X87Extended precision;
+    const bool exactRcp = rcpLikeReferenceCpu();
     for (const auto& c : cases)
     {
         lynx::flrs::Kernel k;
@@ -2482,7 +2519,10 @@ TEST (fl_sampler_interpolators_match_fl)
             std::uint32_t ba, bb;
             std::memcpy (&ba, &a, 4);
             std::memcpy (&bb, &b, 4);
-            same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            if (exactRcp || c.quality < 3) // (linear and 6-point use no reciprocal)
+                same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            else
+                same += (std::abs (a - std::bit_cast<float> (c.bits[2 * p])) < 5e-7f) + (std::abs (b - std::bit_cast<float> (c.bits[2 * p + 1])) < 5e-7f);
         }
         CHECK (same == 16);
     }
@@ -11070,14 +11110,17 @@ TEST (fruity_parametric_eq_exact)
         CHECK (e.latencySamples() == 1536);
         for (int i = 0; i < 12288; i += 512)
             e.process (l.data() + i, r.data() + i, 512);
-        const std::initializer_list<Gold> gold = hq ? std::initializer_list<Gold> {
+        // (named arrays: a std::initializer_list chosen by ?: would point into a temporary array that dies at the end of
+        // the declaration, which GCC 13 reuses for other locals)
+        static const Gold goldHq[] = {
             { 2000, 0.08618364483118057f, 0.11248858273029327f }, { 5000, 0.18998730182647705f, 0.428600937128067f },
             { 8191, -0.1412065178155899f, -0.002996620489284396f }, { 10000, 0.18998737633228302f, -0.012570115737617016f },
-            { 12287, 0.40586185455322266f, -0.014698396436870098f } } : std::initializer_list<Gold> {
+            { 12287, 0.40586185455322266f, -0.014698396436870098f } };
+        static const Gold goldPlain[] = {
             { 2000, 0.18538671731948853f, 0.206522598862648f }, { 5000, 0.4086928963661194f, 0.8167467713356018f },
             { 8191, -0.3218550980091095f, -0.06812914460897446f }, { 10000, 0.40869277715682983f, -0.08537150919437408f },
             { 12287, 0.775394082069397f, -0.08931504935026169f } };
-        for (const auto& g : gold)
+        for (const auto& g : hq ? goldHq : goldPlain)
             CHECK (std::abs (l[(std::size_t) g.i] - g.l) < 1.0e-6f && std::abs (r[(std::size_t) g.i] - g.r) < 1.0e-6f);
     }
 
@@ -11913,7 +11956,9 @@ std::vector<std::uint8_t> morphineTestState()
                 for (int bit = 0; bit < 8; ++bit)
                 {
                     const auto k = byte * 8 + bit;
-                    const float v = a == 0 ? std::cbrt (1.0f / (float) (k + 1 + seed * (k % 3))) * (k < 40 ? 1.0f : 0.2f)
+                    // (cbrtf is not correctly rounded before glibc 2.43 and differs between libms; the cube root in double
+                    // rounded to float gives the same (correctly rounded) bits with old and new glibc)
+                    const float v = a == 0 ? (float) std::cbrt ((double) (1.0f / (float) (k + 1 + seed * (k % 3)))) * (k < 40 ? 1.0f : 0.2f)
                                     : a == 1 ? 0.1f * (float) ((k * 7 + seed) % 11 - 5) / 5.0f
                                              : 0.02f * (float) ((k * 5 + seed) % 7 - 3);
                     b.f32 (v);
