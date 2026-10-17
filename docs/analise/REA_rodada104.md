@@ -112,5 +112,9 @@ settings, "Lock to this size", the mixer's input/track latency fields, per-inser
 
 ## Where I stopped / next steps
 
-- Implemented pieces 1-3 above; Windows build + snapshots compared with FL (see shots in
-  `lynx-test/flui104/<name>`).
+- Pieces 1-3 implemented and checked: build-local with the FL Data dir 1 175 200 checks, 0 failures; Windows build;
+  snapshots of Thief (`lynx-test/flui104/after1`: `s-playlist`, `s-playlist-group-folded`, `s-playlist-picker-audio`,
+  `s-rack-filter`, `s-mixer`) side by side with FL's (`tmp/flui104/flref`).
+- Next candidates: track icons (0xEE offset 8, an icon set of LYNX's own), FL's "Lock to this size", dragging a
+  header to reorder tracks, the mixer's track latency field, mixer strip names / compact height (round 90 item 10),
+  the rack's step-view / keyboard-view switch.
