@@ -1,3 +1,8 @@
+#include "core/EquoFx.h"
+#include "core/FruityDelayBank.h"
+#include "core/MultibandDelayFx.h"
+#include "core/StateParams.h"
+
 // --- round 105: FL arrangements of the remaining native plugin windows, state-backed controls ---------------------
 
 namespace panels105

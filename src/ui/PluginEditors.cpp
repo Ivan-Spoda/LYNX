@@ -17,6 +17,7 @@
 #include "core/ConvolverFx.h"
 #include "core/EquoFx.h"
 #include "core/MultibandDelayFx.h"
+#include "core/Vocodex.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
@@ -593,7 +594,7 @@ public:
 
             case Item::toggle:
             {
-                const auto on = value >= 0.5f;
+                const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted);
                 if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
                 {
                     g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : (hot ? colour::bg6 : colour::bg5));

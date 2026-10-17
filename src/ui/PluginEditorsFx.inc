@@ -26,7 +26,7 @@
             {
                 b.params.push_back (plain + (bank * equofx::numBands + band) * equofx::numTargets + target);
                 const auto hz = 20.0 * std::pow (2.0, band / 3.0);
-                b.labels.add (band % 3 != 0 ? juce::String() : hz >= 1000.0 ? juce::String (hz / 1000.0, 2) + "k" : juce::String (juce::roundToInt (hz)));
+                b.labels.push_back (band % 3 != 0 ? juce::String() : hz >= 1000.0 ? juce::String (hz / 1000.0, 2) + "k" : juce::String (juce::roundToInt (hz)));
             }
             b.bipolar = target == 1;
         }
@@ -41,7 +41,7 @@
             for (int band = 0; band < mbdelay::numBands; ++band)
             {
                 b.params.push_back (plain + bank * 48 + target * 16 + band);
-                b.labels.add (freqs[band]);
+                b.labels.push_back (freqs[band]);
             }
             b.bipolar = target == 2;
         }
@@ -84,7 +84,7 @@
             g.fillRect (cell.withTop (y - 1.5f * s).withHeight (3.0f * s));
             g.setColour (colour::textSecondary);
             g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
-            g.drawFittedText (b.labels[i], juce::Rectangle<float> (cell.getX() - 6.0f * s, area.getBottom() + 1.0f, cell.getWidth() + 12.0f * s, 12.0f * s).toNearestInt(),
+            g.drawFittedText (b.labels[(std::size_t) i], juce::Rectangle<float> (cell.getX() - 6.0f * s, area.getBottom() + 1.0f, cell.getWidth() + 12.0f * s, 12.0f * s).toNearestInt(),
                               juce::Justification::centred, 1, 0.6f);
         }
         if (b.bipolar)
@@ -168,9 +168,18 @@
             const auto three = param01 ("3 bands") >= 0.5f;
             auto f1 = fOf (param01 ("Low/mid freq.")), f2 = fOf (param01 ("Mid/high freq."));
             const auto s1 = slopeOf (param01 ("Low/mid slope")), s2 = slopeOf (param01 ("Mid/high slope"));
-            g.setColour (colour::gridBeat);
-            for (const double hz : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
-                g.drawVerticalLine ((int) (inner.getX() + inner.getWidth() * xOf (hz)), inner.getY(), inner.getBottom());
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (const double hz : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+            {
+                const auto x = inner.getX() + inner.getWidth() * xOf (hz);
+                g.setColour (colour::gridBeat);
+                g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
+                g.setColour (colour::textDisabled);
+                g.drawText (hz >= 1000.0 ? juce::String (juce::roundToInt (hz / 1000.0)) + "k" : juce::String (juce::roundToInt (hz)),
+                            juce::Rectangle<float> (x + 2.0f * s, inner.getBottom() - 12.0f * s, 30.0f * s, 11.0f * s), juce::Justification::centredLeft);
+            }
+            g.setColour (colour::gridBar);
+            g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
             const auto dbAt = [] (double hz, double fc, int slope, bool low) {
                 const auto oct = std::log2 (hz / fc) * (low ? 1.0 : -1.0);
                 return oct <= 0.0 ? -3.0 * std::pow (2.0, oct * 2.0) : -3.0 - slope * oct; // a smooth knee at the crossover
@@ -180,7 +189,6 @@
             for (int band = 0; band < (three ? 3 : 2); ++band)
             {
                 const auto gainDb = 20.0 * std::log10 (juce::jmax (1.0e-4f, levelOf (param01 (levels[three ? band : band * 2]))));
-                const auto top = 24.0; // dB shown above 0
                 strokeBand (g, inner, colours[three ? band : band * 2].withAlpha (fx.enabled ? 1.0f : 0.4f), [&] (double hz) {
                     double db = 0.0;
                     if (band == 0)
@@ -189,8 +197,55 @@
                         db = dbAt (hz, f1, s1, false) + dbAt (hz, f2, s2, true);
                     else
                         db = dbAt (hz, three ? f2 : f1, three ? s2 : s1, false);
-                    return (float) ((db + gainDb + 60.0) / (60.0 + top));
+                    return (float) ((db + gainDb + 48.0) / 96.0); // ±48 dB
                 });
+            }
+            return true;
+        }
+        if (id == "psgraph") // Pitch Shifter (music page): the pitch as a line over the grid
+        {
+            grid8 (g, inner);
+            const auto y = inner.getBottom() - inner.getHeight() * param01 ("Pitch");
+            g.setColour (curveColour);
+            g.drawHorizontalLine ((int) y, inner.getX(), inner.getRight());
+            return true;
+        }
+        if (id == "vcxmap" || id == "vcxcarrier") // Vocodex: the band gain map (read-only) and the carrier
+        {
+            const auto st = vocodex::parseState (vocodex::splitInstallData (fx.state).first);
+            if (id == "vcxcarrier")
+            {
+                g.setColour (colour::textSecondary);
+                g.setFont (font (juce::jmax (8.0f, 10.0f * s)));
+                juce::String text = tr ("Carrier: own input");
+                if (st && st->internalCarrier())
+                    text = tr ("Carrier synthesizer") + ": " + (st->tone.empty() ? juce::String ("-") : juce::String (st->tone));
+                else if (st && st->carIn > 0)
+                    text = tr ("Carrier: side input {0}", { juce::String (st->carIn) });
+                g.drawText (text, inner, juce::Justification::centredLeft);
+                return true;
+            }
+            grid8 (g, inner);
+            g.setColour (colour::textDisabled);
+            g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+            g.drawText (caps (tr ("Band gain multiplier")), inner.reduced (4.0f * s), juce::Justification::topLeft);
+            if (st && ! st->maps[0].x.empty())
+            {
+                const auto& m = st->maps[0];
+                const auto last = juce::jmax (1e-9, m.x.back());
+                juce::Path path;
+                for (std::size_t i = 0; i < m.x.size(); ++i)
+                {
+                    const juce::Point<float> pt { inner.getX() + inner.getWidth() * (float) (m.x[i] / last),
+                                                  inner.getBottom() - inner.getHeight() * (float) juce::jlimit (0.0, 1.0, m.y[i]) };
+                    if (i == 0)
+                        path.startNewSubPath (pt);
+                    else
+                        path.lineTo (pt);
+                    g.setColour (curveColour);
+                    g.drawEllipse (juce::Rectangle<float> (6.0f * s, 6.0f * s).withCentre (pt), 1.0f);
+                }
+                g.strokePath (path, juce::PathStrokeType (juce::jmax (1.5f, 2.0f * s)));
             }
             return true;
         }
@@ -230,6 +285,16 @@
             return true;
         }
         return false;
+    }
+
+    void grid8 (juce::Graphics& g, juce::Rectangle<float> area)
+    {
+        g.setColour (theme::colour::gridBeat);
+        for (int i = 1; i < 8; ++i)
+        {
+            g.drawVerticalLine ((int) (area.getX() + area.getWidth() * (float) i / 8.0f), area.getY(), area.getBottom());
+            g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * (float) i / 8.0f), area.getX(), area.getRight());
+        }
     }
 
     template <typename F>

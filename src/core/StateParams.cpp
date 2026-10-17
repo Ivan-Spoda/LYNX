@@ -12,6 +12,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/MaximusFx.h"
 #include "core/MultibandDelayFx.h"
+#include "core/Vocodex.h"
 
 namespace lynx::stateparams
 {
@@ -350,6 +351,111 @@ Table convolverTable()
     };
     return t;
 }
+
+// --- Vocodex (core/Vocodex.h): FL's 20 controls, the options block and the eight switches, in place in the state -----
+// Ranges from FL's form (REA_rodada20 §4.2.2); those of attack / release curve, mod band width, unison pitch and
+// unison pan are not confirmed (chosen around the installation presets' values).
+struct VcxField
+{
+    const char* name;
+    int minimum, maximum, defaultValue;
+    int at;   // byte offset from the controls block
+    bool byte = false, inverted = false;
+};
+const std::vector<VcxField>& vcxFields()
+{
+    static const std::vector<VcxField> f {
+        { "Wet", 0, 2000, 1000, 0 }, { "SG", 0, 1000, 150, 4 }, { "Mod level", 0, 16000, 12800, 8 }, { "Mod HP", 0, 65536, 55000, 12 },
+        { "Car level", 0, 16000, 0, 16 }, { "Car LP", 0, 65536, 28000, 20 }, { "Noise", 0, 12800, 0, 24 }, { "Noise HP", 0, 65536, 55000, 28 },
+        { "Hold", 0, 10000, 1666, 32 }, { "Attack", 0, 10000, 1115, 36 }, { "Attack curve", 0, 2000, 0, 40 }, { "Release", 0, 10000, 3500, 44 },
+        { "Release curve", 0, 2000, 0, 48 }, { "Freeze", 0, 1, 0, 52 }, { "Band width", 5, 1000, 349, 56 }, { "Flatness", 0, 100, 100, 60 },
+        { "Mod band width", 0, 4000, 2000, 64 }, { "Mod pitch", -1200, 1200, 0, 68 }, { "Unison pitch", 0, 1000, 250, 72 },
+        { "Unison pan", 0, 256, 128, 76 },
+        { "Hold mode", 0, 1, 0, 80 }, { "Order", 1, 4, 2, 84 }, { "Unison", 0, 4, 0, 88 }, { "Bands", 5, 100, 47, 92 },
+        { "Draft", 0, 1, 1, 96, false, true }, { "Mod input", 0, 8, 1, 100 }, { "Car input", -1, 8, 0, 104 },
+        { "L-R encoding", 0, 1, 0, 108, true }, { "Min times", 0, 1, 1, 109, true }, { "To mod", 0, 1, 1, 110, true },
+        { "Threaded", 0, 1, 1, 111, true }, { "Subtractive gate", 0, 1, 1, 112, true }, { "To noise", 0, 1, 1, 113, true },
+        { "From car", 0, 1, 0, 114, true }, { "From consonants", 0, 1, 1, 115, true } };
+    return f;
+}
+
+// byte offset of the controls block in a slot state (FL's state + LYNX's install-data trailer); 0 = not a Vocodex state
+std::size_t vcxBlock (const std::vector<std::uint8_t>& slotState)
+{
+    const auto fl = vocodex::splitInstallData (slotState).first;
+    const auto s = vocodex::parseState (fl);
+    return s && s->paramsAt > 0 && s->paramsAt + 116 <= fl.size() ? s->paramsAt : 0;
+}
+
+Table vocodexTable()
+{
+    Table t;
+    for (const auto& f : vcxFields())
+        t.params.push_back ({ f.name, f.minimum, f.maximum, f.defaultValue });
+    t.get = [] (const std::vector<std::uint8_t>& bytes, int i) -> std::optional<int> {
+        const auto& fs = vcxFields();
+        const auto at = vcxBlock (bytes);
+        if (at == 0 || i < 0 || i >= (int) fs.size())
+            return std::nullopt;
+        const auto& f = fs[(std::size_t) i];
+        std::int32_t v = 0;
+        if (f.byte)
+            v = bytes[at + (std::size_t) f.at] != 0 ? 1 : 0;
+        else
+            std::memcpy (&v, bytes.data() + at + (std::size_t) f.at, 4);
+        return f.inverted ? (v == 0 ? 1 : 0) : v;
+    };
+    t.with = [] (const std::vector<std::uint8_t>& bytes, int i, int raw) {
+        const auto& fs = vcxFields();
+        const auto at = vcxBlock (bytes);
+        if (at == 0 || i < 0 || i >= (int) fs.size())
+            return bytes;
+        const auto& f = fs[(std::size_t) i];
+        raw = std::clamp (raw, f.minimum, f.maximum);
+        auto out = bytes;
+        if (f.inverted)
+            raw = raw != 0 ? 0 : 1;
+        if (f.byte)
+            out[at + (std::size_t) f.at] = (std::uint8_t) (raw != 0 ? 1 : 0);
+        else
+        {
+            const std::int32_t v = raw;
+            std::memcpy (out.data() + at + (std::size_t) f.at, &v, 4);
+        }
+        return out;
+    };
+    t.text = [] (const std::vector<std::uint8_t>&, int i, int raw) -> std::string {
+        const auto db = [] (double g) { return g <= 1e-9 ? std::string ("-inf dB") : format ("%+.1f dB", 20.0 * std::log10 (g)); };
+        const auto hz = [] (int v) { return format ("%.0f Hz", 40.0 * std::pow (375.0, v / 65536.0)); };
+        const auto ms = [] (int v, double k) { return format ("%.1f ms", (std::pow (501.0, v / 10000.0) - 1.0) * k); };
+        switch (i)
+        {
+            case 0: return db ((std::pow (7.0, raw / 1000.0) - 1.0) / 6.0);
+            case 1: return format ("%.0f%%", raw / 10.0);
+            case 2: case 4: return db ((std::pow (11.0, raw / 12800.0) - 1.0) / 10.0);
+            case 3: case 7: return raw == 0 ? "Off" : hz (raw);
+            case 5: return raw >= 65536 ? "Off" : hz (raw);
+            case 6: return db (0.5 * (std::pow (7.0, raw / 12800.0) - 1.0) / 6.0);
+            case 8: return ms (raw, 0.5);
+            case 9: return ms (raw, 2.0);
+            case 11: return ms (raw, 4.0);
+            case 10: case 12: return format ("x%.2f", std::pow (2.0, raw / 1000.0));
+            case 14: return format ("%.2f", 0.5 * (std::pow (5.0, raw / 1000.0) - 1.0));
+            case 15: return format ("%.0f%%", (double) raw);
+            case 16: return format ("x%.2f", std::pow (2.0, raw / 1000.0) / 4.0);
+            case 17: return format ("%+.0f ct", (double) raw);
+            case 18: return format ("%.3f oct", raw / 1000.0);
+            case 19: return format ("%.0f%%", raw * 100.0 / 128.0);
+            case 20: return raw != 0 ? "RMS" : "Peak";
+            case 21: case 23: return format ("%.0f", (double) raw);
+            case 22: return format ("%.0f", raw + 1.0); // FL shows U + 1
+            case 25: return format ("%.0f", (double) raw); // 0 = own input, k = side input k
+            case 26: return raw < 0 ? "Synth" : format ("%.0f", (double) raw);
+            default: return raw != 0 ? "On" : "Off";
+        }
+    };
+    return t;
+}
 } // namespace
 
 std::string bankControl (int bank, const char* control)
@@ -372,6 +478,7 @@ const Table* tableFor (EffectKind kind)
         case EffectKind::multibandDelay: t = multibandDelayTable(); break;
         case EffectKind::equo: t = equoTable(); break;
         case EffectKind::convolver: t = convolverTable(); break;
+        case EffectKind::vocodex: t = vocodexTable(); break;
         default: return nullptr;
     }
     return &tables.emplace (kind, std::move (t)).first->second;

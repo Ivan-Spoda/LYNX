@@ -48,6 +48,7 @@ enum : std::uint16_t
     boxed = 1 << 8,       // label: drawn as a header box (FL's caption plates); section: a plain cell without a title strip
     alignLeft = 1 << 9,   // value / label text aligned left
     raised = 1 << 10,     // section: a lighter inset panel inside another one
+    inverted = 1 << 11,   // toggle: lit while the value is off (FL's white "enabled" LEDs over mute switches)
 };
 
 struct LayoutItem

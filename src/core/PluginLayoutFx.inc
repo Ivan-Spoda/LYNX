@@ -121,7 +121,7 @@ Layout frequencySplitterLayout()
         auto k = knob (cx, 248, 32, outs[b], nullptr, 0, noCaption);
         k.colour = b;
         v.push_back (k);
-        v.push_back (toggle (cx - 25, 268, 20, 11, outMutes[b], nullptr));
+        v.push_back (toggle (cx - 25, 268, 20, 11, outMutes[b], nullptr, inverted));
         v.push_back (label (cx - 6, 268, 30, 11, names[b], alignLeft));
     }
     v.push_back (label (299, 289, 100, 12, TR_NOOP ("Main out"), dim | alignLeft));
@@ -133,7 +133,7 @@ Layout frequencySplitterLayout()
         auto k = knob (x0 + 65.0f, 248, 32, sends[b], nullptr, 0, noCaption);
         k.colour = b;
         v.push_back (k);
-        v.push_back (toggle (x0 + 40.0f, 268, 20, 11, sendMutes[b], nullptr));
+        v.push_back (toggle (x0 + 40.0f, 268, 20, 11, sendMutes[b], nullptr, inverted));
         v.push_back (label (x0 + 59.0f, 268, 30, 11, names[b], alignLeft));
     }
     v.push_back (label (494, 289, 100, 12, TR_NOOP ("Sends"), dim | alignLeft));
@@ -333,5 +333,258 @@ Layout convolverLayout()
     v.push_back (label (560, 28, 150, 40, "Fruity Convolver", dim));
     v.push_back (display (5, 104, 712, 20, "irinfo"));
     v.push_back (display (5, 128, 712, 168, "irwave"));
+    return l;
+}
+
+Layout pitchShifterLayout()
+{
+    // VOICE / MUSIC tabs (the engine: PSOLA or granular) along the left, the pitch graph; then the page's controls —
+    // VOICE: PITCH, FORMANT faders, FORMANT CORRECTION and PITCH ANALYSIS (pitch mode, detector, channel); MUSIC: PITCH,
+    // DURATION faders, DENSITY, JITTER, RAND —, the DELAY panel (delay and feedback faders, T, OFF / POST / PRE /
+    // NO SHIFT) and MIX. Value plates above the faders and knobs, as FL's read-outs.
+    Layout l;
+    l.fl = "Pitch Shifter";
+    l.width = 744;
+    l.height = 280;
+    auto& v = l.items;
+    const auto voice = [&] (LayoutItem i) { v.push_back (when (std::move (i), "Granular", 0.0f, 0.5f)); };
+    const auto music = [&] (LayoutItem i) { v.push_back (when (std::move (i), "Granular", 0.5f, 1.0f)); };
+    const auto fader = [&] (float cx, float bottom, const char* param, const char* caption, std::uint16_t style, auto add) {
+        add (plate (cx - 21, 17, 42, 18, param));
+        add (slider (Item::vslider, cx - 10, 46, 20, bottom - 46, param, nullptr, noCaption | style));
+        add (label (cx - 30, 250, 60, 12, caption));
+    };
+    const auto always = [&] (LayoutItem i) { v.push_back (std::move (i)); };
+    v.push_back (tabs (8, 8, 30, 264, "Granular", TR_NOOP ("Voice|Music")));
+    v.push_back (section (40, 5, 260, 270, nullptr, boxed));
+    voice (display (44, 9, 252, 230, "xy", "Formant", "Pitch"));
+    music (display (44, 9, 252, 230, "psgraph"));
+    v.push_back (label (48, 244, 160, 26, "Pitch Shifter", dim | alignLeft));
+    v.push_back (section (304, 8, 120, 262, nullptr, boxed));
+    fader (333, 236, "Pitch", TR_NOOP ("Pitch"), bipolar, always);
+    fader (391, 236, "Formant", TR_NOOP ("Formant"), bipolar, voice);
+    fader (391, 236, "Duration", TR_NOOP ("Duration"), 0, music);
+    v.push_back (section (427, 8, 119, 262, nullptr, boxed));
+    voice (plate (465, 17, 42, 18, "Formant correction"));
+    voice (knob (486, 75, 44, "Formant correction", TR_NOOP ("Formant correction"), 117));
+    voice (menu (447, 156, 80, 16, "Pitch mode", TR_NOOP ("Relative|C4|C5|C6"), { 0.0f, 1.0f / 3, 2.0f / 3, 1.0f }));
+    voice (menu (447, 189, 80, 16, "Accurate detector", TR_NOOP ("Fast|Accurate")));
+    voice (menu (447, 222, 80, 16, "Channel", TR_NOOP ("Left|Right|Left + right")));
+    voice (label (432, 250, 110, 12, TR_NOOP ("Pitch analysis")));
+    music (plate (465, 17, 42, 18, "Density"));
+    music (knob (486, 75, 44, "Density", TR_NOOP ("Density"), 117));
+    music (plate (436, 171, 42, 18, "Jitter"));
+    music (knob (457, 218, 28, "Jitter", TR_NOOP ("Jitter"), 255));
+    music (plate (494, 171, 42, 18, "Random"));
+    music (knob (515, 218, 28, "Random", TR_NOOP ("Rand"), 255));
+    v.push_back (section (549, 8, 123, 262, nullptr, boxed));
+    v.push_back (plate (558, 17, 46, 18, "Delay"));
+    v.push_back (slider (Item::vslider, 570, 46, 20, 106, "Delay", nullptr, noCaption));
+    v.push_back (plate (617, 17, 42, 18, "Feedback"));
+    v.push_back (slider (Item::vslider, 628, 46, 20, 106, "Feedback", nullptr, noCaption));
+    v.push_back (label (556, 160, 36, 12, TR_NOOP ("Delay")));
+    v.push_back (toggle (594, 160, 12, 12, "Tempo sync", "T", boxed));
+    v.push_back (label (609, 160, 58, 12, TR_NOOP ("Feedback")));
+    v.push_back (radio (588, 180, 70, 60, "Delay mode", TR_NOOP ("Off|Post|Pre|No shift"), { 0.0f, 1.0f / 3, 2.0f / 3, 1.0f }));
+    v.push_back (label (556, 250, 110, 12, TR_NOOP ("Delay mode")));
+    v.push_back (section (675, 8, 63, 262, nullptr, boxed));
+    fader (706, 236, "Mix", TR_NOOP ("Mix"), 0, always);
+    return l;
+}
+
+Layout effectorLayout()
+{
+    // input / output gain on the title strip; X PARAM, Y PARAM, BYPASS, DRY/WET at the left; the X/Y pad; the tempo
+    // divisions; X MOD, Y MOD, the LFO shape and TEMPO at the right; the twelve effect buttons along the bottom
+    Layout l;
+    l.fl = "Effector";
+    l.width = 436;
+    l.height = 412;
+    auto& v = l.items;
+    v.push_back (section (5, 3, 426, 50, nullptr, boxed));
+    v.push_back (knob (37, 23, 26, "Input", TR_NOOP ("Gain"), 46));
+    v.push_back (knob (399, 23, 26, "Output", TR_NOOP ("Gain"), 46, bipolar));
+    v.push_back (label (130, 8, 176, 38, "Effector", dim));
+    v.push_back (section (5, 60, 62, 258, nullptr, boxed));
+    v.push_back (knob (37, 91, 30, "X", TR_NOOP ("X param"), 116));
+    v.push_back (knob (37, 153, 30, "Y", TR_NOOP ("Y param"), 178));
+    v.push_back (toggle (27, 205, 20, 20, "Bypass", nullptr, boxed));
+    v.push_back (label (10, 232, 54, 12, TR_NOOP ("Bypass")));
+    v.push_back (knob (37, 280, 30, "Wet", TR_NOOP ("Dry/wet"), 305));
+    v.push_back (display (72, 60, 258, 258, "xy", "X", "Y"));
+    v.push_back (radio (334, 62, 30, 254, "Mod rate", "8/1|4/1|2/1|1/1|3/4|1/2|3/8|1/4|1/8",
+                        { 1.0f, 7.0f / 8, 6.0f / 8, 5.0f / 8, 4.0f / 8, 3.0f / 8, 2.0f / 8, 1.0f / 8, 0.0f }));
+    v.push_back (section (369, 60, 62, 258, nullptr, boxed));
+    v.push_back (knob (399, 91, 30, "Mod X", TR_NOOP ("X mod"), 116, bipolar));
+    v.push_back (knob (399, 153, 30, "Mod Y", TR_NOOP ("Y mod"), 178, bipolar));
+    v.push_back (radio (382, 196, 34, 54, "LFO shape", TR_NOOP ("Sine|Saw|Square")));
+    v.push_back (knob (399, 280, 30, "Tempo red.", TR_NOOP ("Tempo"), 305));
+    LayoutItem type = radio (8, 326, 420, 80, "Type", TR_NOOP ("Distort|Lo-fi|Flanger|Phaser|Filter|Delay|Reverb|Stereo|Trans|Grain|Vox|Ring"));
+    type.columns = 6;
+    v.push_back (type);
+    return l;
+}
+
+Layout hardcoreLayout()
+{
+    // INPUT, OUTPUT; EQ on and its eight band faders (125 Hz … 16 kHz); CABINET; five pedal boxes, each with its LED
+    // (box on), the knobs of its pedal (captions per pedal type, the knobs a pedal does not use are hidden) and the
+    // pedal type under it. FL's preset browser (.hdprg) is not reproduced.
+    Layout l;
+    l.fl = "Hardcore";
+    l.width = 772;
+    l.height = 475;
+    auto& v = l.items;
+    v.push_back (section (5, 5, 762, 57, nullptr, boxed));
+    v.push_back (label (17, 9, 150, 40, "Hardcore", dim | alignLeft));
+    v.push_back (knob (183, 29, 26, "Input level", nullptr, 0, noCaption | bipolar));
+    v.push_back (label (199, 14, 50, 12, TR_NOOP ("Input"), alignLeft));
+    v.push_back (value (199, 32, 60, 14, "Input level"));
+    v.push_back (knob (273, 29, 26, "Output level", nullptr, 0, noCaption | bipolar));
+    v.push_back (label (289, 14, 50, 12, TR_NOOP ("Output"), alignLeft));
+    v.push_back (value (289, 32, 60, 14, "Output level"));
+    v.push_back (section (362, 8, 262, 50, nullptr, boxed | raised));
+    v.push_back (label (374, 12, 30, 12, TR_NOOP ("EQ")));
+    v.push_back (toggle (380, 30, 16, 16, "EQ on", nullptr, boxed));
+    static const char* const bands[8] { "125", "250", "500", "1k", "2k", "4k", "8k", "16k" };
+    static const char* const bandParams[8] { "EQ band 1", "EQ band 2", "EQ band 3", "EQ band 4", "EQ band 5", "EQ band 6", "EQ band 7", "EQ band 8" };
+    for (int b = 0; b < 8; ++b)
+    {
+        const auto x = 410.0f + 16.0f * (float) b;
+        v.push_back (label (x - 1, 11, 16, 10, bands[b]));
+        v.push_back (slider (Item::vslider, x, 22, 14, 34, bandParams[b], nullptr, noCaption | bipolar));
+    }
+    v.push_back (label (545, 12, 70, 12, TR_NOOP ("Cabinet")));
+    v.push_back (menu (545, 28, 70, 18, "Cabinet",
+                       "None|Model A|Model B|Model C|Model D|Model E|Model F|Model G|Model H|Model I|Model J|Model K|Model L|Model M|Model N|Model O|Model P|Model Q|Model R|Model S|Model T"));
+
+    // pedal types 1…11 and the captions of their knobs (FL's pedal artwork); 3-knob pedals put the third one in the middle
+    struct Pedal
+    {
+        const char* name;
+        const char* knobs[4];
+    };
+    static const Pedal pedals[12] { { "", {} },
+                                    { TR_NOOP ("Distortion"), { TR_NOOP ("Dist"), TR_NOOP ("Comb"), TR_NOOP ("Inferno"), TR_NOOP ("Glass") } },
+                                    { TR_NOOP ("Chorus"), { TR_NOOP ("Width"), TR_NOOP ("Speed"), TR_NOOP ("Intensity"), nullptr } },
+                                    { TR_NOOP ("Flanger"), { TR_NOOP ("Width"), TR_NOOP ("Speed"), TR_NOOP ("Intensity"), nullptr } },
+                                    { TR_NOOP ("Phaser"), { TR_NOOP ("Speed"), TR_NOOP ("Tune"), TR_NOOP ("Width"), TR_NOOP ("Intensity") } },
+                                    { TR_NOOP ("Reverb"), { TR_NOOP ("Decay"), TR_NOOP ("Hi-damp"), TR_NOOP ("Mix"), nullptr } },
+                                    { TR_NOOP ("Delay"), { TR_NOOP ("Time"), TR_NOOP ("Decay"), TR_NOOP ("Mix"), nullptr } },
+                                    { TR_NOOP ("Noise gate"), { TR_NOOP ("Attack"), TR_NOOP ("Release"), TR_NOOP ("Threshold"), nullptr } },
+                                    { TR_NOOP ("Equalizer"), { TR_NOOP ("Low"), TR_NOOP ("Middle"), TR_NOOP ("Treble"), TR_NOOP ("High") } },
+                                    { TR_NOOP ("Compressor"), { TR_NOOP ("Threshold"), TR_NOOP ("Ratio"), TR_NOOP ("Attack"), TR_NOOP ("Release") } },
+                                    { TR_NOOP ("Modulator"), { TR_NOOP ("Pitch"), TR_NOOP ("Amp"), TR_NOOP ("Pan"), TR_NOOP ("Rate") } },
+                                    { TR_NOOP ("Tube drive"), { TR_NOOP ("Low"), TR_NOOP ("High"), TR_NOOP ("Gain"), nullptr } } };
+    static const char* const typeParams[5] { "Box 1 pedal", "Box 2 pedal", "Box 3 pedal", "Box 4 pedal", "Box 5 pedal" };
+    static const char* const onParams[5] { "Box 1 on", "Box 2 on", "Box 3 on", "Box 4 on", "Box 5 on" };
+    static const char* const knobParams[5][5] {
+        { "Box 1 knob 1", "Box 1 knob 2", "Box 1 knob 3", "Box 1 knob 4", "Box 1 knob 5" },
+        { "Box 2 knob 1", "Box 2 knob 2", "Box 2 knob 3", "Box 2 knob 4", "Box 2 knob 5" },
+        { "Box 3 knob 1", "Box 3 knob 2", "Box 3 knob 3", "Box 3 knob 4", "Box 3 knob 5" },
+        { "Box 4 knob 1", "Box 4 knob 2", "Box 4 knob 3", "Box 4 knob 4", "Box 4 knob 5" },
+        { "Box 5 knob 1", "Box 5 knob 2", "Box 5 knob 3", "Box 5 knob 4", "Box 5 knob 5" } };
+    for (int box = 0; box < 5; ++box)
+    {
+        const auto x0 = 22.0f + 147.0f * (float) box;
+        v.push_back (section (x0, 150, 130, 270, nullptr, boxed));
+        v.push_back (section (x0 + 8, 175, 114, 128, nullptr, boxed | raised));
+        v.push_back (toggle (x0 + 61, 226, 14, 14, onParams[box], nullptr, boxed));
+        for (int t = 1; t <= 11; ++t)
+        {
+            const auto lo = ((float) t - 0.499f) / 11.0f, hi = ((float) t + 0.501f) / 11.0f; // as the engine rounds a saved 0.5
+            const auto& p = pedals[t];
+            const auto three = p.knobs[3] == nullptr;
+            for (int k = 0; k < (three ? 3 : 4); ++k)
+            {
+                const auto cx = three && k == 2 ? x0 + 68.0f : x0 + 37.0f + 60.0f * (float) (k % 2);
+                const auto cy = k < 2 ? 203.0f : (three ? 257.0f : 255.0f);
+                v.push_back (when (knob (cx, cy, 26, knobParams[box][k], p.knobs[k], cy + 20), typeParams[box], lo, hi));
+            }
+            v.push_back (when (label (x0 + 10, 282, 110, 16, p.name), typeParams[box], lo, hi));
+        }
+        v.push_back (menu (x0 + 3, 453, 127, 16, typeParams[box],
+                           TR_NOOP ("(empty)|Distortion|Chorus|Flanger|Phaser|Reverb|Delay|Noise gate|Equalizer|Compressor|Modulator|Tube drive")));
+        l.editedElsewhere.push_back (knobParams[box][4]); // no pedal has a fifth knob
+    }
+    l.editedElsewhere.push_back ("(unused 12)");
+    l.editedElsewhere.push_back ("(unused 38)");
+    l.editedElsewhere.push_back ("(unused 44)");
+    return l;
+}
+
+Layout vocodexLayout()
+{
+    // Mixer (WET, SG, MOD, CAR, +NOISE faders, the three filters, MOD / CAR inputs, L-R ENCODING), Contour (from car /
+    // consonants, to mod / noise), DRAFT, THREADED; the envelope follower (HOLD, ATT, REL, their curves, PEAK / RMS,
+    // MIN TIMES, freeze), ORDER, the band and unison knobs, the number of bands; then the band map (read-only: FL's map
+    // editor and the carrier synthesizer's patch browser are not reproduced). All controls live in the slot state.
+    constexpr auto k = EffectKind::vocodex;
+    const auto p = [] (const char* name) { return stateName (EffectKind::vocodex, name); };
+    Layout l;
+    l.fl = "Vocodex";
+    l.width = 598;
+    l.height = 600;
+    auto& v = l.items;
+    v.push_back (section (5, 3, 588, 140, nullptr, boxed | raised));
+    v.push_back (label (14, 8, 60, 18, TR_NOOP ("Mixer"), alignLeft));
+    v.push_back (label (40, 30, 54, 11, TR_NOOP ("Wet")));
+    v.push_back (knob (52, 84, 74, p ("Wet"), nullptr, 0, noCaption | big));
+    const auto fader = [&] (float cx, float top, const char* param, const char* caption, float captionY) {
+        v.push_back (slider (Item::vslider, cx - 9, top, 18, 112 - top, param, nullptr, noCaption));
+        v.push_back (label (cx - 22, captionY, 44, 11, caption));
+    };
+    fader (113, 42, p ("SG"), TR_NOOP ("SG"), 30);
+    fader (157, 42, p ("Mod level"), TR_NOOP ("Mod"), 30);
+    fader (186, 42, p ("Car level"), TR_NOOP ("Car"), 30);
+    fader (215, 54, p ("Noise"), TR_NOOP ("+Noise"), 42);
+    v.push_back (knob (148, 128, 20, p ("Mod HP"), nullptr, 0, noCaption));
+    v.push_back (label (122, 122, 18, 12, TR_NOOP ("HP")));
+    v.push_back (knob (183, 128, 20, p ("Car LP"), nullptr, 0, noCaption));
+    v.push_back (knob (215, 128, 20, p ("Noise HP"), nullptr, 0, noCaption));
+    v.push_back (label (228, 122, 18, 12, TR_NOOP ("HP")));
+    v.push_back (stepper (142, 8, 32, 17, p ("Mod input"), nullptr, 8));
+    v.push_back (stepper (180, 8, 32, 17, p ("Car input"), nullptr, 9));
+    v.push_back (toggle (222, 8, 100, 13, p ("L-R encoding"), TR_NOOP ("L-R encoding")));
+    v.push_back (label (262, 62, 76, 16, TR_NOOP ("Contour")));
+    v.push_back (toggle (280, 82, 110, 12, p ("From car"), TR_NOOP ("Car")));
+    v.push_back (toggle (280, 97, 110, 12, p ("From consonants"), TR_NOOP ("Consonants")));
+    v.push_back (toggle (280, 111, 110, 12, p ("To mod"), TR_NOOP ("Mod")));
+    v.push_back (toggle (280, 125, 110, 12, p ("To noise"), TR_NOOP ("Noise")));
+    v.push_back (label (246, 97, 34, 12, TR_NOOP ("From")));
+    v.push_back (label (246, 111, 34, 12, TR_NOOP ("To")));
+    v.push_back (toggle (428, 8, 56, 13, p ("Draft"), TR_NOOP ("Draft")));
+    v.push_back (toggle (486, 8, 72, 13, p ("Threaded"), TR_NOOP ("Threaded")));
+    v.push_back (label (400, 60, 186, 50, "Vocodex", dim));
+
+    v.push_back (section (5, 147, 588, 135, nullptr, boxed));
+    v.push_back (knob (47, 180, 36, p ("Hold"), TR_NOOP ("Hold"), 208));
+    v.push_back (knob (104, 180, 36, p ("Attack"), TR_NOOP ("Att"), 208));
+    v.push_back (knob (159, 180, 36, p ("Release"), TR_NOOP ("Rel"), 208));
+    v.push_back (toggle (196, 172, 70, 13, p ("Min times"), TR_NOOP ("Min times")));
+    v.push_back (radio (14, 220, 46, 30, p ("Hold mode"), TR_NOOP ("Peak|RMS")));
+    v.push_back (knob (108, 234, 20, p ("Attack curve"), nullptr, 0, noCaption));
+    v.push_back (knob (163, 234, 20, p ("Release curve"), nullptr, 0, noCaption));
+    v.push_back (label (10, 262, 116, 16, TR_NOOP ("Envelope follower"), alignLeft));
+    v.push_back (toggle (130, 262, 18, 16, p ("Freeze"), "*", boxed));
+    v.push_back (tabs (281, 213, 56, 9, p ("Order"), "1|2|3|4"));
+    v.push_back (label (281, 225, 56, 11, TR_NOOP ("Order")));
+    v.push_back (knob (378, 178, 36, p ("Band width"), TR_NOOP ("Width"), 207));
+    v.push_back (knob (435, 178, 28, p ("Mod band width"), nullptr, 0, noCaption));
+    v.push_back (label (410, 201, 50, 12, TR_NOOP ("Mod width")));
+    v.push_back (knob (500, 178, 36, p ("Mod pitch"), TR_NOOP ("Mod pitch"), 207, bipolar));
+    v.push_back (knob (560, 178, 36, p ("Unison"), TR_NOOP ("Unison"), 207, 0, 4));
+    v.push_back (knob (379, 236, 22, p ("Flatness"), nullptr, 0, noCaption));
+    v.push_back (label (354, 250, 50, 12, TR_NOOP ("Flatness")));
+    v.push_back (knob (510, 236, 22, p ("Unison pitch"), nullptr, 0, noCaption));
+    v.push_back (label (485, 250, 50, 12, TR_NOOP ("Uni. pitch")));
+    v.push_back (knob (560, 236, 22, p ("Unison pan"), nullptr, 0, noCaption));
+    v.push_back (label (537, 250, 48, 12, TR_NOOP ("Uni. pan")));
+    v.push_back (stepper (266, 262, 36, 17, p ("Bands"), nullptr, 95));
+    v.push_back (label (306, 262, 130, 17, TR_NOOP ("Bands - distribution"), alignLeft));
+    v.push_back (display (10, 288, 578, 280, "vcxmap"));
+    v.push_back (display (10, 574, 578, 22, "vcxcarrier"));
+    l.menuSwitches = { p ("Subtractive gate") };
+    (void) k;
     return l;
 }

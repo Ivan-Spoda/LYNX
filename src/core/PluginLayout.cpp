@@ -1645,7 +1645,8 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::vintagePhaser,
                                                  // round 105
                                                  EffectKind::vocoder, EffectKind::frequencySplitter, EffectKind::fruityDelayBank,
-                                                 EffectKind::equo, EffectKind::multibandDelay, EffectKind::convolver };
+                                                 EffectKind::equo, EffectKind::multibandDelay, EffectKind::convolver,
+                                                 EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex };
     return kinds;
 }
 
@@ -1703,6 +1704,10 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::equo: l = equoLayout(); break;
         case EffectKind::multibandDelay: l = multibandDelayLayout(); break;
         case EffectKind::convolver: l = convolverLayout(); break;
+        case EffectKind::flPitchShifter: l = pitchShifterLayout(); break;
+        case EffectKind::effector: l = effectorLayout(); break;
+        case EffectKind::hardcore: l = hardcoreLayout(); break;
+        case EffectKind::vocodex: l = vocodexLayout(); break;
         case EffectKind::ridgeStrip: l = ridgeStrip(); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
