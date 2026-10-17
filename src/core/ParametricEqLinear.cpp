@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <memory>
+#include <mutex>
 
 // bit-exactness needs every product and sum rounded on its own (no fused multiply-add)
 #if defined(__clang__)
@@ -43,9 +46,52 @@ float pow2Approx (float y)
     return 1.0f;
 }
 
-void fft (std::vector<std::complex<double>>& a, bool inverse)
+// Twiddle factors of the radix-2 transform below for size n, stage by stage (len = 2, 4, … n: the len/2 factors
+// e^(±2πik/len) start at len/2 − 1). Built once per size and shared; the values are the ones the transform computed
+// per butterfly before (std::polar of the same angle), so the output is unchanged — only the audio thread no longer
+// evaluates a sine and a cosine for every butterfly (REA round 87: this was most of a heavy project's CPU)
+std::shared_ptr<const Twiddles> twiddlesFor (int n)
 {
-    const auto n = a.size();
+    static std::mutex lock;
+    static std::map<int, std::shared_ptr<const Twiddles>> cache;
+    const std::lock_guard<std::mutex> guard (lock);
+    auto& entry = cache[n];
+    if (entry == nullptr)
+    {
+        auto t = std::make_shared<Twiddles>();
+        for (auto* table : { &t->forward, &t->inverse })
+        {
+            const bool inverse = table == &t->inverse;
+            table->reserve ((std::size_t) std::max (0, n - 1));
+            for (std::size_t len = 2; len <= (std::size_t) n; len <<= 1)
+            {
+                const double ang = (inverse ? twoPi : -twoPi) / (double) len;
+                for (std::size_t k = 0; k < len / 2; ++k)
+                    table->push_back (std::polar (1.0, ang * (double) k));
+            }
+        }
+        entry = std::move (t);
+    }
+    return entry;
+}
+
+// (a + bi)(c + di) as std::complex computes it for finite values, without its NaN/infinity recovery branch
+inline std::complex<double> mul (const std::complex<double>& z, const std::complex<double>& w) noexcept
+{
+    const double a = z.real(), b = z.imag(), c = w.real(), d = w.imag();
+    const double ac = a * c;
+    const double bd = b * d;
+    const double ad = a * d;
+    const double bc = b * c;
+    const double x = ac - bd;
+    const double y = ad + bc;
+    if (std::isnan (x) && std::isnan (y))
+        return z * w;
+    return { x, y };
+}
+
+void fft (std::complex<double>* a, std::size_t n, const std::vector<std::complex<double>>& tw) noexcept
+{
     for (std::size_t i = 1, j = 0; i < n; ++i)
     {
         auto bit = n >> 1;
@@ -57,14 +103,14 @@ void fft (std::vector<std::complex<double>>& a, bool inverse)
     }
     for (std::size_t len = 2; len <= n; len <<= 1)
     {
-        const double ang = (inverse ? twoPi : -twoPi) / (double) len;
+        const auto* w = tw.data() + (len / 2 - 1);
+        const auto half = len / 2;
         for (std::size_t i = 0; i < n; i += len)
-            for (std::size_t k = 0; k < len / 2; ++k)
+            for (std::size_t k = 0; k < half; ++k)
             {
-                const auto w = std::polar (1.0, ang * (double) k);
-                const auto u = a[i + k], v = a[i + k + len / 2] * w;
+                const auto u = a[i + k], v = mul (a[i + k + half], w[k]);
                 a[i + k] = u + v;
-                a[i + k + len / 2] = u - v;
+                a[i + k + half] = u - v;
             }
     }
 }
@@ -242,6 +288,9 @@ void FftConvolver::init (int size)
     hop = size / 2;
     pos = 0;
     kernel.assign ((std::size_t) n, {});
+    work.assign ((std::size_t) n, {});
+    work2.assign ((std::size_t) n, {});
+    twiddles = twiddlesFor (n);
     for (int c = 0; c < 2; ++c)
     {
         in[c].assign ((std::size_t) hop, 0.0f);
@@ -263,37 +312,40 @@ void FftConvolver::setKernel (const std::vector<float>& t)
 {
     // zero-phase impulse centred at n/2: (1/n)·IFFT of the table times (−1)^k, mirrored; its middle half is kept,
     // weighted by a sine window, and becomes an n/2-tap FIR with its centre at tap n/4 (§5.3)
-    std::vector<std::complex<double>> spec ((std::size_t) n);
+    // (in the preallocated buffers: a new response is loaded on the audio thread)
+    auto& spec = work;
+    std::fill (spec.begin(), spec.end(), std::complex<double> {});
     for (int k = 0; k <= n / 2; ++k)
         spec[(std::size_t) k] = (k & 1) ? -(double) t[(std::size_t) k] : (double) t[(std::size_t) k];
     for (int k = 1; k < n / 2; ++k)
         spec[(std::size_t) (n - k)] = spec[(std::size_t) k];
-    fft (spec, true);
+    fft (spec.data(), (std::size_t) n, twiddles->inverse);
     const float span = 1.0f / (float) (hop - 1);
-    std::vector<std::complex<double>> taps ((std::size_t) n);
+    auto& taps = work2;
+    std::fill (taps.begin(), taps.end(), std::complex<double> {});
     for (int i = 0; i < hop; ++i)
     {
         const auto h = (float) (spec[(std::size_t) (n / 4 + i)].real() / (double) n);
         const auto w = (float) std::sin ((double) ((float) i * span * 3.14159274f));
         taps[(std::size_t) i] = (double) (w * h);
     }
-    fft (taps, false);
-    kernel = taps;
+    fft (taps.data(), (std::size_t) n, twiddles->forward);
+    std::copy (taps.begin(), taps.end(), kernel.begin());
 }
 
 void FftConvolver::block() noexcept
 {
     const auto scale = 1.0f / (float) n;
-    std::vector<std::complex<double>> x ((std::size_t) n);
+    auto& x = work;
     for (int c = 0; c < 2; ++c)
     {
         std::fill (x.begin(), x.end(), std::complex<double> {});
         for (int i = 0; i < hop; ++i)
             x[(std::size_t) i] = (double) in[c][(std::size_t) i];
-        fft (x, false);
+        fft (x.data(), (std::size_t) n, twiddles->forward);
         for (int k = 0; k < n; ++k)
-            x[(std::size_t) k] *= kernel[(std::size_t) k];
-        fft (x, true);
+            x[(std::size_t) k] = mul (x[(std::size_t) k], kernel[(std::size_t) k]);
+        fft (x.data(), (std::size_t) n, twiddles->inverse);
         auto& o = out[c];
         std::copy (o.begin() + hop, o.end(), o.begin());
         std::fill (o.begin() + hop, o.end(), 0.0f);

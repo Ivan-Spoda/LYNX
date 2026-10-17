@@ -1,10 +1,62 @@
 #include "core/WorkerPool.h"
 
+#include <chrono>
+
 #include "core/Denormals.h"
+
+#if defined(_WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#else
+ #include <semaphore>
+#endif
+
+#if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
+ #include <immintrin.h>
+#endif
 
 namespace lynx
 {
-WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart)
+namespace
+{
+inline void cpuRelax() noexcept
+{
+#if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
+    _mm_pause();
+#elif defined(__aarch64__)
+    asm volatile ("yield");
+#endif
+}
+} // namespace
+
+#if defined(_WIN32)
+struct WorkerPool::Semaphore
+{
+    Semaphore() : handle (CreateSemaphoreW (nullptr, 0, 0x7fffffff, nullptr)) {}
+    ~Semaphore()
+    {
+        if (handle != nullptr)
+            CloseHandle (handle);
+    }
+    void release (int n) noexcept { ReleaseSemaphore (handle, n, nullptr); }
+    void acquire() noexcept { WaitForSingleObject (handle, INFINITE); }
+    HANDLE handle;
+};
+#else
+struct WorkerPool::Semaphore
+{
+    void release (int n) noexcept { s.release (n); }
+    void acquire() noexcept { s.acquire(); }
+    std::counting_semaphore<0x7fffffff> s { 0 };
+};
+#endif
+
+WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart) : wake (std::make_unique<Semaphore>())
 {
     // ticket 0: count 0, nothing to take until the first parallelFor
 
@@ -15,10 +67,17 @@ WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart)
 WorkerPool::~WorkerPool()
 {
     quit.store (true);
-    wake.release ((std::ptrdiff_t) threads.size());
+    wake->release ((int) threads.size());
 
     for (auto& t : threads)
         t.join();
+}
+
+bool WorkerPool::hasWork() const noexcept
+{
+    constexpr auto mask = (std::uint64_t (1) << indexBits) - 1;
+    const auto t = ticket.load (std::memory_order_acquire);
+    return (t & mask) < ((t >> indexBits) & mask);
 }
 
 void WorkerPool::workerLoop (std::function<void()> onStart)
@@ -28,29 +87,78 @@ void WorkerPool::workerLoop (std::function<void()> onStart)
     if (onStart)
         onStart();
 
-    while (true)
+    using clock = std::chrono::steady_clock;
+
+    while (! quit.load (std::memory_order_relaxed))
     {
-        wake.acquire();
+        // spin a little: within a block the next parallelFor (next mixer layer or chunk) follows right away
+        auto spinStart = clock::now();
+        auto found = false;
+
+        for (int i = 0;; ++i)
+        {
+            if (hasWork())
+            {
+                found = true;
+                break;
+            }
+
+            cpuRelax();
+
+            if ((i & 63) == 63)
+            {
+                if (quit.load (std::memory_order_relaxed))
+                    return;
+                if (clock::now() - spinStart > std::chrono::microseconds (spinMicros))
+                    break;
+            }
+        }
+
+        if (found)
+        {
+            work (true);
+            continue;
+        }
+
+        // sleep. Announce it first, then look once more: run() publishes the ticket before reading `sleeping`,
+        // so either it sees this worker asleep and releases the semaphore, or this check sees the work
+        sleeping.fetch_add (1, std::memory_order_seq_cst);
+
+        if (hasWork())
+        {
+            sleeping.fetch_sub (1, std::memory_order_seq_cst);
+            work (true);
+            continue;
+        }
+
+        wake->acquire();
+        sleeping.fetch_sub (1, std::memory_order_seq_cst);
+        wokenUp.fetch_add (1, std::memory_order_relaxed);
 
         if (quit.load())
             return;
 
-        work();
+        work (true);
     }
 }
 
-void WorkerPool::work() noexcept
+bool WorkerPool::work (bool isWorker) noexcept
 {
     constexpr auto mask = (std::uint64_t (1) << indexBits) - 1;
+    auto any = false;
+
     while (true)
     {
         const auto t = ticket.fetch_add (1, std::memory_order_acq_rel);
         const auto i = t & mask, n = (t >> indexBits) & mask;
 
         if (i >= n)
-            return;
+            return any;
 
         call (context, (int) i);
+        any = true;
+        if (isWorker)
+            byWorkers.fetch_add (1, std::memory_order_relaxed);
         done.fetch_add (1, std::memory_order_acq_rel);
     }
 }
@@ -72,13 +180,20 @@ void WorkerPool::run (int n, void* ctx, Call fn) noexcept
     done.store (0, std::memory_order_relaxed);
     ++generation;
     const auto base = generation << (2 * indexBits);
-    ticket.store (base | ((std::uint64_t) n << indexBits), std::memory_order_release); // from here on the workers may take indices
+    ticket.store (base | ((std::uint64_t) n << indexBits), std::memory_order_seq_cst); // from here on the workers may take indices
 
-    wake.release ((std::ptrdiff_t) std::min<int> ((int) threads.size(), n - 1));
-    work();
+    // wake only the sleepers that are needed (spinning workers already see the ticket)
+    if (const auto asleep = sleeping.load (std::memory_order_seq_cst); asleep > 0)
+        wake->release (std::min (asleep, n - 1));
 
-    while (done.load (std::memory_order_acquire) < n)
-        std::this_thread::yield();
+    work (false);
+
+    for (int spins = 0; done.load (std::memory_order_acquire) < n; ++spins)
+    {
+        cpuRelax();
+        if ((spins & 1023) == 1023)
+            std::this_thread::yield();
+    }
 
     ticket.store (base, std::memory_order_release); // count 0: late workers take nothing
 }

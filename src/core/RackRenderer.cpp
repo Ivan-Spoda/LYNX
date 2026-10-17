@@ -7,6 +7,9 @@
 #include "core/NewtoneFx.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <ctime>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -589,6 +592,62 @@ bool anyAbove (const float* l, const float* r, int n, float level) noexcept
 }
 } // namespace
 
+namespace
+{
+std::uint64_t nowNs() noexcept
+{
+#if defined(__linux__)
+    // diagnostics on a busy machine: LYNX_PROFILE_CPU=1 measures each unit in its thread's CPU time (renderwav)
+    static const bool threadCpu = std::getenv ("LYNX_PROFILE_CPU") != nullptr;
+    if (threadCpu)
+    {
+        timespec ts {};
+        clock_gettime (CLOCK_THREAD_CPUTIME_ID, &ts);
+        return (std::uint64_t) ts.tv_sec * 1000000000ull + (std::uint64_t) ts.tv_nsec;
+    }
+#endif
+    return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Adds the time since `start` to `slot` when profiling (start = 0: profiling was off when the unit began)
+struct UnitTimer
+{
+    UnitTimer (bool on, std::atomic<std::uint64_t>& s, std::atomic<std::uint64_t>* m = nullptr) noexcept
+        : slot (s), longest (m), start (on ? nowNs() : 0) {}
+    ~UnitTimer()
+    {
+        if (start == 0)
+            return;
+        const auto used = nowNs() - start;
+        slot.fetch_add (used, std::memory_order_relaxed);
+        if (longest != nullptr)
+        {
+            auto current = longest->load (std::memory_order_relaxed);
+            while (used > current && ! longest->compare_exchange_weak (current, used, std::memory_order_relaxed))
+            {
+            }
+        }
+    }
+    std::atomic<std::uint64_t>& slot;
+    std::atomic<std::uint64_t>* longest;
+    std::uint64_t start;
+};
+} // namespace
+
+void RackRenderer::resetUnitTimes() noexcept
+{
+    for (auto& t : units->channelNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->effectNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->channelMaxNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->effectMaxNs)
+        t.store (0, std::memory_order_relaxed);
+    units->processNs.store (0, std::memory_order_relaxed);
+    units->processedSamples.store (0, std::memory_order_relaxed);
+}
+
 void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
@@ -801,6 +860,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         return;
     }
     channelSilent[(std::size_t) i] = 0;
+    const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->channelNs[(std::size_t) i], &units->channelMaxNs[(std::size_t) i]);
     std::memset (l, 0, sizeof (float) * (std::size_t) n);
     std::memset (r, 0, sizeof (float) * (std::size_t) n);
     int position = 0;
@@ -984,6 +1044,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             std::memcpy (trackScratch (track, 1), r, sizeof (float) * (std::size_t) n);
         }
 
+        const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->effectNs[std::min (key, units->effectNs.size() - 1)],
+                               &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
+
         if (state.hasAutomation && ! isPlugin)
         {
             auto params = slots[i].params; // copy without allocation
@@ -1038,6 +1101,9 @@ void RackRenderer::process (const RackState* state,
                             LiveEventQueue* moreLive) noexcept
 {
     const ScopedFlushDenormals noDenormals;
+    const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->processNs);
+    if (profiling.load (std::memory_order_relaxed))
+        units->processedSamples.fetch_add ((std::uint64_t) std::max (0, numSamples), std::memory_order_relaxed);
     std::memset (left, 0, sizeof (float) * (std::size_t) numSamples);
     std::memset (right, 0, sizeof (float) * (std::size_t) numSamples);
     events.clear();
