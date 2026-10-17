@@ -103,6 +103,17 @@ public:
     // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
     void showAddChannelMenu (int insertAt = -1);
 
+    // Channel filter groups (FL's "All" dropdown in the rack's title, REA round 104): -1 shows every channel,
+    // otherwise only the channels of that group (Song::channelGroups). New channels join the group shown.
+    int getFilterGroup() const noexcept { return filterGroup; }
+    void setFilterGroup (int group);
+    juce::String filterName() const;
+    void showFilterMenu (juce::Component* target);
+    void groupSelected (); // "Group selected..." (Alt+G): the selected channels go into a new, named group
+    void moveSelectedToGroup (int group); // -1 = no group
+    bool isShown (int row) const;          // not hidden by the filter
+    std::function<void()> onFilterChanged; // the title shows the filter's name and the graph editor's state
+
     static constexpr int rowHeight = 30;
     static constexpr int muteWidth = 26;
     static constexpr int knobWidth = 28;
@@ -126,6 +137,10 @@ private:
     int gridLeft() const noexcept { return selectLeft() + selectWidth + 8; }
     juce::Rectangle<int> rowBounds (int row) const;
     int rowY (int row) const;       // top of a row (rows below the graph lane shift down)
+    int filterGroup = -1;
+    static inline std::vector<Note> stepClipboard; // the channel menu's Cut / Copy / Paste (a channel's notes)
+    int visibleIndex (int row) const; // the row's place among the shown rows
+    int shownCount() const;
     int rowAtY (int y) const;       // row under y (the lane counts as its channel's row)
     int graphRow() const;           // the row the lane belongs to (the primary selection), -1 when hidden
     juce::Rectangle<int> laneBounds() const;

@@ -303,6 +303,8 @@ double PlaylistComponent::xToTick (int x) const { return (x - headerWidth) / pix
 int PlaylistComponent::heightOf (int track) const
 {
     const auto& tracks = engine.getSong().playlistTracks;
+    if (noteedit::isFoldedAway (engine.getSong(), track))
+        return foldedHeight;
     const auto h = track >= 0 && track < (int) tracks.size() ? tracks[(std::size_t) track].height : 0;
     return h > 0 ? polish::clampTrackHeight (h) : trackHeight;
 }
@@ -352,7 +354,7 @@ int PlaylistComponent::dividerAt (juce::Point<int> p) const
     const auto track = yToTrack (p.y);
 
     for (auto t : { track - 1, track })
-        if (t >= 0 && std::abs (p.y - (trackToY (t) + heightOf (t))) <= 3)
+        if (t >= 0 && ! noteedit::isFoldedAway (engine.getSong(), t) && std::abs (p.y - (trackToY (t) + heightOf (t))) <= 3)
             return t;
 
     return -1;
@@ -609,6 +611,21 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (! g.getClipBounds().toFloat().intersects (r.expanded (1.0f)))
                 continue; // outside the area being repainted
 
+            if (noteedit::isFoldedAway (song, c.track)) // a folded group: each member's clips as a thin bar (FL)
+            {
+                const auto barColour = c.kind == ClipKind::audio        ? colour::audioClip
+                                       : c.kind == ClipKind::automation ? colour::automation
+                                                                        : tame (patternColour (song, c.pattern));
+                g.setColour (barColour.withAlpha (c.muted ? 0.35f : 0.9f));
+                g.fillRect (juce::Rectangle<float> (x0, y + 2.0f, juce::jmax (2.0f, x1 - x0 - 1.0f), (float) foldedHeight - 4.0f));
+                if (isSelected (i))
+                {
+                    g.setColour (colour::textPrimary);
+                    g.drawRect (juce::Rectangle<float> (x0, y + 1.0f, juce::jmax (2.0f, x1 - x0 - 1.0f), (float) foldedHeight - 2.0f), 1.0f);
+                }
+                continue;
+            }
+
             if (c.kind == ClipKind::automation)
             {
                 paintAutomationClip (g, c, r);
@@ -802,6 +819,8 @@ void PlaylistComponent::paint (juce::Graphics& g)
     }
 
     // --- track headers -----------------------------------------------------
+    // FL's layout: the name on the left, a group header's fold arrow and the mute LED on the right; grouped
+    // tracks sit indented on a block in their header's colour; members of a folded group are thin rows
     {
         const auto headers = juce::Rectangle<int> (0, headerHeight, headerWidth, grid.getHeight());
         juce::Graphics::ScopedSaveState state (g);
@@ -809,6 +828,25 @@ void PlaylistComponent::paint (juce::Graphics& g)
         g.setColour (colour::bg2);
         g.fillRect (headers);
         g.setFont (font (type::small));
+
+        auto colourOf = [&song] (int t) { return t >= 0 && t < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) t].colour : 0u; };
+
+        // group blocks first (behind the headers): from the header's top to the last member's bottom
+        for (int t = 0; t < tracks; ++t)
+        {
+            if (! noteedit::isGroupHeader (song, t))
+                continue;
+            const auto members = noteedit::groupMembers (song, t);
+            const auto last = members.empty() ? t : members.back();
+            const auto top = trackToY (t), bottom = trackToY (last) + heightOf (last);
+            if (top > headers.getBottom() || bottom < headers.getY())
+                continue;
+            auto block = colour::bg3;
+            if (const auto c = colourOf (t); c != 0)
+                block = block.interpolatedWith (tame (juce::Colour (c)), 0.28f);
+            g.setColour (block);
+            g.fillRoundedRectangle (juce::Rectangle<float> (1.0f, (float) top + 1.0f, (float) headerWidth - 2.0f, (float) (bottom - top) - 2.0f), radius::md);
+        }
 
         for (int t = 0; t < tracks; ++t)
         {
@@ -818,28 +856,62 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (y > headers.getBottom() || y + trackHeight < headers.getY())
                 continue;
 
+            if (noteedit::isFoldedAway (song, t))
+                continue; // the group block shows through: a thin row, as FL draws a folded group
+
             const auto muted = song.isTrackMuted (t);
             const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
             const auto hovered = hover.header && hover.track == t;
+            const auto member = noteedit::groupHeaderOf (song, t) >= 0 && ! noteedit::isGroupHeader (song, t);
+            const auto groupHead = noteedit::isGroupHeader (song, t);
+            const auto left = member ? (float) groupIndent : 2.0f;
             auto plate = muted ? colour::bg2 : colour::bg3;
-            const auto trackColour = t < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) t].colour : 0u;
+            const auto trackColour = colourOf (t);
             if (trackColour != 0) // the track's colour (FL projects colour their track headers by group)
-                plate = plate.interpolatedWith (tame (juce::Colour (trackColour)), muted ? 0.22f : 0.5f);
+                plate = plate.interpolatedWith (tame (juce::Colour (trackColour)), muted ? 0.22f : (groupHead ? 0.62f : 0.5f));
             if (hovered)
                 plate = plate.interpolatedWith (colour::bg5, 0.6f);
+            const auto plateArea = juce::Rectangle<float> (left, (float) y + 1.0f, (float) headerWidth - 2.0f - left, (float) trackHeight - 3.0f);
             g.setColour (plate);
-            g.fillRoundedRectangle (juce::Rectangle<float> (2.0f, (float) y + 1.0f, (float) headerWidth - 4.0f, (float) trackHeight - 3.0f), radius::sm);
+            g.fillRoundedRectangle (plateArea, radius::sm);
+
+            if (t == currentTrack) // the selected track (FL marks it next to the LED)
+            {
+                g.setColour (colour::accent);
+                g.fillRoundedRectangle (plateArea.withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f);
+            }
+
+            const auto led = trackLed (t).toFloat();
             g.setColour (muteLed (muted));
-            g.fillEllipse (7.0f, (float) y + trackHeight / 2.0f - 4.0f, 8.0f, 8.0f);
+            g.fillEllipse (led.withSizeKeepingCentre (8.0f, 8.0f));
             if (hovered && hover.led) // the LED is a button: ring it
             {
                 g.setColour (colour::textPrimary.withAlpha (0.7f));
-                g.drawEllipse (5.0f, (float) y + trackHeight / 2.0f - 6.0f, 12.0f, 12.0f, 1.0f);
+                g.drawEllipse (led.withSizeKeepingCentre (12.0f, 12.0f), 1.0f);
             }
+
+            auto textRight = led.getX() - 2.0f;
+            if (const auto arrow = trackArrow (t); ! arrow.isEmpty())
+            {
+                const auto collapsed = t < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) t].collapsed;
+                const auto a = arrow.toFloat().withSizeKeepingCentre (8.0f, 5.0f);
+                juce::Path tri;
+                if (collapsed) // folded: points down (FL), open: up
+                    tri.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
+                else
+                    tri.addTriangle (a.getX(), a.getBottom(), a.getRight(), a.getBottom(), a.getCentreX(), a.getY());
+                g.setColour (hovered && hover.arrow ? colour::textPrimary : colour::textSecondary);
+                g.fillPath (tri);
+                textRight = (float) arrow.getX();
+            }
+
             g.setColour (muted ? colour::textDisabled : (custom ? colour::textPrimary : colour::textSecondary));
+            g.setFont (font (type::small, groupHead));
+            const auto textLeft = (int) left + 6;
             g.drawFittedText (custom ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
                                      : tr ("Track {0}", { juce::String (t + 1) }),
-                              20, y, headerWidth - 24, trackHeight, juce::Justification::centredLeft, trackHeight >= 30 ? 2 : 1, 0.8f);
+                              textLeft, y, juce::jmax (8, (int) textRight - textLeft - 2), trackHeight, juce::Justification::centredLeft,
+                              trackHeight >= 30 ? 2 : 1, 0.8f);
 
             // the divider under the header: lit while hovered or dragged (drag resizes the track)
             if (hover.divider == t || (drag == Drag::trackResize && (resizeTrack == t || resizeAll)))
@@ -1285,22 +1357,30 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // track header: the LED mutes (Ctrl+click or right-click on it: solo); right-click elsewhere: track menu
+    // track header: the LED mutes (Ctrl+click or right-click on it: solo), a group header's arrow folds the
+    // group, a click elsewhere selects the track; right-click elsewhere: track menu
     if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
         const auto track = yToTrack (e.y);
-        const auto onLed = e.x < 20;
+        const auto onLed = trackLed (track).expanded (3).contains (e.getPosition());
+        const auto onArrow = trackArrow (track).contains (e.getPosition());
 
         if (onLed && (e.mods.isPopupMenu() || e.mods.isCtrlDown()))
             engine.editSong ([track, count = numTracks()] (Song& s) { noteedit::soloTrack (s, track, count); });
         else if (e.mods.isPopupMenu())
             showTrackMenu (track);
         else if (onLed)
+            editTrack (track, [] (PlaylistTrack& t) { t.muted = ! t.muted; });
+        else if (onArrow)
             engine.editSong ([track] (Song& s) {
-                if ((int) s.playlistTracks.size() <= track)
-                    s.playlistTracks.resize ((std::size_t) track + 1);
-                s.playlistTracks[(std::size_t) track].muted = ! s.playlistTracks[(std::size_t) track].muted;
+                const auto folded = track < (int) s.playlistTracks.size() && s.playlistTracks[(std::size_t) track].collapsed;
+                noteedit::setGroupCollapsed (s, track, ! folded);
             });
+        else if (! noteedit::isFoldedAway (engine.getSong(), track))
+        {
+            currentTrack = track;
+            repaint (0, headerHeight, headerWidth, getHeight() - headerHeight);
+        }
         return;
     }
 
@@ -2211,67 +2291,205 @@ void PlaylistComponent::deleteTimeSelection()
     sortClips();
 }
 
+juce::Rectangle<int> PlaylistComponent::trackLed (int track) const
+{
+    const auto h = heightOf (track);
+    return { headerWidth - 17, trackToY (track) + h / 2 - 6, 12, 12 };
+}
+
+juce::Rectangle<int> PlaylistComponent::trackArrow (int track) const
+{
+    if (! noteedit::isGroupHeader (engine.getSong(), track))
+        return {};
+
+    const auto led = trackLed (track);
+    return { led.getX() - 15, led.getY() - 1, 13, led.getHeight() + 2 };
+}
+
+void PlaylistComponent::editTrack (int track, std::function<void (PlaylistTrack&)> change)
+{
+    if (track < 0)
+        return;
+
+    engine.editSong ([track, change] (Song& s) {
+        if ((int) s.playlistTracks.size() <= track)
+            s.playlistTracks.resize ((std::size_t) track + 1);
+        change (s.playlistTracks[(std::size_t) track]);
+    });
+}
+
+// The track menu in FL's order (REA round 104): name and colour, size, grouping, its clips, insert / clone /
+// delete, move. FL items LYNX has no counterpart for (icons, track modes, performance settings, ghost notes,
+// consolidate) are left out.
 void PlaylistComponent::showTrackMenu (int track)
 {
     const auto& song = engine.getSong();
-    const auto muted = song.isTrackMuted (track);
     const auto count = numTracks();
+    const auto info = track < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) track] : PlaylistTrack {};
     juce::PopupMenu menu;
-    menu.addSectionHeader (track < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) track].name.empty()
-                               ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) track].name.c_str())
-                               : tr ("Track {0}", { juce::String (track + 1) }));
+    menu.addSectionHeader (! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }));
     menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
-    menu.addItem (muted ? tr ("Unmute") : tr ("Mute"), [this, track] {
-        engine.editSong ([track] (Song& s) {
-            if ((int) s.playlistTracks.size() <= track)
-                s.playlistTracks.resize ((std::size_t) track + 1);
-            s.playlistTracks[(std::size_t) track].muted = ! s.playlistTracks[(std::size_t) track].muted;
+    {
+        juce::PopupMenu colours;
+        colours.addItem (tr ("Default"), true, info.colour == 0, [this, track] { editTrack (track, [] (PlaylistTrack& t) { t.colour = 0; }); });
+        colours.addSeparator();
+        for (auto c : lynxPalette())
+        {
+            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+            juce::Graphics (swatch).fillAll (juce::Colour (c));
+            juce::PopupMenu::Item item;
+            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.image = std::make_unique<juce::DrawableImage> (swatch);
+            item.isTicked = info.colour == c;
+            item.action = [this, track, c] { editTrack (track, [c] (PlaylistTrack& t) { t.colour = c; }); };
+            colours.addItem (std::move (item));
+        }
+        menu.addSubMenu (tr ("Change color"), colours);
+    }
+    menu.addItem (tr ("Random color"), [this, track] {
+        const auto& palette = lynxPalette();
+        const auto c = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];
+        editTrack (track, [c] (PlaylistTrack& t) { t.colour = c; });
+    });
+    menu.addItem (tr ("Auto name"), [this, track] {
+        // the name of the source of the track's first clip (pattern, audio or automation channel)
+        const auto& s = engine.getSong();
+        const Clip* first = nullptr;
+        for (const auto& c : s.playlist)
+            if (c.track == track && (first == nullptr || c.start < first->start))
+                first = &c;
+        if (first == nullptr)
+            return;
+        std::string name;
+        if (first->kind == ClipKind::pattern && first->pattern >= 0 && first->pattern < (int) s.patterns.size())
+            name = s.patterns[(std::size_t) first->pattern].name;
+        else if (first->kind == ClipKind::audio && first->channel >= 0 && first->channel < (int) s.channels.size())
+            name = s.channels[(std::size_t) first->channel].name;
+        else if (first->kind == ClipKind::automation && first->automation >= 0 && first->automation < (int) s.automations.size())
+            name = s.automations[(std::size_t) first->automation].name;
+        if (! name.empty())
+            editTrack (track, [name] (PlaylistTrack& t) { t.name = name; });
+    });
+    menu.addItem (tr ("Reset"), [this, track] {
+        editTrack (track, [] (PlaylistTrack& t) {
+            t.name.clear();
+            t.colour = 0;
+            t.height = 0;
+            t.muted = false;
         });
     });
-    menu.addItem (tr ("Solo (mute the other tracks)"), [this, track, count] { engine.editSong ([track, count] (Song& s) { noteedit::soloTrack (s, track, count); }); });
-    menu.addSeparator();
-    menu.addItem (tr ("Insert a track above"), [this, track] {
-        setSelection ({});
-        engine.editSong ([track] (Song& s) { noteedit::insertTrack (s, track); });
-    });
-    menu.addItem (tr ("Insert a track below"), [this, track] {
-        setSelection ({});
-        engine.editSong ([track] (Song& s) { noteedit::insertTrack (s, track + 1); });
-    });
-    menu.addItem (tr ("Move up"), track > 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track - 1); }); });
-    menu.addItem (tr ("Move down"), [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track + 1); }); });
     menu.addSeparator();
     {
-        // row heights (P18); dragging the divider under a header does the same
-        struct Size
-        {
-            const char* name;
-            int height;
-        };
-        static const Size sizes[] = { { TR_NOOP ("Small"), 24 }, { TR_NOOP ("Normal"), trackHeight }, { TR_NOOP ("Large"), 60 }, { TR_NOOP ("Huge"), 100 } };
-        juce::PopupMenu one, all;
+        // FL's sizes are relative to the default row; dragging the divider under a header sets any size (P18)
+        juce::PopupMenu size, all;
         const auto current = heightOf (track);
 
-        for (const auto& size : sizes)
+        for (int percent : { 33, 50, 100, 150, 200 })
         {
-            one.addItem (tr (size.name) + " (" + juce::String (size.height) + " px)", true, current == size.height,
-                         [this, track, h = size.height] { setTrackHeights ({ track }, h); });
-            all.addItem (tr (size.name) + " (" + juce::String (size.height) + " px)", [this, count, h = size.height] {
+            const auto h = polish::clampTrackHeight ((int) std::lround (trackHeight * percent / 100.0));
+            size.addItem (juce::String (percent) + "%", true, current == h, [this, track, h] { setTrackHeights ({ track }, h); });
+            all.addItem (juce::String (percent) + "%", [this, count, h] {
                 std::vector<int> tracks;
                 for (int t = 0; t < count; ++t)
                     tracks.push_back (t);
                 setTrackHeights (tracks, h);
             });
         }
-
-        menu.addSubMenu (tr ("Track height"), one);
-        menu.addSubMenu (tr ("Height of every track"), all);
+        size.addSeparator();
+        size.addSubMenu (tr ("Every track"), all);
+        menu.addSubMenu (tr ("Size"), size);
     }
     menu.addSeparator();
-    menu.addItem (tr ("Delete the track and its clips"), [this, track] {
+    {
+        const auto header = noteedit::groupHeaderOf (song, track);
+        const auto member = info.grouped && track > 0;
+        const auto folded = header >= 0 && header < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) header].collapsed;
+        menu.addItem (tr ("Group with above track"), track > 0 && ! member, member, [this, track] {
+            engine.editSong ([track] (Song& s) { noteedit::groupWithAbove (s, track); });
+        });
+        menu.addItem (tr ("Ungroup"), member, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::ungroupTrack (s, track); }); });
+        menu.addItem (tr ("Auto color group"), header >= 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::colourGroup (s, track); }); });
+        menu.addItem (tr ("Collapse grouped tracks"), header >= 0, folded, [this, track, folded] {
+            engine.editSong ([track, folded] (Song& s) { noteedit::setGroupCollapsed (s, track, ! folded); });
+        });
+    }
+    menu.addSeparator();
+    {
+        // the sources of the track's clips: choosing one makes it what the pencil paints (FL's "Current clip source")
+        juce::PopupMenu sources;
+        std::vector<std::pair<ClipKind, int>> seen;
+        for (const auto& c : song.playlist)
+        {
+            if (c.track != track)
+                continue;
+            const auto key = std::pair { c.kind, c.kind == ClipKind::pattern ? c.pattern : c.kind == ClipKind::audio ? c.channel : c.automation };
+            if (std::find (seen.begin(), seen.end(), key) != seen.end())
+                continue;
+            seen.push_back (key);
+            juce::String name;
+            if (key.first == ClipKind::pattern && key.second >= 0 && key.second < (int) song.patterns.size())
+                name = juce::String::fromUTF8 (song.patterns[(std::size_t) key.second].name.c_str());
+            else if (key.first == ClipKind::automation && key.second >= 0 && key.second < (int) song.automations.size())
+                name = juce::String::fromUTF8 (song.automations[(std::size_t) key.second].name.c_str());
+            else if (key.second >= 0 && key.second < (int) song.channels.size())
+                name = juce::String::fromUTF8 (song.channels[(std::size_t) key.second].name.c_str());
+            const auto ticked = brush.kind == key.first && (key.first == ClipKind::pattern ? song.currentPattern == key.second : brush.index == key.second);
+            sources.addItem (name, true, ticked, [this, key] {
+                brush.kind = key.first;
+                brush.index = key.first == ClipKind::pattern ? -1 : key.second;
+                if (key.first == ClipKind::pattern)
+                    engine.editSong ([p = key.second] (Song& s) { s.currentPattern = p; }, false);
+                engine.sendChangeMessage();
+            });
+        }
+        menu.addSubMenu (tr ("Current clip source"), sources, ! seen.empty());
+        auto muteAll = [this, track] (bool mute) {
+            engine.editSong ([track, mute] (Song& s) {
+                for (auto& c : s.playlist)
+                    if (c.track == track)
+                        c.muted = mute;
+            });
+        };
+        const auto hasClips = ! seen.empty();
+        menu.addItem (tr ("Mute all clips"), hasClips, false, [muteAll] { muteAll (true); });
+        menu.addItem (tr ("Unmute all clips"), hasClips, false, [muteAll] { muteAll (false); });
+    }
+    menu.addSeparator();
+    menu.addItem (tr ("Insert one"), [this, track] {
+        setSelection ({});
+        engine.editSong ([track] (Song& s) { noteedit::insertTrack (s, track); });
+    });
+    menu.addItem (tr ("Clone"), [this, track] {
+        // a copy of the track (name, colour, size, group) and its clips, right below it
+        setSelection ({});
+        engine.editSong ([track] (Song& s) {
+            noteedit::insertTrack (s, track + 1);
+            if (track < (int) s.playlistTracks.size())
+            {
+                auto copy = s.playlistTracks[(std::size_t) track];
+                copy.collapsed = false;
+                if (noteedit::isGroupHeader (s, track) || copy.grouped)
+                    copy.grouped = true; // stays in the same group
+                s.playlistTracks[(std::size_t) track + 1] = copy;
+            }
+            std::vector<Clip> copies;
+            for (const auto& c : s.playlist)
+                if (c.track == track)
+                {
+                    copies.push_back (c);
+                    copies.back().track = track + 1;
+                }
+            s.playlist.insert (s.playlist.end(), copies.begin(), copies.end());
+        });
+        sortClips();
+    });
+    menu.addItem (tr ("Delete"), [this, track] {
         setSelection ({});
         engine.editSong ([track] (Song& s) { noteedit::removeTrack (s, track); });
     });
+    menu.addSeparator();
+    menu.addItem (tr ("Move up"), track > 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track - 1); }); });
+    menu.addItem (tr ("Move down"), track + 1 < count, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track + 1); }); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
@@ -3083,7 +3301,8 @@ PlaylistComponent::Hover PlaylistComponent::hoverAt (juce::Point<int> p) const
         h.header = true;
         h.track = yToTrack (p.y);
         h.divider = dividerAt (p);
-        h.led = h.divider < 0 && p.x < 20;
+        h.led = h.divider < 0 && trackLed (h.track).expanded (3).contains (p);
+        h.arrow = h.divider < 0 && trackArrow (h.track).contains (p);
         return h;
     }
 
@@ -3141,7 +3360,7 @@ void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
         return;
     }
     if (hover.header)
-        cursor = hover.led ? gesture::Cursor::point : gesture::Cursor::normal;
+        cursor = hover.led || hover.arrow ? gesture::Cursor::point : gesture::Cursor::normal;
     else if (gridArea().contains (p))
     {
         const gesture::Mods m { mods.isShiftDown(), mods.isCtrlDown(), mods.isAltDown() };
@@ -3175,10 +3394,11 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (h.header)
     {
-        hint.text = h.led ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
-                          : tr ("Track: [RMB] menu  [2xLMB] rename  [Shift][Wheel] move up / down");
+        hint.text = h.led     ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
+                    : h.arrow ? tr ("Track group: [LMB] collapse / expand the grouped tracks")
+                              : tr ("Track: [LMB] select  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down");
         hint.value = trackName (h.track);
-        hint.hasMenu = ! h.led;
+        hint.hasMenu = ! h.led && ! h.arrow;
         return hint;
     }
 
@@ -3228,10 +3448,24 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    // double-click a track name: rename it
-    if (e.x >= 20 && e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom() && e.mods.isLeftButtonDown())
+    // double-click a track header: open the source of the track's first clip (FL); empty tracks: rename
+    if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom() && e.mods.isLeftButtonDown())
     {
-        renameTrack (yToTrack (e.y));
+        const auto track = yToTrack (e.y);
+
+        if (trackLed (track).expanded (3).contains (e.getPosition()) || trackArrow (track).contains (e.getPosition()))
+            return;
+
+        const auto& playlist = engine.getSong().playlist;
+        int first = -1;
+        for (int i = 0; i < (int) playlist.size(); ++i)
+            if (playlist[(std::size_t) i].track == track && (first < 0 || playlist[(std::size_t) i].start < playlist[(std::size_t) first].start))
+                first = i;
+
+        if (first >= 0)
+            openClipSource (first, e.mods.isAltDown());
+        else
+            renameTrack (track);
         return;
     }
 
@@ -3241,7 +3475,19 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
     if (hit < 0)
         return;
 
-    const auto& clip = engine.getSong().playlist[(std::size_t) hit];
+    openClipSource (hit, e.mods.isAltDown());
+}
+
+void PlaylistComponent::openClipSource (int hit, bool other)
+{
+    if (hit < 0 || hit >= (int) engine.getSong().playlist.size())
+        return;
+
+    const auto clip = engine.getSong().playlist[(std::size_t) hit];
+
+    if (clip.kind == ClipKind::pattern && clip.pattern != engine.getSong().currentPattern
+        && clip.pattern < (int) engine.getSong().patterns.size())
+        engine.editSong ([p = clip.pattern] (Song& s) { s.currentPattern = p; }, false);
 
     if (clip.kind == ClipKind::automation)
         openAutomationEditor (engine, clip.automation);
@@ -3250,7 +3496,7 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
         auto pianoRoll = editPatternsIn == 2
                          || (editPatternsIn == 0 && clip.pattern < (int) engine.getSong().patterns.size()
                              && hasPianoRollNotes (engine.getSong().patterns[(std::size_t) clip.pattern]));
-        if (e.mods.isAltDown())
+        if (other)
             pianoRoll = ! pianoRoll;
 
         if (pianoRoll && onOpenPianoRoll)
@@ -3504,6 +3750,7 @@ PatternPicker::PatternPicker (AudioEngine& e, PlaylistComponent& p)
       playlist (p)
 {
     engine.addChangeListener (this);
+    seenBrush = playlist.brush.kind;
 }
 
 PatternPicker::~PatternPicker()
@@ -3513,6 +3760,20 @@ PatternPicker::~PatternPicker()
 
 void PatternPicker::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    // the pencil's source changed elsewhere (a clip clicked, the track menu): show its kind, as FL does
+    if (playlist.brush.kind != seenBrush)
+    {
+        seenBrush = playlist.brush.kind;
+        view = seenBrush == ClipKind::audio ? 1 : seenBrush == ClipKind::automation ? 2 : 0;
+        scroll = 0;
+    }
+    repaint();
+}
+
+void PatternPicker::setView (int newView)
+{
+    view = juce::jlimit (0, 2, newView);
+    scroll = 0;
     repaint();
 }
 
@@ -3520,33 +3781,44 @@ std::vector<PatternPicker::Row> PatternPicker::rows() const
 {
     const auto& song = engine.getSong();
     std::vector<Row> list;
-    list.push_back ({ ClipKind::pattern, -1, tr ("Patterns"), {} });
 
-    for (int i = 0; i < (int) song.patterns.size(); ++i)
-        list.push_back ({ ClipKind::pattern, i, juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()),
-                          PlaylistComponent::patternColour (song, i) });
+    if (view == 0)
+        for (int i = 0; i < (int) song.patterns.size(); ++i)
+            list.push_back ({ ClipKind::pattern, i, juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()),
+                              PlaylistComponent::patternColour (song, i) });
 
-    bool audioHeader = false;
-    for (int c = 0; c < (int) song.channels.size(); ++c)
-        if (song.channels[(std::size_t) c].instrument == InstrumentKind::audioClip)
-        {
-            if (! audioHeader)
-                list.push_back ({ ClipKind::audio, -1, tr ("Audio"), {} });
-            audioHeader = true;
-            list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), theme::colour::audioClip });
-        }
+    if (view == 1)
+        for (int c = 0; c < (int) song.channels.size(); ++c)
+            if (song.channels[(std::size_t) c].instrument == InstrumentKind::audioClip)
+                list.push_back ({ ClipKind::audio, c, juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()),
+                                  PlaylistComponent::audioClipColour (song.channels[(std::size_t) c]) });
 
-    if (! song.automations.empty())
-        list.push_back ({ ClipKind::automation, -1, tr ("Automation"), {} });
-    for (int a = 0; a < (int) song.automations.size(); ++a)
-        list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), theme::colour::automation });
+    if (view == 2)
+        for (int a = 0; a < (int) song.automations.size(); ++a)
+            list.push_back ({ ClipKind::automation, a, juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), theme::colour::automation });
 
     return list;
 }
 
+juce::Rectangle<int> PatternPicker::tabBounds (int tab) const
+{
+    const auto w = (getWidth() - 8) / 3;
+    return { 4 + tab * w, 2, w, headerHeight - 4 };
+}
+
+int PatternPicker::listBottom() const
+{
+    return view == 0 ? getHeight() - footerHeight : getHeight();
+}
+
+juce::Rectangle<int> PatternPicker::addBounds() const
+{
+    return view == 0 ? juce::Rectangle<int> (4, getHeight() - footerHeight + 2, getWidth() - 8, footerHeight - 4) : juce::Rectangle<int>();
+}
+
 int PatternPicker::rowAt (int y) const
 {
-    if (y < headerHeight)
+    if (y < headerHeight || y >= listBottom())
         return -1;
 
     const auto index = (y - headerHeight) / rowHeight + scroll;
@@ -3563,42 +3835,86 @@ void PatternPicker::paint (juce::Graphics& g)
     g.fillRect (0, 0, getWidth(), headerHeight);
     g.setColour (colour::border);
     g.fillRect (0, headerHeight - 1, getWidth(), 1);
-    g.setColour (colour::textSecondary);
-    g.setFont (font (type::small, true));
-    g.drawText (theme::caps (tr ("Picker")), 10, 0, getWidth() - 20, headerHeight, juce::Justification::centredLeft);
 
-    for (int i = scroll; i < (int) list.size(); ++i)
+    // the three tabs: patterns, audio clips, automation clips
+    const Icon tabIcons[] = { Icon::pattern, Icon::audioFile, Icon::automate };
+    for (int t = 0; t < 3; ++t)
     {
-        const auto y = headerHeight + (i - scroll) * rowHeight;
-
-        if (y > getHeight())
-            break;
-
-        const auto& row = list[(std::size_t) i];
-
-        if (row.index < 0) // section title
+        const auto r = tabBounds (t).toFloat();
+        if (t == view || t == hoverTab)
         {
-            g.setColour (colour::textDisabled);
-            g.setFont (font (type::caption, true));
-            g.drawText (theme::caps (row.name), 10, y, getWidth() - 20, rowHeight - 3, juce::Justification::bottomLeft);
-            continue;
+            g.setColour (t == view ? colour::bg5 : colour::bg4);
+            g.fillRoundedRectangle (r, radius::sm);
         }
+        icons::draw (g, tabIcons[t], r.withSizeKeepingCentre (16.0f, 16.0f), t == view ? colour::accent : t == hoverTab ? colour::textPrimary : colour::textSecondary);
+    }
 
-        const auto r = juce::Rectangle<int> (4, y + 2, getWidth() - 8, rowHeight - 4);
-        const auto current = row.kind == ClipKind::pattern ? (playlist.brush.kind == ClipKind::pattern && row.index == song.currentPattern)
-                                                           : (playlist.brush.kind == row.kind && playlist.brush.index == row.index);
-        const auto rowColour = tame (row.colour);
-        const auto box = r.toFloat();
-        g.setColour (current ? rowColour.interpolatedWith (colour::bg3, 0.35f) : colour::bg3);
-        g.fillRoundedRectangle (box, radius::sm);
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (0, headerHeight, getWidth(), listBottom() - headerHeight);
 
-        // colour swatch on the left; the current row gets the accent strip instead
-        g.setColour (current ? colour::accent : rowColour);
-        g.fillRoundedRectangle (box.withWidth (3.0f), 1.5f);
+        for (int i = scroll; i < (int) list.size(); ++i)
+        {
+            const auto y = headerHeight + (i - scroll) * rowHeight;
 
-        g.setColour (current ? clipTitleText (rowColour.interpolatedWith (colour::bg3, 0.35f)) : colour::textPrimary.withAlpha (0.85f));
-        g.setFont (font (type::small, current));
-        g.drawText (row.name, r.withTrimmedLeft (10).withTrimmedRight (4), juce::Justification::centredLeft, true);
+            if (y > listBottom())
+                break;
+
+            const auto& row = list[(std::size_t) i];
+            const auto r = juce::Rectangle<int> (4, y + 2, getWidth() - 8, rowHeight - 4);
+            const auto current = row.kind == ClipKind::pattern ? (playlist.brush.kind == ClipKind::pattern && row.index == song.currentPattern)
+                                                               : (playlist.brush.kind == row.kind && playlist.brush.index == row.index);
+            const auto rowColour = tame (row.colour);
+            const auto box = r.toFloat();
+            auto fill = rowColour.interpolatedWith (colour::bg3, current ? 0.25f : 0.55f);
+            if (i == hoverRow && ! current)
+                fill = fill.interpolatedWith (colour::bg5, 0.35f);
+            g.setColour (fill);
+            g.fillRoundedRectangle (box, radius::sm);
+
+            // a faint miniature of the pattern's notes behind the name (FL's picker shows the same)
+            if (row.kind == ClipKind::pattern && row.index < (int) song.patterns.size())
+            {
+                const auto& pattern = song.patterns[(std::size_t) row.index];
+                if (! pattern.notes.empty())
+                {
+                    int low = 127, high = 0;
+                    for (const auto& n : pattern.notes)
+                    {
+                        low = juce::jmin (low, n.key);
+                        high = juce::jmax (high, n.key);
+                    }
+                    const auto body = box.reduced (3.0f, 3.0f);
+                    const auto span = (float) juce::jmax (6, high - low + 2);
+                    const auto length = (double) juce::jmax<std::int64_t> (1, pattern.effectiveLength (song.beatsPerBar));
+                    g.setColour (clipContentColour (rowColour).withAlpha (0.35f));
+                    for (const auto& n : pattern.notes)
+                    {
+                        const auto nx = body.getX() + (float) (n.start / length) * body.getWidth();
+                        const auto nw = juce::jmax (1.5f, (float) (n.length / length) * body.getWidth());
+                        const auto ny = body.getBottom() - ((float) (n.key - low) + 1.0f) / span * body.getHeight();
+                        g.fillRect (nx, ny, juce::jmin (nw, body.getRight() - nx), 1.5f);
+                    }
+                }
+            }
+
+            if (current) // the current source: the accent strip
+            {
+                g.setColour (colour::accent);
+                g.fillRoundedRectangle (box.withWidth (3.0f), 1.5f);
+            }
+
+            g.setColour (clipTitleText (fill));
+            g.setFont (font (type::small, current));
+            g.drawText (row.name, r.withTrimmedLeft (9).withTrimmedRight (4), juce::Justification::centredLeft, true);
+        }
+    }
+
+    if (const auto add = addBounds(); ! add.isEmpty())
+    {
+        g.setColour (hoverAdd ? colour::bg4 : colour::bg3);
+        g.fillRoundedRectangle (add.toFloat(), radius::sm);
+        icons::draw (g, Icon::plus, add.toFloat().withSizeKeepingCentre (14.0f, 14.0f), hoverAdd ? colour::textPrimary : colour::textSecondary);
     }
 
     g.setColour (colour::border);
@@ -3607,17 +3923,35 @@ void PatternPicker::paint (juce::Graphics& g)
 
 void PatternPicker::mouseDown (const juce::MouseEvent& e)
 {
+    for (int t = 0; t < 3; ++t)
+        if (tabBounds (t).contains (e.getPosition()))
+        {
+            setView (t);
+            return;
+        }
+
+    if (addBounds().contains (e.getPosition()))
+    {
+        if (onNewPattern)
+            onNewPattern();
+        return;
+    }
+
     const auto list = rows();
     const auto i = rowAt (e.y);
 
-    if (i < 0 || list[(std::size_t) i].index < 0)
+    if (i < 0)
         return;
 
     const auto& row = list[(std::size_t) i];
     playlist.brush = { row.kind, row.index };
+    seenBrush = row.kind;
 
     if (row.kind == ClipKind::pattern && row.index != engine.getSong().currentPattern)
         engine.editSong ([p = row.index] (Song& s) { s.currentPattern = p; }, false);
+
+    if (e.mods.isPopupMenu() && row.kind == ClipKind::pattern && onPatternMenu)
+        onPatternMenu();
 
     repaint();
 }
@@ -3627,14 +3961,70 @@ void PatternPicker::mouseDoubleClick (const juce::MouseEvent& e)
     const auto list = rows();
     const auto i = rowAt (e.y);
 
-    if (i >= 0 && list[(std::size_t) i].kind == ClipKind::pattern && list[(std::size_t) i].index >= 0 && onOpenPattern)
+    if (i >= 0 && list[(std::size_t) i].kind == ClipKind::pattern && onOpenPattern)
         onOpenPattern();
+}
+
+void PatternPicker::mouseMove (const juce::MouseEvent& e)
+{
+    int tab = -1;
+    for (int t = 0; t < 3; ++t)
+        if (tabBounds (t).contains (e.getPosition()))
+            tab = t;
+    const auto row = rowAt (e.y);
+    const auto add = addBounds().contains (e.getPosition());
+
+    if (tab != hoverTab || row != hoverRow || add != hoverAdd)
+    {
+        hoverTab = tab;
+        hoverRow = row;
+        hoverAdd = add;
+        repaint();
+    }
+}
+
+void PatternPicker::mouseExit (const juce::MouseEvent&)
+{
+    hoverTab = hoverRow = -1;
+    hoverAdd = false;
+    repaint();
+}
+
+ui::Hint PatternPicker::hintAt (juce::Point<int> p)
+{
+    ui::Hint hint;
+    const char* tabs[] = { TR_NOOP ("Picker: patterns"), TR_NOOP ("Picker: audio clips"), TR_NOOP ("Picker: automation clips") };
+
+    for (int t = 0; t < 3; ++t)
+        if (tabBounds (t).contains (p))
+        {
+            hint.text = tr (tabs[t]) + "  " + tr ("[LMB] show");
+            return hint;
+        }
+
+    if (addBounds().contains (p))
+    {
+        hint.text = tr ("New pattern");
+        return hint;
+    }
+
+    const auto list = rows();
+    if (const auto i = rowAt (p.y); i >= 0)
+    {
+        hint.value = list[(std::size_t) i].name;
+        hint.text = list[(std::size_t) i].kind == ClipKind::pattern
+                        ? tr ("Pattern: [LMB] paint it with the pencil  [2xLMB] open  [RMB] menu")
+                        : tr ("Clip source: [LMB] paint it with the pencil");
+        hint.hasMenu = list[(std::size_t) i].kind == ClipKind::pattern;
+    }
+
+    return hint;
 }
 
 void PatternPicker::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
 {
     const auto rows = (int) this->rows().size();
-    const auto visible = juce::jmax (1, (getHeight() - headerHeight) / rowHeight);
+    const auto visible = juce::jmax (1, (listBottom() - headerHeight) / rowHeight);
     scroll = juce::jlimit (0, juce::jmax (0, rows - visible), scroll - (int) std::round (wheel.deltaY * 6.0f));
     repaint();
 }

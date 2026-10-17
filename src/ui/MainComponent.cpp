@@ -240,7 +240,28 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     workspace.setContent (Panel::mixer, mixer, "Mixer", Icon::mixer);
     workspace.setContent (Panel::browser, browser, "Browser", Icon::browser);
     workspace.setTitleTooltip (Panel::channelRack, tr ("Shift+wheel here changes the pattern"));
-    workspace.setTitleAccessory (Panel::channelRack, &swingSlider, 26); // FL keeps the global swing in the rack's title bar
+    // FL keeps the channel filter, the global swing and the graph editor switch in the rack's title bar
+    rackFilterBox.text = rack.filterName();
+    rackFilterBox.onClick = [this] { rack.showFilterMenu (&rackFilterBox); };
+    rack.onFilterChanged = [this] {
+        rackFilterBox.text = rack.filterName();
+        rackFilterBox.repaint();
+        rackGraphButton.setToggleState (rack.areGraphLanesShown(), juce::dontSendNotification);
+    };
+    rackGraphButton.setClickingTogglesState (false);
+    rackGraphButton.onClick = [this] { rack.toggleGraphLanes(); };
+    rackTitleTools.addAndMakeVisible (rackFilterBox);
+    rackTitleTools.addAndMakeVisible (swingSlider);
+    rackTitleTools.addAndMakeVisible (rackGraphButton);
+    rackTitleTools.layout = [this] {
+        auto r = rackTitleTools.getLocalBounds();
+        rackFilterBox.setBounds (r.removeFromLeft (96).reduced (0, 3));
+        r.removeFromLeft (4);
+        swingSlider.setBounds (r.removeFromLeft (26));
+        r.removeFromLeft (4);
+        rackGraphButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
+    };
+    workspace.setTitleAccessory (Panel::channelRack, &rackTitleTools, rackTitleToolsWidth);
     workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
     workspace.onFocusChanged = [this] (Panel) { refreshPanelButtons(); };
     workspace.onKeyInDetachedWindow = [this] (const juce::KeyPress& key) { return keyPressed (key); };
@@ -265,6 +286,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         openPianoRoll();
     };
     picker.onOpenPattern = [this] { showPanel (Panel::channelRack); };
+    picker.onPatternMenu = [this] { makePatternMenu().showMenuAsync (juce::PopupMenu::Options().withMousePosition()); };
+    picker.onNewPattern = [this] { newPatternButton.onClick(); };
     playlist.onRenamePattern = [this] (int p) { showRenamePattern (p); };
     playlist.onOpenInSampler = [this] (int channel) {
         // the audio clip's file in a new Sampler channel (to play it from notes), its settings open
@@ -832,6 +855,7 @@ bool MainComponent::runAction (const std::string& id)
         refreshRecordOptionButtons();
     }
     else if (is ("rack.graphEditor")) rack.toggleGraphLanes();
+    else if (is ("rack.groupSelected")) rack.groupSelected();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
     else if (is ("rack.rotateRight")) rack.rotateSelected (1);
     else if (is ("browser.previous")) browser.step (-1, false);
@@ -1252,6 +1276,7 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             sort.addItem (tr ("By type"), [this] { rack.sortChannels (ChannelSort::type); });
             menu.addSubMenu (tr ("Sort channels"), sort);
             menu.addItem (tr ("Select unused channels"), [this] { rack.selectUnused(); });
+            action (menu, "rack.groupSelected", tr ("Group selected..."));
             break;
         }
         case Panel::playlist:
@@ -1647,6 +1672,15 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     refreshModeButton();
     tempoDisplay.repaint();
 
+    // a project with other filter groups (or none): the rack's filter falls back to "All"
+    if (rack.getFilterGroup() >= (int) song.channelGroups.size())
+        rack.setFilterGroup (-1);
+    if (rackFilterBox.text != rack.filterName())
+    {
+        rackFilterBox.text = rack.filterName();
+        rackFilterBox.repaint();
+    }
+
     if ((int) song.channels.size() != fittedChannelCount && fittedChannelCount >= 0) // a row was added or removed
         fitChannelRack (false);
 
@@ -2004,6 +2038,8 @@ void MainComponent::setQuickTips()
     tip (perfMeter, tr ("CPU, memory and polyphony"));
     tip (output, tr ("Output monitor"));
     tip (swingSlider, tr ("Swing"));
+    tip (rackFilterBox, tr ("Channel filter group"));
+    tip (rackGraphButton, tr ("Graph editor"));
 
     for (int i = 0; i < workspace::panelCount; ++i)
         tip (panelButtons[(std::size_t) i], tr (panelName ((Panel) i)), panelAction ((Panel) i));
@@ -3005,5 +3041,20 @@ void MainComponent::showImportReport()
 void MainComponent::showAudioSettings()
 {
     openSettings ((int) SettingsPage::audio);
+}
+// --- the Channel Rack's filter box ---------------------------------------------------------------
+
+void MainComponent::FilterBox::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    auto area = getLocalBounds().toFloat();
+    g.setColour (hovered ? colour::bg3 : colour::bg1);
+    g.fillRoundedRectangle (area, radius::sm);
+    g.setColour (hovered ? colour::borderStrong : colour::border);
+    g.drawRoundedRectangle (area.reduced (0.5f), radius::sm, 1.0f);
+    g.setColour (colour::textPrimary);
+    g.setFont (font (type::small));
+    g.drawText (text, getLocalBounds().withTrimmedLeft (7).withTrimmedRight (16), juce::Justification::centredLeft, true);
+    icons::draw (g, Icon::chevronDown, area.removeFromRight (16.0f).reduced (3.0f).translated (-2.0f, 0.0f), colour::textSecondary);
 }
 } // namespace lynx

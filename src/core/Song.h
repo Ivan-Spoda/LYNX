@@ -289,6 +289,7 @@ struct ChannelDef
     int cutGroup = 0;        // playing this channel cuts channels with an equal cutBy (0 = none)
     int cutBy = 0;
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = theme default
+    int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
 };
 
 enum class EffectKind : std::uint8_t
@@ -629,6 +630,10 @@ struct PlaylistTrack
     bool muted = false; // clips on this track don't play
     int height = 0;     // Playlist row height in px (0 = the default)
     std::uint32_t colour = 0; // header colour 0xFFRRGGBB (from the .flp or "Rename and color"); 0 = default
+    // Track groups (FL's "Group with above track"): a grouped track belongs to the group of the nearest
+    // ungrouped track above it (the group's header). `collapsed` on a header folds its members into thin rows.
+    bool grouped = false;
+    bool collapsed = false;
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.
@@ -678,6 +683,7 @@ struct Song
     double bpm = 130.0;
     int beatsPerBar = 4;
     float swing = 0.0f; // 0..1: delays off-beat sixteenth notes (like the swing of FL's Channel Rack)
+    std::vector<std::string> channelGroups; // the Channel Rack's filter groups (FL's "All" dropdown), by name
     float masterPitch = 0.0f; // cents, -1200..1200: shifts every note of the built-in instruments (the toolbar's master pitch)
     ProjectInfo info;
     std::vector<ChannelDef> channels;
