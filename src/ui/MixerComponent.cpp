@@ -11,6 +11,7 @@
 #include "core/Effects.h"
 #include "engine/Text.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/PluginEditors.h"
 #include "ui/PluginWindow.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
@@ -335,7 +336,12 @@ void MixerStrips::paint (juce::Graphics& g)
         const auto hovered = [this, t] (Part p) { return hoverTrack == t && hoverPart == p; };
         const auto dragging = [this, t] (Part p) { return dragTrack == t && dragPart == p; };
 
-        g.setColour (isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2));
+        // the strip is tinted with the insert's colour (FL tints whole strips, so groups read at a glance);
+        // kept dark so meters, knobs and text keep their contrast
+        auto plate = isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2);
+        if (track.colour != 0)
+            plate = plate.interpolatedWith (tame (juce::Colour (track.colour)), isSelected ? 0.26f : 0.2f);
+        g.setColour (plate);
         g.fillRoundedRectangle (strip.toFloat(), radius::md);
 
         if (track.colour != 0) // thin colour band at the top
@@ -1910,8 +1916,21 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto vocoder = slot.kind == EffectKind::vocoder;
     g.setColour (colour::textPrimary);
     g.setFont (font (type::title, true));
+    const auto editorButton = ! gate && ! vocoder && NativeEffectWindows::canOpen (slot.kind);
     g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : knobBounds (0).getY()) - 28,
-                getWidth() - 20, 20, juce::Justification::centredLeft);
+                getWidth() - 20 - (editorButton ? editorButtonBounds().getWidth() + 6 : 0), 20, juce::Justification::centredLeft, true);
+
+    if (editorButton) // the effect's own window (FL's plugin window)
+    {
+        const auto b = editorButtonBounds().toFloat();
+        const auto hover = getMouseXYRelative().toFloat();
+        g.setColour (b.contains (hover) ? colour::bg5 : colour::bg4);
+        g.fillRoundedRectangle (b, radius::md);
+        icons::draw (g, Icon::plugin, b.withWidth (22.0f).withSizeKeepingCentre (13.0f, 13.0f).translated (4.0f, 0.0f), colour::textSecondary);
+        g.setColour (colour::textPrimary);
+        g.setFont (font (type::small));
+        g.drawFittedText (tr ("Editor"), b.withTrimmedLeft (24.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+    }
 
     if (vocoder) // the analysis bands' levels, low to high (FL's band level strip)
     {
@@ -2068,6 +2087,14 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
     {
         ParametricEqWindows::open (engine, track, selectedSlot);
+        return;
+    }
+
+    if (selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind != EffectKind::volumeGate
+        && ! vocoderSelected() && NativeEffectWindows::canOpen ((*s)[(std::size_t) selectedSlot].kind)
+        && editorButtonBounds().contains (e.getPosition()))
+    {
+        openEditor (selectedSlot);
         return;
     }
 
@@ -2240,6 +2267,12 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
         return ui::valueHint (specFor (param, selectedSlot), valueOf (param, selectedSlot), gesture);
 
     ui::Hint h;
+    if (const auto* s = slots(); s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size()
+                                 && NativeEffectWindows::canOpen ((*s)[(std::size_t) selectedSlot].kind) && editorButtonBounds().contains (p))
+    {
+        h.text = tr ("Open the effect's window (its full controls, as in FL); double-clicking the slot does the same");
+        return h;
+    }
     if (track > 0 && armBounds().contains (p))
     {
         h.text = tr ("Record arm: Rec + Play records this insert's audio input into a Playlist clip  [RMB] input and monitoring");
@@ -2408,6 +2441,11 @@ void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
             engine.editSong ([t = track, i] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) i].mix = 1.0f; });
             return;
         }
+        else if (slotBounds (i).contains (e.getPosition()) && e.x >= slotBounds (i).getX() + 22)
+        {
+            openEditor (i); // double-click on the name: the effect's window (as clicking a slot in FL)
+            return;
+        }
 
     const auto p = knobAt (e.getPosition());
 
@@ -2518,6 +2556,26 @@ void EffectsPanel::toggleAllWindows()
 juce::Rectangle<int> EffectsPanel::pluginButtonBounds() const
 {
     return { 20, slotsTop + maxEffectSlots * slotHeight + 30, getWidth() - 40, 30 };
+}
+
+void EffectsPanel::openEditor (int slot)
+{
+    const auto* s = slots();
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return;
+    const auto kind = (*s)[(std::size_t) slot].kind;
+    if (kind == EffectKind::plugin)
+        openPluginWindow (slot);
+    else if (kind == EffectKind::parametricEq)
+        ParametricEqWindows::open (engine, track, slot);
+    else if (NativeEffectWindows::canOpen (kind))
+        NativeEffectWindows::open (engine, track, slot);
+}
+
+juce::Rectangle<int> EffectsPanel::editorButtonBounds() const
+{
+    // on the title row of the selected effect's knobs
+    return { getWidth() - 96, knobBounds (0).getY() - 29, 86, 20 };
 }
 
 void EffectsPanel::openPluginWindow (int slot)

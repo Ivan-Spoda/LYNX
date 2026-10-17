@@ -493,6 +493,38 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
     return m;
 }
 
+std::vector<std::vector<std::pair<double, float>>> maximusEnvelopes (const std::vector<std::uint8_t>& d)
+{
+    // the same walk as makeMaximusPreset: fixed block by version, the v14 / v15 options, then 8 envelopes
+    std::vector<std::vector<std::pair<double, float>>> out;
+    if (d.size() < 0x1fe + 12)
+        return out;
+    const auto header = (std::uint32_t) i32At (d, 0);
+    const auto version = header > 0xFFFFu ? (int) (header >> 16) : (int) header;
+    if (version < 3)
+        return out;
+    const std::size_t block = version >= 7 ? 0x1fa : version == 6 ? 0x1f9 : version == 5 ? 0x1f5 : version == 4 ? 0x1f1 : 0x1ee;
+    auto pos = 4 + block;
+    if (version >= 14)
+        pos += 9 + 20;
+    if (version >= 15)
+        pos += 4;
+    bool ok = true;
+    for (int e = 0; e < 8 && ok; ++e)
+    {
+        const auto pts = readCurve (d, pos, ok);
+        if (! ok)
+            break;
+        std::vector<std::pair<double, float>> curve;
+        for (const auto& p : pts)
+            curve.emplace_back (p.dx, p.y);
+        out.push_back (std::move (curve));
+    }
+    if (! ok)
+        out.clear();
+    return out;
+}
+
 namespace
 {
 // FUN_00624580 (types 1 low-pass, 4 high-pass, 5 all-pass) + FUN_00624e90 (stereo direct form I in double, the
