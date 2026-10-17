@@ -185,3 +185,30 @@ TEST (round105_layouts_are_fl_arrangements)
             ++onBank3;
     CHECK (onBank3 >= 20);
 }
+
+TEST (state_params_vocodex_in_place)
+{
+    using namespace lynx;
+    // the Default preset of the installation (skipped without the FL Data directory)
+    const auto file = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Effects" / "Vocodex" / "Default.fst";
+    if (realFlpDir.empty() || ! std::filesystem::exists (file))
+        return;
+    std::ifstream in (file, std::ios::binary);
+    const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    const auto fx = effectFromFlPreset (bytes);
+    CHECK (fx && fx->kind == EffectKind::vocodex);
+    if (! fx || fx->kind != EffectKind::vocodex)
+        return;
+    const auto* table = stateparams::tableFor (EffectKind::vocodex);
+    CHECK (table->get (fx->state, table->index ("Wet")).value_or (-1) == 1000);
+    CHECK (table->get (fx->state, table->index ("Bands")).value_or (-1) == 47);
+    CHECK (table->get (fx->state, table->index ("Draft")).value_or (-1) == 1);   // the field is 0 = Draft on
+    CHECK (table->get (fx->state, table->index ("From car")).value_or (-1) == 0);
+    auto edited = table->with (fx->state, table->index ("Bands"), 60);
+    edited = table->with (edited, table->index ("Draft"), 0);
+    edited = table->with (edited, table->index ("From car"), 1);
+    CHECK (edited.size() == fx->state.size());
+    const auto st = vocodex::parseState (vocodex::splitInstallData (edited).first);
+    CHECK (st && st->bands == 60 && ! st->draft() && st->fromCar);
+    CHECK (table->text (edited, table->index ("Mod pitch"), -1200) == "-1200 ct");
+}
