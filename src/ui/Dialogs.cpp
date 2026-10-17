@@ -107,7 +107,82 @@ private:
     Swatches swatches;
     juce::Label hint;
 };
+
+// One big choice of the record dialog: a title line and a note below it.
+class RecordChoiceButton final : public juce::Button
+{
+public:
+    RecordChoiceButton (const juce::String& title, const juce::String& note)
+        : juce::Button (title), noteText (note)
+    {
+        setSize (380, 46);
+    }
+
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        using namespace theme;
+        const auto r = getLocalBounds().toFloat().reduced (1.0f);
+        g.setColour (down ? colour::bg5 : over ? colour::bg4 : colour::bg3);
+        g.fillRoundedRectangle (r, radius::md);
+        g.setColour (over ? colour::accent : colour::border);
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::md, 1.0f);
+        g.setColour (colour::textPrimary);
+        g.setFont (font (type::body, true));
+        g.drawText (getButtonText(), getLocalBounds().reduced (12, 0).withTrimmedTop (5).withHeight (18), juce::Justification::centredLeft, true);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::small));
+        g.drawText (noteText, getLocalBounds().reduced (12, 0).withTrimmedTop (24).withHeight (16), juce::Justification::centredLeft, true);
+    }
+
+private:
+    juce::String noteText;
+};
+
+class RecordChoiceWindow final : public juce::AlertWindow
+{
+public:
+    RecordChoiceWindow()
+        : juce::AlertWindow (tr ("Recording"), tr ("What would you like to record?"), juce::MessageBoxIconType::NoIcon)
+    {
+        int result = recordChoiceAudio;
+        for (auto* b : { &audio, &notes, &everything })
+        {
+            b->onClick = [this, result] { exitModalState (result); };
+            addCustomComponent (b);
+            ++result;
+        }
+        dontAsk.setButtonText (tr ("Don't ask again (right-click the record button for the recording filter)"));
+        dontAsk.setSize (380, 24);
+        addCustomComponent (&dontAsk);
+        addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    }
+
+    bool dontAskAgain() const { return dontAsk.getToggleState(); }
+
+private:
+    RecordChoiceButton audio { tr ("Audio, into the Playlist as an audio clip"),
+                               tr ("Arms the selected mixer insert; choose its audio input (microphone) if it has none") },
+        notes { tr ("Notes, into the current pattern"), tr ("Notes played on a MIDI keyboard or the PC keyboard") },
+        everything { tr ("Everything"), tr ("Notes, and audio from the armed inserts") };
+    juce::ToggleButton dontAsk;
+};
 } // namespace
+
+std::unique_ptr<juce::AlertWindow> makeRecordChoiceDialog()
+{
+    return std::make_unique<RecordChoiceWindow>();
+}
+
+void showRecordChoiceDialog (std::function<void (int, bool)> onChoice)
+{
+    auto* window = new RecordChoiceWindow();
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([window, onChoice] (int result) {
+                                 if (result > 0)
+                                     onChoice (result, window->dontAskAgain());
+                             }),
+                             true);
+    keepAboveMainWindow (*window);
+}
 
 std::unique_ptr<juce::AlertWindow> makeNameAndColourDialog (const juce::String& title, const juce::String& name, std::uint32_t colour)
 {

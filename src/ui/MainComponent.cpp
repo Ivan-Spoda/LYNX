@@ -120,7 +120,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     output.onModeChanged = [this] { saveUiSettings(); };
     recordButton.setOnColour (theme::colour::record);
     recordButton.setIconColour (theme::colour::record.withMultipliedSaturation (0.8f));
-    recordButton.onClick = [this] { engine.setRecording (! engine.isRecording()); };
+    recordButton.onClick = [this] { toggleRecording(); };
     recordMenuButton.setTooltip (tr ("Recording options: what to record"));
     recordMenuButton.onClick = [this] { showRecordMenu(); };
     recordButton.onRightClick = [this] { showRecordMenu(); };
@@ -223,6 +223,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
     // the workspace panels
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
+    mixerinput::openAudioSettings = [this] { openSettings ((int) SettingsPage::audio); };
     rack.onOpenMixerInsert = [this] (int insert) { // double-click on a channel's route box
         showPanel (Panel::mixer);
         mixer.selectTrack (insert);
@@ -361,6 +362,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
 MainComponent::~MainComponent()
 {
+    mixerinput::openAudioSettings = nullptr;
     saveUiSettings();
     workspace.saveState();
     ui::uninstallSliderContract();
@@ -805,7 +807,7 @@ bool MainComponent::runAction (const std::string& id)
         showPanel (Panel::browser);
         browser.focusSearch();
     }
-    else if (is ("transport.record")) engine.setRecording (! engine.isRecording());
+    else if (is ("transport.record")) toggleRecording();
     else if (is ("transport.metronome"))
     {
         engine.getTransport().metronome.store (! engine.getTransport().metronome.load());
@@ -960,6 +962,12 @@ void MainComponent::loadUiSettings()
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "undoLevels")
             engine.setUndoLevels (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio")
+        {
+            auto o = engine.getRecordOptions();
+            (key == "askWhatToRecord" ? o.askWhatToRecord : key == "recordNotes" ? o.recordNotes : o.recordAudio) = on;
+            engine.setRecordOptions (o);
+        }
     }
 
     startup = StartupOptions::load();
@@ -982,7 +990,10 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
                                       + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
-                                      + "\nundoLevels=" + juce::String (engine.getUndoLevels()) + "\n");
+                                      + "\nundoLevels=" + juce::String (engine.getUndoLevels())
+                                      + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
+                                      + "\nrecordNotes=" + juce::String (engine.getRecordOptions().recordNotes ? 1 : 0)
+                                      + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -1372,17 +1383,79 @@ void MainComponent::addRecordOptions (juce::PopupMenu& menu)
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.placeSongClip = ! r.placeSongClip; }); });
 }
 
+void MainComponent::toggleRecording()
+{
+    if (engine.isRecording())
+    {
+        engine.setRecording (false);
+        return;
+    }
+
+    if (! engine.getRecordOptions().askWhatToRecord || ! persistent)
+    {
+        engine.setRecording (true);
+        return;
+    }
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    showRecordChoiceDialog ([safe] (int choice, bool dontAsk) {
+        if (safe == nullptr)
+            return;
+        auto o = safe->engine.getRecordOptions();
+        o.recordNotes = choice != recordChoiceAudio;
+        o.recordAudio = choice != recordChoiceNotes;
+        if (dontAsk)
+            o.askWhatToRecord = false;
+        safe->engine.setRecordOptions (o);
+        if (dontAsk)
+            safe->saveUiSettings();
+        if (choice == recordChoiceAudio && safe->engine.getArmedInserts().empty())
+            safe->armSelectedInsertForAudio();
+        safe->engine.setRecording (true);
+    });
+}
+
+void MainComponent::armSelectedInsertForAudio()
+{
+    const auto& mixer = engine.getSong().mixer;
+
+    // the selected insert, else the first one with an input, else a free one
+    auto target = this->mixer.getSelectedTrack();
+    for (int t = 1; target <= 0 && t < (int) mixer.size(); ++t)
+        if (mixer[(std::size_t) t].inputChannel >= 0)
+            target = t;
+    if (target <= 0)
+        target = engine.getSong().nextFreeInsert();
+    if (target <= 0 || target >= (int) mixer.size())
+        return;
+
+    showPanel (Panel::mixer);
+    this->mixer.selectTrack (target);
+    if (! engine.isInsertArmed (target))
+        mixerinput::toggleArm (engine, target, &this->mixer);
+}
+
 void MainComponent::showRecordMenu()
 {
-    juce::PopupMenu menu;
-    menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), false, true, [] {});
-    menu.addItem (tr ("Audio from the sound card input (becomes a Playlist clip)"), true, engine.isAudioRecordingArmed(), [this] {
-        engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
+    const auto o = engine.getRecordOptions();
+    auto set = [this] (std::function<void (AudioEngine::RecordOptions&)> change) {
+        auto options = engine.getRecordOptions();
+        change (options);
+        engine.setRecordOptions (options);
+        saveUiSettings();
+    };
 
-        if (engine.getLastRecordingError().isNotEmpty())
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio input"), engine.getLastRecordingError());
-    });
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Recording filter"));
+    menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), true, o.recordNotes,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordNotes = ! r.recordNotes; }); });
+    menu.addItem (tr ("Audio of the armed mixer inserts (becomes Playlist clips)"), true, o.recordAudio,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordAudio = ! r.recordAudio; }); });
+    menu.addItem (tr ("Ask what to record when recording starts"), true, o.askWhatToRecord,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.askWhatToRecord = ! r.askWhatToRecord; }); });
     menu.addSeparator();
+    menu.addItem (tr ("Arm the selected mixer insert for audio (choose its input)..."), [this] { armSelectedInsertForAudio(); });
+    menu.addItem (tr ("Audio settings (input device)..."), [this] { openSettings ((int) SettingsPage::audio); });
     menu.addItem (tr ("Open recordings folder"), [] {
         juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
         juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
@@ -1548,6 +1621,9 @@ void MainComponent::refreshModeButton()
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none && persistent)
+        mixerinput::explain (notice);
+
     const auto& song = engine.getSong();
     bool namesChanged = patternBox.getNumItems() != (int) song.patterns.size();
 

@@ -42,6 +42,9 @@ public:
     // Meters (for the UI); export turns them off to avoid wasting CPU.
     void setMetering (bool on) noexcept { metering.store (on); }
 
+    // External audio input of the inserts (set before the device starts).
+    void setLiveInput (LiveInput* input) noexcept { renderer.setLiveInput (input); }
+
 private:
     std::atomic<bool> metering { true };
     Transport& transport;

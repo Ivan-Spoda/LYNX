@@ -2,6 +2,7 @@
 
 #include "core/FlEffects.h"
 #include "core/FruityVocoder.h"
+#include "core/LiveInput.h"
 #include "core/MixerOps.h"
 #include "ui/AutomationUi.h"
 #include "ui/BrowserComponent.h"
@@ -150,6 +151,12 @@ juce::Rectangle<int> MixerStrips::armArea (int t) const
     return { stripX (t) + 4, 6, 13, 13 };
 }
 
+juce::Rectangle<int> MixerStrips::inputArea (int t) const
+{
+    // a thin level bar under the header (inserts with an input source)
+    return { stripX (t) + 6, headerHeight - 4, stripWidthOf (t) - 16, 3 };
+}
+
 juce::Rectangle<int> MixerStrips::panArea (int t) const
 {
     const auto w = stripWidthOf (t) - 4;
@@ -212,6 +219,10 @@ MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
 
     if (t > 0 && armArea (t).expanded (1).contains (p))
         return Part::arm;
+
+    if (t > 0 && t < (int) engine.getSong().mixer.size() && engine.getSong().mixer[(std::size_t) t].inputChannel >= 0
+        && inputArea (t).expanded (0, 2).contains (p))
+        return Part::input;
     if (headerArea (t).contains (p))
         return Part::header;
     if (panArea (t).contains (p))
@@ -362,6 +373,18 @@ void MixerStrips::paint (juce::Graphics& g)
             g.fillEllipse (r);
             g.setColour (armed ? colour::record.brighter (0.3f) : hovered (Part::arm) ? colour::textSecondary : colour::borderStrong);
             g.drawEllipse (r, 1.0f);
+
+            // the input level (inserts with an audio input source)
+            if (track.inputChannel >= 0 && (std::size_t) t < inputLevels.size())
+            {
+                const auto bar = inputArea (t).toFloat();
+                g.setColour (colour::bg0);
+                g.fillRoundedRectangle (bar, 1.0f);
+                const auto level = inputLevels[(std::size_t) t];
+                const auto fill = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 60.0f) / 60.0f);
+                g.setColour (level >= 0.99f ? colour::record : colour::success);
+                g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), 1.0f);
+            }
         }
 
         // header: number and effect count on one line, the name (once) below
@@ -611,8 +634,17 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
     if (part == Part::arm)
     {
-        engine.setInsertArmed (t, ! engine.isInsertArmed (t));
+        if (e.mods.isPopupMenu())
+            mixerinput::showMenu (engine, t, this);
+        else
+            mixerinput::toggleArm (engine, t, this);
         repaint();
+        return;
+    }
+
+    if (part == Part::input)
+    {
+        mixerinput::showMenu (engine, t, this);
         return;
     }
 
@@ -1068,7 +1100,8 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
         case Part::send:
             return ui::valueHint (specFor (part, t), valueOf (part, t), gesture);
         case Part::mute: h.text = name + " - " + tr ("Click: mute.  Right-click or Ctrl+click: solo"); break;
-        case Part::arm: h.text = name + " - " + tr ("Record arm: audio takes from the input play through this insert"); break;
+        case Part::arm: h.text = name + " - " + tr ("Record arm: Rec + Play records this insert's audio input into a Playlist clip  [RMB] input and monitoring"); h.hasMenu = true; break;
+        case Part::input: h.text = name + " - " + tr ("Input level of this insert's audio input  [LMB] choose the input"); h.hasMenu = true; break;
         case Part::solo: h.text = name + " - " + tr ("Solo"); break;
         case Part::meter: h.text = name + " - " + tr ("Peak meter (left/right) with peak hold  [LMB] clears the clip light"); break;
         case Part::route: h.text = name + " - " + tr ("Send from the selected insert to this one (drag after enabling: level; right-click: sidechain, only here)"); h.hasMenu = true; break;
@@ -1229,6 +1262,17 @@ void MixerStrips::showMenu (int t)
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
 
+    if (t > 0)
+    {
+        const auto& mt = song.mixer[(std::size_t) t];
+        const auto current = mt.inputChannel >= 0
+                                 ? juce::String::fromUTF8 (inputSourceName (mt.inputChannel, mt.inputStereo, engine.getInputChannelNames()).c_str())
+                                 : tr ("none");
+        menu.addItem (tr ("Audio input: {0}...", { current }), [this, t] { mixerinput::showMenu (engine, t, this); });
+        menu.addItem (engine.isInsertArmed (t) ? tr ("Disarm recording") : tr ("Arm recording"), [this, t] { mixerinput::toggleArm (engine, t, this); });
+        menu.addSeparator();
+    }
+
     if (channel < (int) song.channels.size())
         menu.addItem (tr ("Route channel \"{0}\" here", { juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()) }),
                       [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
@@ -1358,6 +1402,21 @@ void MixerStrips::timerCallback()
 {
     auto& meters = engine.getMeters();
     const auto showing = isShowing();
+    const auto& mixer = engine.getSong().mixer;
+    inputLevels.resize (mixer.size(), 0.0f);
+
+    for (std::size_t t = 1; t < mixer.size(); ++t)
+    {
+        const auto peak = mixer[t].inputChannel >= 0 ? juce::jmax (engine.takeInputPeak ((int) t, 0), engine.takeInputPeak ((int) t, 1)) : 0.0f;
+        auto level = juce::jmax (peak, inputLevels[t] * 0.8f);
+        level = level < 1e-4f ? 0.0f : level;
+        if (std::abs (level - inputLevels[t]) > 1e-4f)
+        {
+            inputLevels[t] = level;
+            if (showing)
+                repaint (inputArea ((int) t).expanded (1));
+        }
+    }
 
     for (std::size_t i = 0; i < levels.size(); ++i)
     {
@@ -1376,6 +1435,8 @@ void MixerStrips::timerCallback()
 namespace
 {
 constexpr int panelHeader = 30;
+constexpr int inputRowHeight = 30; // the input row (arm, audio input source) above the slots
+constexpr int slotsTop = panelHeader + inputRowHeight;
 constexpr int slotHeight = 24;
 const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
@@ -1407,11 +1468,41 @@ EffectsPanel::EffectsPanel (AudioEngine& e)
     setWantsKeyboardFocus (false);
     setMouseClickGrabsKeyboardFocus (false);
     engine.addChangeListener (this);
+    startTimerHz (30);
 }
 
 EffectsPanel::~EffectsPanel()
 {
     engine.removeChangeListener (this);
+}
+
+juce::Rectangle<int> EffectsPanel::armBounds() const
+{
+    return { 8, panelHeader + 2, 24, inputRowHeight - 8 };
+}
+
+juce::Rectangle<int> EffectsPanel::inputBoxBounds() const
+{
+    return { 38, panelHeader + 2, getWidth() - 46, inputRowHeight - 8 };
+}
+
+void EffectsPanel::timerCallback()
+{
+    // the input level of the shown insert (the strips read their own); decays like a meter
+    const auto& mixer = engine.getSong().mixer;
+    const auto hasInput = track > 0 && track < (int) mixer.size() && mixer[(std::size_t) track].inputChannel >= 0;
+    auto changed = false;
+
+    for (int side = 0; side < 2; ++side)
+    {
+        const auto peak = hasInput ? engine.peekInputPeak (track, side) : 0.0f;
+        const auto level = juce::jmax (peak, inputLevel[(std::size_t) side] * 0.8f);
+        changed = changed || std::abs (level - inputLevel[(std::size_t) side]) > 1e-4f;
+        inputLevel[(std::size_t) side] = level < 1e-4f ? 0.0f : level;
+    }
+
+    if (changed && isShowing())
+        repaint (inputBoxBounds());
 }
 
 void EffectsPanel::setTrack (int t)
@@ -1435,7 +1526,7 @@ juce::Rectangle<int> EffectsPanel::mixBounds (int slot) const
 
 juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 {
-    return { 8, panelHeader + slot * slotHeight, getWidth() - 16, slotHeight - 3 };
+    return { 8, slotsTop + slot * slotHeight, getWidth() - 16, slotHeight - 3 };
 }
 
 namespace
@@ -1452,7 +1543,7 @@ int shownParams (const EffectSlot& slot)
 
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
-    auto top = panelHeader + maxEffectSlots * slotHeight + 40;
+    auto top = slotsTop + maxEffectSlots * slotHeight + 40;
     // many parameters (Effector: 12): 4 columns and shorter rows to fit the height
     int count = 0;
     if (const auto* s = slots(); ! gateSelected() && s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size())
@@ -1484,7 +1575,7 @@ bool EffectsPanel::gateSelected() const
 
 juce::Rectangle<int> EffectsPanel::gateStepsBounds() const
 {
-    return { 10, panelHeader + maxEffectSlots * slotHeight + 40, getWidth() - 20, 90 };
+    return { 10, slotsTop + maxEffectSlots * slotHeight + 40, getWidth() - 20, 90 };
 }
 
 void EffectsPanel::setGateStep (juce::Point<int> p)
@@ -1505,7 +1596,7 @@ bool EffectsPanel::vocoderSelected() const
 
 juce::Rectangle<int> EffectsPanel::bandLevelsBounds() const
 {
-    return { 10, panelHeader + maxEffectSlots * slotHeight + 40, getWidth() - 20, 70 };
+    return { 10, slotsTop + maxEffectSlots * slotHeight + 40, getWidth() - 20, 70 };
 }
 
 namespace
@@ -1635,6 +1726,51 @@ void EffectsPanel::paint (juce::Graphics& g)
     g.setFont (font (type::title, true));
     g.drawText (tr ("Effects: {0}", { juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) }), 10, 4,
                 getWidth() - 70, panelHeader - 8, juce::Justification::centredLeft, true);
+
+    // input row (inserts): arm switch and the audio input source with its level
+    if (track > 0)
+    {
+        const auto& mt = song.mixer[(std::size_t) track];
+        const auto armed = engine.isInsertArmed (track);
+        const auto a = armBounds().toFloat();
+        g.setColour (armed ? colour::record.withAlpha (0.25f) : hoverInput == 1 ? colour::bg5 : colour::bg3);
+        g.fillRoundedRectangle (a, radius::sm);
+        const auto dot = a.withSizeKeepingCentre (11.0f, 11.0f);
+        g.setColour (armed ? colour::record : colour::bg0);
+        g.fillEllipse (dot);
+        g.setColour (armed ? colour::record.brighter (0.3f) : hoverInput == 1 ? colour::textSecondary : colour::borderStrong);
+        g.drawEllipse (dot, 1.0f);
+
+        const auto box = inputBoxBounds().toFloat();
+        g.setColour (hoverInput == 2 ? colour::bg4 : colour::bg3);
+        g.fillRoundedRectangle (box, radius::sm);
+        g.setColour (hoverInput == 2 ? colour::borderStrong : colour::border);
+        g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
+
+        // the level, as a thin bar along the bottom of the box (left over right)
+        if (mt.inputChannel >= 0)
+        {
+            const auto bar = box.reduced (4.0f, 0.0f).withTop (box.getBottom() - 5.0f).withHeight (3.0f);
+            g.setColour (colour::bg0);
+            g.fillRect (bar);
+            for (int side = 0; side < 2; ++side)
+            {
+                const auto db = juce::Decibels::gainToDecibels (inputLevel[(std::size_t) side], -60.0f);
+                const auto fill = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+                g.setColour (inputLevel[(std::size_t) side] >= 0.99f ? colour::record : colour::success);
+                g.fillRect (bar.withHeight (1.5f).translated (0.0f, side * 1.5f).withWidth (bar.getWidth() * fill));
+            }
+        }
+
+        icons::draw (g, Icon::mic, box.withWidth (18.0f).reduced (2.0f).translated (3.0f, -1.0f), mt.inputChannel >= 0 ? colour::textPrimary : colour::textDisabled);
+        const auto names = engine.getInputChannelNames();
+        const auto label = mt.inputChannel >= 0 ? juce::String::fromUTF8 (inputSourceName (mt.inputChannel, mt.inputStereo, names).c_str())
+                                                : tr ("No audio input");
+        g.setColour (mt.inputChannel >= 0 ? colour::textPrimary : colour::textSecondary);
+        g.setFont (font (type::body));
+        g.drawText (label, box.withTrimmedLeft (24.0f).withTrimmedRight (18.0f).translated (0.0f, -1.0f).toNearestInt(), juce::Justification::centredLeft, true);
+        icons::draw (g, Icon::chevronDown, box.removeFromRight (18.0f).reduced (4.0f).translated (-2.0f, -1.0f), colour::textSecondary);
+    }
 
     // the insert's effects switch
     if (! s->empty())
@@ -1845,6 +1981,22 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
     if (s == nullptr)
         return;
+
+    if (track > 0 && armBounds().contains (e.getPosition()))
+    {
+        if (e.mods.isPopupMenu())
+            mixerinput::showMenu (engine, track, this);
+        else
+            mixerinput::toggleArm (engine, track, this);
+        repaint();
+        return;
+    }
+
+    if (track > 0 && inputBoxBounds().contains (e.getPosition()))
+    {
+        mixerinput::showMenu (engine, track, this);
+        return;
+    }
 
     if (! s->empty() && fxSwitchBounds().contains (e.getPosition()))
     {
@@ -2088,6 +2240,21 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
         return ui::valueHint (specFor (param, selectedSlot), valueOf (param, selectedSlot), gesture);
 
     ui::Hint h;
+    if (track > 0 && armBounds().contains (p))
+    {
+        h.text = tr ("Record arm: Rec + Play records this insert's audio input into a Playlist clip  [RMB] input and monitoring");
+        h.hasMenu = true;
+        return h;
+    }
+    if (track > 0 && inputBoxBounds().contains (p))
+    {
+        h.text = tr ("Audio input source: the microphone or interface input this insert plays and records  [LMB] choose");
+        h.hasMenu = true;
+        const auto& mt = engine.getSong().mixer[(std::size_t) track];
+        if (mt.inputChannel >= 0)
+            h.value = juce::String::fromUTF8 (inputSourceName (mt.inputChannel, mt.inputStereo, engine.getInputChannelNames()).c_str());
+        return h;
+    }
     if (fxSwitchBounds().contains (p) && slots() != nullptr && ! slots()->empty())
     {
         h.text = tr ("All effects of this insert on/off; right-click opens or closes their plugin windows");
@@ -2114,7 +2281,7 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
         if (e.getDistanceFromDragStart() > 4)
         {
             const auto count = slots() != nullptr ? (int) slots()->size() : 0;
-            const auto target = juce::jlimit (0, juce::jmax (0, count - 1), (e.y - panelHeader) / slotHeight);
+            const auto target = juce::jlimit (0, juce::jmax (0, count - 1), (e.y - slotsTop) / slotHeight);
             if (target != dropSlot)
             {
                 dropSlot = target;
@@ -2189,8 +2356,11 @@ void EffectsPanel::mouseMove (const juce::MouseEvent& e)
     else
         led = p.x < slotBounds (slot).getX() + 22;
 
-    if (slot != hoverSlot || param != hoverParam || led != hoverLed)
+    const auto input = track > 0 && armBounds().contains (p) ? 1 : track > 0 && inputBoxBounds().contains (p) ? 2 : 0;
+
+    if (slot != hoverSlot || param != hoverParam || led != hoverLed || input != hoverInput)
     {
+        hoverInput = input;
         hoverSlot = slot;
         hoverParam = param;
         hoverLed = led;
@@ -2200,8 +2370,9 @@ void EffectsPanel::mouseMove (const juce::MouseEvent& e)
 
 void EffectsPanel::mouseExit (const juce::MouseEvent&)
 {
-    if (hoverSlot >= 0 || hoverParam != -1)
+    if (hoverSlot >= 0 || hoverParam != -1 || hoverInput != 0)
     {
+        hoverInput = 0;
         hoverSlot = hoverParam = -1;
         hoverLed = false;
         repaint();
@@ -2346,7 +2517,7 @@ void EffectsPanel::toggleAllWindows()
 
 juce::Rectangle<int> EffectsPanel::pluginButtonBounds() const
 {
-    return { 20, panelHeader + maxEffectSlots * slotHeight + 30, getWidth() - 40, 30 };
+    return { 20, slotsTop + maxEffectSlots * slotHeight + 30, getWidth() - 40, 30 };
 }
 
 void EffectsPanel::openPluginWindow (int slot)
@@ -2564,6 +2735,143 @@ void EffectsPanel::changeListenerCallback (juce::ChangeBroadcaster*)
 
     repaint();
 }
+
+// ---------------------------------------------------------------------------
+
+namespace mixerinput
+{
+std::function<void()> openAudioSettings;
+
+namespace
+{
+juce::String issueText (const AudioEngine::RecordingNotice& notice)
+{
+    using I = AudioEngine::InputIssue;
+    switch (notice.issue)
+    {
+        case I::noDevice: return tr ("No audio device is open. Choose one in Settings > Audio.");
+        case I::noInputDevice:
+            return tr ("No audio input device was found. Connect a microphone or an audio interface, then choose it as the input device in Settings > Audio.");
+        case I::noInputOpen: return tr ("No audio input is open, so nothing can be recorded. Choose an input device in Settings > Audio.");
+        case I::armedWithoutInput:
+            return tr ("Please select an audio input first: the armed insert has none. Click the input box above the insert's effect slots in the Mixer (or right-click its arm button).");
+        case I::insertWithoutInput: return tr ("Insert {0} is armed but has no audio input, so it records nothing.", { juce::String (notice.track) });
+        case I::failed: return tr ("The audio input could not be used: {0}", { notice.detail });
+        case I::none: break;
+    }
+    return {};
+}
+
+bool aboutTheDevice (AudioEngine::InputIssue issue)
+{
+    using I = AudioEngine::InputIssue;
+    return issue == I::noDevice || issue == I::noInputDevice || issue == I::noInputOpen || issue == I::failed;
+}
+} // namespace
+
+void explain (const AudioEngine::RecordingNotice& notice)
+{
+    if (notice.issue == AudioEngine::InputIssue::none)
+        return;
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::WarningIcon)
+                       .withTitle (tr ("Audio input needed"))
+                       .withMessage (issueText (notice));
+
+    if (aboutTheDevice (notice.issue) && openAudioSettings)
+    {
+        options = options.withButton (tr ("Audio settings...")).withButton (tr ("Close"));
+        juce::AlertWindow::showAsync (options, [] (int result) {
+            if (result == 1 && openAudioSettings)
+                openAudioSettings();
+        });
+    }
+    else
+        juce::AlertWindow::showAsync (options.withButton (tr ("OK")), nullptr);
+}
+
+void showMenu (AudioEngine& engine, int track, juce::Component* target, std::function<void()> chosen)
+{
+    if (track <= 0 || track >= (int) engine.getSong().mixer.size())
+        return;
+
+    // the device input opens on demand (only then does Windows show the microphone as in use)
+    if (! engine.hasAudioInput())
+        if (const auto result = engine.openAudioInput(); result.issue != AudioEngine::InputIssue::none)
+        {
+            explain (result);
+            return;
+        }
+
+    const auto& mt = engine.getSong().mixer[(std::size_t) track];
+    const auto names = engine.getInputChannelNames();
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Audio input source"));
+    menu.addItem (tr ("(none)"), true, mt.inputChannel < 0, [&engine, track] { engine.setInsertInput (track, -1, true); });
+
+    const auto sources = inputSources (names);
+    if (sources.empty())
+        menu.addItem (tr ("The audio device has no open input channels"), false, false, nullptr);
+
+    for (const auto& source : sources)
+    {
+        if (! source.stereo && source.channel == 0 && names.size() > 1)
+            menu.addSeparator(); // pairs, then single channels
+        const auto ticked = mt.inputChannel == source.channel && mt.inputStereo == source.stereo;
+        menu.addItem (juce::String::fromUTF8 (source.name.c_str()) + (source.stereo ? "" : "  " + tr ("(mono)")), true, ticked,
+                      [&engine, track, source, chosen] {
+                          engine.setInsertInput (track, source.channel, source.stereo);
+                          if (chosen)
+                              chosen();
+                      });
+    }
+
+    menu.addSectionHeader (tr ("Monitor external input"));
+    const std::pair<InputMonitor, const char*> modes[] = { { InputMonitor::off, TR_NOOP ("Off") },
+                                                          { InputMonitor::whenArmed, TR_NOOP ("When armed") },
+                                                          { InputMonitor::automatic, TR_NOOP ("Auto (when armed, not while playing back)") },
+                                                          { InputMonitor::on, TR_NOOP ("On") } };
+    for (const auto& [mode, label] : modes)
+        menu.addItem (tr (label), true, mt.monitor == mode, [&engine, track, mode = mode] { engine.setInsertMonitor (track, mode); });
+
+    menu.addSeparator();
+    menu.addItem (tr ("Audio settings (input device)..."), openAudioSettings != nullptr, false, [] {
+        if (openAudioSettings)
+            openAudioSettings();
+    });
+
+    auto options = juce::PopupMenu::Options();
+    if (target != nullptr)
+        options = options.withTargetComponent (target).withMousePosition();
+    menu.showMenuAsync (options);
+}
+
+void toggleArm (AudioEngine& engine, int track, juce::Component* target)
+{
+    if (engine.isInsertArmed (track))
+    {
+        engine.setInsertArmed (track, false);
+        return;
+    }
+
+    const auto& mixer = engine.getSong().mixer;
+    if (track <= 0 || track >= (int) mixer.size())
+        return;
+
+    if (mixer[(std::size_t) track].inputChannel >= 0)
+    {
+        engine.setInsertArmed (track, true);
+        if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none)
+            explain (notice);
+        return;
+    }
+
+    // FL: "Audio input needed - Please select an audio input first." Here the input menu opens right away
+    ui::postHint ({ tr ("Audio input needed: choose this insert's input, then it is armed"), {}, false, false }, 4000);
+    showMenu (engine, track, target, [&engine, track] { engine.setInsertArmed (track, true); });
+}
+} // namespace mixerinput
 
 // ---------------------------------------------------------------------------
 

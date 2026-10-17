@@ -15,6 +15,21 @@ namespace lynx
 // The built-in effects offered in the slot menus and the quick-add palette, in menu order.
 const std::vector<EffectKind>& addableEffects();
 
+// External audio input of the inserts (REA_rodada88): FL's "Audio input source" of a mixer track.
+namespace mixerinput
+{
+// Opens Settings > Audio (the main window sets it).
+extern std::function<void()> openAudioSettings;
+// The insert's input menu: (none), the open device's stereo pairs and single channels, the monitoring mode and
+// "Audio settings...". Opens the device input first when it is closed. `chosen` runs after a source is picked.
+void showMenu (AudioEngine& engine, int track, juce::Component* target, std::function<void()> chosen = {});
+// The arm switch: disarms, or arms; an insert without an input source asks for one first ("Audio input
+// needed") and is armed once it has one.
+void toggleArm (AudioEngine& engine, int track, juce::Component* target);
+// Explains a recording problem to the user, with a way to Settings > Audio when it is about the device.
+void explain (const AudioEngine::RecordingNotice& notice);
+} // namespace mixerinput
+
 // FL-style mixer: one compact vertical strip per track (Master first).
 //  - header: record arm, number, name (once), effect count; drag it sideways to reorder inserts
 //  - pan, stereo separation and fader: the shared control contract (ui/ValueControl.h): drag
@@ -67,7 +82,7 @@ public:
     void mouseExit (const juce::MouseEvent& e) override;
 
 private:
-    enum class Part { none, pan, stereo, fader, meter, mute, solo, route, send, header, body, add, arm };
+    enum class Part { none, pan, stereo, fader, meter, mute, solo, route, send, header, body, add, arm, input };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -82,6 +97,7 @@ private:
     juce::Rectangle<int> soloArea (int track) const;
     juce::Rectangle<int> routeArea (int track) const;
     juce::Rectangle<int> armArea (int track) const;
+    juce::Rectangle<int> inputArea (int track) const; // the input level bar (inserts with an input source)
     juce::Rectangle<int> stereoArea (int track) const;
     juce::Rectangle<int> meterArea (int track) const;
     juce::Rectangle<int> sendArea (int track) const;   // send level knob (routing lane)
@@ -117,6 +133,7 @@ private:
     ui::ValueDrag drag;
 
     std::vector<meters::PeakHold> levels; // per track*2: bar, peak hold and clip latch
+    std::vector<float> inputLevels;       // per track: input level (decaying)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerStrips)
 };
@@ -129,7 +146,8 @@ class EffectsPanel final : public juce::Component,
                            public ui::HintSource,
                            public juce::DragAndDropTarget,
                            public juce::FileDragAndDropTarget,
-                           private juce::ChangeListener
+                           private juce::ChangeListener,
+                           private juce::Timer
 {
 public:
     // Effect presets (.fst) dragged from the Browser or Explorer: dropped on a slot they replace it,
@@ -163,7 +181,13 @@ public:
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;
     void showTip (int param, int slot, bool transient);
+    // the input row above the slots (inserts only): arm switch, input source box with its level
+    juce::Rectangle<int> armBounds() const;
+    juce::Rectangle<int> inputBoxBounds() const;
+    int hoverInput = 0; // 1 = arm, 2 = input box
+    std::array<float, 2> inputLevel {};
     int hoverSlot = -1, hoverParam = -1;  // hover feedback: the slot row, the knob (mixParam = a slot's dry/wet)
     bool hoverLed = false;
     ui::ValueSpec specFor (int param, int slot) const; // param = mixParam: the slot's dry/wet
