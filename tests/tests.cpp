@@ -6,6 +6,7 @@
 #include <thread>
 #include <random>
 #include <cctype>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,10 @@
 #include <string>
 #include <tuple>
 #include <vector>
+
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
@@ -93,6 +98,7 @@
 #include "core/GrossBeat.h"
 #include "core/LovePhilter.h"
 #include "core/FlangusFastDist.h"
+#include "core/FruityPhaser.h"
 #include "core/FruityVocoder.h"
 #include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
@@ -1116,6 +1122,7 @@ TEST (flp_real_files)
     int delay2Slots = 0, delay2Exact = 0, delay3Slots = 0, delay3Exact = 0; // REA_rodada52
     int chorusSlots = 0, chorusExact = 0; // REA_rodada59: the exact choruses
     int fastDistSlots = 0, fastDistExact = 0, flangusSlots = 0, flangusExact = 0, flangerSlots = 0, flangerExact = 0; // REA_rodada55
+    int phaserSlots = 0, phaserExact = 0; // REA_rodada105_phaser
     // import with the installation's samples (realFlpDir is ...\Data): for DirectWave/FPC
     lynx::FlpImportOptions withFiles;
     const auto flRoot = std::filesystem::path (realFlpDir).parent_path().string();
@@ -1375,6 +1382,7 @@ TEST (flp_real_files)
                         fastDistSlots += slot.plugin == "Fruity Fast Dist";
                         flangusSlots += slot.plugin == "Fruity Flangus";
                         flangerSlots += slot.plugin == "Fruity Flanger";
+                        phaserSlots += slot.plugin == "Fruity Phaser";
                     }
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
@@ -1389,6 +1397,7 @@ TEST (flp_real_files)
                         fastDistExact += fx.kind == lynx::EffectKind::fruityFastDist;
                         flangusExact += fx.kind == lynx::EffectKind::fruityFlangus;
                         flangerExact += fx.kind == lynx::EffectKind::fruityFlanger;
+                        phaserExact += fx.kind == lynx::EffectKind::fruityPhaser;
                         if (fx.kind == lynx::EffectKind::vocodex)
                             vocodexWithData += ! lynx::vocodex::splitInstallData (fx.state).second.sgDat.empty();
                         if (fx.kind == lynx::EffectKind::fruityWaveShaper)
@@ -2164,6 +2173,8 @@ TEST (flp_real_files)
                  fastDistSlots, flangusExact, flangusSlots, flangerExact, flangerSlots);
     CHECK (fastDistExact >= fastDistSlots && fastDistSlots >= 30 && flangusExact >= flangusSlots && flangusSlots >= 30
            && flangerExact >= flangerSlots && flangerSlots >= 3); // REA_rodada55
+    std::printf ("  Fruity Phaser: %d of %d slots on the exact engine\n", phaserExact, phaserSlots);
+    CHECK (phaserExact >= phaserSlots && phaserSlots >= 3); // REA_rodada105_phaser
 
     // 3x Osc channel presets shipped with FL (.fst): all become synth settings
     int presets = 0, presetsDecoded = 0;
@@ -2444,9 +2455,40 @@ TEST (live_queue_is_fifo_and_bounded)
     CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // one slot stays free to tell full from empty
 }
 
+// Whether this CPU's RCPPS (the ~12-bit reciprocal estimate, whose table is implementation-defined: Intel and AMD
+// differ) gives the same bits as the CPU that the FL golden data was captured on (AMD Zen 2): a hash of the estimate for
+// every float mantissa in [1, 2) (the estimate does not depend on the exponent in the normal range)
+static bool rcpLikeReferenceCpu()
+{
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+    std::uint64_t h = 1469598103934665603ull;
+    for (std::uint32_t m = 0; m < (1u << 23); m += 4)
+    {
+        alignas (16) float f[4];
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            const std::uint32_t bits = 0x3f800000u | (m + j);
+            std::memcpy (&f[j], &bits, 4);
+        }
+        _mm_store_ps (f, _mm_rcp_ps (_mm_load_ps (f)));
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            std::uint32_t bits;
+            std::memcpy (&bits, &f[j], 4);
+            h = (h ^ bits) * 1099511628211ull;
+        }
+    }
+    return h == 0xb5de670652cb0383ull;
+#else
+    return false;
+#endif
+}
+
 // FL's sampler interpolators (REA_rodada69 §1): outputs of FLEngine's own kernels (EXEC, r69/py/gold.py) on a synthetic
 // 16-bit stereo signal; the port must give the same bits (linear, 6-point, 24-point sinc, 32-point sinc at speed 1.37,
 // 16-point sinc widened to 24 points with the cutoff at π/9.5 at speed 9.5)
+// The sinc kernels take 1/x from RCPPS plus one Newton step, as FL does, so FL's own bits depend on the CPU: they are
+// required where RCPPS matches the capture machine's; elsewhere (Intel CPUs) within a few float ulps.
 TEST (fl_sampler_interpolators_match_fl)
 {
     std::vector<float> l, r;
@@ -2468,6 +2510,7 @@ TEST (fl_sampler_interpolators_match_fl)
         { 3, 9.5, { 0xbd97308e, 0x3dd8783c, 0xbd911374, 0x3e162a41, 0xbd8a959e, 0x3e38b220, 0xbd7e6785, 0x3e58895c, 0xbd380c4f, 0x3e7e3008, 0xbd380e4e, 0x3e7e2696, 0x3d00c6d0, 0xbd627d87, 0x3e308cb8, 0xbcece918 } },
     };
     const lynx::flvp::X87Extended precision;
+    const bool exactRcp = rcpLikeReferenceCpu();
     for (const auto& c : cases)
     {
         lynx::flrs::Kernel k;
@@ -2482,7 +2525,10 @@ TEST (fl_sampler_interpolators_match_fl)
             std::uint32_t ba, bb;
             std::memcpy (&ba, &a, 4);
             std::memcpy (&bb, &b, 4);
-            same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            if (exactRcp || c.quality < 3) // (linear and 6-point use no reciprocal)
+                same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            else
+                same += (std::abs (a - std::bit_cast<float> (c.bits[2 * p])) < 5e-7f) + (std::abs (b - std::bit_cast<float> (c.bits[2 * p + 1])) < 5e-7f);
         }
         CHECK (same == 16);
     }
@@ -11070,14 +11116,17 @@ TEST (fruity_parametric_eq_exact)
         CHECK (e.latencySamples() == 1536);
         for (int i = 0; i < 12288; i += 512)
             e.process (l.data() + i, r.data() + i, 512);
-        const std::initializer_list<Gold> gold = hq ? std::initializer_list<Gold> {
+        // (named arrays: a std::initializer_list chosen by ?: would point into a temporary array that dies at the end of
+        // the declaration, which GCC 13 reuses for other locals)
+        static const Gold goldHq[] = {
             { 2000, 0.08618364483118057f, 0.11248858273029327f }, { 5000, 0.18998730182647705f, 0.428600937128067f },
             { 8191, -0.1412065178155899f, -0.002996620489284396f }, { 10000, 0.18998737633228302f, -0.012570115737617016f },
-            { 12287, 0.40586185455322266f, -0.014698396436870098f } } : std::initializer_list<Gold> {
+            { 12287, 0.40586185455322266f, -0.014698396436870098f } };
+        static const Gold goldPlain[] = {
             { 2000, 0.18538671731948853f, 0.206522598862648f }, { 5000, 0.4086928963661194f, 0.8167467713356018f },
             { 8191, -0.3218550980091095f, -0.06812914460897446f }, { 10000, 0.40869277715682983f, -0.08537150919437408f },
             { 12287, 0.775394082069397f, -0.08931504935026169f } };
-        for (const auto& g : gold)
+        for (const auto& g : hq ? goldHq : goldPlain)
             CHECK (std::abs (l[(std::size_t) g.i] - g.l) < 1.0e-6f && std::abs (r[(std::size_t) g.i] - g.r) < 1.0e-6f);
     }
 
@@ -11913,7 +11962,9 @@ std::vector<std::uint8_t> morphineTestState()
                 for (int bit = 0; bit < 8; ++bit)
                 {
                     const auto k = byte * 8 + bit;
-                    const float v = a == 0 ? std::cbrt (1.0f / (float) (k + 1 + seed * (k % 3))) * (k < 40 ? 1.0f : 0.2f)
+                    // (cbrtf is not correctly rounded before glibc 2.43 and differs between libms; the cube root in double
+                    // rounded to float gives the same (correctly rounded) bits with old and new glibc)
+                    const float v = a == 0 ? (float) std::cbrt ((double) (1.0f / (float) (k + 1 + seed * (k % 3)))) * (k < 40 ? 1.0f : 0.2f)
                                     : a == 1 ? 0.1f * (float) ((k * 7 + seed) % 11 - 5) / 5.0f
                                              : 0.02f * (float) ((k * 5 + seed) % 7 - 3);
                     b.f32 (v);
@@ -13165,6 +13216,88 @@ TEST (fruity_fast_dist_flangus_flanger)
         const auto shortFd = lynx::effectFromFl ("Fruity Fast Dist", std::vector<std::uint8_t> (8, 0), 120.0);
         CHECK (! shortFd || shortFd->kind != lynx::EffectKind::fruityFastDist);
     }
+}
+
+// FL's Fruity Phaser (REA_rodada105_phaser): goldens from the installation's own DLL, rendered unmodified in 512-frame
+// calls; LYNX's engine matches it to the last bit on the 27 presets (denormals aside), the tolerance only absorbs
+// compilers (gcc / clang / zig) and libm.
+TEST (fruity_phaser_engine)
+{
+    std::vector<float> in (8192);
+    for (int n = 0; n < 4096; ++n)
+    {
+        in[2 * (std::size_t) n] = (float) (((n * 37) % 200 - 100) / 60.0);
+        in[2 * (std::size_t) n + 1] = (float) (((n * 53) % 170 - 85) / 70.0);
+    }
+    struct Gold
+    {
+        int i;
+        float l, r;
+    };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-5f * std::max (1.0f, std::abs (b)); };
+    auto phase = [&] (lynx::phaserfx::State s, int fs, std::initializer_list<Gold> gold) {
+        lynx::phaserfx::Engine e;
+        e.setRate (fs);
+        e.load (s);
+        e.reset();
+        std::vector<float> io (in);
+        for (int o = 0; o < 4096; o += 512)
+            e.render (io.data() + 2 * o, io.data() + 2 * o, 512);
+        for (const auto& g : gold)
+            CHECK (close (io[2 * (std::size_t) g.i], g.l) && close (io[2 * (std::size_t) g.i + 1], g.r));
+    };
+    phase ({ 2500, 100, 800, 0, 512, 7, 400, 512, 4000 }, 44100,
+           { { 100, 0.243106663f, -1.63760519f }, { 1000, -2.36990547f, 0.841273248f }, { 2047, 1.21970272f, -1.66379488f },
+             { 3000, -2.80603957f, -1.03600585f }, { 4095, 1.80225599f, 0.845855355f } });
+    phase ({ 417, 995, 1000, 0, 1024, 3, 705, 0, 2943 }, 48000,
+           { { 100, -0.360522032f, -0.0510774851f }, { 1000, -0.788047731f, 0.324495822f }, { 2047, 0.304549545f, 0.0850031748f },
+             { 3000, -0.79305625f, 0.114482567f }, { 4095, -0.67624253f, -0.0348635167f } });
+    phase ({ 2448, 510, 417, 1024, 1024, 16, 508, 0, 2500 }, 44100,
+           { { 100, 1.66273713f, -0.0830700323f }, { 1000, -1.47920549f, -0.0849421024f }, { 2047, -0.157817751f, -1.06916845f },
+             { 3000, -0.703828216f, -0.0190049056f }, { 4095, 0.768234849f, -0.965515852f } });
+    phase ({ 5000, 0, 1000, 700, 0, 22, 950, 300, 5000 }, 44100,
+           { { 100, 0.0809119642f, -0.521223426f }, { 1000, 1.07321298f, 0.681761861f }, { 2047, 0.790922821f, -0.205452889f },
+             { 3000, -1.91779351f, 0.599423349f }, { 4095, -1.18747222f, 1.03711367f } });
+
+    // controls: FL's ranges, the stage count clamp, the texts
+    CHECK (std::abs (lynx::phaserfx::sweepHz (0.5f, false) - 0.238405839f) < 1.0e-6f);
+    CHECK (std::abs (lynx::phaserfx::sweepHz (1.0f, true) - 10.0f) < 1.0e-5f);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 5, 11.0f / 22.0f, 120.0) == "12");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 5, 0.0f, 120.0) == "3");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 7, 0.0f, 120.0) == "100% wet");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 8, 0.5f, 120.0) == "+0.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 3, 0.0f, 120.0) == "small");
+    {
+        lynx::EffectParams ctx {};
+        ctx[3] = 1.0f;
+        CHECK (lynx::formatEffectParam (lynx::EffectKind::fruityPhaser, 0, 1.0f, 120.0, ctx) == "10.000 Hz");
+    }
+    CHECK (lynx::effectInfo (lynx::EffectKind::fruityPhaser).params.size() == 9);
+
+    // import: FL's state (version 1 + nine controls) becomes the exact effect; its parameters round-trip
+    const lynx::phaserfx::State ouch { 417, 995, 1000, 0, 1024, 3, 705, 0, 2943 };
+    const auto bytes = lynx::phaserfx::serialize (ouch);
+    const auto slot = lynx::effectFromFl ("Fruity Phaser", bytes, 120.0);
+    CHECK (slot && slot->kind == lynx::EffectKind::fruityPhaser);
+    if (slot)
+    {
+        CHECK (lynx::phaserfx::fromParams (slot->params.data()) == ouch);
+        auto fx = lynx::makeEffect (*slot);
+        fx->prepare (48000.0);
+        std::vector<float> l (4096), r (4096);
+        for (int n = 0; n < 4096; ++n)
+        {
+            l[(std::size_t) n] = in[2 * (std::size_t) n];
+            r[(std::size_t) n] = in[2 * (std::size_t) n + 1];
+        }
+        fx->process (l.data(), r.data(), 4096, slot->params, 120.0);
+        CHECK (close (l[1000], -0.788047731f) && close (r[4095], -0.0348635167f));
+    }
+    auto v2 = bytes;
+    v2[0] = 2; // FL reads only versions below 2
+    const auto later = lynx::effectFromFl ("Fruity Phaser", v2, 120.0);
+    CHECK (! later || later->kind != lynx::EffectKind::fruityPhaser);
+    CHECK (lynx::plugui::hasFlLayout (lynx::EffectKind::fruityPhaser));
 }
 
 // Workflow P2 (docs/WORKFLOW_FL.md)
@@ -15474,3 +15607,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 }
 #include "FabMeasureTests99.inc"
 #include "LynxTuneTests95.inc"
+#include "LynxVerbTests100.inc"
+#include "FacetTests103.inc"

@@ -366,7 +366,14 @@ enum class EffectKind : std::uint8_t
     hushDeEsser,  // LYNX's de-esser (REA_rodada96, core/MixSuite.h)
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
     ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
-    lynxTune      // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    lynxTune,     // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    fruityPhaser, // FL's Fruity Phaser, exact (REA_rodada105_phaser, core/FruityPhaser.h): FL's 9 controls / max
+    epochVerb,    // LYNX's Epoch Verb (REA_rodada100, core/LynxVerbs.h): multi-mode vintage-digital reverb, 17 controls
+    atrium,       // LYNX's Atrium (REA_rodada100, core/LynxVerbs.h): room reverb, early + late sections, 22 controls
+    foilPlate,    // LYNX's Foil Plate (REA_rodada100, core/LynxVerbs.h): plate reverb, 12 controls
+    nebula,       // LYNX's Nebula (REA_rodada100, core/LynxVerbs.h): delay-reverb network, 13 controls
+    halo,         // LYNX's Halo (REA_rodada100, core/LynxVerbs.h): shimmer reverb, 12 controls
+    horizon       // LYNX's Horizon (REA_rodada100, core/LynxVerbs.h): echo + reverb, 24 controls
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

@@ -1,6 +1,7 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
 #include "core/LynxTune.h"
+#include "core/LynxVerbs.h"
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
@@ -31,6 +32,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/FlangusFastDist.h"
+#include "core/FruityPhaser.h"
 
 #include "core/Biquad.h"
 #include "core/FacetEq.h"
@@ -2362,6 +2364,15 @@ const EffectInfo& effectInfo (EffectKind kind)
         return info;
     }();
     static const EffectInfo lofiInfo { "Lo-fi", { { "Rate", 0.0f }, { "Bits", 0.0f }, { "Mix", 1.0f } } };
+    // FL's Fruity Phaser: its nine raw controls / max (core/FruityPhaser.h); defaults = a new FL instance
+    static const EffectInfo fruityPhaserInfo = [] {
+        EffectInfo info { "Fruity Phaser", {} };
+        float p[phaserfx::params] {};
+        phaserfx::toParams (phaserfx::defaults, p);
+        for (int i = 0; i < phaserfx::params; ++i)
+            info.params.push_back ({ phaserfx::paramName (i), p[i] });
+        return info;
+    }();
     static const EffectInfo effectorInfo { "Effector", { { "Type", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
                                                          { "LFO shape", 0.0f }, { "Input", 1.0f }, { "Output", 0.5f } } };
@@ -2472,12 +2483,21 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::aether: return mixsuite::aetherInfo();
         case EffectKind::ember: return mixsuite::emberInfo();
         case EffectKind::lynxTune: return lynxtune::info();
+        case EffectKind::fruityPhaser: return fruityPhaserInfo;
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon: return verbs::info (kind);
     }
     return eq;
 }
 
 std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, const EffectParams& context)
 {
+    if (kind == EffectKind::fruityPhaser && param == 0) // the sweep rate follows the frequency range switch
+        return phaserfx::sweepText (v, context[3] > 0.5f);
     if (kind == EffectKind::parametricEq && peq::flLaw (context) && param >= 0 && param < peq::slopeParam + peq::bands)
     {
         auto p = context;
@@ -2847,6 +2867,15 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return mixsuite::paramText (kind, param, v);
         case EffectKind::lynxTune:
             return lynxtune::paramText (param, v);
+        case EffectKind::fruityPhaser:
+            return phaserfx::paramText (param, v);
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon:
+            return verbs::paramText (kind, param, v, bpm);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -2924,6 +2953,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::frequencySplitter)
         return fsplit::make (slot.params);
+    if (slot.kind == EffectKind::facetEq) // its phase mode (latency) known before the first block
+        return facet::make (&slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)
@@ -3017,6 +3048,13 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::aether:
         case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
+        case EffectKind::fruityPhaser: return phaserfx::make(); // FL's Fruity Phaser, exact (REA_rodada105_phaser)
+        case EffectKind::epochVerb:
+        case EffectKind::atrium:
+        case EffectKind::foilPlate:
+        case EffectKind::nebula:
+        case EffectKind::halo:
+        case EffectKind::horizon: return verbs::make (kind); // LYNX's own reverbs (REA_rodada100)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
