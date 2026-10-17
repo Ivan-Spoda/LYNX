@@ -14731,6 +14731,11 @@ TEST (plugin_layouts_name_real_parameters)
                 CHECK (labels.size() >= 2);
                 CHECK (item.values.empty() || item.values.size() == labels.size());
             }
+            if (item.type == plugui::Item::knob && item.h + 0.5f < item.w) // (a caption above its knob would hide it)
+            {
+                std::printf ("  %s: knob '%s' is shorter than it is wide\n", info.name, item.param != nullptr ? item.param : "");
+                CHECK (false);
+            }
             CHECK (item.param2 == nullptr || plugui::paramIndex (kind, item.param2) >= 0);
             if (item.param2 != nullptr && plugui::paramIndex (kind, item.param2) >= 0)
                 placed[(std::size_t) plugui::paramIndex (kind, item.param2)] = true;
