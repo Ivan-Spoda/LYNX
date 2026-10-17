@@ -136,7 +136,11 @@ Celemony binary, manual text, preset or graphic was used or looked at.
 Routing for MIDI targets: `RackRenderer` keeps a held-notes mask per channel (pattern events, live notes, chokes, stop
 / seek and panic clear it) and hands it to every insert effect (`Effect::setHeldNotes`, forwarded by the parallel
 container). UI: the mixer's effect panel shows LYNX Tune's 12 note switches as a one-octave keyboard (scale notes lit,
-click = switch off / on; pt-BR caption) above its knobs.
+click = switch off / on; pt-BR caption) above its knobs, and its **Editor** window (the round-93 layout system, LYNX
+look) is an own arrangement in FL's conventions — titled sections, big main knob, value read-outs, steppers, toggles:
+PITCH (key and scale menus, voice-range radio, A4 knob) · CORRECTION (big RETUNE, HUMANIZE, TRACKING) · FORMANT
+(preserve, shift) · OUTPUT (transpose stepper, mix, low latency) · TARGET NOTES (twelve switches and the MIDI channel
+stepper); every caption has pt-BR.
 
 ## 5. LYNX Tune — measurements (tests/LynxTuneTests95.inc)
 
@@ -158,9 +162,12 @@ factory, parallel forwarding), Effects.h (`NoteMask`, `setHeldNotes`), RackRende
 ProjectFile ("lynxTune"), MixerComponent (menu entry, keyboard strip), FlpImport (report), pt-BR, docs/PLUGINS.md, website.
 
 ## Where I stopped / next steps
-- Done: LYNX Tune (engine, MIDI-target routing, mixer keyboard strip, tests, docs, website) and LYNX's Newtone edit
+- Done: LYNX Tune (engine, MIDI-target routing, mixer keyboard strip, its own editor page in the round-93 layout
+  system — PITCH · CORRECTION · FORMANT · OUTPUT · TARGET NOTES —, tests, docs, website) and LYNX's Newtone edit
   renderer (§3).
-- Next: an FL-style LYNX Tune editor page in the plugin-layout system of round 93 (`src/core/PluginLayout.cpp`, not in
-  main when this round ended) with a live pitch / correction meter (`controlOutput` 0–2 already exposes sung note, target
-  and correction); Newtone's tremolo, ramps and later-note re-alignment (§2.5); Newtime's warping; register LYNX Tune as
-  the substitute for Auto-Tune / WavesTune in round 98's plugin-substitution map once that lands.
+- Next: a live pitch / correction meter on LYNX Tune's page (`controlOutput` 0–2 already exposes sung note, target and
+  correction); Newtone's tremolo, ramps and later-note re-alignment (§2.5); Newtime's warping; register LYNX Tune as the
+  substitute for Auto-Tune / WavesTune in round 98's plugin-substitution map once that lands (not in main yet).
+- Note for maintainers: GCC 15 at -O2 looped forever in `renderEdits` with an array of two `std::vector` accumulators
+  captured by a lambda (fine with clang, -fwrapv-pointer or sanitizers; no out-of-range access found); the accumulators
+  are now two named vectors.
