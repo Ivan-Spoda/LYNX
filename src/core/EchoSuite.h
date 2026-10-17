@@ -49,8 +49,10 @@ enum Param
     diffusion, diffSize, lowCut, highCut, modRate, modDepth, wow, flutter, shift, shiftDetune, pitch, pitchDetune,
     mode, ducking, paramCount
 };
-enum class Style { single, dual, ratio, pingPong, quad };
-enum class Mode { tape, hifi, bucket, analog, digital, clean, shifter, pitch, reverse, lofi, phaser, detune };
+enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
+// in the panel's order: the modulation section shows wow / flutter (tape), rate / depth (lo-fi … phaser), shift / detune
+// (shifter) or pitch / detune (pitch, reverse, detune) — contiguous ranges of the Mode value
+enum class Mode { tape, lofi, hifi, bucket, analog, digital, clean, phaser, shifter, pitch, reverse, detune };
 constexpr int modeCount = 12;
 constexpr int styleCount = 5;
 

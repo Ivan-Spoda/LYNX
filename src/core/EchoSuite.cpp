@@ -401,14 +401,14 @@ float styleValue (Style s) noexcept { return ((float) s + 0.5f) / (float) styleC
 
 const char* modeName (Mode m) noexcept
 {
-    static const char* const names[modeCount] = { "Tape", "Hi-Fi tape", "Bucket brigade", "Analog", "Digital", "Clean",
-                                                  "Shifter", "Pitch", "Reverse", "Lo-Fi", "Phaser", "Detune" };
+    static const char* const names[modeCount] = { "Tape", "Lo-Fi", "Hi-Fi tape", "Bucket brigade", "Analog", "Digital", "Clean",
+                                                  "Phaser", "Shifter", "Pitch", "Reverse", "Detune" };
     return names[std::clamp ((int) m, 0, modeCount - 1)];
 }
 
 namespace
 {
-const char* const styleNames[styleCount] = { "Single", "Dual", "Ratio", "Ping-pong", "Quad" };
+const char* const styleNames[styleCount] = { "Single", "Ratio", "Quad", "Dual", "Ping-pong" };
 
 class Echoform final : public Effect
 {
@@ -713,7 +713,7 @@ private:
                     c.tapeLp2.set (fc, sr);
                 }
                 shaper.set (m == Mode::lofi ? 0.9f : 0.95f, m == Mode::lofi ? 0.0f : 0.11f);
-                modulation = m == Mode::tape ? ModSource::tape : (m == Mode::phaser ? ModSource::none : ModSource::none);
+                modulation = m == Mode::tape ? ModSource::tape : (m == Mode::lofi ? ModSource::sine : ModSource::none);
                 break;
             }
             case Mode::hifi:

@@ -1617,156 +1617,185 @@ LayoutItem stepped (LayoutItem i, int steps)
     return i;
 }
 
+LayoutItem menuOf (float x, float y, float w, float h, const char* param, const char* caption, const char* options, std::vector<float> values)
+{
+    LayoutItem i;
+    i.type = Item::menu;
+    i.x = x, i.y = y, i.w = w, i.h = h;
+    i.param = param;
+    i.label = caption;
+    i.options = options;
+    i.values = std::move (values);
+    return i;
+}
+
+// The suite's panels follow the ergonomics of the plugins they are inspired by (round 101 UI rule: the same grouping
+// and the same place for each control, drawn in LYNX's own style): a row of small sections left to right, the
+// sections whose meaning depends on the style / mode swap their knobs in place.
 Layout echoformLayout()
 {
     Layout l;
     l.width = 780;
-    l.height = 372;
+    l.height = 300;
     auto& v = l.items;
-    // time: the echo train on top, the two sides, the style
-    v.push_back (section (4, 4, 300, 364, TR_NOOP ("Time")));
-    v.push_back (display (12, 26, 284, 70, "echotrain"));
-    v.push_back (tabs (12, 102, 284, 20, "Style", TR_NOOP ("Single|Dual|Ratio|Ping-pong|Quad"), stepCentres (5)));
-    v.push_back (label (12, 130, 136, 14, TR_NOOP ("Left"), boxed));
-    v.push_back (label (160, 130, 136, 14, TR_NOOP ("Right"), boxed));
-    v.push_back (tabs (12, 150, 136, 20, "Sync L", TR_NOOP ("ms|Note|Dot|Trip"), { 0.25f, 0.5f, 0.75f, 1.0f }));
-    v.push_back (tabs (160, 150, 136, 20, "Sync R", TR_NOOP ("ms|Note|Dot|Trip"), { 0.25f, 0.5f, 0.75f, 1.0f }));
-    v.push_back (dial (50, 206, 42, "Time L", TR_NOOP ("Time")));
-    v.push_back (stepped (dial (112, 206, 34, "Note L", TR_NOOP ("Note")), 9));
-    v.push_back (dial (198, 206, 42, "Time R", TR_NOOP ("Time")));
-    v.push_back (stepped (dial (260, 206, 34, "Note R", TR_NOOP ("Note")), 9));
-    v.push_back (dial (52, 300, 32, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (126, 300, 32, "Spread", TR_NOOP ("Spread"), bipolar));
-    v.push_back (dial (200, 300, 32, "Spacing", TR_NOOP ("Spacing"), bipolar));
-    v.push_back (dial (266, 300, 32, "Width", TR_NOOP ("Width"), bipolar));
-
-    // character
-    v.push_back (section (308, 4, 200, 364, TR_NOOP ("Character")));
-    auto modes = radio (316, 26, 184, 150, "Mode", TR_NOOP ("Tape|Hi-Fi tape|Bucket|Analog|Digital|Clean|Shifter|Pitch|Reverse|Lo-Fi|Phaser|Detune"),
-                        stepCentres (12));
-    modes.columns = 2;
-    v.push_back (modes);
-    v.push_back (dial (360, 222, 34, "Age", TR_NOOP ("Age")));
-    v.push_back (dial (456, 222, 34, "Drive", TR_NOOP ("Drive")));
-    v.push_back (dial (360, 302, 30, "Low cut", TR_NOOP ("Low cut")));
-    v.push_back (dial (456, 302, 30, "High cut", TR_NOOP ("High cut")));
-
-    // feedback, modulation, shift / pitch, output
-    v.push_back (section (512, 4, 264, 364, TR_NOOP ("Feedback")));
-    v.push_back (dial (556, 62, 50, "Feedback", TR_NOOP ("Feedback"), big));
-    v.push_back (dial (640, 56, 30, "Diffusion", TR_NOOP ("Diffusion")));
-    v.push_back (dial (716, 56, 30, "Diffusion size", TR_NOOP ("Size")));
-    v.push_back (label (520, 120, 248, 14, TR_NOOP ("Modulation"), boxed));
-    v.push_back (dial (550, 160, 28, "Mod rate", TR_NOOP ("Rate")));
-    v.push_back (dial (612, 160, 28, "Mod depth", TR_NOOP ("Depth")));
-    v.push_back (dial (674, 160, 28, "Wow", TR_NOOP ("Wow")));
-    v.push_back (dial (736, 160, 28, "Flutter", TR_NOOP ("Flutter")));
-    v.push_back (label (520, 214, 248, 14, TR_NOOP ("Shift / pitch"), boxed));
-    v.push_back (dial (550, 254, 28, "Shift", TR_NOOP ("Shift"), bipolar));
-    v.push_back (dial (612, 254, 28, "Shift detune", TR_NOOP ("Detune"), bipolar));
-    v.push_back (dial (674, 254, 28, "Pitch", TR_NOOP ("Pitch"), bipolar));
-    v.push_back (dial (736, 254, 28, "Pitch detune", TR_NOOP ("Detune"), bipolar));
-    v.push_back (dial (580, 324, 30, "Ducking", TR_NOOP ("Ducking")));
-    v.push_back (dial (700, 320, 38, "Mix", TR_NOOP ("Mix")));
+    const auto top = 4.0f, h = 232.0f, k1 = 66.0f, k2 = 160.0f, d = 34.0f;
+    // mix + style
+    v.push_back (section (4, top, 80, h, TR_NOOP ("Mix")));
+    v.push_back (dial (44, k1, d, "Mix", TR_NOOP ("Mix")));
+    v.push_back (stepped (dial (44, k2, d, "Style", TR_NOOP ("Style")), 4));
+    // delay: the left time (ms or note) and the second knob of the style: spread, ratio, spacing or the right time
+    v.push_back (section (88, top, 188, h, TR_NOOP ("Delay")));
+    v.push_back (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay"), big), "Sync L", 0.0f, 0.5f));
+    v.push_back (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay"), big), 9), "Sync L", 0.5f, 1.0f));
+    v.push_back (when (dial (228, 76, 54, "Spread", TR_NOOP ("Spread"), (std::uint16_t) (big | bipolar)), "Style", 0.0f, 0.2f));
+    v.push_back (when (dial (228, 76, 54, "Ratio", TR_NOOP ("Ratio"), big), "Style", 0.2f, 0.4f));
+    v.push_back (when (dial (228, 76, 54, "Spacing", TR_NOOP ("Spacing"), (std::uint16_t) (big | bipolar)), "Style", 0.4f, 0.6f));
+    v.push_back (when (when (dial (228, 76, 54, "Time R", TR_NOOP ("Delay R"), big), "Style", 0.6f, 1.0f), "Sync R", 0.0f, 0.5f));
+    v.push_back (when (when (stepped (dial (228, 76, 54, "Note R", TR_NOOP ("Delay R"), big), 9), "Style", 0.6f, 1.0f), "Sync R", 0.5f, 1.0f));
+    const std::vector<float> syncValues { 0.25f, 0.5f, 0.75f, 1.0f };
+    v.push_back (menuOf (100, 150, 76, 20, "Sync L", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues));
+    v.push_back (when (menuOf (190, 150, 76, 20, "Sync R", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Style", 0.6f, 1.0f));
+    v.push_back (display (96, 180, 172, 50, "echotrain"));
+    // feedback + width
+    v.push_back (section (280, top, 80, h, TR_NOOP ("Feedback")));
+    v.push_back (dial (320, k1, d, "Feedback", TR_NOOP ("Feedback")));
+    v.push_back (dial (320, k2, d, "Width", TR_NOOP ("Width"), bipolar));
+    // colour
+    v.push_back (section (364, top, 80, h, TR_NOOP ("Colour")));
+    v.push_back (dial (404, k1, d, "Drive", TR_NOOP ("Drive")));
+    v.push_back (dial (404, k2, d, "Age", TR_NOOP ("Age")));
+    // diffusion
+    v.push_back (section (448, top, 80, h, TR_NOOP ("Diffusion")));
+    v.push_back (dial (488, k1, d, "Diffusion", TR_NOOP ("Amount")));
+    v.push_back (dial (488, k2, d, "Diffusion size", TR_NOOP ("Size")));
+    // modulation: wow / flutter (tape), rate / depth, shift / detune (shifter), pitch / detune (pitch, reverse, detune)
+    const auto tape = 1.0f / 12.0f, shifter = 8.0f / 12.0f, pitch = 9.0f / 12.0f, detune = 11.0f / 12.0f;
+    v.push_back (section (532, top, 80, h, TR_NOOP ("Mod")));
+    v.push_back (when (dial (572, k1, d, "Wow", TR_NOOP ("Wow")), "Mode", 0.0f, tape));
+    v.push_back (when (dial (572, k2, d, "Flutter", TR_NOOP ("Flutter")), "Mode", 0.0f, tape));
+    v.push_back (when (dial (572, k1, d, "Mod rate", TR_NOOP ("Rate")), "Mode", tape, shifter));
+    v.push_back (when (dial (572, k2, d, "Mod depth", TR_NOOP ("Depth")), "Mode", tape, shifter));
+    v.push_back (when (dial (572, k1, d, "Shift", TR_NOOP ("Shift"), bipolar), "Mode", shifter, pitch));
+    v.push_back (when (dial (572, k2, d, "Shift detune", TR_NOOP ("Detune"), bipolar), "Mode", shifter, pitch));
+    v.push_back (when (dial (572, k1, d, "Pitch", TR_NOOP ("Pitch"), bipolar), "Mode", pitch, detune));
+    v.push_back (when (dial (572, k2, d, "Pitch detune", TR_NOOP ("Detune"), bipolar), "Mode", pitch, 1.0f));
+    // EQ (high cut above the low cut, as on the hardware-style panels)
+    v.push_back (section (616, top, 80, h, TR_NOOP ("EQ")));
+    v.push_back (dial (656, k1, d, "High cut", TR_NOOP ("High")));
+    v.push_back (dial (656, k2, d, "Low cut", TR_NOOP ("Low")));
+    // ducking
+    v.push_back (section (700, top, 76, h, TR_NOOP ("Duck")));
+    v.push_back (dial (738, k1, d, "Ducking", TR_NOOP ("Ducking")));
+    // the mode selector along the bottom
+    v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
+                         TR_NOOP ("Tape|Lo-Fi|Hi-Fi tape|Bucket brigade|Analog|Digital|Clean|Phaser|Shifter|Pitch|Reverse|Detune"), stepCentres (12)));
     return l;
 }
 
 Layout spiralLayout()
 {
     Layout l;
-    l.width = 520;
-    l.height = 236;
+    l.width = 530;
+    l.height = 210;
     auto& v = l.items;
-    v.push_back (section (4, 4, 200, 228, TR_NOOP ("Spiral")));
-    v.push_back (display (12, 26, 184, 116, "spiral"));
-    v.push_back (tabs (12, 150, 184, 22, "Stereo", TR_NOOP ("Mono|Stereo")));
-    v.push_back (dial (104, 188, 30, "Mix", TR_NOOP ("Mix")));
-    v.push_back (section (208, 4, 308, 228, TR_NOOP ("Echo")));
-    v.push_back (dial (262, 76, 62, "Shift", TR_NOOP ("Shift"), (std::uint16_t) (big | bipolar)));
-    v.push_back (dial (366, 64, 40, "Delay", TR_NOOP ("Delay")));
-    v.push_back (stepped (dial (456, 64, 40, "Sync", TR_NOOP ("Sync")), 23));
-    v.push_back (dial (262, 176, 34, "Feedback", TR_NOOP ("Feedback")));
-    v.push_back (dial (366, 176, 34, "Low cut", TR_NOOP ("Low cut")));
-    v.push_back (dial (456, 176, 34, "High cut", TR_NOOP ("High cut")));
+    v.push_back (section (4, 4, 522, 202, nullptr, boxed));
+    v.push_back (dial (54, 74, 46, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (134, 74, 46, "Delay", TR_NOOP ("Delay")));
+    v.push_back (dial (232, 82, 82, "Shift", TR_NOOP ("Shift"), (std::uint16_t) (big | bipolar)));
+    v.push_back (dial (330, 74, 46, "Feedback", TR_NOOP ("Feedback")));
+    v.push_back (dial (402, 74, 46, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (474, 74, 46, "High cut", TR_NOOP ("High cut")));
+    std::vector<float> syncValues;
+    for (int k = 0; k < 24; ++k)
+        syncValues.push_back (((float) k + 0.5f) / 23.0f);
+    syncValues.back() = 1.0f;
+    v.push_back (menuOf (90, 168, 100, 22, "Sync", TR_NOOP ("Delay sync"),
+                         TR_NOOP ("Free|1/64|1/32|1/16|1/8|1/4|1/2|1/1|2/1|1/64.|1/32.|1/16.|1/8.|1/4.|1/2.|1/1.|1/64T|1/32T|1/16T|1/8T|1/4T|1/2T|1/1T|2/1T"),
+                         syncValues));
+    v.push_back (menuOf (380, 168, 100, 22, "Stereo", TR_NOOP ("Output"), TR_NOOP ("Mono|Stereo"), { 0.0f, 1.0f }));
     return l;
 }
 
 Layout orbitLayout()
 {
     Layout l;
-    l.width = 500;
-    l.height = 236;
+    l.width = 470;
+    l.height = 200;
     auto& v = l.items;
-    v.push_back (section (4, 4, 220, 228, TR_NOOP ("Mode")));
+    v.push_back (section (4, 4, 462, 192, nullptr, boxed));
+    const char* params[5] = { "Mix", "Rate", "Depth", "Feedback", "Manual" };
+    const char* captions[5] = { TR_NOOP ("Mix"), TR_NOOP ("Rate"), TR_NOOP ("Depth"), TR_NOOP ("Feedback"), TR_NOOP ("Manual") };
+    for (int k = 0; k < 5; ++k)
+    {
+        auto knobItem = dial (52.0f + 91.5f * (float) k, 70, 52, params[k], captions[k], k == 1 || k >= 3 ? bipolar : 0);
+        knobItem.colour = k; // each knob in its own colour, as one row of five distinct controls
+        v.push_back (knobItem);
+    }
     std::vector<float> modeValues;
     for (int k = 1; k <= 11; ++k)
         modeValues.push_back ((float) k / 11.0f);
-    auto modes = radio (12, 26, 204, 198, "Mode", TR_NOOP ("Rise|Rise / fall|Through-zero +|Through-zero −|Tri chorus|Octo chorus|Doubler|Drift rise|Drift rise / fall|Ensemble|Symphonic"),
-                        modeValues);
-    modes.columns = 1;
-    v.push_back (modes);
-    v.push_back (section (228, 4, 268, 228, TR_NOOP ("Orbit")));
-    v.push_back (dial (288, 76, 60, "Rate", TR_NOOP ("Rate"), (std::uint16_t) (big | bipolar)));
-    v.push_back (dial (380, 70, 44, "Depth", TR_NOOP ("Depth")));
-    v.push_back (dial (456, 70, 36, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (300, 176, 36, "Feedback", TR_NOOP ("Feedback"), bipolar));
-    v.push_back (dial (400, 176, 36, "Manual", TR_NOOP ("Manual"), bipolar));
+    v.push_back (menuOf (70, 150, 170, 24, "Mode", TR_NOOP ("Mode"),
+                         TR_NOOP ("Rise|Rise / fall|Through-zero +|Through-zero −|Tri chorus|Octo chorus|Doubler|Drift rise|Drift rise / fall|Ensemble|Symphonic"),
+                         modeValues));
     return l;
 }
 
 Layout latticeLayout()
 {
     Layout l;
-    l.width = 800;
-    l.height = 330;
+    l.width = 670;
+    l.height = 300;
     auto& v = l.items;
-    // taps
-    v.push_back (section (4, 4, 264, 322, TR_NOOP ("Taps")));
-    v.push_back (display (12, 26, 248, 70, "lattice"));
-    v.push_back (tabs (12, 102, 248, 20, "Taps", TR_NOOP ("1|2|3|4|8|16"),
-                       { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 9.5f / 24.0f }));
-    v.push_back (dial (46, 160, 38, "Delay", TR_NOOP ("Delay")));
-    v.push_back (stepped (dial (110, 160, 30, "Sync", TR_NOOP ("Sync")), 17));
-    v.push_back (dial (170, 160, 30, "Feedback", TR_NOOP ("Feedback")));
-    v.push_back (dial (228, 160, 30, "Rotate", TR_NOOP ("Rotate")));
-    v.push_back (dial (40, 250, 28, "Spread", TR_NOOP ("Spread")));
-    v.push_back (dial (96, 250, 28, "Slope", TR_NOOP ("Slope"), bipolar));
-    v.push_back (dial (152, 250, 28, "Skew", TR_NOOP ("Skew"), bipolar));
-    v.push_back (dial (208, 250, 28, "Random", TR_NOOP ("Random")));
-    v.push_back (dial (40, 306, 22, "Tap gain", TR_NOOP ("Tap gain"), (std::uint16_t) (bipolar | noCaption)));
-    v.push_back (toggle (80, 298, 90, 20, "Half speed", TR_NOOP ("Half speed")));
-
-    // modulation
-    v.push_back (section (272, 4, 196, 322, TR_NOOP ("Modulation")));
-    v.push_back (dial (370, 58, 46, "Depth", TR_NOOP ("Depth"), big));
-    v.push_back (dial (312, 140, 28, "Detune rate", TR_NOOP ("Detune rate")));
-    v.push_back (dial (370, 140, 28, "Detune depth", TR_NOOP ("Detune")));
-    v.push_back (dial (428, 140, 28, "Over-mod", TR_NOOP ("Over-mod")));
-    v.push_back (dial (312, 220, 28, "Vibrato rate", TR_NOOP ("Vibrato rate")));
-    v.push_back (dial (370, 220, 28, "Vibrato depth", TR_NOOP ("Vibrato")));
-    v.push_back (dial (428, 220, 28, "Smoothing", TR_NOOP ("Smoothing")));
-
-    // diffusion / drive
-    v.push_back (section (472, 4, 160, 322, TR_NOOP ("Diffusion / drive")));
-    v.push_back (toggle (480, 26, 70, 20, "Diffusion on", TR_NOOP ("Diffuse")));
-    v.push_back (dial (504, 82, 26, "Diffusion", TR_NOOP ("Amount")));
-    v.push_back (dial (560, 82, 26, "Diffusion size", TR_NOOP ("Size")));
-    v.push_back (dial (504, 142, 24, "Diffusion rate", TR_NOOP ("Rate")));
-    v.push_back (dial (560, 142, 24, "Diffusion depth", TR_NOOP ("Depth")));
-    v.push_back (toggle (480, 186, 66, 20, "Drive on", TR_NOOP ("Drive")));
-    v.push_back (tabs (552, 186, 72, 20, "Drive post", TR_NOOP ("Pre|Post")));
-    v.push_back (dial (500, 244, 24, "Drive in", TR_NOOP ("In")));
-    v.push_back (dial (552, 244, 24, "Drive out", TR_NOOP ("Out")));
-    v.push_back (dial (604, 244, 24, "Noise", TR_NOOP ("Noise")));
-
-    // tone / output
-    v.push_back (section (636, 4, 160, 322, TR_NOOP ("Tone")));
-    v.push_back (dial (676, 56, 28, "Low cut", TR_NOOP ("Low cut")));
-    v.push_back (dial (752, 56, 28, "High cut", TR_NOOP ("High cut")));
-    v.push_back (tabs (646, 108, 140, 20, "Colour", TR_NOOP ("Bright|Dark")));
-    v.push_back (dial (676, 172, 28, "Crossover", TR_NOOP ("Crossover")));
-    v.push_back (dial (752, 172, 28, "Width", TR_NOOP ("Width")));
-    v.push_back (dial (716, 264, 42, "Mix", TR_NOOP ("Mix"), big));
+    // the five main controls as faders, then the mode (taps) and sync menus under them
+    v.push_back (section (4, 4, 300, 292, nullptr, boxed));
+    const char* faders[5] = { "Mix", "Depth", "Width", "Delay", "Feedback" };
+    const char* captions[5] = { TR_NOOP ("Mix"), TR_NOOP ("Depth"), TR_NOOP ("Width"), TR_NOOP ("Delay"), TR_NOOP ("Feedback") };
+    for (int k = 0; k < 5; ++k)
+        v.push_back (slider (Item::vslider, 16.0f + 58.0f * (float) k, 16, 40, 204, faders[k], captions[k]));
+    v.push_back (menuOf (52, 236, 100, 22, "Taps", TR_NOOP ("Taps"), TR_NOOP ("1|2|3|4|8|16"),
+                         { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 9.5f / 24.0f }));
+    std::vector<float> syncValues;
+    for (int k = 0; k <= 17; ++k)
+        syncValues.push_back ((float) k / 17.0f);
+    v.push_back (menuOf (200, 236, 96, 22, "Sync", TR_NOOP ("Sync"),
+                         "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues));
+    // the pages: modulation, taps, diffusion, EQ, drive, warp
+    l.pages = { TR_NOOP ("Mod"), TR_NOOP ("Taps"), TR_NOOP ("Diff"), TR_NOOP ("EQ"), TR_NOOP ("Drive"), TR_NOOP ("Warp") };
+    v.push_back (pageTabs (312, 8, 354, 22, TR_NOOP ("Mod|Taps|Diff|EQ|Drive|Warp")));
+    v.push_back (section (312, 36, 354, 186, nullptr, boxed));
+    const auto row = [&v] (int page, std::vector<std::pair<const char*, const char*>> knobs, std::vector<LayoutItem> extra = {}) {
+        const auto first = 346.0f + 68.0f * (float) extra.size();
+        for (auto e : extra)
+        {
+            e.page = page;
+            v.push_back (e);
+        }
+        for (std::size_t k = 0; k < knobs.size(); ++k)
+        {
+            auto i = dial (first + 68.0f * (float) k, 112, 38, knobs[k].first, knobs[k].second);
+            i.page = page;
+            v.push_back (i);
+        }
+    };
+    row (0, { { "Detune rate", TR_NOOP ("Slow rate") }, { "Detune depth", TR_NOOP ("Slow depth") }, { "Vibrato rate", TR_NOOP ("Vib rate") },
+              { "Vibrato depth", TR_NOOP ("Vib depth") }, { "Over-mod", TR_NOOP ("Over-mod") } });
+    row (1, { { "Spread", TR_NOOP ("Spread") }, { "Slope", TR_NOOP ("Slope") }, { "Skew", TR_NOOP ("Skew") }, { "Random", TR_NOOP ("Random") },
+              { "Tap gain", TR_NOOP ("Tap gain") } });
+    row (2, { { "Diffusion", TR_NOOP ("Diffusion") }, { "Diffusion size", TR_NOOP ("Size") }, { "Diffusion rate", TR_NOOP ("Mod rate") },
+              { "Diffusion depth", TR_NOOP ("Mod depth") } },
+         { toggle (322, 104, 56, 20, "Diffusion on", TR_NOOP ("On")) });
+    row (3, { { "Low cut", TR_NOOP ("Low cut") }, { "High cut", TR_NOOP ("High cut") }, { "Crossover", TR_NOOP ("Spatial EQ") } },
+         { tabs (322, 104, 56, 40, "Colour", TR_NOOP ("Bright|Dark")) });
+    row (4, { { "Drive in", TR_NOOP ("In gain") }, { "Drive out", TR_NOOP ("Out gain") }, { "Noise", TR_NOOP ("Noise gain") } },
+         { toggle (322, 104, 56, 20, "Drive on", TR_NOOP ("On")) });
+    {
+        auto prePost = tabs (596, 104, 60, 40, "Drive post", TR_NOOP ("Pre|Post"));
+        prePost.page = 4;
+        v.push_back (prePost);
+    }
+    row (5, { { "Rotate", TR_NOOP ("Feedback mix") }, { "Smoothing", TR_NOOP ("Smoothing") } },
+         { tabs (322, 104, 56, 40, "Half speed", TR_NOOP ("1x|1/2x")) });
+    v.push_back (display (312, 230, 354, 62, "lattice"));
     return l;
 }
 

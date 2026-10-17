@@ -1186,27 +1186,6 @@ public:
             g.drawText (juce::String (window >= 1000.0 ? juce::String (window / 1000.0, 2) + " s" : juce::String ((int) window) + " ms"),
                         inner.reduced (2.0f * s), juce::Justification::bottomRight);
         }
-        else if (id == "spiral") // a 1 kHz tone through the repeats: each one moves by the shift (dots fade with the feedback)
-        {
-            grid (6, 4);
-            using namespace echosuite::spiral;
-            const auto hz = shiftHz (fx.params[shift]);
-            const auto gain = juce::jlimit (0.0, 1.0, loopGain (fx.params[feedback]));
-            const auto stereoOn = fx.params[stereo] >= 0.5f;
-            auto level = 1.0;
-            for (int k = 0; k < 24 && level > 0.02; ++k, level *= gain)
-                for (int c = 0; c < (stereoOn ? 2 : 1); ++c)
-                {
-                    const auto f = 1000.0 + (c == 0 ? 1.0 : -1.0) * hz * (k + 1);
-                    if (f < 50.0 || f > 20000.0)
-                        continue;
-                    const auto y = (float) (std::log (f / 50.0) / std::log (400.0));
-                    const auto x = (float) (k + 1) / 25.0f;
-                    const auto d = (3.0f + 4.0f * (float) level) * s;
-                    g.setColour (curveColour.withAlpha ((float) (0.25 + 0.75 * level)));
-                    g.fillEllipse (inner.getX() + inner.getWidth() * x - d * 0.5f, inner.getBottom() - inner.getHeight() * y - d * 0.5f, d, d);
-                }
-        }
         else // a plain well with the plugin's name (FL's scopes / animations are not reproduced)
         {
             g.setColour (colour::bg2);

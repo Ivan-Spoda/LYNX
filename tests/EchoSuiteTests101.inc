@@ -476,7 +476,7 @@ TEST (echosuite101_lattice_taps_feedback_and_layout)
         for (const auto& item : l.items)
         {
             inside = inside && item.x >= 0 && item.y >= 0 && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f;
-            if (lynx::plugui::isValueControl (item.type))
+            if (lynx::plugui::isValueControl (item.type) && item.param != nullptr) // (page tabs have none)
             {
                 const auto p = lynx::plugui::paramIndex (kind, item.param);
                 CHECK (p >= 0);
@@ -485,6 +485,36 @@ TEST (echosuite101_lattice_taps_feedback_and_layout)
             }
         }
         CHECK (inside && std::all_of (placed.begin(), placed.end(), [] (bool b) { return b; }));
+        // controls that swap in place (style / mode dependent) never overlap while both are shown
+        auto params = lynx::makeEffectSlot (kind).params;
+        for (int a = 0; a < 12; ++a)
+            for (int b = 0; b < 5; ++b)
+                for (int c = 0; c < 2; ++c)
+                {
+                    if (kind == EffectKind::echoform)
+                    {
+                        params[es::echoform::mode] = ((float) a + 0.5f) / 12.0f;
+                        params[es::echoform::style] = ((float) b + 0.5f) / 5.0f;
+                        params[es::echoform::syncL] = params[es::echoform::syncR] = c == 0 ? 0.25f : 0.75f;
+                    }
+                    for (int page = 0; page < std::max (1, (int) l.pages.size()); ++page)
+                    {
+                        std::vector<const lynx::plugui::LayoutItem*> shown;
+                        for (const auto& item : l.items)
+                            if (lynx::plugui::isValueControl (item.type) && lynx::plugui::isShown (kind, item, page, params))
+                                shown.push_back (&item);
+                        for (std::size_t i = 0; i < shown.size(); ++i)
+                            for (std::size_t j = i + 1; j < shown.size(); ++j)
+                            {
+                                const auto& p = *shown[i];
+                                const auto& q = *shown[j];
+                                const auto overlap = p.x + 0.5f < q.x + q.w && q.x + 0.5f < p.x + p.w && p.y + 0.5f < q.y + q.h && q.y + 0.5f < p.y + p.h;
+                                if (overlap)
+                                    std::printf ("  %s: '%s' overlaps '%s'\n", lynx::effectInfo (kind).name, p.param ? p.param : "-", q.param ? q.param : "-");
+                                CHECK (! overlap);
+                            }
+                    }
+                }
         CHECK (std::find (lynx::plugui::ownLayoutKinds().begin(), lynx::plugui::ownLayoutKinds().end(), kind) != lynx::plugui::ownLayoutKinds().end());
     }
     CHECK (lynx::formatEffectParam (EffectKind::echoform, es::echoform::timeL, 0.3f, 120.0) == "300.0 ms");

@@ -24,6 +24,8 @@
 //   savestate <file> / loadstate <file>
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
 //   echo <text>
+//   editor <ms> [x y]                 show the plugin's own editor in a window at (x, y) for ms milliseconds (for screenshots
+//                                     taken from outside, e.g. with a screen-capture script); prints its screen bounds
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
@@ -268,6 +270,25 @@ struct Host
             pump (0);
             if (cmd == "pump") { pump (a[1].getIntValue()); continue; }
             if (cmd == "echo") { log (line.fromFirstOccurrenceOf (" ", false, false)); continue; }
+            if (cmd == "editor")
+            {
+                if (plugin == nullptr) { log ("error: no plugin"); continue; }
+                std::unique_ptr<juce::AudioProcessorEditor> ed (plugin->createEditorIfNeeded());
+                if (ed == nullptr) { log ("error: no editor"); continue; }
+                juce::DocumentWindow win ("fxmeasure editor", juce::Colours::black, 0, true);
+                win.setUsingNativeTitleBar (false);
+                win.setTitleBarHeight (0);
+                win.setContentNonOwned (ed.get(), true);
+                win.setTopLeftPosition (a.size() > 3 ? a[2].getIntValue() : 100, a.size() > 3 ? a[3].getIntValue() : 100);
+                win.setVisible (true);
+                win.toFront (true);
+                const auto b = ed->getScreenBounds();
+                log ("editor " + juce::String (b.getX()) + " " + juce::String (b.getY()) + " " + juce::String (b.getWidth()) + " " + juce::String (b.getHeight()));
+                pump (a[1].getIntValue());
+                win.clearContentComponent();
+                ed.reset();
+                continue;
+            }
             if (cmd == "load")
             {
                 if (a.size() > 2) rate = a[2].getDoubleValue();

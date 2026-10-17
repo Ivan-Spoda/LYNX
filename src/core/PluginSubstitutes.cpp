@@ -124,7 +124,8 @@ vst3 = 64545356614c7679616c68616c6c6164
 names = ValhallaDelay
 mix = 1
 map = xml:Mix -> Mix
-map = xml:DelayStyle -> Style
+# styles: Single, Dual, Ratio, PingPong, Quad onto Echoform's order (Single, Ratio, Quad, Dual, Ping-pong)
+map = xml:DelayStyle -> Style | steps 0.1 0.7 0.3 0.9 0.5
 map = xml:DelayLSync -> Sync L
 map = xml:DelayLNote -> Note L
 map = xml:DelayL_Ms -> Time L
@@ -154,7 +155,7 @@ map = xml:Ducking -> Ducking
 # the 17 modes (index floor (24 v)) onto Echoform's 12 characters: Tape, HiFi, BBD, Digital, Ghost (shifter), Pitch,
 # RevPitch (reverse), BBDuck (bucket), Clarity (clean), DuckTape (tape), PitchDuck (pitch), LoFi, Quartz (clean),
 # PhaserDDL (phaser), RichPitch (detune), ChromeTape (tape), Analog; the "duck" variants' built-in ducking is not kept
-map = xml:Mode -> Mode | steps 0.041667 0.041667 0.125 0.208333 0.375 0.541667 0.625 0.708333 0.208333 0.458333 0.041667 0.625 0.791667 0.458333 0.875 0.958333 0.041667 0.291667 0.041667 0.041667 0.041667 0.041667 0.041667 0.041667
+map = xml:Mode -> Mode | steps 0.041667 0.041667 0.208333 0.291667 0.458333 0.708333 0.791667 0.875 0.291667 0.541667 0.041667 0.791667 0.125 0.541667 0.625 0.958333 0.041667 0.375 0.041667 0.041667 0.041667 0.041667 0.041667 0.041667
 
 [valhalla-freqecho]
 product = ValhallaFreqEcho

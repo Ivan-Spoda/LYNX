@@ -430,9 +430,11 @@ TEST (mixsuite_panels_place_every_parameter)
     using namespace lynx;
     // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
     // and never overlap, and the dynamics effects show their live gain-reduction meter
-    CHECK (plugui::ownLayoutKinds().size() == 9); // + the delay / modulation suite (round 101)
+    CHECK (plugui::ownLayoutKinds().size() == 9); // + the delay / modulation suite (round 101, its own test)
     for (const auto kind : plugui::ownLayoutKinds())
     {
+        if (! mixsuite::isSuiteKind (kind))
+            continue;
         const auto& l = plugui::layoutFor (kind);
         CHECK (! plugui::hasFlLayout (kind));
         const auto count = (int) effectInfo (kind).params.size();
