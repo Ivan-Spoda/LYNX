@@ -50,8 +50,16 @@ title row of the selected effect's knobs.
 | Fruity Multiband Compressor | 805 × 160 | input meter, IIR / FIR, LIMITER, GAIN; band graph with four crossover knobs; LOW / MID / HIGH BAND each with A·M·B mode, THRES RATIO KNEE / ATT REL GAIN and its meters |
 | Fruity Reeverb 2 | 538 × 166 | room view; MID / SIDE, H.CUT, L.CUT; DELAY + TEMPO, SIZE, MOD, DIFF, SPEED; BASS, DEC, CROSS, DAMP; DRY / ER / WET faders and SEP |
 | LuxeVerb | 947 × 456 | INPUT · REVERB · PITCH · OUTPUT tiles (value plate, knob, caption), the PITCH section switching between FEEDFORWARD (direct amp fader, pitch / amp / delay ×2) and FEEDBACK (high / low cut, pitch-shift and gain faders, delay, reverb mix); ENVELOPE (off / wet / decay, threshold, scale, low cut, offset, sidechain, attack, decay, smooth) and the analyser |
+| Fruity Parametric EQ 2 | 707 × 356 | response graph (C1…C9 octave plates and SUB / BASS / LOW MID / MID / HIGH MID / PRS / TREBLE plates above, 20 Hz…10 kHz under it, ±18 dB scale at its right) with numbered band handles; the output fader; seven band columns (type button with the band's shape, gain fader, FREQ and BW knobs); FL's bottom row (LIN, HQ, monitor, compare) is replaced by the selected band's read-out |
+| Gross Beat | 840 × 563 | time panel (mix knob), HOLD, scratch dial; 36 time slots and 36 volume slots in 4 × 9 grids (names from the saved state); ATT / REL / TNS; volume panel; envelope editor (the selected time and volume slots, read-only here) with the slot's hold / trigger sync / position sync under it |
+| 3x Osc (channel page) | 560 × 390 | three oscillator rows: shape buttons (sine, square, rounded, custom / triangle, saw, noise, ± invert), PHASE OFS and DETUNE faders, COARSE, FINE, pan, volume (osc 2 and 3); AM OSC 3, HQ, PHASE RAND below |
+| FL Keys (channel page) | 480 × 186 | ENVIRONMENT (decay, release, pan, stereo), MISC (overdrive, LFO, treble, stretch), VELOCITY (vel → muffle, muffle, vel → hardness, hardness, sens), TUNING (tune, detune), the sample set's name; FL's keyboard strip is left out (LYNX's touch keyboard is in the Channel Rack) |
 
 Mapping notes:
+- 3x Osc's shape buttons follow FL's order (sine, square, rounded, custom on the first row; triangle, saw, noise on the
+  second) and set the engine's shapes 0 sine, 1 triangle, 2 square, 3 saw, 4 rounded, 5 noise, 6 custom
+  (REA_rodada47 §1.2); the ± button is the oscillator's invert switch. Captions sit between the rows as in FL (the third
+  row has none).
 - Fruity Limiter COMP page: FL captions the compressor detector window **SUSTAIN** like the limiter's peak window; it is
   mapped to the engine's RMS window (p14) — by analogy with the LIMIT page's SUSTAIN = peak window (p7), **[model]**.
 - LuxeVerb's PITCH header switch is the engine's `Feedback` control (on in the "Exact Mass of Jupiter" preset whose
@@ -61,6 +69,8 @@ Mapping notes:
   presets bar's options menu.
 
 ## Where I stopped / next steps
-- Batch 1: the effects above. Next: Parametric EQ 2 in FL's arrangement (curve + band faders / FREQ / BW knobs),
-  Gross Beat (slot grids, ATT / REL / TNS, envelope view), Maximus / Soundgoodizer (state-based), Fruity Balance /
-  Send, then the generators (3x Osc, FL Keys, BooBass, Sytrus and Harmor main pages) in the channel window.
+- Batch 1 (landed): the effects above, Parametric EQ 2, Gross Beat, 3x Osc and FL Keys pages.
+- Next: Maximus / Soundgoodizer (state-based: amount and A–D), Fruity Balance / Send, BooBass, Sytrus and Harmor main
+  pages, then the remaining Fruity effects (Delay 2, Reeverb, Flangus, Soft Clipper, Blood Overdrive, PanOMatic, Stereo
+  Shaper, Transient Processor, Fast LP, Free Filter, WaveShaper, Delay Bank, Hyper / Vintage Chorus, Vintage Phaser…),
+  whose FL captures are in `tmp/r93/flref` (second batch).

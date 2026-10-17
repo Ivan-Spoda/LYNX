@@ -743,7 +743,7 @@ Layout flKeys()
     l.width = 480;
     l.height = 186;
     auto& v = l.items;
-    v.push_back (label (8, 2, 200, 34, "FL Keys", dim));
+    v.push_back (label (8, 2, 200, 34, "FL Keys", dim | alignLeft));
     v.push_back (display (333, 9, 141, 18, "flkeysname"));
     v.push_back (section (12, 37, 110, 145, TR_NOOP ("Environment")));
     v.push_back (section (132, 37, 111, 145, TR_NOOP ("Misc")));

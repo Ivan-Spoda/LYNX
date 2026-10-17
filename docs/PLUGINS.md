@@ -132,6 +132,14 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Limiter | Emphasis | Insert | Approximate | not ported yet |
 | Parametric EQ | Low Lifter | Insert | Approximate | harmonics generator missing; not ported yet |
 
+**Windows.** Every native effect opens its own window (double-click its Mixer slot, or the **Editor** button over its
+knobs). For the plugins studied so far — Fruity Limiter, Parametric EQ 2, Delay 3, Multiband Compressor, Reeverb 2,
+LuxeVerb, Compressor, Filter, Fast Dist, Chorus, Flanger, Stereo Enhancer, Gross Beat, and the 3x Osc and FL Keys pages
+of the channel settings — the window has the same controls, sections, captions and arrangement as the FL plugin,
+drawn in LYNX's own style, with a presets bar that lists the plugin's FL presets from your installation
+([`docs/analise/UI_STUDY_plugins93.md`](analise/UI_STUDY_plugins93.md)); the other effects show their controls as a
+grid of knobs.
+
 Also on every insert: LYNX's own Filter, Distortion, Lo-fi, Reverb, Compressor, Limiter, Crossover, Volume gate,
 Rhythmic envelope, Auto-pan and the parallel container (Patcher graphs from FL projects are reduced to it, each effect
 inside running its own engine), plus any VST3/CLAP plugin. FL's Peak, Envelope and Keyboard Controllers are imported

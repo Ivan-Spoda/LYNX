@@ -1223,11 +1223,12 @@ public:
                         g.setFont (font (r.getHeight() * 0.9f, true));
                         g.drawText (item.label, r, juce::Justification::centred, false);
                     }
-                    else if (dimmed && (item.style & plugui::alignLeft) == 0 && r.getHeight() > 30.0f * f) // the plugin's name
+                    else if (dimmed && r.getHeight() > 30.0f * f) // the plugin's name, big and quiet
                     {
                         g.setColour (colour::bg4);
                         g.setFont (font (r.getHeight() * 0.6f, true));
-                        g.drawFittedText (item.label, r.toNearestInt(), juce::Justification::centredRight, 1, 0.8f);
+                        g.drawFittedText (item.label, r.toNearestInt(),
+                                          (item.style & plugui::alignLeft) != 0 ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
                     }
                     else
                         caption (item.label, r, dimmed, (item.style & plugui::alignLeft) != 0 ? juce::Justification::centredLeft : juce::Justification::centred);
