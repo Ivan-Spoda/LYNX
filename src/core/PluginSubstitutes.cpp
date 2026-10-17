@@ -148,12 +148,12 @@ waves = RComp
 [waves-cla-2a]
 product = CLA-2A
 vendor = Waves
-lynx = Compressor
+lynx = Glow Leveler
 # [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 4c545356324163536c612d3261207374
 waves = CLA-2A
-# an opto leveller: slower release than the Compressor's default (about 160 ms)
-preset = Release=0.6
+# LYNX's optical leveler (round 96); its state is not translated: moderate leveling (+7 dB into the cell, +3 dB gain)
+preset = Peak reduction=0.45; Gain=0.1
 
 [waves-compressors]
 product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
@@ -171,10 +171,17 @@ names = FabFilter Pro-C 2; FabFilter Pro-C 3; Pro-C 2; Pro-C 3
 [waves-ssl-channel]
 product = SSL E-Channel
 vendor = Waves
-lynx = Parametric EQ
-# [DATA] class ID (stereo component) and <PluginName> from real projects; the EQ curve is not translated (flat)
+lynx = Ridge Strip
+# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96) starts
+# neutral: the EQ curve and dynamics settings are not translated
 vst3 = 5354535648437353736c6368616e6e65
 waves = SSLChannel
+
+[ssl-native-channel]
+product = SSL Native Channel Strip / 4K E
+vendor = Solid State Logic
+lynx = Ridge Strip
+names = SSL Native Channel Strip 2; SSL Native Channel Strip; SSL 4K E; SSL 4K B; Vocalstrip 2; SSL Native Vocalstrip 2
 
 [waves-eqs]
 product = Waves EQ (Q10 / Renaissance EQ / SSL EQ)
@@ -187,6 +194,46 @@ product = FabFilter Pro-Q
 vendor = FabFilter
 lynx = Facet EQ
 names = FabFilter Pro-Q 2; FabFilter Pro-Q 3; FabFilter Pro-Q 4; Pro-Q 2; Pro-Q 3; Pro-Q 4
+
+# ---------------------------------------------------------------- vocal tools -> LYNX's mixing suite (round 96)
+[waves-deesser]
+product = DeEsser
+vendor = Waves
+lynx = Hush De-esser
+waves = DeEsser; DeEsser Stereo
+
+[fabfilter-pro-ds]
+product = FabFilter Pro-DS
+vendor = FabFilter
+lynx = Hush De-esser
+names = FabFilter Pro-DS; Pro-DS
+
+[harrison-deesser]
+product = Harrison De-Esser
+vendor = Harrison
+lynx = Hush De-esser
+names = Harrison De-Esser; Harrison DeEsser
+
+[slate-fresh-air]
+product = Fresh Air
+vendor = Slate Digital
+lynx = Aether
+names = Fresh Air; FreshAir
+
+[soundtoys-decapitator]
+product = Decapitator
+vendor = Soundtoys
+lynx = Ember Saturator
+names = Decapitator
+# a light drive (+5.4 dB, tube) with auto gain, so the slot colours without jumping in level
+preset = Drive=0.15
+
+[fabfilter-saturn]
+product = FabFilter Saturn
+vendor = FabFilter
+lynx = Ember Saturator
+names = FabFilter Saturn; FabFilter Saturn 2; Saturn 2
+preset = Drive=0.15
 
 # ---------------------------------------------------------------- modulation
 [soundtoys-panman]

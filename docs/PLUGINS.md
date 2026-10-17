@@ -168,6 +168,27 @@ Rhythmic envelope, Auto-pan and the parallel container (Patcher graphs from FL p
 inside running its own engine), plus any VST3/CLAP plugin. FL's Peak, Envelope and Keyboard Controllers are imported
 as LYNX controllers.
 
+## LYNX originals: the mixing suite
+
+Five effects of LYNX's own design for vocal and mix chains (REA round 96, [`docs/analise/REA_rodada96.md`](analise/REA_rodada96.md)).
+They are **not** models or copies of any product: each fills the *role* of a familiar kind of studio processor and
+is written only from published DSP knowledge (textbooks, AES / DAFx papers and public circuit analyses of classic
+hardware). No third-party plugin was opened, run or analysed to make them, and no preset, name, graphic or manual
+text of one is used. All are on every mixer insert (*Insert*), report their latency before the first block, have their own panels with live gain-reduction meters,
+oversample where they are nonlinear and never allocate on the audio thread.
+
+| LYNX engine | In the role of | What it is |
+|---|---|---|
+| Ridge Strip | console channel strips, e.g. SSL E-series channels (Waves SSL E-Channel, SSL Native 4K E) | 18 dB/oct high-pass, 12 dB/oct low-pass, four bands with two curve families (brown: constant Q, plain shelves; black: proportional Q, shelves with the overshoot dip), compressor (soft knee, fast attack, release, parallel mix), gate / 1:2 expander, EQ ↔ dynamics order, filters to the sidechain, phase, input / output trims, gain-reduction meters |
+| Glow Leveler | optical levelers such as the Teletronix LA-2A (Waves CLA-2A, UA LA-2A) | feedback leveler with an electro-optical cell model: ~10 ms attack, two-stage release that lengthens after long or heavy leveling; peak reduction, gain, compress / limit, sidechain emphasis, mix |
+| Hush De-esser | de-essers (Waves DeEsser, FabFilter Pro-DS) | split-band (complementary crossover) or wideband reduction, high-pass or band detector, frequency, threshold, range, release, listen, 2 ms lookahead |
+| Aether | "air" EQs and high-frequency exciters (Slate Digital Fresh Air, Maag EQ4 air band) | broad high shelf up to +15 dB (5–20 kHz) plus a 4x-oversampled harmonic exciter on the band above its frequency, even ↔ odd character, mix |
+| Ember Saturator | analog saturators (Soundtoys Decapitator, FabFilter Saturn) | tube (asymmetric, even harmonics), tape (pre/de-emphasis, odd), transistor and fuzz curves; drive, tone tilt, low / high cut, auto gain, mix, 2x / 4x / 8x oversampling with a constant latency |
+
+Product names in the table are trademarks of their owners (Solid State Logic, Waves Audio, Universal Audio,
+FabFilter, Slate Digital, Maag Audio, Soundtoys and the owners of the Teletronix name); they are used only to say
+which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by any of them.
+
 ## LYNX originals: vocal pitch
 
 | LYNX engine | In the role of | What it is |

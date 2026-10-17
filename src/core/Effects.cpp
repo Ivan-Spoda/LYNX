@@ -1,4 +1,5 @@
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/LynxTune.h"
 
 #include "core/Effector.h"
@@ -2465,6 +2466,11 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::newtime: return newtimeInfo;
         case EffectKind::facetEq: return facet::info();
         case EffectKind::apexLimiter: return apex::info();
+        case EffectKind::ridgeStrip: return mixsuite::ridgeInfo();
+        case EffectKind::glowLeveler: return mixsuite::glowInfo();
+        case EffectKind::hushDeEsser: return mixsuite::hushInfo();
+        case EffectKind::aether: return mixsuite::aetherInfo();
+        case EffectKind::ember: return mixsuite::emberInfo();
         case EffectKind::lynxTune: return lynxtune::info();
     }
     return eq;
@@ -2833,6 +2839,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::apexLimiter:
             return apex::paramText (param, v);
+        case EffectKind::ridgeStrip:
+        case EffectKind::glowLeveler:
+        case EffectKind::hushDeEsser:
+        case EffectKind::aether:
+        case EffectKind::ember:
+            return mixsuite::paramText (kind, param, v);
         case EffectKind::lynxTune:
             return lynxtune::paramText (param, v);
 
@@ -2999,6 +3011,11 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::newtime: return newtonefx::make (nullptr); // without its sample: a pass-through
         case EffectKind::facetEq: return facet::make();
         case EffectKind::apexLimiter: return apex::make();
+        case EffectKind::ridgeStrip:
+        case EffectKind::glowLeveler:
+        case EffectKind::hushDeEsser:
+        case EffectKind::aether:
+        case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }

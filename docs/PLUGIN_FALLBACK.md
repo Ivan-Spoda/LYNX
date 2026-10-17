@@ -99,15 +99,21 @@ matches by name).
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-2A (slower release), CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class IDs [DATA], Waves names, names | — |
-| Waves SSL E-Channel, Q10, REQ, SSLEQ | Parametric EQ (flat) | VST3 class ID [DATA], Waves names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
+| Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB; round 96) | VST3 class ID [DATA], Waves name | — |
+| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
+| Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
+| Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | Waves name, names | — |
+| Slate Digital Fresh Air | Aether (neutral; round 96) | name | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | — |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |
 
-Not mapped yet (no LYNX module plays their role): DeEsser, NS1, Doubler, Fresh Air, Little AlterBoy,
-Decapitator, Filterverse, Kickstart, Sausage Fattener, Effectrix, Analog Lab (instrument).
+Not mapped yet (no LYNX module plays their role): NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
+Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
+De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 
 [DATA] = read from FL wrapper records of real projects (identifiers and state layouts only; no plugin code was read).
 Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
