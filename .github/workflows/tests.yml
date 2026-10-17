@@ -15,10 +15,6 @@ jobs:
         compiler: [g++, clang++]
     steps:
       - uses: actions/checkout@v5
-      - name: Machine
-        run: grep -m1 'model name' /proc/cpuinfo; ldd --version | head -1; $CXX --version | head -1
-        env:
-          CXX: ${{ matrix.compiler }}
       - name: Build and test the core (no JUCE)
         env:
           CXX: ${{ matrix.compiler }}

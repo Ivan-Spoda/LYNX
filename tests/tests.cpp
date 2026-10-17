@@ -6,6 +6,7 @@
 #include <thread>
 #include <random>
 #include <cctype>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,10 @@
 #include <string>
 #include <tuple>
 #include <vector>
+
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
@@ -2444,9 +2449,40 @@ TEST (live_queue_is_fifo_and_bounded)
     CHECK (pushed == (int) lynx::LiveEventQueue::capacity - 1); // one slot stays free to tell full from empty
 }
 
+// Whether this CPU's RCPPS (the ~12-bit reciprocal estimate, whose table is implementation-defined: Intel and AMD
+// differ) gives the same bits as the CPU that the FL golden data was captured on (AMD Zen 2): a hash of the estimate for
+// every float mantissa in [1, 2) (the estimate does not depend on the exponent in the normal range)
+static bool rcpLikeReferenceCpu()
+{
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+    std::uint64_t h = 1469598103934665603ull;
+    for (std::uint32_t m = 0; m < (1u << 23); m += 4)
+    {
+        alignas (16) float f[4];
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            const std::uint32_t bits = 0x3f800000u | (m + j);
+            std::memcpy (&f[j], &bits, 4);
+        }
+        _mm_store_ps (f, _mm_rcp_ps (_mm_load_ps (f)));
+        for (std::uint32_t j = 0; j < 4; ++j)
+        {
+            std::uint32_t bits;
+            std::memcpy (&bits, &f[j], 4);
+            h = (h ^ bits) * 1099511628211ull;
+        }
+    }
+    return h == 0xb5de670652cb0383ull;
+#else
+    return false;
+#endif
+}
+
 // FL's sampler interpolators (REA_rodada69 §1): outputs of FLEngine's own kernels (EXEC, r69/py/gold.py) on a synthetic
 // 16-bit stereo signal; the port must give the same bits (linear, 6-point, 24-point sinc, 32-point sinc at speed 1.37,
 // 16-point sinc widened to 24 points with the cutoff at π/9.5 at speed 9.5)
+// The sinc kernels take 1/x from RCPPS plus one Newton step, as FL does, so FL's own bits depend on the CPU: they are
+// required where RCPPS matches the capture machine's; elsewhere (Intel CPUs) within a few float ulps.
 TEST (fl_sampler_interpolators_match_fl)
 {
     std::vector<float> l, r;
@@ -2468,6 +2504,7 @@ TEST (fl_sampler_interpolators_match_fl)
         { 3, 9.5, { 0xbd97308e, 0x3dd8783c, 0xbd911374, 0x3e162a41, 0xbd8a959e, 0x3e38b220, 0xbd7e6785, 0x3e58895c, 0xbd380c4f, 0x3e7e3008, 0xbd380e4e, 0x3e7e2696, 0x3d00c6d0, 0xbd627d87, 0x3e308cb8, 0xbcece918 } },
     };
     const lynx::flvp::X87Extended precision;
+    const bool exactRcp = rcpLikeReferenceCpu();
     for (const auto& c : cases)
     {
         lynx::flrs::Kernel k;
@@ -2482,9 +2519,10 @@ TEST (fl_sampler_interpolators_match_fl)
             std::uint32_t ba, bb;
             std::memcpy (&ba, &a, 4);
             std::memcpy (&bb, &b, 4);
-            same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
-            if (ba != c.bits[2 * p] || bb != c.bits[2 * p + 1])
-                std::printf ("DBG flrs q=%d p=%d got %08x %08x want %08x %08x\n", c.quality, p, ba, bb, c.bits[2 * p], c.bits[2 * p + 1]);
+            if (exactRcp || c.quality < 3) // (linear and 6-point use no reciprocal)
+                same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            else
+                same += (std::abs (a - std::bit_cast<float> (c.bits[2 * p])) < 5e-7f) + (std::abs (b - std::bit_cast<float> (c.bits[2 * p + 1])) < 5e-7f);
         }
         CHECK (same == 16);
     }
@@ -11072,16 +11110,17 @@ TEST (fruity_parametric_eq_exact)
         CHECK (e.latencySamples() == 1536);
         for (int i = 0; i < 12288; i += 512)
             e.process (l.data() + i, r.data() + i, 512);
-        const std::initializer_list<Gold> gold = hq ? std::initializer_list<Gold> {
+        // (named arrays: a std::initializer_list chosen by ?: would point into a temporary array that dies at the end of
+        // the declaration, which GCC 13 reuses for other locals)
+        static const Gold goldHq[] = {
             { 2000, 0.08618364483118057f, 0.11248858273029327f }, { 5000, 0.18998730182647705f, 0.428600937128067f },
             { 8191, -0.1412065178155899f, -0.002996620489284396f }, { 10000, 0.18998737633228302f, -0.012570115737617016f },
-            { 12287, 0.40586185455322266f, -0.014698396436870098f } } : std::initializer_list<Gold> {
+            { 12287, 0.40586185455322266f, -0.014698396436870098f } };
+        static const Gold goldPlain[] = {
             { 2000, 0.18538671731948853f, 0.206522598862648f }, { 5000, 0.4086928963661194f, 0.8167467713356018f },
             { 8191, -0.3218550980091095f, -0.06812914460897446f }, { 10000, 0.40869277715682983f, -0.08537150919437408f },
             { 12287, 0.775394082069397f, -0.08931504935026169f } };
-        for (const auto& g : gold)
-            std::printf ("DBG peq2lin hq=%d i=%d dl=%.3g dr=%.3g\n", (int) hq, g.i, (double) (l[(std::size_t) g.i] - g.l), (double) (r[(std::size_t) g.i] - g.r));
-        for (const auto& g : gold)
+        for (const auto& g : hq ? goldHq : goldPlain)
             CHECK (std::abs (l[(std::size_t) g.i] - g.l) < 1.0e-6f && std::abs (r[(std::size_t) g.i] - g.r) < 1.0e-6f);
     }
 
@@ -12401,8 +12440,6 @@ TEST (gms_engine)
     CHECK (y.size() == 2 * 66150u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.0298744496f, 0.0198248848f }, { 5000, 0.0669416264f, 0.0666475743f }, { 15000, -0.005992427f, 0.013085857f }, { 25000, 0.0102018276f, 0.0130400788f }, { 35000, -0.0679694712f, -0.0050432696f }, { 45000, -0.0161557719f, 0.154340729f }, { 55000, -0.00719845621f, 0.0182181317f }, { 66000, 0.0389953516f, 0.0104107196f } };
     for (const auto& g : golden)
-        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
-    for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
     for (auto v : y)
@@ -12491,8 +12528,6 @@ TEST (toxic_engine)
     CHECK (y.size() == 2 * 66150u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.264782101f, 0.189374551f }, { 5000, -0.605827034f, 0.43244195f }, { 15000, -0.343959779f, -0.111227378f }, { 25000, 0.0127612427f, -0.354315311f }, { 35000, -0.353289753f, -0.307500422f }, { 45000, -0.260735184f, 0.202133358f }, { 55000, -0.0751226544f, -0.0776180848f }, { 66000, -0.0294751395f, 0.00692501338f } };
     for (const auto& g : golden)
-        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
-    for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
     for (auto v : y)
@@ -12550,8 +12585,6 @@ TEST (morphine_engine)
     const auto y = lynx::morphine::renderReference (blob, notes, 44100.0, 80000, "");
     CHECK (y.size() == 2 * 80000u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.00094500737f, 0.00085531926f }, { 5000, 0.0311509669f, -0.11552836f }, { 15000, 0.0843918771f, 0.0369227529f }, { 25000, 0.60864079f, 1.03062224f }, { 35000, -0.346013308f, 0.135865599f }, { 45000, -0.0373920798f, -0.13064307f }, { 60000, -0.138871655f, -0.163586512f }, { 75000, 0.0251323506f, -0.00735046482f } };
-    for (const auto& g : golden)
-        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
     for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
