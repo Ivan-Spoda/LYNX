@@ -1643,65 +1643,68 @@ Layout emberLayout()
 }
 
 // --- LYNX originals: the dynamics suite (REA round 108) --------------------------------------------------------
+// The layout logic follows how the reference plugins are used (round 108 UI rule, screenshots in tmp/comp108/ref):
+// the level / gain-reduction display is the window, the main knobs sit in one row under it with their small
+// companions below, the style is one menu button between them, and the rarely touched parts (character, side chain)
+// fold into a page at the bottom. Drawn entirely in LYNX's own style.
+
+LayoutItem menuOf (float x, float y, float w, float h, const char* param, const char* caption, const char* options)
+{
+    LayoutItem i;
+    i.type = Item::menu;
+    i.x = x, i.y = y, i.w = w, i.h = h;
+    i.param = param;
+    i.label = caption;
+    i.options = options;
+    return i;
+}
 
 Layout crestCompressor()
 {
     Layout l;
-    l.width = 780;
-    l.height = 582;
+    l.width = 840;
+    l.height = 604;
+    l.pages = { TR_NOOP ("Character"), TR_NOOP ("Side chain") };
     auto& v = l.items;
-    // the transfer curve (live input dot) and the automatic switches
-    v.push_back (section (4, 4, 224, 262, TR_NOOP ("Curve")));
-    v.push_back (display (12, 24, 208, 206, "crestcurve"));
-    v.push_back (toggle (12, 238, 100, 20, "Auto gain", TR_NOOP ("Auto gain")));
-    v.push_back (toggle (116, 238, 104, 20, "Auto release", TR_NOOP ("Auto release")));
-
-    // the main controls
-    v.push_back (section (232, 4, 300, 262, TR_NOOP ("Compressor")));
-    v.push_back (dial (276, 62, 44, "Threshold", TR_NOOP ("Threshold"), big));
-    v.push_back (dial (350, 62, 44, "Ratio", TR_NOOP ("Ratio"), big));
-    v.push_back (dial (420, 62, 36, "Knee", TR_NOOP ("Knee")));
-    v.push_back (dial (488, 62, 36, "Range", TR_NOOP ("Range")));
-    v.push_back (dial (276, 150, 36, "Attack", TR_NOOP ("Attack")));
-    v.push_back (dial (350, 150, 36, "Release", TR_NOOP ("Release")));
-    v.push_back (dial (420, 150, 36, "Hold", TR_NOOP ("Hold")));
-    v.push_back (dial (488, 150, 36, "Lookahead", TR_NOOP ("Lookahead")));
-    v.push_back (label (240, 212, 284, 14, TR_NOOP ("Maximum lookahead (latency)")));
-    v.push_back (tabs (240, 230, 284, 22, "Max lookahead", TR_NOOP ("Off|1 ms|2 ms|5 ms|10 ms|20 ms")));
-
-    // live: scrolling gain reduction over the input / output levels, the meter, the levels and the trims
-    v.push_back (section (536, 4, 240, 262, TR_NOOP ("Live")));
-    v.push_back (display (544, 24, 224, 122, "grhistory"));
-    v.push_back (meter (544, 152, 224, 14, 0, TR_NOOP ("Reduction")));
-    v.push_back (display (544, 172, 224, 26, "levels"));
-    v.push_back (dial (580, 222, 24, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (dial (656, 222, 24, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (732, 222, 24, "Output", TR_NOOP ("Output"), bipolar));
-
-    // style
-    v.push_back (section (4, 270, 224, 160, TR_NOOP ("Style")));
-    auto styles = radio (12, 290, 208, 132, "Style",
-                         TR_NOOP ("Clean|Allround|Punch|Upward|Two-way|Vari-mu|Classic|Opto|Vocal|Bus|Pumping"));
-    styles.columns = 2;
-    v.push_back (styles);
-
-    // character and oversampling
-    v.push_back (section (232, 270, 180, 160, TR_NOOP ("Character")));
-    v.push_back (tabs (240, 290, 164, 20, "Character", TR_NOOP ("Off|Warm|Crisp|Bright")));
-    v.push_back (tabs (240, 316, 164, 20, "Character pre", TR_NOOP ("Post|Pre")));
-    v.push_back (tabs (240, 342, 164, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
-    v.push_back (dial (322, 386, 24, "Drive", TR_NOOP ("Drive"), bipolar));
-
-    // side chain
-    v.push_back (section (416, 270, 360, 160, TR_NOOP ("Side chain")));
-    v.push_back (dial (464, 318, 34, "SC level", TR_NOOP ("SC level"), bipolar));
-    v.push_back (dial (552, 318, 34, "Stereo link", TR_NOOP ("Stereo link")));
-    v.push_back (toggle (626, 296, 140, 20, "External SC", TR_NOOP ("External input")));
-    v.push_back (toggle (626, 324, 140, 20, "SC listen", TR_NOOP ("Listen")));
-
-    // side-chain EQ: its curve and three bands (shape, frequency, gain, Q, slope)
-    v.push_back (section (4, 434, 772, 144, TR_NOOP ("Side-chain EQ")));
-    v.push_back (display (12, 454, 236, 116, "crestsceq"));
+    // the display: scrolling input / output level and gain reduction, with the threshold; meters on the right
+    v.push_back (display (8, 8, 704, 252, "grhistory"));
+    v.push_back (display (718, 8, 114, 252, "crestmeters"));
+    // the transfer curve at the left of the knob row
+    v.push_back (display (8, 268, 150, 150, "crestcurve"));
+    // main knobs, the style button between ratio and attack, small companions under them
+    v.push_back (dial (232, 310, 62, "Threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (330, 310, 62, "Ratio", TR_NOOP ("Ratio"), big));
+    v.push_back (menuOf (382, 296, 112, 26, "Style", TR_NOOP ("Style"),
+                         TR_NOOP ("Clean|Allround|Punch|Upward|Two-way|Vari-mu|Classic|Opto|Vocal|Bus|Pumping")));
+    v.push_back (toggle (382, 330, 112, 20, "Auto release", TR_NOOP ("Auto release")));
+    v.push_back (dial (544, 310, 56, "Attack", TR_NOOP ("Attack"), big));
+    v.push_back (dial (636, 310, 56, "Release", TR_NOOP ("Release"), big));
+    v.push_back (dial (206, 408, 30, "Knee", TR_NOOP ("Knee")));
+    v.push_back (dial (266, 408, 30, "Range", TR_NOOP ("Range")));
+    v.push_back (dial (330, 408, 30, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (520, 408, 30, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (dial (580, 408, 30, "Hold", TR_NOOP ("Hold")));
+    v.push_back (dial (640, 408, 30, "SC level", TR_NOOP ("SC level"), bipolar));
+    // make-up and mix on the right, as one goes to them last
+    v.push_back (toggle (712, 268, 120, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    v.push_back (dial (742, 318, 34, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (dial (802, 318, 34, "Mix", TR_NOOP ("Mix")));
+    // the bottom bar: processing options and the meter
+    v.push_back (label (8, 462, 90, 22, TR_NOOP ("Oversampling")));
+    v.push_back (tabs (96, 462, 176, 22, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
+    v.push_back (label (284, 462, 76, 22, TR_NOOP ("Lookahead")));
+    v.push_back (tabs (358, 462, 270, 22, "Max lookahead", TR_NOOP ("Off|1 ms|2 ms|5 ms|10 ms|20 ms")));
+    v.push_back (meter (640, 462, 192, 22, 0, TR_NOOP ("Reduction")));
+    // folded parts
+    v.push_back (pageTabs (8, 492, 240, 22, TR_NOOP ("Character|Side chain")));
+    v.push_back (section (8, 518, 824, 82, nullptr, boxed));
+    v.push_back (onPage (tabs (20, 530, 280, 22, "Character", TR_NOOP ("Off|Warm|Crisp|Bright")), 0));
+    v.push_back (onPage (tabs (310, 530, 140, 22, "Character pre", TR_NOOP ("Post|Pre")), 0));
+    v.push_back (onPage (dial (492, 546, 28, "Drive", TR_NOOP ("Drive"), bipolar), 0));
+    v.push_back (onPage (dial (36, 548, 26, "Stereo link", TR_NOOP ("Stereo link")), 1));
+    v.push_back (onPage (toggle (72, 528, 120, 20, "External SC", TR_NOOP ("External input")), 1));
+    v.push_back (onPage (toggle (72, 554, 120, 20, "SC listen", TR_NOOP ("Listen")), 1));
+    v.push_back (onPage (display (200, 524, 236, 72, "crestsceq"), 1));
     static const char* bandTitles[3] { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3") };
     static const char* fields[3][5] { { "SC1 shape", "SC1 freq.", "SC1 gain", "SC1 Q", "SC1 slope" },
                                       { "SC2 shape", "SC2 freq.", "SC2 gain", "SC2 Q", "SC2 slope" },
@@ -1709,14 +1712,11 @@ Layout crestCompressor()
     static const char* captions[5] { TR_NOOP ("Shape"), TR_NOOP ("Freq"), TR_NOOP ("Gain"), TR_NOOP ("Q"), TR_NOOP ("Slope") };
     for (int b = 0; b < 3; ++b)
     {
-        const auto x0 = 256.0f + 172.0f * (float) b;
-        v.push_back (label (x0, 452, 166, 14, bandTitles[b], boxed));
+        const auto x0 = 444.0f + 130.0f * (float) b;
+        v.push_back (onPage (label (x0, 522, 124, 14, bandTitles[b], boxed), 1));
         for (int f = 0; f < 5; ++f)
-        {
-            const auto cx = x0 + 17.0f + 33.0f * (float) f;
-            auto k = knob (cx, 500, 24, fields[b][f], captions[f], 532, f == 2 ? bipolar : 0, f == 0 ? 9 : (f == 4 ? 9 : 0));
-            v.push_back (k);
-        }
+            v.push_back (onPage (knob (x0 + 13.0f + 24.5f * (float) f, 556, 20, fields[b][f], captions[f], 586, f == 2 ? bipolar : 0,
+                                       f == 0 || f == 4 ? 9 : 0), 1));
     }
     return l;
 }
@@ -1724,18 +1724,15 @@ Layout crestCompressor()
 Layout prismMultiband()
 {
     Layout l;
-    l.width = 820;
-    l.height = 530;
+    l.width = 900;
+    l.height = 560;
+    l.pages = { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4") };
     auto& v = l.items;
-    v.push_back (section (4, 4, 812, 192, TR_NOOP ("Bands")));
-    v.push_back (display (12, 24, 796, 128, "prismbands"));
-    v.push_back (tabs (12, 170, 180, 20, "Slope", TR_NOOP ("12 dB/oct|24 dB/oct|48 dB/oct")));
-    v.push_back (dial (300, 168, 20, "Crossover 1", TR_NOOP ("Crossover 1"), noCaption));
-    v.push_back (dial (440, 168, 20, "Crossover 2", TR_NOOP ("Crossover 2"), noCaption));
-    v.push_back (dial (580, 168, 20, "Crossover 3", TR_NOOP ("Crossover 3"), noCaption));
-    v.push_back (label (216, 170, 70, 18, TR_NOOP ("Crossovers")));
-
-    static const char* titles[4] { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4") };
+    // the bands are the display: click one to edit it, drag a crossover line to move it
+    v.push_back (display (8, 8, 884, 330, "prismbands"));
+    // the selected band's panel
+    v.push_back (section (8, 344, 884, 126, nullptr, boxed));
+    v.push_back (pageTabs (16, 352, 232, 22, TR_NOOP ("Band 1|Band 2|Band 3|Band 4")));
     static const char* names[4][10] {
         { "B1 threshold", "B1 ratio", "B1 range", "B1 expand", "B1 knee", "B1 attack", "B1 release", "B1 level", "B1 on", "B1 solo" },
         { "B2 threshold", "B2 ratio", "B2 range", "B2 expand", "B2 knee", "B2 attack", "B2 release", "B2 level", "B2 on", "B2 solo" },
@@ -1743,64 +1740,63 @@ Layout prismMultiband()
         { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" } };
     for (int b = 0; b < 4; ++b)
     {
-        const auto x = 4.0f + 204.0f * (float) b;
-        auto sec = section (x, 200, 200, 254, titles[b]);
-        sec.colour = b;
-        v.push_back (sec);
-        v.push_back (toggle (x + 8, 220, 44, 20, names[b][8], TR_NOOP ("On")));
-        v.push_back (toggle (x + 56, 220, 48, 20, names[b][9], TR_NOOP ("Solo")));
-        v.push_back (tabs (x + 108, 220, 84, 20, names[b][3], TR_NOOP ("Comp|Exp")));
-        v.push_back (dial (x + 36, 272, 32, names[b][0], TR_NOOP ("Thres")));
-        v.push_back (dial (x + 100, 272, 32, names[b][1], TR_NOOP ("Ratio")));
-        v.push_back (dial (x + 164, 272, 32, names[b][2], TR_NOOP ("Range"), bipolar));
-        v.push_back (dial (x + 36, 342, 28, names[b][4], TR_NOOP ("Knee")));
-        v.push_back (dial (x + 100, 342, 28, names[b][5], TR_NOOP ("Attack")));
-        v.push_back (dial (x + 164, 342, 28, names[b][6], TR_NOOP ("Release")));
-        v.push_back (dial (x + 100, 406, 28, names[b][7], TR_NOOP ("Level"), bipolar));
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (toggle (16, 384, 56, 22, names[b][8], TR_NOOP ("On")));
+        add (toggle (78, 384, 60, 22, names[b][9], TR_NOOP ("Solo")));
+        add (tabs (16, 414, 232, 22, names[b][3], TR_NOOP ("Compress|Expand")));
+        add (dial (312, 398, 46, names[b][0], TR_NOOP ("Threshold"), big));
+        add (dial (402, 398, 46, names[b][2], TR_NOOP ("Range"), big | bipolar));
+        add (dial (484, 398, 36, names[b][1], TR_NOOP ("Ratio")));
+        add (dial (556, 398, 36, names[b][4], TR_NOOP ("Knee")));
+        add (dial (628, 398, 36, names[b][5], TR_NOOP ("Attack")));
+        add (dial (700, 398, 36, names[b][6], TR_NOOP ("Release")));
+        add (dial (788, 398, 40, names[b][7], TR_NOOP ("Level"), bipolar));
     }
-    v.push_back (section (4, 458, 812, 68, TR_NOOP ("Master")));
-    v.push_back (dial (120, 482, 24, "Lookahead", TR_NOOP ("Lookahead")));
-    v.push_back (dial (300, 482, 24, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (480, 482, 24, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (dial (660, 482, 24, "Output", TR_NOOP ("Output"), bipolar));
+    // global bar
+    v.push_back (label (8, 482, 50, 22, TR_NOOP ("Slope")));
+    v.push_back (tabs (56, 482, 200, 22, "Slope", TR_NOOP ("12 dB/oct|24 dB/oct|48 dB/oct")));
+    v.push_back (dial (300, 504, 24, "Crossover 1", TR_NOOP ("Crossover 1")));
+    v.push_back (dial (380, 504, 24, "Crossover 2", TR_NOOP ("Crossover 2")));
+    v.push_back (dial (460, 504, 24, "Crossover 3", TR_NOOP ("Crossover 3")));
+    v.push_back (dial (580, 504, 24, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (dial (660, 504, 24, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (740, 504, 24, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (820, 504, 24, "Output", TR_NOOP ("Output"), bipolar));
     return l;
 }
 
 Layout sentryGate()
 {
     Layout l;
-    l.width = 640;
-    l.height = 380;
+    l.width = 680;
+    l.height = 392;
     auto& v = l.items;
-    v.push_back (section (4, 4, 232, 270, TR_NOOP ("Gate")));
-    v.push_back (display (12, 24, 216, 166, "sentrycurve"));
-    v.push_back (display (12, 196, 216, 42, "grhistory"));
-    v.push_back (meter (12, 244, 216, 14, 0, TR_NOOP ("Reduction")));
-
-    v.push_back (section (240, 4, 396, 270, TR_NOOP ("Controls")));
-    v.push_back (dial (290, 62, 44, "Threshold", TR_NOOP ("Threshold"), big));
-    v.push_back (dial (380, 62, 36, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (466, 62, 36, "Range", TR_NOOP ("Range")));
-    v.push_back (dial (552, 62, 36, "Knee", TR_NOOP ("Knee")));
-    v.push_back (dial (290, 152, 36, "Attack", TR_NOOP ("Attack")));
-    v.push_back (dial (380, 152, 36, "Release", TR_NOOP ("Release")));
-    v.push_back (dial (466, 152, 36, "Hold", TR_NOOP ("Hold")));
-    v.push_back (dial (552, 152, 36, "Lookahead", TR_NOOP ("Lookahead")));
-    v.push_back (toggle (250, 236, 120, 22, "Lookahead on", TR_NOOP ("Lookahead on")));
-    v.push_back (toggle (376, 236, 128, 22, "External SC", TR_NOOP ("External input")));
-    v.push_back (toggle (510, 236, 118, 22, "SC listen", TR_NOOP ("Listen")));
-
-    v.push_back (section (4, 278, 232, 98, TR_NOOP ("Style")));
-    auto styles = radio (12, 298, 216, 70, "Style", TR_NOOP ("Classic|Clean|Vocal|Guitar|Upward"));
-    styles.columns = 2;
-    v.push_back (styles);
-
-    v.push_back (section (240, 278, 396, 98, TR_NOOP ("Side chain and output")));
+    // left: threshold (big) with ratio and range under it
+    v.push_back (dial (86, 84, 92, "Threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (44, 214, 50, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (128, 214, 50, "Range", TR_NOOP ("Range")));
+    // centre: the style button over the curve and the level / reduction history
+    v.push_back (menuOf (180, 8, 330, 24, "Style", TR_NOOP ("Style"), TR_NOOP ("Classic|Clean|Vocal|Guitar|Upward")));
+    v.push_back (display (180, 38, 150, 150, "sentrycurve"));
+    v.push_back (display (336, 38, 174, 150, "grhistory"));
+    v.push_back (meter (180, 194, 330, 16, 0, TR_NOOP ("Reduction")));
+    v.push_back (display (180, 216, 330, 26, "levels"));
+    // right: attack and release (big), hold / knee / look-ahead (small) beside them
+    v.push_back (dial (562, 66, 58, "Attack", TR_NOOP ("Attack"), big));
+    v.push_back (dial (562, 186, 58, "Release", TR_NOOP ("Release"), big));
+    v.push_back (dial (642, 46, 32, "Hold", TR_NOOP ("Hold")));
+    v.push_back (dial (642, 124, 32, "Knee", TR_NOOP ("Knee")));
+    v.push_back (dial (642, 202, 32, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (toggle (588, 252, 88, 20, "Lookahead on", TR_NOOP ("Lookahead on")));
+    // the "expert" strip: side chain, upward expansion, wet / dry
+    v.push_back (section (4, 282, 672, 106, TR_NOOP ("Side chain and output")));
+    v.push_back (toggle (14, 304, 120, 22, "External SC", TR_NOOP ("External input")));
+    v.push_back (toggle (14, 332, 120, 22, "SC listen", TR_NOOP ("Listen")));
     static const std::pair<const char*, const char*> knobs[6] { { "High pass", TR_NOOP ("High pass") }, { "Low pass", TR_NOOP ("Low pass") },
                                                                 { "Up threshold", TR_NOOP ("Up thres") }, { "Up ratio", TR_NOOP ("Up ratio") },
                                                                 { "Dry", TR_NOOP ("Dry") }, { "Output", TR_NOOP ("Output") } };
     for (int k = 0; k < 6; ++k)
-        v.push_back (dial (276.0f + 64.0f * (float) k, 314, 26, knobs[k].first, knobs[k].second, k == 5 ? bipolar : 0));
+        v.push_back (dial (186.0f + 84.0f * (float) k, 326, 28, knobs[k].first, knobs[k].second, k == 5 ? bipolar : 0));
     return l;
 }
 

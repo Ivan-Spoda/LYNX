@@ -1,8 +1,8 @@
 // fxmeasure — black-box measurement host for third-party audio effects (VST3), Windows console tool.
 //
 // It hosts a plugin the way a DAW does — public parameter API only (names, ranges, value <-> text) — feeds test
-// signals from WAV files and records the outputs. No editor is opened and nothing inside the plugin is inspected
-// (round 99 rule: black-box only). Build: tools/fxmeasure/build.sh. Analysis scripts: tools/fxmeasure/py.
+// signals from WAV files and records the outputs. Nothing inside the plugin is inspected (round 99 rule: black-box
+// only); the plugin's own editor is only opened by `editor`, to screenshot it as a user would see it (round 108 UI rule). Build: tools/fxmeasure/build.sh. Analysis scripts: tools/fxmeasure/py.
 //
 //   fxmeasure.exe script.txt          (one command per line; '#' starts a comment)
 //
@@ -23,6 +23,8 @@
 //   latency                           print the reported latency in samples
 //   savestate <file> / loadstate <file>
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
+//   editor <out.png> [ms] [x y]       open the plugin's editor (optionally click at x, y of the window) in a window, let it draw (default 1500 ms), save a PNG
+//                                     of the window (PrintWindow, so it works while covered), close it
 //   echo <text>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -115,6 +117,77 @@ struct Host
             }
             if (ms > 0) Sleep (1);
         } while (juce::Time::getMillisecondCounter() < end);
+    }
+
+
+    // the plugin's editor in a top-level window, captured with PrintWindow (round 108: reference screenshots)
+    void editorShot (const juce::File& out, int ms, int clickX = -1, int clickY = -1)
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> ed (plugin->createEditorIfNeeded());
+        if (ed == nullptr) { log ("error: no editor"); return; }
+        juce::DocumentWindow w (plugin->getName(), juce::Colours::black, 0, true);
+        w.setUsingNativeTitleBar (true);
+        w.setContentNonOwned (ed.get(), true);
+        w.setTopLeftPosition (40, 40);
+        w.setVisible (true);
+        w.toFront (false);
+        runSilence ((int) rate / 4);
+        pump (ms);
+        auto* hwnd = (HWND) w.getPeer()->getNativeHandle();
+        if (clickX >= 0) // a click as the user would make it (e.g. a trial's "Evaluate" button)
+        {
+            POINT pt { clickX, clickY };
+            HWND target = hwnd;
+            for (;;)
+            {
+                POINT local = pt;
+                MapWindowPoints (hwnd, target, &local, 1);
+                HWND child = ChildWindowFromPointEx (target, local, CWP_SKIPINVISIBLE);
+                if (child == nullptr || child == target) break;
+                target = child;
+            }
+            POINT local = pt;
+            MapWindowPoints (hwnd, target, &local, 1);
+            const auto lp = MAKELPARAM (local.x, local.y);
+            PostMessageW (target, WM_MOUSEMOVE, 0, lp);
+            PostMessageW (target, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+            pump (80);
+            PostMessageW (target, WM_LBUTTONUP, 0, lp);
+            pump (ms);
+        }
+        RECT rc;
+        GetClientRect (hwnd, &rc);
+        const int width = rc.right - rc.left, height = rc.bottom - rc.top;
+        HDC screen = GetDC (nullptr), mem = CreateCompatibleDC (screen);
+        HBITMAP bmp = CreateCompatibleBitmap (screen, width, height);
+        auto* old = SelectObject (mem, bmp);
+        PrintWindow (hwnd, mem, 1 | 2); // PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        BITMAPINFO bi {};
+        bi.bmiHeader.biSize = sizeof (BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = width;
+        bi.bmiHeader.biHeight = -height;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        std::vector<juce::uint8> px ((size_t) width * (size_t) height * 4);
+        GetDIBits (mem, bmp, 0, (UINT) height, px.data(), &bi, DIB_RGB_COLORS);
+        SelectObject (mem, old);
+        DeleteObject (bmp);
+        DeleteDC (mem);
+        ReleaseDC (nullptr, screen);
+        juce::Image img (juce::Image::RGB, width, height, false);
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                const auto* q = &px[((size_t) y * (size_t) width + (size_t) x) * 4];
+                img.setPixelAt (x, y, juce::Colour (q[2], q[1], q[0]));
+            }
+        out.deleteFile();
+        juce::FileOutputStream os (out);
+        juce::PNGImageFormat().writeImageToStream (img, os);
+        log ("editor " + juce::String (width) + "x" + juce::String (height) + " -> " + out.getFullPathName());
+        w.clearContentComponent();
+        ed.reset();
+        pump (100);
     }
 
     void runSilence (int samples)
@@ -313,6 +386,7 @@ struct Host
             else if (cmd == "reset") { plugin->reset(); log ("reset"); }
             else if (cmd == "settle") runSilence ((int) (a[1].getDoubleValue() * rate));
             else if (cmd == "process") process (juce::File (a[1]), juce::File (a[2]), a.size() > 3 ? juce::File (a[3]) : juce::File());
+            else if (cmd == "editor") editorShot (juce::File (a[1]), a.size() > 2 ? a[2].getIntValue() : 1500, a.size() > 4 ? a[3].getIntValue() : -1, a.size() > 4 ? a[4].getIntValue() : -1);
             else if (cmd == "latency") { pump (50); log ("latency " + juce::String (plugin->getLatencySamples())); }
             else if (cmd == "savestate")
             {

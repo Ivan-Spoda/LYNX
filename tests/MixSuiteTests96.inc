@@ -467,6 +467,8 @@ TEST (mixsuite_panels_place_every_parameter)
             {
                 const auto& i = *controls[a];
                 const auto& j = *controls[b];
+                if (i.page >= 0 && j.page >= 0 && i.page != j.page) // different pages never show together
+                    continue;
                 const auto overlap = i.x + 0.5f < j.x + j.w && j.x + 0.5f < i.x + i.w && i.y + 0.5f < j.y + j.h && j.y + 0.5f < i.y + i.h;
                 if (overlap)
                 {

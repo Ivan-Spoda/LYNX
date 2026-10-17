@@ -34,4 +34,10 @@ bool isLive (const char* id) noexcept;
 // Paints display `id` when it is one of the suite's (false otherwise). `meter (k)` reads the slot's live output k.
 bool paint (juce::Graphics& g, const juce::String& id, juce::Rectangle<float> area, float scale, const EffectSlot& fx,
             const std::function<float (int)>& meter, const History& history);
+// Band displays (Prism, Ember's multiband mode) under the mouse: the crossover parameter near x (−1 if none) and the
+// band at x. `area` is the display's rectangle; the frequency axis is 20 Hz … 20 kHz, log.
+int crossoverNear (const EffectSlot& fx, juce::Rectangle<float> area, float x, float tolerance);
+int bandAt (const EffectSlot& fx, juce::Rectangle<float> area, float x);
+// the crossover parameter's value for the frequency at x
+float crossoverValueAt (const EffectSlot& fx, juce::Rectangle<float> area, float x);
 } // namespace lynx::dynui
