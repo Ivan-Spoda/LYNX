@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 
+#include "core/AudioCapture.h"
 #include "core/Song.h"
 
 namespace lynx
@@ -30,6 +31,9 @@ public:
 
         return peaks[(std::size_t) track * 2 + (std::size_t) channel].exchange (0.0f, std::memory_order_relaxed);
     }
+
+    // the audio editor's recording tap (round 86): input, Master (0) or a mixer insert
+    AudioCapture capture;
 
 private:
     static void raise (std::atomic<float>& slot, float value) noexcept

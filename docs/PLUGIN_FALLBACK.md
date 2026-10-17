@@ -1,0 +1,116 @@
+# Third-party plugins in projects: loading, and LYNX substitutes
+
+What LYNX does with the third-party plugins (VST2, VST3, CLAP) a project uses, whether the project is an FL Studio
+`.flp` or a LYNX `.lynx`.
+
+## 1. The plugin is installed: it loads with its saved settings
+
+LYNX looks for the same plugin among the ones it has scanned, in this order (`PluginHost::findForeign`):
+
+1. the same identifier: VST3 class ID, VST2 unique ID, CLAP id;
+2. the file FL Studio's plugin database lists for it on this PC, or the very file the project saved;
+3. the same name (plugin or file name) in the same role, preferring the format the project used — so a project saved
+   with a VST2 opens with the VST3 of the same product, and vice versa.
+
+The saved state is carried over: VST3 (FL's component/controller records → JUCE's format), VST2 (FL's own state
+layout, REA round 89), CLAP (FL's `u32 0` + the plugin's state). Between VST2 and VST3 the states differ, so a
+cross-format match plays with the plugin's default settings (the Missing files window says so).
+
+**Waves**: a Waves project plugin is a WaveShell file holding hundreds of plugins. LYNX finds the sub-plugin by its
+VST3 class ID; failing that, by the `<PluginName>` its saved state carries ("RComp" → "RComp Stereo"), never by the
+shell's file name.
+
+## 2. The plugin is NOT installed: a LYNX substitute plays in its place
+
+With **Settings › General › Plugins › "Substitute missing plugins with LYNX equivalents"** on (the default), an
+effect slot whose plugin is missing gets the LYNX effect that plays the same role — a reverb for a reverb, a delay
+for a delay — instead of being dropped:
+
+- the slot shows the original plugin's name with a **LYNX** badge; selecting it shows "LYNX substitute for X";
+- the **Missing files** window lists the plugin as "LYNX substitute: <effect> (the original plugin is used again once
+  it is installed)";
+- when the saved state can be read, its settings are translated (e.g. ValhallaVintageVerb's Mix becomes the slot's
+  dry/wet); otherwise the substitute starts from a sensible default preset;
+- automation of the original plugin's parameters is kept but does not drive the substitute (its parameters mean
+  something else); the slot's on/off, dry/wet and side-chain routing are kept.
+
+**The original is never lost.** The slot keeps the original reference byte for byte (`EffectSlot::substituteFor`):
+an `.flp` plugin keeps its whole FL wrapper record (format, IDs, name, path, state, MIDI ports), a LYNX plugin keeps
+its identifier and state. Saving as `.lynx` writes it next to the substitute; opening that project on a machine that
+has the plugin puts the original back with its saved settings. The `.flp` file itself is never written.
+
+Instruments are not substituted yet (a missing instrument plugin still becomes a built-in synth chosen by the channel
+name, as before).
+
+## 3. New projects: the LYNX equivalents are always available
+
+The Quick add palette lists every equivalent as "<LYNX effect> (LYNX equivalent of <product>)", so typing the
+product's name finds it; the mixer's add menu has a **LYNX equivalents** sub-menu. Both add the built-in effect with
+the same default preset a substitute gets — no third-party plugin involved.
+
+## The substitutes table
+
+The mapping is data: a text table built into `src/core/PluginSubstitutes.cpp` (`builtInTable`), extendable at run
+time with `registerPluginSubstitutes (text)` (later registrations of the same key win). Format:
+
+```
+# comment
+[valhalla-vintageverb]                  # stable key
+product = ValhallaVintageVerb           # shown to the user
+vendor = Valhalla DSP
+role = effect                           # effect (default) | instrument (reserved: not applied yet)
+lynx = Reeverb 2                        # the LYNX effect, by its name in the effect list
+vst3 = 7654535665657633616c68616c6c6176 # VST3 class IDs (32 hex digits, as FL stores them), ';'-separated
+vst2 = StEB; 0x5374506e                 # VST2 unique IDs: four characters or a number
+clap = com.vendor.plugin                # CLAP ids
+names = ValhallaVintageVerb; Vintage Verb   # plugin / file names (case, spaces, punctuation, x64, Stereo/Mono ignored)
+waves = RComp; CLA-2A                   # WaveShell sub-plugins, by the <PluginName> in their state
+preset = Dry=0; Wet=0.8                 # LYNX parameter (by name) = normalised value 0..1
+mix = 0.25                              # the substitute's slot dry/wet
+vst2params = 12                         # VST2 parameters per program (to read "all programs" states)
+map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
+```
+
+Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
+attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
+active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
+the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter.
+
+Matching order: VST2 ID, VST3 class ID, CLAP id, Waves sub-plugin name, then names (a WaveShell's own name never
+matches by name).
+
+### Rules for adding entries
+
+- Parameter maps only from what the saved data itself shows (attribute names, value lists) plus meanings from the
+  vendor's public documentation or our own black-box measurements (render through a legally licensed copy with test
+  signals). Never from decompiling or disassembling third-party binaries. Each map says where its meaning comes from.
+- Unknown meaning → no map (the default preset). Mark unconfirmed readings as such in the table comment.
+- New LYNX modules that play a third-party role (pitch correction, de-esser, noise suppressor, doubler, exciter…)
+  add their entry to `builtInTable` (or call `registerPluginSubstitutes` at start-up) when they land.
+
+### Seed (round 98)
+
+| Third-party product | LYNX substitute | Identified by | Translated |
+|---|---|---|---|
+| ValhallaVintageVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | VST3 class ID [DATA], name | Mix → slot dry/wet |
+| ValhallaRoom, ValhallaPlate, Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (same preset) | name / Waves name | — |
+| Valhalla Supermassive / Shimmer, FabFilter Pro-R | LuxeVerb (default) | name | — |
+| Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
+| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| Waves L1/L2/L3/L4, FabFilter Pro-L | Limiter | Waves name, names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
+| Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB) | VST3 class ID [DATA], Waves name | — |
+| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral) | VST3 class ID [DATA], Waves name, names | — |
+| Waves Q10, REQ, SSLEQ, FabFilter Pro-Q | Parametric EQ (flat) | Waves names, names | — |
+| Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default) | Waves name, names | — |
+| Slate Digital Fresh Air | Aether (neutral) | name | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain) | names | — |
+| Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
+
+Not mapped yet (no LYNX module plays their role): Auto-Tune, NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
+Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
+De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
+
+[DATA] = read from FL wrapper records of real projects (identifiers and state layouts only; no plugin code was read).
+Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
+Waves parameter is translated yet. Soundtoys states are encoded (not translated).

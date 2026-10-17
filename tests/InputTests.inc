@@ -92,8 +92,9 @@ TEST (input_reaches_insert_and_meters)
     // the input goes through the insert's fader: muted insert, nothing out
     song.mixer[2].muted = true;
     auto muted = lynx::RackState::build (song, autoState.get(), 48000.0);
-    renderer.process (muted.get(), true, 0.0, 256, l.data(), r.data());
-    renderer.process (muted.get(), true, 0.0, 256, l.data(), r.data());
+    // (the fader glides at most 0.001 per sample, REA_rodada85 §3: silent after 1000 samples)
+    for (int block = 0; block < 5; ++block)
+        renderer.process (muted.get(), true, 0.0, 256, l.data(), r.data());
     CHECK (std::abs (l[200]) < 1e-6f);
 
     // no input open: nothing happens

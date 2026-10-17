@@ -26,6 +26,7 @@ struct GeneralOptions
     int autosaveMinutes = prefs::defaultAutosaveMinutes; // 0 = never
     int autosaveKeep = prefs::defaultAutosaveKeep;
     bool pluginSandbox = false;
+    bool pluginSubstitutes = true; // missing plugins play a LYNX equivalent (core/PluginSubstitutes.h)
 
     bool operator== (const GeneralOptions&) const = default;
 };

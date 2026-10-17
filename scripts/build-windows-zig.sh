@@ -87,9 +87,9 @@ APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp sr
 # Windows file association (.lynx) and its icon
 APP_SOURCES+=(src/platform/FileTypes.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
-APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
+APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
-APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/EventEditor.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
+APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/EventEditor.cpp src/ui/AudioEditor.cpp src/ui/ToolWindow.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
 APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 # main window chrome: hint bar and toolbar widgets
@@ -99,6 +99,8 @@ APP_SOURCES+=(src/core/ThreeOsc.cpp)
 # onboarding: FL Studio integration (plugin database, sample relocation), background scan, setup wizard
 APP_SOURCES+=(src/core/FlPluginDb.cpp src/engine/FlStudio.cpp src/ui/SetupWizard.cpp)
 APP_SOURCES+=(src/core/MissingFiles.cpp src/ui/MissingFilesDialog.cpp src/ui/SettingsDialog.cpp)
+# LYNX substitutes for missing third-party plugins (round 98)
+APP_SOURCES+=(src/core/PluginSubstitutes.cpp)
 # settings pages (General/Audio/MIDI), plugin manager, shortcut manager (round 82)
 APP_SOURCES+=(src/core/Preferences.cpp src/ui/SettingsPages.cpp src/ui/PluginManager.cpp src/ui/ShortcutManager.cpp)
 # spectral waveforms: band analysis, background cache and drawing
@@ -109,6 +111,8 @@ APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
 APP_SOURCES+=(src/core/FlResampler.cpp src/core/FlKeys.cpp)
 # FL's Hardcore (REA round 71)
 APP_SOURCES+=(src/core/HardcoreFx.cpp)
+# LYNX's Facet EQ and Apex Limiter (round 99)
+APP_SOURCES+=(src/core/FacetEq.cpp src/core/ApexLimiter.cpp)
 # FL's DirectWave (REA round 72)
 APP_SOURCES+=(src/core/DirectWave.cpp)
 # Ogg Vorbis decoding as FL does (REA round 77)

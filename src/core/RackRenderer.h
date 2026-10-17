@@ -221,6 +221,8 @@ private:
     void runEffects (const RackState& state, int track, int n) noexcept;
     void setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept;
     void updateAutomation (const RackState& state, double startTick) noexcept;
+    // ticks from `tick` to the next pattern event (or pattern clip edge) that changes a lane's value; +inf if none
+    static double ticksToNextEvent (const RackState& state, double tick) noexcept;
     void applyPluginParams (const RackState& state, int firstSlot) noexcept; // bindings from this automation slot on
     float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;

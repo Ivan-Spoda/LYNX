@@ -122,8 +122,10 @@ something special, a display in `src/ui/PluginEditors.cpp`.
    Vertical `tabs` (taller than wide) draw as a column with band colours (Maximus' band selector).
 
 ## Where I stopped / next steps
-- Landed in batches 1–3 (merge of feature/plugui93, 2026-10-17); batch 4 below.
-- Batch 4 (2026-10-17): Maximus (state-backed controls), Vintage Phaser; the layout notes (§3).
+- Landed (main 00a5863, 2026-10-17): every arrangement in the table above, including batch 4 — Maximus (state-backed
+  controls) and Vintage Phaser — and the layout notes (§3). `--plugui` now renders the Maximus page too.
+- Small follow-ups: Vintage Phaser's START PHASE caption is cut at 100 % zoom; the Maximus curve is read-only (FL edits
+  its points), SOLO / LIN / monitor options are not shown.
 - Not done: Fruity Send and Fruity Phaser (mapped to LYNX's generic utility / chorus, not FL's controls: they need an
   engine with FL's parameters first), Newtone (pass-through placeholder), Delay Bank, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
   Effector (captures of most in `tmp/r93/flref`; they keep the generated grid of knobs).

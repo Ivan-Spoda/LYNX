@@ -28,6 +28,7 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
     src/core/MissingFiles.cpp
+    src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
     src/core/PluginLayout.cpp
     src/core/FlEffects.cpp
@@ -93,6 +94,8 @@ add_library(lynx_core STATIC
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
     src/core/HardcoreFx.cpp
+    src/core/FacetEq.cpp
+    src/core/ApexLimiter.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/DirectWave.cpp
@@ -115,6 +118,7 @@ target_sources(lynx_core PRIVATE
     src/core/NoteTools.cpp
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
+    src/core/AudioEdit.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/SearchQuery.cpp)
@@ -246,6 +250,7 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
+        src/ui/AudioEditor.cpp
         src/ui/ToolWindow.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp

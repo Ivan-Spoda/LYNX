@@ -407,10 +407,15 @@ int AudioEngine::snapInputKey (int key) const noexcept
     return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
 }
 
-void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample)
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool loop, float gain)
 {
     if (preview != nullptr)
-        preview->play (std::move (sample));
+        preview->play (std::move (sample), loop, gain);
+}
+
+double AudioEngine::getPreviewPosition() const noexcept
+{
+    return preview != nullptr ? preview->getPlayPosition() : -1.0;
 }
 
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
@@ -1205,7 +1210,8 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
         juce::StringArray missing;
         juce::StringArray matched;
         juce::StringArray withoutState;
-        plugins.adoptFlPlugins (imported, &missing, &matched, &withoutState);
+        juce::StringArray substituted;
+        plugins.adoptFlPlugins (imported, &missing, &matched, &withoutState, &substituted);
         missingPlugins = missing;
         matchedPlugins = matched;
         pluginsWithoutState = withoutState;
@@ -1223,6 +1229,22 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
                 }
             missingPluginDetails.push_back (std::move (m));
         }
+        // missing, played by a LYNX substitute that keeps the original for when it is installed
+        for (std::size_t t = 0; t < imported.mixer.size(); ++t)
+            for (const auto& fx : imported.mixer[t].effects)
+                if (fx.isSubstitute())
+                {
+                    const auto name = substituteOriginalName (fx);
+                    auto it = std::find_if (missingPluginDetails.begin(), missingPluginDetails.end(),
+                                            [&] (const MissingPlugin& m) { return m.name == name && ! m.replacementArg.empty(); });
+                    if (it == missingPluginDetails.end())
+                        it = missingPluginDetails.insert (missingPluginDetails.end(),
+                                                          MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
+                                                                          effectInfo (fx.kind).name });
+                    const auto user = imported.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : imported.mixer[t].name;
+                    if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
+                        it->usedBy.push_back (user);
+                }
         // found, but the project's settings are in the other format (VST2 <-> VST3): they play their default sound
         for (const auto& line : withoutState)
             missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Its default settings: the project saved them for the other format (VST2/VST3)") });
@@ -1611,6 +1633,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
     // With the loop region on, the block is split at the loop end and the position jumps back to
     // its start (the nodes see a jump and release their notes, as in FL).
+    // the audio editor's input recording (nothing happens unless it chose the input)
+    meters.capture.push (AudioCapture::input, numInputChannels > 0 ? inputChannelData[0] : nullptr, numInputChannels > 1 ? inputChannelData[1] : nullptr,
+                         numSamples);
+
     std::array<const float*, 64> inputs {};
     std::array<float*, 64> outputs {};
     numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());

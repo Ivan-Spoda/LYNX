@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "core/Effects.h"
+#include "core/PluginSubstitutes.h"
 #include "engine/Text.h"
 
 namespace lynx::ProjectFile
@@ -200,6 +201,8 @@ const char* effectId (EffectKind k)
         case EffectKind::lovePhilter: return "lovePhilter";
         case EffectKind::newtone: return "newtone";
         case EffectKind::newtime: return "newtime";
+        case EffectKind::facetEq: return "facetEq";
+        case EffectKind::apexLimiter: return "apexLimiter";
         case EffectKind::ridgeStrip: return "ridgeStrip";
         case EffectKind::glowLeveler: return "glowLeveler";
         case EffectKind::hushDeEsser: return "hushDeEsser";
@@ -215,6 +218,9 @@ juce::var pluginToVar (const PluginRef& p)
     o->setProperty ("id", str (p.id));
     o->setProperty ("name", str (p.name));
     o->setProperty ("state", str (p.state));
+    // an .flp plugin reference not resolved here (kept by a LYNX substitute): every field, the state byte for byte
+    if (p.foreign.format != ForeignPlugin::Format::none)
+        o->setProperty ("foreign", str (foreignToText (p.foreign)));
     return juce::var (o.release());
 }
 
@@ -224,6 +230,8 @@ PluginRef pluginFromVar (const juce::var& v)
     p.id = v["id"].toString().toStdString();
     p.name = v["name"].toString().toStdString();
     p.state = v["state"].toString().toStdString();
+    if (v.hasProperty ("foreign") && ! foreignFromText (v["foreign"].toString().toStdString(), p.foreign))
+        p.foreign = {};
     return p;
 }
 
@@ -253,6 +261,8 @@ juce::var effectToVar (const EffectSlot& slot)
 
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
+    else if (slot.isSubstitute()) // a LYNX substitute: the original plugin travels with it, unchanged
+        e->setProperty ("substituteFor", pluginToVar (slot.substituteFor));
 
     if (slot.kind == EffectKind::parallel) // container branches, each with its own chain
     {
@@ -308,6 +318,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
             slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
 
     slot.plugin = pluginFromVar (e["plugin"]);
+    if (*kind != EffectKind::plugin && e.hasProperty ("substituteFor"))
+        slot.substituteFor = pluginFromVar (e["substituteFor"]);
     slot.sidechain = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain", -1));
     slot.sidechain2 = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain2", -1));
     slot.samplePath = e.getProperty ("sample", "").toString().toStdString();
@@ -359,7 +371,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::frequencySplitter,
                     EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter, EffectKind::hardcore, EffectKind::distructor, EffectKind::multibandDelay,
                     EffectKind::lovePhilter,
-                    EffectKind::newtone, EffectKind::newtime,
+                    EffectKind::newtone, EffectKind::newtime, EffectKind::facetEq, EffectKind::apexLimiter,
                     EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser, EffectKind::aether, EffectKind::ember })
         if (id == effectId (k))
             return k;

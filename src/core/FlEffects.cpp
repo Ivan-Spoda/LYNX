@@ -1438,11 +1438,14 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::fruityFilter: return { "Fruity Filter" };
         case EffectKind::newtone: return { "Newtone" };
         case EffectKind::newtime: return { "Newtime" };
+        case EffectKind::facetEq:
+        case EffectKind::apexLimiter: return {}; // LYNX's own effects: no FL counterpart
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
         case EffectKind::reeverb2: return { "Fruity Reeverb 2" };
         case EffectKind::luxeVerb: return { "LuxeVerb" };
+        case EffectKind::maximus: return { "Maximus" }; // (a Soundgoodizer slot has its own presets A–D)
         case EffectKind::convolver: return { "Fruity Convolver" };
         case EffectKind::delay: return { "Fruity Delay 3", "Fruity Delay 2" };
         case EffectKind::fruityDelay2: return { "Fruity Delay 2" };

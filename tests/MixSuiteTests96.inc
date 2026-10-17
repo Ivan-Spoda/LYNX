@@ -478,3 +478,38 @@ TEST (mixsuite_panels_place_every_parameter)
         CHECK (meters == (kind == EffectKind::ridgeStrip ? 2 : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser) ? 1 : 0));
     }
 }
+
+TEST (mixsuite_stands_in_for_missing_vocal_plugins)
+{
+    using namespace lynx;
+    // round 98's substitution table puts the suite in the role of the vocal-chain plugins of the queue (by name)
+    const std::pair<const char*, EffectKind> cases[] = { { "FabFilter Pro-DS", EffectKind::hushDeEsser }, { "Fresh Air", EffectKind::aether },
+                                                         { "Decapitator", EffectKind::ember }, { "FabFilter Saturn 2", EffectKind::ember },
+                                                         { "SSL Native Channel Strip 2", EffectKind::ridgeStrip } };
+    for (const auto& [name, kind] : cases)
+    {
+        PluginIdentity id;
+        id.format = ForeignPlugin::Format::vst3;
+        id.name = name;
+        const auto* entry = findPluginSubstitute (id, false);
+        CHECK (entry != nullptr && entry->effect == kind);
+    }
+
+    // CLA-2A by its class ID -> Glow Leveler with the table's preset (peak reduction 0.45, gain 0.1)
+    PluginIdentity cla;
+    cla.format = ForeignPlugin::Format::vst3;
+    cla.name = "WaveShell1-VST3 16.0_x64";
+    const auto hex = std::string ("4c545356324163536c612d3261207374");
+    for (std::size_t i = 0; i < 16; ++i)
+        cla.classId[i] = (std::uint8_t) std::stoi (hex.substr (i * 2, 2), nullptr, 16);
+    cla.hasClassId = true;
+    const auto* entry = findPluginSubstitute (cla, false);
+    CHECK (entry != nullptr && entry->effect == EffectKind::glowLeveler);
+    if (entry != nullptr)
+    {
+        const auto slot = makeSubstituteSlot (*entry);
+        CHECK (slot.kind == EffectKind::glowLeveler);
+        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::peakReduction] - 0.45f) < 1e-6f);
+        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::gain] - 0.1f) < 1e-6f);
+    }
+}

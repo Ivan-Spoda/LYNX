@@ -46,11 +46,14 @@ enum : std::uint32_t
     evGenre = 0xCE,
     evArtist = 0xCF,
     evPatternNotes = 0xE0,
+    evInitControls = 0xD8,      // 12 B records {u32 tick, u32 controlID, i32 value}: reset at song start
+    evPatternEvents = 0xDF,     // same records: the current pattern's events (event editor)
     evControlValues = 0xE1,     // 12 B records {u32 ?, u32 controlID, i32 value}
     evAutomationLink = 0xE3,    // 20 B records {u32 channel<<16, u32 0, u32 controlID, u32 flags, u32 ?}
     evAutomationPoints = 0xEA,  // header 21 B + 24 B per point + 112 B
     evMixerRoutes = 0xEB,       // one byte per destination track
     evChannelLevels = 0xDB,
+    evChannelLevelAdjust = 0xE5, // i32 panAdj, i32 volAdj, i32 ?, i32 modXAdj, i32 modYAdj
     evChannelColour = 0x80,
     evMixerInsertColour = 0x95, // u32 0x00BBGGRR; comes before the 0xEC that opens the insert
     evMixerSlotIndex = 0x62,    // u16: closes the effect slot described by the preceding events     // u32 0x00BBGGRR (also appears in mixer slots)     // i32 pan, i32 volume, i32 pitch (cents), ...
@@ -760,6 +763,18 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 }
                 break;
 
+            case evChannelLevelAdjust:
+                if (section == Section::channel && e.data.size() >= 8)
+                {
+                    auto& c = channel();
+                    // files older than 5.3.7 store these at 1/100 scale (REA_rodada3 §2)
+                    const auto scale = project.versionNumber != 0 && project.versionNumber < version (5, 3, 7) ? 100 : 1;
+                    c.hasLevelAdjust = true;
+                    c.panAdj = readLE<std::int32_t> (e.data, 0) * scale;
+                    c.volAdj = readLE<std::int32_t> (e.data, 4) * scale;
+                }
+                break;
+
             case evPlaylistTrack:
                 if (currentArrangement >= 0 && e.data.size() >= 13)
                 {
@@ -776,6 +791,20 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 if (currentArrangement >= 0 && ! arrangement().tracks.empty())
                     arrangement().tracks.back().name = text (e);
                 break;
+
+            case evInitControls:
+            case evPatternEvents:
+            {
+                std::vector<ControlEvent> list;
+                for (std::size_t o = 0; o + 12 <= e.data.size(); o += 12)
+                    list.push_back ({ readLE<std::uint32_t> (e.data, o), normalizeControlId (readLE<std::uint32_t> (e.data, o + 4)),
+                                      readLE<std::int32_t> (e.data, o + 8) });
+                if (e.id == evInitControls)
+                    project.initControls.insert (project.initControls.end(), list.begin(), list.end());
+                else if (currentPattern >= 0)
+                    pattern().controlEvents.insert (pattern().controlEvents.end(), list.begin(), list.end());
+                break;
+            }
 
             case evControlValues:
                 for (std::size_t o = 0; o + 12 <= e.data.size(); o += 12)

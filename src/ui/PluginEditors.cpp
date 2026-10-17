@@ -1786,7 +1786,7 @@ public:
     {
         juce::Array<juce::File> all;
         const auto roots = findFlStudioRoots();
-        if (roots.data.empty())
+        if (roots.data.empty() || layout == &plugui::soundgoodizerLayout()) // Soundgoodizer: its presets A–D are on the page
             return all;
         const auto base = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Effects");
         for (const auto& plugin : flPluginsForEffect (kind))
