@@ -312,7 +312,7 @@ void RackState::buildMixerGraph()
             depth[(std::size_t) listener] = std::max (depth[(std::size_t) listener], depth[(std::size_t) t] + 1);
 
         if (track.toMaster)
-            mixerInputs[0].push_back ({ t, 0, 1.0f });
+            mixerInputs[0].push_back ({ t, 0, track.masterLevel });
 
         for (std::size_t k = 0; k < track.sends.size(); ++k)
         {

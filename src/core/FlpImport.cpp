@@ -2109,7 +2109,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         auto& track = song.mixer[(std::size_t) t];
 
-        // FL ranges: volume 0..16000 (12800 = 0 dB), pan ±6400, send 0..16000 (12800 = 100%)
+        // FL ranges: volume 0..16000 (12800 = 0 dB), pan ±6400, route levels 0..16000 on the fader curve too
+        // (12800 = 0 dB, 16000 = +5.6 dB; destination 0 = the route to Master). REA_rodada107 §3: FL renders with
+        // a route level of 16000 / 12800 / 6400 differ by +5.6 / 0 / −12.7 dB, the fader curve's values.
         if (p == flp::ControlId::mixerVolume)
             track.volume = std::clamp (control.value / 16000.0f, 0.0f, 1.0f);
         else if (p == flp::ControlId::mixerPan)
@@ -2130,10 +2132,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else
                 track.eq.width[band] = (float) std::clamp (v / 65536.0, 0.0, 1.0);
         }
-        else if (p >= flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
+        else if (p == flp::ControlId::mixerSendBase)
+            track.masterLevel = faderGain (control.value / 16000.0f);
+        else if (p > flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
             for (auto& send : track.sends)
                 if (send.target == p - flp::ControlId::mixerSendBase)
-                    send.level = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+                    send.level = faderGain (control.value / 16000.0f);
     }
 
     // the FL template routes every insert to the send tracks at level 0; that makes no sound, only wastes CPU

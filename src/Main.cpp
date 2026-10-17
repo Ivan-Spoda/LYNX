@@ -1485,6 +1485,23 @@ private:
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
 
+            // --find-plugins: first the targeted scan opening the project in the app runs (its plugins not known yet)
+            if (input.hasFileExtension ("flp") && juce::JUCEApplication::getCommandLineParameters().contains ("--find-plugins"))
+            {
+                juce::MemoryBlock data;
+                if (input.loadFileAsData (data))
+                    try
+                    {
+                        const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                        auto& host = loader.getPluginHost();
+                        report << "scanned=" << host.filesToScanFor (uses).joinIntoString (";") << "\n";
+                        host.scanFiles (host.filesToScanFor (uses), {});
+                    }
+                    catch (const flp::Error&)
+                    {
+                    }
+            }
+
             if (input.hasFileExtension ("flp"))
                 ok = loader.importFlpFile (input, error);
             else if (auto song = lynx::ProjectFile::load (input, error))
