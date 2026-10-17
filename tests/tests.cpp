@@ -286,6 +286,80 @@ TEST (flp_playlist_record_size_by_version)
     CHECK (flp::playlistRecordSize (25002005, 7) == 0);
 }
 
+TEST (flp_playlist_record_size_by_file_flags)
+{
+    // REA_rodada2 §4.2: 0xA9 bit 1 -> 80 B, bits 1 and 3 -> the native 88 B record (FL 25.2.99 / 26.x)
+    CHECK (flp::playlistRecordSize (26001003, 88 * 4, 15) == 88); // 352 is also a multiple of 32
+    CHECK (flp::playlistRecordSize (26001003, 88 * 10, 15) == 88); // ... and of 80
+    CHECK (flp::playlistRecordSize (25002005, 160, 7) == 80);
+    CHECK (flp::playlistRecordSize (21000000, 120, 1) == 60);
+    CHECK (flp::playlistRecordSize (26001003, 63712) == 88); // no flags: the only size that fits besides 32
+}
+
+TEST (flp_native_88_byte_playlist_items_with_clip_gain_and_fades)
+{
+    // an FL 26.1 file: 0xA9 = 15, four 88 B items (352 B: the old 32 B guess read garbage from it)
+    FlpBuilder b (96);
+    b.ascii (0xC7, "26.1.3.5570");
+    b.u8 (0xA9); b.u32 (15);
+    b.u8 (0x9C); b.u32 (130000);
+    b.u8 (0x40); b.u16 (0);
+    b.u8 (0x15); b.u8 (4); // audio clip channel
+    b.utf16 (0xC4, u"C:\\nowhere\\clip.wav");
+
+    std::vector<std::uint8_t> items;
+    auto add = [&] (std::uint32_t pos, std::uint32_t len, std::uint16_t track, float fadeIn, float fadeOut, float gain) {
+        std::vector<std::uint8_t> r (88, 0);
+        const std::uint16_t base = 20480, idx = 0, rv = (std::uint16_t) (499 - track);
+        const float offs[] = { -1.0f, -1.0f };
+        std::memcpy (&r[0], &pos, 4);
+        std::memcpy (&r[4], &base, 2);
+        std::memcpy (&r[6], &idx, 2);
+        std::memcpy (&r[8], &len, 4);
+        std::memcpy (&r[12], &rv, 2);
+        std::memcpy (&r[0x18], offs, 8);
+        std::memcpy (&r[0x24], &fadeIn, 4);
+        std::memcpy (&r[0x2C], &fadeOut, 4);
+        std::memcpy (&r[0x34], &gain, 4);
+        const double stretch = 1.0;
+        const std::int32_t minusOne = -1;
+        std::memcpy (&r[0x40], &stretch, 8);
+        std::memcpy (&r[0x4C], &minusOne, 4);
+        items.insert (items.end(), r.begin(), r.end());
+    };
+    add (0, 384, 0, 0.0f, 0.0f, 1.0f);
+    add (384, 384, 1, 923.0769f, 461.5385f, 1.65f); // 2 beats in, 1 beat out at 130 BPM
+    add (768, 96, 2, 0.0f, 0.0f, 0.0f);
+    add (1536, 192, 3, 0.0f, 5000.0f, 0.5f);        // fade longer than the clip
+    b.data (0xE9, items);
+
+    const auto p = flp::parseProject (b.bytes);
+    CHECK (p.flagsA9 == 15);
+    CHECK (p.arrangements.size() == 1 && p.arrangements[0].items.size() == 4);
+    CHECK (p.warnings.empty());
+
+    if (p.arrangements.size() == 1 && p.arrangements[0].items.size() == 4)
+    {
+        const auto& it = p.arrangements[0].items;
+        CHECK (it[1].position == 384 && it[1].length == 384 && it[1].track == 1 && it[1].kind == flp::PlaylistItem::Kind::channelClip);
+        CHECK (it[3].position == 1536 && it[3].track == 3);
+        CHECK (std::abs (it[1].gain - 1.65f) < 1e-6f && std::abs (it[1].fadeInMs - 923.0769f) < 1e-3f);
+
+        const auto song = lynx::importFlp (p);
+        CHECK (song.playlist.size() == 4);
+
+        if (song.playlist.size() == 4)
+        {
+            const auto beat = (std::int64_t) lynx::ppq;
+            CHECK (song.playlist[0].gain == 1.0f && song.playlist[0].fadeIn == 0 && song.playlist[0].fadeOut == 0);
+            CHECK (std::abs (song.playlist[1].gain - 1.65f) < 1e-6f);
+            CHECK (std::llabs (song.playlist[1].fadeIn - 2 * beat) <= 1 && std::llabs (song.playlist[1].fadeOut - beat) <= 1);
+            CHECK (song.playlist[2].gain == 0.0f);
+            CHECK (song.playlist[3].fadeOut == song.playlist[3].length); // clamped
+        }
+    }
+}
+
 TEST (flp_parses_project_model)
 {
     FlpBuilder b (96);
