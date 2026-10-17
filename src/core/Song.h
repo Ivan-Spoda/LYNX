@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace lynx
 {
@@ -365,7 +366,8 @@ enum class EffectKind : std::uint8_t
     hushDeEsser,  // LYNX's de-esser (REA_rodada96, core/MixSuite.h)
     aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
     ember,        // LYNX's saturator (REA_rodada96, core/MixSuite.h)
-    lynxTune      // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    lynxTune,     // LYNX Tune, LYNX's own real-time vocal pitch corrector (REA_rodada95, core/LynxTune.h)
+    fruitySend    // FL's Fruity Send, exact (REA_rodada105_send, core/FruityBasicFx.h): pan, volume, dry / range + the insert it sends to
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
@@ -410,6 +412,10 @@ struct EffectSlot
 
     bool isSubstitute() const noexcept { return ! substituteFor.id.empty() || substituteFor.foreign.format != ForeignPlugin::Format::none; }
 };
+
+// The insert a Fruity Send slot sends its mid-chain signal to (1…127), or −1 (none, or not a Fruity Send).
+// Such a slot is a route too: the destination is processed after the slot's insert (Song::mixerOrder).
+int fruitySendTarget (const EffectSlot& slot) noexcept;
 
 // Send from one track to another (post-fader), like FL's routing between inserts.
 struct MixerSend
@@ -787,6 +793,11 @@ struct Song
 
     static Song makeDefault();
 };
+
+// The Fruity Send slots of insert `track` that send to another existing insert, in slot order (only the first
+// maxEffectSlots slots run): {slot index, destination insert}. The renderer, the PDC plan and the routing order
+// all enumerate them this way.
+std::vector<std::pair<int, int>> fruitySendsOf (const Song& song, int track);
 
 // Copy of the song ready for export: always in song mode (the current pattern becomes a clip
 // if `wholeSong` is false or the Playlist is empty), with `tailTicks` of silence at the end

@@ -2260,3 +2260,4 @@ countries: br
 "Low latency" = "Baixa latência"
 "TARGET NOTES" = "NOTAS-ALVO"
 "MIDI channel" = "Canal MIDI"
+"Send to" = "Enviar para"

@@ -968,6 +968,30 @@ Layout fruityBalance()
     return l;
 }
 
+Layout fruitySend()
+{
+    // one row: DRY, the SEND TO box (the destination insert, a menu of the mixer's inserts), PAN and VOLUME
+    // (FL Studio 2026, 263 × 89; REA_rodada105_send §4)
+    Layout l;
+    l.fl = "Fruity Send";
+    l.width = 263;
+    l.height = 89;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 263, 89, nullptr, boxed));
+    v.push_back (knob (37, 30, 46, "Dry", TR_NOOP ("Dry"), 72));
+    LayoutItem to;
+    to.type = Item::menu;
+    to.x = 78, to.y = 17, to.w = 48, to.h = 28;
+    to.param = "Send to";
+    to.label = TR_NOOP ("Send to");
+    to.options = TR_NOOP ("None"); // the editor lists the song's inserts
+    v.push_back (to);
+    v.push_back (label (70, 52, 64, 14, TR_NOOP ("Send to")));
+    v.push_back (knob (158, 30, 46, "Pan", TR_NOOP ("Pan"), 72, bipolar));
+    v.push_back (knob (226, 30, 46, "Volume", TR_NOOP ("Volume"), 72));
+    return l;
+}
+
 Layout lynxTune()
 {
     // LYNX Tune (own design, REA round 95; not an FL plugin): PITCH (key, scale, voice range, A4 reference) ·
@@ -1638,7 +1662,7 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::transientProcessor, EffectKind::fruityFreeFilter, EffectKind::fruityWaveShaper,
                                                  EffectKind::vintageChorus, EffectKind::hyperChorus, EffectKind::fruityBalance,
                                                  EffectKind::squeeze, EffectKind::maximus,
-                                                 EffectKind::vintagePhaser };
+                                                 EffectKind::vintagePhaser, EffectKind::fruitySend };
     return kinds;
 }
 
@@ -1696,6 +1720,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
+        case EffectKind::fruitySend: l = fruitySend(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

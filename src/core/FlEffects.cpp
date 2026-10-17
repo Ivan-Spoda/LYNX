@@ -1049,6 +1049,13 @@ std::optional<EffectSlot> fruityBasicExact (const std::string& pluginName, const
             flbasic::balanceToParams (*s, slot.params.data());
             return slot;
         }
+    if (pluginName == "Fruity Send") // the exact send to another insert (REA_rodada105_send)
+        if (const auto s = flbasic::parseSend (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::fruitySend);
+            flbasic::sendToParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Fruity Blood Overdrive")
         if (const auto s = flbasic::parseBloodOverdrive (state))
         {
@@ -1429,6 +1436,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::vintageChorus: return { "Vintage Chorus" };
         case EffectKind::fruityPanOMatic: return { "Fruity PanOMatic" };
         case EffectKind::fruityBalance: return { "Fruity Balance" };
+        case EffectKind::fruitySend: return { "Fruity Send" };
         case EffectKind::fruityBloodOverdrive: return { "Fruity Blood Overdrive" };
         case EffectKind::fruityFastDist: return { "Fruity Fast Dist" };
         case EffectKind::fruityFlangus: return { "Fruity Flangus" };
@@ -1480,7 +1488,8 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     // the exact PanOMatic, Balance and Blood Overdrive likewise (REA_rodada58)
     if ((is ("Fruity PanOMatic") && k >= 0 && k < flbasic::panOMaticParams)
         || (is ("Fruity Balance") && k >= 0 && k < flbasic::balanceParams)
-        || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams))
+        || (is ("Fruity Blood Overdrive") && k >= 0 && k < flbasic::bloodOverdriveParams)
+        || (is ("Fruity Send") && k >= 0 && k < 3)) // (pan, volume, dry; the insert is not a parameter in FL)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
     // Hardcore's 50 parameters: FL sends 0…1 for all of them (the box types and the cabinet as raw numbers, REA_rodada71)
     if (is ("Hardcore") && k >= 0 && k < hardcore::numParams)

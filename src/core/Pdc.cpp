@@ -50,6 +50,19 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
         return sum;
     };
 
+    // the latency of a Fruity Send slot's signal: the insert's input plus the enabled slots before it
+    auto tapLatency = [&] (int t, int slot) {
+        int sum = plan.inAlign[(std::size_t) t];
+        if (t < (int) slotLatency.size())
+        {
+            const auto& slots = song.mixer[(std::size_t) t].effects;
+            for (int s = 0; s < slot && s < (int) slots.size() && s < (int) slotLatency[(std::size_t) t].size(); ++s)
+                if (slots[(std::size_t) s].enabled)
+                    sum += std::max (0, slotLatency[(std::size_t) t][(std::size_t) s]);
+        }
+        return sum;
+    };
+
     // inserts in order: when T is processed, all its sources already have been
     const auto order = song.mixerOrder();
 
@@ -64,6 +77,10 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
         for (const auto& s : track.sends)
             if (s.target > 0 && s.target < tracks)
                 plan.inAlign[(std::size_t) s.target] = std::max (plan.inAlign[(std::size_t) s.target], plan.outLat[(std::size_t) t]);
+
+        // Fruity Send slots leave the chain after the slots before them
+        for (const auto& [slot, target] : fruitySendsOf (song, t))
+            plan.inAlign[(std::size_t) target] = std::max (plan.inAlign[(std::size_t) target], tapLatency (t, slot));
     }
 
     plan.outLat[0] = plan.inAlign[0] + effectsLatency (0);
@@ -77,7 +94,8 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
     {
         const auto& track = song.mixer[(std::size_t) t];
         auto& delays = plan.sendDelay[(std::size_t) t];
-        delays.assign (1 + track.sends.size(), 0);
+        const auto taps = fruitySendsOf (song, t);
+        delays.assign (1 + track.sends.size() + taps.size(), 0);
         delays[0] = track.toMaster ? plan.inAlign[0] - plan.outLat[(std::size_t) t] : 0;
 
         for (std::size_t i = 0; i < track.sends.size(); ++i)
@@ -87,6 +105,9 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
             if (target > 0 && target < tracks)
                 delays[1 + i] = std::max (0, plan.inAlign[(std::size_t) target] - plan.outLat[(std::size_t) t]);
         }
+
+        for (std::size_t j = 0; j < taps.size(); ++j)
+            delays[1 + track.sends.size() + j] = std::max (0, plan.inAlign[(std::size_t) taps[j].second] - tapLatency (t, taps[j].first));
     }
 
     return plan;

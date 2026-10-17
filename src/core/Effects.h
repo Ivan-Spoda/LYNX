@@ -98,6 +98,9 @@ public:
     // The notes held on every Channel Rack channel (`count` masks, by channel index) during the next process(); the
     // pointer stays valid until the next call. Effects that follow notes (LYNX Tune's MIDI targets) keep it.
     virtual void setHeldNotes (const NoteMask* /*channels*/, int /*count*/) noexcept {}
+    // Effects that send audio to another insert (FL's Fruity Send): the buffers the next process() adds its send
+    // into (cleared by the renderer), or nullptr = nothing is sent this block.
+    virtual void setSendOutput (float* /*left*/, float* /*right*/) noexcept {}
     // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
 };

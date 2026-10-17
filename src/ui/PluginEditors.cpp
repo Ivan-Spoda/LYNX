@@ -12,6 +12,7 @@
 #include "core/MaximusFx.h"
 #include "core/MixSuite.h"
 #include "core/ParametricEqFl.h"
+#include "core/FruityBasicFx.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -219,7 +220,17 @@ public:
             return {};
         if (stateBacked())
             return param < plugui::paramCount (kind) ? utf8 (maximusfx::stateParamText (param, stateRaw (param, value)).c_str()) : juce::String();
+        if (kind == EffectKind::fruitySend && param == 3)
+            return flbasic::sendTrack (value) > 0 ? insertName (flbasic::sendTrack (value)) : tr ("None");
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
+    }
+
+    // an insert's name as the mixer shows it
+    juce::String insertName (int t) const
+    {
+        const auto& mixer = engine.getSong().mixer;
+        const auto name = t > 0 && t < (int) mixer.size() ? juce::String::fromUTF8 (mixer[(std::size_t) t].name.c_str()) : juce::String();
+        return name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (t) });
     }
 
     juce::String trackName() const
@@ -642,6 +653,17 @@ public:
 
             case Item::menu:
             {
+                if (kind == EffectKind::fruitySend) // the destination insert (FL's tinted box; "…" = none)
+                {
+                    const auto target = flbasic::sendTrack (value);
+                    g.setColour ((target > 0 ? colour::accent : colour::accentMuted).withAlpha (hot ? 1.0f : 0.85f));
+                    g.fillRoundedRectangle (r, radius::sm * s);
+                    g.setColour (target > 0 ? colour::onAccent : colour::textSecondary);
+                    g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+                    g.drawFittedText (target > 0 ? insertName (target) : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")),
+                                      r.reduced (2.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 2, 0.6f);
+                    break;
+                }
                 const auto c = item.colour >= 0 ? peqview::bandColour (item.colour) : colour::bg5;
                 const auto chosen = plugui::optionAt (item, value);
                 const auto off = chosen == 0 && kind == EffectKind::parametricEq;
@@ -1567,6 +1589,19 @@ public:
                 eqSelected = item.colour;
                 repaint();
                 peqview::showBandMenu (*this, current()->params, item.colour, [this] (std::vector<std::pair<int, float>> changes) { setParams (changes); });
+                return;
+            }
+            if (kind == EffectKind::fruitySend) // FL's list: no destination, then every other insert by name
+            {
+                juce::PopupMenu menu;
+                const auto chosen = flbasic::sendTrack (valueOf (param));
+                menu.addItem (tr ("None"), true, chosen <= 0, [this, param] { setValue (param, 0.0f); });
+                const auto& mixer = engine.getSong().mixer;
+                for (int t = 1; t < (int) mixer.size(); ++t)
+                    if (t != track)
+                        menu.addItem (juce::String (t) + "  " + insertName (t), engine.getSong().canRoute (track, t) || t == chosen, t == chosen,
+                                      [this, param, t] { setValue (param, flbasic::sendTrackValue (t)); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
                 return;
             }
             juce::PopupMenu menu;
