@@ -54,6 +54,17 @@ title row of the selected effect's knobs.
 | Gross Beat | 840 × 563 | time panel (mix knob), HOLD, scratch dial; 36 time slots and 36 volume slots in 4 × 9 grids (names from the saved state); ATT / REL / TNS; volume panel; envelope editor (the selected time and volume slots, read-only here) with the slot's hold / trigger sync / position sync under it |
 | 3x Osc (channel page) | 560 × 390 | three oscillator rows: shape buttons (sine, square, rounded, custom / triangle, saw, noise, ± invert), PHASE OFS and DETUNE faders, COARSE, FINE, pan, volume (osc 2 and 3); AM OSC 3, HQ, PHASE RAND below |
 | FL Keys (channel page) | 480 × 186 | ENVIRONMENT (decay, release, pan, stereo), MISC (overdrive, LFO, treble, stretch), VELOCITY (vel → muffle, muffle, vel → hardness, hardness, sens), TUNING (tune, detune), the sample set's name; FL's keyboard strip is left out (LYNX's touch keyboard is in the Channel Rack) |
+| Fruity Delay 2 | 404 × 102 | INPUT (pan, vol) · FEEDBACK (normal / invert / ping-pong, vol, cut) · TIME (time, offset) · DRY |
+| Fruity Reeverb, Free Filter | Fruity cells | two columns of five (Reeverb); Free Filter: TYPE, FREQ, CENTER / Q (slider), GAIN |
+| Fruity Flangus | 366 × 176 | the order bar and seven faders (depth, speed, delay, spread, cross, dry, wet) in columns |
+| Fruity Soft Clipper | 274 × 133 | THRES, POST, name plate, meter strip, transfer curve |
+| Fruity Blood Overdrive | 428 × 186 | PRE BAND, COLOR · big PRE AMP with x100 · POST FILTER, POST GAIN, captions on plates |
+| Fruity PanOMatic | 307 × 166 | PAN, VOL; LFO shape buttons, AMT, SPD, off / pan / vol; the pan-volume pad |
+| Fruity Stereo Shaper | 276 × 316 | mixer matrix of four faders (R→L, left, right, L→R) over LEFT / RIGHT; pre / post, DELAY, PHASE, in/out difference |
+| Transient Processor | 553 × 325 | in / out meters, SPLIT FREQ, ATTACK and RELEASE panels with their shape controls, DRIVE, SPLIT BALANCE, GAIN, off / on, the view |
+| Fruity WaveShaper | 277 × 358 | the saved shaping curve (read-only here), bipolar / unipolar, PRE, MIX, POST, smooth, oversample, HQ, center |
+| Vintage Chorus | 754 × 214 | MODE (I / II / edit) · DELAYS (time 1 / 2, feedback, high-pass faders) · MODULATION (start phase, wave, L/R phase, tempo sync, speed) · LEVELS (mono input, invert wet, noise gate, noise, gain, mix) |
+| Hyper Chorus | 754 × 214 | three movement pads (delay / feedback, modulation / rate, movement / rate; drag sets both), the voices view, one row of knobs and the delay-lines switch |
 
 Mapping notes:
 - 3x Osc's shape buttons follow FL's order (sine, square, rounded, custom on the first row; triangle, saw, noise on the
@@ -69,7 +80,7 @@ Mapping notes:
   presets bar's options menu.
 
 ## Where I stopped / next steps
-- Batch 1 (landed): the effects above, Parametric EQ 2, Gross Beat, 3x Osc and FL Keys pages.
+- Batch 1 (landed): every arrangement in the table above.
 - Next: Maximus / Soundgoodizer (state-based: amount and A–D), Fruity Balance / Send, BooBass, Sytrus and Harmor main
   pages, then the remaining Fruity effects (Delay 2, Reeverb, Flangus, Soft Clipper, Blood Overdrive, PanOMatic, Stereo
   Shaper, Transient Processor, Fast LP, Free Filter, WaveShaper, Delay Bank, Hyper / Vintage Chorus, Vintage Phaser…),

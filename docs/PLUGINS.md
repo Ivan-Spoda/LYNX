@@ -134,7 +134,9 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 
 **Windows.** Every native effect opens its own window (double-click its Mixer slot, or the **Editor** button over its
 knobs). For the plugins studied so far — Fruity Limiter, Parametric EQ 2, Delay 3, Multiband Compressor, Reeverb 2,
-LuxeVerb, Compressor, Filter, Fast Dist, Chorus, Flanger, Stereo Enhancer, Gross Beat, and the 3x Osc and FL Keys pages
+LuxeVerb, Compressor, Filter, Fast Dist, Chorus, Flanger, Stereo Enhancer, Gross Beat, Delay 2, Reeverb, Flangus, Soft
+Clipper, Blood Overdrive, PanOMatic, Stereo Shaper, Transient Processor, Free Filter, WaveShaper, Vintage Chorus, Hyper
+Chorus, and the 3x Osc and FL Keys pages
 of the channel settings — the window has the same controls, sections, captions and arrangement as the FL plugin,
 drawn in LYNX's own style, with a presets bar that lists the plugin's FL presets from your installation
 ([`docs/analise/UI_STUDY_plugins93.md`](analise/UI_STUDY_plugins93.md)); the other effects show their controls as a
