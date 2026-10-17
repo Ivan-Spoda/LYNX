@@ -2483,6 +2483,8 @@ TEST (fl_sampler_interpolators_match_fl)
             std::memcpy (&ba, &a, 4);
             std::memcpy (&bb, &b, 4);
             same += (ba == c.bits[2 * p]) + (bb == c.bits[2 * p + 1]);
+            if (ba != c.bits[2 * p] || bb != c.bits[2 * p + 1])
+                std::printf ("DBG flrs q=%d p=%d got %08x %08x want %08x %08x\n", c.quality, p, ba, bb, c.bits[2 * p], c.bits[2 * p + 1]);
         }
         CHECK (same == 16);
     }
@@ -11078,6 +11080,8 @@ TEST (fruity_parametric_eq_exact)
             { 8191, -0.3218550980091095f, -0.06812914460897446f }, { 10000, 0.40869277715682983f, -0.08537150919437408f },
             { 12287, 0.775394082069397f, -0.08931504935026169f } };
         for (const auto& g : gold)
+            std::printf ("DBG peq2lin hq=%d i=%d dl=%.3g dr=%.3g\n", (int) hq, g.i, (double) (l[(std::size_t) g.i] - g.l), (double) (r[(std::size_t) g.i] - g.r));
+        for (const auto& g : gold)
             CHECK (std::abs (l[(std::size_t) g.i] - g.l) < 1.0e-6f && std::abs (r[(std::size_t) g.i] - g.r) < 1.0e-6f);
     }
 
@@ -11913,7 +11917,9 @@ std::vector<std::uint8_t> morphineTestState()
                 for (int bit = 0; bit < 8; ++bit)
                 {
                     const auto k = byte * 8 + bit;
-                    const float v = a == 0 ? std::cbrt (1.0f / (float) (k + 1 + seed * (k % 3))) * (k < 40 ? 1.0f : 0.2f)
+                    // (cbrtf is not correctly rounded before glibc 2.43 and differs between libms; the cube root in double
+                    // rounded to float gives the same (correctly rounded) bits with old and new glibc)
+                    const float v = a == 0 ? (float) std::cbrt ((double) (1.0f / (float) (k + 1 + seed * (k % 3)))) * (k < 40 ? 1.0f : 0.2f)
                                     : a == 1 ? 0.1f * (float) ((k * 7 + seed) % 11 - 5) / 5.0f
                                              : 0.02f * (float) ((k * 5 + seed) % 7 - 3);
                     b.f32 (v);
@@ -12395,6 +12401,8 @@ TEST (gms_engine)
     CHECK (y.size() == 2 * 66150u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.0298744496f, 0.0198248848f }, { 5000, 0.0669416264f, 0.0666475743f }, { 15000, -0.005992427f, 0.013085857f }, { 25000, 0.0102018276f, 0.0130400788f }, { 35000, -0.0679694712f, -0.0050432696f }, { 45000, -0.0161557719f, 0.154340729f }, { 55000, -0.00719845621f, 0.0182181317f }, { 66000, 0.0389953516f, 0.0104107196f } };
     for (const auto& g : golden)
+        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
+    for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
     for (auto v : y)
@@ -12483,6 +12491,8 @@ TEST (toxic_engine)
     CHECK (y.size() == 2 * 66150u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.264782101f, 0.189374551f }, { 5000, -0.605827034f, 0.43244195f }, { 15000, -0.343959779f, -0.111227378f }, { 25000, 0.0127612427f, -0.354315311f }, { 35000, -0.353289753f, -0.307500422f }, { 45000, -0.260735184f, 0.202133358f }, { 55000, -0.0751226544f, -0.0776180848f }, { 66000, -0.0294751395f, 0.00692501338f } };
     for (const auto& g : golden)
+        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
+    for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
     for (auto v : y)
@@ -12540,6 +12550,8 @@ TEST (morphine_engine)
     const auto y = lynx::morphine::renderReference (blob, notes, 44100.0, 80000, "");
     CHECK (y.size() == 2 * 80000u);
     static const struct { int i; float l, r; } golden[] = { { 100, 0.00094500737f, 0.00085531926f }, { 5000, 0.0311509669f, -0.11552836f }, { 15000, 0.0843918771f, 0.0369227529f }, { 25000, 0.60864079f, 1.03062224f }, { 35000, -0.346013308f, 0.135865599f }, { 45000, -0.0373920798f, -0.13064307f }, { 60000, -0.138871655f, -0.163586512f }, { 75000, 0.0251323506f, -0.00735046482f } };
+    for (const auto& g : golden)
+        std::printf ("DBG morph i=%d dl=%.3g dr=%.3g\n", g.i, (double) (y[2 * (std::size_t) g.i] - g.l), (double) (y[2 * (std::size_t) g.i + 1] - g.r));
     for (const auto& g : golden)
         CHECK (std::abs (y[2 * (std::size_t) g.i] - g.l) < 1e-6f && std::abs (y[2 * (std::size_t) g.i + 1] - g.r) < 1e-6f);
     double e = 0.0;
