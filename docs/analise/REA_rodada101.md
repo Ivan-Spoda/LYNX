@@ -216,9 +216,33 @@ measured): Orbit's
 voice shapes are our own designs inside the measured delay ranges; Lattice's tap polarity alternation (type 9.5) and
 `type` ≥ 10, the reference's diffusion network, ducking curve, "era" voicing and the duck variants are not modelled.
 
+## 8. Panels (UI rule: the originals' ergonomics in LYNX's own style)
+
+The official demos' editors were opened in `fxmeasure` (new `editor <ms> [x y]` command: the plugin's own editor in a
+plain window) and screenshotted from outside (`cap.ps1`); the shots stay in `tmp/valhd101/ref` with a side-by-side
+`compare_all.png` against `LYNX.exe --plugui`. What the LYNX panels keep from them (layout logic only — LYNX knobs,
+colours, fonts; no graphics, logos or names copied):
+- **Echoform** ↔ ValhallaDelay: one row of sections in the same order — Mix + Style | Delay (big time knob + a second
+  knob that is Spread, Ratio, Spacing or the right time depending on the style; sync menus under them; the time knob
+  turns into a note knob when synced) | Feedback + Width | Colour (Drive, Age) | Diffusion (Amount, Size) | Mod (Wow /
+  Flutter for tape, Rate / Depth, Shift / Detune for the shifter, Pitch / Detune for the pitch modes — swapped in place)
+  | EQ (High, Low) | Duck; the mode selector along the bottom. LYNX adds the echo-train graph. For the swaps to be
+  contiguous value ranges, Echoform's style and mode lists are ordered for the panel; the substitute maps reorder.
+- **Spiral Echo** ↔ FreqEcho: Mix, Delay, a big Shift in the middle, Feedback, Low cut, High cut in one row; delay-sync
+  and output-mode menus under them.
+- **Orbit** ↔ SpaceModulator: five knobs in a row, each in its own colour (Mix, Rate, Depth, Feedback, Manual), mode menu
+  under them.
+- **Lattice Mod** ↔ UberMod: five faders (Mix, Depth, Width, Delay, Feedback) with read-outs, taps and sync menus under
+  them; six pages on the right in the same order and grouping (Mod: slow rate / depth, vibrato rate / depth, over-mod;
+  Taps: spread, slope, skew, random, tap gain; Diff: on, amount, size, mod rate / depth; EQ: colour, low / high cut,
+  spatial EQ; Drive: on, in / out / noise gain, pre / post; Warp: speed, feedback mix, smoothing); LYNX adds the tap graph.
+
+Note: the demos mute their output every 45 s ("Demo version" banner); the measurement captures are a few seconds each
+after a fresh load and their results are consistent between runs, so they are not affected [EXEC].
+
 ## Where I stopped
 
 - Done: measurements §1–§6, Echoform / Spiral Echo / Orbit / Lattice Mod, substitutes with translation, tests
   (`tests/EchoSuiteTests101.inc`), PLUGINS.md / PLUGIN_FALLBACK.md / website lists.
-- Next: land (build-local + Windows build + selftest); later: Orbit voice shapes against
+- Next: land (land-safe.sh); later: Orbit voice shapes against
   finer captures, Lattice polarity patterns.
