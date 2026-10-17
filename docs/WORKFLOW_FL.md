@@ -427,6 +427,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | C12 | Partial | Ctrl+Shift+Left/Right in the rack **rotates the selected channels' steps** by one step (wrapping in the pattern); the Piano Roll's Ctrl+Shift+arrows rotate within the bar |
 | C13 | No | — |
 | C14 | **Done** (most) | Global swing knob in the toolbar (`MainComponent.cpp:121-128`); per-channel swing mix exists in the model and is imported, but there is no UI for it. **UI-C:** channel menu → Steps → **Swing mix (n%)…** sets the per-channel swing mix for the selected channels ([DOC][csx]) |
+| C21 | **Done** (round 90) | Rows whose notes are not plain steps (other key, longer than a step, off the grid, slides) show a **miniature of the notes** instead of the step buttons; a click opens the Piano Roll, drag-painting skips them (`showsNotePreview` in `core/RackOps.h`, LYNX's own rule). Name buttons are tinted with the channel colour; the fitted rack shows at most 32 steps and scrolls beyond |
 | C15 | Partial | Length via the pattern menu (Automatic, 1–32 bars); the grid follows the length (`ChannelRackComponent.cpp:89-99`). No corner drag |
 | C16 | **Done** | Shift+wheel over the Channel Rack panel title changes the pattern (the title shows the pattern's name) |
 | C17 | No | — |
@@ -481,7 +482,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | P8 | Partial | Split, **mute/unmute, chop to grid**, make unique, select all of this pattern, open in rack, **open in Piano Roll**, delete. Missing: per-clip colour and name (no model field yet) |
 | P9 | Partial | Clip volume, normalise, remove fades. No clip automation, crossfades, reverse |
 | P10 | **Done** | Double-click a pattern clip opens the **Piano Roll when the pattern has piano-roll notes, else the Channel Rack** (`hasPianoRollNotes`); Options → "Double-click on a pattern clip opens" sets it; **Alt+double-click opens the other one**; automation clips open their editor |
-| P11 | Partial | LED mutes; **right-click menu: rename, mute, solo, insert above/below, move up/down, delete** (`noteedit::insertTrack/removeTrack/swapTracks/soloTrack`); **double-click the name renames; the hovered header and LED light up**. Missing: colour, height, grouping |
+| P11 | Partial | LED mutes; **right-click menu: rename and colour, mute, solo, insert above/below, move up/down, delete** (`noteedit::insertTrack/removeTrack/swapTracks/soloTrack`); **double-click the name renames; the hovered header and LED light up**. **Round 90: track colours** (imported from the FLP track record 0xEE, kept in .lynx, header tinted). Missing: icon, grouping |
 | P12 | Partial | Track mute; **Ctrl+click or right-click on the LED solos** (again: all play), also in the track menu; **Shift+wheel over a header moves the track up/down** (the mouse follows it). No grouping |
 | P13 | **Done** | Click/drag on the ruler seeks; Ctrl+drag makes the time selection (= the loop), which selects the clips it touches; double-click or Ctrl+click clears it. **Shift+drag inside it moves the selection with its contents, Ctrl+Shift+drag copies** (clips are cut at its edges; `noteedit::moveTimeRange`). No "outside the selection" tint |
 | P14 | Partial | Ctrl+Ins inserts and Ctrl+Del removes the time selection's length across all tracks (clips cut at the edges, markers move) (`core/NoteEdit.cpp` `insertTime`/`deleteTime`). No slice-and-insert, no Insert-key slice |
@@ -518,7 +519,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 | M4 | **Done** (most) | Strip menu: **route the selected inserts here / only here**, send only to this track, send only to Master again. No submix |
 | M5 | **Done** | **Ctrl+L links the selected channels to the selected insert, Ctrl+Shift+L to consecutive inserts from it, Alt+L selects the channels linked to it** (Mixer focused; also in the strip menu). Keys checked on [DOC][sc] |
 | M6 | **Done** | Mute LED: left-click mutes, **right-click or Ctrl+click solos exclusively** (again: unsolo); the "S" button still toggles; solo along the path. No Ctrl+right-click unmute-all |
-| M7 | Partial | Rename in the menu; colour only shown if imported (`:150-154`) |
+| M7 | Partial | Rename in the menu; colour only shown if imported (`:150-154`). **Round 90:** the whole strip is tinted with the insert colour |
 | M8 | **Done** (most) | 10 slots, click empty → add menu, bypass LED, dry/wet, menu with replace / presets / sidechain / move / delete; **drag a slot or wheel over its name to reorder it** (`mixerops::moveEffectSlot`); **A/B compare** (store as B, swap with B) in the slot menu; effect presets dropped from the Browser load into a slot |
 | M9 | **Done** | "FX" switch in the effects panel header: click turns all effects of the insert on/off, **right-click opens or closes their plugin windows** |
 | M10 | **Done** (LYNX variant) | **Record-arm dot on every insert**: arming turns audio recording on and the take plays through the armed insert (`AudioEngine::setInsertArmed`); not saved with the project. No per-insert input selector |
