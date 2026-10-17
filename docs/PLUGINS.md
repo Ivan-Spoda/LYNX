@@ -241,11 +241,21 @@ Product names in the table are trademarks of their owners (Solid State Logic, Wa
 FabFilter, Slate Digital, Maag Audio, Soundtoys and the owners of the Teletronix name); they are used only to say
 which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by any of them.
 
+## LYNX originals: precision EQ
+
+| LYNX engine | In the role of | What it is |
+|---|---|---|
+| Facet EQ | surgical / mastering parametric EQs, e.g. FabFilter Pro-Q | 8 bands (bell, shelves, cuts 6–96 dB/oct, notch, band pass, tilt) on analog prototypes; its own editor with a live pre / post spectrum analyser, draggable nodes (double-click adds, wheel = Q, right-click = shape menu), band solo; per-band dynamic EQ (threshold and range, attack / release, detector on the input or a sidechain track); zero-latency, natural-phase (320 samples) and linear-phase (4608 samples) modes with the latency compensated by PDC |
+
+Facet EQ's curve shapes and dynamic law follow black-box measurements of the reference EQ's official trial
+(docs/analise/MEASURE_fabfilter.md, REA_rodada103.md): only its audio output was measured. FabFilter and Pro-Q are
+trademarks of FabFilter; LYNX is not affiliated with them.
+
 ## LYNX originals: vocal pitch
 
 | LYNX engine | In the role of | What it is |
 |---|---|---|
-| LYNX Tune | automatic vocal pitch correctors, e.g. Antares Auto-Tune, Waves Tune Real-Time | real-time pitch correction on every mixer insert (*Insert*): key and scale (13 scales + custom), per-note switches on a keyboard strip, retune speed (0 ms = the hard "robot" effect … 400 ms), humanize (lets held notes keep their vibrato), formant preserve and formant shift, transpose, A4 reference 430–450 Hz, voice range, low-latency mode (≈ 16 ms instead of ≈ 25 ms for alto / tenor), MIDI target notes (the notes held on a Channel Rack channel — played live or from a pattern — become the targets), mix |
+| LYNX Tune | automatic vocal pitch correctors, e.g. Antares Auto-Tune, Waves Tune Real-Time | real-time pitch correction on every mixer insert (*Insert*): key and scale (13 scales + custom), per-note switches on a keyboard strip, retune speed (0 ms = the hard "robot" effect … 400 ms), humanize (lets held notes keep their vibrato), formant preserve and formant shift, transpose, A4 reference 430–450 Hz, voice range, low-latency mode (≈ 16 ms instead of ≈ 25 ms for alto / tenor), MIDI target notes (the notes held on a Channel Rack channel — played live or from a pattern — become the targets), mix; a live pitch display (detected note, cents and Hz, target note, correction meter, 8-second scrolling graph of the input and corrected pitch) |
 
 LYNX Tune is LYNX's own design, written only from published DSP: YIN pitch detection (de Cheveigné & Kawahara, 2002)
 and TD-PSOLA pitch shifting (Moulines & Charpentier, 1990), which keeps the formants in place. No third-party plugin was
