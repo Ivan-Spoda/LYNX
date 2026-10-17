@@ -145,7 +145,7 @@ the uninstaller unregisters both (and now reads the 64-bit registration from the
 | 8 s each | 64 + 32 | shared / 128, exclusive / 144 | — | 0 | — | — | 0 |
 | reference | 64 + 32 | FL Studio ASIO / 256, 44.1 kHz | 2601 / 2646 (59 / 60 ms) | — | — | — | — |
 
-(LYNX `--rtstress` rows: §6.)
+LYNX runs: §6.
 
 ## 5. Loopback
 
@@ -158,10 +158,23 @@ To measure it on a machine with a loopback cable: `duplex.exe lynx-asio.dll 144 
 
 ## 6. LYNX runs
 
-(filled in below as they are made)
+[MEASURED] `LYNX.exe --rtstress gf92\full.flp report 15 --type "LYNX ASIO" --buffer N --record take.wav` (the
+girlfriend's project, the built-in LYNX ASIO type, the input recorded like Rec + Play; script `tmp/r106/rt.sh`,
+reports and driver logs in `tmp/r106/rt/`):
+
+| Mode / buffer | Reported in / out | Callbacks over deadline | Late device calls | Take | Input underflows / device gaps | Clicks in the take |
+|---|---|---|---|---|---|---|
+| exclusive / 144 (3 ms) | 912 / 288 (19.0 / 6.0 ms) | 0 of 7364 | 0 | 15.000 s of 15 s, 2 ch | 0 / 0 | 0 |
+| shared / 256 | 1664 / 1216 (34.7 / 25.3 ms) | 0 of 4035 | 0 | 14.981 s of 15 s, 2 ch | 0 / 0 | 0 |
+
+Both `result=OK`. The driver is opened twice (LYNX reopens the device when the input is armed); the clock ratio
+settles within ±70 ppm by the end of the 15 s. The microphone took room noise only (−49 / −53 dBFS RMS).
 
 ## Where I stopped / next steps
 
 * Done: exclusive + shared capture, drift-compensated input FIFO (tested), lost-frame filling, latency model,
   panel readout, 32-bit DLL + registration + packaging, built-in LYNX ASIO type, `--rtstress --record`.
-* Next: LYNX `--rtstress` with the built-in type (shared/exclusive) and `--record`; land.
+* Done too: LYNX `--rtstress --record` through the built-in type, shared and exclusive (§6).
+* Not done / ideas: a physical loopback measurement of the round-trip latency (no cable on this PC; `duplex.exe` +
+  `loop.py` are ready for it); a test in a real 32-bit host (verified by our 32-bit test host and the disassembly
+  only); registering the driver needs administrator rights, so other hosts on this PC were not tried this round.
