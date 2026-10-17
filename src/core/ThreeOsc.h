@@ -20,7 +20,7 @@
 //
 // Differences from FL by design / not modelled (REA_rodada47 §5): the "HQ" oscillators (engine_x64.dll, band-limited
 // tables) play the plain tables; the custom wave is resampled with our own interpolation (FL's resampler not decoded);
-// FL's host "HQ render" oversampling mode is off (FL's realtime behaviour); the random seed is per instrument (in FL all
+// FL's host "HQ render" oversampling mode is on only while LYNX renders offline (REA_rodada80 §3.3); the random seed is per instrument (in FL all
 // 3x Osc channels share one seed drawn at start-up). The processor's end-fade table uses IPP's cosine (REA_rodada74).
 
 #include <cstdint>
@@ -52,7 +52,9 @@ std::pair<int, int> threeOscParamRange (int index) noexcept;
 // A custom wave (shape 6) from an audio file: mono, 16384 points over the whole file. Empty if unreadable.
 std::vector<float> threeOscCustomWave (const std::string& wavPath);
 
-std::unique_ptr<Instrument> makeThreeOscInstrument();
+// hostHq: when it returns true at prepare(), the oscillators render as in FL's "HQ render" host mode (FL's
+// exports and command-line renders; REA_rodada80 §3.3)
+std::unique_ptr<Instrument> makeThreeOscInstrument (bool (*hostHq)() noexcept = nullptr);
 
 namespace threeosc
 {
