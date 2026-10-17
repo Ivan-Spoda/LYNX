@@ -145,6 +145,21 @@ the graph on top, binary switches as tabs or toggles. [design]
 - pt-BR for every caption; `--plugui <dir>` also snapshots the five panels. Test `mixsuite_panels_place_every_parameter`:
   every parameter has exactly one control, nothing overlaps or leaves the body, meters where expected. [TEST]
 
+## 4b. Against round 99's black-box measurements (docs/analise/MEASURE_fabfilter.md §4, §5)
+Used only as behavioural comparison; Hush and Ember stay our designs.
+- Ember: same families — tube even + odd, tape / transistor odd only (H2 −156 dB here vs below −140 dB there), level
+  compensated as the drive rises (our auto gain). Matches the measured signatures; no change.
+- Hush: the measured de-esser keeps a fixed latency per band mode (ours: fixed 2 ms) and reduces with a gentle slope
+  (≈ 0.4 dB per dB over the threshold, up to the range) where Hush reduces 1 dB per dB (sibilance held at the
+  threshold, capped at the range). Its "voice" mode detects relative to the broadband level. Both are candidates for
+  a later Hush option (slope / relative detector); not done in this round.
+
+## 4c. Substitutes (round 98's table, `src/core/PluginSubstitutes.cpp`)
+Missing third-party plugins now open as the suite: Waves CLA-2A → Glow Leveler (peak reduction 45 %, gain +3 dB);
+Waves SSL E-Channel and SSL Native channel strips → Ridge Strip (neutral); Waves DeEsser, FabFilter Pro-DS, Harrison
+De-Esser → Hush De-esser; Slate Fresh Air → Aether (neutral); Soundtoys Decapitator, FabFilter Saturn → Ember
+(drive +5.4 dB, auto gain). No state is translated. Test `mixsuite_stands_in_for_missing_vocal_plugins`. [TEST]
+
 ## 5. Verification
 - build-local with the FL Data dir after merging main 90f0cce: 1169845 checks, 0 failures.
 - `--rtstress` (Windows build, Ryzen 5 3600, WASAPI 48 kHz / 480 samples), demo project with all five effects at
@@ -152,6 +167,7 @@ the graph on top, binary switches as tabs or toggles. [design]
   average load 13.0 %, max 34.8 %; heaviest unit an Ember Saturator at 2.2 % (peak 0.1 ms). [TEST]
 
 ## Where I stopped / next steps
-- Landed via tmp/coord/land.sh vocal96: engines, tests, panels with live meters, pt-BR, docs, website list.
-- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed when this round
-  closed: register the suite in the substitution table / fit the de-esser and saturator to the measurements later.
+- Landed via tmp/coord/land.sh vocal96: engines, tests, panels with live meters, pt-BR, substitution entries, docs,
+  website list.
+- Possible next: Hush slope / relative ("voice") detector option (§4b); translate Waves states once their RealWorld
+  parameter meanings are confirmed.
