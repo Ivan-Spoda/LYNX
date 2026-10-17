@@ -241,7 +241,7 @@ MixerStrips::Part MixerStrips::partAt (int t, juce::Point<int> p) const
         return Part::solo;
     if (sending && routeArea (t).contains (p) && (song.routes (selected, t) || song.canRoute (selected, t)))
         return Part::route;
-    if (sending && t > 0 && sendArea (t).contains (p) && song.routes (selected, t))
+    if (sending && sendArea (t).contains (p) && song.routes (selected, t))
         return Part::send;
     if (meterArea (t).contains (p))
         return Part::meter;
@@ -546,11 +546,10 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92 ") + (t == 0 ? juce::String ("M") : juce::String (t)), r.toNearestInt(),
                             juce::Justification::centred);
 
-                if (on && t > 0)
-                    for (const auto& send : song.mixer[(std::size_t) selected].sends)
-                        if (send.target == t)
-                            drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), faderPosition (send.level), false,
-                                      dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
+                // the route's level knob (FL's route knob), on the routes to inserts and to Master
+                if (on)
+                    drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), faderPosition (song.routeLevel (selected, t)), false,
+                              dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
             }
             else if (feedsSelected) // this insert sends into the selected one
             {
@@ -684,7 +683,8 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (Part::send, t)));
             ui::addValueItems (menu, *this, nullptr, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
             menu.addSeparator();
-            menu.addItem (tr ("Remove this send"), [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
+            menu.addItem (t == 0 ? tr ("Remove the route to Master") : tr ("Remove this send"),
+                          [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
             return;
         }
@@ -714,13 +714,17 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         // the selection is the send source: don't change it
         const auto from = selected;
         const auto on = engine.getSong().routes (from, t);
-        engine.editSong ([from, t, on] (Song& s) { s.setRoute (from, t, ! on); });
+        engine.editSong ([from, t, on] (Song& s) {
+            s.setRoute (from, t, ! on);
+            if (! on)
+                s.setRouteLevel (from, t, 1.0f); // a new route starts at 0 dB
+        });
 
-        if (! on && t > 0) // just enabled: dragging adjusts the level
+        if (! on) // just enabled (at 0 dB): dragging adjusts the level, like the route knob
         {
-            dragPart = Part::route;
+            dragPart = Part::send;
             dragTrack = t;
-            dragStartValue = 1.0f;
+            drag.begin (e, unityFader);
         }
         return;
     }
@@ -864,15 +868,6 @@ void MixerStrips::mouseDrag (const juce::MouseEvent& e)
 
     const auto t = dragTrack;
 
-    if (dragPart == Part::route)
-    {
-        const auto from = selected;
-        const auto v = juce::jlimit (0.0f, 1.0f, dragStartValue - (float) e.getDistanceFromDragStartY() / 120.0f);
-        engine.editSong ([from, t, v] (Song& s) { s.setRoute (from, t, true, v); });
-        ui::showValueTip (*this, routeArea (t), juce::String (juce::roundToInt (v * 100.0f)) + "%");
-        return;
-    }
-
     setValue (dragPart, t, drag.update (e, specFor (dragPart, t)));
     showTip (dragPart, t, false);
 }
@@ -897,7 +892,7 @@ ui::ValueSpec MixerStrips::specFor (Part part, int t) const
         return stereoSpec (name + " - " + tr ("Stereo separation"));
 
     if (part == Part::send)
-        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + tr ("Send level"));
+        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
 
     auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
     spec.pixelsForRange = juce::jmax (60, faderRail (juce::jmax (0, t)).getHeight());
@@ -912,11 +907,7 @@ double MixerStrips::valueOf (Part part, int t) const
 
     if (part == Part::send)
     {
-        if (selected > 0 && selected < (int) song.mixer.size())
-            for (const auto& send : song.mixer[(std::size_t) selected].sends)
-                if (send.target == t)
-                    return faderPosition (send.level);
-        return 0.0;
+        return faderPosition (song.routeLevel (selected, t));
     }
 
     return part == Part::pan ? track.pan : part == Part::stereo ? track.stereo : track.volume;
@@ -930,7 +921,7 @@ void MixerStrips::setValue (Part part, int t, double value)
     if (part == Part::send)
     {
         const auto from = selected;
-        engine.editSong ([from, t, v = faderGain ((float) value)] (Song& s) { s.setRoute (from, t, true, v); });
+        engine.editSong ([from, t, v = faderGain ((float) value)] (Song& s) { s.setRouteLevel (from, t, v); });
         return;
     }
 

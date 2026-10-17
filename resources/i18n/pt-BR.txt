@@ -2448,3 +2448,5 @@ countries: br
 "Damping" = "Amortecimento"
 "Bass freq" = "Freq. graves"
 "Late mix" = "Mix da cauda"
+"Level to Master" = "Nível para o Master"
+"Remove the route to Master" = "Remover a rota para o Master"

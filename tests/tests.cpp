@@ -4947,6 +4947,21 @@ TEST (mixer_sends_between_inserts)
     CHECK (pos (4) < pos (2) && pos (2) < pos (1));
     song.setRoute (4, 2, false);
     CHECK (! song.routes (4, 2) && song.routes (4, 0));
+
+    // route levels (FL's route knobs): to inserts and to Master, clamped to the fader range; none without a route
+    song.setRoute (3, 5, true);
+    song.setRouteLevel (3, 5, 0.5f);
+    song.setRouteLevel (3, 0, 1.4f);
+    CHECK (song.routeLevel (3, 5) == 0.5f && song.routeLevel (3, 0) == 1.4f && song.mixer[3].masterLevel == 1.4f);
+    song.setRouteLevel (3, 0, 9.0f);
+    CHECK (song.routeLevel (3, 0) == lynx::maxFaderGain);
+    song.setRouteLevel (3, 6, 0.5f); // no such route: ignored
+    CHECK (! song.routes (3, 6) && song.routeLevel (3, 6) == 0.0f);
+    song.setRoute (3, 0, false);
+    CHECK (song.routeLevel (3, 0) == 0.0f);
+
+    // the route to Master's level scales what insert 1 sends there (0.5 + 0.5·0.25)
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRouteLevel (1, 0, 0.25f); }) - 0.625f) < 1e-4f);
 }
 
 namespace

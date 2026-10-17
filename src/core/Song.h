@@ -773,6 +773,10 @@ struct Song
     // Enables/disables the send from -> to (to == 0 = Master). Does nothing if it would create a cycle.
     void setRoute (int from, int to, bool enabled, float level = 1.0f);
     bool routes (int from, int to) const noexcept;
+    // Level of the route from -> to (to == 0 = Master: `masterLevel`), a linear gain 0..maxFaderGain; 0 without a route.
+    float routeLevel (int from, int to) const noexcept;
+    // Sets the level of an existing route (FL's route knob); does nothing if there is no such route.
+    void setRouteLevel (int from, int to, float level);
     // Inserts (1..N) in processing order: senders come before receivers.
     std::vector<int> mixerOrder() const;
     // Tracks audible with the current solo: the soloed ones, those that feed them and the path to Master.
