@@ -41,7 +41,22 @@ Not compared in depth: Browser (FL 2026 docks it left, LYNX too), plugin wrapper
 
 ## Changes in round 90
 
-(filled in below as they land)
+- **Channel Rack** (`ui/ChannelRackComponent.*`, `core/RackOps.*`): `showsNotePreview` decides per row whether
+  the channel's notes are plain steps (on the step grid, one step long, key 60, no slide/porta); otherwise the row
+  draws a miniature (beat/bar lines, notes by time, length and pitch mapped onto the row's key range, channel
+  colour) and a click opens the Piano Roll; drag-painting steps skips those rows; the hint says what a click does.
+  Name buttons are tinted with the channel colour. `MainComponent::fitChannelRack` caps the fitted width at 32
+  steps (`widthForSteps`), longer patterns scroll.
+- **Playlist** (`ui/PlaylistComponent.*`): `showSongAfterOpen` after opening a .flp/.lynx (scroll to the start,
+  zoom out to the whole song when it is longer than the view; waits for a layout when the panel has no size yet).
+  Track headers tinted with the track colour; the track menu's "Rename and color..." (and double-click) use the
+  shared name-and-colour dialog.
+- **Model / files**: `PlaylistTrack::colour` (0xFFRRGGBB, 0 = default); FLP 0xEE colour at offset 4 imported
+  (FL's default grey 0x485156 = no colour); .lynx `playlistTrackColours` list ([index, 0xRRGGBB]; older versions
+  ignore it); undo history names the change "Playlist tracks".
+- **Mixer** (`ui/MixerComponent.cpp`): strips tinted with the insert colour (selected strips a little more).
+- Tests: `uilook90_rack_note_preview_rule`, `uilook90_flp_track_colours` (Thief: DRUMS 0xFF770E0B, BASSES
+  0xFF16296C, default tracks uncoloured); the selftest's project round trip checks a track colour.
 
 ## Where I stopped / next steps
 
