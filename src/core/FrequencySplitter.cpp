@@ -735,14 +735,19 @@ namespace
 class SplitterEffect final : public Effect
 {
 public:
-    SplitterEffect()
+    // `initial`: the slot's parameters, so the latency (linear-phase mode) is known before the first block — a
+    // latency that appears only after the first block makes the host re-plan its delay compensation (REA round 87)
+    explicit SplitterEffect (const EffectParams* initial = nullptr)
     {
         for (auto& b : bands)
             b.assign ((std::size_t) maxBlock, 0.0f);
+        if (initial != nullptr)
+            expected = *initial, hasExpected = true;
     }
 
     void prepare (double sr) noexcept override
     {
+        rate = sr;
         engine.prepare (sr);
         engine.reset (true);
     }
@@ -798,9 +803,17 @@ public:
         }
     }
 
-    int latencySamples() const noexcept override { return engine.latencySamples(); }
+    int latencySamples() const noexcept override
+    {
+        if (! applied && hasExpected)
+            return (int) (expected[4] * 1.998f) == 1 ? 3 * fftSize ((int) (expected[6] * 5.994f), (float) rate) / 4 : 0;
+        return engine.latencySamples();
+    }
 
 private:
+    double rate = 44100.0;
+    EffectParams expected {};
+    bool hasExpected = false;
     Engine engine;
     std::array<float, engineParams> last {};
     bool applied = false;
@@ -809,4 +822,5 @@ private:
 } // namespace
 
 std::unique_ptr<Effect> make() { return std::make_unique<SplitterEffect>(); }
+std::unique_ptr<Effect> make (const EffectParams& params) { return std::make_unique<SplitterEffect> (&params); }
 } // namespace lynx::fsplit

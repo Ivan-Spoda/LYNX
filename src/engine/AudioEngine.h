@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <deque>
 #include <map>
 #include <tuple>
+#include <utility>
 #include <functional>
 
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -10,9 +12,11 @@
 #include "core/HeldNotes.h"
 #include "core/Preferences.h"
 #include "core/LiveEventQueue.h"
+#include "core/LiveInput.h"
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
+#include "core/RtStats.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/SnapshotExchange.h"
@@ -77,6 +81,10 @@ public:
         RecordMode mode = RecordMode::overdub;
         std::int64_t quantise = 0;      // record quantise in ticks (<= 1: as played); follows the global grid
         bool placeSongClip = true;      // song mode: a take puts a clip of the pattern where recording started
+        // recording filter (FL's record button right-click, REA_rodada88): what a take records
+        bool recordNotes = true;        // notes played (MIDI and PC keyboard)
+        bool recordAudio = true;        // audio of the armed inserts' inputs
+        bool askWhatToRecord = true;    // the record button asks first ("What would you like to record?")
     };
     const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
     void setRecordOptions (const RecordOptions& options);
@@ -86,8 +94,8 @@ public:
     bool isWaitingForInput() const noexcept { return waitingForInput.load(); }
     bool isCountingIn() const noexcept { return transport.countIn.load() > 0.0; }
 
-    // Per-insert record arm: an armed insert receives the audio takes (arming one turns audio recording on;
-    // disarming the last one turns it off). Not saved with the project.
+    // Per-insert record arm: each armed insert records its own audio input (Mixer › insert › input source) into
+    // its own take (arming one turns audio recording on; disarming the last one turns it off). Not saved.
     void setInsertArmed (int track, bool armed);
     bool isInsertArmed (int track) const noexcept;
     const std::vector<int>& getArmedInserts() const noexcept { return armedInserts; }
@@ -121,6 +129,49 @@ public:
     void setAudioRecordingArmed (bool armed);
     bool isAudioRecordingArmed() const noexcept { return audioArmed; }
     juce::String getLastRecordingError() const { return recordingError; }
+
+    // --- external audio input through the mixer (REA_rodada88) ---
+    // Names of the open device's input channels (all of them, open or not); empty without an input device.
+    std::vector<std::string> getInputChannelNames() const;
+    // Problems the UI explains to the user (translated there).
+    enum class InputIssue
+    {
+        none,
+        noDevice,          // no audio device open at all
+        noInputDevice,     // the driver has no input device
+        noInputOpen,       // recording with no input open
+        armedWithoutInput, // armed inserts, none with an input source
+        insertWithoutInput,// one armed insert (track) has no input source
+        failed             // the driver refused (detail = its message) or a file could not be written
+    };
+    struct RecordingNotice
+    {
+        InputIssue issue = InputIssue::none;
+        int track = 0;
+        juce::String detail;
+    };
+    // Opens the input of the current driver: `deviceName` (separate-input drivers; empty = the one chosen in
+    // Settings, else the default), all of its channels. UI thread.
+    RecordingNotice openAudioInput (const juce::String& deviceName = {});
+    bool hasAudioInput() const;
+    // Sets an insert's input source (undoable; -1 = none) and opens the device input when needed.
+    void setInsertInput (int track, int channel, bool stereo);
+    void setInsertMonitor (int track, InputMonitor mode);
+    // Input level of an insert's source since the last call (0..1, per side). UI thread.
+    // (the Mixer's strips take it 30 times a second; other views peek at the last value taken)
+    float takeInputPeak (int track, int side) noexcept
+    {
+        const auto v = liveInput.meters.takePeak (track, side);
+        if (track >= 0 && track < maxMixerTracks && (side == 0 || side == 1))
+            lastInputPeaks[(std::size_t) (track * 2 + side)] = v;
+        return v;
+    }
+    float peekInputPeak (int track, int side) const noexcept
+    {
+        return track >= 0 && track < maxMixerTracks && (side == 0 || side == 1) ? lastInputPeaks[(std::size_t) (track * 2 + side)] : 0.0f;
+    }
+    // A message for the user about recording (e.g. an armed insert without an input), once. UI thread.
+    RecordingNotice takeRecordingNotice() { return std::exchange (recordingNotice, {}); }
 
     // MIDI learn: the next CC received becomes a controller linked to `target`.
     void learnMidiController (const AutomationTarget& target);
@@ -221,6 +272,34 @@ public:
     void copyScope (float* destination, int count) const noexcept;
     static constexpr int scopeSize = 2048;
 
+    // Real-time health of the audio callback (REA round 87): callbacks over their deadline, late device calls, load.
+    const RtStats& getRtStats() const noexcept { return rtStats; }
+    RtStats& getRtStats() noexcept { return rtStats; }
+
+    // What takes the most audio CPU: channels and insert effects, as a share of real time over the last ~2 s of
+    // playback, heaviest first. UI thread.
+    struct UnitLoad
+    {
+        juce::String name;
+        double load = 0.0;      // CPU time / audio time (summed over the worker threads)
+        double longestMs = 0.0; // the longest single call in the window
+    };
+    const std::vector<UnitLoad>& getHeaviestUnits() const noexcept { return heaviestUnits; }
+
+    // How regularly the message thread runs the engine's 30 Hz timer (a saturated UI delays it). UI thread.
+    struct UiPulse
+    {
+        int calls = 0;
+        double maxGapMs = 0.0;
+    };
+    UiPulse takeUiPulse() noexcept { return std::exchange (uiPulse, {}); }
+
+    // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
+    juce::String describeRealtime (bool withUnits = true) const;
+
+    // %APPDATA%\LYNX\audio-glitches.log: a line each time callbacks run over their deadline (at most every 2 s).
+    static juce::File glitchLogFile();
+
     // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
 
@@ -244,6 +323,18 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
+    void chooseSafeBufferSize();
+    void updateRealtimeStats(); // timer: unit loads over a window, glitch log
+    RtStats rtStats;
+    std::vector<UnitLoad> heaviestUnits;
+    std::vector<std::uint64_t> lastChannelNs, lastEffectNs;
+    std::uint64_t lastProcessedSamples = 0;
+    double lastUnitsWindowMs = 0.0, lastUiPulseMs = 0.0;
+    UiPulse uiPulse;
+    int latencyRepublishes = 0;   // PDC re-plans because a unit's latency changed (diagnostics)
+    juce::String lastLatencyChange;
+    std::uint64_t loggedOver = 0, loggedLate = 0;
+    double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     void publishSong();
 
@@ -297,10 +388,23 @@ private:
     bool audioArmed = false;
     juce::String recordingError;
     juce::TimeSliceThread recordThread { "LYNX recording" };
-    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> takeWriter;
+    RecordingNotice recordingNotice;
+    void notify (InputIssue issue, int track = 0, const juce::String& detail = {});
+    struct Take
+    {
+        int track = 0;      // insert it plays through (0 = a new free insert)
+        int first = 0;      // device input channel
+        int channels = 0;   // 1 or 2
+        juce::File file;
+        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+    };
+    static constexpr int maxTakes = 16;
+    std::array<Take, maxTakes> takes;              // guarded by takeLock
+    int takeCount = 0;
     juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
-    juce::File takeFile;
-    int takeChannels = 0;
+    LiveInput liveInput;
+    std::array<float, maxMixerTracks * 2> lastInputPeaks {};
+    std::array<int, LiveInput::maxChannels> inputSlot {}; // device input channel -> callback input index (-1: closed)
     std::atomic<double> takeStartTick { -1.0 };    // position of the first recorded sample
     std::atomic<juce::int64> takeFrames { 0 };
     double takeSampleRate = 44100.0;

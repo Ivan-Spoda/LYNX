@@ -3,6 +3,7 @@
 #include <optional>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <random>
 #include <cctype>
 #include <cmath>
@@ -103,6 +104,8 @@
 #include "core/Vocodex.h"
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
+#include "core/RtStats.h"
+#include "core/ParametricEqLinear.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
@@ -7454,6 +7457,142 @@ TEST (worker_pool_runs_each_index_once_per_round)
     CHECK (failures == 0);
     CHECK (outside.load() == 0);
     CHECK (wrongRound.load() == 0);
+}
+
+TEST (worker_pool_wakes_sleeping_workers)
+{
+    // rounds far apart (the workers have gone to sleep on the semaphore in between): every index still runs once,
+    // and the sleeping workers are woken (REA round 87: the Windows build used to poll with growing Sleep()s)
+    lynx::WorkerPool pool (3);
+    std::vector<std::atomic<int>> hits (16);
+    int failures = 0;
+    for (int r = 0; r < 12; ++r)
+    {
+        std::this_thread::sleep_for (std::chrono::microseconds (lynx::WorkerPool::spinMicros * 4));
+        for (auto& h : hits)
+            h.store (0);
+        auto fn = [&] (int i) {
+            std::this_thread::sleep_for (std::chrono::microseconds (200)); // long enough for woken workers to join
+            hits[(std::size_t) i].fetch_add (1);
+        };
+        pool.parallelFor (16, fn);
+        for (auto& h : hits)
+            failures += h.load() != 1;
+    }
+    CHECK (failures == 0);
+    CHECK (pool.wakeUps() > 0);
+    CHECK (pool.indicesRunByWorkers() > 0);
+}
+
+TEST (realtime_stats_count_deadline_misses_and_late_calls)
+{
+    lynx::RtStats stats;
+    // 10 ms deadline: 3 ms, 9 ms (80-100 %), 12 ms (over), then a call 40 ms after the previous one (late)
+    stats.record (100.0, 3.0, 10.0);
+    stats.record (110.0, 9.0, 10.0);
+    stats.record (120.0, 12.0, 10.0);
+    stats.record (160.0, 2.0, 10.0);
+    const auto s = stats.snapshot();
+    CHECK (s.callbacks == 4);
+    CHECK (s.overBudget == 1);
+    CHECK (s.nearBudget == 1);
+    CHECK (s.lateCalls == 1);
+    CHECK (std::abs (s.maxLoad - 1.2) < 1e-9);
+    CHECK (std::abs (s.averageLoad - 26.0 / 40.0) < 1e-3);
+    CHECK (s.histogram[3] == 1 && s.histogram[9] == 1 && s.histogram[12] == 1 && s.histogram[2] == 1);
+    CHECK (std::abs (stats.takeWindowMaxLoad() - 1.2) < 1e-9 && stats.takeWindowMaxLoad() == 0.0);
+    // a device restart is not a late call
+    stats.deviceRestarted();
+    stats.record (5000.0, 1.0, 10.0);
+    CHECK (stats.snapshot().lateCalls == 1);
+    stats.reset();
+    CHECK (stats.snapshot().callbacks == 0 && stats.snapshot().maxLoad == 0.0);
+}
+
+TEST (safe_default_buffer_size)
+{
+    const std::vector<int> wasapi { 144, 160, 192, 224, 256, 288, 320, 384, 448, 480, 512, 576, 640, 1024, 2048 };
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 480, 48000.0) == 512);   // the 10 ms default becomes 512
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 1024, 48000.0) == 1024); // already larger: kept
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 480, 96000.0) == 1024);  // ~10.7 ms at 96 kHz
+    CHECK (lynx::prefs::safeBufferSize ({ 64, 128, 256 }, 128, 44100.0) == 256); // nothing reaches 512: the largest
+    CHECK (lynx::prefs::safeBufferSize ({}, 0, 44100.0) == 0);
+}
+
+TEST (linear_phase_convolver_matches_direct_convolution)
+{
+    // the block FFT convolver (cached twiddles, REA round 87) equals the direct convolution with its kernel
+    lynx::peqfl::FftConvolver c;
+    c.init (256);
+    std::vector<float> table (129, 1.0f);
+    for (int k = 40; k < 129; ++k)
+        table[(std::size_t) k] = 0.25f; // a high shelf cut
+    c.setKernel (table);
+    // impulse response through step()
+    std::vector<float> ir (600, 0.0f);
+    for (int i = 0; i < 600; ++i)
+    {
+        float l = i == 0 ? 1.0f : 0.0f, r = 0.0f;
+        c.step (l, r);
+        ir[(std::size_t) i] = l;
+    }
+    // then a noise signal, compared with direct convolution by that impulse response
+    lynx::peqfl::FftConvolver d;
+    d.init (256);
+    d.setKernel (table);
+    std::vector<float> x (2000), y (2000);
+    std::uint32_t seed = 1;
+    for (auto& v : x)
+        v = (float) ((seed = seed * 1664525u + 1013904223u) >> 8) / 16777216.0f - 0.5f;
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        float l = x[i], r = 0.0f;
+        d.step (l, r);
+        y[i] = l;
+    }
+    double worst = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        double direct = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= i; ++k)
+            direct += (double) ir[k] * (double) x[i - k];
+        worst = std::max (worst, std::abs (direct - (double) y[i]));
+    }
+    CHECK (worst < 1e-4);
+    // and it delays by 3n/4 with the kernel's centre there
+    const auto peak = (std::size_t) (std::max_element (ir.begin(), ir.end(), [] (float a, float b) { return std::abs (a) < std::abs (b); }) - ir.begin());
+    CHECK (peak == 192);
+}
+
+TEST (patcher_container_is_reused_across_snapshots)
+{
+    // an unchanged Patcher keeps its built effect (its children's tails, delay lines and PDC stay put), and a
+    // linear-phase Frequency Splitter reports its latency before its first block (REA round 87: it used to be
+    // rebuilt on every snapshot and its latency appeared one block late, re-planning PDC in a loop)
+    auto song = lynx::Song::makeDefault();
+    if (song.mixer.size() < 2)
+        song.mixer.resize (2);
+    lynx::EffectSlot splitter;
+    splitter.kind = lynx::EffectKind::frequencySplitter;
+    splitter.params = lynx::makeEffectSlot (lynx::EffectKind::frequencySplitter).params;
+    splitter.params[4] = 0.6f; // linear-phase mode
+    splitter.params[6] = 0.0f; // quality 0
+    lynx::EffectSlot patcher;
+    patcher.kind = lynx::EffectKind::parallel;
+    patcher.branches.push_back ({ { splitter }, 1.0f });
+    patcher.branches.push_back ({ {}, 0.5f });
+    song.mixer[1].effects = { patcher };
+    const auto a = lynx::RackState::build (song, nullptr, 44100.0);
+    const auto b = lynx::RackState::build (song, a.get(), 44100.0);
+    CHECK (a->effects[1][0] == b->effects[1][0]);
+    CHECK (a->effects[1][0]->latencySamples() == 384); // 3/4 of the 512-point FFT, before any block
+    CHECK (a->latencies == a->currentLatencies());
+    song.mixer[1].effects[0].branches[0].chain[0].params[0] = 0.25f; // a child's parameter changed: rebuilt
+    const auto c = lynx::RackState::build (song, b.get(), 44100.0);
+    CHECK (c->effects[1][0] != b->effects[1][0]);
+    song.mixer[1].effects[0].branches[1].gain = 0.75f;
+    const auto d = lynx::RackState::build (song, c.get(), 44100.0);
+    CHECK (d->effects[1][0] != c->effects[1][0]);
 }
 
 TEST (ladder_filter_follows_toxic_law)
@@ -14860,6 +14999,7 @@ TEST (event_editor_playback)
     CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }
 #include "PrefsTests.inc"
+#include "InputTests.inc"
 
 TEST (level_audit_demo_imports_round89)
 {

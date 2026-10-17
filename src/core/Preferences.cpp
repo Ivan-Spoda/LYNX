@@ -132,6 +132,23 @@ double bufferLatencyMs (int bufferSamples, double sampleRate)
     return sampleRate > 0.0 ? 1000.0 * bufferSamples / sampleRate : 0.0;
 }
 
+int safeBufferSize (const std::vector<int>& available, int current, double sampleRate)
+{
+    const int target = sampleRate > 50000.0 ? (sampleRate > 100000.0 ? 2048 : 1024) : 512;
+    if (current >= target)
+        return current;
+    int best = 0, largest = 0;
+    for (const auto b : available)
+    {
+        largest = std::max (largest, b);
+        if (b >= target && (best == 0 || b < best))
+            best = b;
+    }
+    if (best == 0)
+        best = std::max (largest, current);
+    return best;
+}
+
 // --- MIDI -------------------------------------------------------------------------------------------------------
 
 float mapVelocity (float velocity, VelocityCurve curve) noexcept

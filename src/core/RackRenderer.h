@@ -17,6 +17,7 @@
 #include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
+#include "core/LiveInput.h"
 #include "core/Meters.h"
 #include "core/Pdc.h"
 #include "core/Scheduler.h"
@@ -132,6 +133,8 @@ struct RackState
 
 class WorkerPool;
 
+// Whether a parallel container slot (FL's Patcher) can keep its built effect: same branches, children and links.
+bool sameContainer (const EffectSlot& a, const EffectSlot& b);
 // Time spent in each instrument and effect slot (the Plugin performance monitor, round 84). Counted only while
 // `enabled` is on; nanoseconds of processing and of audio rendered, accumulated (the reader takes differences).
 struct ProcessTimes
@@ -157,6 +160,10 @@ public:
     // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
+    // External audio input (REA_rodada88): inserts with an input source hear it (per their monitor mode) and
+    // meter it. The caller fills `input` before each process() call on the same thread. Set before playback.
+    void setLiveInput (LiveInput* input) noexcept { liveInput = input; }
+
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
     void prepare (double sampleRate, int maxBlockSize = 2048);
@@ -174,6 +181,23 @@ public:
                   LiveEventQueue* moreLive = nullptr) noexcept;
 
     static void applyStereoForTest (const MixerTrack& t, float* l, float* r, int n) noexcept { applyStereo (t, l, r, n); }
+
+    // Per-unit CPU profile (REA round 87): the time spent in each channel (instrument, notes, PDC) and in each insert
+    // effect slot, accumulated while profiling is on. Off by default (it costs two clock reads per unit and chunk).
+    // Written by the audio thread and the workers, read by any thread (relaxed counters, nanoseconds).
+    static constexpr int maxChannels = 1024;
+    struct UnitTimes
+    {
+        std::array<std::atomic<std::uint64_t>, maxChannels> channelNs {};
+        std::array<std::atomic<std::uint64_t>, (std::size_t) maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
+        std::array<std::atomic<std::uint64_t>, maxChannels> channelMaxNs {}; // longest single call (spikes)
+        std::array<std::atomic<std::uint64_t>, (std::size_t) maxMixerTracks * maxEffectSlots> effectMaxNs {};
+        std::atomic<std::uint64_t> processNs { 0 }, processedSamples { 0 };
+    };
+    void setProfiling (bool on) noexcept { profiling.store (on, std::memory_order_relaxed); }
+    bool isProfiling() const noexcept { return profiling.load (std::memory_order_relaxed); }
+    const UnitTimes& unitTimes() const noexcept { return *units; }
+    void resetUnitTimes() noexcept;
 
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
@@ -208,13 +232,17 @@ private:
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
     std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
-    static constexpr int maxChannels = 1024;
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
     static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
     double chunkStartTick = 0.0, chunkTps = 1.0;            // of the chunk being rendered (for the arpeggiator)
     WorkerPool* workers = nullptr;
+    LiveInput* liveInput = nullptr;
+    int liveInputOffset = 0; // of the chunk within the process() block
+    void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
+    std::atomic<bool> profiling { false };
+    std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
     std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();
 
     struct SmartDisableState

@@ -96,6 +96,18 @@ public:
             return;
         }
 
+        if (args.contains ("--rtstress"))
+        {
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--no-window]: the real app (window, audio device)
+            // plays the project and reports the callbacks that missed their deadline (REA round 87)
+            const auto i = args.indexOf ("--rtstress");
+            const auto seconds = args[i + 3].getDoubleValue();
+            const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer);
+            return;
+        }
+
         if (args.contains ("--selftest"))
         {
             const auto i = args.indexOf ("--selftest");
@@ -196,6 +208,8 @@ public:
                 report << "type=" << type->getTypeName() << "\n";
                 for (const auto& name : type->getDeviceNames (false))
                     report << "  output=" << name << "\n";
+                for (const auto& name : type->getDeviceNames (true))
+                    report << "  input=" << name << "\n";
             }
 
             const auto flag = args.contains ("--devices") ? args.indexOf ("--devices") : args.indexOf ("--dispositivos");
@@ -206,10 +220,14 @@ public:
 
         if (args.contains ("--devicetest"))
         {
-            // LYNX.exe --devicetest "type" "device" report.txt: opens that output device, receives 1 s of callbacks
-            // writing silence, closes it and reports rate, block size, latency and callbacks (driver check, no sound)
+            // LYNX.exe --devicetest "type" "device" report.txt ["input device"]: opens that output device (and, with the
+            // 4th argument, an input: "*" = the same device / the driver's default input), receives 1 s of callbacks
+            // writing silence, closes it and reports rate, block size, latency, callbacks and the input channels with
+            // their peak level (driver check, no sound)
             const auto i = args.indexOf ("--devicetest");
             const auto typeName = args[i + 1].unquoted(), deviceName = args[i + 2].unquoted();
+            auto inputName = args.size() > i + 4 && ! args[i + 4].startsWith ("--") ? args[i + 4].unquoted() : juce::String();
+            const auto wantInput = inputName.isNotEmpty();
             juce::String report;
             const juce::File reportFile (args[i + 3].unquoted());
             auto step = [&] (const juce::String& line) { report << line << "\n"; reportFile.replaceWithText (report); }; // progress survives a driver that ends the process
@@ -220,19 +238,43 @@ public:
                 if (type->getTypeName() == typeName)
                 {
                     type->scanForDevices();
+                    if (wantInput && type->hasSeparateInputsAndOutputs())
+                    {
+                        const auto inputs = type->getDeviceNames (true);
+                        if (inputName == "*" || ! inputs.contains (inputName))
+                        {
+                            const auto index = type->getDefaultDeviceIndex (true);
+                            inputName = juce::isPositiveAndBelow (index, inputs.size()) ? inputs[index] : juce::String();
+                        }
+                        for (const auto& n : inputs)
+                            step ("input_device=" + n);
+                        step ("input_chosen=" + inputName);
+                    }
+                    else if (wantInput)
+                        inputName = deviceName;
                     step ("step=create");
-                    device.reset (type->createDevice (deviceName, {}));
+                    device.reset (type->createDevice (deviceName, type->hasSeparateInputsAndOutputs() ? inputName : juce::String()));
                     step ("step=created");
                 }
             struct Silence final : juce::AudioIODeviceCallback
             {
-                std::atomic<int> calls { 0 };
-                void audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int channels, int n,
+                std::atomic<int> calls { 0 }, inputs { 0 };
+                std::array<std::atomic<float>, 64> peaks {};
+                void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int channels, int n,
                                                        const juce::AudioIODeviceCallbackContext&) override
                 {
                     for (int c = 0; c < channels; ++c)
                         if (out[c] != nullptr)
                             juce::FloatVectorOperations::clear (out[c], n);
+                    inputs.store (numIn);
+                    for (int c = 0; c < juce::jmin (numIn, 64); ++c)
+                        if (in[c] != nullptr)
+                        {
+                            const auto range = juce::FloatVectorOperations::findMinAndMax (in[c], n);
+                            const auto peak = juce::jmax (std::abs (range.getStart()), std::abs (range.getEnd()));
+                            if (peak > peaks[(std::size_t) c].load())
+                                peaks[(std::size_t) c].store (peak);
+                        }
                     ++calls;
                 }
                 void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
@@ -250,7 +292,16 @@ public:
                 const auto rate = device->getCurrentSampleRate() > 0 ? device->getCurrentSampleRate()
                                   : rates.contains (48000.0) ? 48000.0 : rates.isEmpty() ? 44100.0 : rates[0];
                 step ("rates=" + juce::String (rates.size()) + " chosen=" + juce::String (rate) + " default_block=" + juce::String (device->getDefaultBufferSize()));
-                const auto error = device->open ({}, outputs, rate, device->getDefaultBufferSize());
+                juce::BigInteger inputs;
+                if (wantInput)
+                {
+                    const auto names = device->getInputChannelNames();
+                    step ("input_channels=" + juce::String (names.size()));
+                    for (int c = 0; c < names.size(); ++c)
+                        step ("  in" + juce::String (c + 1) + "=" + names[c]);
+                    inputs.setRange (0, juce::jmin (64, names.size()), true);
+                }
+                const auto error = device->open (inputs, outputs, rate, device->getDefaultBufferSize());
                 if (error.isNotEmpty())
                     step ("error=" + error);
                 else
@@ -263,7 +314,15 @@ public:
                            << "block=" << device->getCurrentBufferSizeSamples() << "\n"
                            << "output_latency=" << device->getOutputLatencyInSamples() << "\n"
                            << "callbacks=" << silence.calls.load() << "\n";
-                    ok = silence.calls.load() > 0;
+                    if (wantInput)
+                    {
+                        report << "input_latency=" << device->getInputLatencyInSamples() << "\n"
+                               << "active_inputs=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n"
+                               << "callback_inputs=" << silence.inputs.load() << "\n";
+                        for (int c = 0; c < juce::jmin (64, silence.inputs.load()); ++c)
+                            report << "  peak_in" << (c + 1) << "=" << juce::Decibels::gainToDecibels (silence.peaks[(std::size_t) c].load(), -150.0f) << " dB\n";
+                    }
+                    ok = silence.calls.load() > 0 && (! wantInput || silence.inputs.load() > 0);
                     device->close();
                 }
             }
@@ -1209,6 +1268,80 @@ private:
         quit();
     }
 
+    // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
+    // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
+    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize)
+    {
+        startupOptions = lynx::StartupOptions::load();
+        engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+        if (bufferSize > 0)
+        {
+            auto setup = engine->getDeviceManager().getAudioDeviceSetup();
+            setup.bufferSize = bufferSize;
+            engine->getDeviceManager().setAudioDeviceSetup (setup, true);
+        }
+        createMainWindow();
+        if (! juce::JUCEApplication::getCommandLineParameters().contains ("--no-window")) // --no-window: is it the UI?
+            mainWindow->reveal();
+
+        juce::String error;
+        auto ok = false;
+        const auto loadStart = juce::Time::getMillisecondCounterHiRes();
+        if (project.hasFileExtension ("flp"))
+            ok = engine->importFlpFile (project, error);
+        else if (auto song = lynx::ProjectFile::load (project, error))
+        {
+            engine->setSong (std::move (*song));
+            ok = true;
+        }
+        const auto loadMs = juce::Time::getMillisecondCounterHiRes() - loadStart;
+
+        if (! ok)
+        {
+            report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+
+        // let the window draw the project, then play from the start with fresh statistics
+        juce::Timer::callAfterDelay (1500, [this, project, report, seconds, loadMs] {
+            if (engine == nullptr)
+                return;
+            engine->stop();
+            engine->rewind();
+            engine->getRtStats().reset();
+            engine->takeUiPulse();
+            engine->play();
+            juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs] {
+                if (engine == nullptr)
+                    return;
+                engine->stop();
+                const auto s = engine->getRtStats().snapshot();
+                juce::String text;
+                text << "project: " << project.getFullPathName() << "\n"
+                     << "LYNX " << getApplicationVersion() << ", " << juce::SystemStats::getOperatingSystemName() << ", "
+                     << juce::SystemStats::getNumCpus() << " logical CPUs (" << juce::SystemStats::getNumPhysicalCpus() << " cores), "
+                     << juce::SystemStats::getCpuModel() << "\n"
+                     << "load " << juce::String (loadMs / 1000.0, 1) << " s, played " << juce::String (seconds, 0) << " s\n"
+                     << engine->describeRealtime();
+                const auto pulse = engine->takeUiPulse();
+                text << "  UI: the 30 Hz engine timer ran " << pulse.calls << " times (" << juce::String (pulse.calls / seconds, 1)
+                     << "/s), longest gap " << juce::String (pulse.maxGapMs, 0) << " ms" << (mainWindow == nullptr || ! mainWindow->isVisible() ? " (window hidden)" : "") << "\n";
+                text << "  load histogram (share of the deadline: callbacks):";
+                for (std::size_t b = 0; b < s.histogram.size(); ++b)
+                    if (s.histogram[b] > 0)
+                        text << " " << (int) (b * 10) << (b + 1 == s.histogram.size() ? juce::String ("+") : "-" + juce::String ((int) (b * 10 + 10))) << "%:" << (juce::int64) s.histogram[b];
+                text << "\n";
+                text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
+                report.replaceWithText (text);
+                setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
+                quit();
+            });
+        });
+    }
+
     // LYNX.exe --render project.(flp|lynx) output.wav [seconds]
     // Exports the current pattern to 24-bit WAV (for an imported .flp, the one with the most notes).
     void runRender (const juce::String& inputPath, const juce::String& outputPath, double seconds)
@@ -1538,6 +1671,7 @@ private:
             saveAlert (ui.makeConfirmDiscardWindow(), "-confirm.png");
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
+            saveAlert (lynx::makeRecordChoiceDialog(), "-record-dialog.png");
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
@@ -1702,6 +1836,12 @@ private:
                 offline.setInsertArmed (3, true);
                 offline.dispatchPendingMessages();
                 saveSnapshot (ui, prefix + "-mixer-multi.png");
+                // the armed insert with an audio input (its input row in the side panel, the level bar on the strip)
+                offline.editSong ([] (lynx::Song& s) { s.mixer[3].inputChannel = 0; });
+                ui.getMixerForSnapshot().selectTrack (3);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-mixer-input.png");
+                offline.undo();
                 offline.setInsertArmed (3, false);
                 ui.getMixerForSnapshot().getStripsForSnapshot().setSelection ({}, 0);
             }

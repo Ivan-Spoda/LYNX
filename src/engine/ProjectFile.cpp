@@ -855,6 +855,14 @@ juce::String toJson (const Song& song)
             o->setProperty ("invertPhase", true);
         if (t.swapChannels)
             o->setProperty ("swap", true);
+        if (t.inputChannel >= 0) // external audio input: device channel (0-based), stereo pair or mono
+        {
+            o->setProperty ("input", t.inputChannel);
+            if (! t.inputStereo)
+                o->setProperty ("inputMono", true);
+        }
+        if (t.monitor != InputMonitor::automatic)
+            o->setProperty ("monitor", (int) t.monitor);
         if (! (t.eq == TrackEq {})) // [gains dB, frequencies Hz, widths 0..1] of the 3 bands
             o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
                                                            t.eq.width[0], t.eq.width[1], t.eq.width[2] });
@@ -1310,6 +1318,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 track.colour = 0xFF000000u | (std::uint32_t) t["colour"].toString().getHexValue32();
             track.invertPhase = (bool) t.getProperty ("invertPhase", false);
             track.swapChannels = (bool) t.getProperty ("swap", false);
+            track.inputChannel = juce::jlimit (-1, 255, (int) t.getProperty ("input", -1));
+            track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
+            track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
 
             if (const auto& eq = t["eq"]; eq.isArray() && eq.size() == 9)
                 for (std::size_t b = 0; b < 3; ++b)

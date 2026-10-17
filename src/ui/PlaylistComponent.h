@@ -160,6 +160,7 @@ private:
     Clip makeBrushClip (int track, std::int64_t start) const; // what a click on empty space places
     void cutWithKnife (juce::Point<int> from, juce::Point<int> to, bool snapOn);
     void zoomToTicks (double from, double to);
+    void zoomIn (int anchorX);
     void zoomOut (int anchorX);
     void setTimeSelection (std::int64_t from, std::int64_t to); // also selects the clips it touches
     void insertTimeSelection();
