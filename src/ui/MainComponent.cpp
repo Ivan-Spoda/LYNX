@@ -20,6 +20,9 @@
 
 #include "core/RackOps.h"
 #include "core/Templates.h"
+#include "ui/NewProjectDialog.h"
+#include "ui/PluginMonitorWindow.h"
+#include "ui/TouchKeyboard.h"
 #include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
 #include "ui/AutomationUi.h"
@@ -2080,17 +2083,62 @@ void MainComponent::autosave()
         folder.getChildFile (juce::String::fromUTF8 (old.c_str()) + ProjectFile::extension).deleteFile();
 }
 
-void MainComponent::newProject()
+void MainComponent::newProject (bool askAlways)
 {
-    confirmDiscard ([this] {
-        engine.stop();
-        engine.rewind();
-        engine.setSong (Song::makeDefault());
-        currentFile = juce::File();
-        projectName = {};
-        importedSuffix = {};
-        updateTitle();
+    confirmDiscard ([this, askAlways] {
+        if (! askAlways && ! newProjectDialogEnabled())
+        {
+            startNewProject (Song::makeDefault(), {});
+            return;
+        }
+        showNewProjectDialog ([safe = juce::Component::SafePointer<MainComponent> (this)] (Song song, juce::File file) {
+            if (safe != nullptr)
+                safe->startNewProject (std::move (song), file);
+        });
     });
+}
+
+void MainComponent::startNewProject (Song song, const juce::File& file)
+{
+    engine.stop();
+    engine.rewind();
+    engine.setSong (std::move (song));
+    currentFile = juce::File();
+    projectName = {};
+    importedSuffix = {};
+
+    if (file != juce::File())
+    {
+        juce::String error;
+        file.getParentDirectory().createDirectory();
+        if (ProjectFile::save (engine.getSong(), file, error))
+        {
+            engine.markSaved();
+            rememberRecent (file);
+            currentFile = file;
+            projectName = file.getFileNameWithoutExtension();
+        }
+        else
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
+    }
+    updateTitle();
+}
+
+void MainComponent::saveAsTemplate()
+{
+    auto* w = new juce::AlertWindow (tr ("Save as template"), tr ("The template appears in File › New project... (saved in {0})", { userTemplatesFolder().getFullPathName() }),
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", projectName.isNotEmpty() ? projectName : tr ("My template"));
+    w->addButton (tr ("Save"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, safe = juce::Component::SafePointer<MainComponent> (this)] (int result) {
+        if (result != 1 || safe == nullptr)
+            return;
+        safe->engine.capturePluginStates();
+        juce::String error;
+        if (! saveUserTemplate (safe->engine.getSong(), w->getTextEditorContents ("name"), error))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
+    }), true);
 }
 
 void MainComponent::chooseFileToOpen()
@@ -2442,6 +2490,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     if (index == 0)
     {
         menu.addItem (tr ("New") + shortcutText ("file.new"), [this] { newProject(); });
+        menu.addItem (tr ("New project..."), [this] { newProject (true); });
 
         juce::PopupMenu templates;
         const auto names = templateNames();
@@ -2473,6 +2522,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         menu.addItem (tr ("Save") + shortcutText ("file.save"), [this] { save (false); });
         menu.addItem (tr ("Save as...") + shortcutText ("file.saveAs"), [this] { save (true); });
+        menu.addItem (tr ("Save as template..."), [this] { saveAsTemplate(); });
         menu.addSeparator();
         menu.addItem (tr ("Export audio...") + shortcutText ("file.export"), [this] { exportAudio(); });
         menu.addItem (tr ("Open autosave folder"), [] {
@@ -2522,6 +2572,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Bring back off-screen panels"), [this] { workspace.bringBackOffscreen(); });
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
+        menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
     }
     else if (index == 3)
     {
@@ -2546,6 +2597,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 engine.getPluginHost().startBackgroundScan(); // progress in the hint bar; LYNX stays usable
         });
         menu.addItem (tr ("Manage shortcuts..."), [this] { showShortcutManager(); });
+        menu.addItem (tr ("Plugin performance monitor..."), [this] { showPluginMonitor (engine); });
         menu.addSeparator();
         menu.addItem (tr ("Record input audio"), true, engine.isAudioRecordingArmed(), [this] {
             engine.setAudioRecordingArmed (! engine.isAudioRecordingArmed());
@@ -2575,6 +2627,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                                                         tr ("Nothing to report (no .flp imported in this session, or everything was converted)."));
             else
                 showImportReport();
+        });
+        menu.addItem (tr ("Built-in plugins (online list)..."), [] {
+            juce::URL ("https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
         });
         menu.addItem (tr ("About LYNX"), [] {
             auto* window = makeAboutWindow().release();

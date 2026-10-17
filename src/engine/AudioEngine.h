@@ -189,7 +189,10 @@ public:
         std::function<bool (double)> progress; // 0..1; false cancels
         double tailSeconds = 0.0;
         int trimSamples = 0;  // PDC: discards this much from the start and renders the same amount extra at the end
-        int ditherBits = 0;   // > 0: TPDF dither with noise shaping for this bit depth
+        int ditherBits = 0;   // > 0: TPDF dither (with noise shaping unless ditherShaping is false) for this bit depth
+        bool ditherShaping = true;
+        // receives every rendered block after the PDC trim (left, right, frames), like `output` does
+        std::function<void (const float*, const float*, int)> capture;
     };
 
     float renderOffline (const RenderOptions& options);
@@ -210,6 +213,9 @@ public:
     }
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
+
+    // Time spent in each instrument and effect (the Plugin performance monitor); nullptr without the rack node.
+    ProcessTimes* getProcessTimes() noexcept;
 
     // Latest output samples (mono), for the oscilloscope. UI thread.
     void copyScope (float* destination, int count) const noexcept;

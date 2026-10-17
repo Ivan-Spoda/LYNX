@@ -12,6 +12,6 @@ void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, c
 // routing, and the original is muted. Runs on a background thread with progress.
 void bounceInsertToAudio (AudioEngine& engine, int track);
 
-// Panel only (for --snapshot mode).
-std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine);
+// Panel only (for --snapshot mode; `format`: 0 WAV, 1 MP3, 2 OGG, 3 FLAC with loop/stem options set). Nothing is saved.
+std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format = 0);
 } // namespace lynx
