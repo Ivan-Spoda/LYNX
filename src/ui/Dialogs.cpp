@@ -113,8 +113,9 @@ class RecordChoiceButton final : public juce::Button
 {
 public:
     RecordChoiceButton (const juce::String& title, const juce::String& note)
-        : juce::Button (title), noteText (note)
+        : juce::Button ({}), noteText (note) // (no component name: the alert window would print it above)
     {
+        setButtonText (title);
         setSize (380, 46);
     }
 
