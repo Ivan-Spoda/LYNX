@@ -163,4 +163,15 @@ void removeTrack (Song& song, int track);
 void swapTracks (Song& song, int a, int b);
 // Solo: `track` plays alone (every other track muted); on the only unmuted track it unmutes all.
 void soloTrack (Song& song, int track, int trackCount);
+
+// --- Playlist track groups (FL's "Group with above track", REA round 104) -----------------------------
+// A track with `grouped` set belongs to the group of the nearest ungrouped track above it: the header.
+bool isGroupHeader (const Song& song, int track);            // the next track is grouped with it
+int groupHeaderOf (const Song& song, int track);             // the header of the track's group (itself for a header), -1 if none
+std::vector<int> groupMembers (const Song& song, int header); // the grouped tracks under a header
+bool isFoldedAway (const Song& song, int track);             // a member of a collapsed group (drawn as a thin row)
+void groupWithAbove (Song& song, int track);                 // no-op on track 0
+void ungroupTrack (Song& song, int track);                   // a member leaves its group (headers stay)
+void setGroupCollapsed (Song& song, int track, bool collapsed); // the group of `track`
+void colourGroup (Song& song, int track);                    // "Auto color group": members take the header's colour
 } // namespace lynx::noteedit

@@ -218,11 +218,124 @@ vendor = Soundtoys
 lynx = Fruity Delay 3
 names = PrimalTap; Little PrimalTap; LittlePrimalTap
 
+# Valhalla delay / modulation plugins -> LYNX's delay / modulation suite (round 101). Their saved state is a JUCE
+# XML block holding every parameter as its normalised value [DATA, EXEC]; the LYNX effects use the same value laws,
+# measured black-box on the official demos (docs/analise/REA_rodada101.md §2-§6), so most settings map one to one.
+# [derived] VST3 class IDs: Steinberg's VST2-compatible UID ("VST" + the VST2 ID found in the state's FBCh header +
+# the first 9 letters of the lower-case name), in FL's byte order; the same rule reproduces ValhallaVintageVerb's ID
+# read from real projects.
 [valhalla-delay]
 product = ValhallaDelay
 vendor = Valhalla DSP
-lynx = Fruity Delay 3
-names = ValhallaDelay; ValhallaFreqEcho
+lynx = Echoform
+vst3 = 64545356614c7679616c68616c6c6164
+names = ValhallaDelay
+mix = 1
+map = xml:Mix -> Mix
+# styles: Single, Dual, Ratio, PingPong, Quad onto Echoform's order (Single, Ratio, Quad, Dual, Ping-pong)
+map = xml:DelayStyle -> Style | steps 0:0.1 0.19:0.7 0.39:0.3 0.59:0.9 0.79:0.5
+map = xml:DelayLSync -> Sync L
+map = xml:DelayLNote -> Note L
+map = xml:DelayL_Ms -> Time L
+map = xml:DelayRSync -> Sync R
+map = xml:DelayRNote -> Note R
+map = xml:DelayR_Ms -> Time R
+map = xml:DelaySpread -> Spread
+map = xml:DelaySpacing -> Spacing
+map = xml:DelayRatio -> Ratio
+map = xml:Feedback -> Feedback
+map = xml:Width -> Width
+map = xml:DriveIn -> Drive
+map = xml:Age -> Age
+map = xml:Diffusion -> Diffusion
+map = xml:DiffSize -> Diffusion size
+map = xml:LowCut -> Low cut
+map = xml:HighCut -> High cut
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:Wow -> Wow
+map = xml:Flutter -> Flutter
+map = xml:FreqShift -> Shift
+map = xml:FreqDetune -> Shift detune
+map = xml:PitchShift -> Pitch
+map = xml:PitchDetune -> Pitch detune
+map = xml:Ducking -> Ducking
+# the 17 modes (index floor (24 v)) onto Echoform's 12 characters: Tape, HiFi, BBD, Digital, Ghost (shifter), Pitch,
+# RevPitch (reverse), BBDuck (bucket), Clarity (clean), DuckTape (tape), PitchDuck (pitch), LoFi, Quartz (clean),
+# PhaserDDL (phaser), RichPitch (detune), ChromeTape (tape), Analog; the "duck" variants' built-in ducking is not kept
+map = xml:Mode -> Mode | steps 0:0.041667 0.0828:0.208333 0.1245:0.291667 0.1662:0.458333 0.2078:0.708333 0.2495:0.791667 0.2912:0.875 0.3328:0.291667 0.3745:0.541667 0.4162:0.041667 0.4578:0.791667 0.4995:0.125 0.5412:0.541667 0.5828:0.625 0.6245:0.958333 0.6662:0.041667 0.7078:0.375 0.7495:0.041667
+
+[valhalla-freqecho]
+product = ValhallaFreqEcho
+vendor = Valhalla DSP
+lynx = Spiral Echo
+vst3 = 4654535645717668616c68616c6c6166
+names = ValhallaFreqEcho
+mix = 1
+map = xml:wetDryMix -> Mix
+map = xml:shift -> Shift
+map = xml:delay -> Delay
+map = xml:sync -> Sync
+map = xml:feedback -> Feedback
+map = xml:lowCut -> Low cut
+map = xml:highCut -> High cut
+map = xml:stereo -> Stereo
+
+[valhalla-spacemodulator]
+product = ValhallaSpaceModulator
+vendor = Valhalla DSP
+lynx = Orbit
+vst3 = 535453564d707664616c68616c6c6173
+names = ValhallaSpaceModulator
+mix = 1
+map = xml:wetDry -> Mix
+map = xml:rate -> Rate
+map = xml:depth -> Depth
+map = xml:feedback -> Feedback
+map = xml:manual -> Manual
+map = xml:Mode -> Mode
+
+[valhalla-ubermod]
+product = ValhallaUberMod
+vendor = Valhalla DSP
+lynx = Lattice Mod
+vst3 = 7554535665627672616c68616c6c6175
+names = ValhallaUberMod
+mix = 1
+map = xml:Mix -> Mix
+map = xml:Depth -> Depth
+map = xml:StereoWidth -> Width
+map = xml:Delay -> Delay
+map = xml:Feedback -> Feedback
+map = xml:Spread -> Spread
+map = xml:Slope -> Slope
+map = xml:Skew -> Skew
+map = xml:Random -> Random
+map = xml:TapGain -> Tap gain
+map = xml:Diffusion -> Diffusion
+map = xml:DiffSize -> Diffusion size
+map = xml:DiffModRate -> Diffusion rate
+map = xml:DiffModDepth -> Diffusion depth
+map = xml:LowCut -> Low cut
+map = xml:HighCut -> High cut
+map = xml:SpatialXover -> Crossover
+map = xml:DetuneRate -> Detune rate
+map = xml:DetuneDepth -> Detune depth
+map = xml:VibratoRate -> Vibrato rate
+map = xml:VibratoDepth -> Vibrato depth
+map = xml:OverMod -> Over-mod
+map = xml:DriveInGain -> Drive in
+map = xml:DriveOutGain -> Drive out
+map = xml:DriveNoiseGain -> Noise
+map = xml:FeedbackRotate -> Rotate
+map = xml:SmoothingTime -> Smoothing
+map = xml:ColorMode -> Colour
+map = xml:type -> Taps
+map = xml:DiffEnable -> Diffusion on
+map = xml:Drive -> Drive on
+map = xml:DrivePrePost -> Drive post
+map = xml:Speed -> Half speed
+# not translated (meaning not confirmed): DelaySync (0-17: which note each step is), InputPan (0-8)
 
 [fabfilter-timeless]
 product = FabFilter Timeless
@@ -426,7 +539,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::horizon; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::fruitySend; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)

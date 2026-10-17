@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/EditorPolish.h"
 #include "core/FruityPhaser.h"
 #include "core/FlPluginDb.h"
 #include "core/FlVoiceProcessor.h"
@@ -662,6 +663,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
+    song.channelGroups = project.filterGroups;
     song.info.title = project.title;
     song.info.author = project.artist;
     song.info.genre = project.genre;
@@ -742,6 +744,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if (c.colour != 0)
             def.colour = 0xFF000000u | c.colour;
+
+        if (c.filterGroup >= 0 && c.filterGroup < (int) project.filterGroups.size())
+            def.group = c.filterGroup;
 
         if (c.hasLevels)
         {
@@ -1791,6 +1796,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
+                 || (plugin == "Fruity Send" && fx.kind != EffectKind::fruitySend)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
             ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast LP" && fx.kind != EffectKind::fruityFastLP)
@@ -2646,12 +2652,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             {
                 const auto coloured = (t.colour & 0xFFFFFF) != 0x485156;
 
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured))
+                const auto sized = std::abs (t.heightScale - 1.0f) > 0.01f;
+
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
 
-                    song.playlistTracks[(std::size_t) t.index] = { t.name, ! t.enabled, 0, coloured ? 0xFF000000u | t.colour : 0u };
+                    auto& track = song.playlistTracks[(std::size_t) t.index];
+                    track = { t.name, ! t.enabled, 0, coloured ? 0xFF000000u | t.colour : 0u };
+                    // FL's size is relative to its default row; LYNX keeps the same proportion of its own default
+                    if (sized)
+                        track.height = polish::clampTrackHeight ((int) std::lround (polish::defaultTrackHeight * t.heightScale));
+                    track.grouped = t.index > 0 && t.grouped;
+                    track.collapsed = ! t.expanded;
                 }
             }
     }

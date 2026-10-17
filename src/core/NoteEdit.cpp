@@ -699,4 +699,91 @@ void soloTrack (Song& song, int track, int trackCount)
     for (int t = 0; t < (int) h.size(); ++t)
         h[(std::size_t) t].muted = alone ? false : t != track;
 }
+// --- track groups ------------------------------------------------------------------------------------
+
+namespace
+{
+bool groupedFlag (const Song& song, int track)
+{
+    return track > 0 && track < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) track].grouped;
+}
+} // namespace
+
+bool isGroupHeader (const Song& song, int track)
+{
+    return track >= 0 && ! groupedFlag (song, track) && groupedFlag (song, track + 1);
+}
+
+int groupHeaderOf (const Song& song, int track)
+{
+    if (track < 0)
+        return -1;
+
+    if (! groupedFlag (song, track))
+        return isGroupHeader (song, track) ? track : -1;
+
+    while (track > 0 && groupedFlag (song, track))
+        --track;
+
+    return track;
+}
+
+std::vector<int> groupMembers (const Song& song, int header)
+{
+    std::vector<int> out;
+
+    if (header < 0 || groupedFlag (song, header))
+        return out;
+
+    for (int t = header + 1; groupedFlag (song, t); ++t)
+        out.push_back (t);
+
+    return out;
+}
+
+bool isFoldedAway (const Song& song, int track)
+{
+    if (! groupedFlag (song, track))
+        return false;
+
+    const auto header = groupHeaderOf (song, track);
+    return header >= 0 && header < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) header].collapsed;
+}
+
+void groupWithAbove (Song& song, int track)
+{
+    if (track <= 0)
+        return;
+
+    headers (song, track + 1)[(std::size_t) track].grouped = true;
+}
+
+void ungroupTrack (Song& song, int track)
+{
+    if (groupedFlag (song, track))
+        song.playlistTracks[(std::size_t) track].grouped = false;
+}
+
+void setGroupCollapsed (Song& song, int track, bool collapsed)
+{
+    const auto header = groupHeaderOf (song, track);
+
+    if (header < 0)
+        return;
+
+    headers (song, header + 1)[(std::size_t) header].collapsed = collapsed;
+}
+
+void colourGroup (Song& song, int track)
+{
+    const auto header = groupHeaderOf (song, track);
+
+    if (header < 0)
+        return;
+
+    const auto colour = header < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) header].colour : 0u;
+
+    for (auto t : groupMembers (song, header))
+        song.playlistTracks[(std::size_t) t].colour = colour;
+}
 } // namespace lynx::noteedit

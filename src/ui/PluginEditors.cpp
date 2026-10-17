@@ -12,8 +12,10 @@
 #include "core/LynxTune.h"
 #include "core/MaximusFx.h"
 #include "core/MixSuite.h"
+#include "core/EchoSuite.h"
 #include "core/ParametricEqFl.h"
 #include "core/VocalPitch.h"
+#include "core/FruityBasicFx.h"
 #include "core/PluginLayout.h"
 #include "core/StateParams.h"
 #include "core/ConvolverFx.h"
@@ -219,7 +221,17 @@ public:
             return {};
         if (isStateParam (param))
             return utf8 (stateTable().text (fx->state, plugui::stateIndex (kind, param), plugui::stateRaw (kind, param, value)).c_str());
+        if (kind == EffectKind::fruitySend && param == 3)
+            return flbasic::sendTrack (value) > 0 ? insertName (flbasic::sendTrack (value)) : tr ("None");
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
+    }
+
+    // an insert's name as the mixer shows it
+    juce::String insertName (int t) const
+    {
+        const auto& mixer = engine.getSong().mixer;
+        const auto name = t > 0 && t < (int) mixer.size() ? juce::String::fromUTF8 (mixer[(std::size_t) t].name.c_str()) : juce::String();
+        return name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (t) });
     }
 
     juce::String trackName() const
@@ -648,6 +660,17 @@ public:
 
             case Item::menu:
             {
+                if (kind == EffectKind::fruitySend) // the destination insert (FL's tinted box; "…" = none)
+                {
+                    const auto target = flbasic::sendTrack (value);
+                    g.setColour ((target > 0 ? colour::accent : colour::accentMuted).withAlpha (hot ? 1.0f : 0.85f));
+                    g.fillRoundedRectangle (r, radius::sm * s);
+                    g.setColour (target > 0 ? colour::onAccent : colour::textSecondary);
+                    g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+                    g.drawFittedText (target > 0 ? insertName (target) : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")),
+                                      r.reduced (2.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 2, 0.6f);
+                    break;
+                }
                 const auto c = item.colour >= 0 ? peqview::bandColour (item.colour) : colour::bg5;
                 const auto chosen = plugui::optionAt (item, value);
                 const auto off = chosen == 0 && kind == EffectKind::parametricEq;
@@ -1267,6 +1290,80 @@ public:
                 return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, mixsuite::ember::shape (style, (x * 2.0f - 1.0f) * drive) * norm);
             }, inner, false);
         }
+        else if (id == "echotrain" || id == "lattice") // the echoes / taps on a time axis: left up, right down
+        {
+            grid (8, 2);
+            const auto params = fx.params;
+            const auto bpm = engine.getSong().bpm > 1.0 ? engine.getSong().bpm : 120.0;
+            struct Tick { double ms; double level; bool right; };
+            std::vector<Tick> ticks;
+            double window = 50.0;
+            if (id == "echotrain")
+            {
+                using namespace echosuite::echoform;
+                const auto st = styleOf (params[style]);
+                auto tL = sideMs (params, false, bpm), tR = sideMs (params, true, bpm);
+                if (st == Style::single || st == Style::quad)
+                    tR = tL;
+                else if (st == Style::ratio)
+                    tR = tL * (0.01 + 0.99 * (double) params[ratio]);
+                const auto gain = juce::jlimit (0.0, 1.0, feedbackGain (params[feedback]));
+                window = juce::jmax (50.0, 4.5 * juce::jmax (tL, tR));
+                if (st == Style::pingPong)
+                {
+                    auto t = tL, level = 1.0;
+                    for (int k = 0; k < 24 && t <= window; ++k)
+                    {
+                        ticks.push_back ({ t, level, (k % 2) == 1 });
+                        t += (k % 2) == 0 ? tR : tL;
+                        level *= std::sqrt (gain);
+                    }
+                }
+                else
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        const auto t = c == 0 ? tL : tR;
+                        auto level = 1.0;
+                        for (int k = 1; k <= 24 && t > 0.0 && t * k <= window; ++k, level *= gain)
+                        {
+                            if (st == Style::quad)
+                                for (int q = 1; q < 4; ++q)
+                                    ticks.push_back ({ t * (k - 1 + q / 4.0), 0.5 * level, c == 1 });
+                            ticks.push_back ({ t * k, st == Style::quad ? 0.5 * level : level, c == 1 });
+                        }
+                    }
+            }
+            else
+            {
+                using namespace echosuite::lattice;
+                const auto n = tapCount (params[taps]);
+                double longest = 1.0;
+                for (int k = 0; k < n; ++k)
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        const auto t = tapMs (params, k, n, c == 1);
+                        longest = juce::jmax (longest, t);
+                        ticks.push_back ({ t, std::abs (tapLevel (params, k, n)) * std::sqrt ((double) n), c == 1 });
+                    }
+                window = longest * 1.15;
+            }
+            const auto mid = inner.getCentreY();
+            g.setColour (colour::gridBar);
+            g.drawHorizontalLine ((int) mid, inner.getX(), inner.getRight());
+            g.setColour (curveColour);
+            for (const auto& t : ticks)
+            {
+                if (t.level < 0.01)
+                    continue;
+                const auto x = inner.getX() + inner.getWidth() * (float) (t.ms / window);
+                const auto h = inner.getHeight() * 0.48f * (float) juce::jlimit (0.0, 1.0, t.level);
+                g.fillRect (juce::Rectangle<float> (x - 1.0f * s, t.right ? mid : mid - h, juce::jmax (1.5f, 2.0f * s), h));
+            }
+            g.setColour (colour::textDisabled);
+            g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+            g.drawText (juce::String (window >= 1000.0 ? juce::String (window / 1000.0, 2) + " s" : juce::String ((int) window) + " ms"),
+                        inner.reduced (2.0f * s), juce::Justification::bottomRight);
+        }
         else if (paintFxDisplay (g, id, item, inner, fx))
         {
         }
@@ -1739,6 +1836,19 @@ public:
                 eqSelected = item.colour;
                 repaint();
                 peqview::showBandMenu (*this, current()->params, item.colour, [this] (std::vector<std::pair<int, float>> changes) { setParams (changes); });
+                return;
+            }
+            if (kind == EffectKind::fruitySend) // FL's list: no destination, then every other insert by name
+            {
+                juce::PopupMenu menu;
+                const auto chosen = flbasic::sendTrack (valueOf (param));
+                menu.addItem (tr ("None"), true, chosen <= 0, [this, param] { setValue (param, 0.0f); });
+                const auto& mixer = engine.getSong().mixer;
+                for (int t = 1; t < (int) mixer.size(); ++t)
+                    if (t != track)
+                        menu.addItem (juce::String (t) + "  " + insertName (t), engine.getSong().canRoute (track, t) || t == chosen, t == chosen,
+                                      [this, param, t] { setValue (param, flbasic::sendTrackValue (t)); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
                 return;
             }
             juce::PopupMenu menu;

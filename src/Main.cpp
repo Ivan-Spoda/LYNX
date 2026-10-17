@@ -3,6 +3,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
+#include "core/NoteEdit.h"
 #include "core/MaximusFx.h"
 #include "core/Harmor.h"
 #include "flp/Flp.h"
@@ -590,6 +591,10 @@ private:
         original.loopEnd = 7680;
         original.playlistTracks.resize (3);
         original.playlistTracks[2].colour = 0xFF2A6FDB; // a track colour (round 90)
+        original.playlistTracks[2].grouped = true;      // track groups and rack filter groups (round 104)
+        original.playlistTracks[1].collapsed = true;
+        original.channelGroups = { "Drums", "Keys" };
+        original.channels[1].group = 1;
         juce::String error;
 
         if (demoProjectPath.isNotEmpty()) // sample project for checking the UI with --snapshot
@@ -608,6 +613,8 @@ private:
                                && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
                                && reloaded->playlistTracks.size() == 3 && reloaded->playlistTracks[2].colour == 0xFF2A6FDB
                                && reloaded->playlistTracks[1].colour == 0
+                               && reloaded->playlistTracks[2].grouped && reloaded->playlistTracks[1].collapsed && ! reloaded->playlistTracks[1].grouped
+                               && reloaded->channelGroups == original.channelGroups && reloaded->channels[1].group == 1 && reloaded->channels[0].group == -1
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
@@ -2020,6 +2027,33 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-playlist-timesel.png");
             ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::pencil);
+            // round 104: a folded track group (FL's thin member rows) and the Picker's audio tab
+            {
+                int header = -1;
+                for (int t = 0; t < (int) offline.getSong().playlistTracks.size() && header < 0; ++t)
+                    if (lynx::noteedit::isGroupHeader (offline.getSong(), t))
+                        header = t;
+                if (header >= 0)
+                {
+                    offline.editSong ([header] (lynx::Song& s) { lynx::noteedit::setGroupCollapsed (s, header, true); }, false);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-playlist-group-folded.png");
+                    offline.editSong ([header] (lynx::Song& s) { lynx::noteedit::setGroupCollapsed (s, header, false); }, false);
+                }
+                ui.getPickerForSnapshot().setView (1);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-playlist-picker-audio.png");
+                ui.getPickerForSnapshot().setView (0);
+            }
+            // round 104: the Channel Rack filtered to its first filter group
+            if (! offline.getSong().channelGroups.empty())
+            {
+                ui.selectTabForSnapshot (0);
+                ui.getRackForSnapshot().setFilterGroup (0);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-rack-filter.png");
+                ui.getRackForSnapshot().setFilterGroup (-1);
+            }
             ui.selectTabForSnapshot (3);
             // LYNX_SNAPSHOT_TRACK=n: shows the effects of that mixer track
             if (const auto track = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_TRACK", {}); track.isNotEmpty())

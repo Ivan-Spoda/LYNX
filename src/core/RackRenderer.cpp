@@ -295,6 +295,8 @@ void RackState::buildMixerGraph()
 
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
     mixerInputs.assign ((std::size_t) tracks, {});
+    sendTaps.clear();
+    slotTap.assign ((std::size_t) tracks, {});
     std::vector<int> depth ((std::size_t) tracks, 0);
 
     // who listens to each track via sidechain (the source goes in an earlier layer)
@@ -324,6 +326,23 @@ void RackState::buildMixerGraph()
                 mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level });
                 depth[(std::size_t) send.target] = std::max (depth[(std::size_t) send.target], depth[(std::size_t) t] + 1);
             }
+        }
+
+        // Fruity Send slots: their own signal, delay lines after the sends' (PdcPlan::sendDelay)
+        const auto taps = fruitySendsOf (song, t);
+        for (std::size_t j = 0; j < taps.size(); ++j)
+        {
+            const auto [slot, target] = taps[j];
+            if ((int) sendTaps.size() >= maxSendTaps)
+                break;
+            if ((std::size_t) t >= slotTap.size())
+                slotTap.resize ((std::size_t) t + 1);
+            if ((std::size_t) slot >= slotTap[(std::size_t) t].size())
+                slotTap[(std::size_t) t].resize ((std::size_t) slot + 1, -1);
+            slotTap[(std::size_t) t][(std::size_t) slot] = (int) sendTaps.size();
+            mixerInputs[(std::size_t) target].push_back ({ t, (int) (1 + track.sends.size() + j), 1.0f, (int) sendTaps.size() });
+            sendTaps.push_back ({ t, slot, target });
+            depth[(std::size_t) target] = std::max (depth[(std::size_t) target], depth[(std::size_t) t] + 1);
         }
     }
 
@@ -725,6 +744,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     smartDisable.assign ((std::size_t) maxMixerTracks * maxEffectSlots, {});
     trackEqs.assign ((std::size_t) maxMixerTracks, {});
     trackScratchBuffers.assign ((std::size_t) maxMixerTracks * 2 * chunkCapacity, 0.0f);
+    tapBuffers.assign ((std::size_t) RackState::maxSendTaps * 2 * chunkCapacity, 0.0f);
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
@@ -743,6 +763,11 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
 float* RackRenderer::trackBuffer (int track, int channel) noexcept
 {
     return mixBuffers.data() + ((std::size_t) track * 2 + (std::size_t) channel) * (std::size_t) blockCapacity;
+}
+
+float* RackRenderer::tapBuffer (int tap, int side) noexcept
+{
+    return tapBuffers.data() + ((std::size_t) tap * 2 + (std::size_t) side) * chunkCapacity;
 }
 
 float RackRenderer::automated (int automation, float base) const noexcept
@@ -1167,6 +1192,23 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->effectNs[std::min (key, units->effectNs.size() - 1)],
                                &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
 
+        // Fruity Send: what it sends goes to its own buffer, pulled by the destination insert (processed later)
+        if (slots[i].kind == EffectKind::fruitySend)
+        {
+            const auto tap = (std::size_t) track < state.slotTap.size() && i < state.slotTap[(std::size_t) track].size()
+                                 ? state.slotTap[(std::size_t) track][i]
+                                 : -1;
+            if (tap >= 0 && tap < RackState::maxSendTaps)
+            {
+                std::memset (tapBuffer (tap, 0), 0, sizeof (float) * (std::size_t) n);
+                std::memset (tapBuffer (tap, 1), 0, sizeof (float) * (std::size_t) n);
+                effects[i]->setSendOutput (tapBuffer (tap, 0), tapBuffer (tap, 1));
+                tapActive[(std::size_t) tap] = 1;
+            }
+            else
+                effects[i]->setSendOutput (nullptr, nullptr);
+        }
+
         if (state.hasAutomation && ! isPlugin)
         {
             auto params = slots[i].params; // copy without allocation
@@ -1533,6 +1575,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
     //    outputs of the tracks that send to it (without writing into others' buffers)
     trackActive.fill (0);
+    tapActive.fill (0);
 
     for (const auto& layer : state.mixerLayers)
     {
@@ -1657,24 +1700,23 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
 
     for (const auto& in : state.mixerInputs[(std::size_t) t])
     {
-        const auto active = trackActive[(std::size_t) in.source];
+        const auto tap = in.tap >= 0 && in.tap < RackState::maxSendTaps ? in.tap : -1;
+        const auto active = tap >= 0 ? tapActive[(std::size_t) tap] : trackActive[(std::size_t) in.source];
         const auto& delays = state.sendDelays[(std::size_t) in.source];
         auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
+        auto* sl = tap >= 0 ? tapBuffer (tap, 0) : trackBuffer (in.source, 0);
+        auto* sr = tap >= 0 ? tapBuffer (tap, 1) : trackBuffer (in.source, 1);
 
         if (delay != nullptr)
         {
             // PDC: this edge is shorter than the slowest one arriving here. A silent source
             // still drains the tail that was in the line.
-            delay->mixInto (active ? trackBuffer (in.source, 0) : nullptr, active ? trackBuffer (in.source, 1) : nullptr,
-                            in.level, dl, dr, n);
+            delay->mixInto (active ? sl : nullptr, active ? sr : nullptr, in.level, dl, dr, n);
             continue;
         }
 
         if (! active)
             continue;
-
-        const auto* sl = trackBuffer (in.source, 0);
-        const auto* sr = trackBuffer (in.source, 1);
 
         for (int i = 0; i < n; ++i)
         {

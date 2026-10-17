@@ -1,5 +1,6 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 #include "core/LynxVerbs.h"
 
@@ -2398,6 +2399,8 @@ const EffectInfo& effectInfo (EffectKind kind)
             info.params.push_back ({ phaserfx::paramName (i), p[i] });
         return info;
     }();
+    // FL's Fruity Send: pan, volume, dry over their ranges and the insert it sends to (core/FruityBasicFx.h)
+    static const EffectInfo fruitySendInfo { "Fruity Send", { { "Pan", 0.5f }, { "Volume", 0.8f }, { "Dry", 1.0f }, { "Send to", 0.0f } } };
     static const EffectInfo effectorInfo { "Effector", { { "Type", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
                                                          { "LFO shape", 0.0f }, { "Input", 1.0f }, { "Output", 0.5f } } };
@@ -2515,6 +2518,11 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::nebula:
         case EffectKind::halo:
         case EffectKind::horizon: return verbs::info (kind);
+        case EffectKind::echoform: return echosuite::echoformInfo();
+        case EffectKind::spiralEcho: return echosuite::spiralInfo();
+        case EffectKind::orbit: return echosuite::orbitInfo();
+        case EffectKind::latticeMod: return echosuite::latticeInfo();
+        case EffectKind::fruitySend: return fruitySendInfo;
     }
     return eq;
 }
@@ -2854,6 +2862,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::fruityBalance:
             return flbasic::balanceParamText (param, v);
 
+        case EffectKind::fruitySend:
+            return flbasic::sendParamText (param, v);
+
         case EffectKind::fruityBloodOverdrive:
             return flbasic::bloodOverdriveParamText (param, v);
         case EffectKind::equo:
@@ -2902,6 +2913,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::halo:
         case EffectKind::horizon:
             return verbs::paramText (kind, param, v, bpm);
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod:
+            return echosuite::paramText (kind, param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3033,6 +3049,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruitySoftClipper: return flshape::makeSoftClipper();
         case EffectKind::fruityPanOMatic: return flbasic::makePanOMatic();
         case EffectKind::fruityBalance: return flbasic::makeBalance();
+        case EffectKind::fruitySend: return flbasic::makeSend(); // FL's Fruity Send (REA_rodada105_send)
         case EffectKind::fruityBloodOverdrive: return flbasic::makeBloodOverdrive();
         case EffectKind::fruityFastLP: return flfilter::makeFastLP();
         case EffectKind::fruityFreeFilter: return flfilter::makeFreeFilter();
@@ -3081,6 +3098,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::nebula:
         case EffectKind::halo:
         case EffectKind::horizon: return verbs::make (kind); // LYNX's own reverbs (REA_rodada100)
+        case EffectKind::echoform:
+        case EffectKind::spiralEcho:
+        case EffectKind::orbit:
+        case EffectKind::latticeMod: return echosuite::make (kind); // LYNX's delay / modulation suite (REA_rodada101)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
