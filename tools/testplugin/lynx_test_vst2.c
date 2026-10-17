@@ -4,7 +4,7 @@
  *   LYNX.exe --vst2test "LYNX Test Synth.dll" report.txt
  * Sound: a sine at the played note, amplitude = parameter 0 ("Gain") × velocity.
  * Parameter 1 ("Tempo") reports the host tempo / 1000 it last read through audioMasterGetTime.
- * State: a program chunk ('LXV2' + gain), so a host must restore it with effSetChunk.
+ * State: a program chunk ('LXV2' + gain + last tempo/1000), so a host must restore it with effSetChunk.
  */
 #include <math.h>
 #include <stdint.h>
@@ -61,7 +61,7 @@ typedef struct
     int note;
     float amplitude;
     double phase;
-    unsigned char chunk[8];
+    unsigned char chunk[12];
 } Synth;
 
 static intptr_t dispatch (Effect* e, int32_t op, int32_t index, intptr_t value, void* ptr, float opt)
@@ -76,10 +76,11 @@ static intptr_t dispatch (Effect* e, int32_t op, int32_t index, intptr_t value, 
         case 23:                                                    /* getChunk */
             memcpy (s->chunk, "LXV2", 4);
             memcpy (s->chunk + 4, &s->gain, 4);
+            memcpy (s->chunk + 8, &s->tempo, 4); /* what the host's time info said (for the host test) */
             *(void**) ptr = s->chunk;
-            return 8;
+            return 12;
         case 24:                                                    /* setChunk */
-            if (value == 8 && memcmp (ptr, "LXV2", 4) == 0)
+            if (value >= 8 && memcmp (ptr, "LXV2", 4) == 0)
                 memcpy (&s->gain, (char*) ptr + 4, 4);
             return 1;
         case 25:                                                    /* processEvents */
